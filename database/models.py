@@ -375,3 +375,321 @@ class IncomeStatement(Base):
 
     def __repr__(self):
         return f"<IncomeStatement(id={self.id}, year_id={self.financial_year_id}, Revenue={self.revenue}, NP={self.net_profit})>"
+
+
+class BudgetScenario(Base):
+    """
+    Budget Scenario - contains forecast assumptions for a company
+    Allows creating multiple forecast scenarios (base case, optimistic, pessimistic, etc.)
+    """
+    __tablename__ = "budget_scenarios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    name = Column(String(255), nullable=False)  # e.g., "Budget 2025-2027", "Scenario Ottimistico"
+    base_year = Column(Integer, nullable=False)  # Base year for % calculations (e.g., 2024)
+    description = Column(Text, nullable=True)
+    is_active = Column(Integer, default=1)  # 1 = active scenario, 0 = archived
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    company = relationship("Company", backref="budget_scenarios")
+    assumptions = relationship("BudgetAssumptions", back_populates="scenario", cascade="all, delete-orphan")
+    forecast_years = relationship("ForecastYear", back_populates="scenario", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<BudgetScenario(id={self.id}, name='{self.name}', base_year={self.base_year})>"
+
+
+class BudgetAssumptions(Base):
+    """
+    Budget Assumptions - stores % variation assumptions for forecasting
+    Each row represents assumptions for one forecast year
+    """
+    __tablename__ = "budget_assumptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scenario_id = Column(Integer, ForeignKey("budget_scenarios.id"), nullable=False)
+    forecast_year = Column(Integer, nullable=False)  # e.g., 2025, 2026, 2027
+
+    # Revenue assumptions (% vs base year)
+    revenue_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # % change in revenue
+    other_revenue_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # % change in other revenue
+
+    # Cost assumptions (% vs base year)
+    variable_materials_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)
+    fixed_materials_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)
+    variable_services_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)
+    fixed_services_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)
+    rent_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Godimento beni terzi
+    personnel_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)
+    other_costs_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Oneri diversi
+
+    # Investment and working capital
+    investments = Column(Numeric(15, 2), default=0, nullable=False)  # New investments
+    receivables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Crediti breve
+    receivables_long_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Crediti lungo
+    payables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Debiti breve
+
+    # Financial parameters
+    interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables
+    interest_rate_payables = Column(Numeric(10, 6), default=0, nullable=False)  # % on payables
+
+    # Tax and other parameters
+    tax_rate = Column(Numeric(10, 6), default=24, nullable=False)  # IRES/IRAP tax rate %
+    fixed_materials_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of materials that are fixed costs
+    fixed_services_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of services that are fixed costs
+    depreciation_rate = Column(Numeric(10, 6), default=20, nullable=False)  # Average depreciation rate %
+
+    # Financing parameters (optional)
+    financing_amount = Column(Numeric(15, 2), default=0, nullable=False)  # New financing amount
+    financing_duration_years = Column(Numeric(10, 2), default=0, nullable=False)  # Loan duration in years
+    financing_interest_rate = Column(Numeric(10, 6), default=0, nullable=False)  # Loan interest rate %
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    scenario = relationship("BudgetScenario", back_populates="assumptions")
+
+    def __repr__(self):
+        return f"<BudgetAssumptions(id={self.id}, scenario_id={self.scenario_id}, year={self.forecast_year})>"
+
+
+class ForecastYear(Base):
+    """
+    Forecast Year - links to forecasted financial statements
+    Similar to FinancialYear but for forecast data
+    """
+    __tablename__ = "forecast_years"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scenario_id = Column(Integer, ForeignKey("budget_scenarios.id"), nullable=False)
+    year = Column(Integer, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    scenario = relationship("BudgetScenario", back_populates="forecast_years")
+    balance_sheet = relationship("ForecastBalanceSheet", back_populates="forecast_year", uselist=False, cascade="all, delete-orphan")
+    income_statement = relationship("ForecastIncomeStatement", back_populates="forecast_year", uselist=False, cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<ForecastYear(id={self.id}, scenario_id={self.scenario_id}, year={self.year})>"
+
+
+class ForecastBalanceSheet(Base):
+    """
+    Forecast Balance Sheet - projected balance sheet
+    Same structure as BalanceSheet but for forecast data
+    """
+    __tablename__ = "forecast_balance_sheets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    forecast_year_id = Column(Integer, ForeignKey("forecast_years.id"), nullable=False, unique=True)
+
+    # Same fields as BalanceSheet
+    sp01_crediti_soci = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02_immob_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
+    sp03_immob_materiali = Column(Numeric(15, 2), default=0, nullable=False)
+    sp04_immob_finanziarie = Column(Numeric(15, 2), default=0, nullable=False)
+    sp05_rimanenze = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06_crediti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07_crediti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp08_attivita_finanziarie = Column(Numeric(15, 2), default=0, nullable=False)
+    sp09_disponibilita_liquide = Column(Numeric(15, 2), default=0, nullable=False)
+    sp10_ratei_risconti_attivi = Column(Numeric(15, 2), default=0, nullable=False)
+    sp11_capitale = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12_riserve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp13_utile_perdita = Column(Numeric(15, 2), default=0, nullable=False)
+    sp14_fondi_rischi = Column(Numeric(15, 2), default=0, nullable=False)
+    sp15_tfr = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16_debiti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17_debiti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp18_ratei_risconti_passivi = Column(Numeric(15, 2), default=0, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    forecast_year = relationship("ForecastYear", back_populates="balance_sheet")
+
+    # Reuse same properties as BalanceSheet
+    @property
+    def total_assets(self) -> Decimal:
+        return (
+            self.sp01_crediti_soci +
+            self.sp02_immob_immateriali +
+            self.sp03_immob_materiali +
+            self.sp04_immob_finanziarie +
+            self.sp05_rimanenze +
+            self.sp06_crediti_breve +
+            self.sp07_crediti_lungo +
+            self.sp08_attivita_finanziarie +
+            self.sp09_disponibilita_liquide +
+            self.sp10_ratei_risconti_attivi
+        )
+
+    @property
+    def total_equity(self) -> Decimal:
+        return (
+            self.sp11_capitale +
+            self.sp12_riserve +
+            self.sp13_utile_perdita
+        )
+
+    @property
+    def total_liabilities(self) -> Decimal:
+        return (
+            self.total_equity +
+            self.sp14_fondi_rischi +
+            self.sp15_tfr +
+            self.sp16_debiti_breve +
+            self.sp17_debiti_lungo +
+            self.sp18_ratei_risconti_passivi
+        )
+
+    @property
+    def fixed_assets(self) -> Decimal:
+        return (
+            self.sp02_immob_immateriali +
+            self.sp03_immob_materiali +
+            self.sp04_immob_finanziarie
+        )
+
+    @property
+    def current_assets(self) -> Decimal:
+        return (
+            self.sp05_rimanenze +
+            self.sp06_crediti_breve +
+            self.sp07_crediti_lungo +
+            self.sp08_attivita_finanziarie +
+            self.sp09_disponibilita_liquide
+        )
+
+    @property
+    def current_liabilities(self) -> Decimal:
+        return self.sp16_debiti_breve
+
+    @property
+    def total_debt(self) -> Decimal:
+        return self.sp16_debiti_breve + self.sp17_debiti_lungo
+
+    @property
+    def working_capital_net(self) -> Decimal:
+        return self.current_assets - self.current_liabilities
+
+    def __repr__(self):
+        return f"<ForecastBalanceSheet(id={self.id}, year_id={self.forecast_year_id}, TA={self.total_assets})>"
+
+
+class ForecastIncomeStatement(Base):
+    """
+    Forecast Income Statement - projected income statement
+    Same structure as IncomeStatement but for forecast data
+    """
+    __tablename__ = "forecast_income_statements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    forecast_year_id = Column(Integer, ForeignKey("forecast_years.id"), nullable=False, unique=True)
+
+    # Same fields as IncomeStatement
+    ce01_ricavi_vendite = Column(Numeric(15, 2), default=0, nullable=False)
+    ce02_variazioni_rimanenze = Column(Numeric(15, 2), default=0, nullable=False)
+    ce03_lavori_interni = Column(Numeric(15, 2), default=0, nullable=False)
+    ce04_altri_ricavi = Column(Numeric(15, 2), default=0, nullable=False)
+    ce05_materie_prime = Column(Numeric(15, 2), default=0, nullable=False)
+    ce06_servizi = Column(Numeric(15, 2), default=0, nullable=False)
+    ce07_godimento_beni = Column(Numeric(15, 2), default=0, nullable=False)
+    ce08_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
+    ce10_var_rimanenze_mat_prime = Column(Numeric(15, 2), default=0, nullable=False)
+    ce11_accantonamenti = Column(Numeric(15, 2), default=0, nullable=False)
+    ce12_oneri_diversi = Column(Numeric(15, 2), default=0, nullable=False)
+    ce13_proventi_partecipazioni = Column(Numeric(15, 2), default=0, nullable=False)
+    ce14_altri_proventi_finanziari = Column(Numeric(15, 2), default=0, nullable=False)
+    ce15_oneri_finanziari = Column(Numeric(15, 2), default=0, nullable=False)
+    ce16_utili_perdite_cambi = Column(Numeric(15, 2), default=0, nullable=False)
+    ce17_rettifiche_attivita_fin = Column(Numeric(15, 2), default=0, nullable=False)
+    ce18_proventi_straordinari = Column(Numeric(15, 2), default=0, nullable=False)
+    ce19_oneri_straordinari = Column(Numeric(15, 2), default=0, nullable=False)
+    ce20_imposte = Column(Numeric(15, 2), default=0, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    forecast_year = relationship("ForecastYear", back_populates="income_statement")
+
+    # Reuse same properties as IncomeStatement
+    @property
+    def production_value(self) -> Decimal:
+        return (
+            self.ce01_ricavi_vendite +
+            self.ce02_variazioni_rimanenze +
+            self.ce03_lavori_interni +
+            self.ce04_altri_ricavi
+        )
+
+    @property
+    def production_cost(self) -> Decimal:
+        return (
+            self.ce05_materie_prime +
+            self.ce06_servizi +
+            self.ce07_godimento_beni +
+            self.ce08_costi_personale +
+            self.ce09_ammortamenti +
+            self.ce10_var_rimanenze_mat_prime +
+            self.ce11_accantonamenti +
+            self.ce12_oneri_diversi
+        )
+
+    @property
+    def ebitda(self) -> Decimal:
+        return self.production_value - (
+            self.ce05_materie_prime +
+            self.ce06_servizi +
+            self.ce07_godimento_beni +
+            self.ce08_costi_personale +
+            self.ce10_var_rimanenze_mat_prime +
+            self.ce11_accantonamenti +
+            self.ce12_oneri_diversi
+        )
+
+    @property
+    def ebit(self) -> Decimal:
+        return self.production_value - self.production_cost
+
+    @property
+    def financial_result(self) -> Decimal:
+        return (
+            self.ce13_proventi_partecipazioni +
+            self.ce14_altri_proventi_finanziari -
+            self.ce15_oneri_finanziari +
+            self.ce16_utili_perdite_cambi
+        )
+
+    @property
+    def extraordinary_result(self) -> Decimal:
+        return self.ce18_proventi_straordinari - self.ce19_oneri_straordinari
+
+    @property
+    def profit_before_tax(self) -> Decimal:
+        return (
+            self.ebit +
+            self.financial_result +
+            self.ce17_rettifiche_attivita_fin +
+            self.extraordinary_result
+        )
+
+    @property
+    def net_profit(self) -> Decimal:
+        return self.profit_before_tax - self.ce20_imposte
+
+    @property
+    def revenue(self) -> Decimal:
+        return self.ce01_ricavi_vendite
+
+    def __repr__(self):
+        return f"<ForecastIncomeStatement(id={self.id}, year_id={self.forecast_year_id}, Revenue={self.revenue}, NP={self.net_profit})>"

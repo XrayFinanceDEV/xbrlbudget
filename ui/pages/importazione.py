@@ -42,11 +42,26 @@ def show():
             help="Seleziona un file XBRL (.xbrl o .xml)"
         )
 
-        create_company = st.checkbox(
-            "Crea nuova azienda se non esiste",
-            value=True,
-            help="Se disabilitato e l'azienda non esiste, l'importazione fallirà"
-        )
+        col1, col2 = st.columns(2)
+
+        with col1:
+            import_mode = st.radio(
+                "Modalità Importazione",
+                ["Aggiorna azienda esistente", "Crea nuova azienda"],
+                help="Scegli se aggiornare l'azienda selezionata o crearne una nuova"
+            )
+
+        with col2:
+            if import_mode == "Crea nuova azienda":
+                st.info("💡 Verrà creata una nuova azienda con i dati dal file XBRL")
+            else:
+                if st.session_state.selected_company_id:
+                    st.info("💡 I dati dell'azienda selezionata verranno aggiornati")
+                else:
+                    st.warning("⚠️ Nessuna azienda selezionata! Seleziona un'azienda o cambia modalità")
+
+        # Set create_company based on mode
+        create_company = (import_mode == "Crea nuova azienda") or (st.session_state.selected_company_id is None)
 
         if uploaded_file is not None:
             # Save uploaded file temporarily
@@ -54,12 +69,21 @@ def show():
                 tmp_file.write(uploaded_file.getvalue())
                 tmp_file_path = tmp_file.name
 
-            if st.button("🚀 Importa XBRL", use_container_width=True):
+            # Validate before allowing import
+            can_import = True
+            if import_mode == "Aggiorna azienda esistente" and not st.session_state.selected_company_id:
+                can_import = False
+                st.error("❌ Devi selezionare un'azienda per aggiornarla")
+
+            if st.button("🚀 Importa XBRL", use_container_width=True, disabled=not can_import):
                 try:
                     with st.spinner("Importazione in corso..."):
+                        # If creating new company, pass None as company_id
+                        company_id = None if import_mode == "Crea nuova azienda" else st.session_state.selected_company_id
+
                         result = import_xbrl_file(
                             file_path=tmp_file_path,
-                            company_id=st.session_state.selected_company_id,
+                            company_id=company_id,
                             create_company=create_company
                         )
 

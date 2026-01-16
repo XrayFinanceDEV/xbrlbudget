@@ -100,13 +100,7 @@ def show():
                         placeholder="Informazioni aggiuntive..."
                     )
 
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    submitted = st.form_submit_button("💾 Salva Modifiche", use_container_width=True)
-
-                with col2:
-                    delete = st.form_submit_button("🗑️ Elimina Azienda", use_container_width=True, type="secondary")
+                submitted = st.form_submit_button("💾 Salva Modifiche", use_container_width=True)
 
                 if submitted:
                     if not name:
@@ -126,19 +120,42 @@ def show():
                             db.rollback()
                             st.error(f"❌ Errore durante l'aggiornamento: {e}")
 
-                if delete:
-                    # Confirm deletion
-                    st.warning("⚠️ Confermare l'eliminazione?")
-                    if st.button("Sì, elimina definitivamente"):
-                        try:
-                            db.delete(company)
-                            db.commit()
-                            st.success("✅ Azienda eliminata")
-                            st.session_state.selected_company_id = None
+            # Delete section outside form
+            st.markdown("---")
+            st.markdown("### 🗑️ Zona Pericolosa")
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.warning("⚠️ L'eliminazione dell'azienda cancellerà anche tutti i bilanci associati!")
+
+            with col2:
+                if 'confirm_delete' not in st.session_state:
+                    st.session_state.confirm_delete = False
+
+                if not st.session_state.confirm_delete:
+                    if st.button("🗑️ Elimina Azienda", use_container_width=True):
+                        st.session_state.confirm_delete = True
+                        st.rerun()
+                else:
+                    st.error("Sei sicuro?")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("✅ Sì", use_container_width=True):
+                            try:
+                                db.delete(company)
+                                db.commit()
+                                st.success("✅ Azienda eliminata")
+                                st.session_state.selected_company_id = None
+                                st.session_state.confirm_delete = False
+                                st.rerun()
+                            except Exception as e:
+                                db.rollback()
+                                st.error(f"❌ Errore: {e}")
+                                st.session_state.confirm_delete = False
+                    with col_b:
+                        if st.button("❌ No", use_container_width=True):
+                            st.session_state.confirm_delete = False
                             st.rerun()
-                        except Exception as e:
-                            db.rollback()
-                            st.error(f"❌ Errore durante l'eliminazione: {e}")
 
         else:
             # View mode

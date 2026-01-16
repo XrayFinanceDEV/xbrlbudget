@@ -131,6 +131,8 @@ page = st.sidebar.radio(
         "📈 Indici Finanziari",
         "⚖️ Altman Z-Score",
         "⭐ Rating FGPMI",
+        "💼 Budget & Previsionale",
+        "🔮 Visualizza Previsionale",
         "📉 Dashboard"
     ]
 )
@@ -255,6 +257,14 @@ elif page == "⚖️ Altman Z-Score":
 elif page == "⭐ Rating FGPMI":
     from ui.pages import rating
     rating.show()
+
+elif page == "💼 Budget & Previsionale":
+    from ui.pages import budget
+    budget.show()
+
+elif page == "🔮 Visualizza Previsionale":
+    from ui.pages import forecast_view
+    forecast_view.show()
 
 elif page == "📉 Dashboard":
     from ui.pages import dashboard

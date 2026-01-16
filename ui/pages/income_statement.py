@@ -109,7 +109,7 @@ def show():
             ("  10. Variazioni rimanenze mat. prime", inc.ce10_var_rimanenze_mat_prime),
             ("  11. Accantonamenti per rischi", inc.ce11_accantonamenti),
             ("  12. Oneri diversi di gestione", inc.ce12_oneri_diversi),
-            ("  TOTALE COSTI PRODUZIONE", inc.production_costs),
+            ("  TOTALE COSTI PRODUZIONE", inc.production_cost),
             ("", ""),
             ("DIFFERENZA (A-B) - EBIT", inc.ebit),
             ("", ""),

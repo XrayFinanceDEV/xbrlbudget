@@ -418,18 +418,39 @@ class XBRLParser:
             # Map facts to fields
             bs_data, inc_data = self.map_facts_to_fields(facts_by_year[year])
 
-            # Create balance sheet
-            bs = BalanceSheet(financial_year_id=fy.id)
-            for field, value in bs_data.items():
-                setattr(bs, field, value)
+            # Get or create balance sheet
+            bs = self.db.query(BalanceSheet).filter(
+                BalanceSheet.financial_year_id == fy.id
+            ).first()
 
-            # Create income statement
-            inc = IncomeStatement(financial_year_id=fy.id)
-            for field, value in inc_data.items():
-                setattr(inc, field, value)
+            if bs:
+                # Update existing balance sheet
+                for field, value in bs_data.items():
+                    setattr(bs, field, value)
+                bs.updated_at = datetime.utcnow()
+            else:
+                # Create new balance sheet
+                bs = BalanceSheet(financial_year_id=fy.id)
+                for field, value in bs_data.items():
+                    setattr(bs, field, value)
+                self.db.add(bs)
 
-            self.db.add(bs)
-            self.db.add(inc)
+            # Get or create income statement
+            inc = self.db.query(IncomeStatement).filter(
+                IncomeStatement.financial_year_id == fy.id
+            ).first()
+
+            if inc:
+                # Update existing income statement
+                for field, value in inc_data.items():
+                    setattr(inc, field, value)
+                inc.updated_at = datetime.utcnow()
+            else:
+                # Create new income statement
+                inc = IncomeStatement(financial_year_id=fy.id)
+                for field, value in inc_data.items():
+                    setattr(inc, field, value)
+                self.db.add(inc)
 
             imported_years.append(year)
             financial_year_ids.append(fy.id)

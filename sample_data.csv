@@ -1,0 +1,40 @@
+BILANCIO ESERCIZIO;Anno 2024;Anno 2023;Tag;Euro
+Dati anagrafici;;;;
+Crediti verso soci;0;0;SP01;€
+Immobilizzazioni immateriali;50 000;45 000;SP02;€
+Immobilizzazioni materiali;250 000;230 000;SP03;€
+Immobilizzazioni finanziarie;0;0;SP04;€
+Rimanenze;80 000;75 000;SP05;€
+Crediti - esigibili entro;150 000;140 000;SP06;€
+Crediti - esigibili oltre;0;0;SP07;€
+Attività finanziarie;10 000;8 000;SP08;€
+Disponibilità liquide;70 000;65 000;SP09;€
+Ratei e risconti attivi;5 000;4 500;SP10;€
+Capitale;100 000;100 000;SP11;€
+Riserve;80 000;70 000;SP12;€
+Utile (perdita);30 000;25 000;SP13;€
+Fondi per rischi;0;0;SP14;€
+Trattamento di fine rapporto;25 000;22 000;SP15;€
+Debiti - esigibili entro;300 000;280 000;SP16;€
+Debiti - esigibili oltre;100 000;110 000;SP17;€
+Ratei e risconti passivi;10 000;8 500;SP18;€
+Ricavi delle vendite;600 000;550 000;CE01;€
+Variazioni delle rimanenze;5 000;3 000;CE02;€
+Incrementi di immobilizzazioni;0;0;CE03;€
+Altri ricavi e proventi;10 000;8 000;CE04;€
+Materie prime;220 000;200 000;CE05;€
+Servizi;100 000;95 000;CE06;€
+Godimento di beni;20 000;18 000;CE07;€
+Costi per il personale;150 000;140 000;CE08;€
+Ammortamenti;30 000;28 000;CE09;€
+Variazioni delle rimanenze di materie;0;0;CE10;€
+Accantonamenti;0;0;CE11;€
+Oneri diversi;15 000;14 000;CE12;€
+Proventi da partecipazioni;0;0;CE13;€
+Altri proventi finanziari;2 000;1 500;CE14;€
+Interessi e altri oneri finanziari;18 000;16 500;CE15;€
+Utili e perdite su cambi;0;0;CE16;€
+Rettifiche di valore;0;0;CE17;€
+Proventi straordinari;5 000;3 000;CE18;€
+Oneri straordinari;0;0;CE19;€
+Imposte;9 000;8 000;CE20;€

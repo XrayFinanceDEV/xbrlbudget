@@ -1,0 +1,46 @@
+{
+  "sectors": {
+    "1": {
+      "code": 1,
+      "name_it": "Industria, Alberghi (Proprietari), Agricoltura, Pesca",
+      "name_short": "Industria",
+      "fgpmi_model": "industria",
+      "altman_model": "manufacturing"
+    },
+    "2": {
+      "code": 2,
+      "name_it": "Commercio",
+      "name_short": "Commercio",
+      "fgpmi_model": "commercio",
+      "altman_model": "services"
+    },
+    "3": {
+      "code": 3,
+      "name_it": "Servizi (Diversi da Autotrasporti) e Alberghi (Locatari)",
+      "name_short": "Servizi",
+      "fgpmi_model": "servizi",
+      "altman_model": "services"
+    },
+    "4": {
+      "code": 4,
+      "name_it": "Autotrasporti",
+      "name_short": "Autotrasporti",
+      "fgpmi_model": "servizi",
+      "altman_model": "services"
+    },
+    "5": {
+      "code": 5,
+      "name_it": "Immobiliare",
+      "name_short": "Immobiliare",
+      "fgpmi_model": "immobiliare",
+      "altman_model": "services"
+    },
+    "6": {
+      "code": 6,
+      "name_it": "Edilizia",
+      "name_short": "Edilizia",
+      "fgpmi_model": "edilizia",
+      "altman_model": "services"
+    }
+  }
+}

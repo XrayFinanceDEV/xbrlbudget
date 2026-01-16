@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrl xmlns="http://www.xbrl.org/2003/instance"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:link="http://www.xbrl.org/2003/linkbase"
+      xmlns:xlink="http://www.w3.org/1999/xlink"
+      xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+      xmlns:itcc="http://www.xbrl.org/taxonomy/it/itcc-ci/2018-11-04">
+
+  <!-- Schema Reference -->
+  <link:schemaRef xlink:type="simple"
+                  xlink:href="http://www.xbrl.org/taxonomy/it/itcc-ci/2018-11-04/itcc-ci-2018-11-04.xsd"/>
+
+  <!-- Contexts (Periods) -->
+  <context id="ctx2024">
+    <entity>
+      <identifier scheme="http://www.agenziaentrate.it">12345678901</identifier>
+    </entity>
+    <period>
+      <instant>2024-12-31</instant>
+    </period>
+  </context>
+
+  <context id="ctx2023">
+    <entity>
+      <identifier scheme="http://www.agenziaentrate.it">12345678901</identifier>
+    </entity>
+    <period>
+      <instant>2023-12-31</instant>
+    </period>
+  </context>
+
+  <!-- Unit (Euro) -->
+  <unit id="EUR">
+    <measure>iso4217:EUR</measure>
+  </unit>
+
+  <!-- BALANCE SHEET FACTS - Year 2024 -->
+
+  <!-- Assets -->
+  <itcc:CreditiVersoSociPerVersAmDoControllate contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:CreditiVersoSociPerVersAmDoControllate>
+  <itcc:ImmobilizzazioniImmateriali contextRef="ctx2024" unitRef="EUR" decimals="0">50000</itcc:ImmobilizzazioniImmateriali>
+  <itcc:ImmobilizzazioniMateriali contextRef="ctx2024" unitRef="EUR" decimals="0">250000</itcc:ImmobilizzazioniMateriali>
+  <itcc:ImmobilizzazioniFinanziarie contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:ImmobilizzazioniFinanziarie>
+  <itcc:Rimanenze contextRef="ctx2024" unitRef="EUR" decimals="0">80000</itcc:Rimanenze>
+  <itcc:CreditiEsigibiliEntroEsSucc contextRef="ctx2024" unitRef="EUR" decimals="0">150000</itcc:CreditiEsigibiliEntroEsSucc>
+  <itcc:CreditiEsigibiliOltreEsSucc contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:CreditiEsigibiliOltreEsSucc>
+  <itcc:AttivitaFinanziarieNonImmob contextRef="ctx2024" unitRef="EUR" decimals="0">10000</itcc:AttivitaFinanziarieNonImmob>
+  <itcc:DisponibilitaLiquide contextRef="ctx2024" unitRef="EUR" decimals="0">70000</itcc:DisponibilitaLiquide>
+  <itcc:RateiERiscontiAttivi contextRef="ctx2024" unitRef="EUR" decimals="0">5000</itcc:RateiERiscontiAttivi>
+
+  <!-- Liabilities & Equity -->
+  <itcc:Capitale contextRef="ctx2024" unitRef="EUR" decimals="0">100000</itcc:Capitale>
+  <itcc:Riserve contextRef="ctx2024" unitRef="EUR" decimals="0">80000</itcc:Riserve>
+  <itcc:UtilePerdita contextRef="ctx2024" unitRef="EUR" decimals="0">30000</itcc:UtilePerdita>
+  <itcc:FondiPerRischiEOneri contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:FondiPerRischiEOneri>
+  <itcc:TFR contextRef="ctx2024" unitRef="EUR" decimals="0">25000</itcc:TFR>
+  <itcc:DebitiEsigibiliEntroEsSucc contextRef="ctx2024" unitRef="EUR" decimals="0">300000</itcc:DebitiEsigibiliEntroEsSucc>
+  <itcc:DebitiEsigibiliOltreEsSucc contextRef="ctx2024" unitRef="EUR" decimals="0">100000</itcc:DebitiEsigibiliOltreEsSucc>
+  <itcc:RateiERiscontiPassivi contextRef="ctx2024" unitRef="EUR" decimals="0">10000</itcc:RateiERiscontiPassivi>
+
+  <!-- INCOME STATEMENT FACTS - Year 2024 -->
+
+  <!-- Revenue -->
+  <itcc:RicaviVenditePrestazioni contextRef="ctx2024" unitRef="EUR" decimals="0">600000</itcc:RicaviVenditePrestazioni>
+  <itcc:VariazioniRimanenze contextRef="ctx2024" unitRef="EUR" decimals="0">5000</itcc:VariazioniRimanenze>
+  <itcc:IncrImmobPerLavoriInterni contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:IncrImmobPerLavoriInterni>
+  <itcc:AltriRicaviProventi contextRef="ctx2024" unitRef="EUR" decimals="0">10000</itcc:AltriRicaviProventi>
+
+  <!-- Costs -->
+  <itcc:MateriePrimeSussidiarie contextRef="ctx2024" unitRef="EUR" decimals="0">220000</itcc:MateriePrimeSussidiarie>
+  <itcc:Servizi contextRef="ctx2024" unitRef="EUR" decimals="0">100000</itcc:Servizi>
+  <itcc:GodimentoBeniDiTerzi contextRef="ctx2024" unitRef="EUR" decimals="0">20000</itcc:GodimentoBeniDiTerzi>
+  <itcc:CostiPersonale contextRef="ctx2024" unitRef="EUR" decimals="0">150000</itcc:CostiPersonale>
+  <itcc:Ammortamenti contextRef="ctx2024" unitRef="EUR" decimals="0">30000</itcc:Ammortamenti>
+  <itcc:VariazioniRimanenzeMatPrime contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:VariazioniRimanenzeMatPrime>
+  <itcc:AccantonamentiRischi contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:AccantonamentiRischi>
+  <itcc:OneriDiversiGestione contextRef="ctx2024" unitRef="EUR" decimals="0">15000</itcc:OneriDiversiGestione>
+
+  <!-- Financial -->
+  <itcc:ProventiPartecipazioni contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:ProventiPartecipazioni>
+  <itcc:AltriProventiFinanziari contextRef="ctx2024" unitRef="EUR" decimals="0">2000</itcc:AltriProventiFinanziari>
+  <itcc:InteressiOneriFinanziari contextRef="ctx2024" unitRef="EUR" decimals="0">18000</itcc:InteressiOneriFinanziari>
+  <itcc:UtiliPerditeCambi contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:UtiliPerditeCambi>
+
+  <!-- Other -->
+  <itcc:RettificheAttivitaFinanziarie contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:RettificheAttivitaFinanziarie>
+  <itcc:ProventiStraordinari contextRef="ctx2024" unitRef="EUR" decimals="0">5000</itcc:ProventiStraordinari>
+  <itcc:OneriStraordinari contextRef="ctx2024" unitRef="EUR" decimals="0">0</itcc:OneriStraordinari>
+  <itcc:Imposte contextRef="ctx2024" unitRef="EUR" decimals="0">9000</itcc:Imposte>
+
+  <!-- BALANCE SHEET FACTS - Year 2023 -->
+
+  <itcc:CreditiVersoSociPerVersAmDoControllate contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:CreditiVersoSociPerVersAmDoControllate>
+  <itcc:ImmobilizzazioniImmateriali contextRef="ctx2023" unitRef="EUR" decimals="0">45000</itcc:ImmobilizzazioniImmateriali>
+  <itcc:ImmobilizzazioniMateriali contextRef="ctx2023" unitRef="EUR" decimals="0">230000</itcc:ImmobilizzazioniMateriali>
+  <itcc:ImmobilizzazioniFinanziarie contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:ImmobilizzazioniFinanziarie>
+  <itcc:Rimanenze contextRef="ctx2023" unitRef="EUR" decimals="0">75000</itcc:Rimanenze>
+  <itcc:CreditiEsigibiliEntroEsSucc contextRef="ctx2023" unitRef="EUR" decimals="0">140000</itcc:CreditiEsigibiliEntroEsSucc>
+  <itcc:CreditiEsigibiliOltreEsSucc contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:CreditiEsigibiliOltreEsSucc>
+  <itcc:AttivitaFinanziarieNonImmob contextRef="ctx2023" unitRef="EUR" decimals="0">8000</itcc:AttivitaFinanziarieNonImmob>
+  <itcc:DisponibilitaLiquide contextRef="ctx2023" unitRef="EUR" decimals="0">65000</itcc:DisponibilitaLiquide>
+  <itcc:RateiERiscontiAttivi contextRef="ctx2023" unitRef="EUR" decimals="0">4500</itcc:RateiERiscontiAttivi>
+
+  <itcc:Capitale contextRef="ctx2023" unitRef="EUR" decimals="0">100000</itcc:Capitale>
+  <itcc:Riserve contextRef="ctx2023" unitRef="EUR" decimals="0">70000</itcc:Riserve>
+  <itcc:UtilePerdita contextRef="ctx2023" unitRef="EUR" decimals="0">25000</itcc:UtilePerdita>
+  <itcc:FondiPerRischiEOneri contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:FondiPerRischiEOneri>
+  <itcc:TFR contextRef="ctx2023" unitRef="EUR" decimals="0">22000</itcc:TFR>
+  <itcc:DebitiEsigibiliEntroEsSucc contextRef="ctx2023" unitRef="EUR" decimals="0">280000</itcc:DebitiEsigibiliEntroEsSucc>
+  <itcc:DebitiEsigibiliOltreEsSucc contextRef="ctx2023" unitRef="EUR" decimals="0">110000</itcc:DebitiEsigibiliOltreEsSucc>
+  <itcc:RateiERiscontiPassivi contextRef="ctx2023" unitRef="EUR" decimals="0">8500</itcc:RateiERiscontiPassivi>
+
+  <!-- INCOME STATEMENT FACTS - Year 2023 -->
+
+  <itcc:RicaviVenditePrestazioni contextRef="ctx2023" unitRef="EUR" decimals="0">550000</itcc:RicaviVenditePrestazioni>
+  <itcc:VariazioniRimanenze contextRef="ctx2023" unitRef="EUR" decimals="0">3000</itcc:VariazioniRimanenze>
+  <itcc:IncrImmobPerLavoriInterni contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:IncrImmobPerLavoriInterni>
+  <itcc:AltriRicaviProventi contextRef="ctx2023" unitRef="EUR" decimals="0">8000</itcc:AltriRicaviProventi>
+
+  <itcc:MateriePrimeSussidiarie contextRef="ctx2023" unitRef="EUR" decimals="0">200000</itcc:MateriePrimeSussidiarie>
+  <itcc:Servizi contextRef="ctx2023" unitRef="EUR" decimals="0">95000</itcc:Servizi>
+  <itcc:GodimentoBeniDiTerzi contextRef="ctx2023" unitRef="EUR" decimals="0">18000</itcc:GodimentoBeniDiTerzi>
+  <itcc:CostiPersonale contextRef="ctx2023" unitRef="EUR" decimals="0">140000</itcc:CostiPersonale>
+  <itcc:Ammortamenti contextRef="ctx2023" unitRef="EUR" decimals="0">28000</itcc:Ammortamenti>
+  <itcc:VariazioniRimanenzeMatPrime contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:VariazioniRimanenzeMatPrime>
+  <itcc:AccantonamentiRischi contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:AccantonamentiRischi>
+  <itcc:OneriDiversiGestione contextRef="ctx2023" unitRef="EUR" decimals="0">14000</itcc:OneriDiversiGestione>
+
+  <itcc:ProventiPartecipazioni contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:ProventiPartecipazioni>
+  <itcc:AltriProventiFinanziari contextRef="ctx2023" unitRef="EUR" decimals="0">1500</itcc:AltriProventiFinanziari>
+  <itcc:InteressiOneriFinanziari contextRef="ctx2023" unitRef="EUR" decimals="0">16500</itcc:InteressiOneriFinanziari>
+  <itcc:UtiliPerditeCambi contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:UtiliPerditeCambi>
+
+  <itcc:RettificheAttivitaFinanziarie contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:RettificheAttivitaFinanziarie>
+  <itcc:ProventiStraordinari contextRef="ctx2023" unitRef="EUR" decimals="0">3000</itcc:ProventiStraordinari>
+  <itcc:OneriStraordinari contextRef="ctx2023" unitRef="EUR" decimals="0">0</itcc:OneriStraordinari>
+  <itcc:Imposte contextRef="ctx2023" unitRef="EUR" decimals="0">8000</itcc:Imposte>
+
+</xbrl>

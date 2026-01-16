@@ -1,0 +1,127 @@
+{
+  "comment": "Mapping of Italian GAAP XBRL taxonomy elements to database fields",
+  "balance_sheet_mapping": {
+    "itcc-ci-2018-11-04:CreditiVersoSociPerVersAmDoControllate": "sp01_crediti_soci",
+    "itcc-ci-2018-11-04:ImmobilizzazioniImmateriali": "sp02_immob_immateriali",
+    "itcc-ci-2018-11-04:ImmobilizzazioniMateriali": "sp03_immob_materiali",
+    "itcc-ci-2018-11-04:ImmobilizzazioniFinanziarie": "sp04_immob_finanziarie",
+    "itcc-ci-2018-11-04:Rimanenze": "sp05_rimanenze",
+    "itcc-ci-2018-11-04:CreditiEsigibiliEntroEsSucc": "sp06_crediti_breve",
+    "itcc-ci-2018-11-04:CreditiEsigibiliOltreEsSucc": "sp07_crediti_lungo",
+    "itcc-ci-2018-11-04:AttivitaFinanziarieNonImmob": "sp08_attivita_finanziarie",
+    "itcc-ci-2018-11-04:DisponibilitaLiquide": "sp09_disponibilita_liquide",
+    "itcc-ci-2018-11-04:RateiERiscontiAttivi": "sp10_ratei_risconti_attivi",
+
+    "itcc-ci-2018-11-04:Capitale": "sp11_capitale",
+    "itcc-ci-2018-11-04:Riserve": "sp12_riserve",
+    "itcc-ci-2018-11-04:UtilePerdita": "sp13_utile_perdita",
+    "itcc-ci-2018-11-04:FondiPerRischiEOneri": "sp14_fondi_rischi",
+    "itcc-ci-2018-11-04:TFR": "sp15_tfr",
+    "itcc-ci-2018-11-04:DebitiEsigibiliEntroEsSucc": "sp16_debiti_breve",
+    "itcc-ci-2018-11-04:DebitiEsigibiliOltreEsSucc": "sp17_debiti_lungo",
+    "itcc-ci-2018-11-04:RateiERiscontiPassivi": "sp18_ratei_risconti_passivi",
+
+    "itcc-ci:DebitiEsigibiliEntroEsercizioSuccessivo": "sp16_debiti_breve",
+    "itcc-ci:DebitiEsigibiliOltreEsercizioSuccessivo": "sp17_debiti_lungo",
+    "itcc-ci:PassivoRateiRisconti": "sp18_ratei_risconti_passivi",
+    "itcc-ci:CreditiEsigibiliEntroEsercizioSuccessivo": "sp06_crediti_breve",
+    "itcc-ci:CreditiEsigibiliOltreEsercizioSuccessivo": "sp07_crediti_lungo",
+    "itcc-ci:AttivoRateiRisconti": "sp10_ratei_risconti_attivi",
+
+    "itcc-ci:TotaleImmobilizzazioniImmateriali": "sp02_immob_immateriali",
+    "itcc-ci:TotaleImmobilizzazioniMateriali": "sp03_immob_materiali",
+    "itcc-ci:TotaleImmobilizzazioniFinanziarie": "sp04_immob_finanziarie",
+    "itcc-ci:TotaleDisponibilitaLiquide": "sp09_disponibilita_liquide",
+    "itcc-ci:TotaleAttivitaFinanziarieNonCostituisconoImmobilizzazioni": "sp08_attivita_finanziarie",
+
+    "itcc-ci:PatrimonioNettoCapitale": "sp11_capitale",
+    "itcc-ci:PatrimonioNettoRiservaLegale": "sp12_riserve",
+    "itcc-ci:PatrimonioNettoAltreRiserveDistintamenteIndicateTotaleAltreRiserve": "sp12_riserve",
+    "itcc-ci:PatrimonioNettoUtilePerditaEsercizio": "sp13_utile_perdita"
+  },
+
+  "income_statement_mapping": {
+    "itcc-ci-2018-11-04:RicaviVenditePrestazioni": "ce01_ricavi_vendite",
+    "itcc-ci-2018-11-04:VariazioniRimanenze": "ce02_variazioni_rimanenze",
+    "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni": "ce03_lavori_interni",
+    "itcc-ci-2018-11-04:AltriRicaviProventi": "ce04_altri_ricavi",
+
+    "itcc-ci-2018-11-04:MateriePrimeSussidiarie": "ce05_materie_prime",
+    "itcc-ci-2018-11-04:Servizi": "ce06_servizi",
+    "itcc-ci-2018-11-04:GodimentoBeniDiTerzi": "ce07_godimento_beni",
+    "itcc-ci-2018-11-04:CostiPersonale": "ce08_costi_personale",
+    "itcc-ci-2018-11-04:Ammortamenti": "ce09_ammortamenti",
+    "itcc-ci-2018-11-04:VariazioniRimanenzeMatPrime": "ce10_var_rimanenze_mat_prime",
+    "itcc-ci-2018-11-04:AccantonamentiRischi": "ce11_accantonamenti",
+    "itcc-ci-2018-11-04:OneriDiversiGestione": "ce12_oneri_diversi",
+
+    "itcc-ci-2018-11-04:ProventiPartecipazioni": "ce13_proventi_partecipazioni",
+    "itcc-ci-2018-11-04:AltriProventiFinanziari": "ce14_altri_proventi_finanziari",
+    "itcc-ci-2018-11-04:InteressiOneriFinanziari": "ce15_oneri_finanziari",
+    "itcc-ci-2018-11-04:UtiliPerditeCambi": "ce16_utili_perdite_cambi",
+
+    "itcc-ci-2018-11-04:RettificheAttivitaFinanziarie": "ce17_rettifiche_attivita_fin",
+    "itcc-ci-2018-11-04:ProventiStraordinari": "ce18_proventi_straordinari",
+    "itcc-ci-2018-11-04:OneriStraordinari": "ce19_oneri_straordinari",
+    "itcc-ci-2018-11-04:Imposte": "ce20_imposte",
+
+    "itcc-ci:CostiProduzioneMateriePrimeSussidiarieConsumoMerci": "ce05_materie_prime",
+    "itcc-ci:CostiProduzioneServizi": "ce06_servizi",
+    "itcc-ci:CostiProduzioneGodimentoBeniTerzi": "ce07_godimento_beni",
+    "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniTotaleAmmortamentiSvalutazioni": "ce09_ammortamenti",
+    "itcc-ci:CostiProduzioneOneriDiversiGestione": "ce12_oneri_diversi",
+
+    "itcc-ci:ValoreProduzioneRicaviVenditePrestazioni": "ce01_ricavi_vendite",
+    "itcc-ci:ValoreProduzioneAltriRicaviProventiTotaleAltriRicaviProventi": "ce04_altri_ricavi"
+  },
+
+  "csv_simplified_mapping": {
+    "comment": "Simplified mapping for CSV imports from TEBE (by row description)",
+    "balance_sheet": {
+      "Crediti verso soci": "sp01_crediti_soci",
+      "Immobilizzazioni immateriali": "sp02_immob_immateriali",
+      "Immobilizzazioni materiali": "sp03_immob_materiali",
+      "Immobilizzazioni finanziarie": "sp04_immob_finanziarie",
+      "Rimanenze": "sp05_rimanenze",
+      "Crediti - esigibili entro": "sp06_crediti_breve",
+      "Crediti - esigibili oltre": "sp07_crediti_lungo",
+      "Attività finanziarie": "sp08_attivita_finanziarie",
+      "Disponibilità liquide": "sp09_disponibilita_liquide",
+      "Ratei e risconti attivi": "sp10_ratei_risconti_attivi",
+
+      "Capitale": "sp11_capitale",
+      "Riserve": "sp12_riserve",
+      "Utile (perdita)": "sp13_utile_perdita",
+      "Fondi per rischi": "sp14_fondi_rischi",
+      "Trattamento di fine rapporto": "sp15_tfr",
+      "Debiti - esigibili entro": "sp16_debiti_breve",
+      "Debiti - esigibili oltre": "sp17_debiti_lungo",
+      "Ratei e risconti passivi": "sp18_ratei_risconti_passivi"
+    },
+    "income_statement": {
+      "Ricavi delle vendite": "ce01_ricavi_vendite",
+      "Variazioni delle rimanenze": "ce02_variazioni_rimanenze",
+      "Incrementi di immobilizzazioni": "ce03_lavori_interni",
+      "Altri ricavi e proventi": "ce04_altri_ricavi",
+
+      "Materie prime": "ce05_materie_prime",
+      "Servizi": "ce06_servizi",
+      "Godimento di beni": "ce07_godimento_beni",
+      "Costi per il personale": "ce08_costi_personale",
+      "Ammortamenti": "ce09_ammortamenti",
+      "Variazioni delle rimanenze di materie": "ce10_var_rimanenze_mat_prime",
+      "Accantonamenti": "ce11_accantonamenti",
+      "Oneri diversi": "ce12_oneri_diversi",
+
+      "Proventi da partecipazioni": "ce13_proventi_partecipazioni",
+      "Altri proventi finanziari": "ce14_altri_proventi_finanziari",
+      "Interessi e altri oneri finanziari": "ce15_oneri_finanziari",
+      "Utili e perdite su cambi": "ce16_utili_perdite_cambi",
+
+      "Rettifiche di valore": "ce17_rettifiche_attivita_fin",
+      "Proventi straordinari": "ce18_proventi_straordinari",
+      "Oneri straordinari": "ce19_oneri_straordinari",
+      "Imposte": "ce20_imposte"
+    }
+  }
+}

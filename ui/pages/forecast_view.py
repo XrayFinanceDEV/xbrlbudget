@@ -19,7 +19,7 @@ def show():
 
     # Check if company is selected
     if not st.session_state.selected_company_id:
-        st.warning("⚠️ Seleziona un'azienda dal menu laterale")
+        st.warning("⚠️ Seleziona un'azienda in alto")
         return
 
     company = db.query(Company).filter(

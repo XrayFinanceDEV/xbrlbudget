@@ -53,7 +53,7 @@ def show():
 
         with col2:
             if import_mode == "Crea nuova azienda":
-                st.info("💡 Verrà creata una nuova azienda con i dati dal file XBRL")
+                st.info("💡 Se esiste già un'azienda con la stessa P.IVA, verrà aggiornata. Altrimenti ne verrà creata una nuova.")
             else:
                 if st.session_state.selected_company_id:
                     st.info("💡 I dati dell'azienda selezionata verranno aggiornati")
@@ -91,7 +91,10 @@ def show():
                     os.unlink(tmp_file_path)
 
                     # Show success
-                    st.success("✅ Importazione completata con successo!")
+                    if result.get('company_created'):
+                        st.success("✅ Importazione completata! Nuova azienda creata.")
+                    else:
+                        st.success("✅ Importazione completata! Azienda esistente aggiornata.")
 
                     col1, col2, col3 = st.columns(3)
 

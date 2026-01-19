@@ -12,12 +12,24 @@ st.set_page_config(
     page_title="Analisi Finanziaria",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS
 st.markdown("""
 <style>
+    /* Hide sidebar completely */
+    [data-testid="stSidebar"] {
+        display: none;
+    }
+
+    /* Adjust main content to use full width */
+    .main .block-container {
+        padding-left: 2rem;
+        padding-right: 2rem;
+        max-width: 100%;
+    }
+
     .main-header {
         font-size: 2.5rem;
         font-weight: bold;
@@ -37,6 +49,14 @@ st.markdown("""
     }
     .stButton>button {
         width: 100%;
+    }
+
+    /* Selection bar styling */
+    .selection-bar {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -58,87 +78,92 @@ if 'selected_company_id' not in st.session_state:
 if 'selected_year' not in st.session_state:
     st.session_state.selected_year = None
 
-# Sidebar - Company Selection
-st.sidebar.title("🏢 Selezione Azienda")
-
 # Get all companies
 db = st.session_state.db
 companies = db.query(Company).all()
 
-if companies:
-    company_options = {f"{c.name} ({c.tax_id})": c.id for c in companies}
-    company_options["+ Nuova Azienda"] = None
+# Company and Year Selection Bar (horizontal layout at top)
+st.markdown('<div class="selection-bar">', unsafe_allow_html=True)
 
-    selected_company_name = st.sidebar.selectbox(
-        "Azienda",
-        options=list(company_options.keys()),
-        index=0 if st.session_state.selected_company_id is None else
-              list(company_options.values()).index(st.session_state.selected_company_id)
-    )
+col1, col2, col3, col4 = st.columns([3, 2, 2, 3])
 
-    st.session_state.selected_company_id = company_options[selected_company_name]
-else:
-    st.sidebar.info("Nessuna azienda trovata. Crea la prima azienda!")
-    st.session_state.selected_company_id = None
+with col1:
+    if companies:
+        company_options = {f"{c.name} ({c.tax_id})": c.id for c in companies}
+        company_options["+ Nuova Azienda"] = None
 
-# If company is selected, show year selection
-if st.session_state.selected_company_id:
-    company = db.query(Company).filter(Company.id == st.session_state.selected_company_id).first()
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader(f"📅 Anno Fiscale")
-
-    # Get available years for this company
-    financial_years = db.query(FinancialYear).filter(
-        FinancialYear.company_id == company.id
-    ).order_by(FinancialYear.year.desc()).all()
-
-    if financial_years:
-        year_options = {str(fy.year): fy.year for fy in financial_years}
-        year_options["+ Nuovo Anno"] = None
-
-        selected_year_str = st.sidebar.selectbox(
-            "Anno",
-            options=list(year_options.keys()),
-            index=0 if st.session_state.selected_year is None else
-                  list(year_options.values()).index(st.session_state.selected_year)
+        selected_company_name = st.selectbox(
+            "🏢 Azienda",
+            options=list(company_options.keys()),
+            index=0 if st.session_state.selected_company_id is None else
+                  list(company_options.values()).index(st.session_state.selected_company_id),
+            key="company_select"
         )
 
-        st.session_state.selected_year = year_options[selected_year_str]
+        st.session_state.selected_company_id = company_options[selected_company_name]
     else:
-        st.sidebar.info("Nessun anno fiscale trovato. Crea il primo anno!")
-        st.session_state.selected_year = None
+        st.info("Nessuna azienda trovata")
+        st.session_state.selected_company_id = None
 
-    # Show company info
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Informazioni Azienda:**")
-    st.sidebar.text(f"Settore: {Sector(company.sector).name}")
-    st.sidebar.text(f"P.IVA: {company.tax_id or 'N/A'}")
+with col2:
+    # If company is selected, show year selection
+    if st.session_state.selected_company_id:
+        company = db.query(Company).filter(Company.id == st.session_state.selected_company_id).first()
 
-st.sidebar.markdown("---")
+        # Get available years for this company
+        financial_years = db.query(FinancialYear).filter(
+            FinancialYear.company_id == company.id
+        ).order_by(FinancialYear.year.desc()).all()
 
-# Navigation
-st.sidebar.title("📋 Navigazione")
+        if financial_years:
+            year_options = {str(fy.year): fy.year for fy in financial_years}
+            year_options["+ Nuovo Anno"] = None
 
-page = st.sidebar.radio(
-    "Sezioni",
-    [
-        "🏠 Home",
-        "🏢 Dati Impresa",
-        "📥 Importazione Dati",
-        "📊 Stato Patrimoniale",
-        "💰 Conto Economico",
-        "📈 Indici Finanziari",
-        "⚖️ Altman Z-Score",
-        "⭐ Rating FGPMI",
-        "💼 Budget & Previsionale",
-        "🔮 Visualizza Previsionale",
-        "📉 Dashboard"
-    ]
-)
+            selected_year_str = st.selectbox(
+                "📅 Anno Fiscale",
+                options=list(year_options.keys()),
+                index=0 if st.session_state.selected_year is None else
+                      list(year_options.values()).index(st.session_state.selected_year),
+                key="year_select"
+            )
 
-# Main content area
-if page == "🏠 Home":
+            st.session_state.selected_year = year_options[selected_year_str]
+        else:
+            st.info("Nessun anno trovato")
+            st.session_state.selected_year = None
+    else:
+        st.selectbox("📅 Anno Fiscale", options=["Seleziona azienda"], disabled=True, key="year_disabled")
+
+with col3:
+    if st.session_state.selected_company_id:
+        company = db.query(Company).filter(Company.id == st.session_state.selected_company_id).first()
+        st.metric("Settore", Sector(company.sector).name, label_visibility="visible")
+    else:
+        st.metric("Settore", "N/A", label_visibility="visible")
+
+with col4:
+    if st.session_state.selected_company_id:
+        company = db.query(Company).filter(Company.id == st.session_state.selected_company_id).first()
+        st.metric("P.IVA", company.tax_id or "N/A", label_visibility="visible")
+    else:
+        st.metric("P.IVA", "N/A", label_visibility="visible")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Main content area - Using Tabs for navigation
+page = st.tabs([
+    "🏠 Home",
+    "📥 Importazione Dati",
+    "📝 Input Ipotesi",
+    "💰 CE Previsionale",
+    "📊 SP Previsionale",
+    "📋 Previsionale Riclassificato",
+    "📈 Indici",
+    "💵 Rendiconto Finanziario"
+])
+
+# Home Tab
+with page[0]:
     st.markdown('<div class="main-header">📊 Analisi Finanziaria - Sistema di Rating</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Analisi di bilancio secondo i principi contabili italiani (OIC)</div>', unsafe_allow_html=True)
 
@@ -184,26 +209,6 @@ if page == "🏠 Home":
 
     st.markdown("---")
 
-    # Quick actions
-    st.subheader("🚀 Azioni Rapide")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        if st.button("➕ Nuova Azienda", use_container_width=True):
-            st.session_state.selected_company_id = None
-            st.rerun()
-
-    with col2:
-        if st.button("📥 Importa XBRL", use_container_width=True):
-            st.info("Vai alla sezione 'Importazione Dati' per importare file XBRL")
-
-    with col3:
-        if st.button("📊 Dashboard", use_container_width=True):
-            st.info("Seleziona 'Dashboard' dalla navigazione")
-
-    st.markdown("---")
-
     # Features
     st.subheader("✨ Funzionalità")
 
@@ -216,7 +221,7 @@ if page == "🏠 Home":
         - ✅ Gestione multi-anno (fino a 5 anni)
         - ✅ Importazione da XBRL (formato italiano)
         - ✅ Importazione da CSV (TEBE)
-        - ✅ Inserimento manuale bilanci
+        - ✅ Previsioni budget 3 anni
         """)
 
     with col2:
@@ -226,51 +231,40 @@ if page == "🏠 Home":
         - ✅ Capitale circolante netto (CCN)
         - ✅ Altman Z-Score settoriale
         - ✅ Rating FGPMI (13 classi di rating)
-        - ✅ Confronti anno su anno
+        - ✅ Rendiconto finanziario
         """)
 
-elif page == "🏢 Dati Impresa":
-    # Import the company data page
-    from ui.pages import dati_impresa
-    dati_impresa.show()
-
-elif page == "📥 Importazione Dati":
+# Importazione Dati Tab
+with page[1]:
     from ui.pages import importazione
     importazione.show()
 
-elif page == "📊 Stato Patrimoniale":
-    from ui.pages import balance_sheet
-    balance_sheet.show()
-
-elif page == "💰 Conto Economico":
-    from ui.pages import income_statement
-    income_statement.show()
-
-elif page == "📈 Indici Finanziari":
-    from ui.pages import ratios
-    ratios.show()
-
-elif page == "⚖️ Altman Z-Score":
-    from ui.pages import altman
-    altman.show()
-
-elif page == "⭐ Rating FGPMI":
-    from ui.pages import rating
-    rating.show()
-
-elif page == "💼 Budget & Previsionale":
+# Input Ipotesi Tab
+with page[2]:
     from ui.pages import budget
     budget.show()
 
-elif page == "🔮 Visualizza Previsionale":
-    from ui.pages import forecast_view
-    forecast_view.show()
+# CE Previsionale Tab
+with page[3]:
+    from ui.pages import ce_previsionale
+    ce_previsionale.show()
 
-elif page == "📉 Dashboard":
-    from ui.pages import dashboard
-    dashboard.show()
+# SP Previsionale Tab
+with page[4]:
+    from ui.pages import sp_previsionale
+    sp_previsionale.show()
 
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.caption("💻 Financial Analysis System v1.0")
-st.sidebar.caption("🇮🇹 Italian GAAP Compliant")
+# Previsionale Riclassificato Tab
+with page[5]:
+    from ui.pages import previsionale_riclassificato
+    previsionale_riclassificato.show()
+
+# Indici Tab (combines ratios + Altman + FGPMI)
+with page[6]:
+    from ui.pages import indici
+    indici.show()
+
+# Rendiconto Finanziario Tab
+with page[7]:
+    from ui.pages import rendiconto_finanziario
+    rendiconto_finanziario.show()

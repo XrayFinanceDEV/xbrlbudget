@@ -18,11 +18,11 @@ def show():
 
     # Check if company and year are selected
     if not st.session_state.selected_company_id:
-        st.warning("⚠️ Seleziona un'azienda dal menu laterale")
+        st.warning("⚠️ Seleziona un'azienda in alto")
         return
 
     if not st.session_state.selected_year:
-        st.warning("⚠️ Seleziona un anno fiscale dal menu laterale")
+        st.warning("⚠️ Seleziona un anno fiscale in alto")
         return
 
     # Get company and financial year

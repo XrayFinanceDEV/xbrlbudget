@@ -12,7 +12,7 @@ from decimal import Decimal
 
 def _show_scenario_form(db, company, scenario=None, all_scenarios=None):
     """
-    Show scenario creation/edit form
+    Show scenario creation/edit form with Excel-like table structure
 
     Args:
         db: Database session
@@ -37,6 +37,9 @@ def _show_scenario_form(db, company, scenario=None, all_scenarios=None):
     # Scenario details form
     st.markdown("### 1️⃣ Informazioni Scenario")
 
+    # Automatically select the latest year as base year
+    base_year = max(fy.year for fy in financial_years)
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -46,13 +49,7 @@ def _show_scenario_form(db, company, scenario=None, all_scenarios=None):
             placeholder="es. Budget 2025-2027"
         )
 
-        base_year_options = [fy.year for fy in financial_years]
-        base_year = st.selectbox(
-            "Anno Base *",
-            options=base_year_options,
-            index=base_year_options.index(scenario.base_year) if scenario and scenario.base_year in base_year_options else 0,
-            help="L'anno su cui basare le variazioni percentuali"
-        )
+        st.info(f"📅 **Anno Base:** {base_year} (ultimo anno disponibile)")
 
     with col2:
         description = st.text_area(
@@ -77,101 +74,27 @@ def _show_scenario_form(db, company, scenario=None, all_scenarios=None):
         return
 
     base_inc = base_fy.income_statement
+    base_bs = base_fy.balance_sheet
 
     st.markdown("---")
-    st.markdown("### 2️⃣ Parametri Generali Budget")
-    st.info("💡 Parametri comuni per tutti gli anni di previsione")
 
-    # Get first assumption for common parameters if editing
-    first_assumption = None
-    if scenario:
-        assumptions_list = db.query(BudgetAssumptions).filter(
-            BudgetAssumptions.scenario_id == scenario.id
-        ).order_by(BudgetAssumptions.forecast_year).first()
-        first_assumption = assumptions_list
+    # Get all available historical years
+    historical_years = sorted([fy.year for fy in financial_years], reverse=True)
 
-    col1, col2, col3 = st.columns(3)
+    # Fetch income statements for all historical years
+    historical_data = {}
+    for year in historical_years:
+        fy = db.query(FinancialYear).filter(
+            FinancialYear.company_id == company.id,
+            FinancialYear.year == year
+        ).first()
+        if fy and fy.income_statement and fy.balance_sheet:
+            historical_data[year] = {
+                'income': fy.income_statement,
+                'balance': fy.balance_sheet
+            }
 
-    with col1:
-        st.markdown("**📊 Aliquote Fiscali**")
-        tax_rate = st.number_input(
-            "% Aliquota IRES/IRAP",
-            min_value=0.0,
-            max_value=100.0,
-            value=float(first_assumption.tax_rate) if first_assumption else 27.9,
-            step=0.1,
-            format="%.2f",
-            help="Aliquota fiscale attesa (IRES 24% + IRAP 3.9% media = 27.9%)"
-        )
-
-        depreciation_rate = st.number_input(
-            "% Ammortamento Medio",
-            min_value=0.0,
-            max_value=100.0,
-            value=float(first_assumption.depreciation_rate) if first_assumption else 20.0,
-            step=1.0,
-            format="%.1f",
-            help="Percentuale media di ammortamento sugli investimenti"
-        )
-
-    with col2:
-        st.markdown("**🏭 Struttura Costi**")
-        fixed_materials_pct = st.number_input(
-            "% Quota Fissa Materie Prime",
-            min_value=0.0,
-            max_value=100.0,
-            value=float(first_assumption.fixed_materials_percentage) if first_assumption else 40.0,
-            step=5.0,
-            format="%.1f",
-            help="Percentuale dei costi materie prime che sono fissi"
-        )
-
-        fixed_services_pct = st.number_input(
-            "% Quota Fissa Servizi",
-            min_value=0.0,
-            max_value=100.0,
-            value=float(first_assumption.fixed_services_percentage) if first_assumption else 40.0,
-            step=5.0,
-            format="%.1f",
-            help="Percentuale dei costi servizi che sono fissi"
-        )
-
-    with col3:
-        st.markdown("**💳 Finanziamenti (opzionale)**")
-        financing_amount = st.number_input(
-            "Importo Finanziamento (€)",
-            min_value=0.0,
-            value=float(first_assumption.financing_amount) if first_assumption else 0.0,
-            step=10000.0,
-            format="%.0f",
-            help="Nuovo finanziamento da ottenere"
-        )
-
-        financing_duration = st.number_input(
-            "Durata Media (anni)",
-            min_value=0.0,
-            max_value=30.0,
-            value=float(first_assumption.financing_duration_years) if first_assumption else 0.0,
-            step=0.5,
-            format="%.1f",
-            help="Durata del finanziamento in anni"
-        )
-
-        financing_rate = st.number_input(
-            "% Tasso Interesse Finanziamento",
-            min_value=0.0,
-            max_value=100.0,
-            value=float(first_assumption.financing_interest_rate) if first_assumption else 0.0,
-            step=0.1,
-            format="%.2f",
-            help="Tasso di interesse sul finanziamento"
-        )
-
-    st.markdown("---")
-    st.markdown("### 3️⃣ Ipotesi Previsionali per Anno")
-    st.info("💡 Inserisci le variazioni % rispetto all'anno base per ciascun anno di previsione")
-
-    # Get existing assumptions if editing
+    # Number of forecast years
     existing_assumptions = {}
     if scenario:
         for assumption in db.query(BudgetAssumptions).filter(
@@ -179,7 +102,6 @@ def _show_scenario_form(db, company, scenario=None, all_scenarios=None):
         ).all():
             existing_assumptions[assumption.forecast_year] = assumption
 
-    # Input assumptions for 3 years
     num_years = st.number_input(
         "Numero di anni da prevedere",
         min_value=1,
@@ -188,178 +110,726 @@ def _show_scenario_form(db, company, scenario=None, all_scenarios=None):
         help="Numero di anni futuri da prevedere (default: 3)"
     )
 
+    forecast_years = [base_year + i + 1 for i in range(num_years)]
+
+    st.markdown("### 2️⃣ Ipotesi Previsionali")
+    st.info("💡 Inserisci le ipotesi per ciascun anno. Le celle in blu rappresentano i valori modificabili.")
+
+    # Get first assumption for common parameters
+    first_assumption = existing_assumptions.get(forecast_years[0]) if existing_assumptions else None
+
+    # Initialize data storage
     assumptions_data = []
 
-    for i in range(num_years):
-        forecast_year = base_year + i + 1
-        existing = existing_assumptions.get(forecast_year)
+    # Store fixed cost percentages for historical years
+    historical_fixed_materials_pct = {}
+    historical_fixed_services_pct = {}
 
-        with st.expander(f"📅 Anno {forecast_year}", expanded=(i == 0)):
-            col1, col2, col3 = st.columns(3)
+    # Create table header
+    st.markdown("---")
+    st.markdown("#### VARIABILI ECONOMICHE")
 
-            with col1:
-                st.markdown("**💰 Ricavi**")
-                revenue_growth = st.number_input(
-                    f"% Ricavi vs {base_year}",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.revenue_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"rev_{forecast_year}",
-                    help=f"Anno base: €{base_inc.ce01_ricavi_vendite:,.0f}"
-                )
+    # Header row - show all historical years + forecast years
+    total_years = len(historical_years) + num_years
+    header_cols = st.columns([3] + [1] * total_years)
+    with header_cols[0]:
+        st.markdown("**ANNI ANALISI**")
 
-                other_revenue_growth = st.number_input(
-                    f"% Altri Ricavi vs {base_year}",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.other_revenue_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"other_rev_{forecast_year}",
-                    help=f"Anno base: €{base_inc.ce04_altri_ricavi:,.0f}"
-                )
+    # Historical years (black text)
+    for idx, year in enumerate(historical_years):
+        with header_cols[idx + 1]:
+            st.markdown(f"**{year}**")
 
-            with col2:
-                st.markdown("**💸 Costi**")
-                var_materials = st.number_input(
-                    "% Costi Var. Materiali",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.variable_materials_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"var_mat_{forecast_year}"
-                )
+    # Forecast years (blue text)
+    for idx, year in enumerate(forecast_years):
+        with header_cols[len(historical_years) + idx + 1]:
+            st.markdown(f"**:blue[{year}]**")
 
-                fix_materials = st.number_input(
-                    "% Costi Fissi Materiali",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.fixed_materials_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"fix_mat_{forecast_year}"
-                )
+    # Revenue growth
+    st.markdown("---")
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % RICAVI RISPETTO ALL'ANNO BASE**")
 
-                var_services = st.number_input(
-                    "% Costi Var. Servizi",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.variable_services_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"var_serv_{forecast_year}"
-                )
+    # Show historical revenue values
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            if year in historical_data:
+                st.markdown(f"€ {historical_data[year]['income'].ce01_ricavi_vendite:,.0f}")
+            else:
+                st.markdown("—")
 
-                fix_services = st.number_input(
-                    "% Costi Fissi Servizi",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.fixed_services_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"fix_serv_{forecast_year}"
-                )
+    # Input for forecast years
+    revenue_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.revenue_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"rev_{year}",
+                help="% da -100% a +1.000%"
+            )
+            revenue_growth_values.append(val)
 
-                rent_growth = st.number_input(
-                    "% Godimento Beni Terzi",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.rent_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"rent_{forecast_year}"
-                )
+    # Other revenue growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % ALTRI RICAVI RISPETTO ALL'ANNO BASE**")
 
-                personnel_growth = st.number_input(
-                    "% Costi Personale",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.personnel_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"pers_{forecast_year}"
-                )
+    # Show historical other revenue values
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            if year in historical_data:
+                st.markdown(f"€ {historical_data[year]['income'].ce04_altri_ricavi:,.0f}")
+            else:
+                st.markdown("—")
 
-                other_costs_growth = st.number_input(
-                    "% Oneri Diversi",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.other_costs_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"other_cost_{forecast_year}"
-                )
+    # Input for forecast years
+    other_revenue_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.other_revenue_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"other_rev_{year}",
+                help="% da -100% a +1.000%"
+            )
+            other_revenue_growth_values.append(val)
 
-            with col3:
-                st.markdown("**🏗️ Investimenti & WC**")
-                investments = st.number_input(
-                    "Investimenti (€)",
-                    min_value=0.0,
-                    value=float(existing.investments) if existing else 0.0,
-                    step=1000.0,
-                    format="%.0f",
-                    key=f"inv_{forecast_year}"
-                )
+    # Fixed percentage for materials - EDITABLE for ALL years (historical + forecast)
+    st.markdown("---")
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**% QUOTA FISSA COSTI PER MATERIE PRIME, SUSSIDIARIE, DI CONSUMO E MERCI**")
 
-                rec_short = st.number_input(
-                    "% Crediti Breve",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.receivables_short_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"rec_short_{forecast_year}"
-                )
+    # Default base percentage
+    base_materials_pct = float(first_assumption.fixed_materials_percentage) if first_assumption else 22.0
 
-                rec_long = st.number_input(
-                    "% Crediti Lungo",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.receivables_long_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"rec_long_{forecast_year}"
-                )
+    # Input for HISTORICAL years (editable!)
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=base_materials_pct,
+                step=1.0,
+                format="%.2f",
+                key=f"fix_mat_pct_hist_{year}",
+                help="% di costi che non saranno influenzati dalle variazioni previsionali (calcolata come media degli anni storici)"
+            )
+            historical_fixed_materials_pct[year] = val
 
-                pay_short = st.number_input(
-                    "% Debiti Breve",
-                    min_value=-100.0,
-                    max_value=1000.0,
-                    value=float(existing.payables_short_growth_pct) if existing else 0.0,
-                    step=0.1,
-                    format="%.2f",
-                    key=f"pay_short_{forecast_year}"
-                )
+    # Input for FORECAST years
+    fixed_materials_pct_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(existing.fixed_materials_percentage) if existing else base_materials_pct,
+                step=1.0,
+                format="%.2f",
+                key=f"fix_mat_pct_{year}",
+                help="% di costi che non saranno influenzati dalle variazioni previsionali (calcolata come media degli anni storici)"
+            )
+            fixed_materials_pct_values.append(val)
 
-            assumptions_data.append({
-                'forecast_year': forecast_year,
-                'revenue_growth_pct': Decimal(str(revenue_growth)),
-                'other_revenue_growth_pct': Decimal(str(other_revenue_growth)),
-                'variable_materials_growth_pct': Decimal(str(var_materials)),
-                'fixed_materials_growth_pct': Decimal(str(fix_materials)),
-                'variable_services_growth_pct': Decimal(str(var_services)),
-                'fixed_services_growth_pct': Decimal(str(fix_services)),
-                'rent_growth_pct': Decimal(str(rent_growth)),
-                'personnel_growth_pct': Decimal(str(personnel_growth)),
-                'other_costs_growth_pct': Decimal(str(other_costs_growth)),
-                'investments': Decimal(str(investments)),
-                'receivables_short_growth_pct': Decimal(str(rec_short)),
-                'receivables_long_growth_pct': Decimal(str(rec_long)),
-                'payables_short_growth_pct': Decimal(str(pay_short)),
-                'interest_rate_receivables': Decimal('0'),
-                'interest_rate_payables': Decimal('0'),
-                # Common parameters (same for all years)
-                'tax_rate': Decimal(str(tax_rate)),
-                'fixed_materials_percentage': Decimal(str(fixed_materials_pct)),
-                'fixed_services_percentage': Decimal(str(fixed_services_pct)),
-                'depreciation_rate': Decimal(str(depreciation_rate)),
-                'financing_amount': Decimal(str(financing_amount)),
-                'financing_duration_years': Decimal(str(financing_duration)),
-                'financing_interest_rate': Decimal(str(financing_rate))
-            })
+    # Variable materials growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % COSTI VARIABILI PER MAT. PRIME RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    var_materials_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.variable_materials_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"var_mat_{year}",
+                help="% da -100% a +1.000%"
+            )
+            var_materials_growth_values.append(val)
+
+    # Fixed materials growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % COSTI FISSI PER MAT. PRIME RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    fix_materials_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.fixed_materials_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"fix_mat_{year}",
+                help="% da -100% a +1.000%"
+            )
+            fix_materials_growth_values.append(val)
+
+    # Fixed percentage for services - EDITABLE for ALL years (historical + forecast)
+    st.markdown("---")
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**% QUOTA FISSA COSTI PER SERVIZI**")
+
+    base_services_pct = float(first_assumption.fixed_services_percentage) if first_assumption else 22.0
+
+    # Input for HISTORICAL years (editable!)
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=base_services_pct,
+                step=1.0,
+                format="%.2f",
+                key=f"fix_serv_pct_hist_{year}",
+                help="% di costi che non saranno influenzati dalle variazioni previsionali (calcolata come media degli anni storici)"
+            )
+            historical_fixed_services_pct[year] = val
+
+    # Input for FORECAST years
+    fixed_services_pct_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(existing.fixed_services_percentage) if existing else base_services_pct,
+                step=1.0,
+                format="%.2f",
+                key=f"fix_serv_pct_{year}",
+                help="% di costi che non saranno influenzati dalle variazioni previsionali (calcolata come media degli anni storici)"
+            )
+            fixed_services_pct_values.append(val)
+
+    # Variable services growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % COSTI VARIABILI PER SERVIZI RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    var_services_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.variable_services_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"var_serv_{year}",
+                help="% da -100% a +1.000%"
+            )
+            var_services_growth_values.append(val)
+
+    # Fixed services growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % COSTI FISSI PER SERVIZI RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    fix_services_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.fixed_services_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"fix_serv_{year}",
+                help="% da -100% a +1.000%"
+            )
+            fix_services_growth_values.append(val)
+
+    # Rent growth
+    st.markdown("---")
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % COSTI GODIMENTO BENI DI TERZI RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    rent_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.rent_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"rent_{year}",
+                help="% da -100% a +1.000%"
+            )
+            rent_growth_values.append(val)
+
+    # Personnel growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % COSTI DEL PERSONALE RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    personnel_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.personnel_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"pers_{year}",
+                help="% da -100% a +1.000%"
+            )
+            personnel_growth_values.append(val)
+
+    # Other costs growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % ONERI DIVERSI DI GESTIONE ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    other_costs_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.other_costs_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"other_cost_{year}",
+                help="% da -100% a +1.000%"
+            )
+            other_costs_growth_values.append(val)
+
+    # Tax rate
+    st.markdown("---")
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**% ALIQUOTA IRES/IRAP ATTESA**")
+
+    base_tax_rate = float(first_assumption.tax_rate) if first_assumption else 27.9
+
+    # Historical years - show base tax rate
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown(f"{base_tax_rate:.2f}%")
+
+    # Forecast years - input
+    tax_rate_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(existing.tax_rate) if existing else base_tax_rate,
+                step=0.1,
+                format="%.2f",
+                key=f"tax_{year}"
+            )
+            tax_rate_values.append(val)
+
+    # === BALANCE SHEET ASSUMPTIONS ===
+    st.markdown("---")
+    st.markdown("#### IMMOBILIZZAZIONI")
+
+    # Immaterial investments
+    st.markdown("**IMMOBILIZZAZIONI IMMATERIALI**")
+
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**INVESTIMENTO**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    investments_immaterial_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                value=float(existing.investments) * 0.3 if existing and existing.investments > 0 else 0.0,
+                step=1000.0,
+                format="%.0f",
+                key=f"inv_immat_{year}"
+            )
+            investments_immaterial_values.append(val)
+
+    # Depreciation rate immaterial
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**% AMM.TO MEDIA**")
+
+    base_depr_rate = float(first_assumption.depreciation_rate) if first_assumption else 20.0
+
+    # Historical years - show base depreciation rate
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown(f"{base_depr_rate:.2f}%")
+
+    # Forecast years - input
+    depreciation_immaterial_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(existing.depreciation_rate) if existing else base_depr_rate,
+                step=1.0,
+                format="%.2f",
+                key=f"depr_immat_{year}"
+            )
+            depreciation_immaterial_values.append(val)
+
+    # Material investments
+    st.markdown("---")
+    st.markdown("**IMMOBILIZZAZIONI MATERIALI**")
+
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**INVESTIMENTO**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    investments_material_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                value=float(existing.investments) * 0.7 if existing and existing.investments > 0 else 0.0,
+                step=1000.0,
+                format="%.0f",
+                key=f"inv_mat_{year}"
+            )
+            investments_material_values.append(val)
+
+    # Depreciation rate material
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**% AMM.TO MEDIA**")
+
+    # Historical years - show base depreciation rate
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown(f"{base_depr_rate:.2f}%")
+
+    # Forecast years - input
+    depreciation_material_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(existing.depreciation_rate) if existing else base_depr_rate,
+                step=1.0,
+                format="%.2f",
+                key=f"depr_mat_{year}"
+            )
+            depreciation_material_values.append(val)
+
+    # === RECEIVABLES ===
+    st.markdown("---")
+    st.markdown("#### CREDITI DELL'ATTIVO CIRCOLANTE")
+
+    # Short-term receivables growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % CREDITI ESIG. ENTRO ES. SUCC. RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    rec_short_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.receivables_short_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"rec_short_{year}",
+                help="% da -100% a +1.000%"
+            )
+            rec_short_growth_values.append(val)
+
+    # Long-term receivables growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % CREDITI ESIG. OLTRE ES. SUCC. RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    rec_long_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.receivables_long_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"rec_long_{year}",
+                help="% da -100% a +1.000%"
+            )
+            rec_long_growth_values.append(val)
+
+    # === PAYABLES ===
+    st.markdown("---")
+    st.markdown("#### DEBITI")
+    st.markdown("**DEBITI ESIGIBILI ENTRO L'ESERCIZIO SUCCESSIVO**")
+
+    # Short-term payables growth
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**VAR. % DEBITI ESIG. ENTRO ES. SUCC. RISPETTO ALL'ANNO BASE**")
+
+    # Historical years - show placeholder
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown("—")
+
+    # Forecast years - input
+    pay_short_growth_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=-100.0,
+                max_value=1000.0,
+                value=float(existing.payables_short_growth_pct) if existing else 0.0,
+                step=0.1,
+                format="%.2f",
+                key=f"pay_short_{year}",
+                help="% da -100% a +1.000%"
+            )
+            pay_short_growth_values.append(val)
+
+    # === FINANCING ===
+    st.markdown("---")
+    st.markdown("**DEBITI ESIGIBILI OLTRE L'ESERCIZIO SUCCESSIVO**")
+
+    # Financing amount
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**IMPORTO FINANZIAMENTO**")
+
+    base_financing = float(first_assumption.financing_amount) if first_assumption else 0.0
+
+    # Historical years - show base financing
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown(f"€ {base_financing:,.0f}")
+
+    # Forecast years - input
+    financing_amount_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                value=float(existing.financing_amount) if existing else base_financing,
+                step=10000.0,
+                format="%.0f",
+                key=f"fin_amt_{year}"
+            )
+            financing_amount_values.append(val)
+
+    # Financing duration
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**DURATA MEDIA**")
+
+    base_duration = float(first_assumption.financing_duration_years) if first_assumption else 5.0
+
+    # Historical years - show base duration
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown(f"{base_duration:.1f} anni")
+
+    # Forecast years - input
+    financing_duration_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=30.0,
+                value=float(existing.financing_duration_years) if existing else base_duration,
+                step=0.5,
+                format="%.1f",
+                key=f"fin_dur_{year}"
+            )
+            financing_duration_values.append(val)
+
+    # Financing interest rate
+    cols = st.columns([3] + [1] * total_years)
+    with cols[0]:
+        st.markdown("**% TASSO INTERESSE PASSIVO MEDIO**")
+
+    base_rate = float(first_assumption.financing_interest_rate) if first_assumption else 3.0
+
+    # Historical years - show base rate
+    for idx, year in enumerate(historical_years):
+        with cols[idx + 1]:
+            st.markdown(f"{base_rate:.2f}%")
+
+    # Forecast years - input
+    financing_rate_values = []
+    for idx, year in enumerate(forecast_years):
+        existing = existing_assumptions.get(year)
+        with cols[len(historical_years) + idx + 1]:
+            val = st.number_input(
+                f"{year}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(existing.financing_interest_rate) if existing else base_rate,
+                step=0.1,
+                format="%.2f",
+                key=f"fin_rate_{year}"
+            )
+            financing_rate_values.append(val)
+
+    # Build assumptions data
+    for idx, year in enumerate(forecast_years):
+        # Calculate total investment (immaterial + material)
+        total_investment = investments_immaterial_values[idx] + investments_material_values[idx]
+
+        # Use average depreciation rate from both types
+        avg_depr_rate = (depreciation_immaterial_values[idx] + depreciation_material_values[idx]) / 2
+
+        assumptions_data.append({
+            'forecast_year': year,
+            'revenue_growth_pct': Decimal(str(revenue_growth_values[idx])),
+            'other_revenue_growth_pct': Decimal(str(other_revenue_growth_values[idx])),
+            'variable_materials_growth_pct': Decimal(str(var_materials_growth_values[idx])),
+            'fixed_materials_growth_pct': Decimal(str(fix_materials_growth_values[idx])),
+            'variable_services_growth_pct': Decimal(str(var_services_growth_values[idx])),
+            'fixed_services_growth_pct': Decimal(str(fix_services_growth_values[idx])),
+            'rent_growth_pct': Decimal(str(rent_growth_values[idx])),
+            'personnel_growth_pct': Decimal(str(personnel_growth_values[idx])),
+            'other_costs_growth_pct': Decimal(str(other_costs_growth_values[idx])),
+            'investments': Decimal(str(total_investment)),
+            'receivables_short_growth_pct': Decimal(str(rec_short_growth_values[idx])),
+            'receivables_long_growth_pct': Decimal(str(rec_long_growth_values[idx])),
+            'payables_short_growth_pct': Decimal(str(pay_short_growth_values[idx])),
+            'interest_rate_receivables': Decimal('0'),
+            'interest_rate_payables': Decimal('0'),
+            # Common/year-specific parameters
+            'tax_rate': Decimal(str(tax_rate_values[idx])),
+            'fixed_materials_percentage': Decimal(str(fixed_materials_pct_values[idx])),
+            'fixed_services_percentage': Decimal(str(fixed_services_pct_values[idx])),
+            'depreciation_rate': Decimal(str(avg_depr_rate)),
+            'financing_amount': Decimal(str(financing_amount_values[idx])),
+            'financing_duration_years': Decimal(str(financing_duration_values[idx])),
+            'financing_interest_rate': Decimal(str(financing_rate_values[idx]))
+        })
 
     # Save button
     st.markdown("---")
@@ -443,7 +913,7 @@ def show():
 
     # Check if company is selected
     if not st.session_state.selected_company_id:
-        st.warning("⚠️ Seleziona un'azienda dal menu laterale")
+        st.warning("⚠️ Seleziona un'azienda in alto")
         return
 
     company = db.query(Company).filter(

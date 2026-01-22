@@ -598,3 +598,279 @@ def get_forecast_income_statement(
         )
 
     return forecast_year.income_statement
+
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/reclassified",
+    response_model=Dict[str, Any],
+    summary="Get reclassified financial data for forecast scenario"
+)
+def get_forecast_reclassified_data(
+    company_id: int,
+    scenario_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get reclassified financial indicators for both historical and forecast years.
+
+    Returns comprehensive metrics for charting and analysis:
+    - Historical data (up to base year)
+    - Forecast data (projection years)
+    - Income Statement reclassified (Revenue, EBITDA, EBIT, Net Profit)
+    - Balance Sheet reclassified (Assets, Equity, Debt, Working Capital)
+    - Key financial ratios (Liquidity, Profitability, Solvency)
+
+    This endpoint is designed for the "Previsionale Riclassificato" page.
+    """
+    from calculations.ratios import FinancialRatiosCalculator
+
+    # Validate scenario belongs to company
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+
+    # Get base year
+    base_year = scenario.base_year
+
+    # Get company
+    company = validate_company_exists(company_id, db)
+
+    # Get all forecast years for this scenario
+    forecast_years = db.query(models.ForecastYear).filter(
+        models.ForecastYear.scenario_id == scenario_id
+    ).order_by(models.ForecastYear.year).all()
+
+    if not forecast_years:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No forecast data found for scenario {scenario_id}"
+        )
+
+    # Get historical data (all years up to and including base year)
+    historical_years = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year <= base_year
+    ).order_by(models.FinancialYear.year).all()
+
+    # Build result structure
+    result = {
+        "scenario": {
+            "id": scenario.id,
+            "name": scenario.name,
+            "base_year": scenario.base_year,
+            "projection_years": len(forecast_years)
+        },
+        "years": [],
+        "historical_data": [],
+        "forecast_data": []
+    }
+
+    # Process historical data
+    for fy in historical_years:
+        if not fy.balance_sheet or not fy.income_statement:
+            continue
+
+        bs = fy.balance_sheet
+        inc = fy.income_statement
+
+        # Calculate ratios
+        calc = FinancialRatiosCalculator(bs, inc)
+        wc_metrics = calc.calculate_working_capital_metrics()
+        liquidity = calc.calculate_liquidity_ratios()
+        profitability = calc.calculate_profitability_ratios()
+        solvency = calc.calculate_solvency_ratios()
+
+        year_data = {
+            "year": fy.year,
+            "type": "historical",
+            # Income Statement Reclassified
+            "income_statement": {
+                "revenue": float(inc.revenue),
+                "production_value": float(inc.production_value),
+                "production_cost": float(inc.production_cost),
+                "ebitda": float(inc.ebitda),
+                "ebit": float(inc.ebit),
+                "financial_result": float(inc.financial_result),
+                "extraordinary_result": float(inc.extraordinary_result),
+                "profit_before_tax": float(inc.profit_before_tax),
+                "net_profit": float(inc.net_profit)
+            },
+            # Balance Sheet Reclassified
+            "balance_sheet": {
+                "total_assets": float(bs.total_assets),
+                "fixed_assets": float(bs.fixed_assets),
+                "current_assets": float(bs.current_assets),
+                "total_equity": float(bs.total_equity),
+                "total_debt": float(bs.total_debt),
+                "current_liabilities": float(bs.current_liabilities),
+                "long_term_debt": float(bs.sp17_debiti_lungo),
+                "working_capital": float(bs.working_capital_net)
+            },
+            # Key Ratios
+            "ratios": {
+                "current_ratio": float(liquidity.current_ratio),
+                "quick_ratio": float(liquidity.quick_ratio),
+                "roe": float(profitability.roe),
+                "roi": float(profitability.roi),
+                "ros": float(profitability.ros),
+                "ebitda_margin": float(profitability.ebitda_margin),
+                "ebit_margin": float(profitability.ebit_margin),
+                "net_margin": float(profitability.net_margin),
+                "debt_to_equity": float(solvency.debt_to_equity),
+                "autonomy_index": float(solvency.autonomy_index)
+            }
+        }
+
+        result["years"].append(fy.year)
+        result["historical_data"].append(year_data)
+
+    # Process forecast data
+    for forecast_year in forecast_years:
+        if not forecast_year.balance_sheet or not forecast_year.income_statement:
+            continue
+
+        bs = forecast_year.balance_sheet
+        inc = forecast_year.income_statement
+
+        # Calculate ratios
+        calc = FinancialRatiosCalculator(bs, inc)
+        wc_metrics = calc.calculate_working_capital_metrics()
+        liquidity = calc.calculate_liquidity_ratios()
+        profitability = calc.calculate_profitability_ratios()
+        solvency = calc.calculate_solvency_ratios()
+
+        year_data = {
+            "year": forecast_year.year,
+            "type": "forecast",
+            # Income Statement Reclassified
+            "income_statement": {
+                "revenue": float(inc.revenue),
+                "production_value": float(inc.production_value),
+                "production_cost": float(inc.production_cost),
+                "ebitda": float(inc.ebitda),
+                "ebit": float(inc.ebit),
+                "financial_result": float(inc.financial_result),
+                "extraordinary_result": float(inc.extraordinary_result),
+                "profit_before_tax": float(inc.profit_before_tax),
+                "net_profit": float(inc.net_profit)
+            },
+            # Balance Sheet Reclassified
+            "balance_sheet": {
+                "total_assets": float(bs.total_assets),
+                "fixed_assets": float(bs.fixed_assets),
+                "current_assets": float(bs.current_assets),
+                "total_equity": float(bs.total_equity),
+                "total_debt": float(bs.total_debt),
+                "current_liabilities": float(bs.current_liabilities),
+                "long_term_debt": float(bs.sp17_debiti_lungo),
+                "working_capital": float(bs.working_capital_net)
+            },
+            # Key Ratios
+            "ratios": {
+                "current_ratio": float(liquidity.current_ratio),
+                "quick_ratio": float(liquidity.quick_ratio),
+                "roe": float(profitability.roe),
+                "roi": float(profitability.roi),
+                "ros": float(profitability.ros),
+                "ebitda_margin": float(profitability.ebitda_margin),
+                "ebit_margin": float(profitability.ebit_margin),
+                "net_margin": float(profitability.net_margin),
+                "debt_to_equity": float(solvency.debt_to_equity),
+                "autonomy_index": float(solvency.autonomy_index)
+            }
+        }
+
+        result["years"].append(forecast_year.year)
+        result["forecast_data"].append(year_data)
+
+    return result
+
+
+# ===== Detailed Cash Flow Endpoints =====
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/detailed-cashflow",
+    response_model=Any,
+    summary="Get detailed cash flow statement for scenario (historical + forecast)"
+)
+def get_detailed_cashflow_scenario(
+    company_id: int,
+    scenario_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed cash flow statement (Italian GAAP - Indirect Method)
+
+    Timeline: base_year (2023) → historical (2024) → forecasts (2025, 2026, 2027)
+
+    Returns comprehensive cash flow with:
+    - Operating activities (detailed breakdown with WC changes, provisions, etc.)
+    - Investing activities (by asset type: tangible, intangible, financial)
+    - Financing activities (debt and equity sources)
+    - Cash reconciliation with verification
+
+    Matches VBA RENDICONTO_FINANZIARIO structure.
+    """
+    from app.services import calculation_service
+
+    # Validate scenario
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+
+    try:
+        result = calculation_service.calculate_detailed_cashflow_historical_and_forecast(
+            db=db,
+            company_id=company_id,
+            scenario_id=scenario_id,
+            base_year=scenario.base_year
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating detailed cashflow: {str(e)}"
+        )
+
+
+@router.get(
+    "/companies/{company_id}/detailed-cashflow",
+    response_model=Any,
+    summary="Get detailed cash flow statement for historical years only"
+)
+def get_detailed_cashflow_historical(
+    company_id: int,
+    start_year: int = Query(..., description="First year to calculate cashflow for"),
+    end_year: int = Query(..., description="Last year to calculate cashflow for"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed cash flow statement for historical years only (no scenario)
+
+    Returns comprehensive cash flow with all components for specified year range.
+    Requires at least 2 years of data (start_year and start_year-1 as base).
+    """
+    from app.services import calculation_service
+
+    # Validate company
+    validate_company_exists(company_id, db)
+
+    try:
+        result = calculation_service.calculate_detailed_cashflow_historical_only(
+            db=db,
+            company_id=company_id,
+            start_year=start_year,
+            end_year=end_year
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating detailed cashflow: {str(e)}"
+        )

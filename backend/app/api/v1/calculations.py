@@ -246,3 +246,70 @@ def get_solvency_ratios(
         return all_ratios.solvency
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get(
+    "/companies/{company_id}/years/{year}/calculations/cashflow",
+    response_model=calc_schemas.CashFlowResult,
+    summary="Calculate cash flow statement"
+)
+def get_cashflow(
+    company_id: int,
+    year: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate cash flow statement using indirect method.
+
+    The indirect method starts with net profit and adjusts for:
+    - Non-cash expenses (depreciation)
+    - Changes in working capital (receivables, inventory, payables)
+    - Investing activities (CAPEX)
+    - Financing activities (debt and equity changes)
+
+    Returns:
+    - Operating, investing, and financing cash flows
+    - Cash flow ratios (OCF margin, FCF, cash conversion)
+    - Verification against actual cash balance changes
+    """
+    try:
+        return calculation_service.calculate_cashflow(db, company_id, year)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating cash flow: {str(e)}"
+        )
+
+
+@router.get(
+    "/companies/{company_id}/calculations/cashflow",
+    response_model=list[calc_schemas.CashFlowResult],
+    summary="Calculate cash flow for all years"
+)
+def get_cashflow_multi_year(
+    company_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate cash flow statements for all available years.
+
+    Returns a list of cash flow results sorted by year.
+    Minimum 2 years of data required.
+    """
+    try:
+        return calculation_service.calculate_cashflow_multi_year(db, company_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating cash flow: {str(e)}"
+        )

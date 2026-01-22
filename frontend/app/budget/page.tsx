@@ -100,7 +100,7 @@ export default function BudgetPage() {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
-          ⚠️ Seleziona un'azienda per gestire gli scenari di budget
+          ⚠️ Seleziona un&apos;azienda per gestire gli scenari di budget
         </div>
       </div>
     );
@@ -210,7 +210,7 @@ function ScenariosList({
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
         <p className="text-gray-700">
-          📝 Nessuno scenario presente. Crea il primo scenario nella tab "Nuovo Scenario"
+          📝 Nessuno scenario presente. Crea il primo scenario nella tab &quot;Nuovo Scenario&quot;
         </p>
       </div>
     );

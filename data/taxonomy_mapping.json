@@ -31,13 +31,53 @@
     "itcc-ci:TotaleImmobilizzazioniImmateriali": "sp02_immob_immateriali",
     "itcc-ci:TotaleImmobilizzazioniMateriali": "sp03_immob_materiali",
     "itcc-ci:TotaleImmobilizzazioniFinanziarie": "sp04_immob_finanziarie",
+    "itcc-ci:TotaleRimanenze": "sp05_rimanenze",
+    "_comment_aggregate_splits": "Aggregate split tags moved to parser AGGREGATE_TAGS to avoid double-counting with detail tags",
     "itcc-ci:TotaleDisponibilitaLiquide": "sp09_disponibilita_liquide",
     "itcc-ci:TotaleAttivitaFinanziarieNonCostituisconoImmobilizzazioni": "sp08_attivita_finanziarie",
 
     "itcc-ci:PatrimonioNettoCapitale": "sp11_capitale",
     "itcc-ci:PatrimonioNettoRiservaLegale": "sp12_riserve",
     "itcc-ci:PatrimonioNettoAltreRiserveDistintamenteIndicateTotaleAltreRiserve": "sp12_riserve",
-    "itcc-ci:PatrimonioNettoUtilePerditaEsercizio": "sp13_utile_perdita"
+    "itcc-ci:PatrimonioNettoUtilePerditaEsercizio": "sp13_utile_perdita",
+    "itcc-ci:TotaleFondiRischiOneri": "sp14_fondi_rischi",
+    "itcc-ci:TrattamentoFineRapportoLavoroSubordinato": "sp15_tfr",
+
+    "itcc-ci:CreditiImposteAnticipateTotaleImposteAnticipate": "sp06_crediti_breve",
+    "itcc-ci:TotaleAttivitaFinanziarieNonCostituisconoImmobilizzazioni": "sp08_attivita_finanziarie",
+
+    "_comment_detail_credits": "Detail credit items by maturity - these are preferred over aggregates",
+    "itcc-ci:CreditiVersoClientiEsigibiliEntroEsercizioSuccessivo": "sp06_crediti_breve",
+    "itcc-ci:CreditiVersoClientiEsigibiliOltreEsercizioSuccessivo": "sp07_crediti_lungo",
+    "itcc-ci:CreditiCreditiTributariEsigibiliEntroEsercizioSuccessivo": "sp06_crediti_breve",
+    "itcc-ci:CreditiCreditiTributariEsigibiliOltreEsercizioSuccessivo": "sp07_crediti_lungo",
+    "itcc-ci:CreditiVersoAltriEsigibiliEntroEsercizioSuccessivo": "sp06_crediti_breve",
+    "itcc-ci:CreditiVersoAltriEsigibiliOltreEsercizioSuccessivo": "sp07_crediti_lungo",
+
+    "_comment_detail_debits": "Detail debt items - mapped to specific fields for cashflow separation",
+    "_comment_financial_debts": "Financial debts (for financing cashflow section)",
+    "itcc-ci:DebitiDebitiVersoBancheEsigibiliEntroEsercizioSuccessivo": "sp16a_debiti_banche_breve",
+    "itcc-ci:DebitiDebitiVersoBancheEsigibiliOltreEsercizioSuccessivo": "sp17a_debiti_banche_lungo",
+    "itcc-ci:DebitiDebitiVersoAltriFinanziatori": "sp16b_debiti_altri_finanz_breve",
+    "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliEntroEsercizioSuccessivo": "sp16b_debiti_altri_finanz_breve",
+    "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliOltreEsercizioSuccessivo": "sp17b_debiti_altri_finanz_lungo",
+    "itcc-ci:DebitiObbligazioni": "sp16c_debiti_obbligazioni_breve",
+    "itcc-ci:DebitiObbligazioniEsigibiliEntroEsercizioSuccessivo": "sp16c_debiti_obbligazioni_breve",
+    "itcc-ci:DebitiObbligazioniEsigibiliOltreEsercizioSuccessivo": "sp17c_debiti_obbligazioni_lungo",
+
+    "_comment_operating_debts": "Operating debts (for working capital cashflow section)",
+    "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliEntroEsercizioSuccessivo": "sp16d_debiti_fornitori_breve",
+    "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliOltreEsercizioSuccessivo": "sp17d_debiti_fornitori_lungo",
+    "itcc-ci:DebitiDebitiTributariEsigibiliEntroEsercizioSuccessivo": "sp16e_debiti_tributari_breve",
+    "itcc-ci:DebitiDebitiTributariEsigibiliOltreEsercizioSuccessivo": "sp17e_debiti_tributari_lungo",
+    "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliEntroEsercizioSuccessivo": "sp16f_debiti_previdenza_breve",
+    "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliOltreEsercizioSuccessivo": "sp17f_debiti_previdenza_lungo",
+    "itcc-ci:DebitiAltriDebitiEsigibiliEntroEsercizioSuccessivo": "sp16g_altri_debiti_breve",
+    "itcc-ci:DebitiAltriDebitiEsigibiliOltreEsercizioSuccessivo": "sp17g_altri_debiti_lungo",
+
+    "_comment_aggregate_debts": "Aggregate debt totals - also populate for backward compatibility and aggregates fallback",
+    "itcc-ci:DebitiEsigibiliEntroEsercizioSuccessivo": "sp16_debiti_breve",
+    "itcc-ci:DebitiEsigibiliOltreEsercizioSuccessivo": "sp17_debiti_lungo"
   },
 
   "income_statement_mapping": {
@@ -51,6 +91,17 @@
     "itcc-ci-2018-11-04:GodimentoBeniDiTerzi": "ce07_godimento_beni",
     "itcc-ci-2018-11-04:CostiPersonale": "ce08_costi_personale",
     "itcc-ci-2018-11-04:Ammortamenti": "ce09_ammortamenti",
+
+    "_comment_depreciation_split": "Split depreciation by asset type for detailed cashflow",
+    "itcc-ci-2018-11-04:AmmortamentoImmobilizzazioniImmateriali": "ce09a_ammort_immateriali",
+    "itcc-ci-2018-11-04:AmmortamentoImmobilizzazioniMateriali": "ce09b_ammort_materiali",
+    "itcc-ci-2018-11-04:SvalutazioniCrediti": "ce09c_svalutazioni",
+    "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmortamentoImmobilizzazioniImmateriali": "ce09a_ammort_immateriali",
+    "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmortamentoImmobilizzazioniMateriali": "ce09b_ammort_materiali",
+    "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniSvalutazioniCrediti": "ce09c_svalutazioni",
+    "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmImmMateriali": "ce09b_ammort_materiali",
+    "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmImmImmateriali": "ce09a_ammort_immateriali",
+
     "itcc-ci-2018-11-04:VariazioniRimanenzeMatPrime": "ce10_var_rimanenze_mat_prime",
     "itcc-ci-2018-11-04:AccantonamentiRischi": "ce11_accantonamenti",
     "itcc-ci-2018-11-04:OneriDiversiGestione": "ce12_oneri_diversi",
@@ -69,6 +120,11 @@
     "itcc-ci:CostiProduzioneServizi": "ce06_servizi",
     "itcc-ci:CostiProduzioneGodimentoBeniTerzi": "ce07_godimento_beni",
     "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniTotaleAmmortamentiSvalutazioni": "ce09_ammortamenti",
+
+    "_comment_provisions": "Provisions (accantonamenti) for cashflow",
+    "itcc-ci:CostiProduzioneAccantonamentiRischi": "ce11_accantonamenti",
+    "itcc-ci:CostiProduzioneAccantonamenti": "ce11_accantonamenti",
+
     "itcc-ci:CostiProduzioneOneriDiversiGestione": "ce12_oneri_diversi",
 
     "itcc-ci:ValoreProduzioneRicaviVenditePrestazioni": "ce01_ricavi_vendite",

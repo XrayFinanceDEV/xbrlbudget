@@ -8,7 +8,12 @@ from decimal import Decimal
 import sys
 import os
 
-# Add backend directory to Python path
+# Add project root directory to Python path (for shared modules: database, calculations, importers, config, data)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Add backend directory to Python path (for app-specific modules)
 backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)

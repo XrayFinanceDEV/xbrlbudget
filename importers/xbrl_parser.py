@@ -338,7 +338,135 @@ class XBRLParser:
                         inc_data[field] = inc_data.get(field, Decimal('0')) + value
                         break
 
+        # Post-process: Calculate aggregate values from detail fields
+        bs_data = self._calculate_aggregates_from_details(bs_data)
+        inc_data = self._calculate_income_aggregates(inc_data)
+
         return bs_data, inc_data
+
+    def _calculate_aggregates_from_details(self, bs_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
+        """
+        Calculate aggregate debt fields from detail fields for hierarchical mapping
+
+        This ensures:
+        - sp16_debiti_breve = sum of all sp16[a-g]_* fields
+        - sp17_debiti_lungo = sum of all sp17[a-g]_* fields
+
+        Args:
+            bs_data: Balance sheet data dictionary
+
+        Returns:
+            Updated balance sheet data with calculated aggregates
+        """
+        # Short-term debt details (sp16)
+        sp16_details = [
+            'sp16a_debiti_banche_breve',
+            'sp16b_debiti_altri_finanz_breve',
+            'sp16c_debiti_obbligazioni_breve',
+            'sp16d_debiti_fornitori_breve',
+            'sp16e_debiti_tributari_breve',
+            'sp16f_debiti_previdenza_breve',
+            'sp16g_altri_debiti_breve'
+        ]
+
+        # Long-term debt details (sp17)
+        sp17_details = [
+            'sp17a_debiti_banche_lungo',
+            'sp17b_debiti_altri_finanz_lungo',
+            'sp17c_debiti_obbligazioni_lungo',
+            'sp17d_debiti_fornitori_lungo',
+            'sp17e_debiti_tributari_lungo',
+            'sp17f_debiti_previdenza_lungo',
+            'sp17g_altri_debiti_lungo'
+        ]
+
+        # Calculate sp16 aggregate from details (if details exist)
+        sp16_from_details = sum(bs_data.get(field, Decimal('0')) for field in sp16_details)
+        if sp16_from_details > 0:
+            # Override aggregate with sum of details
+            bs_data['sp16_debiti_breve'] = sp16_from_details
+
+        # Calculate sp17 aggregate from details (if details exist)
+        sp17_from_details = sum(bs_data.get(field, Decimal('0')) for field in sp17_details)
+        if sp17_from_details > 0:
+            # Override aggregate with sum of details
+            bs_data['sp17_debiti_lungo'] = sp17_from_details
+
+        # If aggregates exist but no details, distribute aggregates to "altri debiti"
+        # This handles old XBRL files that don't have detail breakdowns
+        if bs_data.get('sp16_debiti_breve', Decimal('0')) > 0 and sp16_from_details == 0:
+            # No details found, put all in "altri debiti" (operating)
+            bs_data['sp16g_altri_debiti_breve'] = bs_data['sp16_debiti_breve']
+
+        if bs_data.get('sp17_debiti_lungo', Decimal('0')) > 0 and sp17_from_details == 0:
+            # No details found, put all in "altri debiti" (operating)
+            bs_data['sp17g_altri_debiti_lungo'] = bs_data['sp17_debiti_lungo']
+
+        return bs_data
+
+    def _calculate_income_aggregates(self, inc_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
+        """
+        Calculate aggregate income statement fields from detail fields
+
+        This ensures:
+        - ce09_ammortamenti = ce09a + ce09b + ce09c
+
+        Args:
+            inc_data: Income statement data dictionary
+
+        Returns:
+            Updated income statement data with calculated aggregates
+        """
+        # Depreciation/amortization details
+        ce09a = inc_data.get('ce09a_ammort_immateriali', Decimal('0'))
+        ce09b = inc_data.get('ce09b_ammort_materiali', Decimal('0'))
+        ce09c = inc_data.get('ce09c_svalutazioni', Decimal('0'))
+
+        # If detail fields exist, calculate aggregate
+        if ce09a > 0 or ce09b > 0 or ce09c > 0:
+            inc_data['ce09_ammortamenti'] = ce09a + ce09b + ce09c
+
+        # If aggregate exists but no details, try to estimate split based on balance sheet proportions
+        # This will be handled in a separate method if needed
+
+        return inc_data
+
+    def _estimate_depreciation_split(self, bs: BalanceSheet, inc: IncomeStatement) -> None:
+        """
+        Estimate depreciation split between tangible and intangible if details are missing
+
+        Uses balance sheet asset proportions to estimate the split.
+
+        Args:
+            bs: Balance sheet object
+            inc: Income statement object
+        """
+        # Check if split already exists
+        if inc.ce09a_ammort_immateriali > 0 or inc.ce09b_ammort_materiali > 0:
+            # Split already provided, no estimation needed
+            return
+
+        # Check if total depreciation exists
+        total_depreciation = inc.ce09_ammortamenti
+        if total_depreciation == 0:
+            return
+
+        # Calculate asset proportions from balance sheet
+        immob_immateriali = bs.sp02_immob_immateriali
+        immob_materiali = bs.sp03_immob_materiali
+        total_fixed_assets = immob_immateriali + immob_materiali
+
+        if total_fixed_assets > 0:
+            # Split based on asset proportions
+            intangible_ratio = immob_immateriali / total_fixed_assets
+            tangible_ratio = immob_materiali / total_fixed_assets
+
+            inc.ce09a_ammort_immateriali = total_depreciation * intangible_ratio
+            inc.ce09b_ammort_materiali = total_depreciation * tangible_ratio
+        else:
+            # No fixed assets, use default split (80% tangible, 20% intangible)
+            inc.ce09a_ammort_immateriali = total_depreciation * Decimal('0.2')
+            inc.ce09b_ammort_materiali = total_depreciation * Decimal('0.8')
 
     def import_to_database(self,
                           file_path: str,
@@ -468,6 +596,9 @@ class XBRLParser:
                 for field, value in inc_data.items():
                     setattr(inc, field, value)
                 self.db.add(inc)
+
+            # Post-processing: Estimate depreciation split if missing
+            self._estimate_depreciation_split(bs, inc)
 
             imported_years.append(year)
             financial_year_ids.append(fy.id)

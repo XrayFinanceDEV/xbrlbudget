@@ -40,7 +40,6 @@ export default function Home() {
   }, [selectedCompanyId, selectedYear]);
 
   const totalCompanies = companies.length;
-  const totalYears = companies.reduce((sum, c) => sum + (c.financial_years?.length || 0), 0);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -69,9 +68,8 @@ export default function Home() {
       {/* Statistics */}
       <div className="mb-8">
         <h2 className="text-xl font-semibold text-gray-900 mb-4">📈 Statistiche Sistema</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <MetricCard title="Aziende" value={totalCompanies.toString()} icon="🏢" />
-          <MetricCard title="Anni Fiscali" value={totalYears.toString()} icon="📅" />
           <MetricCard
             title="Azienda Selezionata"
             value={selectedCompanyId ? "Sì" : "No"}
@@ -196,7 +194,7 @@ export default function Home() {
       {!loading && !summary && !error && selectedCompanyId && selectedYear && (
         <div className="text-center py-12 bg-white rounded-lg shadow">
           <p className="text-gray-500">
-            Nessun dato finanziario disponibile per l'azienda e l'anno selezionati
+            Nessun dato finanziario disponibile per l&apos;azienda e l&apos;anno selezionati
           </p>
         </div>
       )}

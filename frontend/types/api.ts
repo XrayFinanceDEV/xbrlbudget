@@ -371,3 +371,131 @@ export interface ForecastGenerationResult {
   }>;
   generated_at: string;
 }
+
+// Cash Flow Statement
+
+export interface CashFlowComponents {
+  net_profit: number;
+  depreciation: number;
+  delta_receivables: number;
+  delta_inventory: number;
+  delta_payables: number;
+  operating_cf: number;
+  capex: number;
+  investing_cf: number;
+  delta_debt: number;
+  delta_equity: number;
+  financing_cf: number;
+  total_cf: number;
+  actual_cash_change: number;
+  cash_beginning: number;
+  cash_ending: number;
+}
+
+export interface CashFlowRatios {
+  ocf_margin: number;
+  free_cash_flow: number;
+  cash_conversion: number;
+  capex_to_operating_cf: number;
+}
+
+export interface CashFlowResult {
+  year: number;
+  components: CashFlowComponents;
+  ratios: CashFlowRatios;
+}
+
+// ===== Detailed Cash Flow (Italian GAAP - Indirect Method) =====
+
+export interface OperatingActivitiesStart {
+  net_profit: number;
+  income_taxes: number;
+  interest_expense_income: number;
+  dividends: number;
+  capital_gains_losses: number;
+  profit_before_adjustments: number;
+}
+
+export interface NonCashAdjustments {
+  provisions: number;
+  depreciation_amortization: number;
+  write_downs: number;
+  total: number;
+}
+
+export interface WorkingCapitalChanges {
+  delta_inventory: number;
+  delta_receivables: number;
+  delta_payables: number;
+  delta_accruals_deferrals_active: number;
+  delta_accruals_deferrals_passive: number;
+  other_wc_changes: number;
+  total: number;
+}
+
+export interface CashAdjustments {
+  interest_paid_received: number;
+  taxes_paid: number;
+  dividends_received: number;
+  use_of_provisions: number;
+  other_cash_changes: number;
+  total: number;
+}
+
+export interface OperatingActivities {
+  start: OperatingActivitiesStart;
+  non_cash_adjustments: NonCashAdjustments;
+  cashflow_before_wc: number;
+  working_capital_changes: WorkingCapitalChanges;
+  cashflow_after_wc: number;
+  cash_adjustments: CashAdjustments;
+  total_operating_cashflow: number;
+}
+
+export interface AssetInvestments {
+  investments: number;
+  disinvestments: number;
+  net: number;
+}
+
+export interface InvestingActivities {
+  tangible_assets: AssetInvestments;
+  intangible_assets: AssetInvestments;
+  financial_assets: AssetInvestments;
+  total_investing_cashflow: number;
+}
+
+export interface FinancingSource {
+  increases: number;
+  decreases: number;
+  net: number;
+}
+
+export interface FinancingActivities {
+  third_party_funds: FinancingSource;
+  own_funds: FinancingSource;
+  total_financing_cashflow: number;
+}
+
+export interface CashReconciliation {
+  total_cashflow: number;
+  cash_beginning: number;
+  cash_ending: number;
+  difference: number;
+  verification_ok: boolean;
+}
+
+export interface DetailedCashFlowStatement {
+  year: number;
+  operating_activities: OperatingActivities;
+  investing_activities: InvestingActivities;
+  financing_activities: FinancingActivities;
+  cash_reconciliation: CashReconciliation;
+}
+
+export interface MultiYearDetailedCashFlow {
+  company_id: number;
+  scenario_id: number | null;
+  base_year: number;
+  cashflows: DetailedCashFlowStatement[];
+}

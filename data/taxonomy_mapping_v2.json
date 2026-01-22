@@ -1,0 +1,303 @@
+{
+  "comment": "Priority-based mapping of Italian GAAP XBRL taxonomy elements to database fields",
+  "version": "2.0",
+  "description": "Each field has multiple priority levels. Parser tries priority_1 first, then priority_2, etc. This ensures compatibility across different taxonomy versions (2011-2018) and schema types (Ordinario/Abbreviato/Micro).",
+
+  "balance_sheet_mapping_v2": {
+    "sp01_crediti_soci": {
+      "priority_1": "itcc-ci-2018-11-04:CreditiVersoSociPerVersAmDoControllate",
+      "priority_2": "itcc-ci:CreditiVersoSoci"
+    },
+
+    "sp02_immob_immateriali": {
+      "priority_1": "itcc-ci:TotaleImmobilizzazioniImmateriali",
+      "priority_2": "itcc-ci-2018-11-04:ImmobilizzazioniImmateriali",
+      "priority_3": "itcc-ci:ImmobilizzazioniImmateriali"
+    },
+
+    "sp03_immob_materiali": {
+      "priority_1": "itcc-ci:TotaleImmobilizzazioniMateriali",
+      "priority_2": "itcc-ci-2018-11-04:ImmobilizzazioniMateriali",
+      "priority_3": "itcc-ci:ImmobilizzazioniMateriali"
+    },
+
+    "sp04_immob_finanziarie": {
+      "priority_1": "itcc-ci:TotaleImmobilizzazioniFinanziarie",
+      "priority_2": "itcc-ci-2018-11-04:ImmobilizzazioniFinanziarie",
+      "priority_3": "itcc-ci:ImmobilizzazioniFinanziarie"
+    },
+
+    "sp05_rimanenze": {
+      "priority_1": "itcc-ci:TotaleRimanenze",
+      "priority_2": "itcc-ci-2018-11-04:Rimanenze",
+      "priority_3": "itcc-ci:Rimanenze"
+    },
+
+    "sp06_crediti_breve": {
+      "comment": "Short-term credits - prefer detailed split tags",
+      "priority_1": "itcc-ci:TotaleCreditiIscrittiAttivoCircolanteQuotaScadenteEntroEsercizio",
+      "priority_2": "itcc-ci:CreditiEsigibiliEntroEsercizioSuccessivo",
+      "priority_3": "itcc-ci-2018-11-04:CreditiEsigibiliEntroEsSucc",
+      "priority_4": "itcc-ci:CreditiImposteAnticipateTotaleImposteAnticipate",
+      "detail_tags": [
+        "itcc-ci:CreditiVersoClientiEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:CreditiCreditiTributariEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoAltriEsigibiliEntroEsercizioSuccessivo"
+      ]
+    },
+
+    "sp07_crediti_lungo": {
+      "comment": "Long-term credits - prefer detailed split tags",
+      "priority_1": "itcc-ci:TotaleCreditiIscrittiAttivoCircolanteQuotaScadenteOltreEsercizio",
+      "priority_2": "itcc-ci:CreditiEsigibiliOltreEsercizioSuccessivo",
+      "priority_3": "itcc-ci-2018-11-04:CreditiEsigibiliOltreEsSucc",
+      "detail_tags": [
+        "itcc-ci:CreditiVersoClientiEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:CreditiCreditiTributariEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoAltriEsigibiliOltreEsercizioSuccessivo"
+      ]
+    },
+
+    "sp08_attivita_finanziarie": {
+      "priority_1": "itcc-ci:TotaleAttivitaFinanziarieNonCostituisconoImmobilizzazioni",
+      "priority_2": "itcc-ci-2018-11-04:AttivitaFinanziarieNonImmob",
+      "priority_3": "itcc-ci:AttivitaFinanziarieNonImmob"
+    },
+
+    "sp09_disponibilita_liquide": {
+      "priority_1": "itcc-ci:TotaleDisponibilitaLiquide",
+      "priority_2": "itcc-ci-2018-11-04:DisponibilitaLiquide",
+      "priority_3": "itcc-ci:DisponibilitaLiquide"
+    },
+
+    "sp10_ratei_risconti_attivi": {
+      "priority_1": "itcc-ci:AttivoRateiRisconti",
+      "priority_2": "itcc-ci-2018-11-04:RateiERiscontiAttivi",
+      "priority_3": "itcc-ci:RateiERiscontiAttivi"
+    },
+
+    "sp11_capitale": {
+      "priority_1": "itcc-ci:PatrimonioNettoCapitale",
+      "priority_2": "itcc-ci-2018-11-04:Capitale",
+      "priority_3": "itcc-ci:Capitale"
+    },
+
+    "sp12_riserve": {
+      "comment": "Accumulates ALL reserve types (legal, share premium, other reserves, retained earnings)",
+      "accumulate_all": true,
+      "detail_tags": [
+        "itcc-ci:PatrimonioNettoRiservaLegale",
+        "itcc-ci:PatrimonioNettoRiservaSoprapprezzo",
+        "itcc-ci:PatrimonioNettoRiservaSoprapprezzoAzioni",
+        "itcc-ci:PatrimonioNettoRiservaRivalutazione",
+        "itcc-ci:PatrimonioNettoRiserveStatutarie",
+        "itcc-ci:PatrimonioNettoAltreRiserve",
+        "itcc-ci:PatrimonioNettoAltreRiserveDistintamenteIndicateTotaleAltreRiserve",
+        "itcc-ci:PatrimonioNettoRiservaOperazioniCoperturaFlussiFinanziariAttesi",
+        "itcc-ci:PatrimonioNettoUtiliPerditePortatiNuovo"
+      ],
+      "priority_1": "itcc-ci-2018-11-04:Riserve",
+      "priority_2": "itcc-ci:Riserve"
+    },
+
+    "sp13_utile_perdita": {
+      "priority_1": "itcc-ci:PatrimonioNettoUtilePerditaEsercizio",
+      "priority_2": "itcc-ci-2018-11-04:UtilePerdita",
+      "priority_3": "itcc-ci:UtilePerdita"
+    },
+
+    "sp14_fondi_rischi": {
+      "priority_1": "itcc-ci:TotaleFondiRischiOneri",
+      "priority_2": "itcc-ci-2018-11-04:FondiPerRischiEOneri",
+      "priority_3": "itcc-ci:FondiPerRischiEOneri"
+    },
+
+    "sp15_tfr": {
+      "priority_1": "itcc-ci:TrattamentoFineRapportoLavoroSubordinato",
+      "priority_2": "itcc-ci-2018-11-04:TFR",
+      "priority_3": "itcc-ci:TFR"
+    },
+
+    "sp16_debiti_breve": {
+      "comment": "Short-term debts - prefer detailed split tags",
+      "priority_1": "itcc-ci:TotaleDebitiQuotaScadenteEntroEsercizio",
+      "priority_2": "itcc-ci:DebitiEsigibiliEntroEsercizioSuccessivo",
+      "priority_3": "itcc-ci-2018-11-04:DebitiEsigibiliEntroEsSucc",
+      "detail_tags": [
+        "itcc-ci:DebitiDebitiVersoBancheEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiTributariEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiAltriDebitiEsigibiliEntroEsercizioSuccessivo"
+      ]
+    },
+
+    "sp17_debiti_lungo": {
+      "comment": "Long-term debts - prefer detailed split tags",
+      "priority_1": "itcc-ci:TotaleDebitiQuotaScadenteOltreEsercizio",
+      "priority_2": "itcc-ci:DebitiEsigibiliOltreEsercizioSuccessivo",
+      "priority_3": "itcc-ci-2018-11-04:DebitiEsigibiliOltreEsSucc",
+      "detail_tags": [
+        "itcc-ci:DebitiDebitiVersoBancheEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiTributariEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiAltriDebitiEsigibiliOltreEsercizioSuccessivo"
+      ]
+    },
+
+    "sp18_ratei_risconti_passivi": {
+      "priority_1": "itcc-ci:PassivoRateiRisconti",
+      "priority_2": "itcc-ci-2018-11-04:RateiERiscontiPassivi",
+      "priority_3": "itcc-ci:RateiERiscontiPassivi"
+    }
+  },
+
+  "income_statement_mapping_v2": {
+    "ce01_ricavi_vendite": {
+      "priority_1": "itcc-ci:ValoreProduzioneRicaviVenditePrestazioni",
+      "priority_2": "itcc-ci-2018-11-04:RicaviVenditePrestazioni",
+      "priority_3": "itcc-ci:RicaviVenditePrestazioni"
+    },
+
+    "ce02_variazioni_rimanenze": {
+      "comment": "Multiple variations exist across taxonomies",
+      "priority_1": "itcc-ci:ValoreProduzioneVariazioniRimanenze",
+      "priority_2": "itcc-ci-2018-11-04:VariazioniRimanenze",
+      "priority_3": "itcc-ci:VariazioniRimanenze",
+      "priority_4": "itcc-ci:ValoreProduzioneVariazioniRimanenzeProdottiCorsoLavorazioneSemilavoratiFiniti"
+    },
+
+    "ce03_lavori_interni": {
+      "priority_1": "itcc-ci:ValoreProduzioneIncrementoImmobilizzazioniLavoriInterni",
+      "priority_2": "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni",
+      "priority_3": "itcc-ci:IncrImmobPerLavoriInterni"
+    },
+
+    "ce04_altri_ricavi": {
+      "priority_1": "itcc-ci:ValoreProduzioneAltriRicaviProventiTotaleAltriRicaviProventi",
+      "priority_2": "itcc-ci-2018-11-04:AltriRicaviProventi",
+      "priority_3": "itcc-ci:AltriRicaviProventi"
+    },
+
+    "ce05_materie_prime": {
+      "priority_1": "itcc-ci:CostiProduzioneMateriePrimeSussidiarieConsumoMerci",
+      "priority_2": "itcc-ci-2018-11-04:MateriePrimeSussidiarie",
+      "priority_3": "itcc-ci:MateriePrimeSussidiarie"
+    },
+
+    "ce06_servizi": {
+      "priority_1": "itcc-ci:CostiProduzioneServizi",
+      "priority_2": "itcc-ci-2018-11-04:Servizi",
+      "priority_3": "itcc-ci:Servizi"
+    },
+
+    "ce07_godimento_beni": {
+      "priority_1": "itcc-ci:CostiProduzioneGodimentoBeniTerzi",
+      "priority_2": "itcc-ci-2018-11-04:GodimentoBeniDiTerzi",
+      "priority_3": "itcc-ci:GodimentoBeniDiTerzi"
+    },
+
+    "ce08_costi_personale": {
+      "priority_1": "itcc-ci:CostiProduzioneCostiPersonaleTotaleCostiPersonale",
+      "priority_2": "itcc-ci-2018-11-04:CostiPersonale",
+      "priority_3": "itcc-ci:CostiPersonale"
+    },
+
+    "ce09_ammortamenti": {
+      "priority_1": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniTotaleAmmortamentiSvalutazioni",
+      "priority_2": "itcc-ci-2018-11-04:Ammortamenti",
+      "priority_3": "itcc-ci:Ammortamenti"
+    },
+
+    "ce10_var_rimanenze_mat_prime": {
+      "priority_1": "itcc-ci:CostiProduzioneVariazioniRimanenzeMateriePrimeSussidiarieConsumoMerci",
+      "priority_2": "itcc-ci-2018-11-04:VariazioniRimanenzeMatPrime",
+      "priority_3": "itcc-ci:VariazioniRimanenzeMatPrime"
+    },
+
+    "ce11_accantonamenti": {
+      "priority_1": "itcc-ci:CostiProduzioneAccantonamentiRischi",
+      "priority_2": "itcc-ci-2018-11-04:AccantonamentiRischi",
+      "priority_3": "itcc-ci:AccantonamentiRischi"
+    },
+
+    "ce12_oneri_diversi": {
+      "priority_1": "itcc-ci:CostiProduzioneOneriDiversiGestione",
+      "priority_2": "itcc-ci-2018-11-04:OneriDiversiGestione",
+      "priority_3": "itcc-ci:OneriDiversiGestione"
+    },
+
+    "ce13_proventi_partecipazioni": {
+      "priority_1": "itcc-ci:ProventiOneriFinanziariProventiPartecipazioni",
+      "priority_2": "itcc-ci-2018-11-04:ProventiPartecipazioni",
+      "priority_3": "itcc-ci:ProventiPartecipazioni"
+    },
+
+    "ce14_altri_proventi_finanziari": {
+      "priority_1": "itcc-ci:ProventiOneriFinanziariAltriProventiFinanziariTotaleAltriProventiFinanziari",
+      "priority_2": "itcc-ci-2018-11-04:AltriProventiFinanziari",
+      "priority_3": "itcc-ci:AltriProventiFinanziari"
+    },
+
+    "ce15_oneri_finanziari": {
+      "priority_1": "itcc-ci:ProventiOneriFinanziariInteressiAltriOneriFinanziariTotaleInteressiAltriOneriFinanziari",
+      "priority_2": "itcc-ci-2018-11-04:InteressiOneriFinanziari",
+      "priority_3": "itcc-ci:InteressiOneriFinanziari"
+    },
+
+    "ce16_utili_perdite_cambi": {
+      "priority_1": "itcc-ci:ProventiOneriFinanziariUtiliPerditesuCambi",
+      "priority_2": "itcc-ci-2018-11-04:UtiliPerditeCambi",
+      "priority_3": "itcc-ci:UtiliPerditeCambi"
+    },
+
+    "ce17_rettifiche_attivita_fin": {
+      "priority_1": "itcc-ci:RettificheValoreAttivitaFinanziarieTotaleRettifiche",
+      "priority_2": "itcc-ci-2018-11-04:RettificheAttivitaFinanziarie",
+      "priority_3": "itcc-ci:RettificheAttivitaFinanziarie"
+    },
+
+    "ce18_proventi_straordinari": {
+      "priority_1": "itcc-ci:ProventiOneriStraordinariProventiTotaleProventi",
+      "priority_2": "itcc-ci-2018-11-04:ProventiStraordinari",
+      "priority_3": "itcc-ci:ProventiStraordinari"
+    },
+
+    "ce19_oneri_straordinari": {
+      "priority_1": "itcc-ci:ProventiOneriStraordinariOneriTotaleOneri",
+      "priority_2": "itcc-ci-2018-11-04:OneriStraordinari",
+      "priority_3": "itcc-ci:OneriStraordinari"
+    },
+
+    "ce20_imposte": {
+      "comment": "Income taxes - multiple tag variations exist",
+      "priority_1": "itcc-ci:ImposteRedditoEsercizioCorrentiDifferiteAnticipateTotaleImposteRedditoEsercizioCorrentiDifferiteAnticipate",
+      "priority_2": "itcc-ci:ImposteRedditoEsercizioCorrentiDifferiteAnticipateImposteCorrenti",
+      "priority_3": "itcc-ci:ImposteSulReddito",
+      "priority_4": "itcc-ci-2018-11-04:Imposte",
+      "priority_5": "itcc-ci:Imposte"
+    }
+  },
+
+  "aggregate_tags_for_reconciliation": {
+    "comment": "High-level aggregate tags used for reconciliation - NOT mapped directly to fields",
+    "balance_sheet": {
+      "TotaleAttivo": "total_assets",
+      "TotalePassivo": "total_passivo",
+      "TotaleCrediti": "total_crediti",
+      "TotaleDebiti": "total_debiti",
+      "TotalePatrimonioNetto": "total_patrimonio",
+      "TotaleImmobilizzazioni": "total_immobilizzazioni",
+      "TotaleAttivoCircolante": "total_attivo_circolante"
+    },
+    "income_statement": {
+      "TotaleValoreProduzione": "total_production_value",
+      "TotaleCostiProduzione": "total_production_costs",
+      "DifferenzaValoreCostiProduzione": "ebit_calculated",
+      "TotaleProventiOneriFinanziari": "total_financial_result",
+      "RisultatoPrimaImposte": "profit_before_tax_calculated",
+      "UtilePerditaEsercizio": "net_profit_calculated"
+    }
+  }
+}

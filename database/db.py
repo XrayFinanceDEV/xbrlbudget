@@ -1,15 +1,24 @@
 """
 Database connection and session management
 """
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from config import DATABASE_URL
+
+# Use absolute path for database to ensure all apps use the same database
+# Database is located in project root directory
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT.endswith('/database'):
+    PROJECT_ROOT = os.path.dirname(PROJECT_ROOT)
+
+DATABASE_PATH = os.path.join(PROJECT_ROOT, "financial_analysis.db")
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 # Create SQLAlchemy engine
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    connect_args={"check_same_thread": False},
     echo=False  # Set to True for SQL debugging
 )
 

@@ -2,7 +2,22 @@
 Pydantic schemas for data import operations
 """
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+
+
+class ReconciliationAdjustment(BaseModel):
+    """Details of a reconciliation adjustment"""
+    xbrl_total: float = Field(..., description="Official total from XBRL")
+    imported_sum: float = Field(..., description="Sum of imported detail items")
+    adjustment: float = Field(..., description="Adjustment amount applied")
+    applied_to: str = Field(..., description="Database field where adjustment was applied")
+
+
+class ReconciliationInfo(BaseModel):
+    """Reconciliation information for a specific year"""
+    aggregate_totals: Optional[Dict[str, float]] = Field(None, description="Aggregate totals captured from XBRL")
+    reconciliation_adjustments: Optional[Dict[str, ReconciliationAdjustment]] = Field(None, description="Adjustments made to balance the sheet")
+    unmapped_tags: Optional[List[Dict[str, Any]]] = Field(None, description="Tags found but not imported")
 
 
 class XBRLImportResponse(BaseModel):
@@ -17,6 +32,7 @@ class XBRLImportResponse(BaseModel):
     contexts_found: int = Field(..., description="Number of contexts found in XBRL")
     years_imported: int = Field(..., description="Number of years successfully imported")
     company_created: bool = Field(..., description="Whether a new company was created")
+    reconciliation_info: Optional[Dict[int, ReconciliationInfo]] = Field(None, description="Reconciliation details per year")
 
     class Config:
         json_schema_extra = {

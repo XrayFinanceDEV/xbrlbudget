@@ -9,7 +9,7 @@ import os
 
 from app.core.database import get_db
 from app.schemas.imports import XBRLImportResponse, CSVImportResponse, ImportError
-from importers.xbrl_parser import import_xbrl_file, XBRLParseError
+from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced, XBRLParseError
 from importers.csv_importer import import_csv_file
 
 router = APIRouter()
@@ -86,8 +86,8 @@ async def upload_xbrl(
             tmp.write(content)
             tmp_file = tmp.name
 
-        # Import XBRL file using existing parser
-        result = import_xbrl_file(
+        # Import XBRL file using enhanced parser with reconciliation
+        result = import_xbrl_file_enhanced(
             file_path=tmp_file,
             company_id=company_id,
             create_company=create_company

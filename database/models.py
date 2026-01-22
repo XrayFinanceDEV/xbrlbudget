@@ -114,9 +114,28 @@ class BalanceSheet(Base):
     # C) Trattamento di fine rapporto di lavoro subordinato (TFR)
     sp15_tfr = Column(Numeric(15, 2), default=0, nullable=False)
 
-    # D) Debiti - split by maturity
+    # D) Debiti - split by maturity AND by nature (financial vs operating)
+    # Aggregate fields (for backward compatibility)
     sp16_debiti_breve = Column(Numeric(15, 2), default=0, nullable=False)  # Entro 12 mesi
     sp17_debiti_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # Oltre 12 mesi
+
+    # DETAILED BREAKDOWN - Financial debts (for financing cashflow)
+    sp16a_debiti_banche_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17a_debiti_banche_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16b_debiti_altri_finanz_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17b_debiti_altri_finanz_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16c_debiti_obbligazioni_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17c_debiti_obbligazioni_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Operating debts (for working capital cashflow)
+    sp16d_debiti_fornitori_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17d_debiti_fornitori_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16e_debiti_tributari_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17e_debiti_tributari_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16f_debiti_previdenza_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17f_debiti_previdenza_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16g_altri_debiti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17g_altri_debiti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
 
     # E) Ratei e risconti passivi
     sp18_ratei_risconti_passivi = Column(Numeric(15, 2), default=0, nullable=False)
@@ -196,6 +215,54 @@ class BalanceSheet(Base):
         return self.sp16_debiti_breve + self.sp17_debiti_lungo
 
     @property
+    def financial_debt_short(self) -> Decimal:
+        """Short-term Financial Debt (for financing cashflow)"""
+        return (
+            self.sp16a_debiti_banche_breve +
+            self.sp16b_debiti_altri_finanz_breve +
+            self.sp16c_debiti_obbligazioni_breve
+        )
+
+    @property
+    def financial_debt_long(self) -> Decimal:
+        """Long-term Financial Debt (for financing cashflow)"""
+        return (
+            self.sp17a_debiti_banche_lungo +
+            self.sp17b_debiti_altri_finanz_lungo +
+            self.sp17c_debiti_obbligazioni_lungo
+        )
+
+    @property
+    def financial_debt_total(self) -> Decimal:
+        """Total Financial Debt (for financing cashflow)"""
+        return self.financial_debt_short + self.financial_debt_long
+
+    @property
+    def operating_debt_short(self) -> Decimal:
+        """Short-term Operating Debt (for working capital cashflow)"""
+        return (
+            self.sp16d_debiti_fornitori_breve +
+            self.sp16e_debiti_tributari_breve +
+            self.sp16f_debiti_previdenza_breve +
+            self.sp16g_altri_debiti_breve
+        )
+
+    @property
+    def operating_debt_long(self) -> Decimal:
+        """Long-term Operating Debt (rare, but exists)"""
+        return (
+            self.sp17d_debiti_fornitori_lungo +
+            self.sp17e_debiti_tributari_lungo +
+            self.sp17f_debiti_previdenza_lungo +
+            self.sp17g_altri_debiti_lungo
+        )
+
+    @property
+    def operating_debt_total(self) -> Decimal:
+        """Total Operating Debt (for working capital cashflow)"""
+        return self.operating_debt_short + self.operating_debt_long
+
+    @property
     def working_capital_net(self) -> Decimal:
         """Net Working Capital (Capitale Circolante Netto - CCN)"""
         return self.current_assets - self.current_liabilities
@@ -251,6 +318,11 @@ class IncomeStatement(Base):
 
     # B.10) Ammortamenti e svalutazioni
     ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # B.10) Split depreciation by asset type (for detailed cashflow)
+    ce09a_ammort_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09b_ammort_materiali = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09c_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)  # Write-downs
 
     # B.11) Variazioni delle rimanenze di materie prime
     ce10_var_rimanenze_mat_prime = Column(Numeric(15, 2), default=0, nullable=False)
@@ -507,6 +579,25 @@ class ForecastBalanceSheet(Base):
     sp15_tfr = Column(Numeric(15, 2), default=0, nullable=False)
     sp16_debiti_breve = Column(Numeric(15, 2), default=0, nullable=False)
     sp17_debiti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Financial debts (for financing cashflow)
+    sp16a_debiti_banche_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17a_debiti_banche_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16b_debiti_altri_finanz_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17b_debiti_altri_finanz_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16c_debiti_obbligazioni_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17c_debiti_obbligazioni_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Operating debts (for working capital cashflow)
+    sp16d_debiti_fornitori_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17d_debiti_fornitori_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16e_debiti_tributari_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17e_debiti_tributari_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16f_debiti_previdenza_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17f_debiti_previdenza_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp16g_altri_debiti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp17g_altri_debiti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp18_ratei_risconti_passivi = Column(Numeric(15, 2), default=0, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -577,6 +668,54 @@ class ForecastBalanceSheet(Base):
         return self.sp16_debiti_breve + self.sp17_debiti_lungo
 
     @property
+    def financial_debt_short(self) -> Decimal:
+        """Short-term Financial Debt (for financing cashflow)"""
+        return (
+            self.sp16a_debiti_banche_breve +
+            self.sp16b_debiti_altri_finanz_breve +
+            self.sp16c_debiti_obbligazioni_breve
+        )
+
+    @property
+    def financial_debt_long(self) -> Decimal:
+        """Long-term Financial Debt (for financing cashflow)"""
+        return (
+            self.sp17a_debiti_banche_lungo +
+            self.sp17b_debiti_altri_finanz_lungo +
+            self.sp17c_debiti_obbligazioni_lungo
+        )
+
+    @property
+    def financial_debt_total(self) -> Decimal:
+        """Total Financial Debt (for financing cashflow)"""
+        return self.financial_debt_short + self.financial_debt_long
+
+    @property
+    def operating_debt_short(self) -> Decimal:
+        """Short-term Operating Debt (for working capital cashflow)"""
+        return (
+            self.sp16d_debiti_fornitori_breve +
+            self.sp16e_debiti_tributari_breve +
+            self.sp16f_debiti_previdenza_breve +
+            self.sp16g_altri_debiti_breve
+        )
+
+    @property
+    def operating_debt_long(self) -> Decimal:
+        """Long-term Operating Debt (rare, but exists)"""
+        return (
+            self.sp17d_debiti_fornitori_lungo +
+            self.sp17e_debiti_tributari_lungo +
+            self.sp17f_debiti_previdenza_lungo +
+            self.sp17g_altri_debiti_lungo
+        )
+
+    @property
+    def operating_debt_total(self) -> Decimal:
+        """Total Operating Debt (for working capital cashflow)"""
+        return self.operating_debt_short + self.operating_debt_long
+
+    @property
     def working_capital_net(self) -> Decimal:
         return self.current_assets - self.current_liabilities
 
@@ -604,6 +743,9 @@ class ForecastIncomeStatement(Base):
     ce07_godimento_beni = Column(Numeric(15, 2), default=0, nullable=False)
     ce08_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)
     ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09a_ammort_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09b_ammort_materiali = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09c_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)
     ce10_var_rimanenze_mat_prime = Column(Numeric(15, 2), default=0, nullable=False)
     ce11_accantonamenti = Column(Numeric(15, 2), default=0, nullable=False)
     ce12_oneri_diversi = Column(Numeric(15, 2), default=0, nullable=False)

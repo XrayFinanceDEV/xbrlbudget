@@ -12,7 +12,7 @@ Sistema completo di analisi finanziaria per bilanci italiani secondo i principi 
 **🚀 Modern Full-Stack Architecture:**
 - **Backend API** (FastAPI) - Production-ready REST API with comprehensive financial analysis
 - **Frontend UI** (Next.js 15) - Modern React-based interface with TypeScript
-- **Legacy Web App** (Streamlit) - Deprecated, use for reference only
+- **Legacy Web App** (Streamlit) - Located in `/legacy` folder, deprecated but preserved for reference
 
 ## Caratteristiche
 
@@ -236,14 +236,16 @@ POST /import/csv                               # Upload CSV file (TEBE format)
    yarn install
    ```
 
-4. **Setup Legacy Streamlit (Deprecated)**
+4. **Setup Legacy Streamlit (Optional - Deprecated)**
    ```bash
-   # Only if you need to access legacy features
+   # Only if you need to access legacy Streamlit app
+   cd legacy
    python3 -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   pip install -r requirements.txt
+   pip install -r ../requirements.txt
 
-   # Inizializza database
+   # Inizializza database (from project root)
+   cd ..
    python -c "from database.db import init_db; init_db()"
    ```
 
@@ -324,11 +326,14 @@ curl -X POST http://localhost:8000/api/v1/import/csv?company_id=1 \
 
 #### Avvio Applicazione Legacy
 ```bash
+cd legacy
 source .venv/bin/activate
 streamlit run app.py
 ```
 
 L'applicazione sarà disponibile su `http://localhost:8501`
+
+**Nota:** Eseguire dalla directory `/legacy`
 
 ### Import Dati
 
@@ -382,97 +387,117 @@ rating = fgpmi.calculate()
 
 ## Struttura Progetto
 
-### Backend (FastAPI)
-```
-backend/
-├── app/
-│   ├── main.py                     # FastAPI application
-│   ├── api/v1/
-│   │   ├── companies.py            # Company endpoints
-│   │   ├── financial_years.py      # Financial data endpoints
-│   │   ├── calculations.py         # Analysis endpoints
-│   │   └── imports.py              # Data import endpoints
-│   ├── schemas/                    # Pydantic models
-│   │   ├── company.py
-│   │   ├── financial_year.py
-│   │   ├── balance_sheet.py
-│   │   ├── income_statement.py
-│   │   ├── budget.py
-│   │   ├── calculations.py
-│   │   └── imports.py              # Import response schemas
-│   ├── services/                   # Business logic
-│   │   └── calculation_service.py
-│   └── core/
-│       ├── config.py               # Pydantic Settings
-│       ├── database.py             # DB session management
-│       └── decimal_encoder.py      # JSON serialization
-├── database/                       # ✓ Shared with Streamlit
-│   ├── models.py                   # SQLAlchemy models
-│   └── db.py
-├── calculations/                   # ✓ Shared with Streamlit
-│   ├── base.py                     # Base calculator
-│   ├── ratios.py                   # Financial ratios
-│   ├── altman.py                   # Altman Z-Score
-│   ├── rating_fgpmi.py             # FGPMI Rating
-│   └── forecast_engine.py          # Budget forecasting
-├── importers/                      # ✓ Shared with Streamlit
-│   ├── xbrl_parser.py              # XBRL importer
-│   └── csv_importer.py             # CSV importer
-├── data/                           # ✓ Shared with Streamlit
-│   ├── sectors.json
-│   ├── rating_tables.json
-│   └── taxonomy_mapping.json
-└── requirements.txt                # FastAPI dependencies
-```
-
-### Next.js Frontend (Recommended)
-```
-frontend/
-├── app/
-│   ├── layout.tsx                  # Root layout with providers
-│   ├── page.tsx                    # Home/Dashboard page
-│   ├── companies/                  # Company management
-│   ├── analysis/                   # Financial analysis pages
-│   └── import/                     # Data import UI
-├── components/                     # React components
-│   ├── ui/                         # shadcn/ui components
-│   ├── navigation/                 # Navigation components
-│   └── charts/                     # Chart components (Recharts)
-├── lib/
-│   ├── api.ts                      # API client (fetch wrapper)
-│   └── utils.ts                    # Utility functions
-├── types/
-│   └── api.ts                      # TypeScript types for API
-├── package.json                    # Node dependencies
-├── next.config.ts                  # Next.js configuration
-├── tailwind.config.ts              # Tailwind CSS config
-└── tsconfig.json                   # TypeScript config
-```
-
-### Streamlit Web App (⚠️ Deprecated)
 ```
 budget/
-├── app.py                          # Streamlit main app (LEGACY)
-├── config.py                       # Configuration
-├── requirements.txt                # Streamlit dependencies
-├── ui/
-│   └── pages/                      # Streamlit pages (DEPRECATED)
-│       ├── dashboard.py
-│       ├── importazione.py
-│       ├── budget.py
-│       ├── balance_sheet.py
-│       ├── income_statement.py
-│       ├── ratios.py
-│       ├── altman.py
-│       └── rating.py
-└── [database, calculations, importers, data]  # Shared with backend
+├── backend/                        # 🚀 FastAPI Backend (Modern)
+│   ├── app/
+│   │   ├── main.py                 # FastAPI application entry point
+│   │   ├── api/v1/
+│   │   │   ├── companies.py        # Company CRUD endpoints
+│   │   │   ├── financial_years.py  # Financial data endpoints
+│   │   │   ├── calculations.py     # Analysis & ratios endpoints
+│   │   │   ├── budget_scenarios.py # Budget & forecasting endpoints
+│   │   │   └── imports.py          # XBRL/CSV import endpoints
+│   │   ├── schemas/                # Pydantic request/response models
+│   │   ├── services/               # Business logic layer
+│   │   │   └── calculation_service.py
+│   │   ├── calculations/           # Backend-specific calculations
+│   │   │   ├── cashflow.py         # Cash flow statement
+│   │   │   └── cashflow_detailed.py
+│   │   └── core/
+│   │       ├── config.py           # Pydantic Settings
+│   │       ├── database.py         # DB dependency injection
+│   │       └── decimal_encoder.py  # JSON Decimal serialization
+│   └── requirements.txt
+│
+├── frontend/                       # 🎨 Next.js Frontend (Modern)
+│   ├── app/
+│   │   ├── layout.tsx              # Root layout with providers
+│   │   ├── page.tsx                # Home/Dashboard
+│   │   ├── import/page.tsx         # XBRL/CSV import UI
+│   │   ├── budget/page.tsx         # Budget assumptions
+│   │   ├── analysis/page.tsx       # Financial analysis
+│   │   ├── cashflow/page.tsx       # Cash flow statement
+│   │   └── forecast/               # Budget forecast pages
+│   ├── components/                 # Reusable React components
+│   ├── contexts/
+│   │   └── AppContext.tsx          # Global state (companies, years)
+│   ├── lib/
+│   │   └── api.ts                  # Axios API client
+│   ├── types/
+│   │   └── api.ts                  # TypeScript API interfaces
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── database/                       # 🗄️ SHARED: SQLAlchemy ORM Models
+│   ├── models.py                   # All database models
+│   └── db.py                       # Engine, session, Base
+│
+├── calculations/                   # 🧮 SHARED: Financial Calculators
+│   ├── base.py                     # Base calculator utilities
+│   ├── ratios.py                   # Financial ratios
+│   ├── altman.py                   # Altman Z-Score
+│   ├── rating_fgpmi.py             # FGPMI Rating model
+│   └── forecast_engine.py          # 3-year budget projections
+│
+├── importers/                      # 📥 SHARED: Data Import Parsers
+│   ├── xbrl_parser.py              # Italian XBRL parser
+│   ├── xbrl_parser_enhanced.py     # Enhanced XBRL with hierarchical debts
+│   └── csv_importer.py             # TEBE CSV format importer
+│
+├── data/                           # 📊 SHARED: Configuration Data
+│   ├── taxonomy_mapping.json       # XBRL taxonomy mappings (2011-2018)
+│   ├── taxonomy_mapping_v2.json    # Enhanced mappings with debt breakdown
+│   ├── rating_tables.json          # FGPMI rating thresholds per sector
+│   └── sectors.json                # Sector definitions
+│
+├── legacy/                         # 📦 LEGACY: Streamlit App (Deprecated)
+│   ├── app.py                      # Streamlit entry point
+│   ├── ui/pages/                   # Streamlit pages
+│   ├── reports/                    # Report generation
+│   ├── tests/                      # Test suite
+│   ├── vba/                        # VBA-related files
+│   ├── sample_data/                # Sample XBRL/CSV files
+│   ├── test_*.py                   # Individual test files
+│   ├── debug_*.py                  # Debug scripts
+│   └── migrate_*.py                # Database migration scripts
+│
+├── docs/                           # 📚 Documentation
+├── config.py                       # 🔧 SHARED: Configuration constants
+├── requirements.txt                # Python dependencies (legacy)
+├── README.md
+├── CLAUDE.md                       # AI assistant instructions
+└── financial_analysis.db           # SQLite database
 ```
 
-**Key Architecture Points:**
-- 🔄 **85% Code Reuse**: Database models, calculators, and importers are shared between backend and legacy Streamlit
-- 🎯 **Single Source of Truth**: Same calculation logic across all interfaces
-- 📊 **Modern Stack**: FastAPI backend + Next.js frontend for production use
-- ⚠️ **Legacy Support**: Streamlit maintained for reference but no new features
+### Architecture Overview
+
+**Modern Stack (Production):**
+```
+Next.js Frontend (Port 3000)
+        ↓ HTTP API calls
+FastAPI Backend (Port 8000)
+        ↓ imports
+Shared Modules (database/, calculations/, importers/)
+        ↓
+SQLite Database (financial_analysis.db)
+```
+
+**Legacy Stack (Deprecated):**
+```
+Streamlit App (Port 8501) → legacy/app.py
+        ↓ imports
+Shared Modules (database/, calculations/, importers/)
+        ↓
+SQLite Database (same database)
+```
+
+**Key Architecture Principles:**
+- ✅ **Single Source of Truth**: Shared modules (`database/`, `calculations/`, `importers/`, `config.py`, `data/`) used by both modern and legacy apps
+- ✅ **No Code Duplication**: Backend imports directly from root shared modules (via `sys.path`)
+- ✅ **API-First**: Frontend is pure TypeScript/React with zero Python dependencies, communicates via REST API only
+- ✅ **Clean Separation**: Modern stack in `/backend` and `/frontend`, legacy preserved in `/legacy`
+- ✅ **Same Database**: Both applications use the same SQLite database for data continuity
 
 ## Settori Supportati
 

@@ -15,7 +15,11 @@ from database import models
 from calculations.ratios import FinancialRatiosCalculator
 from calculations.altman import AltmanCalculator
 from calculations.rating_fgpmi import FGPMICalculator
+from app.calculations.cashflow import CashFlowCalculator
+from app.calculations.cashflow_detailed import DetailedCashFlowCalculator
 from app.schemas import calculations as calc_schemas
+from app.schemas.cashflow_detailed import DetailedCashFlowStatement, MultiYearDetailedCashFlow
+from decimal import Decimal
 
 
 def _convert_namedtuple_to_dict(nt):
@@ -244,4 +248,260 @@ def calculate_complete_analysis(
         altman=altman,
         fgpmi=fgpmi,
         summary=summary
+    )
+
+
+def calculate_cashflow(
+    db: Session,
+    company_id: int,
+    year: int
+) -> calc_schemas.CashFlowResult:
+    """
+    Calculate cash flow statement for a specific year using indirect method
+
+    Args:
+        db: Database session
+        company_id: Company ID
+        year: Financial year
+
+    Returns:
+        CashFlowResult schema with all components and ratios
+    """
+    # Get current year data
+    company, fy, bs_current, inc_current = get_financial_year_with_statements(db, company_id, year)
+
+    # Try to get previous year
+    fy_previous = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year == year - 1
+    ).first()
+
+    bs_previous = fy_previous.balance_sheet if fy_previous else None
+
+    # Calculate EBITDA from income statement
+    ebitda = Decimal(str(inc_current.ebitda))
+
+    # Calculate cash flow
+    result = CashFlowCalculator.calculate(bs_current, bs_previous, inc_current, ebitda)
+
+    # Convert NamedTuple to dict
+    result_dict = _convert_namedtuple_to_dict(result)
+
+    return calc_schemas.CashFlowResult(**result_dict)
+
+
+def calculate_cashflow_multi_year(
+    db: Session,
+    company_id: int
+) -> list[calc_schemas.CashFlowResult]:
+    """
+    Calculate cash flow statements for all available years
+
+    Args:
+        db: Database session
+        company_id: Company ID
+
+    Returns:
+        List of CashFlowResult schemas, one per year (sorted by year)
+    """
+    # Get all financial years for company
+    financial_years = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id
+    ).order_by(models.FinancialYear.year).all()
+
+    if len(financial_years) < 2:
+        raise ValueError("At least 2 years of data required for cash flow analysis")
+
+    results = []
+
+    for i, fy in enumerate(financial_years):
+        # Skip if missing statements
+        if not fy.balance_sheet or not fy.income_statement:
+            continue
+
+        # Get previous year (None for first year)
+        bs_previous = None
+        if i > 0:
+            fy_prev = financial_years[i-1]
+            if fy_prev.balance_sheet:
+                bs_previous = fy_prev.balance_sheet
+
+        # Calculate cash flow
+        ebitda = Decimal(str(fy.income_statement.ebitda))
+        result = CashFlowCalculator.calculate(
+            fy.balance_sheet,
+            bs_previous,
+            fy.income_statement,
+            ebitda
+        )
+
+        # Convert to schema
+        result_dict = _convert_namedtuple_to_dict(result)
+        results.append(calc_schemas.CashFlowResult(**result_dict))
+
+    return results
+
+
+def calculate_detailed_cashflow_historical_and_forecast(
+    db: Session,
+    company_id: int,
+    scenario_id: int,
+    base_year: int
+) -> MultiYearDetailedCashFlow:
+    """
+    Calculate detailed cash flow for base year (historical) and forecast years
+
+    Timeline: (base_year-1) & base_year -> cashflow for base_year (2024)
+              base_year & forecast_years -> cashflows for forecasts (2025, 2026, 2027)
+
+    Example: base_year=2024
+        - Calculates cashflow FOR 2024 using (2023, 2024) balance sheets
+        - Calculates cashflow FOR 2025 using (2024, 2025_forecast) balance sheets
+        - Calculates cashflow FOR 2026 using (2025_forecast, 2026_forecast) balance sheets
+        - Calculates cashflow FOR 2027 using (2026_forecast, 2027_forecast) balance sheets
+
+    Args:
+        db: Database session
+        company_id: Company ID
+        scenario_id: Budget scenario ID
+        base_year: Last historical year (e.g., 2024)
+
+    Returns:
+        MultiYearDetailedCashFlow with base year + forecast cashflows
+    """
+    from database.models import BudgetScenario, ForecastYear
+
+    # Get scenario
+    scenario = db.query(BudgetScenario).filter(
+        BudgetScenario.id == scenario_id,
+        BudgetScenario.company_id == company_id
+    ).first()
+
+    if not scenario:
+        raise ValueError(f"Scenario {scenario_id} not found for company {company_id}")
+
+    if scenario.base_year != base_year:
+        raise ValueError(f"Scenario base year {scenario.base_year} does not match requested base year {base_year}")
+
+    # Get base year financial statements (last historical year)
+    fy_base = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year == base_year
+    ).first()
+
+    if not fy_base or not fy_base.balance_sheet or not fy_base.income_statement:
+        raise ValueError(f"Base year {base_year} missing financial statements")
+
+    # Get previous year (base_year - 1) for calculating base year cashflow
+    fy_previous = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year == base_year - 1
+    ).first()
+
+    cashflows = []
+
+    # Calculate cashflow FOR base year (using base_year-1 and base_year)
+    if fy_previous and fy_previous.balance_sheet:
+        base_year_cf = DetailedCashFlowCalculator.calculate(
+            bs_current=fy_base.balance_sheet,
+            bs_previous=fy_previous.balance_sheet,
+            inc_current=fy_base.income_statement,
+            year=base_year
+        )
+        cashflows.append(base_year_cf)
+
+    # Get forecast years
+    forecast_years = db.query(ForecastYear).filter(
+        ForecastYear.scenario_id == scenario_id
+    ).order_by(ForecastYear.year).all()
+
+    if not forecast_years:
+        raise ValueError(f"No forecast years found for scenario {scenario_id}")
+
+    # Calculate forecast cashflows (using base year as starting point)
+    previous_bs = fy_base.balance_sheet
+
+    for forecast_year in forecast_years:
+        if not forecast_year.balance_sheet or not forecast_year.income_statement:
+            continue
+
+        forecast_cf = DetailedCashFlowCalculator.calculate(
+            bs_current=forecast_year.balance_sheet,
+            bs_previous=previous_bs,
+            inc_current=forecast_year.income_statement,
+            year=forecast_year.year
+        )
+        cashflows.append(forecast_cf)
+
+        # Update previous for next iteration
+        previous_bs = forecast_year.balance_sheet
+
+    return MultiYearDetailedCashFlow(
+        company_id=company_id,
+        scenario_id=scenario_id,
+        base_year=base_year,
+        cashflows=cashflows
+    )
+
+
+def calculate_detailed_cashflow_historical_only(
+    db: Session,
+    company_id: int,
+    start_year: int,
+    end_year: int
+) -> MultiYearDetailedCashFlow:
+    """
+    Calculate detailed cash flow for historical years only (no scenario)
+
+    Args:
+        db: Database session
+        company_id: Company ID
+        start_year: First year to calculate cashflow for
+        end_year: Last year to calculate cashflow for
+
+    Returns:
+        MultiYearDetailedCashFlow with historical cashflows only
+    """
+    # Get all financial years in range
+    financial_years = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year >= start_year - 1,  # Need previous year as base
+        models.FinancialYear.year <= end_year
+    ).order_by(models.FinancialYear.year).all()
+
+    if len(financial_years) < 2:
+        raise ValueError("At least 2 years of historical data required for cashflow calculation")
+
+    cashflows = []
+    base_year = start_year - 1
+
+    # Calculate cashflow for each year starting from start_year
+    for i in range(1, len(financial_years)):
+        current = financial_years[i]
+        previous = financial_years[i-1]
+
+        if current.year < start_year:
+            continue
+
+        if not current.balance_sheet or not current.income_statement:
+            continue
+        if not previous.balance_sheet:
+            continue
+
+        cf = DetailedCashFlowCalculator.calculate(
+            bs_current=current.balance_sheet,
+            bs_previous=previous.balance_sheet,
+            inc_current=current.income_statement,
+            year=current.year
+        )
+        cashflows.append(cf)
+
+    if not cashflows:
+        raise ValueError("No cashflows could be calculated for the specified period")
+
+    return MultiYearDetailedCashFlow(
+        company_id=company_id,
+        scenario_id=None,
+        base_year=base_year,
+        cashflows=cashflows
     )

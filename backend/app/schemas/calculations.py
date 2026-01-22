@@ -153,3 +153,52 @@ class FinancialAnalysis(BaseModel):
     altman: AltmanResult
     fgpmi: FGPMIResult
     summary: SummaryMetrics
+
+
+# ============= CASH FLOW STATEMENT =============
+
+class CashFlowComponents(BaseModel):
+    """Components of cash flow statement (indirect method)"""
+    model_config = ConfigDict(from_attributes=True)
+
+    # Operating activities
+    net_profit: float
+    depreciation: float
+    delta_receivables: float
+    delta_inventory: float
+    delta_payables: float
+    operating_cf: float
+
+    # Investing activities
+    capex: float
+    investing_cf: float
+
+    # Financing activities
+    delta_debt: float
+    delta_equity: float
+    financing_cf: float
+
+    # Total
+    total_cf: float
+    actual_cash_change: float
+    cash_beginning: float
+    cash_ending: float
+
+
+class CashFlowRatios(BaseModel):
+    """Cash flow related ratios"""
+    model_config = ConfigDict(from_attributes=True)
+
+    ocf_margin: float  # Operating CF / EBITDA
+    free_cash_flow: float  # Operating CF + Investing CF
+    cash_conversion: float  # Operating CF / Net Profit
+    capex_to_operating_cf: float  # CAPEX / Operating CF
+
+
+class CashFlowResult(BaseModel):
+    """Complete cash flow statement result"""
+    model_config = ConfigDict(from_attributes=True)
+
+    year: int
+    components: CashFlowComponents
+    ratios: CashFlowRatios

@@ -1,6 +1,9 @@
 # Netlify Configuration for XBRL Budget Frontend (Next.js 15)
 
 [build]
+  # Base directory - IMPORTANT: This tells Netlify to work only in frontend directory
+  base = "frontend"
+
   # Build command
   command = "npm run build"
 
@@ -13,6 +16,10 @@
 
   # Disable Next.js telemetry
   NEXT_TELEMETRY_DISABLED = "1"
+
+  # Prevent Python/pip from being used
+  # This ensures Netlify doesn't try to install Python dependencies
+  NPM_FLAGS = "--legacy-peer-deps"
 
 # Optional: Redirect API calls to backend through Netlify
 # Uncomment and configure if you want to proxy API requests

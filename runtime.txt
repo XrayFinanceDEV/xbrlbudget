@@ -1,0 +1,3 @@
+# This file intentionally left minimal
+# Frontend uses Node.js (configured in netlify.toml)
+# Backend runs separately on https://kpsfinanciallab.w3pro.it:8001

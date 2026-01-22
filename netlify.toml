@@ -7,8 +7,8 @@
   # Build command
   command = "npm run build"
 
-  # Netlify automatically detects Next.js and serves from .next directory
-  # No need to specify publish directory
+  # Publish directory - where the built files are
+  publish = ".next"
 
 [build.environment]
   # Node version (Next.js 15 requires Node 18.18+)
@@ -17,17 +17,9 @@
   # Disable Next.js telemetry
   NEXT_TELEMETRY_DISABLED = "1"
 
-  # Prevent Python/pip from being used
-  # This ensures Netlify doesn't try to install Python dependencies
-  NPM_FLAGS = "--legacy-peer-deps"
-
-# Optional: Redirect API calls to backend through Netlify
-# Uncomment and configure if you want to proxy API requests
-# [[redirects]]
-#   from = "/api/v1/*"
-#   to = "https://your-backend-api.com/api/v1/:splat"
-#   status = 200
-#   force = true
+# Enable Next.js runtime for proper SSR/SSG support
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 # Headers for security
 [[headers]]

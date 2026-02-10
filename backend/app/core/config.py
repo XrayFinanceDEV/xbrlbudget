@@ -35,9 +35,7 @@ class Settings(BaseSettings):
         "http://localhost:3002",  # Next.js dev server (alternative port)
         "http://localhost:8000",  # FastAPI dev server
         "http://localhost:8501",  # Streamlit (legacy)
-        "https://*.netlify.app",  # Netlify preview/production deployments
-        # TODO: Add your custom Netlify domain after deployment
-        # "https://your-site-name.netlify.app",
+        "https://xbrlbudget.netlify.app",  # Netlify production deployment
     ]
 
     # Application

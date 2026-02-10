@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { getDetailedCashFlow } from "@/lib/api";
+import { getDetailedCashFlow, getBudgetScenarios } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -41,10 +41,7 @@ export default function CashflowPage() {
     if (!selectedCompanyId) return;
 
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/v1/companies/${selectedCompanyId}/scenarios`
-      );
-      const data = await response.json();
+      const data = await getBudgetScenarios(selectedCompanyId);
       setScenarios(data);
 
       // Auto-select first active scenario

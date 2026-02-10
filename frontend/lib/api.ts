@@ -41,6 +41,18 @@ export const createCompany = async (company: {
   return data;
 };
 
+export const updateCompany = async (
+  id: number,
+  data: { name?: string; tax_id?: string; sector?: number; notes?: string }
+): Promise<Company> => {
+  const { data: result } = await api.put<Company>(`/companies/${id}`, data);
+  return result;
+};
+
+export const deleteCompany = async (id: number): Promise<void> => {
+  await api.delete(`/companies/${id}`);
+};
+
 // Financial Years
 export const getCompanyYears = async (companyId: number): Promise<number[]> => {
   const { data } = await api.get<number[]>(`/companies/${companyId}/years`);
@@ -129,6 +141,16 @@ export const getCompleteAnalysis = async (
   return data;
 };
 
+export const getMultiYearRatios = async (
+  companyId: number,
+  scenarioId: number
+): Promise<import('@/types/api').MultiYearRatios> => {
+  const { data } = await api.get<import('@/types/api').MultiYearRatios>(
+    `/companies/${companyId}/scenarios/${scenarioId}/ratios`
+  );
+  return data;
+};
+
 // Import APIs
 export interface ReconciliationAdjustment {
   xbrl_total: number;
@@ -170,7 +192,8 @@ export interface CSVImportResult {
 export const importXBRL = async (
   file: File,
   companyId?: number | null,
-  createCompany: boolean = true
+  createCompany: boolean = true,
+  sector?: number
 ): Promise<XBRLImportResult> => {
   const formData = new FormData();
   formData.append('file', file);
@@ -180,6 +203,9 @@ export const importXBRL = async (
     params.append('company_id', companyId.toString());
   }
   params.append('create_company', createCompany.toString());
+  if (sector) {
+    params.append('sector', sector.toString());
+  }
 
   const { data } = await api.post<XBRLImportResult>(
     `/import/xbrl?${params.toString()}`,
@@ -214,6 +240,60 @@ export const importCSV = async (
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+    }
+  );
+  return data;
+};
+
+export interface PDFImportResult {
+  success: boolean;
+  company_id: number;
+  company_name: string;
+  fiscal_year: number;
+  balance_sheet_id: number;
+  income_statement_id: number;
+  format: string;
+  confidence_score: number;
+  extraction_time_seconds: number;
+  message: string;
+  warnings: string[];
+}
+
+export const importPDF = async (
+  file: File,
+  fiscalYear: number,
+  companyName?: string,
+  companyId?: number | null,
+  createCompany: boolean = true,
+  sector?: number
+): Promise<PDFImportResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const params = new URLSearchParams();
+  params.append('fiscal_year', fiscalYear.toString());
+  params.append('create_company', createCompany.toString());
+
+  if (companyId !== null && companyId !== undefined) {
+    params.append('company_id', companyId.toString());
+  }
+
+  if (companyName) {
+    params.append('company_name', companyName);
+  }
+
+  if (sector) {
+    params.append('sector', sector.toString());
+  }
+
+  const { data } = await api.post<PDFImportResult>(
+    `/import/pdf?${params.toString()}`,
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 120000, // 120 seconds for PDF processing
     }
   );
   return data;
@@ -395,6 +475,51 @@ export const getDetailedCashFlowHistorical = async (
     `/companies/${companyId}/detailed-cashflow?start_year=${startYear}&end_year=${endYear}`
   );
   return data;
+};
+
+// Scenario Analysis (comprehensive single-call)
+export const getScenarioAnalysis = async (
+  companyId: number,
+  scenarioId: number
+): Promise<import('@/types/api').ScenarioAnalysis> => {
+  const { data } = await api.get<import('@/types/api').ScenarioAnalysis>(
+    `/companies/${companyId}/scenarios/${scenarioId}/analysis`
+  );
+  return data;
+};
+
+// PDF Report Download
+export const downloadReportPDF = async (
+  companyId: number,
+  scenarioId: number,
+  companyName?: string
+): Promise<void> => {
+  const response = await api.get(
+    `/companies/${companyId}/scenarios/${scenarioId}/report/pdf`,
+    { responseType: 'blob' }
+  );
+
+  // Create download link
+  const blob = new Blob([response.data], { type: 'application/pdf' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+
+  // Extract filename from Content-Disposition header or build one
+  const contentDisposition = response.headers['content-disposition'];
+  let filename = 'report.pdf';
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="?([^"]+)"?/);
+    if (match) filename = match[1];
+  } else if (companyName) {
+    filename = `${companyName.replace(/\s+/g, '_')}_Analisi.pdf`;
+  }
+
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
 };
 
 export default api;

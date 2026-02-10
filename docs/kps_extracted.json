@@ -1,0 +1,31 @@
+{
+  "company_name": "KPS FINANCIAL LAB S.R.L.",
+  "tax_id": "11793470961",
+  "year": 2024,
+  "format": "micro",
+  "balance_sheet": {
+    "sp01_crediti_soci": 0.0,
+    "sp02_immob_immateriali": 53138.0,
+    "sp03_immob_materiali": 5029.0,
+    "sp04_immob_finanziarie": 14270.0,
+    "sp05_rimanenze": 0.0,
+    "sp06_crediti": 82472.0,
+    "sp07_attivita_finanziarie": 0.0,
+    "sp08_disponibilita_liquide": 43932.0,
+    "sp09_ratei_risconti_attivi": 6845.0,
+    "sp10_capitale_sociale": 10000.0,
+    "sp11_riserve": 19519.0,
+    "sp12_utile_perdita": 2567.0,
+    "sp13_fondi_rischi": 0.0,
+    "sp14_tfr": 0.0,
+    "sp15_debiti_lungo": 0.0,
+    "sp16_debiti_breve": 173578.0,
+    "sp17_ratei_risconti_passivi": 22.0,
+    "sp18_totale_attivo": 205686.0,
+    "sp18_totale_passivo": 205686.0
+  },
+  "income_statement": {
+    "ce01_ricavi_vendite": 227426.0,
+    "ce20_utile_perdita": 2567.0
+  }
+}

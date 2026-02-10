@@ -21,12 +21,38 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   Legend,
-  ResponsiveContainer,
   ComposedChart,
   Area,
 } from "recharts";
+import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PageHeader } from "@/components/page-header";
+import { ScenarioSelector } from "@/components/scenario-selector";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+
+// Chart configs
+const assetsChartConfig = {
+  fixed_assets: { label: "Immobilizzazioni", color: "hsl(var(--chart-3))" },
+  current_assets: { label: "Attivo Circolante", color: "hsl(var(--chart-1))" },
+  total_assets: { label: "Totale Attivo", color: "hsl(var(--chart-5))" },
+} satisfies ChartConfig;
+
+const equityDebtChartConfig = {
+  total_equity: { label: "Patrimonio Netto", color: "hsl(var(--chart-2))" },
+  total_debt: { label: "Debiti Totali", color: "hsl(var(--chart-5))" },
+} satisfies ChartConfig;
+
+const wcChartConfig = {
+  working_capital_net: { label: "CCN", color: "hsl(var(--chart-4))" },
+} satisfies ChartConfig;
 
 export default function ForecastBalancePage() {
   const { selectedCompanyId, years: availableYears } = useApp();
@@ -139,9 +165,13 @@ export default function ForecastBalancePage() {
   if (!selectedCompanyId) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
-          Seleziona un&apos;azienda per visualizzare i previsionali
-        </div>
+        <Alert variant="default" className="border-yellow-500/50 text-yellow-700 dark:text-yellow-400 [&>svg]:text-yellow-600">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Attenzione</AlertTitle>
+          <AlertDescription>
+            Seleziona un&apos;azienda per visualizzare i previsionali
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -149,233 +179,259 @@ export default function ForecastBalancePage() {
   if (scenarios.length === 0 && !loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 className="text-2xl font-bold text-gray-900 mb-4">
-          Stato Patrimoniale Previsionale
-        </h1>
-        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded">
-          Nessuno scenario budget trovato. Vai alla tab &quot;Input Ipotesi&quot; per creare uno scenario.
-        </div>
+        <PageHeader
+          title="Stato Patrimoniale Previsionale"
+          icon={<BarChart3 className="h-6 w-6" />}
+        />
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>Nessuno scenario trovato</AlertTitle>
+          <AlertDescription>
+            Nessuno scenario budget trovato. Vai alla tab &quot;Input Ipotesi&quot; per creare uno scenario.
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-4">
-        Stato Patrimoniale Previsionale
-      </h1>
+      <PageHeader
+        title="Stato Patrimoniale Previsionale"
+        icon={<BarChart3 className="h-6 w-6" />}
+      />
 
       {/* Scenario Selector */}
-      <div className="bg-white shadow rounded-lg p-4 mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Scenario Budget:
-        </label>
-        <select
-          value={selectedScenario?.id || ""}
-          onChange={(e) => {
-            const scenario = scenarios.find((s) => s.id === Number(e.target.value));
-            setSelectedScenario(scenario || null);
-          }}
-          className="w-full md:w-96 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {scenarios.map((scenario) => (
-            <option key={scenario.id} value={scenario.id}>
-              {scenario.name} - Anno Base: {scenario.base_year}
-              {scenario.is_active ? " (Attivo)" : ""}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <ScenarioSelector
+            scenarios={scenarios}
+            selectedScenario={selectedScenario}
+            onSelect={setSelectedScenario}
+          />
+        </CardContent>
+      </Card>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
-          {error}
-        </div>
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Errore</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {loading && (
         <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Caricamento...</p>
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+          <p className="mt-4 text-muted-foreground">Caricamento...</p>
         </div>
       )}
 
       {!loading && selectedScenario && historicalYears.length > 0 && (
         <>
           {/* Balance Sheet Table */}
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              Stato Patrimoniale: Confronto Storico vs Previsionale
-            </h2>
-
-            {/* Balance Check Warning */}
-            <BalanceCheckWarning
-              historicalYears={historicalYears}
-              historicalData={historicalData}
-              forecastYears={forecastYears}
-              forecastData={forecastData}
-            />
-
-            <div className="overflow-x-auto">
-              <BalanceSheetTable
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-xl">
+                Stato Patrimoniale: Confronto Storico vs Previsionale
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Balance Check Warning */}
+              <BalanceCheckWarning
                 historicalYears={historicalYears}
                 historicalData={historicalData}
                 forecastYears={forecastYears}
                 forecastData={forecastData}
               />
-            </div>
-          </div>
+
+              <div className="overflow-x-auto">
+                <BalanceSheetTable
+                  historicalYears={historicalYears}
+                  historicalData={historicalData}
+                  forecastYears={forecastYears}
+                  forecastData={forecastData}
+                />
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Charts */}
           {Object.keys(forecastData).length > 0 && (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Assets Composition Chart */}
-                <div className="bg-white shadow rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Composizione Attivo
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart
-                      data={prepareChartData(
-                        historicalYears,
-                        historicalData,
-                        forecastYears,
-                        forecastData
-                      )}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="year" />
-                      <YAxis />
-                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                      <Legend />
-                      <Area
-                        type="monotone"
-                        dataKey="fixed_assets"
-                        fill="#f59e0b"
-                        stroke="#f59e0b"
-                        name="Immobilizzazioni"
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="current_assets"
-                        fill="#3b82f6"
-                        stroke="#3b82f6"
-                        name="Attivo Circolante"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="total_assets"
-                        stroke="#ef4444"
-                        strokeWidth={2}
-                        name="Totale Attivo"
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Composizione Attivo</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={assetsChartConfig} className="h-[300px] w-full">
+                      <ComposedChart
+                        data={prepareChartData(
+                          historicalYears,
+                          historicalData,
+                          forecastYears,
+                          forecastData
+                        )}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="year" />
+                        <YAxis />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value: any) => formatCurrency(Number(value))}
+                            />
+                          }
+                        />
+                        <Legend />
+                        <Area
+                          type="monotone"
+                          dataKey="fixed_assets"
+                          fill="var(--color-fixed_assets)"
+                          stroke="var(--color-fixed_assets)"
+                          name="Immobilizzazioni"
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="current_assets"
+                          fill="var(--color-current_assets)"
+                          stroke="var(--color-current_assets)"
+                          name="Attivo Circolante"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="total_assets"
+                          stroke="var(--color-total_assets)"
+                          strokeWidth={2}
+                          name="Totale Attivo"
+                        />
+                      </ComposedChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
 
                 {/* Equity vs Debt Chart */}
-                <div className="bg-white shadow rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Patrimonio Netto vs Debiti
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart
-                      data={prepareChartData(
-                        historicalYears,
-                        historicalData,
-                        forecastYears,
-                        forecastData
-                      )}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="year" />
-                      <YAxis />
-                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                      <Legend />
-                      <Bar dataKey="total_equity" fill="#10b981" name="Patrimonio Netto" />
-                      <Bar dataKey="total_debt" fill="#ef4444" name="Debiti Totali" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Patrimonio Netto vs Debiti</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={equityDebtChartConfig} className="h-[300px] w-full">
+                      <BarChart
+                        data={prepareChartData(
+                          historicalYears,
+                          historicalData,
+                          forecastYears,
+                          forecastData
+                        )}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="year" />
+                        <YAxis />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value: any) => formatCurrency(Number(value))}
+                            />
+                          }
+                        />
+                        <Legend />
+                        <Bar dataKey="total_equity" fill="var(--color-total_equity)" name="Patrimonio Netto" />
+                        <Bar dataKey="total_debt" fill="var(--color-total_debt)" name="Debiti Totali" />
+                      </BarChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
               </div>
 
               {/* Working Capital Chart */}
-              <div className="bg-white shadow rounded-lg p-6 mb-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Capitale Circolante Netto (CCN)
-                </h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart
-                    data={prepareChartData(
-                      historicalYears,
-                      historicalData,
-                      forecastYears,
-                      forecastData
-                    )}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="year" />
-                    <YAxis />
-                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="working_capital_net"
-                      stroke="#8b5cf6"
-                      strokeWidth={2}
-                      name="CCN"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Capitale Circolante Netto (CCN)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer config={wcChartConfig} className="h-[300px] w-full">
+                    <LineChart
+                      data={prepareChartData(
+                        historicalYears,
+                        historicalData,
+                        forecastYears,
+                        forecastData
+                      )}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="year" />
+                      <YAxis />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value: any) => formatCurrency(Number(value))}
+                          />
+                        }
+                      />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="working_capital_net"
+                        stroke="var(--color-working_capital_net)"
+                        strokeWidth={2}
+                        name="CCN"
+                      />
+                    </LineChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
 
               {/* Key Metrics Summary */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Riepilogo Indicatori Chiave
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {forecastYears.map((year) => {
-                    const forecast = forecastData[year];
-                    if (!forecast) return null;
+              <Card>
+                <CardHeader>
+                  <CardTitle>Riepilogo Indicatori Chiave</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {forecastYears.map((year) => {
+                      const forecast = forecastData[year];
+                      if (!forecast) return null;
 
-                    const debtToEquity = forecast.total_equity !== 0
-                      ? forecast.total_debt / forecast.total_equity
-                      : 0;
+                      const debtToEquity = forecast.total_equity !== 0
+                        ? forecast.total_debt / forecast.total_equity
+                        : 0;
 
-                    return (
-                      <div key={year} className="border border-gray-200 rounded-lg p-4">
-                        <h4 className="font-semibold text-gray-700 mb-3 text-center">
-                          {year}
-                        </h4>
-                        <div className="space-y-2 text-sm">
-                          <MetricRow
-                            label="Totale Attivo"
-                            value={formatCurrency(forecast.total_assets)}
-                          />
-                          <MetricRow
-                            label="Patrimonio Netto"
-                            value={formatCurrency(forecast.total_equity)}
-                          />
-                          <MetricRow
-                            label="Debiti Totali"
-                            value={formatCurrency(forecast.total_debt)}
-                          />
-                          <MetricRow
-                            label="CCN"
-                            value={formatCurrency(forecast.working_capital_net)}
-                          />
-                          <MetricRow
-                            label="Debt/Equity"
-                            value={debtToEquity.toFixed(2)}
-                          />
+                      return (
+                        <div key={year} className="border border-border rounded-lg p-4">
+                          <h4 className="font-semibold text-muted-foreground mb-3 text-center">
+                            {year}
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <MetricRow
+                              label="Totale Attivo"
+                              value={formatCurrency(forecast.total_assets)}
+                            />
+                            <MetricRow
+                              label="Patrimonio Netto"
+                              value={formatCurrency(forecast.total_equity)}
+                            />
+                            <MetricRow
+                              label="Debiti Totali"
+                              value={formatCurrency(forecast.total_debt)}
+                            />
+                            <MetricRow
+                              label="CCN"
+                              value={formatCurrency(forecast.working_capital_net)}
+                            />
+                            <MetricRow
+                              label="Debt/Equity"
+                              value={debtToEquity.toFixed(2)}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
             </>
           )}
         </>
@@ -424,45 +480,26 @@ function BalanceCheckWarning({
   if (issues.length === 0) return null;
 
   return (
-    <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded p-4">
-      <div className="flex items-start">
-        <div className="flex-shrink-0">
-          <svg
-            className="h-5 w-5 text-yellow-400"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </div>
-        <div className="ml-3 flex-1">
-          <h3 className="text-sm font-medium text-yellow-800">
-            Sbilancio Rilevato
-          </h3>
-          <div className="mt-2 text-sm text-yellow-700">
-            <p className="mb-1">
-              Il bilancio non quadra per i seguenti anni (differenza tra Attivo e Passivo):
-            </p>
-            <ul className="list-disc list-inside space-y-1">
-              {issues.map((issue) => (
-                <li key={issue.year}>
-                  <strong>{issue.year}</strong> ({issue.type === 'historical' ? 'Storico' : 'Previsionale'}):
-                  <span className="font-semibold ml-1">{formatCurrency(issue.diff)}</span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs">
-              Possibili cause: errori di arrotondamento nell&apos;importazione XBRL/CSV, imprecisione nei dati originali.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Alert variant="default" className="mb-4 border-yellow-500/50 text-yellow-700 dark:text-yellow-400 [&>svg]:text-yellow-600">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>Sbilancio Rilevato</AlertTitle>
+      <AlertDescription>
+        <p className="mb-1">
+          Il bilancio non quadra per i seguenti anni (differenza tra Attivo e Passivo):
+        </p>
+        <ul className="list-disc list-inside space-y-1">
+          {issues.map((issue) => (
+            <li key={issue.year}>
+              <strong>{issue.year}</strong> ({issue.type === 'historical' ? 'Storico' : 'Previsionale'}):
+              <span className="font-semibold ml-1">{formatCurrency(issue.diff)}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs">
+          Possibili cause: errori di arrotondamento nell&apos;importazione XBRL/CSV, imprecisione nei dati originali.
+        </p>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -538,6 +575,60 @@ function BalanceSheetTable({
       indent: true,
     },
     {
+      label: "1) Partecipazioni",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04a_partecipazioni")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04a_partecipazioni || 0),
+      indent: true,
+    },
+    {
+      label: "2) Crediti",
+      historicalValues: [],
+      forecastValues: [],
+      indent: true,
+    },
+    {
+      label: "Esigibili entro l'esercizio successivo",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04b_crediti_immob_breve")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04b_crediti_immob_breve || 0),
+      indent: true,
+    },
+    {
+      label: "Esigibili oltre l'esercizio successivo",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04c_crediti_immob_lungo")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04c_crediti_immob_lungo || 0),
+      indent: true,
+    },
+    {
+      label: "Totale crediti",
+      historicalValues: historicalYears.map((y) =>
+        getHistoricalValue(y, "sp04b_crediti_immob_breve") +
+        getHistoricalValue(y, "sp04c_crediti_immob_lungo")
+      ),
+      forecastValues: forecastYears.map((y) =>
+        (forecastData[y]?.sp04b_crediti_immob_breve || 0) +
+        (forecastData[y]?.sp04c_crediti_immob_lungo || 0)
+      ),
+      indent: true,
+    },
+    {
+      label: "3) Altri titoli",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04d_altri_titoli")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04d_altri_titoli || 0),
+      indent: true,
+    },
+    {
+      label: "4) Strumenti finanziari derivati attivi",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04e_strumenti_derivati_attivi")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04e_strumenti_derivati_attivi || 0),
+      indent: true,
+    },
+    {
+      label: "Totale immobilizzazioni finanziarie",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04_immob_finanziarie")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04_immob_finanziarie || 0),
+      indent: true,
+    },
+    {
       label: "Totale Immobilizzazioni",
       historicalValues: historicalYears.map((y) => getHistoricalValue(y, "fixed_assets", true)),
       forecastValues: forecastYears.map((y) => forecastData[y]?.fixed_assets || 0),
@@ -569,13 +660,13 @@ function BalanceSheetTable({
       indent: true,
     },
     {
-      label: "III - Attività finanziarie che non costituiscono immobilizzazioni",
+      label: "III - Attivit\u00e0 finanziarie che non costituiscono immobilizzazioni",
       historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp08_attivita_finanziarie")),
       forecastValues: forecastYears.map((y) => forecastData[y]?.sp08_attivita_finanziarie || 0),
       indent: true,
     },
     {
-      label: "IV - Disponibilità liquide",
+      label: "IV - Disponibilit\u00e0 liquide",
       historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp09_disponibilita_liquide")),
       forecastValues: forecastYears.map((y) => forecastData[y]?.sp09_disponibilita_liquide || 0),
       indent: true,
@@ -619,15 +710,57 @@ function BalanceSheetTable({
       indent: true,
     },
     {
-      label: "IV-VII - Riserve",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12_riserve")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12_riserve || 0),
+      label: "II - Riserva da soprapprezzo delle azioni",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12a_riserva_sovrapprezzo")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12a_riserva_sovrapprezzo || 0),
+      indent: true,
+    },
+    {
+      label: "III - Riserve di rivalutazione",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12b_riserve_rivalutazione")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12b_riserve_rivalutazione || 0),
+      indent: true,
+    },
+    {
+      label: "IV - Riserva legale",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12c_riserva_legale")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12c_riserva_legale || 0),
+      indent: true,
+    },
+    {
+      label: "V - Riserve statutarie",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12d_riserve_statutarie")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12d_riserve_statutarie || 0),
+      indent: true,
+    },
+    {
+      label: "VI - Altre riserve",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12e_altre_riserve")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12e_altre_riserve || 0),
+      indent: true,
+    },
+    {
+      label: "VII - Riserva per operazioni di copertura dei flussi finanziari attesi",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12f_riserva_copertura_flussi")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12f_riserva_copertura_flussi || 0),
+      indent: true,
+    },
+    {
+      label: "VIII - Utili (perdite) portati a nuovo",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12g_utili_perdite_portati")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12g_utili_perdite_portati || 0),
       indent: true,
     },
     {
       label: "IX - Utile (perdita) dell'esercizio",
       historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp13_utile_perdita")),
       forecastValues: forecastYears.map((y) => forecastData[y]?.sp13_utile_perdita || 0),
+      indent: true,
+    },
+    {
+      label: "X - Riserva negativa per azioni proprie in portafoglio",
+      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12h_riserva_neg_azioni_proprie")),
+      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12h_riserva_neg_azioni_proprie || 0),
       indent: true,
     },
     {
@@ -703,43 +836,46 @@ function BalanceSheetTable({
   ];
 
   return (
-    <table className="min-w-full divide-y divide-gray-200 border border-gray-300">
-      <thead className="bg-gray-100">
+    <table className="min-w-full divide-y divide-border border border-border">
+      <thead className="bg-muted">
         <tr>
-          <th className="px-4 py-3 text-left text-xs font-bold text-gray-900 uppercase border-r border-gray-300">
+          <th className="px-4 py-3 text-left text-xs font-bold text-foreground uppercase border-r border-border">
             Descrizione
           </th>
           {historicalYears.map((year) => (
             <th
               key={year}
-              className="px-4 py-3 text-center text-xs font-bold text-gray-900 uppercase border-r border-gray-300"
+              className="px-4 py-3 text-center text-xs font-bold text-foreground uppercase border-r border-border"
             >
               {year}
-              <div className="text-gray-600 font-normal">(Storico)</div>
+              <div className="text-muted-foreground font-normal">(Storico)</div>
             </th>
           ))}
           {forecastYears.map((year) => (
             <th
               key={year}
-              className="px-4 py-3 text-center text-xs font-bold text-cyan-700 uppercase border-r border-gray-300 bg-cyan-50"
+              className="px-4 py-3 text-center text-xs font-bold text-primary uppercase border-r border-border bg-primary/10"
             >
               {year}
-              <div className="text-cyan-600 font-normal">(Previsionale)</div>
+              <div className="text-primary font-normal">(Previsionale)</div>
             </th>
           ))}
         </tr>
       </thead>
-      <tbody className="bg-white divide-y divide-gray-200">
+      <tbody className="bg-card divide-y divide-border">
         {rows.map((row, index) => {
           const bgClass = row.isTotal
-            ? "bg-gray-200 font-bold"
+            ? "bg-muted font-bold"
             : row.isSubtotal
-            ? "bg-blue-50 font-semibold"
-            : "hover:bg-gray-50";
+            ? "bg-primary/10 font-semibold"
+            : "hover:bg-muted/50";
 
           return (
             <tr key={index} className={bgClass}>
-              <td className={`px-4 py-2 text-sm text-gray-900 border-r border-gray-200 ${row.indent ? 'pl-8' : ''}`}>
+              <td className={cn(
+                "px-4 py-2 text-sm text-foreground border-r border-border",
+                row.indent && "pl-8"
+              )}>
                 {row.label}
               </td>
               {/* Historical columns */}
@@ -748,9 +884,11 @@ function BalanceSheetTable({
                 return (
                   <td
                     key={`hist-${i}`}
-                    className={`px-4 py-2 text-sm text-right border-r border-gray-200 ${
-                      isNegative ? "text-red-600" : "text-gray-900"
-                    } ${row.isTotal || row.isSubtotal ? "font-semibold" : ""}`}
+                    className={cn(
+                      "px-4 py-2 text-sm text-right border-r border-border",
+                      isNegative ? "text-destructive" : "text-foreground",
+                      (row.isTotal || row.isSubtotal) && "font-semibold"
+                    )}
                   >
                     {row.isTotal && !value ? "" : formatCurrency(value)}
                   </td>
@@ -762,9 +900,11 @@ function BalanceSheetTable({
                 return (
                   <td
                     key={`forecast-${i}`}
-                    className={`px-4 py-2 text-sm text-right border-r border-gray-200 ${
-                      forecastNegative ? "text-red-600" : "text-gray-900"
-                    } ${row.isTotal || row.isSubtotal ? "font-semibold" : ""}`}
+                    className={cn(
+                      "px-4 py-2 text-sm text-right border-r border-border",
+                      forecastNegative ? "text-destructive" : "text-foreground",
+                      (row.isTotal || row.isSubtotal) && "font-semibold"
+                    )}
                   >
                     {row.isTotal && !value ? "" : formatCurrency(value)}
                   </td>
@@ -782,8 +922,8 @@ function BalanceSheetTable({
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
-      <span className="text-gray-600">{label}:</span>
-      <span className="font-semibold text-gray-900">{value}</span>
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="font-semibold text-foreground">{value}</span>
     </div>
   );
 }

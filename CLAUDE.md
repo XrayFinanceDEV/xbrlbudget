@@ -21,11 +21,14 @@ Both applications share the same core modules (`database/`, `calculations/`, `im
 **Key Directories:**
 - `backend/` - FastAPI REST API (uses shared modules from root)
 - `frontend/` - Next.js 15 React frontend (TypeScript, API client only)
-- `database/` - **SHARED** SQLAlchemy ORM models (837 lines, used by both apps)
+- `database/` - **SHARED** SQLAlchemy ORM models (used by both apps)
 - `calculations/` - **SHARED** Financial calculators (ratios, Altman, FGPMI, forecasting)
-- `importers/` - **SHARED** XBRL and CSV parsers
+- `importers/` - **SHARED** XBRL, CSV, and PDF parsers
+- `pdf_service/` - PDF report generation (EM-Score, Italian text, report builder)
 - `data/` - **SHARED** Taxonomy mappings, rating tables, sector definitions
 - `config.py` - **SHARED** Configuration constants
+- `tests/` - Test scripts (DB, calculations, XBRL, FGPMI, CSV)
+- `docs/` - Reference docs, guides, PDF samples
 - `legacy/` - Old Streamlit app (deprecated, preserved for reference)
 - `financial_analysis.db` - **SHARED** SQLite database in project root
 
@@ -39,298 +42,148 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 cd frontend && npm run dev
 ```
 
+**API Workflow (3 calls):**
+```bash
+# 1. INPUT: Upload data → POST /api/v1/import/{xbrl|csv|pdf}
+# 2. ASSUMPTIONS: Create scenario + bulk assumptions → PUT /scenarios/{id}/assumptions
+# 3. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
+```
+
 **Important:** Backend imports shared modules from project root via `sys.path` manipulation in `backend/app/main.py`. No code duplication - single source of truth for all business logic.
 
 ## Development Commands
 
-### Modern Stack (FastAPI + Next.js) - **RECOMMENDED**
-
-#### Backend Setup
+### Backend Setup
 ```bash
 cd backend
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Initialize database (first time only - from project root)
-cd ..
-python -c "from database.db import init_db; init_db()"
+# Initialize database (first time, from project root)
+cd .. && python -c "from database.db import init_db; init_db()"
 ```
 
-#### Running Backend API
+### Running Backend
 ```bash
-cd backend
-source venv/bin/activate
+cd backend && source venv/bin/activate
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-# API available at:
-# - http://localhost:8000/api/v1
-# - http://localhost:8000/docs (Swagger UI)
+# API: http://localhost:8000/api/v1
+# Docs: http://localhost:8000/docs
 ```
 
-#### Frontend Setup
+### Frontend Setup & Run
 ```bash
 cd frontend
 npm install
-# or: pnpm install / yarn install
+npm run dev  # http://localhost:3000
 ```
-
-#### Running Frontend
-```bash
-cd frontend
-npm run dev
-# or: pnpm dev / yarn dev
-
-# Frontend available at: http://localhost:3000
-```
-
-### Legacy App (Streamlit) - **DEPRECATED**
-
-```bash
-cd legacy
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r ../requirements.txt
-
-# Run Streamlit app
-streamlit run app.py
-
-# Application will be available at http://localhost:8501
-```
-
-**Note:** The Streamlit app is maintained for reference only. All new development should use the FastAPI + Next.js stack.
-
-## Application Features
-
-### Modern Frontend (Next.js) - Primary Interface
-
-**Pages/Routes** (in `frontend/app/`):
-1. **Home** (`/`) - Dashboard with company overview
-2. **Import** (`/import`) - XBRL/CSV data import interface
-3. **Budget** (`/budget`) - Budget scenario creation and assumptions input
-4. **Analysis** (`/analysis`) - Financial ratios, Altman Z-Score, FGPMI Rating
-5. **Cash Flow** (`/cashflow`) - Cash Flow Statement (indirect method)
-6. **Forecast - Income** (`/forecast/income`) - Income Statement projections
-7. **Forecast - Balance** (`/forecast/balance`) - Balance Sheet projections
-8. **Forecast - Reclassified** (`/forecast/reclassified`) - Reclassified indicators with charts
-
-**Global State** (via `AppContext.tsx`):
-- Selected company and year
-- Available companies list
-- Financial data caching
-
-### Legacy App (Streamlit) - Horizontal Tab Navigation
-
-Located in `/legacy/app.py`. Uses **horizontal tabs** at the top for navigation.
-
-**Top Selection Bar**:
-- Company selector, Year selector, Sector display, P.IVA display
-
-**Main Tabs**: Same features as modern frontend but in Streamlit UI
 
 ### Testing
-
 ```bash
-cd legacy
-
-# Run individual test files (no pytest runner configured)
-python test_db.py                 # Database models and relationships
-python test_calculations.py       # Financial ratios, Altman, working capital
-python test_fgpmi.py              # FGPMI rating model
-python test_csv_import.py         # CSV importer (TEBE format)
+cd tests
+python test_db.py                 # Database models
+python test_calculations.py       # Financial ratios, Altman
+python test_fgpmi.py              # FGPMI rating
 python test_xbrl_import.py        # XBRL parser
-python test_bkps_xbrl.py          # Real XBRL data validation
-
-# Tests use drop_all() and init_db() to reset database state
 ```
 
 ### Database Operations
-
 ```bash
 # Reset database (WARNING: deletes all data)
-# Run from project root
 python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
-
-# Database migration (if schema changes)
-cd legacy
-python migrate_db.py
 ```
-
-**Database Location:** `/home/peter/DEV/budget/financial_analysis.db` (project root)
-- Shared by both modern and legacy applications
-- Uses absolute path configuration to ensure consistency
 
 ## Architecture
 
-### Project Structure
+### Simplified API Design (7 Core Endpoints)
+
+**Pattern:** INPUT → ASSUMPTIONS → OUTPUT
+
+1. **INPUT (3 endpoints)**: Data import
+   - `POST /api/v1/import/xbrl` - Italian XBRL files (6 taxonomies)
+   - `POST /api/v1/import/csv` - CSV files (TEBE format)
+   - `POST /api/v1/import/pdf` - PDF balance sheets (Docling AI)
+
+2. **ASSUMPTIONS (2 endpoints)**: Budget scenarios
+   - `POST /companies/{id}/scenarios` - Create scenario
+   - `PUT /scenarios/{id}/assumptions` - Bulk upsert all years (auto_generate=true)
+
+3. **OUTPUT (1 endpoint)**: Complete analysis
+   - `GET /scenarios/{id}/analysis` - Returns historical + forecast + all calculations
+
+4. **MANAGEMENT (2 endpoints)**: Basic CRUD
+   - `GET /companies` - List companies
+   - `GET /companies/{id}/scenarios` - List scenarios
+
+**Key Simplification:** 1 comprehensive API call replaces 10+ granular endpoints
+
+### Shared Module Architecture
 
 ```
-budget/
-├── backend/                    # FastAPI Backend (Modern)
-│   └── app/
-│       ├── main.py             # FastAPI entry point
-│       ├── api/v1/             # REST API endpoints
-│       ├── schemas/            # Pydantic request/response models
-│       ├── services/           # Business logic layer
-│       ├── calculations/       # Backend-specific calculations (cashflow)
-│       └── core/               # FastAPI config, database dependency injection
-│
-├── frontend/                   # Next.js Frontend (Modern)
-│   ├── app/                    # Next.js pages (App Router)
-│   ├── components/             # React components
-│   ├── contexts/               # Global state (AppContext)
-│   ├── lib/api.ts              # Axios API client
-│   └── types/api.ts            # TypeScript interfaces
-│
-├── database/                   # SHARED: SQLAlchemy ORM Models
-│   ├── models.py               # All database models (837 lines)
-│   └── db.py                   # Engine, session, Base, init_db()
-│
-├── calculations/               # SHARED: Financial Calculators
-│   ├── base.py                 # Base calculator utilities
-│   ├── ratios.py               # Financial ratios
-│   ├── altman.py               # Altman Z-Score
-│   ├── rating_fgpmi.py         # FGPMI Rating model
-│   └── forecast_engine.py      # 3-year budget projections
-│
-├── importers/                  # SHARED: Data Import Parsers
-│   ├── xbrl_parser.py          # Italian XBRL parser
-│   ├── xbrl_parser_enhanced.py # Enhanced with hierarchical debts
-│   └── csv_importer.py         # TEBE CSV format importer
-│
-├── data/                       # SHARED: Configuration Data
-│   ├── taxonomy_mapping.json   # XBRL taxonomy mappings (2011-2018)
-│   ├── taxonomy_mapping_v2.json # Enhanced mappings
-│   ├── rating_tables.json      # FGPMI rating thresholds per sector
-│   └── sectors.json            # Sector definitions
-│
-├── config.py                   # SHARED: Configuration constants
-├── financial_analysis.db       # SHARED: SQLite database (root)
-│
-└── legacy/                     # Legacy Streamlit App (Deprecated)
-    ├── app.py                  # Streamlit entry point
-    ├── ui/pages/               # Streamlit pages
-    ├── reports/                # Report generation
-    ├── tests/                  # Test suite
-    └── sample_data/            # Sample XBRL/CSV files
+Project Root
+├── backend/           # FastAPI REST API (imports shared modules)
+├── frontend/          # Next.js 15 React frontend
+├── database/          # SHARED: SQLAlchemy ORM models
+├── calculations/      # SHARED: Financial calculators
+├── importers/         # SHARED: XBRL/CSV/PDF parsers
+├── pdf_service/       # PDF report generation + EM-Score
+├── data/              # SHARED: Taxonomy/rating configs
+├── config.py          # SHARED: Constants
+├── tests/             # Test scripts
+├── docs/              # Reference docs & guides
+└── legacy/            # Streamlit (deprecated)
 ```
 
-### Multi-Layer Calculator Architecture
+**Backend Import Pattern:**
+```python
+# backend/app/main.py sets up sys.path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 
-The system uses a **layered calculation architecture** where each module builds on lower layers:
-
-1. **Base Layer** (`calculations/base.py`): Common utilities (safe_divide, rounding, Excel-like functions)
-2. **Financial Ratios** (`calculations/ratios.py`): Liquidity, solvency, profitability, activity ratios
-3. **Risk Models** (`calculations/altman.py`, `calculations/rating_fgpmi.py`): Use ratios + raw financials
-4. **Forecasting Engine** (`calculations/forecast_engine.py`): Generates 3-year projections based on assumptions
-
-**Important:** Calculators work with **SQLAlchemy ORM objects** (BalanceSheet, IncomeStatement), not dictionaries. They use `Decimal` for all monetary calculations to avoid floating-point precision issues.
-
-### Data Flow
-
-**Modern Stack (FastAPI + Next.js):**
+# Then anywhere in backend:
+from database.models import Company, BalanceSheet
+from calculations.ratios import FinancialRatiosCalculator
+from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced
 ```
-XBRL/CSV File
-    ↓
-Next.js Frontend (Upload)
-    ↓ HTTP POST
-FastAPI Backend (/api/v1/import)
-    ↓
-Importers (xbrl_parser.py, csv_importer.py)
-    ↓
-Database Models (database/models.py)
-    ↓
-SQLite Database (financial_analysis.db)
-    ↓
-Calculators (calculations/*.py)
-    ↓ JSON Response
-Next.js Frontend (Display)
-```
-
-**Legacy Stack (Streamlit):**
-```
-XBRL/CSV Import → Database (SQLite) → Calculator Layer → Streamlit UI → Charts/Tables
-     ↓                ↓                       ↓
-Taxonomy Mapping   ORM Models        Decimal-based math
-(data/*.json)    (database/models.py)  (calculations/*.py)
-```
-
-**Critical Path (Both Applications):**
-1. **Import**: XBRL Parser (`importers/xbrl_parser.py`) or CSV Importer → Creates Company/FinancialYear/BalanceSheet/IncomeStatement
-2. **Calculation**: Instantiate calculator with ORM objects → Call calculate() → Returns NamedTuple results
-3. **Display**:
-   - Modern: Backend serializes to JSON → Frontend renders with Recharts
-   - Legacy: Streamlit pages (`legacy/ui/pages/*.py`) fetch data → Render with Plotly charts
-
-**Shared Module Import Pattern:**
-- Backend: Uses `sys.path.insert(0, project_root)` in `backend/app/main.py` to import shared modules
-- Legacy: Imports shared modules directly (runs from project root)
-- Database: Both use `database.db` which configures absolute path to root database file
 
 ### Database Schema
 
-**Location:** `/home/peter/DEV/budget/financial_analysis.db` (project root, shared by all apps)
+**Location:** `/home/peter/DEV/budget/financial_analysis.db` (shared by all apps)
 
-**Core Models** (`database/models.py` - 837 lines):
-- `Company`: Master data (name, tax_id, sector 1-6)
-- `FinancialYear`: Container linking company to financial statements for a specific year
-- `BalanceSheet`: Balance sheet with detailed debt breakdown
-  - Standard fields: sp01-sp18 (follows Italian civil code art. 2424)
-  - Hierarchical debts: sp16a-g (banks, financial, bonds, suppliers, tax, social security, other)
-  - Split by maturity: short-term (breve) and long-term (lungo)
-- `IncomeStatement`: 20 line items (ce01-ce20), follows Italian civil code art. 2425
+**Core Models:**
+- `Company` - Master data (name, tax_id, sector 1-6)
+- `FinancialYear` - Links company to financial statements for a year
+- `BalanceSheet` - sp01-sp18 (Italian civil code art. 2424) + hierarchical debts
+- `IncomeStatement` - ce01-ce20 (Italian civil code art. 2425)
 
-**Forecasting Models** (for 3-year budget projections):
-- `BudgetScenario`: Scenario metadata (name, base year, active flag)
-- `BudgetAssumptions`: Growth percentages per year (revenue, costs, investments)
-- `ForecastYear`: Links scenario to forecast financial statements
-- `ForecastBalanceSheet`, `ForecastIncomeStatement`: Projected financials (same structure as historical)
+**Forecasting Models:**
+- `BudgetScenario` - Scenario metadata (name, base_year, projection_years)
+- `BudgetAssumptions` - Growth percentages per forecast year
+- `ForecastYear` - Links scenario to forecasted statements
+- `ForecastBalanceSheet`, `ForecastIncomeStatement` - Projected financials
 
-**Key Relationships:**
-- One Company → Many FinancialYears
-- One FinancialYear → One BalanceSheet + One IncomeStatement
-- One BudgetScenario → Many ForecastYears
-- One ForecastYear → One ForecastBalanceSheet + One ForecastIncomeStatement
-- All use cascade="all, delete-orphan" (deleting company removes all child records)
+**Relationships:** All use cascade="all, delete-orphan" (deleting company removes all child records)
 
-**Database Access:**
-- Backend: `from database.db import Base, engine, SessionLocal, init_db, drop_all`
-- Legacy: Same imports (both use absolute path configuration)
+### Calculator Architecture
 
-### Sector-Specific Logic
+**Layered design** (each layer builds on lower layers):
 
-The application implements **sector-specific formulas** for Italian industries:
+1. **Base** (`calculations/base.py`) - safe_divide, rounding, Excel-like functions
+2. **Ratios** (`calculations/ratios.py`) - Liquidity, solvency, profitability, activity
+3. **Risk Models** (`calculations/altman.py`, `rating_fgpmi.py`) - Use ratios + raw financials
+4. **Forecasting** (`calculations/forecast_engine.py`) - 3-5 year projections
 
-**Sectors** (config.py Sector enum):
-1. INDUSTRIA (Manufacturing, Hotels-owners, Agriculture, Fishing)
-2. COMMERCIO (Commerce/Retail)
-3. SERVIZI (Services, Hotels-lessees)
-4. AUTOTRASPORTI (Transport)
-5. IMMOBILIARE (Real Estate)
-6. EDILIZIA (Construction)
-
-**Sector determines:**
-- Altman Z-Score coefficients (Manufacturing uses 5-component model, others use 4-component)
-- FGPMI indicator thresholds (stored in `data/rating_tables.json`, loaded per sector)
-- Default ratio interpretation benchmarks
-
-### XBRL Taxonomy Mapping
-
-**Supported Taxonomies**: 2011-01-04 through 2018-11-04 (Italian XBRL standards)
-
-**Critical Files:**
-- `data/taxonomy_mapping.json`: Maps XBRL tags → internal codes (sp01-sp18, ce01-ce20)
-- `importers/xbrl_parser.py`: Detects taxonomy version, extracts values, handles different balance sheet types (Ordinario/Abbreviato/Micro)
-
-**Pattern Recognition**: Parser detects schema type by row count (config.TAXONOMY_ROW_COUNTS), then applies appropriate mapping.
+**Important:** Calculators work with SQLAlchemy ORM objects, not dicts. Use Decimal for all monetary calculations.
 
 ## Key Conventions
 
 ### Naming Conventions
-- **Italian codes**: Balance sheet items = `sp01-sp18`, Income statement = `ce01-ce20`
-- **Aggregates**: `TA` (Total Assets), `CN` (Equity), `MOL` (EBITDA), `RO` (EBIT) - see config.NAMED_RANGES
-- **Database columns**: Use full Italian names (e.g., `sp03_immob_materiali`, `ce01_ricavi_vendite`)
-- **Calculator results**: Return NamedTuples (WorkingCapitalMetrics, LiquidityRatios, AltmanResult, etc.)
+- **Italian codes**: Balance sheet = `sp01-sp18`, Income statement = `ce01-ce20`
+- **Aggregates**: `TA` (Total Assets), `CN` (Equity), `MOL` (EBITDA), `RO` (EBIT)
+- **Database columns**: Full Italian names (e.g., `sp03_immob_materiali`, `ce01_ricavi_vendite`)
+- **Calculator results**: Return NamedTuples (WorkingCapitalMetrics, LiquidityRatios, etc.)
 
 ### Financial Calculations
 - **Always use Decimal**: Import from decimal module, never use float for money
@@ -340,159 +193,189 @@ The application implements **sector-specific formulas** for Italian industries:
 
 ### Italian Accounting Standards (OIC)
 - **Balance Sheet must balance**: Assets = Equity + Liabilities (tolerance: €0.01)
-- **Working Capital** (CCN): Current Assets - Current Liabilities
-- **EBITDA** (MOL): EBIT + Depreciation + Amortization
-- **EBIT** (RO): Operating Revenue - Operating Costs (before financial items)
+- **Working Capital (CCN)**: Current Assets - Current Liabilities
+- **EBITDA (MOL)**: EBIT + Depreciation + Amortization
+- **EBIT (RO)**: Operating Revenue - Operating Costs (before financial items)
 - **Tax Rate**: 24% IRES (Italian corporate tax) used in forecasting
 
-### State Management
+### Sector-Specific Logic
 
-**Modern Frontend (Next.js):**
-- Global state managed by `AppContext.tsx` (React Context API)
-- Company/year selection persisted in context
-- API calls via `lib/api.ts` (Axios client)
-- TypeScript interfaces in `types/api.ts`
+**Sectors** (config.py Sector enum):
+1. INDUSTRIA (Manufacturing) - 5-component Altman model
+2. COMMERCIO (Commerce/Retail) - 4-component Altman model
+3. SERVIZI (Services)
+4. AUTOTRASPORTI (Transport)
+5. IMMOBILIARE (Real Estate)
+6. EDILIZIA (Construction)
 
-**Legacy App (Streamlit):**
-- `st.session_state.db`: Cached database session (initialized once via @st.cache_resource)
-- `st.session_state.selected_company_id`: Currently selected company
-- `st.session_state.selected_year`: Currently selected fiscal year
-- **Pattern**: Sidebar handles company/year selection, pages read from session_state, call database queries, pass results to calculators.
+Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_tables.json`)
 
-## Important Implementation Notes
+## Critical Implementation Notes
 
-### XBRL Import Gotchas
-- XBRL files may contain multiple contexts (dates) - parser must select correct period
-- Values are in full euros (not thousands) - no scaling needed
-- Taxonomy version affects tag names - use version detection before mapping
-- Abbreviated/Micro schemas have fewer line items - map to closest standard item
+### XBRL Import
+- Supports taxonomies 2011-01-04 through 2018-11-04
+- Values in full euros (not thousands)
+- Parser detects schema type (Ordinario/Abbreviato/Micro)
+- Enhanced parser (`xbrl_parser_enhanced.py`) includes hierarchical debt reconciliation
+
+### PDF Import (Docling AI)
+- First run downloads models (~2GB)
+- Processing time: 3-10 seconds per PDF
+- Supports Bilancio Micro, Abbreviato, Ordinario (IV CEE format)
+- Maps extracted tables to sp01-sp18, ce01-ce20
 
 ### FGPMI Rating Model
-- **Complex multi-table lookup**: Loads 7 indicator tables from JSON per sector
-- **Score ranges**: Each indicator has sector-specific thresholds (excellent/good/sufficient/poor)
-- **Revenue bonus**: +2 points if revenue > €500K
-- **Rating classes**: 13 classes (AAA → B-), calculated from total points/max points percentage
-- **Data location**: `data/rating_tables.json` contains all threshold tables
+- Complex multi-table lookup (7 indicators, sector-specific thresholds)
+- Revenue bonus: +2 points if revenue > €500K
+- Rating classes: 13 classes (AAA → B-)
+- Data: `data/rating_tables.json`
 
-### Forecasting Engine Logic
-- **Base year**: User selects historical year as baseline
-- **Projection years**: Default 3 years forward
-- **Cost split**: Variable (60%) vs Fixed (40%) for materials/services
-- **Cash as plug**: Balance sheet balances by adjusting cash (sp09_disponibilita_liquide)
-- **Negative cash**: If cash goes negative, increase short-term debt (sp16_debiti_breve)
-- **Integration**: Forecast statements stored in separate tables but use same calculator classes
+### Forecasting Engine
+- Base year + 3 or 5 forecast years
+- Cost split: Variable (60%) vs Fixed (40%)
+- Cash as plug: Balances by adjusting sp09_disponibilita_liquide
+- Negative cash: Increases short-term debt (sp16_debiti_breve)
+- Triggered by: bulk assumptions endpoint with `auto_generate=true`
 
-### CSV Import (TEBE Format)
-- **Format**: Semicolon-delimited (config.CSV_DELIMITER = ";")
-- **Encoding**: UTF-8 with HTML entity cleanup (`&nbsp;`, accented characters)
-- **Structure**: Rows = accounts, Columns = years (up to 2 years per import)
-- **Mapping**: Uses account descriptions (Italian text) to match internal codes
+### Bulk Assumptions Workflow
+```python
+# Frontend: One form, one save, one API call
+PUT /scenarios/{id}/assumptions
+{
+  "assumptions": [
+    {"forecast_year": 2025, "revenue_growth_pct": 5.0, ...},
+    {"forecast_year": 2026, "revenue_growth_pct": 4.0, ...},
+    {"forecast_year": 2027, "revenue_growth_pct": 3.5, ...}
+  ],
+  "auto_generate": true  # Triggers forecast generation
+}
+# Returns: {success: true, forecast_generated: true, forecast_years: [2025,2026,2027]}
+```
 
 ## Common Tasks
 
 ### Adding a New Financial Ratio
-1. Add calculation method to `FinancialRatiosCalculator` class in `calculations/ratios.py`
-2. Add to appropriate NamedTuple (LiquidityRatios, SolvencyRatios, etc.)
-3. Update backend API:
-   - Add to response schema in `backend/app/schemas/calculations.py`
-   - Update `backend/app/services/calculation_service.py` if needed
-4. Update frontend:
-   - Add to TypeScript interfaces in `frontend/types/api.ts`
-   - Display in appropriate page component (e.g., `frontend/app/analysis/page.tsx`)
-5. Add test case in `legacy/test_calculations.py`
+1. Add method to `FinancialRatiosCalculator` in `calculations/ratios.py`
+2. Add to appropriate NamedTuple
+3. Update `backend/app/schemas/calculations.py`
+4. Update `frontend/types/api.ts`
+5. Ratio automatically included in `/analysis` endpoint response
 
-### Adding a New API Endpoint (Backend)
-1. Create endpoint function in appropriate router (`backend/app/api/v1/*.py`)
-2. Define Pydantic schemas in `backend/app/schemas/`
-3. Add business logic in `backend/app/services/` if complex
-4. Update frontend API client in `frontend/lib/api.ts`
-5. Update TypeScript types in `frontend/types/api.ts`
-6. Test endpoint via Swagger UI at `http://localhost:8000/docs`
+### Adding a New API Endpoint
 
-### Supporting a New XBRL Taxonomy Version
-1. Add version to `config.SUPPORTED_TAXONOMIES`
-2. Update `data/taxonomy_mapping.json` with new tag mappings
-3. Add row counts to `config.TAXONOMY_ROW_COUNTS` if schema structure changed
-4. Test with sample file in `legacy/test_xbrl_import.py`
-5. Both backend and legacy will automatically use updated mapping
+**⚠️ IMPORTANT:** Avoid creating new endpoints. The API is intentionally simplified.
+
+**Ask first:**
+- Can it be added to `/analysis` endpoint response?
+- Does it fit INPUT → ASSUMPTIONS → OUTPUT workflow?
+- Will it require multiple frontend calls?
+
+**If truly needed:**
+1. Extend existing comprehensive endpoints (preferred)
+2. Or create in appropriate router (`backend/app/api/v1/*.py`)
+3. Add business logic in `backend/app/services/` (consolidate, don't duplicate)
+4. Update frontend `lib/api.ts` and `types/api.ts`
 
 ### Extending Database Schema
-1. Modify models in `database/models.py` (shared by both apps)
-2. Create migration script or use `legacy/migrate_db.py` template
-3. Update any affected calculators in `calculations/`
-4. Update Pydantic schemas in `backend/app/schemas/` to match new structure
+1. Modify `database/models.py` (shared by both apps)
+2. Create migration script (or use `drop_all(); init_db()` for dev)
+3. Update affected calculators in `calculations/`
+4. Update Pydantic schemas in `backend/app/schemas/`
 5. Update TypeScript interfaces in `frontend/types/api.ts`
-6. Reset database for development: `python -c "from database.db import drop_all, init_db; drop_all(); init_db()"`
 
-### Creating a New Frontend Page (Next.js)
-1. Create file in `frontend/app/` (e.g., `frontend/app/new-feature/page.tsx`)
-2. Use `useAppContext()` hook to access global state (company, year)
-3. Make API calls via `frontend/lib/api.ts`
-4. Add navigation link in layout if needed
-5. Follow existing patterns: fetch data → display with components → use Recharts for visualization
-
-### Creating a New Legacy Page (Streamlit - Deprecated)
-1. Create file in `legacy/ui/pages/` (e.g., `new_feature.py`)
-2. Implement `show()` function that uses `st.session_state` for context
-3. Add page to navigation list in `legacy/app.py`
-4. Follow existing patterns: fetch data → calculate → display with columns/charts
+### Creating a Frontend Page
+1. Create file in `frontend/app/` (e.g., `new-feature/page.tsx`)
+2. Use `useAppContext()` hook for global state (company/scenario selection)
+3. Call `/analysis` endpoint once, cache result
+4. All pages should read from same cached comprehensive response
+5. Use Recharts for charts, wrapped in shadcn `ChartContainer` with `ChartConfig`
+6. Use shadcn/ui components (`Card`, `Table`, `Badge`, etc.) - not raw HTML
+7. Use semantic colors (`text-foreground`, `bg-card`, `border-border`) - not hardcoded hex
+8. Charts use CSS variable colors: `var(--chart-1)` through `var(--chart-5)`
 
 ## Technical Constraints
 
-- **SQLite database**: Single-file at project root (`financial_analysis.db`), no concurrent writes (use transactions carefully)
-  - Shared by both modern and legacy applications
-  - Absolute path configured in `database/db.py` to ensure consistency
-- **Decimal precision**: All monetary values use Numeric(15, 2) - max 9,999,999,999,999.99
-- **JSON serialization**: Backend uses custom `DecimalJSONResponse` to convert Decimal to float in API responses
-- **Caching**:
-  - Legacy (Streamlit): Use `@st.cache_resource` for database, `@st.cache_data` for calculations
-  - Modern (Next.js): Client-side state management via React Context
-- **Italian locale**: UI text is in Italian, number formatting uses European conventions
-- **No user authentication**: Single-user application (add authentication layer if multi-tenant needed)
-- **CORS**: Backend allows requests from localhost:3000-3002 (Next.js), 8501 (Streamlit)
-
-## Key File Paths
-
-**Always use these absolute paths when referencing files:**
-- Database: `/home/peter/DEV/budget/financial_analysis.db`
-- Shared modules: `/home/peter/DEV/budget/{database,calculations,importers,config.py,data}/`
-- Backend: `/home/peter/DEV/budget/backend/app/`
-- Frontend: `/home/peter/DEV/budget/frontend/`
-- Legacy: `/home/peter/DEV/budget/legacy/`
-
-**Import Pattern for Backend:**
-```python
-# backend/app/main.py sets up sys.path
-import sys, os
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, project_root)
-
-# Then anywhere in backend code:
-from database.models import Company, BalanceSheet
-from calculations.ratios import FinancialRatiosCalculator
-from importers.xbrl_parser import import_xbrl_file
-```
+- **SQLite database**: Single-file, no concurrent writes (use transactions carefully)
+- **Decimal precision**: Numeric(15, 2) - max 9,999,999,999,999.99
+- **JSON serialization**: Backend uses custom `DecimalJSONResponse` (Decimal → float)
+- **Italian locale**: UI text in Italian, European number formatting
+- **No authentication**: Single-user application
+- **CORS**: Allows localhost:3000-3002 (Next.js), 8501 (Streamlit)
+- **Frontend UI**: shadcn/ui components only - no raw HTML tables/buttons
+- **Charts**: Recharts with `ChartContainer` + CSS variable colors (blue/slate palette)
+- **Status colors**: Altman/FGPMI use explicit green/yellow/red with `dark:` variants
+- **No emojis**: Use lucide-react icons instead
 
 ## Development Workflow
 
 **Working on Shared Modules** (database, calculations, importers):
 - Changes automatically affect both modern and legacy apps
 - Test with backend: `curl http://localhost:8000/api/v1/companies`
-- Test with legacy: Run test files in `legacy/` directory
+- Run test scripts: `cd tests && python test_calculations.py`
 - No code duplication - single source of truth
 
 **Working on Backend API**:
-- Modify files in `backend/app/`
-- Backend imports shared modules from project root
+- Follow simplified API pattern (avoid granular endpoints)
+- Prefer extending `/analysis` endpoint
 - Test via Swagger UI at http://localhost:8000/docs
-- Frontend automatically picks up API changes
 
 **Working on Frontend**:
-- Modify files in `frontend/`
-- Frontend is pure TypeScript/React, no Python dependencies
-- Communicates with backend via HTTP only
-- Test at http://localhost:3000
+- shadcn/ui (new-york style, slate base) + Tailwind CSS v3 + next-themes
+- Use comprehensive endpoints (call `/analysis` once, cache result)
+- All analysis pages read from same cached response
+- Report page (`/report`) renders full financial analysis with 11 sections
+- Typical workflow:
+  ```typescript
+  // Budget page: Bulk save
+  await api.bulkUpsertAssumptions(companyId, scenarioId, {
+    assumptions: [...],  // All years
+    auto_generate: true
+  })
+
+  // Analysis/Forecast/Cashflow/Report pages: Get everything once
+  const analysis = await api.getScenarioAnalysis(companyId, scenarioId)
+  // All data available: analysis.historical_years, .forecast_years, .calculations
+  ```
+
+**Frontend Pages:**
+- `/` - Home (company list)
+- `/import` - XBRL/CSV/PDF upload
+- `/budget` - Scenario assumptions editor
+- `/forecast/income`, `/forecast/balance`, `/forecast/reclassified` - Forecast views
+- `/analysis` - Financial ratios & charts
+- `/cashflow` - Cash flow statement
+- `/report` - Full report preview (mirrors PDF output)
 
 **Working on Legacy App** (deprecated):
 - Only for reference or maintenance
 - All new features should be added to modern stack
+
+## API Migration Notes
+
+### Deprecated Endpoints
+
+**Use `/analysis` instead:**
+```
+❌ GET /calculations/altman
+❌ GET /calculations/fgpmi
+❌ GET /calculations/ratios
+❌ GET /scenarios/{id}/reclassified
+❌ GET /scenarios/{id}/detailed-cashflow
+✅ GET /scenarios/{id}/analysis (returns ALL)
+```
+
+**Use bulk assumptions:**
+```
+❌ POST /assumptions (per year)
+❌ PUT /assumptions/{year}
+✅ PUT /assumptions (bulk, all years)
+```
+
+**Why simplified:**
+- Old: 15+ API calls per workflow
+- New: 3 API calls total
+- Better UX, simpler code, faster performance
+
+---
+
+**For detailed API documentation, examples, and usage, see README.md**

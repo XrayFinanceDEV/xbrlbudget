@@ -505,7 +505,8 @@ class EnhancedXBRLParser:
         self,
         file_path: str,
         company_id: Optional[int] = None,
-        create_company: bool = True
+        create_company: bool = True,
+        sector: Optional[int] = None
     ) -> Dict[str, any]:
         """Import XBRL file to database with reconciliation"""
 
@@ -537,7 +538,7 @@ class EnhancedXBRLParser:
                     company = Company(
                         name=entity_info.get('name', 'Imported Company'),
                         tax_id=tax_id,
-                        sector=1
+                        sector=sector or 1
                     )
                     self.db.add(company)
                     self.db.commit()
@@ -632,10 +633,11 @@ class EnhancedXBRLParser:
 def import_xbrl_file_enhanced(
     file_path: str,
     company_id: Optional[int] = None,
-    create_company: bool = True
+    create_company: bool = True,
+    sector: Optional[int] = None
 ) -> Dict[str, any]:
     """
     Convenience function to import XBRL file with reconciliation
     """
     with EnhancedXBRLParser() as parser:
-        return parser.import_to_database(file_path, company_id, create_company)
+        return parser.import_to_database(file_path, company_id, create_company, sector=sector)

@@ -69,23 +69,75 @@ class BalanceSheet(Base):
     # A) Crediti verso soci per versamenti ancora dovuti
     sp01_crediti_soci = Column(Numeric(15, 2), default=0, nullable=False)
 
+    # DETAILED BREAKDOWN - Crediti verso soci
+    sp01a_parte_richiamata = Column(Numeric(15, 2), default=0, nullable=False)  # A.1) Parte già richiamata
+    sp01b_parte_da_richiamare = Column(Numeric(15, 2), default=0, nullable=False)  # A.2) Parte da richiamare
+
     # B) Immobilizzazioni
     # B.I) Immobilizzazioni immateriali
     sp02_immob_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
 
+    # DETAILED BREAKDOWN - Immobilizzazioni immateriali
+    sp02a_costi_impianto = Column(Numeric(15, 2), default=0, nullable=False)  # 1) Costi di impianto e ampliamento
+    sp02b_costi_sviluppo = Column(Numeric(15, 2), default=0, nullable=False)  # 2) Costi di sviluppo
+    sp02c_brevetti = Column(Numeric(15, 2), default=0, nullable=False)  # 3) Diritti di brevetto industriale e utilizzo opere ingegno
+    sp02d_concessioni = Column(Numeric(15, 2), default=0, nullable=False)  # 4) Concessioni, licenze, marchi e diritti simili
+    sp02e_avviamento = Column(Numeric(15, 2), default=0, nullable=False)  # 5) Avviamento
+    sp02f_immob_in_corso = Column(Numeric(15, 2), default=0, nullable=False)  # 6) Immobilizzazioni in corso e acconti
+    sp02g_altre_immob_imm = Column(Numeric(15, 2), default=0, nullable=False)  # 7) Altre
+
     # B.II) Immobilizzazioni materiali
     sp03_immob_materiali = Column(Numeric(15, 2), default=0, nullable=False)
 
+    # DETAILED BREAKDOWN - Immobilizzazioni materiali
+    sp03a_terreni_fabbricati = Column(Numeric(15, 2), default=0, nullable=False)  # 1) Terreni e fabbricati
+    sp03b_impianti_macchinari = Column(Numeric(15, 2), default=0, nullable=False)  # 2) Impianti e macchinario
+    sp03c_attrezzature = Column(Numeric(15, 2), default=0, nullable=False)  # 3) Attrezzature industriali e commerciali
+    sp03d_altri_beni = Column(Numeric(15, 2), default=0, nullable=False)  # 4) Altri beni
+    sp03e_immob_in_corso = Column(Numeric(15, 2), default=0, nullable=False)  # 5) Immobilizzazioni in corso e acconti
+
     # B.III) Immobilizzazioni finanziarie
     sp04_immob_finanziarie = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Immobilizzazioni finanziarie
+    sp04a_partecipazioni = Column(Numeric(15, 2), default=0, nullable=False)  # 1) Partecipazioni
+    sp04b_crediti_immob_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 2) Crediti - Entro esercizio successivo
+    sp04c_crediti_immob_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 2) Crediti - Oltre esercizio successivo
+    sp04d_altri_titoli = Column(Numeric(15, 2), default=0, nullable=False)  # 3) Altri titoli
+    sp04e_strumenti_derivati_attivi = Column(Numeric(15, 2), default=0, nullable=False)  # 4) Strumenti finanziari derivati attivi
 
     # C) Attivo circolante
     # C.I) Rimanenze
     sp05_rimanenze = Column(Numeric(15, 2), default=0, nullable=False)
 
+    # DETAILED BREAKDOWN - Rimanenze
+    sp05a_materie_prime = Column(Numeric(15, 2), default=0, nullable=False)  # 1) Materie prime, sussidiarie e di consumo
+    sp05b_prodotti_in_corso = Column(Numeric(15, 2), default=0, nullable=False)  # 2) Prodotti in corso di lavorazione e semilavorati
+    sp05c_lavori_in_corso = Column(Numeric(15, 2), default=0, nullable=False)  # 3) Lavori in corso su ordinazione
+    sp05d_prodotti_finiti = Column(Numeric(15, 2), default=0, nullable=False)  # 4) Prodotti finiti e merci
+    sp05e_acconti = Column(Numeric(15, 2), default=0, nullable=False)  # 5) Acconti
+
     # C.II) Crediti - split by maturity
     sp06_crediti_breve = Column(Numeric(15, 2), default=0, nullable=False)  # Entro 12 mesi
     sp07_crediti_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # Oltre 12 mesi
+
+    # DETAILED BREAKDOWN - Crediti breve termine (by source)
+    sp06a_crediti_clienti_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 1) verso clienti
+    sp06b_crediti_controllate_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 2) verso imprese controllate
+    sp06c_crediti_collegate_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 3) verso imprese collegate
+    sp06d_crediti_controllanti_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 4) verso imprese controllanti
+    sp06e_crediti_tributari_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 5) crediti tributari
+    sp06f_imposte_anticipate_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 5-bis) imposte anticipate
+    sp06g_crediti_altri_breve = Column(Numeric(15, 2), default=0, nullable=False)  # 5-ter) verso altri
+
+    # DETAILED BREAKDOWN - Crediti lungo termine (by source)
+    sp07a_crediti_clienti_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 1) verso clienti
+    sp07b_crediti_controllate_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 2) verso imprese controllate
+    sp07c_crediti_collegate_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 3) verso imprese collegate
+    sp07d_crediti_controllanti_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 4) verso imprese controllanti
+    sp07e_crediti_tributari_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 5) crediti tributari
+    sp07f_imposte_anticipate_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 5-bis) imposte anticipate
+    sp07g_crediti_altri_lungo = Column(Numeric(15, 2), default=0, nullable=False)  # 5-ter) verso altri
 
     # C.III) Attività finanziarie che non costituiscono immobilizzazioni
     sp08_attivita_finanziarie = Column(Numeric(15, 2), default=0, nullable=False)
@@ -105,11 +157,27 @@ class BalanceSheet(Base):
     # A.II-VII) Riserve (aggregated)
     sp12_riserve = Column(Numeric(15, 2), default=0, nullable=False)
 
-    # A.VIII/IX) Utile/Perdita dell'esercizio
+    # DETAILED BREAKDOWN - Patrimonio Netto (Riserve)
+    sp12a_riserva_sovrapprezzo = Column(Numeric(15, 2), default=0, nullable=False)  # II - Riserva da soprapprezzo azioni
+    sp12b_riserve_rivalutazione = Column(Numeric(15, 2), default=0, nullable=False)  # III - Riserve di rivalutazione
+    sp12c_riserva_legale = Column(Numeric(15, 2), default=0, nullable=False)  # IV - Riserva legale
+    sp12d_riserve_statutarie = Column(Numeric(15, 2), default=0, nullable=False)  # V - Riserve statutarie
+    sp12e_altre_riserve = Column(Numeric(15, 2), default=0, nullable=False)  # VI - Altre riserve
+    sp12f_riserva_copertura_flussi = Column(Numeric(15, 2), default=0, nullable=False)  # VII - Riserva per operazioni di copertura dei flussi finanziari attesi
+    sp12g_utili_perdite_portati = Column(Numeric(15, 2), default=0, nullable=False)  # VIII - Utili (perdite) portati a nuovo
+    sp12h_riserva_neg_azioni_proprie = Column(Numeric(15, 2), default=0, nullable=False)  # X - Riserva negativa per azioni proprie in portafoglio
+
+    # A.IX) Utile/Perdita dell'esercizio
     sp13_utile_perdita = Column(Numeric(15, 2), default=0, nullable=False)
 
     # B) Fondi per rischi e oneri
     sp14_fondi_rischi = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Fondi per rischi e oneri
+    sp14a_fondi_trattamento_quiescenza = Column(Numeric(15, 2), default=0, nullable=False)  # 1) per trattamento di quiescenza
+    sp14b_fondi_imposte = Column(Numeric(15, 2), default=0, nullable=False)  # 2) per imposte, anche differite
+    sp14c_strumenti_derivati_passivi = Column(Numeric(15, 2), default=0, nullable=False)  # 3) strumenti finanziari derivati passivi
+    sp14d_altri_fondi = Column(Numeric(15, 2), default=0, nullable=False)  # 4) altri
 
     # C) Trattamento di fine rapporto di lavoro subordinato (TFR)
     sp15_tfr = Column(Numeric(15, 2), default=0, nullable=False)
@@ -299,6 +367,8 @@ class IncomeStatement(Base):
     ce03_lavori_interni = Column(Numeric(15, 2), default=0, nullable=False)
 
     # A.4) Incrementi di immobilizzazioni per lavori interni
+    ce03a_incrementi_immobilizzazioni = Column(Numeric(15, 2), default=0, nullable=False)
+
     # A.5) Altri ricavi e proventi
     ce04_altri_ricavi = Column(Numeric(15, 2), default=0, nullable=False)
 
@@ -315,6 +385,7 @@ class IncomeStatement(Base):
 
     # B.9) Per il personale
     ce08_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)
+    ce08a_tfr_accrual = Column(Numeric(15, 2), default=0, nullable=False)  # TFR accrual detail ("di cui...")
 
     # B.10) Ammortamenti e svalutazioni
     ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
@@ -322,7 +393,8 @@ class IncomeStatement(Base):
     # B.10) Split depreciation by asset type (for detailed cashflow)
     ce09a_ammort_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
     ce09b_ammort_materiali = Column(Numeric(15, 2), default=0, nullable=False)
-    ce09c_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)  # Write-downs
+    ce09c_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)  # Other write-downs of fixed assets (c)
+    ce09d_svalutazione_crediti = Column(Numeric(15, 2), default=0, nullable=False)  # Write-downs of receivables (d)
 
     # B.11) Variazioni delle rimanenze di materie prime
     ce10_var_rimanenze_mat_prime = Column(Numeric(15, 2), default=0, nullable=False)
@@ -331,6 +403,8 @@ class IncomeStatement(Base):
     ce11_accantonamenti = Column(Numeric(15, 2), default=0, nullable=False)
 
     # B.13) Altri accantonamenti
+    ce11b_altri_accantonamenti = Column(Numeric(15, 2), default=0, nullable=False)
+
     # B.14) Oneri diversi di gestione
     ce12_oneri_diversi = Column(Numeric(15, 2), default=0, nullable=False)
 
@@ -350,6 +424,12 @@ class IncomeStatement(Base):
 
     # === D) RETTIFICHE DI VALORE DI ATTIVITÀ FINANZIARIE ===
     ce17_rettifiche_attivita_fin = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # D.18) Rivalutazioni
+    ce17a_rivalutazioni = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # D.19) Svalutazioni
+    ce17b_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)
 
     # === E) PROVENTI E ONERI STRAORDINARI ===
     ce18_proventi_straordinari = Column(Numeric(15, 2), default=0, nullable=False)
@@ -372,6 +452,7 @@ class IncomeStatement(Base):
             self.ce01_ricavi_vendite +
             self.ce02_variazioni_rimanenze +
             self.ce03_lavori_interni +
+            self.ce03a_incrementi_immobilizzazioni +
             self.ce04_altri_ricavi
         )
 
@@ -563,19 +644,96 @@ class ForecastBalanceSheet(Base):
 
     # Same fields as BalanceSheet
     sp01_crediti_soci = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Crediti verso soci
+    sp01a_parte_richiamata = Column(Numeric(15, 2), default=0, nullable=False)
+    sp01b_parte_da_richiamare = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp02_immob_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Immobilizzazioni immateriali
+    sp02a_costi_impianto = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02b_costi_sviluppo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02c_brevetti = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02d_concessioni = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02e_avviamento = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02f_immob_in_corso = Column(Numeric(15, 2), default=0, nullable=False)
+    sp02g_altre_immob_imm = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp03_immob_materiali = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Immobilizzazioni materiali
+    sp03a_terreni_fabbricati = Column(Numeric(15, 2), default=0, nullable=False)
+    sp03b_impianti_macchinari = Column(Numeric(15, 2), default=0, nullable=False)
+    sp03c_attrezzature = Column(Numeric(15, 2), default=0, nullable=False)
+    sp03d_altri_beni = Column(Numeric(15, 2), default=0, nullable=False)
+    sp03e_immob_in_corso = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp04_immob_finanziarie = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Immobilizzazioni finanziarie
+    sp04a_partecipazioni = Column(Numeric(15, 2), default=0, nullable=False)
+    sp04b_crediti_immob_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp04c_crediti_immob_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp04d_altri_titoli = Column(Numeric(15, 2), default=0, nullable=False)
+    sp04e_strumenti_derivati_attivi = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp05_rimanenze = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Rimanenze
+    sp05a_materie_prime = Column(Numeric(15, 2), default=0, nullable=False)
+    sp05b_prodotti_in_corso = Column(Numeric(15, 2), default=0, nullable=False)
+    sp05c_lavori_in_corso = Column(Numeric(15, 2), default=0, nullable=False)
+    sp05d_prodotti_finiti = Column(Numeric(15, 2), default=0, nullable=False)
+    sp05e_acconti = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp06_crediti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Crediti breve termine
+    sp06a_crediti_clienti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06b_crediti_controllate_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06c_crediti_collegate_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06d_crediti_controllanti_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06e_crediti_tributari_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06f_imposte_anticipate_breve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp06g_crediti_altri_breve = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp07_crediti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Crediti lungo termine
+    sp07a_crediti_clienti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07b_crediti_controllate_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07c_crediti_collegate_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07d_crediti_controllanti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07e_crediti_tributari_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07f_imposte_anticipate_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp07g_crediti_altri_lungo = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp08_attivita_finanziarie = Column(Numeric(15, 2), default=0, nullable=False)
     sp09_disponibilita_liquide = Column(Numeric(15, 2), default=0, nullable=False)
     sp10_ratei_risconti_attivi = Column(Numeric(15, 2), default=0, nullable=False)
     sp11_capitale = Column(Numeric(15, 2), default=0, nullable=False)
     sp12_riserve = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Patrimonio Netto (Riserve)
+    sp12a_riserva_sovrapprezzo = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12b_riserve_rivalutazione = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12c_riserva_legale = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12d_riserve_statutarie = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12e_altre_riserve = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12f_riserva_copertura_flussi = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12g_utili_perdite_portati = Column(Numeric(15, 2), default=0, nullable=False)
+    sp12h_riserva_neg_azioni_proprie = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp13_utile_perdita = Column(Numeric(15, 2), default=0, nullable=False)
     sp14_fondi_rischi = Column(Numeric(15, 2), default=0, nullable=False)
+
+    # DETAILED BREAKDOWN - Fondi per rischi e oneri
+    sp14a_fondi_trattamento_quiescenza = Column(Numeric(15, 2), default=0, nullable=False)
+    sp14b_fondi_imposte = Column(Numeric(15, 2), default=0, nullable=False)
+    sp14c_strumenti_derivati_passivi = Column(Numeric(15, 2), default=0, nullable=False)
+    sp14d_altri_fondi = Column(Numeric(15, 2), default=0, nullable=False)
+
     sp15_tfr = Column(Numeric(15, 2), default=0, nullable=False)
     sp16_debiti_breve = Column(Numeric(15, 2), default=0, nullable=False)
     sp17_debiti_lungo = Column(Numeric(15, 2), default=0, nullable=False)
@@ -737,11 +895,13 @@ class ForecastIncomeStatement(Base):
     ce01_ricavi_vendite = Column(Numeric(15, 2), default=0, nullable=False)
     ce02_variazioni_rimanenze = Column(Numeric(15, 2), default=0, nullable=False)
     ce03_lavori_interni = Column(Numeric(15, 2), default=0, nullable=False)
+    ce03a_incrementi_immobilizzazioni = Column(Numeric(15, 2), default=0, nullable=False)
     ce04_altri_ricavi = Column(Numeric(15, 2), default=0, nullable=False)
     ce05_materie_prime = Column(Numeric(15, 2), default=0, nullable=False)
     ce06_servizi = Column(Numeric(15, 2), default=0, nullable=False)
     ce07_godimento_beni = Column(Numeric(15, 2), default=0, nullable=False)
     ce08_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)
+    ce08a_tfr_accrual = Column(Numeric(15, 2), default=0, nullable=False, comment="TFR accrual (di cui)")
     ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
     ce09a_ammort_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
     ce09b_ammort_materiali = Column(Numeric(15, 2), default=0, nullable=False)
@@ -754,6 +914,8 @@ class ForecastIncomeStatement(Base):
     ce15_oneri_finanziari = Column(Numeric(15, 2), default=0, nullable=False)
     ce16_utili_perdite_cambi = Column(Numeric(15, 2), default=0, nullable=False)
     ce17_rettifiche_attivita_fin = Column(Numeric(15, 2), default=0, nullable=False)
+    ce17a_rivalutazioni = Column(Numeric(15, 2), default=0, nullable=False)
+    ce17b_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)
     ce18_proventi_straordinari = Column(Numeric(15, 2), default=0, nullable=False)
     ce19_oneri_straordinari = Column(Numeric(15, 2), default=0, nullable=False)
     ce20_imposte = Column(Numeric(15, 2), default=0, nullable=False)
@@ -771,6 +933,7 @@ class ForecastIncomeStatement(Base):
             self.ce01_ricavi_vendite +
             self.ce02_variazioni_rimanenze +
             self.ce03_lavori_interni +
+            self.ce03a_incrementi_immobilizzazioni +
             self.ce04_altri_ricavi
         )
 

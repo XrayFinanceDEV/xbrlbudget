@@ -10,7 +10,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -19,6 +18,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+# Don't ignore frontend lib directory
+!frontend/lib/
 
 # Virtual Environment
 .venv/
@@ -36,12 +37,12 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
-financial_analysis.db
 
 # Streamlit
 .streamlit/
@@ -57,6 +58,7 @@ temp/
 
 # Claude Code
 .claude/
+.playwright-mcp/
 
 # Test outputs
 test_output/
@@ -88,6 +90,7 @@ dmypy.json
 # Backups
 *.bak
 *.backup
+*.db.backup_*
 
 # Excel/XBRL test files (keep samples)
 vba/

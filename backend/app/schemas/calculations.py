@@ -62,6 +62,58 @@ class ActivityRatios(BaseModel):
     cash_conversion_cycle: float   # Ciclo di conversione del denaro
 
 
+class CoverageRatios(BaseModel):
+    """Coverage/Solidity ratios (Indici di Solidità)"""
+    model_config = ConfigDict(from_attributes=True)
+
+    fixed_assets_coverage_with_equity_and_ltdebt: float  # (CN+PF)/AF
+    fixed_assets_coverage_with_equity: float              # CN/AF
+    independence_from_third_parties: float                # CN/(PC+PF)
+
+
+class TurnoverRatios(BaseModel):
+    """Turnover ratios (actual turnover, not days)"""
+    model_config = ConfigDict(from_attributes=True)
+
+    inventory_turnover: float        # TdM = CO/RD
+    receivables_turnover: float      # TdC = RIC/LD
+    payables_turnover: float         # TdD = (CO+AC+ODG)/PC
+    working_capital_turnover: float  # TdCCN = RIC/CCN
+    total_assets_turnover: float     # TdAT = RIC/TA
+
+
+class ExtendedProfitabilityRatios(BaseModel):
+    """Extended profitability indices"""
+    model_config = ConfigDict(from_attributes=True)
+
+    spread: float                      # ROI - ROD
+    financial_leverage_effect: float   # (PC+PF)/CN
+    ebitda_on_sales: float            # MOL/RIC
+    financial_charges_on_revenue: float  # OF/RIC
+
+
+class EfficiencyRatios(BaseModel):
+    """Efficiency ratios (Indici di Efficienza)"""
+    model_config = ConfigDict(from_attributes=True)
+
+    revenue_per_employee_cost: float   # RIC/CL (Rendimento dipendenti)
+    revenue_per_materials_cost: float  # RIC/CO (Rendimento materie)
+
+
+class BreakEvenAnalysis(BaseModel):
+    """Break Even Point analysis"""
+    model_config = ConfigDict(from_attributes=True)
+
+    fixed_costs: float                  # Costi Fissi
+    variable_costs: float               # Costi Variabili
+    contribution_margin: float          # Margine di Contribuzione
+    contribution_margin_percentage: float  # %MdC
+    break_even_revenue: float           # Ricavi BEP
+    safety_margin: float                # Margine di Sicurezza
+    operating_leverage: float           # Leva Operativa
+    fixed_cost_multiplier: float        # Moltiplicatore CF
+
+
 class AllRatios(BaseModel):
     """All financial ratios combined"""
     working_capital: WorkingCapitalMetrics
@@ -69,6 +121,11 @@ class AllRatios(BaseModel):
     solvency: SolvencyRatios
     profitability: ProfitabilityRatios
     activity: ActivityRatios
+    coverage: CoverageRatios
+    turnover: TurnoverRatios
+    extended_profitability: ExtendedProfitabilityRatios
+    efficiency: EfficiencyRatios
+    break_even: BreakEvenAnalysis
 
 
 class SummaryMetrics(BaseModel):

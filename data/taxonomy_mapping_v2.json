@@ -204,6 +204,13 @@
       "priority_3": "itcc-ci:CostiPersonale"
     },
 
+    "ce08a_tfr_accrual": {
+      "comment": "TFR accrual - detail field of ce08 (di cui per acc.to TFR)",
+      "priority_1": "itcc-ci:CostiProduzionePersonaleTrattamentoFineRapporto",
+      "priority_2": "itcc-ci:AccantonamentoEsercizioTrattamentoFineRapportoLavoroSubordinato",
+      "priority_3": "itcc-ci-2018-11-04:CostiPersonaleTFR"
+    },
+
     "ce09_ammortamenti": {
       "priority_1": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniTotaleAmmortamentiSvalutazioni",
       "priority_2": "itcc-ci-2018-11-04:Ammortamenti",

@@ -16,12 +16,40 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
   ComposedChart,
   Area,
 } from "recharts";
+import {
+  ClipboardList,
+  BarChart3,
+  Coins,
+  TrendingUp,
+  Loader2,
+  AlertCircle,
+  AlertTriangle,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/page-header";
+import { ScenarioSelector } from "@/components/scenario-selector";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 
 interface ReclassifiedYearData {
   year: number;
@@ -72,6 +100,35 @@ interface ReclassifiedData {
   historical_data: ReclassifiedYearData[];
   forecast_data: ReclassifiedYearData[];
 }
+
+// Chart configs
+const revenueChartConfig = {
+  revenue: { label: "Ricavi", color: "hsl(var(--chart-1))" },
+  ebitda: { label: "EBITDA", color: "hsl(var(--chart-2))" },
+  ebit: { label: "EBIT", color: "hsl(var(--chart-3))" },
+  net_profit: { label: "Utile Netto", color: "hsl(var(--chart-4))" },
+} satisfies ChartConfig;
+
+const marginChartConfig = {
+  ebitda_margin: { label: "Margine EBITDA", color: "hsl(var(--chart-2))" },
+  roe: { label: "ROE", color: "hsl(var(--chart-1))" },
+  roi: { label: "ROI", color: "hsl(var(--chart-3))" },
+} satisfies ChartConfig;
+
+const structureChartConfig = {
+  total_assets: { label: "Totale Attivo", color: "hsl(var(--chart-1))" },
+  total_equity: { label: "Patrimonio Netto", color: "hsl(var(--chart-2))" },
+  total_debt: { label: "Debiti Totali", color: "hsl(var(--chart-5))" },
+} satisfies ChartConfig;
+
+const wcChartConfig = {
+  working_capital: { label: "Capitale Circolante Netto", color: "hsl(var(--chart-1))" },
+  current_ratio: { label: "Indice Liquidità Corrente", color: "hsl(var(--chart-2))" },
+} satisfies ChartConfig;
+
+const solvencyChartConfig = {
+  debt_to_equity: { label: "Debt-to-Equity", color: "hsl(var(--chart-5))" },
+} satisfies ChartConfig;
 
 export default function ForecastReclassifiedPage() {
   const { selectedCompanyId } = useApp();
@@ -177,7 +234,8 @@ export default function ForecastReclassifiedPage() {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-center h-64">
-          <div className="text-lg text-gray-600">Caricamento...</div>
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <span className="ml-2 text-lg text-muted-foreground">Caricamento...</span>
         </div>
       </div>
     );
@@ -186,9 +244,11 @@ export default function ForecastReclassifiedPage() {
   if (error) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">{error}</p>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Errore</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -196,9 +256,13 @@ export default function ForecastReclassifiedPage() {
   if (!selectedCompanyId) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-yellow-800">Seleziona un&apos;azienda per visualizzare i dati previsionali</p>
-        </div>
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Nessuna azienda selezionata</AlertTitle>
+          <AlertDescription>
+            Seleziona un&apos;azienda per visualizzare i dati previsionali
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -206,393 +270,382 @@ export default function ForecastReclassifiedPage() {
   if (scenarios.length === 0) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-yellow-800">
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Nessuno scenario disponibile</AlertTitle>
+          <AlertDescription>
             Nessuno scenario disponibile. Crea uno scenario nella pagina &quot;Input Ipotesi&quot;.
-          </p>
-        </div>
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">
-          📋 Previsionale Riclassificato
-        </h1>
-        <p className="text-gray-600">
-          Analisi degli indicatori finanziari previsionali con confronto storico
-        </p>
-      </div>
+      <PageHeader
+        title="Previsionale Riclassificato"
+        description="Analisi degli indicatori finanziari previsionali con confronto storico"
+        icon={<ClipboardList className="h-6 w-6" />}
+      />
 
       {/* Scenario Selector */}
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-gray-700">
-            Scenario:
-          </label>
-          <select
-            className="flex-1 max-w-md rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            value={selectedScenario?.id || ""}
-            onChange={(e) => {
-              const scenario = scenarios.find(
-                (s) => s.id === parseInt(e.target.value)
-              );
-              setSelectedScenario(scenario || null);
-            }}
-          >
-            {scenarios.map((scenario) => (
-              <option key={scenario.id} value={scenario.id}>
-                {scenario.name}
-                {scenario.is_active === 1 && " (Attivo)"}
-              </option>
-            ))}
-          </select>
-        </div>
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <ScenarioSelector
+            scenarios={scenarios}
+            selectedScenario={selectedScenario}
+            onSelect={setSelectedScenario}
+          />
 
-        {selectedScenario && reclassifiedData && (
-          <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-            <div>
-              <span className="text-gray-600">Anno Base:</span>
-              <span className="ml-2 font-semibold">
-                {reclassifiedData.scenario.base_year}
-              </span>
+          {selectedScenario && reclassifiedData && (
+            <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Anno Base:</span>
+                <span className="ml-2 font-semibold text-foreground">
+                  {reclassifiedData.scenario.base_year}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Anni Previsionali:</span>
+                <span className="ml-2 font-semibold text-foreground">
+                  {reclassifiedData.scenario.projection_years}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Totale Anni:</span>
+                <span className="ml-2 font-semibold text-foreground">
+                  {reclassifiedData.years.length}
+                </span>
+              </div>
             </div>
-            <div>
-              <span className="text-gray-600">Anni Previsionali:</span>
-              <span className="ml-2 font-semibold">
-                {reclassifiedData.scenario.projection_years}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-600">Totale Anni:</span>
-              <span className="ml-2 font-semibold">
-                {reclassifiedData.years.length}
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </CardContent>
+      </Card>
 
       {!reclassifiedData ? (
-        <div className="bg-white shadow rounded-lg p-6">
-          <p className="text-gray-600">Seleziona uno scenario per visualizzare i dati</p>
-        </div>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-muted-foreground">Seleziona uno scenario per visualizzare i dati</p>
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-6">
           {/* Income Statement Reclassified */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              📊 Conto Economico Riclassificato
-            </h2>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Conto Economico Riclassificato
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Revenue and Profitability */}
+              <div className="mb-6">
+                <h3 className="text-md font-medium text-muted-foreground mb-3">
+                  Ricavi e Redditività
+                </h3>
+                <ChartContainer config={revenueChartConfig} className="h-[300px] w-full">
+                  <ComposedChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="year" />
+                    <YAxis
+                      yAxisId="left"
+                      label={{ value: "\u20AC", angle: -90, position: "insideLeft" }}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          formatter={(value) => formatCurrency(value as number)}
+                          labelFormatter={(label) => `Anno ${label}`}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar
+                      yAxisId="left"
+                      dataKey="revenue"
+                      fill="var(--color-revenue)"
+                      fillOpacity={0.8}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="ebitda"
+                      stroke="var(--color-ebitda)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="ebit"
+                      stroke="var(--color-ebit)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="net_profit"
+                      stroke="var(--color-net_profit)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                  </ComposedChart>
+                </ChartContainer>
+              </div>
 
-            {/* Revenue and Profitability */}
-            <div className="mb-6">
-              <h3 className="text-md font-medium text-gray-700 mb-3">
-                Ricavi e Redditività
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="year" />
-                  <YAxis
-                    yAxisId="left"
-                    label={{ value: "€", angle: -90, position: "insideLeft" }}
-                  />
-                  <Tooltip
-                    formatter={(value: any) => formatCurrency(value)}
-                    labelFormatter={(label) => `Anno ${label}`}
-                  />
-                  <Legend />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="revenue"
-                    name="Ricavi"
-                    fill="#3b82f6"
-                    fillOpacity={0.8}
-                  />
-                  <Line
-                    yAxisId="left"
-                    type="monotone"
-                    dataKey="ebitda"
-                    name="EBITDA"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                  <Line
-                    yAxisId="left"
-                    type="monotone"
-                    dataKey="ebit"
-                    name="EBIT"
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                  <Line
-                    yAxisId="left"
-                    type="monotone"
-                    dataKey="net_profit"
-                    name="Utile Netto"
-                    stroke="#8b5cf6"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+              {/* Profitability Margins */}
+              <div>
+                <h3 className="text-md font-medium text-muted-foreground mb-3">
+                  Margini di Redditività (%)
+                </h3>
+                <ChartContainer config={marginChartConfig} className="h-[300px] w-full">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="year" />
+                    <YAxis
+                      label={{ value: "%", angle: -90, position: "insideLeft" }}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          formatter={(value) => `${(value as number).toFixed(2)}%`}
+                          labelFormatter={(label) => `Anno ${label}`}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Line
+                      type="monotone"
+                      dataKey="ebitda_margin"
+                      stroke="var(--color-ebitda_margin)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="roe"
+                      stroke="var(--color-roe)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="roi"
+                      stroke="var(--color-roi)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ChartContainer>
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Profitability Margins */}
-            <div>
-              <h3 className="text-md font-medium text-gray-700 mb-3">
-                Margini di Redditività (%)
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
+          {/* Balance Sheet Reclassified */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Coins className="h-5 w-5" />
+                Stato Patrimoniale Riclassificato
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Assets, Equity, Debt */}
+              <div className="mb-6">
+                <h3 className="text-md font-medium text-muted-foreground mb-3">
+                  Struttura Patrimoniale
+                </h3>
+                <ChartContainer config={structureChartConfig} className="h-[300px] w-full">
+                  <ComposedChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="year" />
+                    <YAxis
+                      label={{ value: "\u20AC", angle: -90, position: "insideLeft" }}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          formatter={(value) => formatCurrency(value as number)}
+                          labelFormatter={(label) => `Anno ${label}`}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Area
+                      type="monotone"
+                      dataKey="total_assets"
+                      fill="var(--color-total_assets)"
+                      fillOpacity={0.3}
+                      stroke="var(--color-total_assets)"
+                      strokeWidth={2}
+                    />
+                    <Bar
+                      dataKey="total_equity"
+                      fill="var(--color-total_equity)"
+                      fillOpacity={0.8}
+                    />
+                    <Bar
+                      dataKey="total_debt"
+                      fill="var(--color-total_debt)"
+                      fillOpacity={0.8}
+                    />
+                  </ComposedChart>
+                </ChartContainer>
+              </div>
+
+              {/* Working Capital and Liquidity */}
+              <div>
+                <h3 className="text-md font-medium text-muted-foreground mb-3">
+                  Capitale Circolante e Liquidità
+                </h3>
+                <ChartContainer config={wcChartConfig} className="h-[300px] w-full">
+                  <ComposedChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="year" />
+                    <YAxis
+                      yAxisId="left"
+                      label={{ value: "\u20AC", angle: -90, position: "insideLeft" }}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      label={{ value: "Ratio", angle: 90, position: "insideRight" }}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          formatter={(value, name) =>
+                            name === "current_ratio"
+                              ? (value as number).toFixed(2)
+                              : formatCurrency(value as number)
+                          }
+                          labelFormatter={(label) => `Anno ${label}`}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar
+                      yAxisId="left"
+                      dataKey="working_capital"
+                      fill="var(--color-working_capital)"
+                      fillOpacity={0.8}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="current_ratio"
+                      stroke="var(--color-current_ratio)"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                  </ComposedChart>
+                </ChartContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Solvency Ratios */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Indici di Solvibilità
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer config={solvencyChartConfig} className="h-[300px] w-full">
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="year" />
-                  <YAxis
-                    label={{ value: "%", angle: -90, position: "insideLeft" }}
+                  <YAxis />
+                  <ChartTooltip
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value) => (value as number).toFixed(2)}
+                        labelFormatter={(label) => `Anno ${label}`}
+                      />
+                    }
                   />
-                  <Tooltip
-                    formatter={(value: any) => `${value.toFixed(2)}%`}
-                    labelFormatter={(label) => `Anno ${label}`}
-                  />
-                  <Legend />
+                  <ChartLegend content={<ChartLegendContent />} />
                   <Line
                     type="monotone"
-                    dataKey="ebitda_margin"
-                    name="Margine EBITDA"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="roe"
-                    name="ROE"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="roi"
-                    name="ROI"
-                    stroke="#f59e0b"
+                    dataKey="debt_to_equity"
+                    stroke="var(--color-debt_to_equity)"
                     strokeWidth={2}
                     dot={{ r: 4 }}
                   />
                 </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Balance Sheet Reclassified */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              💰 Stato Patrimoniale Riclassificato
-            </h2>
-
-            {/* Assets, Equity, Debt */}
-            <div className="mb-6">
-              <h3 className="text-md font-medium text-gray-700 mb-3">
-                Struttura Patrimoniale
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="year" />
-                  <YAxis
-                    label={{ value: "€", angle: -90, position: "insideLeft" }}
-                  />
-                  <Tooltip
-                    formatter={(value: any) => formatCurrency(value)}
-                    labelFormatter={(label) => `Anno ${label}`}
-                  />
-                  <Legend />
-                  <Area
-                    type="monotone"
-                    dataKey="total_assets"
-                    name="Totale Attivo"
-                    fill="#3b82f6"
-                    fillOpacity={0.3}
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                  />
-                  <Bar
-                    dataKey="total_equity"
-                    name="Patrimonio Netto"
-                    fill="#10b981"
-                    fillOpacity={0.8}
-                  />
-                  <Bar
-                    dataKey="total_debt"
-                    name="Debiti Totali"
-                    fill="#ef4444"
-                    fillOpacity={0.8}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Working Capital and Liquidity */}
-            <div>
-              <h3 className="text-md font-medium text-gray-700 mb-3">
-                Capitale Circolante e Liquidità
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="year" />
-                  <YAxis
-                    yAxisId="left"
-                    label={{ value: "€", angle: -90, position: "insideLeft" }}
-                  />
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    label={{ value: "Ratio", angle: 90, position: "insideRight" }}
-                  />
-                  <Tooltip
-                    formatter={(value: any, name: any) =>
-                      name === "Indice Liquidità Corrente"
-                        ? value.toFixed(2)
-                        : formatCurrency(value)
-                    }
-                    labelFormatter={(label) => `Anno ${label}`}
-                  />
-                  <Legend />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="working_capital"
-                    name="Capitale Circolante Netto"
-                    fill="#3b82f6"
-                    fillOpacity={0.8}
-                  />
-                  <Line
-                    yAxisId="right"
-                    type="monotone"
-                    dataKey="current_ratio"
-                    name="Indice Liquidità Corrente"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Solvency Ratios */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              📈 Indici di Solvibilità
-            </h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="year" />
-                <YAxis />
-                <Tooltip
-                  formatter={(value: any) => value.toFixed(2)}
-                  labelFormatter={(label) => `Anno ${label}`}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="debt_to_equity"
-                  name="Debt-to-Equity"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+              </ChartContainer>
+            </CardContent>
+          </Card>
 
           {/* Data Table Summary */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              📋 Riepilogo Dati
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Anno
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tipo
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      Ricavi
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      EBITDA
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      EBIT
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      Utile Netto
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      Totale Attivo
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      CCN
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5" />
+                Riepilogo Dati
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Anno</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead className="text-right">Ricavi</TableHead>
+                    <TableHead className="text-right">EBITDA</TableHead>
+                    <TableHead className="text-right">EBIT</TableHead>
+                    <TableHead className="text-right">Utile Netto</TableHead>
+                    <TableHead className="text-right">Totale Attivo</TableHead>
+                    <TableHead className="text-right">CCN</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {[...reclassifiedData.historical_data, ...reclassifiedData.forecast_data].map(
                     (yearData) => (
-                      <tr
+                      <TableRow
                         key={yearData.year}
-                        className={
-                          yearData.type === "forecast"
-                            ? "bg-blue-50"
-                            : ""
-                        }
+                        className={cn(
+                          yearData.type === "forecast" && "bg-primary/10"
+                        )}
                       >
-                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <TableCell className="font-medium">
                           {yearData.year}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                          {yearData.type === "historical" ? (
-                            <span className="text-gray-600">Storico</span>
-                          ) : (
-                            <span className="text-blue-600 font-medium">Previsionale</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={yearData.type === "forecast" ? "default" : "secondary"}>
+                            {yearData.type === "historical" ? "Storico" : "Previsionale"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
                           {formatCurrency(yearData.income_statement.revenue)}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        </TableCell>
+                        <TableCell className="text-right">
                           {formatCurrency(yearData.income_statement.ebitda)}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        </TableCell>
+                        <TableCell className="text-right">
                           {formatCurrency(yearData.income_statement.ebit)}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        </TableCell>
+                        <TableCell className="text-right">
                           {formatCurrency(yearData.income_statement.net_profit)}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        </TableCell>
+                        <TableCell className="text-right">
                           {formatCurrency(yearData.balance_sheet.total_assets)}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        </TableCell>
+                        <TableCell className="text-right">
                           {formatCurrency(yearData.balance_sheet.working_capital)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     )
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

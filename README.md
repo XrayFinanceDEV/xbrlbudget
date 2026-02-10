@@ -18,6 +18,7 @@ Sistema completo di analisi finanziaria per bilanci italiani secondo i principi 
 
 ### Gestione Dati
 - ✅ Creazione e modifica aziende
+- ✅ Selezione settore (6 settori) durante l'importazione e dalla pagina Aziende
 - ✅ Gestione multi-anno (fino a 5 anni)
 - ✅ Importazione da XBRL (formato italiano - tassonomie 2011-2018)
 - ✅ Importazione da CSV (TEBE)
@@ -47,7 +48,61 @@ Sistema completo di analisi finanziaria per bilanci italiani secondo i principi 
 
 ## 🎯 API REST (FastAPI)
 
-### Endpoints Disponibili
+### Simplified API Workflow
+
+**The API follows a 3-phase pattern: INPUT → ASSUMPTIONS → OUTPUT**
+
+Questo elimina la necessità di fare 15+ chiamate API - solo **3 chiamate totali**!
+
+#### Phase 1: INPUT - Data Import (3 endpoints)
+```bash
+POST /api/v1/import/xbrl    # Italian XBRL files (6 taxonomies supported)
+POST /api/v1/import/csv     # CSV files (TEBE format)
+POST /api/v1/import/pdf     # PDF balance sheets (Docling AI extraction)
+```
+
+#### Phase 2: ASSUMPTIONS - Budget Scenarios (2 endpoints)
+```bash
+# Create scenario
+POST /api/v1/companies/{id}/scenarios
+{
+  "name": "Budget 2025-2027",
+  "base_year": 2024,
+  "projection_years": 3
+}
+
+# Bulk upsert assumptions (all years at once!)
+PUT /api/v1/companies/{id}/scenarios/{scenario_id}/assumptions
+{
+  "assumptions": [
+    {"forecast_year": 2025, "revenue_growth_pct": 5.0, ...},
+    {"forecast_year": 2026, "revenue_growth_pct": 4.0, ...},
+    {"forecast_year": 2027, "revenue_growth_pct": 3.5, ...}
+  ],
+  "auto_generate": true  # Genera automaticamente il forecast!
+}
+```
+
+#### Phase 3: OUTPUT - Complete Analysis (1 comprehensive endpoint) ⭐
+
+```bash
+GET /api/v1/companies/{id}/scenarios/{scenario_id}/analysis
+```
+
+**Questo endpoint restituisce TUTTO in una singola risposta:**
+- ✅ Dati storici (base_year - 1 e base_year)
+- ✅ Dati previsionali (3 o 5 anni con assumptions)
+- ✅ Tutti i calcoli per ogni anno (Altman, FGPMI, ratios)
+- ✅ Rendiconto finanziario multi-anno
+
+**Query Parameters:**
+- `include_historical=true` - Include anni storici (default: true)
+- `include_forecast=true` - Include anni previsionali (default: true)
+- `include_calculations=true` - Include calcoli (default: true)
+
+---
+
+### Detailed Endpoint Reference
 
 **Base URL:** `http://localhost:8000/api/v1`
 
@@ -66,22 +121,39 @@ GET    /companies/{id}/years/{year}/income-statement   # Get income statement
 PUT    /companies/{id}/years/{year}/income-statement   # Update income statement
 ```
 
+#### Budget Scenarios & Forecasting
+```
+GET    /companies/{id}/scenarios               # List scenarios
+POST   /companies/{id}/scenarios               # Create scenario
+GET    /companies/{id}/scenarios/{sid}         # Get scenario
+PUT    /companies/{id}/scenarios/{sid}         # Update scenario
+DELETE /companies/{id}/scenarios/{sid}         # Delete scenario
+
+# Bulk assumptions (RECOMMENDED - sostituisce chiamate multiple)
+PUT    /companies/{id}/scenarios/{sid}/assumptions  # Upsert all years at once
+```
+
 #### Financial Analysis & Calculations
+
+**⭐ RECOMMENDED: Use comprehensive endpoint**
+```
+GET /companies/{id}/scenarios/{sid}/analysis   # Complete analysis (ALL data in one call)
+```
+
+**Legacy individual endpoints** (deprecated, use /analysis instead):
 ```
 GET /companies/{id}/years/{year}/calculations/ratios          # All financial ratios
 GET /companies/{id}/years/{year}/calculations/summary         # Summary metrics
 GET /companies/{id}/years/{year}/calculations/altman          # Altman Z-Score
 GET /companies/{id}/years/{year}/calculations/fgpmi           # FGPMI Rating
 GET /companies/{id}/years/{year}/calculations/complete        # Complete analysis
-GET /companies/{id}/years/{year}/calculations/ratios/liquidity      # Liquidity only
-GET /companies/{id}/years/{year}/calculations/ratios/profitability  # Profitability only
-GET /companies/{id}/years/{year}/calculations/ratios/solvency       # Solvency only
 ```
 
 #### Data Import
 ```
 POST /import/xbrl                              # Upload XBRL file (Italian GAAP)
 POST /import/csv                               # Upload CSV file (TEBE format)
+POST /import/pdf                               # Upload PDF file (Docling AI extraction)
 ```
 
 #### Interactive API Documentation
@@ -105,6 +177,7 @@ POST /import/csv                               # Upload CSV file (TEBE format)
 - `file` (required): XBRL file (.xbrl or .xml)
 - `company_id` (optional): Existing company ID
 - `create_company` (optional, default: true): Create company from XBRL entity info
+- `sector` (optional, 1-6): Company sector for new company creation (default: 1 Industria)
 
 **Response includes:**
 - Taxonomy version detected
@@ -133,6 +206,140 @@ POST /import/csv                               # Upload CSV file (TEBE format)
 - Years imported
 - Rows processed
 - Fields imported (balance sheet and income statement separately)
+
+#### PDF Import (`POST /api/v1/import/pdf`) - 🆕 NEW
+
+**Supported Features:**
+- ✅ Automatic table extraction using Docling AI
+- ✅ Support for Bilancio Micro, Abbreviato, Ordinario (IV CEE format)
+- ✅ Intelligent mapping to Italian GAAP schema (sp01-sp18, ce01-ce20)
+- ✅ Automatic company creation or update
+- ✅ File validation (type, size max 50MB)
+- ✅ First run downloads AI models (~2GB), cached for subsequent imports
+
+**Parameters:**
+- `file` (required): PDF file (.pdf)
+- `fiscal_year` (required): Fiscal year of the balance sheet
+- `company_id` (optional): Existing company ID
+- `company_name` (optional): Company name (required if creating new company)
+- `create_company` (optional, default: true): Create company if not exists
+- `sector` (optional, 1-6): Company sector for new company creation (default: 3 Servizi)
+
+**Response includes:**
+- Company ID and name
+- Financial year ID created
+- Balance sheet and income statement IDs
+- Fields imported
+- Extraction quality metrics
+
+**Processing Time:** 3-10 seconds per PDF (first run: +model download time)
+
+**Note:** First run downloads Docling AI models (~2GB). Subsequent runs are fast as models are cached.
+
+### Complete Analysis Response Structure
+
+Il endpoint `/companies/{id}/scenarios/{sid}/analysis` restituisce una risposta completa con questa struttura:
+
+```json
+{
+  "scenario": {
+    "id": 1,
+    "name": "Budget 2025-2027",
+    "base_year": 2024,
+    "projection_years": 3,
+    "company": {
+      "id": 123,
+      "name": "Acme SpA",
+      "tax_id": "IT12345678901",
+      "sector": 1
+    }
+  },
+  "historical_years": [
+    {
+      "year": 2023,
+      "balance_sheet": {
+        "sp01_crediti_soci": 0.0,
+        "sp02_immob_immateriali": 15000.0,
+        // ... all sp01-sp18 fields
+        "total_assets": 1000000.0,
+        "total_equity": 300000.0,
+        "total_debt": 700000.0
+      },
+      "income_statement": {
+        "ce01_ricavi_vendite": 800000.0,
+        // ... all ce01-ce20 fields
+        "revenue": 800000.0,
+        "ebitda": 110000.0,
+        "ebit": 95000.0,
+        "net_profit": 45000.0
+      }
+    },
+    { "year": 2024, /* ... same structure */ }
+  ],
+  "forecast_years": [
+    {
+      "year": 2025,
+      "assumptions": {
+        "revenue_growth_pct": 5.0,
+        "material_cost_growth_pct": 3.0,
+        "capex_tangible": 50000.0,
+        // ... all assumptions
+      },
+      "balance_sheet": { /* ... same as historical */ },
+      "income_statement": { /* ... same as historical */ }
+    },
+    // ... years 2026, 2027
+  ],
+  "calculations": {
+    "by_year": {
+      "2023": {
+        "altman": {
+          "z_score": 2.85,
+          "classification": "gray_zone",
+          "components": {"A": 0.35, "B": 0.45, "C": 0.95, "D": 0.60, "E": 0.50}
+        },
+        "fgpmi": {
+          "rating_code": "BB+",
+          "total_score": 65,
+          "max_score": 100,
+          "rating_description": "Buono"
+        },
+        "ratios": {
+          "working_capital": {"ccln": 300000, "ccn": 300000},
+          "liquidity": {"current_ratio": 2.5, "quick_ratio": 1.8},
+          "solvency": {"autonomy_index": 30.0, "debt_to_equity": 2.33},
+          "profitability": {"roe": 15.0, "roi": 9.5, "ros": 11.9},
+          "activity": {"asset_turnover": 0.80, "receivables_days": 45}
+        }
+      },
+      // ... all years (2023-2027)
+    },
+    "cashflow": {
+      "years": [
+        {
+          "year": 2024,
+          "base_year": 2023,
+          "operating": {"net_profit": 50000, "depreciation": 15000, "total": 51000},
+          "investing": {"capex_tangible": -30000, "total": -35000},
+          "financing": {"debt_change": 10000, "total": 5000},
+          "net_cashflow": 21000,
+          "ratios": {"ocf_margin": 6.4, "free_cashflow": 16000}
+        },
+        // ... all years
+      ]
+    }
+  }
+}
+```
+
+**Vantaggi:**
+- ✅ Una singola chiamata API invece di 10+ chiamate separate
+- ✅ Tutti i dati necessari per le pagine di analisi/forecast in una risposta
+- ✅ Struttura coerente tra anni storici e previsionali
+- ✅ Cache una volta, usa ovunque nel frontend
+- ✅ Calcoli pre-computati sul backend (nessun calcolo lato client)
+
+---
 
 ### API Response Examples
 
@@ -307,7 +514,7 @@ curl http://localhost:8000/api/v1/companies/1/years/2024/calculations/altman
 
 **Importare dati da XBRL:**
 ```bash
-curl -X POST http://localhost:8000/api/v1/import/xbrl?create_company=true \
+curl -X POST "http://localhost:8000/api/v1/import/xbrl?create_company=true&sector=2" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@bilancio.xbrl"
 ```
@@ -501,12 +708,16 @@ SQLite Database (same database)
 
 ## Settori Supportati
 
-1. **Industria** (Manufacturing)
-2. **Commercio** (Commerce)
-3. **Servizi** (Services)
-4. **Autotrasporti** (Transport)
-5. **Immobiliare** (Real Estate)
-6. **Edilizia** (Construction)
+| # | Settore | Descrizione |
+|---|---------|-------------|
+| 1 | **Industria** | Industria, Alberghi (Proprietari), Agricoltura, Pesca |
+| 2 | **Commercio** | Commercio |
+| 3 | **Servizi** | Servizi (diversi da Autotrasporti) e Alberghi (Locatari) |
+| 4 | **Autotrasporti** | Autotrasporti |
+| 5 | **Immobiliare** | Immobiliare |
+| 6 | **Edilizia** | Edilizia |
+
+Il settore determina i coefficienti dell'Altman Z-Score (modello a 5 o 4 componenti) e le soglie del Rating FGPMI. Il settore viene selezionato durante l'importazione e puo essere modificato dalla pagina Aziende.
 
 ## Testing
 
@@ -692,13 +903,15 @@ Usa **solo FastAPI** quando:
 ### 🚀 Next.js Frontend (In Progress)
 - ✅ Next.js 15 with App Router
 - ✅ TypeScript configuration
-- ✅ Tailwind CSS styling
+- ✅ Tailwind CSS + shadcn/ui components
 - ✅ API client setup
-- ✅ Dashboard page (basic implementation)
-- 🔄 Company management pages
-- 🔄 Financial analysis pages
+- ✅ Dashboard with company management (editable sector)
+- ✅ Import page with sector selection (XBRL, CSV, PDF)
+- ✅ Financial analysis pages
+- ✅ Budget assumptions management
+- ✅ Forecast pages (Income, Balance, Reclassified)
+- ✅ Cash flow statement (Italian GAAP)
 - 🔄 Import UI with drag-and-drop
-- 🔄 Budget management interface
 
 ### ⚠️ Streamlit Web App (Deprecated)
 - ✅ Fully functional but deprecated
@@ -709,21 +922,24 @@ Usa **solo FastAPI** quando:
 
 ---
 
-**Version:** 2.2.0 (Next.js Frontend)
-**Released:** January 2026
+**Version:** 2.3.0 (Sector Selection)
+**Released:** February 2026
 **Python:** 3.11+
-**Backend:** FastAPI 0.115+ with XBRL/CSV Import
-**Frontend:** Next.js 15 with TypeScript (In Progress) | Streamlit 1.40+ (Deprecated)
+**Backend:** FastAPI 0.115+ with XBRL/CSV/PDF Import
+**Frontend:** Next.js 15 with TypeScript + shadcn/ui | Streamlit 1.40+ (Deprecated)
 **Made with ❤️ in Italy 🇮🇹**
 
-### What's New in 2.2.0
+### What's New in 2.3.0
+- ✨ **Sector selection** during XBRL/PDF import (6 sectors)
+- ✨ **Editable sector** on Home page company table
+- ✨ Sector affects Altman Z-Score model and FGPMI rating thresholds
+
+### Version 2.2.0 (Previous)
 - 🚀 **Next.js 15 frontend** with TypeScript and Tailwind CSS
+- 🎨 **shadcn/ui redesign** - all pages migrated to shadcn components
 - ⚠️ **Streamlit marked as legacy** - no new features planned
 - ✨ Modern React-based UI with App Router
 - ✨ TypeScript end-to-end type safety
-- 🎨 Tailwind CSS for responsive design
-- 📱 Mobile-first approach
-- 🔄 Features being migrated from Streamlit to Next.js
 
 ### Version 2.1.0 (Previous)
 - ✨ XBRL file upload API endpoint

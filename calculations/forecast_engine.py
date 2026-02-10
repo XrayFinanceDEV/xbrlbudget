@@ -186,6 +186,15 @@ class ForecastEngine:
         # Personnel
         ce08 = base_inc.ce08_costi_personale * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
 
+        # TFR accrual - calculate as same percentage of personnel costs as base year
+        # This maintains the TFR accrual rate (typically ~5-7% of gross personnel costs)
+        if base_inc.ce08_costi_personale > 0 and base_inc.ce08a_tfr_accrual > 0:
+            tfr_rate = base_inc.ce08a_tfr_accrual / base_inc.ce08_costi_personale
+            ce08a = ce08 * tfr_rate
+        else:
+            # If base year has no TFR data, keep it zero
+            ce08a = Decimal('0')
+
         # Depreciation - calculated based on investments using user-defined depreciation rate
         base_depreciation = base_inc.ce09_ammortamenti
         depreciation_rate = assumption.depreciation_rate / Decimal('100')
@@ -232,6 +241,7 @@ class ForecastEngine:
             'ce06_servizi': ce06,
             'ce07_godimento_beni': ce07,
             'ce08_costi_personale': ce08,
+            'ce08a_tfr_accrual': ce08a,
             'ce09_ammortamenti': ce09,
             'ce10_var_rimanenze_mat_prime': ce10,
             'ce11_accantonamenti': ce11,
@@ -320,8 +330,22 @@ class ForecastEngine:
         )
 
         sp11 = base_bs.sp11_capitale  # Capital - keep constant
-        sp12 = base_bs.sp12_riserve + (previous_bs.sp13_utile_perdita if hasattr(previous_bs, 'sp13_utile_perdita') else base_bs.sp13_utile_perdita)  # Add previous year's profit to reserves
+
+        # Calculate previous year's profit to add to reserves
+        previous_profit = previous_bs.sp13_utile_perdita if hasattr(previous_bs, 'sp13_utile_perdita') else base_bs.sp13_utile_perdita
+        sp12 = base_bs.sp12_riserve + previous_profit  # Add previous year's profit to reserves
         sp13 = net_profit  # Current year profit
+
+        # Calculate detailed breakdown for Patrimonio Netto (Reserves)
+        # Keep most reserve components constant, add previous profit to "utili portati a nuovo"
+        sp12a = base_bs.sp12a_riserva_sovrapprezzo  # Share premium reserve - constant
+        sp12b = base_bs.sp12b_riserve_rivalutazione  # Revaluation reserves - constant
+        sp12c = base_bs.sp12c_riserva_legale  # Legal reserve - constant (unless legal requirement changes)
+        sp12d = base_bs.sp12d_riserve_statutarie  # Statutory reserves - constant
+        sp12e = base_bs.sp12e_altre_riserve  # Other reserves - constant
+        sp12f = base_bs.sp12f_riserva_copertura_flussi  # Cash flow hedge reserve - constant
+        sp12g = base_bs.sp12g_utili_perdite_portati + previous_profit  # Add previous year's profit here
+        sp12h = base_bs.sp12h_riserva_neg_azioni_proprie  # Negative reserve for treasury shares - constant
 
         # Liabilities - apply growth rates
         sp16 = base_bs.sp16_debiti_breve * (Decimal('1') + assumption.payables_short_growth_pct / Decimal('100'))
@@ -350,11 +374,98 @@ class ForecastEngine:
             sp16 = sp16 + abs(sp09)
             sp09 = Decimal('0')
 
+        # Calculate detailed breakdown for Immobilizzazioni finanziarie (sp04)
+        # Distribute proportionally based on base year values
+        total_base_sp04 = (
+            base_bs.sp04a_partecipazioni +
+            base_bs.sp04b_crediti_immob_breve +
+            base_bs.sp04c_crediti_immob_lungo +
+            base_bs.sp04d_altri_titoli +
+            base_bs.sp04e_strumenti_derivati_attivi
+        )
+
+        if total_base_sp04 > 0:
+            ratio = sp04 / total_base_sp04
+            sp04a = base_bs.sp04a_partecipazioni * ratio
+            sp04b = base_bs.sp04b_crediti_immob_breve * ratio
+            sp04c = base_bs.sp04c_crediti_immob_lungo * ratio
+            sp04d = base_bs.sp04d_altri_titoli * ratio
+            sp04e = base_bs.sp04e_strumenti_derivati_attivi * ratio
+        else:
+            # If all detail fields are zero, keep them zero
+            sp04a = sp04b = sp04c = sp04d = sp04e = Decimal('0')
+
+        # Calculate detailed breakdown for debts (both short and long term)
+        # For short-term debts
+        total_base_sp16_detailed = (
+            base_bs.sp16a_debiti_banche_breve +
+            base_bs.sp16b_debiti_altri_finanz_breve +
+            base_bs.sp16c_debiti_obbligazioni_breve +
+            base_bs.sp16d_debiti_fornitori_breve +
+            base_bs.sp16e_debiti_tributari_breve +
+            base_bs.sp16f_debiti_previdenza_breve +
+            base_bs.sp16g_altri_debiti_breve
+        )
+
+        if total_base_sp16_detailed > 0:
+            ratio_sp16 = sp16 / total_base_sp16_detailed
+            sp16a = base_bs.sp16a_debiti_banche_breve * ratio_sp16
+            sp16b = base_bs.sp16b_debiti_altri_finanz_breve * ratio_sp16
+            sp16c = base_bs.sp16c_debiti_obbligazioni_breve * ratio_sp16
+            sp16d = base_bs.sp16d_debiti_fornitori_breve * ratio_sp16
+            sp16e = base_bs.sp16e_debiti_tributari_breve * ratio_sp16
+            sp16f = base_bs.sp16f_debiti_previdenza_breve * ratio_sp16
+            sp16g = base_bs.sp16g_altri_debiti_breve * ratio_sp16
+        else:
+            # If all detail fields are zero, assign proportionally
+            # (e.g., 40% financial, 60% operating)
+            financial_portion = sp16 * Decimal('0.4')
+            sp16a = financial_portion * Decimal('0.7')  # 70% banks
+            sp16b = financial_portion * Decimal('0.2')  # 20% other financial
+            sp16c = financial_portion * Decimal('0.1')  # 10% bonds
+            operating_portion = sp16 * Decimal('0.6')
+            sp16d = operating_portion * Decimal('0.6')  # 60% suppliers
+            sp16e = operating_portion * Decimal('0.2')  # 20% tax
+            sp16f = operating_portion * Decimal('0.1')  # 10% social security
+            sp16g = operating_portion * Decimal('0.1')  # 10% other
+
+        # For long-term debts
+        total_base_sp17_detailed = (
+            base_bs.sp17a_debiti_banche_lungo +
+            base_bs.sp17b_debiti_altri_finanz_lungo +
+            base_bs.sp17c_debiti_obbligazioni_lungo +
+            base_bs.sp17d_debiti_fornitori_lungo +
+            base_bs.sp17e_debiti_tributari_lungo +
+            base_bs.sp17f_debiti_previdenza_lungo +
+            base_bs.sp17g_altri_debiti_lungo
+        )
+
+        if total_base_sp17_detailed > 0:
+            ratio_sp17 = sp17 / total_base_sp17_detailed
+            sp17a = base_bs.sp17a_debiti_banche_lungo * ratio_sp17
+            sp17b = base_bs.sp17b_debiti_altri_finanz_lungo * ratio_sp17
+            sp17c = base_bs.sp17c_debiti_obbligazioni_lungo * ratio_sp17
+            sp17d = base_bs.sp17d_debiti_fornitori_lungo * ratio_sp17
+            sp17e = base_bs.sp17e_debiti_tributari_lungo * ratio_sp17
+            sp17f = base_bs.sp17f_debiti_previdenza_lungo * ratio_sp17
+            sp17g = base_bs.sp17g_altri_debiti_lungo * ratio_sp17
+        else:
+            # If all detail fields are zero, keep them zero for long-term
+            sp17a = sp17b = sp17c = sp17d = sp17e = sp17f = sp17g = Decimal('0')
+
         return {
             'sp01_crediti_soci': sp01,
             'sp02_immob_immateriali': sp02,
             'sp03_immob_materiali': sp03,
             'sp04_immob_finanziarie': sp04,
+
+            # Detailed breakdown - Immobilizzazioni finanziarie
+            'sp04a_partecipazioni': sp04a,
+            'sp04b_crediti_immob_breve': sp04b,
+            'sp04c_crediti_immob_lungo': sp04c,
+            'sp04d_altri_titoli': sp04d,
+            'sp04e_strumenti_derivati_attivi': sp04e,
+
             'sp05_rimanenze': sp05,
             'sp06_crediti_breve': sp06,
             'sp07_crediti_lungo': sp07,
@@ -363,11 +474,41 @@ class ForecastEngine:
             'sp10_ratei_risconti_attivi': sp10,
             'sp11_capitale': sp11,
             'sp12_riserve': sp12,
+
+            # Detailed breakdown - Patrimonio Netto (Riserve)
+            'sp12a_riserva_sovrapprezzo': sp12a,
+            'sp12b_riserve_rivalutazione': sp12b,
+            'sp12c_riserva_legale': sp12c,
+            'sp12d_riserve_statutarie': sp12d,
+            'sp12e_altre_riserve': sp12e,
+            'sp12f_riserva_copertura_flussi': sp12f,
+            'sp12g_utili_perdite_portati': sp12g,
+            'sp12h_riserva_neg_azioni_proprie': sp12h,
+
             'sp13_utile_perdita': sp13,
             'sp14_fondi_rischi': sp14,
             'sp15_tfr': sp15,
             'sp16_debiti_breve': sp16,
             'sp17_debiti_lungo': sp17,
+
+            # Detailed breakdown - Financial debts
+            'sp16a_debiti_banche_breve': sp16a,
+            'sp17a_debiti_banche_lungo': sp17a,
+            'sp16b_debiti_altri_finanz_breve': sp16b,
+            'sp17b_debiti_altri_finanz_lungo': sp17b,
+            'sp16c_debiti_obbligazioni_breve': sp16c,
+            'sp17c_debiti_obbligazioni_lungo': sp17c,
+
+            # Detailed breakdown - Operating debts
+            'sp16d_debiti_fornitori_breve': sp16d,
+            'sp17d_debiti_fornitori_lungo': sp17d,
+            'sp16e_debiti_tributari_breve': sp16e,
+            'sp17e_debiti_tributari_lungo': sp17e,
+            'sp16f_debiti_previdenza_breve': sp16f,
+            'sp17f_debiti_previdenza_lungo': sp17f,
+            'sp16g_altri_debiti_breve': sp16g,
+            'sp17g_altri_debiti_lungo': sp17g,
+
             'sp18_ratei_risconti_passivi': sp18
         }
 

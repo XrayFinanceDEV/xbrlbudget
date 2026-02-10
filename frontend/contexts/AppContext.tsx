@@ -14,6 +14,7 @@ interface AppContextType {
   selectedCompany: Company | null;
   loading: boolean;
   error: string | null;
+  refreshCompanies: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -26,20 +27,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load companies function
+  const loadCompanies = async () => {
+    try {
+      const data = await getCompanies();
+      setCompanies(prevCompanies => {
+        // If currently selected company was deleted, clear selection
+        setSelectedCompanyId(prevId => {
+          if (prevId && !data.find(c => c.id === prevId)) {
+            return null;
+          }
+          // If no company is selected and companies exist, select the first one
+          if (!prevId && data.length > 0) {
+            return data[0].id;
+          }
+          return prevId;
+        });
+        return data;
+      });
+    } catch (err) {
+      console.error("Error loading companies:", err);
+      setError("Impossibile caricare le aziende");
+    }
+  };
+
   // Load companies on mount
   useEffect(() => {
-    const loadCompanies = async () => {
-      try {
-        const data = await getCompanies();
-        setCompanies(data);
-        if (data.length > 0) {
-          setSelectedCompanyId(data[0].id);
-        }
-      } catch (err) {
-        console.error("Error loading companies:", err);
-        setError("Impossibile caricare le aziende");
-      }
-    };
     loadCompanies();
   }, []);
 
@@ -81,6 +94,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         selectedCompany,
         loading,
         error,
+        refreshCompanies: loadCompanies,
       }}
     >
       {children}

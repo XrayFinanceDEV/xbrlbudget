@@ -90,6 +90,8 @@
     "itcc-ci-2018-11-04:Servizi": "ce06_servizi",
     "itcc-ci-2018-11-04:GodimentoBeniDiTerzi": "ce07_godimento_beni",
     "itcc-ci-2018-11-04:CostiPersonale": "ce08_costi_personale",
+    "itcc-ci:CostiProduzionePersonaleTrattamentoFineRapporto": "ce08a_tfr_accrual",
+    "itcc-ci:AccantonamentoEsercizioTrattamentoFineRapportoLavoroSubordinato": "ce08a_tfr_accrual",
     "itcc-ci-2018-11-04:Ammortamenti": "ce09_ammortamenti",
 
     "_comment_depreciation_split": "Split depreciation by asset type for detailed cashflow",

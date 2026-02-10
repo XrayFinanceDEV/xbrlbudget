@@ -428,6 +428,94 @@ def delete_budget_assumptions(
     return None
 
 
+@router.put(
+    "/companies/{company_id}/scenarios/{scenario_id}/assumptions",
+    response_model=Any,
+    summary="Bulk upsert assumptions for all forecast years"
+)
+def bulk_upsert_assumptions(
+    company_id: int,
+    scenario_id: int,
+    request: Any,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk insert or update assumptions for all forecast years at once.
+
+    **Simplified workflow:**
+    1. User sets assumptions for all years (3 or 5) in one call
+    2. API automatically generates forecast (if auto_generate=true)
+    3. Done!
+
+    **Request body:**
+    ```json
+    {
+        "assumptions": [
+            {
+                "forecast_year": 2025,
+                "revenue_growth_pct": 5.0,
+                "material_cost_growth_pct": 3.0,
+                "service_cost_growth_pct": 2.5,
+                "personnel_cost_growth_pct": 2.0,
+                "capex_tangible": 50000.00,
+                "capex_intangible": 10000.00,
+                ...
+            },
+            { "forecast_year": 2026, ... },
+            { "forecast_year": 2027, ... }
+        ],
+        "auto_generate": true
+    }
+    ```
+
+    **This replaces:**
+    - Individual POST /assumptions (per year)
+    - Individual PUT /assumptions/{year} (per year)
+    - Separate POST /generate call
+
+    **Result:**
+    - All assumptions saved in one transaction
+    - Forecast automatically generated
+    - Frontend needs only ONE API call instead of 4+
+    """
+    from app.services import assumptions_service
+    from app.schemas import analysis as analysis_schemas
+
+    # Validate scenario belongs to company
+    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+
+    try:
+        # Parse request body
+        if isinstance(request, dict):
+            request_data = request
+        else:
+            request_data = request.model_dump() if hasattr(request, 'model_dump') else request
+
+        assumptions_list = request_data.get("assumptions", [])
+        auto_generate = request_data.get("auto_generate", True)
+
+        # Call service layer
+        result = assumptions_service.bulk_upsert_assumptions(
+            db=db,
+            scenario_id=scenario_id,
+            assumptions_list=assumptions_list,
+            auto_generate=auto_generate
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving assumptions: {str(e)}"
+        )
+
+
 # ===== Forecast Generation Endpoint =====
 
 @router.post(
@@ -831,6 +919,52 @@ def get_detailed_cashflow_scenario(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating detailed cashflow: {str(e)}"
+        )
+
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/ratios",
+    response_model=Any,
+    summary="Get all financial ratios for scenario (historical + forecast)"
+)
+def get_ratios_scenario(
+    company_id: int,
+    scenario_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all financial ratios for historical and forecast years
+
+    Timeline: historical years → forecast years
+
+    Returns comprehensive ratios including:
+    - Working capital metrics
+    - Liquidity, solvency, profitability ratios
+    - Activity, coverage, turnover ratios
+    - Extended profitability, efficiency, break-even analysis
+    """
+    from app.services import calculation_service
+
+    # Validate scenario
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+
+    try:
+        result = calculation_service.calculate_ratios_historical_and_forecast(
+            db=db,
+            company_id=company_id,
+            scenario_id=scenario_id,
+            base_year=scenario.base_year
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating ratios: {str(e)}"
         )
 
 

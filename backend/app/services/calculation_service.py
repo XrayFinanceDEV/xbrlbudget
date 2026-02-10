@@ -108,6 +108,11 @@ def calculate_all_ratios(
     solvency = calc.calculate_solvency_ratios()
     profitability = calc.calculate_profitability_ratios()
     activity = calc.calculate_activity_ratios()
+    coverage = calc.calculate_coverage_ratios()
+    turnover = calc.calculate_turnover_ratios()
+    extended_profitability = calc.calculate_extended_profitability_ratios()
+    efficiency = calc.calculate_efficiency_ratios()
+    break_even = calc.calculate_break_even_analysis()
 
     # Convert to Pydantic models
     return calc_schemas.AllRatios(
@@ -115,7 +120,12 @@ def calculate_all_ratios(
         liquidity=calc_schemas.LiquidityRatios(**_convert_namedtuple_to_dict(liquidity)),
         solvency=calc_schemas.SolvencyRatios(**_convert_namedtuple_to_dict(solvency)),
         profitability=calc_schemas.ProfitabilityRatios(**_convert_namedtuple_to_dict(profitability)),
-        activity=calc_schemas.ActivityRatios(**_convert_namedtuple_to_dict(activity))
+        activity=calc_schemas.ActivityRatios(**_convert_namedtuple_to_dict(activity)),
+        coverage=calc_schemas.CoverageRatios(**_convert_namedtuple_to_dict(coverage)),
+        turnover=calc_schemas.TurnoverRatios(**_convert_namedtuple_to_dict(turnover)),
+        extended_profitability=calc_schemas.ExtendedProfitabilityRatios(**_convert_namedtuple_to_dict(extended_profitability)),
+        efficiency=calc_schemas.EfficiencyRatios(**_convert_namedtuple_to_dict(efficiency)),
+        break_even=calc_schemas.BreakEvenAnalysis(**_convert_namedtuple_to_dict(break_even))
     )
 
 
@@ -442,6 +452,88 @@ def calculate_detailed_cashflow_historical_and_forecast(
         base_year=base_year,
         cashflows=cashflows
     )
+
+
+def calculate_ratios_historical_and_forecast(
+    db: Session,
+    company_id: int,
+    scenario_id: int,
+    base_year: int
+) -> dict:
+    """
+    Calculate all financial ratios for historical and forecast years
+
+    Args:
+        db: Database session
+        company_id: Company ID
+        scenario_id: Budget scenario ID
+        base_year: Last historical year
+
+    Returns:
+        Dictionary with years and ratios for each year
+    """
+    from database.models import BudgetScenario, ForecastYear
+
+    # Get scenario
+    scenario = db.query(BudgetScenario).filter(
+        BudgetScenario.id == scenario_id,
+        BudgetScenario.company_id == company_id
+    ).first()
+
+    if not scenario:
+        raise ValueError(f"Scenario {scenario_id} not found for company {company_id}")
+
+    # Get all historical years
+    historical_years = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id
+    ).order_by(models.FinancialYear.year).all()
+
+    # Get all forecast years
+    forecast_years = db.query(ForecastYear).filter(
+        ForecastYear.scenario_id == scenario_id
+    ).order_by(ForecastYear.year).all()
+
+    result = {
+        "company_id": company_id,
+        "scenario_id": scenario_id,
+        "base_year": base_year,
+        "years": [],
+        "ratios": []
+    }
+
+    # Calculate ratios for historical years
+    for fy in historical_years:
+        if not fy.balance_sheet or not fy.income_statement:
+            continue
+
+        calc = FinancialRatiosCalculator(fy.balance_sheet, fy.income_statement)
+        all_ratios = calc.calculate_all_ratios()
+
+        # Convert NamedTuples to dicts
+        ratios_dict = {}
+        for category, ratios in all_ratios.items():
+            ratios_dict[category] = _convert_namedtuple_to_dict(ratios)
+
+        result["years"].append(fy.year)
+        result["ratios"].append(ratios_dict)
+
+    # Calculate ratios for forecast years
+    for fy in forecast_years:
+        if not fy.balance_sheet or not fy.income_statement:
+            continue
+
+        calc = FinancialRatiosCalculator(fy.balance_sheet, fy.income_statement)
+        all_ratios = calc.calculate_all_ratios()
+
+        # Convert NamedTuples to dicts
+        ratios_dict = {}
+        for category, ratios in all_ratios.items():
+            ratios_dict[category] = _convert_namedtuple_to_dict(ratios)
+
+        result["years"].append(fy.year)
+        result["ratios"].append(ratios_dict)
+
+    return result
 
 
 def calculate_detailed_cashflow_historical_only(

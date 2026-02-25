@@ -308,6 +308,8 @@ export interface BudgetScenario {
   company_id: number;
   name: string;
   base_year: number;
+  scenario_type: "budget" | "infrannuale";
+  period_months: number | null;
   description: string | null;
   is_active: number;
   created_at: string;
@@ -318,6 +320,8 @@ export interface BudgetScenarioCreate {
   company_id: number;
   name: string;
   base_year: number;
+  scenario_type?: "budget" | "infrannuale";
+  period_months?: number;
   description?: string;
   is_active?: number;
 }
@@ -325,8 +329,28 @@ export interface BudgetScenarioCreate {
 export interface BudgetScenarioUpdate {
   name?: string;
   base_year?: number;
+  scenario_type?: string;
+  period_months?: number;
   description?: string;
   is_active?: number;
+}
+
+// Intra-Year Comparison Types
+export interface IntraYearComparisonItem {
+  code: string;
+  label: string;
+  partial_value: number;
+  reference_value: number;
+  pct_of_reference: number;
+  annualized_value: number;
+}
+
+export interface IntraYearComparison {
+  partial_year: number;
+  reference_year: number;
+  period_months: number;
+  income_items: IntraYearComparisonItem[];
+  balance_items: IntraYearComparisonItem[];
 }
 
 export interface BudgetAssumptions {

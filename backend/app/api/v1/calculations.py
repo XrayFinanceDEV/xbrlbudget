@@ -12,6 +12,8 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from app.core.database import get_db
+from app.core.auth import get_current_user_id
+from app.core.ownership import validate_company_owned_by_user
 from app.schemas import calculations as calc_schemas
 from app.services import calculation_service
 
@@ -26,7 +28,8 @@ router = APIRouter()
 def get_financial_ratios(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Calculate all financial ratios for a specific company and year.
@@ -38,6 +41,7 @@ def get_financial_ratios(
     - Profitability ratios (ROE, ROI, ROS, ROD, margins)
     - Activity ratios (Turnover, Days metrics, Cash cycle)
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_all_ratios(db, company_id, year)
     except ValueError as e:
@@ -60,7 +64,8 @@ def get_financial_ratios(
 def get_summary_metrics(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get summary financial metrics for dashboard display.
@@ -71,6 +76,7 @@ def get_summary_metrics(
     - Working Capital, Current Ratio
     - ROE, ROI, D/E, EBITDA Margin
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_summary_metrics(db, company_id, year)
     except ValueError as e:
@@ -93,7 +99,8 @@ def get_summary_metrics(
 def get_altman_zscore(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Calculate Altman Z-Score for bankruptcy prediction.
@@ -108,6 +115,7 @@ def get_altman_zscore(
     - Classification (safe, gray_zone, distress)
     - Italian interpretation text
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_altman_zscore(db, company_id, year)
     except ValueError as e:
@@ -130,7 +138,8 @@ def get_altman_zscore(
 def get_fgpmi_rating(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Calculate FGPMI (Fondo di Garanzia PMI) credit rating.
@@ -145,6 +154,7 @@ def get_fgpmi_rating(
     - Revenue bonus (+2 if >500K)
     - Individual indicator scores (V1-V7)
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_fgpmi_rating(db, company_id, year)
     except ValueError as e:
@@ -167,7 +177,8 @@ def get_fgpmi_rating(
 def get_complete_analysis(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get complete financial analysis including:
@@ -178,6 +189,7 @@ def get_complete_analysis(
 
     This is a comprehensive endpoint that returns all calculations in one response.
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_complete_analysis(db, company_id, year)
     except ValueError as e:
@@ -202,7 +214,8 @@ def get_complete_analysis(
 def get_liquidity_ratios(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Get only liquidity ratios (Current, Quick, Acid Test)"""
     try:
@@ -220,7 +233,8 @@ def get_liquidity_ratios(
 def get_profitability_ratios(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Get only profitability ratios (ROE, ROI, ROS, margins)"""
     try:
@@ -238,7 +252,8 @@ def get_profitability_ratios(
 def get_solvency_ratios(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Get only solvency/leverage ratios"""
     try:
@@ -256,7 +271,8 @@ def get_solvency_ratios(
 def get_cashflow(
     company_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Calculate cash flow statement using indirect method.
@@ -272,6 +288,7 @@ def get_cashflow(
     - Cash flow ratios (OCF margin, FCF, cash conversion)
     - Verification against actual cash balance changes
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_cashflow(db, company_id, year)
     except ValueError as e:
@@ -293,7 +310,8 @@ def get_cashflow(
 )
 def get_cashflow_multi_year(
     company_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Calculate cash flow statements for all available years.
@@ -301,6 +319,7 @@ def get_cashflow_multi_year(
     Returns a list of cash flow results sorted by year.
     Minimum 2 years of data required.
     """
+    validate_company_owned_by_user(db, company_id, user_id)
     try:
         return calculation_service.calculate_cashflow_multi_year(db, company_id)
     except ValueError as e:

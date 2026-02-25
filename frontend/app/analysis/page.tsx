@@ -1,16 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useApp } from "@/contexts/AppContext";
 import {
-  getCompleteAnalysis,
-  getAllRatios,
-  getAltmanZScore,
-  getFGPMIRating,
-  getMultiYearRatios,
-  getBudgetScenarios,
-  downloadReportPDF,
-} from "@/lib/api";
+  useCompleteAnalysis,
+  useScenarios,
+  useMultiYearRatios,
+  getPreferredScenario,
+} from "@/hooks/use-queries";
+import { downloadReportPDF } from "@/lib/api";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type {
   FinancialAnalysis,
@@ -160,93 +158,29 @@ const fgpmiChartConfig = {
 
 export default function AnalysisPage() {
   const { selectedCompanyId, selectedCompany, selectedYear } = useApp();
-  const [analysis, setAnalysis] = useState<FinancialAnalysis | null>(null);
-  const [multiYearRatios, setMultiYearRatios] = useState<MultiYearRatios | null>(null);
-  const [scenarios, setScenarios] = useState<any[]>([]);
+  const { data: scenarios = [] } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
   const [downloadingPDF, setDownloadingPDF] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Load scenarios when company changes
+  // Auto-select preferred scenario when scenarios load
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      setSelectedScenario(null);
-      return;
+    if (scenarios.length > 0 && !selectedScenario) {
+      const preferred = getPreferredScenario(scenarios);
+      if (preferred) setSelectedScenario(preferred.id);
     }
-    loadScenarios();
-  }, [selectedCompanyId]);
+    if (!selectedCompanyId) setSelectedScenario(null);
+  }, [scenarios, selectedCompanyId, selectedScenario]);
 
-  // Load analysis when year changes
-  useEffect(() => {
-    if (!selectedCompanyId || !selectedYear) {
-      setAnalysis(null);
-      return;
-    }
-    loadAnalysis();
-  }, [selectedCompanyId, selectedYear]);
-
-  // Load multi-year ratios when scenario is selected
-  useEffect(() => {
-    if (!selectedCompanyId || !selectedScenario) {
-      setMultiYearRatios(null);
-      return;
-    }
-    loadMultiYearRatios();
-  }, [selectedCompanyId, selectedScenario]);
-
-  const loadScenarios = async () => {
-    if (!selectedCompanyId) return;
-
-    try {
-      const data = await getBudgetScenarios(selectedCompanyId);
-      setScenarios(data);
-      // Auto-select active scenario if available
-      const activeScenario = data.find((s: any) => s.is_active === 1);
-      if (activeScenario) {
-        setSelectedScenario(activeScenario.id);
-      } else if (data.length > 0) {
-        setSelectedScenario(data[0].id);
-      }
-    } catch (err) {
-      console.error("Error loading scenarios:", err);
-    }
-  };
-
-  const loadAnalysis = async () => {
-    if (!selectedCompanyId || !selectedYear) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const data = await getCompleteAnalysis(selectedCompanyId, selectedYear);
-      setAnalysis(data);
-    } catch (err) {
-      console.error("Error loading analysis:", err);
-      setError("Impossibile caricare l'analisi finanziaria");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMultiYearRatios = async () => {
-    if (!selectedCompanyId || !selectedScenario) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const data = await getMultiYearRatios(selectedCompanyId, selectedScenario);
-      setMultiYearRatios(data);
-    } catch (err) {
-      console.error("Error loading multi-year ratios:", err);
-      setError("Impossibile caricare gli indici pluriennali");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: analysis, isLoading: analysisLoading, error: analysisError } = useCompleteAnalysis(
+    selectedCompanyId,
+    selectedYear
+  );
+  const { data: multiYearRatios } = useMultiYearRatios(
+    selectedCompanyId,
+    selectedScenario
+  );
+  const loading = analysisLoading;
+  const error = analysisError ? "Impossibile caricare l'analisi finanziaria" : null;
 
   const handleDownloadPDF = async () => {
     if (!selectedCompanyId || !selectedScenario) return;
@@ -255,7 +189,6 @@ export default function AnalysisPage() {
       await downloadReportPDF(selectedCompanyId, selectedScenario, selectedCompany?.name);
     } catch (err) {
       console.error("Error downloading PDF:", err);
-      setError("Impossibile generare il report PDF");
     } finally {
       setDownloadingPDF(false);
     }
@@ -286,48 +219,21 @@ export default function AnalysisPage() {
     }
   };
 
-  // Prepare radar chart data for financial ratios
-  const prepareRadarData = () => {
+  // Memoized chart data — only recompute when analysis changes
+  const radarData = useMemo(() => {
     if (!analysis) return [];
-
     return [
-      {
-        metric: "Liquidita",
-        value: Math.min(analysis.ratios.liquidity.current_ratio * 100, 200),
-        fullMark: 200,
-      },
-      {
-        metric: "Autonomia",
-        value: analysis.ratios.solvency.autonomy_index * 100,
-        fullMark: 100,
-      },
-      {
-        metric: "ROE",
-        value: Math.min(analysis.ratios.profitability.roe * 100 + 50, 100),
-        fullMark: 100,
-      },
-      {
-        metric: "ROI",
-        value: Math.min(analysis.ratios.profitability.roi * 100 + 50, 100),
-        fullMark: 100,
-      },
-      {
-        metric: "EBITDA %",
-        value: Math.min(analysis.ratios.profitability.ebitda_margin * 100 + 50, 100),
-        fullMark: 100,
-      },
-      {
-        metric: "Rotazione",
-        value: Math.min(analysis.ratios.activity.asset_turnover * 100, 200),
-        fullMark: 200,
-      },
+      { metric: "Liquidita", value: Math.min(analysis.ratios.liquidity.current_ratio * 100, 200), fullMark: 200 },
+      { metric: "Autonomia", value: analysis.ratios.solvency.autonomy_index * 100, fullMark: 100 },
+      { metric: "ROE", value: Math.min(analysis.ratios.profitability.roe * 100 + 50, 100), fullMark: 100 },
+      { metric: "ROI", value: Math.min(analysis.ratios.profitability.roi * 100 + 50, 100), fullMark: 100 },
+      { metric: "EBITDA %", value: Math.min(analysis.ratios.profitability.ebitda_margin * 100 + 50, 100), fullMark: 100 },
+      { metric: "Rotazione", value: Math.min(analysis.ratios.activity.asset_turnover * 100, 200), fullMark: 200 },
     ];
-  };
+  }, [analysis]);
 
-  // Prepare data for Altman components chart
-  const prepareAltmanComponentsData = () => {
+  const altmanComponentsData = useMemo(() => {
     if (!analysis) return [];
-
     const components = analysis.altman.components;
     return [
       { name: "A (CCN/TA)", value: components.A, label: "Working Capital" },
@@ -338,19 +244,17 @@ export default function AnalysisPage() {
         ? [{ name: "E (FAT/TA)", value: components.E, label: "Asset Turnover" }]
         : []),
     ];
-  };
+  }, [analysis]);
 
-  // Prepare data for FGPMI indicators chart
-  const prepareFGPMIIndicatorsData = () => {
+  const fgpmiIndicatorsData = useMemo(() => {
     if (!analysis) return [];
-
     return Object.values(analysis.fgpmi.indicators).map((indicator) => ({
       name: indicator.code,
       points: indicator.points,
       maxPoints: indicator.max_points,
       percentage: indicator.percentage,
     }));
-  };
+  }, [analysis]);
 
   if (loading && !analysis) {
     return (
@@ -410,10 +314,6 @@ export default function AnalysisPage() {
       </div>
     );
   }
-
-  const radarData = prepareRadarData();
-  const altmanComponentsData = prepareAltmanComponentsData();
-  const fgpmiIndicatorsData = prepareFGPMIIndicatorsData();
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

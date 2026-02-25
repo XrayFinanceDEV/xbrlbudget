@@ -14,12 +14,16 @@ sqlalchemy==2.0.36
 lxml==5.3.0
 python-xbrl==1.1.1
 
-# PDF extraction
-docling==2.14.0
+# PDF extraction (PyMuPDF + Claude Haiku)
+PyMuPDF>=1.25.0
+anthropic>=0.40.0
 
 # PDF report generation
 reportlab==4.2.5
 matplotlib==3.9.3
+
+# Authentication
+PyJWT==2.9.0
 
 # Testing
 pytest==8.3.4

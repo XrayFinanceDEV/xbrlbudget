@@ -123,19 +123,19 @@ export function getEMScoreColor(rating: string): string {
 // Unified blue/gray chart palette for the report
 // Primary series use saturated blues; secondary/negative use grays
 export const CHART_COLORS = [
-  "var(--chart-1)", // bright blue
-  "var(--chart-2)", // mid blue
-  "var(--chart-3)", // light blue
-  "var(--chart-4)", // slate blue
-  "var(--chart-5)", // gray blue
+  "hsl(var(--chart-1))", // bright blue
+  "hsl(var(--chart-2))", // mid blue
+  "hsl(var(--chart-3))", // light blue
+  "hsl(var(--chart-4))", // slate blue
+  "hsl(var(--chart-5))", // gray blue
 ];
 
 // Semantic colors used in waterfall / bar charts for positive vs negative
-export const CHART_POSITIVE = "var(--chart-1)";  // blue
-export const CHART_NEGATIVE = "var(--chart-4)";  // dark slate
-export const CHART_NEUTRAL = "var(--chart-5)";   // gray
-export const CHART_ACCENT = "var(--chart-2)";    // mid blue
-export const CHART_MUTED = "var(--chart-5)";     // muted gray-blue
+export const CHART_POSITIVE = "hsl(var(--chart-1))";  // blue
+export const CHART_NEGATIVE = "hsl(var(--chart-4))";  // dark slate
+export const CHART_NEUTRAL = "hsl(var(--chart-5))";   // gray
+export const CHART_ACCENT = "hsl(var(--chart-2))";    // mid blue
+export const CHART_MUTED = "hsl(var(--chart-5))";     // muted gray-blue
 
 // Gauge zones: use blue gradient instead of red/yellow/green
 export const GAUGE_ZONES_BAD_GOOD = [
@@ -145,5 +145,5 @@ export const GAUGE_ZONES_BAD_GOOD = [
 ];
 
 // Reference line colors (muted, not traffic-light)
-export const REF_LINE_UPPER = "var(--chart-1)";   // blue threshold
-export const REF_LINE_LOWER = "var(--chart-4)";   // dark slate threshold
+export const REF_LINE_UPPER = "hsl(var(--chart-1))";   // blue threshold
+export const REF_LINE_LOWER = "hsl(var(--chart-4))";   // dark slate threshold

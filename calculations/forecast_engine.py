@@ -38,11 +38,9 @@ class ForecastEngine:
         if not scenario:
             raise ValueError(f"Budget scenario {scenario_id} not found")
 
-        # Get base year data
-        base_fy = self.db.query(FinancialYear).filter(
-            FinancialYear.company_id == scenario.company_id,
-            FinancialYear.year == scenario.base_year
-        ).first()
+        # Get base year data (prefer full-year record)
+        from database.queries import get_fy_prefer_full
+        base_fy = get_fy_prefer_full(self.db, scenario.company_id, scenario.base_year)
 
         if not base_fy or not base_fy.balance_sheet or not base_fy.income_statement:
             raise ValueError(f"Base year {scenario.base_year} data not found or incomplete")

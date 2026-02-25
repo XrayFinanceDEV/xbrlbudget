@@ -506,7 +506,8 @@ class EnhancedXBRLParser:
         file_path: str,
         company_id: Optional[int] = None,
         create_company: bool = True,
-        sector: Optional[int] = None
+        sector: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, any]:
         """Import XBRL file to database with reconciliation"""
 
@@ -527,9 +528,10 @@ class EnhancedXBRLParser:
                 existing_company = None
 
                 if tax_id:
-                    existing_company = self.db.query(Company).filter(
-                        Company.tax_id == tax_id
-                    ).first()
+                    query = self.db.query(Company).filter(Company.tax_id == tax_id)
+                    if user_id:
+                        query = query.filter(Company.user_id == user_id)
+                    existing_company = query.first()
 
                 if existing_company:
                     company = existing_company
@@ -538,7 +540,8 @@ class EnhancedXBRLParser:
                     company = Company(
                         name=entity_info.get('name', 'Imported Company'),
                         tax_id=tax_id,
-                        sector=sector or 1
+                        sector=sector or 1,
+                        user_id=user_id,
                     )
                     self.db.add(company)
                     self.db.commit()
@@ -550,6 +553,8 @@ class EnhancedXBRLParser:
         else:
             company = self.db.query(Company).filter(Company.id == company_id).first()
             if not company:
+                raise XBRLParseError(f"Company with ID {company_id} not found")
+            if user_id and company.user_id != user_id:
                 raise XBRLParseError(f"Company with ID {company_id} not found")
 
         facts_by_year = self.extract_facts(root, contexts)
@@ -563,9 +568,11 @@ class EnhancedXBRLParser:
         all_reconciliation_info = {}
 
         for year in years:
+            # Only match full-year records so XBRL import doesn't clobber partial-year data
             fy = self.db.query(FinancialYear).filter(
                 FinancialYear.company_id == company_id,
-                FinancialYear.year == year
+                FinancialYear.year == year,
+                FinancialYear.period_months.is_(None),
             ).first()
 
             if not fy:
@@ -634,10 +641,11 @@ def import_xbrl_file_enhanced(
     file_path: str,
     company_id: Optional[int] = None,
     create_company: bool = True,
-    sector: Optional[int] = None
+    sector: Optional[int] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, any]:
     """
     Convenience function to import XBRL file with reconciliation
     """
     with EnhancedXBRLParser() as parser:
-        return parser.import_to_database(file_path, company_id, create_company, sector=sector)
+        return parser.import_to_database(file_path, company_id, create_company, sector=sector, user_id=user_id)

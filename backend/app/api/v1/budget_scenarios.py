@@ -2,7 +2,7 @@
 Budget Scenarios and Assumptions API endpoints
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 import sys
@@ -14,6 +14,8 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from app.core.database import get_db
+from app.core.auth import get_current_user_id
+from app.core.ownership import validate_company_owned_by_user
 from app.schemas import budget as budget_schemas
 from app.schemas import forecast as forecast_schemas
 from database import models
@@ -24,23 +26,19 @@ router = APIRouter()
 
 # ===== Validation Helper Functions =====
 
-def validate_company_exists(company_id: int, db: Session) -> models.Company:
-    """Validate company exists and return it"""
-    company = db.query(models.Company).filter(models.Company.id == company_id).first()
-    if not company:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Company with id {company_id} not found"
-        )
-    return company
+def validate_company_exists(company_id: int, user_id: str, db: Session) -> models.Company:
+    """Validate company exists, belongs to user, and return it"""
+    return validate_company_owned_by_user(db, company_id, user_id)
 
 
 def validate_scenario_belongs_to_company(
     scenario_id: int,
     company_id: int,
-    db: Session
+    user_id: str,
+    db: Session,
 ) -> models.BudgetScenario:
-    """Validate scenario exists and belongs to company"""
+    """Validate company belongs to user and scenario belongs to company"""
+    validate_company_owned_by_user(db, company_id, user_id)
     scenario = db.query(models.BudgetScenario).filter(
         models.BudgetScenario.id == scenario_id,
         models.BudgetScenario.company_id == company_id
@@ -56,10 +54,8 @@ def validate_scenario_belongs_to_company(
 
 def validate_base_year_data(company_id: int, base_year: int, db: Session):
     """Validate that base year has complete financial data"""
-    financial_year = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == base_year
-    ).first()
+    from database.queries import get_fy_prefer_full
+    financial_year = get_fy_prefer_full(db, company_id, base_year)
 
     if not financial_year:
         raise HTTPException(
@@ -104,15 +100,16 @@ def list_budget_scenarios(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     is_active: Optional[int] = Query(None, ge=0, le=1),
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     List all budget scenarios for a company
 
     Optional filtering by is_active flag (0=inactive, 1=active)
     """
-    # Validate company exists
-    validate_company_exists(company_id, db)
+    # Validate company exists and belongs to user
+    validate_company_exists(company_id, user_id, db)
 
     # Build query
     query = db.query(models.BudgetScenario).filter(
@@ -139,13 +136,17 @@ def get_budget_scenario(
     company_id: int,
     scenario_id: int,
     include_details: bool = Query(False, description="Include nested assumptions and forecast years"),
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get a single budget scenario with optional details
 
     Set include_details=true to get nested assumptions and forecast years
     """
+    # Validate company belongs to user
+    validate_company_exists(company_id, user_id, db)
+
     # Build query with optional eager loading
     query = db.query(models.BudgetScenario).filter(
         models.BudgetScenario.id == scenario_id,
@@ -177,7 +178,8 @@ def get_budget_scenario(
 def create_budget_scenario(
     company_id: int,
     scenario_create: budget_schemas.BudgetScenarioCreate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Create a new budget scenario
@@ -186,8 +188,8 @@ def create_budget_scenario(
     Use POST /scenarios/{id}/assumptions to add forecast assumptions.
     Use POST /scenarios/{id}/generate to generate forecasts.
     """
-    # Validate company exists
-    validate_company_exists(company_id, db)
+    # Validate company exists and belongs to user
+    validate_company_exists(company_id, user_id, db)
 
     # Validate base year has complete data
     validate_base_year_data(company_id, scenario_create.base_year, db)
@@ -216,7 +218,8 @@ def update_budget_scenario(
     company_id: int,
     scenario_id: int,
     scenario_update: budget_schemas.BudgetScenarioUpdate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Update an existing budget scenario metadata
@@ -224,7 +227,7 @@ def update_budget_scenario(
     Only provided fields will be updated
     """
     # Validate scenario belongs to company
-    db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # If base_year is being updated, validate new base year data
     if scenario_update.base_year is not None and scenario_update.base_year != db_scenario.base_year:
@@ -248,7 +251,8 @@ def update_budget_scenario(
 def delete_budget_scenario(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Delete a budget scenario and all associated data
@@ -259,13 +263,90 @@ def delete_budget_scenario(
     - All forecasted balance sheets and income statements
     """
     # Validate scenario belongs to company
-    db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Delete (cascade will handle related records)
     db.delete(db_scenario)
     db.commit()
 
     return None
+
+
+# ===== Intra-Year Comparison Endpoint =====
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/comparison",
+    response_model=budget_schemas.IntraYearComparison,
+    summary="Get intra-year comparison (partial year vs reference full year)"
+)
+def get_intra_year_comparison(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Compare partial-year financial data with reference full year.
+
+    Only valid for scenarios with scenario_type="infrannuale".
+    Returns line-by-line comparison with percentages and annualized values.
+    """
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Comparison is only available for infrannuale scenarios"
+        )
+
+    try:
+        from calculations.intra_year_engine import IntraYearEngine
+        engine = IntraYearEngine(db)
+        return engine.get_comparison(scenario_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+# ===== Promote Infrannuale Projection =====
+
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/promote",
+    response_model=Any,
+    summary="Promote infrannuale projection to full-year FinancialYear"
+)
+def promote_projection(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Copy the infrannuale projection into a proper FinancialYear record
+    so it can be used as base year for budget scenarios.
+
+    Only valid for scenarios with scenario_type="infrannuale" that have
+    a generated projection (ForecastYear).
+    """
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only infrannuale scenarios can be promoted"
+        )
+
+    try:
+        from app.services.promote_service import promote_projection_to_financial_year
+        result = promote_projection_to_financial_year(db, scenario_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
 # ===== Budget Assumptions Endpoints =====
@@ -277,7 +358,8 @@ def delete_budget_scenario(
 def list_budget_assumptions(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get all budget assumptions for a scenario
@@ -285,7 +367,7 @@ def list_budget_assumptions(
     Returns assumptions ordered by forecast year (ascending)
     """
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Get assumptions ordered by year
     assumptions = db.query(models.BudgetAssumptions).filter(
@@ -304,7 +386,8 @@ def create_budget_assumptions(
     company_id: int,
     scenario_id: int,
     assumptions_create: budget_schemas.BudgetAssumptionsCreate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Create budget assumptions for a forecast year
@@ -312,7 +395,7 @@ def create_budget_assumptions(
     Each scenario can have multiple assumption records (one per forecast year)
     """
     # Validate scenario belongs to company
-    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Ensure scenario_id matches
     if assumptions_create.scenario_id != scenario_id:
@@ -358,7 +441,8 @@ def update_budget_assumptions(
     scenario_id: int,
     year: int,
     assumptions_update: budget_schemas.BudgetAssumptionsUpdate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Update budget assumptions for a specific forecast year
@@ -366,7 +450,7 @@ def update_budget_assumptions(
     Only provided fields will be updated
     """
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Find assumptions for this year
     db_assumptions = db.query(models.BudgetAssumptions).filter(
@@ -399,7 +483,8 @@ def delete_budget_assumptions(
     company_id: int,
     scenario_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Delete budget assumptions for a specific forecast year
@@ -407,7 +492,7 @@ def delete_budget_assumptions(
     This will also delete the associated forecast year and forecasted statements (cascade)
     """
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Find assumptions for this year
     db_assumptions = db.query(models.BudgetAssumptions).filter(
@@ -436,8 +521,9 @@ def delete_budget_assumptions(
 def bulk_upsert_assumptions(
     company_id: int,
     scenario_id: int,
-    request: Any,
-    db: Session = Depends(get_db)
+    request: Any = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Bulk insert or update assumptions for all forecast years at once.
@@ -482,7 +568,7 @@ def bulk_upsert_assumptions(
     from app.schemas import analysis as analysis_schemas
 
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     try:
         # Parse request body
@@ -525,7 +611,8 @@ def bulk_upsert_assumptions(
 def generate_forecasts(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Generate (or regenerate) forecasts for all years in the scenario
@@ -538,7 +625,7 @@ def generate_forecasts(
     5. Return summary statistics
     """
     # Validate scenario belongs to company
-    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Validate base year data
     validate_base_year_data(company_id, scenario.base_year, db)
@@ -554,10 +641,15 @@ def generate_forecasts(
             detail=f"Cannot generate forecast: no assumptions found for scenario {scenario_id}. Add assumptions first."
         )
 
-    # Generate forecast using ForecastEngine
+    # Generate forecast using appropriate engine
     try:
-        engine = ForecastEngine(db)
-        result = engine.generate_forecast(scenario_id)
+        if scenario.scenario_type == "infrannuale":
+            from calculations.intra_year_engine import IntraYearEngine
+            engine = IntraYearEngine(db)
+            result = engine.generate_projection(scenario_id)
+        else:
+            engine = ForecastEngine(db)
+            result = engine.generate_forecast(scenario_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -608,7 +700,8 @@ def generate_forecasts(
 def list_forecast_years(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     List all forecast years for a scenario
@@ -616,7 +709,7 @@ def list_forecast_years(
     Returns forecast year metadata (id, year, timestamps)
     """
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Get forecast years ordered by year
     forecast_years = db.query(models.ForecastYear).filter(
@@ -634,7 +727,8 @@ def get_forecast_balance_sheet(
     company_id: int,
     scenario_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get forecasted balance sheet for a specific year
@@ -642,7 +736,7 @@ def get_forecast_balance_sheet(
     Returns all balance sheet line items and calculated properties
     """
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Validate forecast year exists
     forecast_year = validate_forecast_year_exists(scenario_id, year, db)
@@ -665,7 +759,8 @@ def get_forecast_income_statement(
     company_id: int,
     scenario_id: int,
     year: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get forecasted income statement for a specific year
@@ -673,7 +768,7 @@ def get_forecast_income_statement(
     Returns all income statement line items and calculated properties
     """
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Validate forecast year exists
     forecast_year = validate_forecast_year_exists(scenario_id, year, db)
@@ -696,7 +791,8 @@ def get_forecast_income_statement(
 def get_forecast_reclassified_data(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get reclassified financial indicators for both historical and forecast years.
@@ -713,13 +809,13 @@ def get_forecast_reclassified_data(
     from calculations.ratios import FinancialRatiosCalculator
 
     # Validate scenario belongs to company
-    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Get base year
     base_year = scenario.base_year
 
     # Get company
-    company = validate_company_exists(company_id, db)
+    company = validate_company_exists(company_id, user_id, db)
 
     # Get all forecast years for this scenario
     forecast_years = db.query(models.ForecastYear).filter(
@@ -732,10 +828,11 @@ def get_forecast_reclassified_data(
             detail=f"No forecast data found for scenario {scenario_id}"
         )
 
-    # Get historical data (all years up to and including base year)
+    # Get historical data (full-year records up to and including base year)
     historical_years = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year <= base_year
+        models.FinancialYear.year <= base_year,
+        models.FinancialYear.period_months.is_(None),
     ).order_by(models.FinancialYear.year).all()
 
     # Build result structure
@@ -882,7 +979,8 @@ def get_forecast_reclassified_data(
 def get_detailed_cashflow_scenario(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get detailed cash flow statement (Italian GAAP - Indirect Method)
@@ -900,7 +998,7 @@ def get_detailed_cashflow_scenario(
     from app.services import calculation_service
 
     # Validate scenario
-    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     try:
         result = calculation_service.calculate_detailed_cashflow_historical_and_forecast(
@@ -930,7 +1028,8 @@ def get_detailed_cashflow_scenario(
 def get_ratios_scenario(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get all financial ratios for historical and forecast years
@@ -946,7 +1045,7 @@ def get_ratios_scenario(
     from app.services import calculation_service
 
     # Validate scenario
-    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, db)
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     try:
         result = calculation_service.calculate_ratios_historical_and_forecast(
@@ -977,7 +1076,8 @@ def get_detailed_cashflow_historical(
     company_id: int,
     start_year: int = Query(..., description="First year to calculate cashflow for"),
     end_year: int = Query(..., description="Last year to calculate cashflow for"),
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get detailed cash flow statement for historical years only (no scenario)
@@ -988,7 +1088,7 @@ def get_detailed_cashflow_historical(
     from app.services import calculation_service
 
     # Validate company
-    validate_company_exists(company_id, db)
+    validate_company_exists(company_id, user_id, db)
 
     try:
         result = calculation_service.calculate_detailed_cashflow_historical_only(

@@ -6,6 +6,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.auth import get_current_user_id
+from app.core.ownership import validate_company_owned_by_user
 
 router = APIRouter()
 
@@ -46,9 +48,11 @@ router = APIRouter()
 def download_pdf_report(
     company_id: int,
     scenario_id: int,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Generate and stream a PDF financial analysis report."""
+    validate_company_owned_by_user(db, company_id, user_id)
     from pdf_service.report_generator import generate_report_data
     from pdf_service.pdf_renderer import PDFReportRenderer
 

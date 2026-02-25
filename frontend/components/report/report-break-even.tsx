@@ -32,9 +32,9 @@ interface ReportBreakEvenProps {
 }
 
 const bepConfig: ChartConfig = {
-  revenue: { label: "Fatturato", color: "var(--chart-1)" },
-  bep: { label: "Break Even Point", color: "var(--chart-2)" },
-  safety: { label: "Margine Sicurezza %", color: "var(--chart-3)" },
+  revenue: { label: "Fatturato", color: "hsl(var(--chart-1))" },
+  bep: { label: "Break Even Point", color: "hsl(var(--chart-2))" },
+  safety: { label: "Margine Sicurezza %", color: "hsl(var(--chart-3))" },
 };
 
 export function ReportBreakEven({ data }: ReportBreakEvenProps) {
@@ -78,8 +78,8 @@ export function ReportBreakEven({ data }: ReportBreakEvenProps) {
                   formatter={(value: number) => formatCurrency(value)}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="revenue" stroke="var(--chart-1)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="bep" stroke="var(--chart-2)" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="revenue" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="bep" stroke="hsl(var(--chart-2))" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
               </LineChart>
             </ChartContainer>
           </div>
@@ -97,7 +97,7 @@ export function ReportBreakEven({ data }: ReportBreakEvenProps) {
                   content={<ChartTooltipContent />}
                   formatter={(value: number) => `${value.toFixed(2)}%`}
                 />
-                <Line type="monotone" dataKey="safety" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="safety" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ChartContainer>
           </div>

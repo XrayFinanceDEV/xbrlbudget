@@ -32,10 +32,10 @@ interface ReportCashflowProps {
 }
 
 const cfConfig: ChartConfig = {
-  operating: { label: "Operativa", color: "var(--chart-1)" },
-  investing: { label: "Investimento", color: "var(--chart-2)" },
-  financing: { label: "Finanziamento", color: "var(--chart-3)" },
-  total: { label: "Totale", color: "var(--chart-4)" },
+  operating: { label: "Operativa", color: "hsl(var(--chart-1))" },
+  investing: { label: "Investimento", color: "hsl(var(--chart-2))" },
+  financing: { label: "Finanziamento", color: "hsl(var(--chart-3))" },
+  total: { label: "Totale", color: "hsl(var(--chart-4))" },
 };
 
 export function ReportCashflow({ data }: ReportCashflowProps) {
@@ -86,10 +86,10 @@ export function ReportCashflow({ data }: ReportCashflowProps) {
                 formatter={(value: number) => formatCurrency(value)}
               />
               <Legend />
-              <Line type="monotone" dataKey="operating" stroke="var(--chart-1)" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="investing" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="financing" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="total" stroke="var(--chart-4)" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="operating" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="investing" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="financing" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="total" stroke="hsl(var(--chart-4))" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
             </LineChart>
           </ChartContainer>
 

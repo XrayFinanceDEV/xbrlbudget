@@ -106,19 +106,27 @@ def bulk_upsert_assumptions(
             scenario_id=scenario_id,
             forecast_year=assumption_data.get("forecast_year"),
             revenue_growth_pct=assumption_data.get("revenue_growth_pct", 0.0),
-            material_cost_growth_pct=assumption_data.get("material_cost_growth_pct", 0.0),
-            service_cost_growth_pct=assumption_data.get("service_cost_growth_pct", 0.0),
-            personnel_cost_growth_pct=assumption_data.get("personnel_cost_growth_pct", 0.0),
             other_revenue_growth_pct=assumption_data.get("other_revenue_growth_pct", 0.0),
-            depreciation_rate_tangible_pct=assumption_data.get("depreciation_rate_tangible_pct", 0.0),
-            depreciation_rate_intangible_pct=assumption_data.get("depreciation_rate_intangible_pct", 0.0),
-            capex_tangible=assumption_data.get("capex_tangible", 0.0),
-            capex_intangible=assumption_data.get("capex_intangible", 0.0),
-            new_debt=assumption_data.get("new_debt", 0.0),
-            debt_repayment=assumption_data.get("debt_repayment", 0.0),
-            interest_rate_pct=assumption_data.get("interest_rate_pct", 0.0),
-            tax_rate_pct=assumption_data.get("tax_rate_pct", 24.0),  # Default Italian IRES rate
-            dividend_payout_pct=assumption_data.get("dividend_payout_pct", 0.0)
+            variable_materials_growth_pct=assumption_data.get("variable_materials_growth_pct", 0.0),
+            fixed_materials_growth_pct=assumption_data.get("fixed_materials_growth_pct", 0.0),
+            variable_services_growth_pct=assumption_data.get("variable_services_growth_pct", 0.0),
+            fixed_services_growth_pct=assumption_data.get("fixed_services_growth_pct", 0.0),
+            rent_growth_pct=assumption_data.get("rent_growth_pct", 0.0),
+            personnel_growth_pct=assumption_data.get("personnel_growth_pct", 0.0),
+            other_costs_growth_pct=assumption_data.get("other_costs_growth_pct", 0.0),
+            investments=assumption_data.get("investments", 0.0),
+            receivables_short_growth_pct=assumption_data.get("receivables_short_growth_pct", 0.0),
+            receivables_long_growth_pct=assumption_data.get("receivables_long_growth_pct", 0.0),
+            payables_short_growth_pct=assumption_data.get("payables_short_growth_pct", 0.0),
+            interest_rate_receivables=assumption_data.get("interest_rate_receivables", 0.0),
+            interest_rate_payables=assumption_data.get("interest_rate_payables", 0.0),
+            tax_rate=assumption_data.get("tax_rate", 27.9),
+            fixed_materials_percentage=assumption_data.get("fixed_materials_percentage", 40.0),
+            fixed_services_percentage=assumption_data.get("fixed_services_percentage", 40.0),
+            depreciation_rate=assumption_data.get("depreciation_rate", 20.0),
+            financing_amount=assumption_data.get("financing_amount", 0.0),
+            financing_duration_years=assumption_data.get("financing_duration_years", 0.0),
+            financing_interest_rate=assumption_data.get("financing_interest_rate", 0.0),
         )
         db.add(db_assumption)
         assumptions_saved += 1
@@ -131,8 +139,13 @@ def bulk_upsert_assumptions(
     forecast_generated = False
     if auto_generate:
         try:
-            engine = ForecastEngine(db)
-            engine.generate_forecast(scenario_id)
+            if scenario.scenario_type == "infrannuale":
+                from calculations.intra_year_engine import IntraYearEngine
+                engine = IntraYearEngine(db)
+                engine.generate_projection(scenario_id)
+            else:
+                engine = ForecastEngine(db)
+                engine.generate_forecast(scenario_id)
             forecast_generated = True
         except Exception as e:
             # If forecast generation fails, return success for assumptions but note failure

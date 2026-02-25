@@ -11,7 +11,7 @@ import type {
   FinancialAnalysis,
 } from '@/types/api';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:8000/api/v1');
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -19,6 +19,32 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Auth token management
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+}
+
+// Request interceptor: add Bearer token
+api.interceptors.request.use((config) => {
+  if (_authToken) {
+    config.headers.Authorization = `Bearer ${_authToken}`;
+  }
+  return config;
+});
+
+// Response interceptor: request new token on 401
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined' && window.parent !== window) {
+      window.parent.postMessage({ type: 'REQUEST_AUTH_TOKEN' }, '*');
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Companies
 export const getCompanies = async (): Promise<Company[]> => {
@@ -193,7 +219,8 @@ export const importXBRL = async (
   file: File,
   companyId?: number | null,
   createCompany: boolean = true,
-  sector?: number
+  sector?: number,
+  periodMonths?: number
 ): Promise<XBRLImportResult> => {
   const formData = new FormData();
   formData.append('file', file);
@@ -205,6 +232,9 @@ export const importXBRL = async (
   params.append('create_company', createCompany.toString());
   if (sector) {
     params.append('sector', sector.toString());
+  }
+  if (periodMonths) {
+    params.append('period_months', periodMonths.toString());
   }
 
   const { data } = await api.post<XBRLImportResult>(
@@ -257,6 +287,8 @@ export interface PDFImportResult {
   extraction_time_seconds: number;
   message: string;
   warnings: string[];
+  prior_year_imported?: boolean;
+  prior_fiscal_year?: number | null;
 }
 
 export const importPDF = async (
@@ -265,7 +297,8 @@ export const importPDF = async (
   companyName?: string,
   companyId?: number | null,
   createCompany: boolean = true,
-  sector?: number
+  sector?: number,
+  periodMonths?: number
 ): Promise<PDFImportResult> => {
   const formData = new FormData();
   formData.append('file', file);
@@ -286,6 +319,10 @@ export const importPDF = async (
     params.append('sector', sector.toString());
   }
 
+  if (periodMonths) {
+    params.append('period_months', periodMonths.toString());
+  }
+
   const { data } = await api.post<PDFImportResult>(
     `/import/pdf?${params.toString()}`,
     formData,
@@ -293,7 +330,7 @@ export const importPDF = async (
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-      timeout: 120000, // 120 seconds for PDF processing
+      timeout: 300000, // 5 minutes for PDF processing (Docling model loading + extraction)
     }
   );
   return data;
@@ -473,6 +510,49 @@ export const getDetailedCashFlowHistorical = async (
 ): Promise<import('@/types/api').MultiYearDetailedCashFlow> => {
   const { data } = await api.get<import('@/types/api').MultiYearDetailedCashFlow>(
     `/companies/${companyId}/detailed-cashflow?start_year=${startYear}&end_year=${endYear}`
+  );
+  return data;
+};
+
+// Intra-Year Comparison
+export const getIntraYearComparison = async (
+  companyId: number,
+  scenarioId: number
+): Promise<import('@/types/api').IntraYearComparison> => {
+  const { data } = await api.get<import('@/types/api').IntraYearComparison>(
+    `/companies/${companyId}/scenarios/${scenarioId}/comparison`
+  );
+  return data;
+};
+
+// Bulk Assumptions (used by both budget and infrannuale)
+export const bulkUpsertAssumptions = async (
+  companyId: number,
+  scenarioId: number,
+  payload: { assumptions: Record<string, unknown>[]; auto_generate: boolean }
+): Promise<{ success: boolean; forecast_generated: boolean; forecast_years: number[] }> => {
+  const { data } = await api.put(
+    `/companies/${companyId}/scenarios/${scenarioId}/assumptions`,
+    payload
+  );
+  return data;
+};
+
+// Promote Infrannuale Projection
+export interface PromoteResult {
+  success: boolean;
+  financial_year_id: number;
+  year: number;
+  company_id: number;
+  message: string;
+}
+
+export const promoteProjection = async (
+  companyId: number,
+  scenarioId: number
+): Promise<PromoteResult> => {
+  const { data } = await api.post<PromoteResult>(
+    `/companies/${companyId}/scenarios/${scenarioId}/promote`
   );
   return data;
 };

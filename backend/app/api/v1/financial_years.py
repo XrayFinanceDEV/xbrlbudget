@@ -13,21 +13,27 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from app.core.database import get_db
+from app.core.auth import get_current_user_id
+from app.core.ownership import validate_company_owned_by_user
 from app.schemas import financial_year as schemas
 from app.schemas import balance_sheet as bs_schemas
 from app.schemas import income_statement as is_schemas
 from database import models
+from database.queries import get_fy_prefer_full
 
 router = APIRouter()
 
 
 @router.get("/companies/{company_id}/years/{year}", response_model=schemas.FinancialYear)
-def get_financial_year(company_id: int, year: int, db: Session = Depends(get_db)):
+def get_financial_year(
+    company_id: int,
+    year: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     """Get financial year for a specific company and year"""
-    fy = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year
-    ).first()
+    validate_company_owned_by_user(db, company_id, user_id)
+    fy = get_fy_prefer_full(db, company_id, year)
 
     if not fy:
         raise HTTPException(
@@ -42,16 +48,11 @@ def get_financial_year(company_id: int, year: int, db: Session = Depends(get_db)
 def create_financial_year(
     company_id: int,
     year_data: schemas.FinancialYearCreate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Create a new financial year for a company"""
-    # Verify company exists
-    company = db.query(models.Company).filter(models.Company.id == company_id).first()
-    if not company:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Company with id {company_id} not found"
-        )
+    validate_company_owned_by_user(db, company_id, user_id)
 
     # Check if year already exists for this company
     existing = db.query(models.FinancialYear).filter(
@@ -83,8 +84,15 @@ def create_financial_year(
 
 
 @router.delete("/companies/{company_id}/years/{year}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_financial_year(company_id: int, year: int, db: Session = Depends(get_db)):
+def delete_financial_year(
+    company_id: int,
+    year: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     """Delete a financial year and all associated financial statements"""
+    validate_company_owned_by_user(db, company_id, user_id)
+
     fy = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
         models.FinancialYear.year == year
@@ -102,12 +110,15 @@ def delete_financial_year(company_id: int, year: int, db: Session = Depends(get_
 
 
 @router.get("/companies/{company_id}/years/{year}/balance-sheet", response_model=bs_schemas.BalanceSheet)
-def get_balance_sheet(company_id: int, year: int, db: Session = Depends(get_db)):
+def get_balance_sheet(
+    company_id: int,
+    year: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     """Get balance sheet for a specific company and year"""
-    fy = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year
-    ).first()
+    validate_company_owned_by_user(db, company_id, user_id)
+    fy = get_fy_prefer_full(db, company_id, year)
 
     if not fy:
         raise HTTPException(
@@ -129,13 +140,12 @@ def update_balance_sheet(
     company_id: int,
     year: int,
     bs_update: bs_schemas.BalanceSheetUpdate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Update balance sheet for a specific year"""
-    fy = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year
-    ).first()
+    validate_company_owned_by_user(db, company_id, user_id)
+    fy = get_fy_prefer_full(db, company_id, year)
 
     if not fy:
         raise HTTPException(
@@ -160,12 +170,15 @@ def update_balance_sheet(
 
 
 @router.get("/companies/{company_id}/years/{year}/income-statement", response_model=is_schemas.IncomeStatement)
-def get_income_statement(company_id: int, year: int, db: Session = Depends(get_db)):
+def get_income_statement(
+    company_id: int,
+    year: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     """Get income statement for a specific company and year"""
-    fy = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year
-    ).first()
+    validate_company_owned_by_user(db, company_id, user_id)
+    fy = get_fy_prefer_full(db, company_id, year)
 
     if not fy:
         raise HTTPException(
@@ -187,13 +200,12 @@ def update_income_statement(
     company_id: int,
     year: int,
     is_update: is_schemas.IncomeStatementUpdate,
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Update income statement for a specific year"""
-    fy = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year
-    ).first()
+    validate_company_owned_by_user(db, company_id, user_id)
+    fy = get_fy_prefer_full(db, company_id, year)
 
     if not fy:
         raise HTTPException(

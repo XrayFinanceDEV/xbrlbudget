@@ -2,10 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import {
-  getBudgetScenarios,
-  getForecastReclassifiedData,
-} from "@/lib/api";
+import { useScenarios, useReclassifiedData, getPreferredScenario } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type { BudgetScenario } from "@/types/api";
 import {
@@ -132,70 +129,23 @@ const solvencyChartConfig = {
 
 export default function ForecastReclassifiedPage() {
   const { selectedCompanyId } = useApp();
-  const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
+  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
-  const [reclassifiedData, setReclassifiedData] = useState<ReclassifiedData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Load scenarios when company changes
+  // Auto-select preferred scenario when scenarios load
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      setSelectedScenario(null);
-      return;
+    if (scenarios.length > 0 && !selectedScenario) {
+      setSelectedScenario(getPreferredScenario(scenarios));
     }
-    loadScenarios();
-  }, [selectedCompanyId]);
+    if (!selectedCompanyId) setSelectedScenario(null);
+  }, [scenarios, selectedCompanyId, selectedScenario]);
 
-  // Load reclassified data when scenario changes
-  useEffect(() => {
-    if (!selectedScenario || !selectedCompanyId) {
-      setReclassifiedData(null);
-      return;
-    }
-    loadReclassifiedData();
-  }, [selectedScenario, selectedCompanyId]);
-
-  const loadScenarios = async () => {
-    if (!selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      const data = await getBudgetScenarios(selectedCompanyId);
-      setScenarios(data);
-      // Auto-select active scenario or first one
-      const activeScenario = data.find((s) => s.is_active === 1) || data[0];
-      if (activeScenario) {
-        setSelectedScenario(activeScenario);
-      }
-    } catch (err) {
-      console.error("Error loading scenarios:", err);
-      setError("Impossibile caricare gli scenari");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadReclassifiedData = async () => {
-    if (!selectedScenario || !selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const data = await getForecastReclassifiedData(
-        selectedCompanyId,
-        selectedScenario.id
-      );
-      setReclassifiedData(data);
-    } catch (err) {
-      console.error("Error loading reclassified data:", err);
-      setError("Impossibile caricare i dati riclassificati");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: reclassifiedData, isLoading: dataLoading, error: dataError } = useReclassifiedData(
+    selectedCompanyId,
+    selectedScenario?.id ?? null
+  );
+  const loading = scenariosLoading || dataLoading;
+  const error = dataError ? "Impossibile caricare i dati riclassificati" : null;
 
   // Prepare chart data by combining historical and forecast
   const prepareChartData = () => {

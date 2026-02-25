@@ -38,16 +38,16 @@ interface ReportScoringProps {
 }
 
 const altmanTrendConfig: ChartConfig = {
-  z_score: { label: "Z-Score", color: "var(--chart-1)" },
+  z_score: { label: "Z-Score", color: "hsl(var(--chart-1))" },
 };
 
 const altmanComponentConfig: ChartConfig = {
-  value: { label: "Valore", color: "var(--chart-1)" },
+  value: { label: "Valore", color: "hsl(var(--chart-1))" },
 };
 
 const fgpmiConfig: ChartConfig = {
-  points: { label: "Punti", color: "var(--chart-1)" },
-  max_points: { label: "Max Punti", color: "var(--chart-3)" },
+  points: { label: "Punti", color: "hsl(var(--chart-1))" },
+  max_points: { label: "Max Punti", color: "hsl(var(--chart-3))" },
 };
 
 const ALTMAN_LABELS: Record<string, string> = {
@@ -138,13 +138,13 @@ export function ReportScoring({ data }: ReportScoringProps) {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="year" />
                   <YAxis />
-                  <ReferenceLine y={2.6} stroke="var(--chart-1)" strokeDasharray="5 5" label={{ value: "Safe", position: "right", fontSize: 10 }} />
-                  <ReferenceLine y={1.1} stroke="var(--chart-4)" strokeDasharray="5 5" label={{ value: "Distress", position: "right", fontSize: 10 }} />
+                  <ReferenceLine y={2.6} stroke="hsl(var(--chart-1))" strokeDasharray="5 5" label={{ value: "Safe", position: "right", fontSize: 10 }} />
+                  <ReferenceLine y={1.1} stroke="hsl(var(--chart-4))" strokeDasharray="5 5" label={{ value: "Distress", position: "right", fontSize: 10 }} />
                   <ChartTooltip
                     content={<ChartTooltipContent />}
                     formatter={(value: number) => formatNumber(value, 2)}
                   />
-                  <Line type="monotone" dataKey="z_score" stroke="var(--chart-1)" strokeWidth={2} dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="z_score" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
               </ChartContainer>
             </div>
@@ -162,11 +162,11 @@ export function ReportScoring({ data }: ReportScoringProps) {
                       [`${formatNumber(value, 4)}`, props.payload.label]
                     }
                   />
-                  <Bar dataKey="value" fill="var(--chart-1)" radius={[0, 4, 4, 0]}>
+                  <Bar dataKey="value" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]}>
                     {altmanComponents.map((entry, index) => (
                       <Cell
                         key={index}
-                        fill={entry.value >= 0 ? "var(--chart-1)" : "var(--chart-4)"}
+                        fill={entry.value >= 0 ? "hsl(var(--chart-1))" : "hsl(var(--chart-4))"}
                       />
                     ))}
                   </Bar>
@@ -277,8 +277,8 @@ export function ReportScoring({ data }: ReportScoringProps) {
                   ]}
                 />
                 <Legend />
-                <Bar dataKey="points" fill="var(--chart-1)" name="Punti" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="max_points" fill="var(--chart-5)" name="Max Punti" radius={[4, 4, 0, 0]} opacity={0.4} />
+                <Bar dataKey="points" fill="hsl(var(--chart-1))" name="Punti" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="max_points" fill="hsl(var(--chart-5))" name="Max Punti" radius={[4, 4, 0, 0]} opacity={0.4} />
               </BarChart>
             </ChartContainer>
 

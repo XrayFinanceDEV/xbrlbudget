@@ -32,9 +32,9 @@ interface ReportStructuralProps {
 }
 
 const structuralConfig: ChartConfig = {
-  ms: { label: "Margine di Struttura (MS)", color: "var(--chart-1)" },
-  ccn: { label: "Capitale Circ. Netto (CCN)", color: "var(--chart-2)" },
-  mt: { label: "Margine di Tesoreria (MT)", color: "var(--chart-3)" },
+  ms: { label: "Margine di Struttura (MS)", color: "hsl(var(--chart-1))" },
+  ccn: { label: "Capitale Circ. Netto (CCN)", color: "hsl(var(--chart-2))" },
+  mt: { label: "Margine di Tesoreria (MT)", color: "hsl(var(--chart-3))" },
 };
 
 export function ReportStructural({ data }: ReportStructuralProps) {
@@ -71,9 +71,9 @@ export function ReportStructural({ data }: ReportStructuralProps) {
                 formatter={(value: number) => formatCurrency(value)}
               />
               <Legend />
-              <Line type="monotone" dataKey="ms" stroke="var(--chart-1)" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="ccn" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="mt" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="ms" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="ccn" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="mt" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>
           </ChartContainer>
 

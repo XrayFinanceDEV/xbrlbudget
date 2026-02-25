@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
+from app.core.auth import get_current_user_id
+from app.core.ownership import validate_company_owned_by_user
 from app.schemas import analysis as analysis_schemas
 from app.services import analysis_service
 
@@ -68,7 +70,8 @@ def get_complete_analysis(
         default=True,
         description="Include all calculations (Altman, FGPMI, ratios, cashflow)"
     ),
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Get complete financial analysis for a scenario.
@@ -89,6 +92,8 @@ def get_complete_analysis(
         HTTPException 400: If data incomplete or invalid
         HTTPException 500: If calculation errors occur
     """
+    validate_company_owned_by_user(db, company_id, user_id)
+
     try:
         result = analysis_service.get_complete_analysis(
             db=db,

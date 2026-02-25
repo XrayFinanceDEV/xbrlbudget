@@ -208,7 +208,7 @@ function RatioChart({
   });
 
   const config: ChartConfig = {};
-  const colors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
+  const colors = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
   ratios.forEach((r, i) => {
     config[r.key] = { label: r.label, color: colors[i % colors.length] };
   });

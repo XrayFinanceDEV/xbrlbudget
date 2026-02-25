@@ -21,6 +21,10 @@ if backend_path not in sys.path:
 from app.core.config import settings
 from app.core.decimal_encoder import decimal_to_float
 
+# Propagate ANTHROPIC_API_KEY to os.environ so shared modules (pdf_importer) can access it
+if settings.ANTHROPIC_API_KEY:
+    os.environ['ANTHROPIC_API_KEY'] = settings.ANTHROPIC_API_KEY
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -31,9 +35,13 @@ app = FastAPI(
 )
 
 # Configure CORS
+cors_origins = list(settings.BACKEND_CORS_ORIGINS)
+if settings.ALLOWED_ORIGINS:
+    cors_origins.extend([o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

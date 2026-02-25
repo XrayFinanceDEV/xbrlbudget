@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  Home,
+  Building2,
   Upload,
   FileSpreadsheet,
   TrendingUp,
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const MAIN_TABS = [
-  { href: "/", label: "Home", icon: Home, match: (path: string) => path === "/" },
+  { href: "/aziende", label: "Aziende", icon: Building2, match: (path: string) => path.startsWith("/aziende") },
   { href: "/import", label: "Importazione", icon: Upload, match: (path: string) => path.startsWith("/import") },
   { href: "/budget", label: "Input Ipotesi", icon: FileSpreadsheet, match: (path: string) => path.startsWith("/budget") },
 ];
@@ -43,6 +43,9 @@ const ANALYSIS_TABS = [
 export function Navigation() {
   const pathname = usePathname();
   const isForecastActive = pathname.startsWith("/forecast");
+
+  // Hide navigation on homepage and infrannuale (has its own nav)
+  if (pathname === "/" || pathname.startsWith("/infrannuale")) return null;
 
   return (
     <div className="border-b border-border bg-background">

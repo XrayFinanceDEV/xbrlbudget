@@ -2,16 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import {
-  getBudgetScenarios,
-  getForecastBalanceSheet,
-  getBalanceSheet,
-} from "@/lib/api";
+import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type {
   BudgetScenario,
-  ForecastBalanceSheet,
-  BalanceSheet,
+  ScenarioAnalysis,
 } from "@/types/api";
 import {
   LineChart,
@@ -54,113 +49,33 @@ const wcChartConfig = {
   working_capital_net: { label: "CCN", color: "hsl(var(--chart-4))" },
 } satisfies ChartConfig;
 
+// Type for year data from analysis endpoint
+type YearData = {
+  year: number;
+  type: "historical" | "forecast";
+  income_statement: Record<string, number>;
+  balance_sheet: Record<string, number>;
+};
+
 export default function ForecastBalancePage() {
-  const { selectedCompanyId, years: availableYears } = useApp();
-  const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
+  const { selectedCompanyId } = useApp();
+  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
-  const [forecastYears, setForecastYears] = useState<number[]>([]);
-  const [historicalYears, setHistoricalYears] = useState<number[]>([]);
-  const [historicalData, setHistoricalData] = useState<Record<number, BalanceSheet>>({});
-  const [forecastData, setForecastData] = useState<Record<number, ForecastBalanceSheet>>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Load scenarios when company changes
+  // Auto-select preferred scenario when scenarios load
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      setSelectedScenario(null);
-      return;
+    if (scenarios.length > 0 && !selectedScenario) {
+      setSelectedScenario(getPreferredScenario(scenarios));
     }
-    loadScenarios();
-  }, [selectedCompanyId]);
+    if (!selectedCompanyId) setSelectedScenario(null);
+  }, [scenarios, selectedCompanyId, selectedScenario]);
 
-  // Load forecast data when scenario changes
-  useEffect(() => {
-    if (!selectedScenario || !selectedCompanyId) {
-      setForecastData({});
-      setHistoricalData({});
-      setHistoricalYears([]);
-      return;
-    }
-    loadForecastData();
-  }, [selectedScenario, selectedCompanyId]);
-
-  const loadScenarios = async () => {
-    if (!selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      const data = await getBudgetScenarios(selectedCompanyId);
-      setScenarios(data);
-      // Auto-select active scenario or first one
-      const activeScenario = data.find((s) => s.is_active === 1) || data[0];
-      if (activeScenario) {
-        setSelectedScenario(activeScenario);
-      }
-    } catch (err) {
-      console.error("Error loading scenarios:", err);
-      setError("Impossibile caricare gli scenari");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadForecastData = async () => {
-    if (!selectedScenario || !selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const baseYear = selectedScenario.base_year;
-
-      // Load historical years (all years up to and including base year)
-      const histYears = availableYears
-        .filter((y) => y <= baseYear)
-        .sort((a, b) => a - b);
-      setHistoricalYears(histYears);
-
-      // Load historical data for all years
-      const historical: Record<number, BalanceSheet> = {};
-      for (const year of histYears) {
-        try {
-          const data = await getBalanceSheet(selectedCompanyId, year);
-          historical[year] = data;
-        } catch (err: any) {
-          console.error(`Error loading historical data for year ${year}:`, err);
-        }
-      }
-      setHistoricalData(historical);
-
-      // Calculate forecast years (typically 3 years after base)
-      const forecastYrs = [baseYear + 1, baseYear + 2, baseYear + 3];
-      setForecastYears(forecastYrs);
-
-      // Load forecast data for each year
-      const forecasts: Record<number, ForecastBalanceSheet> = {};
-      for (const year of forecastYrs) {
-        try {
-          const forecast = await getForecastBalanceSheet(
-            selectedCompanyId,
-            selectedScenario.id,
-            year
-          );
-          forecasts[year] = forecast;
-        } catch (err: any) {
-          if (err.response?.status !== 404) {
-            console.error(`Error loading forecast for year ${year}:`, err);
-          }
-        }
-      }
-      setForecastData(forecasts);
-    } catch (err: any) {
-      console.error("Error loading forecast data:", err);
-      setError("Impossibile caricare i dati previsionali");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+    selectedCompanyId,
+    selectedScenario?.id ?? null
+  );
+  const loading = scenariosLoading || analysisLoading;
+  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
 
   if (!selectedCompanyId) {
     return (
@@ -193,6 +108,9 @@ export default function ForecastBalancePage() {
       </div>
     );
   }
+
+  const historicalYears = analysisData?.historical_years ?? [];
+  const forecastYears = analysisData?.forecast_years ?? [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -227,7 +145,7 @@ export default function ForecastBalancePage() {
         </div>
       )}
 
-      {!loading && selectedScenario && historicalYears.length > 0 && (
+      {!loading && analysisData && historicalYears.length > 0 && (
         <>
           {/* Balance Sheet Table */}
           <Card className="mb-6">
@@ -240,24 +158,20 @@ export default function ForecastBalancePage() {
               {/* Balance Check Warning */}
               <BalanceCheckWarning
                 historicalYears={historicalYears}
-                historicalData={historicalData}
                 forecastYears={forecastYears}
-                forecastData={forecastData}
               />
 
               <div className="overflow-x-auto">
                 <BalanceSheetTable
                   historicalYears={historicalYears}
-                  historicalData={historicalData}
                   forecastYears={forecastYears}
-                  forecastData={forecastData}
                 />
               </div>
             </CardContent>
           </Card>
 
           {/* Charts */}
-          {Object.keys(forecastData).length > 0 && (
+          {forecastYears.length > 0 && (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Assets Composition Chart */}
@@ -267,14 +181,7 @@ export default function ForecastBalancePage() {
                   </CardHeader>
                   <CardContent>
                     <ChartContainer config={assetsChartConfig} className="h-[300px] w-full">
-                      <ComposedChart
-                        data={prepareChartData(
-                          historicalYears,
-                          historicalData,
-                          forecastYears,
-                          forecastData
-                        )}
-                      >
+                      <ComposedChart data={prepareChartData(historicalYears, forecastYears)}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="year" />
                         <YAxis />
@@ -319,14 +226,7 @@ export default function ForecastBalancePage() {
                   </CardHeader>
                   <CardContent>
                     <ChartContainer config={equityDebtChartConfig} className="h-[300px] w-full">
-                      <BarChart
-                        data={prepareChartData(
-                          historicalYears,
-                          historicalData,
-                          forecastYears,
-                          forecastData
-                        )}
-                      >
+                      <BarChart data={prepareChartData(historicalYears, forecastYears)}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="year" />
                         <YAxis />
@@ -353,14 +253,7 @@ export default function ForecastBalancePage() {
                 </CardHeader>
                 <CardContent>
                   <ChartContainer config={wcChartConfig} className="h-[300px] w-full">
-                    <LineChart
-                      data={prepareChartData(
-                        historicalYears,
-                        historicalData,
-                        forecastYears,
-                        forecastData
-                      )}
-                    >
+                    <LineChart data={prepareChartData(historicalYears, forecastYears)}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="year" />
                       <YAxis />
@@ -391,35 +284,35 @@ export default function ForecastBalancePage() {
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {forecastYears.map((year) => {
-                      const forecast = forecastData[year];
-                      if (!forecast) return null;
+                    {forecastYears.map((fy) => {
+                      const bs = fy.balance_sheet;
+                      if (!bs) return null;
 
-                      const debtToEquity = forecast.total_equity !== 0
-                        ? forecast.total_debt / forecast.total_equity
+                      const debtToEquity = bs.total_equity !== 0
+                        ? bs.total_debt / bs.total_equity
                         : 0;
 
                       return (
-                        <div key={year} className="border border-border rounded-lg p-4">
+                        <div key={fy.year} className="border border-border rounded-lg p-4">
                           <h4 className="font-semibold text-muted-foreground mb-3 text-center">
-                            {year}
+                            {fy.year}
                           </h4>
                           <div className="space-y-2 text-sm">
                             <MetricRow
                               label="Totale Attivo"
-                              value={formatCurrency(forecast.total_assets)}
+                              value={formatCurrency(bs.total_assets)}
                             />
                             <MetricRow
                               label="Patrimonio Netto"
-                              value={formatCurrency(forecast.total_equity)}
+                              value={formatCurrency(bs.total_equity)}
                             />
                             <MetricRow
                               label="Debiti Totali"
-                              value={formatCurrency(forecast.total_debt)}
+                              value={formatCurrency(bs.total_debt)}
                             />
                             <MetricRow
                               label="CCN"
-                              value={formatCurrency(forecast.working_capital_net)}
+                              value={formatCurrency(bs.working_capital_net)}
                             />
                             <MetricRow
                               label="Debt/Equity"
@@ -443,36 +336,30 @@ export default function ForecastBalancePage() {
 // Balance Check Warning Component
 function BalanceCheckWarning({
   historicalYears,
-  historicalData,
   forecastYears,
-  forecastData,
 }: {
-  historicalYears: number[];
-  historicalData: Record<number, BalanceSheet>;
-  forecastYears: number[];
-  forecastData: Record<number, ForecastBalanceSheet>;
+  historicalYears: YearData[];
+  forecastYears: YearData[];
 }) {
-  const TOLERANCE = 1.0; // 1 euro tolerance (rounding errors below this are acceptable)
+  const TOLERANCE = 1.0;
   const issues: Array<{ year: number; diff: number; type: 'historical' | 'forecast' }> = [];
 
-  // Check historical years
-  historicalYears.forEach((year) => {
-    const data = historicalData[year];
-    if (data) {
-      const diff = Math.abs(data.total_assets - data.total_liabilities);
+  historicalYears.forEach((yd) => {
+    const bs = yd.balance_sheet;
+    if (bs) {
+      const diff = Math.abs(bs.total_assets - (bs.total_equity + bs.total_debt + (bs.sp14_fondi_rischi || 0) + (bs.sp15_tfr || 0) + (bs.sp18_ratei_risconti_passivi || 0)));
       if (diff > TOLERANCE) {
-        issues.push({ year, diff, type: 'historical' });
+        issues.push({ year: yd.year, diff, type: 'historical' });
       }
     }
   });
 
-  // Check forecast years
-  forecastYears.forEach((year) => {
-    const data = forecastData[year];
-    if (data) {
-      const diff = Math.abs(data.total_assets - data.total_liabilities);
+  forecastYears.forEach((yd) => {
+    const bs = yd.balance_sheet;
+    if (bs) {
+      const diff = Math.abs(bs.total_assets - (bs.total_equity + bs.total_debt + (bs.sp14_fondi_rischi || 0) + (bs.sp15_tfr || 0) + (bs.sp18_ratei_risconti_passivi || 0)));
       if (diff > TOLERANCE) {
-        issues.push({ year, diff, type: 'forecast' });
+        issues.push({ year: yd.year, diff, type: 'forecast' });
       }
     }
   });
@@ -506,331 +393,88 @@ function BalanceCheckWarning({
 // Balance Sheet Table Component
 function BalanceSheetTable({
   historicalYears,
-  historicalData,
   forecastYears,
-  forecastData,
 }: {
-  historicalYears: number[];
-  historicalData: Record<number, BalanceSheet>;
-  forecastYears: number[];
-  forecastData: Record<number, ForecastBalanceSheet>;
+  historicalYears: YearData[];
+  forecastYears: YearData[];
 }) {
-  // Helper function to get value from historical data
-  const getHistoricalValue = (year: number, field: string, isCalculated: boolean = false): number => {
-    const data = historicalData[year];
-    if (!data) return 0;
-
-    if (isCalculated) {
-      // For calculated fields like total_assets, total_equity, etc.
-      return (data as any)[field] || 0;
-    }
-    // For regular string fields that need parsing
-    return parseFloat((data as any)[field]) || 0;
+  const getVal = (yearData: YearData, field: string): number => {
+    return yearData.balance_sheet[field] || 0;
   };
 
   const rows: Array<{
     label: string;
-    historicalValues: number[];
-    forecastValues: number[];
+    field?: string;
+    computed?: (yd: YearData) => number;
     isTotal?: boolean;
     isSubtotal?: boolean;
     indent?: boolean;
   }> = [
     // ATTIVO (ASSETS)
-    {
-      label: "ATTIVO",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    // A) CREDITI VERSO SOCI
-    {
-      label: "A) Crediti verso soci per versamenti ancora dovuti",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp01_crediti_soci")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp01_crediti_soci || 0),
-    },
-    // B) IMMOBILIZZAZIONI
-    {
-      label: "B) IMMOBILIZZAZIONI",
-      historicalValues: [],
-      forecastValues: [],
-      isSubtotal: true,
-    },
-    {
-      label: "I - Immobilizzazioni immateriali",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp02_immob_immateriali")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp02_immob_immateriali || 0),
-      indent: true,
-    },
-    {
-      label: "II - Immobilizzazioni materiali",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp03_immob_materiali")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp03_immob_materiali || 0),
-      indent: true,
-    },
-    {
-      label: "III - Immobilizzazioni finanziarie",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04_immob_finanziarie")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04_immob_finanziarie || 0),
-      indent: true,
-    },
-    {
-      label: "1) Partecipazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04a_partecipazioni")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04a_partecipazioni || 0),
-      indent: true,
-    },
-    {
-      label: "2) Crediti",
-      historicalValues: [],
-      forecastValues: [],
-      indent: true,
-    },
-    {
-      label: "Esigibili entro l'esercizio successivo",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04b_crediti_immob_breve")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04b_crediti_immob_breve || 0),
-      indent: true,
-    },
-    {
-      label: "Esigibili oltre l'esercizio successivo",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04c_crediti_immob_lungo")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04c_crediti_immob_lungo || 0),
-      indent: true,
-    },
+    { label: "ATTIVO", isTotal: true },
+    { label: "A) Crediti verso soci per versamenti ancora dovuti", field: "sp01_crediti_soci" },
+    { label: "B) IMMOBILIZZAZIONI", isSubtotal: true },
+    { label: "I - Immobilizzazioni immateriali", field: "sp02_immob_immateriali", indent: true },
+    { label: "II - Immobilizzazioni materiali", field: "sp03_immob_materiali", indent: true },
+    { label: "III - Immobilizzazioni finanziarie", field: "sp04_immob_finanziarie", indent: true },
+    { label: "1) Partecipazioni", field: "sp04a_partecipazioni", indent: true },
+    { label: "2) Crediti" },
+    { label: "Esigibili entro l'esercizio successivo", field: "sp04b_crediti_immob_breve", indent: true },
+    { label: "Esigibili oltre l'esercizio successivo", field: "sp04c_crediti_immob_lungo", indent: true },
     {
       label: "Totale crediti",
-      historicalValues: historicalYears.map((y) =>
-        getHistoricalValue(y, "sp04b_crediti_immob_breve") +
-        getHistoricalValue(y, "sp04c_crediti_immob_lungo")
-      ),
-      forecastValues: forecastYears.map((y) =>
-        (forecastData[y]?.sp04b_crediti_immob_breve || 0) +
-        (forecastData[y]?.sp04c_crediti_immob_lungo || 0)
-      ),
+      computed: (yd) => (yd.balance_sheet.sp04b_crediti_immob_breve || 0) + (yd.balance_sheet.sp04c_crediti_immob_lungo || 0),
       indent: true,
     },
-    {
-      label: "3) Altri titoli",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04d_altri_titoli")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04d_altri_titoli || 0),
-      indent: true,
-    },
-    {
-      label: "4) Strumenti finanziari derivati attivi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04e_strumenti_derivati_attivi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04e_strumenti_derivati_attivi || 0),
-      indent: true,
-    },
-    {
-      label: "Totale immobilizzazioni finanziarie",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp04_immob_finanziarie")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp04_immob_finanziarie || 0),
-      indent: true,
-    },
-    {
-      label: "Totale Immobilizzazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "fixed_assets", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.fixed_assets || 0),
-      isSubtotal: true,
-    },
-    // C) ATTIVO CIRCOLANTE
-    {
-      label: "C) ATTIVO CIRCOLANTE",
-      historicalValues: [],
-      forecastValues: [],
-      isSubtotal: true,
-    },
-    {
-      label: "I - Rimanenze",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp05_rimanenze")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp05_rimanenze || 0),
-      indent: true,
-    },
-    {
-      label: "II - Crediti (entro esercizio successivo)",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp06_crediti_breve")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp06_crediti_breve || 0),
-      indent: true,
-    },
-    {
-      label: "II - Crediti (oltre esercizio successivo)",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp07_crediti_lungo")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp07_crediti_lungo || 0),
-      indent: true,
-    },
-    {
-      label: "III - Attivit\u00e0 finanziarie che non costituiscono immobilizzazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp08_attivita_finanziarie")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp08_attivita_finanziarie || 0),
-      indent: true,
-    },
-    {
-      label: "IV - Disponibilit\u00e0 liquide",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp09_disponibilita_liquide")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp09_disponibilita_liquide || 0),
-      indent: true,
-    },
-    {
-      label: "Totale Attivo Circolante",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "current_assets", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.current_assets || 0),
-      isSubtotal: true,
-    },
-    // D) RATEI E RISCONTI
-    {
-      label: "D) Ratei e risconti attivi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp10_ratei_risconti_attivi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp10_ratei_risconti_attivi || 0),
-    },
-    {
-      label: "TOTALE ATTIVO",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "total_assets", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.total_assets || 0),
-      isTotal: true,
-    },
+    { label: "3) Altri titoli", field: "sp04d_altri_titoli", indent: true },
+    { label: "4) Strumenti finanziari derivati attivi", field: "sp04e_strumenti_derivati_attivi", indent: true },
+    { label: "Totale immobilizzazioni finanziarie", field: "sp04_immob_finanziarie", indent: true },
+    { label: "Totale Immobilizzazioni", field: "fixed_assets", isSubtotal: true },
+    { label: "C) ATTIVO CIRCOLANTE", isSubtotal: true },
+    { label: "I - Rimanenze", field: "sp05_rimanenze", indent: true },
+    { label: "II - Crediti (entro esercizio successivo)", field: "sp06_crediti_breve", indent: true },
+    { label: "II - Crediti (oltre esercizio successivo)", field: "sp07_crediti_lungo", indent: true },
+    { label: "III - Attivit\u00e0 finanziarie che non costituiscono immobilizzazioni", field: "sp08_attivita_finanziarie", indent: true },
+    { label: "IV - Disponibilit\u00e0 liquide", field: "sp09_disponibilita_liquide", indent: true },
+    { label: "Totale Attivo Circolante", field: "current_assets", isSubtotal: true },
+    { label: "D) Ratei e risconti attivi", field: "sp10_ratei_risconti_attivi" },
+    { label: "TOTALE ATTIVO", field: "total_assets", isTotal: true },
     // PASSIVO (LIABILITIES & EQUITY)
-    {
-      label: "PASSIVO E PATRIMONIO NETTO",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    // A) PATRIMONIO NETTO
-    {
-      label: "A) PATRIMONIO NETTO",
-      historicalValues: [],
-      forecastValues: [],
-      isSubtotal: true,
-    },
-    {
-      label: "I - Capitale",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp11_capitale")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp11_capitale || 0),
-      indent: true,
-    },
-    {
-      label: "II - Riserva da soprapprezzo delle azioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12a_riserva_sovrapprezzo")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12a_riserva_sovrapprezzo || 0),
-      indent: true,
-    },
-    {
-      label: "III - Riserve di rivalutazione",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12b_riserve_rivalutazione")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12b_riserve_rivalutazione || 0),
-      indent: true,
-    },
-    {
-      label: "IV - Riserva legale",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12c_riserva_legale")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12c_riserva_legale || 0),
-      indent: true,
-    },
-    {
-      label: "V - Riserve statutarie",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12d_riserve_statutarie")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12d_riserve_statutarie || 0),
-      indent: true,
-    },
-    {
-      label: "VI - Altre riserve",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12e_altre_riserve")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12e_altre_riserve || 0),
-      indent: true,
-    },
-    {
-      label: "VII - Riserva per operazioni di copertura dei flussi finanziari attesi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12f_riserva_copertura_flussi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12f_riserva_copertura_flussi || 0),
-      indent: true,
-    },
-    {
-      label: "VIII - Utili (perdite) portati a nuovo",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12g_utili_perdite_portati")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12g_utili_perdite_portati || 0),
-      indent: true,
-    },
-    {
-      label: "IX - Utile (perdita) dell'esercizio",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp13_utile_perdita")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp13_utile_perdita || 0),
-      indent: true,
-    },
-    {
-      label: "X - Riserva negativa per azioni proprie in portafoglio",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp12h_riserva_neg_azioni_proprie")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp12h_riserva_neg_azioni_proprie || 0),
-      indent: true,
-    },
-    {
-      label: "Totale Patrimonio Netto",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "total_equity", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.total_equity || 0),
-      isSubtotal: true,
-    },
-    // B) FONDI PER RISCHI E ONERI
-    {
-      label: "B) Fondi per rischi e oneri",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp14_fondi_rischi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp14_fondi_rischi || 0),
-    },
-    // C) TRATTAMENTO DI FINE RAPPORTO
-    {
-      label: "C) Trattamento di fine rapporto di lavoro subordinato",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp15_tfr")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp15_tfr || 0),
-    },
-    // D) DEBITI
-    {
-      label: "D) DEBITI",
-      historicalValues: [],
-      forecastValues: [],
-      isSubtotal: true,
-    },
-    {
-      label: "Debiti (entro esercizio successivo)",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp16_debiti_breve")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp16_debiti_breve || 0),
-      indent: true,
-    },
-    {
-      label: "Debiti (oltre esercizio successivo)",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp17_debiti_lungo")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp17_debiti_lungo || 0),
-      indent: true,
-    },
-    {
-      label: "Totale Debiti",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "total_debt", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.total_debt || 0),
-      isSubtotal: true,
-    },
-    // E) RATEI E RISCONTI
-    {
-      label: "E) Ratei e risconti passivi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "sp18_ratei_risconti_passivi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.sp18_ratei_risconti_passivi || 0),
-    },
+    { label: "PASSIVO E PATRIMONIO NETTO", isTotal: true },
+    { label: "A) PATRIMONIO NETTO", isSubtotal: true },
+    { label: "I - Capitale", field: "sp11_capitale", indent: true },
+    { label: "II - Riserva da soprapprezzo delle azioni", field: "sp12a_riserva_sovrapprezzo", indent: true },
+    { label: "III - Riserve di rivalutazione", field: "sp12b_riserve_rivalutazione", indent: true },
+    { label: "IV - Riserva legale", field: "sp12c_riserva_legale", indent: true },
+    { label: "V - Riserve statutarie", field: "sp12d_riserve_statutarie", indent: true },
+    { label: "VI - Altre riserve", field: "sp12e_altre_riserve", indent: true },
+    { label: "VII - Riserva per operazioni di copertura dei flussi finanziari attesi", field: "sp12f_riserva_copertura_flussi", indent: true },
+    { label: "VIII - Utili (perdite) portati a nuovo", field: "sp12g_utili_perdite_portati", indent: true },
+    { label: "IX - Utile (perdita) dell'esercizio", field: "sp13_utile_perdita", indent: true },
+    { label: "X - Riserva negativa per azioni proprie in portafoglio", field: "sp12h_riserva_neg_azioni_proprie", indent: true },
+    { label: "Totale Patrimonio Netto", field: "total_equity", isSubtotal: true },
+    { label: "B) Fondi per rischi e oneri", field: "sp14_fondi_rischi" },
+    { label: "C) Trattamento di fine rapporto di lavoro subordinato", field: "sp15_tfr" },
+    { label: "D) DEBITI", isSubtotal: true },
+    { label: "Debiti (entro esercizio successivo)", field: "sp16_debiti_breve", indent: true },
+    { label: "Debiti (oltre esercizio successivo)", field: "sp17_debiti_lungo", indent: true },
+    { label: "Totale Debiti", field: "total_debt", isSubtotal: true },
+    { label: "E) Ratei e risconti passivi", field: "sp18_ratei_risconti_passivi" },
     {
       label: "TOTALE PASSIVO E PATRIMONIO NETTO",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "total_liabilities", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.total_liabilities || 0),
+      computed: (yd) => {
+        const bs = yd.balance_sheet;
+        return (bs.total_equity || 0) + (bs.total_debt || 0) + (bs.sp14_fondi_rischi || 0) + (bs.sp15_tfr || 0) + (bs.sp18_ratei_risconti_passivi || 0);
+      },
       isTotal: true,
     },
-    // Difference row to show balance check
     {
       label: "DIFFERENZA (Attivo - Passivo)",
-      historicalValues: historicalYears.map((y) => {
-        const data = historicalData[y];
-        if (!data) return 0;
-        return data.total_assets - data.total_liabilities;
-      }),
-      forecastValues: forecastYears.map((y) => {
-        const forecast = forecastData[y];
-        if (!forecast) return 0;
-        return forecast.total_assets - forecast.total_liabilities;
-      }),
+      computed: (yd) => {
+        const bs = yd.balance_sheet;
+        const totalPassivo = (bs.total_equity || 0) + (bs.total_debt || 0) + (bs.sp14_fondi_rischi || 0) + (bs.sp15_tfr || 0) + (bs.sp18_ratei_risconti_passivi || 0);
+        return (bs.total_assets || 0) - totalPassivo;
+      },
       isSubtotal: true,
     },
   ];
@@ -842,21 +486,21 @@ function BalanceSheetTable({
           <th className="px-4 py-3 text-left text-xs font-bold text-foreground uppercase border-r border-border">
             Descrizione
           </th>
-          {historicalYears.map((year) => (
+          {historicalYears.map((yd) => (
             <th
-              key={year}
+              key={yd.year}
               className="px-4 py-3 text-center text-xs font-bold text-foreground uppercase border-r border-border"
             >
-              {year}
+              {yd.year}
               <div className="text-muted-foreground font-normal">(Storico)</div>
             </th>
           ))}
-          {forecastYears.map((year) => (
+          {forecastYears.map((yd) => (
             <th
-              key={year}
+              key={yd.year}
               className="px-4 py-3 text-center text-xs font-bold text-primary uppercase border-r border-border bg-primary/10"
             >
-              {year}
+              {yd.year}
               <div className="text-primary font-normal">(Previsionale)</div>
             </th>
           ))}
@@ -864,6 +508,16 @@ function BalanceSheetTable({
       </thead>
       <tbody className="bg-card divide-y divide-border">
         {rows.map((row, index) => {
+          const getValue = (yd: YearData): number | null => {
+            if (row.computed) return row.computed(yd);
+            if (row.field) return getVal(yd, row.field);
+            return null;
+          };
+
+          const histValues = historicalYears.map(getValue);
+          const fcValues = forecastYears.map(getValue);
+          const hasValues = row.field || row.computed;
+
           const bgClass = row.isTotal
             ? "bg-muted font-bold"
             : row.isSubtotal
@@ -878,38 +532,30 @@ function BalanceSheetTable({
               )}>
                 {row.label}
               </td>
-              {/* Historical columns */}
-              {row.historicalValues.map((value, i) => {
-                const isNegative = value < 0;
-                return (
-                  <td
-                    key={`hist-${i}`}
-                    className={cn(
-                      "px-4 py-2 text-sm text-right border-r border-border",
-                      isNegative ? "text-destructive" : "text-foreground",
-                      (row.isTotal || row.isSubtotal) && "font-semibold"
-                    )}
-                  >
-                    {row.isTotal && !value ? "" : formatCurrency(value)}
-                  </td>
-                );
-              })}
-              {/* Forecast columns */}
-              {row.forecastValues.map((value, i) => {
-                const forecastNegative = value < 0;
-                return (
-                  <td
-                    key={`forecast-${i}`}
-                    className={cn(
-                      "px-4 py-2 text-sm text-right border-r border-border",
-                      forecastNegative ? "text-destructive" : "text-foreground",
-                      (row.isTotal || row.isSubtotal) && "font-semibold"
-                    )}
-                  >
-                    {row.isTotal && !value ? "" : formatCurrency(value)}
-                  </td>
-                );
-              })}
+              {histValues.map((value, i) => (
+                <td
+                  key={`hist-${i}`}
+                  className={cn(
+                    "px-4 py-2 text-sm text-right border-r border-border",
+                    value !== null && value < 0 ? "text-destructive" : "text-foreground",
+                    (row.isTotal || row.isSubtotal) && "font-semibold"
+                  )}
+                >
+                  {value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}
+                </td>
+              ))}
+              {fcValues.map((value, i) => (
+                <td
+                  key={`forecast-${i}`}
+                  className={cn(
+                    "px-4 py-2 text-sm text-right border-r border-border",
+                    value !== null && value < 0 ? "text-destructive" : "text-foreground",
+                    (row.isTotal || row.isSubtotal) && "font-semibold"
+                  )}
+                >
+                  {value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}
+                </td>
+              ))}
             </tr>
           );
         })}
@@ -930,44 +576,17 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 
 // Helper function to prepare chart data
 function prepareChartData(
-  historicalYears: number[],
-  historicalData: Record<number, BalanceSheet>,
-  forecastYears: number[],
-  forecastData: Record<number, ForecastBalanceSheet>
+  historicalYears: YearData[],
+  forecastYears: YearData[]
 ): any[] {
-  const data: any[] = [];
-
-  // Add historical data
-  historicalYears.forEach((year) => {
-    const historical = historicalData[year];
-    if (historical) {
-      data.push({
-        year: year.toString(),
-        total_assets: historical.total_assets,
-        total_equity: historical.total_equity,
-        total_debt: historical.total_debt,
-        fixed_assets: historical.fixed_assets,
-        current_assets: historical.current_assets,
-        working_capital_net: historical.working_capital_net,
-      });
-    }
-  });
-
-  // Add forecast data
-  forecastYears.forEach((year) => {
-    const forecast = forecastData[year];
-    if (forecast) {
-      data.push({
-        year: year.toString(),
-        total_assets: forecast.total_assets,
-        total_equity: forecast.total_equity,
-        total_debt: forecast.total_debt,
-        fixed_assets: forecast.fixed_assets,
-        current_assets: forecast.current_assets,
-        working_capital_net: forecast.working_capital_net,
-      });
-    }
-  });
-
-  return data;
+  const allYears = [...historicalYears, ...forecastYears];
+  return allYears.map((yd) => ({
+    year: yd.year.toString(),
+    total_assets: yd.balance_sheet.total_assets || 0,
+    total_equity: yd.balance_sheet.total_equity || 0,
+    total_debt: yd.balance_sheet.total_debt || 0,
+    fixed_assets: yd.balance_sheet.fixed_assets || 0,
+    current_assets: yd.balance_sheet.current_assets || 0,
+    working_capital_net: yd.balance_sheet.working_capital_net || 0,
+  }));
 }

@@ -2,16 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import {
-  getBudgetScenarios,
-  getForecastIncomeStatement,
-  getIncomeStatement,
-} from "@/lib/api";
+import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type {
   BudgetScenario,
-  ForecastIncomeStatement,
-  IncomeStatement,
+  ScenarioAnalysis,
 } from "@/types/api";
 import {
   LineChart,
@@ -56,112 +51,24 @@ const profitChartConfig = {
 } satisfies ChartConfig;
 
 export default function ForecastIncomePage() {
-  const { selectedCompanyId, years: availableYears } = useApp();
-  const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
+  const { selectedCompanyId } = useApp();
+  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
-  const [forecastYears, setForecastYears] = useState<number[]>([]);
-  const [historicalYears, setHistoricalYears] = useState<number[]>([]);
-  const [historicalData, setHistoricalData] = useState<Record<number, IncomeStatement>>({});
-  const [forecastData, setForecastData] = useState<Record<number, ForecastIncomeStatement>>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Load scenarios when company changes
+  // Auto-select preferred scenario when scenarios load
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      setSelectedScenario(null);
-      return;
+    if (scenarios.length > 0 && !selectedScenario) {
+      setSelectedScenario(getPreferredScenario(scenarios));
     }
-    loadScenarios();
-  }, [selectedCompanyId]);
+    if (!selectedCompanyId) setSelectedScenario(null);
+  }, [scenarios, selectedCompanyId, selectedScenario]);
 
-  // Load forecast data when scenario changes
-  useEffect(() => {
-    if (!selectedScenario || !selectedCompanyId) {
-      setForecastData({});
-      setHistoricalData({});
-      setHistoricalYears([]);
-      return;
-    }
-    loadForecastData();
-  }, [selectedScenario, selectedCompanyId]);
-
-  const loadScenarios = async () => {
-    if (!selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      const data = await getBudgetScenarios(selectedCompanyId);
-      setScenarios(data);
-      // Auto-select active scenario or first one
-      const activeScenario = data.find((s) => s.is_active === 1) || data[0];
-      if (activeScenario) {
-        setSelectedScenario(activeScenario);
-      }
-    } catch (err) {
-      console.error("Error loading scenarios:", err);
-      setError("Impossibile caricare gli scenari");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadForecastData = async () => {
-    if (!selectedScenario || !selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const baseYear = selectedScenario.base_year;
-
-      // Load historical years (all years up to and including base year)
-      const histYears = availableYears
-        .filter((y) => y <= baseYear)
-        .sort((a, b) => a - b);
-      setHistoricalYears(histYears);
-
-      // Load historical data for all years
-      const historical: Record<number, IncomeStatement> = {};
-      for (const year of histYears) {
-        try {
-          const data = await getIncomeStatement(selectedCompanyId, year);
-          historical[year] = data;
-        } catch (err: any) {
-          console.error(`Error loading historical data for year ${year}:`, err);
-        }
-      }
-      setHistoricalData(historical);
-
-      // Calculate forecast years (typically 3 years after base)
-      const forecastYrs = [baseYear + 1, baseYear + 2, baseYear + 3];
-      setForecastYears(forecastYrs);
-
-      // Load forecast data for each year
-      const forecasts: Record<number, ForecastIncomeStatement> = {};
-      for (const year of forecastYrs) {
-        try {
-          const forecast = await getForecastIncomeStatement(
-            selectedCompanyId,
-            selectedScenario.id,
-            year
-          );
-          forecasts[year] = forecast;
-        } catch (err: any) {
-          if (err.response?.status !== 404) {
-            console.error(`Error loading forecast for year ${year}:`, err);
-          }
-        }
-      }
-      setForecastData(forecasts);
-    } catch (err: any) {
-      console.error("Error loading forecast data:", err);
-      setError("Impossibile caricare i dati previsionali");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+    selectedCompanyId,
+    selectedScenario?.id ?? null
+  );
+  const loading = scenariosLoading || analysisLoading;
+  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
 
   if (!selectedCompanyId) {
     return (
@@ -192,6 +99,9 @@ export default function ForecastIncomePage() {
       </div>
     );
   }
+
+  const historicalYears = analysisData?.historical_years ?? [];
+  const forecastYears = analysisData?.forecast_years ?? [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -225,7 +135,7 @@ export default function ForecastIncomePage() {
         </div>
       )}
 
-      {!loading && selectedScenario && historicalYears.length > 0 && (
+      {!loading && analysisData && historicalYears.length > 0 && (
         <>
           {/* Income Statement Table */}
           <Card className="mb-6">
@@ -238,16 +148,14 @@ export default function ForecastIncomePage() {
               <div className="overflow-x-auto">
                 <IncomeStatementTable
                   historicalYears={historicalYears}
-                  historicalData={historicalData}
                   forecastYears={forecastYears}
-                  forecastData={forecastData}
                 />
               </div>
             </CardContent>
           </Card>
 
           {/* Charts */}
-          {Object.keys(forecastData).length > 0 && (
+          {forecastYears.length > 0 && (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Revenue & EBITDA Chart */}
@@ -258,13 +166,7 @@ export default function ForecastIncomePage() {
                   <CardContent>
                     <ChartContainer config={revenueChartConfig} className="h-[300px] w-full">
                       <LineChart
-                        data={prepareChartData(
-                          historicalYears,
-                          historicalData,
-                          forecastYears,
-                          forecastData,
-                          ["revenue", "ebitda"]
-                        )}
+                        data={prepareChartData(historicalYears, forecastYears, ["revenue", "ebitda"])}
                       >
                         <CartesianGrid vertical={false} />
                         <XAxis dataKey="year" />
@@ -302,13 +204,7 @@ export default function ForecastIncomePage() {
                   <CardContent>
                     <ChartContainer config={profitChartConfig} className="h-[300px] w-full">
                       <BarChart
-                        data={prepareChartData(
-                          historicalYears,
-                          historicalData,
-                          forecastYears,
-                          forecastData,
-                          ["ebit", "net_profit"]
-                        )}
+                        data={prepareChartData(historicalYears, forecastYears, ["ebit", "net_profit"])}
                       >
                         <CartesianGrid vertical={false} />
                         <XAxis dataKey="year" />
@@ -336,36 +232,36 @@ export default function ForecastIncomePage() {
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {forecastYears.map((year) => {
-                      const forecast = forecastData[year];
-                      if (!forecast) return null;
+                    {forecastYears.map((fy) => {
+                      const inc = fy.income_statement;
+                      if (!inc) return null;
 
                       return (
-                        <Card key={year}>
+                        <Card key={fy.year}>
                           <CardContent className="pt-6">
                             <h4 className="font-semibold text-muted-foreground mb-3 text-center">
-                              {year}
+                              {fy.year}
                             </h4>
                             <div className="space-y-2 text-sm">
                               <MetricRow
                                 label="Ricavi"
-                                value={formatCurrency(forecast.revenue)}
+                                value={formatCurrency(inc.revenue)}
                               />
                               <MetricRow
                                 label="EBITDA"
-                                value={formatCurrency(forecast.ebitda)}
+                                value={formatCurrency(inc.ebitda)}
                               />
                               <MetricRow
                                 label="Margine EBITDA"
-                                value={formatPercentage(forecast.ebitda / forecast.revenue)}
+                                value={formatPercentage(inc.revenue ? inc.ebitda / inc.revenue : 0)}
                               />
                               <MetricRow
                                 label="EBIT"
-                                value={formatCurrency(forecast.ebit)}
+                                value={formatCurrency(inc.ebit)}
                               />
                               <MetricRow
                                 label="Utile Netto"
-                                value={formatCurrency(forecast.net_profit)}
+                                value={formatCurrency(inc.net_profit)}
                               />
                             </div>
                           </CardContent>
@@ -383,270 +279,84 @@ export default function ForecastIncomePage() {
   );
 }
 
+// Type for year data from analysis endpoint
+type YearData = {
+  year: number;
+  type: "historical" | "forecast";
+  income_statement: Record<string, number>;
+  balance_sheet: Record<string, number>;
+};
+
 // Income Statement Table Component
 function IncomeStatementTable({
   historicalYears,
-  historicalData,
   forecastYears,
-  forecastData,
 }: {
-  historicalYears: number[];
-  historicalData: Record<number, IncomeStatement>;
-  forecastYears: number[];
-  forecastData: Record<number, ForecastIncomeStatement>;
+  historicalYears: YearData[];
+  forecastYears: YearData[];
 }) {
-  // Helper function to get value from historical data
-  const getHistoricalValue = (year: number, field: string, isCalculated: boolean = false): number => {
-    const data = historicalData[year];
-    if (!data) return 0;
-
-    if (isCalculated) {
-      // For calculated fields like production_value, ebitda, etc.
-      return (data as any)[field] || 0;
-    }
-    // For regular string fields that need parsing
-    return parseFloat((data as any)[field]) || 0;
+  const getVal = (yearData: YearData, field: string): number => {
+    return yearData.income_statement[field] || 0;
   };
 
   const rows: Array<{
     label: string;
-    historicalValues: number[];
-    forecastValues: number[];
+    field?: string;
+    calculated?: (yd: YearData) => number;
     isTotal?: boolean;
     isSubtotal?: boolean;
     indent?: number;
   }> = [
     // A) VALORE DELLA PRODUZIONE
-    {
-      label: "A) VALORE DELLA PRODUZIONE",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    {
-      label: "1) Ricavi delle vendite e delle prestazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce01_ricavi_vendite")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce01_ricavi_vendite || 0),
-    },
-    {
-      label: "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce02_variazioni_rimanenze")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce02_variazioni_rimanenze || 0),
-    },
-    {
-      label: "3) Variazioni dei lavori in corso su ordinazione",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce03_lavori_interni")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce03_lavori_interni || 0),
-    },
-    {
-      label: "5) Altri ricavi e proventi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce04_altri_ricavi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce04_altri_ricavi || 0),
-    },
-    {
-      label: "Totale Valore della Produzione",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "production_value", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.production_value || 0),
-      isSubtotal: true,
-    },
+    { label: "A) VALORE DELLA PRODUZIONE", isTotal: true },
+    { label: "1) Ricavi delle vendite e delle prestazioni", field: "ce01_ricavi_vendite" },
+    { label: "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti", field: "ce02_variazioni_rimanenze" },
+    { label: "3) Variazioni dei lavori in corso su ordinazione", field: "ce03_lavori_interni" },
+    { label: "5) Altri ricavi e proventi", field: "ce04_altri_ricavi" },
+    { label: "Totale Valore della Produzione", field: "production_value", isSubtotal: true },
     // B) COSTI DELLA PRODUZIONE
-    {
-      label: "B) COSTI DELLA PRODUZIONE",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    {
-      label: "6) Materie prime, sussidiarie, di consumo e di merci",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce05_materie_prime")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce05_materie_prime || 0),
-    },
-    {
-      label: "7) Servizi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce06_servizi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce06_servizi || 0),
-    },
-    {
-      label: "8) Godimento di beni di terzi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce07_godimento_beni")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce07_godimento_beni || 0),
-    },
-    {
-      label: "9) Personale",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce08_costi_personale")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce08_costi_personale || 0),
-    },
-    {
-      label: "di cui per acc.to trattamento di fine rapporto, di quiescenza e simili",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce08a_tfr_accrual")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce08a_tfr_accrual || 0),
-      indent: 1,
-    },
-    {
-      label: "10) Ammortamenti e svalutazioni:",
-      historicalValues: [],
-      forecastValues: [],
-    },
-    {
-      label: "a) Ammortamento delle immobilizzazioni immateriali",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce09a_ammort_immateriali")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce09a_ammort_immateriali || 0),
-      indent: 1,
-    },
-    {
-      label: "b) Ammortamento delle immobilizzazioni materiali",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce09b_ammort_materiali")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce09b_ammort_materiali || 0),
-      indent: 1,
-    },
-    {
-      label: "c) Altre svalutazioni delle immobilizzazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce09c_svalutazioni")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce09c_svalutazioni || 0),
-      indent: 1,
-    },
-    {
-      label: "d) Sval. dei crediti compresi nell'attivo circ. e delle disp. liquide",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce09d_svalutazione_crediti")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce09d_svalutazione_crediti || 0),
-      indent: 1,
-    },
-    {
-      label: "Totale ammortamenti e svalutazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce09_ammortamenti")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce09_ammortamenti || 0),
-      indent: 1,
-    },
-    {
-      label: "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce10_var_rimanenze_mat_prime")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce10_var_rimanenze_mat_prime || 0),
-    },
-    {
-      label: "12) Accantonamenti per rischi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce11_accantonamenti")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce11_accantonamenti || 0),
-    },
-    {
-      label: "13) Altri accantonamenti",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce11b_altri_accantonamenti")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce11b_altri_accantonamenti || 0),
-    },
-    {
-      label: "14) Oneri diversi di gestione",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce12_oneri_diversi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce12_oneri_diversi || 0),
-    },
-    {
-      label: "Totale Costi della Produzione",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "production_cost", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.production_cost || 0),
-      isSubtotal: true,
-    },
+    { label: "B) COSTI DELLA PRODUZIONE", isTotal: true },
+    { label: "6) Materie prime, sussidiarie, di consumo e di merci", field: "ce05_materie_prime" },
+    { label: "7) Servizi", field: "ce06_servizi" },
+    { label: "8) Godimento di beni di terzi", field: "ce07_godimento_beni" },
+    { label: "9) Personale", field: "ce08_costi_personale" },
+    { label: "di cui per acc.to trattamento di fine rapporto, di quiescenza e simili", field: "ce08a_tfr_accrual", indent: 1 },
+    { label: "10) Ammortamenti e svalutazioni:" },
+    { label: "a) Ammortamento delle immobilizzazioni immateriali", field: "ce09a_ammort_immateriali", indent: 1 },
+    { label: "b) Ammortamento delle immobilizzazioni materiali", field: "ce09b_ammort_materiali", indent: 1 },
+    { label: "c) Altre svalutazioni delle immobilizzazioni", field: "ce09c_svalutazioni", indent: 1 },
+    { label: "d) Sval. dei crediti compresi nell'attivo circ. e delle disp. liquide", field: "ce09d_svalutazione_crediti", indent: 1 },
+    { label: "Totale ammortamenti e svalutazioni", field: "ce09_ammortamenti", indent: 1 },
+    { label: "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci", field: "ce10_var_rimanenze_mat_prime" },
+    { label: "12) Accantonamenti per rischi", field: "ce11_accantonamenti" },
+    { label: "13) Altri accantonamenti", field: "ce11b_altri_accantonamenti" },
+    { label: "14) Oneri diversi di gestione", field: "ce12_oneri_diversi" },
+    { label: "Totale Costi della Produzione", field: "production_cost", isSubtotal: true },
     // EBITDA
-    {
-      label: "EBITDA (MOL)",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ebitda", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ebitda || 0),
-      isSubtotal: true,
-    },
+    { label: "EBITDA (MOL)", field: "ebitda", isSubtotal: true },
     // EBIT
-    {
-      label: "EBIT (Risultato Operativo)",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ebit", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ebit || 0),
-      isSubtotal: true,
-    },
+    { label: "EBIT (Risultato Operativo)", field: "ebit", isSubtotal: true },
     // C) PROVENTI E ONERI FINANZIARI
-    {
-      label: "C) PROVENTI E ONERI FINANZIARI",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    {
-      label: "15) Proventi da partecipazioni",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce13_proventi_partecipazioni")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce13_proventi_partecipazioni || 0),
-    },
-    {
-      label: "16) Altri proventi finanziari",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce14_altri_proventi_finanziari")),
-      forecastValues: forecastYears.map(
-        (y) => forecastData[y]?.ce14_altri_proventi_finanziari || 0
-      ),
-    },
-    {
-      label: "17) Interessi e altri oneri finanziari",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce15_oneri_finanziari")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce15_oneri_finanziari || 0),
-    },
-    {
-      label: "17-bis) Utili e perdite su cambi",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce16_utili_perdite_cambi")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce16_utili_perdite_cambi || 0),
-    },
-    {
-      label: "Totale Proventi/Oneri Finanziari",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "financial_result", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.financial_result || 0),
-      isSubtotal: true,
-    },
+    { label: "C) PROVENTI E ONERI FINANZIARI", isTotal: true },
+    { label: "15) Proventi da partecipazioni", field: "ce13_proventi_partecipazioni" },
+    { label: "16) Altri proventi finanziari", field: "ce14_altri_proventi_finanziari" },
+    { label: "17) Interessi e altri oneri finanziari", field: "ce15_oneri_finanziari" },
+    { label: "17-bis) Utili e perdite su cambi", field: "ce16_utili_perdite_cambi" },
+    { label: "Totale Proventi/Oneri Finanziari", field: "financial_result", isSubtotal: true },
     // D) RETTIFICHE DI VALORE
-    {
-      label: "D) RETTIFICHE DI VALORE ATTIVIT\u00c0 FINANZIARIE",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    {
-      label: "18-19) Rettifiche di valore",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce17_rettifiche_attivita_fin")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce17_rettifiche_attivita_fin || 0),
-    },
+    { label: "D) RETTIFICHE DI VALORE ATTIVIT\u00c0 FINANZIARIE", isTotal: true },
+    { label: "18-19) Rettifiche di valore", field: "ce17_rettifiche_attivita_fin" },
     // E) PROVENTI E ONERI STRAORDINARI
-    {
-      label: "E) PROVENTI E ONERI STRAORDINARI",
-      historicalValues: [],
-      forecastValues: [],
-      isTotal: true,
-    },
-    {
-      label: "20) Proventi straordinari",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce18_proventi_straordinari")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce18_proventi_straordinari || 0),
-    },
-    {
-      label: "21) Oneri straordinari",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce19_oneri_straordinari")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce19_oneri_straordinari || 0),
-    },
-    {
-      label: "Totale Proventi/Oneri Straordinari",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "extraordinary_result", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.extraordinary_result || 0),
-      isSubtotal: true,
-    },
+    { label: "E) PROVENTI E ONERI STRAORDINARI", isTotal: true },
+    { label: "20) Proventi straordinari", field: "ce18_proventi_straordinari" },
+    { label: "21) Oneri straordinari", field: "ce19_oneri_straordinari" },
+    { label: "Totale Proventi/Oneri Straordinari", field: "extraordinary_result", isSubtotal: true },
     // RISULTATO PRIMA DELLE IMPOSTE
-    {
-      label: "Risultato prima delle imposte",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "profit_before_tax", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.profit_before_tax || 0),
-      isSubtotal: true,
-    },
+    { label: "Risultato prima delle imposte", field: "profit_before_tax", isSubtotal: true },
     // IMPOSTE
-    {
-      label: "22) Imposte sul reddito",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "ce20_imposte")),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.ce20_imposte || 0),
-    },
+    { label: "22) Imposte sul reddito", field: "ce20_imposte" },
     // UTILE/PERDITA
-    {
-      label: "23) UTILE (PERDITA) DELL'ESERCIZIO",
-      historicalValues: historicalYears.map((y) => getHistoricalValue(y, "net_profit", true)),
-      forecastValues: forecastYears.map((y) => forecastData[y]?.net_profit || 0),
-      isTotal: true,
-    },
+    { label: "23) UTILE (PERDITA) DELL'ESERCIZIO", field: "net_profit", isTotal: true },
   ];
 
   return (
@@ -656,72 +366,88 @@ function IncomeStatementTable({
           <TableHead className="px-4 py-3 text-left text-xs font-bold text-foreground uppercase border-r border-border">
             Descrizione
           </TableHead>
-          {historicalYears.map((year) => (
+          {historicalYears.map((yd) => (
             <TableHead
-              key={year}
+              key={yd.year}
               className="px-4 py-3 text-center text-xs font-bold text-foreground uppercase border-r border-border"
             >
-              {year}
+              {yd.year}
               <div className="text-muted-foreground font-normal">(Storico)</div>
             </TableHead>
           ))}
-          {forecastYears.map((year) => (
+          {forecastYears.map((yd) => (
             <TableHead
-              key={year}
+              key={yd.year}
               className="px-4 py-3 text-center text-xs font-bold text-primary uppercase border-r border-border bg-primary/10"
             >
-              {year}
+              {yd.year}
               <div className="text-primary font-normal">(Previsionale)</div>
             </TableHead>
           ))}
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row, index) => (
-          <TableRow
-            key={index}
-            className={cn(
-              row.isTotal
-                ? "bg-muted font-bold hover:bg-muted"
-                : row.isSubtotal
-                ? "bg-primary/10 font-semibold hover:bg-primary/10"
-                : "hover:bg-muted/50"
-            )}
-          >
-            <TableCell
-              className="px-4 py-2 text-sm text-foreground border-r border-border"
-              style={{ paddingLeft: row.indent ? `${1 + row.indent * 1.5}rem` : undefined }}
+        {rows.map((row, index) => {
+          const histValues = row.field
+            ? historicalYears.map((yd) => getVal(yd, row.field!))
+            : [];
+          const fcValues = row.field
+            ? forecastYears.map((yd) => getVal(yd, row.field!))
+            : [];
+
+          return (
+            <TableRow
+              key={index}
+              className={cn(
+                row.isTotal
+                  ? "bg-muted font-bold hover:bg-muted"
+                  : row.isSubtotal
+                  ? "bg-primary/10 font-semibold hover:bg-primary/10"
+                  : "hover:bg-muted/50"
+              )}
             >
-              {row.label}
-            </TableCell>
-            {/* Historical columns */}
-            {row.historicalValues.map((value, i) => (
               <TableCell
-                key={`hist-${i}`}
-                className={cn(
-                  "px-4 py-2 text-sm text-right border-r border-border",
-                  value < 0 ? "text-destructive" : "text-foreground",
-                  (row.isTotal || row.isSubtotal) && "font-semibold"
-                )}
+                className="px-4 py-2 text-sm text-foreground border-r border-border"
+                style={{ paddingLeft: row.indent ? `${1 + row.indent * 1.5}rem` : undefined }}
               >
-                {row.isTotal && !value ? "" : formatCurrency(value)}
+                {row.label}
               </TableCell>
-            ))}
-            {/* Forecast columns */}
-            {row.forecastValues.map((value, i) => (
-              <TableCell
-                key={`forecast-${i}`}
-                className={cn(
-                  "px-4 py-2 text-sm text-right border-r border-border",
-                  value < 0 ? "text-destructive" : "text-foreground",
-                  (row.isTotal || row.isSubtotal) && "font-semibold"
-                )}
-              >
-                {row.isTotal && !value ? "" : formatCurrency(value)}
-              </TableCell>
-            ))}
-          </TableRow>
-        ))}
+              {/* Historical columns */}
+              {histValues.map((value, i) => (
+                <TableCell
+                  key={`hist-${i}`}
+                  className={cn(
+                    "px-4 py-2 text-sm text-right border-r border-border",
+                    value < 0 ? "text-destructive" : "text-foreground",
+                    (row.isTotal || row.isSubtotal) && "font-semibold"
+                  )}
+                >
+                  {row.isTotal && !value ? "" : formatCurrency(value)}
+                </TableCell>
+              ))}
+              {/* Forecast columns */}
+              {fcValues.map((value, i) => (
+                <TableCell
+                  key={`forecast-${i}`}
+                  className={cn(
+                    "px-4 py-2 text-sm text-right border-r border-border",
+                    value < 0 ? "text-destructive" : "text-foreground",
+                    (row.isTotal || row.isSubtotal) && "font-semibold"
+                  )}
+                >
+                  {row.isTotal && !value ? "" : formatCurrency(value)}
+                </TableCell>
+              ))}
+              {/* Empty cells for section headers without field */}
+              {!row.field && historicalYears.map((yd) => (
+                <TableCell key={`hist-empty-${yd.year}`} className="px-4 py-2 text-sm text-right border-r border-border" />
+              ))}
+              {!row.field && forecastYears.map((yd) => (
+                <TableCell key={`fc-empty-${yd.year}`} className="px-4 py-2 text-sm text-right border-r border-border" />
+              ))}
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
@@ -739,41 +465,16 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 
 // Helper function to prepare chart data
 function prepareChartData(
-  historicalYears: number[],
-  historicalData: Record<number, IncomeStatement>,
-  forecastYears: number[],
-  forecastData: Record<number, ForecastIncomeStatement>,
+  historicalYears: YearData[],
+  forecastYears: YearData[],
   metrics: string[]
 ): any[] {
-  const data: any[] = [];
-
-  // Add historical data
-  historicalYears.forEach((year) => {
-    const historical = historicalData[year];
-    if (historical) {
-      data.push({
-        year: year.toString(),
-        revenue: historical.revenue,
-        ebitda: historical.ebitda,
-        ebit: historical.ebit,
-        net_profit: historical.net_profit,
-      });
-    }
-  });
-
-  // Add forecast data
-  forecastYears.forEach((year) => {
-    const forecast = forecastData[year];
-    if (forecast) {
-      data.push({
-        year: year.toString(),
-        revenue: forecast.revenue,
-        ebitda: forecast.ebitda,
-        ebit: forecast.ebit,
-        net_profit: forecast.net_profit,
-      });
-    }
-  });
-
-  return data;
+  const allYears = [...historicalYears, ...forecastYears];
+  return allYears.map((yd) => ({
+    year: yd.year.toString(),
+    revenue: yd.income_statement.revenue || 0,
+    ebitda: yd.income_statement.ebitda || 0,
+    ebit: yd.income_statement.ebit || 0,
+    net_profit: yd.income_statement.net_profit || 0,
+  }));
 }

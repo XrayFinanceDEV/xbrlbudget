@@ -8,6 +8,8 @@ import tempfile
 import os
 
 from app.core.database import get_db
+from app.core.auth import get_current_user_id
+from app.core.ownership import validate_company_owned_by_user, check_company_limit
 from app.schemas.imports import XBRLImportResponse, CSVImportResponse, ImportError
 from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced, XBRLParseError
 from importers.csv_importer import import_csv_file
@@ -35,7 +37,9 @@ async def upload_xbrl(
     company_id: Optional[int] = Query(None, description="Existing company ID (optional)"),
     create_company: bool = Query(True, description="Create company if not exists"),
     sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6, used when creating new company)"),
-    db: Session = Depends(get_db)
+    period_months: Optional[int] = Query(None, ge=1, le=11, description="Months in partial year (1-11). NULL = full 12-month year"),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Import XBRL file and extract financial data.
@@ -88,13 +92,34 @@ async def upload_xbrl(
             tmp.write(content)
             tmp_file = tmp.name
 
+        # Validate company ownership if company_id provided
+        if company_id:
+            validate_company_owned_by_user(db, company_id, user_id)
+        elif create_company:
+            check_company_limit(db, user_id)
+
         # Import XBRL file using enhanced parser with reconciliation
         result = import_xbrl_file_enhanced(
             file_path=tmp_file,
             company_id=company_id,
             create_company=create_company,
-            sector=sector
+            sector=sector,
+            user_id=user_id,
         )
+
+        # Set period_months on FinancialYear if partial year import
+        # Target only records without period_months (newly created by XBRL parser)
+        if period_months and result.get("company_id"):
+            from database.models import FinancialYear as FYModel
+            for year in result.get("years_imported", []):
+                fy = db.query(FYModel).filter(
+                    FYModel.company_id == result["company_id"],
+                    FYModel.year == year,
+                    FYModel.period_months.is_(None),
+                ).order_by(FYModel.id.desc()).first()
+                if fy:
+                    fy.period_months = period_months
+            db.commit()
 
         return XBRLImportResponse(**result)
 
@@ -153,7 +178,8 @@ async def upload_csv(
     company_id: int = Query(..., description="Company ID to import data for"),
     year1: Optional[int] = Query(None, description="First year (most recent, auto-detect if None)"),
     year2: Optional[int] = Query(None, description="Second year (previous, auto-detect if None)"),
-    db: Session = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
     Import CSV file (TEBE format) and extract financial data.
@@ -182,11 +208,8 @@ async def upload_csv(
             detail=f"Invalid file type: .{file_ext}. Only .csv files are supported."
         )
 
-    # Validate company exists
-    from database.models import Company
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(status_code=404, detail=f"Company with ID {company_id} not found")
+    # Validate company exists and belongs to user
+    validate_company_owned_by_user(db, company_id, user_id)
 
     # Read file content
     try:
@@ -254,9 +277,10 @@ async def upload_csv(
     - Bilancio Abbreviato (abbreviated format)  
     - Bilancio Ordinario (full format)
     
-    Uses Docling AI to extract table data from PDF and maps to Italian GAAP schema.
-    
-    Processing time: 3-10 seconds per PDF (first run downloads models ~2GB).
+    Uses PyMuPDF + Claude Haiku to extract table data from PDF and maps to Italian GAAP schema.
+    Requires ANTHROPIC_API_KEY.
+
+    Processing time: ~5 seconds per PDF.
     """
 )
 async def upload_pdf(
@@ -266,10 +290,12 @@ async def upload_pdf(
     company_name: Optional[str] = Query(None, description="Company name (for new company creation)"),
     create_company: bool = Query(True, description="Create company if not exists"),
     sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6, used when creating new company)"),
-    db: Session = Depends(get_db)
+    period_months: Optional[int] = Query(None, ge=1, le=11, description="Months in partial year (1-11). NULL = full 12-month year"),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """
-    Import PDF balance sheet and extract financial data using Docling AI.
+    Import PDF balance sheet and extract financial data using PyMuPDF + Claude Haiku.
 
     Args:
         file: Uploaded PDF file
@@ -328,14 +354,22 @@ async def upload_pdf(
             tmp.write(content)
             tmp_file = tmp.name
 
-        # Import PDF file using Docling
+        # Validate company ownership if company_id provided
+        if company_id:
+            validate_company_owned_by_user(db, company_id, user_id)
+        elif create_company:
+            check_company_limit(db, user_id)
+
+        # Import PDF file (importer handles period_months + prior year internally)
         result = import_pdf_balance_sheet(
             file_path=tmp_file,
             company_id=company_id,
             fiscal_year=fiscal_year,
             company_name=company_name,
             create_company=create_company,
-            sector=sector
+            sector=sector,
+            period_months=period_months,
+            user_id=user_id,
         )
 
         return result

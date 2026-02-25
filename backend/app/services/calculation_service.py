@@ -12,6 +12,7 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from database import models
+from database.queries import get_fy_prefer_full
 from calculations.ratios import FinancialRatiosCalculator
 from calculations.altman import AltmanCalculator
 from calculations.rating_fgpmi import FGPMICalculator
@@ -56,11 +57,8 @@ def get_financial_year_with_statements(
     Raises:
         ValueError: If any required data is missing
     """
-    # Get financial year with company
-    fy = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year
-    ).first()
+    # Get financial year with company (prefer full-year record)
+    fy = get_fy_prefer_full(db, company_id, year)
 
     if not fy:
         raise ValueError(f"Financial year {year} for company {company_id} not found")
@@ -280,11 +278,8 @@ def calculate_cashflow(
     # Get current year data
     company, fy, bs_current, inc_current = get_financial_year_with_statements(db, company_id, year)
 
-    # Try to get previous year
-    fy_previous = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year - 1
-    ).first()
+    # Try to get previous year (prefer full-year record)
+    fy_previous = get_fy_prefer_full(db, company_id, year - 1)
 
     bs_previous = fy_previous.balance_sheet if fy_previous else None
 
@@ -314,9 +309,10 @@ def calculate_cashflow_multi_year(
     Returns:
         List of CashFlowResult schemas, one per year (sorted by year)
     """
-    # Get all financial years for company
+    # Get all full-year financial years for company (exclude partial)
     financial_years = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.period_months.is_(None),
     ).order_by(models.FinancialYear.year).all()
 
     if len(financial_years) < 2:
@@ -393,20 +389,14 @@ def calculate_detailed_cashflow_historical_and_forecast(
     if scenario.base_year != base_year:
         raise ValueError(f"Scenario base year {scenario.base_year} does not match requested base year {base_year}")
 
-    # Get base year financial statements (last historical year)
-    fy_base = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == base_year
-    ).first()
+    # Get base year financial statements (last historical year, prefer full-year)
+    fy_base = get_fy_prefer_full(db, company_id, base_year)
 
     if not fy_base or not fy_base.balance_sheet or not fy_base.income_statement:
         raise ValueError(f"Base year {base_year} missing financial statements")
 
     # Get previous year (base_year - 1) for calculating base year cashflow
-    fy_previous = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == base_year - 1
-    ).first()
+    fy_previous = get_fy_prefer_full(db, company_id, base_year - 1)
 
     cashflows = []
 
@@ -483,9 +473,10 @@ def calculate_ratios_historical_and_forecast(
     if not scenario:
         raise ValueError(f"Scenario {scenario_id} not found for company {company_id}")
 
-    # Get all historical years
+    # Get all full-year historical years (exclude partial)
     historical_years = db.query(models.FinancialYear).filter(
-        models.FinancialYear.company_id == company_id
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.period_months.is_(None),
     ).order_by(models.FinancialYear.year).all()
 
     # Get all forecast years
@@ -554,11 +545,12 @@ def calculate_detailed_cashflow_historical_only(
     Returns:
         MultiYearDetailedCashFlow with historical cashflows only
     """
-    # Get all financial years in range
+    # Get all full-year financial years in range (exclude partial)
     financial_years = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
         models.FinancialYear.year >= start_year - 1,  # Need previous year as base
-        models.FinancialYear.year <= end_year
+        models.FinancialYear.year <= end_year,
+        models.FinancialYear.period_months.is_(None),
     ).order_by(models.FinancialYear.year).all()
 
     if len(financial_years) < 2:

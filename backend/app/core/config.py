@@ -9,10 +9,12 @@ from typing import List, Optional
 
 def get_database_url() -> str:
     """Get absolute path to project root database"""
-    # Get project root (4 levels up from this file: core -> app -> backend -> budget)
-    current_file = os.path.abspath(__file__)
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
-    db_path = os.path.join(project_root, "financial_analysis.db")
+    db_path = os.environ.get('DATABASE_PATH')
+    if not db_path:
+        # Get project root (4 levels up from this file: core -> app -> backend -> budget)
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+        db_path = os.path.join(project_root, "financial_analysis.db")
     return f"sqlite:///{db_path}"
 
 
@@ -37,6 +39,17 @@ class Settings(BaseSettings):
         "http://localhost:8501",  # Streamlit (legacy)
         "https://xbrlbudget.netlify.app",  # Netlify production deployment
     ]
+
+    # CORS - Additional origins from env var (comma-separated)
+    ALLOWED_ORIGINS: Optional[str] = None
+
+    # Authentication
+    SUPABASE_JWT_SECRET: Optional[str] = None  # Supabase JWT secret (HS256)
+    DEV_USER_ID: Optional[str] = None  # Bypass auth in dev mode
+    MAX_COMPANIES_PER_USER: int = 50  # Company limit per user
+
+    # Anthropic API (for PDF LLM extraction)
+    ANTHROPIC_API_KEY: Optional[str] = None
 
     # Application
     DEBUG: bool = True

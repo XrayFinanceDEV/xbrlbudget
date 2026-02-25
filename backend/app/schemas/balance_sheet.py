@@ -10,24 +10,24 @@ from decimal import Decimal
 class BalanceSheetBase(BaseModel):
     """Base BalanceSheet schema with all line items"""
     # Assets
-    sp01_crediti_soci: Decimal = Field(default=Decimal("0"), ge=0)
-    sp02_immob_immateriali: Decimal = Field(default=Decimal("0"), ge=0)
-    sp03_immob_materiali: Decimal = Field(default=Decimal("0"), ge=0)
-    sp04_immob_finanziarie: Decimal = Field(default=Decimal("0"), ge=0)
+    sp01_crediti_soci: Decimal = Field(default=Decimal("0"))
+    sp02_immob_immateriali: Decimal = Field(default=Decimal("0"))
+    sp03_immob_materiali: Decimal = Field(default=Decimal("0"))
+    sp04_immob_finanziarie: Decimal = Field(default=Decimal("0"))
 
     # Detailed breakdown - Immobilizzazioni finanziarie
-    sp04a_partecipazioni: Decimal = Field(default=Decimal("0"), ge=0)
-    sp04b_crediti_immob_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp04c_crediti_immob_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp04d_altri_titoli: Decimal = Field(default=Decimal("0"), ge=0)
-    sp04e_strumenti_derivati_attivi: Decimal = Field(default=Decimal("0"), ge=0)
+    sp04a_partecipazioni: Decimal = Field(default=Decimal("0"))
+    sp04b_crediti_immob_breve: Decimal = Field(default=Decimal("0"))
+    sp04c_crediti_immob_lungo: Decimal = Field(default=Decimal("0"))
+    sp04d_altri_titoli: Decimal = Field(default=Decimal("0"))
+    sp04e_strumenti_derivati_attivi: Decimal = Field(default=Decimal("0"))
 
-    sp05_rimanenze: Decimal = Field(default=Decimal("0"), ge=0)
-    sp06_crediti_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp07_crediti_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp08_attivita_finanziarie: Decimal = Field(default=Decimal("0"), ge=0)
-    sp09_disponibilita_liquide: Decimal = Field(default=Decimal("0"), ge=0)
-    sp10_ratei_risconti_attivi: Decimal = Field(default=Decimal("0"), ge=0)
+    sp05_rimanenze: Decimal = Field(default=Decimal("0"))
+    sp06_crediti_breve: Decimal = Field(default=Decimal("0"))
+    sp07_crediti_lungo: Decimal = Field(default=Decimal("0"))
+    sp08_attivita_finanziarie: Decimal = Field(default=Decimal("0"))
+    sp09_disponibilita_liquide: Decimal = Field(default=Decimal("0"))
+    sp10_ratei_risconti_attivi: Decimal = Field(default=Decimal("0"))
 
     # Liabilities & Equity
     sp11_capitale: Decimal = Field(default=Decimal("0"))
@@ -44,30 +44,30 @@ class BalanceSheetBase(BaseModel):
     sp12h_riserva_neg_azioni_proprie: Decimal = Field(default=Decimal("0"))
 
     sp13_utile_perdita: Decimal = Field(default=Decimal("0"))
-    sp14_fondi_rischi: Decimal = Field(default=Decimal("0"), ge=0)
-    sp15_tfr: Decimal = Field(default=Decimal("0"), ge=0)
-    sp16_debiti_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17_debiti_lungo: Decimal = Field(default=Decimal("0"), ge=0)
+    sp14_fondi_rischi: Decimal = Field(default=Decimal("0"))
+    sp15_tfr: Decimal = Field(default=Decimal("0"))
+    sp16_debiti_breve: Decimal = Field(default=Decimal("0"))
+    sp17_debiti_lungo: Decimal = Field(default=Decimal("0"))
 
     # Detailed breakdown - Financial debts
-    sp16a_debiti_banche_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17a_debiti_banche_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp16b_debiti_altri_finanz_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17b_debiti_altri_finanz_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp16c_debiti_obbligazioni_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17c_debiti_obbligazioni_lungo: Decimal = Field(default=Decimal("0"), ge=0)
+    sp16a_debiti_banche_breve: Decimal = Field(default=Decimal("0"))
+    sp17a_debiti_banche_lungo: Decimal = Field(default=Decimal("0"))
+    sp16b_debiti_altri_finanz_breve: Decimal = Field(default=Decimal("0"))
+    sp17b_debiti_altri_finanz_lungo: Decimal = Field(default=Decimal("0"))
+    sp16c_debiti_obbligazioni_breve: Decimal = Field(default=Decimal("0"))
+    sp17c_debiti_obbligazioni_lungo: Decimal = Field(default=Decimal("0"))
 
     # Detailed breakdown - Operating debts
-    sp16d_debiti_fornitori_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17d_debiti_fornitori_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp16e_debiti_tributari_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17e_debiti_tributari_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp16f_debiti_previdenza_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17f_debiti_previdenza_lungo: Decimal = Field(default=Decimal("0"), ge=0)
-    sp16g_altri_debiti_breve: Decimal = Field(default=Decimal("0"), ge=0)
-    sp17g_altri_debiti_lungo: Decimal = Field(default=Decimal("0"), ge=0)
+    sp16d_debiti_fornitori_breve: Decimal = Field(default=Decimal("0"))
+    sp17d_debiti_fornitori_lungo: Decimal = Field(default=Decimal("0"))
+    sp16e_debiti_tributari_breve: Decimal = Field(default=Decimal("0"))
+    sp17e_debiti_tributari_lungo: Decimal = Field(default=Decimal("0"))
+    sp16f_debiti_previdenza_breve: Decimal = Field(default=Decimal("0"))
+    sp17f_debiti_previdenza_lungo: Decimal = Field(default=Decimal("0"))
+    sp16g_altri_debiti_breve: Decimal = Field(default=Decimal("0"))
+    sp17g_altri_debiti_lungo: Decimal = Field(default=Decimal("0"))
 
-    sp18_ratei_risconti_passivi: Decimal = Field(default=Decimal("0"), ge=0)
+    sp18_ratei_risconti_passivi: Decimal = Field(default=Decimal("0"))
 
 
 class BalanceSheetCreate(BalanceSheetBase):

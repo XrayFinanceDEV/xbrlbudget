@@ -23,6 +23,7 @@ Sistema completo di analisi finanziaria per bilanci italiani secondo i principi 
 - ✅ Importazione da XBRL (formato italiano - tassonomie 2011-2018)
 - ✅ Importazione da CSV (TEBE)
 - ✅ Inserimento manuale bilanci (Stato Patrimoniale + Conto Economico)
+- ✅ **Multi-tenancy**: Autenticazione Supabase JWT, dati isolati per utente (max 50 aziende)
 
 ### Analisi Finanziaria
 - ✅ **Indici di Liquidità**: Current Ratio, Quick Ratio, Acid Test
@@ -46,6 +47,62 @@ Sistema completo di analisi finanziaria per bilanci italiani secondo i principi 
 - ✅ **Assumptions Management**: Gestione ipotesi crescita per categoria
 - ✅ **Cash Flow Analysis**: Rendiconto finanziario (metodo indiretto)
 
+## 🔐 Authentication & Multi-Tenancy
+
+The app is designed to be embedded as an iframe inside **Formula Finance**. Authentication is handled via Supabase JWT tokens passed from the parent app — no separate login required.
+
+### How It Works
+
+1. **Parent app** (Formula Finance) authenticates users via Supabase
+2. **Parent sends JWT** to iframe via `postMessage` (`{ type: 'AUTH_TOKEN', token: '...' }`)
+3. **Frontend stores token** and includes it as `Authorization: Bearer <token>` on all API calls
+4. **Backend validates JWT** (HS256), extracts `user_id` from `sub` claim
+5. **All data is scoped** per user — each user sees only their companies (max 50)
+
+### Configuration
+
+| Environment Variable | Description | Required |
+|---------------------|-------------|----------|
+| `SUPABASE_JWT_SECRET` | Supabase JWT secret for HS256 verification | Production |
+| `DEV_USER_ID` | Bypass JWT auth with a fixed user_id | Dev only |
+| `MAX_COMPANIES_PER_USER` | Company limit per user (default: 50) | Optional |
+
+### Dev Mode
+
+For local development without Formula Finance, set `DEV_USER_ID`:
+
+```bash
+# No JWT required — all API calls use "dev-user-001" as user_id
+DEV_USER_ID=dev-user-001 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### Production Mode
+
+```bash
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+All API endpoints require authentication. Unauthenticated requests return `401 Unauthorized`.
+
+### API Authentication
+
+Include the JWT token in all API requests:
+
+```bash
+curl -H "Authorization: Bearer <supabase-jwt-token>" \
+  http://localhost:8000/api/v1/companies
+```
+
+### PostMessage Protocol (iframe ↔ parent)
+
+| Direction | Message | When |
+|-----------|---------|------|
+| Child → Parent | `{ type: 'REQUEST_AUTH_TOKEN' }` | On iframe load |
+| Parent → Child | `{ type: 'AUTH_TOKEN', token: 'jwt...' }` | On request + token refresh |
+| Parent → Child | `{ type: 'AUTH_LOGOUT' }` | On user logout |
+
+---
+
 ## 🎯 API REST (FastAPI)
 
 ### Simplified API Workflow
@@ -58,7 +115,7 @@ Questo elimina la necessità di fare 15+ chiamate API - solo **3 chiamate totali
 ```bash
 POST /api/v1/import/xbrl    # Italian XBRL files (6 taxonomies supported)
 POST /api/v1/import/csv     # CSV files (TEBE format)
-POST /api/v1/import/pdf     # PDF balance sheets (Docling AI extraction)
+POST /api/v1/import/pdf     # PDF balance sheets (Claude AI extraction)
 ```
 
 #### Phase 2: ASSUMPTIONS - Budget Scenarios (2 endpoints)
@@ -153,7 +210,7 @@ GET /companies/{id}/years/{year}/calculations/complete        # Complete analysi
 ```
 POST /import/xbrl                              # Upload XBRL file (Italian GAAP)
 POST /import/csv                               # Upload CSV file (TEBE format)
-POST /import/pdf                               # Upload PDF file (Docling AI extraction)
+POST /import/pdf                               # Upload PDF file (Claude AI extraction)
 ```
 
 #### Interactive API Documentation
@@ -210,7 +267,7 @@ POST /import/pdf                               # Upload PDF file (Docling AI ext
 #### PDF Import (`POST /api/v1/import/pdf`) - 🆕 NEW
 
 **Supported Features:**
-- ✅ Automatic table extraction using Docling AI
+- ✅ Automatic table extraction using PyMuPDF + Claude Haiku
 - ✅ Support for Bilancio Micro, Abbreviato, Ordinario (IV CEE format)
 - ✅ Intelligent mapping to Italian GAAP schema (sp01-sp18, ce01-ce20)
 - ✅ Automatic company creation or update
@@ -234,7 +291,7 @@ POST /import/pdf                               # Upload PDF file (Docling AI ext
 
 **Processing Time:** 3-10 seconds per PDF (first run: +model download time)
 
-**Note:** First run downloads Docling AI models (~2GB). Subsequent runs are fast as models are cached.
+**Note:** Requires `ANTHROPIC_API_KEY` environment variable.
 
 ### Complete Analysis Response Structure
 
@@ -456,15 +513,86 @@ Il endpoint `/companies/{id}/scenarios/{sid}/analysis` restituisce una risposta 
    python -c "from database.db import init_db; init_db()"
    ```
 
+## Docker Deployment
+
+Deploy the full stack (backend + frontend + nginx) with a single command.
+
+### Quick Start
+
+```bash
+# 1. Copy and edit environment config
+cp .env.docker .env
+# Edit .env — set SUPABASE_JWT_SECRET for production, or DEV_USER_ID for testing
+
+# 2. Build and start
+docker compose build
+docker compose up -d
+
+# 3. Verify
+curl http://localhost/health          # → {"status": "ok"}
+open http://localhost                  # → Next.js app
+open http://localhost/docs             # → Swagger UI
+```
+
+### Architecture
+
+```
+Internet → Nginx (:80)
+              ├── /                    → Frontend (Next.js, :3000)
+              └── /api/, /docs, /health → Backend (FastAPI, :8000)
+```
+
+Three services: **nginx** (reverse proxy), **backend** (FastAPI + shared modules), **frontend** (Next.js standalone). SQLite database persisted via Docker volume.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SUPABASE_JWT_SECRET` | Supabase JWT secret (HS256) | Required in prod |
+| `DEV_USER_ID` | Bypass JWT auth (any string) | - |
+| `ANTHROPIC_API_KEY` | Claude API key for PDF extraction | - |
+| `ALLOWED_ORIGINS` | Extra CORS origins (comma-separated) | - |
+| `MAX_COMPANIES_PER_USER` | Company limit per user | 50 |
+| `PORT` | External port | 80 |
+
+### Common Operations
+
+```bash
+# View logs
+docker compose logs -f
+
+# Restart after .env changes
+docker compose down && docker compose up -d
+
+# Rebuild after code changes
+docker compose build && docker compose up -d
+
+# Stop and remove data (database)
+docker compose down -v
+```
+
+### Volumes
+
+| Volume | Contents |
+|--------|----------|
+| `db-data` | SQLite database (`financial_analysis.db`) — persists across restarts |
+
+---
+
 ## Utilizzo
 
-### 🚀 Avvio Completo (Backend + Frontend)
+### Avvio Completo (Backend + Frontend)
 
 #### 1. Avvia Backend API
 ```bash
 cd backend
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Dev mode (no JWT required):
+DEV_USER_ID=dev-user-001 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Production mode (requires Supabase JWT):
+SUPABASE_JWT_SECRET=your-secret uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Il backend sarà disponibile su:
@@ -614,7 +742,9 @@ budget/
 │   │   └── core/
 │   │       ├── config.py           # Pydantic Settings
 │   │       ├── database.py         # DB dependency injection
-│   │       └── decimal_encoder.py  # JSON Decimal serialization
+│   │       ├── decimal_encoder.py  # JSON Decimal serialization
+│   │       ├── auth.py             # JWT validation + dev mode fallback
+│   │       └── ownership.py        # Company ownership + limit checks
 │   └── requirements.txt
 │
 ├── frontend/                       # 🎨 Next.js Frontend (Modern)
@@ -628,6 +758,7 @@ budget/
 │   │   └── forecast/               # Budget forecast pages
 │   ├── components/                 # Reusable React components
 │   ├── contexts/
+│   │   ├── AuthContext.tsx         # JWT auth via postMessage from parent iframe
 │   │   └── AppContext.tsx          # Global state (companies, years)
 │   ├── lib/
 │   │   └── api.ts                  # Axios API client
@@ -705,6 +836,7 @@ SQLite Database (same database)
 - ✅ **API-First**: Frontend is pure TypeScript/React with zero Python dependencies, communicates via REST API only
 - ✅ **Clean Separation**: Modern stack in `/backend` and `/frontend`, legacy preserved in `/legacy`
 - ✅ **Same Database**: Both applications use the same SQLite database for data continuity
+- ✅ **Multi-Tenant**: All data scoped per `user_id` via Supabase JWT auth (max 50 companies per user)
 
 ## Settori Supportati
 
@@ -801,7 +933,7 @@ Panoramica completa con grafici interattivi:
 SQLite locale (`financial_analysis.db`)
 
 **Modelli:**
-- `Company`: Anagrafica aziende
+- `Company`: Anagrafica aziende (con `user_id` per multi-tenancy, composite unique su user_id + tax_id)
 - `FinancialYear`: Anni fiscali
 - `BalanceSheet`: Stato Patrimoniale (22 voci)
 - `IncomeStatement`: Conto Economico (20 voci)
@@ -889,12 +1021,18 @@ Usa **solo FastAPI** quando:
 ### ✅ Backend API (Complete)
 - ✅ REST API with complete CRUD operations
 - ✅ All financial calculations (ratios, Altman, FGPMI)
-- ✅ **Data import endpoints (XBRL/CSV upload via API)**
+- ✅ **Data import endpoints (XBRL/CSV/PDF upload via API)**
   - Multipart file upload with validation
   - Support for all 6 Italian XBRL taxonomies (2011-2018)
   - CSV import in TEBE format
-  - Automatic company creation from XBRL
+  - PDF import via PyMuPDF + Claude Haiku
+  - Automatic company creation from XBRL/PDF
   - Comprehensive error handling
+- ✅ **Authentication & Multi-Tenancy**
+  - Supabase JWT validation (HS256)
+  - Dev mode bypass via `DEV_USER_ID`
+  - Per-user data isolation (all endpoints scoped by user_id)
+  - Company limit enforcement (max 50 per user)
 - ✅ Interactive API documentation (Swagger UI)
 - ✅ 85% code reuse from existing calculators
 - ✅ Pydantic schemas for type safety
@@ -922,14 +1060,20 @@ Usa **solo FastAPI** quando:
 
 ---
 
-**Version:** 2.3.0 (Sector Selection)
+**Version:** 2.4.0 (Multi-Tenancy & Auth)
 **Released:** February 2026
 **Python:** 3.11+
-**Backend:** FastAPI 0.115+ with XBRL/CSV/PDF Import
+**Backend:** FastAPI 0.115+ with XBRL/CSV/PDF Import + JWT Auth
 **Frontend:** Next.js 15 with TypeScript + shadcn/ui | Streamlit 1.40+ (Deprecated)
 **Made with ❤️ in Italy 🇮🇹**
 
-### What's New in 2.3.0
+### What's New in 2.4.0
+- ✨ **Supabase JWT authentication** via iframe postMessage protocol
+- ✨ **Multi-tenancy**: All data scoped per user_id (max 50 companies per user)
+- ✨ **Dev mode**: `DEV_USER_ID` env var bypasses JWT for local development
+- ✨ **Company ownership validation** on all API endpoints (404 for unauthorized access)
+
+### Version 2.3.0 (Previous)
 - ✨ **Sector selection** during XBRL/PDF import (6 sectors)
 - ✨ **Editable sector** on Home page company table
 - ✨ Sector affects Altman Z-Score model and FGPMI rating thresholds

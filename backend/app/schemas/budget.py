@@ -3,7 +3,7 @@ Pydantic schemas for Budget and Forecast models
 """
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from decimal import Decimal
 
 
@@ -13,6 +13,8 @@ class BudgetScenarioBase(BaseModel):
     company_id: int
     name: str = Field(..., min_length=1, max_length=255)
     base_year: int = Field(..., ge=2000, le=2100)
+    scenario_type: str = Field(default="budget")  # "budget" | "infrannuale"
+    period_months: Optional[int] = Field(default=None, ge=1, le=11)
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
 
@@ -26,6 +28,8 @@ class BudgetScenarioUpdate(BaseModel):
     """Schema for updating a BudgetScenario"""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     base_year: Optional[int] = Field(None, ge=2000, le=2100)
+    scenario_type: Optional[str] = None
+    period_months: Optional[int] = Field(None, ge=1, le=11)
     description: Optional[str] = None
     is_active: Optional[int] = Field(None, ge=0, le=1)
 
@@ -155,3 +159,23 @@ class ForecastYearInDB(ForecastYearBase):
 class ForecastYear(ForecastYearInDB):
     """Full ForecastYear schema for API responses"""
     pass
+
+
+# Intra-Year Comparison Schemas
+class IntraYearComparisonItem(BaseModel):
+    """Single line item comparison between partial year and reference"""
+    code: str
+    label: str
+    partial_value: float
+    reference_value: float
+    pct_of_reference: float
+    annualized_value: float
+
+
+class IntraYearComparison(BaseModel):
+    """Complete comparison between partial year and reference full year"""
+    partial_year: int
+    reference_year: int
+    period_months: int
+    income_items: List[IntraYearComparisonItem]
+    balance_items: List[IntraYearComparisonItem]

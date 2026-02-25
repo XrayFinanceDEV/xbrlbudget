@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**XBRL Budget** is an Italian GAAP compliant financial analysis and credit rating system. It analyzes Italian company financial statements, calculates comprehensive financial ratios, and provides credit risk assessments using Altman Z-Score and FGPMI rating models.
+**XBRL Budget** is an Italian GAAP compliant financial analysis and credit rating system. It analyzes Italian company financial statements, calculates comprehensive financial ratios, and provides credit risk assessments using Altman Z-Score and FGPMI rating models. Includes **intra-year analysis** (situazione infrannuale) for projecting partial-year financials to 12 months.
 
 **Key Domain:** Italian accounting (OIC - Organismo Italiano di Contabilità) with specialized XBRL import for Italian taxonomies.
 
@@ -14,6 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Both applications share the same core modules (`database/`, `calculations/`, `importers/`) and SQLite database.
 
+**Multi-tenancy:** App is embedded as an iframe in Formula Finance. Supabase JWT auth identifies users; all data is scoped per `user_id` on the `Company` model (max 50 companies per user).
+
 ## Quick Reference
 
 **Project Root:** `/home/peter/DEV/budget/`
@@ -21,7 +23,7 @@ Both applications share the same core modules (`database/`, `calculations/`, `im
 **Key Directories:**
 - `backend/` - FastAPI REST API (uses shared modules from root)
 - `frontend/` - Next.js 15 React frontend (TypeScript, API client only)
-- `database/` - **SHARED** SQLAlchemy ORM models (used by both apps)
+- `database/` - **SHARED** SQLAlchemy ORM models + query helpers (used by both apps)
 - `calculations/` - **SHARED** Financial calculators (ratios, Altman, FGPMI, forecasting)
 - `importers/` - **SHARED** XBRL, CSV, and PDF parsers
 - `pdf_service/` - PDF report generation (EM-Score, Italian text, report builder)
@@ -34,19 +36,30 @@ Both applications share the same core modules (`database/`, `calculations/`, `im
 
 **Run Modern Stack:**
 ```bash
-# Terminal 1: Backend
+# Terminal 1: Backend (dev mode — no JWT required)
 cd backend && source venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+DEV_USER_ID=dev-user-001 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Terminal 2: Frontend
 cd frontend && npm run dev
 ```
 
-**API Workflow (3 calls):**
+**API Workflow — Budget (3 calls):**
 ```bash
 # 1. INPUT: Upload data → POST /api/v1/import/{xbrl|csv|pdf}
 # 2. ASSUMPTIONS: Create scenario + bulk assumptions → PUT /scenarios/{id}/assumptions
 # 3. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
+```
+
+**API Workflow — Infrannuale (5 calls + optional promote):**
+```bash
+# 1. INPUT: Upload partial-year data → POST /api/v1/import/{pdf|xbrl} (with period_months)
+# 2. SCENARIO: Create infrannuale scenario → POST /companies/{id}/scenarios (scenario_type="infrannuale")
+# 3. COMPARE: Get partial vs reference comparison → GET /scenarios/{id}/comparison
+# 4. PROJECT: Save overrides + project to 12M → PUT /scenarios/{id}/assumptions (auto_generate=true)
+# 5. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
+# 6. PROMOTE (optional): Copy projection to FinancialYear → POST /scenarios/{id}/promote
+#    → Enables using projected year as base year for a subsequent budget scenario
 ```
 
 **Important:** Backend imports shared modules from project root via `sys.path` manipulation in `backend/app/main.py`. No code duplication - single source of truth for all business logic.
@@ -67,7 +80,12 @@ cd .. && python -c "from database.db import init_db; init_db()"
 ### Running Backend
 ```bash
 cd backend && source venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Dev mode (no JWT required, uses fallback user_id):
+DEV_USER_ID=dev-user-001 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Production mode (requires Supabase JWT):
+SUPABASE_JWT_SECRET=your-jwt-secret uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 # API: http://localhost:8000/api/v1
 # Docs: http://localhost:8000/docs
@@ -97,34 +115,70 @@ python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
 
 ## Architecture
 
-### Simplified API Design (7 Core Endpoints)
+### Simplified API Design
 
 **Pattern:** INPUT → ASSUMPTIONS → OUTPUT
 
 1. **INPUT (3 endpoints)**: Data import
-   - `POST /api/v1/import/xbrl` - Italian XBRL files (6 taxonomies)
+   - `POST /api/v1/import/xbrl` - Italian XBRL files (6 taxonomies). Optional `period_months` for partial year.
    - `POST /api/v1/import/csv` - CSV files (TEBE format)
-   - `POST /api/v1/import/pdf` - PDF balance sheets (Docling AI)
+   - `POST /api/v1/import/pdf` - PDF balance sheets (Docling AI). Optional `period_months` for partial year.
 
 2. **ASSUMPTIONS (2 endpoints)**: Budget scenarios
-   - `POST /companies/{id}/scenarios` - Create scenario
+   - `POST /companies/{id}/scenarios` - Create scenario (`scenario_type`: "budget" or "infrannuale")
    - `PUT /scenarios/{id}/assumptions` - Bulk upsert all years (auto_generate=true)
 
 3. **OUTPUT (1 endpoint)**: Complete analysis
    - `GET /scenarios/{id}/analysis` - Returns historical + forecast + all calculations
 
-4. **MANAGEMENT (2 endpoints)**: Basic CRUD
+4. **INTRA-YEAR (2 endpoints)**: Partial-year comparison + promote
+   - `GET /scenarios/{id}/comparison` - Compare partial year vs reference full year (infrannuale only)
+   - `POST /scenarios/{id}/promote` - Copy infrannuale projection to a full-year FinancialYear (enables budget base year)
+
+5. **MANAGEMENT (2 endpoints)**: Basic CRUD
    - `GET /companies` - List companies
    - `GET /companies/{id}/scenarios` - List scenarios
 
 **Key Simplification:** 1 comprehensive API call replaces 10+ granular endpoints
+
+### Authentication & Multi-Tenancy
+
+**Architecture:** App embedded as iframe in Formula Finance → parent sends Supabase JWT via `postMessage` → frontend stores token → all API calls include `Authorization: Bearer <token>` → backend validates JWT, extracts `user_id` from `sub` claim → all queries scoped by `user_id`.
+
+**Key Files:**
+- `backend/app/core/auth.py` — `get_current_user_id()` FastAPI dependency (JWT decode or DEV_USER_ID fallback)
+- `backend/app/core/ownership.py` — `validate_company_owned_by_user()`, `check_company_limit()`
+- `frontend/contexts/AuthContext.tsx` — postMessage listener, token state, syncs to API client
+- `frontend/lib/api.ts` — Axios interceptors for Bearer token injection + 401 re-auth
+
+**Config (env vars):**
+- `SUPABASE_JWT_SECRET` — Supabase JWT secret (HS256). Required in production.
+- `DEV_USER_ID` — Bypass JWT in dev mode. Set to any string (e.g., `dev-user-001`).
+- `MAX_COMPANIES_PER_USER` — Company limit per user (default: 50).
+
+**PostMessage Protocol:**
+| Direction | Message | When |
+|-----------|---------|------|
+| Child → Parent | `{ type: 'REQUEST_AUTH_TOKEN' }` | On iframe load |
+| Parent → Child | `{ type: 'AUTH_TOKEN', token: 'jwt...' }` | On request + token refresh |
+| Parent → Child | `{ type: 'AUTH_LOGOUT' }` | On user logout |
+
+**Dev mode:** When `DEV_USER_ID` is set and no JWT provided, backend uses that value as user_id. Frontend auth timeout (1s) stops loading spinner, allowing unauthenticated API calls.
+
+**All API endpoints** require authentication. Every route has `user_id: str = Depends(get_current_user_id)`. Companies are filtered by `user_id`; accessing another user's company returns 404.
 
 ### Shared Module Architecture
 
 ```
 Project Root
 ├── backend/           # FastAPI REST API (imports shared modules)
+│   └── app/core/
+│       ├── auth.py        # JWT validation + dev mode fallback
+│       └── ownership.py   # Company ownership + limit checks
 ├── frontend/          # Next.js 15 React frontend
+│   └── contexts/
+│       ├── AuthContext.tsx # postMessage JWT listener
+│       └── AppContext.tsx  # Global state (waits for auth)
 ├── database/          # SHARED: SQLAlchemy ORM models
 ├── calculations/      # SHARED: Financial calculators
 ├── importers/         # SHARED: XBRL/CSV/PDF parsers
@@ -144,8 +198,11 @@ sys.path.insert(0, project_root)
 
 # Then anywhere in backend:
 from database.models import Company, BalanceSheet
+from database.queries import get_fy_prefer_full, get_fy_partial  # Safe FinancialYear lookups
 from calculations.ratios import FinancialRatiosCalculator
 from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced
+from app.core.auth import get_current_user_id  # Auth dependency
+from app.core.ownership import validate_company_owned_by_user  # Ownership check
 ```
 
 ### Database Schema
@@ -153,16 +210,18 @@ from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced
 **Location:** `/home/peter/DEV/budget/financial_analysis.db` (shared by all apps)
 
 **Core Models:**
-- `Company` - Master data (name, tax_id, sector 1-6)
-- `FinancialYear` - Links company to financial statements for a year
+- `Company` - Master data (name, tax_id, sector 1-6, user_id). Composite unique on (user_id, tax_id).
+- `FinancialYear` - Links company to financial statements for a year. `period_months` (NULL=full year, 1-11=partial)
 - `BalanceSheet` - sp01-sp18 (Italian civil code art. 2424) + hierarchical debts
 - `IncomeStatement` - ce01-ce20 (Italian civil code art. 2425)
 
 **Forecasting Models:**
-- `BudgetScenario` - Scenario metadata (name, base_year, projection_years)
+- `BudgetScenario` - Scenario metadata (name, base_year). `scenario_type`: "budget" | "infrannuale". `period_months` for partial year.
 - `BudgetAssumptions` - Growth percentages per forecast year
 - `ForecastYear` - Links scenario to forecasted statements
 - `ForecastBalanceSheet`, `ForecastIncomeStatement` - Projected financials
+
+**FinancialYear coexistence:** A company+year can have both a partial-year record (`period_months` 1-11) and a promoted full-year record (`period_months` NULL). All queries use `database/queries.py` helpers (`get_fy_prefer_full`, `get_fy_partial`) to select the correct record. Importers match by `period_months` when deleting/updating to avoid clobbering the wrong record.
 
 **Relationships:** All use cascade="all, delete-orphan" (deleting company removes all child records)
 
@@ -173,7 +232,8 @@ from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced
 1. **Base** (`calculations/base.py`) - safe_divide, rounding, Excel-like functions
 2. **Ratios** (`calculations/ratios.py`) - Liquidity, solvency, profitability, activity
 3. **Risk Models** (`calculations/altman.py`, `rating_fgpmi.py`) - Use ratios + raw financials
-4. **Forecasting** (`calculations/forecast_engine.py`) - 3-5 year projections
+4. **Forecasting** (`calculations/forecast_engine.py`) - 3-5 year budget projections
+5. **Intra-Year** (`calculations/intra_year_engine.py`) - Partial-year → 12-month projection
 
 **Important:** Calculators work with SQLAlchemy ORM objects, not dicts. Use Decimal for all monetary calculations.
 
@@ -230,16 +290,38 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
 - Rating classes: 13 classes (AAA → B-)
 - Data: `data/rating_tables.json`
 
-### Forecasting Engine
+### Forecasting Engine (Budget)
 - Base year + 3 or 5 forecast years
 - Cost split: Variable (60%) vs Fixed (40%)
 - Cash as plug: Balances by adjusting sp09_disponibilita_liquide
 - Negative cash: Increases short-term debt (sp16_debiti_breve)
 - Triggered by: bulk assumptions endpoint with `auto_generate=true`
 
+### Intra-Year Engine (Infrannuale)
+- Projects partial-year financials (e.g., 9 months) to a full 12-month year
+- Requires: partial year data + reference full year (base_year = previous year)
+- **Comparison** (`get_comparison`): Line-by-line partial vs reference with % and annualized values
+  - P&L items: annualized = partial_value * (12 / period_months)
+  - BS items: point-in-time values (no annualization)
+- **Projection** (`generate_projection`): Single forecast year using growth rates vs reference
+  - Revenue/costs: growth % applied to reference year values (frontend pre-calculates from user overrides)
+  - Materials/services: split variable/fixed with separate growth rates
+  - Depreciation: annualize partial + new investment depreciation
+  - BS working capital: turnover ratios from reference year applied to projected P&L
+  - Equity: capital constant, reserves absorb prior year profit, current year from projection
+  - Cash as plug (same as budget engine)
+  - Taxes: recalculated on projected pre-tax profit
+- Output stored as ForecastYear (compatible with existing `/analysis` endpoint)
+- **Promote** (`POST /scenarios/{id}/promote`): Copies ForecastYear BS/IS into a new FinancialYear (period_months=NULL)
+  - Enables using the projected year as base year for a subsequent budget scenario
+  - Dynamic column copy via `__table__.columns` intersection (handles missing fields gracefully)
+  - Fails if a full-year FinancialYear already exists for that company+year
+  - Service: `backend/app/services/promote_service.py`
+- Frontend wizard: Import → Comparison → Projection (editable) → Results → Promote to Budget
+
 ### Bulk Assumptions Workflow
 ```python
-# Frontend: One form, one save, one API call
+# Budget: Multiple years
 PUT /scenarios/{id}/assumptions
 {
   "assumptions": [
@@ -247,9 +329,37 @@ PUT /scenarios/{id}/assumptions
     {"forecast_year": 2026, "revenue_growth_pct": 4.0, ...},
     {"forecast_year": 2027, "revenue_growth_pct": 3.5, ...}
   ],
-  "auto_generate": true  # Triggers forecast generation
+  "auto_generate": true  # Triggers ForecastEngine
 }
 # Returns: {success: true, forecast_generated: true, forecast_years: [2025,2026,2027]}
+
+# Infrannuale: Single year (growth % calculated by frontend from user overrides)
+PUT /scenarios/{id}/assumptions
+{
+  "assumptions": [
+    {"forecast_year": 2025, "revenue_growth_pct": 8.3, ...}  # 1 year only
+  ],
+  "auto_generate": true  # Triggers IntraYearEngine (detected via scenario_type)
+}
+# Returns: {success: true, forecast_generated: true, forecast_years: [2025]}
+```
+
+### Promote Infrannuale → Budget Workflow
+```python
+# Full user flow: partial-year import → infrannuale projection → promote → budget forecast
+
+# After infrannuale projection is generated:
+POST /companies/{id}/scenarios/{scenario_id}/promote
+# Returns: {success: true, financial_year_id: 123, year: 2025, company_id: 1, message: "..."}
+
+# Now create a budget scenario using the promoted year as base:
+POST /companies/{id}/scenarios
+{
+  "company_id": 1, "name": "Budget 2026-2028",
+  "base_year": 2025,  # ← the promoted year
+  "scenario_type": "budget"
+}
+# Proceeds with normal budget workflow (assumptions → analysis)
 ```
 
 ## Common Tasks
@@ -299,8 +409,8 @@ PUT /scenarios/{id}/assumptions
 - **Decimal precision**: Numeric(15, 2) - max 9,999,999,999,999.99
 - **JSON serialization**: Backend uses custom `DecimalJSONResponse` (Decimal → float)
 - **Italian locale**: UI text in Italian, European number formatting
-- **No authentication**: Single-user application
-- **CORS**: Allows localhost:3000-3002 (Next.js), 8501 (Streamlit)
+- **Authentication**: Supabase JWT via iframe postMessage (see below). Dev mode: `DEV_USER_ID` env var bypasses JWT.
+- **CORS**: Allows localhost:3000-3002 (Next.js), 8501 (Streamlit), plus Formula Finance origin in production
 - **Frontend UI**: shadcn/ui components only - no raw HTML tables/buttons
 - **Charts**: Recharts with `ChartContainer` + CSS variable colors (blue/slate palette)
 - **Status colors**: Altman/FGPMI use explicit green/yellow/red with `dark:` variants
@@ -324,7 +434,7 @@ PUT /scenarios/{id}/assumptions
 - Use comprehensive endpoints (call `/analysis` once, cache result)
 - All analysis pages read from same cached response
 - Report page (`/report`) renders full financial analysis with 11 sections
-- Typical workflow:
+- Typical workflow (budget):
   ```typescript
   // Budget page: Bulk save
   await api.bulkUpsertAssumptions(companyId, scenarioId, {
@@ -337,9 +447,38 @@ PUT /scenarios/{id}/assumptions
   // All data available: analysis.historical_years, .forecast_years, .calculations
   ```
 
+- Typical workflow (infrannuale):
+  ```typescript
+  // 1. Import partial-year PDF/XBRL with period_months
+  const importResult = await api.importPDF(file, fiscalYear, name, null, true, sector, periodMonths)
+
+  // 2. Create infrannuale scenario (base_year = fiscalYear - 1)
+  const scenario = await api.createBudgetScenario(companyId, {
+    company_id: companyId, name: `Infrannuale 9M 2025`,
+    base_year: 2024, scenario_type: "infrannuale", period_months: 9,
+  })
+
+  // 3. Get comparison (partial year vs reference full year)
+  const comparison = await api.getIntraYearComparison(companyId, scenarioId)
+
+  // 4. User edits projections → frontend converts to growth %, saves + generates
+  await api.bulkUpsertAssumptions(companyId, scenarioId, {
+    assumptions: [{ forecast_year: 2025, revenue_growth_pct: 5.0, ... }],
+    auto_generate: true
+  })
+
+  // 5. Results via standard analysis endpoint
+  const analysis = await api.getScenarioAnalysis(companyId, scenarioId)
+
+  // 6. (Optional) Promote projection to full-year → enables budget
+  await api.promoteProjection(companyId, scenarioId)
+  // Now the projected year is a FinancialYear that can be used as budget base year
+  ```
+
 **Frontend Pages:**
 - `/` - Home (company list)
 - `/import` - XBRL/CSV/PDF upload
+- `/infrannuale` - Intra-year analysis wizard (import partial year → compare → project → results)
 - `/budget` - Scenario assumptions editor
 - `/forecast/income`, `/forecast/balance`, `/forecast/reclassified` - Forecast views
 - `/analysis` - Financial ratios & charts

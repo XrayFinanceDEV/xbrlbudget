@@ -35,16 +35,16 @@ interface ReportIncomeMarginsProps {
 }
 
 const incomeLineConfig: ChartConfig = {
-  revenue: { label: "Fatturato", color: "var(--chart-1)" },
-  ebitda: { label: "EBITDA", color: "var(--chart-2)" },
-  ebit: { label: "EBIT", color: "var(--chart-3)" },
-  net_profit: { label: "Utile Netto", color: "var(--chart-4)" },
+  revenue: { label: "Fatturato", color: "hsl(var(--chart-1))" },
+  ebitda: { label: "EBITDA", color: "hsl(var(--chart-2))" },
+  ebit: { label: "EBIT", color: "hsl(var(--chart-3))" },
+  net_profit: { label: "Utile Netto", color: "hsl(var(--chart-4))" },
 };
 
 const marginConfig: ChartConfig = {
-  ebitda_margin: { label: "EBITDA %", color: "var(--chart-2)" },
-  ebit_margin: { label: "EBIT %", color: "var(--chart-3)" },
-  net_margin: { label: "Utile Netto %", color: "var(--chart-4)" },
+  ebitda_margin: { label: "EBITDA %", color: "hsl(var(--chart-2))" },
+  ebit_margin: { label: "EBIT %", color: "hsl(var(--chart-3))" },
+  net_margin: { label: "Utile Netto %", color: "hsl(var(--chart-4))" },
 };
 
 export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
@@ -84,14 +84,14 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
   const netProfit = inc.net_profit || 0;
 
   const waterfallData = [
-    { name: "Fatturato", value: revenue, base: 0, delta: revenue, fill: "var(--chart-1)" },
-    { name: "Costi Prod.", value: -Math.abs(prodCost), base: revenue - Math.abs(prodCost), delta: -Math.abs(prodCost), fill: "var(--chart-4)" },
-    { name: "EBITDA", value: ebitda, base: 0, delta: ebitda, fill: "var(--chart-2)" },
-    { name: "Ammort.", value: -Math.abs(depreciation), base: ebitda - Math.abs(depreciation), delta: -Math.abs(depreciation), fill: "var(--chart-4)" },
-    { name: "EBIT", value: ebit, base: 0, delta: ebit, fill: "var(--chart-3)" },
-    { name: "Gest. Fin.", value: financialResult, base: ebit + Math.min(0, financialResult), delta: financialResult, fill: financialResult >= 0 ? "var(--chart-3)" : "var(--chart-4)" },
-    { name: "Imposte", value: -Math.abs(taxes), base: ebit + financialResult - Math.abs(taxes), delta: -Math.abs(taxes), fill: "var(--chart-5)" },
-    { name: "Utile Netto", value: netProfit, base: 0, delta: netProfit, fill: "var(--chart-1)" },
+    { name: "Fatturato", value: revenue, base: 0, delta: revenue, fill: "hsl(var(--chart-1))" },
+    { name: "Costi Prod.", value: -Math.abs(prodCost), base: revenue - Math.abs(prodCost), delta: -Math.abs(prodCost), fill: "hsl(var(--chart-4))" },
+    { name: "EBITDA", value: ebitda, base: 0, delta: ebitda, fill: "hsl(var(--chart-2))" },
+    { name: "Ammort.", value: -Math.abs(depreciation), base: ebitda - Math.abs(depreciation), delta: -Math.abs(depreciation), fill: "hsl(var(--chart-4))" },
+    { name: "EBIT", value: ebit, base: 0, delta: ebit, fill: "hsl(var(--chart-3))" },
+    { name: "Gest. Fin.", value: financialResult, base: ebit + Math.min(0, financialResult), delta: financialResult, fill: financialResult >= 0 ? "hsl(var(--chart-3))" : "hsl(var(--chart-4))" },
+    { name: "Imposte", value: -Math.abs(taxes), base: ebit + financialResult - Math.abs(taxes), delta: -Math.abs(taxes), fill: "hsl(var(--chart-5))" },
+    { name: "Utile Netto", value: netProfit, base: 0, delta: netProfit, fill: "hsl(var(--chart-1))" },
   ];
 
   // Variation table
@@ -137,10 +137,10 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
                   formatter={(value: number) => formatCurrency(value)}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="revenue" stroke="var(--chart-1)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="ebitda" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="ebit" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="net_profit" stroke="var(--chart-4)" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="revenue" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="ebitda" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="ebit" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="net_profit" stroke="hsl(var(--chart-4))" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ChartContainer>
           </div>
@@ -159,9 +159,9 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
                   formatter={(value: number) => `${value.toFixed(2)}%`}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="ebitda_margin" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="ebit_margin" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="net_margin" stroke="var(--chart-4)" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="ebitda_margin" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="ebit_margin" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="net_margin" stroke="hsl(var(--chart-4))" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ChartContainer>
           </div>

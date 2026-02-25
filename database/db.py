@@ -12,7 +12,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT.endswith('/database'):
     PROJECT_ROOT = os.path.dirname(PROJECT_ROOT)
 
-DATABASE_PATH = os.path.join(PROJECT_ROOT, "financial_analysis.db")
+DATABASE_PATH = os.environ.get('DATABASE_PATH') or os.path.join(PROJECT_ROOT, "financial_analysis.db")
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 # Create SQLAlchemy engine

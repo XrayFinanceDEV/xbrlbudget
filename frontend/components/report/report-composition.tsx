@@ -23,19 +23,19 @@ interface ReportCompositionProps {
 }
 
 const assetConfig: ChartConfig = {
-  immobilizzazioni: { label: "Immobilizzazioni", color: "var(--chart-1)" },
-  rimanenze: { label: "Rimanenze", color: "var(--chart-2)" },
-  crediti: { label: "Crediti", color: "var(--chart-3)" },
-  liquidita: { label: "Liquidita", color: "var(--chart-4)" },
-  altro_attivo: { label: "Altro Attivo", color: "var(--chart-5)" },
+  immobilizzazioni: { label: "Immobilizzazioni", color: "hsl(var(--chart-1))" },
+  rimanenze: { label: "Rimanenze", color: "hsl(var(--chart-2))" },
+  crediti: { label: "Crediti", color: "hsl(var(--chart-3))" },
+  liquidita: { label: "Liquidita", color: "hsl(var(--chart-4))" },
+  altro_attivo: { label: "Altro Attivo", color: "hsl(var(--chart-5))" },
 };
 
 const liabilityConfig: ChartConfig = {
-  patrimonio_netto: { label: "Patrimonio Netto", color: "var(--chart-1)" },
-  debiti_breve: { label: "Debiti Breve", color: "var(--chart-2)" },
-  debiti_lungo: { label: "Debiti M/L", color: "var(--chart-3)" },
-  fondi_tfr: { label: "Fondi/TFR", color: "var(--chart-4)" },
-  altro_passivo: { label: "Altro Passivo", color: "var(--chart-5)" },
+  patrimonio_netto: { label: "Patrimonio Netto", color: "hsl(var(--chart-1))" },
+  debiti_breve: { label: "Debiti Breve", color: "hsl(var(--chart-2))" },
+  debiti_lungo: { label: "Debiti M/L", color: "hsl(var(--chart-3))" },
+  fondi_tfr: { label: "Fondi/TFR", color: "hsl(var(--chart-4))" },
+  altro_passivo: { label: "Altro Passivo", color: "hsl(var(--chart-5))" },
 };
 
 function getCompositionData(allYears: ScenarioAnalysisYearData[]) {
@@ -95,11 +95,11 @@ export function ReportComposition({ data }: ReportCompositionProps) {
                   formatter={(value: number) => `${value.toFixed(1)}%`}
                 />
                 <Legend />
-                <Bar dataKey="immobilizzazioni" stackId="a" fill="var(--chart-1)" />
-                <Bar dataKey="rimanenze" stackId="a" fill="var(--chart-2)" />
-                <Bar dataKey="crediti" stackId="a" fill="var(--chart-3)" />
-                <Bar dataKey="liquidita" stackId="a" fill="var(--chart-4)" />
-                <Bar dataKey="altro_attivo" stackId="a" fill="var(--chart-5)" />
+                <Bar dataKey="immobilizzazioni" stackId="a" fill="hsl(var(--chart-1))" />
+                <Bar dataKey="rimanenze" stackId="a" fill="hsl(var(--chart-2))" />
+                <Bar dataKey="crediti" stackId="a" fill="hsl(var(--chart-3))" />
+                <Bar dataKey="liquidita" stackId="a" fill="hsl(var(--chart-4))" />
+                <Bar dataKey="altro_attivo" stackId="a" fill="hsl(var(--chart-5))" />
               </BarChart>
             </ChartContainer>
           </div>
@@ -117,11 +117,11 @@ export function ReportComposition({ data }: ReportCompositionProps) {
                   formatter={(value: number) => `${value.toFixed(1)}%`}
                 />
                 <Legend />
-                <Bar dataKey="patrimonio_netto" stackId="a" fill="var(--chart-1)" />
-                <Bar dataKey="debiti_breve" stackId="a" fill="var(--chart-2)" />
-                <Bar dataKey="debiti_lungo" stackId="a" fill="var(--chart-3)" />
-                <Bar dataKey="fondi_tfr" stackId="a" fill="var(--chart-4)" />
-                <Bar dataKey="altro_passivo" stackId="a" fill="var(--chart-5)" />
+                <Bar dataKey="patrimonio_netto" stackId="a" fill="hsl(var(--chart-1))" />
+                <Bar dataKey="debiti_breve" stackId="a" fill="hsl(var(--chart-2))" />
+                <Bar dataKey="debiti_lungo" stackId="a" fill="hsl(var(--chart-3))" />
+                <Bar dataKey="fondi_tfr" stackId="a" fill="hsl(var(--chart-4))" />
+                <Bar dataKey="altro_passivo" stackId="a" fill="hsl(var(--chart-5))" />
               </BarChart>
             </ChartContainer>
           </div>

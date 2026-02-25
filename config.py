@@ -209,6 +209,14 @@ PDF_MARGIN = {
     "bottom": 25
 }
 
+# PDF LLM Extraction Settings
+PDF_LLM_MODEL = "claude-haiku-4-5-20251001"
+PDF_LLM_MAX_TOKENS = 8192
+
+# Scenario Types
+SCENARIO_TYPE_BUDGET = "budget"
+SCENARIO_TYPE_INFRANNUALE = "infrannuale"
+
 # CSV Import Settings
 CSV_DELIMITER = ";"  # Semicolon for Italian CSV format
 CSV_ENCODING = "utf-8"

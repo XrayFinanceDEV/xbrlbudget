@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useApp } from "@/contexts/AppContext";
+import { useScenarios, useInvalidateScenarios, useInvalidateAnalysis } from "@/hooks/use-queries";
 import {
-  getBudgetScenarios,
   createBudgetScenario,
   updateBudgetScenario,
   deleteBudgetScenario,
@@ -64,42 +64,19 @@ import { PageHeader } from "@/components/page-header";
 
 export default function BudgetPage() {
   const { selectedCompanyId, years } = useApp();
-  const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
+  const invalidateScenarios = useInvalidateScenarios();
+  const invalidateAnalysis = useInvalidateAnalysis();
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("list");
   const [editingScenario, setEditingScenario] = useState<BudgetScenario | null>(null);
-
-  // Load scenarios
-  useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      return;
-    }
-    loadScenarios();
-  }, [selectedCompanyId]);
-
-  const loadScenarios = async () => {
-    if (!selectedCompanyId) return;
-
-    try {
-      setLoading(true);
-      const data = await getBudgetScenarios(selectedCompanyId);
-      setScenarios(data);
-    } catch (err) {
-      console.error("Error loading scenarios:", err);
-      setError("Impossibile caricare gli scenari");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDeleteScenario = async (scenarioId: number) => {
     if (!selectedCompanyId) return;
 
     try {
       await deleteBudgetScenario(selectedCompanyId, scenarioId);
-      await loadScenarios();
+      invalidateScenarios(selectedCompanyId);
       toast.success("Scenario eliminato con successo");
     } catch (err) {
       console.error("Error deleting scenario:", err);
@@ -111,17 +88,15 @@ export default function BudgetPage() {
     if (!selectedCompanyId) return;
 
     try {
-      setLoading(true);
       await generateForecast(selectedCompanyId, scenarioId);
       toast.success("Previsionale ricalcolato con successo!");
-      await loadScenarios();
+      invalidateScenarios(selectedCompanyId);
+      invalidateAnalysis(selectedCompanyId, scenarioId);
     } catch (err: any) {
       console.error("Error regenerating forecast:", err);
       toast.error(
         err.response?.data?.detail || "Impossibile ricalcolare il previsionale"
       );
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -133,7 +108,7 @@ export default function BudgetPage() {
   const handleScenarioSaved = () => {
     setEditingScenario(null);
     setActiveTab("list");
-    loadScenarios();
+    if (selectedCompanyId) invalidateScenarios(selectedCompanyId);
   };
 
   if (!selectedCompanyId) {
@@ -469,7 +444,7 @@ function ScenarioForm({
     }
   }, [scenario, companyId]);
 
-  const updateAssumption = (year: number, field: string, value: number) => {
+  const updateAssumption = useCallback((year: number, field: string, value: number) => {
     setAssumptions((prev) => ({
       ...prev,
       [year]: {
@@ -477,7 +452,7 @@ function ScenarioForm({
         [field]: value,
       },
     }));
-  };
+  }, []);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -543,7 +518,7 @@ function ScenarioForm({
     }
   };
 
-  const historicalYears = years.sort((a, b) => a - b);
+  const historicalYears = [...new Set(years)].filter(y => y <= baseYear).sort((a, b) => a - b);
 
   return (
     <Card>

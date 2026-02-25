@@ -3,7 +3,7 @@ SQLAlchemy ORM Models for Financial Analysis Application
 """
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database.db import Base
 from config import Sector
@@ -15,10 +15,14 @@ class Company(Base):
     Company master data (DATI_IMPRESA)
     """
     __tablename__ = "companies"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'tax_id', name='uq_company_user_tax_id'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), nullable=True, index=True)  # Supabase user UUID
     name = Column(String(255), nullable=False, index=True)
-    tax_id = Column(String(20), unique=True, nullable=True, index=True)  # Partita IVA / Codice Fiscale
+    tax_id = Column(String(20), nullable=True, index=True)  # Partita IVA / Codice Fiscale
     sector = Column(Integer, nullable=False)  # 1-6 (Sector enum)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -26,6 +30,7 @@ class Company(Base):
 
     # Relationships
     financial_years = relationship("FinancialYear", back_populates="company", cascade="all, delete-orphan")
+    budget_scenarios = relationship("BudgetScenario", back_populates="company", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Company(id={self.id}, name='{self.name}', sector={self.sector})>"
@@ -40,6 +45,7 @@ class FinancialYear(Base):
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     year = Column(Integer, nullable=False, index=True)  # e.g., 2024
+    period_months = Column(Integer, nullable=True, default=None)  # NULL/12 = full year, 1-11 = partial
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -49,7 +55,7 @@ class FinancialYear(Base):
     income_statement = relationship("IncomeStatement", back_populates="financial_year", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<FinancialYear(id={self.id}, company_id={self.company_id}, year={self.year})>"
+        return f"<FinancialYear(id={self.id}, company_id={self.company_id}, year={self.year}, period_months={self.period_months})>"
 
 
 class BalanceSheet(Base):
@@ -541,13 +547,15 @@ class BudgetScenario(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     name = Column(String(255), nullable=False)  # e.g., "Budget 2025-2027", "Scenario Ottimistico"
     base_year = Column(Integer, nullable=False)  # Base year for % calculations (e.g., 2024)
+    scenario_type = Column(String(20), nullable=False, default="budget")  # "budget" | "infrannuale"
+    period_months = Column(Integer, nullable=True)  # 1-11 for partial year (infrannuale), NULL for budget
     description = Column(Text, nullable=True)
     is_active = Column(Integer, default=1)  # 1 = active scenario, 0 = archived
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    company = relationship("Company", backref="budget_scenarios")
+    company = relationship("Company", back_populates="budget_scenarios")
     assumptions = relationship("BudgetAssumptions", back_populates="scenario", cascade="all, delete-orphan")
     forecast_years = relationship("ForecastYear", back_populates="scenario", cascade="all, delete-orphan")
 

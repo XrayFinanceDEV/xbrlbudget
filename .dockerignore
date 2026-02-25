@@ -1,0 +1,16 @@
+.git
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/.next
+**/venv
+**/.venv
+*.db
+legacy/
+.env
+.env.*
+!.env.docker
+*.png
+*.jpg
+docs/examples/
+tests/

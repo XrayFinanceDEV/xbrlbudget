@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { getDetailedCashFlow, getBudgetScenarios } from "@/lib/api";
+import { useScenarios, useDetailedCashflow, getPreferredScenario } from "@/hooks/use-queries";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -13,67 +13,23 @@ import type { MultiYearDetailedCashFlow, DetailedCashFlowStatement } from "@/typ
 
 export default function CashflowPage() {
   const { selectedCompanyId } = useApp();
-  const [cashflowData, setCashflowData] = useState<MultiYearDetailedCashFlow | null>(null);
-  const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
-  const [scenarios, setScenarios] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data: scenarios = [] } = useScenarios(selectedCompanyId);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<number | null>(null);
 
-  // Load scenarios when company changes
+  // Auto-select preferred scenario when scenarios load
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      setSelectedScenario(null);
-      setCashflowData(null);
-      return;
+    if (scenarios.length > 0 && !selectedScenarioId) {
+      const preferred = getPreferredScenario(scenarios);
+      if (preferred) setSelectedScenarioId(preferred.id);
     }
-    loadScenarios();
-  }, [selectedCompanyId]);
+    if (!selectedCompanyId) setSelectedScenarioId(null);
+  }, [scenarios, selectedCompanyId, selectedScenarioId]);
 
-  // Load cashflow when scenario changes
-  useEffect(() => {
-    if (selectedScenario && selectedCompanyId) {
-      loadCashflow();
-    }
-  }, [selectedScenario, selectedCompanyId]);
-
-  const loadScenarios = async () => {
-    if (!selectedCompanyId) return;
-
-    try {
-      const data = await getBudgetScenarios(selectedCompanyId);
-      setScenarios(data);
-
-      // Auto-select first active scenario
-      const activeScenario = data.find((s: any) => s.is_active === 1);
-      if (activeScenario) {
-        setSelectedScenario(activeScenario.id);
-      }
-    } catch (err) {
-      console.error("Error loading scenarios:", err);
-    }
-  };
-
-  const loadCashflow = async () => {
-    if (!selectedCompanyId || !selectedScenario) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const data = await getDetailedCashFlow(selectedCompanyId, selectedScenario);
-      setCashflowData(data);
-    } catch (err: any) {
-      console.error("Error loading cashflow:", err);
-      if (err.response?.status === 404) {
-        setError("Dati non disponibili per questo scenario");
-      } else {
-        setError("Impossibile caricare il rendiconto finanziario");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: cashflowData, isLoading: loading, error: cashflowError } = useDetailedCashflow(
+    selectedCompanyId,
+    selectedScenarioId
+  );
+  const error = cashflowError ? "Impossibile caricare il rendiconto finanziario" : null;
 
   if (loading && !cashflowData) {
     return (
@@ -135,8 +91,8 @@ export default function CashflowPage() {
               </label>
               <select
                 className="flex h-9 w-full max-w-md rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={selectedScenario || ""}
-                onChange={(e) => setSelectedScenario(parseInt(e.target.value))}
+                value={selectedScenarioId || ""}
+                onChange={(e) => setSelectedScenarioId(parseInt(e.target.value))}
               >
                 <option value="">-- Seleziona uno scenario --</option>
                 {scenarios.map((scenario) => (
@@ -264,8 +220,8 @@ export default function CashflowPage() {
             </label>
             <select
               className="flex h-9 w-full max-w-md rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={selectedScenario || ""}
-              onChange={(e) => setSelectedScenario(parseInt(e.target.value))}
+              value={selectedScenarioId || ""}
+              onChange={(e) => setSelectedScenarioId(parseInt(e.target.value))}
             >
               {scenarios.map((scenario) => (
                 <option key={scenario.id} value={scenario.id}>

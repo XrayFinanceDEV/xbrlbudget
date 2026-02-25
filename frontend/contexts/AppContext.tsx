@@ -1,7 +1,16 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { getCompanies, getCompanyYears } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { Company } from "@/types/api";
 
 interface AppContextType {
@@ -20,6 +29,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const { isLoading: authLoading } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([]);
@@ -27,34 +37,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load companies function
-  const loadCompanies = async () => {
+  // Ref to read current selectedCompanyId without adding it as a dependency
+  const selectedCompanyIdRef = useRef(selectedCompanyId);
+  selectedCompanyIdRef.current = selectedCompanyId;
+
+  // Stable loadCompanies — no dependencies, reads current selection via ref
+  const loadCompanies = useCallback(async () => {
     try {
       const data = await getCompanies();
-      setCompanies(prevCompanies => {
-        // If currently selected company was deleted, clear selection
-        setSelectedCompanyId(prevId => {
-          if (prevId && !data.find(c => c.id === prevId)) {
-            return null;
-          }
-          // If no company is selected and companies exist, select the first one
-          if (!prevId && data.length > 0) {
-            return data[0].id;
-          }
-          return prevId;
-        });
-        return data;
-      });
+      setCompanies(data);
+
+      // Fix selection if needed (outside of setCompanies callback)
+      const currentId = selectedCompanyIdRef.current;
+      if (currentId && !data.find((c) => c.id === currentId)) {
+        setSelectedCompanyId(null);
+      } else if (!currentId && data.length > 0) {
+        setSelectedCompanyId(data[0].id);
+      }
     } catch (err) {
       console.error("Error loading companies:", err);
       setError("Impossibile caricare le aziende");
     }
-  };
-
-  // Load companies on mount
-  useEffect(() => {
-    loadCompanies();
   }, []);
+
+  // Load companies after auth resolves
+  useEffect(() => {
+    if (!authLoading) {
+      loadCompanies();
+    }
+  }, [authLoading, loadCompanies]);
 
   // Load years when company changes
   useEffect(() => {
@@ -68,7 +79,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         setSelectedYear(null);
         const data = await getCompanyYears(selectedCompanyId);
-        setYears(data);
+        // Only update years if content actually changed (stabilize reference)
+        setYears((prev) => {
+          const same =
+            prev.length === data.length && prev.every((y, i) => y === data[i]);
+          return same ? prev : data;
+        });
         if (data.length > 0) {
           setSelectedYear(data[0]);
         }
@@ -80,25 +96,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadYears();
   }, [selectedCompanyId]);
 
-  const selectedCompany = companies.find((c) => c.id === selectedCompanyId) || null;
+  const selectedCompany = useMemo(
+    () => companies.find((c) => c.id === selectedCompanyId) ?? null,
+    [companies, selectedCompanyId]
+  );
+
+  // Memoize context value to prevent all consumers re-rendering on unrelated changes
+  const contextValue = useMemo<AppContextType>(
+    () => ({
+      companies,
+      selectedCompanyId,
+      setSelectedCompanyId,
+      years,
+      selectedYear,
+      setSelectedYear,
+      selectedCompany,
+      loading,
+      error,
+      refreshCompanies: loadCompanies,
+    }),
+    [
+      companies,
+      selectedCompanyId,
+      years,
+      selectedYear,
+      selectedCompany,
+      loading,
+      error,
+      loadCompanies,
+    ]
+  );
 
   return (
-    <AppContext.Provider
-      value={{
-        companies,
-        selectedCompanyId,
-        setSelectedCompanyId,
-        years,
-        selectedYear,
-        setSelectedYear,
-        selectedCompany,
-        loading,
-        error,
-        refreshCompanies: loadCompanies,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+    <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>
   );
 }
 

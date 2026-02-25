@@ -1,12 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import {
-  getScenarioAnalysis,
-  getBudgetScenarios,
-  downloadReportPDF,
-} from "@/lib/api";
+import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
+import { downloadReportPDF } from "@/lib/api";
 import type { ScenarioAnalysis, BudgetScenario } from "@/types/api";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
@@ -32,67 +29,24 @@ import { ReportNotes } from "@/components/report/report-notes";
 export default function ReportPage() {
   const { selectedCompanyId, selectedCompany } = useApp();
 
-  const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
+  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
-  const [analysisData, setAnalysisData] = useState<ScenarioAnalysis | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
-  // Load scenarios when company changes
+  // Auto-select preferred scenario when scenarios load
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setScenarios([]);
-      setSelectedScenario(null);
-      setAnalysisData(null);
-      return;
+    if (scenarios.length > 0 && !selectedScenario) {
+      setSelectedScenario(getPreferredScenario(scenarios));
     }
+    if (!selectedCompanyId) setSelectedScenario(null);
+  }, [scenarios, selectedCompanyId, selectedScenario]);
 
-    const loadScenarios = async () => {
-      try {
-        const data = await getBudgetScenarios(selectedCompanyId);
-        setScenarios(data);
-        if (data.length > 0) {
-          const active = data.find((s) => s.is_active) || data[0];
-          setSelectedScenario(active);
-        } else {
-          setSelectedScenario(null);
-          setAnalysisData(null);
-        }
-      } catch {
-        setScenarios([]);
-        setSelectedScenario(null);
-      }
-    };
-
-    loadScenarios();
-  }, [selectedCompanyId]);
-
-  // Load analysis data when scenario changes
-  const loadAnalysis = useCallback(async () => {
-    if (!selectedCompanyId || !selectedScenario) {
-      setAnalysisData(null);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const data = await getScenarioAnalysis(selectedCompanyId, selectedScenario.id);
-      setAnalysisData(data);
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || "Errore nel caricamento dell'analisi";
-      setError(msg);
-      setAnalysisData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedCompanyId, selectedScenario]);
-
-  useEffect(() => {
-    loadAnalysis();
-  }, [loadAnalysis]);
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+    selectedCompanyId,
+    selectedScenario?.id ?? null
+  );
+  const loading = scenariosLoading || analysisLoading;
+  const error = analysisError ? "Errore nel caricamento dell'analisi" : null;
 
   // PDF download
   const handleDownload = async () => {

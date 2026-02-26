@@ -9,6 +9,7 @@ Total: ~5s at ~$0.01/PDF vs Docling's ~133s.
 import json
 import os
 import logging
+import re
 import tempfile
 import time
 from decimal import Decimal
@@ -125,7 +126,7 @@ CE_END_KEYWORDS_FALLBACK = [
 
 # Fallback: single-keyword detection if range-based fails
 SP_FALLBACK_KEYWORDS = ["totale attivo", "totale passivo"]
-CE_FALLBACK_KEYWORDS = ["totale valore della produzione", "differenza tra valore e costi"]
+CE_FALLBACK_KEYWORDS = ["totale valore della produzione", "differenza tra valore e costi", "differ. tra valore e costi"]
 
 
 def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
@@ -150,10 +151,18 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     total_pages = len(doc)
     logger.info(f"PDF has {total_pages} pages")
 
-    # Scan all pages and cache lowercased text
+    # Scan all pages and cache lowercased text.
+    # Collapse spaced-out text (e.g. "S T A T O" → "STATO") for keyword matching
+    # (Dylog format uses spaced headers).
+    def _normalize_for_search(text: str) -> str:
+        lowered = text.lower()
+        lowered = re.sub(r'\b(\w) (?=\w\b)', r'\1', lowered)  # "s t a t o" → "stato"
+        lowered = re.sub(r' {2,}', ' ', lowered)               # collapse multi-spaces
+        return lowered
+
     page_texts = []
     for page_num in range(total_pages):
-        page_texts.append(doc[page_num].get_text().lower())
+        page_texts.append(_normalize_for_search(doc[page_num].get_text()))
     doc.close()
 
     def _find_start(start_kws, after_page=0):
@@ -179,12 +188,18 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
             sp_end = min(sp_start + 2, total_pages - 1)
 
     # --- CE range ---
-    # CE start: search after SP start to avoid re-matching the SP header page
+    # CE start: search after SP start to avoid re-matching the SP header page.
+    # Strategy: try strict match first (both "conto economico" + "valore della produzione"),
+    # then try "valore della produzione" alone after SP end (Dylog format puts VP on last
+    # SP page without a "conto economico" header until a later page).
     ce_after = (sp_start + 1) if sp_start is not None else 0
     ce_start = _find_start(CE_START_KEYWORDS, after_page=ce_after)
     # If CE start not found after SP, try from the beginning (SP may not exist)
     if ce_start is None and ce_after > 0:
         ce_start = _find_start(CE_START_KEYWORDS)
+    # Relaxed: try "valore della produzione" alone after SP end (Dylog)
+    if ce_start is None and sp_end is not None:
+        ce_start = _find_start(["valore della produzione"], after_page=sp_end)
 
     ce_end = None
     if ce_start is not None:
@@ -247,6 +262,285 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     return sp_pages, ce_pages
 
 
+# ---------------------------------------------------------------------------
+# Zucchetti IV Direttiva pre-filter
+# ---------------------------------------------------------------------------
+
+# Zucchetti account detail line: "100220 000 - description"
+_ZUCCHETTI_ACCOUNT_RE = re.compile(r'^\s*\d{6}\s+\d{3}\s+-\s+')
+
+# Bare numeric value: "(1.234)", "1.234.567", "0", "(0)" — with optional parens
+_BARE_NUMBER_RE = re.compile(
+    r'^\s*\(?\d[\d.]*\)?\s*$'
+)
+
+# Footer block lines (multi-line footer split across lines)
+_ZUCCHETTI_FOOTER_WORDS = re.compile(
+    r'^\s*(administrator|Data:|Ora:|Utente:|Pag\.|AGO\s*-|di\s*$|\d{2}-\d{2}-\d{4}$|\d{2}:\d{2}$|\d{2}\.\d{2}\.\d{2}$)',
+    re.IGNORECASE
+)
+
+# Repeated page headers / metadata (appear at top of every page)
+_ZUCCHETTI_PAGE_HEADER_RE = re.compile(
+    r'^\s*(BILANCIO SCHEMA XBRL|Esercizio$|Dal$|Al$|'
+    r'\d{4}/\d|Registrazioni fino al|'
+    r'Schema$|Esteso$|Versione tassonomia|\d{8}$|'
+    r'Regime Contabile|Tipo Reddito|Partita IVA|Codice Fiscale|'
+    r'Impresa$|Ordinario$|Abbreviato$|'
+    r'\d{2}-\d{2}-\d{4}$|\d{11}$|'  # dates and P.IVA/CF numbers
+    r'Differenza arrotondamento unit)',
+    re.IGNORECASE
+)
+
+
+def _is_zucchetti_format(text: str) -> bool:
+    """Detect Zucchetti format by presence of account detail lines."""
+    matches = sum(1 for line in text.splitlines()
+                  if _ZUCCHETTI_ACCOUNT_RE.match(line))
+    return matches >= 5
+
+
+def _preprocess_zucchetti(text: str) -> str:
+    """Strip Zucchetti detail account lines and their preceding values.
+
+    Zucchetti layout puts the value on the line BEFORE the account detail:
+        82.818                          ← value (to remove)
+        100815 000 - impianti specifici ← account detail (to remove)
+        ...
+        Totale 2) impianti e macchinario  ← structural (to keep)
+        146.992                            ← total value (to keep)
+
+    Pass 1: mark indices of account lines and their preceding value lines.
+    Pass 2: remove marked lines + footer/header noise.
+    """
+    if not _is_zucchetti_format(text):
+        return text
+
+    lines = text.splitlines()
+
+    # Pass 1: find lines to remove (account details + their preceding values)
+    remove = set()
+    for i, line in enumerate(lines):
+        if _ZUCCHETTI_ACCOUNT_RE.match(line):
+            remove.add(i)
+            # Also remove preceding bare-number line(s)
+            j = i - 1
+            while j >= 0 and _BARE_NUMBER_RE.match(lines[j]):
+                remove.add(j)
+                j -= 1
+
+    # Pass 2: also mark footer block lines for removal.
+    # Footer pattern spans multiple lines; mark the full block by scanning for
+    # known trigger words and eating surrounding bare-number lines (page numbers).
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if _ZUCCHETTI_FOOTER_WORDS.match(stripped):
+            remove.add(i)
+            # Eat adjacent bare single/double-digit lines (page num, total pages)
+            for j in (i - 1, i + 1):
+                if 0 <= j < len(lines) and re.match(r'^\s*\d{1,2}\s*$', lines[j]):
+                    remove.add(j)
+
+    # Pass 3: filter remaining lines, dropping repeated page headers
+    # Track company name to allow first occurrence but skip repeats
+    company_name = None
+    seen_section_header = False
+    section_header_count = 0
+    filtered = []
+    for i, line in enumerate(lines):
+        if i in remove:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _ZUCCHETTI_PAGE_HEADER_RE.match(stripped):
+            continue
+        # Track section headers (STATO PATRIMONIALE / CONTO ECONOMICO)
+        is_section = stripped.startswith('STATO PATRIMONIALE') or stripped.startswith('CONTO ECONOMICO')
+        if is_section:
+            section_header_count += 1
+            if not seen_section_header:
+                seen_section_header = True
+            elif section_header_count > 1:
+                continue  # skip repeated section headers from later pages
+        # Keep company name only on first occurrence
+        if company_name is None and not seen_section_header:
+            if not _BARE_NUMBER_RE.match(stripped):
+                company_name = stripped
+                filtered.append(line)
+                continue
+        elif stripped == company_name:
+            continue  # skip repeated company name
+        filtered.append(line)
+
+    result = '\n'.join(filtered)
+    logger.info(f"Zucchetti pre-filter: {len(text)} -> {len(result)} chars")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Datev Koinos IV Direttiva pre-filter
+# ---------------------------------------------------------------------------
+
+# Datev Koinos account detail: standalone 5-11 digit code on its own line
+_DATEV_ACCOUNT_CODE_STANDALONE_RE = re.compile(r'^\s*\d{5,11}\s*$')
+
+# Datev Koinos account detail: code + description on same line (longer codes)
+# e.g. "06015101010 Impianti generici" or "10030100910 IVA in compensazione..."
+_DATEV_ACCOUNT_CODE_INLINE_RE = re.compile(r'^\s*\d{7,11}\s+\S')
+
+# Standalone A/P/C/R flag (single letter on its own line)
+_DATEV_FLAG_RE = re.compile(r'^\s*[APCR]\s*$')
+
+# Footer: "Bilancio micro-imprese" or "Pagina X di Y"
+_DATEV_FOOTER_RE = re.compile(
+    r'^\s*(Bilancio micro-imprese|Pagina \d+ di \d+)',
+    re.IGNORECASE
+)
+
+# Bare Italian-format number: "554,68", "24.383,23", "-13.541,08", "(1.234,56)", "0,00", "0"
+_DATEV_BARE_NUMBER_RE = re.compile(
+    r'^\s*[-\(]?\d[\d.]*(?:,\d{2})?\)?\s*$'
+)
+
+# Bare date on its own line (DD/MM/YYYY or DD.MM.YYYY)
+_DATEV_BARE_DATE_RE = re.compile(r'^\s*\d{2}[/\.]\d{2}[/\.]\d{4}\s*$')
+
+
+def _is_datev_koinos_format(text: str) -> bool:
+    """Detect Datev Koinos format by account codes + A/P/C/R flag lines."""
+    lines = text.splitlines()
+    standalone = sum(1 for l in lines if _DATEV_ACCOUNT_CODE_STANDALONE_RE.match(l))
+    inline = sum(1 for l in lines if _DATEV_ACCOUNT_CODE_INLINE_RE.match(l))
+    flag_count = sum(1 for l in lines if _DATEV_FLAG_RE.match(l))
+    # Need account codes (either type) AND standalone flags
+    return (standalone + inline) >= 5 and flag_count >= 5
+
+
+def _preprocess_datev_koinos(text: str) -> str:
+    """Strip Datev Koinos account detail noise.
+
+    Datev Koinos layout (after PyMuPDF extraction) has two variants:
+
+    Variant A — short codes (5-7 digits) are standalone:
+        54.164,31             ← subtotal value (KEEP)
+        050101010             ← account code (remove)
+        Spese di costituzione ← account description (remove)
+        A                     ← flag (remove)
+        67.705,39             ← detail value (remove)
+
+    Variant B — long codes (7-11 digits) are inline with description:
+        06015101010 Impianti generici  ← code+description (remove)
+        A                              ← flag (remove)
+        37.793,41                      ← detail value (remove)
+
+    Both variants: after removing detail blocks, keep structural labels
+    and subtotal values.
+    """
+    if not _is_datev_koinos_format(text):
+        return text
+
+    lines = text.splitlines()
+    remove = set()
+
+    for i, line in enumerate(lines):
+        # Variant B: inline code+description (e.g. "06015101010 Impianti generici")
+        if _DATEV_ACCOUNT_CODE_INLINE_RE.match(line):
+            remove.add(i)
+            # Next lines: flag (A/P/C/R), then value
+            j = i + 1
+            while j < len(lines) and j <= i + 2:
+                s = lines[j].strip()
+                if not s:
+                    j += 1
+                    continue
+                if _DATEV_FLAG_RE.match(lines[j]):
+                    remove.add(j)
+                    if j + 1 < len(lines) and _DATEV_BARE_NUMBER_RE.match(lines[j + 1]):
+                        remove.add(j + 1)
+                    break
+                j += 1
+            continue
+
+        # Variant A: standalone code (e.g. "050101010")
+        if _DATEV_ACCOUNT_CODE_STANDALONE_RE.match(line):
+            remove.add(i)
+            # Remove following lines: description, flag, value
+            j = i + 1
+            while j < len(lines) and j <= i + 3:
+                s = lines[j].strip()
+                if not s:
+                    j += 1
+                    continue
+                if _DATEV_FLAG_RE.match(lines[j]):
+                    remove.add(j)
+                    if j + 1 < len(lines) and _DATEV_BARE_NUMBER_RE.match(lines[j + 1]):
+                        remove.add(j + 1)
+                    break
+                # Description line between code and flag — remove it
+                # But don't eat structural lines (IV CEE labels)
+                if re.match(r'^\s*\d+\)', s) or re.match(r'^\s*[A-E]\)', s) or 'Totale' in s:
+                    break
+                remove.add(j)
+                j += 1
+
+    # Also remove footers and bare dates
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if _DATEV_FOOTER_RE.match(stripped):
+            remove.add(i)
+        if _DATEV_BARE_DATE_RE.match(stripped):
+            remove.add(i)
+
+    filtered = [line for i, line in enumerate(lines) if i not in remove and line.strip()]
+    result = '\n'.join(filtered)
+    logger.info(f"Datev Koinos pre-filter: {len(text)} -> {len(result)} chars")
+    return result
+
+
+def _strip_separator_noise(text: str) -> str:
+    """Remove separator lines (-----, =====) and repeated page headers.
+
+    Applies to Dylog and similar ERP printouts that insert ASCII separators
+    and repeated header/footer lines on every page.
+    """
+    lines = text.splitlines()
+    # Detect: if fewer than 5 separator lines, skip (probably not noisy)
+    sep_count = sum(1 for l in lines if re.match(r'^\s*[-=]{5,}\s*$', l.strip()))
+    if sep_count < 5:
+        return text
+
+    # Dylog repeated page header pattern
+    _dylog_header_re = re.compile(
+        r'^\s*(DATA\s*:|PAGINA Nr|Stampato con tecnologia|FISCOLASER|'
+        r'DESCRIZIONE VOCE|ESER\.\s+\d)',
+        re.IGNORECASE
+    )
+
+    filtered = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Remove separator lines
+        if re.match(r'^[-=]{5,}$', stripped):
+            continue
+        # Remove repeated page headers
+        if _dylog_header_re.match(stripped):
+            continue
+        # Remove bare page numbers (single digit on a line)
+        if re.match(r'^\d{1,2}$', stripped):
+            continue
+        # Remove bare dates like 01/12/2025 on their own line
+        if re.match(r'^\d{2}/\d{2}/\d{4}$', stripped):
+            continue
+        filtered.append(line)
+
+    result = '\n'.join(filtered)
+    logger.info(f"Separator noise filter: {len(text)} -> {len(result)} chars ({sep_count} separators removed)")
+    return result
+
+
 def extract_relevant_pages(file_path: str) -> Tuple[str, str]:
     """
     Open PDF with PyMuPDF, detect SP and CE pages by keywords,
@@ -265,6 +559,16 @@ def extract_relevant_pages(file_path: str) -> Tuple[str, str]:
     sp_text = "\n".join(doc[p].get_text() for p in sorted(sp_pages))
     ce_text = "\n".join(doc[p].get_text() for p in sorted(ce_pages))
     doc.close()
+
+    # Pre-filter ERP account detail lines (no-op for standard PDFs)
+    sp_text = _preprocess_zucchetti(sp_text)
+    ce_text = _preprocess_zucchetti(ce_text)
+    sp_text = _preprocess_datev_koinos(sp_text)
+    ce_text = _preprocess_datev_koinos(ce_text)
+
+    # Strip separator lines and repeated headers (Dylog, etc.)
+    sp_text = _strip_separator_noise(sp_text)
+    ce_text = _strip_separator_noise(ce_text)
 
     logger.info(
         f"SP text: {len(sp_text)} chars, CE text: {len(ce_text)} chars"
@@ -316,6 +620,7 @@ Extract the Stato Patrimoniale (balance sheet) values from the text below.
 NUMBER RULES:
 - Italian format: dots are thousand separators, commas are decimal separators (1.234.567 = 1234567)
 - Parentheses mean negative: (347.117) = -347117
+- Trailing minus means negative: 347.117- = -347117
 - Dash or empty = 0
 - Return plain numbers without any formatting (no dots, no commas)
 - All values in full euros (not thousands)
@@ -323,15 +628,28 @@ NUMBER RULES:
 EXTRACTION RULES:
 - Extract values EXACTLY as they appear: parentheses = negative, plain numbers = positive
 - Do NOT flip signs - preserve the original sign from the PDF (e.g., losses, negative reserves)
-- Crediti "esigibili entro l'esercizio successivo" go to sp06_crediti_breve
-- Crediti "esigibili oltre l'esercizio successivo" go to sp07_crediti_lungo
-- If crediti are not split by maturity, put the total in sp06_crediti_breve
-- Debiti "esigibili entro l'esercizio successivo" go to sp16_debiti_breve
-- Debiti "esigibili oltre l'esercizio successivo" go to sp17_debiti_lungo
-- If debiti are not split by maturity, put the total in sp16_debiti_breve
+
+CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
+- sp06_crediti_breve = C.II) Crediti "esigibili entro l'esercizio successivo"
+- sp07_crediti_lungo = C.II) Crediti "esigibili oltre l'esercizio successivo"
+- If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
+
+DEBITI (in PASSIVO section, AFTER "Totale attivo"):
+- IMPORTANT: "entro/oltre" in the PASSIVO section refers to DEBTS, not credits
+- First find TOTALE Debiti (D) — the sum of all debt categories
+- sp17_debiti_lungo: look for ALL "di cui esigibili oltre l'esercizio successivo" sub-lines
+  under individual debt items (e.g., under "Debiti verso fornitori", under "Altri debiti", etc.)
+  and SUM them. These "di cui" lines are indented sub-totals showing the long-term portion.
+- sp16_debiti_breve = TOTALE Debiti (D) minus sp17_debiti_lungo
+- CRITICAL: sp16 + sp17 MUST equal TOTALE Debiti (D). If they don't, recalculate sp16 as the difference.
+- If debiti are not split by maturity at all, put TOTALE Debiti in sp16_debiti_breve and sp17=0
+
+PATRIMONIO NETTO:
 - sp11_capitale is ONLY "I - Capitale" (share capital). Do NOT include it in sp12_riserve
 - sp12_riserve = sum of ONLY items II through VIII: sovrapprezzo azioni (II), riserve di rivalutazione (III), riserva legale (IV), riserve statutarie (V), altre riserve (VI), riserva per operazioni di copertura (VII), utili (perdite) portati a nuovo (VIII), riserva negativa azioni proprie
 - IMPORTANT: Verify that sp11_capitale + sp12_riserve + sp13_utile_perdita = "Totale patrimonio netto"
+
+TOTALS:
 - Extract totale_attivo and totale_passivo for validation
 - totale_passivo = Totale patrimonio netto + fondi rischi + TFR + debiti + ratei passivi
 
@@ -346,6 +664,7 @@ Extract BOTH columns into current_year and prior_year.
 NUMBER RULES:
 - Italian format: dots are thousand separators, commas are decimal separators (1.234.567 = 1234567)
 - Parentheses mean negative: (347.117) = -347117
+- Trailing minus means negative: 347.117- = -347117
 - Dash or empty = 0
 - Return plain numbers without any formatting (no dots, no commas)
 - All values in full euros (not thousands)
@@ -353,15 +672,28 @@ NUMBER RULES:
 EXTRACTION RULES:
 - Extract values EXACTLY as they appear: parentheses = negative, plain numbers = positive
 - Do NOT flip signs - preserve the original sign from the PDF (e.g., losses, negative reserves)
-- Crediti "esigibili entro l'esercizio successivo" go to sp06_crediti_breve
-- Crediti "esigibili oltre l'esercizio successivo" go to sp07_crediti_lungo
-- If crediti are not split by maturity, put the total in sp06_crediti_breve
-- Debiti "esigibili entro l'esercizio successivo" go to sp16_debiti_breve
-- Debiti "esigibili oltre l'esercizio successivo" go to sp17_debiti_lungo
-- If debiti are not split by maturity, put the total in sp16_debiti_breve
+
+CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
+- sp06_crediti_breve = C.II) Crediti "esigibili entro l'esercizio successivo"
+- sp07_crediti_lungo = C.II) Crediti "esigibili oltre l'esercizio successivo"
+- If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
+
+DEBITI (in PASSIVO section, AFTER "Totale attivo"):
+- IMPORTANT: "entro/oltre" in the PASSIVO section refers to DEBTS, not credits
+- First find TOTALE Debiti (D) — the sum of all debt categories
+- sp17_debiti_lungo: look for ALL "di cui esigibili oltre l'esercizio successivo" sub-lines
+  under individual debt items (e.g., under "Debiti verso fornitori", under "Altri debiti", etc.)
+  and SUM them. These "di cui" lines are indented sub-totals showing the long-term portion.
+- sp16_debiti_breve = TOTALE Debiti (D) minus sp17_debiti_lungo
+- CRITICAL: sp16 + sp17 MUST equal TOTALE Debiti (D). If they don't, recalculate sp16 as the difference.
+- If debiti are not split by maturity at all, put TOTALE Debiti in sp16_debiti_breve and sp17=0
+
+PATRIMONIO NETTO:
 - sp11_capitale is ONLY "I - Capitale" (share capital). Do NOT include it in sp12_riserve
 - sp12_riserve = sum of ONLY items II through VIII: sovrapprezzo azioni (II), riserve di rivalutazione (III), riserva legale (IV), riserve statutarie (V), altre riserve (VI), riserva per operazioni di copertura (VII), utili (perdite) portati a nuovo (VIII), riserva negativa azioni proprie
 - IMPORTANT: Verify that sp11_capitale + sp12_riserve + sp13_utile_perdita = "Totale patrimonio netto"
+
+TOTALS:
 - Extract totale_attivo and totale_passivo for validation
 - totale_passivo = Totale patrimonio netto + fondi rischi + TFR + debiti + ratei passivi
 
@@ -374,6 +706,7 @@ Extract the Conto Economico (income statement) values from the text below.
 NUMBER RULES:
 - Italian format: dots are thousand separators, commas are decimal separators (1.234.567 = 1234567)
 - Parentheses mean negative: (347.117) = -347117
+- Trailing minus means negative: 347.117- = -347117
 - Dash or empty = 0
 - Return plain numbers without any formatting (no dots, no commas)
 - All values in full euros (not thousands)
@@ -402,6 +735,7 @@ Extract BOTH columns into current_year and prior_year.
 NUMBER RULES:
 - Italian format: dots are thousand separators, commas are decimal separators (1.234.567 = 1234567)
 - Parentheses mean negative: (347.117) = -347117
+- Trailing minus means negative: 347.117- = -347117
 - Dash or empty = 0
 - Return plain numbers without any formatting (no dots, no commas)
 - All values in full euros (not thousands)
@@ -500,6 +834,63 @@ def _model_to_decimal_dict(model: pydantic.BaseModel) -> Dict[str, Decimal]:
     return result
 
 
+# Core cost fields that must always be positive (the model subtracts them).
+# Some PDFs (e.g. Zucchetti, "bilancio riclassificato") show costs as negative.
+_POSITIVE_COST_FIELDS = {
+    'ce05_materie_prime', 'ce06_servizi', 'ce07_godimento_beni',
+    'ce08_costi_personale', 'ce08a_tfr_accrual',
+    'ce09_ammortamenti', 'ce09a_ammort_immateriali', 'ce09b_ammort_materiali',
+    'ce09c_svalutazioni', 'ce09d_svalutazione_crediti',
+    'ce11_accantonamenti', 'ce11b_altri_accantonamenti',
+    'ce12_oneri_diversi',
+    'ce15_oneri_finanziari',
+    'ce19_oneri_straordinari',
+}
+
+# Ambiguous fields: only flip if the PDF uses "all costs as negative" convention.
+# ce10_var_rimanenze_mat_prime — can be legitimately negative (inventory reduction)
+# ce20_imposte — can be negative (net tax credit)
+# If many core cost fields were negative, the PDF uses a negative convention
+# and these should be flipped too.
+_CONDITIONAL_COST_FIELDS = {
+    'ce10_var_rimanenze_mat_prime',
+    'ce20_imposte',
+}
+
+
+def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
+    """Ensure cost fields are stored as positive values.
+
+    The model formulas explicitly subtract costs (e.g. EBIT = VP - COPRO),
+    so ce05-ce12, ce15, ce19, ce20 must be positive.  Some PDFs show costs
+    in parentheses and the LLM correctly extracts them as negative — this
+    function flips those to positive.
+
+    When the PDF uses "all costs as negative" convention (detected by ≥3
+    core cost fields being negative), also flip ce10 and ce20.
+    """
+    # Pass 1: flip core cost fields and count how many were negative
+    flipped = []
+    for field in _POSITIVE_COST_FIELDS:
+        val = income_data.get(field, Decimal('0'))
+        if val < 0:
+            income_data[field] = abs(val)
+            flipped.append(field)
+
+    # Pass 2: if many core fields were negative, the PDF uses "costs as negative"
+    # convention — also flip the ambiguous fields
+    if len(flipped) >= 3:
+        for field in _CONDITIONAL_COST_FIELDS:
+            val = income_data.get(field, Decimal('0'))
+            if val < 0:
+                income_data[field] = abs(val)
+                flipped.append(field)
+
+    if flipped:
+        logger.info(f"CE sign normalization: flipped {len(flipped)} fields to positive: {flipped}")
+    return income_data
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -554,41 +945,64 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     except anthropic.APIError as e:
         raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
 
-    # Step 4: Convert to Decimal dicts
+    # Step 4: Convert to Decimal dicts and normalize signs
     balance_sheet_data = _model_to_decimal_dict(sp_result)
-    income_data = _model_to_decimal_dict(ce_result)
+    income_data = _normalize_ce_signs(_model_to_decimal_dict(ce_result))
 
     # Log key values for verification
     logger.info(f"SP totale_attivo = {balance_sheet_data.get('totale_attivo')}")
     logger.info(f"SP totale_passivo = {balance_sheet_data.get('totale_passivo')}")
     logger.info(f"CE ce01_ricavi_vendite = {income_data.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate equity consistency
-    # sp11 + sp12 + sp13 should approximately equal totale_passivo - (sp14+sp15+sp16+sp17+sp18)
+    # Step 5: Validate debt split then equity consistency
+    balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
+    balance_sheet_data = _validate_equity(balance_sheet_data, "single")
+
+    return balance_sheet_data, income_data
+
+
+def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
+    """Validate and auto-correct debt split: sp16 + sp17 must equal total debiti.
+
+    The total debiti can be inferred from totale_passivo - (patrimonio_netto + fondi + tfr + ratei).
+    If sp16 + sp17 overshoots total debiti, recalculate sp16 = total_debiti - sp17.
+    """
+    tot_passivo = balance_sheet_data.get('totale_passivo', Decimal('0'))
+    if tot_passivo == 0:
+        return balance_sheet_data
+
     sp11 = balance_sheet_data.get('sp11_capitale', Decimal('0'))
     sp12 = balance_sheet_data.get('sp12_riserve', Decimal('0'))
     sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
-    computed_equity = sp11 + sp12 + sp13
-    tot_passivo = balance_sheet_data.get('totale_passivo', Decimal('0'))
-    liabilities = (
-        balance_sheet_data.get('sp14_fondi_rischi', Decimal('0')) +
-        balance_sheet_data.get('sp15_tfr', Decimal('0')) +
-        balance_sheet_data.get('sp16_debiti_breve', Decimal('0')) +
-        balance_sheet_data.get('sp17_debiti_lungo', Decimal('0')) +
-        balance_sheet_data.get('sp18_ratei_risconti_passivi', Decimal('0'))
-    )
-    expected_equity = tot_passivo - liabilities
-    equity_diff = abs(computed_equity - expected_equity)
-    if equity_diff > Decimal('1'):
-        logger.warning(
-            f"Equity mismatch: sp11+sp12+sp13={computed_equity} but "
-            f"totale_passivo-liabilities={expected_equity} (diff={equity_diff}). "
-            f"Correcting sp12_riserve from {sp12} to {sp12 - equity_diff}"
-        )
-        # Auto-correct: adjust sp12_riserve to make equity match
-        balance_sheet_data['sp12_riserve'] = expected_equity - sp11 - sp13
+    sp14 = balance_sheet_data.get('sp14_fondi_rischi', Decimal('0'))
+    sp15 = balance_sheet_data.get('sp15_tfr', Decimal('0'))
+    sp16 = balance_sheet_data.get('sp16_debiti_breve', Decimal('0'))
+    sp17 = balance_sheet_data.get('sp17_debiti_lungo', Decimal('0'))
+    sp18 = balance_sheet_data.get('sp18_ratei_risconti_passivi', Decimal('0'))
 
-    return balance_sheet_data, income_data
+    patrimonio_netto = sp11 + sp12 + sp13
+    total_debiti = tot_passivo - patrimonio_netto - sp14 - sp15 - sp18
+    debt_sum = sp16 + sp17
+    diff = abs(debt_sum - total_debiti)
+
+    if diff > Decimal('1') and total_debiti > 0:
+        new_sp16 = total_debiti - sp17
+        if new_sp16 >= 0:
+            logger.warning(
+                f"[{label}] Debt mismatch: sp16+sp17={debt_sum} but total debiti={total_debiti} "
+                f"(diff={diff}). Correcting sp16 from {sp16} to {new_sp16}"
+            )
+            balance_sheet_data['sp16_debiti_breve'] = new_sp16
+        else:
+            # sp17 exceeds total debiti — correct sp17 instead
+            logger.warning(
+                f"[{label}] Debt mismatch: sp17={sp17} > total debiti={total_debiti}. "
+                f"Correcting sp17 to {total_debiti} and sp16 to 0"
+            )
+            balance_sheet_data['sp17_debiti_lungo'] = total_debiti
+            balance_sheet_data['sp16_debiti_breve'] = Decimal('0')
+
+    return balance_sheet_data
 
 
 def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
@@ -670,17 +1084,19 @@ def extract_pdf_both_years_with_llm(
     except anthropic.APIError as e:
         raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
 
-    # Step 4: Convert to Decimal dicts
+    # Step 4: Convert to Decimal dicts and normalize signs
     current_bs = _model_to_decimal_dict(sp_result.current_year)
     prior_bs = _model_to_decimal_dict(sp_result.prior_year)
-    current_ce = _model_to_decimal_dict(ce_result.current_year)
-    prior_ce = _model_to_decimal_dict(ce_result.prior_year)
+    current_ce = _normalize_ce_signs(_model_to_decimal_dict(ce_result.current_year))
+    prior_ce = _normalize_ce_signs(_model_to_decimal_dict(ce_result.prior_year))
 
     # Log key values
     logger.info(f"[current] SP totale_attivo={current_bs.get('totale_attivo')}, CE ricavi={current_ce.get('ce01_ricavi_vendite')}")
     logger.info(f"[prior]   SP totale_attivo={prior_bs.get('totale_attivo')}, CE ricavi={prior_ce.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate equity consistency for both years
+    # Step 5: Validate debt split then equity consistency for both years
+    current_bs = _validate_debiti(current_bs, "current")
+    prior_bs = _validate_debiti(prior_bs, "prior")
     current_bs = _validate_equity(current_bs, "current")
     prior_bs = _validate_equity(prior_bs, "prior")
 

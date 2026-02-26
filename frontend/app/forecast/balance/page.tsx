@@ -102,7 +102,7 @@ export default function ForecastBalancePage() {
           <Info className="h-4 w-4" />
           <AlertTitle>Nessuno scenario trovato</AlertTitle>
           <AlertDescription>
-            Nessuno scenario budget trovato. Vai alla tab &quot;Input Ipotesi&quot; per creare uno scenario.
+            Nessuno scenario budget trovato. Vai alla tab &quot;Scenari&quot; per creare uno scenario.
           </AlertDescription>
         </Alert>
       </div>

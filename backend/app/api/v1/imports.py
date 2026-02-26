@@ -37,7 +37,7 @@ async def upload_xbrl(
     company_id: Optional[int] = Query(None, description="Existing company ID (optional)"),
     create_company: bool = Query(True, description="Create company if not exists"),
     sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6, used when creating new company)"),
-    period_months: Optional[int] = Query(None, ge=1, le=11, description="Months in partial year (1-11). NULL = full 12-month year"),
+    period_months: Optional[int] = Query(None, ge=1, le=12, description="Months in partial year (1-12). NULL = full 12-month year"),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -290,7 +290,7 @@ async def upload_pdf(
     company_name: Optional[str] = Query(None, description="Company name (for new company creation)"),
     create_company: bool = Query(True, description="Create company if not exists"),
     sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6, used when creating new company)"),
-    period_months: Optional[int] = Query(None, ge=1, le=11, description="Months in partial year (1-11). NULL = full 12-month year"),
+    period_months: Optional[int] = Query(None, ge=1, le=12, description="Months in partial year (1-12). NULL = full 12-month year"),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):

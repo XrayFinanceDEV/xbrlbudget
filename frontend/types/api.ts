@@ -379,6 +379,17 @@ export interface BudgetAssumptions {
   financing_amount: number;
   financing_duration_years: number;
   financing_interest_rate: number;
+  ce02_override: number | null;
+  ce03_override: number | null;
+  ce10_override: number | null;
+  ce11_override: number | null;
+  ce13_override: number | null;
+  ce14_override: number | null;
+  ce15_override: number | null;
+  ce16_override: number | null;
+  ce17_override: number | null;
+  ce18_override: number | null;
+  ce19_override: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -408,6 +419,17 @@ export interface BudgetAssumptionsCreate {
   financing_amount?: number;
   financing_duration_years?: number;
   financing_interest_rate?: number;
+  ce02_override?: number | null;
+  ce03_override?: number | null;
+  ce10_override?: number | null;
+  ce11_override?: number | null;
+  ce13_override?: number | null;
+  ce14_override?: number | null;
+  ce15_override?: number | null;
+  ce16_override?: number | null;
+  ce17_override?: number | null;
+  ce18_override?: number | null;
+  ce19_override?: number | null;
 }
 
 export interface ForecastBalanceSheet {

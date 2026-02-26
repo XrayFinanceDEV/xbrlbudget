@@ -224,7 +224,7 @@ export default function ForecastReclassifiedPage() {
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Nessuno scenario disponibile</AlertTitle>
           <AlertDescription>
-            Nessuno scenario disponibile. Crea uno scenario nella pagina &quot;Input Ipotesi&quot;.
+            Nessuno scenario disponibile. Crea uno scenario nella pagina &quot;Scenari&quot;.
           </AlertDescription>
         </Alert>
       </div>

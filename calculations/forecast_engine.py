@@ -202,24 +202,20 @@ class ForecastEngine:
         # Other costs
         ce12 = base_inc.ce12_oneri_diversi * (Decimal('1') + assumption.other_costs_growth_pct / Decimal('100'))
 
-        # Keep other items constant or zero for simplicity
-        ce02 = base_inc.ce02_variazioni_rimanenze
-        ce03 = base_inc.ce03_lavori_interni
-        ce10 = base_inc.ce10_var_rimanenze_mat_prime
-        ce11 = base_inc.ce11_accantonamenti
-        ce13 = base_inc.ce13_proventi_partecipazioni
-        ce16 = base_inc.ce16_utili_perdite_cambi
-        ce17 = base_inc.ce17_rettifiche_attivita_fin
-        ce18 = base_inc.ce18_proventi_straordinari
-        ce19 = base_inc.ce19_oneri_straordinari
+        # CE line items: use override if set, otherwise fall back to base year
+        ce02 = assumption.ce02_override if assumption.ce02_override is not None else base_inc.ce02_variazioni_rimanenze
+        ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
+        ce10 = assumption.ce10_override if assumption.ce10_override is not None else base_inc.ce10_var_rimanenze_mat_prime
+        ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
+        ce13 = assumption.ce13_override if assumption.ce13_override is not None else base_inc.ce13_proventi_partecipazioni
+        ce16 = assumption.ce16_override if assumption.ce16_override is not None else base_inc.ce16_utili_perdite_cambi
+        ce17 = assumption.ce17_override if assumption.ce17_override is not None else base_inc.ce17_rettifiche_attivita_fin
+        ce18 = assumption.ce18_override if assumption.ce18_override is not None else base_inc.ce18_proventi_straordinari
+        ce19 = assumption.ce19_override if assumption.ce19_override is not None else base_inc.ce19_oneri_straordinari
 
-        # Financial income on receivables
-        # Will be calculated after balance sheet is projected
-        ce14 = Decimal('0')  # Placeholder
-
-        # Financial costs on payables
-        # Will be calculated after balance sheet is projected
-        ce15 = Decimal('0')  # Placeholder
+        # Financial income/costs: use override if set, otherwise placeholder (calculated after BS projection)
+        ce14 = assumption.ce14_override if assumption.ce14_override is not None else Decimal('0')
+        ce15 = assumption.ce15_override if assumption.ce15_override is not None else Decimal('0')
 
         # Taxes - use user-defined tax rate (IRES/IRAP)
         production_value = ce01 + ce02 + ce03 + ce04

@@ -99,6 +99,15 @@ export default function AziendePage() {
 
   const [saving, setSaving] = useState(false);
 
+  // Refresh companies list on mount and when page regains focus
+  useEffect(() => {
+    refreshCompanies();
+
+    const handleFocus = () => refreshCompanies();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [refreshCompanies]);
+
   // Load details for all companies
   useEffect(() => {
     if (companies.length === 0) return;

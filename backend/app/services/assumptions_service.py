@@ -127,6 +127,17 @@ def bulk_upsert_assumptions(
             financing_amount=assumption_data.get("financing_amount", 0.0),
             financing_duration_years=assumption_data.get("financing_duration_years", 0.0),
             financing_interest_rate=assumption_data.get("financing_interest_rate", 0.0),
+            ce02_override=assumption_data.get("ce02_override", None),
+            ce03_override=assumption_data.get("ce03_override", None),
+            ce10_override=assumption_data.get("ce10_override", None),
+            ce11_override=assumption_data.get("ce11_override", None),
+            ce13_override=assumption_data.get("ce13_override", None),
+            ce14_override=assumption_data.get("ce14_override", None),
+            ce15_override=assumption_data.get("ce15_override", None),
+            ce16_override=assumption_data.get("ce16_override", None),
+            ce17_override=assumption_data.get("ce17_override", None),
+            ce18_override=assumption_data.get("ce18_override", None),
+            ce19_override=assumption_data.get("ce19_override", None),
         )
         db.add(db_assumption)
         assumptions_saved += 1

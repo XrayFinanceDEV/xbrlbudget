@@ -554,6 +554,11 @@ class BudgetScenario(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # AI-generated report comments (persisted to avoid re-generation)
+    ai_comment_dashboard = Column(Text, nullable=True)
+    ai_comment_composition = Column(Text, nullable=True)
+    ai_comment_income_margins = Column(Text, nullable=True)
+
     # Relationships
     company = relationship("Company", back_populates="budget_scenarios")
     assumptions = relationship("BudgetAssumptions", back_populates="scenario", cascade="all, delete-orphan")
@@ -607,6 +612,19 @@ class BudgetAssumptions(Base):
     financing_amount = Column(Numeric(15, 2), default=0, nullable=False)  # New financing amount
     financing_duration_years = Column(Numeric(10, 2), default=0, nullable=False)  # Loan duration in years
     financing_interest_rate = Column(Numeric(10, 6), default=0, nullable=False)  # Loan interest rate %
+
+    # CE line item overrides (absolute EUR values, nullable = use base year value)
+    ce02_override = Column(Numeric(15, 2), nullable=True)  # Variazioni rimanenze prodotti
+    ce03_override = Column(Numeric(15, 2), nullable=True)  # Incrementi immobilizzazioni per lavori interni
+    ce10_override = Column(Numeric(15, 2), nullable=True)  # Variazioni rimanenze materie prime
+    ce11_override = Column(Numeric(15, 2), nullable=True)  # Accantonamenti per rischi e oneri
+    ce13_override = Column(Numeric(15, 2), nullable=True)  # Proventi da partecipazioni
+    ce14_override = Column(Numeric(15, 2), nullable=True)  # Altri proventi finanziari
+    ce15_override = Column(Numeric(15, 2), nullable=True)  # Interessi e oneri finanziari
+    ce16_override = Column(Numeric(15, 2), nullable=True)  # Utili e perdite su cambi
+    ce17_override = Column(Numeric(15, 2), nullable=True)  # Rettifiche di valore di attività finanziarie
+    ce18_override = Column(Numeric(15, 2), nullable=True)  # Proventi straordinari
+    ce19_override = Column(Numeric(15, 2), nullable=True)  # Oneri straordinari
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

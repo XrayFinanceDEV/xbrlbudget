@@ -24,6 +24,7 @@ interface AppContextType {
   loading: boolean;
   error: string | null;
   refreshCompanies: () => Promise<void>;
+  refreshYears: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -67,6 +68,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [authLoading, loadCompanies]);
 
+  // Reload years for the currently selected company
+  const refreshYears = useCallback(async () => {
+    const companyId = selectedCompanyIdRef.current;
+    if (!companyId) return;
+    try {
+      const data = await getCompanyYears(companyId);
+      setYears((prev) => {
+        const same =
+          prev.length === data.length && prev.every((y, i) => y === data[i]);
+        return same ? prev : data;
+      });
+    } catch (err) {
+      console.error("Error refreshing years:", err);
+    }
+  }, []);
+
   // Load years when company changes
   useEffect(() => {
     if (!selectedCompanyId) {
@@ -79,7 +96,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         setSelectedYear(null);
         const data = await getCompanyYears(selectedCompanyId);
-        // Only update years if content actually changed (stabilize reference)
         setYears((prev) => {
           const same =
             prev.length === data.length && prev.every((y, i) => y === data[i]);
@@ -114,6 +130,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       refreshCompanies: loadCompanies,
+      refreshYears,
     }),
     [
       companies,
@@ -124,6 +141,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       loadCompanies,
+      refreshYears,
     ]
   );
 

@@ -93,7 +93,7 @@ export default function ForecastIncomePage() {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Nessuno scenario budget trovato. Vai alla tab &quot;Input Ipotesi&quot; per creare uno scenario.
+            Nessuno scenario budget trovato. Vai alla tab &quot;Scenari&quot; per creare uno scenario.
           </AlertDescription>
         </Alert>
       </div>

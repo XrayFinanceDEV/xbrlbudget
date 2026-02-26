@@ -3,14 +3,14 @@
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
-import { downloadReportPDF } from "@/lib/api";
+import { downloadReportPDF, getReportAIComments, generateReportAIComments, type ReportAICommentsResponse } from "@/lib/api";
 import type { ScenarioAnalysis, BudgetScenario } from "@/types/api";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { FileText, Download, Loader2, AlertTriangle } from "lucide-react";
+import { FileText, Download, Loader2, AlertTriangle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { ReportTOC } from "@/components/report/report-toc";
@@ -25,6 +25,7 @@ import { ReportBreakEven } from "@/components/report/report-break-even";
 import { ReportCashflow } from "@/components/report/report-cashflow";
 import { ReportAppendices } from "@/components/report/report-appendices";
 import { ReportNotes } from "@/components/report/report-notes";
+import { ReportAIComment } from "@/components/report/report-ai-comment";
 
 export default function ReportPage() {
   const { selectedCompanyId, selectedCompany } = useApp();
@@ -32,6 +33,8 @@ export default function ReportPage() {
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [aiComments, setAiComments] = useState<ReportAICommentsResponse>({});
+  const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
 
   // Auto-select preferred scenario when scenarios load
   useEffect(() => {
@@ -47,6 +50,42 @@ export default function ReportPage() {
   );
   const loading = scenariosLoading || analysisLoading;
   const error = analysisError ? "Errore nel caricamento dell'analisi" : null;
+
+  // Load stored AI comments when scenario/analysis changes
+  useEffect(() => {
+    if (!selectedCompanyId || !selectedScenario) {
+      setAiComments({});
+      return;
+    }
+    let cancelled = false;
+    getReportAIComments(selectedCompanyId, selectedScenario.id)
+      .then((data) => {
+        if (!cancelled) setAiComments(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAiComments({});
+      });
+    return () => { cancelled = true; };
+  }, [selectedCompanyId, selectedScenario]);
+
+  // Generate AI comments on button click
+  const handleGenerateAIComments = async () => {
+    if (!selectedCompanyId || !selectedScenario) return;
+    setAiCommentsLoading(true);
+    try {
+      const data = await generateReportAIComments(selectedCompanyId, selectedScenario.id);
+      setAiComments(data);
+      if (Object.keys(data).length > 0) {
+        toast.success("Commenti AI generati");
+      } else {
+        toast.info("Nessun commento generato (chiave API mancante?)");
+      }
+    } catch {
+      toast.error("Errore nella generazione dei commenti AI");
+    } finally {
+      setAiCommentsLoading(false);
+    }
+  };
 
   // PDF download
   const handleDownload = async () => {
@@ -96,6 +135,18 @@ export default function ReportPage() {
             />
           )}
           <Button
+            onClick={handleGenerateAIComments}
+            disabled={aiCommentsLoading || !analysisData}
+            variant="outline"
+          >
+            {aiCommentsLoading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-2" />
+            )}
+            Commenti AI
+          </Button>
+          <Button
             onClick={handleDownload}
             disabled={downloading || !analysisData}
             variant="outline"
@@ -132,7 +183,7 @@ export default function ReportPage() {
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Nessuno Scenario</AlertTitle>
           <AlertDescription>
-            Nessuno scenario budget trovato. Vai alla pagina Input Ipotesi per
+            Nessuno scenario budget trovato. Vai alla pagina Scenari per
             creare uno scenario e generare le previsioni.
           </AlertDescription>
         </Alert>
@@ -144,8 +195,11 @@ export default function ReportPage() {
           <div className="flex-1 min-w-0 space-y-6">
             <ReportCover data={analysisData} />
             <ReportDashboard data={analysisData} />
+            <ReportAIComment comment={aiComments.dashboard_comment} loading={aiCommentsLoading} />
             <ReportComposition data={analysisData} />
+            <ReportAIComment comment={aiComments.composition_comment} loading={aiCommentsLoading} />
             <ReportIncomeMargins data={analysisData} />
+            <ReportAIComment comment={aiComments.income_margins_comment} loading={aiCommentsLoading} />
             <ReportStructural data={analysisData} />
             <ReportRatios data={analysisData} />
             <ReportScoring data={analysisData} />

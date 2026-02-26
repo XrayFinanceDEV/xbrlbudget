@@ -568,6 +568,33 @@ export const getScenarioAnalysis = async (
   return data;
 };
 
+// AI Report Comments
+export interface ReportAICommentsResponse {
+  dashboard_comment?: string;
+  composition_comment?: string;
+  income_margins_comment?: string;
+}
+
+export const getReportAIComments = async (
+  companyId: number,
+  scenarioId: number
+): Promise<ReportAICommentsResponse> => {
+  const { data } = await api.get<ReportAICommentsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/report/ai-comments`
+  );
+  return data;
+};
+
+export const generateReportAIComments = async (
+  companyId: number,
+  scenarioId: number
+): Promise<ReportAICommentsResponse> => {
+  const { data } = await api.post<ReportAICommentsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/report/ai-comments`
+  );
+  return data;
+};
+
 // PDF Report Download
 export const downloadReportPDF = async (
   companyId: number,

@@ -40,6 +40,9 @@ import {
   Calendar,
   AlertTriangle,
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -405,6 +408,17 @@ function ScenarioForm({
             financing_amount: a.financing_amount,
             financing_duration_years: a.financing_duration_years,
             financing_interest_rate: a.financing_interest_rate,
+            ce02_override: a.ce02_override,
+            ce03_override: a.ce03_override,
+            ce10_override: a.ce10_override,
+            ce11_override: a.ce11_override,
+            ce13_override: a.ce13_override,
+            ce14_override: a.ce14_override,
+            ce15_override: a.ce15_override,
+            ce16_override: a.ce16_override,
+            ce17_override: a.ce17_override,
+            ce18_override: a.ce18_override,
+            ce19_override: a.ce19_override,
           };
         });
         setAssumptions(assumptionsMap);
@@ -412,9 +426,10 @@ function ScenarioForm({
         setNumYears(data.length || 3);
       });
     } else {
-      // Initialize with defaults
+      // Initialize with defaults, pre-populating CE overrides from base year
       setExistingAssumptionYears(new Set());
       const defaultAssumptions: Record<number, Partial<BudgetAssumptionsCreate>> = {};
+      const baseIncome = historicalData[baseYear]?.income;
       forecastYears.forEach((year) => {
         defaultAssumptions[year] = {
           forecast_year: year,
@@ -432,19 +447,34 @@ function ScenarioForm({
           receivables_long_growth_pct: 0,
           payables_short_growth_pct: 0,
           tax_rate: 27.9,
-          fixed_materials_percentage: 22,
-          fixed_services_percentage: 22,
+          fixed_materials_percentage: 0,
+          fixed_services_percentage: 0,
           depreciation_rate: 20,
           financing_amount: 0,
           financing_duration_years: 5,
           financing_interest_rate: 3,
+          ce02_override: baseIncome ? parseFloat(baseIncome.ce02_variazioni_rimanenze) : null,
+          ce03_override: baseIncome ? parseFloat(baseIncome.ce03_lavori_interni) : null,
+          ce10_override: baseIncome ? parseFloat(baseIncome.ce10_var_rimanenze_mat_prime) : null,
+          ce11_override: baseIncome ? parseFloat(baseIncome.ce11_accantonamenti) : null,
+          ce13_override: baseIncome ? parseFloat(baseIncome.ce13_proventi_partecipazioni) : null,
+          ce14_override: baseIncome ? parseFloat(baseIncome.ce14_altri_proventi_finanziari) : null,
+          ce15_override: baseIncome ? parseFloat(baseIncome.ce15_oneri_finanziari) : null,
+          ce16_override: baseIncome ? parseFloat(baseIncome.ce16_utili_perdite_cambi) : null,
+          ce17_override: baseIncome ? parseFloat(baseIncome.ce17_rettifiche_attivita_fin) : null,
+          ce18_override: baseIncome ? parseFloat(baseIncome.ce18_proventi_straordinari) : null,
+          ce19_override: baseIncome ? parseFloat(baseIncome.ce19_oneri_straordinari) : null,
         };
       });
       setAssumptions(defaultAssumptions);
     }
   }, [scenario, companyId]);
 
-  const updateAssumption = useCallback((year: number, field: string, value: number) => {
+  // Auto-generator state
+  const [inflationRate, setInflationRate] = useState(2.5);
+  const [showAutoGen, setShowAutoGen] = useState(false);
+
+  const updateAssumption = useCallback((year: number, field: string, value: number | null) => {
     setAssumptions((prev) => ({
       ...prev,
       [year]: {
@@ -609,6 +639,18 @@ function ScenarioForm({
             </AlertDescription>
           </Alert>
 
+          {/* Auto-Generator Card */}
+          <AutoGeneratorCard
+            historicalYears={historicalYears}
+            forecastYears={forecastYears}
+            historicalData={historicalData}
+            inflationRate={inflationRate}
+            setInflationRate={setInflationRate}
+            showAutoGen={showAutoGen}
+            setShowAutoGen={setShowAutoGen}
+            updateAssumption={updateAssumption}
+          />
+
           <AssumptionsTable
             historicalYears={historicalYears}
             forecastYears={forecastYears}
@@ -645,6 +687,186 @@ function ScenarioForm({
   );
 }
 
+// Auto-Generator Helper
+function calculateTrend(
+  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>,
+  year1: number,
+  year2: number,
+  getValue: (income: IncomeStatement) => number
+): number | null {
+  const d1 = historicalData[year1];
+  const d2 = historicalData[year2];
+  if (!d1?.income || !d2?.income) return null;
+  const v1 = getValue(d1.income);
+  const v2 = getValue(d2.income);
+  if (v1 === 0) return null;
+  return ((v2 - v1) / Math.abs(v1)) * 100;
+}
+
+const TREND_ITEMS: {
+  label: string;
+  fields: string[];
+  getValue: (i: IncomeStatement) => number;
+}[] = [
+  { label: "Ricavi", fields: ["revenue_growth_pct"], getValue: (i) => parseFloat(i.ce01_ricavi_vendite) },
+  { label: "Altri ricavi", fields: ["other_revenue_growth_pct"], getValue: (i) => parseFloat(i.ce04_altri_ricavi) },
+  { label: "Materie prime", fields: ["variable_materials_growth_pct", "fixed_materials_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce05_materie_prime)) },
+  { label: "Servizi", fields: ["variable_services_growth_pct", "fixed_services_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce06_servizi)) },
+  { label: "Godimento beni", fields: ["rent_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce07_godimento_beni)) },
+  { label: "Personale", fields: ["personnel_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce08_costi_personale)) },
+  { label: "Oneri diversi", fields: ["other_costs_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce12_oneri_diversi)) },
+];
+
+function AutoGeneratorCard({
+  historicalYears,
+  forecastYears,
+  historicalData,
+  inflationRate,
+  setInflationRate,
+  showAutoGen,
+  setShowAutoGen,
+  updateAssumption,
+}: {
+  historicalYears: number[];
+  forecastYears: number[];
+  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
+  inflationRate: number;
+  setInflationRate: (v: number) => void;
+  showAutoGen: boolean;
+  setShowAutoGen: (v: boolean) => void;
+  updateAssumption: (year: number, field: string, value: number | null) => void;
+}) {
+  const n = forecastYears.length;
+  const hasTwoYears = historicalYears.length >= 2;
+  const year1 = hasTwoYears ? historicalYears[historicalYears.length - 2] : 0;
+  const year2 = hasTwoYears ? historicalYears[historicalYears.length - 1] : 0;
+
+  // Compute trends and faded rates for each item
+  const computedRows = TREND_ITEMS.map((item) => {
+    const trend = hasTwoYears
+      ? calculateTrend(historicalData, year1, year2, item.getValue)
+      : null;
+    const blended = trend !== null ? (trend + inflationRate) / 2 : inflationRate;
+    const rates = forecastYears.map((_, i) => {
+      if (n === 1) return Math.round(blended * 100) / 100;
+      const weight = i / (n - 1);
+      return Math.round((blended * (1 - weight) + inflationRate * weight) * 100) / 100;
+    });
+    return { ...item, trend, rates };
+  });
+
+  const applyAutoAssumptions = () => {
+    for (const row of computedRows) {
+      forecastYears.forEach((year, i) => {
+        for (const field of row.fields) {
+          updateAssumption(year, field, row.rates[i]);
+        }
+      });
+    }
+    // BS fields: use inflation directly
+    const bsFields = ["receivables_short_growth_pct", "receivables_long_growth_pct", "payables_short_growth_pct"];
+    for (const year of forecastYears) {
+      for (const field of bsFields) {
+        updateAssumption(year, field, Math.round(inflationRate * 100) / 100);
+      }
+    }
+    toast.success("Ipotesi applicate con successo");
+  };
+
+  return (
+    <Card className="mb-4 border-dashed">
+      <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowAutoGen(!showAutoGen)}>
+        <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <Zap className="h-4 w-4 text-amber-500" />
+          Auto-genera Ipotesi
+          {showAutoGen ? (
+            <ChevronDown className="h-4 w-4 ml-auto text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 ml-auto text-muted-foreground" />
+          )}
+        </CardTitle>
+      </CardHeader>
+      {showAutoGen && (
+        <CardContent className="pt-0">
+          <div className="flex items-center gap-3 mb-4">
+            <Label htmlFor="inflation-rate" className="text-xs font-medium whitespace-nowrap">
+              Inflazione attesa:
+            </Label>
+            <Input
+              id="inflation-rate"
+              type="number"
+              step="0.1"
+              min="-10"
+              max="50"
+              value={inflationRate}
+              onChange={(e) => setInflationRate(parseFloat(e.target.value) || 0)}
+              className="w-24 h-8 text-xs"
+            />
+            <span className="text-xs text-muted-foreground">%</span>
+          </div>
+
+          {!hasTwoYears && (
+            <Alert className="mb-3">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="text-xs">
+                Serve almeno 2 anni storici per calcolare il trend. Verranno usati i valori di inflazione.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs border border-border divide-y divide-border">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="px-3 py-1.5 text-left font-semibold text-foreground">Voce</th>
+                  <th className="px-3 py-1.5 text-center font-semibold text-foreground">Trend storico</th>
+                  {forecastYears.map((year) => (
+                    <th key={year} className="px-3 py-1.5 text-center font-semibold text-primary">
+                      {year}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {computedRows.map((row) => (
+                  <tr key={row.label} className="hover:bg-muted/50">
+                    <td className="px-3 py-1.5 font-medium text-foreground">{row.label}</td>
+                    <td className="px-3 py-1.5 text-center text-muted-foreground">
+                      {row.trend !== null ? `${row.trend >= 0 ? "+" : ""}${row.trend.toFixed(1)}%` : "\u2014"}
+                    </td>
+                    {row.rates.map((rate, i) => (
+                      <td key={i} className="px-3 py-1.5 text-center font-medium text-primary">
+                        {rate.toFixed(1)}%
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {/* BS fields row */}
+                <tr className="hover:bg-muted/50">
+                  <td className="px-3 py-1.5 font-medium text-foreground">Crediti / Debiti breve</td>
+                  <td className="px-3 py-1.5 text-center text-muted-foreground">{"\u2014"}</td>
+                  {forecastYears.map((year) => (
+                    <td key={year} className="px-3 py-1.5 text-center font-medium text-primary">
+                      {inflationRate.toFixed(1)}%
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-end mt-3">
+            <Button size="sm" onClick={applyAutoAssumptions}>
+              <Zap className="h-3.5 w-3.5" />
+              Applica ipotesi
+            </Button>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 // Assumptions Table Component (full version matching design)
 function AssumptionsTable({
   historicalYears,
@@ -657,8 +879,9 @@ function AssumptionsTable({
   forecastYears: number[];
   historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
   assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
-  onUpdate: (year: number, field: string, value: number) => void;
+  onUpdate: (year: number, field: string, value: number | null) => void;
 }) {
+  const [showCEDetail, setShowCEDetail] = useState(false);
   const totalYears = historicalYears.length + forecastYears.length;
 
   // Calculate historical percentages for display
@@ -684,6 +907,28 @@ function AssumptionsTable({
         return formatCurrency(Math.abs(parseFloat(income.ce08_costi_personale)));
       case "ce12_oneri_diversi":
         return formatCurrency(Math.abs(parseFloat(income.ce12_oneri_diversi)));
+      case "ce02_variazioni_rimanenze":
+        return formatCurrency(parseFloat(income.ce02_variazioni_rimanenze));
+      case "ce03_lavori_interni":
+        return formatCurrency(parseFloat(income.ce03_lavori_interni));
+      case "ce10_var_rimanenze_mat_prime":
+        return formatCurrency(parseFloat(income.ce10_var_rimanenze_mat_prime));
+      case "ce11_accantonamenti":
+        return formatCurrency(parseFloat(income.ce11_accantonamenti));
+      case "ce13_proventi_partecipazioni":
+        return formatCurrency(parseFloat(income.ce13_proventi_partecipazioni));
+      case "ce14_altri_proventi_finanziari":
+        return formatCurrency(parseFloat(income.ce14_altri_proventi_finanziari));
+      case "ce15_oneri_finanziari":
+        return formatCurrency(parseFloat(income.ce15_oneri_finanziari));
+      case "ce16_utili_perdite_cambi":
+        return formatCurrency(parseFloat(income.ce16_utili_perdite_cambi));
+      case "ce17_rettifiche_attivita_fin":
+        return formatCurrency(parseFloat(income.ce17_rettifiche_attivita_fin));
+      case "ce18_proventi_straordinari":
+        return formatCurrency(parseFloat(income.ce18_proventi_straordinari));
+      case "ce19_oneri_straordinari":
+        return formatCurrency(parseFloat(income.ce19_oneri_straordinari));
       default:
         return "\u2014";
     }
@@ -808,13 +1053,13 @@ function AssumptionsTable({
                   step="1"
                   min="0"
                   max="100"
-                  value={assumptions[year]?.fixed_materials_percentage ?? 22}
+                  value={assumptions[year]?.fixed_materials_percentage ?? 0}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
-                    onUpdate(year, "fixed_materials_percentage", isNaN(val) ? 22 : val);
+                    onUpdate(year, "fixed_materials_percentage", isNaN(val) ? 0 : val);
                   }}
                   className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="22.00%"
+                  placeholder="0%"
                   title="Quota fissa di costi che non varieranno nel previsionale (0-100%)"
                 />
               </td>
@@ -901,13 +1146,13 @@ function AssumptionsTable({
                   step="1"
                   min="0"
                   max="100"
-                  value={assumptions[year]?.fixed_services_percentage ?? 22}
+                  value={assumptions[year]?.fixed_services_percentage ?? 0}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
-                    onUpdate(year, "fixed_services_percentage", isNaN(val) ? 22 : val);
+                    onUpdate(year, "fixed_services_percentage", isNaN(val) ? 0 : val);
                   }}
                   className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="22.00%"
+                  placeholder="0%"
                   title="Quota fissa di costi che non varieranno nel previsionale (0-100%)"
                 />
               </td>
@@ -1093,6 +1338,62 @@ function AssumptionsTable({
               </td>
             ))}
           </tr>
+
+          {/* DETTAGLIO CONTO ECONOMICO Section (collapsible) */}
+          <tr className="bg-muted cursor-pointer" onClick={() => setShowCEDetail(!showCEDetail)}>
+            <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
+              <div className="flex items-center gap-1">
+                {showCEDetail ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                DETTAGLIO CONTO ECONOMICO
+              </div>
+            </td>
+          </tr>
+
+          {showCEDetail && (
+            <>
+              {/* CE Override Rows */}
+              {([
+                { field: "ce02_override", histField: "ce02_variazioni_rimanenze", label: "Variazioni rimanenze prodotti (A.2)" },
+                { field: "ce03_override", histField: "ce03_lavori_interni", label: "Incrementi immobilizzazioni per lavori interni (A.3)" },
+                { field: "ce10_override", histField: "ce10_var_rimanenze_mat_prime", label: "Variazioni rimanenze materie prime (B.11)" },
+                { field: "ce11_override", histField: "ce11_accantonamenti", label: "Accantonamenti per rischi e oneri (B.12)" },
+                { field: "ce13_override", histField: "ce13_proventi_partecipazioni", label: "Proventi da partecipazioni (C.15)" },
+                { field: "ce14_override", histField: "ce14_altri_proventi_finanziari", label: "Altri proventi finanziari (C.16)" },
+                { field: "ce15_override", histField: "ce15_oneri_finanziari", label: "Interessi e oneri finanziari (C.17)" },
+                { field: "ce16_override", histField: "ce16_utili_perdite_cambi", label: "Utili e perdite su cambi (C.17-bis)" },
+                { field: "ce17_override", histField: "ce17_rettifiche_attivita_fin", label: "Rettifiche attività finanziarie (D)" },
+                { field: "ce18_override", histField: "ce18_proventi_straordinari", label: "Proventi straordinari (E.20)" },
+                { field: "ce19_override", histField: "ce19_oneri_straordinari", label: "Oneri straordinari (E.21)" },
+              ] as const).map(({ field, histField, label }) => (
+                <tr key={field} className="hover:bg-muted/50">
+                  <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+                    <div className="font-medium">{label}</div>
+                  </td>
+                  {historicalYears.map((year) => (
+                    <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                      {getHistoricalValue(year, histField)}
+                    </td>
+                  ))}
+                  {forecastYears.map((year) => (
+                    <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                      <input
+                        type="number"
+                        step="100"
+                        value={assumptions[year]?.[field as keyof typeof assumptions[number]] ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);
+                        }}
+                        className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="base year"
+                        title={`${label} - valore in EUR (vuoto = usa anno base)`}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </>
+          )}
 
           {/* IMMOBILIZZAZIONI Section */}
           <tr className="bg-muted">

@@ -14,6 +14,7 @@ import {
   getScenarioAnalysis,
   getBudgetScenarios,
   promoteProjection,
+  deleteCompany,
 } from "@/lib/api";
 import axios from "axios";
 import type {
@@ -34,6 +35,7 @@ import {
   Loader2,
   Check,
   Printer,
+  Trash2,
   TrendingUp,
   TrendingDown,
   GitCompareArrows,
@@ -90,6 +92,7 @@ const MONTH_LABELS: Record<number, string> = {
   9: "9 mesi (30/09)",
   10: "10 mesi (31/10)",
   11: "11 mesi (30/11)",
+  12: "12 mesi (31/12)",
 };
 
 const SECTOR_OPTIONS: Record<number, string> = {
@@ -775,6 +778,15 @@ export default function InfraannualePage() {
   const [ratingVisible, setRatingVisible] = useState(false);
   const [showNoAlertsConfirm, setShowNoAlertsConfirm] = useState(false);
 
+  // Refresh companies list on mount and when page regains focus
+  useEffect(() => {
+    refreshCompanies();
+
+    const handleFocus = () => refreshCompanies();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [refreshCompanies]);
+
   // Auto-select first company if needed
   useEffect(() => {
     if (companies.length > 0 && !selectedCompany) {
@@ -1110,6 +1122,74 @@ export default function InfraannualePage() {
     }
   };
 
+  // Auto-save projection with 0% growth for 12M infrannuale (no annualization needed)
+  const saveProjection12M = async () => {
+    if (!comparison || !importResult || !scenario) return;
+
+    // Pre-fill overrides from comparison partial values (= full year when 12M)
+    const defaults: Record<string, string> = {};
+    for (const item of comparison.income_items) {
+      if (EDITABLE_CE_CODES.includes(item.code)) {
+        defaults[item.code] = Math.round(item.partial_value).toString();
+      }
+    }
+    setOverrides(defaults);
+
+    // Set projectedBS from comparison balance items (already full-year values)
+    const projItems: IntraYearComparisonItem[] = comparison.balance_items.map((item) => ({
+      ...item,
+      annualized_value: item.partial_value,
+    }));
+    setProjectedBS(buildBalanceItemsWithTotals(projItems));
+
+    // Calculate growth rates from imported 12M values vs reference year
+    try {
+      const refItems = comparison.income_items.reduce(
+        (acc, item) => ({ ...acc, [item.code]: item.reference_value }),
+        {} as Record<string, number>
+      );
+      const calcGrowth = (code: string): number => {
+        const importedVal = comparison.income_items.find(i => i.code === code)?.partial_value ?? 0;
+        const refV = refItems[code] || 0;
+        if (refV === 0) return 0;
+        return ((importedVal / refV) - 1) * 100;
+      };
+
+      await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
+        assumptions: [{
+          forecast_year: fiscalYear,
+          revenue_growth_pct: calcGrowth("ce01_ricavi_vendite"),
+          other_revenue_growth_pct: calcGrowth("ce04_altri_ricavi"),
+          variable_materials_growth_pct: calcGrowth("ce05_materie_prime"),
+          fixed_materials_growth_pct: calcGrowth("ce05_materie_prime"),
+          variable_services_growth_pct: calcGrowth("ce06_servizi"),
+          fixed_services_growth_pct: calcGrowth("ce06_servizi"),
+          rent_growth_pct: calcGrowth("ce07_godimento_beni"),
+          personnel_growth_pct: calcGrowth("ce08_costi_personale"),
+          other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
+          tax_rate: 27.9,
+          fixed_materials_percentage: 40,
+          fixed_services_percentage: 40,
+          depreciation_rate: 20,
+          investments: 0,
+          receivables_short_growth_pct: 0,
+          receivables_long_growth_pct: 0,
+          payables_short_growth_pct: 0,
+          interest_rate_receivables: 0,
+          interest_rate_payables: 0,
+          financing_amount: 0,
+          financing_duration_years: 0,
+          financing_interest_rate: 0,
+        }],
+        auto_generate: true,
+      });
+      setAnalysis(null); // Clear stale analysis so Indicatori tab reloads
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Errore nel salvataggio proiezione";
+      toast.error(msg);
+    }
+  };
+
   // STEP 4: Load Analysis
   const loadAnalysis = useCallback(async () => {
     if (!importResult || !scenario) return;
@@ -1142,6 +1222,19 @@ export default function InfraannualePage() {
     setActiveTab("comparison");
   };
 
+  const handleDeleteCompany = async (id: number, name: string) => {
+    try {
+      await deleteCompany(id);
+      await refreshCompanies();
+      if (selectedCompany === id) setSelectedCompany(null);
+      if (importResult?.companyId === id) setImportResult(null);
+      toast.success(`"${name}" eliminata`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Errore durante l'eliminazione";
+      toast.error(msg);
+    }
+  };
+
   // Load existing infrannuale scenarios on mount
   const [existingScenarios, setExistingScenarios] = useState<
     Array<{ scenario: BudgetScenario; company: Company }>
@@ -1171,9 +1264,9 @@ export default function InfraannualePage() {
     { id: "aziende", label: "Aziende", icon: Building2, enabled: true },
     { id: "import", label: "Importazione", icon: Upload, enabled: true },
     { id: "comparison", label: "Confronto", icon: GitCompareArrows, enabled: !!scenario },
-    { id: "projection", label: "Proiezione", icon: LineChart, enabled: !!comparison },
+    ...(periodMonths !== 12 ? [{ id: "projection", label: "Proiezione", icon: LineChart, enabled: !!comparison }] : []),
     { id: "results", label: "Indicatori", icon: BarChart3, enabled: !!scenario },
-    { id: "stampa", label: "Stampa", icon: Printer, enabled: !!projectedBS },
+    { id: "stampa", label: "Stampa", icon: Printer, enabled: !!(projectedBS || (periodMonths === 12 && comparison)) },
   ];
 
   return (
@@ -1234,10 +1327,38 @@ export default function InfraannualePage() {
                           {s.name} - Base: {s.base_year}
                         </p>
                       </div>
-                      <Button variant="outline" size="sm">
-                        Riprendi
-                        <ArrowRight className="h-4 w-4 ml-1" />
-                      </Button>
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Button variant="outline" size="sm" onClick={() => handleResumeScenario(s, c)}>
+                          Riprendi
+                          <ArrowRight className="h-4 w-4 ml-1" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button size="sm" variant="ghost">
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Elimina azienda</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Eliminare &quot;{c.name}&quot; e tutti i dati associati
+                                (bilanci, scenari, previsioni)? Questa azione non può
+                                essere annullata.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Annulla</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleDeleteCompany(c.id, c.name)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Elimina
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1545,7 +1666,7 @@ export default function InfraannualePage() {
                     periodMonths={comparison.period_months}
                     referenceYear={comparison.reference_year}
                     partialYear={comparison.partial_year}
-                    showAnnualized
+                    showAnnualized={periodMonths !== 12}
                     showRevenuePct
                   />
                 </CardContent>
@@ -1570,8 +1691,15 @@ export default function InfraannualePage() {
               </Card>
 
               <div className="flex justify-end">
-                <Button onClick={() => setActiveTab("projection")}>
-                  Vai alla Proiezione
+                <Button onClick={async () => {
+                  if (periodMonths === 12) {
+                    await saveProjection12M();
+                    setActiveTab("results");
+                  } else {
+                    setActiveTab("projection");
+                  }
+                }}>
+                  {periodMonths === 12 ? "Vai agli Indicatori" : "Vai alla Proiezione"}
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
               </div>
@@ -1673,8 +1801,9 @@ export default function InfraannualePage() {
                 <CardHeader>
                   <CardTitle className="text-base">Indicatori Finanziari</CardTitle>
                   <CardDescription>
-                    Confronto: storico {comparison.reference_year}, infrannuale {comparison.period_months}M{" "}
-                    {comparison.partial_year} (annualizzato), proiezione 12M {comparison.partial_year}
+                    {periodMonths === 12
+                      ? `Confronto: storico ${comparison.reference_year}, infrannuale 12M ${comparison.partial_year}`
+                      : `Confronto: storico ${comparison.reference_year}, infrannuale ${comparison.period_months}M ${comparison.partial_year} (annualizzato), proiezione 12M ${comparison.partial_year}`}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1684,6 +1813,7 @@ export default function InfraannualePage() {
                     forecastIs={analysis.forecast_years?.[0]?.income_statement || {}}
                     extraAlerts={extraAlerts}
                     showRating={ratingVisible}
+                    hideProiezione={periodMonths === 12}
                   />
                 </CardContent>
               </Card>
@@ -1742,11 +1872,13 @@ export default function InfraannualePage() {
                 <p className="mt-2 text-muted-foreground">Caricamento dati...</p>
               </CardContent>
             </Card>
-          ) : analysis && comparison && projectedBS ? (
+          ) : analysis && comparison && (projectedBS || periodMonths === 12) ? (
             <StampaContent
               comparison={comparison}
               overrides={overrides}
-              projectedBS={projectedBS}
+              projectedBS={projectedBS ?? buildBalanceItemsWithTotals(
+                comparison.balance_items.map((i) => ({ ...i, annualized_value: i.partial_value }))
+              )}
               forecastBs={analysis.forecast_years?.[0]?.balance_sheet || {}}
               forecastIs={analysis.forecast_years?.[0]?.income_statement || {}}
               extraAlerts={extraAlerts}
@@ -1755,12 +1887,13 @@ export default function InfraannualePage() {
               periodMonths={periodMonths}
               companyId={importResult?.companyId}
               scenarioId={scenario?.id}
+              onBeforePromote={periodMonths === 12 ? saveProjection12M : undefined}
             />
           ) : (
             <Card>
               <CardContent className="py-12 text-center">
                 <p className="text-muted-foreground">
-                  Genera prima la proiezione nel passaggio Proiezione.
+                  Completa prima i passaggi precedenti.
                 </p>
               </CardContent>
             </Card>
@@ -2273,12 +2406,14 @@ function IndicatoriTable({
   forecastIs,
   extraAlerts,
   showRating = true,
+  hideProiezione = false,
 }: {
   comparison: IntraYearComparison;
   forecastBs: Record<string, number>;
   forecastIs: Record<string, number>;
   extraAlerts: Record<string, boolean>;
   showRating?: boolean;
+  hideProiezione?: boolean;
 }) {
   // Build data maps from comparison
   const storicoBs: Record<string, number> = {};
@@ -2336,16 +2471,16 @@ function IndicatoriTable({
     <div className="space-y-4">
       {/* Overall Rating Cards - only shown after "Calcola Rating" */}
       {showRating && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className={cn("grid gap-4", hideProiezione ? "grid-cols-2" : "grid-cols-3")}>
           {[
             { label: `Storico ${comparison.reference_year}`, rating: storicoRating, oltre: oltreCount(storicoScores), alerts: 0 },
             { label: `Infrann. ${comparison.period_months}M ${comparison.partial_year}`, rating: infraRating, oltre: oltreCount(infraScores), alerts: alertCount },
-            {
+            ...(!hideProiezione ? [{
               label: `Proiezione ${comparison.partial_year}`,
               rating: proiezioneRating,
               oltre: proiezioneScores ? oltreCount(proiezioneScores) : null,
               alerts: alertCount,
-            },
+            }] : []),
           ].map((col) => (
             <div key={col.label} className="flex items-center justify-between rounded-lg border border-border p-3">
               <div>
@@ -2390,9 +2525,11 @@ function IndicatoriTable({
             <TableHead className="text-right">
               Infrann. {comparison.period_months}M {comparison.partial_year}
             </TableHead>
-            <TableHead className="text-right">
-              Proiezione {comparison.partial_year}
-            </TableHead>
+            {!hideProiezione && (
+              <TableHead className="text-right">
+                Proiezione {comparison.partial_year}
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -2419,18 +2556,20 @@ function IndicatoriTable({
                     {showRating && <span className={cn("inline-block h-2.5 w-2.5 rounded-full", scoreDotColor(is_))} />}
                   </span>
                 </TableCell>
-                <TableCell className="text-right">
-                  {proiezioneInd && proiezioneScores ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="font-medium">
-                        {formatIndicatorValue(proiezioneInd[def.key], def.format)}
+                {!hideProiezione && (
+                  <TableCell className="text-right">
+                    {proiezioneInd && proiezioneScores ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="font-medium">
+                          {formatIndicatorValue(proiezioneInd[def.key], def.format)}
+                        </span>
+                        {showRating && <span className={cn("inline-block h-2.5 w-2.5 rounded-full", scoreDotColor(proiezioneScores[idx]))} />}
                       </span>
-                      {showRating && <span className={cn("inline-block h-2.5 w-2.5 rounded-full", scoreDotColor(proiezioneScores[idx]))} />}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                )}
               </TableRow>
             );
           })}
@@ -2453,6 +2592,7 @@ function StampaContent({
   periodMonths,
   companyId,
   scenarioId,
+  onBeforePromote,
 }: {
   comparison: IntraYearComparison;
   overrides: Record<string, string>;
@@ -2465,9 +2605,10 @@ function StampaContent({
   periodMonths: number;
   companyId?: number;
   scenarioId?: number;
+  onBeforePromote?: () => Promise<void>;
 }) {
   const router = useRouter();
-  const { refreshCompanies } = useApp();
+  const { refreshCompanies, refreshYears } = useApp();
   const [promoting, setPromoting] = useState(false);
   const refYear = comparison.reference_year;
   const partialYear = comparison.partial_year;
@@ -2576,8 +2717,10 @@ function StampaContent({
             onClick={async () => {
               setPromoting(true);
               try {
+                if (onBeforePromote) await onBeforePromote();
                 await promoteProjection(companyId, scenarioId);
                 await refreshCompanies();
+                await refreshYears();
                 toast.success("Proiezione confermata come anno completo");
                 router.push("/budget");
               } catch (err: unknown) {
@@ -2596,7 +2739,7 @@ function StampaContent({
             ) : (
               <ArrowRight className="h-4 w-4 mr-2" />
             )}
-            Conferma Proiezione e passa al Budget
+            {periodMonths === 12 ? "Conferma e passa al Budget" : "Conferma Proiezione e passa al Budget"}
           </Button>
         )}
       </div>
@@ -2605,7 +2748,7 @@ function StampaContent({
       <div className="text-center space-y-1 print:mb-4">
         <h1 className="text-xl font-bold">{companyName}</h1>
         <p className="text-sm text-muted-foreground">
-          Analisi Infrannuale {periodMonths}M {partialYear} — Proiezione 12M {partialYear}
+          Analisi Infrannuale {periodMonths === 12 ? "" : `${periodMonths}M `}{partialYear}{periodMonths !== 12 ? ` — Proiezione 12M ${partialYear}` : ""}
         </p>
         <p className="text-xs text-muted-foreground">
           Anno di riferimento: {refYear} | Data: {new Date().toLocaleDateString("it-IT")}
@@ -2698,7 +2841,8 @@ function StampaContent({
         </Table>
       </div>
 
-      {/* 3. CE PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico */}
+      {/* 3. CE PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
+      {periodMonths !== 12 && (
       <div className="print:break-before-page">
         <h2 className="text-base font-semibold mb-2">
           Conto Economico — Proiezione {partialYear}
@@ -2745,8 +2889,10 @@ function StampaContent({
           </TableBody>
         </Table>
       </div>
+      )}
 
-      {/* 4. SP PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico */}
+      {/* 4. SP PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
+      {periodMonths !== 12 && (
       <div>
         <h2 className="text-base font-semibold mb-2">
           Stato Patrimoniale — Proiezione {partialYear}
@@ -2797,17 +2943,18 @@ function StampaContent({
           </TableBody>
         </Table>
       </div>
+      )}
 
       {/* 5. INDICATORI DELLA CRISI D'IMPRESA */}
       <div className="print:break-before-page">
         <h2 className="text-base font-semibold mb-2">Indicatori della Crisi d&apos;Impresa</h2>
 
         {/* Rating cards */}
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className={cn("grid gap-4 mb-4", periodMonths === 12 ? "grid-cols-2" : "grid-cols-3")}>
           {[
             { label: `Storico ${refYear}`, rating: storicoRating, oltre: oltreCount(storicoScores), alerts: 0 },
             { label: `Infrann. ${periodMonths}M ${partialYear}`, rating: infraRating, oltre: oltreCount(infraScores), alerts: alertCount },
-            { label: `Proiezione ${partialYear}`, rating: proiezioneRating, oltre: oltreCount(proiezioneScores), alerts: alertCount },
+            ...(periodMonths !== 12 ? [{ label: `Proiezione ${partialYear}`, rating: proiezioneRating, oltre: oltreCount(proiezioneScores), alerts: alertCount }] : []),
           ].map(col => (
             <div key={col.label} className="flex items-center justify-between rounded-lg border border-border p-3">
               <div>
@@ -2831,7 +2978,7 @@ function StampaContent({
               <TableHead>Indicatore</TableHead>
               <TableHead className="text-right">Storico {refYear}</TableHead>
               <TableHead className="text-right">Infrann. {periodMonths}M</TableHead>
-              <TableHead className="text-right">Proiezione {partialYear}</TableHead>
+              {periodMonths !== 12 && <TableHead className="text-right">Proiezione {partialYear}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2850,12 +2997,14 @@ function StampaContent({
                     <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(infraScores[idx]))} />
                   </span>
                 </TableCell>
-                <TableCell className="text-right">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="font-medium">{formatInd(proiezioneInd[def.key], def.format)}</span>
-                    <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(proiezioneScores[idx]))} />
-                  </span>
-                </TableCell>
+                {periodMonths !== 12 && (
+                  <TableCell className="text-right">
+                    <span className="inline-flex items-center gap-2">
+                      <span className="font-medium">{formatInd(proiezioneInd[def.key], def.format)}</span>
+                      <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(proiezioneScores[idx]))} />
+                    </span>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

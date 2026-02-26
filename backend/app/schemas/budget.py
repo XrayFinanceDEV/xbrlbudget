@@ -14,7 +14,7 @@ class BudgetScenarioBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     base_year: int = Field(..., ge=2000, le=2100)
     scenario_type: str = Field(default="budget")  # "budget" | "infrannuale"
-    period_months: Optional[int] = Field(default=None, ge=1, le=11)
+    period_months: Optional[int] = Field(default=None, ge=1, le=12)
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
 
@@ -29,7 +29,7 @@ class BudgetScenarioUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     base_year: Optional[int] = Field(None, ge=2000, le=2100)
     scenario_type: Optional[str] = None
-    period_months: Optional[int] = Field(None, ge=1, le=11)
+    period_months: Optional[int] = Field(None, ge=1, le=12)
     description: Optional[str] = None
     is_active: Optional[int] = Field(None, ge=0, le=1)
 
@@ -88,6 +88,19 @@ class BudgetAssumptionsBase(BaseModel):
     financing_duration_years: Decimal = Field(default=Decimal("0"))
     financing_interest_rate: Decimal = Field(default=Decimal("0"))
 
+    # CE line item overrides (absolute EUR values, None = use base year value)
+    ce02_override: Optional[Decimal] = None
+    ce03_override: Optional[Decimal] = None
+    ce10_override: Optional[Decimal] = None
+    ce11_override: Optional[Decimal] = None
+    ce13_override: Optional[Decimal] = None
+    ce14_override: Optional[Decimal] = None
+    ce15_override: Optional[Decimal] = None
+    ce16_override: Optional[Decimal] = None
+    ce17_override: Optional[Decimal] = None
+    ce18_override: Optional[Decimal] = None
+    ce19_override: Optional[Decimal] = None
+
 
 class BudgetAssumptionsCreate(BudgetAssumptionsBase):
     """Schema for creating new BudgetAssumptions"""
@@ -119,6 +132,19 @@ class BudgetAssumptionsUpdate(BaseModel):
     financing_amount: Optional[Decimal] = None
     financing_duration_years: Optional[Decimal] = None
     financing_interest_rate: Optional[Decimal] = None
+
+    # CE line item overrides
+    ce02_override: Optional[Decimal] = None
+    ce03_override: Optional[Decimal] = None
+    ce10_override: Optional[Decimal] = None
+    ce11_override: Optional[Decimal] = None
+    ce13_override: Optional[Decimal] = None
+    ce14_override: Optional[Decimal] = None
+    ce15_override: Optional[Decimal] = None
+    ce16_override: Optional[Decimal] = None
+    ce17_override: Optional[Decimal] = None
+    ce18_override: Optional[Decimal] = None
+    ce19_override: Optional[Decimal] = None
 
 
 class BudgetAssumptionsInDB(BudgetAssumptionsBase):

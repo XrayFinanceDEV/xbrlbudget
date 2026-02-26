@@ -25,7 +25,7 @@ import {
 const MAIN_TABS = [
   { href: "/aziende", label: "Aziende", icon: Building2, match: (path: string) => path.startsWith("/aziende") },
   { href: "/import", label: "Importazione", icon: Upload, match: (path: string) => path.startsWith("/import") },
-  { href: "/budget", label: "Input Ipotesi", icon: FileSpreadsheet, match: (path: string) => path.startsWith("/budget") },
+  { href: "/budget", label: "Scenari", icon: FileSpreadsheet, match: (path: string) => path.startsWith("/budget") },
 ];
 
 const FORECAST_TABS = [

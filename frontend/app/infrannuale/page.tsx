@@ -1579,10 +1579,10 @@ export default function InfraannualePage() {
                   </Button>
                 </div>
               ) : (
+                <div className="flex justify-end">
                 <Button
                   onClick={handleImport}
                   disabled={importing || !file}
-                  className="w-full"
                 >
                   {importing ? (
                     <>
@@ -1596,6 +1596,7 @@ export default function InfraannualePage() {
                     </>
                   )}
                 </Button>
+                </div>
               )}
             </CardContent>
           </Card>

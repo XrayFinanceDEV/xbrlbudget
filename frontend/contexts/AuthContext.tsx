@@ -21,10 +21,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   useEffect(() => {
+    const PARENT_ORIGIN = process.env.NEXT_PUBLIC_PARENT_ORIGIN || "";
+
     // Listen for JWT from parent iframe via postMessage
     const handleMessage = (event: MessageEvent) => {
-      // In production, validate origin:
-      // if (event.origin !== 'https://formulafinance.app') return;
+      // Validate origin in production (skip if not configured)
+      if (PARENT_ORIGIN && event.origin !== PARENT_ORIGIN) return;
 
       if (event.data?.type === "AUTH_TOKEN" && event.data?.token) {
         setToken(event.data.token);
@@ -40,14 +42,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Request token from parent (in case we loaded after parent sent it)
     if (window.parent !== window) {
-      window.parent.postMessage({ type: "REQUEST_AUTH_TOKEN" }, "*");
+      window.parent.postMessage({ type: "REQUEST_AUTH_TOKEN" }, PARENT_ORIGIN || "*");
     }
 
-    // Dev mode: if no token received within 1s, stop loading
-    // Backend will use DEV_USER_ID fallback when no Authorization header
+    // When NOT in iframe (standalone dev mode): short timeout, backend uses DEV_USER_ID fallback
+    // When in iframe: longer timeout to allow postMessage token exchange to complete
+    const isInIframe = window.parent !== window;
     const devTimeout = setTimeout(() => {
       setIsLoading(false);
-    }, 1000);
+    }, isInIframe ? 5000 : 1000);
 
     return () => {
       window.removeEventListener("message", handleMessage);

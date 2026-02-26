@@ -10,6 +10,8 @@ COPY frontend/ .
 # Ensure public dir exists (Next.js standalone expects it)
 RUN mkdir -p public
 ENV NEXT_PUBLIC_API_URL=""
+ARG NEXT_PUBLIC_PARENT_ORIGIN=""
+ENV NEXT_PUBLIC_PARENT_ORIGIN=${NEXT_PUBLIC_PARENT_ORIGIN}
 RUN npm run build
 
 FROM node:20-alpine AS runner

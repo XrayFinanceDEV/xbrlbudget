@@ -630,8 +630,9 @@ EXTRACTION RULES:
 - Do NOT flip signs - preserve the original sign from the PDF (e.g., losses, negative reserves)
 
 CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
-- sp06_crediti_breve = C.II) Crediti "esigibili entro l'esercizio successivo"
-- sp07_crediti_lungo = C.II) Crediti "esigibili oltre l'esercizio successivo"
+- sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across ALL crediti categories (verso clienti, tributari, verso altri, etc.)
+- sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across ALL crediti categories
+- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". Do NOT use "Totale crediti" directly as sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
@@ -674,8 +675,9 @@ EXTRACTION RULES:
 - Do NOT flip signs - preserve the original sign from the PDF (e.g., losses, negative reserves)
 
 CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
-- sp06_crediti_breve = C.II) Crediti "esigibili entro l'esercizio successivo"
-- sp07_crediti_lungo = C.II) Crediti "esigibili oltre l'esercizio successivo"
+- sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across ALL crediti categories (verso clienti, tributari, verso altri, etc.)
+- sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across ALL crediti categories
+- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". Do NOT use "Totale crediti" directly as sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
@@ -954,11 +956,61 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     logger.info(f"SP totale_passivo = {balance_sheet_data.get('totale_passivo')}")
     logger.info(f"CE ce01_ricavi_vendite = {income_data.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate debt split then equity consistency
+    # Step 5: Validate crediti, debt split, then equity consistency
+    balance_sheet_data = _validate_crediti(balance_sheet_data, "single")
     balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
     balance_sheet_data = _validate_equity(balance_sheet_data, "single")
 
     return balance_sheet_data, income_data
+
+
+def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
+    """Validate crediti: sp06 + sp07 must not exceed the crediti implied by totale_attivo.
+
+    If totale_attivo is available, crediti = totale_attivo - (sp01..sp05 + sp08 + sp09 + sp10).
+    If sp06 + sp07 overshoots, the LLM likely put total crediti in sp06 instead of just entro.
+    Fix: sp06 = total_crediti - sp07.
+    """
+    tot_attivo = balance_sheet_data.get('totale_attivo', Decimal('0'))
+    if tot_attivo == 0:
+        return balance_sheet_data
+
+    sp01 = balance_sheet_data.get('sp01_crediti_soci', Decimal('0'))
+    sp02 = balance_sheet_data.get('sp02_immob_immateriali', Decimal('0'))
+    sp03 = balance_sheet_data.get('sp03_immob_materiali', Decimal('0'))
+    sp04 = balance_sheet_data.get('sp04_immob_finanziarie', Decimal('0'))
+    sp05 = balance_sheet_data.get('sp05_rimanenze', Decimal('0'))
+    sp06 = balance_sheet_data.get('sp06_crediti_breve', Decimal('0'))
+    sp07 = balance_sheet_data.get('sp07_crediti_lungo', Decimal('0'))
+    sp08 = balance_sheet_data.get('sp08_attivita_finanziarie', Decimal('0'))
+    sp09 = balance_sheet_data.get('sp09_disponibilita_liquide', Decimal('0'))
+    sp10 = balance_sheet_data.get('sp10_ratei_risconti_attivi', Decimal('0'))
+
+    non_crediti = sp01 + sp02 + sp03 + sp04 + sp05 + sp08 + sp09 + sp10
+    expected_crediti = tot_attivo - non_crediti
+    actual_crediti = sp06 + sp07
+
+    diff = actual_crediti - expected_crediti
+    if diff > Decimal('1') and sp07 > 0 and abs(diff - sp07) <= Decimal('1'):
+        # Classic double-count: LLM put total crediti in sp06, then also added sp07
+        new_sp06 = expected_crediti - sp07
+        logger.warning(
+            f"[{label}] Crediti double-count detected: sp06+sp07={actual_crediti} but "
+            f"expected={expected_crediti} (diff={diff} ≈ sp07={sp07}). "
+            f"Correcting sp06 from {sp06} to {new_sp06}"
+        )
+        balance_sheet_data['sp06_crediti_breve'] = new_sp06
+    elif diff > Decimal('1'):
+        # General overshoot — correct sp06
+        new_sp06 = expected_crediti - sp07
+        if new_sp06 >= 0:
+            logger.warning(
+                f"[{label}] Crediti mismatch: sp06+sp07={actual_crediti} but "
+                f"expected={expected_crediti} (diff={diff}). Correcting sp06 to {new_sp06}"
+            )
+            balance_sheet_data['sp06_crediti_breve'] = new_sp06
+
+    return balance_sheet_data
 
 
 def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
@@ -1094,7 +1146,9 @@ def extract_pdf_both_years_with_llm(
     logger.info(f"[current] SP totale_attivo={current_bs.get('totale_attivo')}, CE ricavi={current_ce.get('ce01_ricavi_vendite')}")
     logger.info(f"[prior]   SP totale_attivo={prior_bs.get('totale_attivo')}, CE ricavi={prior_ce.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate debt split then equity consistency for both years
+    # Step 5: Validate crediti, debt split, then equity consistency for both years
+    current_bs = _validate_crediti(current_bs, "current")
+    prior_bs = _validate_crediti(prior_bs, "prior")
     current_bs = _validate_debiti(current_bs, "current")
     prior_bs = _validate_debiti(prior_bs, "prior")
     current_bs = _validate_equity(current_bs, "current")

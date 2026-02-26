@@ -99,3 +99,6 @@ BKPS.XBRL
 # Keep sample files
 !sample_data.xbrl
 !sample_data.csv
+
+# Docker env (contains secrets)
+.env.docker

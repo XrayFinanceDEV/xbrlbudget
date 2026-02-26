@@ -30,7 +30,9 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { isLoading: authLoading } = useAuth();
+  const { isLoading: authLoading, isAuthenticated } = useAuth();
+  const authLoadingRef = useRef(authLoading);
+  authLoadingRef.current = authLoading;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([]);
@@ -43,7 +45,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   selectedCompanyIdRef.current = selectedCompanyId;
 
   // Stable loadCompanies — no dependencies, reads current selection via ref
+  // Skips API call if auth is still loading (prevents 401 in iframe mode)
   const loadCompanies = useCallback(async () => {
+    if (authLoadingRef.current) return;
     try {
       const data = await getCompanies();
       setCompanies(data);

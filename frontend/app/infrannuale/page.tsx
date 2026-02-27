@@ -489,8 +489,8 @@ function buildBalanceItemsWithTotals(
     sp05_rimanenze: "I - Rimanenze",
     sp06_crediti_breve: "II - Crediti (entro esercizio successivo)",
     sp07_crediti_lungo: "II - Crediti (oltre esercizio successivo)",
-    sp08_attivita_finanziarie: "III - Attivit\u00e0 finanziarie che non costituiscono immobilizzazioni",
-    sp09_disponibilita_liquide: "IV - Disponibilit\u00e0 liquide",
+    sp08_attivita_finanziarie: "III - Attività finanziarie che non costituiscono immobilizzazioni",
+    sp09_disponibilita_liquide: "IV - Disponibilità liquide",
     sp10_ratei_risconti_attivi: "D) Ratei e risconti attivi",
     sp11_capitale: "I - Capitale",
     sp12_riserve: "II-VIII - Riserve",
@@ -723,7 +723,7 @@ function buildIncomeItemsWithEbitda(
     labeled("ce16_utili_perdite_cambi"),
     makeRow("_totale_fin", "Totale Proventi/Oneri Finanziari", partialFin, refFin, annFin),
     // D) RETTIFICHE DI VALORE
-    hdr("_hdr_d", "D) RETTIFICHE DI VALORE ATTIVIT\u00c0 FINANZIARIE"),
+    hdr("_hdr_d", "D) RETTIFICHE DI VALORE ATTIVITÀ FINANZIARIE"),
     labeled("ce17_rettifiche_attivita_fin"),
     // E) PROVENTI E ONERI STRAORDINARI
     hdr("_hdr_e", "E) PROVENTI E ONERI STRAORDINARI"),

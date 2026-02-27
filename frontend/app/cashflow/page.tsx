@@ -272,7 +272,7 @@ export default function CashflowPage() {
               <tbody className="bg-card divide-y divide-border">
                 {/* A. OPERATING ACTIVITIES */}
                 <CashFlowRow
-                  label="A. Flussi finanziari derivanti dell'attivit\u00e0 operativa"
+                  label="A. Flussi finanziari derivanti dell'attività operativa"
                   historicalValues={Array(historicalYears.length).fill(0)}
                   forecastValues={Array(forecastYears.length).fill(0)}
                   isSection={true}
@@ -303,7 +303,7 @@ export default function CashflowPage() {
                   indent={1}
                 />
                 <CashFlowRow
-                  label="(Plusvalenze)/minusvalenze derivanti dalla cessione di attivit\u00e0"
+                  label="(Plusvalenze)/minusvalenze derivanti dalla cessione di attività"
                   historicalValues={getValues((cf) => cf.operating_activities.start.capital_gains_losses, historicalYears)}
                   forecastValues={getValues((cf) => cf.operating_activities.start.capital_gains_losses, forecastYears)}
                   indent={1}
@@ -459,7 +459,7 @@ export default function CashflowPage() {
                 />
 
                 <CashFlowRow
-                  label="Flusso finanziario dell'attivit\u00e0 operativa (A)"
+                  label="Flusso finanziario dell'attività operativa (A)"
                   historicalValues={getValues((cf) => cf.operating_activities.total_operating_cashflow, historicalYears)}
                   forecastValues={getValues((cf) => cf.operating_activities.total_operating_cashflow, forecastYears)}
                   isTotal={true}
@@ -467,7 +467,7 @@ export default function CashflowPage() {
 
                 {/* B. INVESTING ACTIVITIES */}
                 <CashFlowRow
-                  label="B. Flussi finanziari derivanti dall'attivit\u00e0 d'investimento"
+                  label="B. Flussi finanziari derivanti dall'attività d'investimento"
                   historicalValues={Array(historicalYears.length).fill(0)}
                   forecastValues={Array(forecastYears.length).fill(0)}
                   isSection={true}
@@ -512,7 +512,7 @@ export default function CashflowPage() {
                 />
 
                 <CashFlowRow
-                  label="Attivit\u00e0 finanziarie (immobilizzate e circolanti)"
+                  label="Attività finanziarie (immobilizzate e circolanti)"
                   historicalValues={Array(historicalYears.length).fill(0)}
                   forecastValues={Array(forecastYears.length).fill(0)}
                   indent={1}
@@ -531,7 +531,7 @@ export default function CashflowPage() {
                 />
 
                 <CashFlowRow
-                  label="Flusso finanziario dell'attivit\u00e0 di investimento (B)"
+                  label="Flusso finanziario dell'attività di investimento (B)"
                   historicalValues={getValues((cf) => cf.investing_activities.total_investing_cashflow, historicalYears)}
                   forecastValues={getValues((cf) => cf.investing_activities.total_investing_cashflow, forecastYears)}
                   isTotal={true}
@@ -539,7 +539,7 @@ export default function CashflowPage() {
 
                 {/* C. FINANCING ACTIVITIES */}
                 <CashFlowRow
-                  label="C. Flussi finanziari derivanti dall'attivit\u00e0 di finanziamento"
+                  label="C. Flussi finanziari derivanti dall'attività di finanziamento"
                   historicalValues={Array(historicalYears.length).fill(0)}
                   forecastValues={Array(forecastYears.length).fill(0)}
                   isSection={true}
@@ -584,7 +584,7 @@ export default function CashflowPage() {
                 />
 
                 <CashFlowRow
-                  label="Flusso finanziario dell'attivit\u00e0 di finanziamento (C)"
+                  label="Flusso finanziario dell'attività di finanziamento (C)"
                   historicalValues={getValues((cf) => cf.financing_activities.total_financing_cashflow, historicalYears)}
                   forecastValues={getValues((cf) => cf.financing_activities.total_financing_cashflow, forecastYears)}
                   isTotal={true}
@@ -593,7 +593,7 @@ export default function CashflowPage() {
                 {/* CASH RECONCILIATION */}
                 <tr className="h-4"></tr>
                 <CashFlowRow
-                  label="Incremento (decremento) delle disponibilit\u00e0 liquide (A\u00b1B\u00b1C)"
+                  label="Incremento (decremento) delle disponibilità liquide (A±B±C)"
                   historicalValues={getValues((cf) => cf.cash_reconciliation.total_cashflow, historicalYears)}
                   forecastValues={getValues((cf) => cf.cash_reconciliation.total_cashflow, forecastYears)}
                   isTotal={true}
@@ -601,12 +601,12 @@ export default function CashflowPage() {
 
                 <tr className="h-4"></tr>
                 <CashFlowRow
-                  label="Disponibilit\u00e0 liquide all'inizio dell'esercizio"
+                  label="Disponibilità liquide all'inizio dell'esercizio"
                   historicalValues={getValues((cf) => cf.cash_reconciliation.cash_beginning, historicalYears)}
                   forecastValues={getValues((cf) => cf.cash_reconciliation.cash_beginning, forecastYears)}
                 />
                 <CashFlowRow
-                  label="Disponibilit\u00e0 liquide alla fine dell'esercizio"
+                  label="Disponibilità liquide alla fine dell'esercizio"
                   historicalValues={getValues((cf) => cf.cash_reconciliation.cash_ending, historicalYears)}
                   forecastValues={getValues((cf) => cf.cash_reconciliation.cash_ending, forecastYears)}
                 />

@@ -344,7 +344,7 @@ function IncomeStatementTable({
     { label: "17-bis) Utili e perdite su cambi", field: "ce16_utili_perdite_cambi" },
     { label: "Totale Proventi/Oneri Finanziari", field: "financial_result", isSubtotal: true },
     // D) RETTIFICHE DI VALORE
-    { label: "D) RETTIFICHE DI VALORE ATTIVIT\u00c0 FINANZIARIE", isTotal: true },
+    { label: "D) RETTIFICHE DI VALORE ATTIVITÀ FINANZIARIE", isTotal: true },
     { label: "18-19) Rettifiche di valore", field: "ce17_rettifiche_attivita_fin" },
     // E) PROVENTI E ONERI STRAORDINARI
     { label: "E) PROVENTI E ONERI STRAORDINARI", isTotal: true },

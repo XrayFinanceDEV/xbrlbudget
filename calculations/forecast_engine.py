@@ -213,9 +213,9 @@ class ForecastEngine:
         ce18 = assumption.ce18_override if assumption.ce18_override is not None else base_inc.ce18_proventi_straordinari
         ce19 = assumption.ce19_override if assumption.ce19_override is not None else base_inc.ce19_oneri_straordinari
 
-        # Financial income/costs: use override if set, otherwise placeholder (calculated after BS projection)
-        ce14 = assumption.ce14_override if assumption.ce14_override is not None else Decimal('0')
-        ce15 = assumption.ce15_override if assumption.ce15_override is not None else Decimal('0')
+        # Financial income/costs: use override if set, otherwise carry forward from base year
+        ce14 = assumption.ce14_override if assumption.ce14_override is not None else base_inc.ce14_altri_proventi_finanziari
+        ce15 = assumption.ce15_override if assumption.ce15_override is not None else base_inc.ce15_oneri_finanziari
 
         # Taxes - use user-defined tax rate (IRES/IRAP)
         production_value = ce01 + ce02 + ce03 + ce04

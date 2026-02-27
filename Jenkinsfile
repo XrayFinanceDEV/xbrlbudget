@@ -14,6 +14,7 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = 'budget'
         COMPOSE_FILE = 'docker-compose.yml'
+        PORT = '9090'
         SUPABASE_JWT_SECRET = credentials('budget-supabase-jwt-secret')
         ANTHROPIC_API_KEY = credentials('budget-anthropic-api-key')
     }

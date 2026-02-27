@@ -33,7 +33,7 @@ ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 PARENT_ORIGIN=https://app.formulafinance.it
 ALLOWED_ORIGINS=https://app.formulafinance.it
 MAX_COMPANIES_PER_USER=50
-PORT=8080
+PORT=9090
 """.stripIndent()
             }
         }
@@ -55,7 +55,7 @@ PORT=8080
             steps {
                 retry(5) {
                     sleep(time: 5, unit: 'SECONDS')
-                    sh 'curl -sf http://127.0.0.1:8080/health'
+                    sh 'curl -sf http://127.0.0.1:9090/health'
                 }
             }
         }

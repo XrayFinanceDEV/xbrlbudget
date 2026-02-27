@@ -46,6 +46,7 @@ PORT=8080
 
         stage('Deploy') {
             steps {
+                sh 'docker compose down --timeout 10'
                 sh 'docker compose up -d --remove-orphans'
             }
         }

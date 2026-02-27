@@ -69,11 +69,11 @@ PORT=8080
     post {
         failure {
             sh '''
-                echo "Deploy failed — rolling back to previous images"
-                docker compose up -d --remove-orphans
+                echo "Deploy failed — attempting rollback"
+                docker compose up -d --remove-orphans || true
             '''
         }
-        always {
+        cleanup {
             cleanWs(cleanWhenNotBuilt: false)
         }
     }

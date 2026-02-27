@@ -14,6 +14,8 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = 'budget'
         COMPOSE_FILE = 'docker-compose.yml'
+        SUPABASE_JWT_SECRET = credentials('budget-supabase-jwt-secret')
+        ANTHROPIC_API_KEY = credentials('budget-anthropic-api-key')
     }
 
     stages {
@@ -23,13 +25,16 @@ pipeline {
             }
         }
 
-        stage('Verify env') {
+        stage('Generate env') {
             steps {
-                script {
-                    if (!fileExists('.env.docker')) {
-                        error '.env.docker not found. Copy .env.docker.example to .env.docker and fill in secrets on the VPS.'
-                    }
-                }
+                writeFile file: '.env.docker', text: """\
+SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+PARENT_ORIGIN=https://app.formulafinance.it
+ALLOWED_ORIGINS=https://app.formulafinance.it
+MAX_COMPANIES_PER_USER=50
+PORT=8080
+""".stripIndent()
             }
         }
 

@@ -54,9 +54,9 @@ PORT=9090
 
         stage('Health check') {
             steps {
-                retry(5) {
+                retry(10) {
                     sleep(time: 5, unit: 'SECONDS')
-                    sh 'curl -sf http://127.0.0.1:9090/health'
+                    sh 'docker inspect --format="{{.State.Health.Status}}" budget-backend-1 | grep -q healthy'
                 }
             }
         }

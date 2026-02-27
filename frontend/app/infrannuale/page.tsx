@@ -114,6 +114,8 @@ const EDITABLE_CE_CODES = [
   "ce08_costi_personale",
   "ce09_ammortamenti",
   "ce12_oneri_diversi",
+  "ce14_altri_proventi_finanziari",
+  "ce15_oneri_finanziari",
 ];
 
 // Key BS items the user can override (informational, not directly editable in v1)
@@ -1098,6 +1100,8 @@ export default function InfraannualePage() {
           rent_growth_pct: calcGrowth("ce07_godimento_beni"),
           personnel_growth_pct: calcGrowth("ce08_costi_personale"),
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
+          ce14_override: parseFloat(overrides["ce14_altri_proventi_finanziari"] || "0") || null,
+          ce15_override: parseFloat(overrides["ce15_oneri_finanziari"] || "0") || null,
           tax_rate: 27.9,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
@@ -1167,6 +1171,8 @@ export default function InfraannualePage() {
           rent_growth_pct: calcGrowth("ce07_godimento_beni"),
           personnel_growth_pct: calcGrowth("ce08_costi_personale"),
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
+          ce14_override: comparison.income_items.find(i => i.code === "ce14_altri_proventi_finanziari")?.partial_value ?? null,
+          ce15_override: comparison.income_items.find(i => i.code === "ce15_oneri_finanziari")?.partial_value ?? null,
           tax_rate: 27.9,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,

@@ -315,8 +315,8 @@ class IntraYearEngine:
         ce10 = _get_field(partial_inc, 'ce10_var_rimanenze_mat_prime') * factor
         ce11 = _get_field(partial_inc, 'ce11_accantonamenti') * factor
         ce13 = _get_field(partial_inc, 'ce13_proventi_partecipazioni') * factor
-        ce14 = _get_field(partial_inc, 'ce14_altri_proventi_finanziari') * factor
-        ce15 = _get_field(partial_inc, 'ce15_oneri_finanziari') * factor
+        ce14 = assumption.ce14_override if assumption.ce14_override is not None else _get_field(partial_inc, 'ce14_altri_proventi_finanziari') * factor
+        ce15 = assumption.ce15_override if assumption.ce15_override is not None else _get_field(partial_inc, 'ce15_oneri_finanziari') * factor
         ce16 = _get_field(partial_inc, 'ce16_utili_perdite_cambi') * factor
         ce17 = _get_field(partial_inc, 'ce17_rettifiche_attivita_fin') * factor
         ce18 = _get_field(partial_inc, 'ce18_proventi_straordinari') * factor

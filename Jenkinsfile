@@ -41,7 +41,7 @@ PORT=9090
 
         stage('Build') {
             steps {
-                sh 'docker compose build --parallel'
+                sh 'docker compose build --no-cache --parallel'
             }
         }
 

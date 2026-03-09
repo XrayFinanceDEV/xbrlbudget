@@ -1231,9 +1231,23 @@ export default function InfraannualePage() {
   const handleDeleteCompany = async (id: number, name: string) => {
     try {
       await deleteCompany(id);
+      // Immediately remove stale scenarios for this company so the list
+      // doesn't show clickable entries for a deleted company.
+      setExistingScenarios((prev) => prev.filter((e) => e.company.id !== id));
       await refreshCompanies();
       if (selectedCompany === id) setSelectedCompany(null);
-      if (importResult?.companyId === id) setImportResult(null);
+      if (importResult?.companyId === id) {
+        // Reset all wizard state tied to the deleted company
+        setImportResult(null);
+        setScenario(null);
+        setComparison(null);
+        setAnalysis(null);
+        setOverrides({});
+        setProjectedBS(null);
+        setMissingRefYear(null);
+        setFile(null);
+        setRefFile(null);
+      }
       toast.success(`"${name}" eliminata`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Errore durante l'eliminazione";
@@ -1413,6 +1427,7 @@ export default function InfraannualePage() {
                 <div>
                   <Label>File</Label>
                   <Input
+                    key={file ? "has-file" : "no-file"}
                     type="file"
                     accept={importType === "pdf" ? ".pdf,.PDF" : ".xbrl,.XBRL,.xml,.XML"}
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -1544,6 +1559,7 @@ export default function InfraannualePage() {
                     </p>
                     <div className="flex items-center gap-3 mt-4">
                       <Input
+                        key={refFile ? "has-ref" : "no-ref"}
                         type="file"
                         accept=".pdf"
                         className="flex-1"

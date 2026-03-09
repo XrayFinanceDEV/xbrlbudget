@@ -177,6 +177,7 @@ class EnhancedXBRLParser:
             period = ctx.find('.//xbrli:period', namespaces=self.XBRL_NAMESPACES)
 
             if period is not None:
+                period_months = None
                 instant = period.find('.//xbrli:instant', namespaces=self.XBRL_NAMESPACES)
                 if instant is not None:
                     date_str = instant.text
@@ -186,12 +187,20 @@ class EnhancedXBRLParser:
                     except:
                         year = None
                 else:
+                    start_date_el = period.find('.//xbrli:startDate', namespaces=self.XBRL_NAMESPACES)
                     end_date = period.find('.//xbrli:endDate', namespaces=self.XBRL_NAMESPACES)
                     if end_date is not None:
                         date_str = end_date.text
                         try:
                             date = datetime.strptime(date_str, '%Y-%m-%d')
                             year = date.year
+                            # Detect period_months from startDate..endDate
+                            if start_date_el is not None:
+                                start = datetime.strptime(start_date_el.text, '%Y-%m-%d')
+                                # Calculate months: Jan 1 to Jun 30 = 6 months, Jan 1 to Dec 31 = 12
+                                months = (date.year - start.year) * 12 + (date.month - start.month + 1)
+                                if months >= 1 and months <= 11:
+                                    period_months = months
                         except:
                             year = None
                     else:
@@ -200,7 +209,8 @@ class EnhancedXBRLParser:
                 contexts[ctx_id] = {
                     'id': ctx_id,
                     'year': year,
-                    'date': date_str if 'date_str' in locals() else None
+                    'date': date_str if 'date_str' in locals() else None,
+                    'period_months': period_months,
                 }
 
         return contexts
@@ -597,23 +607,49 @@ class EnhancedXBRLParser:
         if not facts_by_year:
             raise XBRLParseError("No financial facts found in XBRL file")
 
+        # Detect period_months per year from duration contexts
+        year_period_months = {}
+        for ctx in contexts.values():
+            yr = ctx.get('year')
+            pm = ctx.get('period_months')
+            if yr and pm:
+                # Keep the period_months (partial year detected)
+                year_period_months[yr] = pm
+
         years = sorted(facts_by_year.keys(), reverse=True)
         imported_years = []
         financial_year_ids = []
         all_reconciliation_info = {}
 
         for year in years:
-            # Only match full-year records so XBRL import doesn't clobber partial-year data
-            fy = self.db.query(FinancialYear).filter(
-                FinancialYear.company_id == company_id,
-                FinancialYear.year == year,
-                FinancialYear.period_months.is_(None),
-            ).first()
+            detected_pm = year_period_months.get(year)  # None = full year, 1-11 = partial
 
-            if not fy:
-                fy = FinancialYear(company_id=company_id, year=year)
-                self.db.add(fy)
-                self.db.flush()
+            if detected_pm:
+                # Partial year: match existing partial record or create new one
+                fy = self.db.query(FinancialYear).filter(
+                    FinancialYear.company_id == company_id,
+                    FinancialYear.year == year,
+                    FinancialYear.period_months.isnot(None),
+                ).first()
+
+                if not fy:
+                    fy = FinancialYear(company_id=company_id, year=year, period_months=detected_pm)
+                    self.db.add(fy)
+                    self.db.flush()
+                else:
+                    fy.period_months = detected_pm
+            else:
+                # Full year: match existing full-year record
+                fy = self.db.query(FinancialYear).filter(
+                    FinancialYear.company_id == company_id,
+                    FinancialYear.year == year,
+                    FinancialYear.period_months.is_(None),
+                ).first()
+
+                if not fy:
+                    fy = FinancialYear(company_id=company_id, year=year)
+                    self.db.add(fy)
+                    self.db.flush()
 
             # Map facts with reconciliation
             bs_data, inc_data, reconciliation_info = self.map_facts_to_fields_with_reconciliation(
@@ -668,7 +704,8 @@ class EnhancedXBRLParser:
             'contexts_found': len(contexts),
             'years_imported': len(imported_years),
             'company_created': company_created,
-            'reconciliation_info': all_reconciliation_info
+            'reconciliation_info': all_reconciliation_info,
+            'year_period_months': year_period_months,  # {year: months} for partial years
         }
 
 

@@ -120,20 +120,11 @@ async def upload_xbrl(
         )
         logger.info(f"[XBRL IMPORT] Parser OK: years={result.get('years')} company_id={result.get('company_id')}")
 
-        # Set period_months on FinancialYear if partial year import
-        # Target only records without period_months (newly created by XBRL parser)
-        if period_months and result.get("company_id"):
-            from database.models import FinancialYear as FYModel
-            for year in result.get("years", []):
-                fy = db.query(FYModel).filter(
-                    FYModel.company_id == result["company_id"],
-                    FYModel.year == year,
-                    FYModel.period_months.is_(None),
-                ).order_by(FYModel.id.desc()).first()
-                if fy:
-                    fy.period_months = period_months
-            db.commit()
-            logger.info(f"[XBRL IMPORT] period_months={period_months} set on years={result.get('years_imported')}")
+        # period_months is now auto-detected from XBRL contexts by the parser
+        # Log if partial years were detected
+        detected_pm = result.get("year_period_months", {})
+        if detected_pm:
+            logger.info(f"[XBRL IMPORT] Auto-detected partial years: {detected_pm}")
 
         logger.info(f"[XBRL IMPORT] SUCCESS")
         return XBRLImportResponse(**result)

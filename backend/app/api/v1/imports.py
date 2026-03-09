@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import tempfile
 import os
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.core.auth import get_current_user_id
@@ -56,6 +60,8 @@ async def upload_xbrl(
     Raises:
         HTTPException: If file validation fails or parsing errors occur
     """
+    logger.info(f"[XBRL IMPORT] START filename={file.filename} company_id={company_id} sector={sector} period_months={period_months} user_id={user_id}")
+
     # Validate file extension
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -73,7 +79,9 @@ async def upload_xbrl(
     # Read file content
     try:
         content = await file.read()
+        logger.info(f"[XBRL IMPORT] File read OK, size={len(content)} bytes")
     except Exception as e:
+        logger.error(f"[XBRL IMPORT] Failed to read file: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
 
     if len(content) > MAX_FILE_SIZE:
@@ -83,6 +91,7 @@ async def upload_xbrl(
         )
 
     if len(content) == 0:
+        logger.error("[XBRL IMPORT] File is empty (0 bytes)")
         raise HTTPException(status_code=400, detail="File is empty")
 
     # Save to temporary file
@@ -91,14 +100,17 @@ async def upload_xbrl(
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xbrl') as tmp:
             tmp.write(content)
             tmp_file = tmp.name
+        logger.info(f"[XBRL IMPORT] Temp file written: {tmp_file}")
 
         # Validate company ownership if company_id provided
         if company_id:
             validate_company_owned_by_user(db, company_id, user_id)
         elif create_company:
             check_company_limit(db, user_id)
+        logger.info(f"[XBRL IMPORT] Ownership/limit check passed")
 
         # Import XBRL file using enhanced parser with reconciliation
+        logger.info(f"[XBRL IMPORT] Calling import_xbrl_file_enhanced...")
         result = import_xbrl_file_enhanced(
             file_path=tmp_file,
             company_id=company_id,
@@ -106,6 +118,7 @@ async def upload_xbrl(
             sector=sector,
             user_id=user_id,
         )
+        logger.info(f"[XBRL IMPORT] Parser OK: years={result.get('years')} company_id={result.get('company_id')}")
 
         # Set period_months on FinancialYear if partial year import
         # Target only records without period_months (newly created by XBRL parser)
@@ -120,10 +133,13 @@ async def upload_xbrl(
                 if fy:
                     fy.period_months = period_months
             db.commit()
+            logger.info(f"[XBRL IMPORT] period_months={period_months} set on years={result.get('years_imported')}")
 
+        logger.info(f"[XBRL IMPORT] SUCCESS")
         return XBRLImportResponse(**result)
 
     except XBRLParseError as e:
+        logger.error(f"[XBRL IMPORT] XBRLParseError: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=422,
             detail={
@@ -134,6 +150,7 @@ async def upload_xbrl(
             }
         )
     except ValueError as e:
+        logger.error(f"[XBRL IMPORT] ValueError: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=422,
             detail={
@@ -144,6 +161,7 @@ async def upload_xbrl(
             }
         )
     except Exception as e:
+        logger.error(f"[XBRL IMPORT] UNEXPECTED {type(e).__name__}: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
             detail={

@@ -6,6 +6,7 @@ then Claude Haiku parses IV CEE fields via structured output (~3-5s).
 Total: ~5s at ~$0.01/PDF vs Docling's ~133s.
 """
 
+import base64
 import json
 import os
 import logging
@@ -13,7 +14,7 @@ import re
 import tempfile
 import time
 from decimal import Decimal
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import fitz  # PyMuPDF
 import pydantic
@@ -825,6 +826,115 @@ def _extract_with_llm(
 
 
 # ---------------------------------------------------------------------------
+# Vision-based extraction (fallback for image-only PDFs)
+# ---------------------------------------------------------------------------
+
+def _render_pdf_pages_as_images(file_path: str, pages: Optional[Set[int]] = None, dpi: int = 200) -> List[str]:
+    """Render PDF pages as base64-encoded PNG images using PyMuPDF.
+
+    Args:
+        file_path: Path to the PDF
+        pages: Set of zero-based page indices (None = all pages)
+        dpi: Resolution for rendering
+
+    Returns:
+        List of base64-encoded PNG strings
+    """
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        raise PDFImportError(f"Cannot open PDF file: {e}")
+
+    if pages is None:
+        pages = set(range(len(doc)))
+
+    images = []
+    zoom = dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
+
+    for p in sorted(pages):
+        if p < len(doc):
+            pix = doc[p].get_pixmap(matrix=matrix)
+            images.append(base64.standard_b64encode(pix.tobytes("png")).decode("ascii"))
+
+    doc.close()
+    logger.info(f"Rendered {len(images)} PDF pages as images ({dpi} dpi)")
+    return images
+
+
+def _extract_with_llm_vision(
+    client: anthropic.Anthropic,
+    images: List[str],
+    system_prompt: str,
+    output_model: type[pydantic.BaseModel],
+    section_name: str,
+    tool_name: str,
+    max_retries: int = 2,
+) -> pydantic.BaseModel:
+    """Call Claude with vision (page images) for structured extraction."""
+    logger.info(f"Calling Claude (vision) for {section_name} extraction ({len(images)} images)...")
+
+    tool = _build_tool_schema(output_model, tool_name)
+
+    # Build content blocks: images + text instruction
+    content: List[dict] = []
+    for img_b64 in images:
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": img_b64},
+        })
+    content.append({
+        "type": "text",
+        "text": (
+            f"Extract the {section_name} values from these Italian balance sheet pages. "
+            f"Use the {tool_name} tool to record your results."
+        ),
+    })
+
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.messages.create(
+                model=PDF_LLM_MODEL,
+                max_tokens=PDF_LLM_MAX_TOKENS,
+                system=system_prompt,
+                messages=[{"role": "user", "content": content}],
+                tools=[tool],
+                tool_choice={"type": "tool", "name": tool_name},
+            )
+
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = output_model.model_validate(block.input)
+                    logger.info(f"{section_name} vision extraction complete")
+                    return result
+
+            raise PDFImportError(f"No tool_use block in {section_name} vision response")
+
+        except anthropic.InternalServerError as e:
+            last_error = e
+            if attempt < max_retries:
+                wait = 2 ** attempt
+                logger.warning(f"API 500 error, retrying in {wait}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait)
+            else:
+                raise
+
+    raise last_error  # unreachable but satisfies type checker
+
+
+def _is_image_pdf(file_path: str) -> bool:
+    """Check if a PDF contains no extractable text (image-only)."""
+    try:
+        doc = fitz.open(file_path)
+        total_chars = sum(len(doc[p].get_text().strip()) for p in range(len(doc)))
+        doc.close()
+        return total_chars < 50  # threshold: fewer than 50 chars = image-based
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -921,31 +1031,58 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     except Exception as e:
         raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
-    # Step 1: Extract relevant page text with PyMuPDF
-    sp_text, ce_text = extract_relevant_pages(file_path)
+    # Step 1: Check if PDF is image-based (no extractable text)
+    use_vision = _is_image_pdf(file_path)
 
-    if not sp_text.strip():
-        raise PDFImportError("No text extracted from balance sheet pages")
+    if use_vision:
+        logger.info("Image-based PDF detected, using vision extraction")
+        all_images = _render_pdf_pages_as_images(file_path)
 
-    # Step 2: Extract balance sheet via Claude Haiku
-    try:
-        sp_result = _extract_with_llm(
-            client, sp_text, SP_SYSTEM_PROMPT,
-            BalanceSheetExtraction, "Stato Patrimoniale",
-            tool_name="balance_sheet",
-        )
-    except anthropic.APIError as e:
-        raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+        # Step 2v: Extract balance sheet via vision
+        try:
+            sp_result = _extract_with_llm_vision(
+                client, all_images, SP_SYSTEM_PROMPT,
+                BalanceSheetExtraction, "Stato Patrimoniale",
+                tool_name="balance_sheet",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during SP vision extraction: {e}")
 
-    # Step 3: Extract income statement via Claude Haiku
-    try:
-        ce_result = _extract_with_llm(
-            client, ce_text, CE_SYSTEM_PROMPT,
-            IncomeStatementExtraction, "Conto Economico",
-            tool_name="income_statement",
-        )
-    except anthropic.APIError as e:
-        raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
+        # Step 3v: Extract income statement via vision
+        try:
+            ce_result = _extract_with_llm_vision(
+                client, all_images, CE_SYSTEM_PROMPT,
+                IncomeStatementExtraction, "Conto Economico",
+                tool_name="income_statement",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during CE vision extraction: {e}")
+    else:
+        # Step 1b: Extract relevant page text with PyMuPDF
+        sp_text, ce_text = extract_relevant_pages(file_path)
+
+        if not sp_text.strip():
+            raise PDFImportError("No text extracted from balance sheet pages")
+
+        # Step 2: Extract balance sheet via Claude Haiku
+        try:
+            sp_result = _extract_with_llm(
+                client, sp_text, SP_SYSTEM_PROMPT,
+                BalanceSheetExtraction, "Stato Patrimoniale",
+                tool_name="balance_sheet",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+
+        # Step 3: Extract income statement via Claude Haiku
+        try:
+            ce_result = _extract_with_llm(
+                client, ce_text, CE_SYSTEM_PROMPT,
+                IncomeStatementExtraction, "Conto Economico",
+                tool_name="income_statement",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
     balance_sheet_data = _model_to_decimal_dict(sp_result)
@@ -1110,31 +1247,58 @@ def extract_pdf_both_years_with_llm(
     except Exception as e:
         raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
-    # Step 1: Extract relevant page text with PyMuPDF
-    sp_text, ce_text = extract_relevant_pages(file_path)
+    # Step 1: Check if PDF is image-based (no extractable text)
+    use_vision = _is_image_pdf(file_path)
 
-    if not sp_text.strip():
-        raise PDFImportError("No text extracted from balance sheet pages")
+    if use_vision:
+        logger.info("Image-based PDF detected, using vision extraction (both years)")
+        all_images = _render_pdf_pages_as_images(file_path)
 
-    # Step 2: Extract balance sheet (both years) via Claude Haiku
-    try:
-        sp_result = _extract_with_llm(
-            client, sp_text, SP_BOTH_YEARS_SYSTEM_PROMPT,
-            TwoYearBalanceSheetExtraction, "Stato Patrimoniale (both years)",
-            tool_name="balance_sheet_both_years",
-        )
-    except anthropic.APIError as e:
-        raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+        # Step 2v: Extract balance sheet (both years) via vision
+        try:
+            sp_result = _extract_with_llm_vision(
+                client, all_images, SP_BOTH_YEARS_SYSTEM_PROMPT,
+                TwoYearBalanceSheetExtraction, "Stato Patrimoniale (both years)",
+                tool_name="balance_sheet_both_years",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during SP vision extraction: {e}")
 
-    # Step 3: Extract income statement (both years) via Claude Haiku
-    try:
-        ce_result = _extract_with_llm(
-            client, ce_text, CE_BOTH_YEARS_SYSTEM_PROMPT,
-            TwoYearIncomeStatementExtraction, "Conto Economico (both years)",
-            tool_name="income_statement_both_years",
-        )
-    except anthropic.APIError as e:
-        raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
+        # Step 3v: Extract income statement (both years) via vision
+        try:
+            ce_result = _extract_with_llm_vision(
+                client, all_images, CE_BOTH_YEARS_SYSTEM_PROMPT,
+                TwoYearIncomeStatementExtraction, "Conto Economico (both years)",
+                tool_name="income_statement_both_years",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during CE vision extraction: {e}")
+    else:
+        # Step 1b: Extract relevant page text with PyMuPDF
+        sp_text, ce_text = extract_relevant_pages(file_path)
+
+        if not sp_text.strip():
+            raise PDFImportError("No text extracted from balance sheet pages")
+
+        # Step 2: Extract balance sheet (both years) via Claude Haiku
+        try:
+            sp_result = _extract_with_llm(
+                client, sp_text, SP_BOTH_YEARS_SYSTEM_PROMPT,
+                TwoYearBalanceSheetExtraction, "Stato Patrimoniale (both years)",
+                tool_name="balance_sheet_both_years",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+
+        # Step 3: Extract income statement (both years) via Claude Haiku
+        try:
+            ce_result = _extract_with_llm(
+                client, ce_text, CE_BOTH_YEARS_SYSTEM_PROMPT,
+                TwoYearIncomeStatementExtraction, "Conto Economico (both years)",
+                tool_name="income_statement_both_years",
+            )
+        except anthropic.APIError as e:
+            raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
     current_bs = _model_to_decimal_dict(sp_result.current_year)

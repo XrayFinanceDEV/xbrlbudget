@@ -124,7 +124,7 @@ async def upload_xbrl(
         # Target only records without period_months (newly created by XBRL parser)
         if period_months and result.get("company_id"):
             from database.models import FinancialYear as FYModel
-            for year in result.get("years_imported", []):
+            for year in result.get("years", []):
                 fy = db.query(FYModel).filter(
                     FYModel.company_id == result["company_id"],
                     FYModel.year == year,

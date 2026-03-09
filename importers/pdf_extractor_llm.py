@@ -717,9 +717,9 @@ NUMBER RULES:
 EXTRACTION RULES:
 - Extract values EXACTLY as they appear: parentheses = negative, plain numbers = positive
 - Do NOT flip signs - preserve the original sign from the PDF
-- ce08_costi_personale = Total "9) per il personale" (the sum, not sub-items)
+- ce08_costi_personale = Total personnel costs. Use "Totale costi per il personale" if present, otherwise "9) per il personale". If the "9)" line shows a dash but sub-items (a/b/c/d/e) and a "Totale" line exist, use the Totale value.
 - ce08a_tfr_accrual = sub-item "c) trattamento di fine rapporto" under personnel costs (item 9c)
-- ce09_ammortamenti = Total "10) ammortamenti e svalutazioni" (the sum of 10a+10b+10c+10d)
+- ce09_ammortamenti = Total depreciation/amortization. Use "Totale ammortamenti e svalutazioni" if present, otherwise "10) ammortamenti e svalutazioni". If the "10)" line shows a dash but sub-items and a "Totale" line exist, use the Totale value.
 - Extract sub-items ce09a (10a), ce09b (10b), ce09c (10c), ce09d (10d) if available
 - ce10_var_rimanenze_mat_prime = item 11) variazioni delle rimanenze di materie prime
 - ce11_accantonamenti = item 12) accantonamenti per rischi
@@ -746,9 +746,9 @@ NUMBER RULES:
 EXTRACTION RULES:
 - Extract values EXACTLY as they appear: parentheses = negative, plain numbers = positive
 - Do NOT flip signs - preserve the original sign from the PDF
-- ce08_costi_personale = Total "9) per il personale" (the sum, not sub-items)
+- ce08_costi_personale = Total personnel costs. Use "Totale costi per il personale" if present, otherwise "9) per il personale". If the "9)" line shows a dash but sub-items (a/b/c/d/e) and a "Totale" line exist, use the Totale value.
 - ce08a_tfr_accrual = sub-item "c) trattamento di fine rapporto" under personnel costs (item 9c)
-- ce09_ammortamenti = Total "10) ammortamenti e svalutazioni" (the sum of 10a+10b+10c+10d)
+- ce09_ammortamenti = Total depreciation/amortization. Use "Totale ammortamenti e svalutazioni" if present, otherwise "10) ammortamenti e svalutazioni". If the "10)" line shows a dash but sub-items and a "Totale" line exist, use the Totale value.
 - Extract sub-items ce09a (10a), ce09b (10b), ce09c (10c), ce09d (10d) if available
 - ce10_var_rimanenze_mat_prime = item 11) variazioni delle rimanenze di materie prime
 - ce11_accantonamenti = item 12) accantonamenti per rischi

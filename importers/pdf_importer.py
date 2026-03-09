@@ -246,6 +246,20 @@ def import_pdf_balance_sheet(
         income_statement = _create_income_statement(db, financial_year_obj.id, income_data)
         logger.info(f"Income statement created (ID: {income_statement.id})")
 
+        # Step 6b: Cross-check SP utile vs CE net profit
+        sp_utile = balance_sheet.sp13_utile_perdita
+        ce_utile = income_statement.net_profit
+        profit_diff = abs(sp_utile - ce_utile)
+        if profit_diff > Decimal('1'):
+            profit_warning = (
+                f"Net profit mismatch: SP Utile/Perdita = {sp_utile}, "
+                f"CE Net Profit = {ce_utile} (diff: {profit_diff})"
+            )
+            logger.warning(profit_warning)
+            warnings.append(profit_warning)
+        else:
+            logger.info(f"Net profit cross-check OK: SP={sp_utile}, CE={ce_utile}")
+
         # Step 7: Save prior year if dual-year extraction was used
         prior_year_imported = False
         prior_fiscal_year = fiscal_year - 1 if fiscal_year else None
@@ -285,6 +299,18 @@ def import_pdf_balance_sheet(
                         logger.info(
                             f"Prior year {prior_fiscal_year} imported (BS ID: {prior_bs.id}, CE ID: {prior_ce.id})"
                         )
+
+                        # Cross-check prior year SP utile vs CE net profit
+                        prior_sp_utile = prior_bs.sp13_utile_perdita
+                        prior_ce_utile = prior_ce.net_profit
+                        prior_profit_diff = abs(prior_sp_utile - prior_ce_utile)
+                        if prior_profit_diff > Decimal('1'):
+                            prior_profit_warning = (
+                                f"Prior year net profit mismatch: SP Utile/Perdita = {prior_sp_utile}, "
+                                f"CE Net Profit = {prior_ce_utile} (diff: {prior_profit_diff})"
+                            )
+                            logger.warning(prior_profit_warning)
+                            warnings.append(prior_profit_warning)
                     else:
                         logger.warning(f"Prior year {prior_fiscal_year} balance sheet does not balance, skipping")
 

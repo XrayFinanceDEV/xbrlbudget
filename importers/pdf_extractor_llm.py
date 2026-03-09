@@ -721,7 +721,12 @@ EXTRACTION RULES:
 - ce08a_tfr_accrual = sub-item "c) trattamento di fine rapporto" under personnel costs (item 9c)
 - ce09_ammortamenti = Total depreciation/amortization. Use "Totale ammortamenti e svalutazioni" if present, otherwise "10) ammortamenti e svalutazioni". If the "10)" line shows a dash but sub-items and a "Totale" line exist, use the Totale value.
 - Extract sub-items ce09a (10a), ce09b (10b), ce09c (10c), ce09d (10d) if available
-- ce10_var_rimanenze_mat_prime = item 11) variazioni delle rimanenze di materie prime
+- IMPORTANT: ce02_variazioni_rimanenze (item 2) and ce10_var_rimanenze_mat_prime (item 11) are DIFFERENT items. Do NOT confuse them:
+  - ce02 = item 2) "Variazioni delle rimanenze di PRODOTTI in corso di lavorazione, semilavorati e finiti" (under A) Valore della produzione)
+  - ce10 = item 11) "Variazioni delle rimanenze di MATERIE PRIME, sussidiarie, di consumo e merci" (under B) Costi della produzione)
+  - If only one "variazioni rimanenze" item exists and it's under B) Costi, it's ce10. Set ce02 to 0.
+- ce04_altri_ricavi = item 5) "Altri ricavi e proventi" — use the TOTAL including sub-items (contributi in conto esercizio + altri). Use "Totale altri ricavi e proventi" if present.
+- ce10_var_rimanenze_mat_prime = item 11) variazioni delle rimanenze di materie prime (under B costs, NOT item 2)
 - ce11_accantonamenti = item 12) accantonamenti per rischi
 - ce11b_altri_accantonamenti = item 13) altri accantonamenti
 - ce15_oneri_finanziari = item 17) interessi e altri oneri finanziari (total)
@@ -750,7 +755,12 @@ EXTRACTION RULES:
 - ce08a_tfr_accrual = sub-item "c) trattamento di fine rapporto" under personnel costs (item 9c)
 - ce09_ammortamenti = Total depreciation/amortization. Use "Totale ammortamenti e svalutazioni" if present, otherwise "10) ammortamenti e svalutazioni". If the "10)" line shows a dash but sub-items and a "Totale" line exist, use the Totale value.
 - Extract sub-items ce09a (10a), ce09b (10b), ce09c (10c), ce09d (10d) if available
-- ce10_var_rimanenze_mat_prime = item 11) variazioni delle rimanenze di materie prime
+- IMPORTANT: ce02_variazioni_rimanenze (item 2) and ce10_var_rimanenze_mat_prime (item 11) are DIFFERENT items. Do NOT confuse them:
+  - ce02 = item 2) "Variazioni delle rimanenze di PRODOTTI in corso di lavorazione, semilavorati e finiti" (under A) Valore della produzione)
+  - ce10 = item 11) "Variazioni delle rimanenze di MATERIE PRIME, sussidiarie, di consumo e merci" (under B) Costi della produzione)
+  - If only one "variazioni rimanenze" item exists and it's under B) Costi, it's ce10. Set ce02 to 0.
+- ce04_altri_ricavi = item 5) "Altri ricavi e proventi" — use the TOTAL including sub-items (contributi in conto esercizio + altri). Use "Totale altri ricavi e proventi" if present.
+- ce10_var_rimanenze_mat_prime = item 11) variazioni delle rimanenze di materie prime (under B costs, NOT item 2)
 - ce11_accantonamenti = item 12) accantonamenti per rischi
 - ce11b_altri_accantonamenti = item 13) altri accantonamenti
 - ce15_oneri_finanziari = item 17) interessi e altri oneri finanziari (total)

@@ -176,7 +176,7 @@ export default function ImportPage() {
 
               <div>
                 <Label htmlFor="file-upload">Carica file XBRL</Label>
-                <Input id="file-upload" type="file" accept=".xbrl,.xml" onChange={handleFileChange} className="mt-1" />
+                <Input id="file-upload" type="file" accept=".xbrl,.XBRL,.xml,.XML" onChange={handleFileChange} className="mt-1" />
                 {selectedFile && <p className="mt-2 text-sm text-muted-foreground">File: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)</p>}
               </div>
 

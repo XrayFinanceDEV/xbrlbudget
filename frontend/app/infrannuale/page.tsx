@@ -1414,7 +1414,7 @@ export default function InfraannualePage() {
                   <Label>File</Label>
                   <Input
                     type="file"
-                    accept={importType === "pdf" ? ".pdf" : ".xbrl,.xml"}
+                    accept={importType === "pdf" ? ".pdf,.PDF" : ".xbrl,.XBRL,.xml,.XML"}
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                   />
                 </div>

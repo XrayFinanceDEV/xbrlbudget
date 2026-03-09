@@ -95,6 +95,30 @@ class EnhancedXBRLParser:
 
         return cleaned.strip()
 
+    # HTML entities not defined in XML that may appear in XBRL files
+    # (e.g. in Nota Integrativa sections embedded as HTML-encoded text)
+    HTML_ENTITIES_REPLACE = {
+        '&rsquo;': '&#x2019;',
+        '&lsquo;': '&#x2018;',
+        '&rdquo;': '&#x201D;',
+        '&ldquo;': '&#x201C;',
+        '&nbsp;': '&#xA0;',
+        '&hellip;': '&#x2026;',
+        '&euro;': '&#x20AC;',
+        '&mdash;': '&#x2014;',
+        '&ndash;': '&#x2013;',
+        '&bull;': '&#x2022;',
+        '&copy;': '&#xA9;',
+        '&reg;': '&#xAE;',
+        '&trade;': '&#x2122;',
+        '&agrave;': '&#xE0;',
+        '&egrave;': '&#xE8;',
+        '&igrave;': '&#xEC;',
+        '&ograve;': '&#xF2;',
+        '&ugrave;': '&#xF9;',
+        '&eacute;': '&#xE9;',
+    }
+
     def parse_file(self, file_path: str) -> etree._Element:
         """Parse XBRL file and return root element"""
         if not Path(file_path).exists():
@@ -105,8 +129,19 @@ class EnhancedXBRLParser:
             tree = etree.parse(file_path, parser)
             root = tree.getroot()
             return root
-        except etree.XMLSyntaxError as e:
-            raise XBRLParseError(f"Invalid XML syntax: {e}")
+        except etree.XMLSyntaxError:
+            # Retry: read raw content, fix encoding and replace HTML entities
+            try:
+                raw = Path(file_path).read_bytes()
+                text = raw.decode('utf-8', errors='replace')
+                # Replace HTML entities not valid in XML with numeric equivalents
+                for entity, replacement in self.HTML_ENTITIES_REPLACE.items():
+                    text = text.replace(entity, replacement)
+                parser = etree.XMLParser(remove_blank_text=True, recover=True)
+                root = etree.fromstring(text.encode('utf-8'), parser)
+                return root
+            except Exception as e2:
+                raise XBRLParseError(f"Invalid XML syntax: {e2}")
         except Exception as e:
             raise XBRLParseError(f"Error parsing XBRL file: {e}")
 

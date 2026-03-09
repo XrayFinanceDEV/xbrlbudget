@@ -199,7 +199,7 @@
     },
 
     "ce08_costi_personale": {
-      "priority_1": "itcc-ci:CostiProduzioneCostiPersonaleTotaleCostiPersonale",
+      "priority_1": "itcc-ci:CostiProduzionePersonaleTotaleCostiPersonale",
       "priority_2": "itcc-ci-2018-11-04:CostiPersonale",
       "priority_3": "itcc-ci:CostiPersonale"
     },

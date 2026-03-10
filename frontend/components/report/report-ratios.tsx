@@ -26,9 +26,13 @@ import {
 } from "@/components/ui/chart";
 import { formatNumber } from "@/lib/formatters";
 import type { ScenarioAnalysis } from "@/types/api";
+import type { ReportAICommentsResponse } from "@/lib/api";
+import { ReportAIComment } from "./report-ai-comment";
 
 interface ReportRatiosProps {
   data: ScenarioAnalysis;
+  aiComments?: ReportAICommentsResponse;
+  aiCommentsLoading?: boolean;
 }
 
 interface RatioRow {
@@ -129,57 +133,85 @@ function formatRatioValue(value: number | null, format: RatioRow["format"]): str
   }
 }
 
-export function ReportRatios({ data }: ReportRatiosProps) {
+// Map section titles to AI comment keys
+const SECTION_COMMENT_MAP: Record<string, keyof ReportAICommentsResponse> = {
+  "Indici di Liquidita": "liquidity_comment",
+  "Indici di Solvibilita": "solvency_comment",
+  "Indici di Redditivita": "profitability_comment",
+  "Indici di Efficienza": "efficiency_comment",
+};
+
+// Sections that should start on a new print page (max 2 chart+table per page)
+const PAGE_BREAK_BEFORE: Set<string> = new Set([
+  "Indici di Solvibilita",
+  "Indici di Redditivita",
+  "Indici di Rotazione",
+  "Indici di Redditivita Estesa",
+]);
+
+export function ReportRatios({ data, aiComments, aiCommentsLoading }: ReportRatiosProps) {
   const allYears = [...data.historical_years, ...data.forecast_years]
     .map((y) => y.year)
     .sort((a, b) => a - b);
 
   return (
     <section id="ratios">
-      <div className="space-y-6">
-        {RATIO_SECTIONS.map((section) => (
-          <Card key={section.title}>
-            <CardHeader>
-              <CardTitle className="text-lg">{section.title}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Chart for this section */}
-              <RatioChart data={data} years={allYears} ratios={section.ratios} />
+      <div className="space-y-6 print:space-y-1">
+        {RATIO_SECTIONS.map((section) => {
+          const commentKey = SECTION_COMMENT_MAP[section.title];
+          const breakBefore = PAGE_BREAK_BEFORE.has(section.title);
+          return (
+            <div key={section.title} className={`space-y-2 ${breakBefore ? "print:break-before-page" : ""}`}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">{section.title}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6 print:space-y-1">
+                  {/* Chart for this section */}
+                  <RatioChart data={data} years={allYears} ratios={section.ratios} />
 
-              {/* Table */}
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[200px]">Indice</TableHead>
-                      {allYears.map((year) => (
-                        <TableHead key={year} className="text-right min-w-[100px]">
-                          {year}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {section.ratios.map((ratio) => (
-                      <TableRow key={ratio.key}>
-                        <TableCell className="font-medium">{ratio.label}</TableCell>
-                        {allYears.map((year) => {
-                          const calc = data.calculations.by_year[String(year)];
-                          const value = calc ? getRatioValue(calc.ratios, ratio.key) : null;
-                          return (
-                            <TableCell key={year} className="text-right">
-                              {formatRatioValue(value, ratio.format)}
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                  {/* Table */}
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[200px] print:min-w-0">Indice</TableHead>
+                          {allYears.map((year) => (
+                            <TableHead key={year} className="text-right min-w-[100px] print:min-w-0">
+                              {year}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {section.ratios.map((ratio) => (
+                          <TableRow key={ratio.key}>
+                            <TableCell className="font-medium">{ratio.label}</TableCell>
+                            {allYears.map((year) => {
+                              const calc = data.calculations.by_year[String(year)];
+                              const value = calc ? getRatioValue(calc.ratios, ratio.key) : null;
+                              return (
+                                <TableCell key={year} className="text-right">
+                                  {formatRatioValue(value, ratio.format)}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+              {commentKey && (
+                <ReportAIComment
+                  comment={aiComments?.[commentKey]}
+                  loading={aiCommentsLoading}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -217,7 +249,7 @@ function RatioChart({
   const isDays = ratios[0]?.format === "days";
 
   return (
-    <ChartContainer config={config} className="h-[250px] w-full">
+    <ChartContainer config={config} className="h-[250px] print:h-[160px] w-full">
       <LineChart data={chartData}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="year" />

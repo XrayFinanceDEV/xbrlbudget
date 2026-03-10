@@ -558,6 +558,13 @@ class BudgetScenario(Base):
     ai_comment_dashboard = Column(Text, nullable=True)
     ai_comment_composition = Column(Text, nullable=True)
     ai_comment_income_margins = Column(Text, nullable=True)
+    ai_comment_structural = Column(Text, nullable=True)
+    ai_comment_liquidity = Column(Text, nullable=True)
+    ai_comment_solvency = Column(Text, nullable=True)
+    ai_comment_profitability = Column(Text, nullable=True)
+    ai_comment_efficiency = Column(Text, nullable=True)
+    ai_comment_break_even = Column(Text, nullable=True)
+    ai_comment_cashflow = Column(Text, nullable=True)
 
     # Relationships
     company = relationship("Company", back_populates="budget_scenarios")

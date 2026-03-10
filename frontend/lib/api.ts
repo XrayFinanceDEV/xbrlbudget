@@ -573,6 +573,13 @@ export interface ReportAICommentsResponse {
   dashboard_comment?: string;
   composition_comment?: string;
   income_margins_comment?: string;
+  structural_comment?: string;
+  liquidity_comment?: string;
+  solvency_comment?: string;
+  profitability_comment?: string;
+  efficiency_comment?: string;
+  break_even_comment?: string;
+  cashflow_comment?: string;
 }
 
 export const getReportAIComments = async (
@@ -593,40 +600,6 @@ export const generateReportAIComments = async (
     `/companies/${companyId}/scenarios/${scenarioId}/report/ai-comments`
   );
   return data;
-};
-
-// PDF Report Download
-export const downloadReportPDF = async (
-  companyId: number,
-  scenarioId: number,
-  companyName?: string
-): Promise<void> => {
-  const response = await api.get(
-    `/companies/${companyId}/scenarios/${scenarioId}/report/pdf`,
-    { responseType: 'blob' }
-  );
-
-  // Create download link
-  const blob = new Blob([response.data], { type: 'application/pdf' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-
-  // Extract filename from Content-Disposition header or build one
-  const contentDisposition = response.headers['content-disposition'];
-  let filename = 'report.pdf';
-  if (contentDisposition) {
-    const match = contentDisposition.match(/filename="?([^"]+)"?/);
-    if (match) filename = match[1];
-  } else if (companyName) {
-    filename = `${companyName.replace(/\s+/g, '_')}_Analisi.pdf`;
-  }
-
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
 };
 
 export default api;

@@ -26,14 +26,11 @@ export function ReportCover({ data }: ReportCoverProps) {
   return (
     <section id="cover">
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Dati Aziendali</CardTitle>
-        </CardHeader>
         <CardContent>
           <div className="text-center mb-6">
             <h2 className="text-3xl font-bold text-foreground">{company.name}</h2>
             <p className="text-lg text-muted-foreground mt-1">
-              Relazione Analisi Indici &amp; Rating
+              Relazione sullo Scenario Economico Finanziario
             </p>
             <p className="text-muted-foreground">
               Anni {minYear} - {maxYear}

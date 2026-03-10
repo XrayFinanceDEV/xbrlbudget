@@ -60,15 +60,16 @@ export function ReportBreakEven({ data }: ReportBreakEvenProps) {
 
   return (
     <section id="break-even">
+      <div className="space-y-6 print:space-y-1">
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Break Even Point</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent>
           {/* BEP vs Revenue chart */}
-          <div>
+          <div className="print-together">
             <h3 className="text-base font-semibold mb-3">Fatturato vs Break Even Point</h3>
-            <ChartContainer config={bepConfig} className="h-[300px] w-full">
+            <ChartContainer config={bepConfig} className="h-[300px] print:h-[180px] w-full">
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
@@ -83,11 +84,17 @@ export function ReportBreakEven({ data }: ReportBreakEvenProps) {
               </LineChart>
             </ChartContainer>
           </div>
+        </CardContent>
+      </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Margine di Sicurezza</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6 print:space-y-1">
           {/* Safety margin chart */}
-          <div>
-            <h3 className="text-base font-semibold mb-3">Margine di Sicurezza</h3>
-            <ChartContainer config={bepConfig} className="h-[200px] w-full">
+          <div className="print-together">
+            <ChartContainer config={bepConfig} className="h-[200px] print:h-[140px] w-full">
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
@@ -103,7 +110,7 @@ export function ReportBreakEven({ data }: ReportBreakEvenProps) {
           </div>
 
           {/* Metrics table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto print-together">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -196,6 +203,7 @@ export function ReportBreakEven({ data }: ReportBreakEvenProps) {
           </div>
         </CardContent>
       </Card>
+      </div>
     </section>
   );
 }

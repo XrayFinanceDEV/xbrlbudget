@@ -2,14 +2,6 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   LineChart,
   Line,
   BarChart,
@@ -123,11 +115,11 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
         <CardHeader>
           <CardTitle className="text-xl">Conto Economico e Margini</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-8">
+        <CardContent className="space-y-8 print:space-y-3">
           {/* Income Lines */}
-          <div>
-            <h3 className="text-base font-semibold mb-3">Valori Assoluti</h3>
-            <ChartContainer config={incomeLineConfig} className="h-[300px] w-full">
+          <div className="print-together">
+            <h3 className="text-base font-semibold mb-3 print:mb-1">Valori Assoluti</h3>
+            <ChartContainer config={incomeLineConfig} className="h-[300px] print:h-[180px] w-full">
               <LineChart data={lineData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
@@ -146,9 +138,9 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
           </div>
 
           {/* Margin % */}
-          <div>
-            <h3 className="text-base font-semibold mb-3">Margini Percentuali</h3>
-            <ChartContainer config={marginConfig} className="h-[300px] w-full">
+          <div className="print-together">
+            <h3 className="text-base font-semibold mb-3 print:mb-1">Margini Percentuali</h3>
+            <ChartContainer config={marginConfig} className="h-[300px] print:h-[180px] w-full">
               <LineChart data={marginData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
@@ -167,11 +159,11 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
           </div>
 
           {/* Waterfall */}
-          <div>
-            <h3 className="text-base font-semibold mb-3">
+          <div className="print-together">
+            <h3 className="text-base font-semibold mb-3 print:mb-1">
               Cascata dal Fatturato all&apos;Utile Netto ({latestYear.year})
             </h3>
-            <ChartContainer config={{ value: { label: "Valore" } }} className="h-[300px] w-full">
+            <ChartContainer config={{ value: { label: "Valore" } }} className="h-[300px] print:h-[180px] w-full">
               <BarChart data={waterfallData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
@@ -188,42 +180,26 @@ export function ReportIncomeMargins({ data }: ReportIncomeMarginsProps) {
             </ChartContainer>
           </div>
 
-          {/* Variation Table */}
+          {/* Variation Table — compact: show last 3 transitions to fit page */}
           {variationRows.length > 0 && (
-            <div>
-              <h3 className="text-base font-semibold mb-3">Variazioni Anno su Anno</h3>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Periodo</TableHead>
-                    <TableHead className="text-right">Var. Fatturato</TableHead>
-                    <TableHead className="text-right">Var. EBITDA</TableHead>
-                    <TableHead className="text-right">Var. Utile Netto</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {variationRows.map((row) => (
-                    <TableRow key={row.period}>
-                      <TableCell className="font-medium">{row.period}</TableCell>
-                      <TableCell className="text-right">
-                        <span className={row.revChange >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-                          {row.revChange >= 0 ? "+" : ""}{formatNumber(row.revChange, 1)}%
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className={row.ebitdaChange >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-                          {row.ebitdaChange >= 0 ? "+" : ""}{formatNumber(row.ebitdaChange, 1)}%
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className={row.netChange >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-                          {row.netChange >= 0 ? "+" : ""}{formatNumber(row.netChange, 1)}%
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="print-together">
+              <h3 className="text-base font-semibold mb-3 print:mb-1">Variazioni Anno su Anno</h3>
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm print:text-[10px]">
+                {variationRows.slice(-3).map((row) => (
+                  <div key={row.period} className="flex items-center gap-2">
+                    <span className="font-medium text-muted-foreground">{row.period}</span>
+                    <span className={row.revChange >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                      Fatt. {row.revChange >= 0 ? "+" : ""}{formatNumber(row.revChange, 1)}%
+                    </span>
+                    <span className={row.ebitdaChange >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                      EBITDA {row.ebitdaChange >= 0 ? "+" : ""}{formatNumber(row.ebitdaChange, 1)}%
+                    </span>
+                    <span className={row.netChange >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                      Utile {row.netChange >= 0 ? "+" : ""}{formatNumber(row.netChange, 1)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>

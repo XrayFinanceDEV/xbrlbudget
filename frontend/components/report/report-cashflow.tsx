@@ -73,9 +73,10 @@ export function ReportCashflow({ data }: ReportCashflowProps) {
         <CardHeader>
           <CardTitle className="text-xl">Rendiconto Finanziario</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-6 print:space-y-1">
           {/* Cashflow trend chart */}
-          <ChartContainer config={cfConfig} className="h-[300px] w-full">
+          <div className="print-together">
+          <ChartContainer config={cfConfig} className="h-[300px] print:h-[180px] w-full">
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="year" />
@@ -92,9 +93,10 @@ export function ReportCashflow({ data }: ReportCashflowProps) {
               <Line type="monotone" dataKey="total" stroke="hsl(var(--chart-4))" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
             </LineChart>
           </ChartContainer>
+          </div>
 
           {/* Summary table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto print-together">
             <Table>
               <TableHeader>
                 <TableRow>

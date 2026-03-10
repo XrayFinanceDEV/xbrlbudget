@@ -3,14 +3,14 @@
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
-import { downloadReportPDF, getReportAIComments, generateReportAIComments, type ReportAICommentsResponse } from "@/lib/api";
+import { getReportAIComments, generateReportAIComments, type ReportAICommentsResponse } from "@/lib/api";
 import type { ScenarioAnalysis, BudgetScenario } from "@/types/api";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { FileText, Download, Loader2, AlertTriangle, Sparkles } from "lucide-react";
+import { FileText, Loader2, AlertTriangle, Sparkles, Printer } from "lucide-react";
 import { toast } from "sonner";
 
 import { ReportTOC } from "@/components/report/report-toc";
@@ -32,7 +32,6 @@ export default function ReportPage() {
 
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
-  const [downloading, setDownloading] = useState(false);
   const [aiComments, setAiComments] = useState<ReportAICommentsResponse>({});
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
 
@@ -87,25 +86,6 @@ export default function ReportPage() {
     }
   };
 
-  // PDF download
-  const handleDownload = async () => {
-    if (!selectedCompanyId || !selectedScenario) return;
-
-    setDownloading(true);
-    try {
-      await downloadReportPDF(
-        selectedCompanyId,
-        selectedScenario.id,
-        selectedCompany?.name
-      );
-      toast.success("Report PDF scaricato");
-    } catch {
-      toast.error("Errore nel download del PDF");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   if (!selectedCompanyId) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -119,50 +99,48 @@ export default function ReportPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <PageHeader
-        title="Report Analisi Finanziaria"
-        description={selectedCompany?.name}
-        icon={<FileText className="h-6 w-6" />}
-      >
-        <div className="flex items-center gap-3">
-          {scenarios.length > 0 && (
-            <ScenarioSelector
-              scenarios={scenarios}
-              selectedScenario={selectedScenario}
-              onSelect={setSelectedScenario}
-              label="Scenario:"
-            />
-          )}
-          <Button
-            onClick={handleGenerateAIComments}
-            disabled={aiCommentsLoading || !analysisData}
-            variant="outline"
-          >
-            {aiCommentsLoading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4 mr-2" />
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 print:px-0 print:py-0 print:max-w-none">
+      <div className="print:hidden">
+        <PageHeader
+          title="Report Analisi Finanziaria"
+          description={selectedCompany?.name}
+          icon={<FileText className="h-6 w-6" />}
+        >
+          <div className="flex items-center gap-3">
+            {scenarios.length > 0 && (
+              <ScenarioSelector
+                scenarios={scenarios}
+                selectedScenario={selectedScenario}
+                onSelect={setSelectedScenario}
+                label="Scenario:"
+              />
             )}
-            Commenti AI
-          </Button>
-          <Button
-            onClick={handleDownload}
-            disabled={downloading || !analysisData}
-            variant="outline"
-          >
-            {downloading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            Scarica PDF
-          </Button>
-        </div>
-      </PageHeader>
+            <Button
+              onClick={handleGenerateAIComments}
+              disabled={aiCommentsLoading || !analysisData}
+              variant="outline"
+            >
+              {aiCommentsLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-2" />
+              )}
+              Commenti AI
+            </Button>
+            <Button
+              onClick={() => setTimeout(() => window.print(), 100)}
+              disabled={!analysisData}
+              variant="outline"
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Stampa
+            </Button>
+          </div>
+        </PageHeader>
+      </div>
 
       {error && (
-        <Alert variant="destructive" className="mb-6">
+        <Alert variant="destructive" className="mb-6 print:hidden">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Errore</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
@@ -170,7 +148,7 @@ export default function ReportPage() {
       )}
 
       {loading && (
-        <Card className="mb-6">
+        <Card className="mb-6 print:hidden">
           <CardContent className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             <span className="ml-3 text-muted-foreground">Caricamento analisi...</span>
@@ -179,7 +157,7 @@ export default function ReportPage() {
       )}
 
       {!loading && !analysisData && !error && scenarios.length === 0 && (
-        <Alert className="mb-6">
+        <Alert className="mb-6 print:hidden">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Nessuno Scenario</AlertTitle>
           <AlertDescription>
@@ -190,23 +168,49 @@ export default function ReportPage() {
       )}
 
       {analysisData && (
-        <div className="flex gap-6">
-          <ReportTOC />
-          <div className="flex-1 min-w-0 space-y-6">
+        <div className="flex gap-6 print:block">
+          <div className="print:hidden">
+            <ReportTOC />
+          </div>
+          <div className="flex-1 min-w-0 space-y-6 print:space-y-1">
             <ReportCover data={analysisData} />
-            <ReportDashboard data={analysisData} />
-            <ReportAIComment comment={aiComments.dashboard_comment} loading={aiCommentsLoading} />
-            <ReportComposition data={analysisData} />
-            <ReportAIComment comment={aiComments.composition_comment} loading={aiCommentsLoading} />
-            <ReportIncomeMargins data={analysisData} />
-            <ReportAIComment comment={aiComments.income_margins_comment} loading={aiCommentsLoading} />
-            <ReportStructural data={analysisData} />
-            <ReportRatios data={analysisData} />
-            <ReportScoring data={analysisData} />
-            <ReportBreakEven data={analysisData} />
-            <ReportCashflow data={analysisData} />
-            <ReportAppendices data={analysisData} />
-            <ReportNotes />
+            <div className="print-section-group print:space-y-1 space-y-2">
+              <ReportDashboard data={analysisData} />
+              <ReportAIComment comment={aiComments.dashboard_comment} loading={aiCommentsLoading} />
+            </div>
+            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+              <ReportComposition data={analysisData} />
+              <ReportAIComment comment={aiComments.composition_comment} loading={aiCommentsLoading} />
+            </div>
+            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+              <ReportIncomeMargins data={analysisData} />
+              <ReportAIComment comment={aiComments.income_margins_comment} loading={aiCommentsLoading} />
+            </div>
+            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+              <ReportStructural data={analysisData} />
+              <ReportAIComment comment={aiComments.structural_comment} loading={aiCommentsLoading} />
+            </div>
+            <ReportRatios data={analysisData} aiComments={aiComments} aiCommentsLoading={aiCommentsLoading} />
+            <div className="print:break-before-page">
+              <ReportScoring data={analysisData} />
+            </div>
+            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+              <ReportBreakEven data={analysisData} />
+              <ReportAIComment comment={aiComments.break_even_comment} loading={aiCommentsLoading} />
+            </div>
+            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+              <ReportCashflow data={analysisData} />
+              <ReportAIComment comment={aiComments.cashflow_comment} loading={aiCommentsLoading} />
+            </div>
+            <div className="print:break-before-page">
+              <ReportAppendices data={analysisData} section="bs" />
+            </div>
+            <div className="print:break-before-page">
+              <ReportAppendices data={analysisData} section="is" />
+            </div>
+            <div>
+              <ReportNotes />
+            </div>
           </div>
         </div>
       )}

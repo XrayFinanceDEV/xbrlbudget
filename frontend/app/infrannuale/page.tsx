@@ -2783,13 +2783,13 @@ function StampaContent({
         <h2 className="text-base font-semibold mb-2">
           Conto Economico — Confronto {periodMonths}M {partialYear} vs 12M {refYear}
         </h2>
-        <Table>
+        <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead>Voce</TableHead>
-              <TableHead className="text-right">Storico {refYear}</TableHead>
-              <TableHead className="text-right">Infrannuale {periodMonths}M</TableHead>
-              <TableHead className="text-right">Infrann./Storico</TableHead>
+              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Infrannuale/<br />Storico</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2804,14 +2804,14 @@ function StampaContent({
               );
               return (
                 <TableRow key={item.code} className={cn(isSubtotal && "bg-primary/10 font-semibold hover:bg-primary/10")}>
-                  <TableCell className={cn("text-sm", isSubtotal ? "font-semibold" : "font-medium")}>{item.label}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">
+                  <TableCell className={cn("text-sm", isSubtotal ? "font-semibold text-sm" : "font-normal text-xs")}>{item.label}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
                     {formatEuro(item.reference_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {formatEuro(item.partial_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {deltaFmt(item.partial_value, item.reference_value)}
                   </TableCell>
                 </TableRow>
@@ -2826,13 +2826,13 @@ function StampaContent({
         <h2 className="text-base font-semibold mb-2">
           Stato Patrimoniale — Confronto
         </h2>
-        <Table>
+        <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead>Voce</TableHead>
-              <TableHead className="text-right">Storico {refYear}</TableHead>
-              <TableHead className="text-right">Infrannuale {periodMonths}M</TableHead>
-              <TableHead className="text-right">Infrann./Storico</TableHead>
+              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Infrannuale/<br />Storico</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2847,14 +2847,14 @@ function StampaContent({
               );
               return (
                 <TableRow key={item.code} className={cn(isSubtotal && "bg-primary/10 font-semibold hover:bg-primary/10")}>
-                  <TableCell className={cn("text-sm", isSubtotal ? "font-semibold" : "font-medium")}>{item.label}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">
+                  <TableCell className={cn("text-sm", isSubtotal ? "font-semibold text-sm" : "font-normal text-xs")}>{item.label}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
                     {formatEuro(item.reference_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {formatEuro(item.partial_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {deltaFmt(item.partial_value, item.reference_value)}
                   </TableCell>
                 </TableRow>
@@ -2870,14 +2870,14 @@ function StampaContent({
         <h2 className="text-base font-semibold mb-2">
           Conto Economico — Proiezione {partialYear}
         </h2>
-        <Table>
+        <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead>Voce</TableHead>
-              <TableHead className="text-right">Storico {refYear}</TableHead>
-              <TableHead className="text-right">Infrannuale {periodMonths}M</TableHead>
-              <TableHead className="text-right">Proiezione {partialYear}</TableHead>
-              <TableHead className="text-right">Proiez./Storico</TableHead>
+              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Proiezione<br />{partialYear}</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Proiezione/<br />Storico</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2893,17 +2893,17 @@ function StampaContent({
               );
               return (
                 <TableRow key={item.code} className={cn(isSubtotal && "bg-primary/10 font-semibold hover:bg-primary/10")}>
-                  <TableCell className={cn("text-sm", isSubtotal ? "font-semibold" : "font-medium")}>{item.label}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">
+                  <TableCell className={cn(isSubtotal ? "font-semibold text-sm" : "font-normal text-xs")}>{item.label}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
                     {formatEuro(item.reference_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {formatEuro(item.partial_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm font-medium">
+                  <TableCell className="text-right text-xs font-medium">
                     {formatEuro(projValue)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {deltaFmt(projValue, item.reference_value)}
                   </TableCell>
                 </TableRow>
@@ -2916,18 +2916,18 @@ function StampaContent({
 
       {/* 4. SP PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
-      <div>
+      <div className="print:break-before-page">
         <h2 className="text-base font-semibold mb-2">
           Stato Patrimoniale — Proiezione {partialYear}
         </h2>
-        <Table>
+        <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead>Voce</TableHead>
-              <TableHead className="text-right">Storico {refYear}</TableHead>
-              <TableHead className="text-right">Infrannuale {periodMonths}M</TableHead>
-              <TableHead className="text-right">Proiezione {partialYear}</TableHead>
-              <TableHead className="text-right">Proiez./Storico</TableHead>
+              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Proiezione<br />{partialYear}</TableHead>
+              <TableHead className="text-right text-xs leading-tight">Proiezione/<br />Storico</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2943,17 +2943,17 @@ function StampaContent({
               );
               return (
                 <TableRow key={item.code} className={cn(isSubtotal && "bg-primary/10 font-semibold hover:bg-primary/10")}>
-                  <TableCell className={cn("text-sm", isSubtotal ? "font-semibold" : "font-medium")}>{item.label}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">
+                  <TableCell className={cn(isSubtotal ? "font-semibold text-sm" : "font-normal text-xs")}>{item.label}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
                     {formatEuro(item.reference_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {formatEuro(item.partial_value)}
                   </TableCell>
-                  <TableCell className="text-right text-sm font-medium">
+                  <TableCell className="text-right text-xs font-medium">
                     {isNaN(projVal) ? <span className="text-muted-foreground">-</span> : formatEuro(projVal)}
                   </TableCell>
-                  <TableCell className="text-right text-sm">
+                  <TableCell className="text-right text-xs">
                     {isNaN(projVal) ? (
                       <span className="text-muted-foreground">-</span>
                     ) : (
@@ -3044,13 +3044,13 @@ function StampaContent({
             </span>
           )}
         </h2>
-        <div className="rounded-lg border border-border p-4 space-y-2">
+        <div className="rounded-lg border border-border p-4 print:p-2 space-y-2 print:space-y-0.5">
           {EXTRA_ALERT_DEFS.map((def, idx) => {
             const isActive = !!extraAlerts[def.key];
             return (
-              <div key={def.key} className="flex items-start gap-2 text-sm">
+              <div key={def.key} className="flex items-start gap-2 text-sm print:text-[10px] print:leading-tight">
                 <span className={cn(
-                  "mt-0.5 inline-block h-4 w-4 shrink-0 rounded border text-center text-xs leading-4",
+                  "mt-0.5 inline-block h-4 w-4 print:h-3 print:w-3 shrink-0 rounded border text-center text-xs print:text-[8px] leading-4 print:leading-3",
                   isActive
                     ? "bg-red-600 border-red-600 text-white dark:bg-red-500 dark:border-red-500"
                     : "border-border text-transparent"

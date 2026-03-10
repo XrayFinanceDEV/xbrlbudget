@@ -84,3 +84,159 @@
       sans-serif;
   }
 }
+
+/* Print styles for Report page */
+@media print {
+  /* Force light theme — white background (no gray tint) */
+  :root,
+  .dark {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --border: 220 13% 87%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --chart-1: 221 83% 53%;
+    --chart-2: 210 60% 42%;
+    --chart-3: 199 55% 62%;
+    --chart-4: 215 25% 47%;
+    --chart-5: 220 14% 60%;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Nuclear override: force white bg on everything in dark mode */
+  html, body,
+  body > div, body > div > div, body > div > div > div,
+  .dark body, .dark main,
+  [class*="bg-background"],
+  [class*="bg-card"],
+  [class*="bg-muted"],
+  [class*="bg-popover"],
+  [class*="bg-accent"],
+  [class*="bg-secondary"] {
+    background-color: white !important;
+    background: white !important;
+  }
+
+  /* Force dark text */
+  body, [class*="text-foreground"], [class*="text-card-foreground"] {
+    color: hsl(222.2, 84%, 4.9%) !important;
+  }
+
+  /* Force light borders */
+  *, *::before, *::after {
+    border-color: hsl(220, 13%, 87%) !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 12mm 10mm;
+  }
+
+  /* Constrain content to page width */
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+  table {
+    width: 100% !important;
+    table-layout: fixed !important;
+  }
+  /* First column wider, year columns equal (skip tables with explicit col widths) */
+  table:not(.print-custom-cols) th:first-child,
+  table:not(.print-custom-cols) td:first-child {
+    width: 25% !important;
+  }
+
+  /* Cards: no shadow, visible border */
+  [data-slot="card"] {
+    box-shadow: none !important;
+    border-radius: 0.375rem !important;
+    border: 1px solid hsl(220, 13%, 78%) !important;
+    break-inside: auto;
+    overflow: hidden !important;
+  }
+
+  /* Compact card padding */
+  [data-slot="card-header"] {
+    padding: 0.5rem 0.75rem 0.25rem !important;
+    break-after: avoid;
+  }
+  [data-slot="card"] > div:not([data-slot="card-header"]) {
+    padding: 0.25rem 0.75rem 0.5rem !important;
+  }
+
+  /* Prevent orphaned rows and chart blocks */
+  .recharts-wrapper {
+    break-inside: avoid;
+  }
+  tr {
+    break-inside: avoid;
+  }
+
+  /* Keep chart+table blocks together when they fit */
+  .print-together {
+    break-inside: avoid;
+  }
+
+  /* Section groups flow naturally */
+  .print-section-group {
+    break-inside: auto;
+  }
+
+  /* Reduce chart bottom margin (Recharts legend gap) */
+  .recharts-legend-wrapper {
+    font-size: 10px !important;
+  }
+
+  /* Dashboard gauges: 3 columns compact */
+  .print-gauges-row {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  /* Headings: avoid orphans, compact spacing */
+  h3, h4 {
+    break-after: avoid;
+    margin-bottom: 0.25rem !important;
+  }
+
+  /* Compact appendix tables */
+  .print-compact-table td,
+  .print-compact-table th {
+    padding: 0.1rem 0.2rem !important;
+    white-space: nowrap;
+    font-size: 10px !important;
+  }
+
+  /* Tables: tighter in print, fit within page */
+  table {
+    margin-top: 0.125rem !important;
+    font-size: 11px !important;
+  }
+  td, th {
+    padding: 0.2rem 0.3rem !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  th {
+    white-space: nowrap;
+  }
+
+  /* Hide scrollbars in print */
+  ::-webkit-scrollbar {
+    display: none !important;
+  }
+  * {
+    scrollbar-width: none !important;
+  }
+}

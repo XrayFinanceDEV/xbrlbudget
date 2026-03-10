@@ -58,6 +58,33 @@ const ALTMAN_LABELS: Record<string, string> = {
   E: "Fatturato/Totale Attivo",
 };
 
+const ALTMAN_CLASS_LABELS: Record<string, string> = {
+  safe: "Zona Sicura",
+  gray_zone: "Zona d'Ombra",
+  distress: "Zona di Pericolo",
+};
+
+function MiniBar({ value, max }: { value: number; max: number }) {
+  const pct = max > 0 ? Math.min(Math.abs(value) / max * 100, 100) : 0;
+  const isNeg = value < 0;
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-[50px] h-[10px] bg-muted rounded-sm overflow-hidden print:w-[40px] print:h-[8px]">
+        <div
+          className={cn(
+            "h-full rounded-sm",
+            isNeg ? "bg-red-500/70" : "bg-blue-500/70"
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs tabular-nums text-muted-foreground print:text-[9px]">
+        {formatNumber(value, 2)}
+      </span>
+    </div>
+  );
+}
+
 export function ReportScoring({ data }: ReportScoringProps) {
   const allYears = [...data.historical_years, ...data.forecast_years]
     .map((y) => y.year)
@@ -111,14 +138,12 @@ export function ReportScoring({ data }: ReportScoringProps) {
 
   return (
     <section id="scoring">
-      <div className="space-y-6">
+      <div className="space-y-6 print:space-y-1">
         {/* Altman Z-Score */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Altman Z-Score</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center gap-4 mb-2">
+            <div className="flex items-center gap-4">
               <span className="text-sm text-muted-foreground">
                 Modello: {latestCalc.altman.model_type === "manufacturing" ? "Manifatturiero (5 componenti)" : "Servizi (4 componenti)"}
               </span>
@@ -129,11 +154,12 @@ export function ReportScoring({ data }: ReportScoringProps) {
                 {latestCalc.altman.interpretation_it}
               </Badge>
             </div>
-
+          </CardHeader>
+          <CardContent className="space-y-6 print:space-y-1">
             {/* Z-Score Trend */}
-            <div>
+            <div className="print-together">
               <h4 className="text-sm font-medium mb-2">Andamento Z-Score</h4>
-              <ChartContainer config={altmanTrendConfig} className="h-[250px] w-full">
+              <ChartContainer config={altmanTrendConfig} className="h-[250px] print:h-[160px] w-full">
                 <LineChart data={altmanTrendData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="year" />
@@ -150,9 +176,9 @@ export function ReportScoring({ data }: ReportScoringProps) {
             </div>
 
             {/* Components (horizontal bar) */}
-            <div>
+            <div className="print-together">
               <h4 className="text-sm font-medium mb-2">Componenti ({latestYear})</h4>
-              <ChartContainer config={altmanComponentConfig} className="h-[200px] w-full">
+              <ChartContainer config={altmanComponentConfig} className="h-[200px] print:h-[140px] w-full">
                 <BarChart data={altmanComponents} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis type="number" />
@@ -175,41 +201,68 @@ export function ReportScoring({ data }: ReportScoringProps) {
             </div>
 
             {/* Multi-year table */}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Anno</TableHead>
-                  <TableHead className="text-right">Z-Score</TableHead>
-                  <TableHead>Classificazione</TableHead>
-                  {Object.keys(latestCalc.altman.components).filter(k => latestCalc.altman.components[k as keyof typeof latestCalc.altman.components] != null).map((k) => (
-                    <TableHead key={k} className="text-right">{k}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {allYears.map((year) => {
-                  const calc = data.calculations.by_year[String(year)];
-                  if (!calc) return null;
-                  return (
-                    <TableRow key={year}>
-                      <TableCell className="font-medium">{year}</TableCell>
-                      <TableCell className={cn("text-right font-semibold", getAltmanColor(calc.altman.classification))}>
-                        {formatNumber(calc.altman.z_score, 2)}
-                      </TableCell>
-                      <TableCell>{calc.altman.interpretation_it}</TableCell>
-                      {Object.entries(calc.altman.components).filter(([, v]) => v != null).map(([k, v]) => (
-                        <TableCell key={k} className="text-right">{formatNumber(v as number, 4)}</TableCell>
+            {(() => {
+              // Compute max absolute component value across all years for bar scaling
+              const componentKeys = Object.keys(latestCalc.altman.components).filter(
+                (k) => latestCalc.altman.components[k as keyof typeof latestCalc.altman.components] != null
+              );
+              let maxAbsVal = 0;
+              for (const year of allYears) {
+                const calc = data.calculations.by_year[String(year)];
+                if (!calc) continue;
+                for (const k of componentKeys) {
+                  const v = calc.altman.components[k as keyof typeof calc.altman.components];
+                  if (v != null) maxAbsVal = Math.max(maxAbsVal, Math.abs(v as number));
+                }
+              }
+
+              return (
+                <Table className="print-together">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Anno</TableHead>
+                      <TableHead className="text-right">Z-Score</TableHead>
+                      <TableHead>Classificazione</TableHead>
+                      {componentKeys.map((k) => (
+                        <TableHead key={k}>{k}</TableHead>
                       ))}
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {allYears.map((year) => {
+                      const calc = data.calculations.by_year[String(year)];
+                      if (!calc) return null;
+                      return (
+                        <TableRow key={year}>
+                          <TableCell className="font-medium">{year}</TableCell>
+                          <TableCell className={cn("text-right font-semibold", getAltmanColor(calc.altman.classification))}>
+                            {formatNumber(calc.altman.z_score, 2)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={cn(getAltmanColor(calc.altman.classification))}>
+                              {ALTMAN_CLASS_LABELS[calc.altman.classification] || calc.altman.classification}
+                            </Badge>
+                          </TableCell>
+                          {componentKeys.map((k) => {
+                            const v = calc.altman.components[k as keyof typeof calc.altman.components] as number;
+                            return (
+                              <TableCell key={k}>
+                                <MiniBar value={v ?? 0} max={maxAbsVal} />
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              );
+            })()}
           </CardContent>
         </Card>
 
         {/* EM-Score */}
-        <Card>
+        <Card className="print:break-before-page">
           <CardHeader>
             <CardTitle className="text-lg">EM-Score</CardTitle>
           </CardHeader>
@@ -244,12 +297,11 @@ export function ReportScoring({ data }: ReportScoringProps) {
         </Card>
 
         {/* FGPMI */}
+        <div className="print:break-before-page">
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Rating FGPMI</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center gap-4 mb-2">
+            <div className="flex items-center gap-4">
               <span className="text-sm text-muted-foreground">
                 Modello settore: {latestCalc.fgpmi.sector_model}
               </span>
@@ -263,9 +315,10 @@ export function ReportScoring({ data }: ReportScoringProps) {
                 ({latestCalc.fgpmi.total_score}/{latestCalc.fgpmi.max_score} punti)
               </span>
             </div>
-
+          </CardHeader>
+          <CardContent className="space-y-6 print:space-y-1">
             {/* Indicators bar chart */}
-            <ChartContainer config={fgpmiConfig} className="h-[250px] w-full">
+            <ChartContainer config={fgpmiConfig} className="h-[250px] print:h-[160px] w-full">
               <BarChart data={fgpmiIndicators}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="code" tick={{ fontSize: 10 }} />
@@ -328,7 +381,7 @@ export function ReportScoring({ data }: ReportScoringProps) {
             </Table>
 
             {/* Multi-year FGPMI comparison */}
-            <div>
+            <div className="print-together">
               <h4 className="text-sm font-medium mb-2">Evoluzione Rating</h4>
               <Table>
                 <TableHeader>
@@ -363,6 +416,7 @@ export function ReportScoring({ data }: ReportScoringProps) {
             </div>
           </CardContent>
         </Card>
+        </div>
       </div>
     </section>
   );

@@ -74,9 +74,9 @@ export function ReportDashboard({ data }: ReportDashboardProps) {
             Ultimo anno analizzato: {latestYear}
           </p>
         </CardHeader>
-        <CardContent className="space-y-8">
+        <CardContent className="space-y-8 print:space-y-2">
           {/* Gauges */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 print-together print-gauges-row">
             <div className="flex flex-col items-center">
               <ReportGauge
                 value={calc.altman.z_score}
@@ -130,7 +130,7 @@ export function ReportDashboard({ data }: ReportDashboardProps) {
           </div>
 
           {/* Key Metrics Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 print:grid-cols-4 print:gap-2">
             {latestYearData && (
               <>
                 <MetricCard
@@ -186,9 +186,9 @@ export function ReportDashboard({ data }: ReportDashboardProps) {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-card p-3 text-center">
+    <div className="rounded-lg border bg-card p-3 text-center print:p-1.5">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold text-foreground mt-0.5">{value}</div>
+      <div className="text-lg font-semibold text-foreground mt-0.5 print:text-sm print:mt-0">{value}</div>
     </div>
   );
 }

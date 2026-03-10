@@ -12,6 +12,9 @@ from database.db import SessionLocal
 from config import SUPPORTED_TAXONOMIES, CSV_HTML_ENTITIES_TO_REPLACE
 import json
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class XBRLParseError(Exception):
@@ -616,6 +619,8 @@ class EnhancedXBRLParser:
                 # Keep the period_months (partial year detected)
                 year_period_months[yr] = pm
 
+        logger.info(f"[XBRL] Auto-detected period_months: {year_period_months}")
+
         years = sorted(facts_by_year.keys(), reverse=True)
         imported_years = []
         financial_year_ids = []
@@ -654,6 +659,12 @@ class EnhancedXBRLParser:
             # Map facts with reconciliation
             bs_data, inc_data, reconciliation_info = self.map_facts_to_fields_with_reconciliation(
                 facts_by_year[year]
+            )
+
+            logger.info(
+                f"[XBRL] Year {year} (pm={detected_pm}): "
+                f"ce08={inc_data.get('ce08_costi_personale', 'MISSING')}, "
+                f"sp13={bs_data.get('sp13_utile_perdita', 'MISSING')}"
             )
 
             all_reconciliation_info[year] = reconciliation_info

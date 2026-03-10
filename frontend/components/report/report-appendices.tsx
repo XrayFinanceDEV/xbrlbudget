@@ -15,6 +15,7 @@ import type { ScenarioAnalysis, ScenarioAnalysisYearData } from "@/types/api";
 
 interface ReportAppendicesProps {
   data: ScenarioAnalysis;
+  section?: "bs" | "is";
 }
 
 const BS_KEYS = [
@@ -80,27 +81,30 @@ function getValue(yearData: ScenarioAnalysisYearData, key: string): number {
   return (yearData.balance_sheet[key] ?? yearData.income_statement[key] ?? 0) as number;
 }
 
-export function ReportAppendices({ data }: ReportAppendicesProps) {
+export function ReportAppendices({ data, section }: ReportAppendicesProps) {
   const allYears = [...data.historical_years, ...data.forecast_years].sort(
     (a, b) => a.year - b.year
   );
 
+  const showBS = !section || section === "bs";
+  const showIS = !section || section === "is";
+
   return (
-    <section id="appendices">
+    <section id={section ? `appendices-${section}` : "appendices"}>
       <div className="space-y-6">
         {/* Balance Sheet */}
-        <Card>
+        {showBS && <Card>
           <CardHeader>
             <CardTitle className="text-lg">Stato Patrimoniale</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="print:text-[11px] print-compact-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[250px]">Voce</TableHead>
+                    <TableHead className="min-w-[250px] print:min-w-0">Voce</TableHead>
                     {allYears.map((y) => (
-                      <TableHead key={y.year} className="text-right min-w-[110px]">
+                      <TableHead key={y.year} className="text-right min-w-[110px] print:min-w-0 print:px-1">
                         {y.year}
                         {y.type === "forecast" && (
                           <span className="text-xs text-muted-foreground ml-1">(P)</span>
@@ -196,21 +200,21 @@ export function ReportAppendices({ data }: ReportAppendicesProps) {
               </Table>
             </div>
           </CardContent>
-        </Card>
+        </Card>}
 
         {/* Income Statement */}
-        <Card>
+        {showIS && <Card>
           <CardHeader>
             <CardTitle className="text-lg">Conto Economico</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="print:text-[11px] print-compact-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[250px]">Voce</TableHead>
+                    <TableHead className="min-w-[250px] print:min-w-0">Voce</TableHead>
                     {allYears.map((y) => (
-                      <TableHead key={y.year} className="text-right min-w-[110px]">
+                      <TableHead key={y.year} className="text-right min-w-[110px] print:min-w-0 print:px-1">
                         {y.year}
                         {y.type === "forecast" && (
                           <span className="text-xs text-muted-foreground ml-1">(P)</span>
@@ -329,7 +333,7 @@ export function ReportAppendices({ data }: ReportAppendicesProps) {
               </Table>
             </div>
           </CardContent>
-        </Card>
+        </Card>}
       </div>
     </section>
   );

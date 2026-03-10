@@ -38,7 +38,7 @@ export function ReportGauge({ value, min, max, label, sublabel, zones }: GaugePr
 
   return (
     <div className="flex flex-col items-center">
-      <ChartContainer config={chartConfig} className="h-[160px] w-[300px]">
+      <ChartContainer config={chartConfig} className="h-[160px] w-[300px] print:h-[120px] print:w-[200px]">
         <PieChart width={300} height={160}>
           <Pie
             data={data}

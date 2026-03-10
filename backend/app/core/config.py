@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # API Settings
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "XBRL Budget API"
-    VERSION: str = "1.0.0"
+    VERSION: str = "1.1.0"
 
     # Database - Use absolute path pointing to root database
     # This ensures backend and legacy app share the same database

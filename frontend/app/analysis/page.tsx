@@ -8,7 +8,7 @@ import {
   useMultiYearRatios,
   getPreferredScenario,
 } from "@/hooks/use-queries";
-import { downloadReportPDF } from "@/lib/api";
+
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type {
   FinancialAnalysis,
@@ -47,7 +47,6 @@ import {
   Sparkles,
   PieChart,
   Loader2,
-  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -62,7 +61,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+
 import {
   ChartContainer,
   ChartTooltip,
@@ -160,8 +159,6 @@ export default function AnalysisPage() {
   const { selectedCompanyId, selectedCompany, selectedYear } = useApp();
   const { data: scenarios = [] } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
-  const [downloadingPDF, setDownloadingPDF] = useState(false);
-
   // Auto-select preferred scenario when scenarios load
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenario) {
@@ -181,18 +178,6 @@ export default function AnalysisPage() {
   );
   const loading = analysisLoading;
   const error = analysisError ? "Impossibile caricare l'analisi finanziaria" : null;
-
-  const handleDownloadPDF = async () => {
-    if (!selectedCompanyId || !selectedScenario) return;
-    try {
-      setDownloadingPDF(true);
-      await downloadReportPDF(selectedCompanyId, selectedScenario, selectedCompany?.name);
-    } catch (err) {
-      console.error("Error downloading PDF:", err);
-    } finally {
-      setDownloadingPDF(false);
-    }
-  };
 
   // Get color for Altman classification
   const getAltmanColor = (classification: string) => {
@@ -322,20 +307,6 @@ export default function AnalysisPage() {
         description={`Indici finanziari, Altman Z-Score e Rating FGPMI per l'anno ${selectedYear}`}
         icon={<PieChart className="h-6 w-6" />}
       >
-        {selectedScenario && (
-          <Button
-            variant="outline"
-            onClick={handleDownloadPDF}
-            disabled={downloadingPDF}
-          >
-            {downloadingPDF ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            {downloadingPDF ? "Generazione..." : "Scarica PDF"}
-          </Button>
-        )}
       </PageHeader>
 
       {/* Summary Cards */}

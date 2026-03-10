@@ -59,8 +59,9 @@ export function ReportStructural({ data }: ReportStructuralProps) {
         <CardHeader>
           <CardTitle className="text-xl">Analisi Strutturale</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <ChartContainer config={structuralConfig} className="h-[300px] w-full">
+        <CardContent className="space-y-6 print:space-y-1">
+          <div className="print-together">
+          <ChartContainer config={structuralConfig} className="h-[300px] print:h-[180px] w-full">
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="year" />
@@ -118,6 +119,7 @@ export function ReportStructural({ data }: ReportStructuralProps) {
               </TableRow>
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </section>

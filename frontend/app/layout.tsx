@@ -30,19 +30,25 @@ export default function RootLayout({
         >
           <AuthProvider>
           <AppProvider>
-            <div className="min-h-screen flex flex-col bg-background">
+            <div className="min-h-screen flex flex-col bg-background print:bg-white">
               {/* Header */}
-              <AppHeader />
+              <div className="print:hidden">
+                <AppHeader />
+              </div>
 
               {/* Navigation */}
-              <Navigation />
+              <div className="print:hidden">
+                <Navigation />
+              </div>
 
               {/* Main Content */}
               <main className="flex-1">
                 {children}
               </main>
             </div>
-            <Toaster />
+            <div className="print:hidden">
+              <Toaster />
+            </div>
           </AppProvider>
           </AuthProvider>
         </ThemeProvider>

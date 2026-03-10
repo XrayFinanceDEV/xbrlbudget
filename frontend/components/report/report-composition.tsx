@@ -81,11 +81,11 @@ export function ReportComposition({ data }: ReportCompositionProps) {
         <CardHeader>
           <CardTitle className="text-xl">Composizione Patrimoniale</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-8">
+        <CardContent className="space-y-8 print:space-y-2">
           {/* Asset Composition */}
-          <div>
+          <div className="print-together">
             <h3 className="text-base font-semibold mb-3">Composizione Attivo (%)</h3>
-            <ChartContainer config={assetConfig} className="h-[300px] w-full">
+            <ChartContainer config={assetConfig} className="h-[300px] print:h-[180px] w-full">
               <BarChart data={chartData} stackOffset="expand">
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
@@ -105,9 +105,9 @@ export function ReportComposition({ data }: ReportCompositionProps) {
           </div>
 
           {/* Liability Composition */}
-          <div>
+          <div className="print-together">
             <h3 className="text-base font-semibold mb-3">Composizione Passivo (%)</h3>
-            <ChartContainer config={liabilityConfig} className="h-[300px] w-full">
+            <ChartContainer config={liabilityConfig} className="h-[300px] print:h-[180px] w-full">
               <BarChart data={chartData} stackOffset="expand">
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />

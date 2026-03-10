@@ -11,6 +11,9 @@ This replaces ~15 individual endpoints with one comprehensive endpoint.
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.core.auth import get_current_user_id
@@ -111,6 +114,7 @@ def get_complete_analysis(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Error calculating complete analysis for company=%s scenario=%s", company_id, scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating complete analysis: {str(e)}"

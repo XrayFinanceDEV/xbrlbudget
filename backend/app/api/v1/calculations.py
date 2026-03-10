@@ -3,8 +3,11 @@ Calculations API endpoints - Financial ratios, Altman Z-Score, FGPMI Rating
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import logging
 import sys
 import os
+
+logger = logging.getLogger(__name__)
 
 # Add backend directory to Python path
 backend_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -50,6 +53,7 @@ def get_financial_ratios(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating ratios: {str(e)}"
@@ -85,6 +89,7 @@ def get_summary_metrics(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating summary: {str(e)}"
@@ -124,6 +129,7 @@ def get_altman_zscore(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating Altman Z-Score: {str(e)}"
@@ -163,6 +169,7 @@ def get_fgpmi_rating(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating FGPMI rating: {str(e)}"
@@ -198,6 +205,7 @@ def get_complete_analysis(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating complete analysis: {str(e)}"
@@ -297,6 +305,7 @@ def get_cashflow(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating cash flow: {str(e)}"
@@ -328,6 +337,7 @@ def get_cashflow_multi_year(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Calculation error on %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating cash flow: {str(e)}"

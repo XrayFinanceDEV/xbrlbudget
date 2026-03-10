@@ -1,12 +1,21 @@
 """
 FastAPI Application - XBRL Budget API
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from decimal import Decimal
+import logging
 import sys
 import os
+
+# Configure logging — all app loggers inherit this level
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("budget")
 
 # Add project root directory to Python path (for shared modules: database, calculations, importers, config, data)
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,6 +69,16 @@ class DecimalJSONResponse(JSONResponse):
 
 # Override default response class
 app.default_response_class = DecimalJSONResponse
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Log full traceback for any unhandled exception, then return 500."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/")

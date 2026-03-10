@@ -5,8 +5,11 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
+import logging
 import sys
 import os
+
+logger = logging.getLogger(__name__)
 
 # Add backend directory to Python path
 backend_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -596,6 +599,7 @@ def bulk_upsert_assumptions(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Error saving assumptions for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error saving assumptions: {str(e)}"
@@ -656,6 +660,7 @@ def generate_forecasts(
             detail=f"Forecast generation failed: {str(e)}"
         )
     except Exception as e:
+        logger.exception("Forecast generation error for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal error during forecast generation: {str(e)}"
@@ -1014,6 +1019,7 @@ def get_detailed_cashflow_scenario(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Error calculating detailed cashflow for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating detailed cashflow: {str(e)}"
@@ -1061,6 +1067,7 @@ def get_ratios_scenario(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Error calculating ratios for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating ratios: {str(e)}"
@@ -1104,6 +1111,7 @@ def get_detailed_cashflow_historical(
             detail=str(e)
         )
     except Exception as e:
+        logger.exception("Error calculating detailed cashflow for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error calculating detailed cashflow: {str(e)}"

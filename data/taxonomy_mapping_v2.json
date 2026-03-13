@@ -217,6 +217,20 @@
       "priority_3": "itcc-ci:Ammortamenti"
     },
 
+    "ce09a_ammort_immateriali": {
+      "comment": "Detail: ammortamento immobilizzazioni immateriali (B.10.a)",
+      "priority_1": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmortamentoImmobilizzazioniImmateriali",
+      "priority_2": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmImmImmateriali",
+      "priority_3": "itcc-ci-2018-11-04:AmmortImmobilizzazioniImmateriali"
+    },
+
+    "ce09b_ammort_materiali": {
+      "comment": "Detail: ammortamento immobilizzazioni materiali (B.10.b)",
+      "priority_1": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmortamentoImmobilizzazioniMateriali",
+      "priority_2": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAmmImmMateriali",
+      "priority_3": "itcc-ci-2018-11-04:AmmortImmobilizzazioniMateriali"
+    },
+
     "ce10_var_rimanenze_mat_prime": {
       "priority_1": "itcc-ci:CostiProduzioneVariazioniRimanenzeMateriePrimeSussidiarieConsumoMerci",
       "priority_2": "itcc-ci-2018-11-04:VariazioniRimanenzeMatPrime",
@@ -236,9 +250,10 @@
     },
 
     "ce13_proventi_partecipazioni": {
-      "priority_1": "itcc-ci:ProventiOneriFinanziariProventiPartecipazioni",
-      "priority_2": "itcc-ci-2018-11-04:ProventiPartecipazioni",
-      "priority_3": "itcc-ci:ProventiPartecipazioni"
+      "priority_1": "itcc-ci:ProventiOneriFinanziariProventiPartecipazioniTotaleProventiPartecipazioni",
+      "priority_2": "itcc-ci:ProventiOneriFinanziariProventiPartecipazioni",
+      "priority_3": "itcc-ci-2018-11-04:ProventiPartecipazioni",
+      "priority_4": "itcc-ci:ProventiPartecipazioni"
     },
 
     "ce14_altri_proventi_finanziari": {
@@ -254,15 +269,18 @@
     },
 
     "ce16_utili_perdite_cambi": {
-      "priority_1": "itcc-ci:ProventiOneriFinanziariUtiliPerditesuCambi",
-      "priority_2": "itcc-ci-2018-11-04:UtiliPerditeCambi",
-      "priority_3": "itcc-ci:UtiliPerditeCambi"
+      "priority_1": "itcc-ci:ProventiOneriFinanziariUtiliPerditeCambi",
+      "priority_2": "itcc-ci:ProventiOneriFinanziariUtiliPerditesuCambi",
+      "priority_3": "itcc-ci-2018-11-04:UtiliPerditeCambi",
+      "priority_4": "itcc-ci:UtiliPerditeCambi"
     },
 
     "ce17_rettifiche_attivita_fin": {
-      "priority_1": "itcc-ci:RettificheValoreAttivitaFinanziarieTotaleRettifiche",
-      "priority_2": "itcc-ci-2018-11-04:RettificheAttivitaFinanziarie",
-      "priority_3": "itcc-ci:RettificheAttivitaFinanziarie"
+      "priority_1": "itcc-ci:TotaleRettificheValoreAttivitaPassivitaFinanziarie",
+      "priority_2": "itcc-ci:RettificheValoreAttivitaFinanziarieTotaleRettifiche",
+      "priority_3": "itcc-ci:TotaleRettificheValoreAttivitaFinanziarie",
+      "priority_4": "itcc-ci-2018-11-04:RettificheAttivitaFinanziarie",
+      "priority_5": "itcc-ci:RettificheAttivitaFinanziarie"
     },
 
     "ce18_proventi_straordinari": {

@@ -278,11 +278,16 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
 - Parser detects schema type (Ordinario/Abbreviato/Micro)
 - Enhanced parser (`xbrl_parser_enhanced.py`) includes hierarchical debt reconciliation
 
-### PDF Import (Docling AI)
-- First run downloads models (~2GB)
+### PDF Import (Claude LLM)
+- Uses PyMuPDF text extraction + Claude Haiku 4.5 for structured extraction
 - Processing time: 3-10 seconds per PDF
 - Supports Bilancio Micro, Abbreviato, Ordinario (IV CEE format)
+- Supports "Stampa dettaglio voci" format (ERP detail reports with account-level GL entries)
+- Supports "Situazione Contabile" trial balance format (deterministic parser, no LLM)
+- Pre-filters: Zucchetti, Datev/Koinos, Stampa dettaglio voci, Dylog separator noise
+- Post-extraction validators: crediti, debiti split, equity consistency, ce20_imposte cross-check
 - Maps extracted tables to sp01-sp18, ce01-ce20
+- Both single-year and dual-year (both columns) extraction modes
 
 ### FGPMI Rating Model
 - Complex multi-table lookup (7 indicators, sector-specific thresholds)

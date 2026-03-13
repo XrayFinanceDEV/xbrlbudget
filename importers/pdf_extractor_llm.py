@@ -126,7 +126,11 @@ CE_END_KEYWORDS_FALLBACK = [
 ]
 
 # Fallback: single-keyword detection if range-based fails
-SP_FALLBACK_KEYWORDS = ["totale attivo", "totale passivo"]
+SP_FALLBACK_KEYWORDS = [
+    "totale attivo", "totale passivo",
+    "attivo circolante",      # always present on BS asset pages
+    "patrimonio netto",       # always present on BS liability pages
+]
 CE_FALLBACK_KEYWORDS = ["totale valore della produzione", "differenza tra valore e costi", "differ. tra valore e costi"]
 
 
@@ -499,6 +503,99 @@ def _preprocess_datev_koinos(text: str) -> str:
     return result
 
 
+# ---------------------------------------------------------------------------
+# "Stampa dettaglio voci" pre-filter (accounting software detail report)
+# ---------------------------------------------------------------------------
+
+# Account code lines: "67.01.01.01", "84.01.01", "55.01.07" etc.
+_STAMPA_DETAIL_ACCOUNT_RE = re.compile(
+    r'^\s*\d{2}\.\d{2}\.\d{2}(?:\.\d{2})?\s*$'
+)
+
+# Detail value lines ending with D (Dare/debit) or A (Avere/credit)
+_STAMPA_DETAIL_VALUE_RE = re.compile(
+    r'^\s*[\d.,]+\s+[DA]\s*$'
+)
+
+# Page header pattern for this format
+_STAMPA_PAGE_HEADER_RE = re.compile(
+    r'^\s*(Data di stampa|Pagina|Dati generali|Sede legale:|Codice fiscale:|'
+    r'Partita IVA:|Stampa dettaglio voci)\s*$',
+    re.IGNORECASE
+)
+
+# "% Reddito" column header
+_STAMPA_PERCENT_RE = re.compile(r'^\s*\d{1,3}\s{3,}$')
+
+
+def _is_stampa_dettaglio_format(text: str) -> bool:
+    """Detect 'Stampa dettaglio voci' format by account codes + D/A suffixes."""
+    lines = text.splitlines()
+    account_codes = sum(1 for l in lines if _STAMPA_DETAIL_ACCOUNT_RE.match(l))
+    da_values = sum(1 for l in lines if _STAMPA_DETAIL_VALUE_RE.match(l))
+    return account_codes >= 5 and da_values >= 5
+
+
+def _preprocess_stampa_dettaglio(text: str) -> str:
+    """Strip account-level detail from 'Stampa dettaglio voci' format.
+
+    This format has IV CEE section headers (3.B.9, 1.C.2, etc.) with
+    account-level details underneath. We keep section headers and totals,
+    removing individual account lines and their D/A-suffixed values.
+
+    Also removes repeated page headers and metadata.
+    """
+    if not _is_stampa_dettaglio_format(text):
+        return text
+
+    lines = text.splitlines()
+    remove = set()
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        # Remove account code lines (e.g., "67.01.01.01")
+        if _STAMPA_DETAIL_ACCOUNT_RE.match(stripped):
+            remove.add(i)
+            # Also remove following description and value lines
+            j = i + 1
+            while j < len(lines) and j <= i + 3:
+                s = lines[j].strip()
+                if not s:
+                    j += 1
+                    continue
+                if _STAMPA_DETAIL_VALUE_RE.match(s):
+                    remove.add(j)
+                    break
+                # Description line between code and value
+                if not s[0].isdigit() or '.' not in s[:5]:
+                    remove.add(j)
+                else:
+                    break
+                j += 1
+            continue
+
+        # Remove D/A value lines that weren't caught above
+        if _STAMPA_DETAIL_VALUE_RE.match(stripped):
+            remove.add(i)
+            continue
+
+        # Remove page headers
+        if _STAMPA_PAGE_HEADER_RE.match(stripped):
+            remove.add(i)
+            continue
+
+        # Remove "% Reddito" percentage values (e.g., "100   ", "80   ", "75   ")
+        if _STAMPA_PERCENT_RE.match(stripped):
+            remove.add(i)
+            continue
+
+    filtered = [line for i, line in enumerate(lines) if i not in remove and line.strip()]
+    result = '\n'.join(filtered)
+    logger.info(f"Stampa dettaglio pre-filter: {len(text)} -> {len(result)} chars")
+    return result
+
+
 def _strip_separator_noise(text: str) -> str:
     """Remove separator lines (-----, =====) and repeated page headers.
 
@@ -562,6 +659,8 @@ def extract_relevant_pages(file_path: str) -> Tuple[str, str]:
     doc.close()
 
     # Pre-filter ERP account detail lines (no-op for standard PDFs)
+    sp_text = _preprocess_stampa_dettaglio(sp_text)
+    ce_text = _preprocess_stampa_dettaglio(ce_text)
     sp_text = _preprocess_zucchetti(sp_text)
     ce_text = _preprocess_zucchetti(ce_text)
     sp_text = _preprocess_datev_koinos(sp_text)
@@ -1021,7 +1120,10 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     """
     Extract balance sheet and income statement from PDF using PyMuPDF + Claude Haiku 4.5.
 
-    Requires ANTHROPIC_API_KEY environment variable.
+    For "Situazione Contabile" (trial balance) PDFs with XX/YY/ZZZ account codes,
+    uses a deterministic parser instead of the LLM.
+
+    Requires ANTHROPIC_API_KEY environment variable (unless situazione contabile).
 
     Args:
         file_path: Path to the PDF file
@@ -1032,6 +1134,28 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     Raises:
         PDFImportError: If extraction fails
     """
+    # Check for Situazione Contabile format (trial balance with XX/YY/ZZZ codes)
+    # Route to deterministic parser — bypasses LLM entirely
+    try:
+        doc = fitz.open(file_path)
+        sample_text = ""
+        for page in doc:
+            sample_text += page.get_text()
+            if len(sample_text) > 5000:
+                break
+        doc.close()
+    except Exception:
+        sample_text = ""
+
+    from importers.situazione_contabile_parser import is_situazione_contabile, extract_situazione_contabile
+    if is_situazione_contabile(sample_text):
+        logger.info("Situazione contabile (trial balance) format detected, using deterministic parser")
+        balance_sheet_data, income_data = extract_situazione_contabile(file_path)
+        # Skip LLM validators (_validate_crediti/_validate_debiti/_validate_equity)
+        # as they rely on full column names and are designed to fix LLM errors.
+        # The deterministic parser produces correct values directly.
+        return balance_sheet_data, income_data
+
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
@@ -1107,6 +1231,9 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     balance_sheet_data = _validate_crediti(balance_sheet_data, "single")
     balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
     balance_sheet_data = _validate_equity(balance_sheet_data, "single")
+
+    # Step 6: Cross-check ce20_imposte against BS utile
+    income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
 
     return balance_sheet_data, income_data
 
@@ -1230,6 +1357,60 @@ def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
     return balance_sheet_data
 
 
+def _validate_ce_imposte(
+    ce_data: Dict[str, Decimal],
+    bs_data: Dict[str, Decimal],
+    label: str,
+) -> Dict[str, Decimal]:
+    """Cross-check ce20_imposte against BS utile and CE risultato ante imposte.
+
+    In multi-column PDFs (e.g. "Stampa dettaglio voci"), when a year has zero
+    imposte the LLM may pick up the other year's value.  Fix by computing:
+      expected_imposte = risultato_ante_imposte - utile_from_BS
+    """
+    sp13 = bs_data.get('sp13_utile_perdita', Decimal('0'))
+    # Compute risultato ante imposte from CE fields
+    vp = (
+        ce_data.get('ce01_ricavi_vendite', Decimal('0'))
+        + ce_data.get('ce02_variazioni_rimanenze', Decimal('0'))
+        + ce_data.get('ce03_lavori_in_economia', Decimal('0'))
+        + ce_data.get('ce04_altri_ricavi', Decimal('0'))
+    )
+    copro = (
+        ce_data.get('ce05_materie_prime', Decimal('0'))
+        + ce_data.get('ce06_servizi', Decimal('0'))
+        + ce_data.get('ce07_godimento_beni', Decimal('0'))
+        + ce_data.get('ce08_costi_personale', Decimal('0'))
+        + ce_data.get('ce09_ammortamenti', Decimal('0'))
+        + ce_data.get('ce10_var_rimanenze_mat_prime', Decimal('0'))
+        + ce_data.get('ce11_accantonamenti', Decimal('0'))
+        + ce_data.get('ce11b_altri_accantonamenti', Decimal('0'))
+        + ce_data.get('ce12_oneri_diversi', Decimal('0'))
+    )
+    financial = (
+        ce_data.get('ce13_proventi_partecipazioni', Decimal('0'))
+        + ce_data.get('ce14_altri_proventi_finanziari', Decimal('0'))
+        - ce_data.get('ce15_oneri_finanziari', Decimal('0'))
+        + ce_data.get('ce16_utili_perdite_cambi', Decimal('0'))
+        - ce_data.get('ce17_rettifiche_attivita_fin', Decimal('0'))
+    )
+    risultato_ante = vp - copro + financial
+    expected_imposte = risultato_ante - sp13
+
+    ce20 = ce_data.get('ce20_imposte', Decimal('0'))
+    diff = abs(ce20 - expected_imposte)
+
+    if diff > Decimal('1') and abs(expected_imposte) < abs(ce20) + Decimal('1'):
+        logger.warning(
+            f"[{label}] ce20_imposte cross-check: extracted={ce20}, "
+            f"expected (risultato_ante {risultato_ante} - utile_BS {sp13})={expected_imposte}. "
+            f"Correcting."
+        )
+        ce_data['ce20_imposte'] = max(expected_imposte, Decimal('0'))
+
+    return ce_data
+
+
 def extract_pdf_both_years_with_llm(
     file_path: str,
 ) -> Tuple[Dict[str, Decimal], Dict[str, Decimal], Dict[str, Decimal], Dict[str, Decimal]]:
@@ -1327,5 +1508,9 @@ def extract_pdf_both_years_with_llm(
     prior_bs = _validate_debiti(prior_bs, "prior")
     current_bs = _validate_equity(current_bs, "current")
     prior_bs = _validate_equity(prior_bs, "prior")
+
+    # Step 6: Cross-check ce20_imposte against BS utile
+    current_ce = _validate_ce_imposte(current_ce, current_bs, "current")
+    prior_ce = _validate_ce_imposte(prior_ce, prior_bs, "prior")
 
     return current_bs, current_ce, prior_bs, prior_ce

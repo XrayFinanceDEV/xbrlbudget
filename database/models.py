@@ -473,6 +473,7 @@ class IncomeStatement(Base):
             self.ce09_ammortamenti +
             self.ce10_var_rimanenze_mat_prime +
             self.ce11_accantonamenti +
+            self.ce11b_altri_accantonamenti +
             self.ce12_oneri_diversi
         )
 
@@ -489,6 +490,7 @@ class IncomeStatement(Base):
             self.ce08_costi_personale +
             self.ce10_var_rimanenze_mat_prime +
             self.ce11_accantonamenti +
+            self.ce11b_altri_accantonamenti +
             self.ce12_oneri_diversi
         )
 
@@ -980,6 +982,7 @@ class ForecastIncomeStatement(Base):
             self.ce09_ammortamenti +
             self.ce10_var_rimanenze_mat_prime +
             self.ce11_accantonamenti +
+            self.ce11b_altri_accantonamenti +
             self.ce12_oneri_diversi
         )
 
@@ -992,6 +995,7 @@ class ForecastIncomeStatement(Base):
             self.ce08_costi_personale +
             self.ce10_var_rimanenze_mat_prime +
             self.ce11_accantonamenti +
+            self.ce11b_altri_accantonamenti +
             self.ce12_oneri_diversi
         )
 

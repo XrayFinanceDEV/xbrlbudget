@@ -207,6 +207,7 @@ class ForecastEngine:
         ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
         ce10 = assumption.ce10_override if assumption.ce10_override is not None else base_inc.ce10_var_rimanenze_mat_prime
         ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
+        ce11b = base_inc.ce11b_altri_accantonamenti  # Carry forward (no override available)
         ce13 = assumption.ce13_override if assumption.ce13_override is not None else base_inc.ce13_proventi_partecipazioni
         ce16 = assumption.ce16_override if assumption.ce16_override is not None else base_inc.ce16_utili_perdite_cambi
         ce17 = assumption.ce17_override if assumption.ce17_override is not None else base_inc.ce17_rettifiche_attivita_fin
@@ -219,7 +220,7 @@ class ForecastEngine:
 
         # Taxes - use user-defined tax rate (IRES/IRAP)
         production_value = ce01 + ce02 + ce03 + ce04
-        production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce12
+        production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
         ebit = production_value - production_cost
         financial_result = ce13 + ce14 - ce15 + ce16
         profit_before_tax = ebit + financial_result + ce17 + (ce18 - ce19)
@@ -239,6 +240,7 @@ class ForecastEngine:
             'ce09_ammortamenti': ce09,
             'ce10_var_rimanenze_mat_prime': ce10,
             'ce11_accantonamenti': ce11,
+            'ce11b_altri_accantonamenti': ce11b,
             'ce12_oneri_diversi': ce12,
             'ce13_proventi_partecipazioni': ce13,
             'ce14_altri_proventi_finanziari': ce14,
@@ -312,6 +314,7 @@ class ForecastEngine:
             forecast_inc['ce09_ammortamenti'] -
             forecast_inc['ce10_var_rimanenze_mat_prime'] -
             forecast_inc['ce11_accantonamenti'] -
+            forecast_inc['ce11b_altri_accantonamenti'] -
             forecast_inc['ce12_oneri_diversi'] +
             forecast_inc['ce13_proventi_partecipazioni'] +
             forecast_inc['ce14_altri_proventi_finanziari'] -

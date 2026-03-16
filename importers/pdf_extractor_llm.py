@@ -731,8 +731,10 @@ EXTRACTION RULES:
 
 CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
 - sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across ALL crediti categories (verso clienti, tributari, verso altri, etc.)
+  PLUS "imposte anticipate" (deferred tax assets) if shown as a separate line within crediti
 - sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across ALL crediti categories
-- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". Do NOT use "Totale crediti" directly as sp06.
+- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". If they don't, add the difference to sp06.
+  Common cause: "imposte anticipate" is a separate line within crediti that must be included in sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
@@ -776,8 +778,10 @@ EXTRACTION RULES:
 
 CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
 - sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across ALL crediti categories (verso clienti, tributari, verso altri, etc.)
+  PLUS "imposte anticipate" (deferred tax assets) if shown as a separate line within crediti
 - sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across ALL crediti categories
-- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". Do NOT use "Totale crediti" directly as sp06.
+- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". If they don't, add the difference to sp06.
+  Common cause: "imposte anticipate" is a separate line within crediti that must be included in sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
@@ -1227,10 +1231,11 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     logger.info(f"SP totale_passivo = {balance_sheet_data.get('totale_passivo')}")
     logger.info(f"CE ce01_ricavi_vendite = {income_data.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate crediti, debt split, then equity consistency
+    # Step 5: Validate crediti, then equity (before debiti, since debt validator
+    # derives total_debiti from patrimonio_netto which needs correct sp12 first)
     balance_sheet_data = _validate_crediti(balance_sheet_data, "single")
-    balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
     balance_sheet_data = _validate_equity(balance_sheet_data, "single")
+    balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
 
     # Step 6: Cross-check ce20_imposte against BS utile
     income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
@@ -1281,6 +1286,16 @@ def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dic
             logger.warning(
                 f"[{label}] Crediti mismatch: sp06+sp07={actual_crediti} but "
                 f"expected={expected_crediti} (diff={diff}). Correcting sp06 to {new_sp06}"
+            )
+            balance_sheet_data['sp06_crediti_breve'] = new_sp06
+    elif diff < Decimal('-1'):
+        # Undershoot — LLM likely missed "imposte anticipate" or other crediti items
+        new_sp06 = expected_crediti - sp07
+        if new_sp06 >= 0:
+            logger.warning(
+                f"[{label}] Crediti undershoot: sp06+sp07={actual_crediti} but "
+                f"expected={expected_crediti} (missing={abs(diff)}, likely imposte anticipate). "
+                f"Correcting sp06 from {sp06} to {new_sp06}"
             )
             balance_sheet_data['sp06_crediti_breve'] = new_sp06
 
@@ -1348,12 +1363,13 @@ def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
     expected_equity = tot_passivo - liabilities
     equity_diff = abs(computed_equity - expected_equity)
     if equity_diff > Decimal('1'):
+        new_sp12 = expected_equity - sp11 - sp13
         logger.warning(
             f"[{label}] Equity mismatch: sp11+sp12+sp13={computed_equity} but "
             f"totale_passivo-liabilities={expected_equity} (diff={equity_diff}). "
-            f"Correcting sp12_riserve from {sp12} to {sp12 - equity_diff}"
+            f"Correcting sp12_riserve from {sp12} to {new_sp12}"
         )
-        balance_sheet_data['sp12_riserve'] = expected_equity - sp11 - sp13
+        balance_sheet_data['sp12_riserve'] = new_sp12
     return balance_sheet_data
 
 
@@ -1501,13 +1517,14 @@ def extract_pdf_both_years_with_llm(
     logger.info(f"[current] SP totale_attivo={current_bs.get('totale_attivo')}, CE ricavi={current_ce.get('ce01_ricavi_vendite')}")
     logger.info(f"[prior]   SP totale_attivo={prior_bs.get('totale_attivo')}, CE ricavi={prior_ce.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate crediti, debt split, then equity consistency for both years
+    # Step 5: Validate crediti, then equity (before debiti, since debt validator
+    # derives total_debiti from patrimonio_netto which needs correct sp12 first)
     current_bs = _validate_crediti(current_bs, "current")
     prior_bs = _validate_crediti(prior_bs, "prior")
-    current_bs = _validate_debiti(current_bs, "current")
-    prior_bs = _validate_debiti(prior_bs, "prior")
     current_bs = _validate_equity(current_bs, "current")
     prior_bs = _validate_equity(prior_bs, "prior")
+    current_bs = _validate_debiti(current_bs, "current")
+    prior_bs = _validate_debiti(prior_bs, "prior")
 
     # Step 6: Cross-check ce20_imposte against BS utile
     current_ce = _validate_ce_imposte(current_ce, current_bs, "current")

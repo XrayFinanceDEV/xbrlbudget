@@ -217,21 +217,27 @@ class IntraYearEngine:
         partial_year_num = scenario.base_year + 1  # e.g., 2025
         ref_year_num = scenario.base_year           # e.g., 2024
 
-        # Load partial year (the imported partial-year data)
         from database.queries import get_fy_partial, get_fy_prefer_full
+
+        # Load partial year: prefer partial-year record, fall back to full-year
+        # (full-year record may exist if the same year was also imported for budget)
         partial_fy = get_fy_partial(self.db, company_id, partial_year_num)
+        if not partial_fy:
+            partial_fy = get_fy_prefer_full(self.db, company_id, partial_year_num)
 
         if not partial_fy or not partial_fy.balance_sheet or not partial_fy.income_statement:
             raise ValueError(
-                f"Partial year {partial_year_num} data not found or incomplete for company {company_id}"
+                f"Dati anno {partial_year_num} non trovati o incompleti per l'azienda {company_id}. "
+                f"Importare il bilancio {partial_year_num} prima di procedere."
             )
 
-        # Load reference full year (must be full-year record)
+        # Load reference full year
         ref_fy = get_fy_prefer_full(self.db, company_id, ref_year_num)
 
         if not ref_fy or not ref_fy.balance_sheet or not ref_fy.income_statement:
             raise ValueError(
-                f"Reference year {ref_year_num} data not found or incomplete for company {company_id}"
+                f"Dati anno di riferimento {ref_year_num} non trovati o incompleti per l'azienda {company_id}. "
+                f"Importare il bilancio storico {ref_year_num} prima di procedere."
             )
 
         return partial_fy, ref_fy
@@ -314,6 +320,7 @@ class IntraYearEngine:
         ce03 = _get_field(partial_inc, 'ce03_lavori_interni') * factor
         ce10 = _get_field(partial_inc, 'ce10_var_rimanenze_mat_prime') * factor
         ce11 = _get_field(partial_inc, 'ce11_accantonamenti') * factor
+        ce11b = _get_field(partial_inc, 'ce11b_altri_accantonamenti') * factor
         ce13 = _get_field(partial_inc, 'ce13_proventi_partecipazioni') * factor
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else _get_field(partial_inc, 'ce14_altri_proventi_finanziari') * factor
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else _get_field(partial_inc, 'ce15_oneri_finanziari') * factor
@@ -324,7 +331,7 @@ class IntraYearEngine:
 
         # Taxes - recalculate on projected pre-tax profit
         production_value = ce01 + ce02 + ce03 + ce04
-        production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce12
+        production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
         ebit = production_value - production_cost
         financial_result = ce13 + ce14 - ce15 + ce16
         profit_before_tax = ebit + financial_result + ce17 + (ce18 - ce19)
@@ -344,6 +351,7 @@ class IntraYearEngine:
             'ce09_ammortamenti': ce09,
             'ce10_var_rimanenze_mat_prime': ce10,
             'ce11_accantonamenti': ce11,
+            'ce11b_altri_accantonamenti': ce11b,
             'ce12_oneri_diversi': ce12,
             'ce13_proventi_partecipazioni': ce13,
             'ce14_altri_proventi_finanziari': ce14,

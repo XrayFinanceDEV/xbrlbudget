@@ -307,6 +307,10 @@ def get_intra_year_comparison(
         engine = IntraYearEngine(db)
         return engine.get_comparison(scenario_id)
     except ValueError as e:
+        logger.error(
+            f"[COMPARISON] Failed for company={company_id} scenario={scenario_id} "
+            f"base_year={scenario.base_year} period_months={scenario.period_months}: {e}"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)

@@ -46,6 +46,8 @@ class FinancialYear(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     year = Column(Integer, nullable=False, index=True)  # e.g., 2024
     period_months = Column(Integer, nullable=True, default=None)  # NULL/12 = full year, 1-11 = partial
+    original_bs_snapshot = Column(Text, nullable=True, default=None)  # JSON: original BS values before rettifiche
+    original_is_snapshot = Column(Text, nullable=True, default=None)  # JSON: original IS values before rettifiche
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -392,6 +394,9 @@ class IncomeStatement(Base):
     # B.9) Per il personale
     ce08_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)
     ce08a_tfr_accrual = Column(Numeric(15, 2), default=0, nullable=False)  # TFR accrual detail ("di cui...")
+    ce08b_salari_stipendi = Column(Numeric(15, 2), default=0, nullable=False)  # a) Salari e stipendi
+    ce08c_oneri_sociali = Column(Numeric(15, 2), default=0, nullable=False)  # b) Oneri sociali
+    ce08d_altri_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)  # d) Altri costi del personale
 
     # B.10) Ammortamenti e svalutazioni
     ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
@@ -937,6 +942,9 @@ class ForecastIncomeStatement(Base):
     ce07_godimento_beni = Column(Numeric(15, 2), default=0, nullable=False)
     ce08_costi_personale = Column(Numeric(15, 2), default=0, nullable=False)
     ce08a_tfr_accrual = Column(Numeric(15, 2), default=0, nullable=False, comment="TFR accrual (di cui)")
+    ce08b_salari_stipendi = Column(Numeric(15, 2), default=0, nullable=False, comment="a) Salari e stipendi")
+    ce08c_oneri_sociali = Column(Numeric(15, 2), default=0, nullable=False, comment="b) Oneri sociali")
+    ce08d_altri_costi_personale = Column(Numeric(15, 2), default=0, nullable=False, comment="d) Altri costi personale")
     ce09_ammortamenti = Column(Numeric(15, 2), default=0, nullable=False)
     ce09a_ammort_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
     ce09b_ammort_materiali = Column(Numeric(15, 2), default=0, nullable=False)

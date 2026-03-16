@@ -103,6 +103,9 @@ export interface IncomeStatement {
   ce07_godimento_beni: string;
   ce08_costi_personale: string;
   ce08a_tfr_accrual: string;  // TFR accrual detail
+  ce08b_salari_stipendi: string;  // Salari e stipendi
+  ce08c_oneri_sociali: string;  // Oneri sociali
+  ce08d_altri_costi_personale: string;  // Altri costi personale
   ce09_ammortamenti: string;  // Total depreciation
   ce09a_ammort_immateriali: string;  // Intangible depreciation
   ce09b_ammort_materiali: string;  // Tangible depreciation
@@ -515,6 +518,9 @@ export interface ForecastIncomeStatement {
   ce07_godimento_beni: number;
   ce08_costi_personale: number;
   ce08a_tfr_accrual: number;
+  ce08b_salari_stipendi: number;
+  ce08c_oneri_sociali: number;
+  ce08d_altri_costi_personale: number;
   ce09_ammortamenti: number;
   ce09a_ammort_immateriali: number;
   ce09b_ammort_materiali: number;
@@ -697,6 +703,18 @@ export interface EMScoreResult {
   rating: string;
   z_score_used: number;
   description: string;
+}
+
+// ===== Adjustable Financial Year (Rettifiche) =====
+
+export interface AdjustableFinancialYear {
+  financial_year_id: number;
+  year: number;
+  period_months: number | null;
+  balance_sheet: Record<string, number>;
+  income_statement: Record<string, number>;
+  original_balance_sheet: Record<string, number> | null;
+  original_income_statement: Record<string, number> | null;
 }
 
 // ===== Scenario Analysis (comprehensive single-call response) =====

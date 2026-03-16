@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import {
@@ -15,6 +15,8 @@ import {
   getBudgetScenarios,
   promoteProjection,
   deleteCompany,
+  getAdjustableFinancialYear,
+  saveAdjustments,
 } from "@/lib/api";
 import axios from "axios";
 import type {
@@ -23,6 +25,7 @@ import type {
   IntraYearComparison,
   IntraYearComparisonItem,
   ScenarioAnalysis,
+  AdjustableFinancialYear,
 } from "@/types/api";
 import { toast } from "sonner";
 import {
@@ -40,6 +43,8 @@ import {
   TrendingDown,
   GitCompareArrows,
   LineChart,
+  Pencil,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -668,25 +673,25 @@ function buildIncomeItemsWithEbitda(
   // Relabel items to match IV CEE format
   const relabel: Record<string, string> = {
     ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
-    ce02_variazioni_rimanenze: "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti",
-    ce03_lavori_interni: "3) Variazioni dei lavori in corso su ordinazione",
+    ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
+    ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",
     ce04_altri_ricavi: "5) Altri ricavi e proventi",
-    ce05_materie_prime: "6) Materie prime, sussidiarie, di consumo e di merci",
-    ce06_servizi: "7) Servizi",
-    ce07_godimento_beni: "8) Godimento di beni di terzi",
-    ce08_costi_personale: "9) Personale",
+    ce05_materie_prime: "6) Per materie prime, sussidiarie, di consumo e di merci",
+    ce06_servizi: "7) Per servizi",
+    ce07_godimento_beni: "8) Per godimento di beni di terzi",
+    ce08_costi_personale: "9) Per il personale",
     ce09_ammortamenti: "10) Ammortamenti e svalutazioni",
-    ce10_var_rimanenze_mat_prime: "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci",
+    ce10_var_rimanenze_mat_prime: "11) Var. rimanenze di materie prime, suss., di cons. e merci",
     ce11_accantonamenti: "12) Accantonamenti per rischi",
     ce12_oneri_diversi: "14) Oneri diversi di gestione",
     ce13_proventi_partecipazioni: "15) Proventi da partecipazioni",
     ce14_altri_proventi_finanziari: "16) Altri proventi finanziari",
     ce15_oneri_finanziari: "17) Interessi e altri oneri finanziari",
     ce16_utili_perdite_cambi: "17-bis) Utili e perdite su cambi",
-    ce17_rettifiche_attivita_fin: "18-19) Rettifiche di valore",
-    ce18_proventi_straordinari: "20) Proventi straordinari",
-    ce19_oneri_straordinari: "21) Oneri straordinari",
-    ce20_imposte: "22) Imposte sul reddito",
+    ce17_rettifiche_attivita_fin: "Totale rettifiche di valore (18 - 19)",
+    ce18_proventi_straordinari: "Proventi straordinari",
+    ce19_oneri_straordinari: "Oneri straordinari",
+    ce20_imposte: "20) Imposte sul reddito dell'esercizio",
   };
 
   const labeled = (code: string): IntraYearComparisonItem => {
@@ -721,9 +726,9 @@ function buildIncomeItemsWithEbitda(
     labeled("ce14_altri_proventi_finanziari"),
     labeled("ce15_oneri_finanziari"),
     labeled("ce16_utili_perdite_cambi"),
-    makeRow("_totale_fin", "Totale Proventi/Oneri Finanziari", partialFin, refFin, annFin),
+    makeRow("_totale_fin", "Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", partialFin, refFin, annFin),
     // D) RETTIFICHE DI VALORE
-    hdr("_hdr_d", "D) RETTIFICHE DI VALORE ATTIVITÀ FINANZIARIE"),
+    hdr("_hdr_d", "D) RETTIFICHE DI VALORE DI ATTIVITÀ E PASSIVITÀ FINANZIARIE"),
     labeled("ce17_rettifiche_attivita_fin"),
     // E) PROVENTI E ONERI STRAORDINARI
     hdr("_hdr_e", "E) PROVENTI E ONERI STRAORDINARI"),
@@ -731,10 +736,816 @@ function buildIncomeItemsWithEbitda(
     labeled("ce19_oneri_straordinari"),
     makeRow("_totale_straord", "Totale Proventi/Oneri Straordinari", partialStraord, refStraord, annStraord),
     // Risultato prima delle imposte
-    makeRow("_profit_before_tax", "Risultato prima delle imposte", partialPBT, refPBT, annPBT),
+    makeRow("_profit_before_tax", "Risultato prima delle imposte (A - B +/- C +/- D +/- E)", partialPBT, refPBT, annPBT),
     labeled("ce20_imposte"),
-    makeRow("_net_profit", "23) UTILE (PERDITA) DELL'ESERCIZIO", partialNetProfit, refNetProfit, annNetProfit),
+    makeRow("_net_profit", "21) Utile (perdita) dell'esercizio", partialNetProfit, refNetProfit, annNetProfit),
   ];
+}
+
+// ===== DOUBLE-ENTRY RULES =====
+// Maps: editable field → counterpart field and direction
+// "same" = counterpart moves in same direction as delta (e.g. cost up → liability up)
+// "inverse" = counterpart moves opposite (e.g. depreciation up → asset down)
+const DOUBLE_ENTRY_RULES: Array<{
+  editable: string;
+  counterpart: string;
+  direction: "same" | "inverse";
+  editableType: "bs" | "ce";
+  counterpartType: "bs" | "ce";
+}> = [
+  { editable: "sp05_rimanenze", counterpart: "ce02_variazioni_rimanenze", direction: "same", editableType: "bs", counterpartType: "ce" },
+  { editable: "sp06_crediti_breve", counterpart: "ce09d_svalutazione_crediti", direction: "inverse", editableType: "bs", counterpartType: "ce" },
+  { editable: "ce08_costi_personale", counterpart: "sp16f_debiti_previdenza_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce08a_tfr_accrual", counterpart: "sp15_tfr", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce09a_ammort_immateriali", counterpart: "sp02_immob_immateriali", direction: "inverse", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce09b_ammort_materiali", counterpart: "sp03_immob_materiali", direction: "inverse", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce05_materie_prime", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce06_servizi", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce07_godimento_beni", counterpart: "sp18_ratei_risconti_passivi", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce11_accantonamenti", counterpart: "sp14_fondi_rischi", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce15_oneri_finanziari", counterpart: "sp18_ratei_risconti_passivi", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce12_oneri_diversi", counterpart: "sp16g_altri_debiti_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce20_imposte", counterpart: "sp16e_debiti_tributari_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
+  { editable: "ce09d_svalutazione_crediti", counterpart: "sp06_crediti_breve", direction: "inverse", editableType: "ce", counterpartType: "bs" },
+];
+
+// Standalone editable fields (no double-entry counterpart — free edit)
+// Standalone editable fields (no double-entry counterpart — free edit)
+const STANDALONE_EDITABLE = new Set([
+  // All SP fields (except computed: sp13, sp16, sp17 which are auto-recalculated)
+  "sp01_crediti_soci",
+  "sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie",
+  "sp05_rimanenze",
+  "sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso",
+  "sp05d_prodotti_finiti", "sp05e_acconti",
+  "sp06_crediti_breve",
+  "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+  "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
+  "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
+  "sp06g_crediti_altri_breve",
+  "sp07_crediti_lungo",
+  "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+  "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+  "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
+  "sp07g_crediti_altri_lungo",
+  "sp08_attivita_finanziarie", "sp09_disponibilita_liquide",
+  "sp10_ratei_risconti_attivi",
+  "sp11_capitale", "sp12_riserve", "sp12g_utili_perdite_portati",
+  "sp14_fondi_rischi", "sp15_tfr",
+  "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+  "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+  "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+  "sp16g_altri_debiti_breve",
+  "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+  "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
+  "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
+  "sp17g_altri_debiti_lungo",
+  "sp18_ratei_risconti_passivi",
+  // CE standalone
+  "ce01_ricavi_vendite",
+  "ce04_altri_ricavi",
+  "ce17a_rivalutazioni",
+  "ce17b_svalutazioni",
+  "ce18_proventi_straordinari",
+  "ce19_oneri_straordinari",
+]);
+
+const EDITABLE_RETTIFICHE = new Set([
+  ...DOUBLE_ENTRY_RULES.map((r) => r.editable),
+  ...STANDALONE_EDITABLE,
+]);
+const AUTO_ADJUSTED = new Set(DOUBLE_ENTRY_RULES.map((r) => r.counterpart));
+
+// Italian labels for rettifiche fields
+const RETTIFICHE_LABELS: Record<string, string> = {
+  // SP - Attivo
+  sp01_crediti_soci: "A) Crediti verso soci",
+  sp02_immob_immateriali: "B.I) Immobilizzazioni immateriali",
+  sp03_immob_materiali: "B.II) Immobilizzazioni materiali",
+  sp04_immob_finanziarie: "B.III) Immobilizzazioni finanziarie",
+  sp05_rimanenze: "C.I) Rimanenze",
+  sp05a_materie_prime: "  1) Materie prime, sussidiarie e di consumo",
+  sp05b_prodotti_in_corso: "  2) Prodotti in c/lavorazione e semilavorati",
+  sp05c_lavori_in_corso: "  3) Lavori in corso su ordinazione",
+  sp05d_prodotti_finiti: "  4) Prodotti finiti e merci",
+  sp05e_acconti: "  5) Acconti",
+  sp06_crediti_breve: "C.II) Crediti (entro es. successivo)",
+  sp06a_crediti_clienti_breve: "  1) Verso clienti",
+  sp06b_crediti_controllate_breve: "  2) Verso imprese controllate",
+  sp06c_crediti_collegate_breve: "  3) Verso imprese collegate",
+  sp06d_crediti_controllanti_breve: "  4) Verso controllanti",
+  sp06e_crediti_tributari_breve: "  5-bis) Crediti tributari",
+  sp06f_imposte_anticipate_breve: "  5-ter) Imposte anticipate",
+  sp06g_crediti_altri_breve: "  5-quater) Verso altri",
+  sp07_crediti_lungo: "C.II) Crediti (oltre es. successivo)",
+  sp07a_crediti_clienti_lungo: "  1) Verso clienti",
+  sp07b_crediti_controllate_lungo: "  2) Verso imprese controllate",
+  sp07c_crediti_collegate_lungo: "  3) Verso imprese collegate",
+  sp07d_crediti_controllanti_lungo: "  4) Verso controllanti",
+  sp07e_crediti_tributari_lungo: "  5-bis) Crediti tributari",
+  sp07f_imposte_anticipate_lungo: "  5-ter) Imposte anticipate",
+  sp07g_crediti_altri_lungo: "  5-quater) Verso altri",
+  sp08_attivita_finanziarie: "C.III) Attività finanziarie",
+  sp09_disponibilita_liquide: "C.IV) Disponibilità liquide",
+  sp10_ratei_risconti_attivi: "D) Ratei e risconti attivi",
+  // SP - Passivo
+  sp11_capitale: "A.I) Capitale",
+  sp12_riserve: "A.II-VIII) Riserve",
+  sp12g_utili_perdite_portati: "  VIII) Utili (perdite) portati a nuovo",
+  sp13_utile_perdita: "A.IX) Utile (perdita) esercizio",
+  sp14_fondi_rischi: "B) Fondi per rischi e oneri",
+  sp15_tfr: "C) Trattamento di fine rapporto di lavoro subordinato",
+  sp18_ratei_risconti_passivi: "E) Ratei e risconti",
+  // CE
+  ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
+  ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
+  ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",
+  ce04_altri_ricavi: "5) Altri ricavi e proventi",
+  ce05_materie_prime: "6) Per materie prime, sussidiarie, di consumo e di merci",
+  ce06_servizi: "7) Per servizi",
+  ce07_godimento_beni: "8) Per godimento di beni di terzi",
+  ce08_costi_personale: "9) Per il personale",
+  ce08b_salari_stipendi: "  a) Salari e stipendi",
+  ce08c_oneri_sociali: "  b) Oneri sociali",
+  ce08a_tfr_accrual: "  c) Trattamento di fine rapporto",
+  ce08d_altri_costi_personale: "  e) Altri costi",
+  ce09_ammortamenti: "10) Ammortamenti e svalutazioni",
+  ce09a_ammort_immateriali: "  a) Ammort. delle immobilizzazioni immateriali",
+  ce09b_ammort_materiali: "  b) Ammort. delle immobilizzazioni materiali",
+  ce09c_svalutazioni: "  c) Altre svalutazioni delle immobilizzazioni",
+  ce09d_svalutazione_crediti: "  d) Svalutazioni dei crediti dell'attivo circ. e disp. liquide",
+  ce10_var_rimanenze_mat_prime: "11) Var. rimanenze di materie prime, suss., di cons. e merci",
+  ce11_accantonamenti: "12) Accantonamenti per rischi",
+  ce11b_altri_accantonamenti: "13) Altri accantonamenti",
+  ce12_oneri_diversi: "14) Oneri diversi di gestione",
+  ce13_proventi_partecipazioni: "15) Proventi da partecipazioni",
+  ce14_altri_proventi_finanziari: "16) Altri proventi finanziari",
+  ce15_oneri_finanziari: "17) Interessi e altri oneri finanziari",
+  ce16_utili_perdite_cambi: "17-bis) Utili e perdite su cambi",
+  ce17a_rivalutazioni: "18) Rivalutazioni",
+  ce17b_svalutazioni: "19) Svalutazioni",
+  ce17_rettifiche_attivita_fin: "Totale rettifiche di valore (18 - 19)",
+  ce18_proventi_straordinari: "Proventi straordinari",
+  ce19_oneri_straordinari: "Oneri straordinari",
+  ce20_imposte: "20) Imposte sul reddito dell'esercizio",
+};
+
+// Fields to show in the rettifiche table, organized by section
+const RETTIFICHE_BS_ATTIVO = [
+  "sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
+  "sp04_immob_finanziarie",
+  "sp05_rimanenze",
+  "sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso",
+  "sp05d_prodotti_finiti", "sp05e_acconti",
+  "sp06_crediti_breve",
+  "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+  "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
+  "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
+  "sp06g_crediti_altri_breve",
+  "sp07_crediti_lungo",
+  "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+  "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+  "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
+  "sp07g_crediti_altri_lungo",
+  "sp08_attivita_finanziarie", "sp09_disponibilita_liquide",
+  "sp10_ratei_risconti_attivi",
+];
+const RETTIFICHE_BS_PN = [
+  "sp11_capitale", "sp12_riserve", "sp12g_utili_perdite_portati", "sp13_utile_perdita",
+];
+const RETTIFICHE_BS_OTHER_PASSIVO = [
+  "sp14_fondi_rischi", "sp15_tfr",
+];
+// Synthetic debt groups: Banche, Fornitori, Altri (aggregated)
+const DEBT_GROUPS: Array<{ label: string; entro: string[]; oltre: string[] }> = [
+  {
+    label: "Debiti verso banche",
+    entro: ["sp16a_debiti_banche_breve"],
+    oltre: ["sp17a_debiti_banche_lungo"],
+  },
+  {
+    label: "Debiti verso fornitori",
+    entro: ["sp16d_debiti_fornitori_breve"],
+    oltre: ["sp17d_debiti_fornitori_lungo"],
+  },
+  {
+    label: "Altri debiti",
+    entro: ["sp16b_debiti_altri_finanz_breve", "sp16c_debiti_obbligazioni_breve",
+            "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve", "sp16g_altri_debiti_breve"],
+    oltre: ["sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo",
+            "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo", "sp17g_altri_debiti_lungo"],
+  },
+];
+// Main-level fields for total calculation (excludes detail sub-fields to avoid double-counting)
+const PASSIVO_TOTAL_FIELDS = [
+  "sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
+  "sp14_fondi_rischi", "sp15_tfr",
+  "sp16_debiti_breve", "sp17_debiti_lungo", "sp18_ratei_risconti_passivi",
+];
+// Detail fields that should always show when their parent is non-zero
+const DETAIL_PARENTS: Record<string, string> = {
+  sp05a_materie_prime: "sp05_rimanenze",
+  sp05b_prodotti_in_corso: "sp05_rimanenze",
+  sp05c_lavori_in_corso: "sp05_rimanenze",
+  sp05d_prodotti_finiti: "sp05_rimanenze",
+  sp05e_acconti: "sp05_rimanenze",
+  sp06a_crediti_clienti_breve: "sp06_crediti_breve",
+  sp06b_crediti_controllate_breve: "sp06_crediti_breve",
+  sp06c_crediti_collegate_breve: "sp06_crediti_breve",
+  sp06d_crediti_controllanti_breve: "sp06_crediti_breve",
+  sp06e_crediti_tributari_breve: "sp06_crediti_breve",
+  sp06f_imposte_anticipate_breve: "sp06_crediti_breve",
+  sp06g_crediti_altri_breve: "sp06_crediti_breve",
+  sp07a_crediti_clienti_lungo: "sp07_crediti_lungo",
+  sp07b_crediti_controllate_lungo: "sp07_crediti_lungo",
+  sp07c_crediti_collegate_lungo: "sp07_crediti_lungo",
+  sp07d_crediti_controllanti_lungo: "sp07_crediti_lungo",
+  sp07e_crediti_tributari_lungo: "sp07_crediti_lungo",
+  sp07f_imposte_anticipate_lungo: "sp07_crediti_lungo",
+  sp07g_crediti_altri_lungo: "sp07_crediti_lungo",
+  sp12g_utili_perdite_portati: "sp12_riserve",
+  ce08b_salari_stipendi: "ce08_costi_personale",
+  ce08c_oneri_sociali: "ce08_costi_personale",
+  ce08a_tfr_accrual: "ce08_costi_personale",
+  ce08d_altri_costi_personale: "ce08_costi_personale",
+  ce09a_ammort_immateriali: "ce09_ammortamenti",
+  ce09b_ammort_materiali: "ce09_ammortamenti",
+  ce09c_svalutazioni: "ce09_ammortamenti",
+  ce09d_svalutazione_crediti: "ce09_ammortamenti",
+  ce17a_rivalutazioni: "ce17_rettifiche_attivita_fin",
+  ce17b_svalutazioni: "ce17_rettifiche_attivita_fin",
+};
+// CE split by IV CEE section for proper subtotal placement
+const CE_A = [
+  "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni",
+  "ce04_altri_ricavi",
+];
+const CE_B = [
+  "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
+  "ce08_costi_personale",
+  "ce08b_salari_stipendi", "ce08c_oneri_sociali", "ce08a_tfr_accrual", "ce08d_altri_costi_personale",
+  "ce09_ammortamenti",
+  "ce09a_ammort_immateriali", "ce09b_ammort_materiali",
+  "ce09c_svalutazioni", "ce09d_svalutazione_crediti",
+  "ce10_var_rimanenze_mat_prime", "ce11_accantonamenti", "ce11b_altri_accantonamenti",
+  "ce12_oneri_diversi",
+];
+const CE_C = [
+  "ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari",
+  "ce15_oneri_finanziari", "ce16_utili_perdite_cambi",
+];
+const CE_D = [
+  "ce17a_rivalutazioni", "ce17b_svalutazioni", "ce17_rettifiche_attivita_fin",
+];
+const CE_E = [
+  "ce18_proventi_straordinari", "ce19_oneri_straordinari",
+];
+const CE_IMPOSTE = ["ce20_imposte"];
+
+interface RettificheTabProps {
+  adjustableData: AdjustableFinancialYear | null;
+  referenceYearData: Record<string, number> | null;
+  referenceYear: number;
+  corrections: Record<string, number>;
+  setCorrections: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  loading: boolean;
+  saving: boolean;
+  adjustmentsApplied: boolean;
+  onSave: () => Promise<void>;
+  onReset: () => Promise<void>;
+  onNext: () => void;
+}
+
+function RettificheTab({
+  adjustableData,
+  referenceYearData,
+  referenceYear,
+  corrections,
+  setCorrections,
+  loading,
+  saving,
+  adjustmentsApplied,
+  onSave,
+  onReset,
+  onNext,
+}: RettificheTabProps) {
+  if (loading || !adjustableData) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-muted-foreground">Caricamento dati...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const original = {
+    ...adjustableData.original_balance_sheet,
+    ...adjustableData.original_income_statement,
+  } as Record<string, number>;
+
+  // Apply double-entry rules when a field changes
+  const handleChange = (field: string, newValue: number) => {
+    const updated = { ...corrections, [field]: newValue };
+
+    // Find all rules where this field is the editable side
+    for (const rule of DOUBLE_ENTRY_RULES) {
+      if (rule.editable === field) {
+        const origEditable = original[rule.editable] ?? 0;
+        const origCounterpart = original[rule.counterpart] ?? 0;
+        const delta = newValue - origEditable;
+
+        if (rule.direction === "same") {
+          // For counterparts with multiple sources (e.g. sp16d from ce05 + ce06),
+          // accumulate all deltas
+          const otherRulesForSameCounterpart = DOUBLE_ENTRY_RULES.filter(
+            (r) => r.counterpart === rule.counterpart && r.editable !== field
+          );
+          let totalDelta = delta;
+          for (const otherRule of otherRulesForSameCounterpart) {
+            const otherOrig = original[otherRule.editable] ?? 0;
+            const otherCurrent = updated[otherRule.editable] ?? otherOrig;
+            totalDelta += otherCurrent - otherOrig;
+          }
+          updated[rule.counterpart] = origCounterpart + totalDelta;
+        } else {
+          // inverse: delta in editable → negative delta in counterpart
+          const otherRulesForSameCounterpart = DOUBLE_ENTRY_RULES.filter(
+            (r) => r.counterpart === rule.counterpart && r.editable !== field
+          );
+          let totalDelta = delta;
+          for (const otherRule of otherRulesForSameCounterpart) {
+            const otherOrig = original[otherRule.editable] ?? 0;
+            const otherCurrent = updated[otherRule.editable] ?? otherOrig;
+            totalDelta += otherCurrent - otherOrig;
+          }
+          updated[rule.counterpart] = origCounterpart - totalDelta;
+        }
+      }
+    }
+
+    // Recalculate sp16_debiti_breve and sp17_debiti_lungo as sum of detail fields
+    const sp16details = [
+      "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+      "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+      "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+      "sp16g_altri_debiti_breve",
+    ];
+    updated["sp16_debiti_breve"] = sp16details.reduce(
+      (sum, k) => sum + (updated[k] ?? original[k] ?? 0), 0
+    );
+    const sp17details = [
+      "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+      "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
+      "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
+      "sp17g_altri_debiti_lungo",
+    ];
+    updated["sp17_debiti_lungo"] = sp17details.reduce(
+      (sum, k) => sum + (updated[k] ?? original[k] ?? 0), 0
+    );
+
+    // Recalculate ce09_ammortamenti as sum of detail fields
+    updated["ce09_ammortamenti"] = (updated["ce09a_ammort_immateriali"] ?? original["ce09a_ammort_immateriali"] ?? 0)
+      + (updated["ce09b_ammort_materiali"] ?? original["ce09b_ammort_materiali"] ?? 0)
+      + (updated["ce09c_svalutazioni"] ?? original["ce09c_svalutazioni"] ?? 0)
+      + (updated["ce09d_svalutazione_crediti"] ?? original["ce09d_svalutazione_crediti"] ?? 0);
+
+    // Recalculate ce17_rettifiche_attivita_fin = rivalutazioni - svalutazioni
+    updated["ce17_rettifiche_attivita_fin"] = (updated["ce17a_rivalutazioni"] ?? original["ce17a_rivalutazioni"] ?? 0)
+      - (updated["ce17b_svalutazioni"] ?? original["ce17b_svalutazioni"] ?? 0);
+
+    // Recalculate sp13_utile_perdita from CE net profit
+    const ceVal = (k: string) => updated[k] ?? original[k] ?? 0;
+    const vp = ceVal("ce01_ricavi_vendite") + ceVal("ce02_variazioni_rimanenze")
+      + ceVal("ce03_lavori_interni") + ceVal("ce04_altri_ricavi");
+    const costs = ceVal("ce05_materie_prime") + ceVal("ce06_servizi")
+      + ceVal("ce07_godimento_beni") + ceVal("ce08_costi_personale")
+      + ceVal("ce09_ammortamenti") + ceVal("ce10_var_rimanenze_mat_prime")
+      + ceVal("ce11_accantonamenti") + ceVal("ce11b_altri_accantonamenti")
+      + ceVal("ce12_oneri_diversi");
+    const ebit = vp - costs;
+    const financial = ceVal("ce13_proventi_partecipazioni") + ceVal("ce14_altri_proventi_finanziari")
+      - ceVal("ce15_oneri_finanziari") + ceVal("ce16_utili_perdite_cambi");
+    const rettifiche = ceVal("ce17_rettifiche_attivita_fin");
+    const straord = ceVal("ce18_proventi_straordinari") - ceVal("ce19_oneri_straordinari");
+    const netProfit = ebit + financial + rettifiche + straord - ceVal("ce20_imposte");
+    updated["sp13_utile_perdita"] = Math.round(netProfit * 100) / 100;
+
+    setCorrections(updated);
+  };
+
+  // Compute totals
+  const val = (k: string) => corrections[k] ?? original[k] ?? 0;
+  const refVal = (k: string) => referenceYearData?.[k] ?? 0;
+  const hasRef = !!referenceYearData;
+  // Main-level attivo fields only (no detail sub-fields to avoid double-counting)
+  const ATTIVO_TOTAL_FIELDS = [
+    "sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
+    "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve",
+    "sp07_crediti_lungo", "sp08_attivita_finanziarie", "sp09_disponibilita_liquide",
+    "sp10_ratei_risconti_attivi",
+  ];
+  const totalAttivo = ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + val(k), 0);
+  const pnFields = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita"];
+  const totalPN = pnFields.reduce((s, k) => s + val(k), 0);
+  const totalPassivo = totalPN + val("sp14_fondi_rischi") + val("sp15_tfr")
+    + val("sp16_debiti_breve") + val("sp17_debiti_lungo") + val("sp18_ratei_risconti_passivi");
+  const balanceDiff = Math.abs(totalAttivo - totalPassivo);
+  const isBalanced = balanceDiff < 1;
+
+  const colCount = hasRef ? 5 : 4;
+
+  const renderSection = (title: string, fields: string[], isCE: boolean = false) => (
+    <>
+      {title && (
+        <TableRow className="bg-muted/50">
+          <TableCell colSpan={colCount} className="font-semibold text-sm py-1.5">
+            {title}
+          </TableCell>
+        </TableRow>
+      )}
+      {fields.map((field) => {
+        const origVal = original[field] ?? 0;
+        const corrVal = val(field);
+        const delta = corrVal - origVal;
+        const isEditable = EDITABLE_RETTIFICHE.has(field);
+        const isAutoAdj = AUTO_ADJUSTED.has(field);
+        const isComputed = field === "sp13_utile_perdita" || field === "sp16_debiti_breve" || field === "sp17_debiti_lungo" || field === "ce09_ammortamenti" || field === "ce17_rettifiche_attivita_fin";
+        const hasDelta = Math.abs(delta) > 0.01;
+        const isDetail = (RETTIFICHE_LABELS[field] ?? "").startsWith("  ");
+
+        // Show detail rows if parent is non-zero; otherwise skip zero rows unless editable/auto/computed
+        const parentField = DETAIL_PARENTS[field];
+        const parentNonZero = parentField ? Math.abs(val(parentField)) > 0.01 || Math.abs(original[parentField] ?? 0) > 0.01 : false;
+        if (Math.abs(origVal) < 0.01 && Math.abs(corrVal) < 0.01 && !isEditable && !isAutoAdj && !isComputed && !parentNonZero) {
+          return null;
+        }
+
+        return (
+          <TableRow key={field} className={cn(
+            hasDelta && "bg-yellow-50/50 dark:bg-yellow-950/10",
+            isDetail && "text-muted-foreground"
+          )}>
+            <TableCell className={cn("text-xs py-1", isDetail ? "pl-6" : "font-medium")}>
+              {RETTIFICHE_LABELS[field] ?? field}
+            </TableCell>
+            {hasRef && (
+              <TableCell className="text-right text-xs py-1 font-mono tabular-nums text-muted-foreground/50">
+                {formatEuro(refVal(field))}
+              </TableCell>
+            )}
+            <TableCell className="text-right text-xs py-1 font-mono tabular-nums text-muted-foreground">
+              {formatEuro(origVal)}
+            </TableCell>
+            <TableCell className={cn(
+              "text-right text-xs py-1 font-mono tabular-nums",
+              hasDelta ? (delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400") : "text-muted-foreground/40"
+            )}>
+              {hasDelta ? (delta > 0 ? "+" : "") + formatEuro(delta) : "-"}
+            </TableCell>
+            <TableCell className="text-right py-1">
+              {isEditable ? (
+                <Input
+                  className="h-7 w-32 ml-auto text-right text-xs font-mono tabular-nums"
+                  value={formatInputNumber(Math.round(corrVal).toString())}
+                  onChange={(e) => {
+                    const raw = parseInputNumber(e.target.value);
+                    const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                    if (!isNaN(num)) handleChange(field, num);
+                  }}
+                />
+              ) : (
+                <span className={cn(
+                  "text-xs font-mono tabular-nums",
+                  isComputed && hasDelta ? "font-semibold" : "",
+                  isAutoAdj && hasDelta ? "text-blue-600 dark:text-blue-400" : ""
+                )}>
+                  {formatEuro(corrVal)}
+                </span>
+              )}
+            </TableCell>
+          </TableRow>
+        );
+      })}
+    </>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Rettifiche di Bilancio</CardTitle>
+          <CardDescription>
+            Modifica le voci editabili per applicare rettifiche contabili. Le contropartite si aggiornano automaticamente in partita doppia.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {/* Balance check */}
+          <div className={cn(
+            "mb-4 p-3 rounded-lg border text-sm flex items-center justify-between",
+            isBalanced
+              ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300"
+              : "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300"
+          )}>
+            <div>
+              <span className="font-medium">Verifica quadratura: </span>
+              Totale Attivo {formatEuro(totalAttivo)} | Totale Passivo {formatEuro(totalPassivo)}
+              {!isBalanced && <span className="ml-2">(diff: {formatEuro(balanceDiff)})</span>}
+            </div>
+            {isBalanced ? (
+              <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
+            ) : (
+              <span className="text-xs font-medium">SBILANCIATO</span>
+            )}
+          </div>
+
+          <div className="border rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Voce</TableHead>
+                  {hasRef && <TableHead className="text-xs text-right">{referenceYear}</TableHead>}
+                  <TableHead className="text-xs text-right">Originale</TableHead>
+                  <TableHead className="text-xs text-right">Rettifica</TableHead>
+                  <TableHead className="text-xs text-right">Rettificato</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {renderSection("STATO PATRIMONIALE — ATTIVO", RETTIFICHE_BS_ATTIVO)}
+                <TableRow className="bg-muted font-semibold">
+                  <TableCell className="text-xs py-1.5">TOTALE ATTIVO</TableCell>
+                  {hasRef && <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/50">
+                    {formatEuro(ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + refVal(k), 0))}
+                  </TableCell>}
+                  <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums">
+                    {formatEuro(ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + (original[k] ?? 0), 0))}
+                  </TableCell>
+                  <TableCell />
+                  <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-semibold">
+                    {formatEuro(totalAttivo)}
+                  </TableCell>
+                </TableRow>
+
+                {/* PASSIVO — A) Patrimonio Netto */}
+                {renderSection("STATO PATRIMONIALE — PASSIVO E NETTO", RETTIFICHE_BS_PN)}
+                {renderSection("", RETTIFICHE_BS_OTHER_PASSIVO)}
+
+                {/* D) Debiti — grouped by type with entro/oltre */}
+                <TableRow className="bg-muted/50">
+                  <TableCell colSpan={colCount} className="font-semibold text-sm py-1.5">
+                    D) Debiti
+                  </TableCell>
+                </TableRow>
+                {DEBT_GROUPS.map((group) => {
+                  const sumFields = (fields: string[], src: Record<string, number>) =>
+                    fields.reduce((s, k) => s + (src[k] ?? 0), 0);
+                  const origEntro = sumFields(group.entro, original);
+                  const origOltre = sumFields(group.oltre, original);
+                  const corrEntro = group.entro.reduce((s, k) => s + val(k), 0);
+                  const corrOltre = group.oltre.reduce((s, k) => s + val(k), 0);
+                  const origTotal = origEntro + origOltre;
+                  const corrTotal = corrEntro + corrOltre;
+                  if (Math.abs(origTotal) < 0.01 && Math.abs(corrTotal) < 0.01) return null;
+
+                  const refEntro = hasRef ? group.entro.reduce((s, k) => s + refVal(k), 0) : 0;
+                  const refOltre = hasRef ? group.oltre.reduce((s, k) => s + refVal(k), 0) : 0;
+                  const isSingleEntro = group.entro.length === 1;
+                  const isSingleOltre = group.oltre.length === 1;
+
+                  const debtRow = (label: string, key: string, rv: number, origV: number, corrV: number, indent: boolean, editField?: string) => {
+                    const delta = corrV - origV;
+                    const hasDelta = Math.abs(delta) > 0.01;
+                    return (
+                      <TableRow key={key} className={cn(hasDelta && "bg-yellow-50/50 dark:bg-yellow-950/10")}>
+                        <TableCell className={cn("text-xs py-1", indent ? "pl-8 text-muted-foreground" : "pl-4 font-medium")}>
+                          {label}
+                        </TableCell>
+                        {hasRef && <TableCell className="text-right text-xs py-1 font-mono tabular-nums text-muted-foreground/50">
+                          {formatEuro(rv)}
+                        </TableCell>}
+                        <TableCell className="text-right text-xs py-1 font-mono tabular-nums text-muted-foreground">
+                          {formatEuro(origV)}
+                        </TableCell>
+                        <TableCell className={cn(
+                          "text-right text-xs py-1 font-mono tabular-nums",
+                          hasDelta ? (delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400") : "text-muted-foreground/40"
+                        )}>
+                          {hasDelta ? (delta > 0 ? "+" : "") + formatEuro(delta) : "-"}
+                        </TableCell>
+                        <TableCell className="text-right py-1">
+                          {editField ? (
+                            <Input
+                              className="h-7 w-32 ml-auto text-right text-xs font-mono tabular-nums"
+                              value={formatInputNumber(Math.round(corrV).toString())}
+                              onChange={(e) => {
+                                const raw = parseInputNumber(e.target.value);
+                                const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                                if (!isNaN(num)) handleChange(editField, num);
+                              }}
+                            />
+                          ) : (
+                            <span className={cn("text-xs font-mono tabular-nums", !indent && "font-medium",
+                              hasDelta && indent ? "text-blue-600 dark:text-blue-400" : ""
+                            )}>
+                              {formatEuro(corrV)}
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  };
+
+                  return (
+                    <React.Fragment key={group.label}>
+                      {debtRow(group.label, group.label, refEntro + refOltre, origTotal, corrTotal, false)}
+                      {debtRow("entro 12 mesi", group.label + "_entro", refEntro, origEntro, corrEntro, true,
+                        isSingleEntro ? group.entro[0] : undefined)}
+                      {debtRow("oltre 12 mesi", group.label + "_oltre", refOltre, origOltre, corrOltre, true,
+                        isSingleOltre ? group.oltre[0] : undefined)}
+                    </React.Fragment>
+                  );
+                })}
+                {/* Totale debiti */}
+                {(() => {
+                  const origDebtTotal = (original["sp16_debiti_breve"] ?? 0) + (original["sp17_debiti_lungo"] ?? 0);
+                  const corrDebtTotal = val("sp16_debiti_breve") + val("sp17_debiti_lungo");
+                  return (
+                    <TableRow className="font-medium">
+                      <TableCell className="text-xs py-1.5 pl-4">Totale debiti</TableCell>
+                      {hasRef && <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/50">
+                        {formatEuro(refVal("sp16_debiti_breve") + refVal("sp17_debiti_lungo"))}
+                      </TableCell>}
+                      <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground">
+                        {formatEuro(origDebtTotal)}
+                      </TableCell>
+                      <TableCell />
+                      <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-medium">
+                        {formatEuro(corrDebtTotal)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })()}
+
+                {/* E) Ratei e risconti passivi */}
+                {renderSection("", ["sp18_ratei_risconti_passivi"])}
+
+                <TableRow className="bg-muted font-semibold">
+                  <TableCell className="text-xs py-1.5">TOTALE PASSIVO</TableCell>
+                  {hasRef && <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/50">
+                    {formatEuro(PASSIVO_TOTAL_FIELDS.reduce((s, k) => s + refVal(k), 0))}
+                  </TableCell>}
+                  <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums">
+                    {formatEuro(PASSIVO_TOTAL_FIELDS.reduce((s, k) => s + (original[k] ?? 0), 0))}
+                  </TableCell>
+                  <TableCell />
+                  <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-semibold">
+                    {formatEuro(totalPassivo)}
+                  </TableCell>
+                </TableRow>
+
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="border rounded-lg overflow-hidden mt-6">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Voce</TableHead>
+                  {hasRef && <TableHead className="text-xs text-right">{referenceYear}</TableHead>}
+                  <TableHead className="text-xs text-right">Originale</TableHead>
+                  <TableHead className="text-xs text-right">Rettifica</TableHead>
+                  <TableHead className="text-xs text-right">Rettificato</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* CE sectioned with subtotals */}
+                {(() => {
+                  const ceV = (k: string) => corrections[k] ?? original[k] ?? 0;
+                  const origV = (k: string) => original[k] ?? 0;
+
+                  const resultRow = (label: string, origVal: number, corrVal: number, bold = false) => {
+                    const delta = corrVal - origVal;
+                    const hasDelta = Math.abs(delta) > 0.01;
+                    return (
+                      <TableRow key={label} className={cn(bold && "bg-muted font-semibold")}>
+                        <TableCell className={cn("text-xs py-1.5", bold && "font-semibold")}>{label}</TableCell>
+                        <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground">
+                          {formatEuro(origVal)}
+                        </TableCell>
+                        <TableCell className={cn(
+                          "text-right text-xs py-1.5 font-mono tabular-nums",
+                          hasDelta ? (delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400") : "text-muted-foreground/40"
+                        )}>
+                          {hasDelta ? (delta > 0 ? "+" : "") + formatEuro(delta) : "-"}
+                        </TableCell>
+                        <TableCell className={cn("text-right text-xs py-1.5 font-mono tabular-nums", bold && "font-semibold")}>
+                          {formatEuro(corrVal)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  };
+
+                  // Compute subtotals
+                  const sumF = (keys: string[], fn: (k: string) => number) => keys.reduce((s, k) => s + fn(k), 0);
+                  const vp = sumF(CE_A, ceV);
+                  const origVp = sumF(CE_A, origV);
+                  const costMainKeys = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
+                    "ce08_costi_personale", "ce09_ammortamenti", "ce10_var_rimanenze_mat_prime",
+                    "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi"];
+                  const costs = sumF(costMainKeys, ceV);
+                  const origCosts = sumF(costMainKeys, origV);
+                  const ebit = vp - costs;
+                  const origEbit = origVp - origCosts;
+                  const fin = ceV("ce13_proventi_partecipazioni") + ceV("ce14_altri_proventi_finanziari")
+                    - ceV("ce15_oneri_finanziari") + ceV("ce16_utili_perdite_cambi");
+                  const origFin = origV("ce13_proventi_partecipazioni") + origV("ce14_altri_proventi_finanziari")
+                    - origV("ce15_oneri_finanziari") + origV("ce16_utili_perdite_cambi");
+                  const rett = ceV("ce17_rettifiche_attivita_fin");
+                  const origRett = origV("ce17_rettifiche_attivita_fin");
+                  const straord = ceV("ce18_proventi_straordinari") - ceV("ce19_oneri_straordinari");
+                  const origStraord = origV("ce18_proventi_straordinari") - origV("ce19_oneri_straordinari");
+                  const pbt = ebit + fin + rett + straord;
+                  const origPbt = origEbit + origFin + origRett + origStraord;
+                  const netProfit = pbt - ceV("ce20_imposte");
+                  const origNetProfit = origPbt - origV("ce20_imposte");
+                  const sp13 = val("sp13_utile_perdita");
+                  const ceSpMatch = Math.abs(netProfit - sp13) < 1;
+
+                  return (
+                    <>
+                      {renderSection("A) VALORE DELLA PRODUZIONE", CE_A, true)}
+                      {resultRow("Totale valore della produzione", origVp, vp, false)}
+                      {renderSection("B) COSTI DELLA PRODUZIONE", CE_B, true)}
+                      {resultRow("Totale costi della produzione", origCosts, costs, false)}
+                      {resultRow("Differenza tra valore e costi della produzione (A - B)", origEbit, ebit, true)}
+                      {renderSection("C) PROVENTI E ONERI FINANZIARI", CE_C, true)}
+                      {resultRow("Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", origFin, fin, false)}
+                      {renderSection("D) RETTIFICHE DI VALORE DI ATTIVITÀ E PASSIVITÀ FINANZIARIE", CE_D, true)}
+                      {renderSection("E) PROVENTI E ONERI STRAORDINARI", CE_E, true)}
+                      {resultRow("Risultato prima delle imposte (A - B +/- C +/- D +/- E)", origPbt, pbt, true)}
+                      {renderSection("", CE_IMPOSTE, true)}
+                      {resultRow("21) Utile (perdita) dell'esercizio", origNetProfit, netProfit, true)}
+                      <TableRow className={cn(
+                        "border-t-2",
+                        ceSpMatch
+                          ? "bg-green-50/50 dark:bg-green-950/10"
+                          : "bg-red-50/50 dark:bg-red-950/10"
+                      )}>
+                        <TableCell colSpan={3} className="text-xs py-1.5 font-medium">
+                          Verifica CE ↔ SP: Utile CE = {formatEuro(netProfit)} | SP13 = {formatEuro(sp13)}
+                        </TableCell>
+                        <TableCell className={cn(
+                          "text-right text-xs py-1.5 font-mono font-semibold",
+                          ceSpMatch ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                        )}>
+                          {ceSpMatch ? "OK" : `diff: ${formatEuro(Math.abs(netProfit - sp13))}`}
+                        </TableCell>
+                      </TableRow>
+                    </>
+                  );
+                })()}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Actions */}
+      <div className="flex items-center justify-between">
+        <div>
+          {adjustmentsApplied && (
+            <Button variant="outline" size="sm" onClick={onReset} disabled={saving}>
+              <RotateCcw className="h-4 w-4 mr-1.5" />
+              Ripristina originale
+            </Button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button
+            onClick={onSave}
+            disabled={saving}
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Salvataggio...
+              </>
+            ) : (
+              <>
+                <Check className="h-4 w-4 mr-2" />
+                Applica Rettifiche
+              </>
+            )}
+          </Button>
+          <Button variant="outline" onClick={onNext}>
+            {adjustmentsApplied ? "Continua" : "Salta"} <ArrowRight className="h-4 w-4 ml-1.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function InfraannualePage() {
@@ -763,6 +1574,14 @@ export default function InfraannualePage() {
   // Second import (historical year when infra-year PDF has only 1 column)
   const [refFile, setRefFile] = useState<File | null>(null);
   const [importingRef, setImportingRef] = useState(false);
+
+  // Step 1b: Rettifiche (Adjustments)
+  const [adjustableData, setAdjustableData] = useState<AdjustableFinancialYear | null>(null);
+  const [referenceYearData, setReferenceYearData] = useState<Record<string, number> | null>(null);
+  const [corrections, setCorrections] = useState<Record<string, number>>({});
+  const [loadingAdjustable, setLoadingAdjustable] = useState(false);
+  const [savingAdjustments, setSavingAdjustments] = useState(false);
+  const [adjustmentsApplied, setAdjustmentsApplied] = useState(false);
 
   // Step 2: Comparison
   const [scenario, setScenario] = useState<BudgetScenario | null>(null);
@@ -809,7 +1628,7 @@ export default function InfraannualePage() {
     setScenario(scenarioData);
     setImportResult({ companyId, companyName });
     toast.success(`Importazione completata: ${companyName}`);
-    setActiveTab("comparison");
+    setActiveTab("rettifiche");
   };
 
   // STEP 1: Import Handler (infra-year PDF/XBRL)
@@ -966,6 +1785,56 @@ export default function InfraannualePage() {
       setLoadingComparison(false);
     }
   }, [importResult, scenario]);
+
+  // Load adjustable data when rettifiche tab is active
+  const loadAdjustable = useCallback(async () => {
+    if (!importResult) return;
+    setLoadingAdjustable(true);
+    try {
+      const refYear = fiscalYear - 1;
+      // Fetch current year adjustable data + reference year in parallel
+      const [data, refData] = await Promise.all([
+        getAdjustableFinancialYear(
+          importResult.companyId,
+          fiscalYear,
+          periodMonths < 12 ? periodMonths : undefined
+        ),
+        getAdjustableFinancialYear(importResult.companyId, refYear).catch(() => null),
+      ]);
+      setAdjustableData(data);
+      // Merge reference year BS+IS into a single dict
+      if (refData) {
+        setReferenceYearData({ ...refData.balance_sheet, ...refData.income_statement });
+      }
+      // Initialize corrections from current BS/IS values
+      const initial: Record<string, number> = {};
+      for (const [k, v] of Object.entries(data.balance_sheet)) {
+        initial[k] = v;
+      }
+      for (const [k, v] of Object.entries(data.income_statement)) {
+        initial[k] = v;
+      }
+      setCorrections(initial);
+      // Check if adjustments were already applied (snapshot differs from current)
+      if (data.original_balance_sheet) {
+        const hasDiffs = Object.keys(data.original_balance_sheet).some(
+          (k) => Math.abs((data.original_balance_sheet![k] || 0) - (data.balance_sheet[k] || 0)) > 0.01
+        );
+        setAdjustmentsApplied(hasDiffs);
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Errore nel caricamento dati";
+      toast.error(msg);
+    } finally {
+      setLoadingAdjustable(false);
+    }
+  }, [importResult, fiscalYear, periodMonths]);
+
+  useEffect(() => {
+    if (activeTab === "rettifiche" && !adjustableData && importResult) {
+      loadAdjustable();
+    }
+  }, [activeTab, adjustableData, importResult, loadAdjustable]);
 
   useEffect(() => {
     if (activeTab === "comparison" && !comparison && scenario) {
@@ -1283,6 +2152,7 @@ export default function InfraannualePage() {
   const STEPS = [
     { id: "aziende", label: "Aziende", icon: Building2, enabled: true },
     { id: "import", label: "Importazione", icon: Upload, enabled: true },
+    { id: "rettifiche", label: "Rettifiche", icon: Pencil, enabled: !!importResult },
     { id: "comparison", label: "Confronto", icon: GitCompareArrows, enabled: !!scenario },
     ...(periodMonths !== 12 ? [{ id: "projection", label: "Proiezione", icon: LineChart, enabled: !!comparison }] : []),
     { id: "results", label: "Indicatori", icon: BarChart3, enabled: !!scenario },
@@ -1594,9 +2464,9 @@ export default function InfraannualePage() {
                   </div>
                   <Button
                     className="mt-3"
-                    onClick={() => setActiveTab("comparison")}
+                    onClick={() => setActiveTab("rettifiche")}
                   >
-                    Vai al Confronto
+                    Vai alle Rettifiche
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </div>
@@ -1623,6 +2493,75 @@ export default function InfraannualePage() {
             </CardContent>
           </Card>
         </div>}
+
+        {/* STEP 1b: RETTIFICHE */}
+        {activeTab === "rettifiche" && <RettificheTab
+          adjustableData={adjustableData}
+          referenceYearData={referenceYearData}
+          referenceYear={fiscalYear - 1}
+          corrections={corrections}
+          setCorrections={setCorrections}
+          loading={loadingAdjustable}
+          saving={savingAdjustments}
+          adjustmentsApplied={adjustmentsApplied}
+          onSave={async () => {
+            if (!importResult || !adjustableData) return;
+            setSavingAdjustments(true);
+            try {
+              const bs: Record<string, number> = {};
+              const is_: Record<string, number> = {};
+              for (const k of Object.keys(adjustableData.balance_sheet)) {
+                bs[k] = corrections[k] ?? adjustableData.balance_sheet[k];
+              }
+              for (const k of Object.keys(adjustableData.income_statement)) {
+                is_[k] = corrections[k] ?? adjustableData.income_statement[k];
+              }
+              const result = await saveAdjustments(
+                importResult.companyId,
+                fiscalYear,
+                bs,
+                is_,
+                periodMonths < 12 ? periodMonths : undefined
+              );
+              setAdjustableData(result);
+              setAdjustmentsApplied(true);
+              setComparison(null); // Force reload comparison with corrected data
+              toast.success("Rettifiche salvate");
+            } catch (error: unknown) {
+              const msg = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : "Errore nel salvataggio";
+              toast.error(msg);
+            } finally {
+              setSavingAdjustments(false);
+            }
+          }}
+          onReset={async () => {
+            if (!importResult || !adjustableData?.original_balance_sheet || !adjustableData?.original_income_statement) return;
+            setSavingAdjustments(true);
+            try {
+              const result = await saveAdjustments(
+                importResult.companyId,
+                fiscalYear,
+                adjustableData.original_balance_sheet,
+                adjustableData.original_income_statement,
+                periodMonths < 12 ? periodMonths : undefined
+              );
+              setAdjustableData(result);
+              // Reset corrections to original values
+              const initial: Record<string, number> = {};
+              for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
+              for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
+              setCorrections(initial);
+              setAdjustmentsApplied(false);
+              setComparison(null);
+              toast.success("Rettifiche annullate — ripristinati i valori originali");
+            } catch (error: unknown) {
+              toast.error("Errore nel ripristino");
+            } finally {
+              setSavingAdjustments(false);
+            }
+          }}
+          onNext={() => setActiveTab("comparison")}
+        />}
 
         {/* STEP 2: COMPARISON */}
         {activeTab === "comparison" && <div className="space-y-6">

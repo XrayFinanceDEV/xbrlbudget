@@ -514,6 +514,42 @@ export const getDetailedCashFlowHistorical = async (
   return data;
 };
 
+// Adjustable Financial Year (Rettifiche)
+export const getAdjustableFinancialYear = async (
+  companyId: number,
+  year: number,
+  periodMonths?: number
+): Promise<import('@/types/api').AdjustableFinancialYear> => {
+  const params = new URLSearchParams();
+  if (periodMonths !== undefined) {
+    params.append('period_months', periodMonths.toString());
+  }
+  const qs = params.toString();
+  const { data } = await api.get<import('@/types/api').AdjustableFinancialYear>(
+    `/companies/${companyId}/years/${year}/adjustable${qs ? `?${qs}` : ''}`
+  );
+  return data;
+};
+
+export const saveAdjustments = async (
+  companyId: number,
+  year: number,
+  balanceSheet: Record<string, number>,
+  incomeStatement: Record<string, number>,
+  periodMonths?: number
+): Promise<import('@/types/api').AdjustableFinancialYear> => {
+  const params = new URLSearchParams();
+  if (periodMonths !== undefined) {
+    params.append('period_months', periodMonths.toString());
+  }
+  const qs = params.toString();
+  const { data } = await api.put<import('@/types/api').AdjustableFinancialYear>(
+    `/companies/${companyId}/years/${year}/adjustments${qs ? `?${qs}` : ''}`,
+    { balance_sheet: balanceSheet, income_statement: incomeStatement }
+  );
+  return data;
+};
+
 // Intra-Year Comparison
 export const getIntraYearComparison = async (
   companyId: number,

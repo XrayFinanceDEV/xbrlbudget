@@ -1,8 +1,10 @@
 """
 Financial Year API endpoints
 """
-from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+from typing import List, Dict, Any, Optional
+from decimal import Decimal
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 import sys
 import os
@@ -18,6 +20,7 @@ from app.core.ownership import validate_company_owned_by_user
 from app.schemas import financial_year as schemas
 from app.schemas import balance_sheet as bs_schemas
 from app.schemas import income_statement as is_schemas
+from app.schemas.adjustments import AdjustableFinancialYear, AdjustmentsUpdate
 from database import models
 from database.queries import get_fy_prefer_full
 
@@ -227,3 +230,155 @@ def update_income_statement(
     db.commit()
     db.refresh(fy.income_statement)
     return fy.income_statement
+
+
+# ===== Rettifiche (Adjustments) Endpoints =====
+
+# Helper: list of SP/CE column names from the ORM model (exclude non-financial columns)
+_BS_SKIP = {"id", "financial_year_id", "created_at", "updated_at"}
+_IS_SKIP = {"id", "financial_year_id", "created_at", "updated_at"}
+
+
+def _bs_to_dict(bs: models.BalanceSheet) -> Dict[str, float]:
+    """Convert BalanceSheet ORM object to dict of {column: float}."""
+    result = {}
+    for col in models.BalanceSheet.__table__.columns:
+        if col.name in _BS_SKIP:
+            continue
+        val = getattr(bs, col.name)
+        result[col.name] = float(val) if val is not None else 0.0
+    return result
+
+
+def _is_to_dict(is_obj: models.IncomeStatement) -> Dict[str, float]:
+    """Convert IncomeStatement ORM object to dict of {column: float}."""
+    result = {}
+    for col in models.IncomeStatement.__table__.columns:
+        if col.name in _IS_SKIP:
+            continue
+        val = getattr(is_obj, col.name)
+        result[col.name] = float(val) if val is not None else 0.0
+    return result
+
+
+def _find_fy(db: Session, company_id: int, year: int, period_months: Optional[int] = None) -> Optional[models.FinancialYear]:
+    """Find a FinancialYear by company, year, and optionally period_months."""
+    query = db.query(models.FinancialYear).filter(
+        models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year == year,
+    )
+    if period_months is not None and period_months < 12:
+        query = query.filter(models.FinancialYear.period_months == period_months)
+    else:
+        query = query.filter(
+            (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12)
+        )
+    return query.first()
+
+
+@router.get(
+    "/companies/{company_id}/years/{year}/adjustable",
+    response_model=AdjustableFinancialYear,
+)
+def get_adjustable_financial_year(
+    company_id: int,
+    year: int,
+    period_months: Optional[int] = Query(None),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Get BS + IS data for the Rettifiche tab.
+    On first call (no snapshot), saves current BS/IS as the original snapshot.
+    Uses year + period_months to find the correct FinancialYear.
+    """
+    validate_company_owned_by_user(db, company_id, user_id)
+
+    fy = _find_fy(db, company_id, year, period_months)
+    if not fy:
+        raise HTTPException(status_code=404, detail="Financial year not found")
+    if not fy.balance_sheet or not fy.income_statement:
+        raise HTTPException(status_code=404, detail="Balance sheet or income statement not found")
+
+    bs_dict = _bs_to_dict(fy.balance_sheet)
+    is_dict = _is_to_dict(fy.income_statement)
+
+    # Create snapshot on first access (if not already saved)
+    if fy.original_bs_snapshot is None:
+        fy.original_bs_snapshot = json.dumps(bs_dict)
+        fy.original_is_snapshot = json.dumps(is_dict)
+        db.commit()
+
+    original_bs = json.loads(fy.original_bs_snapshot) if fy.original_bs_snapshot else None
+    original_is = json.loads(fy.original_is_snapshot) if fy.original_is_snapshot else None
+
+    return AdjustableFinancialYear(
+        financial_year_id=fy.id,
+        year=fy.year,
+        period_months=fy.period_months,
+        balance_sheet=bs_dict,
+        income_statement=is_dict,
+        original_balance_sheet=original_bs,
+        original_income_statement=original_is,
+    )
+
+
+@router.put(
+    "/companies/{company_id}/years/{year}/adjustments",
+    response_model=AdjustableFinancialYear,
+)
+def save_adjustments(
+    company_id: int,
+    year: int,
+    payload: AdjustmentsUpdate,
+    period_months: Optional[int] = Query(None),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Save corrected BS + IS values from the Rettifiche tab.
+    Only updates columns that exist on the ORM model.
+    """
+    validate_company_owned_by_user(db, company_id, user_id)
+
+    fy = _find_fy(db, company_id, year, period_months)
+    if not fy:
+        raise HTTPException(status_code=404, detail="Financial year not found")
+    if not fy.balance_sheet or not fy.income_statement:
+        raise HTTPException(status_code=404, detail="Balance sheet or income statement not found")
+
+    # Ensure snapshot exists before overwriting
+    if fy.original_bs_snapshot is None:
+        fy.original_bs_snapshot = json.dumps(_bs_to_dict(fy.balance_sheet))
+        fy.original_is_snapshot = json.dumps(_is_to_dict(fy.income_statement))
+
+    # Update BS fields
+    bs_columns = {col.name for col in models.BalanceSheet.__table__.columns} - _BS_SKIP
+    for field, value in payload.balance_sheet.items():
+        if field in bs_columns:
+            setattr(fy.balance_sheet, field, Decimal(str(value)))
+
+    # Update IS fields
+    is_columns = {col.name for col in models.IncomeStatement.__table__.columns} - _IS_SKIP
+    for field, value in payload.income_statement.items():
+        if field in is_columns:
+            setattr(fy.income_statement, field, Decimal(str(value)))
+
+    db.commit()
+    db.refresh(fy.balance_sheet)
+    db.refresh(fy.income_statement)
+
+    bs_dict = _bs_to_dict(fy.balance_sheet)
+    is_dict = _is_to_dict(fy.income_statement)
+    original_bs = json.loads(fy.original_bs_snapshot) if fy.original_bs_snapshot else None
+    original_is = json.loads(fy.original_is_snapshot) if fy.original_is_snapshot else None
+
+    return AdjustableFinancialYear(
+        financial_year_id=fy.id,
+        year=fy.year,
+        period_months=fy.period_months,
+        balance_sheet=bs_dict,
+        income_statement=is_dict,
+        original_balance_sheet=original_bs,
+        original_income_statement=original_is,
+    )

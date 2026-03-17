@@ -47,6 +47,7 @@
 
     "_comment_detail_rimanenze": "C.I) Rimanenze detail sub-fields (sp05a-e)",
     "itcc-ci:RimanenzeMateriePrimeSussidiarieConsumoMerci": "sp05a_materie_prime",
+    "itcc-ci:RimanenzeMateriePrimeSussidiarieConsumo": "sp05a_materie_prime",
     "itcc-ci:RimanenzeProdottiCorsoLavorazioneSemilavorati": "sp05b_prodotti_in_corso",
     "itcc-ci:RimanenzeLavoriCorsoOrdinazione": "sp05c_lavori_in_corso",
     "itcc-ci:RimanenzeProdottiFinitiMerci": "sp05d_prodotti_finiti",

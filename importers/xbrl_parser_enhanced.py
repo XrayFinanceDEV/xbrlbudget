@@ -428,12 +428,14 @@ class EnhancedXBRLParser:
             if local_name in self.AGGREGATE_TAGS:
                 continue
 
-            # Skip if already matched via v2
+            # Skip if already matched via v2 (exact local name match, not substring)
             already_matched = False
             for matched_tag in reconciliation_info.get('priority_matches', {}).values():
-                if matched_tag and local_name in matched_tag:
-                    already_matched = True
-                    break
+                if matched_tag:
+                    matched_local = matched_tag.split(':')[-1] if ':' in matched_tag else matched_tag
+                    if local_name == matched_local:
+                        already_matched = True
+                        break
 
             if already_matched:
                 continue

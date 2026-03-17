@@ -99,10 +99,16 @@ class IntraYearEngine:
         Returns comparison data between partial year and reference full year.
 
         For each P&L and BS line item: partial value, reference value,
-        percentage of reference, and annualized value.
+        prior year value (year before reference), percentage of reference,
+        and annualized value.
         """
         scenario = self._load_scenario(scenario_id)
         partial_fy, ref_fy = self._load_financial_years(scenario)
+
+        # Try to load prior year (year before reference) for additional context
+        from database.queries import get_fy_prefer_full
+        prior_year_num = scenario.base_year - 1  # e.g., 2023
+        prior_fy = get_fy_prefer_full(self.db, scenario.company_id, prior_year_num)
 
         period_months = scenario.period_months
         factor = Decimal('12') / Decimal(str(period_months))
@@ -111,6 +117,7 @@ class IntraYearEngine:
         for field_name, label in CE_FIELDS:
             partial_val = _get_field(partial_fy.income_statement, field_name)
             ref_val = _get_field(ref_fy.income_statement, field_name)
+            prior_val = _get_field(prior_fy.income_statement, field_name) if prior_fy and prior_fy.income_statement else Decimal('0')
             annualized = partial_val * factor
             pct = float(_safe_divide(partial_val * Decimal('100'), ref_val)) if ref_val != 0 else 0.0
 
@@ -119,6 +126,7 @@ class IntraYearEngine:
                 'label': label,
                 'partial_value': float(partial_val),
                 'reference_value': float(ref_val),
+                'prior_value': float(prior_val),
                 'pct_of_reference': round(pct, 2),
                 'annualized_value': float(annualized.quantize(Decimal('0.01'))),
             })
@@ -127,6 +135,7 @@ class IntraYearEngine:
         for field_name, label in SP_FIELDS:
             partial_val = _get_field(partial_fy.balance_sheet, field_name)
             ref_val = _get_field(ref_fy.balance_sheet, field_name)
+            prior_val = _get_field(prior_fy.balance_sheet, field_name) if prior_fy and prior_fy.balance_sheet else Decimal('0')
             # BS items are stock (point-in-time), annualization doesn't apply
             # Show partial value as "annualized" for consistency
             pct = float(_safe_divide(partial_val * Decimal('100'), ref_val)) if ref_val != 0 else 0.0
@@ -136,6 +145,7 @@ class IntraYearEngine:
                 'label': label,
                 'partial_value': float(partial_val),
                 'reference_value': float(ref_val),
+                'prior_value': float(prior_val),
                 'pct_of_reference': round(pct, 2),
                 'annualized_value': float(partial_val),  # BS = point-in-time, no annualization
             })
@@ -143,6 +153,7 @@ class IntraYearEngine:
         return {
             'partial_year': scenario.base_year + 1,  # e.g., 2025
             'reference_year': scenario.base_year,     # e.g., 2024
+            'prior_year': prior_year_num if prior_fy else None,  # e.g., 2023 or None
             'period_months': period_months,
             'income_items': income_items,
             'balance_items': balance_items,

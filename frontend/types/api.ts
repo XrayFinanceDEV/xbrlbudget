@@ -344,6 +344,7 @@ export interface IntraYearComparisonItem {
   label: string;
   partial_value: number;
   reference_value: number;
+  prior_value: number;
   pct_of_reference: number;
   annualized_value: number;
 }
@@ -351,6 +352,7 @@ export interface IntraYearComparisonItem {
 export interface IntraYearComparison {
   partial_year: number;
   reference_year: number;
+  prior_year: number | null;
   period_months: number;
   income_items: IntraYearComparisonItem[];
   balance_items: IntraYearComparisonItem[];

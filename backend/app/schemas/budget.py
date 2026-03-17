@@ -194,6 +194,7 @@ class IntraYearComparisonItem(BaseModel):
     label: str
     partial_value: float
     reference_value: float
+    prior_value: float = 0.0
     pct_of_reference: float
     annualized_value: float
 
@@ -202,6 +203,7 @@ class IntraYearComparison(BaseModel):
     """Complete comparison between partial year and reference full year"""
     partial_year: int
     reference_year: int
+    prior_year: Optional[int] = None
     period_months: int
     income_items: List[IntraYearComparisonItem]
     balance_items: List[IntraYearComparisonItem]

@@ -117,6 +117,7 @@ async def upload_xbrl(
             create_company=create_company,
             sector=sector,
             user_id=user_id,
+            period_months=period_months,
         )
         logger.info(f"[XBRL IMPORT] Parser OK: years={result.get('years')} company_id={result.get('company_id')}")
 

@@ -450,8 +450,29 @@ class EnhancedXBRLParser:
                         matched = True  # Mark as matched to avoid "unmapped" warning
                         break
 
-                    # Only add if not already added via v2
-                    if field not in bs_data or bs_data[field] == Decimal('0'):
+                    # Detail fields accumulate (multiple XBRL categories may map to same field,
+                    # e.g. AltriDebiti + Acconti both → sp16g/sp17g)
+                    ACCUMULATE_FIELDS = {
+                        'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                        'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                        'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+                        'sp06g_crediti_altri_breve',
+                        'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                        'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                        'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+                        'sp07g_crediti_altri_lungo',
+                        'sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                        'sp16c_debiti_obbligazioni_breve', 'sp16d_debiti_fornitori_breve',
+                        'sp16e_debiti_tributari_breve', 'sp16f_debiti_previdenza_breve',
+                        'sp16g_altri_debiti_breve',
+                        'sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                        'sp17c_debiti_obbligazioni_lungo', 'sp17d_debiti_fornitori_lungo',
+                        'sp17e_debiti_tributari_lungo', 'sp17f_debiti_previdenza_lungo',
+                        'sp17g_altri_debiti_lungo',
+                    }
+                    if field in ACCUMULATE_FIELDS:
+                        bs_data[field] = bs_data.get(field, Decimal('0')) + value
+                    elif field not in bs_data or bs_data[field] == Decimal('0'):
                         bs_data[field] = bs_data.get(field, Decimal('0')) + value
                     matched = True
                     matched_tags.add(local_name)
@@ -556,6 +577,7 @@ class EnhancedXBRLParser:
         create_company: bool = True,
         sector: Optional[int] = None,
         user_id: Optional[str] = None,
+        period_months: Optional[int] = None,
     ) -> Dict[str, any]:
         """Import XBRL file to database with reconciliation"""
 
@@ -625,6 +647,13 @@ class EnhancedXBRLParser:
         imported_years = []
         financial_year_ids = []
         all_reconciliation_info = {}
+
+        # Apply user-specified period_months to the most recent year if not auto-detected
+        if period_months and period_months < 12:
+            most_recent = years[0]
+            if most_recent not in year_period_months:
+                year_period_months[most_recent] = period_months
+                logger.info(f"[XBRL] User override: year {most_recent} → period_months={period_months}")
 
         for year in years:
             detected_pm = year_period_months.get(year)  # None = full year, 1-11 = partial
@@ -726,9 +755,10 @@ def import_xbrl_file_enhanced(
     create_company: bool = True,
     sector: Optional[int] = None,
     user_id: Optional[str] = None,
+    period_months: Optional[int] = None,
 ) -> Dict[str, any]:
     """
     Convenience function to import XBRL file with reconciliation
     """
     with EnhancedXBRLParser() as parser:
-        return parser.import_to_database(file_path, company_id, create_company, sector=sector, user_id=user_id)
+        return parser.import_to_database(file_path, company_id, create_company, sector=sector, user_id=user_id, period_months=period_months)

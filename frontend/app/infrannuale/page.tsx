@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import {
@@ -84,6 +84,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const MONTH_LABELS: Record<number, string> = {
   1: "1 mese (31/01)",
@@ -468,22 +476,23 @@ function buildBalanceItemsWithTotals(
   const byCode = new Map(items.map((i) => [i.code, i]));
   const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
 
-  const v = (code: string, key: "partial_value" | "reference_value" | "annualized_value") =>
+  const v = (code: string, key: "partial_value" | "reference_value" | "annualized_value" | "prior_value") =>
     byCode.get(code)?.[key] ?? 0;
 
-  const makeRow = (code: string, label: string, partial: number, ref: number, annualized: number): IntraYearComparisonItem => ({
+  const makeRow = (code: string, label: string, partial: number, ref: number, annualized: number, prior: number = 0): IntraYearComparisonItem => ({
     code, label,
     partial_value: partial,
     reference_value: ref,
+    prior_value: prior,
     pct_of_reference: safePct(partial, ref),
     annualized_value: annualized,
   });
 
   const hdr = (code: string, label: string): IntraYearComparisonItem =>
-    makeRow(code, label, 0, 0, 0);
+    makeRow(code, label, 0, 0, 0, 0);
 
   const item = (code: string): IntraYearComparisonItem =>
-    byCode.get(code) ?? { code, label: code, partial_value: 0, reference_value: 0, pct_of_reference: 0, annualized_value: 0 };
+    byCode.get(code) ?? { code, label: code, partial_value: 0, reference_value: 0, prior_value: 0, pct_of_reference: 0, annualized_value: 0 };
 
   // Relabel
   const relabel: Record<string, string> = {
@@ -518,32 +527,38 @@ function buildBalanceItemsWithTotals(
   const PN_CODES = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita"];
   const DEBT_CODES = ["sp16_debiti_breve", "sp17_debiti_lungo"];
 
-  const sumCodes = (codes: string[], key: "partial_value" | "reference_value" | "annualized_value") =>
+  const sumCodes = (codes: string[], key: "partial_value" | "reference_value" | "annualized_value" | "prior_value") =>
     codes.reduce((acc, c) => acc + v(c, key), 0);
 
   const totImmobP = sumCodes(IMMOB_CODES, "partial_value");
   const totImmobR = sumCodes(IMMOB_CODES, "reference_value");
   const totImmobA = sumCodes(IMMOB_CODES, "annualized_value");
+  const totImmobPr = sumCodes(IMMOB_CODES, "prior_value");
 
   const totCircP = sumCodes(CIRC_CODES, "partial_value");
   const totCircR = sumCodes(CIRC_CODES, "reference_value");
   const totCircA = sumCodes(CIRC_CODES, "annualized_value");
+  const totCircPr = sumCodes(CIRC_CODES, "prior_value");
 
   const totAttivoP = sumCodes(ATTIVO_CODES, "partial_value");
   const totAttivoR = sumCodes(ATTIVO_CODES, "reference_value");
   const totAttivoA = sumCodes(ATTIVO_CODES, "annualized_value");
+  const totAttivoPr = sumCodes(ATTIVO_CODES, "prior_value");
 
   const totPNP = sumCodes(PN_CODES, "partial_value");
   const totPNR = sumCodes(PN_CODES, "reference_value");
   const totPNA = sumCodes(PN_CODES, "annualized_value");
+  const totPNPr = sumCodes(PN_CODES, "prior_value");
 
   const totDebtP = sumCodes(DEBT_CODES, "partial_value");
   const totDebtR = sumCodes(DEBT_CODES, "reference_value");
   const totDebtA = sumCodes(DEBT_CODES, "annualized_value");
+  const totDebtPr = sumCodes(DEBT_CODES, "prior_value");
 
   const totPassivoP = sumCodes(PASSIVO_CODES, "partial_value");
   const totPassivoR = sumCodes(PASSIVO_CODES, "reference_value");
   const totPassivoA = sumCodes(PASSIVO_CODES, "annualized_value");
+  const totPassivoPr = sumCodes(PASSIVO_CODES, "prior_value");
 
   return [
     // ATTIVO
@@ -554,7 +569,7 @@ function buildBalanceItemsWithTotals(
     labeled("sp02_immob_immateriali"),
     labeled("sp03_immob_materiali"),
     labeled("sp04_immob_finanziarie"),
-    makeRow("_totale_immob", "Totale Immobilizzazioni", totImmobP, totImmobR, totImmobA),
+    makeRow("_totale_immob", "Totale Immobilizzazioni", totImmobP, totImmobR, totImmobA, totImmobPr),
     // C) ATTIVO CIRCOLANTE
     hdr("_hdr_circ", "C) ATTIVO CIRCOLANTE"),
     labeled("sp05_rimanenze"),
@@ -562,10 +577,10 @@ function buildBalanceItemsWithTotals(
     labeled("sp07_crediti_lungo"),
     labeled("sp08_attivita_finanziarie"),
     labeled("sp09_disponibilita_liquide"),
-    makeRow("_totale_circ", "Totale Attivo Circolante", totCircP, totCircR, totCircA),
+    makeRow("_totale_circ", "Totale Attivo Circolante", totCircP, totCircR, totCircA, totCircPr),
     // D) Ratei
     labeled("sp10_ratei_risconti_attivi"),
-    makeRow("_totale_attivo", "TOTALE ATTIVO", totAttivoP, totAttivoR, totAttivoA),
+    makeRow("_totale_attivo", "TOTALE ATTIVO", totAttivoP, totAttivoR, totAttivoA, totAttivoPr),
     // PASSIVO E PATRIMONIO NETTO
     hdr("_hdr_passivo", "PASSIVO E PATRIMONIO NETTO"),
     // A) PATRIMONIO NETTO
@@ -573,7 +588,7 @@ function buildBalanceItemsWithTotals(
     labeled("sp11_capitale"),
     labeled("sp12_riserve"),
     labeled("sp13_utile_perdita"),
-    makeRow("_totale_pn", "Totale Patrimonio Netto", totPNP, totPNR, totPNA),
+    makeRow("_totale_pn", "Totale Patrimonio Netto", totPNP, totPNR, totPNA, totPNPr),
     // B) Fondi
     labeled("sp14_fondi_rischi"),
     // C) TFR
@@ -582,13 +597,13 @@ function buildBalanceItemsWithTotals(
     hdr("_hdr_debiti", "D) DEBITI"),
     labeled("sp16_debiti_breve"),
     labeled("sp17_debiti_lungo"),
-    makeRow("_totale_debiti", "Totale Debiti", totDebtP, totDebtR, totDebtA),
+    makeRow("_totale_debiti", "Totale Debiti", totDebtP, totDebtR, totDebtA, totDebtPr),
     // E) Ratei passivi
     labeled("sp18_ratei_risconti_passivi"),
-    makeRow("_totale_passivo", "TOTALE PASSIVO E PATRIMONIO NETTO", totPassivoP, totPassivoR, totPassivoA),
+    makeRow("_totale_passivo", "TOTALE PASSIVO E PATRIMONIO NETTO", totPassivoP, totPassivoR, totPassivoA, totPassivoPr),
     // Differenza
     makeRow("_differenza", "DIFFERENZA (Attivo - Passivo)",
-      totAttivoP - totPassivoP, totAttivoR - totPassivoR, totAttivoA - totPassivoA),
+      totAttivoP - totPassivoP, totAttivoR - totPassivoR, totAttivoA - totPassivoA, totAttivoPr - totPassivoPr),
   ];
 }
 
@@ -600,34 +615,36 @@ function buildIncomeItemsWithEbitda(
   const factor = 12 / periodMonths;
   const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
 
-  const v = (code: string, key: "partial_value" | "reference_value") =>
+  const v = (code: string, key: "partial_value" | "reference_value" | "prior_value") =>
     byCode.get(code)?.[key] ?? 0;
   const ann = (code: string) => byCode.get(code)?.annualized_value ?? 0;
-  const sum = (codes: string[], key: "partial_value" | "reference_value") =>
+  const sum = (codes: string[], key: "partial_value" | "reference_value" | "prior_value") =>
     codes.reduce((acc, c) => acc + v(c, key), 0);
   const sumAnn = (codes: string[]) =>
     codes.reduce((acc, c) => acc + ann(c), 0);
 
   // Lookup or zero-item helper
   const item = (code: string): IntraYearComparisonItem =>
-    byCode.get(code) ?? { code, label: code, partial_value: 0, reference_value: 0, pct_of_reference: 0, annualized_value: 0 };
+    byCode.get(code) ?? { code, label: code, partial_value: 0, reference_value: 0, prior_value: 0, pct_of_reference: 0, annualized_value: 0 };
 
   // Helper: create a synthetic row
-  const makeRow = (code: string, label: string, partial: number, ref: number, annualized: number): IntraYearComparisonItem => ({
+  const makeRow = (code: string, label: string, partial: number, ref: number, annualized: number, prior: number = 0): IntraYearComparisonItem => ({
     code, label,
     partial_value: partial,
     reference_value: ref,
+    prior_value: prior,
     pct_of_reference: safePct(partial, ref),
     annualized_value: annualized,
   });
 
   // Header row (no values)
   const hdr = (code: string, label: string): IntraYearComparisonItem =>
-    makeRow(code, label, 0, 0, 0);
+    makeRow(code, label, 0, 0, 0, 0);
 
   // Subtotals
   const partialVP = sum(VP_CODES, "partial_value");
   const refVP = sum(VP_CODES, "reference_value");
+  const priorVP = sum(VP_CODES, "prior_value");
   const annVP = sumAnn(VP_CODES);
 
   const COST_CODES_ALL = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
@@ -635,36 +652,44 @@ function buildIncomeItemsWithEbitda(
     "ce11_accantonamenti", "ce12_oneri_diversi"];
   const partialCP = sum(COST_CODES_ALL, "partial_value");
   const refCP = sum(COST_CODES_ALL, "reference_value");
+  const priorCP = sum(COST_CODES_ALL, "prior_value");
   const annCP = sumAnn(COST_CODES_ALL);
 
   const partialEbitda = partialVP - (partialCP - v("ce09_ammortamenti", "partial_value"));
   const refEbitda = refVP - (refCP - v("ce09_ammortamenti", "reference_value"));
+  const priorEbitda = priorVP - (priorCP - v("ce09_ammortamenti", "prior_value"));
   const annEbitda = annVP - (annCP - ann("ce09_ammortamenti"));
 
   const partialEbit = partialVP - partialCP;
   const refEbit = refVP - refCP;
+  const priorEbit = priorVP - priorCP;
   const annEbit = annVP - annCP;
 
   const FIN_INCOME = ["ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari", "ce16_utili_perdite_cambi"];
   const FIN_COST = ["ce15_oneri_finanziari"];
   const partialFin = sum(FIN_INCOME, "partial_value") - sum(FIN_COST, "partial_value");
   const refFin = sum(FIN_INCOME, "reference_value") - sum(FIN_COST, "reference_value");
+  const priorFin = sum(FIN_INCOME, "prior_value") - sum(FIN_COST, "prior_value");
   const annFin = sumAnn(FIN_INCOME) - sumAnn(FIN_COST);
 
   const partialStraord = v("ce18_proventi_straordinari", "partial_value") - v("ce19_oneri_straordinari", "partial_value");
   const refStraord = v("ce18_proventi_straordinari", "reference_value") - v("ce19_oneri_straordinari", "reference_value");
+  const priorStraord = v("ce18_proventi_straordinari", "prior_value") - v("ce19_oneri_straordinari", "prior_value");
   const annStraord = ann("ce18_proventi_straordinari") - ann("ce19_oneri_straordinari");
 
   const partialRettifiche = v("ce17_rettifiche_attivita_fin", "partial_value");
   const refRettifiche = v("ce17_rettifiche_attivita_fin", "reference_value");
+  const priorRettifiche = v("ce17_rettifiche_attivita_fin", "prior_value");
   const annRettifiche = ann("ce17_rettifiche_attivita_fin");
 
   const partialPBT = partialEbit + partialFin + partialRettifiche + partialStraord;
   const refPBT = refEbit + refFin + refRettifiche + refStraord;
+  const priorPBT = priorEbit + priorFin + priorRettifiche + priorStraord;
   const annPBT = annEbit + annFin + annRettifiche + annStraord;
 
   const partialNetProfit = partialPBT - v("ce20_imposte", "partial_value");
   const refNetProfit = refPBT - v("ce20_imposte", "reference_value");
+  const priorNetProfit = priorPBT - v("ce20_imposte", "prior_value");
   const annNetProfit = annPBT - ann("ce20_imposte");
 
   const partialRevenue = v("ce01_ricavi_vendite", "partial_value");
@@ -706,7 +731,7 @@ function buildIncomeItemsWithEbitda(
     labeled("ce02_variazioni_rimanenze"),
     labeled("ce03_lavori_interni"),
     labeled("ce04_altri_ricavi"),
-    makeRow("_totale_vp", "Totale Valore della Produzione", partialVP, refVP, annVP),
+    makeRow("_totale_vp", "Totale Valore della Produzione", partialVP, refVP, annVP, priorVP),
     // B) COSTI DELLA PRODUZIONE
     hdr("_hdr_b", "B) COSTI DELLA PRODUZIONE"),
     labeled("ce05_materie_prime"),
@@ -717,16 +742,16 @@ function buildIncomeItemsWithEbitda(
     labeled("ce10_var_rimanenze_mat_prime"),
     labeled("ce11_accantonamenti"),
     labeled("ce12_oneri_diversi"),
-    makeRow("_totale_cp", "Totale Costi della Produzione", partialCP, refCP, annCP),
-    makeRow("_ebitda", "EBITDA (MOL)", partialEbitda, refEbitda, annEbitda),
-    makeRow("_ebit", "EBIT (Risultato Operativo)", partialEbit, refEbit, annEbit),
+    makeRow("_totale_cp", "Totale Costi della Produzione", partialCP, refCP, annCP, priorCP),
+    makeRow("_ebitda", "EBITDA (MOL)", partialEbitda, refEbitda, annEbitda, priorEbitda),
+    makeRow("_ebit", "EBIT (Risultato Operativo)", partialEbit, refEbit, annEbit, priorEbit),
     // C) PROVENTI E ONERI FINANZIARI
     hdr("_hdr_c", "C) PROVENTI E ONERI FINANZIARI"),
     labeled("ce13_proventi_partecipazioni"),
     labeled("ce14_altri_proventi_finanziari"),
     labeled("ce15_oneri_finanziari"),
     labeled("ce16_utili_perdite_cambi"),
-    makeRow("_totale_fin", "Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", partialFin, refFin, annFin),
+    makeRow("_totale_fin", "Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", partialFin, refFin, annFin, priorFin),
     // D) RETTIFICHE DI VALORE
     hdr("_hdr_d", "D) RETTIFICHE DI VALORE DI ATTIVITÀ E PASSIVITÀ FINANZIARIE"),
     labeled("ce17_rettifiche_attivita_fin"),
@@ -734,87 +759,111 @@ function buildIncomeItemsWithEbitda(
     hdr("_hdr_e", "E) PROVENTI E ONERI STRAORDINARI"),
     labeled("ce18_proventi_straordinari"),
     labeled("ce19_oneri_straordinari"),
-    makeRow("_totale_straord", "Totale Proventi/Oneri Straordinari", partialStraord, refStraord, annStraord),
+    makeRow("_totale_straord", "Totale Proventi/Oneri Straordinari", partialStraord, refStraord, annStraord, priorStraord),
     // Risultato prima delle imposte
-    makeRow("_profit_before_tax", "Risultato prima delle imposte (A - B +/- C +/- D +/- E)", partialPBT, refPBT, annPBT),
+    makeRow("_profit_before_tax", "Risultato prima delle imposte (A - B +/- C +/- D +/- E)", partialPBT, refPBT, annPBT, priorPBT),
     labeled("ce20_imposte"),
-    makeRow("_net_profit", "21) Utile (perdita) dell'esercizio", partialNetProfit, refNetProfit, annNetProfit),
+    makeRow("_net_profit", "21) Utile (perdita) dell'esercizio", partialNetProfit, refNetProfit, annNetProfit, priorNetProfit),
   ];
 }
 
-// ===== DOUBLE-ENTRY RULES =====
-// Maps: editable field → counterpart field and direction
+// ===== PROPOSAL RULES =====
+// When a field is edited, propose a counterpart adjustment shown in the review dialog.
 // "same" = counterpart moves in same direction as delta (e.g. cost up → liability up)
 // "inverse" = counterpart moves opposite (e.g. depreciation up → asset down)
-const DOUBLE_ENTRY_RULES: Array<{
+interface ProposalRule {
   editable: string;
   counterpart: string;
   direction: "same" | "inverse";
-  editableType: "bs" | "ce";
-  counterpartType: "bs" | "ce";
-}> = [
-  { editable: "sp05_rimanenze", counterpart: "ce02_variazioni_rimanenze", direction: "same", editableType: "bs", counterpartType: "ce" },
-  { editable: "sp06_crediti_breve", counterpart: "ce09d_svalutazione_crediti", direction: "inverse", editableType: "bs", counterpartType: "ce" },
-  { editable: "ce08_costi_personale", counterpart: "sp16f_debiti_previdenza_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce08a_tfr_accrual", counterpart: "sp15_tfr", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce09a_ammort_immateriali", counterpart: "sp02_immob_immateriali", direction: "inverse", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce09b_ammort_materiali", counterpart: "sp03_immob_materiali", direction: "inverse", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce05_materie_prime", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce06_servizi", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce07_godimento_beni", counterpart: "sp18_ratei_risconti_passivi", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce11_accantonamenti", counterpart: "sp14_fondi_rischi", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce15_oneri_finanziari", counterpart: "sp18_ratei_risconti_passivi", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce12_oneri_diversi", counterpart: "sp16g_altri_debiti_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce20_imposte", counterpart: "sp16e_debiti_tributari_breve", direction: "same", editableType: "ce", counterpartType: "bs" },
-  { editable: "ce09d_svalutazione_crediti", counterpart: "sp06_crediti_breve", direction: "inverse", editableType: "ce", counterpartType: "bs" },
+  explanation: string; // Italian description of the double-entry logic
+  // Optional: allow splitting the counterpart amount between two fields
+  splitAlt?: { field: string; label: string };
+}
+const PROPOSAL_RULES: ProposalRule[] = [
+  // ===== BS ATTIVO → CE =====
+  { editable: "sp01_crediti_soci", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs soci → più altri ricavi" },
+  { editable: "sp02_immob_immateriali", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più immob. immateriali → più incrementi per lavori interni" },
+  { editable: "sp03_immob_materiali", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più immob. materiali → più incrementi per lavori interni" },
+  { editable: "sp04_immob_finanziarie", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più immob. finanziarie → più proventi finanziari" },
+  { editable: "sp05_rimanenze", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più rimanenze → variazione positiva rimanenze" },
+  { editable: "sp05a_materie_prime", counterpart: "ce10_var_rimanenze_mat_prime", direction: "inverse", explanation: "Più rimanenze materie → meno variazione mat. prime (costo)" },
+  { editable: "sp05b_prodotti_in_corso", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più prodotti in c/lav → variazione positiva rimanenze" },
+  { editable: "sp05c_lavori_in_corso", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più lavori in corso → variazione positiva rimanenze" },
+  { editable: "sp05d_prodotti_finiti", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più prodotti finiti → variazione positiva rimanenze" },
+  { editable: "sp05e_acconti", counterpart: "ce05_materie_prime", direction: "same", explanation: "Più acconti a fornitori → più costi materie prime" },
+  { editable: "sp06_crediti_breve", counterpart: "ce01_ricavi_vendite", direction: "same", explanation: "Più crediti commerciali → più ricavi" },
+  { editable: "sp06a_crediti_clienti_breve", counterpart: "ce01_ricavi_vendite", direction: "same", explanation: "Più crediti vs clienti → più ricavi vendite" },
+  { editable: "sp06b_crediti_controllate_breve", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs controllate → più altri ricavi" },
+  { editable: "sp06c_crediti_collegate_breve", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs collegate → più altri ricavi" },
+  { editable: "sp06d_crediti_controllanti_breve", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs controllanti → più altri ricavi" },
+  { editable: "sp06e_crediti_tributari_breve", counterpart: "ce20_imposte", direction: "inverse", explanation: "Più crediti tributari → meno imposte" },
+  { editable: "sp06f_imposte_anticipate_breve", counterpart: "ce20_imposte", direction: "inverse", explanation: "Più imposte anticipate → meno imposte correnti" },
+  { editable: "sp06g_crediti_altri_breve", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti diversi → più altri ricavi" },
+  { editable: "sp07_crediti_lungo", counterpart: "ce01_ricavi_vendite", direction: "same", explanation: "Più crediti oltre → più ricavi" },
+  { editable: "sp07a_crediti_clienti_lungo", counterpart: "ce01_ricavi_vendite", direction: "same", explanation: "Più crediti clienti oltre → più ricavi vendite" },
+  { editable: "sp07b_crediti_controllate_lungo", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs controllate oltre → più altri ricavi" },
+  { editable: "sp07c_crediti_collegate_lungo", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs collegate oltre → più altri ricavi" },
+  { editable: "sp07d_crediti_controllanti_lungo", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs controllanti oltre → più altri ricavi" },
+  { editable: "sp07e_crediti_tributari_lungo", counterpart: "ce20_imposte", direction: "inverse", explanation: "Più crediti tributari oltre → meno imposte" },
+  { editable: "sp07f_imposte_anticipate_lungo", counterpart: "ce20_imposte", direction: "inverse", explanation: "Più imposte anticipate oltre → meno imposte correnti" },
+  { editable: "sp07g_crediti_altri_lungo", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti diversi oltre → più altri ricavi" },
+  { editable: "sp08_attivita_finanziarie", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più attività finanziarie → più proventi finanziari" },
+  { editable: "sp09_disponibilita_liquide", counterpart: "ce01_ricavi_vendite", direction: "same", explanation: "Più liquidità → più ricavi (incasso)" },
+  { editable: "sp10_ratei_risconti_attivi", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più ratei attivi → più altri ricavi di competenza" },
+  // ===== BS PASSIVO → CE =====
+  { editable: "sp11_capitale", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più capitale → più liquidità (conferimento)" },
+  { editable: "sp12_riserve", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserve → più liquidità (conferimento)" },
+  { editable: "sp12g_utili_perdite_portati", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più utili a nuovo → più liquidità" },
+  { editable: "sp14_fondi_rischi", counterpart: "ce11_accantonamenti", direction: "same", explanation: "Più fondi rischi → più accantonamenti" },
+  { editable: "sp15_tfr", counterpart: "ce08a_tfr_accrual", direction: "same", explanation: "Più fondo TFR → più accantonamento TFR" },
+  { editable: "sp16a_debiti_banche_breve", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti vs banche → più oneri finanziari" },
+  { editable: "sp16b_debiti_altri_finanz_breve", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti finanziari → più oneri finanziari" },
+  { editable: "sp16c_debiti_obbligazioni_breve", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti obbligazionari → più oneri finanziari" },
+  { editable: "sp16d_debiti_fornitori_breve", counterpart: "ce06_servizi", direction: "same", explanation: "Più debiti fornitori → più costi per servizi / materie prime", splitAlt: { field: "ce05_materie_prime", label: "6) Per materie prime" } },
+  { editable: "sp16e_debiti_tributari_breve", counterpart: "ce20_imposte", direction: "same", explanation: "Più debiti tributari → più imposte" },
+  { editable: "sp16f_debiti_previdenza_breve", counterpart: "ce08_costi_personale", direction: "same", explanation: "Più debiti previdenziali → più costi del personale" },
+  { editable: "sp16g_altri_debiti_breve", counterpart: "ce12_oneri_diversi", direction: "same", explanation: "Più altri debiti → più oneri diversi" },
+  { editable: "sp17a_debiti_banche_lungo", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti vs banche lungo → più oneri finanziari" },
+  { editable: "sp17b_debiti_altri_finanz_lungo", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti finanziari lungo → più oneri finanziari" },
+  { editable: "sp17c_debiti_obbligazioni_lungo", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti obbligazionari lungo → più oneri finanziari" },
+  { editable: "sp17d_debiti_fornitori_lungo", counterpart: "ce06_servizi", direction: "same", explanation: "Più debiti fornitori lungo → più costi per servizi / materie prime", splitAlt: { field: "ce05_materie_prime", label: "6) Per materie prime" } },
+  { editable: "sp17e_debiti_tributari_lungo", counterpart: "ce20_imposte", direction: "same", explanation: "Più debiti tributari lungo → più imposte" },
+  { editable: "sp17f_debiti_previdenza_lungo", counterpart: "ce08_costi_personale", direction: "same", explanation: "Più debiti previdenziali lungo → più costi del personale" },
+  { editable: "sp17g_altri_debiti_lungo", counterpart: "ce12_oneri_diversi", direction: "same", explanation: "Più altri debiti lungo → più oneri diversi" },
+  { editable: "sp18_ratei_risconti_passivi", counterpart: "ce07_godimento_beni", direction: "same", explanation: "Più ratei passivi → più godimento beni di terzi" },
+  // ===== CE → BS =====
+  { editable: "ce01_ricavi_vendite", counterpart: "sp06a_crediti_clienti_breve", direction: "same", explanation: "Più ricavi → più crediti vs clienti" },
+  { editable: "ce04_altri_ricavi", counterpart: "sp06g_crediti_altri_breve", direction: "same", explanation: "Più altri ricavi → più crediti diversi" },
+  { editable: "ce05_materie_prime", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", explanation: "Più costi materie prime → più debiti vs fornitori" },
+  { editable: "ce06_servizi", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", explanation: "Più costi servizi → più debiti vs fornitori" },
+  { editable: "ce07_godimento_beni", counterpart: "sp18_ratei_risconti_passivi", direction: "same", explanation: "Più godimento beni terzi → più ratei e risconti passivi" },
+  { editable: "ce08_costi_personale", counterpart: "sp16f_debiti_previdenza_breve", direction: "same", explanation: "Più costi personale → più debiti previdenziali" },
+  { editable: "ce08b_salari_stipendi", counterpart: "sp16f_debiti_previdenza_breve", direction: "same", explanation: "Più salari e stipendi → più debiti previdenziali" },
+  { editable: "ce08c_oneri_sociali", counterpart: "sp16f_debiti_previdenza_breve", direction: "same", explanation: "Più oneri sociali → più debiti previdenziali" },
+  { editable: "ce08a_tfr_accrual", counterpart: "sp15_tfr", direction: "same", explanation: "Più TFR accantonato → più fondo TFR" },
+  { editable: "ce08d_altri_costi_personale", counterpart: "sp16g_altri_debiti_breve", direction: "same", explanation: "Più altri costi personale → più altri debiti" },
+  { editable: "ce09a_ammort_immateriali", counterpart: "sp02_immob_immateriali", direction: "inverse", explanation: "Più ammortamento → meno immobilizzazioni immateriali" },
+  { editable: "ce09b_ammort_materiali", counterpart: "sp03_immob_materiali", direction: "inverse", explanation: "Più ammortamento → meno immobilizzazioni materiali" },
+  { editable: "ce09c_svalutazioni", counterpart: "sp04_immob_finanziarie", direction: "inverse", explanation: "Più svalutazioni → meno immobilizzazioni finanziarie" },
+  { editable: "ce09d_svalutazione_crediti", counterpart: "sp06_crediti_breve", direction: "inverse", explanation: "Più svalutazione crediti → meno crediti commerciali" },
+  { editable: "ce11_accantonamenti", counterpart: "sp14_fondi_rischi", direction: "same", explanation: "Più accantonamenti rischi → più fondi per rischi e oneri" },
+  { editable: "ce11b_altri_accantonamenti", counterpart: "sp14_fondi_rischi", direction: "same", explanation: "Più altri accantonamenti → più fondi rischi" },
+  { editable: "ce12_oneri_diversi", counterpart: "sp16g_altri_debiti_breve", direction: "same", explanation: "Più oneri diversi → più altri debiti" },
+  { editable: "ce13_proventi_partecipazioni", counterpart: "sp04_immob_finanziarie", direction: "same", explanation: "Più proventi partecipazioni → più immob. finanziarie" },
+  { editable: "ce14_altri_proventi_finanziari", counterpart: "sp08_attivita_finanziarie", direction: "same", explanation: "Più proventi finanziari → più attività finanziarie" },
+  { editable: "ce15_oneri_finanziari", counterpart: "sp16a_debiti_banche_breve", direction: "same", explanation: "Più oneri finanziari → più debiti vs banche" },
+  { editable: "ce16_utili_perdite_cambi", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più utili su cambi → più liquidità" },
+  { editable: "ce17a_rivalutazioni", counterpart: "sp04_immob_finanziarie", direction: "same", explanation: "Più rivalutazioni → più immob. finanziarie" },
+  { editable: "ce17b_svalutazioni", counterpart: "sp04_immob_finanziarie", direction: "inverse", explanation: "Più svalutazioni → meno immob. finanziarie" },
+  { editable: "ce18_proventi_straordinari", counterpart: "sp06g_crediti_altri_breve", direction: "same", explanation: "Più proventi straordinari → più crediti diversi" },
+  { editable: "ce19_oneri_straordinari", counterpart: "sp16g_altri_debiti_breve", direction: "same", explanation: "Più oneri straordinari → più altri debiti" },
+  { editable: "ce20_imposte", counterpart: "sp16e_debiti_tributari_breve", direction: "same", explanation: "Più imposte → più debiti tributari" },
 ];
 
-// Standalone editable fields (no double-entry counterpart — free edit)
-// Standalone editable fields (no double-entry counterpart — free edit)
-const STANDALONE_EDITABLE = new Set([
-  // All SP fields (except computed: sp13, sp16, sp17 which are auto-recalculated)
-  "sp01_crediti_soci",
-  "sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie",
-  "sp05_rimanenze",
-  "sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso",
-  "sp05d_prodotti_finiti", "sp05e_acconti",
-  "sp06_crediti_breve",
-  "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
-  "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
-  "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
-  "sp06g_crediti_altri_breve",
-  "sp07_crediti_lungo",
-  "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
-  "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
-  "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
-  "sp07g_crediti_altri_lungo",
-  "sp08_attivita_finanziarie", "sp09_disponibilita_liquide",
-  "sp10_ratei_risconti_attivi",
-  "sp11_capitale", "sp12_riserve", "sp12g_utili_perdite_portati",
-  "sp14_fondi_rischi", "sp15_tfr",
-  "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
-  "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
-  "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
-  "sp16g_altri_debiti_breve",
-  "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
-  "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
-  "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
-  "sp17g_altri_debiti_lungo",
-  "sp18_ratei_risconti_passivi",
-  // CE standalone
-  "ce01_ricavi_vendite",
-  "ce04_altri_ricavi",
-  "ce17a_rivalutazioni",
-  "ce17b_svalutazioni",
-  "ce18_proventi_straordinari",
-  "ce19_oneri_straordinari",
-]);
-
-const EDITABLE_RETTIFICHE = new Set([
-  ...DOUBLE_ENTRY_RULES.map((r) => r.editable),
-  ...STANDALONE_EDITABLE,
-]);
-const AUTO_ADJUSTED = new Set(DOUBLE_ENTRY_RULES.map((r) => r.counterpart));
+// All editable fields = all proposal rule editables (every editable field has a proposal rule)
+const EDITABLE_RETTIFICHE = new Set(PROPOSAL_RULES.map((r) => r.editable));
+// Fields that are counterpart targets — shown with special styling after proposals are applied
+const AUTO_ADJUSTED = new Set(PROPOSAL_RULES.map((r) => r.counterpart));
 
 // Italian labels for rettifiche fields
 const RETTIFICHE_LABELS: Record<string, string> = {
@@ -1002,16 +1051,37 @@ const CE_E = [
 ];
 const CE_IMPOSTE = ["ce20_imposte"];
 
+// Proposal generated for the review dialog
+interface DoubleEntryProposal {
+  id: number;
+  editedField: string;
+  editedLabel: string;
+  delta: number;
+  counterpartField: string;
+  counterpartLabel: string;
+  proposedDelta: number;
+  accepted: boolean;
+  explanation: string;
+  // Optional split: allows distributing the amount between two counterpart fields
+  splitAlt?: {
+    field: string;
+    label: string;
+    amount: number; // amount allocated to the alternative (rest goes to main counterpart)
+  };
+}
+
 interface RettificheTabProps {
   adjustableData: AdjustableFinancialYear | null;
   referenceYearData: Record<string, number> | null;
   referenceYear: number;
+  periodMonths: number;
+  fiscalYear: number;
   corrections: Record<string, number>;
   setCorrections: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   loading: boolean;
   saving: boolean;
   adjustmentsApplied: boolean;
-  onSave: () => Promise<void>;
+  onSave: (finalCorrections?: Record<string, number>) => Promise<void>;
   onReset: () => Promise<void>;
   onNext: () => void;
 }
@@ -1020,6 +1090,8 @@ function RettificheTab({
   adjustableData,
   referenceYearData,
   referenceYear,
+  periodMonths,
+  fiscalYear,
   corrections,
   setCorrections,
   loading,
@@ -1029,6 +1101,31 @@ function RettificheTab({
   onReset,
   onNext,
 }: RettificheTabProps) {
+  // Compute end-of-period date label, e.g. "30/06/2025"
+  const periodEndDate = (() => {
+    const lastDay = new Date(fiscalYear, periodMonths, 0).getDate();
+    const mm = String(periodMonths).padStart(2, "0");
+    return `${lastDay}/${mm}/${fiscalYear}`;
+  })();
+
+  // Sticky column header bar — appears when the first table header scrolls out of view
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [showStickyHeader, setShowStickyHeader] = useState(false);
+  // State for double-entry review dialog
+  const [showProposalDialog, setShowProposalDialog] = useState(false);
+  const [proposals, setProposals] = useState<DoubleEntryProposal[]>([]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowStickyHeader(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   if (loading || !adjustableData) {
     return (
       <Card>
@@ -1044,95 +1141,231 @@ function RettificheTab({
     ...adjustableData.original_balance_sheet,
     ...adjustableData.original_income_statement,
   } as Record<string, number>;
+  // Reconcile debt sub-fields so "Altri debiti" absorbs any gap vs imported aggregate
+  reconcileSubfields(original);
 
-  // Apply double-entry rules when a field changes
+  // Handle field changes — only direct edit + conditional sub-field aggregates + sp13 recalc.
+  // Double-entry counterparts are proposed via dialog, not auto-applied.
+  // IMPORTANT: Only recalculate an aggregate when one of its component fields is edited,
+  // to avoid corrupting aggregates when details don't sum to the original total.
+  const SP16_DETAILS = [
+    "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+    "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+    "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+    "sp16g_altri_debiti_breve",
+  ];
+  const SP17_DETAILS = [
+    "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+    "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
+    "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
+    "sp17g_altri_debiti_lungo",
+  ];
+  const SP05_DETAILS = ["sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso", "sp05d_prodotti_finiti", "sp05e_acconti"];
+  const SP06_DETAILS = [
+    "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve", "sp06c_crediti_collegate_breve",
+    "sp06d_crediti_controllanti_breve", "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
+    "sp06g_crediti_altri_breve",
+  ];
+  const SP07_DETAILS = [
+    "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo", "sp07c_crediti_collegate_lungo",
+    "sp07d_crediti_controllanti_lungo", "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
+    "sp07g_crediti_altri_lungo",
+  ];
+  const CE08_DETAILS = ["ce08b_salari_stipendi", "ce08c_oneri_sociali", "ce08a_tfr_accrual", "ce08d_altri_costi_personale"];
+  const CE09_DETAILS = ["ce09a_ammort_immateriali", "ce09b_ammort_materiali", "ce09c_svalutazioni", "ce09d_svalutazione_crediti"];
+  const CE17_DETAILS = ["ce17a_rivalutazioni", "ce17b_svalutazioni"];
+  // All CE fields that affect the P&L result
+  const CE_FIELDS = [
+    "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce04_altri_ricavi",
+    "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni", "ce08_costi_personale",
+    "ce09_ammortamenti", "ce09a_ammort_immateriali", "ce09b_ammort_materiali", "ce09c_svalutazioni", "ce09d_svalutazione_crediti",
+    "ce10_var_rimanenze_mat_prime", "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi",
+    "ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari", "ce15_oneri_finanziari", "ce16_utili_perdite_cambi",
+    "ce17_rettifiche_attivita_fin", "ce17a_rivalutazioni", "ce17b_svalutazioni",
+    "ce18_proventi_straordinari", "ce19_oneri_straordinari", "ce20_imposte",
+  ];
+
   const handleChange = (field: string, newValue: number) => {
     const updated = { ...corrections, [field]: newValue };
 
-    // Find all rules where this field is the editable side
-    for (const rule of DOUBLE_ENTRY_RULES) {
-      if (rule.editable === field) {
-        const origEditable = original[rule.editable] ?? 0;
-        const origCounterpart = original[rule.counterpart] ?? 0;
-        const delta = newValue - origEditable;
+    // Recalculate parent aggregates using delta-based approach:
+    // parent = original_parent + sum(sub_field_deltas)
+    // This preserves the original aggregate when sub-fields don't sum to it (common in imports).
+    const applySubfieldDelta = (details: string[], parent: string) => {
+      const totalDelta = details.reduce((s, k) => {
+        const orig = original[k] ?? 0;
+        const curr = updated[k] ?? orig;
+        return s + (curr - orig);
+      }, 0);
+      updated[parent] = (original[parent] ?? 0) + totalDelta;
+    };
 
-        if (rule.direction === "same") {
-          // For counterparts with multiple sources (e.g. sp16d from ce05 + ce06),
-          // accumulate all deltas
-          const otherRulesForSameCounterpart = DOUBLE_ENTRY_RULES.filter(
-            (r) => r.counterpart === rule.counterpart && r.editable !== field
-          );
-          let totalDelta = delta;
-          for (const otherRule of otherRulesForSameCounterpart) {
-            const otherOrig = original[otherRule.editable] ?? 0;
-            const otherCurrent = updated[otherRule.editable] ?? otherOrig;
-            totalDelta += otherCurrent - otherOrig;
-          }
-          updated[rule.counterpart] = origCounterpart + totalDelta;
-        } else {
-          // inverse: delta in editable → negative delta in counterpart
-          const otherRulesForSameCounterpart = DOUBLE_ENTRY_RULES.filter(
-            (r) => r.counterpart === rule.counterpart && r.editable !== field
-          );
-          let totalDelta = delta;
-          for (const otherRule of otherRulesForSameCounterpart) {
-            const otherOrig = original[otherRule.editable] ?? 0;
-            const otherCurrent = updated[otherRule.editable] ?? otherOrig;
-            totalDelta += otherCurrent - otherOrig;
-          }
-          updated[rule.counterpart] = origCounterpart - totalDelta;
-        }
-      }
+    if (SP05_DETAILS.includes(field)) applySubfieldDelta(SP05_DETAILS, "sp05_rimanenze");
+    if (SP06_DETAILS.includes(field)) applySubfieldDelta(SP06_DETAILS, "sp06_crediti_breve");
+    if (SP07_DETAILS.includes(field)) applySubfieldDelta(SP07_DETAILS, "sp07_crediti_lungo");
+    if (CE08_DETAILS.includes(field)) applySubfieldDelta(CE08_DETAILS, "ce08_costi_personale");
+    if (SP16_DETAILS.includes(field)) applySubfieldDelta(SP16_DETAILS, "sp16_debiti_breve");
+    if (SP17_DETAILS.includes(field)) applySubfieldDelta(SP17_DETAILS, "sp17_debiti_lungo");
+    if (CE09_DETAILS.includes(field)) applySubfieldDelta(CE09_DETAILS, "ce09_ammortamenti");
+    if (CE17_DETAILS.includes(field)) {
+      // ce17 is special: rivalutazioni - svalutazioni
+      const d17a = (updated["ce17a_rivalutazioni"] ?? original["ce17a_rivalutazioni"] ?? 0) - (original["ce17a_rivalutazioni"] ?? 0);
+      const d17b = (updated["ce17b_svalutazioni"] ?? original["ce17b_svalutazioni"] ?? 0) - (original["ce17b_svalutazioni"] ?? 0);
+      updated["ce17_rettifiche_attivita_fin"] = (original["ce17_rettifiche_attivita_fin"] ?? 0) + d17a - d17b;
     }
 
-    // Recalculate sp16_debiti_breve and sp17_debiti_lungo as sum of detail fields
-    const sp16details = [
-      "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
-      "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
-      "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
-      "sp16g_altri_debiti_breve",
-    ];
-    updated["sp16_debiti_breve"] = sp16details.reduce(
-      (sum, k) => sum + (updated[k] ?? original[k] ?? 0), 0
-    );
-    const sp17details = [
-      "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
-      "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
-      "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
-      "sp17g_altri_debiti_lungo",
-    ];
-    updated["sp17_debiti_lungo"] = sp17details.reduce(
-      (sum, k) => sum + (updated[k] ?? original[k] ?? 0), 0
-    );
-
-    // Recalculate ce09_ammortamenti as sum of detail fields
-    updated["ce09_ammortamenti"] = (updated["ce09a_ammort_immateriali"] ?? original["ce09a_ammort_immateriali"] ?? 0)
-      + (updated["ce09b_ammort_materiali"] ?? original["ce09b_ammort_materiali"] ?? 0)
-      + (updated["ce09c_svalutazioni"] ?? original["ce09c_svalutazioni"] ?? 0)
-      + (updated["ce09d_svalutazione_crediti"] ?? original["ce09d_svalutazione_crediti"] ?? 0);
-
-    // Recalculate ce17_rettifiche_attivita_fin = rivalutazioni - svalutazioni
-    updated["ce17_rettifiche_attivita_fin"] = (updated["ce17a_rivalutazioni"] ?? original["ce17a_rivalutazioni"] ?? 0)
-      - (updated["ce17b_svalutazioni"] ?? original["ce17b_svalutazioni"] ?? 0);
-
-    // Recalculate sp13_utile_perdita from CE net profit
-    const ceVal = (k: string) => updated[k] ?? original[k] ?? 0;
-    const vp = ceVal("ce01_ricavi_vendite") + ceVal("ce02_variazioni_rimanenze")
-      + ceVal("ce03_lavori_interni") + ceVal("ce04_altri_ricavi");
-    const costs = ceVal("ce05_materie_prime") + ceVal("ce06_servizi")
-      + ceVal("ce07_godimento_beni") + ceVal("ce08_costi_personale")
-      + ceVal("ce09_ammortamenti") + ceVal("ce10_var_rimanenze_mat_prime")
-      + ceVal("ce11_accantonamenti") + ceVal("ce11b_altri_accantonamenti")
-      + ceVal("ce12_oneri_diversi");
-    const ebit = vp - costs;
-    const financial = ceVal("ce13_proventi_partecipazioni") + ceVal("ce14_altri_proventi_finanziari")
-      - ceVal("ce15_oneri_finanziari") + ceVal("ce16_utili_perdite_cambi");
-    const rettifiche = ceVal("ce17_rettifiche_attivita_fin");
-    const straord = ceVal("ce18_proventi_straordinari") - ceVal("ce19_oneri_straordinari");
-    const netProfit = ebit + financial + rettifiche + straord - ceVal("ce20_imposte");
-    updated["sp13_utile_perdita"] = Math.round(netProfit * 100) / 100;
+    // Only recalculate sp13 (P&L result → BS) if a CE field was edited
+    if (CE_FIELDS.includes(field)) {
+      const ceVal = (k: string) => updated[k] ?? original[k] ?? 0;
+      const vp = ceVal("ce01_ricavi_vendite") + ceVal("ce02_variazioni_rimanenze")
+        + ceVal("ce03_lavori_interni") + ceVal("ce04_altri_ricavi");
+      const costs = ceVal("ce05_materie_prime") + ceVal("ce06_servizi")
+        + ceVal("ce07_godimento_beni") + ceVal("ce08_costi_personale")
+        + ceVal("ce09_ammortamenti") + ceVal("ce10_var_rimanenze_mat_prime")
+        + ceVal("ce11_accantonamenti") + ceVal("ce11b_altri_accantonamenti")
+        + ceVal("ce12_oneri_diversi");
+      const ebit = vp - costs;
+      const financial = ceVal("ce13_proventi_partecipazioni") + ceVal("ce14_altri_proventi_finanziari")
+        - ceVal("ce15_oneri_finanziari") + ceVal("ce16_utili_perdite_cambi");
+      const rettifiche = ceVal("ce17_rettifiche_attivita_fin");
+      const straord = ceVal("ce18_proventi_straordinari") - ceVal("ce19_oneri_straordinari");
+      const netProfit = ebit + financial + rettifiche + straord - ceVal("ce20_imposte");
+      updated["sp13_utile_perdita"] = Math.round(netProfit * 100) / 100;
+    }
 
     setCorrections(updated);
+  };
+
+  // Helper: recalculate all sub-field aggregates + sp13 on a corrections snapshot
+  const recalcAggregates = (corr: Record<string, number>): Record<string, number> => {
+    const u = { ...corr };
+    // Delta-based: parent = original_parent + sum(sub_field_deltas)
+    const applyDelta = (details: string[], parent: string) => {
+      const totalDelta = details.reduce((s, k) => {
+        const orig = original[k] ?? 0;
+        const curr = u[k] ?? orig;
+        return s + (curr - orig);
+      }, 0);
+      u[parent] = (original[parent] ?? 0) + totalDelta;
+    };
+    applyDelta(SP05_DETAILS, "sp05_rimanenze");
+    applyDelta(SP06_DETAILS, "sp06_crediti_breve");
+    applyDelta(SP07_DETAILS, "sp07_crediti_lungo");
+    applyDelta(CE08_DETAILS, "ce08_costi_personale");
+    applyDelta(SP16_DETAILS, "sp16_debiti_breve");
+    applyDelta(SP17_DETAILS, "sp17_debiti_lungo");
+    applyDelta(CE09_DETAILS, "ce09_ammortamenti");
+    // ce17: rivalutazioni - svalutazioni
+    const d17a = (u["ce17a_rivalutazioni"] ?? original["ce17a_rivalutazioni"] ?? 0) - (original["ce17a_rivalutazioni"] ?? 0);
+    const d17b = (u["ce17b_svalutazioni"] ?? original["ce17b_svalutazioni"] ?? 0) - (original["ce17b_svalutazioni"] ?? 0);
+    u["ce17_rettifiche_attivita_fin"] = (original["ce17_rettifiche_attivita_fin"] ?? 0) + d17a - d17b;
+    // sp13 from P&L — Risultato calculated first in CE, then set in SP
+    const cv = (k: string) => u[k] ?? original[k] ?? 0;
+    const vp = cv("ce01_ricavi_vendite") + cv("ce02_variazioni_rimanenze")
+      + cv("ce03_lavori_interni") + cv("ce04_altri_ricavi");
+    const costs = cv("ce05_materie_prime") + cv("ce06_servizi") + cv("ce07_godimento_beni")
+      + cv("ce08_costi_personale") + cv("ce09_ammortamenti") + cv("ce10_var_rimanenze_mat_prime")
+      + cv("ce11_accantonamenti") + cv("ce11b_altri_accantonamenti") + cv("ce12_oneri_diversi");
+    const ebit = vp - costs;
+    const fin = cv("ce13_proventi_partecipazioni") + cv("ce14_altri_proventi_finanziari")
+      - cv("ce15_oneri_finanziari") + cv("ce16_utili_perdite_cambi");
+    const rett = cv("ce17_rettifiche_attivita_fin");
+    const str = cv("ce18_proventi_straordinari") - cv("ce19_oneri_straordinari");
+    u["sp13_utile_perdita"] = Math.round((ebit + fin + rett + str - cv("ce20_imposte")) * 100) / 100;
+    return u;
+  };
+
+  // Compute double-entry proposals from user edits.
+  // Only proposes the INCREMENTAL amount not yet covered by the counterpart's current delta.
+  // This prevents re-proposing already-approved entries.
+  const computeProposals = (): DoubleEntryProposal[] => {
+    const result: DoubleEntryProposal[] = [];
+    for (const rule of PROPOSAL_RULES) {
+      const origEditable = original[rule.editable] ?? 0;
+      const corrEditable = corrections[rule.editable] ?? origEditable;
+      const editDelta = corrEditable - origEditable;
+      if (Math.abs(editDelta) < 0.01) continue;
+
+      // What the counterpart delta SHOULD be based on the current edit
+      const expectedCounterpartDelta = rule.direction === "same" ? editDelta : -editDelta;
+      // What the counterpart delta ALREADY is (from prior approvals or manual edits)
+      const origCounterpart = original[rule.counterpart] ?? 0;
+      const corrCounterpart = corrections[rule.counterpart] ?? origCounterpart;
+      const currentCounterpartDelta = corrCounterpart - origCounterpart;
+
+      // Only propose the remaining amount not yet applied
+      // For split rules, also account for the alt field's delta
+      let alreadyApplied = currentCounterpartDelta;
+      if (rule.splitAlt) {
+        const origAlt = original[rule.splitAlt.field] ?? 0;
+        const corrAlt = corrections[rule.splitAlt.field] ?? origAlt;
+        alreadyApplied += (corrAlt - origAlt);
+      }
+
+      // How much is still needed? (accounting for direction)
+      const remaining = expectedCounterpartDelta - alreadyApplied;
+      if (Math.abs(remaining) < 0.01) continue; // fully covered already
+
+      result.push({
+        id: result.length,
+        editedField: rule.editable,
+        editedLabel: RETTIFICHE_LABELS[rule.editable] ?? rule.editable,
+        delta: editDelta,
+        counterpartField: rule.counterpart,
+        counterpartLabel: RETTIFICHE_LABELS[rule.counterpart] ?? rule.counterpart,
+        proposedDelta: remaining,
+        accepted: true,
+        explanation: rule.explanation,
+        splitAlt: rule.splitAlt ? {
+          field: rule.splitAlt.field,
+          label: rule.splitAlt.label,
+          amount: 0,
+        } : undefined,
+      });
+    }
+    return result;
+  };
+
+  // Called when user clicks "Applica Rettifiche"
+  const handleApplyClick = () => {
+    const computed = computeProposals();
+    setProposals(computed);
+    setShowProposalDialog(true);
+  };
+
+  // Called when user confirms proposals in dialog
+  const applyProposalsAndSave = () => {
+    const updated = { ...corrections };
+    // Apply accepted proposals as counterpart changes
+    // Group by counterpart to accumulate multiple proposals targeting the same field
+    const counterpartDeltas: Record<string, number> = {};
+    for (const p of proposals) {
+      if (!p.accepted) continue;
+      // If split: main counterpart gets (proposedDelta - splitAlt.amount), alt gets splitAlt.amount
+      if (p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01) {
+        const mainAmount = p.proposedDelta - p.splitAlt.amount;
+        counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + mainAmount;
+        counterpartDeltas[p.splitAlt.field] = (counterpartDeltas[p.splitAlt.field] ?? 0) + p.splitAlt.amount;
+      } else {
+        counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + p.proposedDelta;
+      }
+    }
+    for (const [field, totalDelta] of Object.entries(counterpartDeltas)) {
+      const origVal = original[field] ?? 0;
+      updated[field] = origVal + totalDelta;
+    }
+    // Recalculate all aggregates and sp13
+    const final = recalcAggregates(updated);
+    setCorrections(final);
+    setShowProposalDialog(false);
+    // Pass final corrections directly (React state is async)
+    onSave(final);
+  };
+
+  // Save without applying any counterpart proposals
+  const saveWithoutProposals = () => {
+    setShowProposalDialog(false);
+    onSave();
   };
 
   // Compute totals
@@ -1260,15 +1493,33 @@ function RettificheTab({
             )}
           </div>
 
+          {/* Sentinel: when this scrolls out of view, show the sticky header */}
+          <div ref={sentinelRef} />
+
+          {/* Sticky column header bar */}
+          {showStickyHeader && (
+            <div className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b shadow-sm">
+              <div className="max-w-screen-xl mx-auto px-4">
+                <div className="flex items-center h-9 text-xs font-medium text-muted-foreground">
+                  <span className="flex-1">Voce</span>
+                  {hasRef && <span className="w-28 text-right">{referenceYear}</span>}
+                  <span className="w-28 text-right">{periodEndDate}</span>
+                  <span className="w-28 text-right">Rettifica</span>
+                  <span className="w-32 text-right">{periodEndDate} Rett.</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="border rounded-lg overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs">Voce</TableHead>
                   {hasRef && <TableHead className="text-xs text-right">{referenceYear}</TableHead>}
-                  <TableHead className="text-xs text-right">Originale</TableHead>
+                  <TableHead className="text-xs text-right">{periodEndDate}</TableHead>
                   <TableHead className="text-xs text-right">Rettifica</TableHead>
-                  <TableHead className="text-xs text-right">Rettificato</TableHead>
+                  <TableHead className="text-xs text-right">{periodEndDate} Rett.</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1281,7 +1532,7 @@ function RettificheTab({
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums">
                     {formatEuro(ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + (original[k] ?? 0), 0))}
                   </TableCell>
-                  <TableCell />
+                  <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/40">-</TableCell>
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-semibold">
                     {formatEuro(totalAttivo)}
                   </TableCell>
@@ -1379,7 +1630,7 @@ function RettificheTab({
                       <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground">
                         {formatEuro(origDebtTotal)}
                       </TableCell>
-                      <TableCell />
+                      <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/40">-</TableCell>
                       <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-medium">
                         {formatEuro(corrDebtTotal)}
                       </TableCell>
@@ -1398,7 +1649,7 @@ function RettificheTab({
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums">
                     {formatEuro(PASSIVO_TOTAL_FIELDS.reduce((s, k) => s + (original[k] ?? 0), 0))}
                   </TableCell>
-                  <TableCell />
+                  <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/40">-</TableCell>
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-semibold">
                     {formatEuro(totalPassivo)}
                   </TableCell>
@@ -1414,9 +1665,9 @@ function RettificheTab({
                 <TableRow>
                   <TableHead className="text-xs">Voce</TableHead>
                   {hasRef && <TableHead className="text-xs text-right">{referenceYear}</TableHead>}
-                  <TableHead className="text-xs text-right">Originale</TableHead>
+                  <TableHead className="text-xs text-right">{periodEndDate}</TableHead>
                   <TableHead className="text-xs text-right">Rettifica</TableHead>
-                  <TableHead className="text-xs text-right">Rettificato</TableHead>
+                  <TableHead className="text-xs text-right">{periodEndDate} Rett.</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1425,12 +1676,17 @@ function RettificheTab({
                   const ceV = (k: string) => corrections[k] ?? original[k] ?? 0;
                   const origV = (k: string) => original[k] ?? 0;
 
-                  const resultRow = (label: string, origVal: number, corrVal: number, bold = false) => {
+                  const resultRow = (label: string, refValue: number, origVal: number, corrVal: number, bold = false) => {
                     const delta = corrVal - origVal;
                     const hasDelta = Math.abs(delta) > 0.01;
                     return (
                       <TableRow key={label} className={cn(bold && "bg-muted font-semibold")}>
                         <TableCell className={cn("text-xs py-1.5", bold && "font-semibold")}>{label}</TableCell>
+                        {hasRef && (
+                          <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/50">
+                            {formatEuro(refValue)}
+                          </TableCell>
+                        )}
                         <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground">
                           {formatEuro(origVal)}
                         </TableCell>
@@ -1451,49 +1707,58 @@ function RettificheTab({
                   const sumF = (keys: string[], fn: (k: string) => number) => keys.reduce((s, k) => s + fn(k), 0);
                   const vp = sumF(CE_A, ceV);
                   const origVp = sumF(CE_A, origV);
+                  const refVp = sumF(CE_A, refVal);
                   const costMainKeys = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
                     "ce08_costi_personale", "ce09_ammortamenti", "ce10_var_rimanenze_mat_prime",
                     "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi"];
                   const costs = sumF(costMainKeys, ceV);
                   const origCosts = sumF(costMainKeys, origV);
+                  const refCosts = sumF(costMainKeys, refVal);
                   const ebit = vp - costs;
                   const origEbit = origVp - origCosts;
+                  const refEbit = refVp - refCosts;
                   const fin = ceV("ce13_proventi_partecipazioni") + ceV("ce14_altri_proventi_finanziari")
                     - ceV("ce15_oneri_finanziari") + ceV("ce16_utili_perdite_cambi");
                   const origFin = origV("ce13_proventi_partecipazioni") + origV("ce14_altri_proventi_finanziari")
                     - origV("ce15_oneri_finanziari") + origV("ce16_utili_perdite_cambi");
+                  const refFinVal = refVal("ce13_proventi_partecipazioni") + refVal("ce14_altri_proventi_finanziari")
+                    - refVal("ce15_oneri_finanziari") + refVal("ce16_utili_perdite_cambi");
                   const rett = ceV("ce17_rettifiche_attivita_fin");
                   const origRett = origV("ce17_rettifiche_attivita_fin");
+                  const refRett = refVal("ce17_rettifiche_attivita_fin");
                   const straord = ceV("ce18_proventi_straordinari") - ceV("ce19_oneri_straordinari");
                   const origStraord = origV("ce18_proventi_straordinari") - origV("ce19_oneri_straordinari");
+                  const refStraord = refVal("ce18_proventi_straordinari") - refVal("ce19_oneri_straordinari");
                   const pbt = ebit + fin + rett + straord;
                   const origPbt = origEbit + origFin + origRett + origStraord;
+                  const refPbt = refEbit + refFinVal + refRett + refStraord;
                   const netProfit = pbt - ceV("ce20_imposte");
                   const origNetProfit = origPbt - origV("ce20_imposte");
+                  const refNetProfit = refPbt - refVal("ce20_imposte");
                   const sp13 = val("sp13_utile_perdita");
                   const ceSpMatch = Math.abs(netProfit - sp13) < 1;
 
                   return (
                     <>
                       {renderSection("A) VALORE DELLA PRODUZIONE", CE_A, true)}
-                      {resultRow("Totale valore della produzione", origVp, vp, false)}
+                      {resultRow("Totale valore della produzione", refVp, origVp, vp, false)}
                       {renderSection("B) COSTI DELLA PRODUZIONE", CE_B, true)}
-                      {resultRow("Totale costi della produzione", origCosts, costs, false)}
-                      {resultRow("Differenza tra valore e costi della produzione (A - B)", origEbit, ebit, true)}
+                      {resultRow("Totale costi della produzione", refCosts, origCosts, costs, false)}
+                      {resultRow("Differenza tra valore e costi della produzione (A - B)", refEbit, origEbit, ebit, true)}
                       {renderSection("C) PROVENTI E ONERI FINANZIARI", CE_C, true)}
-                      {resultRow("Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", origFin, fin, false)}
+                      {resultRow("Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", refFinVal, origFin, fin, false)}
                       {renderSection("D) RETTIFICHE DI VALORE DI ATTIVITÀ E PASSIVITÀ FINANZIARIE", CE_D, true)}
                       {renderSection("E) PROVENTI E ONERI STRAORDINARI", CE_E, true)}
-                      {resultRow("Risultato prima delle imposte (A - B +/- C +/- D +/- E)", origPbt, pbt, true)}
+                      {resultRow("Risultato prima delle imposte (A - B +/- C +/- D +/- E)", refPbt, origPbt, pbt, true)}
                       {renderSection("", CE_IMPOSTE, true)}
-                      {resultRow("21) Utile (perdita) dell'esercizio", origNetProfit, netProfit, true)}
+                      {resultRow("21) Utile (perdita) dell'esercizio", refNetProfit, origNetProfit, netProfit, true)}
                       <TableRow className={cn(
                         "border-t-2",
                         ceSpMatch
                           ? "bg-green-50/50 dark:bg-green-950/10"
                           : "bg-red-50/50 dark:bg-red-950/10"
                       )}>
-                        <TableCell colSpan={3} className="text-xs py-1.5 font-medium">
+                        <TableCell colSpan={hasRef ? 4 : 3} className="text-xs py-1.5 font-medium">
                           Verifica CE ↔ SP: Utile CE = {formatEuro(netProfit)} | SP13 = {formatEuro(sp13)}
                         </TableCell>
                         <TableCell className={cn(
@@ -1524,7 +1789,7 @@ function RettificheTab({
         </div>
         <div className="flex gap-2">
           <Button
-            onClick={onSave}
+            onClick={handleApplyClick}
             disabled={saving}
           >
             {saving ? (
@@ -1540,11 +1805,289 @@ function RettificheTab({
             )}
           </Button>
           <Button variant="outline" onClick={onNext}>
-            {adjustmentsApplied ? "Continua" : "Salta"} <ArrowRight className="h-4 w-4 ml-1.5" />
+            Passa al Confronto <ArrowRight className="h-4 w-4 ml-1.5" />
           </Button>
         </div>
       </div>
+
+      {/* Double-entry review dialog */}
+      <Dialog open={showProposalDialog} onOpenChange={setShowProposalDialog}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Registrazioni in Partita Doppia</DialogTitle>
+            <DialogDescription>
+              Le rettifiche inserite generano le seguenti contropartite contabili.
+              Verifica gli importi proposti, modifica se necessario, o deseleziona le voci da non applicare.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 my-2">
+            {proposals.length === 0 && (
+              <div className="p-4 text-center text-sm text-muted-foreground border rounded-lg border-dashed">
+                Nessuna contropartita automatica proposta per le modifiche effettuate.
+              </div>
+            )}
+            {proposals.map((p, idx) => {
+              const dirLabel = p.delta > 0 ? "+" : "";
+              const cpDirLabel = p.proposedDelta > 0 ? "+" : "";
+              return (
+                <div
+                  key={p.id}
+                  className={cn(
+                    "border rounded-lg p-3 transition-colors",
+                    p.accepted
+                      ? "bg-card border-border"
+                      : "bg-muted/30 border-dashed opacity-60"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      checked={p.accepted}
+                      onCheckedChange={(checked) => {
+                        setProposals(prev => prev.map((pp, i) =>
+                          i === idx ? { ...pp, accepted: !!checked } : pp
+                        ));
+                      }}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      {/* Edited field */}
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-sm font-medium">{p.editedLabel}</span>
+                        <span className={cn(
+                          "text-sm font-mono tabular-nums font-semibold",
+                          p.delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                        )}>
+                          {dirLabel}{formatEuro(p.delta)}
+                        </span>
+                      </div>
+
+                      {/* Arrow + counterpart (with optional split) */}
+                      {p.splitAlt ? (
+                        <>
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-sm text-muted-foreground">{p.counterpartLabel}</span>
+                            <Input
+                              className="h-7 w-36 text-right text-xs font-mono tabular-nums"
+                              value={formatInputNumber(Math.round(p.proposedDelta - (p.splitAlt.amount ?? 0)).toString())}
+                              disabled={!p.accepted}
+                              onChange={(e) => {
+                                const raw = parseInputNumber(e.target.value);
+                                const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                                if (!isNaN(num)) {
+                                  setProposals(prev => prev.map((pp, i) =>
+                                    i === idx ? { ...pp, splitAlt: { ...pp.splitAlt!, amount: pp.proposedDelta - num } } : pp
+                                  ));
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-sm text-muted-foreground">{p.splitAlt.label}</span>
+                            <Input
+                              className="h-7 w-36 text-right text-xs font-mono tabular-nums"
+                              value={formatInputNumber(Math.round(p.splitAlt.amount).toString())}
+                              disabled={!p.accepted}
+                              onChange={(e) => {
+                                const raw = parseInputNumber(e.target.value);
+                                const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                                if (!isNaN(num)) {
+                                  setProposals(prev => prev.map((pp, i) =>
+                                    i === idx ? { ...pp, splitAlt: { ...pp.splitAlt!, amount: num } } : pp
+                                  ));
+                                }
+                              }}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground/60 mt-0.5 ml-6">
+                            Totale: {formatEuro(p.proposedDelta)}
+                          </p>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-sm text-muted-foreground">{p.counterpartLabel}</span>
+                          <Input
+                            className="h-7 w-36 text-right text-xs font-mono tabular-nums"
+                            value={formatInputNumber(Math.round(p.proposedDelta).toString())}
+                            disabled={!p.accepted}
+                            onChange={(e) => {
+                              const raw = parseInputNumber(e.target.value);
+                              const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                              if (!isNaN(num)) {
+                                setProposals(prev => prev.map((pp, i) =>
+                                  i === idx ? { ...pp, proposedDelta: num } : pp
+                                ));
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Explanation */}
+                      <p className="text-xs text-muted-foreground mt-1 italic">
+                        {p.explanation}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Preview: P&L result after proposals */}
+          {(() => {
+            const preview = { ...corrections };
+            const counterpartDeltas: Record<string, number> = {};
+            for (const p of proposals) {
+              if (!p.accepted) continue;
+              if (p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01) {
+                counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + (p.proposedDelta - p.splitAlt.amount);
+                counterpartDeltas[p.splitAlt.field] = (counterpartDeltas[p.splitAlt.field] ?? 0) + p.splitAlt.amount;
+              } else {
+                counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + p.proposedDelta;
+              }
+            }
+            for (const [field, totalDelta] of Object.entries(counterpartDeltas)) {
+              preview[field] = (original[field] ?? 0) + totalDelta;
+            }
+            const final = recalcAggregates(preview);
+            const origNetProfit = (() => {
+              const ov = (k: string) => original[k] ?? 0;
+              const vp = ov("ce01_ricavi_vendite") + ov("ce02_variazioni_rimanenze") + ov("ce03_lavori_interni") + ov("ce04_altri_ricavi");
+              const c = ov("ce05_materie_prime") + ov("ce06_servizi") + ov("ce07_godimento_beni") + ov("ce08_costi_personale")
+                + ov("ce09_ammortamenti") + ov("ce10_var_rimanenze_mat_prime") + ov("ce11_accantonamenti") + ov("ce11b_altri_accantonamenti") + ov("ce12_oneri_diversi");
+              const f = ov("ce13_proventi_partecipazioni") + ov("ce14_altri_proventi_finanziari") - ov("ce15_oneri_finanziari") + ov("ce16_utili_perdite_cambi");
+              const r = ov("ce17_rettifiche_attivita_fin");
+              const s = ov("ce18_proventi_straordinari") - ov("ce19_oneri_straordinari");
+              return (vp - c) + f + r + s - ov("ce20_imposte");
+            })();
+            const newNetProfit = final["sp13_utile_perdita"];
+            const ATTIVO_F = ["sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
+              "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve",
+              "sp07_crediti_lungo", "sp08_attivita_finanziarie", "sp09_disponibilita_liquide", "sp10_ratei_risconti_attivi"];
+            const PASSIVO_F = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
+              "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve", "sp17_debiti_lungo", "sp18_ratei_risconti_passivi"];
+            const fv = (k: string) => final[k] ?? original[k] ?? 0;
+            const tA = ATTIVO_F.reduce((s, k) => s + fv(k), 0);
+            const tP = PASSIVO_F.reduce((s, k) => s + fv(k), 0);
+            const balanced = Math.abs(tA - tP) < 1;
+
+            return (
+              <div className={cn(
+                "p-3 rounded-lg border text-sm",
+                balanced
+                  ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                  : "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
+              )}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium">Risultato d&apos;esercizio: </span>
+                    <span className="font-mono tabular-nums">{formatEuro(origNetProfit)}</span>
+                    <ArrowRight className="inline h-3.5 w-3.5 mx-1.5 text-muted-foreground" />
+                    <span className="font-mono tabular-nums font-semibold">{formatEuro(newNetProfit)}</span>
+                  </div>
+                  <div className="text-xs">
+                    {balanced ? (
+                      <span className="text-green-600 dark:text-green-400 font-medium flex items-center gap-1">
+                        <Check className="h-3.5 w-3.5" /> Quadrato
+                      </span>
+                    ) : (
+                      <span className="text-yellow-600 dark:text-yellow-400 font-medium">
+                        Attivo {formatEuro(tA)} / Passivo {formatEuro(tP)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            {proposals.length > 0 ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={saveWithoutProposals}>
+                  Salva senza contropartite
+                </Button>
+                <Button variant="outline" onClick={() => setShowProposalDialog(false)}>
+                  Annulla
+                </Button>
+                <Button onClick={applyProposalsAndSave}>
+                  <Check className="h-4 w-4 mr-1.5" />
+                  Conferma e Applica
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setShowProposalDialog(false)}>
+                  Annulla
+                </Button>
+                <Button onClick={saveWithoutProposals}>
+                  <Check className="h-4 w-4 mr-1.5" />
+                  Salva Rettifiche
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+// Reconcile sub-fields with imported aggregates.
+// When imported aggregates don't match the sum of detail sub-fields,
+// allocate the gap to the designated plug field.
+function reconcileSubfields(data: Record<string, number>) {
+  const reconcile = (details: string[], parent: string, plug: string) => {
+    const total = data[parent] ?? 0;
+    const sum = details.reduce((s, k) => s + (data[k] ?? 0), 0);
+    const gap = total - sum;
+    if (Math.abs(gap) > 0.01) {
+      data[plug] = (data[plug] ?? 0) + gap;
+    }
+  };
+
+  // Rimanenze: gap → sp05e_acconti
+  reconcile(
+    ["sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso", "sp05d_prodotti_finiti", "sp05e_acconti"],
+    "sp05_rimanenze", "sp05e_acconti"
+  );
+  // Crediti breve: gap → sp06g_crediti_altri_breve
+  reconcile(
+    ["sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve", "sp06c_crediti_collegate_breve",
+     "sp06d_crediti_controllanti_breve", "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve", "sp06g_crediti_altri_breve"],
+    "sp06_crediti_breve", "sp06g_crediti_altri_breve"
+  );
+  // Crediti lungo: gap → sp07g_crediti_altri_lungo
+  reconcile(
+    ["sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo", "sp07c_crediti_collegate_lungo",
+     "sp07d_crediti_controllanti_lungo", "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo", "sp07g_crediti_altri_lungo"],
+    "sp07_crediti_lungo", "sp07g_crediti_altri_lungo"
+  );
+  // Personale: gap → ce08b_salari_stipendi (main account)
+  reconcile(
+    ["ce08b_salari_stipendi", "ce08c_oneri_sociali", "ce08a_tfr_accrual", "ce08d_altri_costi_personale"],
+    "ce08_costi_personale", "ce08b_salari_stipendi"
+  );
+  // Ammortamenti: gap → ce09c_svalutazioni
+  reconcile(
+    ["ce09a_ammort_immateriali", "ce09b_ammort_materiali", "ce09c_svalutazioni", "ce09d_svalutazione_crediti"],
+    "ce09_ammortamenti", "ce09c_svalutazioni"
+  );
+  // Debiti breve: gap → sp16g_altri_debiti_breve
+  reconcile(
+    ["sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve", "sp16c_debiti_obbligazioni_breve",
+     "sp16d_debiti_fornitori_breve", "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve", "sp16g_altri_debiti_breve"],
+    "sp16_debiti_breve", "sp16g_altri_debiti_breve"
+  );
+  // Debiti lungo: gap → sp17g_altri_debiti_lungo
+  reconcile(
+    ["sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo",
+     "sp17d_debiti_fornitori_lungo", "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo", "sp17g_altri_debiti_lungo"],
+    "sp17_debiti_lungo", "sp17g_altri_debiti_lungo"
   );
 }
 
@@ -1806,22 +2349,21 @@ export default function InfraannualePage() {
       if (refData) {
         setReferenceYearData({ ...refData.balance_sheet, ...refData.income_statement });
       }
-      // Initialize corrections from current BS/IS values
+      // Initialize corrections from SAVED values (balance_sheet/income_statement),
+      // which include any previously applied rettifiche. Original values are used
+      // only for delta display and proposal calculation.
       const initial: Record<string, number> = {};
-      for (const [k, v] of Object.entries(data.balance_sheet)) {
-        initial[k] = v;
-      }
-      for (const [k, v] of Object.entries(data.income_statement)) {
-        initial[k] = v;
-      }
+      for (const [k, v] of Object.entries(data.balance_sheet)) initial[k] = v;
+      for (const [k, v] of Object.entries(data.income_statement)) initial[k] = v;
+      reconcileSubfields(initial);
       setCorrections(initial);
-      // Check if adjustments were already applied (snapshot differs from current)
-      if (data.original_balance_sheet) {
-        const hasDiffs = Object.keys(data.original_balance_sheet).some(
-          (k) => Math.abs((data.original_balance_sheet![k] || 0) - (data.balance_sheet[k] || 0)) > 0.01
-        );
-        setAdjustmentsApplied(hasDiffs);
-      }
+      // Check if adjustments were previously applied (saved values differ from originals)
+      const hasExisting = data.original_balance_sheet && Object.keys(data.balance_sheet).some(k => {
+        const saved = data.balance_sheet[k] ?? 0;
+        const orig = data.original_balance_sheet![k] ?? 0;
+        return Math.abs(saved - orig) > 0.01;
+      });
+      setAdjustmentsApplied(!!hasExisting);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nel caricamento dati";
       toast.error(msg);
@@ -2499,22 +3041,25 @@ export default function InfraannualePage() {
           adjustableData={adjustableData}
           referenceYearData={referenceYearData}
           referenceYear={fiscalYear - 1}
+          periodMonths={periodMonths}
+          fiscalYear={fiscalYear}
           corrections={corrections}
           setCorrections={setCorrections}
           loading={loadingAdjustable}
           saving={savingAdjustments}
           adjustmentsApplied={adjustmentsApplied}
-          onSave={async () => {
+          onSave={async (finalCorrections?: Record<string, number>) => {
             if (!importResult || !adjustableData) return;
             setSavingAdjustments(true);
             try {
+              const corr = finalCorrections ?? corrections;
               const bs: Record<string, number> = {};
               const is_: Record<string, number> = {};
               for (const k of Object.keys(adjustableData.balance_sheet)) {
-                bs[k] = corrections[k] ?? adjustableData.balance_sheet[k];
+                bs[k] = corr[k] ?? adjustableData.balance_sheet[k];
               }
               for (const k of Object.keys(adjustableData.income_statement)) {
-                is_[k] = corrections[k] ?? adjustableData.income_statement[k];
+                is_[k] = corr[k] ?? adjustableData.income_statement[k];
               }
               const result = await saveAdjustments(
                 importResult.companyId,
@@ -2550,6 +3095,7 @@ export default function InfraannualePage() {
               const initial: Record<string, number> = {};
               for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
               for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
+              reconcileSubfields(initial);
               setCorrections(initial);
               setAdjustmentsApplied(false);
               setComparison(null);
@@ -2628,6 +3174,7 @@ export default function InfraannualePage() {
                     periodMonths={comparison.period_months}
                     referenceYear={comparison.reference_year}
                     partialYear={comparison.partial_year}
+                    priorYear={comparison.prior_year}
                     showAnnualized={periodMonths !== 12}
                     showRevenuePct
                   />
@@ -2647,6 +3194,7 @@ export default function InfraannualePage() {
                     periodMonths={comparison.period_months}
                     referenceYear={comparison.reference_year}
                     partialYear={comparison.partial_year}
+                    priorYear={comparison.prior_year}
                     showAnnualized={false}
                   />
                 </CardContent>
@@ -2723,6 +3271,7 @@ export default function InfraannualePage() {
                 periodMonths={comparison.period_months}
                 referenceYear={comparison.reference_year}
                 partialYear={comparison.partial_year}
+                priorYear={comparison.prior_year}
                 showAnnualized
               />
             </CardContent>
@@ -2873,6 +3422,7 @@ function ComparisonTable({
   periodMonths,
   referenceYear,
   partialYear,
+  priorYear,
   showAnnualized,
   showRevenuePct = false,
 }: {
@@ -2880,10 +3430,12 @@ function ComparisonTable({
   periodMonths: number;
   referenceYear: number;
   partialYear: number;
+  priorYear: number | null;
   showAnnualized: boolean;
   showRevenuePct?: boolean;
 }) {
   const expectedPct = (periodMonths / 12) * 100;
+  const hasPriorYear = priorYear != null && items.some((i) => i.prior_value !== 0);
 
   // Revenue values for % computation
   const partialRevenue = showRevenuePct
@@ -2892,13 +3444,18 @@ function ComparisonTable({
   const refRevenue = showRevenuePct
     ? (items.find((i) => i.code === "ce01_ricavi_vendite")?.reference_value ?? 0)
     : 0;
+  const priorRevenue = showRevenuePct && hasPriorYear
+    ? (items.find((i) => i.code === "ce01_ricavi_vendite")?.prior_value ?? 0)
+    : 0;
 
   const pctOnRevenue = (value: number, revenue: number) =>
     revenue !== 0 ? (value / revenue) * 100 : 0;
 
   // Column date labels
+  const priorDate = priorYear ? `31/12/${priorYear}` : "";
   const refDate = `31/12/${referenceYear}`;
-  const partialDate = `${String(periodMonths).padStart(2, "0")}/${partialYear}`;
+  const lastDay = new Date(partialYear, periodMonths, 0).getDate();
+  const partialDate = `${lastDay}/${String(periodMonths).padStart(2, "0")}/${partialYear}`;
   const projDate = `31/12/${partialYear}`;
 
   // Revenue for annualized % computation
@@ -2915,6 +3472,11 @@ function ComparisonTable({
         {/* Row 1: Category labels */}
         <TableRow className="border-b-0">
           <TableHead rowSpan={2} className="align-bottom">Voce</TableHead>
+          {hasPriorYear && (
+            <TableHead colSpan={colSpan} className="text-center pb-0 text-muted-foreground text-xs font-normal">
+              Storico
+            </TableHead>
+          )}
           <TableHead colSpan={colSpan} className="text-center pb-0 text-muted-foreground text-xs font-normal">
             Storico
           </TableHead>
@@ -2932,6 +3494,12 @@ function ComparisonTable({
         </TableRow>
         {/* Row 2: Dates */}
         <TableRow>
+          {hasPriorYear && (
+            <TableHead className="text-right text-xs font-semibold">{priorDate}</TableHead>
+          )}
+          {hasPriorYear && showRevenuePct && (
+            <TableHead className="text-right text-xs text-muted-foreground w-14">%</TableHead>
+          )}
           <TableHead className="text-right text-xs font-semibold">{refDate}</TableHead>
           {showRevenuePct && <TableHead className="text-right text-xs text-muted-foreground w-14">%</TableHead>}
           <TableHead className="text-right text-xs font-semibold">{partialDate}</TableHead>
@@ -2951,7 +3519,8 @@ function ComparisonTable({
             (item) =>
               ALWAYS_SHOW_CODES.has(item.code) ||
               item.partial_value !== 0 ||
-              item.reference_value !== 0
+              item.reference_value !== 0 ||
+              item.prior_value !== 0
           )
           .map((item) => {
             const isHeader = item.code.startsWith("_hdr_");
@@ -2963,8 +3532,8 @@ function ComparisonTable({
 
             // Section headers: bold label spanning all columns
             if (isHeader) {
-              // Count total columns: 1 (label) + colSpan (ref) + colSpan (partial) + [colSpan (ann)] + 1 (delta)
-              const totalCols = 1 + colSpan + colSpan + (showAnnualized ? colSpan : 0) + 1;
+              // Count total columns: 1 (label) + [colSpan (prior)] + colSpan (ref) + colSpan (partial) + [colSpan (ann)] + 1 (delta)
+              const totalCols = 1 + (hasPriorYear ? colSpan : 0) + colSpan + colSpan + (showAnnualized ? colSpan : 0) + 1;
               return (
                 <TableRow key={item.code} className="bg-muted hover:bg-muted">
                   <TableCell colSpan={totalCols} className="text-sm font-bold py-2">
@@ -2984,6 +3553,17 @@ function ComparisonTable({
                 <TableCell className={cn("text-sm", isSubtotal ? "font-semibold" : "font-medium")}>
                   {item.label}
                 </TableCell>
+                {/* Prior year (anno precedente) */}
+                {hasPriorYear && (
+                  <TableCell className="text-right text-sm text-muted-foreground">
+                    {isPctRow ? formatPct(item.prior_value) : formatEuro(item.prior_value)}
+                  </TableCell>
+                )}
+                {hasPriorYear && showRevenuePct && (
+                  <TableCell className="text-right text-xs text-muted-foreground">
+                    {!isPctRow && formatPct(pctOnRevenue(item.prior_value, priorRevenue))}
+                  </TableCell>
+                )}
                 {/* Reference (historical) */}
                 <TableCell className="text-right text-sm text-muted-foreground">
                   {isPctRow ? formatPct(item.reference_value) : formatEuro(item.reference_value)}
@@ -3071,7 +3651,8 @@ function ProjectionTable({
   onOverrideChange: (code: string, value: string) => void;
 }) {
   const refDate = `31/12/${referenceYear}`;
-  const partialDate = `${String(periodMonths).padStart(2, "0")}/${partialYear}`;
+  const lastDay = new Date(partialYear, periodMonths, 0).getDate();
+  const partialDate = `${lastDay}/${String(periodMonths).padStart(2, "0")}/${partialYear}`;
   const projDate = `31/12/${partialYear}`;
 
   // Revenue values for % computation
@@ -3158,7 +3739,8 @@ function ProjectionTable({
             (item) =>
               ALWAYS_SHOW_CODES.has(item.code) ||
               item.partial_value !== 0 ||
-              item.reference_value !== 0
+              item.reference_value !== 0 ||
+              item.prior_value !== 0
           )
           .map((item) => {
             const isHeader = item.code.startsWith("_hdr_");

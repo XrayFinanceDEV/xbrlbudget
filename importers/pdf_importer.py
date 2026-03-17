@@ -23,6 +23,41 @@ class PDFImportError(Exception):
     pass
 
 
+# Map short keys from situazione_contabile_parser to full DB field names
+_SC_KEY_MAP = {
+    'sp01': 'sp01_crediti_soci', 'sp02': 'sp02_immob_immateriali', 'sp03': 'sp03_immob_materiali',
+    'sp04': 'sp04_immob_finanziarie', 'sp05': 'sp05_rimanenze',
+    'sp06': 'sp06_crediti_breve', 'sp07': 'sp07_crediti_lungo',
+    'sp08': 'sp08_attivita_finanziarie', 'sp09': 'sp09_disponibilita_liquide',
+    'sp10': 'sp10_ratei_risconti_attivi', 'sp11': 'sp11_capitale', 'sp12': 'sp12_riserve',
+    'sp13': 'sp13_utile_perdita', 'sp14': 'sp14_fondi_rischi', 'sp15': 'sp15_tfr',
+    'sp16': 'sp16_debiti_breve', 'sp17': 'sp17_debiti_lungo',
+    'sp18': 'sp18_ratei_risconti_passivi',
+    'ce01': 'ce01_ricavi_vendite', 'ce02': 'ce02_variazioni_rimanenze',
+    'ce03': 'ce03_lavori_interni', 'ce04': 'ce04_altri_ricavi',
+    'ce05': 'ce05_materie_prime', 'ce06': 'ce06_servizi', 'ce07': 'ce07_godimento_beni',
+    'ce08': 'ce08_costi_personale', 'ce09': 'ce09_ammortamenti',
+    'ce10': 'ce10_var_rimanenze_mat_prime', 'ce11': 'ce11_accantonamenti',
+    'ce11b': 'ce11b_altri_accantonamenti', 'ce12': 'ce12_oneri_diversi',
+    'ce13': 'ce13_proventi_partecipazioni', 'ce14': 'ce14_altri_proventi_finanziari',
+    'ce15': 'ce15_oneri_finanziari', 'ce16': 'ce16_utili_perdite_cambi',
+    'ce17': 'ce17_rettifiche_attivita_fin', 'ce18': 'ce18_proventi_straordinari',
+    'ce19': 'ce19_oneri_straordinari', 'ce20': 'ce20_imposte',
+}
+
+def _map_sc_keys(data: Dict[str, Decimal]) -> Dict[str, Decimal]:
+    """Map short SC parser keys (sp03, ce01) to full DB field names (sp03_immob_materiali)."""
+    result = {}
+    for k, v in data.items():
+        # Already a full key? Pass through.
+        if '_' in k:
+            result[k] = v
+        elif k in _SC_KEY_MAP:
+            result[_SC_KEY_MAP[k]] = v
+        # else: skip (totale_attivo, totale_passivo, etc.)
+    return result
+
+
 def _create_balance_sheet(db, financial_year_id: int, data: Dict[str, Decimal]) -> 'BalanceSheet':
     """Create a BalanceSheet record from a dict of sp01-sp18 values."""
     bs = BalanceSheet(
@@ -156,22 +191,39 @@ def import_pdf_balance_sheet(
         mapper = IVCEEMapper()
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
 
-        # Step 1: Extract PDF data via LLM (requires ANTHROPIC_API_KEY)
+        # Step 1: Detect format and extract PDF data
         prior_bs_data = None
         prior_ce_data = None
-        if not api_key:
-            raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
 
-        logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
-        if period_months:
-            # Dual-year extraction for infrannuale: get both columns
-            from importers.pdf_extractor_llm import extract_pdf_both_years_with_llm
-            logger.info(f"Dual-year extraction (period_months={period_months})")
-            balance_sheet_data, income_data, prior_bs_data, prior_ce_data = extract_pdf_both_years_with_llm(file_path)
+        # Auto-detect Situazione Contabile (trial balance) format
+        import fitz
+        from importers.situazione_contabile_parser import is_situazione_contabile, extract_situazione_contabile
+        doc = fitz.open(file_path)
+        sample_text = "".join(page.get_text() for page in doc[:3])
+        doc.close()
+        is_trial_balance = is_situazione_contabile(sample_text)
+
+        if is_trial_balance:
+            logger.info("Situazione Contabile format detected — using deterministic parser")
+            sc_bs, sc_ce = extract_situazione_contabile(file_path)
+            # SC parser returns short keys (sp03, ce01); map to full DB field names
+            balance_sheet_data = _map_sc_keys(sc_bs)
+            income_data = _map_sc_keys(sc_ce)
         else:
-            # Single-year extraction for budget
-            from importers.pdf_extractor_llm import extract_pdf_with_llm
-            balance_sheet_data, income_data = extract_pdf_with_llm(file_path)
+            # IV CEE format — use LLM extraction
+            if not api_key:
+                raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
+
+            logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
+            if period_months:
+                # Dual-year extraction for infrannuale: get both columns
+                from importers.pdf_extractor_llm import extract_pdf_both_years_with_llm
+                logger.info(f"Dual-year extraction (period_months={period_months})")
+                balance_sheet_data, income_data, prior_bs_data, prior_ce_data = extract_pdf_both_years_with_llm(file_path)
+            else:
+                # Single-year extraction for budget
+                from importers.pdf_extractor_llm import extract_pdf_with_llm
+                balance_sheet_data, income_data = extract_pdf_with_llm(file_path)
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
@@ -318,7 +370,7 @@ def import_pdf_balance_sheet(
         db.commit()
 
         extraction_time = (datetime.utcnow() - extraction_start).total_seconds()
-        extraction_method = "llm"
+        extraction_method = "situazione_contabile" if is_trial_balance else "llm"
 
         logger.info(
             f"PDF import successful: company={company.name}, "

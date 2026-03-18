@@ -17,8 +17,11 @@ COPY database/ database/
 COPY calculations/ calculations/
 COPY importers/ importers/
 COPY pdf_service/ pdf_service/
-COPY data/ data/
 COPY backend/ backend/
+
+# Stage data files (taxonomy, rating tables) outside volume mount path
+# The entrypoint will sync these to /app/data on every startup
+COPY data/ /app/data-staging/
 
 # Data directory for SQLite volume mount
 RUN mkdir -p /app/data

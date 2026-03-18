@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Sync code data files (taxonomy, rating tables) from staging to volume
+# This ensures the volume always has the latest versions after each deploy
+if [ -d /app/data-staging ]; then
+    echo "Syncing data files to volume..."
+    cp -f /app/data-staging/* /app/data/ 2>/dev/null || true
+fi
+
 # Initialize database if it doesn't exist
 if [ ! -f "${DATABASE_PATH:-/app/data/financial_analysis.db}" ]; then
     echo "Initializing database..."

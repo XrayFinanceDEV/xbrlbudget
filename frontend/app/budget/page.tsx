@@ -49,6 +49,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
@@ -65,8 +66,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/page-header";
 
+// Round percentage values to 1 decimal to avoid showing e.g. "11,000000"
+const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
+  parseFloat((Number(v ?? fallback)).toFixed(1));
+
 export default function BudgetPage() {
-  const { selectedCompanyId, years } = useApp();
+  const { selectedCompanyId, selectedCompany, years } = useApp();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -167,6 +172,7 @@ export default function BudgetPage() {
           <ScenariosList
             scenarios={scenarios}
             loading={loading}
+            companyName={selectedCompany?.name ?? null}
             onEdit={handleEditScenario}
             onDelete={handleDeleteScenario}
             onRegenerate={handleRegenerateScenario}
@@ -194,12 +200,14 @@ export default function BudgetPage() {
 function ScenariosList({
   scenarios,
   loading,
+  companyName,
   onEdit,
   onDelete,
   onRegenerate,
 }: {
   scenarios: BudgetScenario[];
   loading: boolean;
+  companyName: string | null;
   onEdit: (scenario: BudgetScenario) => void;
   onDelete: (id: number) => void;
   onRegenerate: (id: number) => void;
@@ -232,6 +240,9 @@ function ScenariosList({
           <CardContent className="p-6">
             <div className="flex items-start justify-between">
               <div className="flex-1">
+                {companyName && (
+                  <Badge variant="secondary" className="mb-2">{companyName}</Badge>
+                )}
                 <h3 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
                   {scenario.is_active ? (
                     <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
@@ -1033,7 +1044,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.revenue_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.revenue_growth_pct)}
                   onChange={(e) => onUpdate(year, "revenue_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1063,7 +1074,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.other_revenue_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.other_revenue_growth_pct)}
                   onChange={(e) => onUpdate(year, "other_revenue_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1096,7 +1107,7 @@ function CEAssumptionsTable({
                   step="1"
                   min="0"
                   max="100"
-                  value={assumptions[year]?.fixed_materials_percentage ?? 0}
+                  value={fmtPct(assumptions[year]?.fixed_materials_percentage)}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
                     onUpdate(year, "fixed_materials_percentage", isNaN(val) ? 0 : val);
@@ -1129,7 +1140,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.variable_materials_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.variable_materials_growth_pct)}
                   onChange={(e) => onUpdate(year, "variable_materials_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1159,7 +1170,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.fixed_materials_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.fixed_materials_growth_pct)}
                   onChange={(e) => onUpdate(year, "fixed_materials_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1189,7 +1200,7 @@ function CEAssumptionsTable({
                   step="1"
                   min="0"
                   max="100"
-                  value={assumptions[year]?.fixed_services_percentage ?? 0}
+                  value={fmtPct(assumptions[year]?.fixed_services_percentage)}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
                     onUpdate(year, "fixed_services_percentage", isNaN(val) ? 0 : val);
@@ -1222,7 +1233,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.variable_services_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.variable_services_growth_pct)}
                   onChange={(e) => onUpdate(year, "variable_services_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1252,7 +1263,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.fixed_services_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.fixed_services_growth_pct)}
                   onChange={(e) => onUpdate(year, "fixed_services_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1282,7 +1293,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.rent_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.rent_growth_pct)}
                   onChange={(e) => onUpdate(year, "rent_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1312,7 +1323,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.personnel_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.personnel_growth_pct)}
                   onChange={(e) => onUpdate(year, "personnel_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1342,7 +1353,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="-100"
                   max="100"
-                  value={assumptions[year]?.other_costs_growth_pct || 0}
+                  value={fmtPct(assumptions[year]?.other_costs_growth_pct)}
                   onChange={(e) => onUpdate(year, "other_costs_growth_pct", parseFloat(e.target.value) || 0)}
                   className={inputCls}
                   placeholder="0%"
@@ -1397,7 +1408,7 @@ function CEAssumptionsTable({
                   step="0.1"
                   min="0"
                   max="100"
-                  value={assumptions[year]?.tax_rate || 27.9}
+                  value={fmtPct(assumptions[year]?.tax_rate, 27.9)}
                   onChange={(e) => onUpdate(year, "tax_rate", parseFloat(e.target.value) || 27.9)}
                   className={inputCls}
                   placeholder="27.90%"
@@ -1410,9 +1421,10 @@ function CEAssumptionsTable({
           {/* DETTAGLIO CONTO ECONOMICO Section (collapsible) */}
           <tr className="bg-muted cursor-pointer" onClick={() => setShowCEDetail(!showCEDetail)}>
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
                 {showCEDetail ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 DETTAGLIO CONTO ECONOMICO
+                <span className="text-xs font-normal text-muted-foreground">(inserire importi in €, non %)</span>
               </div>
             </td>
           </tr>
@@ -1447,7 +1459,7 @@ function CEAssumptionsTable({
                       <input
                         type="number"
                         step="100"
-                        value={assumptions[year]?.[field as keyof typeof assumptions[number]] ?? ""}
+                        value={(() => { const v = assumptions[year]?.[field as keyof typeof assumptions[number]]; return v != null ? fmtPct(v as number) : ""; })()}
                         onChange={(e) => {
                           const val = e.target.value;
                           onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);
@@ -1674,7 +1686,7 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="1" min="0" max="100"
-                  value={assumptions[year]?.depreciation_rate || 20}
+                  value={fmtPct(assumptions[year]?.depreciation_rate, 20)}
                   onChange={(e) => onUpdate(year, "depreciation_rate", parseFloat(e.target.value) || 20)}
                   className={inputCls} placeholder="20.00%" title="Percentuale ammortamento (0-100%)" />
               </td>
@@ -1720,7 +1732,7 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="1" min="0" max="100"
-                  value={assumptions[year]?.depreciation_rate || 20}
+                  value={fmtPct(assumptions[year]?.depreciation_rate, 20)}
                   onChange={(e) => onUpdate(year, "depreciation_rate", parseFloat(e.target.value) || 20)}
                   className={inputCls} placeholder="20.00%" title="Percentuale ammortamento (0-100%)" />
               </td>
@@ -1842,7 +1854,7 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="0.1" min="0" max="100"
-                  value={assumptions[year]?.financing_interest_rate || 3}
+                  value={fmtPct(assumptions[year]?.financing_interest_rate, 3)}
                   onChange={(e) => onUpdate(year, "financing_interest_rate", parseFloat(e.target.value) || 3)}
                   className={inputCls} placeholder="3.00%" title="Tasso interesse (0-100%)" />
               </td>
@@ -1885,7 +1897,7 @@ function SPAssumptionsTable({
                   {forecastYears.map((year) => (
                     <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                       <input type="number" step="0.5" min="-100" max="1000"
-                        value={assumptions[year]?.[field as keyof typeof assumptions[number]] ?? ""}
+                        value={(() => { const v = assumptions[year]?.[field as keyof typeof assumptions[number]]; return v != null ? fmtPct(v as number) : ""; })()}
                         onChange={(e) => {
                           const val = e.target.value;
                           onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);
@@ -1926,7 +1938,7 @@ function SPAssumptionsTable({
                   {forecastYears.map((year) => (
                     <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                       <input type="number" step="0.5" min="-100" max="1000"
-                        value={assumptions[year]?.[field as keyof typeof assumptions[number]] ?? ""}
+                        value={(() => { const v = assumptions[year]?.[field as keyof typeof assumptions[number]]; return v != null ? fmtPct(v as number) : ""; })()}
                         onChange={(e) => {
                           const val = e.target.value;
                           onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);

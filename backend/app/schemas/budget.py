@@ -68,10 +68,20 @@ class BudgetAssumptionsBase(BaseModel):
     other_costs_growth_pct: Decimal = Field(default=Decimal("0"))
 
     # Investment and working capital
-    investments: Decimal = Field(default=Decimal("0"))
+    investments: Decimal = Field(default=Decimal("0"))  # Legacy total (ignored if split fields provided)
+    intangible_investments: Decimal = Field(default=Decimal("0"))
+    tangible_investments: Decimal = Field(default=Decimal("0"))
     receivables_short_growth_pct: Decimal = Field(default=Decimal("0"))
     receivables_long_growth_pct: Decimal = Field(default=Decimal("0"))
     payables_short_growth_pct: Decimal = Field(default=Decimal("0"))
+
+    # Working capital turnover days (None = auto-compute from base year)
+    dso_days: Optional[Decimal] = None
+    dio_days: Optional[Decimal] = None
+    dpo_days: Optional[Decimal] = None
+
+    # Existing financial debt repayment (None = keep constant)
+    existing_debt_repayment_years: Optional[Decimal] = None
 
     # Financial parameters
     interest_rate_receivables: Decimal = Field(default=Decimal("0"))
@@ -87,6 +97,21 @@ class BudgetAssumptionsBase(BaseModel):
     financing_amount: Decimal = Field(default=Decimal("0"))
     financing_duration_years: Decimal = Field(default=Decimal("0"))
     financing_interest_rate: Decimal = Field(default=Decimal("0"))
+
+    # SP line item growth % overrides (None = 0% / carry forward unchanged)
+    sp01_growth_pct: Optional[Decimal] = None
+    sp04_growth_pct: Optional[Decimal] = None
+    sp08_growth_pct: Optional[Decimal] = None
+    sp10_growth_pct: Optional[Decimal] = None
+    sp14_growth_pct: Optional[Decimal] = None
+    sp16e_growth_pct: Optional[Decimal] = None
+    sp16f_growth_pct: Optional[Decimal] = None
+    sp16g_growth_pct: Optional[Decimal] = None
+    sp17d_growth_pct: Optional[Decimal] = None
+    sp17e_growth_pct: Optional[Decimal] = None
+    sp17f_growth_pct: Optional[Decimal] = None
+    sp17g_growth_pct: Optional[Decimal] = None
+    sp18_growth_pct: Optional[Decimal] = None
 
     # CE line item overrides (absolute EUR values, None = use base year value)
     ce02_override: Optional[Decimal] = None
@@ -120,9 +145,15 @@ class BudgetAssumptionsUpdate(BaseModel):
     personnel_growth_pct: Optional[Decimal] = None
     other_costs_growth_pct: Optional[Decimal] = None
     investments: Optional[Decimal] = None
+    intangible_investments: Optional[Decimal] = None
+    tangible_investments: Optional[Decimal] = None
     receivables_short_growth_pct: Optional[Decimal] = None
     receivables_long_growth_pct: Optional[Decimal] = None
     payables_short_growth_pct: Optional[Decimal] = None
+    dso_days: Optional[Decimal] = None
+    dio_days: Optional[Decimal] = None
+    dpo_days: Optional[Decimal] = None
+    existing_debt_repayment_years: Optional[Decimal] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None
@@ -132,6 +163,21 @@ class BudgetAssumptionsUpdate(BaseModel):
     financing_amount: Optional[Decimal] = None
     financing_duration_years: Optional[Decimal] = None
     financing_interest_rate: Optional[Decimal] = None
+
+    # SP line item growth % overrides
+    sp01_growth_pct: Optional[Decimal] = None
+    sp04_growth_pct: Optional[Decimal] = None
+    sp08_growth_pct: Optional[Decimal] = None
+    sp10_growth_pct: Optional[Decimal] = None
+    sp14_growth_pct: Optional[Decimal] = None
+    sp16e_growth_pct: Optional[Decimal] = None
+    sp16f_growth_pct: Optional[Decimal] = None
+    sp16g_growth_pct: Optional[Decimal] = None
+    sp17d_growth_pct: Optional[Decimal] = None
+    sp17e_growth_pct: Optional[Decimal] = None
+    sp17f_growth_pct: Optional[Decimal] = None
+    sp17g_growth_pct: Optional[Decimal] = None
+    sp18_growth_pct: Optional[Decimal] = None
 
     # CE line item overrides
     ce02_override: Optional[Decimal] = None

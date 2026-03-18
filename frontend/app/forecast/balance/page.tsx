@@ -433,7 +433,21 @@ function BalanceSheetTable({
     { label: "C) ATTIVO CIRCOLANTE", isSubtotal: true },
     { label: "I - Rimanenze", field: "sp05_rimanenze", indent: true },
     { label: "II - Crediti (entro esercizio successivo)", field: "sp06_crediti_breve", indent: true },
+    { label: "  1) Verso clienti", field: "sp06a_crediti_clienti_breve", indent: true },
+    { label: "  2) Verso imprese controllate", field: "sp06b_crediti_controllate_breve", indent: true },
+    { label: "  3) Verso imprese collegate", field: "sp06c_crediti_collegate_breve", indent: true },
+    { label: "  4) Verso controllanti", field: "sp06d_crediti_controllanti_breve", indent: true },
+    { label: "  5-bis) Crediti tributari", field: "sp06e_crediti_tributari_breve", indent: true },
+    { label: "  5-ter) Imposte anticipate", field: "sp06f_imposte_anticipate_breve", indent: true },
+    { label: "  5-quater) Verso altri", field: "sp06g_crediti_altri_breve", indent: true },
     { label: "II - Crediti (oltre esercizio successivo)", field: "sp07_crediti_lungo", indent: true },
+    { label: "  1) Verso clienti", field: "sp07a_crediti_clienti_lungo", indent: true },
+    { label: "  2) Verso imprese controllate", field: "sp07b_crediti_controllate_lungo", indent: true },
+    { label: "  3) Verso imprese collegate", field: "sp07c_crediti_collegate_lungo", indent: true },
+    { label: "  4) Verso controllanti", field: "sp07d_crediti_controllanti_lungo", indent: true },
+    { label: "  5-bis) Crediti tributari", field: "sp07e_crediti_tributari_lungo", indent: true },
+    { label: "  5-ter) Imposte anticipate", field: "sp07f_imposte_anticipate_lungo", indent: true },
+    { label: "  5-quater) Verso altri", field: "sp07g_crediti_altri_lungo", indent: true },
     { label: "III - Attività finanziarie che non costituiscono immobilizzazioni", field: "sp08_attivita_finanziarie", indent: true },
     { label: "IV - Disponibilità liquide", field: "sp09_disponibilita_liquide", indent: true },
     { label: "Totale Attivo Circolante", field: "current_assets", isSubtotal: true },
@@ -457,7 +471,13 @@ function BalanceSheetTable({
     { label: "C) Trattamento di fine rapporto di lavoro subordinato", field: "sp15_tfr" },
     { label: "D) DEBITI", isSubtotal: true },
     { label: "Debiti (entro esercizio successivo)", field: "sp16_debiti_breve", indent: true },
+    { label: "  Banche", computed: (yd) => (yd.balance_sheet.sp16a_debiti_banche_breve || 0) + (yd.balance_sheet.sp16b_debiti_altri_finanz_breve || 0) + (yd.balance_sheet.sp16c_debiti_obbligazioni_breve || 0), indent: true },
+    { label: "  Fornitori", field: "sp16d_debiti_fornitori_breve", indent: true },
+    { label: "  Altri", computed: (yd) => (yd.balance_sheet.sp16e_debiti_tributari_breve || 0) + (yd.balance_sheet.sp16f_debiti_previdenza_breve || 0) + (yd.balance_sheet.sp16g_altri_debiti_breve || 0), indent: true },
     { label: "Debiti (oltre esercizio successivo)", field: "sp17_debiti_lungo", indent: true },
+    { label: "  Banche", computed: (yd) => (yd.balance_sheet.sp17a_debiti_banche_lungo || 0) + (yd.balance_sheet.sp17b_debiti_altri_finanz_lungo || 0) + (yd.balance_sheet.sp17c_debiti_obbligazioni_lungo || 0), indent: true },
+    { label: "  Fornitori", field: "sp17d_debiti_fornitori_lungo", indent: true },
+    { label: "  Altri", computed: (yd) => (yd.balance_sheet.sp17e_debiti_tributari_lungo || 0) + (yd.balance_sheet.sp17f_debiti_previdenza_lungo || 0) + (yd.balance_sheet.sp17g_altri_debiti_lungo || 0), indent: true },
     { label: "Totale Debiti", field: "total_debt", isSubtotal: true },
     { label: "E) Ratei e risconti passivi", field: "sp18_ratei_risconti_passivi" },
     {
@@ -507,7 +527,13 @@ function BalanceSheetTable({
         </tr>
       </thead>
       <tbody className="bg-card divide-y divide-border">
-        {rows.map((row, index) => {
+        {rows.filter((row) => {
+          // Hide detail subfield rows when no historical year has that detail populated.
+          // This avoids showing mechanical breakdowns from the forecast engine
+          // when the original data (abbreviato) only has aggregate totals.
+          if (!row.field || !row.label.startsWith("  ")) return true;
+          return historicalYears.some((yd) => Math.abs(getVal(yd, row.field!)) >= 0.5);
+        }).map((row, index) => {
           const getValue = (yd: YearData): number | null => {
             if (row.computed) return row.computed(yd);
             if (row.field) return getVal(yd, row.field);
@@ -527,10 +553,10 @@ function BalanceSheetTable({
           return (
             <tr key={index} className={bgClass}>
               <td className={cn(
-                "px-4 py-2 text-sm text-foreground border-r border-border",
-                row.indent && "pl-8"
+                "px-4 py-2 text-sm border-r border-border",
+                row.label.startsWith("  ") ? "pl-12 text-muted-foreground" : row.indent ? "pl-8 text-foreground" : "text-foreground"
               )}>
-                {row.label}
+                {row.label.trimStart()}
               </td>
               {histValues.map((value, i) => (
                 <td

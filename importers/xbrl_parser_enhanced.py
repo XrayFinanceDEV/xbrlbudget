@@ -221,6 +221,8 @@ class EnhancedXBRLParser:
     def extract_entity_info(self, root: etree._Element) -> Dict[str, str]:
         """Extract entity (company) information from XBRL"""
         entity_info = {}
+        partita_iva = None
+        codice_fiscale = None
 
         context = root.find('.//xbrli:context', namespaces=self.XBRL_NAMESPACES)
 
@@ -228,20 +230,36 @@ class EnhancedXBRLParser:
             entity = context.find('.//xbrli:entity', namespaces=self.XBRL_NAMESPACES)
 
             if entity is not None:
+                # Use entity identifier as fallback tax_id
                 identifier = entity.find('.//xbrli:identifier', namespaces=self.XBRL_NAMESPACES)
                 if identifier is not None:
                     entity_info['tax_id'] = identifier.text
 
                 for elem in root.iter():
                     try:
-                        tag_str = etree.QName(elem).localname.lower() if hasattr(elem, 'tag') else ''
+                        local_name = etree.QName(elem).localname if hasattr(elem, 'tag') else ''
                     except:
-                        tag_str = str(elem.tag).lower() if elem.tag else ''
+                        local_name = str(elem.tag) if elem.tag else ''
 
-                    if 'denominazione' in tag_str or 'ragionesociale' in tag_str or 'name' in tag_str:
+                    tag_lower = local_name.lower()
+
+                    if not entity_info.get('name') and ('denominazione' in tag_lower or 'ragionesociale' in tag_lower or 'name' in tag_lower):
                         if elem.text:
                             entity_info['name'] = self.clean_xbrl_text(elem.text)
-                            break
+
+                    # Extract P.IVA and CF from DatiAnagrafici section
+                    if local_name == 'DatiAnagraficiPartitaIva' and elem.text and elem.text.strip():
+                        partita_iva = elem.text.strip()
+                    elif local_name == 'DatiAnagraficiCodiceFiscale' and elem.text and elem.text.strip():
+                        codice_fiscale = elem.text.strip()
+
+        # Prefer CF > P.IVA > entity identifier as tax_id
+        # CF is the permanent unique identifier; P.IVA can change (mergers etc.)
+        # Entity identifier can be a software vendor code (e.g. Wolters Kluwer COMPCODE)
+        if codice_fiscale:
+            entity_info['tax_id'] = codice_fiscale
+        elif partita_iva:
+            entity_info['tax_id'] = partita_iva
 
         return entity_info
 

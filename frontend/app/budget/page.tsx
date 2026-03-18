@@ -105,7 +105,7 @@ export default function BudgetPage() {
 
   const handleEditScenario = (scenario: BudgetScenario) => {
     setEditingScenario(scenario);
-    setActiveTab("create");
+    setActiveTab("info");
   };
 
   const handleScenarioSaved = () => {
@@ -156,28 +156,14 @@ export default function BudgetPage() {
         </Alert>
       )}
 
-      {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => {
-          setActiveTab(value);
-          if (value === "list") {
-            setEditingScenario(null);
-          }
-        }}
-      >
-        <TabsList>
-          <TabsTrigger value="list" className="gap-1.5">
-            <ClipboardList className="h-4 w-4" />
-            Scenari
-          </TabsTrigger>
-          <TabsTrigger value="create" className="gap-1.5">
-            <Plus className="h-4 w-4" />
-            Nuovo Scenario
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="list">
+      {activeTab === "list" ? (
+        <>
+          <div className="flex justify-end mb-4">
+            <Button onClick={() => setActiveTab("info")}>
+              <Plus className="h-4 w-4" />
+              Nuovo Scenario
+            </Button>
+          </div>
           <ScenariosList
             scenarios={scenarios}
             loading={loading}
@@ -185,21 +171,21 @@ export default function BudgetPage() {
             onDelete={handleDeleteScenario}
             onRegenerate={handleRegenerateScenario}
           />
-        </TabsContent>
-
-        <TabsContent value="create">
-          <ScenarioForm
-            companyId={selectedCompanyId}
-            years={years}
-            scenario={editingScenario}
-            onSaved={handleScenarioSaved}
-            onCancel={() => {
-              setEditingScenario(null);
-              setActiveTab("list");
-            }}
-          />
-        </TabsContent>
-      </Tabs>
+        </>
+      ) : (
+        <ScenarioForm
+          companyId={selectedCompanyId}
+          years={years}
+          scenario={editingScenario}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onSaved={handleScenarioSaved}
+          onCancel={() => {
+            setEditingScenario(null);
+            setActiveTab("list");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -329,12 +315,16 @@ function ScenarioForm({
   companyId,
   years,
   scenario,
+  activeTab,
+  setActiveTab,
   onSaved,
   onCancel,
 }: {
   companyId: number;
   years: number[];
   scenario: BudgetScenario | null;
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -398,6 +388,12 @@ function ScenarioForm({
             personnel_growth_pct: a.personnel_growth_pct,
             other_costs_growth_pct: a.other_costs_growth_pct,
             investments: a.investments,
+            intangible_investments: a.intangible_investments,
+            tangible_investments: a.tangible_investments,
+            dso_days: a.dso_days,
+            dio_days: a.dio_days,
+            dpo_days: a.dpo_days,
+            existing_debt_repayment_years: a.existing_debt_repayment_years,
             receivables_short_growth_pct: a.receivables_short_growth_pct,
             receivables_long_growth_pct: a.receivables_long_growth_pct,
             payables_short_growth_pct: a.payables_short_growth_pct,
@@ -408,6 +404,19 @@ function ScenarioForm({
             financing_amount: a.financing_amount,
             financing_duration_years: a.financing_duration_years,
             financing_interest_rate: a.financing_interest_rate,
+            sp01_growth_pct: a.sp01_growth_pct,
+            sp04_growth_pct: a.sp04_growth_pct,
+            sp08_growth_pct: a.sp08_growth_pct,
+            sp10_growth_pct: a.sp10_growth_pct,
+            sp14_growth_pct: a.sp14_growth_pct,
+            sp16e_growth_pct: a.sp16e_growth_pct,
+            sp16f_growth_pct: a.sp16f_growth_pct,
+            sp16g_growth_pct: a.sp16g_growth_pct,
+            sp17d_growth_pct: a.sp17d_growth_pct,
+            sp17e_growth_pct: a.sp17e_growth_pct,
+            sp17f_growth_pct: a.sp17f_growth_pct,
+            sp17g_growth_pct: a.sp17g_growth_pct,
+            sp18_growth_pct: a.sp18_growth_pct,
             ce02_override: a.ce02_override,
             ce03_override: a.ce03_override,
             ce10_override: a.ce10_override,
@@ -443,9 +452,15 @@ function ScenarioForm({
           personnel_growth_pct: 0,
           other_costs_growth_pct: 0,
           investments: 0,
+          intangible_investments: 0,
+          tangible_investments: 0,
           receivables_short_growth_pct: 0,
           receivables_long_growth_pct: 0,
           payables_short_growth_pct: 0,
+          dso_days: null,
+          dio_days: null,
+          dpo_days: null,
+          existing_debt_repayment_years: null,
           tax_rate: 27.9,
           fixed_materials_percentage: 0,
           fixed_services_percentage: 0,
@@ -551,139 +566,138 @@ function ScenarioForm({
   const historicalYears = [...new Set(years)].filter(y => y <= baseYear).sort((a, b) => a - b);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {scenario ? (
-            <>
-              <Pencil className="h-5 w-5" />
-              Modifica Scenario: {scenario.name}
-            </>
-          ) : (
-            <>
-              <Plus className="h-5 w-5" />
-              Nuovo Scenario Budget
-            </>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {/* Scenario Details */}
-        <div className="mb-6">
-          <h3 className="text-lg font-semibold text-foreground mb-3">
+    <div>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="info" className="gap-1.5">
+            <ClipboardList className="h-4 w-4" />
             Informazioni Scenario
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="scenario-name">Nome Scenario *</Label>
-              <Input
-                id="scenario-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="es. Budget 2025-2027"
-              />
-              <p className="text-sm text-muted-foreground flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" />
-                <strong>Anno Base:</strong> {baseYear} (ultimo anno disponibile)
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="scenario-description">Descrizione</Label>
-              <Textarea
-                id="scenario-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Descrizione dello scenario..."
-                rows={2}
-              />
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="scenario-active"
-                  checked={isActive}
-                  onCheckedChange={(checked) => setIsActive(checked === true)}
-                />
-                <Label htmlFor="scenario-active" className="text-sm font-normal">
-                  Scenario Attivo
-                </Label>
+          </TabsTrigger>
+          <TabsTrigger value="ce" className="gap-1.5">
+            <FileSpreadsheet className="h-4 w-4" />
+            Variabili Economiche
+          </TabsTrigger>
+          <TabsTrigger value="sp" className="gap-1.5">
+            <Package className="h-4 w-4" />
+            Variabili Patrimoniali
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="info">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {scenario ? (
+                  <><Pencil className="h-5 w-5" /> Modifica Scenario: {scenario.name}</>
+                ) : (
+                  <><Plus className="h-5 w-5" /> Nuovo Scenario Budget</>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="space-y-2">
+                  <Label htmlFor="scenario-name">Nome Scenario *</Label>
+                  <Input
+                    id="scenario-name"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="es. Budget 2025-2027"
+                  />
+                  <p className="text-sm text-muted-foreground flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5" />
+                    <strong>Anno Base:</strong> {baseYear} (ultimo anno disponibile)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="scenario-description">Descrizione</Label>
+                  <Textarea
+                    id="scenario-description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Descrizione dello scenario..."
+                    rows={2}
+                  />
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="scenario-active"
+                      checked={isActive}
+                      onCheckedChange={(checked) => setIsActive(checked === true)}
+                    />
+                    <Label htmlFor="scenario-active" className="text-sm font-normal">
+                      Scenario Attivo
+                    </Label>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
 
-        <div className="border-t border-border pt-6 mb-6">
-          <Label htmlFor="num-years" className="font-semibold text-foreground">
-            Numero di anni da prevedere
-          </Label>
-          <Input
-            id="num-years"
-            type="number"
-            min={1}
-            max={5}
-            value={numYears}
-            onChange={(e) => setNumYears(parseInt(e.target.value) || 3)}
-            className="w-32 mt-2"
-          />
-        </div>
+              <div className="border-t border-border pt-6 mb-6">
+                <Label htmlFor="num-years" className="font-semibold text-foreground">
+                  Numero di anni da prevedere
+                </Label>
+                <Input
+                  id="num-years"
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={numYears}
+                  onChange={(e) => setNumYears(parseInt(e.target.value) || 3)}
+                  className="w-32 mt-2"
+                />
+              </div>
 
-        {/* Assumptions Table */}
-        <div className="mb-6">
-          <h3 className="text-lg font-semibold text-foreground mb-3">
-            Ipotesi Previsionali
-          </h3>
-          <Alert className="mb-4">
-            <Info className="h-4 w-4" />
-            <AlertDescription>
-              Inserisci le ipotesi per ciascun anno. Le celle evidenziate rappresentano i valori
-              modificabili.
-            </AlertDescription>
-          </Alert>
+              {/* Auto-Generator Card */}
+              <AutoGeneratorCard
+                historicalYears={historicalYears}
+                forecastYears={forecastYears}
+                historicalData={historicalData}
+                inflationRate={inflationRate}
+                setInflationRate={setInflationRate}
+                showAutoGen={showAutoGen}
+                setShowAutoGen={setShowAutoGen}
+                updateAssumption={updateAssumption}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          {/* Auto-Generator Card */}
-          <AutoGeneratorCard
-            historicalYears={historicalYears}
-            forecastYears={forecastYears}
-            historicalData={historicalData}
-            inflationRate={inflationRate}
-            setInflationRate={setInflationRate}
-            showAutoGen={showAutoGen}
-            setShowAutoGen={setShowAutoGen}
-            updateAssumption={updateAssumption}
-          />
-
-          <AssumptionsTable
+        <TabsContent value="ce">
+          <CEAssumptionsTable
             historicalYears={historicalYears}
             forecastYears={forecastYears}
             historicalData={historicalData}
             assumptions={assumptions}
             onUpdate={updateAssumption}
           />
-        </div>
+        </TabsContent>
 
-        {/* Actions */}
-        <div className="flex justify-center gap-4 pt-6 border-t border-border">
-          {scenario && (
-            <Button variant="outline" onClick={onCancel}>
-              <X className="h-4 w-4" />
-              Annulla
-            </Button>
+        <TabsContent value="sp">
+          <SPAssumptionsTable
+            historicalYears={historicalYears}
+            forecastYears={forecastYears}
+            historicalData={historicalData}
+            assumptions={assumptions}
+            onUpdate={updateAssumption}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* Actions - always visible */}
+      <div className="flex justify-center gap-4 pt-6 mt-6 border-t border-border">
+        <Button variant="outline" onClick={onCancel}>
+          <X className="h-4 w-4" />
+          {scenario ? "Annulla" : "Indietro"}
+        </Button>
+        <Button onClick={handleSave} disabled={loading}>
+          {loading ? (
+            <><Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...</>
+          ) : (
+            <><Save className="h-4 w-4" /> Salva e Calcola Previsionale</>
           )}
-          <Button onClick={handleSave} disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Salvataggio...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" />
-                Salva e Calcola Previsionale
-              </>
-            )}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -868,100 +882,129 @@ function AutoGeneratorCard({
 }
 
 // Assumptions Table Component (full version matching design)
-function AssumptionsTable({
-  historicalYears,
-  forecastYears,
-  historicalData,
-  assumptions,
-  onUpdate,
-}: {
+// Shared table props type
+type AssumptionsTableProps = {
   historicalYears: number[];
   forecastYears: number[];
   historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
   assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
   onUpdate: (year: number, field: string, value: number | null) => void;
-}) {
+};
+
+// Shared helper: get historical CE value for display
+function getHistoricalCEValue(
+  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>,
+  year: number,
+  field: string,
+): string {
+  const data = historicalData[year];
+  if (!data) return "\u2014";
+  const income = data.income;
+  switch (field) {
+    case "ce01_ricavi_vendite":
+      return formatCurrency(parseFloat(income.ce01_ricavi_vendite));
+    case "ce04_altri_ricavi":
+      return formatCurrency(parseFloat(income.ce04_altri_ricavi));
+    case "ce05_materie_prime":
+      return formatCurrency(Math.abs(parseFloat(income.ce05_materie_prime)));
+    case "ce06_servizi":
+      return formatCurrency(Math.abs(parseFloat(income.ce06_servizi)));
+    case "ce07_godimento_beni":
+      return formatCurrency(Math.abs(parseFloat(income.ce07_godimento_beni)));
+    case "ce08_costi_personale":
+      return formatCurrency(Math.abs(parseFloat(income.ce08_costi_personale)));
+    case "ce12_oneri_diversi":
+      return formatCurrency(Math.abs(parseFloat(income.ce12_oneri_diversi)));
+    case "ce02_variazioni_rimanenze":
+      return formatCurrency(parseFloat(income.ce02_variazioni_rimanenze));
+    case "ce03_lavori_interni":
+      return formatCurrency(parseFloat(income.ce03_lavori_interni));
+    case "ce10_var_rimanenze_mat_prime":
+      return formatCurrency(parseFloat(income.ce10_var_rimanenze_mat_prime));
+    case "ce11_accantonamenti":
+      return formatCurrency(parseFloat(income.ce11_accantonamenti));
+    case "ce13_proventi_partecipazioni":
+      return formatCurrency(parseFloat(income.ce13_proventi_partecipazioni));
+    case "ce14_altri_proventi_finanziari":
+      return formatCurrency(parseFloat(income.ce14_altri_proventi_finanziari));
+    case "ce15_oneri_finanziari":
+      return formatCurrency(parseFloat(income.ce15_oneri_finanziari));
+    case "ce16_utili_perdite_cambi":
+      return formatCurrency(parseFloat(income.ce16_utili_perdite_cambi));
+    case "ce17_rettifiche_attivita_fin":
+      return formatCurrency(parseFloat(income.ce17_rettifiche_attivita_fin));
+    case "ce18_proventi_straordinari":
+      return formatCurrency(parseFloat(income.ce18_proventi_straordinari));
+    case "ce19_oneri_straordinari":
+      return formatCurrency(parseFloat(income.ce19_oneri_straordinari));
+    default:
+      return "\u2014";
+  }
+}
+
+// Shared helper: get historical BS value for display
+function getHistoricalBSValue(
+  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>,
+  year: number,
+  field: string,
+): string {
+  const data = historicalData[year];
+  if (!data?.balance) return "\u2014";
+  const val = parseFloat((data.balance as unknown as Record<string, string>)[field] || "0");
+  return formatCurrency(val);
+}
+
+// Shared table header component
+function AssumptionsTableHeader({ historicalYears, forecastYears }: { historicalYears: number[]; forecastYears: number[] }) {
+  return (
+    <thead className="bg-muted">
+      <tr>
+        <th className="px-3 py-2 text-left text-xs font-bold text-foreground uppercase tracking-wider border-r border-border sticky left-0 bg-muted z-10" style={{minWidth: '300px'}}>
+          ANNI ANALISI
+        </th>
+        {historicalYears.map((year) => (
+          <th
+            key={year}
+            className="px-3 py-2 text-center text-xs font-bold text-foreground uppercase border-r border-border"
+            style={{minWidth: '120px'}}
+          >
+            {year}
+          </th>
+        ))}
+        {forecastYears.map((year) => (
+          <th
+            key={year}
+            className="px-3 py-2 text-center text-xs font-bold text-primary uppercase border-r border-border bg-primary/10"
+            style={{minWidth: '120px'}}
+          >
+            {year}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+function CEAssumptionsTable({
+  historicalYears,
+  forecastYears,
+  historicalData,
+  assumptions,
+  onUpdate,
+}: AssumptionsTableProps) {
   const [showCEDetail, setShowCEDetail] = useState(false);
   const totalYears = historicalYears.length + forecastYears.length;
+  const baseYear = historicalYears[historicalYears.length - 1];
 
-  // Calculate historical percentages for display
-  const getHistoricalValue = (year: number, field: string): string => {
-    const data = historicalData[year];
-    if (!data) return "\u2014";
+  const getHistoricalValue = (year: number, field: string) =>
+    getHistoricalCEValue(historicalData, year, field);
 
-    const income = data.income;
-    const balance = data.balance;
-
-    switch (field) {
-      case "ce01_ricavi_vendite":
-        return formatCurrency(parseFloat(income.ce01_ricavi_vendite));
-      case "ce04_altri_ricavi":
-        return formatCurrency(parseFloat(income.ce04_altri_ricavi));
-      case "ce05_materie_prime":
-        return formatCurrency(Math.abs(parseFloat(income.ce05_materie_prime)));
-      case "ce06_servizi":
-        return formatCurrency(Math.abs(parseFloat(income.ce06_servizi)));
-      case "ce07_godimento_beni":
-        return formatCurrency(Math.abs(parseFloat(income.ce07_godimento_beni)));
-      case "ce08_costi_personale":
-        return formatCurrency(Math.abs(parseFloat(income.ce08_costi_personale)));
-      case "ce12_oneri_diversi":
-        return formatCurrency(Math.abs(parseFloat(income.ce12_oneri_diversi)));
-      case "ce02_variazioni_rimanenze":
-        return formatCurrency(parseFloat(income.ce02_variazioni_rimanenze));
-      case "ce03_lavori_interni":
-        return formatCurrency(parseFloat(income.ce03_lavori_interni));
-      case "ce10_var_rimanenze_mat_prime":
-        return formatCurrency(parseFloat(income.ce10_var_rimanenze_mat_prime));
-      case "ce11_accantonamenti":
-        return formatCurrency(parseFloat(income.ce11_accantonamenti));
-      case "ce13_proventi_partecipazioni":
-        return formatCurrency(parseFloat(income.ce13_proventi_partecipazioni));
-      case "ce14_altri_proventi_finanziari":
-        return formatCurrency(parseFloat(income.ce14_altri_proventi_finanziari));
-      case "ce15_oneri_finanziari":
-        return formatCurrency(parseFloat(income.ce15_oneri_finanziari));
-      case "ce16_utili_perdite_cambi":
-        return formatCurrency(parseFloat(income.ce16_utili_perdite_cambi));
-      case "ce17_rettifiche_attivita_fin":
-        return formatCurrency(parseFloat(income.ce17_rettifiche_attivita_fin));
-      case "ce18_proventi_straordinari":
-        return formatCurrency(parseFloat(income.ce18_proventi_straordinari));
-      case "ce19_oneri_straordinari":
-        return formatCurrency(parseFloat(income.ce19_oneri_straordinari));
-      default:
-        return "\u2014";
-    }
-  };
+  const inputCls = "w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary";
 
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border border border-border">
-        <thead className="bg-muted">
-          <tr>
-            <th className="px-3 py-2 text-left text-xs font-bold text-foreground uppercase tracking-wider border-r border-border sticky left-0 bg-muted z-10" style={{minWidth: '300px'}}>
-              ANNI ANALISI
-            </th>
-            {historicalYears.map((year) => (
-              <th
-                key={year}
-                className="px-3 py-2 text-center text-xs font-bold text-foreground uppercase border-r border-border"
-                style={{minWidth: '120px'}}
-              >
-                {year}
-              </th>
-            ))}
-            {forecastYears.map((year) => (
-              <th
-                key={year}
-                className="px-3 py-2 text-center text-xs font-bold text-primary uppercase border-r border-border bg-primary/10"
-                style={{minWidth: '120px'}}
-              >
-                {year}
-              </th>
-            ))}
-          </tr>
-        </thead>
+        <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} />
         <tbody className="bg-card divide-y divide-border">
           {/* VARIABILI ECONOMICHE Section */}
           <tr className="bg-muted">
@@ -975,7 +1018,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % RICAVI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei ricavi rispetto all'anno base. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei ricavi rispetto all'anno base. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -987,14 +1030,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.revenue_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "revenue_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1005,7 +1048,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % ALTRI RICAVI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale degli altri ricavi rispetto all'anno base. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale degli altri ricavi rispetto all'anno base. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1017,14 +1060,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.other_revenue_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "other_revenue_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1058,7 +1101,7 @@ function AssumptionsTable({
                     const val = parseFloat(e.target.value);
                     onUpdate(year, "fixed_materials_percentage", isNaN(val) ? 0 : val);
                   }}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={inputCls}
                   placeholder="0%"
                   title="Quota fissa di costi che non varieranno nel previsionale (0-100%)"
                 />
@@ -1071,7 +1114,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % COSTI VARIABILI PER MAT. PRIME RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei costi variabili per materie prime. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei costi variabili per materie prime. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1083,14 +1126,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.variable_materials_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "variable_materials_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1101,7 +1144,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % COSTI FISSI PER MAT. PRIME RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei costi fissi per materie prime. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei costi fissi per materie prime. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1113,14 +1156,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.fixed_materials_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "fixed_materials_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1151,7 +1194,7 @@ function AssumptionsTable({
                     const val = parseFloat(e.target.value);
                     onUpdate(year, "fixed_services_percentage", isNaN(val) ? 0 : val);
                   }}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={inputCls}
                   placeholder="0%"
                   title="Quota fissa di costi che non varieranno nel previsionale (0-100%)"
                 />
@@ -1164,7 +1207,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % COSTI VARIABILI PER SERVIZI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei costi variabili per servizi. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei costi variabili per servizi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1176,14 +1219,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.variable_services_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "variable_services_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1194,7 +1237,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % COSTI FISSI PER SERVIZI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei costi fissi per servizi. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei costi fissi per servizi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1206,14 +1249,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.fixed_services_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "fixed_services_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1224,7 +1267,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % COSTI GODIMENTO BENI DI TERZI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei costi di godimento beni di terzi. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei costi di godimento beni di terzi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1236,14 +1279,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.rent_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "rent_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1254,7 +1297,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % COSTI DEL PERSONALE RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale dei costi del personale. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale dei costi del personale. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1266,14 +1309,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.personnel_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "personnel_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1284,7 +1327,7 @@ function AssumptionsTable({
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
                 VAR. % ONERI DIVERSI DI GESTIONE ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale degli oneri diversi di gestione. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                <span title="Variazione percentuale degli oneri diversi di gestione. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1296,14 +1339,14 @@ function AssumptionsTable({
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.1"
                   min="-100"
-                  max="1000"
+                  max="100"
                   value={assumptions[year]?.other_costs_growth_pct || 0}
                   onChange={(e) => onUpdate(year, "other_costs_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
+                  className={inputCls}
+                  placeholder="0%"
+                  title="Inserire variazione % da -100% a +100%"
                 />
               </td>
             ))}
@@ -1317,11 +1360,36 @@ function AssumptionsTable({
                 <span title="Aliquota fiscale attesa (IRES + IRAP). Valori tipici: 24-30%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
-            {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                30,00%
-              </td>
-            ))}
+            {historicalYears.map((year) => {
+              const d = historicalData[year];
+              let taxPct: string | null = null;
+              if (d?.income) {
+                const inc = d.income;
+                const ebit = parseFloat(inc.ce01_ricavi_vendite) + parseFloat(inc.ce02_variazioni_rimanenze)
+                  + parseFloat(inc.ce03_lavori_interni) + parseFloat(inc.ce04_altri_ricavi)
+                  - parseFloat(inc.ce05_materie_prime) - parseFloat(inc.ce06_servizi)
+                  - parseFloat(inc.ce07_godimento_beni) - parseFloat(inc.ce08_costi_personale)
+                  - parseFloat(inc.ce09_ammortamenti) - parseFloat(inc.ce10_var_rimanenze_mat_prime)
+                  - parseFloat(inc.ce11_accantonamenti) - parseFloat(inc.ce12_oneri_diversi);
+                const financial = parseFloat(inc.ce13_proventi_partecipazioni)
+                  + parseFloat(inc.ce14_altri_proventi_finanziari)
+                  - parseFloat(inc.ce15_oneri_finanziari)
+                  + parseFloat(inc.ce16_utili_perdite_cambi)
+                  + parseFloat(inc.ce17_rettifiche_attivita_fin)
+                  + parseFloat(inc.ce18_proventi_straordinari)
+                  - parseFloat(inc.ce19_oneri_straordinari);
+                const pbt = ebit + financial;
+                const taxes = parseFloat(inc.ce20_imposte);
+                if (pbt > 0 && taxes > 0) {
+                  taxPct = (taxes / pbt * 100).toFixed(1) + "%";
+                }
+              }
+              return (
+                <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                  {taxPct ?? "\u2014"}
+                </td>
+              );
+            })}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input
@@ -1331,7 +1399,7 @@ function AssumptionsTable({
                   max="100"
                   value={assumptions[year]?.tax_rate || 27.9}
                   onChange={(e) => onUpdate(year, "tax_rate", parseFloat(e.target.value) || 27.9)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={inputCls}
                   placeholder="27.90%"
                   title="Aliquota fiscale attesa (0-100%)"
                 />
@@ -1384,7 +1452,7 @@ function AssumptionsTable({
                           const val = e.target.value;
                           onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);
                         }}
-                        className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                        className={inputCls}
                         placeholder="base year"
                         title={`${label} - valore in EUR (vuoto = usa anno base)`}
                       />
@@ -1395,6 +1463,171 @@ function AssumptionsTable({
             </>
           )}
 
+          {/* CAPITALE CIRCOLANTE (GIORNI) Section */}
+          <tr className="bg-muted">
+            <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
+              CAPITALE CIRCOLANTE (GIORNI)
+            </td>
+          </tr>
+
+          {/* DSO - Days Sales Outstanding */}
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                GG. INCASSO CREDITI (DSO)
+                <span title="Giorni medi di incasso crediti commerciali. Vuoto = calcolato da anno base"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => {
+              const d = historicalData[year];
+              const dso = d && d.balance && d.income && parseFloat(d.income.ce01_ricavi_vendite) > 0
+                ? Math.round(360 * parseFloat(d.balance.sp06_crediti_breve) / parseFloat(d.income.ce01_ricavi_vendite))
+                : null;
+              return (
+                <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                  {dso !== null ? `${dso} gg` : "\u2014"}
+                </td>
+              );
+            })}
+            {forecastYears.map((year) => {
+              const baseD = historicalData[baseYear];
+              const autoDso = baseD && baseD.balance && baseD.income && parseFloat(baseD.income.ce01_ricavi_vendite) > 0
+                ? Math.round(360 * parseFloat(baseD.balance.sp06_crediti_breve) / parseFloat(baseD.income.ce01_ricavi_vendite))
+                : 60;
+              return (
+                <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="365"
+                    value={assumptions[year]?.dso_days ?? autoDso}
+                    onChange={(e) => onUpdate(year, "dso_days", parseFloat(e.target.value) || 0)}
+                    className={inputCls}
+                    placeholder={String(autoDso)}
+                    title="Giorni medi incasso crediti (0-365)"
+                  />
+                </td>
+              );
+            })}
+          </tr>
+
+          {/* DIO - Days Inventory Outstanding */}
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                GG. ROTAZIONE MAGAZZINO (DIO)
+                <span title="Giorni medi di giacenza magazzino. Vuoto = calcolato da anno base"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => {
+              const d = historicalData[year];
+              const dio = d && d.balance && d.income && parseFloat(d.income.ce01_ricavi_vendite) > 0
+                ? Math.round(360 * parseFloat(d.balance.sp05_rimanenze) / parseFloat(d.income.ce01_ricavi_vendite))
+                : null;
+              return (
+                <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                  {dio !== null ? `${dio} gg` : "\u2014"}
+                </td>
+              );
+            })}
+            {forecastYears.map((year) => {
+              const baseD = historicalData[baseYear];
+              const autoDio = baseD && baseD.balance && baseD.income && parseFloat(baseD.income.ce01_ricavi_vendite) > 0
+                ? Math.round(360 * parseFloat(baseD.balance.sp05_rimanenze) / parseFloat(baseD.income.ce01_ricavi_vendite))
+                : 30;
+              return (
+                <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="365"
+                    value={assumptions[year]?.dio_days ?? autoDio}
+                    onChange={(e) => onUpdate(year, "dio_days", parseFloat(e.target.value) || 0)}
+                    className={inputCls}
+                    placeholder={String(autoDio)}
+                    title="Giorni medi giacenza magazzino (0-365)"
+                  />
+                </td>
+              );
+            })}
+          </tr>
+
+          {/* DPO - Days Payable Outstanding */}
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                GG. PAGAMENTO FORNITORI (DPO)
+                <span title="Giorni medi di pagamento fornitori. Vuoto = calcolato da anno base"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => {
+              const d = historicalData[year];
+              const purchases = d && d.income
+                ? parseFloat(d.income.ce05_materie_prime) + parseFloat(d.income.ce06_servizi)
+                : 0;
+              const payables = d && d.balance
+                ? parseFloat(d.balance.sp16d_debiti_fornitori_breve || "0") + parseFloat(d.balance.sp17d_debiti_fornitori_lungo || "0")
+                : 0;
+              const dpo = purchases > 0 ? Math.round(360 * payables / purchases) : null;
+              return (
+                <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                  {dpo !== null ? `${dpo} gg` : "\u2014"}
+                </td>
+              );
+            })}
+            {forecastYears.map((year) => {
+              const baseD = historicalData[baseYear];
+              const basePurchases = baseD && baseD.income
+                ? parseFloat(baseD.income.ce05_materie_prime) + parseFloat(baseD.income.ce06_servizi)
+                : 0;
+              const basePayables = baseD && baseD.balance
+                ? parseFloat(baseD.balance.sp16d_debiti_fornitori_breve || "0") + parseFloat(baseD.balance.sp17d_debiti_fornitori_lungo || "0")
+                : 0;
+              const autoDpo = basePurchases > 0 ? Math.round(360 * basePayables / basePurchases) : 60;
+              return (
+                <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="365"
+                    value={assumptions[year]?.dpo_days ?? autoDpo}
+                    onChange={(e) => onUpdate(year, "dpo_days", parseFloat(e.target.value) || 0)}
+                    className={inputCls}
+                    placeholder={String(autoDpo)}
+                    title="Giorni medi pagamento fornitori (0-365)"
+                  />
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// SP Assumptions Table: Investments, Financing, and SP Detail overrides
+function SPAssumptionsTable({
+  historicalYears,
+  forecastYears,
+  historicalData,
+  assumptions,
+  onUpdate,
+}: AssumptionsTableProps) {
+  const [showSPDetail, setShowSPDetail] = useState(false);
+  const totalYears = historicalYears.length + forecastYears.length;
+
+  // Input CSS class (shared)
+  const inputCls = "w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary";
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-border border border-border">
+        <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} />
+        <tbody className="bg-card divide-y divide-border">
           {/* IMMOBILIZZAZIONI Section */}
           <tr className="bg-muted">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
@@ -1402,14 +1635,12 @@ function AssumptionsTable({
             </td>
           </tr>
 
-          {/* Intangible Assets Header */}
           <tr className="bg-muted/70">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
               IMMOBILIZZAZIONI IMMATERIALI
             </td>
           </tr>
 
-          {/* Intangible Investment */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1418,27 +1649,18 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="1000"
-                  min="0"
-                  value={(assumptions[year]?.investments || 0) / 2}
-                  onChange={(e) => onUpdate(year, "investments", (parseFloat(e.target.value) || 0) * 2)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0"
-                  title="Investimento in immobilizzazioni immateriali (EUR)"
-                />
+                <input type="number" step="1000" min="0"
+                  value={assumptions[year]?.intangible_investments || 0}
+                  onChange={(e) => onUpdate(year, "intangible_investments", parseFloat(e.target.value) || 0)}
+                  className={inputCls} placeholder="0" title="Investimento immob. immateriali (EUR)" />
               </td>
             ))}
           </tr>
 
-          {/* Intangible Depreciation Rate */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1447,35 +1669,24 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  max="100"
+                <input type="number" step="1" min="0" max="100"
                   value={assumptions[year]?.depreciation_rate || 20}
                   onChange={(e) => onUpdate(year, "depreciation_rate", parseFloat(e.target.value) || 20)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="20.00%"
-                  title="Percentuale ammortamento (0-100%)"
-                />
+                  className={inputCls} placeholder="20.00%" title="Percentuale ammortamento (0-100%)" />
               </td>
             ))}
           </tr>
 
-          {/* Tangible Assets Header */}
           <tr className="bg-muted/70">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
               IMMOBILIZZAZIONI MATERIALI
             </td>
           </tr>
 
-          {/* Tangible Investment */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1484,27 +1695,18 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="1000"
-                  min="0"
-                  value={assumptions[year]?.investments || 0}
-                  onChange={(e) => onUpdate(year, "investments", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0"
-                  title="Investimento in immobilizzazioni materiali (EUR)"
-                />
+                <input type="number" step="1000" min="0"
+                  value={assumptions[year]?.tangible_investments || 0}
+                  onChange={(e) => onUpdate(year, "tangible_investments", parseFloat(e.target.value) || 0)}
+                  className={inputCls} placeholder="0" title="Investimento immob. materiali (EUR)" />
               </td>
             ))}
           </tr>
 
-          {/* Tangible Depreciation Rate */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1513,146 +1715,80 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  max="100"
+                <input type="number" step="1" min="0" max="100"
                   value={assumptions[year]?.depreciation_rate || 20}
                   onChange={(e) => onUpdate(year, "depreciation_rate", parseFloat(e.target.value) || 20)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="20.00%"
-                  title="Percentuale ammortamento (0-100%)"
-                />
+                  className={inputCls} placeholder="20.00%" title="Percentuale ammortamento (0-100%)" />
               </td>
             ))}
           </tr>
 
-          {/* CREDITI DELL'ATTIVO CIRCOLANTE Section */}
+          {/* DEBITI FINANZIARI Section */}
           <tr className="bg-muted">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
-              CREDITI DELL&apos;ATTIVO CIRCOLANTE
+              DEBITI FINANZIARI
             </td>
           </tr>
 
-          {/* Short-term Receivables Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % CREDITI ESIG. ENTRO ES. SUCC. RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale crediti esigibili entro l'esercizio successivo. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                DEBITO FINANZIARIO INIZIALE
+                <span title="Totale debiti finanziari anno base (banche + altri finanziari + obbligazioni)"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
-            {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
-            ))}
+            {historicalYears.map((year) => {
+              const d = historicalData[year];
+              const finDebt = d && d.balance
+                ? parseFloat(d.balance.sp16a_debiti_banche_breve || "0") + parseFloat(d.balance.sp16b_debiti_altri_finanz_breve || "0") +
+                  parseFloat(d.balance.sp16c_debiti_obbligazioni_breve || "0") +
+                  parseFloat(d.balance.sp17a_debiti_banche_lungo || "0") + parseFloat(d.balance.sp17b_debiti_altri_finanz_lungo || "0") +
+                  parseFloat(d.balance.sp17c_debiti_obbligazioni_lungo || "0")
+                : 0;
+              return (
+                <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                  {finDebt > 0 ? formatCurrency(finDebt) : "\u2014"}
+                </td>
+              );
+            })}
             {forecastYears.map((year) => (
-              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="-100"
-                  max="1000"
-                  value={assumptions[year]?.receivables_short_growth_pct || 0}
-                  onChange={(e) => onUpdate(year, "receivables_short_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
-                />
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/30">{"\u2014"}</td>
             ))}
           </tr>
 
-          {/* Long-term Receivables Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % CREDITI ESIG. OLTRE ES. SUCC. RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale crediti esigibili oltre l'esercizio successivo. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                ANNI RIMBORSO DEBITO ESISTENTE
+                <span title="Numero anni per rimborsare il debito finanziario esistente. Vuoto = debito costante"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="-100"
-                  max="1000"
-                  value={assumptions[year]?.receivables_long_growth_pct || 0}
-                  onChange={(e) => onUpdate(year, "receivables_long_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
-                />
+                <input type="number" step="1" min="1" max="30"
+                  value={assumptions[year]?.existing_debt_repayment_years ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? null : parseFloat(e.target.value) || null;
+                    onUpdate(year, "existing_debt_repayment_years", val);
+                  }}
+                  className={inputCls} placeholder="costante" title="Anni per rimborso debito esistente (vuoto = costante)" />
               </td>
             ))}
           </tr>
 
-          {/* DEBITI Section */}
-          <tr className="bg-muted">
-            <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
-              DEBITI
-            </td>
-          </tr>
-
-          {/* Short-term Payables Header */}
           <tr className="bg-muted/70">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
-              DEBITI ESIGIBILI ENTRO L&apos;ESERCIZIO SUCCESSIVO
+              NUOVO FINANZIAMENTO
             </td>
           </tr>
 
-          {/* Short-term Payables Growth */}
-          <tr className="hover:bg-muted/50">
-            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
-              <div className="font-medium flex items-center gap-1">
-                VAR. % DEBITI ESIG. ENTRO ES. SUCC. RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale debiti esigibili entro l'esercizio successivo. Valori accettati: da -100% a +1.000%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
-              </div>
-            </td>
-            {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
-            ))}
-            {forecastYears.map((year) => (
-              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="-100"
-                  max="1000"
-                  value={assumptions[year]?.payables_short_growth_pct || 0}
-                  onChange={(e) => onUpdate(year, "payables_short_growth_pct", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0.00%"
-                  title="Inserire variazione % da -100% a +1.000%"
-                />
-              </td>
-            ))}
-          </tr>
-
-          {/* Long-term Payables Header */}
-          <tr className="bg-muted/70">
-            <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
-              DEBITI ESIGIBILI OLTRE L&apos;ESERCIZIO SUCCESSIVO
-            </td>
-          </tr>
-
-          {/* Financing Amount */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1661,27 +1797,18 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="1000"
-                  min="0"
+                <input type="number" step="1000" min="0"
                   value={assumptions[year]?.financing_amount || 0}
                   onChange={(e) => onUpdate(year, "financing_amount", parseFloat(e.target.value) || 0)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="0"
-                  title="Importo nuovo finanziamento (EUR)"
-                />
+                  className={inputCls} placeholder="0" title="Importo nuovo finanziamento (EUR)" />
               </td>
             ))}
           </tr>
 
-          {/* Financing Duration */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1690,28 +1817,18 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="1"
-                  min="1"
-                  max="30"
+                <input type="number" step="1" min="1" max="30"
                   value={assumptions[year]?.financing_duration_years || 5}
                   onChange={(e) => onUpdate(year, "financing_duration_years", parseFloat(e.target.value) || 5)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="5"
-                  title="Durata in anni (1-30)"
-                />
+                  className={inputCls} placeholder="5" title="Durata in anni (1-30)" />
               </td>
             ))}
           </tr>
 
-          {/* Financing Interest Rate */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
@@ -1720,26 +1837,108 @@ function AssumptionsTable({
               </div>
             </td>
             {historicalYears.map((year) => (
-              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
-                {"\u2014"}
-              </td>
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
             ))}
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="100"
+                <input type="number" step="0.1" min="0" max="100"
                   value={assumptions[year]?.financing_interest_rate || 3}
                   onChange={(e) => onUpdate(year, "financing_interest_rate", parseFloat(e.target.value) || 3)}
-                  className="w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="3.00%"
-                  title="Tasso interesse (0-100%)"
-                />
+                  className={inputCls} placeholder="3.00%" title="Tasso interesse (0-100%)" />
               </td>
             ))}
           </tr>
+
+          {/* DETTAGLIO STATO PATRIMONIALE Section (collapsible) */}
+          <tr className="bg-muted cursor-pointer" onClick={() => setShowSPDetail(!showSPDetail)}>
+            <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
+              <div className="flex items-center gap-1">
+                {showSPDetail ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                DETTAGLIO STATO PATRIMONIALE
+              </div>
+            </td>
+          </tr>
+
+          {showSPDetail && (
+            <>
+              {/* SP detail header - Attivo */}
+              <tr className="bg-muted/70">
+                <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
+                  ATTIVO
+                </td>
+              </tr>
+              {([
+                { field: "sp01_growth_pct", bsField: "sp01_crediti_soci", label: "Crediti verso soci" },
+                { field: "sp04_growth_pct", bsField: "sp04_immob_finanziarie", label: "Immobilizzazioni finanziarie" },
+                { field: "sp08_growth_pct", bsField: "sp08_attivita_finanziarie", label: "Attività finanziarie correnti" },
+                { field: "sp10_growth_pct", bsField: "sp10_ratei_risconti_attivi", label: "Ratei e risconti attivi" },
+              ] as const).map(({ field, bsField, label }) => (
+                <tr key={field} className="hover:bg-muted/50">
+                  <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+                    <div className="font-medium">VAR. % {label}</div>
+                  </td>
+                  {historicalYears.map((year) => (
+                    <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                      {getHistoricalBSValue(historicalData, year, bsField)}
+                    </td>
+                  ))}
+                  {forecastYears.map((year) => (
+                    <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                      <input type="number" step="0.5" min="-100" max="1000"
+                        value={assumptions[year]?.[field as keyof typeof assumptions[number]] ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);
+                        }}
+                        className={inputCls} placeholder="0%"
+                        title={`Variazione % ${label} (vuoto = invariato)`} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+
+              {/* SP detail header - Passivo */}
+              <tr className="bg-muted/70">
+                <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
+                  PASSIVO
+                </td>
+              </tr>
+              {([
+                { field: "sp14_growth_pct", bsField: "sp14_fondi_rischi", label: "Fondi per rischi e oneri" },
+                { field: "sp16e_growth_pct", bsField: "sp16e_debiti_tributari_breve", label: "Debiti tributari (breve)" },
+                { field: "sp16f_growth_pct", bsField: "sp16f_debiti_previdenza_breve", label: "Debiti previdenziali (breve)" },
+                { field: "sp16g_growth_pct", bsField: "sp16g_altri_debiti_breve", label: "Altri debiti (breve)" },
+                { field: "sp17d_growth_pct", bsField: "sp17d_debiti_fornitori_lungo", label: "Debiti fornitori (lungo)" },
+                { field: "sp17e_growth_pct", bsField: "sp17e_debiti_tributari_lungo", label: "Debiti tributari (lungo)" },
+                { field: "sp17f_growth_pct", bsField: "sp17f_debiti_previdenza_lungo", label: "Debiti previdenziali (lungo)" },
+                { field: "sp17g_growth_pct", bsField: "sp17g_altri_debiti_lungo", label: "Altri debiti (lungo)" },
+                { field: "sp18_growth_pct", bsField: "sp18_ratei_risconti_passivi", label: "Ratei e risconti passivi" },
+              ] as const).map(({ field, bsField, label }) => (
+                <tr key={field} className="hover:bg-muted/50">
+                  <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+                    <div className="font-medium">VAR. % {label}</div>
+                  </td>
+                  {historicalYears.map((year) => (
+                    <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">
+                      {getHistoricalBSValue(historicalData, year, bsField)}
+                    </td>
+                  ))}
+                  {forecastYears.map((year) => (
+                    <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                      <input type="number" step="0.5" min="-100" max="1000"
+                        value={assumptions[year]?.[field as keyof typeof assumptions[number]] ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          onUpdate(year, field, val === "" ? null : parseFloat(val) || 0);
+                        }}
+                        className={inputCls} placeholder="0%"
+                        title={`Variazione % ${label} (vuoto = invariato)`} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </>
+          )}
         </tbody>
       </table>
     </div>

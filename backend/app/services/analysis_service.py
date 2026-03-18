@@ -230,8 +230,12 @@ def _calculate_year_metrics(
     fgpmi_calc = FGPMICalculator(bs, inc, sector)
     fgpmi = fgpmi_calc.calculate()
 
-    # Calculate EM-Score from Altman Z-Score
-    em_rating, em_z_used = calculate_em_score(altman.z_score, sector)
+    # Calculate EM-Score: always use services Z-Score (EM table is calibrated on 4-component model)
+    if altman.model_type == "manufacturing":
+        em_z = altman_calc.calculate_z_score_services(altman.components)
+    else:
+        em_z = altman.z_score
+    em_rating, em_z_used = calculate_em_score(em_z, sector)
     em_description = get_em_score_description(em_rating)
 
     return {

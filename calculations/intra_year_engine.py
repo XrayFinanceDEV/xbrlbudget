@@ -26,15 +26,26 @@ CE_FIELDS = [
     ('ce06_servizi', 'Costi per servizi'),
     ('ce07_godimento_beni', 'Godimento beni di terzi'),
     ('ce08_costi_personale', 'Costi del personale'),
+    ('ce08b_salari_stipendi', 'Salari e stipendi'),
+    ('ce08c_oneri_sociali', 'Oneri sociali'),
+    ('ce08a_tfr_accrual', 'TFR accantonamento'),
+    ('ce08d_altri_costi_personale', 'Altri costi del personale'),
     ('ce09_ammortamenti', 'Ammortamenti e svalutazioni'),
+    ('ce09a_ammort_immateriali', 'Ammortamento immobilizzazioni immateriali'),
+    ('ce09b_ammort_materiali', 'Ammortamento immobilizzazioni materiali'),
+    ('ce09c_svalutazioni', 'Svalutazioni immobilizzazioni'),
+    ('ce09d_svalutazione_crediti', 'Svalutazione crediti'),
     ('ce10_var_rimanenze_mat_prime', 'Variazioni rimanenze materie prime'),
     ('ce11_accantonamenti', 'Accantonamenti per rischi'),
+    ('ce11b_altri_accantonamenti', 'Altri accantonamenti'),
     ('ce12_oneri_diversi', 'Oneri diversi di gestione'),
     ('ce13_proventi_partecipazioni', 'Proventi da partecipazioni'),
     ('ce14_altri_proventi_finanziari', 'Altri proventi finanziari'),
     ('ce15_oneri_finanziari', 'Oneri finanziari'),
     ('ce16_utili_perdite_cambi', 'Utili/perdite su cambi'),
     ('ce17_rettifiche_attivita_fin', 'Rettifiche attivita finanziarie'),
+    ('ce17a_rivalutazioni', 'Rivalutazioni'),
+    ('ce17b_svalutazioni', 'Svalutazioni'),
     ('ce18_proventi_straordinari', 'Proventi straordinari'),
     ('ce19_oneri_straordinari', 'Oneri straordinari'),
     ('ce20_imposte', 'Imposte sul reddito'),
@@ -48,7 +59,21 @@ SP_FIELDS = [
     ('sp04_immob_finanziarie', 'Immobilizzazioni finanziarie'),
     ('sp05_rimanenze', 'Rimanenze'),
     ('sp06_crediti_breve', 'Crediti esigibili entro 12 mesi'),
+    ('sp06a_crediti_clienti_breve', 'Verso clienti'),
+    ('sp06b_crediti_controllate_breve', 'Verso imprese controllate'),
+    ('sp06c_crediti_collegate_breve', 'Verso imprese collegate'),
+    ('sp06d_crediti_controllanti_breve', 'Verso controllanti'),
+    ('sp06e_crediti_tributari_breve', 'Crediti tributari'),
+    ('sp06f_imposte_anticipate_breve', 'Imposte anticipate'),
+    ('sp06g_crediti_altri_breve', 'Verso altri'),
     ('sp07_crediti_lungo', 'Crediti esigibili oltre 12 mesi'),
+    ('sp07a_crediti_clienti_lungo', 'Verso clienti'),
+    ('sp07b_crediti_controllate_lungo', 'Verso imprese controllate'),
+    ('sp07c_crediti_collegate_lungo', 'Verso imprese collegate'),
+    ('sp07d_crediti_controllanti_lungo', 'Verso controllanti'),
+    ('sp07e_crediti_tributari_lungo', 'Crediti tributari'),
+    ('sp07f_imposte_anticipate_lungo', 'Imposte anticipate'),
+    ('sp07g_crediti_altri_lungo', 'Verso altri'),
     ('sp08_attivita_finanziarie', 'Attivita finanziarie'),
     ('sp09_disponibilita_liquide', 'Disponibilita liquide'),
     ('sp10_ratei_risconti_attivi', 'Ratei e risconti attivi'),
@@ -58,7 +83,21 @@ SP_FIELDS = [
     ('sp14_fondi_rischi', 'Fondi per rischi e oneri'),
     ('sp15_tfr', 'TFR'),
     ('sp16_debiti_breve', 'Debiti esigibili entro 12 mesi'),
+    ('sp16a_debiti_banche_breve', 'Debiti verso banche'),
+    ('sp16b_debiti_altri_finanz_breve', 'Debiti verso altri finanziatori'),
+    ('sp16c_debiti_obbligazioni_breve', 'Debiti obbligazionari'),
+    ('sp16d_debiti_fornitori_breve', 'Debiti verso fornitori'),
+    ('sp16e_debiti_tributari_breve', 'Debiti tributari'),
+    ('sp16f_debiti_previdenza_breve', 'Debiti previdenziali'),
+    ('sp16g_altri_debiti_breve', 'Altri debiti'),
     ('sp17_debiti_lungo', 'Debiti esigibili oltre 12 mesi'),
+    ('sp17a_debiti_banche_lungo', 'Debiti verso banche'),
+    ('sp17b_debiti_altri_finanz_lungo', 'Debiti verso altri finanziatori'),
+    ('sp17c_debiti_obbligazioni_lungo', 'Debiti obbligazionari'),
+    ('sp17d_debiti_fornitori_lungo', 'Debiti verso fornitori'),
+    ('sp17e_debiti_tributari_lungo', 'Debiti tributari'),
+    ('sp17f_debiti_previdenza_lungo', 'Debiti previdenziali'),
+    ('sp17g_altri_debiti_lungo', 'Altri debiti'),
     ('sp18_ratei_risconti_passivi', 'Ratei e risconti passivi'),
 ]
 
@@ -76,6 +115,29 @@ def _get_field(obj, field_name, default=Decimal('0')):
     if val is None:
         return default
     return Decimal(str(val))
+
+
+def _get_total_investments(assumption) -> Decimal:
+    """Get total investments from split fields or legacy field."""
+    intangible = getattr(assumption, 'intangible_investments', None) or Decimal('0')
+    tangible = getattr(assumption, 'tangible_investments', None) or Decimal('0')
+    if intangible > 0 or tangible > 0:
+        return Decimal(str(intangible)) + Decimal(str(tangible))
+    inv = assumption.investments if assumption.investments else Decimal('0')
+    return Decimal(str(inv))
+
+
+def _get_split_investments(assumption):
+    """Return (intangible, tangible) investment amounts."""
+    intangible = getattr(assumption, 'intangible_investments', None) or Decimal('0')
+    tangible = getattr(assumption, 'tangible_investments', None) or Decimal('0')
+    intangible = Decimal(str(intangible))
+    tangible = Decimal(str(tangible))
+    if intangible > 0 or tangible > 0:
+        return intangible, tangible
+    # Legacy fallback
+    total = Decimal(str(assumption.investments)) if assumption.investments else Decimal('0')
+    return total / 2, total / 2
 
 
 class IntraYearEngine:
@@ -304,23 +366,40 @@ class IntraYearEngine:
         ref_ce08 = _get_field(ref_inc, 'ce08_costi_personale')
         ce08 = ref_ce08 * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
 
-        # TFR accrual - maintain same % of personnel as reference
-        ref_ce08a = _get_field(ref_inc, 'ce08a_tfr_accrual')
-        if ref_ce08 > 0 and ref_ce08a > 0:
-            tfr_rate = ref_ce08a / ref_ce08
-            ce08a = ce08 * tfr_rate
+        # Personnel sub-items - maintain same proportions as reference year
+        if ref_ce08 > 0:
+            growth_factor = ce08 / ref_ce08
+            ce08a = _get_field(ref_inc, 'ce08a_tfr_accrual') * growth_factor
+            ce08b = _get_field(ref_inc, 'ce08b_salari_stipendi') * growth_factor
+            ce08c = _get_field(ref_inc, 'ce08c_oneri_sociali') * growth_factor
+            ce08d = _get_field(ref_inc, 'ce08d_altri_costi_personale') * growth_factor
         else:
             ce08a = Decimal('0')
+            ce08b = Decimal('0')
+            ce08c = Decimal('0')
+            ce08d = Decimal('0')
 
         # Depreciation - annualize (linear accrual) + new investments
         partial_ce09 = _get_field(partial_inc, 'ce09_ammortamenti')
         ce09 = partial_ce09 * factor
+        # Sub-items: annualize partial year values
+        partial_ce09a = _get_field(partial_inc, 'ce09a_ammort_immateriali')
+        partial_ce09b = _get_field(partial_inc, 'ce09b_ammort_materiali')
+        ce09a = partial_ce09a * factor
+        ce09b = partial_ce09b * factor
+        ce09c = _get_field(partial_inc, 'ce09c_svalutazioni') * factor
+        ce09d = _get_field(partial_inc, 'ce09d_svalutazione_crediti') * factor
         # Add depreciation on new investments if any
-        if assumption.investments > 0:
+        intangible_inv, tangible_inv = _get_split_investments(assumption)
+        total_investments = intangible_inv + tangible_inv
+        if total_investments > 0:
             depreciation_rate = assumption.depreciation_rate / Decimal('100')
             remaining_months = Decimal('12') - Decimal(str(period_months))
-            new_dep = assumption.investments * depreciation_rate * remaining_months / Decimal('12')
-            ce09 = ce09 + new_dep
+            new_dep_intangible = intangible_inv * depreciation_rate * remaining_months / Decimal('12')
+            new_dep_tangible = tangible_inv * depreciation_rate * remaining_months / Decimal('12')
+            ce09a = ce09a + new_dep_intangible
+            ce09b = ce09b + new_dep_tangible
+            ce09 = ce09 + new_dep_intangible + new_dep_tangible
 
         # Other costs
         ref_ce12 = _get_field(ref_inc, 'ce12_oneri_diversi')
@@ -359,7 +438,14 @@ class IntraYearEngine:
             'ce07_godimento_beni': ce07,
             'ce08_costi_personale': ce08,
             'ce08a_tfr_accrual': ce08a,
+            'ce08b_salari_stipendi': ce08b,
+            'ce08c_oneri_sociali': ce08c,
+            'ce08d_altri_costi_personale': ce08d,
             'ce09_ammortamenti': ce09,
+            'ce09a_ammort_immateriali': ce09a,
+            'ce09b_ammort_materiali': ce09b,
+            'ce09c_svalutazioni': ce09c,
+            'ce09d_svalutazione_crediti': ce09d,
             'ce10_var_rimanenze_mat_prime': ce10,
             'ce11_accantonamenti': ce11,
             'ce11b_altri_accantonamenti': ce11b,
@@ -415,14 +501,10 @@ class IntraYearEngine:
             sp04 = partial_sp04
 
         # Add new investments if any
-        if assumption.investments > 0:
-            inv = assumption.investments
-            if total_fixed > 0:
-                sp02 = sp02 + inv * partial_sp02 / total_fixed
-                sp03 = sp03 + inv * partial_sp03 / total_fixed
-                sp04 = sp04 + inv * partial_sp04 / total_fixed
-            else:
-                sp03 = sp03 + inv  # Default to tangible
+        intangible_inv, tangible_inv = _get_split_investments(assumption)
+        if intangible_inv > 0 or tangible_inv > 0:
+            sp02 = sp02 + intangible_inv
+            sp03 = sp03 + tangible_inv
 
         # WORKING CAPITAL - use turnover ratios from reference year
         projected_revenue = projected_inc['ce01_ricavi_vendite']

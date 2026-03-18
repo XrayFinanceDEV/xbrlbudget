@@ -320,7 +320,11 @@ function IncomeStatementTable({
     { label: "7) Servizi", field: "ce06_servizi" },
     { label: "8) Godimento di beni di terzi", field: "ce07_godimento_beni" },
     { label: "9) Personale", field: "ce08_costi_personale" },
-    { label: "di cui per acc.to trattamento di fine rapporto, di quiescenza e simili", field: "ce08a_tfr_accrual", indent: 1 },
+    { label: "a) Salari e stipendi", field: "ce08b_salari_stipendi", indent: 1 },
+    { label: "b) Oneri sociali", field: "ce08c_oneri_sociali", indent: 1 },
+    { label: "c) Trattamento di fine rapporto", field: "ce08a_tfr_accrual", indent: 1 },
+    { label: "d) Trattamento di quiescenza e simili" },
+    { label: "e) Altri costi del personale", field: "ce08d_altri_costi_personale", indent: 1 },
     { label: "10) Ammortamenti e svalutazioni:" },
     { label: "a) Ammortamento delle immobilizzazioni immateriali", field: "ce09a_ammort_immateriali", indent: 1 },
     { label: "b) Ammortamento delle immobilizzazioni materiali", field: "ce09b_ammort_materiali", indent: 1 },
@@ -345,7 +349,9 @@ function IncomeStatementTable({
     { label: "Totale Proventi/Oneri Finanziari", field: "financial_result", isSubtotal: true },
     // D) RETTIFICHE DI VALORE
     { label: "D) RETTIFICHE DI VALORE ATTIVITÀ FINANZIARIE", isTotal: true },
-    { label: "18-19) Rettifiche di valore", field: "ce17_rettifiche_attivita_fin" },
+    { label: "18) Rivalutazioni", field: "ce17a_rivalutazioni", indent: 1 },
+    { label: "19) Svalutazioni", field: "ce17b_svalutazioni", indent: 1 },
+    { label: "Totale rettifiche di valore", field: "ce17_rettifiche_attivita_fin", isSubtotal: true },
     // E) PROVENTI E ONERI STRAORDINARI
     { label: "E) PROVENTI E ONERI STRAORDINARI", isTotal: true },
     { label: "20) Proventi straordinari", field: "ce18_proventi_straordinari" },
@@ -387,7 +393,11 @@ function IncomeStatementTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row, index) => {
+        {rows.filter((row) => {
+          // Hide detail subfield rows when no historical year has that detail populated.
+          if (!row.field || !row.indent) return true;
+          return historicalYears.some((yd) => Math.abs(getVal(yd, row.field!)) >= 0.5);
+        }).map((row, index) => {
           const histValues = row.field
             ? historicalYears.map((yd) => getVal(yd, row.field!))
             : [];

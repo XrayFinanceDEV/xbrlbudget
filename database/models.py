@@ -607,10 +607,20 @@ class BudgetAssumptions(Base):
     other_costs_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Oneri diversi
 
     # Investment and working capital
-    investments = Column(Numeric(15, 2), default=0, nullable=False)  # New investments
-    receivables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Crediti breve
+    investments = Column(Numeric(15, 2), default=0, nullable=False)  # New investments (legacy: total)
+    intangible_investments = Column(Numeric(15, 2), default=0, nullable=False)  # Immobilizzazioni immateriali
+    tangible_investments = Column(Numeric(15, 2), default=0, nullable=False)  # Immobilizzazioni materiali
+    receivables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Legacy: Crediti breve growth %
     receivables_long_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Crediti lungo
-    payables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Debiti breve
+    payables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Legacy: Debiti breve growth %
+
+    # Working capital turnover days (NULL = auto-compute from base year)
+    dso_days = Column(Numeric(10, 2), nullable=True)  # Days Sales Outstanding
+    dio_days = Column(Numeric(10, 2), nullable=True)  # Days Inventory Outstanding
+    dpo_days = Column(Numeric(10, 2), nullable=True)  # Days Payable Outstanding
+
+    # Existing financial debt repayment (NULL = keep constant)
+    existing_debt_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay existing fin. debt
 
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables
@@ -626,6 +636,21 @@ class BudgetAssumptions(Base):
     financing_amount = Column(Numeric(15, 2), default=0, nullable=False)  # New financing amount
     financing_duration_years = Column(Numeric(10, 2), default=0, nullable=False)  # Loan duration in years
     financing_interest_rate = Column(Numeric(10, 6), default=0, nullable=False)  # Loan interest rate %
+
+    # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
+    sp01_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti verso soci
+    sp04_growth_pct = Column(Numeric(10, 6), nullable=True)  # Immobilizzazioni finanziarie
+    sp08_growth_pct = Column(Numeric(10, 6), nullable=True)  # Attività finanziarie correnti
+    sp10_growth_pct = Column(Numeric(10, 6), nullable=True)  # Ratei e risconti attivi
+    sp14_growth_pct = Column(Numeric(10, 6), nullable=True)  # Fondi per rischi e oneri
+    sp16e_growth_pct = Column(Numeric(10, 6), nullable=True)  # Debiti tributari (breve)
+    sp16f_growth_pct = Column(Numeric(10, 6), nullable=True)  # Debiti previdenziali (breve)
+    sp16g_growth_pct = Column(Numeric(10, 6), nullable=True)  # Altri debiti (breve)
+    sp17d_growth_pct = Column(Numeric(10, 6), nullable=True)  # Debiti fornitori (lungo)
+    sp17e_growth_pct = Column(Numeric(10, 6), nullable=True)  # Debiti tributari (lungo)
+    sp17f_growth_pct = Column(Numeric(10, 6), nullable=True)  # Debiti previdenziali (lungo)
+    sp17g_growth_pct = Column(Numeric(10, 6), nullable=True)  # Altri debiti (lungo)
+    sp18_growth_pct = Column(Numeric(10, 6), nullable=True)  # Ratei e risconti passivi
 
     # CE line item overrides (absolute EUR values, nullable = use base year value)
     ce02_override = Column(Numeric(15, 2), nullable=True)  # Variazioni rimanenze prodotti
@@ -949,8 +974,10 @@ class ForecastIncomeStatement(Base):
     ce09a_ammort_immateriali = Column(Numeric(15, 2), default=0, nullable=False)
     ce09b_ammort_materiali = Column(Numeric(15, 2), default=0, nullable=False)
     ce09c_svalutazioni = Column(Numeric(15, 2), default=0, nullable=False)
+    ce09d_svalutazione_crediti = Column(Numeric(15, 2), default=0, nullable=False, comment="d) Svalutazione crediti attivo circolante")
     ce10_var_rimanenze_mat_prime = Column(Numeric(15, 2), default=0, nullable=False)
     ce11_accantonamenti = Column(Numeric(15, 2), default=0, nullable=False)
+    ce11b_altri_accantonamenti = Column(Numeric(15, 2), default=0, nullable=False, comment="Altri accantonamenti")
     ce12_oneri_diversi = Column(Numeric(15, 2), default=0, nullable=False)
     ce13_proventi_partecipazioni = Column(Numeric(15, 2), default=0, nullable=False)
     ce14_altri_proventi_finanziari = Column(Numeric(15, 2), default=0, nullable=False)

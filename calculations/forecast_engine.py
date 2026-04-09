@@ -221,13 +221,15 @@ class ForecastEngine:
             ce08c = Decimal('0')
             ce08d = Decimal('0')
 
-        # Depreciation - calculated based on investments using user-defined depreciation rate
+        # Depreciation - calculated based on investments using user-defined depreciation rates
         base_depreciation = base_inc.ce09_ammortamenti
-        depreciation_rate = assumption.depreciation_rate / Decimal('100')
+        depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
+        depreciation_rate_intangible = (getattr(assumption, 'depreciation_rate_intangible', None) or assumption.depreciation_rate) / Decimal('100')
         # Use split fields if available, fall back to legacy total
         intangible_inv, tangible_inv = self._get_split_investments(assumption)
-        total_investments = intangible_inv + tangible_inv
-        new_depreciation = total_investments * depreciation_rate if total_investments > 0 else Decimal('0')
+        new_depr_intangible = intangible_inv * depreciation_rate_intangible if intangible_inv > 0 else Decimal('0')
+        new_depr_tangible = tangible_inv * depreciation_rate_tangible if tangible_inv > 0 else Decimal('0')
+        new_depreciation = new_depr_intangible + new_depr_tangible
         ce09 = base_depreciation + new_depreciation
 
         # Depreciation sub-items: base year detail + new investment depreciation
@@ -235,8 +237,8 @@ class ForecastEngine:
         base_ce09b = getattr(base_inc, 'ce09b_ammort_materiali', None) or Decimal('0')
         base_ce09c = getattr(base_inc, 'ce09c_svalutazioni', None) or Decimal('0')
         base_ce09d = getattr(base_inc, 'ce09d_svalutazione_crediti', None) or Decimal('0')
-        ce09a = base_ce09a + (intangible_inv * depreciation_rate if intangible_inv > 0 else Decimal('0'))
-        ce09b = base_ce09b + (tangible_inv * depreciation_rate if tangible_inv > 0 else Decimal('0'))
+        ce09a = base_ce09a + new_depr_intangible
+        ce09b = base_ce09b + new_depr_tangible
         ce09c = base_ce09c
         ce09d = base_ce09d
 

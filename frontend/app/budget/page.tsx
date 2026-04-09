@@ -412,6 +412,7 @@ function ScenarioForm({
             fixed_materials_percentage: a.fixed_materials_percentage,
             fixed_services_percentage: a.fixed_services_percentage,
             depreciation_rate: a.depreciation_rate,
+            depreciation_rate_intangible: a.depreciation_rate_intangible,
             financing_amount: a.financing_amount,
             financing_duration_years: a.financing_duration_years,
             financing_interest_rate: a.financing_interest_rate,
@@ -476,6 +477,7 @@ function ScenarioForm({
           fixed_materials_percentage: 0,
           fixed_services_percentage: 0,
           depreciation_rate: 20,
+          depreciation_rate_intangible: 20,
           financing_amount: 0,
           financing_duration_years: 5,
           financing_interest_rate: 3,
@@ -1686,9 +1688,9 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="1" min="0" max="100"
-                  value={fmtPct(assumptions[year]?.depreciation_rate, 20)}
-                  onChange={(e) => onUpdate(year, "depreciation_rate", parseFloat(e.target.value) || 20)}
-                  className={inputCls} placeholder="20.00%" title="Percentuale ammortamento (0-100%)" />
+                  value={fmtPct(assumptions[year]?.depreciation_rate_intangible, 20)}
+                  onChange={(e) => onUpdate(year, "depreciation_rate_intangible", parseFloat(e.target.value) || 20)}
+                  className={inputCls} placeholder="20.00%" title="Percentuale ammortamento immateriali (0-100%)" />
               </td>
             ))}
           </tr>

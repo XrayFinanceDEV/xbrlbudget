@@ -630,7 +630,8 @@ class BudgetAssumptions(Base):
     tax_rate = Column(Numeric(10, 6), default=24, nullable=False)  # IRES/IRAP tax rate %
     fixed_materials_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of materials that are fixed costs
     fixed_services_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of services that are fixed costs
-    depreciation_rate = Column(Numeric(10, 6), default=20, nullable=False)  # Average depreciation rate %
+    depreciation_rate = Column(Numeric(10, 6), default=20, nullable=False)  # Average depreciation rate % (tangible)
+    depreciation_rate_intangible = Column(Numeric(10, 6), default=20, nullable=False)  # Average depreciation rate % (intangible)
 
     # Financing parameters (optional)
     financing_amount = Column(Numeric(15, 2), default=0, nullable=False)  # New financing amount

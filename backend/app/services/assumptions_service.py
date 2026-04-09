@@ -130,6 +130,7 @@ def bulk_upsert_assumptions(
             fixed_materials_percentage=assumption_data.get("fixed_materials_percentage", 40.0),
             fixed_services_percentage=assumption_data.get("fixed_services_percentage", 40.0),
             depreciation_rate=assumption_data.get("depreciation_rate", 20.0),
+            depreciation_rate_intangible=assumption_data.get("depreciation_rate_intangible", 20.0),
             financing_amount=assumption_data.get("financing_amount", 0.0),
             financing_duration_years=assumption_data.get("financing_duration_years", 0.0),
             financing_interest_rate=assumption_data.get("financing_interest_rate", 0.0),

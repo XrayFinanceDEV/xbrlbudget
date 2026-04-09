@@ -387,6 +387,7 @@ export interface BudgetAssumptions {
   fixed_materials_percentage: number;
   fixed_services_percentage: number;
   depreciation_rate: number;
+  depreciation_rate_intangible: number;
   financing_amount: number;
   financing_duration_years: number;
   financing_interest_rate: number;
@@ -446,6 +447,7 @@ export interface BudgetAssumptionsCreate {
   fixed_materials_percentage?: number;
   fixed_services_percentage?: number;
   depreciation_rate?: number;
+  depreciation_rate_intangible?: number;
   financing_amount?: number;
   financing_duration_years?: number;
   financing_interest_rate?: number;

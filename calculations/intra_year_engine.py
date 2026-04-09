@@ -393,10 +393,11 @@ class IntraYearEngine:
         intangible_inv, tangible_inv = _get_split_investments(assumption)
         total_investments = intangible_inv + tangible_inv
         if total_investments > 0:
-            depreciation_rate = assumption.depreciation_rate / Decimal('100')
+            depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
+            depreciation_rate_intangible = (getattr(assumption, 'depreciation_rate_intangible', None) or assumption.depreciation_rate) / Decimal('100')
             remaining_months = Decimal('12') - Decimal(str(period_months))
-            new_dep_intangible = intangible_inv * depreciation_rate * remaining_months / Decimal('12')
-            new_dep_tangible = tangible_inv * depreciation_rate * remaining_months / Decimal('12')
+            new_dep_intangible = intangible_inv * depreciation_rate_intangible * remaining_months / Decimal('12')
+            new_dep_tangible = tangible_inv * depreciation_rate_tangible * remaining_months / Decimal('12')
             ce09a = ce09a + new_dep_intangible
             ce09b = ce09b + new_dep_tangible
             ce09 = ce09 + new_dep_intangible + new_dep_tangible

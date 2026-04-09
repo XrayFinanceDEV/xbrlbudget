@@ -92,6 +92,7 @@ class BudgetAssumptionsBase(BaseModel):
     fixed_materials_percentage: Decimal = Field(default=Decimal("40"))
     fixed_services_percentage: Decimal = Field(default=Decimal("40"))
     depreciation_rate: Decimal = Field(default=Decimal("20"))
+    depreciation_rate_intangible: Decimal = Field(default=Decimal("20"))
 
     # Financing parameters
     financing_amount: Decimal = Field(default=Decimal("0"))
@@ -160,6 +161,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     fixed_materials_percentage: Optional[Decimal] = None
     fixed_services_percentage: Optional[Decimal] = None
     depreciation_rate: Optional[Decimal] = None
+    depreciation_rate_intangible: Optional[Decimal] = None
     financing_amount: Optional[Decimal] = None
     financing_duration_years: Optional[Decimal] = None
     financing_interest_rate: Optional[Decimal] = None

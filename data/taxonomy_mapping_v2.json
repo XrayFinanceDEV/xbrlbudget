@@ -41,7 +41,11 @@
       "priority_4": "itcc-ci:CreditiImposteAnticipateTotaleImposteAnticipate",
       "detail_tags": [
         "itcc-ci:CreditiVersoClientiEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoImpreseControllateEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoImpreseCollegateEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoImpresaControllanteEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:CreditiCreditiTributariEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:CreditiImposteAnticipateEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:CreditiVersoAltriEsigibiliEntroEsercizioSuccessivo"
       ]
     },
@@ -53,7 +57,11 @@
       "priority_3": "itcc-ci-2018-11-04:CreditiEsigibiliOltreEsSucc",
       "detail_tags": [
         "itcc-ci:CreditiVersoClientiEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoImpreseControllateEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoImpreseCollegateEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:CreditiVersoImpresaControllanteEsigibiliOltreEsercizioSuccessivo",
         "itcc-ci:CreditiCreditiTributariEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:CreditiImposteAnticipateEsigibiliOltreEsercizioSuccessivo",
         "itcc-ci:CreditiVersoAltriEsigibiliOltreEsercizioSuccessivo"
       ]
     },
@@ -125,9 +133,13 @@
       "priority_3": "itcc-ci-2018-11-04:DebitiEsigibiliEntroEsSucc",
       "detail_tags": [
         "itcc-ci:DebitiDebitiVersoBancheEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoSociFinanziamentiEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiObbligazioniEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:DebitiDebitiTributariEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliEntroEsercizioSuccessivo",
+        "itcc-ci:DebitiAccontiEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:DebitiAltriDebitiEsigibiliEntroEsercizioSuccessivo"
       ]
     },
@@ -139,9 +151,13 @@
       "priority_3": "itcc-ci-2018-11-04:DebitiEsigibiliOltreEsSucc",
       "detail_tags": [
         "itcc-ci:DebitiDebitiVersoBancheEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiDebitiVersoSociFinanziamentiEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiObbligazioniEsigibiliOltreEsercizioSuccessivo",
         "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliOltreEsercizioSuccessivo",
         "itcc-ci:DebitiDebitiTributariEsigibiliOltreEsercizioSuccessivo",
         "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliOltreEsercizioSuccessivo",
+        "itcc-ci:DebitiAccontiEsigibiliOltreEsercizioSuccessivo",
         "itcc-ci:DebitiAltriDebitiEsigibiliOltreEsercizioSuccessivo"
       ]
     },

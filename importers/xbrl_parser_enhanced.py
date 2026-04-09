@@ -545,7 +545,45 @@ class EnhancedXBRLParser:
                     'value': float(value)
                 })
 
-        # Third pass: Reconciliation
+        # Third pass: Sum detail fields into aggregates when aggregate is missing
+        # Many XBRL files provide only detail-level Entro/Oltre tags (e.g.
+        # DebitiDebitiVersoBancheEsigibiliEntroEsercizioSuccessivo) without the
+        # aggregate tags (e.g. DebitiEsigibiliEntroEsercizioSuccessivo).
+        # Without this step, sp06/sp07/sp16/sp17 stay at 0 and reconciliation
+        # incorrectly dumps the grand total into the short-term aggregate.
+        DETAIL_TO_AGGREGATE = {
+            'sp06_crediti_breve': [
+                'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+                'sp06g_crediti_altri_breve',
+            ],
+            'sp07_crediti_lungo': [
+                'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+                'sp07g_crediti_altri_lungo',
+            ],
+            'sp16_debiti_breve': [
+                'sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                'sp16c_debiti_obbligazioni_breve', 'sp16d_debiti_fornitori_breve',
+                'sp16e_debiti_tributari_breve', 'sp16f_debiti_previdenza_breve',
+                'sp16g_altri_debiti_breve',
+            ],
+            'sp17_debiti_lungo': [
+                'sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                'sp17c_debiti_obbligazioni_lungo', 'sp17d_debiti_fornitori_lungo',
+                'sp17e_debiti_tributari_lungo', 'sp17f_debiti_previdenza_lungo',
+                'sp17g_altri_debiti_lungo',
+            ],
+        }
+        for agg_field, detail_fields in DETAIL_TO_AGGREGATE.items():
+            if bs_data.get(agg_field, Decimal('0')) == Decimal('0'):
+                detail_sum = sum(bs_data.get(f, Decimal('0')) for f in detail_fields)
+                if detail_sum != Decimal('0'):
+                    bs_data[agg_field] = detail_sum
+
+        # Fourth pass: Reconciliation
         # Reconcile credits if we have TotaleCrediti
         if 'total_crediti' in aggregates:
             total_crediti_xbrl = aggregates['total_crediti']

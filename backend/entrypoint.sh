@@ -14,6 +14,10 @@ if [ ! -f "${DATABASE_PATH:-/app/data/financial_analysis.db}" ]; then
     cd /app && python -c "from database.db import init_db; init_db()"
 fi
 
+# Apply schema migrations (idempotent — skips columns that already exist)
+echo "Running schema migrations..."
+cd /app && python migrate_db.py "${DATABASE_PATH:-/app/data/financial_analysis.db}"
+
 # Start uvicorn
 cd /app/backend
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2

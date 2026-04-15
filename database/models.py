@@ -48,6 +48,7 @@ class FinancialYear(Base):
     period_months = Column(Integer, nullable=True, default=None)  # NULL/12 = full year, 1-11 = partial
     original_bs_snapshot = Column(Text, nullable=True, default=None)  # JSON: original BS values before rettifiche
     original_is_snapshot = Column(Text, nullable=True, default=None)  # JSON: original IS values before rettifiche
+    rettifiche_log = Column(Text, nullable=True, default=None)  # JSON: list of per-edit double-entry rettifiche entries
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -573,6 +574,10 @@ class BudgetScenario(Base):
     ai_comment_break_even = Column(Text, nullable=True)
     ai_comment_cashflow = Column(Text, nullable=True)
 
+    # Infrannuale (intra-year) AI comments — JSON dict:
+    # {overall, ce_confronto, sp_confronto, ce_proiezione, sp_proiezione, indicatori}
+    ai_comments_infrannuale = Column(Text, nullable=True)
+
     # Relationships
     company = relationship("Company", back_populates="budget_scenarios")
     assumptions = relationship("BudgetAssumptions", back_populates="scenario", cascade="all, delete-orphan")
@@ -1071,3 +1076,31 @@ class ForecastIncomeStatement(Base):
 
     def __repr__(self):
         return f"<ForecastIncomeStatement(id={self.id}, year_id={self.forecast_year_id}, Revenue={self.revenue}, NP={self.net_profit})>"
+
+
+class UploadedFile(Base):
+    """
+    Tracks every file uploaded via the import endpoints (XBRL, CSV, PDF).
+
+    Stores the raw bytes on disk at `storage_path` and records the outcome of
+    the import attempt. Enables reproducing user-reported bugs by recovering
+    the exact input that produced wrong/missing data.
+
+    Retention: 90 days (cleanup script deletes both file and row).
+    """
+    __tablename__ = "uploaded_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), nullable=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True)
+    filename = Column(String(255), nullable=False)
+    file_type = Column(String(10), nullable=False)  # xbrl | csv | pdf
+    file_size = Column(Integer, nullable=False)
+    storage_path = Column(String(500), nullable=False)
+    status = Column(String(20), nullable=False, default="pending", index=True)  # pending | success | error
+    error_message = Column(Text, nullable=True)
+    error_traceback = Column(Text, nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<UploadedFile(id={self.id}, user_id={self.user_id}, type={self.file_type}, status={self.status})>"

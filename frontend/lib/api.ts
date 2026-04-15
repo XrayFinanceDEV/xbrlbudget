@@ -536,16 +536,19 @@ export const saveAdjustments = async (
   year: number,
   balanceSheet: Record<string, number>,
   incomeStatement: Record<string, number>,
-  periodMonths?: number
+  periodMonths?: number,
+  rettificheLog?: import('@/types/api').RettificaEntry[],
 ): Promise<import('@/types/api').AdjustableFinancialYear> => {
   const params = new URLSearchParams();
   if (periodMonths !== undefined) {
     params.append('period_months', periodMonths.toString());
   }
   const qs = params.toString();
+  const body: Record<string, unknown> = { balance_sheet: balanceSheet, income_statement: incomeStatement };
+  if (rettificheLog !== undefined) body.rettifiche_log = rettificheLog;
   const { data } = await api.put<import('@/types/api').AdjustableFinancialYear>(
     `/companies/${companyId}/years/${year}/adjustments${qs ? `?${qs}` : ''}`,
-    { balance_sheet: balanceSheet, income_statement: incomeStatement }
+    body
   );
   return data;
 };
@@ -636,6 +639,50 @@ export const generateReportAIComments = async (
     `/companies/${companyId}/scenarios/${scenarioId}/report/ai-comments`
   );
   return data;
+};
+
+// ===== Infrannuale (Stampa tab) AI comments =====
+
+export interface InfrannualeAIComments {
+  overall?: string;
+  ce_confronto?: string;
+  sp_confronto?: string;
+  ce_proiezione?: string;
+  sp_proiezione?: string;
+  indicatori?: string;
+}
+
+export const getInfrannualeAIComments = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<InfrannualeAIComments> => {
+  const { data } = await api.get<InfrannualeAIComments>(
+    `/companies/${companyId}/scenarios/${scenarioId}/infrannuale/ai-comments`
+  );
+  return data;
+};
+
+export const generateInfrannualeAIComments = async (
+  companyId: number,
+  scenarioId: number,
+  ctx: Record<string, unknown>,
+): Promise<InfrannualeAIComments> => {
+  const { data } = await api.post<InfrannualeAIComments>(
+    `/companies/${companyId}/scenarios/${scenarioId}/infrannuale/ai-comments`,
+    ctx,
+  );
+  return data;
+};
+
+export const saveInfrannualeAIComments = async (
+  companyId: number,
+  scenarioId: number,
+  comments: InfrannualeAIComments,
+): Promise<void> => {
+  await api.put(
+    `/companies/${companyId}/scenarios/${scenarioId}/infrannuale/ai-comments`,
+    comments,
+  );
 };
 
 export default api;

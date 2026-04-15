@@ -322,3 +322,195 @@ def save_comments(db: Session, scenario_id: int, comments: Dict[str, str]) -> No
     for dict_key, col_name in _COMMENT_FIELDS:
         setattr(scenario, col_name, comments.get(dict_key))
     db.commit()
+
+
+# ========================================================================
+# Infrannuale (intra-year analysis) comments — Stampa tab
+# ========================================================================
+
+class InfrannualeComments(pydantic.BaseModel):
+    """Structured output for 6 infrannuale Stampa comments (Italian)."""
+    overall: str = pydantic.Field(
+        description="2-3 frasi introduttive complessive: confronto storico vs infrannuale e tendenza proiettata, salute generale."
+    )
+    ce_confronto: str = pydantic.Field(
+        description="2-3 frasi sul confronto di Conto Economico: evoluzione ricavi, margini e utile tra anno di riferimento e periodo infrannuale (annualizzato o diretto)."
+    )
+    sp_confronto: str = pydantic.Field(
+        description="2-3 frasi sul confronto di Stato Patrimoniale: variazioni principali di attivo, patrimonio netto e debiti."
+    )
+    ce_proiezione: str = pydantic.Field(
+        description="2-3 frasi sulla proiezione di Conto Economico a fine anno: trend su ricavi, costi e redditività attesa."
+    )
+    sp_proiezione: str = pydantic.Field(
+        description="2-3 frasi sulla proiezione di Stato Patrimoniale a fine anno: evoluzione capitale circolante, indebitamento, liquidità."
+    )
+    indicatori: str = pydantic.Field(
+        description="2-3 frasi sugli indicatori della crisi d'impresa: rating, punti critici, confronto tra colonne."
+    )
+
+
+_INFRANNUALE_SYSTEM_PROMPT = (
+    "Sei un analista finanziario senior italiano. Stai commentando un'analisi infrannuale "
+    "(situazione intermedia di X mesi proiettata a 12 mesi) per un report da stampare. "
+    "Produci 6 commenti brevi e professionali: un commento introduttivo complessivo e un "
+    "commento per ciascuna delle 5 tabelle (CE confronto, SP confronto, CE proiezione, SP "
+    "proiezione, indicatori della crisi d'impresa). Tono professionale, 2-3 frasi ciascuno. "
+    "Non elencare numeri già visibili nelle tabelle: interpreta, evidenzia tendenze, rischi "
+    "e punti di forza. Usa il tool fornito."
+)
+
+
+def _build_infrannuale_summary(ctx: Dict[str, Any]) -> str:
+    """Compact text summary of comparison + projection + indicators for the LLM."""
+    scenario = ctx.get("scenario", {})
+    lines = [
+        f"Azienda: {scenario.get('company_name', 'N/A')}",
+        f"Scenario: {scenario.get('name', 'N/A')}",
+        f"Anno riferimento: {ctx.get('reference_year')} (12M) | Periodo infrannuale: {ctx.get('period_months')}M {ctx.get('partial_year')}",
+        "",
+    ]
+
+    # CE summary (partial vs reference + annualized + projected)
+    lines.append("--- CONTO ECONOMICO ---")
+    for code, label in [
+        ("ce01_ricavi_vendite", "Ricavi"),
+        ("_totale_vp", "Tot. valore produzione"),
+        ("_totale_cp", "Tot. costi produzione"),
+        ("_ebitda", "EBITDA"),
+        ("_ebit", "EBIT"),
+        ("_totale_fin", "Fin."),
+        ("_profit_before_tax", "PBT"),
+        ("ce20_imposte", "Imposte"),
+        ("_net_profit", "Utile netto"),
+    ]:
+        row = ctx.get("income_map", {}).get(code, {})
+        if not row:
+            continue
+        ref = _n(row.get("reference_value"))
+        partial = _n(row.get("partial_value"))
+        ann = _n(row.get("annualized_value"))
+        proj = _n(row.get("projected_value"))
+        lines.append(f"{label}: S={ref:,.0f} | I={partial:,.0f} | Ann={ann:,.0f} | P={proj:,.0f}")
+    lines.append("")
+
+    # BS summary
+    lines.append("--- STATO PATRIMONIALE ---")
+    for code, label in [
+        ("_totale_attivo", "Tot. Attivo"),
+        ("sp05_rimanenze", "Rimanenze"),
+        ("sp06_crediti_breve", "Crediti breve"),
+        ("sp09_disponibilita_liquide", "Cassa"),
+        ("_totale_pn", "Patrimonio Netto"),
+        ("sp14_fondi_rischi", "Fondi rischi"),
+        ("sp15_tfr", "TFR"),
+        ("_totale_debiti", "Tot. Debiti"),
+        ("sp16_debiti_breve", "Debiti breve"),
+        ("sp17_debiti_lungo", "Debiti lungo"),
+    ]:
+        row = ctx.get("balance_map", {}).get(code, {})
+        if not row:
+            continue
+        ref = _n(row.get("reference_value"))
+        partial = _n(row.get("partial_value"))
+        proj = _n(row.get("projected_value"))
+        lines.append(f"{label}: S={ref:,.0f} | I={partial:,.0f} | P={proj:,.0f}")
+    lines.append("")
+
+    # Indicators
+    indicators = ctx.get("indicators", {})
+    if indicators:
+        lines.append("--- INDICATORI ---")
+        for col_name, vals in indicators.items():
+            lines.append(f"{col_name}: " + " | ".join(f"{k}={v}" for k, v in vals.items()))
+        lines.append("")
+
+    # Rating
+    ratings = ctx.get("ratings", {})
+    if ratings:
+        lines.append("--- RATING ---")
+        for col_name, r in ratings.items():
+            lines.append(f"{col_name}: {r.get('code')} ({r.get('label')}) — oltre={r.get('oltre_count')}/14, alerts={r.get('alerts', 0)}")
+
+    return "\n".join(lines)
+
+
+def generate_infrannuale_comments(ctx: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Generate 6 AI comments for the infrannuale Stampa via Claude Haiku.
+
+    `ctx` shape (built by the endpoint):
+        {
+          scenario: {name, company_name, ...},
+          reference_year, partial_year, period_months,
+          income_map: {code: {reference_value, partial_value, annualized_value, projected_value}},
+          balance_map: {code: {reference_value, partial_value, projected_value}},
+          indicators: {"Storico": {...}, "Infrann.": {...}, "Proiez.": {...}},
+          ratings: {"Storico": {code, label, oltre_count, alerts}, ...},
+        }
+
+    Returns {} on missing API key or any error.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        logger.debug("No ANTHROPIC_API_KEY set — skipping infrannuale AI comments")
+        return {}
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        summary = _build_infrannuale_summary(ctx)
+        tool = _build_tool_schema(InfrannualeComments, "infrannuale_comments")
+
+        response = client.messages.create(
+            model=PDF_LLM_MODEL,
+            max_tokens=AI_COMMENTS_MAX_TOKENS,
+            system=_INFRANNUALE_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Analizza i dati seguenti e genera i 6 commenti richiesti usando il tool "
+                    "infrannuale_comments.\n\n"
+                    f"{summary}"
+                ),
+            }],
+            tools=[tool],
+            tool_choice={"type": "tool", "name": "infrannuale_comments"},
+        )
+
+        for block in response.content:
+            if block.type == "tool_use":
+                return InfrannualeComments.model_validate(block.input).model_dump()
+
+        logger.warning("No tool_use block in infrannuale AI comments response")
+        return {}
+
+    except Exception as e:
+        logger.warning(f"Infrannuale AI comments generation failed: {e}")
+        return {}
+
+
+import json as _json
+
+
+def get_infrannuale_comments(db: Session, scenario_id: int) -> Dict[str, str]:
+    """Read stored infrannuale AI comments (JSON) from BudgetScenario."""
+    scenario = db.query(BudgetScenario).filter(BudgetScenario.id == scenario_id).first()
+    if not scenario or not scenario.ai_comments_infrannuale:
+        return {}
+    try:
+        data = _json.loads(scenario.ai_comments_infrannuale)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_infrannuale_comments(db: Session, scenario_id: int, comments: Dict[str, str]) -> None:
+    """Write infrannuale AI comments to BudgetScenario as JSON text."""
+    scenario = db.query(BudgetScenario).filter(BudgetScenario.id == scenario_id).first()
+    if not scenario:
+        return
+    # Keep only the six known keys to avoid pollution
+    allowed = {"overall", "ce_confronto", "sp_confronto", "ce_proiezione", "sp_proiezione", "indicatori"}
+    cleaned = {k: v for k, v in comments.items() if k in allowed and isinstance(v, str)}
+    scenario.ai_comments_infrannuale = _json.dumps(cleaned) if cleaned else None
+    db.commit()

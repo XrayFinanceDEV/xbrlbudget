@@ -61,6 +61,7 @@ MIGRATIONS = {
         ("period_months",                      "INTEGER"),
         ("original_bs_snapshot",               "TEXT"),
         ("original_is_snapshot",               "TEXT"),
+        ("rettifiche_log",                     "TEXT"),
     ],
     "budget_scenarios": [
         ("scenario_type",                      "VARCHAR(20) DEFAULT 'budget' NOT NULL"),
@@ -75,6 +76,7 @@ MIGRATIONS = {
         ("ai_comment_efficiency",              "TEXT"),
         ("ai_comment_break_even",              "TEXT"),
         ("ai_comment_cashflow",                "TEXT"),
+        ("ai_comments_infrannuale",            "TEXT"),
     ],
     "budget_assumptions": [
         ("intangible_investments",             "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
@@ -120,8 +122,46 @@ MIGRATIONS = {
     ],
 }
 
+NEW_TABLES = {
+    "uploaded_files": """
+        CREATE TABLE uploaded_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id VARCHAR(36),
+            company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+            filename VARCHAR(255) NOT NULL,
+            file_type VARCHAR(10) NOT NULL,
+            file_size INTEGER NOT NULL,
+            storage_path VARCHAR(500) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            error_message TEXT,
+            error_traceback TEXT,
+            uploaded_at DATETIME
+        )
+    """,
+}
+
+NEW_INDEXES = {
+    "uploaded_files": [
+        ("ix_uploaded_files_user_id",     "user_id"),
+        ("ix_uploaded_files_company_id",  "company_id"),
+        ("ix_uploaded_files_status",      "status"),
+        ("ix_uploaded_files_uploaded_at", "uploaded_at"),
+    ],
+}
+
 conn = sqlite3.connect(DB_PATH)
 cur = conn.cursor()
+
+tables_created = 0
+for table, ddl in NEW_TABLES.items():
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+    if cur.fetchone():
+        continue
+    cur.execute(ddl)
+    print(f"  CREATE TABLE {table}")
+    tables_created += 1
+    for idx_name, col in NEW_INDEXES.get(table, []):
+        cur.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({col})")
 
 added = 0
 skipped = 0
@@ -139,4 +179,4 @@ for table, columns in MIGRATIONS.items():
 
 conn.commit()
 conn.close()
-print(f"\nDone. Added {added} columns, skipped {skipped} (already existed).")
+print(f"\nDone. Created {tables_created} tables, added {added} columns, skipped {skipped} (already existed).")

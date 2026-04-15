@@ -17,6 +17,10 @@ import {
   deleteCompany,
   getAdjustableFinancialYear,
   saveAdjustments,
+  getInfrannualeAIComments,
+  generateInfrannualeAIComments,
+  saveInfrannualeAIComments,
+  type InfrannualeAIComments,
 } from "@/lib/api";
 import axios from "axios";
 import type {
@@ -26,6 +30,7 @@ import type {
   IntraYearComparisonItem,
   ScenarioAnalysis,
   AdjustableFinancialYear,
+  RettificaEntry,
 } from "@/types/api";
 import { toast } from "sonner";
 import {
@@ -45,8 +50,10 @@ import {
   LineChart,
   Pencil,
   RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -57,11 +64,14 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -120,15 +130,27 @@ const SECTOR_OPTIONS: Record<number, string> = {
 // Key P&L items the user can override
 const EDITABLE_CE_CODES = [
   "ce01_ricavi_vendite",
+  "ce02_variazioni_rimanenze",
+  "ce03_lavori_interni",
   "ce04_altri_ricavi",
   "ce05_materie_prime",
   "ce06_servizi",
   "ce07_godimento_beni",
   "ce08_costi_personale",
   "ce09_ammortamenti",
+  "ce10_var_rimanenze_mat_prime",
+  "ce11_accantonamenti",
+  "ce11b_altri_accantonamenti",
   "ce12_oneri_diversi",
+  "ce13_proventi_partecipazioni",
   "ce14_altri_proventi_finanziari",
   "ce15_oneri_finanziari",
+  "ce16_utili_perdite_cambi",
+  "ce17a_rivalutazioni",
+  "ce17b_svalutazioni",
+  "ce18_proventi_straordinari",
+  "ce19_oneri_straordinari",
+  "ce20_imposte",
 ];
 
 // Key BS items the user can override (informational, not directly editable in v1)
@@ -186,6 +208,9 @@ const ALWAYS_SHOW_CODES = new Set([
   // BS section headers and subtotals
   "_hdr_attivo", "_hdr_immob", "_hdr_circ", "_hdr_passivo", "_hdr_pn", "_hdr_debiti",
   "_totale_immob", "_totale_circ", "_totale_pn", "_totale_debiti", "_differenza",
+  // Debt creditor-type group headers — always visible (OIC art. 2424 structure)
+  "_debt_banche", "_debt_altri_finanz", "_debt_obbligazioni",
+  "_debt_fornitori", "_debt_tributari", "_debt_previdenza", "_debt_altri",
 ]);
 
 // BS codes: sp01-sp10 = Attivo, sp11-sp18 = Passivo
@@ -471,8 +496,30 @@ function computeCrisisRating(
 }
 
 function buildBalanceItemsWithTotals(
-  items: IntraYearComparisonItem[],
+  rawItems: IntraYearComparisonItem[],
 ): IntraYearComparisonItem[] {
+  // Reconcile sub-fields per year so debt/crediti/rimanenze details always show
+  // when the parent aggregate has a value (common in bilancio abbreviato imports
+  // where sub-fields arrive as 0 and the gap lives in the aggregate).
+  const reconcilePerYear = (key: "partial_value" | "reference_value" | "prior_value") => {
+    const data: Record<string, number> = {};
+    for (const it of rawItems) data[it.code] = it[key] ?? 0;
+    reconcileSubfields(data);
+    return data;
+  };
+  const partialData = reconcilePerYear("partial_value");
+  const refData = reconcilePerYear("reference_value");
+  const priorData = reconcilePerYear("prior_value");
+  const items: IntraYearComparisonItem[] = rawItems.map((it) => ({
+    ...it,
+    partial_value: partialData[it.code] ?? it.partial_value,
+    reference_value: refData[it.code] ?? it.reference_value,
+    prior_value: priorData[it.code] ?? it.prior_value,
+    // Keep annualized_value as caller supplied — Projection tab writes projected BS
+    // values there; for the Comparison tab the backend already mirrors partial into
+    // annualized (BS is point-in-time).
+  }));
+
   const byCode = new Map(items.map((i) => [i.code, i]));
   const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
 
@@ -500,6 +547,11 @@ function buildBalanceItemsWithTotals(
     sp02_immob_immateriali: "I - Immobilizzazioni immateriali",
     sp03_immob_materiali: "II - Immobilizzazioni materiali",
     sp04_immob_finanziarie: "III - Immobilizzazioni finanziarie",
+    sp04a_partecipazioni: "  1) Partecipazioni",
+    sp04b_crediti_immob_breve: "  2) Crediti (entro es. successivo)",
+    sp04c_crediti_immob_lungo: "  2) Crediti (oltre es. successivo)",
+    sp04d_altri_titoli: "  3) Altri titoli",
+    sp04e_strumenti_derivati_attivi: "  4) Strumenti finanziari derivati attivi",
     sp05_rimanenze: "I - Rimanenze",
     sp06_crediti_breve: "II - Crediti (entro esercizio successivo)",
     sp06a_crediti_clienti_breve: "  1) Verso clienti",
@@ -521,26 +573,33 @@ function buildBalanceItemsWithTotals(
     sp09_disponibilita_liquide: "IV - Disponibilità liquide",
     sp10_ratei_risconti_attivi: "D) Ratei e risconti attivi",
     sp11_capitale: "I - Capitale",
-    sp12_riserve: "II-VIII - Riserve",
+    sp12a_riserva_sovrapprezzo: "II - Riserva da soprapprezzo delle azioni",
+    sp12b_riserve_rivalutazione: "III - Riserve di rivalutazione",
+    sp12c_riserva_legale: "IV - Riserva legale",
+    sp12d_riserve_statutarie: "V - Riserve statutarie",
+    sp12e_altre_riserve: "VI - Altre riserve",
+    sp12f_riserva_copertura_flussi: "VII - Riserva per copertura flussi finanziari",
+    sp12g_utili_perdite_portati: "VIII - Utili (perdite) portati a nuovo",
     sp13_utile_perdita: "IX - Utile (perdita) dell'esercizio",
+    sp12h_riserva_neg_azioni_proprie: "X - Riserva negativa per azioni proprie",
     sp14_fondi_rischi: "B) Fondi per rischi e oneri",
     sp15_tfr: "C) Trattamento di fine rapporto di lavoro subordinato",
     sp16_debiti_breve: "Debiti (entro esercizio successivo)",
-    sp16a_debiti_banche_breve: "  1) Debiti verso banche",
-    sp16b_debiti_altri_finanz_breve: "  2) Debiti verso altri finanziatori",
-    sp16c_debiti_obbligazioni_breve: "  3) Debiti obbligazionari",
-    sp16d_debiti_fornitori_breve: "  7) Debiti verso fornitori",
-    sp16e_debiti_tributari_breve: "  12) Debiti tributari",
-    sp16f_debiti_previdenza_breve: "  13) Debiti previdenziali",
-    sp16g_altri_debiti_breve: "  14) Altri debiti",
+    sp16a_debiti_banche_breve: "  entro 12 mesi",
+    sp16b_debiti_altri_finanz_breve: "  entro 12 mesi",
+    sp16c_debiti_obbligazioni_breve: "  entro 12 mesi",
+    sp16d_debiti_fornitori_breve: "  entro 12 mesi",
+    sp16e_debiti_tributari_breve: "  entro 12 mesi",
+    sp16f_debiti_previdenza_breve: "  entro 12 mesi",
+    sp16g_altri_debiti_breve: "  entro 12 mesi",
     sp17_debiti_lungo: "Debiti (oltre esercizio successivo)",
-    sp17a_debiti_banche_lungo: "  1) Debiti verso banche",
-    sp17b_debiti_altri_finanz_lungo: "  2) Debiti verso altri finanziatori",
-    sp17c_debiti_obbligazioni_lungo: "  3) Debiti obbligazionari",
-    sp17d_debiti_fornitori_lungo: "  7) Debiti verso fornitori",
-    sp17e_debiti_tributari_lungo: "  12) Debiti tributari",
-    sp17f_debiti_previdenza_lungo: "  13) Debiti previdenziali",
-    sp17g_altri_debiti_lungo: "  14) Altri debiti",
+    sp17a_debiti_banche_lungo: "  oltre 12 mesi",
+    sp17b_debiti_altri_finanz_lungo: "  oltre 12 mesi",
+    sp17c_debiti_obbligazioni_lungo: "  oltre 12 mesi",
+    sp17d_debiti_fornitori_lungo: "  oltre 12 mesi",
+    sp17e_debiti_tributari_lungo: "  oltre 12 mesi",
+    sp17f_debiti_previdenza_lungo: "  oltre 12 mesi",
+    sp17g_altri_debiti_lungo: "  oltre 12 mesi",
     sp18_ratei_risconti_passivi: "E) Ratei e risconti passivi",
   };
 
@@ -597,6 +656,11 @@ function buildBalanceItemsWithTotals(
     labeled("sp02_immob_immateriali"),
     labeled("sp03_immob_materiali"),
     labeled("sp04_immob_finanziarie"),
+    labeled("sp04a_partecipazioni"),
+    labeled("sp04b_crediti_immob_breve"),
+    labeled("sp04c_crediti_immob_lungo"),
+    labeled("sp04d_altri_titoli"),
+    labeled("sp04e_strumenti_derivati_attivi"),
     makeRow("_totale_immob", "Totale Immobilizzazioni", totImmobP, totImmobR, totImmobA, totImmobPr),
     // C) ATTIVO CIRCOLANTE
     hdr("_hdr_circ", "C) ATTIVO CIRCOLANTE"),
@@ -628,31 +692,46 @@ function buildBalanceItemsWithTotals(
     // A) PATRIMONIO NETTO
     hdr("_hdr_pn", "A) PATRIMONIO NETTO"),
     labeled("sp11_capitale"),
-    labeled("sp12_riserve"),
+    labeled("sp12a_riserva_sovrapprezzo"),
+    labeled("sp12b_riserve_rivalutazione"),
+    labeled("sp12c_riserva_legale"),
+    labeled("sp12d_riserve_statutarie"),
+    labeled("sp12e_altre_riserve"),
+    labeled("sp12f_riserva_copertura_flussi"),
+    labeled("sp12g_utili_perdite_portati"),
     labeled("sp13_utile_perdita"),
+    labeled("sp12h_riserva_neg_azioni_proprie"),
     makeRow("_totale_pn", "Totale Patrimonio Netto", totPNP, totPNR, totPNA, totPNPr),
     // B) Fondi
     labeled("sp14_fondi_rischi"),
     // C) TFR
     labeled("sp15_tfr"),
-    // D) DEBITI
+    // D) DEBITI — grouped by creditor type (OIC art. 2424), each with entro/oltre sub-rows
     hdr("_hdr_debiti", "D) DEBITI"),
-    labeled("sp16_debiti_breve"),
-    labeled("sp16a_debiti_banche_breve"),
-    labeled("sp16b_debiti_altri_finanz_breve"),
-    labeled("sp16c_debiti_obbligazioni_breve"),
-    labeled("sp16d_debiti_fornitori_breve"),
-    labeled("sp16e_debiti_tributari_breve"),
-    labeled("sp16f_debiti_previdenza_breve"),
-    labeled("sp16g_altri_debiti_breve"),
-    labeled("sp17_debiti_lungo"),
-    labeled("sp17a_debiti_banche_lungo"),
-    labeled("sp17b_debiti_altri_finanz_lungo"),
-    labeled("sp17c_debiti_obbligazioni_lungo"),
-    labeled("sp17d_debiti_fornitori_lungo"),
-    labeled("sp17e_debiti_tributari_lungo"),
-    labeled("sp17f_debiti_previdenza_lungo"),
-    labeled("sp17g_altri_debiti_lungo"),
+    ...(() => {
+      const groupSum = (breve: string, lungo: string, key: "partial_value" | "reference_value" | "annualized_value" | "prior_value") =>
+        v(breve, key) + v(lungo, key);
+      const debtGroup = (code: string, label: string, breve: string, lungo: string): IntraYearComparisonItem[] => [
+        makeRow(
+          code, label,
+          groupSum(breve, lungo, "partial_value"),
+          groupSum(breve, lungo, "reference_value"),
+          groupSum(breve, lungo, "annualized_value"),
+          groupSum(breve, lungo, "prior_value"),
+        ),
+        labeled(breve),
+        labeled(lungo),
+      ];
+      return [
+        ...debtGroup("_debt_banche", "1) Debiti verso banche", "sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"),
+        ...debtGroup("_debt_altri_finanz", "2) Debiti verso altri finanziatori", "sp16b_debiti_altri_finanz_breve", "sp17b_debiti_altri_finanz_lungo"),
+        ...debtGroup("_debt_obbligazioni", "3) Debiti obbligazionari", "sp16c_debiti_obbligazioni_breve", "sp17c_debiti_obbligazioni_lungo"),
+        ...debtGroup("_debt_fornitori", "7) Debiti verso fornitori", "sp16d_debiti_fornitori_breve", "sp17d_debiti_fornitori_lungo"),
+        ...debtGroup("_debt_tributari", "12) Debiti tributari", "sp16e_debiti_tributari_breve", "sp17e_debiti_tributari_lungo"),
+        ...debtGroup("_debt_previdenza", "13) Debiti previdenziali", "sp16f_debiti_previdenza_breve", "sp17f_debiti_previdenza_lungo"),
+        ...debtGroup("_debt_altri", "14) Altri debiti", "sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo"),
+      ];
+    })(),
     makeRow("_totale_debiti", "Totale Debiti", totDebtP, totDebtR, totDebtA, totDebtPr),
     // E) Ratei passivi
     labeled("sp18_ratei_risconti_passivi"),
@@ -867,7 +946,11 @@ const PROPOSAL_RULES: ProposalRule[] = [
   { editable: "sp01_crediti_soci", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs soci → più altri ricavi", counterpartNeg: "ce09d_svalutazione_crediti", directionNeg: "inverse", explanationNeg: "Meno crediti vs soci → svalutazione crediti / oneri diversi", splitAltNeg: { field: "ce12_oneri_diversi", label: "14) Oneri diversi di gestione" } },
   { editable: "sp02_immob_immateriali", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più immob. immateriali → più incrementi per lavori interni" },
   { editable: "sp03_immob_materiali", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più immob. materiali → più incrementi per lavori interni" },
-  { editable: "sp04_immob_finanziarie", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più immob. finanziarie → più proventi finanziari" },
+  { editable: "sp04a_partecipazioni", counterpart: "ce13_proventi_partecipazioni", direction: "same", explanation: "Più partecipazioni → più proventi da partecipazioni" },
+  { editable: "sp04b_crediti_immob_breve", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più crediti immob. breve → più proventi finanziari" },
+  { editable: "sp04c_crediti_immob_lungo", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più crediti immob. lungo → più proventi finanziari" },
+  { editable: "sp04d_altri_titoli", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più altri titoli → più proventi finanziari" },
+  { editable: "sp04e_strumenti_derivati_attivi", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più strumenti derivati attivi → più proventi finanziari" },
   { editable: "sp05_rimanenze", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più rimanenze → variazione positiva rimanenze" },
   { editable: "sp05a_materie_prime", counterpart: "ce10_var_rimanenze_mat_prime", direction: "inverse", explanation: "Più rimanenze materie → meno variazione mat. prime (costo)" },
   { editable: "sp05b_prodotti_in_corso", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più prodotti in c/lav → variazione positiva rimanenze" },
@@ -895,7 +978,13 @@ const PROPOSAL_RULES: ProposalRule[] = [
   { editable: "sp10_ratei_risconti_attivi", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più ratei attivi → più altri ricavi di competenza" },
   // ===== BS PASSIVO → CE =====
   { editable: "sp11_capitale", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più capitale → più liquidità (conferimento)" },
-  { editable: "sp12_riserve", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserve → più liquidità (conferimento)" },
+  { editable: "sp12a_riserva_sovrapprezzo", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserva sovrapprezzo → più liquidità (conferimento)" },
+  { editable: "sp12b_riserve_rivalutazione", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserve rivalutazione → più liquidità" },
+  { editable: "sp12c_riserva_legale", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserva legale → più liquidità" },
+  { editable: "sp12d_riserve_statutarie", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserve statutarie → più liquidità" },
+  { editable: "sp12e_altre_riserve", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più altre riserve → più liquidità" },
+  { editable: "sp12f_riserva_copertura_flussi", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più riserva copertura flussi → più liquidità" },
+  { editable: "sp12h_riserva_neg_azioni_proprie", counterpart: "sp09_disponibilita_liquide", direction: "inverse", explanation: "Più riserva neg. azioni proprie → meno liquidità (riacquisto)" },
   { editable: "sp12g_utili_perdite_portati", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più utili a nuovo → più liquidità" },
   { editable: "sp14_fondi_rischi", counterpart: "ce11_accantonamenti", direction: "same", explanation: "Più fondi rischi → più accantonamenti" },
   { editable: "sp15_tfr", counterpart: "ce08a_tfr_accrual", direction: "same", explanation: "Più fondo TFR → più accantonamento TFR" },
@@ -904,18 +993,20 @@ const PROPOSAL_RULES: ProposalRule[] = [
   { editable: "sp16c_debiti_obbligazioni_breve", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti obbligazionari → più oneri finanziari" },
   { editable: "sp16d_debiti_fornitori_breve", counterpart: "ce06_servizi", direction: "same", explanation: "Più debiti fornitori → più costi per servizi / materie prime", splitAlt: { field: "ce05_materie_prime", label: "6) Per materie prime" } },
   { editable: "sp16e_debiti_tributari_breve", counterpart: "ce20_imposte", direction: "same", explanation: "Più debiti tributari → più imposte" },
-  { editable: "sp16f_debiti_previdenza_breve", counterpart: "ce08_costi_personale", direction: "same", explanation: "Più debiti previdenziali → più costi del personale" },
+  { editable: "sp16f_debiti_previdenza_breve", counterpart: "ce08c_oneri_sociali", direction: "same", explanation: "Più debiti previdenziali → più oneri sociali" },
   { editable: "sp16g_altri_debiti_breve", counterpart: "ce12_oneri_diversi", direction: "same", explanation: "Più altri debiti → più oneri diversi" },
   { editable: "sp17a_debiti_banche_lungo", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti vs banche lungo → più oneri finanziari" },
   { editable: "sp17b_debiti_altri_finanz_lungo", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti finanziari lungo → più oneri finanziari" },
   { editable: "sp17c_debiti_obbligazioni_lungo", counterpart: "ce15_oneri_finanziari", direction: "same", explanation: "Più debiti obbligazionari lungo → più oneri finanziari" },
   { editable: "sp17d_debiti_fornitori_lungo", counterpart: "ce06_servizi", direction: "same", explanation: "Più debiti fornitori lungo → più costi per servizi / materie prime", splitAlt: { field: "ce05_materie_prime", label: "6) Per materie prime" } },
   { editable: "sp17e_debiti_tributari_lungo", counterpart: "ce20_imposte", direction: "same", explanation: "Più debiti tributari lungo → più imposte" },
-  { editable: "sp17f_debiti_previdenza_lungo", counterpart: "ce08_costi_personale", direction: "same", explanation: "Più debiti previdenziali lungo → più costi del personale" },
+  { editable: "sp17f_debiti_previdenza_lungo", counterpart: "ce08c_oneri_sociali", direction: "same", explanation: "Più debiti previdenziali lungo → più oneri sociali" },
   { editable: "sp17g_altri_debiti_lungo", counterpart: "ce12_oneri_diversi", direction: "same", explanation: "Più altri debiti lungo → più oneri diversi" },
   { editable: "sp18_ratei_risconti_passivi", counterpart: "ce07_godimento_beni", direction: "same", explanation: "Più ratei passivi → più godimento beni di terzi" },
   // ===== CE → BS =====
   { editable: "ce01_ricavi_vendite", counterpart: "sp06a_crediti_clienti_breve", direction: "same", explanation: "Più ricavi → più crediti vs clienti" },
+  { editable: "ce02_variazioni_rimanenze", counterpart: "sp05b_prodotti_in_corso", direction: "same", explanation: "Più variazione rimanenze → più rimanenze prodotti in c/lav" },
+  { editable: "ce03_lavori_interni", counterpart: "sp03_immob_materiali", direction: "same", explanation: "Più incrementi per lavori interni → più immob. materiali" },
   { editable: "ce04_altri_ricavi", counterpart: "sp06g_crediti_altri_breve", direction: "same", explanation: "Più altri ricavi → più crediti diversi" },
   { editable: "ce05_materie_prime", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", explanation: "Più costi materie prime → più debiti vs fornitori" },
   { editable: "ce06_servizi", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", explanation: "Più costi servizi → più debiti vs fornitori" },
@@ -927,17 +1018,17 @@ const PROPOSAL_RULES: ProposalRule[] = [
   { editable: "ce08d_altri_costi_personale", counterpart: "sp16g_altri_debiti_breve", direction: "same", explanation: "Più altri costi personale → più altri debiti" },
   { editable: "ce09a_ammort_immateriali", counterpart: "sp02_immob_immateriali", direction: "inverse", explanation: "Più ammortamento → meno immobilizzazioni immateriali" },
   { editable: "ce09b_ammort_materiali", counterpart: "sp03_immob_materiali", direction: "inverse", explanation: "Più ammortamento → meno immobilizzazioni materiali" },
-  { editable: "ce09c_svalutazioni", counterpart: "sp04_immob_finanziarie", direction: "inverse", explanation: "Più svalutazioni → meno immobilizzazioni finanziarie" },
-  { editable: "ce09d_svalutazione_crediti", counterpart: "sp06_crediti_breve", direction: "inverse", explanation: "Più svalutazione crediti → meno crediti commerciali" },
+  { editable: "ce09c_svalutazioni", counterpart: "sp04a_partecipazioni", direction: "inverse", explanation: "Più svalutazioni → meno partecipazioni" },
+  { editable: "ce09d_svalutazione_crediti", counterpart: "sp06a_crediti_clienti_breve", direction: "inverse", explanation: "Più svalutazione crediti → meno crediti verso clienti" },
   { editable: "ce11_accantonamenti", counterpart: "sp14_fondi_rischi", direction: "same", explanation: "Più accantonamenti rischi → più fondi per rischi e oneri" },
   { editable: "ce11b_altri_accantonamenti", counterpart: "sp14_fondi_rischi", direction: "same", explanation: "Più altri accantonamenti → più fondi rischi" },
   { editable: "ce12_oneri_diversi", counterpart: "sp16g_altri_debiti_breve", direction: "same", explanation: "Più oneri diversi → più altri debiti" },
-  { editable: "ce13_proventi_partecipazioni", counterpart: "sp04_immob_finanziarie", direction: "same", explanation: "Più proventi partecipazioni → più immob. finanziarie" },
+  { editable: "ce13_proventi_partecipazioni", counterpart: "sp04a_partecipazioni", direction: "same", explanation: "Più proventi partecipazioni → più partecipazioni" },
   { editable: "ce14_altri_proventi_finanziari", counterpart: "sp08_attivita_finanziarie", direction: "same", explanation: "Più proventi finanziari → più attività finanziarie" },
   { editable: "ce15_oneri_finanziari", counterpart: "sp16a_debiti_banche_breve", direction: "same", explanation: "Più oneri finanziari → più debiti vs banche" },
   { editable: "ce16_utili_perdite_cambi", counterpart: "sp09_disponibilita_liquide", direction: "same", explanation: "Più utili su cambi → più liquidità" },
-  { editable: "ce17a_rivalutazioni", counterpart: "sp04_immob_finanziarie", direction: "same", explanation: "Più rivalutazioni → più immob. finanziarie" },
-  { editable: "ce17b_svalutazioni", counterpart: "sp04_immob_finanziarie", direction: "inverse", explanation: "Più svalutazioni → meno immob. finanziarie" },
+  { editable: "ce17a_rivalutazioni", counterpart: "sp04a_partecipazioni", direction: "same", explanation: "Più rivalutazioni → più partecipazioni" },
+  { editable: "ce17b_svalutazioni", counterpart: "sp04a_partecipazioni", direction: "inverse", explanation: "Più svalutazioni → meno partecipazioni" },
   { editable: "ce18_proventi_straordinari", counterpart: "sp06g_crediti_altri_breve", direction: "same", explanation: "Più proventi straordinari → più crediti diversi" },
   { editable: "ce19_oneri_straordinari", counterpart: "sp16g_altri_debiti_breve", direction: "same", explanation: "Più oneri straordinari → più altri debiti" },
   { editable: "ce20_imposte", counterpart: "sp16e_debiti_tributari_breve", direction: "same", explanation: "Più imposte → più debiti tributari" },
@@ -948,6 +1039,15 @@ const EDITABLE_RETTIFICHE = new Set(PROPOSAL_RULES.map((r) => r.editable));
 // Fields that are counterpart targets — shown with special styling after proposals are applied
 const AUTO_ADJUSTED = new Set(PROPOSAL_RULES.map((r) => r.counterpart));
 
+// Aggregate/computed fields that must NOT be used as counterparts —
+// they are rebuilt from their sub-fields in recalcAggregates (or from CE for sp13),
+// so posting a direct delta to them would be silently wiped out.
+const NON_POSTABLE_FIELDS = new Set([
+  "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve", "sp07_crediti_lungo",
+  "sp12_riserve", "sp13_utile_perdita", "sp16_debiti_breve", "sp17_debiti_lungo",
+  "ce08_costi_personale", "ce09_ammortamenti", "ce17_rettifiche_attivita_fin",
+]);
+
 // Italian labels for rettifiche fields
 const RETTIFICHE_LABELS: Record<string, string> = {
   // SP - Attivo
@@ -955,6 +1055,11 @@ const RETTIFICHE_LABELS: Record<string, string> = {
   sp02_immob_immateriali: "B.I) Immobilizzazioni immateriali",
   sp03_immob_materiali: "B.II) Immobilizzazioni materiali",
   sp04_immob_finanziarie: "B.III) Immobilizzazioni finanziarie",
+  sp04a_partecipazioni: "  1) Partecipazioni",
+  sp04b_crediti_immob_breve: "  2) Crediti (entro es. successivo)",
+  sp04c_crediti_immob_lungo: "  2) Crediti (oltre es. successivo)",
+  sp04d_altri_titoli: "  3) Altri titoli",
+  sp04e_strumenti_derivati_attivi: "  4) Strumenti finanziari derivati attivi",
   sp05_rimanenze: "C.I) Rimanenze",
   sp05a_materie_prime: "  1) Materie prime, sussidiarie e di consumo",
   sp05b_prodotti_in_corso: "  2) Prodotti in c/lavorazione e semilavorati",
@@ -982,9 +1087,16 @@ const RETTIFICHE_LABELS: Record<string, string> = {
   sp10_ratei_risconti_attivi: "D) Ratei e risconti attivi",
   // SP - Passivo
   sp11_capitale: "A.I) Capitale",
-  sp12_riserve: "A.II-VIII) Riserve",
-  sp12g_utili_perdite_portati: "  VIII) Utili (perdite) portati a nuovo",
+  sp12a_riserva_sovrapprezzo: "A.II) Riserva da soprapprezzo azioni",
+  sp12b_riserve_rivalutazione: "A.III) Riserve di rivalutazione",
+  sp12c_riserva_legale: "A.IV) Riserva legale",
+  sp12d_riserve_statutarie: "A.V) Riserve statutarie",
+  sp12e_altre_riserve: "A.VI) Altre riserve",
+  sp12f_riserva_copertura_flussi: "A.VII) Riserva per copertura flussi finanziari",
+  sp12_riserve: "A.II-VIII) Totale riserve",
+  sp12g_utili_perdite_portati: "A.VIII) Utili (perdite) portati a nuovo",
   sp13_utile_perdita: "A.IX) Utile (perdita) esercizio",
+  sp12h_riserva_neg_azioni_proprie: "A.X) Riserva negativa per azioni proprie in portafoglio",
   sp14_fondi_rischi: "B) Fondi per rischi e oneri",
   sp15_tfr: "C) Trattamento di fine rapporto di lavoro subordinato",
   sp18_ratei_risconti_passivi: "E) Ratei e risconti",
@@ -1022,10 +1134,67 @@ const RETTIFICHE_LABELS: Record<string, string> = {
   ce20_imposte: "20) Imposte sul reddito dell'esercizio",
 };
 
+// Field categorization for double-entry counterpart filtering.
+type AcctCategory = "ATTIVO" | "PASSIVO" | "CE_POS" | "CE_NEG";
+const CE_POSITIVE_FIELDS = new Set([
+  "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce04_altri_ricavi",
+  "ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari", "ce16_utili_perdite_cambi",
+  "ce17a_rivalutazioni", "ce18_proventi_straordinari",
+]);
+const CE_NEGATIVE_FIELDS = new Set([
+  "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
+  "ce08a_tfr_accrual", "ce08b_salari_stipendi", "ce08c_oneri_sociali", "ce08d_altri_costi_personale",
+  "ce09a_ammort_immateriali", "ce09b_ammort_materiali", "ce09c_svalutazioni", "ce09d_svalutazione_crediti",
+  "ce10_var_rimanenze_mat_prime", "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi",
+  "ce15_oneri_finanziari", "ce17b_svalutazioni", "ce19_oneri_straordinari", "ce20_imposte",
+]);
+function fieldCategory(field: string): AcctCategory | null {
+  if (/^sp(0[1-9]|10)/.test(field)) return "ATTIVO";
+  if (/^sp1[1-8]/.test(field)) return "PASSIVO";
+  if (CE_POSITIVE_FIELDS.has(field)) return "CE_POS";
+  if (CE_NEGATIVE_FIELDS.has(field)) return "CE_NEG";
+  return null;
+}
+
+// Double-entry categories allowed for a given edit direction.
+// Asset↑ balances with Passivo↑ (loan) or Revenue↑ (earn); Asset↓ with Passivo↓ (pay) or Cost↑ (write-off);
+// Passivo↑ with Asset↑ (loan drawn) or Cost↑ (expense on credit); Passivo↓ with Asset↓ (paid) or Revenue↑;
+// CE moves always pair with BS (same-side CE reclassifications are unusual and left to direct edit).
+function allowedCounterpartCategories(editedField: string, delta: number): Set<AcctCategory> {
+  const cat = fieldCategory(editedField);
+  const pos = delta > 0;
+  if (cat === "ATTIVO") return pos ? new Set<AcctCategory>(["PASSIVO", "CE_POS"]) : new Set<AcctCategory>(["PASSIVO", "CE_NEG"]);
+  if (cat === "PASSIVO") return pos ? new Set<AcctCategory>(["ATTIVO", "CE_NEG"]) : new Set<AcctCategory>(["ATTIVO", "CE_POS"]);
+  if (cat === "CE_POS" || cat === "CE_NEG") return new Set<AcctCategory>(["ATTIVO", "PASSIVO"]);
+  return new Set<AcctCategory>(["ATTIVO", "PASSIVO", "CE_POS", "CE_NEG"]);
+}
+
+// Selectable counterparts grouped for the picker dropdown.
+// Excludes computed/aggregate fields that would be overwritten by recalcAggregates.
+const COUNTERPART_GROUPS: Array<{ label: string; category: AcctCategory }> = [
+  { label: "SP — Attivo", category: "ATTIVO" },
+  { label: "SP — Passivo", category: "PASSIVO" },
+  { label: "CE — Ricavi e Proventi", category: "CE_POS" },
+  { label: "CE — Costi e Oneri", category: "CE_NEG" },
+];
+const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field: string; label: string }> = (() => {
+  return Object.keys(RETTIFICHE_LABELS)
+    .filter((k) => !NON_POSTABLE_FIELDS.has(k))
+    .sort()
+    .flatMap((field) => {
+      const cat = fieldCategory(field);
+      if (!cat) return [];
+      const group = COUNTERPART_GROUPS.find((g) => g.category === cat)!.label;
+      return [{ group, category: cat, field, label: RETTIFICHE_LABELS[field].trim() }];
+    });
+})();
+
 // Fields to show in the rettifiche table, organized by section
 const RETTIFICHE_BS_ATTIVO = [
   "sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
   "sp04_immob_finanziarie",
+  "sp04a_partecipazioni", "sp04b_crediti_immob_breve", "sp04c_crediti_immob_lungo",
+  "sp04d_altri_titoli", "sp04e_strumenti_derivati_attivi",
   "sp05_rimanenze",
   "sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso",
   "sp05d_prodotti_finiti", "sp05e_acconti",
@@ -1043,30 +1212,25 @@ const RETTIFICHE_BS_ATTIVO = [
   "sp10_ratei_risconti_attivi",
 ];
 const RETTIFICHE_BS_PN = [
-  "sp11_capitale", "sp12_riserve", "sp12g_utili_perdite_portati", "sp13_utile_perdita",
+  "sp11_capitale",
+  "sp12a_riserva_sovrapprezzo", "sp12b_riserve_rivalutazione", "sp12c_riserva_legale",
+  "sp12d_riserve_statutarie", "sp12e_altre_riserve", "sp12f_riserva_copertura_flussi",
+  "sp12g_utili_perdite_portati",
+  "sp13_utile_perdita",
+  "sp12h_riserva_neg_azioni_proprie",
 ];
 const RETTIFICHE_BS_OTHER_PASSIVO = [
   "sp14_fondi_rischi", "sp15_tfr",
 ];
-// Synthetic debt groups: Banche, Fornitori, Altri (aggregated)
+// Debt groups split by subtype so each entro/oltre pair is individually editable
 const DEBT_GROUPS: Array<{ label: string; entro: string[]; oltre: string[] }> = [
-  {
-    label: "Debiti verso banche",
-    entro: ["sp16a_debiti_banche_breve"],
-    oltre: ["sp17a_debiti_banche_lungo"],
-  },
-  {
-    label: "Debiti verso fornitori",
-    entro: ["sp16d_debiti_fornitori_breve"],
-    oltre: ["sp17d_debiti_fornitori_lungo"],
-  },
-  {
-    label: "Altri debiti",
-    entro: ["sp16b_debiti_altri_finanz_breve", "sp16c_debiti_obbligazioni_breve",
-            "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve", "sp16g_altri_debiti_breve"],
-    oltre: ["sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo",
-            "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo", "sp17g_altri_debiti_lungo"],
-  },
+  { label: "1) Debiti verso banche", entro: ["sp16a_debiti_banche_breve"], oltre: ["sp17a_debiti_banche_lungo"] },
+  { label: "2) Debiti verso altri finanziatori", entro: ["sp16b_debiti_altri_finanz_breve"], oltre: ["sp17b_debiti_altri_finanz_lungo"] },
+  { label: "3) Debiti obbligazionari", entro: ["sp16c_debiti_obbligazioni_breve"], oltre: ["sp17c_debiti_obbligazioni_lungo"] },
+  { label: "7) Debiti verso fornitori", entro: ["sp16d_debiti_fornitori_breve"], oltre: ["sp17d_debiti_fornitori_lungo"] },
+  { label: "12) Debiti tributari", entro: ["sp16e_debiti_tributari_breve"], oltre: ["sp17e_debiti_tributari_lungo"] },
+  { label: "13) Debiti previdenziali", entro: ["sp16f_debiti_previdenza_breve"], oltre: ["sp17f_debiti_previdenza_lungo"] },
+  { label: "14) Altri debiti", entro: ["sp16g_altri_debiti_breve"], oltre: ["sp17g_altri_debiti_lungo"] },
 ];
 // Main-level fields for total calculation (excludes detail sub-fields to avoid double-counting)
 const PASSIVO_TOTAL_FIELDS = [
@@ -1095,7 +1259,19 @@ const DETAIL_PARENTS: Record<string, string> = {
   sp07e_crediti_tributari_lungo: "sp07_crediti_lungo",
   sp07f_imposte_anticipate_lungo: "sp07_crediti_lungo",
   sp07g_crediti_altri_lungo: "sp07_crediti_lungo",
+  sp04a_partecipazioni: "sp04_immob_finanziarie",
+  sp04b_crediti_immob_breve: "sp04_immob_finanziarie",
+  sp04c_crediti_immob_lungo: "sp04_immob_finanziarie",
+  sp04d_altri_titoli: "sp04_immob_finanziarie",
+  sp04e_strumenti_derivati_attivi: "sp04_immob_finanziarie",
+  sp12a_riserva_sovrapprezzo: "sp12_riserve",
+  sp12b_riserve_rivalutazione: "sp12_riserve",
+  sp12c_riserva_legale: "sp12_riserve",
+  sp12d_riserve_statutarie: "sp12_riserve",
+  sp12e_altre_riserve: "sp12_riserve",
+  sp12f_riserva_copertura_flussi: "sp12_riserve",
   sp12g_utili_perdite_portati: "sp12_riserve",
+  sp12h_riserva_neg_azioni_proprie: "sp12_riserve",
   ce08b_salari_stipendi: "ce08_costi_personale",
   ce08c_oneri_sociali: "ce08_costi_personale",
   ce08a_tfr_accrual: "ce08_costi_personale",
@@ -1106,6 +1282,20 @@ const DETAIL_PARENTS: Record<string, string> = {
   ce09d_svalutazione_crediti: "ce09_ammortamenti",
   ce17a_rivalutazioni: "ce17_rettifiche_attivita_fin",
   ce17b_svalutazioni: "ce17_rettifiche_attivita_fin",
+  sp16a_debiti_banche_breve: "sp16_debiti_breve",
+  sp16b_debiti_altri_finanz_breve: "sp16_debiti_breve",
+  sp16c_debiti_obbligazioni_breve: "sp16_debiti_breve",
+  sp16d_debiti_fornitori_breve: "sp16_debiti_breve",
+  sp16e_debiti_tributari_breve: "sp16_debiti_breve",
+  sp16f_debiti_previdenza_breve: "sp16_debiti_breve",
+  sp16g_altri_debiti_breve: "sp16_debiti_breve",
+  sp17a_debiti_banche_lungo: "sp17_debiti_lungo",
+  sp17b_debiti_altri_finanz_lungo: "sp17_debiti_lungo",
+  sp17c_debiti_obbligazioni_lungo: "sp17_debiti_lungo",
+  sp17d_debiti_fornitori_lungo: "sp17_debiti_lungo",
+  sp17e_debiti_tributari_lungo: "sp17_debiti_lungo",
+  sp17f_debiti_previdenza_lungo: "sp17_debiti_lungo",
+  sp17g_altri_debiti_lungo: "sp17_debiti_lungo",
 };
 // CE split by IV CEE section for proper subtotal placement
 const CE_A = [
@@ -1164,10 +1354,12 @@ interface RettificheTabProps {
   loading: boolean;
   saving: boolean;
   adjustmentsApplied: boolean;
-  onSave: (finalCorrections?: Record<string, number>) => Promise<void>;
+  onSave: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<void>;
   onReset: () => Promise<void>;
   onNext: () => void;
 }
+
+const RETTIFICHE_MAX = 20;
 
 function RettificheTab({
   adjustableData,
@@ -1194,13 +1386,19 @@ function RettificheTab({
   // Sticky column header bar — appears when the first table header scrolls out of view
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
-  // State for double-entry review dialog
-  const [showProposalDialog, setShowProposalDialog] = useState(false);
-  const [proposals, setProposals] = useState<DoubleEntryProposal[]>([]);
-  // Track approved proposals to prevent re-proposing: Set of "editedField→counterpartField" keys
-  const [approvedPairs, setApprovedPairs] = useState<Set<string>>(new Set());
+  // Per-edit double-entry dialog (single proposal for the in-flight edit)
+  const [activeProposal, setActiveProposal] = useState<DoubleEntryProposal | null>(null);
+  // Pending (uncommitted) edits: value shown in input but not yet confirmed via dialog
+  const [pendingEdits, setPendingEdits] = useState<Record<string, number>>({});
+  // Persisted journal of confirmed rettifiche — hydrated from adjustableData
+  const [log, setLog] = useState<RettificaEntry[]>(adjustableData?.rettifiche_log ?? []);
   // Summary dialog shown before navigating to Confronto
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
+
+  // Hydrate log whenever adjustableData changes (e.g. after save or reset)
+  useEffect(() => {
+    setLog(adjustableData?.rettifiche_log ?? []);
+  }, [adjustableData]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -1247,7 +1445,9 @@ function RettificheTab({
     "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
     "sp17g_altri_debiti_lungo",
   ];
+  const SP04_DETAILS = ["sp04a_partecipazioni", "sp04b_crediti_immob_breve", "sp04c_crediti_immob_lungo", "sp04d_altri_titoli", "sp04e_strumenti_derivati_attivi"];
   const SP05_DETAILS = ["sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso", "sp05d_prodotti_finiti", "sp05e_acconti"];
+  const SP12_DETAILS = ["sp12a_riserva_sovrapprezzo", "sp12b_riserve_rivalutazione", "sp12c_riserva_legale", "sp12d_riserve_statutarie", "sp12e_altre_riserve", "sp12f_riserva_copertura_flussi", "sp12g_utili_perdite_portati", "sp12h_riserva_neg_azioni_proprie"];
   const SP06_DETAILS = [
     "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve", "sp06c_crediti_collegate_breve",
     "sp06d_crediti_controllanti_breve", "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
@@ -1272,63 +1472,52 @@ function RettificheTab({
     "ce18_proventi_straordinari", "ce19_oneri_straordinari", "ce20_imposte",
   ];
 
-  const handleChange = (field: string, newValue: number) => {
-    const updated = { ...corrections, [field]: newValue };
-    // Clear approved pairs for this field so counterpart proposals can be regenerated
-    if (approvedPairs.size > 0) {
-      const newApproved = new Set<string>();
-      for (const key of approvedPairs) {
-        if (!key.startsWith(`${field}→`)) newApproved.add(key);
-      }
-      if (newApproved.size !== approvedPairs.size) setApprovedPairs(newApproved);
+  // Per-edit flow: input onChange updates only pendingEdits (display), onBlur triggers the proposal dialog.
+  const onFieldChange = (field: string, newValue: number) => {
+    setPendingEdits((prev) => ({ ...prev, [field]: newValue }));
+  };
+  const commitEdit = (field: string) => {
+    const pending = pendingEdits[field];
+    if (pending === undefined) return;
+    const committed = corrections[field] ?? original[field] ?? 0;
+    const editDelta = pending - committed;
+    if (Math.abs(editDelta) < 0.01) {
+      setPendingEdits((prev) => { const u = { ...prev }; delete u[field]; return u; });
+      return;
     }
-
-    // Recalculate parent aggregates using delta-based approach:
-    // parent = original_parent + sum(sub_field_deltas)
-    // This preserves the original aggregate when sub-fields don't sum to it (common in imports).
-    const applySubfieldDelta = (details: string[], parent: string) => {
-      const totalDelta = details.reduce((s, k) => {
-        const orig = original[k] ?? 0;
-        const curr = updated[k] ?? orig;
-        return s + (curr - orig);
-      }, 0);
-      updated[parent] = (original[parent] ?? 0) + totalDelta;
-    };
-
-    if (SP05_DETAILS.includes(field)) applySubfieldDelta(SP05_DETAILS, "sp05_rimanenze");
-    if (SP06_DETAILS.includes(field)) applySubfieldDelta(SP06_DETAILS, "sp06_crediti_breve");
-    if (SP07_DETAILS.includes(field)) applySubfieldDelta(SP07_DETAILS, "sp07_crediti_lungo");
-    if (CE08_DETAILS.includes(field)) applySubfieldDelta(CE08_DETAILS, "ce08_costi_personale");
-    if (SP16_DETAILS.includes(field)) applySubfieldDelta(SP16_DETAILS, "sp16_debiti_breve");
-    if (SP17_DETAILS.includes(field)) applySubfieldDelta(SP17_DETAILS, "sp17_debiti_lungo");
-    if (CE09_DETAILS.includes(field)) applySubfieldDelta(CE09_DETAILS, "ce09_ammortamenti");
-    if (CE17_DETAILS.includes(field)) {
-      // ce17 is special: rivalutazioni - svalutazioni
-      const d17a = (updated["ce17a_rivalutazioni"] ?? original["ce17a_rivalutazioni"] ?? 0) - (original["ce17a_rivalutazioni"] ?? 0);
-      const d17b = (updated["ce17b_svalutazioni"] ?? original["ce17b_svalutazioni"] ?? 0) - (original["ce17b_svalutazioni"] ?? 0);
-      updated["ce17_rettifiche_attivita_fin"] = (original["ce17_rettifiche_attivita_fin"] ?? 0) + d17a - d17b;
+    // Enforce 20-entry cap before opening dialog
+    if (log.length >= RETTIFICHE_MAX) {
+      toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche. Eliminane qualcuna per aggiungerne altre.`);
+      setPendingEdits((prev) => { const u = { ...prev }; delete u[field]; return u; });
+      return;
     }
-
-    // Only recalculate sp13 (P&L result → BS) if a CE field was edited
-    if (CE_FIELDS.includes(field)) {
-      const ceVal = (k: string) => updated[k] ?? original[k] ?? 0;
-      const vp = ceVal("ce01_ricavi_vendite") + ceVal("ce02_variazioni_rimanenze")
-        + ceVal("ce03_lavori_interni") + ceVal("ce04_altri_ricavi");
-      const costs = ceVal("ce05_materie_prime") + ceVal("ce06_servizi")
-        + ceVal("ce07_godimento_beni") + ceVal("ce08_costi_personale")
-        + ceVal("ce09_ammortamenti") + ceVal("ce10_var_rimanenze_mat_prime")
-        + ceVal("ce11_accantonamenti") + ceVal("ce11b_altri_accantonamenti")
-        + ceVal("ce12_oneri_diversi");
-      const ebit = vp - costs;
-      const financial = ceVal("ce13_proventi_partecipazioni") + ceVal("ce14_altri_proventi_finanziari")
-        - ceVal("ce15_oneri_finanziari") + ceVal("ce16_utili_perdite_cambi");
-      const rettifiche = ceVal("ce17_rettifiche_attivita_fin");
-      const straord = ceVal("ce18_proventi_straordinari") - ceVal("ce19_oneri_straordinari");
-      const netProfit = ebit + financial + rettifiche + straord - ceVal("ce20_imposte");
-      updated["sp13_utile_perdita"] = Math.round(netProfit * 100) / 100;
+    // Find matching PROPOSAL_RULE for default counterpart
+    const rule = PROPOSAL_RULES.find((r) => r.editable === field);
+    let counterpartField = "";
+    let proposedDelta = -editDelta;
+    let explanation = "Nessuna regola predefinita — seleziona manualmente la contropartita.";
+    let splitAlt: DoubleEntryProposal["splitAlt"] = undefined;
+    if (rule) {
+      const useNeg = editDelta < 0 && rule.counterpartNeg;
+      counterpartField = useNeg ? rule.counterpartNeg! : rule.counterpart;
+      const dir = useNeg ? (rule.directionNeg ?? rule.direction) : rule.direction;
+      proposedDelta = dir === "same" ? editDelta : -editDelta;
+      explanation = useNeg ? (rule.explanationNeg ?? rule.explanation) : rule.explanation;
+      const activeSplitAlt = useNeg ? rule.splitAltNeg : rule.splitAlt;
+      if (activeSplitAlt) splitAlt = { field: activeSplitAlt.field, label: activeSplitAlt.label, amount: 0 };
     }
-
-    setCorrections(updated);
+    setActiveProposal({
+      id: Date.now(),
+      editedField: field,
+      editedLabel: RETTIFICHE_LABELS[field] ?? field,
+      delta: editDelta,
+      counterpartField,
+      counterpartLabel: RETTIFICHE_LABELS[counterpartField] ?? counterpartField,
+      proposedDelta,
+      accepted: true,
+      explanation,
+      splitAlt,
+    });
   };
 
   // Helper: recalculate all sub-field aggregates + sp13 on a corrections snapshot
@@ -1343,9 +1532,11 @@ function RettificheTab({
       }, 0);
       u[parent] = (original[parent] ?? 0) + totalDelta;
     };
+    applyDelta(SP04_DETAILS, "sp04_immob_finanziarie");
     applyDelta(SP05_DETAILS, "sp05_rimanenze");
     applyDelta(SP06_DETAILS, "sp06_crediti_breve");
     applyDelta(SP07_DETAILS, "sp07_crediti_lungo");
+    applyDelta(SP12_DETAILS, "sp12_riserve");
     applyDelta(CE08_DETAILS, "ce08_costi_personale");
     applyDelta(SP16_DETAILS, "sp16_debiti_breve");
     applyDelta(SP17_DETAILS, "sp17_debiti_lungo");
@@ -1370,160 +1561,77 @@ function RettificheTab({
     return u;
   };
 
-  // Compute double-entry proposals from user edits.
-  // Only proposes the INCREMENTAL amount not yet covered by the counterpart's current delta.
-  // This prevents re-proposing already-approved entries.
-  const computeProposals = (): DoubleEntryProposal[] => {
-    const result: DoubleEntryProposal[] = [];
-
-    // Map parent aggregates → their subfield detail arrays.
-    // When a subfield is edited, handleChange recalculates the parent via
-    // applySubfieldDelta.  If both the parent rule and a subfield rule target
-    // the same counterpart we must skip the parent rule to avoid double-counting.
-    const PARENT_SUBFIELDS: Record<string, string[]> = {
-      "sp05_rimanenze": SP05_DETAILS,
-      "sp06_crediti_breve": SP06_DETAILS,
-      "sp07_crediti_lungo": SP07_DETAILS,
-      "ce08_costi_personale": CE08_DETAILS,
-      "sp16_debiti_breve": SP16_DETAILS,
-      "sp17_debiti_lungo": SP17_DETAILS,
-      "ce09_ammortamenti": CE09_DETAILS,
-    };
-    const recalculatedParents = new Set<string>();
-    for (const [parent, subfields] of Object.entries(PARENT_SUBFIELDS)) {
-      if (subfields.some(sf => {
-        const orig = original[sf] ?? 0;
-        const corr = corrections[sf] ?? orig;
-        return Math.abs(corr - orig) >= 0.01;
-      })) recalculatedParents.add(parent);
+  // Confirm the active proposal: write the entry to the log, apply deltas to corrections, persist.
+  const confirmActiveEdit = () => {
+    if (!activeProposal) return;
+    const p = activeProposal;
+    if (!p.counterpartField) {
+      toast.error("Seleziona una contropartita");
+      return;
     }
-
-    for (const rule of PROPOSAL_RULES) {
-      const origEditable = original[rule.editable] ?? 0;
-      const corrEditable = corrections[rule.editable] ?? origEditable;
-      const editDelta = corrEditable - origEditable;
-      if (Math.abs(editDelta) < 0.01) continue;
-
-      // Use alternative counterpart for negative deltas (e.g. credit decrease → loss, not revenue decrease)
-      const useNeg = editDelta < 0 && rule.counterpartNeg;
-
-      // Skip parent rule when its delta comes from subfield recalculation
-      // and a subfield rule already covers the same counterpart
-      if (recalculatedParents.has(rule.editable)) {
-        const subs = PARENT_SUBFIELDS[rule.editable];
-        const activeCP = useNeg ? rule.counterpartNeg! : rule.counterpart;
-        if (subs && PROPOSAL_RULES.some(r => {
-          if (!subs.includes(r.editable)) return false;
-          // Check if subfield rule targets the same counterpart for its delta direction
-          const sfOrig = original[r.editable] ?? 0;
-          const sfCorr = corrections[r.editable] ?? sfOrig;
-          const sfDelta = sfCorr - sfOrig;
-          const sfNeg = sfDelta < 0 && r.counterpartNeg;
-          const sfCP = sfNeg ? r.counterpartNeg! : r.counterpart;
-          return sfCP === activeCP;
-        })) {
-          continue;
-        }
-      }
-      const activeCounterpart = useNeg ? rule.counterpartNeg! : rule.counterpart;
-      const activeDirection = useNeg ? (rule.directionNeg ?? rule.direction) : rule.direction;
-      const activeExplanation = useNeg ? (rule.explanationNeg ?? rule.explanation) : rule.explanation;
-
-      // Skip if this exact pair was already approved by the user
-      if (approvedPairs.has(`${rule.editable}→${activeCounterpart}`)) continue;
-
-      // What the counterpart delta SHOULD be based on the current edit
-      const expectedCounterpartDelta = activeDirection === "same" ? editDelta : -editDelta;
-      // What the counterpart delta ALREADY is (from prior approvals or manual edits)
-      const origCounterpart = original[activeCounterpart] ?? 0;
-      const corrCounterpart = corrections[activeCounterpart] ?? origCounterpart;
-      const currentCounterpartDelta = corrCounterpart - origCounterpart;
-
-      // Determine the active splitAlt (primary or negative variant)
-      const activeSplitAlt = useNeg ? rule.splitAltNeg : rule.splitAlt;
-
-      // Only propose the remaining amount not yet applied
-      // For split rules, also account for the alt field's delta
-      let alreadyApplied = currentCounterpartDelta;
-      if (activeSplitAlt) {
-        const origAlt = original[activeSplitAlt.field] ?? 0;
-        const corrAlt = corrections[activeSplitAlt.field] ?? origAlt;
-        alreadyApplied += (corrAlt - origAlt);
-      }
-
-      // How much is still needed? (accounting for direction)
-      const remaining = expectedCounterpartDelta - alreadyApplied;
-      if (Math.abs(remaining) < 0.01) continue; // fully covered already
-
-      result.push({
-        id: result.length,
-        editedField: rule.editable,
-        editedLabel: RETTIFICHE_LABELS[rule.editable] ?? rule.editable,
-        delta: editDelta,
-        counterpartField: activeCounterpart,
-        counterpartLabel: RETTIFICHE_LABELS[activeCounterpart] ?? activeCounterpart,
-        proposedDelta: remaining,
-        accepted: true,
-        explanation: activeExplanation,
-        splitAlt: activeSplitAlt ? {
-          field: activeSplitAlt.field,
-          label: activeSplitAlt.label,
-          amount: 0,
-        } : undefined,
+    const updated = { ...corrections };
+    updated[p.editedField] = (updated[p.editedField] ?? original[p.editedField] ?? 0) + p.delta;
+    // Counterpart: handle split if present
+    const splitAmount = p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01 ? p.splitAlt.amount : 0;
+    const mainAmount = p.proposedDelta - splitAmount;
+    updated[p.counterpartField] = (updated[p.counterpartField] ?? original[p.counterpartField] ?? 0) + mainAmount;
+    const newEntries: RettificaEntry[] = [{
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      edited_field: p.editedField,
+      edited_label: p.editedLabel,
+      edit_delta: p.delta,
+      counterpart_field: p.counterpartField,
+      counterpart_label: p.counterpartLabel,
+      counterpart_delta: mainAmount,
+      explanation: p.explanation,
+      created_at: new Date().toISOString(),
+    }];
+    if (splitAmount !== 0 && p.splitAlt) {
+      updated[p.splitAlt.field] = (updated[p.splitAlt.field] ?? original[p.splitAlt.field] ?? 0) + splitAmount;
+      newEntries.push({
+        id: `${Date.now() + 1}-${Math.random().toString(36).slice(2, 8)}`,
+        edited_field: p.editedField,
+        edited_label: p.editedLabel,
+        edit_delta: 0, // split row — primary edit already recorded
+        counterpart_field: p.splitAlt.field,
+        counterpart_label: p.splitAlt.label,
+        counterpart_delta: splitAmount,
+        explanation: `(split) ${p.explanation}`,
+        created_at: new Date().toISOString(),
       });
     }
-    return result;
-  };
-
-  // Called when user clicks "Applica Rettifiche"
-  const handleApplyClick = () => {
-    const computed = computeProposals();
-    setProposals(computed);
-    setShowProposalDialog(true);
-  };
-
-  // Called when user confirms proposals in dialog
-  const applyProposalsAndSave = () => {
-    const updated = { ...corrections };
-    // Track which pairs were approved in this batch
-    const newApproved = new Set(approvedPairs);
-    // Apply accepted proposals as counterpart changes
-    // Group by counterpart to accumulate multiple proposals targeting the same field
-    const counterpartDeltas: Record<string, number> = {};
-    for (const p of proposals) {
-      if (!p.accepted) continue;
-      // Record this pair as approved so it won't be re-proposed
-      newApproved.add(`${p.editedField}→${p.counterpartField}`);
-      if (p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01) {
-        newApproved.add(`${p.editedField}→${p.splitAlt.field}`);
-      }
-      // If split: main counterpart gets (proposedDelta - splitAlt.amount), alt gets splitAlt.amount
-      if (p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01) {
-        const mainAmount = p.proposedDelta - p.splitAlt.amount;
-        counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + mainAmount;
-        counterpartDeltas[p.splitAlt.field] = (counterpartDeltas[p.splitAlt.field] ?? 0) + p.splitAlt.amount;
-      } else {
-        counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + p.proposedDelta;
-      }
-    }
-    setApprovedPairs(newApproved);
-    for (const [field, totalDelta] of Object.entries(counterpartDeltas)) {
-      // Preserve any prior corrections — add new delta on top of existing value
-      const currentVal = updated[field] ?? original[field] ?? 0;
-      updated[field] = currentVal + totalDelta;
-    }
-    // Recalculate all aggregates and sp13
     const final = recalcAggregates(updated);
+    const newLog = [...log, ...newEntries];
+    if (newLog.length > RETTIFICHE_MAX) {
+      toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
+      return;
+    }
     setCorrections(final);
-    setShowProposalDialog(false);
-    // Pass final corrections directly (React state is async)
-    onSave(final);
+    setLog(newLog);
+    setPendingEdits((prev) => { const u = { ...prev }; delete u[p.editedField]; return u; });
+    setActiveProposal(null);
+    onSave(final, newLog);
   };
 
-  // Save without applying any counterpart proposals
-  const saveWithoutProposals = () => {
-    setShowProposalDialog(false);
-    onSave();
+  const cancelActiveEdit = () => {
+    if (activeProposal) {
+      setPendingEdits((prev) => { const u = { ...prev }; delete u[activeProposal.editedField]; return u; });
+    }
+    setActiveProposal(null);
+  };
+
+  // Delete one log entry: reverse its deltas in corrections, remove from log, persist.
+  const deleteLogEntry = (entryId: string) => {
+    const entry = log.find((e) => e.id === entryId);
+    if (!entry) return;
+    const updated = { ...corrections };
+    updated[entry.edited_field] = (updated[entry.edited_field] ?? original[entry.edited_field] ?? 0) - entry.edit_delta;
+    updated[entry.counterpart_field] = (updated[entry.counterpart_field] ?? original[entry.counterpart_field] ?? 0) - entry.counterpart_delta;
+    const final = recalcAggregates(updated);
+    const newLog = log.filter((e) => e.id !== entryId);
+    setCorrections(final);
+    setLog(newLog);
+    onSave(final, newLog);
   };
 
   // Compute totals
@@ -1562,7 +1670,7 @@ function RettificheTab({
         const delta = corrVal - origVal;
         const isEditable = EDITABLE_RETTIFICHE.has(field);
         const isAutoAdj = AUTO_ADJUSTED.has(field);
-        const isComputed = field === "sp13_utile_perdita" || field === "sp16_debiti_breve" || field === "sp17_debiti_lungo" || field === "ce09_ammortamenti" || field === "ce17_rettifiche_attivita_fin";
+        const isComputed = field === "sp04_immob_finanziarie" || field === "sp12_riserve" || field === "sp13_utile_perdita" || field === "sp16_debiti_breve" || field === "sp17_debiti_lungo" || field === "ce09_ammortamenti" || field === "ce17_rettifiche_attivita_fin";
         const hasDelta = Math.abs(delta) > 0.01;
         const isDetail = (RETTIFICHE_LABELS[field] ?? "").startsWith("  ");
 
@@ -1599,11 +1707,15 @@ function RettificheTab({
               {isEditable ? (
                 <Input
                   className="h-7 w-32 ml-auto text-right text-xs font-mono tabular-nums"
-                  value={formatInputNumber(Math.round(corrVal).toString())}
+                  value={formatInputNumber(Math.round(pendingEdits[field] ?? corrVal).toString())}
                   onChange={(e) => {
                     const raw = parseInputNumber(e.target.value);
                     const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
-                    if (!isNaN(num)) handleChange(field, num);
+                    if (!isNaN(num)) onFieldChange(field, num);
+                  }}
+                  onBlur={() => commitEdit(field)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
                   }}
                 />
               ) : (
@@ -1715,12 +1827,15 @@ function RettificheTab({
                   const corrOltre = group.oltre.reduce((s, k) => s + val(k), 0);
                   const origTotal = origEntro + origOltre;
                   const corrTotal = corrEntro + corrOltre;
-                  if (Math.abs(origTotal) < 0.01 && Math.abs(corrTotal) < 0.01) return null;
+                  // Group header always shown (OIC art. 2424 structure, matches /forecast/balance).
+                  // Sub-rows show only when any year has a non-zero value.
 
                   const refEntro = hasRef ? group.entro.reduce((s, k) => s + refVal(k), 0) : 0;
                   const refOltre = hasRef ? group.oltre.reduce((s, k) => s + refVal(k), 0) : 0;
                   const isSingleEntro = group.entro.length === 1;
                   const isSingleOltre = group.oltre.length === 1;
+                  const entroNonZero = Math.abs(origEntro) > 0.01 || Math.abs(corrEntro) > 0.01 || Math.abs(refEntro) > 0.01;
+                  const oltreNonZero = Math.abs(origOltre) > 0.01 || Math.abs(corrOltre) > 0.01 || Math.abs(refOltre) > 0.01;
 
                   const debtRow = (label: string, key: string, rv: number, origV: number, corrV: number, indent: boolean, editField?: string) => {
                     const delta = corrV - origV;
@@ -1746,11 +1861,15 @@ function RettificheTab({
                           {editField ? (
                             <Input
                               className="h-7 w-32 ml-auto text-right text-xs font-mono tabular-nums"
-                              value={formatInputNumber(Math.round(corrV).toString())}
+                              value={formatInputNumber(Math.round(pendingEdits[editField] ?? corrV).toString())}
                               onChange={(e) => {
                                 const raw = parseInputNumber(e.target.value);
                                 const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
-                                if (!isNaN(num)) handleChange(editField, num);
+                                if (!isNaN(num)) onFieldChange(editField, num);
+                              }}
+                              onBlur={() => commitEdit(editField)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
                               }}
                             />
                           ) : (
@@ -1765,6 +1884,9 @@ function RettificheTab({
                     );
                   };
 
+                  // Rettifiche sub-rows always rendered (inputs need to be reachable even
+                  // when the creditor group is currently zero, so the user can add a posting).
+                  void entroNonZero; void oltreNonZero;
                   return (
                     <React.Fragment key={group.label}>
                       {debtRow(group.label, group.label, refEntro + refOltre, origTotal, corrTotal, false)}
@@ -1875,6 +1997,13 @@ function RettificheTab({
                   const ebit = vp - costs;
                   const origEbit = origVp - origCosts;
                   const refEbit = refVp - refCosts;
+                  // EBITDA = EBIT + ammortamenti e svalutazioni
+                  const ammort = ceV("ce09_ammortamenti");
+                  const origAmmort = origV("ce09_ammortamenti");
+                  const refAmmort = refVal("ce09_ammortamenti");
+                  const ebitda = ebit + ammort;
+                  const origEbitda = origEbit + origAmmort;
+                  const refEbitda = refEbit + refAmmort;
                   const fin = ceV("ce13_proventi_partecipazioni") + ceV("ce14_altri_proventi_finanziari")
                     - ceV("ce15_oneri_finanziari") + ceV("ce16_utili_perdite_cambi");
                   const origFin = origV("ce13_proventi_partecipazioni") + origV("ce14_altri_proventi_finanziari")
@@ -1902,7 +2031,8 @@ function RettificheTab({
                       {resultRow("Totale valore della produzione", refVp, origVp, vp, false)}
                       {renderSection("B) COSTI DELLA PRODUZIONE", CE_B, true)}
                       {resultRow("Totale costi della produzione", refCosts, origCosts, costs, false)}
-                      {resultRow("Differenza tra valore e costi della produzione (A - B)", refEbit, origEbit, ebit, true)}
+                      {resultRow("EBITDA (MOL)", refEbitda, origEbitda, ebitda, true)}
+                      {resultRow("EBIT (Differenza tra valore e costi della produzione, A - B)", refEbit, origEbit, ebit, true)}
                       {renderSection("C) PROVENTI E ONERI FINANZIARI", CE_C, true)}
                       {resultRow("Totale proventi e oneri finanziari (15 + 16 - 17 +/- 17-bis)", refFinVal, origFin, fin, false)}
                       {renderSection("D) RETTIFICHE DI VALORE DI ATTIVITÀ E PASSIVITÀ FINANZIARIE", CE_D, true)}
@@ -1935,6 +2065,65 @@ function RettificheTab({
         </CardContent>
       </Card>
 
+      {/* Rettifiche applicate — journal of individual double-entry postings */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>Rettifiche applicate</span>
+            <Badge variant="outline" className="font-mono">
+              {log.length} / {RETTIFICHE_MAX}
+            </Badge>
+          </CardTitle>
+          <CardDescription>
+            Elenco delle scritture in partita doppia registrate. Elimina una voce per invertirne gli effetti.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {log.length === 0 ? (
+            <div className="p-6 text-center text-sm text-muted-foreground border rounded-lg border-dashed">
+              Nessuna rettifica registrata. Modifica un valore nelle tabelle sopra per iniziare.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {log.map((e, i) => (
+                <div key={e.id} className="flex items-center gap-2 border rounded-md px-3 py-2 text-xs">
+                  <span className="text-muted-foreground w-5">{i + 1}.</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="font-medium truncate">{e.edited_label.trim()}</span>
+                      <span className={cn(
+                        "font-mono tabular-nums font-semibold",
+                        e.edit_delta > 0 ? "text-green-600 dark:text-green-400" : e.edit_delta < 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"
+                      )}>
+                        {e.edit_delta > 0 ? "+" : ""}{formatEuro(e.edit_delta)}
+                      </span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground truncate">{e.counterpart_label.trim()}</span>
+                      <span className={cn(
+                        "font-mono tabular-nums",
+                        e.counterpart_delta > 0 ? "text-green-600 dark:text-green-400" : e.counterpart_delta < 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"
+                      )}>
+                        {e.counterpart_delta > 0 ? "+" : ""}{formatEuro(e.counterpart_delta)}
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => deleteLogEntry(e.id)}
+                    disabled={saving}
+                    title="Elimina rettifica"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Actions */}
       <div className="flex items-center justify-between">
         <div>
@@ -1945,249 +2134,167 @@ function RettificheTab({
             </Button>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={handleApplyClick}
-            disabled={saving}
-          >
-            {saving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Salvataggio...
-              </>
-            ) : (
-              <>
-                <Check className="h-4 w-4 mr-2" />
-                Applica Rettifiche
-              </>
-            )}
-          </Button>
-          <Button variant="outline" onClick={() => setShowSummaryDialog(true)}>
+        <div className="flex items-center gap-2">
+          {saving && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" /> Salvataggio...
+            </span>
+          )}
+          <Button onClick={() => setShowSummaryDialog(true)}>
             Passa al Confronto <ArrowRight className="h-4 w-4 ml-1.5" />
           </Button>
         </div>
       </div>
 
-      {/* Double-entry review dialog */}
-      <Dialog open={showProposalDialog} onOpenChange={setShowProposalDialog}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+      {/* Per-edit double-entry dialog */}
+      <Dialog open={!!activeProposal} onOpenChange={(o) => { if (!o) cancelActiveEdit(); }}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Registrazioni in Partita Doppia</DialogTitle>
+            <DialogTitle>Registra Rettifica</DialogTitle>
             <DialogDescription>
-              Le rettifiche inserite generano le seguenti contropartite contabili.
-              Verifica gli importi proposti, modifica se necessario, o deseleziona le voci da non applicare.
+              Scegli la contropartita per completare la partita doppia, poi conferma per registrare la rettifica.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 my-2">
-            {proposals.length === 0 && (
-              <div className="p-4 text-center text-sm text-muted-foreground border rounded-lg border-dashed">
-                Nessuna contropartita automatica proposta per le modifiche effettuate.
-              </div>
-            )}
-            {proposals.map((p, idx) => {
-              const dirLabel = p.delta > 0 ? "+" : "";
-              const cpDirLabel = p.proposedDelta > 0 ? "+" : "";
-              return (
-                <div
-                  key={p.id}
-                  className={cn(
-                    "border rounded-lg p-3 transition-colors",
-                    p.accepted
-                      ? "bg-card border-border"
-                      : "bg-muted/30 border-dashed opacity-60"
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <Checkbox
-                      checked={p.accepted}
-                      onCheckedChange={(checked) => {
-                        setProposals(prev => prev.map((pp, i) =>
-                          i === idx ? { ...pp, accepted: !!checked } : pp
-                        ));
-                      }}
-                      className="mt-1"
-                    />
-                    <div className="flex-1 min-w-0">
-                      {/* Edited field */}
-                      <div className="flex items-baseline gap-2 flex-wrap">
-                        <span className="text-sm font-medium">{p.editedLabel}</span>
-                        <span className={cn(
-                          "text-sm font-mono tabular-nums font-semibold",
-                          p.delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
-                        )}>
-                          {dirLabel}{formatEuro(p.delta)}
-                        </span>
-                      </div>
-
-                      {/* Arrow + counterpart (with optional split) */}
-                      {p.splitAlt ? (
-                        <>
-                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <span className="text-sm text-muted-foreground">{p.counterpartLabel}</span>
-                            <Input
-                              className="h-7 w-36 text-right text-xs font-mono tabular-nums"
-                              value={formatInputNumber(Math.round(p.proposedDelta - (p.splitAlt.amount ?? 0)).toString())}
-                              disabled={!p.accepted}
-                              onChange={(e) => {
-                                const raw = parseInputNumber(e.target.value);
-                                const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
-                                if (!isNaN(num)) {
-                                  setProposals(prev => prev.map((pp, i) =>
-                                    i === idx ? { ...pp, splitAlt: { ...pp.splitAlt!, amount: pp.proposedDelta - num } } : pp
-                                  ));
-                                }
-                              }}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <span className="text-sm text-muted-foreground">{p.splitAlt.label}</span>
-                            <Input
-                              className="h-7 w-36 text-right text-xs font-mono tabular-nums"
-                              value={formatInputNumber(Math.round(p.splitAlt.amount).toString())}
-                              disabled={!p.accepted}
-                              onChange={(e) => {
-                                const raw = parseInputNumber(e.target.value);
-                                const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
-                                if (!isNaN(num)) {
-                                  setProposals(prev => prev.map((pp, i) =>
-                                    i === idx ? { ...pp, splitAlt: { ...pp.splitAlt!, amount: num } } : pp
-                                  ));
-                                }
-                              }}
-                            />
-                          </div>
-                          <p className="text-xs text-muted-foreground/60 mt-0.5 ml-6">
-                            Totale: {formatEuro(p.proposedDelta)}
-                          </p>
-                        </>
-                      ) : (
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span className="text-sm text-muted-foreground">{p.counterpartLabel}</span>
-                          <Input
-                            className="h-7 w-36 text-right text-xs font-mono tabular-nums"
-                            value={formatInputNumber(Math.round(p.proposedDelta).toString())}
-                            disabled={!p.accepted}
-                            onChange={(e) => {
-                              const raw = parseInputNumber(e.target.value);
-                              const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
-                              if (!isNaN(num)) {
-                                setProposals(prev => prev.map((pp, i) =>
-                                  i === idx ? { ...pp, proposedDelta: num } : pp
-                                ));
-                              }
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {/* Explanation */}
-                      <p className="text-xs text-muted-foreground mt-1 italic">
-                        {p.explanation}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Preview: P&L result after proposals */}
-          {(() => {
-            const preview = { ...corrections };
-            const counterpartDeltas: Record<string, number> = {};
-            for (const p of proposals) {
-              if (!p.accepted) continue;
-              if (p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01) {
-                counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + (p.proposedDelta - p.splitAlt.amount);
-                counterpartDeltas[p.splitAlt.field] = (counterpartDeltas[p.splitAlt.field] ?? 0) + p.splitAlt.amount;
-              } else {
-                counterpartDeltas[p.counterpartField] = (counterpartDeltas[p.counterpartField] ?? 0) + p.proposedDelta;
-              }
-            }
-            for (const [field, totalDelta] of Object.entries(counterpartDeltas)) {
-              preview[field] = (original[field] ?? 0) + totalDelta;
-            }
-            const final = recalcAggregates(preview);
-            const origNetProfit = (() => {
-              const ov = (k: string) => original[k] ?? 0;
-              const vp = ov("ce01_ricavi_vendite") + ov("ce02_variazioni_rimanenze") + ov("ce03_lavori_interni") + ov("ce04_altri_ricavi");
-              const c = ov("ce05_materie_prime") + ov("ce06_servizi") + ov("ce07_godimento_beni") + ov("ce08_costi_personale")
-                + ov("ce09_ammortamenti") + ov("ce10_var_rimanenze_mat_prime") + ov("ce11_accantonamenti") + ov("ce11b_altri_accantonamenti") + ov("ce12_oneri_diversi");
-              const f = ov("ce13_proventi_partecipazioni") + ov("ce14_altri_proventi_finanziari") - ov("ce15_oneri_finanziari") + ov("ce16_utili_perdite_cambi");
-              const r = ov("ce17_rettifiche_attivita_fin");
-              const s = ov("ce18_proventi_straordinari") - ov("ce19_oneri_straordinari");
-              return (vp - c) + f + r + s - ov("ce20_imposte");
-            })();
-            const newNetProfit = final["sp13_utile_perdita"];
-            const ATTIVO_F = ["sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
-              "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve",
-              "sp07_crediti_lungo", "sp08_attivita_finanziarie", "sp09_disponibilita_liquide", "sp10_ratei_risconti_attivi"];
-            const PASSIVO_F = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
-              "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve", "sp17_debiti_lungo", "sp18_ratei_risconti_passivi"];
-            const fv = (k: string) => final[k] ?? original[k] ?? 0;
-            const tA = ATTIVO_F.reduce((s, k) => s + fv(k), 0);
-            const tP = PASSIVO_F.reduce((s, k) => s + fv(k), 0);
-            const balanced = Math.abs(tA - tP) < 1;
-
+          {activeProposal && (() => {
+            const p = activeProposal;
+            const update = (patch: Partial<DoubleEntryProposal>) =>
+              setActiveProposal((prev) => prev ? { ...prev, ...patch } : prev);
+            const dirLabel = p.delta > 0 ? "+" : "";
             return (
-              <div className={cn(
-                "p-3 rounded-lg border text-sm",
-                balanced
-                  ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
-                  : "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
-              )}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-medium">Risultato d&apos;esercizio: </span>
-                    <span className="font-mono tabular-nums">{formatEuro(origNetProfit)}</span>
-                    <ArrowRight className="inline h-3.5 w-3.5 mx-1.5 text-muted-foreground" />
-                    <span className="font-mono tabular-nums font-semibold">{formatEuro(newNetProfit)}</span>
+              <div className="space-y-3 my-2">
+                <div className="border rounded-lg p-3 bg-card">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-sm font-medium">{p.editedLabel}</span>
+                    <span className={cn(
+                      "text-sm font-mono tabular-nums font-semibold",
+                      p.delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                    )}>
+                      {dirLabel}{formatEuro(p.delta)}
+                    </span>
                   </div>
-                  <div className="text-xs">
-                    {balanced ? (
-                      <span className="text-green-600 dark:text-green-400 font-medium flex items-center gap-1">
-                        <Check className="h-3.5 w-3.5" /> Quadrato
-                      </span>
-                    ) : (
-                      <span className="text-yellow-600 dark:text-yellow-400 font-medium">
-                        Attivo {formatEuro(tA)} / Passivo {formatEuro(tP)}
-                      </span>
-                    )}
-                  </div>
+
+                  {p.splitAlt ? (
+                    <>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <Select
+                          value={p.counterpartField || undefined}
+                          onValueChange={(newField) => update({
+                            counterpartField: newField,
+                            counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                            splitAlt: undefined,
+                          })}
+                        >
+                          <SelectTrigger className="h-7 flex-1 min-w-0 text-xs">
+                            <SelectValue placeholder="Seleziona contropartita..." />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-80">
+                            {(() => {
+                              const allowed = allowedCounterpartCategories(p.editedField, p.delta);
+                              return COUNTERPART_GROUPS.filter((g) => allowed.has(g.category)).map((g) => (
+                                <SelectGroup key={g.label}>
+                                  <SelectLabel className="text-xs">{g.label}</SelectLabel>
+                                  {COUNTERPART_OPTIONS.filter((o) => o.category === g.category).map((o) => (
+                                    <SelectItem key={o.field} value={o.field} className="text-xs">
+                                      {o.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              ));
+                            })()}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          className="h-7 w-36 text-right text-xs font-mono tabular-nums"
+                          value={formatInputNumber(Math.round(p.proposedDelta - p.splitAlt.amount).toString())}
+                          onChange={(e) => {
+                            const raw = parseInputNumber(e.target.value);
+                            const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                            if (!isNaN(num) && p.splitAlt) {
+                              update({ splitAlt: { ...p.splitAlt, amount: p.proposedDelta - num } });
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-sm text-muted-foreground flex-1">{p.splitAlt.label}</span>
+                        <Input
+                          className="h-7 w-36 text-right text-xs font-mono tabular-nums"
+                          value={formatInputNumber(Math.round(p.splitAlt.amount).toString())}
+                          onChange={(e) => {
+                            const raw = parseInputNumber(e.target.value);
+                            const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                            if (!isNaN(num) && p.splitAlt) {
+                              update({ splitAlt: { ...p.splitAlt, amount: num } });
+                            }
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground/60 mt-0.5 ml-6">
+                        Totale: {formatEuro(p.proposedDelta)}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <Select
+                        value={p.counterpartField || undefined}
+                        onValueChange={(newField) => update({
+                          counterpartField: newField,
+                          counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                        })}
+                      >
+                        <SelectTrigger className="h-7 flex-1 min-w-0 text-xs">
+                          <SelectValue placeholder="Seleziona contropartita..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-80">
+                          {(() => {
+                            const allowed = allowedCounterpartCategories(p.editedField, p.delta);
+                            return COUNTERPART_GROUPS.filter((g) => allowed.has(g.category)).map((g) => (
+                              <SelectGroup key={g.label}>
+                                <SelectLabel className="text-xs">{g.label}</SelectLabel>
+                                {COUNTERPART_OPTIONS.filter((o) => o.category === g.category).map((o) => (
+                                  <SelectItem key={o.field} value={o.field} className="text-xs">
+                                    {o.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            ));
+                          })()}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        className="h-7 w-36 text-right text-xs font-mono tabular-nums"
+                        value={formatInputNumber(Math.round(p.proposedDelta).toString())}
+                        onChange={(e) => {
+                          const raw = parseInputNumber(e.target.value);
+                          const num = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+                          if (!isNaN(num)) update({ proposedDelta: num });
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground mt-1 italic">{p.explanation}</p>
                 </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Rettifiche registrate: {log.length} / {RETTIFICHE_MAX}
+                </p>
               </div>
             );
           })()}
 
           <DialogFooter className="gap-2 sm:gap-0">
-            {proposals.length > 0 ? (
-              <>
-                <Button variant="ghost" size="sm" onClick={saveWithoutProposals}>
-                  Salva senza contropartite
-                </Button>
-                <Button variant="outline" onClick={() => setShowProposalDialog(false)}>
-                  Annulla
-                </Button>
-                <Button onClick={applyProposalsAndSave}>
-                  <Check className="h-4 w-4 mr-1.5" />
-                  Conferma e Applica
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => setShowProposalDialog(false)}>
-                  Annulla
-                </Button>
-                <Button onClick={saveWithoutProposals}>
-                  <Check className="h-4 w-4 mr-1.5" />
-                  Salva Rettifiche
-                </Button>
-              </>
-            )}
+            <Button variant="outline" onClick={cancelActiveEdit}>
+              Annulla
+            </Button>
+            <Button onClick={confirmActiveEdit} disabled={!activeProposal?.counterpartField}>
+              <Check className="h-4 w-4 mr-1.5" />
+              Registra rettifica
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2203,8 +2310,11 @@ function RettificheTab({
           </DialogHeader>
 
           {(() => {
-            // Collect all fields with deltas, grouped by section
-            type ChangedField = { field: string; label: string; origVal: number; newVal: number; delta: number };
+            // Collect all fields with deltas, grouped by section.
+            // `isAggregate` = computed parent field (e.g. sp06_crediti_breve) whose delta
+            // comes entirely from sub-field edits; shown in muted gray to avoid the
+            // visual impression of a duplicate posting.
+            type ChangedField = { field: string; label: string; origVal: number; newVal: number; delta: number; isAggregate: boolean };
             const bsAttivoChanges: ChangedField[] = [];
             const bsPassivoChanges: ChangedField[] = [];
             const ceChanges: ChangedField[] = [];
@@ -2260,6 +2370,7 @@ function RettificheTab({
                     origVal: origV,
                     newVal: corrV,
                     delta: d,
+                    isAggregate: NON_POSTABLE_FIELDS.has(f),
                   });
                 }
               }
@@ -2298,17 +2409,32 @@ function RettificheTab({
                       </thead>
                       <tbody>
                         {changes.map((c) => (
-                          <tr key={c.field} className="border-t border-border/50">
+                          <tr
+                            key={c.field}
+                            className={cn(
+                              "border-t border-border/50",
+                              c.isAggregate && "text-muted-foreground/70 italic",
+                            )}
+                            title={c.isAggregate ? "Totale ricalcolato da sotto-voci (non è una rettifica diretta)" : undefined}
+                          >
                             <td className="px-3 py-1.5">{c.label}</td>
-                            <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                            <td className={cn(
+                              "px-3 py-1.5 text-right font-mono tabular-nums",
+                              c.isAggregate ? "text-muted-foreground/60" : "text-muted-foreground"
+                            )}>
                               {formatEuro(c.origVal)}
                             </td>
-                            <td className="px-3 py-1.5 text-right font-mono tabular-nums font-medium">
+                            <td className={cn(
+                              "px-3 py-1.5 text-right font-mono tabular-nums",
+                              c.isAggregate ? "" : "font-medium"
+                            )}>
                               {formatEuro(c.newVal)}
                             </td>
                             <td className={cn(
-                              "px-3 py-1.5 text-right font-mono tabular-nums font-semibold",
-                              c.delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                              "px-3 py-1.5 text-right font-mono tabular-nums",
+                              c.isAggregate
+                                ? "text-muted-foreground/70"
+                                : cn("font-semibold", c.delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")
                             )}>
                               {c.delta > 0 ? "+" : ""}{formatEuro(c.delta)}
                             </td>
@@ -2392,10 +2518,22 @@ function reconcileSubfields(data: Record<string, number>) {
     }
   };
 
+  // Immob. finanziarie: gap → sp04a_partecipazioni
+  reconcile(
+    ["sp04a_partecipazioni", "sp04b_crediti_immob_breve", "sp04c_crediti_immob_lungo", "sp04d_altri_titoli", "sp04e_strumenti_derivati_attivi"],
+    "sp04_immob_finanziarie", "sp04a_partecipazioni"
+  );
   // Rimanenze: gap → sp05e_acconti
   reconcile(
     ["sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso", "sp05d_prodotti_finiti", "sp05e_acconti"],
     "sp05_rimanenze", "sp05e_acconti"
+  );
+  // Riserve: gap → sp12e_altre_riserve
+  reconcile(
+    ["sp12a_riserva_sovrapprezzo", "sp12b_riserve_rivalutazione", "sp12c_riserva_legale",
+     "sp12d_riserve_statutarie", "sp12e_altre_riserve", "sp12f_riserva_copertura_flussi",
+     "sp12g_utili_perdite_portati", "sp12h_riserva_neg_azioni_proprie"],
+    "sp12_riserve", "sp12e_altre_riserve"
   );
   // Crediti breve: gap → sp06g_crediti_altri_breve
   reconcile(
@@ -2431,6 +2569,20 @@ function reconcileSubfields(data: Record<string, number>) {
      "sp17d_debiti_fornitori_lungo", "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo", "sp17g_altri_debiti_lungo"],
     "sp17_debiti_lungo", "sp17g_altri_debiti_lungo"
   );
+
+  // Attivo vs Passivo: small import-rounding imbalance (≤ 5 €) → plug into sp09 (cash).
+  // Rettifiche are double-entry so balance is preserved after this one-shot adjustment.
+  const attivoKeys = ["sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
+    "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve", "sp07_crediti_lungo",
+    "sp08_attivita_finanziarie", "sp09_disponibilita_liquide", "sp10_ratei_risconti_attivi"];
+  const passivoKeys = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
+    "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve", "sp17_debiti_lungo", "sp18_ratei_risconti_passivi"];
+  const attivo = attivoKeys.reduce((s, k) => s + (data[k] ?? 0), 0);
+  const passivo = passivoKeys.reduce((s, k) => s + (data[k] ?? 0), 0);
+  const bsGap = attivo - passivo;
+  if (Math.abs(bsGap) > 0.01 && Math.abs(bsGap) <= 5) {
+    data["sp09_disponibilita_liquide"] = (data["sp09_disponibilita_liquide"] ?? 0) - bsGap;
+  }
 }
 
 export default function InfraannualePage() {
@@ -2774,12 +2926,12 @@ export default function InfraannualePage() {
     // Compute projected net profit from overrides (same logic as ProjectionTable)
     const allCostCodes = [
       ...EBITDA_COST_CODES, "ce09_ammortamenti",
-      "ce15_oneri_finanziari", "ce19_oneri_straordinari", "ce20_imposte",
+      "ce15_oneri_finanziari", "ce17b_svalutazioni", "ce19_oneri_straordinari", "ce20_imposte",
     ];
     const allIncomeCodes = [
       ...VP_CODES,
       "ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari",
-      "ce16_utili_perdite_cambi", "ce17_rettifiche_attivita_fin", "ce18_proventi_straordinari",
+      "ce16_utili_perdite_cambi", "ce17a_rivalutazioni", "ce18_proventi_straordinari",
     ];
     const projIncome = allIncomeCodes.reduce(
       (acc, c) => acc + (EDITABLE_CE_CODES.includes(c) ? projCEVal(c) : (refCE.get(c)?.annualized_value ?? 0)), 0
@@ -2865,6 +3017,25 @@ export default function InfraannualePage() {
         return ((overrideVal / refV) - 1) * 100;
       };
 
+      const ovr = (code: string) => {
+        const v = parseFloat(overrides[code] || "0");
+        return isNaN(v) ? null : v;
+      };
+      // ce17 is an aggregate (rivalutazioni - svalutazioni); send the net to the backend
+      const ce17Net = ((): number | null => {
+        const a = ovr("ce17a_rivalutazioni");
+        const b = ovr("ce17b_svalutazioni");
+        if (a === null && b === null) return null;
+        return (a ?? 0) - (b ?? 0);
+      })();
+      // Tax rate derived from projected imposte / PBT (fallback to 27.9 if unavailable)
+      const ce20v = ovr("ce20_imposte");
+      const derivedTaxRate = (() => {
+        if (ce20v === null) return 27.9;
+        const pbt = projIncome - (projCosts - (ovr("ce20_imposte") ?? 0));
+        if (pbt === 0) return 27.9;
+        return (ce20v / pbt) * 100;
+      })();
       await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
         assumptions: [{
           forecast_year: fiscalYear,
@@ -2877,9 +3048,18 @@ export default function InfraannualePage() {
           rent_growth_pct: calcGrowth("ce07_godimento_beni"),
           personnel_growth_pct: calcGrowth("ce08_costi_personale"),
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
-          ce14_override: parseFloat(overrides["ce14_altri_proventi_finanziari"] || "0") || null,
-          ce15_override: parseFloat(overrides["ce15_oneri_finanziari"] || "0") || null,
-          tax_rate: 27.9,
+          ce02_override: ovr("ce02_variazioni_rimanenze"),
+          ce03_override: ovr("ce03_lavori_interni"),
+          ce10_override: ovr("ce10_var_rimanenze_mat_prime"),
+          ce11_override: ovr("ce11_accantonamenti"),
+          ce13_override: ovr("ce13_proventi_partecipazioni"),
+          ce14_override: ovr("ce14_altri_proventi_finanziari"),
+          ce15_override: ovr("ce15_oneri_finanziari"),
+          ce16_override: ovr("ce16_utili_perdite_cambi"),
+          ce17_override: ce17Net,
+          ce18_override: ovr("ce18_proventi_straordinari"),
+          ce19_override: ovr("ce19_oneri_straordinari"),
+          tax_rate: derivedTaxRate,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
           depreciation_rate: 20,
@@ -3427,7 +3607,7 @@ export default function InfraannualePage() {
           loading={loadingAdjustable}
           saving={savingAdjustments}
           adjustmentsApplied={adjustmentsApplied}
-          onSave={async (finalCorrections?: Record<string, number>) => {
+          onSave={async (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => {
             if (!importResult || !adjustableData) return;
             setSavingAdjustments(true);
             try {
@@ -3445,12 +3625,12 @@ export default function InfraannualePage() {
                 fiscalYear,
                 bs,
                 is_,
-                periodMonths < 12 ? periodMonths : undefined
+                periodMonths < 12 ? periodMonths : undefined,
+                finalLog
               );
               setAdjustableData(result);
               setAdjustmentsApplied(true);
               setComparison(null); // Force reload comparison with corrected data
-              toast.success("Rettifiche salvate");
             } catch (error: unknown) {
               const msg = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : "Errore nel salvataggio";
               toast.error(msg);
@@ -3467,7 +3647,8 @@ export default function InfraannualePage() {
                 fiscalYear,
                 adjustableData.original_balance_sheet,
                 adjustableData.original_income_statement,
-                periodMonths < 12 ? periodMonths : undefined
+                periodMonths < 12 ? periodMonths : undefined,
+                []  // Clear rettifiche log on reset
               );
               setAdjustableData(result);
               // Reset corrections to original values
@@ -4072,14 +4253,15 @@ function ProjectionTable({
   const projVP = VP_CODES.reduce((acc, c) => acc + pv(c), 0);
   const PROJ_COST_CODES_ALL = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
     "ce08_costi_personale", "ce09_ammortamenti", "ce10_var_rimanenze_mat_prime",
-    "ce11_accantonamenti", "ce12_oneri_diversi"];
+    "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi"];
   const projCP = PROJ_COST_CODES_ALL.reduce((acc, c) => acc + pv(c), 0);
   const projEbitda = projVP - (projCP - pv("ce09_ammortamenti"));
   const projEbit = projVP - projCP;
 
   const projFin = ["ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari", "ce16_utili_perdite_cambi"].reduce((acc, c) => acc + pv(c), 0)
     - pv("ce15_oneri_finanziari");
-  const projRettifiche = pv("ce17_rettifiche_attivita_fin");
+  // ce17 is an aggregate (rivalutazioni - svalutazioni); derive from its sub-fields so overrides apply
+  const projRettifiche = pv("ce17a_rivalutazioni") - pv("ce17b_svalutazioni");
   const projStraord = pv("ce18_proventi_straordinari") - pv("ce19_oneri_straordinari");
   const projPBT = projEbit + projFin + projRettifiche + projStraord;
   const projNetProfit = projPBT - pv("ce20_imposte");
@@ -4541,9 +4723,33 @@ function StampaContent({
   const router = useRouter();
   const { refreshCompanies, refreshYears } = useApp();
   const [promoting, setPromoting] = useState(false);
+  const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
+  const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
   const refYear = comparison.reference_year;
   const partialYear = comparison.partial_year;
   const annFactor = 12 / periodMonths;
+
+  // Load stored AI comments on mount / scenario change
+  useEffect(() => {
+    if (!companyId || !scenarioId) return;
+    let cancelled = false;
+    getInfrannualeAIComments(companyId, scenarioId)
+      .then((data) => { if (!cancelled) setAiComments(data); })
+      .catch(() => { if (!cancelled) setAiComments({}); });
+    return () => { cancelled = true; };
+  }, [companyId, scenarioId]);
+
+  const handleCommentChange = (key: keyof InfrannualeAIComments, value: string) => {
+    setAiComments((prev) => ({ ...prev, [key]: value }));
+  };
+  const handleCommentBlur = async () => {
+    if (!companyId || !scenarioId) return;
+    try {
+      await saveInfrannualeAIComments(companyId, scenarioId, aiComments);
+    } catch {
+      toast.error("Errore nel salvataggio del commento");
+    }
+  };
 
   // --- P&L data ---
   const incomeItems = buildIncomeItemsWithEbitda(comparison.income_items, periodMonths);
@@ -4635,10 +4841,110 @@ function StampaContent({
   const visibleIncome = incomeItems.filter(item => ALWAYS_SHOW_CODES.has(item.code) || item.partial_value !== 0 || item.reference_value !== 0);
   const visibleBalance = balanceItems.filter(item => ALWAYS_SHOW_CODES.has(item.code) || item.partial_value !== 0 || item.reference_value !== 0);
 
+  // Build context payload for the AI generator
+  const buildAICtx = (): Record<string, unknown> => {
+    const income_map: Record<string, { reference_value: number; partial_value: number; annualized_value: number; projected_value: number }> = {};
+    for (const it of incomeItems) {
+      income_map[it.code] = {
+        reference_value: it.reference_value ?? 0,
+        partial_value: it.partial_value ?? 0,
+        annualized_value: it.annualized_value ?? 0,
+        projected_value: getProjectedCE(it),
+      };
+    }
+    const balance_map: Record<string, { reference_value: number; partial_value: number; projected_value: number }> = {};
+    for (const it of balanceItems) {
+      balance_map[it.code] = {
+        reference_value: it.reference_value ?? 0,
+        partial_value: it.partial_value ?? 0,
+        projected_value: projBSMap.get(it.code) ?? 0,
+      };
+    }
+    const indicatorsRow = (ind: ReturnType<typeof computeIndicators>) => ({
+      DSCR: ind.dscr.toFixed(2),
+      EBITDA_margin_pct: ind.ebitda_margin.toFixed(1),
+      current_ratio: ind.current_ratio.toFixed(2),
+      ROI_pct: ind.roi.toFixed(1),
+      ROE_pct: ind.roe.toFixed(1),
+      ROS_pct: ind.ros.toFixed(1),
+      indipendenza_fin_pct: ind.indipendenza.toFixed(1),
+      PFN_EBITDA: ind.pfn_ebitda.toFixed(2),
+      OF_MOL_pct: ind.of_mol.toFixed(1),
+    });
+    const ratingRow = (rating: ReturnType<typeof computeCrisisRating>, scores: number[], alerts: number) => ({
+      code: rating.code,
+      label: rating.label,
+      oltre_count: scores.filter((s) => s < 0.33).length,
+      alerts,
+    });
+    return {
+      scenario: { name: "Infrannuale", company_name: companyName },
+      reference_year: refYear,
+      partial_year: partialYear,
+      period_months: periodMonths,
+      income_map,
+      balance_map,
+      indicators: {
+        Storico: indicatorsRow(storicoInd),
+        Infrannuale: indicatorsRow(infraInd),
+        Proiezione: indicatorsRow(proiezioneInd),
+      },
+      ratings: {
+        Storico: ratingRow(storicoRating, storicoScores, 0),
+        Infrannuale: ratingRow(infraRating, infraScores, alertCount),
+        Proiezione: ratingRow(proiezioneRating, proiezioneScores, alertCount),
+      },
+    };
+  };
+
+  const handleGenerateAIComments = async () => {
+    if (!companyId || !scenarioId) return;
+    setAiCommentsLoading(true);
+    try {
+      const data = await generateInfrannualeAIComments(companyId, scenarioId, buildAICtx());
+      if (Object.keys(data).length === 0) {
+        toast.info("Nessun commento generato (chiave API mancante?)");
+      } else {
+        setAiComments(data);
+        toast.success("Commenti AI generati");
+      }
+    } catch {
+      toast.error("Errore nella generazione dei commenti AI");
+    } finally {
+      setAiCommentsLoading(false);
+    }
+  };
+
+  const CommentBlock = ({ k, placeholder }: { k: keyof InfrannualeAIComments; placeholder: string }) => {
+    const value = aiComments[k] ?? "";
+    // Hide empty blocks when printing to keep the PDF clean
+    return (
+      <div className={cn("rounded-md border border-border/60 bg-muted/20 p-3 my-2 print:my-2", !value && "print:hidden")}>
+        <Textarea
+          value={value}
+          onChange={(e) => handleCommentChange(k, e.target.value)}
+          onBlur={handleCommentBlur}
+          placeholder={placeholder}
+          className="min-h-[60px] resize-y text-sm bg-transparent border-0 focus-visible:ring-1 print:border-0 print:bg-transparent print:min-h-0 print:p-0"
+        />
+      </div>
+    );
+  };
+
   return (
     <div id="stampa-content" className="space-y-8 print:space-y-6 bg-white dark:bg-slate-950 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 -mt-8 pt-8 pb-8">
       {/* Action buttons */}
       <div className="flex justify-end gap-2 print:hidden">
+        {companyId && scenarioId && (
+          <Button variant="outline" onClick={handleGenerateAIComments} disabled={aiCommentsLoading}>
+            {aiCommentsLoading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-2" />
+            )}
+            Genera commenti AI
+          </Button>
+        )}
         <Button onClick={() => window.print()} variant="outline">
           <Printer className="h-4 w-4 mr-2" />
           Stampa PDF
@@ -4686,6 +4992,12 @@ function StampaContent({
         </p>
       </div>
 
+      {/* Overall AI commentary — rendered before the first table, editable */}
+      <CommentBlock
+        k="overall"
+        placeholder="Commento complessivo sull'analisi infrannuale (clicca 'Genera commenti AI' o scrivi manualmente)..."
+      />
+
       {/* 1. CE CONFRONTO: Storico | Infrannuale | Infrann./Storico */}
       <div className="print:break-before-avoid">
         <h2 className="text-base font-semibold mb-2">
@@ -4729,6 +5041,8 @@ function StampaContent({
         </Table>
       </div>
 
+      <CommentBlock k="ce_confronto" placeholder="Commento su Conto Economico — Confronto..." />
+
       {/* 2. SP CONFRONTO: Storico | Infrannuale | Infrann./Storico */}
       <div className="print:break-before-page">
         <h2 className="text-base font-semibold mb-2">
@@ -4771,6 +5085,8 @@ function StampaContent({
           </TableBody>
         </Table>
       </div>
+
+      <CommentBlock k="sp_confronto" placeholder="Commento su Stato Patrimoniale — Confronto..." />
 
       {/* 3. CE PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
@@ -4821,6 +5137,8 @@ function StampaContent({
         </Table>
       </div>
       )}
+
+      {periodMonths !== 12 && <CommentBlock k="ce_proiezione" placeholder="Commento su Conto Economico — Proiezione..." />}
 
       {/* 4. SP PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
@@ -4875,6 +5193,8 @@ function StampaContent({
         </Table>
       </div>
       )}
+
+      {periodMonths !== 12 && <CommentBlock k="sp_proiezione" placeholder="Commento su Stato Patrimoniale — Proiezione..." />}
 
       {/* 5. INDICATORI DELLA CRISI D'IMPRESA */}
       <div className="print:break-before-page">
@@ -4941,6 +5261,8 @@ function StampaContent({
           </TableBody>
         </Table>
       </div>
+
+      <CommentBlock k="indicatori" placeholder="Commento sugli indicatori della crisi d'impresa..." />
 
       {/* 6. SEGNALI EXTRACONTABILI */}
       <div>

@@ -317,6 +317,62 @@ def get_intra_year_comparison(
         )
 
 
+# ===== Infrannuale AI Comments (Stampa tab) =====
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/infrannuale/ai-comments",
+    summary="Get stored infrannuale AI comments (Stampa tab)",
+)
+def get_infrannuale_ai_comments(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    from app.services.ai_comments_service import get_infrannuale_comments
+    return get_infrannuale_comments(db, scenario_id)
+
+
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/infrannuale/ai-comments",
+    summary="Generate infrannuale AI comments via Haiku and persist them",
+)
+def generate_infrannuale_ai_comments(
+    company_id: int,
+    scenario_id: int,
+    ctx: Dict[str, Any] = Body(..., description="Pre-built context: scenario, income_map, balance_map, indicators, ratings"),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    from app.services.ai_comments_service import (
+        generate_infrannuale_comments,
+        save_infrannuale_comments,
+    )
+    comments = generate_infrannuale_comments(ctx)
+    if comments:
+        save_infrannuale_comments(db, scenario_id, comments)
+    return comments
+
+
+@router.put(
+    "/companies/{company_id}/scenarios/{scenario_id}/infrannuale/ai-comments",
+    summary="Save user-edited infrannuale AI comments (no LLM call)",
+)
+def save_infrannuale_ai_comments(
+    company_id: int,
+    scenario_id: int,
+    comments: Dict[str, str] = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    from app.services.ai_comments_service import save_infrannuale_comments
+    save_infrannuale_comments(db, scenario_id, comments)
+    return {"success": True}
+
+
 # ===== Promote Infrannuale Projection =====
 
 @router.post(

@@ -51,14 +51,21 @@ cd frontend && npm run dev
 # 3. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
 ```
 
-**API Workflow — Infrannuale (5 calls + optional promote):**
+**API Workflow — Infrannuale (5 calls + optional promote + optional AI comments):**
 ```bash
 # 1. INPUT: Upload partial-year data → POST /api/v1/import/{pdf|xbrl} (with period_months)
-# 2. SCENARIO: Create infrannuale scenario → POST /companies/{id}/scenarios (scenario_type="infrannuale")
-# 3. COMPARE: Get partial vs reference comparison → GET /scenarios/{id}/comparison
-# 4. PROJECT: Save overrides + project to 12M → PUT /scenarios/{id}/assumptions (auto_generate=true)
-# 5. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
-# 6. PROMOTE (optional): Copy projection to FinancialYear → POST /scenarios/{id}/promote
+# 2. RETTIFICHE (optional): Adjust imported BS/IS with double-entry postings
+#    GET  /api/v1/companies/{id}/years/{year}/adjustable  (seeds original snapshot + returns rettifiche_log)
+#    PUT  /api/v1/companies/{id}/years/{year}/adjustments (persists BS/IS + rettifiche_log, max 20 entries)
+# 3. SCENARIO: Create infrannuale scenario → POST /companies/{id}/scenarios (scenario_type="infrannuale")
+# 4. COMPARE: Get partial vs reference comparison → GET /scenarios/{id}/comparison
+# 5. PROJECT: Save overrides + project to 12M → PUT /scenarios/{id}/assumptions (auto_generate=true)
+# 6. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
+# 7. AI COMMENTS (optional, Stampa tab): 6 editable narrative comments
+#    GET  /scenarios/{id}/infrannuale/ai-comments   (stored dict)
+#    POST /scenarios/{id}/infrannuale/ai-comments   (body=ctx → Haiku generate + save)
+#    PUT  /scenarios/{id}/infrannuale/ai-comments   (body=dict → save user edits)
+# 8. PROMOTE (optional): Copy projection to FinancialYear → POST /scenarios/{id}/promote
 #    → Enables using projected year as base year for a subsequent budget scenario
 ```
 
@@ -138,6 +145,12 @@ python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
 5. **MANAGEMENT (2 endpoints)**: Basic CRUD
    - `GET /companies` - List companies
    - `GET /companies/{id}/scenarios` - List scenarios
+
+6. **ADMIN / UPLOAD TRACKING (3 endpoints)**: Developer-only, header-auth
+   - `GET /admin/uploads` - Filter by user_id / file_type / status / date range
+   - `GET /admin/uploads/{id}` - Full record including error_traceback
+   - `GET /admin/uploads/{id}/download` - Stream the original file
+   - Gated by `X-Admin-Key` header matching `ADMIN_API_KEY` env var. Not used by the iframe frontend.
 
 **Key Simplification:** 1 comprehensive API call replaces 10+ granular endpoints
 
@@ -322,7 +335,78 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
   - Dynamic column copy via `__table__.columns` intersection (handles missing fields gracefully)
   - Fails if a full-year FinancialYear already exists for that company+year
   - Service: `backend/app/services/promote_service.py`
-- Frontend wizard: Import → Comparison → Projection (editable) → Results → Promote to Budget
+- Frontend wizard: Import → Rettifiche → Comparison → Projection (editable) → Results → Promote to Budget
+
+### Rettifiche (BS/IS Adjustments Journal)
+Journal of double-entry corrections applied to the imported partial-year financials before comparison/projection.
+
+- **Persistence:** `FinancialYear.original_bs_snapshot` + `original_is_snapshot` (pre-rettifiche JSON) and `FinancialYear.rettifiche_log` (JSON array of per-edit entries). Snapshot is created on first GET to `/adjustable`, so `BalanceSheet`/`IncomeStatement` always reflect the *current* corrected state while `original_*_snapshot` is immutable.
+- **Per-edit flow:** typing a new value into any BS/CE input updates a local `pendingEdits` map. On blur / Enter, a single-row proposal dialog opens with a suggested double-entry counterpart (from `PROPOSAL_RULES`) pre-filled. Confirming appends a `RettificaEntry` to the log, applies both deltas to `corrections`, and persists via `PUT /adjustments`. Cancelling reverts.
+- **Counterpart picker** (`COUNTERPART_GROUPS` + `allowedCounterpartCategories`): the dropdown is filtered by double-entry category based on the edited field and sign — e.g. Debito↑ shows only Costi/Oneri + Attivo; Credito↑ shows only Ricavi/Proventi + Passivo. Aggregate/computed fields (`sp04`, `sp05`, `sp06`, `sp07`, `sp12`, `sp13`, `sp16`, `sp17`, `ce08`, `ce09`, `ce17`) are excluded via `NON_POSTABLE_FIELDS` because `recalcAggregates` would overwrite any direct delta.
+- **Journal panel** lists every confirmed entry with a per-row delete (reverses both deltas, filters log, persists). Hard cap of **20 entries** (`RETTIFICHE_MAX`) — enforced both client-side (toast + block) and server-side (400 error on `/adjustments`).
+- **Auto-reconciliation:** `reconcileSubfields(original)` (frontend) plugs small (≤ 5 €) Attivo-vs-Passivo imbalances from import rounding into `sp09_disponibilita_liquide` on load; subsequent rettifiche preserve balance because they're always double-entry.
+- **Hydration:** on tab mount, `corrections` is seeded from `adjustableData.balance_sheet`/`income_statement` (post-rettifiche) and `log` from `adjustableData.rettifiche_log`. Reopening the tab shows the persisted journal.
+- **Reset** (`onReset`): sends `original_*_snapshot` back as BS/IS + empty log to `PUT /adjustments` — wipes all corrections and the journal.
+- Key files:
+  - `database/models.py` — `FinancialYear.rettifiche_log` column
+  - `backend/app/schemas/adjustments.py` — `RettificaEntry`, `AdjustableFinancialYear.rettifiche_log`, `AdjustmentsUpdate.rettifiche_log`
+  - `backend/app/api/v1/financial_years.py` — `RETTIFICHE_LOG_MAX = 20`, GET `/adjustable`, PUT `/adjustments`
+  - `frontend/app/infrannuale/page.tsx` — `RettificheTab` component, `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`, `recalcAggregates`, `reconcileSubfields`
+
+### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
+All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable. When adding a new BS/IS sub-field, add rows in all of:
+- `frontend/app/infrannuale/page.tsx` — `RETTIFICHE_BS_ATTIVO` / `RETTIFICHE_BS_PN`, `CE_A`–`CE_E`, and the `relabel` map inside `buildBalanceItemsWithTotals` / `buildIncomeItemsWithEbitda` (Confronto)
+- `frontend/app/forecast/balance/page.tsx` — the `rows` array in `BalanceSheetTable`
+- `frontend/app/forecast/income/page.tsx` — the `rows` array in `IncomeStatementTable`
+
+Detail blocks shared across all views:
+- **Immob. finanziarie (sp04):** sp04a_partecipazioni, sp04b/c_crediti_immob_breve/lungo, sp04d_altri_titoli, sp04e_strumenti_derivati_attivi. Aggregate `sp04_immob_finanziarie` is computed from sub-fields.
+- **Crediti (sp06/sp07):** a through g per entro/oltre (clienti, controllate, collegate, controllanti, tributari, imposte anticipate, altri).
+- **Patrimonio netto (sp12):** sp12a (sovrapprezzo) through sp12h (riserva neg. azioni proprie), with sp12g (utili portati) before sp13 and sp12h after. Aggregate `sp12_riserve` is computed from sub-fields.
+- **Debiti (sp16/sp17):** 7 creditor-typed groups (`_debt_banche`, `_debt_altri_finanz`, `_debt_obbligazioni`, `_debt_fornitori`, `_debt_tributari`, `_debt_previdenza`, `_debt_altri`), each rendered as a synthetic total row followed by entro (sp16x) and oltre (sp17x) sub-rows. Group headers are pinned into `ALWAYS_SHOW_CODES` so the full OIC art. 2424 structure shows even when a group is zero; sub-rows follow the standard "hide when all years zero" filter in Confronto/forecast, but are always visible in Rettifiche so they remain editable. Aggregates `sp16_debiti_breve`/`sp17_debiti_lungo` and `total_debt` are computed.
+- **P&L:** ce08a–d (personale: TFR, salari, oneri sociali, altri), ce09a–d (ammortamenti/svalutazioni), ce17a/b (rivalutazioni/svalutazioni). EBITDA + EBIT rows shown in all three pages.
+
+**Per-year sub-field reconciliation (Confronto tab):** Bilancio abbreviato imports often populate only parent aggregates (e.g. `sp16_debiti_breve`) leaving detail sub-fields at 0. `buildBalanceItemsWithTotals` applies `reconcileSubfields` to each year column (partial/reference/prior) independently, so the gap is plugged into the "altri" bucket (`sp04a`, `sp05e`, `sp06g`, `sp07g`, `sp12e`, `sp16g`, `sp17g`) before rows are built. This mirrors the Rettifiche load-time reconciliation and prevents detail rows from being hidden by the zero-filter.
+
+**Recap dialog (Riepilogo Rettifiche):** aggregate rows that were updated indirectly by `recalcAggregates` (any field in `NON_POSTABLE_FIELDS`) render in muted-gray italic with a tooltip explaining they are derived totals, so the user doesn't mistake them for duplicated postings.
+
+### Projection Tab (Proiezione P&L editable overrides)
+Expanded `EDITABLE_CE_CODES` to cover **22 CE fields** (ce01–ce20 plus ce08/09/11/17 sub-fields), so the user can override almost every projected P&L line directly in the Proiezione table.
+
+- **Backend override plumbing:** `calculateProjectedBS` sends the full set of override fields the backend schema supports (`ce02_override`, `ce03_override`, `ce10_override`, `ce11_override`, `ce13_override` through `ce19_override`). For ce17 the picker exposes `ce17a` and `ce17b` separately; the backend stores the net (`ce17a − ce17b`) in `ce17_override`. For `ce20_imposte`, the override is translated to an effective `tax_rate` (`ce20 / PBT × 100`) so the forecast engine reproduces it.
+- **Consistency:** `ProjectionTable`'s `PROJ_COST_CODES_ALL` includes `ce11b_altri_accantonamenti` (matches `calculateProjectedBS`'s `EBITDA_COST_CODES`), and `projRettifiche` is derived from `pv("ce17a") − pv("ce17b")` so edits flow into PBT → net profit. BS `sp13` now always agrees with the P&L utile displayed above it.
+- **Gotcha:** `buildBalanceItemsWithTotals` must NOT overwrite `annualized_value` when called from `calculateProjectedBS` — the Projection tab writes projected BS values into that field. Only `partial_value`, `reference_value`, `prior_value` are reconciled per year.
+
+### Infrannuale AI Comments (Stampa tab)
+Editable AI-generated commentary rendered above each table in the Stampa tab. Six comments total: **overall** (before the first table) + one per section (`ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`).
+
+- **Persistence:** `BudgetScenario.ai_comments_infrannuale` — single TEXT column storing a JSON dict. Six keys only (extra keys are stripped on save). Reset/regenerate replaces the whole dict.
+- **Generation:** `ai_comments_service.generate_infrannuale_comments(ctx)` calls Claude Haiku with a structured tool (Pydantic `InfrannualeComments`) so output is shape-validated. The frontend builds `ctx` locally (scenario, `income_map`, `balance_map`, `indicators` per column, `ratings`) and POSTs it to the backend — keeps the compute on the client and the LLM call server-side only. Missing `ANTHROPIC_API_KEY` returns an empty dict (toast: "chiave API mancante").
+- **Endpoints** (scenario-scoped):
+  - `GET /companies/{id}/scenarios/{scenario_id}/infrannuale/ai-comments` — return stored
+  - `POST .../infrannuale/ai-comments` — generate via Haiku + save + return
+  - `PUT .../infrannuale/ai-comments` — save user edits (no LLM call)
+- **UI:** in `StampaContent`, each `CommentBlock` is a shadcn `Textarea` bound to `aiComments[key]`; `onChange` updates local state, `onBlur` persists via `saveInfrannualeAIComments`. Empty blocks are hidden in print (`print:hidden`) so the PDF stays clean.
+- **Key files:**
+  - `database/models.py` — `BudgetScenario.ai_comments_infrannuale`
+  - `backend/app/services/ai_comments_service.py` — `InfrannualeComments`, `generate_infrannuale_comments`, `get/save_infrannuale_comments`
+  - `backend/app/api/v1/budget_scenarios.py` — 3 endpoints under `/infrannuale/ai-comments`
+  - `frontend/lib/api.ts` — `InfrannualeAIComments` + `get/generate/saveInfrannualeAIComments`
+  - `frontend/app/infrannuale/page.tsx` — `StampaContent` state, `buildAICtx()`, `CommentBlock`
+
+### Upload Tracking (debugging user-reported import problems)
+- Every `/import/{xbrl,csv,pdf}` call persists the raw bytes to `data/uploads/{user_id}/{YYYY-MM}/...` and logs a row in the `uploaded_files` table **before** parsing runs (so parser crashes are still tracked).
+- DB row: `filename`, `file_type`, `file_size`, `storage_path`, `status` (pending/success/error), `error_message`, `error_traceback`, `uploaded_at`, `company_id`.
+- Tracker errors are swallowed — tracking must never break the import flow.
+- HTTP ownership/limit failures (`HTTPException`) are NOT marked as parser errors.
+- Retention: 90 days via `scripts/cleanup_uploads.py` (daily cron). Override with `UPLOAD_RETENTION_DAYS`.
+- Admin retrieval: `GET /api/v1/admin/uploads*` endpoints, gated by `X-Admin-Key` header (matches `ADMIN_API_KEY` env var).
+- Key files:
+  - `database/models.py` — `UploadedFile` model
+  - `backend/app/services/upload_tracker.py` — `save_upload`, `mark_success`, `mark_error`
+  - `backend/app/api/v1/admin.py` — admin router
+  - `migrate_db.py` — `CREATE TABLE IF NOT EXISTS uploaded_files` for existing prod DBs
+  - `scripts/cleanup_uploads.py` — retention cron job
 
 ### Bulk Assumptions Workflow
 ```python

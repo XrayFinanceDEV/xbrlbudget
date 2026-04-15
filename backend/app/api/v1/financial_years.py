@@ -311,6 +311,7 @@ def get_adjustable_financial_year(
 
     original_bs = json.loads(fy.original_bs_snapshot) if fy.original_bs_snapshot else None
     original_is = json.loads(fy.original_is_snapshot) if fy.original_is_snapshot else None
+    rettifiche_log = json.loads(fy.rettifiche_log) if fy.rettifiche_log else []
 
     return AdjustableFinancialYear(
         financial_year_id=fy.id,
@@ -320,7 +321,11 @@ def get_adjustable_financial_year(
         income_statement=is_dict,
         original_balance_sheet=original_bs,
         original_income_statement=original_is,
+        rettifiche_log=rettifiche_log,
     )
+
+
+RETTIFICHE_LOG_MAX = 20
 
 
 @router.put(
@@ -364,6 +369,15 @@ def save_adjustments(
         if field in is_columns:
             setattr(fy.income_statement, field, Decimal(str(value)))
 
+    # Persist rettifiche log if provided (max RETTIFICHE_LOG_MAX entries)
+    if payload.rettifiche_log is not None:
+        if len(payload.rettifiche_log) > RETTIFICHE_LOG_MAX:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Massimo {RETTIFICHE_LOG_MAX} rettifiche consentite",
+            )
+        fy.rettifiche_log = json.dumps([e.model_dump() for e in payload.rettifiche_log])
+
     db.commit()
     db.refresh(fy.balance_sheet)
     db.refresh(fy.income_statement)
@@ -372,6 +386,7 @@ def save_adjustments(
     is_dict = _is_to_dict(fy.income_statement)
     original_bs = json.loads(fy.original_bs_snapshot) if fy.original_bs_snapshot else None
     original_is = json.loads(fy.original_is_snapshot) if fy.original_is_snapshot else None
+    rettifiche_log = json.loads(fy.rettifiche_log) if fy.rettifiche_log else []
 
     return AdjustableFinancialYear(
         financial_year_id=fy.id,
@@ -381,4 +396,5 @@ def save_adjustments(
         income_statement=is_dict,
         original_balance_sheet=original_bs,
         original_income_statement=original_is,
+        rettifiche_log=rettifiche_log,
     )

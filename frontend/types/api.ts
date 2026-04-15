@@ -749,6 +749,18 @@ export interface EMScoreResult {
 
 // ===== Adjustable Financial Year (Rettifiche) =====
 
+export interface RettificaEntry {
+  id: string;
+  edited_field: string;
+  edited_label: string;
+  edit_delta: number;
+  counterpart_field: string;
+  counterpart_label: string;
+  counterpart_delta: number;
+  explanation?: string | null;
+  created_at: string;
+}
+
 export interface AdjustableFinancialYear {
   financial_year_id: number;
   year: number;
@@ -757,6 +769,7 @@ export interface AdjustableFinancialYear {
   income_statement: Record<string, number>;
   original_balance_sheet: Record<string, number> | null;
   original_income_statement: Record<string, number> | null;
+  rettifiche_log: RettificaEntry[];
 }
 
 // ===== Scenario Analysis (comprehensive single-call response) =====

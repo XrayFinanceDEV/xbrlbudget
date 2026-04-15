@@ -551,6 +551,9 @@ Three services: **nginx** (reverse proxy), **backend** (FastAPI + shared modules
 | `SUPABASE_JWT_SECRET` | Supabase JWT secret (HS256) | Required in prod |
 | `DEV_USER_ID` | Bypass JWT auth (any string) | - |
 | `ANTHROPIC_API_KEY` | Claude API key for PDF extraction | - |
+| `ADMIN_API_KEY` | Secret for `/admin/uploads/*` endpoints (see Upload Tracking) | - |
+| `UPLOAD_ROOT` | Override uploaded-file storage dir | `data/uploads` |
+| `UPLOAD_RETENTION_DAYS` | Cleanup retention for uploaded files | 90 |
 | `ALLOWED_ORIGINS` | Extra CORS origins (comma-separated) | - |
 | `MAX_COMPANIES_PER_USER` | Company limit per user | 50 |
 | `PORT` | External port | 80 |
@@ -575,7 +578,45 @@ docker compose down -v
 
 | Volume | Contents |
 |--------|----------|
-| `db-data` | SQLite database (`financial_analysis.db`) — persists across restarts |
+| `db-data` | SQLite database + uploaded input files (`/app/data/` includes `uploads/`) — persists across restarts |
+
+---
+
+## Upload Tracking & Admin Debug
+
+Every file uploaded via `/api/v1/import/{xbrl,csv,pdf}` is persisted to disk and recorded in the `uploaded_files` table. This lets the developer reproduce user-reported problems (wrong numbers, wrong signs, misclassified accounts, hard parser crashes) by retrieving the exact input that caused the issue.
+
+### Storage
+- Files saved to `data/uploads/{user_id}/{YYYY-MM}/{timestamp}_{uuid}.{ext}` (Docker: `/app/data/uploads/...`, inside the `db-data` volume)
+- DB row holds: `filename`, `file_type`, `file_size`, `status` (`pending`/`success`/`error`), `error_message`, `error_traceback`, `uploaded_at`, `company_id`
+- Tracker writes the row **before** the parser runs, so even a parser crash is captured
+- Retention: **90 days** (configurable via `UPLOAD_RETENTION_DAYS`). Run the cleanup script daily:
+  ```cron
+  0 3 * * *  cd /app && python scripts/cleanup_uploads.py >> /var/log/upload_cleanup.log 2>&1
+  ```
+
+### Admin endpoints
+All gated by the header `X-Admin-Key: <ADMIN_API_KEY>`. Not reachable from the iframe — intended for curl/browser debugging.
+
+```bash
+# 1. List a user's uploads, newest first
+curl -H "X-Admin-Key: $ADMIN_API_KEY" \
+  "https://host/api/v1/admin/uploads?user_id=abc-123&file_type=pdf&limit=20"
+
+# 2. Inspect one (includes full error traceback)
+curl -H "X-Admin-Key: $ADMIN_API_KEY" https://host/api/v1/admin/uploads/42
+
+# 3. Download the original file
+curl -H "X-Admin-Key: $ADMIN_API_KEY" \
+  https://host/api/v1/admin/uploads/42/download -o original.pdf
+```
+
+Supported filters: `user_id`, `file_type` (`xbrl`/`csv`/`pdf`), `status`, `company_id`, `since`, `until`, `limit` (max 500).
+
+### Jenkins wiring
+1. Add Jenkins credential (Secret text, ID `budget-admin-api-key`)
+2. `Jenkinsfile` already exports it to `.env.docker` on every build
+3. Container reads it via `env_file` in `docker-compose.yml`
 
 ---
 
@@ -1005,10 +1046,6 @@ Usa **solo FastAPI** quando:
 - ✅ Necessiti solo di API per analisi finanziaria programmatica
 - ✅ Vuoi microservizi specializzati
 
-### ⚠️ Legacy: **Streamlit Web App** (Deprecated)
-- ❌ **Non raccomandato per nuovi progetti**
-- 🔧 Mantenuto solo per compatibilità e riferimento
-- 🚀 Migra al nuovo stack Next.js per funzionalità moderne
 
 **Migration Path:** Se stai usando Streamlit, considera di migrare al nuovo stack FastAPI + Next.js per beneficiare di:
 - Interfaccia utente moderna e responsive

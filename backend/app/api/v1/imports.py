@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user_id
 from app.core.ownership import validate_company_owned_by_user, check_company_limit
 from app.schemas.imports import XBRLImportResponse, CSVImportResponse, ImportError
+from app.services.upload_tracker import save_upload, mark_success, mark_error
 from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced, XBRLParseError
 from importers.csv_importer import import_csv_file
 from importers.pdf_importer import import_pdf_balance_sheet, PDFImportError
@@ -94,6 +95,9 @@ async def upload_xbrl(
         logger.error("[XBRL IMPORT] File is empty (0 bytes)")
         raise HTTPException(status_code=400, detail="File is empty")
 
+    # Track upload (persist file + DB row BEFORE parsing so hard crashes are captured)
+    upload_record = save_upload(db, user_id, file.filename, "xbrl", content, company_id=company_id)
+
     # Save to temporary file
     tmp_file = None
     try:
@@ -127,10 +131,12 @@ async def upload_xbrl(
         if detected_pm:
             logger.info(f"[XBRL IMPORT] Auto-detected partial years: {detected_pm}")
 
+        mark_success(db, upload_record, company_id=result.get("company_id"))
         logger.info(f"[XBRL IMPORT] SUCCESS")
         return XBRLImportResponse(**result)
 
     except XBRLParseError as e:
+        mark_error(db, upload_record, e)
         logger.error(f"[XBRL IMPORT] XBRLParseError: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=422,
@@ -142,6 +148,7 @@ async def upload_xbrl(
             }
         )
     except ValueError as e:
+        mark_error(db, upload_record, e)
         logger.error(f"[XBRL IMPORT] ValueError: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=422,
@@ -152,7 +159,11 @@ async def upload_xbrl(
                 "details": "Invalid data in XBRL file"
             }
         )
+    except HTTPException:
+        # Ownership/limit failures are user errors, not parser bugs — re-raise without tracking as error
+        raise
     except Exception as e:
+        mark_error(db, upload_record, e)
         logger.error(f"[XBRL IMPORT] UNEXPECTED {type(e).__name__}: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
@@ -230,6 +241,9 @@ async def upload_csv(
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="File is empty")
 
+    # Track upload
+    upload_record = save_upload(db, user_id, file.filename, "csv", content, company_id=company_id)
+
     # Save to temporary file
     tmp_file = None
     try:
@@ -245,9 +259,11 @@ async def upload_csv(
             year2=year2
         )
 
+        mark_success(db, upload_record)
         return CSVImportResponse(**result)
 
     except ValueError as e:
+        mark_error(db, upload_record, e)
         raise HTTPException(
             status_code=422,
             detail={
@@ -257,7 +273,10 @@ async def upload_csv(
                 "details": "Failed to parse CSV file. Check format and data."
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        mark_error(db, upload_record, e)
         raise HTTPException(
             status_code=500,
             detail={
@@ -357,6 +376,9 @@ async def upload_pdf(
             detail="Either company_id or (create_company=True and company_name) must be provided"
         )
 
+    # Track upload
+    upload_record = save_upload(db, user_id, file.filename, "pdf", content, company_id=company_id)
+
     # Save to temporary file
     tmp_file = None
     try:
@@ -382,9 +404,11 @@ async def upload_pdf(
             user_id=user_id,
         )
 
+        mark_success(db, upload_record, company_id=result.get("company_id") if isinstance(result, dict) else None)
         return result
 
     except PDFImportError as e:
+        mark_error(db, upload_record, e)
         raise HTTPException(
             status_code=422,
             detail={
@@ -395,6 +419,7 @@ async def upload_pdf(
             }
         )
     except ValueError as e:
+        mark_error(db, upload_record, e)
         raise HTTPException(
             status_code=422,
             detail={
@@ -404,7 +429,10 @@ async def upload_pdf(
                 "details": "Invalid data in PDF file"
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        mark_error(db, upload_record, e)
         raise HTTPException(
             status_code=500,
             detail={

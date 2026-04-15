@@ -17,6 +17,7 @@ pipeline {
         PORT = '9090'
         SUPABASE_JWT_SECRET = credentials('budget-supabase-jwt-secret')
         ANTHROPIC_API_KEY = credentials('budget-anthropic-api-key')
+        ADMIN_API_KEY = credentials('budget-admin-api-key')
     }
 
     stages {
@@ -31,6 +32,7 @@ pipeline {
                 writeFile file: '.env.docker', text: """\
 SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+ADMIN_API_KEY=${ADMIN_API_KEY}
 PARENT_ORIGIN=https://app.formulafinance.it
 ALLOWED_ORIGINS=https://app.formulafinance.it
 MAX_COMPANIES_PER_USER=50

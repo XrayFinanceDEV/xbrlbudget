@@ -48,7 +48,7 @@ def init_db():
     """
     Initialize database - create all tables
     """
-    from database.models import Company, FinancialYear, BalanceSheet, IncomeStatement
+    from database.models import Company, FinancialYear, BalanceSheet, IncomeStatement, UploadedFile
     Base.metadata.create_all(bind=engine)
 
 

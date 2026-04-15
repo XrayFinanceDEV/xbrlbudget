@@ -98,7 +98,7 @@ def health_check():
 
 
 # Import and include API routes
-from app.api.v1 import companies, financial_years, calculations, imports, budget_scenarios, analysis, reports
+from app.api.v1 import companies, financial_years, calculations, imports, budget_scenarios, analysis, reports, admin
 app.include_router(companies.router, prefix=settings.API_V1_PREFIX, tags=["companies"])
 app.include_router(financial_years.router, prefix=settings.API_V1_PREFIX, tags=["financial_years"])
 app.include_router(calculations.router, prefix=settings.API_V1_PREFIX, tags=["calculations"])
@@ -106,6 +106,7 @@ app.include_router(imports.router, prefix=settings.API_V1_PREFIX, tags=["imports
 app.include_router(budget_scenarios.router, prefix=settings.API_V1_PREFIX, tags=["budget_scenarios"])
 app.include_router(analysis.router, prefix=settings.API_V1_PREFIX, tags=["analysis"])
 app.include_router(reports.router, prefix=settings.API_V1_PREFIX, tags=["reports"])
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX, tags=["admin"])
 
 
 if __name__ == "__main__":

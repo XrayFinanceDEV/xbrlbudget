@@ -5,8 +5,10 @@
 
   "balance_sheet_mapping_v2": {
     "sp01_crediti_soci": {
-      "priority_1": "itcc-ci-2018-11-04:CreditiVersoSociPerVersAmDoControllate",
-      "priority_2": "itcc-ci:CreditiVersoSoci"
+      "priority_1": "itcc-ci:TotaleCreditiVersoSociVersamentiAncoraDovuti",
+      "priority_2": "itcc-ci:CreditiVersoSociVersamentiAncoraDovuti",
+      "priority_3": "itcc-ci-2018-11-04:CreditiVersoSociPerVersAmDoControllate",
+      "priority_4": "itcc-ci:CreditiVersoSoci"
     },
 
     "sp02_immob_immateriali": {
@@ -98,6 +100,7 @@
         "itcc-ci:PatrimonioNettoRiservaSoprapprezzo",
         "itcc-ci:PatrimonioNettoRiservaSoprapprezzoAzioni",
         "itcc-ci:PatrimonioNettoRiservaRivalutazione",
+        "itcc-ci:PatrimonioNettoRiserveRivalutazione",
         "itcc-ci:PatrimonioNettoRiserveStatutarie",
         "itcc-ci:PatrimonioNettoAltreRiserve",
         "itcc-ci:PatrimonioNettoAltreRiserveDistintamenteIndicateTotaleAltreRiserve",
@@ -106,6 +109,37 @@
       ],
       "priority_1": "itcc-ci-2018-11-04:Riserve",
       "priority_2": "itcc-ci:Riserve"
+    },
+
+    "sp12a_riserva_sovrapprezzo": {
+      "priority_1": "itcc-ci:PatrimonioNettoRiservaSoprapprezzoAzioni",
+      "priority_2": "itcc-ci:PatrimonioNettoRiservaSoprapprezzo"
+    },
+
+    "sp12b_riserve_rivalutazione": {
+      "priority_1": "itcc-ci:PatrimonioNettoRiserveRivalutazione",
+      "priority_2": "itcc-ci:PatrimonioNettoRiservaRivalutazione"
+    },
+
+    "sp12c_riserva_legale": {
+      "priority_1": "itcc-ci:PatrimonioNettoRiservaLegale"
+    },
+
+    "sp12d_riserve_statutarie": {
+      "priority_1": "itcc-ci:PatrimonioNettoRiserveStatutarie"
+    },
+
+    "sp12e_altre_riserve": {
+      "priority_1": "itcc-ci:PatrimonioNettoAltreRiserveDistintamenteIndicateTotaleAltreRiserve",
+      "priority_2": "itcc-ci:PatrimonioNettoAltreRiserve"
+    },
+
+    "sp12f_riserva_copertura_flussi": {
+      "priority_1": "itcc-ci:PatrimonioNettoRiservaOperazioniCoperturaFlussiFinanziariAttesi"
+    },
+
+    "sp12g_utili_perdite_portati": {
+      "priority_1": "itcc-ci:PatrimonioNettoUtiliPerditePortatiNuovo"
     },
 
     "sp13_utile_perdita": {
@@ -162,6 +196,48 @@
       ]
     },
 
+    "sp16a_debiti_banche_breve": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoBancheEsigibiliEntroEsercizioSuccessivo"
+    },
+    "sp17a_debiti_banche_lungo": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoBancheEsigibiliOltreEsercizioSuccessivo"
+    },
+    "sp16b_debiti_altri_finanz_breve": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliEntroEsercizioSuccessivo"
+    },
+    "sp17b_debiti_altri_finanz_lungo": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliOltreEsercizioSuccessivo"
+    },
+    "sp16d_debiti_fornitori_breve": {
+      "comment": "priority_2 = creditor-type total (no entro/oltre) mapped to breve for PFN subtraction",
+      "priority_1": "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliEntroEsercizioSuccessivo",
+      "priority_2": "itcc-ci:DebitiDebitiVersoFornitoriTotaleDebitiVersoFornitori"
+    },
+    "sp17d_debiti_fornitori_lungo": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliOltreEsercizioSuccessivo"
+    },
+    "sp16e_debiti_tributari_breve": {
+      "priority_1": "itcc-ci:DebitiDebitiTributariEsigibiliEntroEsercizioSuccessivo",
+      "priority_2": "itcc-ci:DebitiDebitiTributariTotaleDebitiTributari"
+    },
+    "sp17e_debiti_tributari_lungo": {
+      "priority_1": "itcc-ci:DebitiDebitiTributariEsigibiliOltreEsercizioSuccessivo"
+    },
+    "sp16f_debiti_previdenza_breve": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliEntroEsercizioSuccessivo",
+      "priority_2": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeTotaleDebitiVersoIstitutiPrevidenzaSicurezzaSociale"
+    },
+    "sp17f_debiti_previdenza_lungo": {
+      "priority_1": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliOltreEsercizioSuccessivo"
+    },
+    "sp16g_altri_debiti_breve": {
+      "priority_1": "itcc-ci:DebitiAltriDebitiEsigibiliEntroEsercizioSuccessivo",
+      "priority_2": "itcc-ci:DebitiAltriDebitiTotaleAltriDebiti"
+    },
+    "sp17g_altri_debiti_lungo": {
+      "priority_1": "itcc-ci:DebitiAltriDebitiEsigibiliOltreEsercizioSuccessivo"
+    },
+
     "sp18_ratei_risconti_passivi": {
       "priority_1": "itcc-ci:PassivoRateiRisconti",
       "priority_2": "itcc-ci-2018-11-04:RateiERiscontiPassivi",
@@ -185,9 +261,10 @@
     },
 
     "ce03_lavori_interni": {
-      "priority_1": "itcc-ci:ValoreProduzioneIncrementoImmobilizzazioniLavoriInterni",
-      "priority_2": "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni",
-      "priority_3": "itcc-ci:IncrImmobPerLavoriInterni"
+      "priority_1": "itcc-ci:ValoreProduzioneIncrementiImmobilizzazioniLavoriInterni",
+      "priority_2": "itcc-ci:ValoreProduzioneIncrementoImmobilizzazioniLavoriInterni",
+      "priority_3": "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni",
+      "priority_4": "itcc-ci:IncrImmobPerLavoriInterni"
     },
 
     "ce04_altri_ricavi": {

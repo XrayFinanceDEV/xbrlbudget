@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   importXBRL,
   importPDF,
@@ -331,19 +332,27 @@ function computeIndicators(
   const currentLiabilities = v(bs, "sp16_debiti_breve");
   const longTermDebt = v(bs, "sp17_debiti_lungo");
 
-  // PFN: use detailed financial debt if available, else total debts
-  const financialDebtShort =
-    v(bs, "sp16a_debiti_banche_breve") +
-    v(bs, "sp16b_debiti_altri_finanz_breve") +
-    v(bs, "sp16c_debiti_obbligazioni_breve");
-  const financialDebtLong =
-    v(bs, "sp17a_debiti_banche_lungo") +
-    v(bs, "sp17b_debiti_altri_finanz_lungo") +
-    v(bs, "sp17c_debiti_obbligazioni_lungo");
-  const hasDetailedDebt = financialDebtShort > 0 || financialDebtLong > 0;
-  const totalFinancialDebt = hasDetailedDebt
-    ? financialDebtShort + financialDebtLong
-    : currentLiabilities + longTermDebt;
+  // PFN: financial debt = banche + obbligazioni (excluding soci finanziamenti / altri finanz.)
+  // Priority 1: direct bank debt sub-fields (entro/oltre detail available)
+  const bankDebt =
+    v(bs, "sp16a_debiti_banche_breve") + v(bs, "sp17a_debiti_banche_lungo") +
+    v(bs, "sp16c_debiti_obbligazioni_breve") + v(bs, "sp17c_debiti_obbligazioni_lungo");
+  const hasDirectBankDebt = bankDebt > 0;
+  // Priority 2: subtract known non-financial debts (fornitori, tributari, previdenza,
+  // altri finanz./soci) from total. Exclude sp16g/sp17g ("altri debiti") — those are
+  // plug fields that absorb unclassified amounts after reconcileSubfields.
+  const knownNonBankDebt =
+    v(bs, "sp16b_debiti_altri_finanz_breve") + v(bs, "sp17b_debiti_altri_finanz_lungo") +
+    v(bs, "sp16d_debiti_fornitori_breve") + v(bs, "sp17d_debiti_fornitori_lungo") +
+    v(bs, "sp16e_debiti_tributari_breve") + v(bs, "sp17e_debiti_tributari_lungo") +
+    v(bs, "sp16f_debiti_previdenza_breve") + v(bs, "sp17f_debiti_previdenza_lungo");
+  const totalDebt = currentLiabilities + longTermDebt;
+  const hasNonBankDetail = knownNonBankDebt > 0;
+  const totalFinancialDebt = hasDirectBankDebt
+    ? bankDebt
+    : hasNonBankDetail
+      ? totalDebt - knownNonBankDebt
+      : totalDebt;  // abbreviato: no detail at all, use total as fallback
   const pfn = totalFinancialDebt - cash - financialAssets;
 
   // DSCR = (EBITDA - Imposte) / Oneri finanziari
@@ -1099,6 +1108,20 @@ const RETTIFICHE_LABELS: Record<string, string> = {
   sp12h_riserva_neg_azioni_proprie: "A.X) Riserva negativa per azioni proprie in portafoglio",
   sp14_fondi_rischi: "B) Fondi per rischi e oneri",
   sp15_tfr: "C) Trattamento di fine rapporto di lavoro subordinato",
+  sp16a_debiti_banche_breve: "D) Debiti vs banche (entro)",
+  sp16b_debiti_altri_finanz_breve: "D) Debiti vs altri finanz. (entro)",
+  sp16c_debiti_obbligazioni_breve: "D) Debiti obbligazionari (entro)",
+  sp16d_debiti_fornitori_breve: "D) Debiti vs fornitori (entro)",
+  sp16e_debiti_tributari_breve: "D) Debiti tributari (entro)",
+  sp16f_debiti_previdenza_breve: "D) Debiti previdenziali (entro)",
+  sp16g_altri_debiti_breve: "D) Altri debiti (entro)",
+  sp17a_debiti_banche_lungo: "D) Debiti vs banche (oltre)",
+  sp17b_debiti_altri_finanz_lungo: "D) Debiti vs altri finanz. (oltre)",
+  sp17c_debiti_obbligazioni_lungo: "D) Debiti obbligazionari (oltre)",
+  sp17d_debiti_fornitori_lungo: "D) Debiti vs fornitori (oltre)",
+  sp17e_debiti_tributari_lungo: "D) Debiti tributari (oltre)",
+  sp17f_debiti_previdenza_lungo: "D) Debiti previdenziali (oltre)",
+  sp17g_altri_debiti_lungo: "D) Altri debiti (oltre)",
   sp18_ratei_risconti_passivi: "E) Ratei e risconti",
   // CE
   ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
@@ -1156,13 +1179,20 @@ function fieldCategory(field: string): AcctCategory | null {
   return null;
 }
 
-// Double-entry categories allowed for a given edit direction.
-// Asset↑ balances with Passivo↑ (loan) or Revenue↑ (earn); Asset↓ with Passivo↓ (pay) or Cost↑ (write-off);
-// Passivo↑ with Asset↑ (loan drawn) or Cost↑ (expense on credit); Passivo↓ with Asset↓ (paid) or Revenue↑;
-// CE moves always pair with BS (same-side CE reclassifications are unusual and left to direct edit).
-function allowedCounterpartCategories(editedField: string, delta: number): Set<AcctCategory> {
+// Double-entry categories allowed for a given edit direction and mode.
+// "rettifica" = cross-side double-entry (BS↔CE or ATTIVO↔PASSIVO) — affects P&L.
+// "riclassifica" = same-side reclassification (SP→SP or CE→CE) — no P&L impact.
+function allowedCounterpartCategories(editedField: string, delta: number, mode: ProposalMode): Set<AcctCategory> {
   const cat = fieldCategory(editedField);
   const pos = delta > 0;
+  if (mode === "riclassifica") {
+    // Same-side only: ATTIVO↔ATTIVO, PASSIVO↔PASSIVO, CE↔CE (any CE sub-type)
+    if (cat === "ATTIVO") return new Set<AcctCategory>(["ATTIVO"]);
+    if (cat === "PASSIVO") return new Set<AcctCategory>(["PASSIVO"]);
+    if (cat === "CE_POS" || cat === "CE_NEG") return new Set<AcctCategory>(["CE_POS", "CE_NEG"]);
+    return new Set<AcctCategory>(["ATTIVO", "PASSIVO", "CE_POS", "CE_NEG"]);
+  }
+  // "rettifica" — cross-side double-entry (original logic)
   if (cat === "ATTIVO") return pos ? new Set<AcctCategory>(["PASSIVO", "CE_POS"]) : new Set<AcctCategory>(["PASSIVO", "CE_NEG"]);
   if (cat === "PASSIVO") return pos ? new Set<AcctCategory>(["ATTIVO", "CE_NEG"]) : new Set<AcctCategory>(["ATTIVO", "CE_POS"]);
   if (cat === "CE_POS" || cat === "CE_NEG") return new Set<AcctCategory>(["ATTIVO", "PASSIVO"]);
@@ -1177,6 +1207,47 @@ const COUNTERPART_GROUPS: Array<{ label: string; category: AcctCategory }> = [
   { label: "CE — Ricavi e Proventi", category: "CE_POS" },
   { label: "CE — Costi e Oneri", category: "CE_NEG" },
 ];
+// Descriptive labels for the counterpart picker (overrides generic RETTIFICHE_LABELS for debt/credit sub-fields)
+const COUNTERPART_PICKER_LABELS: Record<string, string> = {
+  sp16a_debiti_banche_breve: "Debiti vs banche (entro)",
+  sp16b_debiti_altri_finanz_breve: "Debiti vs altri finanz. (entro)",
+  sp16c_debiti_obbligazioni_breve: "Debiti obbligazionari (entro)",
+  sp16d_debiti_fornitori_breve: "Debiti vs fornitori (entro)",
+  sp16e_debiti_tributari_breve: "Debiti tributari (entro)",
+  sp16f_debiti_previdenza_breve: "Debiti previdenziali (entro)",
+  sp16g_altri_debiti_breve: "Altri debiti (entro)",
+  sp17a_debiti_banche_lungo: "Debiti vs banche (oltre)",
+  sp17b_debiti_altri_finanz_lungo: "Debiti vs altri finanz. (oltre)",
+  sp17c_debiti_obbligazioni_lungo: "Debiti obbligazionari (oltre)",
+  sp17d_debiti_fornitori_lungo: "Debiti vs fornitori (oltre)",
+  sp17e_debiti_tributari_lungo: "Debiti tributari (oltre)",
+  sp17f_debiti_previdenza_lungo: "Debiti previdenziali (oltre)",
+  sp17g_altri_debiti_lungo: "Altri debiti (oltre)",
+  sp06a_crediti_clienti_breve: "Crediti vs clienti (entro)",
+  sp06b_crediti_controllate_breve: "Crediti vs controllate (entro)",
+  sp06c_crediti_collegate_breve: "Crediti vs collegate (entro)",
+  sp06d_crediti_controllanti_breve: "Crediti vs controllanti (entro)",
+  sp06e_crediti_tributari_breve: "Crediti tributari (entro)",
+  sp06f_imposte_anticipate_breve: "Imposte anticipate (entro)",
+  sp06g_crediti_altri_breve: "Altri crediti (entro)",
+  sp07a_crediti_clienti_lungo: "Crediti vs clienti (oltre)",
+  sp07b_crediti_controllate_lungo: "Crediti vs controllate (oltre)",
+  sp07c_crediti_collegate_lungo: "Crediti vs collegate (oltre)",
+  sp07d_crediti_controllanti_lungo: "Crediti vs controllanti (oltre)",
+  sp07e_crediti_tributari_lungo: "Crediti tributari (oltre)",
+  sp07f_imposte_anticipate_lungo: "Imposte anticipate (oltre)",
+  sp07g_crediti_altri_lungo: "Altri crediti (oltre)",
+  sp04a_partecipazioni: "Partecipazioni",
+  sp04b_crediti_immob_breve: "Crediti immobilizzati (entro)",
+  sp04c_crediti_immob_lungo: "Crediti immobilizzati (oltre)",
+  sp04d_altri_titoli: "Altri titoli",
+  sp04e_strumenti_derivati_attivi: "Strumenti finanz. derivati attivi",
+  sp05a_materie_prime: "Rimanenze materie prime",
+  sp05b_prodotti_in_corso: "Prodotti in corso di lavorazione",
+  sp05c_lavori_in_corso: "Lavori in corso su ordinazione",
+  sp05d_prodotti_finiti: "Prodotti finiti e merci",
+  sp05e_acconti: "Acconti (rimanenze)",
+};
 const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field: string; label: string }> = (() => {
   return Object.keys(RETTIFICHE_LABELS)
     .filter((k) => !NON_POSTABLE_FIELDS.has(k))
@@ -1185,7 +1256,8 @@ const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field:
       const cat = fieldCategory(field);
       if (!cat) return [];
       const group = COUNTERPART_GROUPS.find((g) => g.category === cat)!.label;
-      return [{ group, category: cat, field, label: RETTIFICHE_LABELS[field].trim() }];
+      const label = COUNTERPART_PICKER_LABELS[field] ?? RETTIFICHE_LABELS[field].trim();
+      return [{ group, category: cat, field, label }];
     });
 })();
 
@@ -1325,8 +1397,10 @@ const CE_E = [
 const CE_IMPOSTE = ["ce20_imposte"];
 
 // Proposal generated for the review dialog
+type ProposalMode = "rettifica" | "riclassifica" | "correggi_import";
 interface DoubleEntryProposal {
   id: number;
+  mode: ProposalMode;
   editedField: string;
   editedLabel: string;
   delta: number;
@@ -1508,6 +1582,7 @@ function RettificheTab({
     }
     setActiveProposal({
       id: Date.now(),
+      mode: "rettifica",
       editedField: field,
       editedLabel: RETTIFICHE_LABELS[field] ?? field,
       delta: editDelta,
@@ -1565,6 +1640,34 @@ function RettificheTab({
   const confirmActiveEdit = () => {
     if (!activeProposal) return;
     const p = activeProposal;
+    // Correggi Import: single-entry, no counterpart required
+    if (p.mode === "correggi_import") {
+      const updated = { ...corrections };
+      updated[p.editedField] = (updated[p.editedField] ?? original[p.editedField] ?? 0) + p.delta;
+      const newEntry: RettificaEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        edited_field: p.editedField,
+        edited_label: p.editedLabel,
+        edit_delta: p.delta,
+        counterpart_field: "_correzione_import",
+        counterpart_label: "Correzione importazione",
+        counterpart_delta: 0,
+        explanation: p.explanation || "Correzione dato importato",
+        created_at: new Date().toISOString(),
+      };
+      const final = recalcAggregates(updated);
+      const newLog = [...log, newEntry];
+      if (newLog.length > RETTIFICHE_MAX) {
+        toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
+        return;
+      }
+      setCorrections(final);
+      setLog(newLog);
+      setPendingEdits((prev) => { const u = { ...prev }; delete u[p.editedField]; return u; });
+      setActiveProposal(null);
+      onSave(final, newLog);
+      return;
+    }
     if (!p.counterpartField) {
       toast.error("Seleziona una contropartita");
       return;
@@ -2097,14 +2200,20 @@ function RettificheTab({
                       )}>
                         {e.edit_delta > 0 ? "+" : ""}{formatEuro(e.edit_delta)}
                       </span>
-                      <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="text-muted-foreground truncate">{e.counterpart_label.trim()}</span>
-                      <span className={cn(
-                        "font-mono tabular-nums",
-                        e.counterpart_delta > 0 ? "text-green-600 dark:text-green-400" : e.counterpart_delta < 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"
-                      )}>
-                        {e.counterpart_delta > 0 ? "+" : ""}{formatEuro(e.counterpart_delta)}
-                      </span>
+                      {e.counterpart_field === "_correzione_import" ? (
+                        <span className="text-muted-foreground italic text-xs">corr. import</span>
+                      ) : (
+                        <>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground truncate">{e.counterpart_label.trim()}</span>
+                          <span className={cn(
+                            "font-mono tabular-nums",
+                            e.counterpart_delta > 0 ? "text-green-600 dark:text-green-400" : e.counterpart_delta < 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"
+                          )}>
+                            {e.counterpart_delta > 0 ? "+" : ""}{formatEuro(e.counterpart_delta)}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <Button
@@ -2150,9 +2259,13 @@ function RettificheTab({
       <Dialog open={!!activeProposal} onOpenChange={(o) => { if (!o) cancelActiveEdit(); }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Registra Rettifica</DialogTitle>
+            <DialogTitle>{activeProposal?.mode === "correggi_import" ? "Correggi Importazione" : activeProposal?.mode === "riclassifica" ? "Registra Riclassifica" : "Registra Rettifica"}</DialogTitle>
             <DialogDescription>
-              Scegli la contropartita per completare la partita doppia, poi conferma per registrare la rettifica.
+              {activeProposal?.mode === "correggi_import"
+                ? "Correggi un valore importato in modo errato. Modifica singola senza partita doppia."
+                : activeProposal?.mode === "riclassifica"
+                ? "Sposta l'importo tra voci dello stesso tipo (SP o CE) senza impatto sul Conto Economico."
+                : "Scegli la contropartita per completare la partita doppia, poi conferma per registrare la rettifica."}
             </DialogDescription>
           </DialogHeader>
 
@@ -2160,9 +2273,69 @@ function RettificheTab({
             const p = activeProposal;
             const update = (patch: Partial<DoubleEntryProposal>) =>
               setActiveProposal((prev) => prev ? { ...prev, ...patch } : prev);
+            const switchMode = (newMode: ProposalMode) => {
+              // Reset counterpart selection when switching mode
+              update({ mode: newMode, counterpartField: "", counterpartLabel: "", splitAlt: undefined });
+            };
             const dirLabel = p.delta > 0 ? "+" : "";
+            // For riclassifica, counterpart always moves opposite (one goes up, the other goes down)
+            const effectiveDelta = p.mode === "riclassifica" ? -p.delta : p.proposedDelta;
+            // Build the counterpart picker (shared by both layouts)
+            const counterpartPicker = (onSelect: (field: string) => void) => (
+              <Select
+                value={p.counterpartField || undefined}
+                onValueChange={onSelect}
+              >
+                <SelectTrigger className="h-7 flex-1 min-w-0 text-xs">
+                  <SelectValue placeholder="Seleziona contropartita..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  {(() => {
+                    const allowed = allowedCounterpartCategories(p.editedField, p.delta, p.mode);
+                    return COUNTERPART_GROUPS.filter((g) => allowed.has(g.category)).map((g) => (
+                      <SelectGroup key={g.label}>
+                        <SelectLabel className="text-xs">{g.label}</SelectLabel>
+                        {COUNTERPART_OPTIONS.filter((o) => o.category === g.category && o.field !== p.editedField).map((o) => (
+                          <SelectItem key={o.field} value={o.field} className="text-xs">
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ));
+                  })()}
+                </SelectContent>
+              </Select>
+            );
             return (
               <div className="space-y-3 my-2">
+                {/* Mode toggle: Rettifica vs Riclassifica vs Correggi Import */}
+                <div className="flex gap-2">
+                  <Button
+                    variant={p.mode === "rettifica" ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => p.mode !== "rettifica" && switchMode("rettifica")}
+                  >
+                    Rettifica (SP ↔ CE)
+                  </Button>
+                  <Button
+                    variant={p.mode === "riclassifica" ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => p.mode !== "riclassifica" && switchMode("riclassifica")}
+                  >
+                    Riclassifica (stessa sezione)
+                  </Button>
+                  <Button
+                    variant={p.mode === "correggi_import" ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => p.mode !== "correggi_import" && switchMode("correggi_import")}
+                  >
+                    Correggi Import
+                  </Button>
+                </div>
+
                 <div className="border rounded-lg p-3 bg-card">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="text-sm font-medium">{p.editedLabel}</span>
@@ -2174,37 +2347,37 @@ function RettificheTab({
                     </span>
                   </div>
 
-                  {p.splitAlt ? (
+                  {p.mode === "correggi_import" ? (
+                    /* Correggi Import: single-entry correction, no counterpart */
+                    <p className="text-xs text-muted-foreground mt-1.5 italic">
+                      Correzione singola per errore di importazione. Non richiede contropartita.
+                    </p>
+                  ) : p.mode === "riclassifica" ? (
+                    /* Riclassifica: simple same-side move, always opposite delta, no split */
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      {counterpartPicker((newField) => update({
+                        counterpartField: newField,
+                        counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                        proposedDelta: -p.delta,
+                        explanation: `Riclassifica: ${p.editedLabel} → ${RETTIFICHE_LABELS[newField] ?? newField}`,
+                      }))}
+                      <span className={cn(
+                        "text-sm font-mono tabular-nums font-semibold w-36 text-right",
+                        effectiveDelta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                      )}>
+                        {effectiveDelta > 0 ? "+" : ""}{formatEuro(effectiveDelta)}
+                      </span>
+                    </div>
+                  ) : p.splitAlt ? (
                     <>
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                         <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <Select
-                          value={p.counterpartField || undefined}
-                          onValueChange={(newField) => update({
-                            counterpartField: newField,
-                            counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
-                            splitAlt: undefined,
-                          })}
-                        >
-                          <SelectTrigger className="h-7 flex-1 min-w-0 text-xs">
-                            <SelectValue placeholder="Seleziona contropartita..." />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-80">
-                            {(() => {
-                              const allowed = allowedCounterpartCategories(p.editedField, p.delta);
-                              return COUNTERPART_GROUPS.filter((g) => allowed.has(g.category)).map((g) => (
-                                <SelectGroup key={g.label}>
-                                  <SelectLabel className="text-xs">{g.label}</SelectLabel>
-                                  {COUNTERPART_OPTIONS.filter((o) => o.category === g.category).map((o) => (
-                                    <SelectItem key={o.field} value={o.field} className="text-xs">
-                                      {o.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              ));
-                            })()}
-                          </SelectContent>
-                        </Select>
+                        {counterpartPicker((newField) => update({
+                          counterpartField: newField,
+                          counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                          splitAlt: undefined,
+                        }))}
                         <Input
                           className="h-7 w-36 text-right text-xs font-mono tabular-nums"
                           value={formatInputNumber(Math.round(p.proposedDelta - p.splitAlt.amount).toString())}
@@ -2239,32 +2412,10 @@ function RettificheTab({
                   ) : (
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                       <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <Select
-                        value={p.counterpartField || undefined}
-                        onValueChange={(newField) => update({
-                          counterpartField: newField,
-                          counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
-                        })}
-                      >
-                        <SelectTrigger className="h-7 flex-1 min-w-0 text-xs">
-                          <SelectValue placeholder="Seleziona contropartita..." />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-80">
-                          {(() => {
-                            const allowed = allowedCounterpartCategories(p.editedField, p.delta);
-                            return COUNTERPART_GROUPS.filter((g) => allowed.has(g.category)).map((g) => (
-                              <SelectGroup key={g.label}>
-                                <SelectLabel className="text-xs">{g.label}</SelectLabel>
-                                {COUNTERPART_OPTIONS.filter((o) => o.category === g.category).map((o) => (
-                                  <SelectItem key={o.field} value={o.field} className="text-xs">
-                                    {o.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            ));
-                          })()}
-                        </SelectContent>
-                      </Select>
+                      {counterpartPicker((newField) => update({
+                        counterpartField: newField,
+                        counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                      }))}
                       <Input
                         className="h-7 w-36 text-right text-xs font-mono tabular-nums"
                         value={formatInputNumber(Math.round(p.proposedDelta).toString())}
@@ -2291,9 +2442,9 @@ function RettificheTab({
             <Button variant="outline" onClick={cancelActiveEdit}>
               Annulla
             </Button>
-            <Button onClick={confirmActiveEdit} disabled={!activeProposal?.counterpartField}>
+            <Button onClick={confirmActiveEdit} disabled={activeProposal?.mode !== "correggi_import" && !activeProposal?.counterpartField}>
               <Check className="h-4 w-4 mr-1.5" />
-              Registra rettifica
+              {activeProposal?.mode === "correggi_import" ? "Applica correzione" : activeProposal?.mode === "riclassifica" ? "Registra riclassifica" : "Registra rettifica"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3361,7 +3512,15 @@ export default function InfraannualePage() {
             </CardContent>
           </Card>
           <div className="flex justify-end">
-            <Button onClick={() => setActiveTab("import")}>
+            <Button onClick={() => {
+              setImportResult(null);
+              setScenario(null);
+              setComparison(null);
+              setAdjustableData(null);
+              setAnalysis(null);
+              setFile(null);
+              setActiveTab("import");
+            }}>
               Nuova Importazione
               <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
@@ -4722,6 +4881,7 @@ function StampaContent({
 }) {
   const router = useRouter();
   const { refreshCompanies, refreshYears } = useApp();
+  const { logoUrl } = useAuth();
   const [promoting, setPromoting] = useState(false);
   const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
@@ -4919,20 +5079,25 @@ function StampaContent({
     const value = aiComments[k] ?? "";
     // Hide empty blocks when printing to keep the PDF clean
     return (
-      <div className={cn("rounded-md border border-border/60 bg-muted/20 p-3 my-2 print:my-2", !value && "print:hidden")}>
+      <div className={cn("rounded-md border border-border/60 bg-muted/20 p-3 my-2 print:my-1 print:p-2", !value && "print:hidden")}>
+        {/* Screen: editable textarea */}
         <Textarea
           value={value}
           onChange={(e) => handleCommentChange(k, e.target.value)}
           onBlur={handleCommentBlur}
           placeholder={placeholder}
-          className="min-h-[60px] resize-y text-sm bg-transparent border-0 focus-visible:ring-1 print:border-0 print:bg-transparent print:min-h-0 print:p-0"
+          className="min-h-[60px] resize-y text-sm bg-transparent border-0 focus-visible:ring-1 print:hidden"
         />
+        {/* Print: plain text (no textarea chrome, no resize handle) */}
+        {value && (
+          <p className="hidden print:block text-xs leading-relaxed whitespace-pre-wrap m-0">{value}</p>
+        )}
       </div>
     );
   };
 
   return (
-    <div id="stampa-content" className="space-y-8 print:space-y-6 bg-white dark:bg-slate-950 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 -mt-8 pt-8 pb-8">
+    <div id="stampa-content" className="space-y-8 print:space-y-3 bg-white dark:bg-slate-950 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 -mt-8 pt-8 pb-8">
       {/* Action buttons */}
       <div className="flex justify-end gap-2 print:hidden">
         {companyId && scenarioId && (
@@ -4983,6 +5148,13 @@ function StampaContent({
 
       {/* Header */}
       <div className="text-center space-y-1 print:mb-4">
+        {logoUrl && (
+          <img
+            src={logoUrl}
+            alt="Logo"
+            className="mx-auto h-10 w-auto object-contain print:h-8 mb-2"
+          />
+        )}
         <h1 className="text-xl font-bold">{companyName}</h1>
         <p className="text-sm text-muted-foreground">
           Analisi Infrannuale {periodMonths === 12 ? "" : `${periodMonths}M `}{partialYear}{periodMonths !== 12 ? ` — Proiezione 12M ${partialYear}` : ""}
@@ -4999,14 +5171,14 @@ function StampaContent({
       />
 
       {/* 1. CE CONFRONTO: Storico | Infrannuale | Infrann./Storico */}
-      <div className="print:break-before-avoid">
+      <div>
         <h2 className="text-base font-semibold mb-2">
           Conto Economico — Confronto {periodMonths}M {partialYear} vs 12M {refYear}
         </h2>
         <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="w-[55%] print:w-[44%]">Voce</TableHead>
               <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
               <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
               <TableHead className="text-right text-xs leading-tight">Infrannuale/<br />Storico</TableHead>
@@ -5019,7 +5191,7 @@ function StampaContent({
                 "_ebitda", "_ebit", "_profit_before_tax", "_net_profit"].includes(item.code);
               if (isHeader) return (
                 <TableRow key={item.code} className="bg-muted hover:bg-muted">
-                  <TableCell colSpan={4} className="text-sm font-bold py-2">{item.label}</TableCell>
+                  <TableCell colSpan={4} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
               return (
@@ -5044,14 +5216,14 @@ function StampaContent({
       <CommentBlock k="ce_confronto" placeholder="Commento su Conto Economico — Confronto..." />
 
       {/* 2. SP CONFRONTO: Storico | Infrannuale | Infrann./Storico */}
-      <div className="print:break-before-page">
+      <div>
         <h2 className="text-base font-semibold mb-2">
           Stato Patrimoniale — Confronto
         </h2>
         <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="w-[55%] print:w-[44%]">Voce</TableHead>
               <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
               <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
               <TableHead className="text-right text-xs leading-tight">Infrannuale/<br />Storico</TableHead>
@@ -5064,7 +5236,7 @@ function StampaContent({
                 "_totale_immob", "_totale_circ", "_totale_pn", "_totale_debiti", "_differenza"].includes(item.code);
               if (isHeader) return (
                 <TableRow key={item.code} className="bg-muted hover:bg-muted">
-                  <TableCell colSpan={4} className="text-sm font-bold py-2">{item.label}</TableCell>
+                  <TableCell colSpan={4} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
               return (
@@ -5090,14 +5262,14 @@ function StampaContent({
 
       {/* 3. CE PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
-      <div className="print:break-before-page">
+      <div>
         <h2 className="text-base font-semibold mb-2">
           Conto Economico — Proiezione {partialYear}
         </h2>
         <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="w-[55%] print:w-[44%]">Voce</TableHead>
               <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
               <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
               <TableHead className="text-right text-xs leading-tight">Proiezione<br />{partialYear}</TableHead>
@@ -5112,7 +5284,7 @@ function StampaContent({
               const projValue = getProjectedCE(item);
               if (isHeader) return (
                 <TableRow key={item.code} className="bg-muted hover:bg-muted">
-                  <TableCell colSpan={5} className="text-sm font-bold py-2">{item.label}</TableCell>
+                  <TableCell colSpan={5} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
               return (
@@ -5142,14 +5314,14 @@ function StampaContent({
 
       {/* 4. SP PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
-      <div className="print:break-before-page">
+      <div>
         <h2 className="text-base font-semibold mb-2">
           Stato Patrimoniale — Proiezione {partialYear}
         </h2>
         <Table className="table-fixed print-custom-cols">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[60%]">Voce</TableHead>
+              <TableHead className="w-[55%] print:w-[44%]">Voce</TableHead>
               <TableHead className="text-right text-xs leading-tight">Storico<br />{refYear}</TableHead>
               <TableHead className="text-right text-xs leading-tight">Infrannuale<br />{periodMonths}M</TableHead>
               <TableHead className="text-right text-xs leading-tight">Proiezione<br />{partialYear}</TableHead>
@@ -5164,7 +5336,7 @@ function StampaContent({
               const projVal = projBSMap.get(item.code) ?? NaN;
               if (isHeader) return (
                 <TableRow key={item.code} className="bg-muted hover:bg-muted">
-                  <TableCell colSpan={5} className="text-sm font-bold py-2">{item.label}</TableCell>
+                  <TableCell colSpan={5} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
               return (
@@ -5197,7 +5369,7 @@ function StampaContent({
       {periodMonths !== 12 && <CommentBlock k="sp_proiezione" placeholder="Commento su Stato Patrimoniale — Proiezione..." />}
 
       {/* 5. INDICATORI DELLA CRISI D'IMPRESA */}
-      <div className="print:break-before-page">
+      <div>
         <h2 className="text-base font-semibold mb-2">Indicatori della Crisi d&apos;Impresa</h2>
 
         {/* Rating cards */}

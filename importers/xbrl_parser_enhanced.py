@@ -345,9 +345,32 @@ class EnhancedXBRLParser:
                 if local_name == expected_local:
                     return value, xbrl_tag
 
-                # Match with "Totale" prefix
-                if local_name.startswith('Totale') and expected_local in local_name:
+                # Match with "Totale" prefix (e.g., TotaleImmobilizzazioniImmateriali == Totale + ImmobilizzazioniImmateriali)
+                if local_name == 'Totale' + expected_local:
                     return value, xbrl_tag
+
+        # Fuzzy fallback: match minor spelling variations (e.g., Incremento vs Incrementi)
+        # Only when lengths are within 10% of each other (prevents short-substring-of-long matches)
+        for priority_key in ['priority_1', 'priority_2', 'priority_3', 'priority_4', 'priority_5']:
+            if priority_key not in field_config:
+                continue
+
+            xbrl_tag = field_config[priority_key]
+            expected_local = xbrl_tag.split(':')[-1]
+
+            for fact_tag, value in facts.items():
+                local_name = etree.QName(fact_tag).localname if fact_tag.startswith('{') else fact_tag.split(':')[-1]
+
+                # Only consider near-equal length strings (within 10%)
+                len_ratio = len(local_name) / max(len(expected_local), 1)
+                if len(expected_local) > 15 and 0.9 <= len_ratio <= 1.1:
+                    if local_name.lower() == expected_local.lower():
+                        logger.info(f"[XBRL] Fuzzy case match: {local_name} ~ {xbrl_tag}")
+                        return value, xbrl_tag
+                    # Check if only 1-2 chars differ (e.g., Incremento vs Incrementi)
+                    if expected_local in local_name or local_name in expected_local:
+                        logger.info(f"[XBRL] Fuzzy near-match: {local_name} ~ {xbrl_tag}")
+                        return value, xbrl_tag
 
         # Try detail_tags if present and not already tried (for non-accumulate_all)
         if not field_config.get('accumulate_all', False) and 'detail_tags' in field_config:

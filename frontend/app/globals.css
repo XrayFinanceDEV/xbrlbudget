@@ -239,4 +239,49 @@
   * {
     scrollbar-width: none !important;
   }
+
+  /* Stampa content: compact spacing, natural page flow */
+  #stampa-content {
+    gap: 0.75rem !important;
+  }
+  #stampa-content h2 {
+    font-size: 12px !important;
+    margin-bottom: 0.15rem !important;
+    break-after: avoid;
+  }
+  /* Stampa tables: extra compact for better page fit */
+  #stampa-content table {
+    font-size: 9px !important;
+  }
+  #stampa-content td,
+  #stampa-content th {
+    padding: 0.1rem 0.2rem !important;
+    line-height: 1.25 !important;
+  }
+  /* First column: narrower in print so number columns have room */
+  #stampa-content .print-custom-cols th:first-child,
+  #stampa-content .print-custom-cols td:first-child {
+    width: 44% !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+  }
+  /* Number columns: prevent truncation */
+  #stampa-content .print-custom-cols th:not(:first-child),
+  #stampa-content .print-custom-cols td:not(:first-child) {
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+  /* Allow tables to break across pages naturally */
+  #stampa-content table {
+    break-inside: auto;
+  }
+  /* Keep table header with first rows */
+  #stampa-content thead {
+    break-after: avoid;
+  }
+  /* Textarea hidden in print (CommentBlock uses <p> fallback) */
+  #stampa-content textarea {
+    display: none !important;
+  }
 }

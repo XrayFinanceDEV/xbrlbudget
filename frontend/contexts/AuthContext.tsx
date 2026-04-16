@@ -7,13 +7,28 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** Logo URL from parent app (postMessage) or JWT user_metadata */
+  logoUrl: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Decode JWT payload without verifying (signature verified server-side) */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   // Sync token to API client
   useEffect(() => {
@@ -31,10 +46,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event.data?.type === "AUTH_TOKEN" && event.data?.token) {
         setToken(event.data.token);
         setIsLoading(false);
+
+        // Accept logo_url from parent postMessage (preferred)
+        if (event.data.logo_url) {
+          setLogoUrl(event.data.logo_url);
+        } else {
+          // Fallback: try to extract from JWT user_metadata
+          const payload = decodeJwtPayload(event.data.token);
+          const meta = payload?.user_metadata as Record<string, unknown> | undefined;
+          const logo = meta?.logo_url ?? meta?.avatar_url ?? meta?.logo;
+          if (typeof logo === "string" && logo) {
+            setLogoUrl(logo);
+          }
+        }
       }
 
       if (event.data?.type === "AUTH_LOGOUT") {
         setToken(null);
+        setLogoUrl(null);
       }
     };
 
@@ -64,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         token,
         isAuthenticated: !!token,
         isLoading,
+        logoUrl,
       }}
     >
       {children}

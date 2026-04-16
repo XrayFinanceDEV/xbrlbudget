@@ -666,6 +666,110 @@ def bulk_upsert_assumptions(
         )
 
 
+# ===== CE Override (direct forecast editing) =====
+
+# All CE override fields that can be patched from the forecast income table
+_CE_OVERRIDE_FIELDS = {
+    "ce01_override", "ce02_override", "ce03_override", "ce04_override",
+    "ce05_override", "ce06_override", "ce07_override", "ce08_override",
+    "ce08a_override", "ce08b_override", "ce08c_override", "ce08d_override",
+    "ce09_override", "ce09a_override", "ce09b_override", "ce09c_override", "ce09d_override",
+    "ce10_override", "ce11_override", "ce11b_override", "ce12_override",
+    "ce13_override", "ce14_override", "ce15_override", "ce16_override",
+    "ce17_override", "ce17a_override", "ce17b_override",
+    "ce18_override", "ce19_override", "ce20_override",
+}
+
+@router.patch(
+    "/companies/{company_id}/scenarios/{scenario_id}/ce-override",
+    response_model=Any,
+    summary="Batch-patch CE overrides and regenerate forecast"
+)
+def patch_ce_override(
+    company_id: int,
+    scenario_id: int,
+    request: Any = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Update one or more CE overrides, then regenerate the forecast once.
+
+    **Request body:**
+    ```json
+    {
+        "overrides": [
+            { "forecast_year": 2025, "field": "ce01_override", "value": 1200000.00 },
+            { "forecast_year": 2025, "field": "ce05_override", "value": null },
+            { "forecast_year": 2026, "field": "ce01_override", "value": 1300000.00 }
+        ]
+    }
+    ```
+
+    Set `value` to `null` to clear an override and revert to engine calculation.
+    """
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+
+    if isinstance(request, dict):
+        request_data = request
+    else:
+        request_data = request.model_dump() if hasattr(request, 'model_dump') else request
+
+    overrides = request_data.get("overrides", [])
+    if not overrides:
+        raise HTTPException(status_code=400, detail="overrides list is required")
+
+    from decimal import Decimal as D
+
+    # Cache assumption rows per year to avoid repeated queries
+    assumption_cache: dict = {}
+    applied = 0
+
+    for entry in overrides:
+        forecast_year = entry.get("forecast_year")
+        field = entry.get("field")
+        value = entry.get("value")
+
+        if not forecast_year or not field:
+            raise HTTPException(status_code=400, detail="Each override needs forecast_year and field")
+        if field not in _CE_OVERRIDE_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Invalid override field: {field}")
+
+        if forecast_year not in assumption_cache:
+            assumption = db.query(models.BudgetAssumptions).filter(
+                models.BudgetAssumptions.scenario_id == scenario_id,
+                models.BudgetAssumptions.forecast_year == forecast_year
+            ).first()
+            if not assumption:
+                raise HTTPException(status_code=404, detail=f"No assumptions found for year {forecast_year}")
+            assumption_cache[forecast_year] = assumption
+
+        setattr(assumption_cache[forecast_year], field, D(str(value)) if value is not None else None)
+        applied += 1
+
+    db.commit()
+
+    # Regenerate forecast once
+    scenario = db.query(models.BudgetScenario).filter(
+        models.BudgetScenario.id == scenario_id
+    ).first()
+
+    try:
+        if scenario.scenario_type == "infrannuale":
+            from calculations.intra_year_engine import IntraYearEngine
+            engine = IntraYearEngine(db)
+            engine.generate_projection(scenario_id)
+        else:
+            from calculations.forecast_engine import ForecastEngine
+            engine = ForecastEngine(db)
+            engine.generate_forecast(scenario_id)
+    except Exception as e:
+        logger.exception("Forecast regeneration failed after CE override patch")
+        raise HTTPException(status_code=500, detail=f"Overrides saved but forecast regeneration failed: {str(e)}")
+
+    return {"success": True, "applied": applied}
+
+
 # ===== Forecast Generation Endpoint =====
 
 @router.post(
@@ -675,6 +779,7 @@ def bulk_upsert_assumptions(
 def generate_forecasts(
     company_id: int,
     scenario_id: int,
+    clear_overrides: bool = Query(False, description="Clear all CE overrides before regenerating"),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -687,6 +792,8 @@ def generate_forecasts(
     3. Call ForecastEngine to generate forecasted balance sheets and income statements
     4. Create/update ForecastYear, ForecastBalanceSheet, and ForecastIncomeStatement records
     5. Return summary statistics
+
+    Pass ?clear_overrides=true to reset all manual CE overrides before regenerating.
     """
     # Validate scenario belongs to company
     scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
@@ -695,15 +802,23 @@ def generate_forecasts(
     validate_base_year_data(company_id, scenario.base_year, db)
 
     # Validate at least one assumption exists
-    assumptions_count = db.query(models.BudgetAssumptions).filter(
+    assumptions = db.query(models.BudgetAssumptions).filter(
         models.BudgetAssumptions.scenario_id == scenario_id
-    ).count()
+    ).all()
 
-    if assumptions_count == 0:
+    if not assumptions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot generate forecast: no assumptions found for scenario {scenario_id}. Add assumptions first."
         )
+
+    # Clear all CE overrides if requested
+    if clear_overrides:
+        for assumption in assumptions:
+            for col in assumption.__table__.columns:
+                if col.name.endswith("_override"):
+                    setattr(assumption, col.name, None)
+        db.commit()
 
     # Generate forecast using appropriate engine
     try:

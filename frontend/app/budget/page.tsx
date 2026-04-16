@@ -96,7 +96,7 @@ export default function BudgetPage() {
     if (!selectedCompanyId) return;
 
     try {
-      await generateForecast(selectedCompanyId, scenarioId);
+      await generateForecast(selectedCompanyId, scenarioId, true);
       toast.success("Previsionale ricalcolato con successo!");
       invalidateScenarios(selectedCompanyId);
       invalidateAnalysis(selectedCompanyId, scenarioId);
@@ -561,8 +561,8 @@ function ScenarioForm({
         }
       }
 
-      // Generate forecast
-      await generateForecast(companyId, savedScenario.id);
+      // Generate forecast (clear_overrides=true resets manual CE edits)
+      await generateForecast(companyId, savedScenario.id, true);
 
       toast.success("Scenario salvato e previsionale calcolato con successo!");
       onSaved();

@@ -671,6 +671,28 @@ class BudgetAssumptions(Base):
     ce18_override = Column(Numeric(15, 2), nullable=True)  # Proventi straordinari
     ce19_override = Column(Numeric(15, 2), nullable=True)  # Oneri straordinari
 
+    # CE overrides for direct forecast editing (absolute EUR values, nullable = use engine calculation)
+    ce01_override = Column(Numeric(15, 2), nullable=True)  # Ricavi delle vendite
+    ce04_override = Column(Numeric(15, 2), nullable=True)  # Altri ricavi e proventi
+    ce05_override = Column(Numeric(15, 2), nullable=True)  # Materie prime
+    ce06_override = Column(Numeric(15, 2), nullable=True)  # Servizi
+    ce07_override = Column(Numeric(15, 2), nullable=True)  # Godimento di beni di terzi
+    ce08_override = Column(Numeric(15, 2), nullable=True)  # Costi del personale
+    ce08a_override = Column(Numeric(15, 2), nullable=True)  # TFR accrual
+    ce08b_override = Column(Numeric(15, 2), nullable=True)  # Salari e stipendi
+    ce08c_override = Column(Numeric(15, 2), nullable=True)  # Oneri sociali
+    ce08d_override = Column(Numeric(15, 2), nullable=True)  # Altri costi del personale
+    ce09_override = Column(Numeric(15, 2), nullable=True)  # Totale ammortamenti e svalutazioni
+    ce09a_override = Column(Numeric(15, 2), nullable=True)  # Ammortamento immobilizzazioni immateriali
+    ce09b_override = Column(Numeric(15, 2), nullable=True)  # Ammortamento immobilizzazioni materiali
+    ce09c_override = Column(Numeric(15, 2), nullable=True)  # Altre svalutazioni delle immobilizzazioni
+    ce09d_override = Column(Numeric(15, 2), nullable=True)  # Svalutazione crediti
+    ce11b_override = Column(Numeric(15, 2), nullable=True)  # Altri accantonamenti
+    ce12_override = Column(Numeric(15, 2), nullable=True)  # Oneri diversi di gestione
+    ce17a_override = Column(Numeric(15, 2), nullable=True)  # Rivalutazioni
+    ce17b_override = Column(Numeric(15, 2), nullable=True)  # Svalutazioni
+    ce20_override = Column(Numeric(15, 2), nullable=True)  # Imposte sul reddito
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

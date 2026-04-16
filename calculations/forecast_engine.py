@@ -173,87 +173,109 @@ class ForecastEngine:
         """
         Calculate forecasted income statement based on assumptions
         """
-        # Apply growth rates to base year values
-        ce01 = base_inc.ce01_ricavi_vendite * (Decimal('1') + assumption.revenue_growth_pct / Decimal('100'))
-        ce04 = base_inc.ce04_altri_ricavi * (Decimal('1') + assumption.other_revenue_growth_pct / Decimal('100'))
+        # Apply growth rates to base year values (overrides take precedence)
+        if assumption.ce01_override is not None:
+            ce01 = assumption.ce01_override
+        else:
+            ce01 = base_inc.ce01_ricavi_vendite * (Decimal('1') + assumption.revenue_growth_pct / Decimal('100'))
+        if assumption.ce04_override is not None:
+            ce04 = assumption.ce04_override
+        else:
+            ce04 = base_inc.ce04_altri_ricavi * (Decimal('1') + assumption.other_revenue_growth_pct / Decimal('100'))
 
         # Calculate costs - split between variable and fixed components based on user-defined percentages
 
         # Materials
-        base_materials = base_inc.ce05_materie_prime
-        fixed_pct_materials = assumption.fixed_materials_percentage / Decimal('100')
-        variable_pct_materials = Decimal('1') - fixed_pct_materials
-        variable_materials = base_materials * variable_pct_materials
-        fixed_materials = base_materials * fixed_pct_materials
-        ce05 = (
-            variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100')) +
-            fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
-        )
+        if assumption.ce05_override is not None:
+            ce05 = assumption.ce05_override
+        else:
+            base_materials = base_inc.ce05_materie_prime
+            fixed_pct_materials = assumption.fixed_materials_percentage / Decimal('100')
+            variable_pct_materials = Decimal('1') - fixed_pct_materials
+            variable_materials = base_materials * variable_pct_materials
+            fixed_materials = base_materials * fixed_pct_materials
+            ce05 = (
+                variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100')) +
+                fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
+            )
 
         # Services
-        base_services = base_inc.ce06_servizi
-        fixed_pct_services = assumption.fixed_services_percentage / Decimal('100')
-        variable_pct_services = Decimal('1') - fixed_pct_services
-        variable_services = base_services * variable_pct_services
-        fixed_services = base_services * fixed_pct_services
-        ce06 = (
-            variable_services * (Decimal('1') + assumption.variable_services_growth_pct / Decimal('100')) +
-            fixed_services * (Decimal('1') + assumption.fixed_services_growth_pct / Decimal('100'))
-        )
+        if assumption.ce06_override is not None:
+            ce06 = assumption.ce06_override
+        else:
+            base_services = base_inc.ce06_servizi
+            fixed_pct_services = assumption.fixed_services_percentage / Decimal('100')
+            variable_pct_services = Decimal('1') - fixed_pct_services
+            variable_services = base_services * variable_pct_services
+            fixed_services = base_services * fixed_pct_services
+            ce06 = (
+                variable_services * (Decimal('1') + assumption.variable_services_growth_pct / Decimal('100')) +
+                fixed_services * (Decimal('1') + assumption.fixed_services_growth_pct / Decimal('100'))
+            )
 
         # Rent/Godimento beni
-        ce07 = base_inc.ce07_godimento_beni * (Decimal('1') + assumption.rent_growth_pct / Decimal('100'))
+        if assumption.ce07_override is not None:
+            ce07 = assumption.ce07_override
+        else:
+            ce07 = base_inc.ce07_godimento_beni * (Decimal('1') + assumption.rent_growth_pct / Decimal('100'))
 
         # Personnel
-        ce08 = base_inc.ce08_costi_personale * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
+        if assumption.ce08_override is not None:
+            ce08 = assumption.ce08_override
+        else:
+            ce08 = base_inc.ce08_costi_personale * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
 
-        # Personnel sub-items - maintain same proportions as base year
+        # Personnel sub-items — override or maintain same proportions as base year
         base_ce08 = base_inc.ce08_costi_personale
         if base_ce08 > 0:
             growth_factor = ce08 / base_ce08
-            ce08a = (base_inc.ce08a_tfr_accrual or Decimal('0')) * growth_factor
-            ce08b = (getattr(base_inc, 'ce08b_salari_stipendi', None) or Decimal('0')) * growth_factor
-            ce08c = (getattr(base_inc, 'ce08c_oneri_sociali', None) or Decimal('0')) * growth_factor
-            ce08d = (getattr(base_inc, 'ce08d_altri_costi_personale', None) or Decimal('0')) * growth_factor
         else:
-            ce08a = Decimal('0')
-            ce08b = Decimal('0')
-            ce08c = Decimal('0')
-            ce08d = Decimal('0')
+            growth_factor = Decimal('1')
+        ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else (base_inc.ce08a_tfr_accrual or Decimal('0')) * growth_factor
+        ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else (getattr(base_inc, 'ce08b_salari_stipendi', None) or Decimal('0')) * growth_factor
+        ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else (getattr(base_inc, 'ce08c_oneri_sociali', None) or Decimal('0')) * growth_factor
+        ce08d = assumption.ce08d_override if assumption.ce08d_override is not None else (getattr(base_inc, 'ce08d_altri_costi_personale', None) or Decimal('0')) * growth_factor
 
-        # Depreciation - calculated based on investments using user-defined depreciation rates
-        base_depreciation = base_inc.ce09_ammortamenti
+        # Depreciation — override total or calculate from investments
         depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
         depreciation_rate_intangible = (getattr(assumption, 'depreciation_rate_intangible', None) or assumption.depreciation_rate) / Decimal('100')
-        # Use split fields if available, fall back to legacy total
         intangible_inv, tangible_inv = self._get_split_investments(assumption)
         new_depr_intangible = intangible_inv * depreciation_rate_intangible if intangible_inv > 0 else Decimal('0')
         new_depr_tangible = tangible_inv * depreciation_rate_tangible if tangible_inv > 0 else Decimal('0')
-        new_depreciation = new_depr_intangible + new_depr_tangible
-        ce09 = base_depreciation + new_depreciation
 
-        # Depreciation sub-items: base year detail + new investment depreciation
+        # Depreciation sub-items: override or base year detail + new investment depreciation
         base_ce09a = getattr(base_inc, 'ce09a_ammort_immateriali', None) or Decimal('0')
         base_ce09b = getattr(base_inc, 'ce09b_ammort_materiali', None) or Decimal('0')
         base_ce09c = getattr(base_inc, 'ce09c_svalutazioni', None) or Decimal('0')
         base_ce09d = getattr(base_inc, 'ce09d_svalutazione_crediti', None) or Decimal('0')
-        ce09a = base_ce09a + new_depr_intangible
-        ce09b = base_ce09b + new_depr_tangible
-        ce09c = base_ce09c
-        ce09d = base_ce09d
+        ce09a = assumption.ce09a_override if assumption.ce09a_override is not None else base_ce09a + new_depr_intangible
+        ce09b = assumption.ce09b_override if assumption.ce09b_override is not None else base_ce09b + new_depr_tangible
+        ce09c = assumption.ce09c_override if assumption.ce09c_override is not None else base_ce09c
+        ce09d = assumption.ce09d_override if assumption.ce09d_override is not None else base_ce09d
+
+        # Total depreciation: override or sum of sub-items
+        if assumption.ce09_override is not None:
+            ce09 = assumption.ce09_override
+        else:
+            ce09 = ce09a + ce09b + ce09c + ce09d
 
         # Other costs
-        ce12 = base_inc.ce12_oneri_diversi * (Decimal('1') + assumption.other_costs_growth_pct / Decimal('100'))
+        if assumption.ce12_override is not None:
+            ce12 = assumption.ce12_override
+        else:
+            ce12 = base_inc.ce12_oneri_diversi * (Decimal('1') + assumption.other_costs_growth_pct / Decimal('100'))
 
         # CE line items: use override if set, otherwise fall back to base year
         ce02 = assumption.ce02_override if assumption.ce02_override is not None else base_inc.ce02_variazioni_rimanenze
         ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
         ce10 = assumption.ce10_override if assumption.ce10_override is not None else base_inc.ce10_var_rimanenze_mat_prime
         ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
-        ce11b = base_inc.ce11b_altri_accantonamenti  # Carry forward (no override available)
+        ce11b = assumption.ce11b_override if assumption.ce11b_override is not None else base_inc.ce11b_altri_accantonamenti
         ce13 = assumption.ce13_override if assumption.ce13_override is not None else base_inc.ce13_proventi_partecipazioni
         ce16 = assumption.ce16_override if assumption.ce16_override is not None else base_inc.ce16_utili_perdite_cambi
-        ce17 = assumption.ce17_override if assumption.ce17_override is not None else base_inc.ce17_rettifiche_attivita_fin
+        ce17a = assumption.ce17a_override if assumption.ce17a_override is not None else (getattr(base_inc, 'ce17a_rivalutazioni', None) or Decimal('0'))
+        ce17b = assumption.ce17b_override if assumption.ce17b_override is not None else (getattr(base_inc, 'ce17b_svalutazioni', None) or Decimal('0'))
+        ce17 = assumption.ce17_override if assumption.ce17_override is not None else (ce17a - ce17b)
         ce18 = assumption.ce18_override if assumption.ce18_override is not None else base_inc.ce18_proventi_straordinari
         ce19 = assumption.ce19_override if assumption.ce19_override is not None else base_inc.ce19_oneri_straordinari
 
@@ -269,14 +291,17 @@ class ForecastEngine:
             # Interest on full amount (first year approximation; BS handles amortization)
             ce15 = ce15 + financing_amount * financing_rate
 
-        # Taxes - use user-defined tax rate (IRES/IRAP)
+        # Taxes - use override if set, otherwise use tax rate
         production_value = ce01 + ce02 + ce03 + ce04
         production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
         ebit = production_value - production_cost
         financial_result = ce13 + ce14 - ce15 + ce16
         profit_before_tax = ebit + financial_result + ce17 + (ce18 - ce19)
-        tax_rate_decimal = assumption.tax_rate / Decimal('100')
-        ce20 = max(Decimal('0'), profit_before_tax * tax_rate_decimal)
+        if assumption.ce20_override is not None:
+            ce20 = assumption.ce20_override
+        else:
+            tax_rate_decimal = assumption.tax_rate / Decimal('100')
+            ce20 = max(Decimal('0'), profit_before_tax * tax_rate_decimal)
 
         return {
             'ce01_ricavi_vendite': ce01,
@@ -305,6 +330,8 @@ class ForecastEngine:
             'ce15_oneri_finanziari': ce15,
             'ce16_utili_perdite_cambi': ce16,
             'ce17_rettifiche_attivita_fin': ce17,
+            'ce17a_rivalutazioni': ce17a,
+            'ce17b_svalutazioni': ce17b,
             'ce18_proventi_straordinari': ce18,
             'ce19_oneri_straordinari': ce19,
             'ce20_imposte': ce20
@@ -358,7 +385,9 @@ class ForecastEngine:
 
         sp04 = max(ZERO, _prev('sp04_immob_finanziarie') * (D('1') + _sp_growth('sp04_growth_pct')) - ce09c)
 
-        # Working capital via turnover days (or legacy growth % fallback)
+        # Working capital via turnover days
+        # When turnover days are not explicitly set, derive them from the base year
+        # so that working capital scales proportionally with revenue/purchases.
         forecast_revenue = forecast_inc['ce01_ricavi_vendite']
         forecast_purchases = forecast_inc['ce05_materie_prime'] + forecast_inc['ce06_servizi']
         base_revenue = base_inc.ce01_ricavi_vendite or D('1')
@@ -368,20 +397,21 @@ class ForecastEngine:
         dso = getattr(assumption, 'dso_days', None)
         if dso is not None:
             dso = D(str(dso))
-            sp06 = forecast_revenue * dso / DAYS
         else:
-            # Legacy fallback: growth %
-            sp06 = _prev('sp06_crediti_breve') * (D('1') + assumption.receivables_short_growth_pct / D('100'))
+            # Auto-derive DSO from base year: base_sp06 / base_revenue * 360
+            base_sp06 = _base('sp06_crediti_breve')
+            dso = (base_sp06 / base_revenue * DAYS) if base_revenue > 0 else ZERO
+        sp06 = forecast_revenue * dso / DAYS
 
         # DIO → sp05 (inventory)
         dio = getattr(assumption, 'dio_days', None)
         if dio is not None:
             dio = D(str(dio))
-            sp05 = forecast_revenue * dio / DAYS
         else:
-            # Legacy fallback: proportional to revenue
-            revenue_growth = D('1') + assumption.revenue_growth_pct / D('100')
-            sp05 = _prev('sp05_rimanenze') * revenue_growth
+            # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
+            base_sp05 = _base('sp05_rimanenze')
+            dio = (base_sp05 / base_revenue * DAYS) if base_revenue > 0 else ZERO
+        sp05 = forecast_revenue * dio / DAYS
 
         # Long-term receivables, other current assets
         sp07 = _prev('sp07_crediti_lungo') * (D('1') + assumption.receivables_long_growth_pct / D('100'))
@@ -457,10 +487,11 @@ class ForecastEngine:
         dpo = getattr(assumption, 'dpo_days', None)
         if dpo is not None:
             dpo = D(str(dpo))
-            sp16d = forecast_purchases * dpo / DAYS
         else:
-            # Legacy fallback: carry from previous with growth %
-            sp16d = _prev('sp16d_debiti_fornitori_breve') * (D('1') + assumption.payables_short_growth_pct / D('100'))
+            # Auto-derive DPO from base year: base_sp16d / base_purchases * 360
+            base_sp16d = _base('sp16d_debiti_fornitori_breve')
+            dpo = (base_sp16d / base_purchases * DAYS) if base_purchases > 0 else ZERO
+        sp16d = forecast_purchases * dpo / DAYS
 
         # Long-term trade payables
         sp17d = _prev('sp17d_debiti_fornitori_lungo') * (D('1') + _sp_growth('sp17d_growth_pct'))

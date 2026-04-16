@@ -415,6 +415,26 @@ export interface BudgetAssumptions {
   ce17_override: number | null;
   ce18_override: number | null;
   ce19_override: number | null;
+  ce01_override: number | null;
+  ce04_override: number | null;
+  ce05_override: number | null;
+  ce06_override: number | null;
+  ce07_override: number | null;
+  ce08_override: number | null;
+  ce08a_override: number | null;
+  ce08b_override: number | null;
+  ce08c_override: number | null;
+  ce08d_override: number | null;
+  ce09_override: number | null;
+  ce09a_override: number | null;
+  ce09b_override: number | null;
+  ce09c_override: number | null;
+  ce09d_override: number | null;
+  ce11b_override: number | null;
+  ce12_override: number | null;
+  ce17a_override: number | null;
+  ce17b_override: number | null;
+  ce20_override: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -475,6 +495,26 @@ export interface BudgetAssumptionsCreate {
   ce17_override?: number | null;
   ce18_override?: number | null;
   ce19_override?: number | null;
+  ce01_override?: number | null;
+  ce04_override?: number | null;
+  ce05_override?: number | null;
+  ce06_override?: number | null;
+  ce07_override?: number | null;
+  ce08_override?: number | null;
+  ce08a_override?: number | null;
+  ce08b_override?: number | null;
+  ce08c_override?: number | null;
+  ce08d_override?: number | null;
+  ce09_override?: number | null;
+  ce09a_override?: number | null;
+  ce09b_override?: number | null;
+  ce09c_override?: number | null;
+  ce09d_override?: number | null;
+  ce11b_override?: number | null;
+  ce12_override?: number | null;
+  ce17a_override?: number | null;
+  ce17b_override?: number | null;
+  ce20_override?: number | null;
 }
 
 export interface ForecastBalanceSheet {

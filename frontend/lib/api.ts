@@ -431,10 +431,12 @@ export const deleteBudgetAssumptions = async (
 // Forecast Generation
 export const generateForecast = async (
   companyId: number,
-  scenarioId: number
+  scenarioId: number,
+  clearOverrides: boolean = false
 ): Promise<import('@/types/api').ForecastGenerationResult> => {
+  const params = clearOverrides ? "?clear_overrides=true" : "";
   const { data } = await api.post<import('@/types/api').ForecastGenerationResult>(
-    `/companies/${companyId}/scenarios/${scenarioId}/generate`
+    `/companies/${companyId}/scenarios/${scenarioId}/generate${params}`
   );
   return data;
 };
@@ -573,6 +575,19 @@ export const bulkUpsertAssumptions = async (
   const { data } = await api.put(
     `/companies/${companyId}/scenarios/${scenarioId}/assumptions`,
     payload
+  );
+  return data;
+};
+
+// Batch-patch CE overrides and regenerate forecast
+export const patchCeOverrides = async (
+  companyId: number,
+  scenarioId: number,
+  overrides: Array<{ forecast_year: number; field: string; value: number | null }>
+): Promise<{ success: boolean; applied: number }> => {
+  const { data } = await api.patch(
+    `/companies/${companyId}/scenarios/${scenarioId}/ce-override`,
+    { overrides }
   );
   return data;
 };

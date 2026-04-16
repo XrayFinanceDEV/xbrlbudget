@@ -44,11 +44,14 @@ DEV_USER_ID=dev-user-001 uvicorn app.main:app --host 127.0.0.1 --port 8000 --rel
 cd frontend && npm run dev
 ```
 
-**API Workflow — Budget (3 calls):**
+**API Workflow — Budget (3 calls + optional CE overrides):**
 ```bash
 # 1. INPUT: Upload data → POST /api/v1/import/{xbrl|csv|pdf}
 # 2. ASSUMPTIONS: Create scenario + bulk assumptions → PUT /scenarios/{id}/assumptions
 # 3. OUTPUT: Get complete analysis → GET /scenarios/{id}/analysis
+# 4. CE OVERRIDES (optional): Edit forecast P&L values directly from /forecast/income
+#    PATCH /scenarios/{id}/ce-override  (batch overrides → regenerate forecast)
+#    POST  /scenarios/{id}/generate?clear_overrides=true  (reset all overrides → regenerate)
 ```
 
 **API Workflow — Infrannuale (5 calls + optional promote + optional AI comments):**
@@ -142,11 +145,15 @@ python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
    - `GET /scenarios/{id}/comparison` - Compare partial year vs reference full year (infrannuale only)
    - `POST /scenarios/{id}/promote` - Copy infrannuale projection to a full-year FinancialYear (enables budget base year)
 
-5. **MANAGEMENT (2 endpoints)**: Basic CRUD
+5. **CE OVERRIDES (2 endpoints)**: Direct forecast P&L editing from `/forecast/income`
+   - `PATCH /scenarios/{id}/ce-override` - Batch-update CE overrides + regenerate forecast
+   - `POST /scenarios/{id}/generate?clear_overrides=true` - Reset all overrides + regenerate
+
+6. **MANAGEMENT (2 endpoints)**: Basic CRUD
    - `GET /companies` - List companies
    - `GET /companies/{id}/scenarios` - List scenarios
 
-6. **ADMIN / UPLOAD TRACKING (3 endpoints)**: Developer-only, header-auth
+7. **ADMIN / UPLOAD TRACKING (3 endpoints)**: Developer-only, header-auth
    - `GET /admin/uploads` - Filter by user_id / file_type / status / date range
    - `GET /admin/uploads/{id}` - Full record including error_traceback
    - `GET /admin/uploads/{id}/download` - Stream the original file
@@ -314,6 +321,26 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
 - Cash as plug: Balances by adjusting sp09_disponibilita_liquide
 - Negative cash: Increases short-term debt (sp16_debiti_breve)
 - Triggered by: bulk assumptions endpoint with `auto_generate=true`
+- **CE overrides**: Every CE field (31 total) can be overridden with an absolute EUR value. Override takes precedence over growth-% calculation. `None` = use engine calculation.
+- **Auto-derived turnover days**: When DSO/DIO/DPO not explicitly set in assumptions, derived from base year ratios (e.g., `DSO = base_sp06 / base_revenue * 360`). Working capital always scales proportionally with revenue/cost changes — including when revenue is changed via CE override.
+- **Override clearing**: `POST /generate?clear_overrides=true` nulls all `*_override` columns on all assumption rows before regenerating. Uses dynamic `__table__.columns` introspection. Called by budget page "Ricalcola" and "Salva e Calcola Previsionale" buttons.
+
+### Editable Forecast Income Statement (CE Overrides)
+User can manually edit any P&L line in forecast year columns on `/forecast/income`. Edits are collected locally, then batch-saved with "Aggiorna Previsionale". The BS adapts automatically: more revenue → more receivables (via DSO), more costs → more payables (via DPO), cash as plug.
+
+- **Override fields**: 31 `ce*_override` columns on `BudgetAssumptions` — one per editable CE field (ce01–ce20 plus sub-fields ce08a–d, ce09a–d, ce11b, ce17a/b). Nullable; `NULL` = use engine calculation.
+- **Batch endpoint**: `PATCH /scenarios/{id}/ce-override` accepts `{ overrides: [{ forecast_year, field, value }] }`. Applies all overrides to the assumptions rows, then regenerates forecast once.
+- **Frontend flow**: Click forecast cell → inline input → blur/Enter saves to `pendingEdits` state (yellow highlight) → "Aggiorna Previsionale" button appears → click sends all pending edits via batch endpoint → analysis cache invalidated → table refreshes.
+- **Clearing overrides**: Empty a cell's input to send `null` (reverts to engine value). "Ricalcola" and "Salva e Calcola" from `/budget` page both call `POST /generate?clear_overrides=true` to wipe all overrides.
+- **Visual indicators**: Pending edits = yellow background + yellow underline. Server-persisted overrides = blue underline. Override status read from `assumptions` object in analysis response.
+- **Key files:**
+  - `database/models.py` — `BudgetAssumptions.ce*_override` columns
+  - `backend/app/schemas/budget.py` — Pydantic schemas for all override fields
+  - `backend/app/api/v1/budget_scenarios.py` — `PATCH /ce-override`, `POST /generate?clear_overrides=true`
+  - `calculations/forecast_engine.py` — Override checks in `_calculate_income_statement`, auto-derived DSO/DIO/DPO in `_calculate_balance_sheet`
+  - `frontend/app/forecast/income/page.tsx` — `FIELD_TO_OVERRIDE` map, `EditableCell`, `pendingEdits` state, batch save
+  - `frontend/app/budget/page.tsx` — `generateForecast(..., true)` in Ricalcola + Salva handlers
+  - `frontend/lib/api.ts` — `patchCeOverrides()`, `generateForecast(clearOverrides)`
 
 ### Intra-Year Engine (Infrannuale)
 - Projects partial-year financials (e.g., 9 months) to a full 12-month year
@@ -431,6 +458,22 @@ PUT /scenarios/{id}/assumptions
   "auto_generate": true  # Triggers IntraYearEngine (detected via scenario_type)
 }
 # Returns: {success: true, forecast_generated: true, forecast_years: [2025]}
+
+# CE Override: Edit individual forecast P&L values after generation
+PATCH /scenarios/{id}/ce-override
+{
+  "overrides": [
+    {"forecast_year": 2026, "field": "ce01_override", "value": 1750000},
+    {"forecast_year": 2026, "field": "ce08_override", "value": 230000},
+    {"forecast_year": 2027, "field": "ce01_override", "value": 1820000}
+  ]
+}
+# Applies overrides to assumptions, regenerates forecast once
+# Returns: {success: true, applied: 3}
+
+# Regenerate with override reset (used by budget page Ricalcola / Salva buttons)
+POST /scenarios/{id}/generate?clear_overrides=true
+# Nulls all *_override columns, then regenerates from growth percentages
 ```
 
 ### Promote Infrannuale → Budget Workflow
@@ -534,6 +577,16 @@ POST /companies/{id}/scenarios
   // Analysis/Forecast/Cashflow/Report pages: Get everything once
   const analysis = await api.getScenarioAnalysis(companyId, scenarioId)
   // All data available: analysis.historical_years, .forecast_years, .calculations
+
+  // (Optional) Edit forecast P&L values directly on /forecast/income
+  await api.patchCeOverrides(companyId, scenarioId, [
+    { forecast_year: 2026, field: "ce01_override", value: 1750000 },
+    { forecast_year: 2026, field: "ce08_override", value: 230000 },
+  ])
+  // BS auto-adapts: more revenue → more receivables, more costs → more payables
+
+  // Regenerate from budget page resets all manual edits
+  await api.generateForecast(companyId, scenarioId, true)  // clear_overrides=true
   ```
 
 - Typical workflow (infrannuale):
@@ -569,7 +622,8 @@ POST /companies/{id}/scenarios
 - `/import` - XBRL/CSV/PDF upload
 - `/infrannuale` - Intra-year analysis wizard (import partial year → compare → project → results)
 - `/budget` - Scenario assumptions editor
-- `/forecast/income`, `/forecast/balance`, `/forecast/reclassified` - Forecast views
+- `/forecast/income` - Forecast P&L (editable: click forecast cells → batch save → BS auto-adapts)
+- `/forecast/balance`, `/forecast/reclassified` - Forecast BS views (read-only, adapts to CE overrides)
 - `/analysis` - Financial ratios & charts
 - `/cashflow` - Cash flow statement
 - `/report` - Full report preview (mirrors PDF output)

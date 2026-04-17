@@ -49,6 +49,34 @@ const wcChartConfig = {
   working_capital_net: { label: "CCN", color: "hsl(var(--chart-4))" },
 } satisfies ChartConfig;
 
+const pfnChartConfig = {
+  pfn: { label: "PFN", color: "hsl(var(--chart-1))" },
+} satisfies ChartConfig;
+
+// Posizione Finanziaria Netta: debito finanziario − cassa − attività finanziarie.
+// Priorità: sub-field banche/obbligazioni (detail); fallback: debito totale
+// meno voci non finanziarie conosciute; ultimo: debito totale (abbreviato senza dettaglio).
+function computePFN(bs: Record<string, number>): number {
+  const v = (k: string) => bs[k] || 0;
+  const cash = v("sp09_disponibilita_liquide");
+  const financialAssets = v("sp08_attivita_finanziarie");
+  const totalDebt = v("sp16_debiti_breve") + v("sp17_debiti_lungo");
+
+  const bankDebt =
+    v("sp16a_debiti_banche_breve") + v("sp17a_debiti_banche_lungo") +
+    v("sp16c_debiti_obbligazioni_breve") + v("sp17c_debiti_obbligazioni_lungo");
+  if (bankDebt > 0) return bankDebt - cash - financialAssets;
+
+  const knownNonBankDebt =
+    v("sp16b_debiti_altri_finanz_breve") + v("sp17b_debiti_altri_finanz_lungo") +
+    v("sp16d_debiti_fornitori_breve") + v("sp17d_debiti_fornitori_lungo") +
+    v("sp16e_debiti_tributari_breve") + v("sp17e_debiti_tributari_lungo") +
+    v("sp16f_debiti_previdenza_breve") + v("sp17f_debiti_previdenza_lungo");
+  if (knownNonBankDebt > 0) return (totalDebt - knownNonBankDebt) - cash - financialAssets;
+
+  return totalDebt - cash - financialAssets;
+}
+
 // Type for year data from analysis endpoint
 type YearData = {
   year: number;
@@ -244,38 +272,63 @@ export default function ForecastBalancePage() {
                     </ChartContainer>
                   </CardContent>
                 </Card>
-              </div>
 
-              {/* Working Capital Chart */}
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>Capitale Circolante Netto (CCN)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ChartContainer config={wcChartConfig} className="h-[300px] w-full">
-                    <LineChart data={prepareChartData(historicalYears, forecastYears)}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="year" />
-                      <YAxis />
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            formatter={(value: any) => formatCurrency(Number(value))}
-                          />
-                        }
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="working_capital_net"
-                        stroke="var(--color-working_capital_net)"
-                        strokeWidth={2}
-                        name="CCN"
-                      />
-                    </LineChart>
-                  </ChartContainer>
-                </CardContent>
-              </Card>
+                {/* Working Capital Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Capitale Circolante Netto (CCN)</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={wcChartConfig} className="h-[300px] w-full">
+                      <LineChart data={prepareChartData(historicalYears, forecastYears)}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="year" />
+                        <YAxis />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value: any) => formatCurrency(Number(value))}
+                            />
+                          }
+                        />
+                        <Legend />
+                        <Line
+                          type="monotone"
+                          dataKey="working_capital_net"
+                          stroke="var(--color-working_capital_net)"
+                          strokeWidth={2}
+                          name="CCN"
+                        />
+                      </LineChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+
+                {/* PFN (Posizione Finanziaria Netta) Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Posizione Finanziaria Netta (PFN)</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={pfnChartConfig} className="h-[300px] w-full">
+                      <BarChart data={prepareChartData(historicalYears, forecastYears)}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="year" />
+                        <YAxis />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value: any) => formatCurrency(Number(value))}
+                            />
+                          }
+                        />
+                        <Legend />
+                        <Bar dataKey="pfn" fill="var(--color-pfn)" name="PFN" />
+                      </BarChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+              </div>
 
               {/* Key Metrics Summary */}
               <Card>
@@ -313,6 +366,10 @@ export default function ForecastBalancePage() {
                             <MetricRow
                               label="CCN"
                               value={formatCurrency(bs.working_capital_net)}
+                            />
+                            <MetricRow
+                              label="PFN"
+                              value={formatCurrency(computePFN(bs))}
                             />
                             <MetricRow
                               label="Debt/Equity"
@@ -628,5 +685,6 @@ function prepareChartData(
     fixed_assets: yd.balance_sheet.fixed_assets || 0,
     current_assets: yd.balance_sheet.current_assets || 0,
     working_capital_net: yd.balance_sheet.working_capital_net || 0,
+    pfn: computePFN(yd.balance_sheet),
   }));
 }

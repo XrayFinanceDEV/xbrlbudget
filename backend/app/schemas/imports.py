@@ -16,7 +16,10 @@ class ReconciliationAdjustment(BaseModel):
 class ReconciliationInfo(BaseModel):
     """Reconciliation information for a specific year"""
     aggregate_totals: Optional[Dict[str, float]] = Field(None, description="Aggregate totals captured from XBRL")
-    reconciliation_adjustments: Optional[Dict[str, ReconciliationAdjustment]] = Field(None, description="Adjustments made to balance the sheet")
+    # Adjustments dict is heterogeneous: crediti/debiti use ReconciliationAdjustment shape,
+    # debt_creditor_fallback uses a different shape ({source, sp17_distributed, sp17_unallocated}).
+    # Typed as Dict[str, Any] so new fallback entries don't break the response schema.
+    reconciliation_adjustments: Optional[Dict[str, Dict[str, Any]]] = Field(None, description="Adjustments made to balance the sheet")
     unmapped_tags: Optional[List[Dict[str, Any]]] = Field(None, description="Tags found but not imported")
 
 

@@ -51,6 +51,62 @@ class EnhancedXBRLParser:
         'TotaleAttivoCircolante': 'total_attivo_circolante',
     }
 
+    # Per-creditor "Totale*" tags (full-debt total for a group, no entro/oltre split).
+    # These are typically present for the COMPARATIVE year in Wolters Kluwer bilanci
+    # when the detail entro/oltre tags are not republished. Used as fallback to
+    # populate sp16x/sp17x when per-creditor entro/oltre sub-fields are missing.
+    # Key = XBRL local name, value = target "creditor bucket" (maps to sp16x/sp17x).
+    CREDITOR_TOTAL_TAGS = {
+        'DebitiDebitiVersoBancheTotaleDebitiVersoBanche': 'banche',
+        'DebitiDebitiVersoAltriFinanziatoriTotaleDebitiVersoAltriFinanziatori': 'altri_finanz',
+        'DebitiDebitiVersoSociFinanziamentiTotaleDebitiVersoSociFinanziamenti': 'altri_finanz',
+        'DebitiObbligazioniTotaleObbligazioni': 'obbligazioni',
+        'DebitiObbligazioniConvertibiliTotaleObbligazioniConvertibili': 'obbligazioni',
+        'DebitiDebitiVersoFornitoriTotaleDebitiVersoFornitori': 'fornitori',
+        'DebitiDebitiTributariTotaleDebitiTributari': 'tributari',
+        'DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeTotaleDebitiVersoIstitutiPrevidenzaSicurezzaSociale': 'previdenza',
+        'DebitiAltriDebitiTotaleAltriDebiti': 'altri',
+        'DebitiAccontiTotaleAcconti': 'altri',
+    }
+
+    # Mapping of creditor bucket -> (sp16x field, sp17x field).
+    CREDITOR_FIELDS = {
+        'banche': ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo'),
+        'altri_finanz': ('sp16b_debiti_altri_finanz_breve', 'sp17b_debiti_altri_finanz_lungo'),
+        'obbligazioni': ('sp16c_debiti_obbligazioni_breve', 'sp17c_debiti_obbligazioni_lungo'),
+        'fornitori': ('sp16d_debiti_fornitori_breve', 'sp17d_debiti_fornitori_lungo'),
+        'tributari': ('sp16e_debiti_tributari_breve', 'sp17e_debiti_tributari_lungo'),
+        'previdenza': ('sp16f_debiti_previdenza_breve', 'sp17f_debiti_previdenza_lungo'),
+        'altri': ('sp16g_altri_debiti_breve', 'sp17g_altri_debiti_lungo'),
+    }
+
+    # Per-debtor "Totale*" tags for C.II) Crediti (operating receivables, NOT
+    # B.III.2 Crediti Immobilizzati which map to sp04*). Same fallback pattern
+    # as CREDITOR_TOTAL_TAGS: used when per-type Entro/Oltre tags are missing
+    # from the comparative year. Note: tag naming is inconsistent — items whose
+    # taxonomy name starts with "Crediti" (e.g. "Crediti tributari") get the
+    # doubled prefix `CreditiCrediti*`; items named "Verso X" get `CreditiVerso*`.
+    CREDIT_TOTAL_TAGS = {
+        'CreditiVersoClientiTotaleCreditiVersoClienti': 'clienti',
+        'CreditiVersoImpreseControllateTotaleCreditiVersoImpreseControllate': 'controllate',
+        'CreditiVersoImpreseCollegateTotaleCreditiVersoImpreseCollegate': 'collegate',
+        'CreditiVersoControllantiTotaleCreditiVersoControllanti': 'controllanti',
+        'CreditiCreditiTributariTotaleCreditiTributari': 'tributari',
+        'CreditiImposteAnticipateTotaleImposteAnticipate': 'imposte_anticipate',
+        'CreditiVersoAltriTotaleCreditiVersoAltri': 'altri',
+    }
+
+    # Mapping of debtor bucket -> (sp06x field, sp07x field).
+    CREDIT_FIELDS = {
+        'clienti': ('sp06a_crediti_clienti_breve', 'sp07a_crediti_clienti_lungo'),
+        'controllate': ('sp06b_crediti_controllate_breve', 'sp07b_crediti_controllate_lungo'),
+        'collegate': ('sp06c_crediti_collegate_breve', 'sp07c_crediti_collegate_lungo'),
+        'controllanti': ('sp06d_crediti_controllanti_breve', 'sp07d_crediti_controllanti_lungo'),
+        'tributari': ('sp06e_crediti_tributari_breve', 'sp07e_crediti_tributari_lungo'),
+        'imposte_anticipate': ('sp06f_imposte_anticipate_breve', 'sp07f_imposte_anticipate_lungo'),
+        'altri': ('sp06g_crediti_altri_breve', 'sp07g_crediti_altri_lungo'),
+    }
+
     def __init__(self, db_session=None):
         """Initialize enhanced parser"""
         self.db = db_session or SessionLocal()
@@ -405,6 +461,13 @@ class EnhancedXBRLParser:
         bs_data = {}
         inc_data = {}
         aggregates = {}
+        # Per-creditor full-debt totals (bucket -> amount). Populated from
+        # "DebitiDebitiVersoXTotaleDebitiVersoX" tags when present; used as
+        # fallback for prior years that only publish totals without entro/oltre.
+        creditor_totals: Dict[str, Decimal] = {}
+        # Per-debtor full-credit totals (bucket -> amount). Same fallback role
+        # for C.II Crediti when comparative year only publishes group totals.
+        credit_totals: Dict[str, Decimal] = {}
         reconciliation_info = {
             'unmapped_tags': [],
             'aggregate_totals': {},
@@ -420,6 +483,16 @@ class EnhancedXBRLParser:
                 aggregate_key = self.AGGREGATE_TAGS[local_name]
                 aggregates[aggregate_key] = value
                 reconciliation_info['aggregate_totals'][local_name] = float(value)
+
+            # Collect per-creditor full-debt totals (fallback for years w/o entro/oltre detail)
+            if local_name in self.CREDITOR_TOTAL_TAGS:
+                bucket = self.CREDITOR_TOTAL_TAGS[local_name]
+                creditor_totals[bucket] = creditor_totals.get(bucket, Decimal('0')) + value
+
+            # Collect per-debtor full-credit totals (same fallback role for C.II Crediti)
+            if local_name in self.CREDIT_TOTAL_TAGS:
+                bucket = self.CREDIT_TOTAL_TAGS[local_name]
+                credit_totals[bucket] = credit_totals.get(bucket, Decimal('0')) + value
 
             # Also check v2 reconciliation aggregates
             if hasattr(self, 'aggregate_tags_reconciliation'):
@@ -605,6 +678,94 @@ class EnhancedXBRLParser:
                 detail_sum = sum(bs_data.get(f, Decimal('0')) for f in detail_fields)
                 if detail_sum != Decimal('0'):
                     bs_data[agg_field] = detail_sum
+
+        # 3b: Fill per-creditor debt breakdown from "Totale*" fallback tags.
+        # Runs when the per-creditor Entro/Oltre tags are missing from the XBRL
+        # (typical for COMPARATIVE years in Wolters Kluwer bilanci — the full
+        # detail only gets republished for the current year). Uses the
+        # "DebitiDebitiVerso*Totale*" tags collected in the first pass to seed
+        # sp16x_breve, then redistributes the overall sp17 aggregate into sp17x
+        # (banche priority by default — Italian SMEs usually hold mutuos there).
+        sp16_agg = bs_data.get('sp16_debiti_breve', Decimal('0'))
+        sp17_agg = bs_data.get('sp17_debiti_lungo', Decimal('0'))
+        entro_detail_sum = sum(bs_data.get(f, Decimal('0'))
+                               for (f, _) in self.CREDITOR_FIELDS.values())
+        oltre_detail_sum = sum(bs_data.get(f, Decimal('0'))
+                               for (_, f) in self.CREDITOR_FIELDS.values())
+
+        if creditor_totals and entro_detail_sum == Decimal('0') and oltre_detail_sum == Decimal('0') \
+                and (sp16_agg + sp17_agg) > Decimal('0'):
+            # Seed sp16x with each creditor's total (treat as short-term initially).
+            for bucket, total in creditor_totals.items():
+                if total == Decimal('0'):
+                    continue
+                breve_field, _ = self.CREDITOR_FIELDS[bucket]
+                bs_data[breve_field] = bs_data.get(breve_field, Decimal('0')) + total
+
+            # Move the overall oltre aggregate into sp17a (banche lungo) by default,
+            # spilling to other groups in priority order if banche has less than sp17.
+            priority = ['banche', 'altri_finanz', 'obbligazioni', 'fornitori', 'altri', 'tributari', 'previdenza']
+            remaining_oltre = sp17_agg
+            for bucket in priority:
+                if remaining_oltre <= Decimal('0'):
+                    break
+                breve_field, lungo_field = self.CREDITOR_FIELDS[bucket]
+                available = bs_data.get(breve_field, Decimal('0'))
+                if available <= Decimal('0'):
+                    continue
+                move = min(available, remaining_oltre)
+                bs_data[breve_field] = available - move
+                bs_data[lungo_field] = bs_data.get(lungo_field, Decimal('0')) + move
+                remaining_oltre -= move
+
+            reconciliation_info['reconciliation_adjustments']['debt_creditor_fallback'] = {
+                'source': 'per-creditor Totale* tags (no entro/oltre detail in XBRL)',
+                'sp17_distributed': float(sp17_agg - remaining_oltre),
+                'sp17_unallocated': float(remaining_oltre),
+            }
+
+        # 3c: Same fallback for C.II Crediti — seed sp06x_breve from per-debtor
+        # Totale tags, then redistribute the overall sp07 aggregate into sp07x
+        # (clienti priority by default, since long-term receivables most often
+        # sit under Verso clienti).
+        sp06_agg = bs_data.get('sp06_crediti_breve', Decimal('0'))
+        sp07_agg = bs_data.get('sp07_crediti_lungo', Decimal('0'))
+        cr_entro_detail_sum = sum(bs_data.get(f, Decimal('0'))
+                                  for (f, _) in self.CREDIT_FIELDS.values())
+        cr_oltre_detail_sum = sum(bs_data.get(f, Decimal('0'))
+                                  for (_, f) in self.CREDIT_FIELDS.values())
+
+        if credit_totals and cr_entro_detail_sum == Decimal('0') and cr_oltre_detail_sum == Decimal('0') \
+                and (sp06_agg + sp07_agg) > Decimal('0'):
+            # Seed sp06x with each debtor's total (treat as short-term initially).
+            for bucket, total in credit_totals.items():
+                if total == Decimal('0'):
+                    continue
+                breve_field, _ = self.CREDIT_FIELDS[bucket]
+                bs_data[breve_field] = bs_data.get(breve_field, Decimal('0')) + total
+
+            # Move the overall oltre aggregate into sp07a (clienti lungo) by default,
+            # spilling to other groups in priority order when clienti total is smaller.
+            priority = ['clienti', 'altri', 'tributari', 'imposte_anticipate',
+                        'controllate', 'collegate', 'controllanti']
+            remaining_oltre = sp07_agg
+            for bucket in priority:
+                if remaining_oltre <= Decimal('0'):
+                    break
+                breve_field, lungo_field = self.CREDIT_FIELDS[bucket]
+                available = bs_data.get(breve_field, Decimal('0'))
+                if available <= Decimal('0'):
+                    continue
+                move = min(available, remaining_oltre)
+                bs_data[breve_field] = available - move
+                bs_data[lungo_field] = bs_data.get(lungo_field, Decimal('0')) + move
+                remaining_oltre -= move
+
+            reconciliation_info['reconciliation_adjustments']['credit_debtor_fallback'] = {
+                'source': 'per-debtor Totale* tags (no entro/oltre detail in XBRL)',
+                'sp07_distributed': float(sp07_agg - remaining_oltre),
+                'sp07_unallocated': float(remaining_oltre),
+            }
 
         # Fourth pass: Reconciliation
         # Reconcile credits if we have TotaleCrediti

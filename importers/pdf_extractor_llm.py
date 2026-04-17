@@ -43,6 +43,22 @@ class BalanceSheetExtraction(pydantic.BaseModel):
     sp05_rimanenze: float = pydantic.Field(0, description="C.I) Rimanenze")
     sp06_crediti_breve: float = pydantic.Field(0, description="C.II) Crediti esigibili entro l'esercizio successivo")
     sp07_crediti_lungo: float = pydantic.Field(0, description="C.II) Crediti esigibili oltre l'esercizio successivo")
+    # Debtor-type breakdown for C.II Crediti per OIC art. 2424 (entro/oltre per group).
+    # Must sum to sp06_crediti_breve and sp07_crediti_lungo respectively.
+    sp06a_crediti_clienti_breve: float = pydantic.Field(0, description="C.II.1) Crediti verso clienti — entro l'esercizio")
+    sp07a_crediti_clienti_lungo: float = pydantic.Field(0, description="C.II.1) Crediti verso clienti — oltre l'esercizio")
+    sp06b_crediti_controllate_breve: float = pydantic.Field(0, description="C.II.2) Crediti verso imprese controllate — entro l'esercizio")
+    sp07b_crediti_controllate_lungo: float = pydantic.Field(0, description="C.II.2) Crediti verso imprese controllate — oltre l'esercizio")
+    sp06c_crediti_collegate_breve: float = pydantic.Field(0, description="C.II.3) Crediti verso imprese collegate — entro l'esercizio")
+    sp07c_crediti_collegate_lungo: float = pydantic.Field(0, description="C.II.3) Crediti verso imprese collegate — oltre l'esercizio")
+    sp06d_crediti_controllanti_breve: float = pydantic.Field(0, description="C.II.4) Crediti verso controllanti — entro l'esercizio")
+    sp07d_crediti_controllanti_lungo: float = pydantic.Field(0, description="C.II.4) Crediti verso controllanti — oltre l'esercizio")
+    sp06e_crediti_tributari_breve: float = pydantic.Field(0, description="C.II.5-bis) Crediti tributari — entro l'esercizio")
+    sp07e_crediti_tributari_lungo: float = pydantic.Field(0, description="C.II.5-bis) Crediti tributari — oltre l'esercizio")
+    sp06f_imposte_anticipate_breve: float = pydantic.Field(0, description="C.II.5-ter) Imposte anticipate — entro l'esercizio")
+    sp07f_imposte_anticipate_lungo: float = pydantic.Field(0, description="C.II.5-ter) Imposte anticipate — oltre l'esercizio")
+    sp06g_crediti_altri_breve: float = pydantic.Field(0, description="C.II.5-quater) Crediti verso altri — entro l'esercizio")
+    sp07g_crediti_altri_lungo: float = pydantic.Field(0, description="C.II.5-quater) Crediti verso altri — oltre l'esercizio")
     sp08_attivita_finanziarie: float = pydantic.Field(0, description="C.III) Attivita finanziarie che non costituiscono immobilizzazioni")
     sp09_disponibilita_liquide: float = pydantic.Field(0, description="C.IV) Disponibilita liquide")
     sp10_ratei_risconti_attivi: float = pydantic.Field(0, description="D) Ratei e risconti attivi")
@@ -53,9 +69,27 @@ class BalanceSheetExtraction(pydantic.BaseModel):
     sp15_tfr: float = pydantic.Field(0, description="C) Trattamento di fine rapporto di lavoro subordinato")
     sp16_debiti_breve: float = pydantic.Field(0, description="D) Debiti esigibili entro l'esercizio successivo")
     sp17_debiti_lungo: float = pydantic.Field(0, description="D) Debiti esigibili oltre l'esercizio successivo")
+    # Creditor-type breakdown per OIC art. 2424 (entro/oltre per group).
+    # Must sum to sp16_debiti_breve and sp17_debiti_lungo respectively.
+    sp16a_debiti_banche_breve: float = pydantic.Field(0, description="D.4) Debiti verso banche — entro l'esercizio")
+    sp17a_debiti_banche_lungo: float = pydantic.Field(0, description="D.4) Debiti verso banche — oltre l'esercizio")
+    sp16b_debiti_altri_finanz_breve: float = pydantic.Field(0, description="D.3)+D.5) Debiti verso soci per finanziamenti + verso altri finanziatori — entro l'esercizio")
+    sp17b_debiti_altri_finanz_lungo: float = pydantic.Field(0, description="D.3)+D.5) Debiti verso soci per finanziamenti + verso altri finanziatori — oltre l'esercizio")
+    sp16c_debiti_obbligazioni_breve: float = pydantic.Field(0, description="D.1)+D.2)+D.8) Obbligazioni + obbligazioni convertibili + debiti rappresentati da titoli di credito — entro l'esercizio")
+    sp17c_debiti_obbligazioni_lungo: float = pydantic.Field(0, description="D.1)+D.2)+D.8) Obbligazioni + obbligazioni convertibili + debiti rappresentati da titoli di credito — oltre l'esercizio")
+    sp16d_debiti_fornitori_breve: float = pydantic.Field(0, description="D.7) Debiti verso fornitori — entro l'esercizio")
+    sp17d_debiti_fornitori_lungo: float = pydantic.Field(0, description="D.7) Debiti verso fornitori — oltre l'esercizio")
+    sp16e_debiti_tributari_breve: float = pydantic.Field(0, description="D.12) Debiti tributari — entro l'esercizio")
+    sp17e_debiti_tributari_lungo: float = pydantic.Field(0, description="D.12) Debiti tributari — oltre l'esercizio")
+    sp16f_debiti_previdenza_breve: float = pydantic.Field(0, description="D.13) Debiti verso istituti di previdenza e di sicurezza sociale — entro l'esercizio")
+    sp17f_debiti_previdenza_lungo: float = pydantic.Field(0, description="D.13) Debiti verso istituti di previdenza e di sicurezza sociale — oltre l'esercizio")
+    sp16g_altri_debiti_breve: float = pydantic.Field(0, description="D.6)+D.9-11bis)+D.14) Acconti + verso controllate/collegate/controllanti + altri debiti — entro l'esercizio")
+    sp17g_altri_debiti_lungo: float = pydantic.Field(0, description="D.6)+D.9-11bis)+D.14) Acconti + verso controllate/collegate/controllanti + altri debiti — oltre l'esercizio")
     sp18_ratei_risconti_passivi: float = pydantic.Field(0, description="E) Ratei e risconti passivi")
     totale_attivo: float = pydantic.Field(0, description="Totale attivo (total assets)")
     totale_passivo: float = pydantic.Field(0, description="Totale passivo (total equity + liabilities)")
+    totale_debiti: float = pydantic.Field(0, description="Totale debiti (D) — the explicit 'Totale debiti' line from the PDF, sum of all debt categories (both entro and oltre). Used for validation.")
+    totale_crediti: float = pydantic.Field(0, description="Totale crediti (C.II) — the explicit 'Totale crediti' line from the PDF, sum of all C.II debtor categories (both entro and oltre). Used for validation.")
 
 
 class IncomeStatementExtraction(pydantic.BaseModel):
@@ -737,15 +771,46 @@ CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
   Common cause: "imposte anticipate" is a separate line within crediti that must be included in sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
+CREDITI — DEBTOR-TYPE BREAKDOWN (split each group into entro + oltre):
+- For each C.II) Crediti sub-item, separate "entro l'esercizio successivo" (sp06*) from "oltre l'esercizio successivo" (sp07*).
+- Map each OIC item to its bucket:
+  * C.II.1 Crediti verso clienti             -> sp06a / sp07a
+  * C.II.2 Crediti verso imprese controllate -> sp06b / sp07b
+  * C.II.3 Crediti verso imprese collegate   -> sp06c / sp07c
+  * C.II.4 Crediti verso controllanti + C.II.5 Crediti verso imprese sottoposte al controllo delle controllanti -> sp06d / sp07d
+  * C.II.5-bis Crediti tributari             -> sp06e / sp07e
+  * C.II.5-ter Imposte anticipate            -> sp06f / sp07f
+  * C.II.5-quater Crediti verso altri        -> sp06g / sp07g
+- CRITICAL: sp06a+sp06b+sp06c+sp06d+sp06e+sp06f+sp06g MUST equal sp06_crediti_breve.
+- CRITICAL: sp07a+sp07b+sp07c+sp07d+sp07e+sp07f+sp07g MUST equal sp07_crediti_lungo.
+- If a group is missing in the PDF, leave it at 0.
+- If the PDF shows only "Totale crediti" without a breakdown, put everything in sp06g_crediti_altri_breve (or sp07g_crediti_altri_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
+- IMPORTANT: Do NOT confuse C.II Crediti (operating receivables in "Attivo circolante") with B.III.2 Crediti (immobilized financial receivables). Only extract C.II values here.
+
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
 - IMPORTANT: "entro/oltre" in the PASSIVO section refers to DEBTS, not credits
-- First find TOTALE Debiti (D) — the sum of all debt categories
+- First find TOTALE Debiti (D) — the sum of all debt categories. Put this exact line's value into `totale_debiti`.
 - sp17_debiti_lungo: look for ALL "di cui esigibili oltre l'esercizio successivo" sub-lines
   under individual debt items (e.g., under "Debiti verso fornitori", under "Altri debiti", etc.)
   and SUM them. These "di cui" lines are indented sub-totals showing the long-term portion.
 - sp16_debiti_breve = TOTALE Debiti (D) minus sp17_debiti_lungo
 - CRITICAL: sp16 + sp17 MUST equal TOTALE Debiti (D). If they don't, recalculate sp16 as the difference.
 - If debiti are not split by maturity at all, put TOTALE Debiti in sp16_debiti_breve and sp17=0
+
+DEBITI — CREDITOR-TYPE BREAKDOWN (split each group into entro + oltre):
+- For each debt item, separate "entro l'esercizio successivo" (sp16*) from "oltre l'esercizio successivo" (sp17*).
+- Map each OIC item to its bucket:
+  * D.4 Debiti verso banche                                    -> sp16a / sp17a
+  * D.3 verso soci per finanziamenti + D.5 verso altri finanziatori -> sp16b / sp17b
+  * D.1 Obbligazioni + D.2 Obbligazioni convertibili + D.8 rappresentati da titoli -> sp16c / sp17c
+  * D.7 Debiti verso fornitori                                 -> sp16d / sp17d
+  * D.12 Debiti tributari                                      -> sp16e / sp17e
+  * D.13 Debiti verso istituti di previdenza/sicurezza sociale -> sp16f / sp17f
+  * D.6 Acconti + D.9/10/11/11bis verso controllate/collegate/controllanti + D.14 Altri debiti -> sp16g / sp17g
+- CRITICAL: sp16a+sp16b+sp16c+sp16d+sp16e+sp16f+sp16g MUST equal sp16_debiti_breve.
+- CRITICAL: sp17a+sp17b+sp17c+sp17d+sp17e+sp17f+sp17g MUST equal sp17_debiti_lungo.
+- If a group is missing in the PDF, leave it at 0.
+- If the PDF shows only the "Totale debiti" without a breakdown, put everything in sp16g_altri_debiti_breve (or sp17g_altri_debiti_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
 
 PATRIMONIO NETTO:
 - sp11_capitale is ONLY "I - Capitale" (share capital). Do NOT include it in sp12_riserve
@@ -784,15 +849,46 @@ CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
   Common cause: "imposte anticipate" is a separate line within crediti that must be included in sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
+CREDITI — DEBTOR-TYPE BREAKDOWN (split each group into entro + oltre):
+- For each C.II) Crediti sub-item, separate "entro l'esercizio successivo" (sp06*) from "oltre l'esercizio successivo" (sp07*).
+- Map each OIC item to its bucket:
+  * C.II.1 Crediti verso clienti             -> sp06a / sp07a
+  * C.II.2 Crediti verso imprese controllate -> sp06b / sp07b
+  * C.II.3 Crediti verso imprese collegate   -> sp06c / sp07c
+  * C.II.4 Crediti verso controllanti + C.II.5 Crediti verso imprese sottoposte al controllo delle controllanti -> sp06d / sp07d
+  * C.II.5-bis Crediti tributari             -> sp06e / sp07e
+  * C.II.5-ter Imposte anticipate            -> sp06f / sp07f
+  * C.II.5-quater Crediti verso altri        -> sp06g / sp07g
+- CRITICAL: sp06a+sp06b+sp06c+sp06d+sp06e+sp06f+sp06g MUST equal sp06_crediti_breve.
+- CRITICAL: sp07a+sp07b+sp07c+sp07d+sp07e+sp07f+sp07g MUST equal sp07_crediti_lungo.
+- If a group is missing in the PDF, leave it at 0.
+- If the PDF shows only "Totale crediti" without a breakdown, put everything in sp06g_crediti_altri_breve (or sp07g_crediti_altri_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
+- IMPORTANT: Do NOT confuse C.II Crediti (operating receivables in "Attivo circolante") with B.III.2 Crediti (immobilized financial receivables). Only extract C.II values here.
+
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
 - IMPORTANT: "entro/oltre" in the PASSIVO section refers to DEBTS, not credits
-- First find TOTALE Debiti (D) — the sum of all debt categories
+- First find TOTALE Debiti (D) — the sum of all debt categories. Put this exact line's value into `totale_debiti`.
 - sp17_debiti_lungo: look for ALL "di cui esigibili oltre l'esercizio successivo" sub-lines
   under individual debt items (e.g., under "Debiti verso fornitori", under "Altri debiti", etc.)
   and SUM them. These "di cui" lines are indented sub-totals showing the long-term portion.
 - sp16_debiti_breve = TOTALE Debiti (D) minus sp17_debiti_lungo
 - CRITICAL: sp16 + sp17 MUST equal TOTALE Debiti (D). If they don't, recalculate sp16 as the difference.
 - If debiti are not split by maturity at all, put TOTALE Debiti in sp16_debiti_breve and sp17=0
+
+DEBITI — CREDITOR-TYPE BREAKDOWN (split each group into entro + oltre):
+- For each debt item, separate "entro l'esercizio successivo" (sp16*) from "oltre l'esercizio successivo" (sp17*).
+- Map each OIC item to its bucket:
+  * D.4 Debiti verso banche                                    -> sp16a / sp17a
+  * D.3 verso soci per finanziamenti + D.5 verso altri finanziatori -> sp16b / sp17b
+  * D.1 Obbligazioni + D.2 Obbligazioni convertibili + D.8 rappresentati da titoli -> sp16c / sp17c
+  * D.7 Debiti verso fornitori                                 -> sp16d / sp17d
+  * D.12 Debiti tributari                                      -> sp16e / sp17e
+  * D.13 Debiti verso istituti di previdenza/sicurezza sociale -> sp16f / sp17f
+  * D.6 Acconti + D.9/10/11/11bis verso controllate/collegate/controllanti + D.14 Altri debiti -> sp16g / sp17g
+- CRITICAL: sp16a+sp16b+sp16c+sp16d+sp16e+sp16f+sp16g MUST equal sp16_debiti_breve.
+- CRITICAL: sp17a+sp17b+sp17c+sp17d+sp17e+sp17f+sp17g MUST equal sp17_debiti_lungo.
+- If a group is missing in the PDF, leave it at 0.
+- If the PDF shows only the "Totale debiti" without a breakdown, put everything in sp16g_altri_debiti_breve (or sp17g_altri_debiti_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
 
 PATRIMONIO NETTO:
 - sp11_capitale is ONLY "I - Capitale" (share capital). Do NOT include it in sp12_riserve
@@ -1231,11 +1327,11 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     logger.info(f"SP totale_passivo = {balance_sheet_data.get('totale_passivo')}")
     logger.info(f"CE ce01_ricavi_vendite = {income_data.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate crediti, then equity (before debiti, since debt validator
-    # derives total_debiti from patrimonio_netto which needs correct sp12 first)
+    # Step 5: Validate crediti; then debiti (using explicit totale_debiti when present);
+    # then equity (which uses the corrected debt aggregate to derive expected equity).
     balance_sheet_data = _validate_crediti(balance_sheet_data, "single")
-    balance_sheet_data = _validate_equity(balance_sheet_data, "single")
     balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
+    balance_sheet_data = _validate_equity(balance_sheet_data, "single")
 
     # Step 6: Cross-check ce20_imposte against BS utile
     income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
@@ -1299,30 +1395,62 @@ def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dic
             )
             balance_sheet_data['sp06_crediti_breve'] = new_sp06
 
+    # Reconcile debtor-type breakdown against the aggregates.
+    # Residual (aggregate − sum of a..g) plugs into the "altri" bucket (g), so
+    # sum of detail always matches sp06_crediti_breve / sp07_crediti_lungo and
+    # the Rettifiche journal has a meaningful starting point.
+    _CREDIT_BREVE_GROUPS = ['sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                            'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                            'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+                            'sp06g_crediti_altri_breve']
+    _CREDIT_LUNGO_GROUPS = ['sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                            'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                            'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+                            'sp07g_crediti_altri_lungo']
+    for aggregate, groups, altri_key in (
+        ('sp06_crediti_breve', _CREDIT_BREVE_GROUPS, 'sp06g_crediti_altri_breve'),
+        ('sp07_crediti_lungo', _CREDIT_LUNGO_GROUPS, 'sp07g_crediti_altri_lungo'),
+    ):
+        total = balance_sheet_data.get(aggregate, Decimal('0'))
+        breakdown_sum = sum(balance_sheet_data.get(g, Decimal('0')) for g in groups)
+        residual = total - breakdown_sum
+        if abs(residual) > Decimal('1'):
+            logger.info(
+                f"[{label}] Credit breakdown residual for {aggregate}: "
+                f"aggregate={total}, breakdown_sum={breakdown_sum}, plugging {residual} into {altri_key}"
+            )
+            balance_sheet_data[altri_key] = balance_sheet_data.get(altri_key, Decimal('0')) + residual
+
     return balance_sheet_data
 
 
 def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
     """Validate and auto-correct debt split: sp16 + sp17 must equal total debiti.
 
-    The total debiti can be inferred from totale_passivo - (patrimonio_netto + fondi + tfr + ratei).
-    If sp16 + sp17 overshoots total debiti, recalculate sp16 = total_debiti - sp17.
+    Uses the explicit `totale_debiti` field from the PDF when present (most reliable).
+    Falls back to inference from totale_passivo - (patrimonio_netto + fondi + tfr + ratei)
+    when the explicit value is missing.
     """
-    tot_passivo = balance_sheet_data.get('totale_passivo', Decimal('0'))
-    if tot_passivo == 0:
-        return balance_sheet_data
-
-    sp11 = balance_sheet_data.get('sp11_capitale', Decimal('0'))
-    sp12 = balance_sheet_data.get('sp12_riserve', Decimal('0'))
-    sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
-    sp14 = balance_sheet_data.get('sp14_fondi_rischi', Decimal('0'))
-    sp15 = balance_sheet_data.get('sp15_tfr', Decimal('0'))
     sp16 = balance_sheet_data.get('sp16_debiti_breve', Decimal('0'))
     sp17 = balance_sheet_data.get('sp17_debiti_lungo', Decimal('0'))
-    sp18 = balance_sheet_data.get('sp18_ratei_risconti_passivi', Decimal('0'))
+    explicit_total = balance_sheet_data.get('totale_debiti', Decimal('0'))
 
-    patrimonio_netto = sp11 + sp12 + sp13
-    total_debiti = tot_passivo - patrimonio_netto - sp14 - sp15 - sp18
+    if explicit_total > 0:
+        total_debiti = explicit_total
+        source = "explicit"
+    else:
+        tot_passivo = balance_sheet_data.get('totale_passivo', Decimal('0'))
+        if tot_passivo == 0:
+            return balance_sheet_data
+        sp11 = balance_sheet_data.get('sp11_capitale', Decimal('0'))
+        sp12 = balance_sheet_data.get('sp12_riserve', Decimal('0'))
+        sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+        sp14 = balance_sheet_data.get('sp14_fondi_rischi', Decimal('0'))
+        sp15 = balance_sheet_data.get('sp15_tfr', Decimal('0'))
+        sp18 = balance_sheet_data.get('sp18_ratei_risconti_passivi', Decimal('0'))
+        total_debiti = tot_passivo - (sp11 + sp12 + sp13) - sp14 - sp15 - sp18
+        source = "inferred"
+
     debt_sum = sp16 + sp17
     diff = abs(debt_sum - total_debiti)
 
@@ -1330,18 +1458,44 @@ def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
         new_sp16 = total_debiti - sp17
         if new_sp16 >= 0:
             logger.warning(
-                f"[{label}] Debt mismatch: sp16+sp17={debt_sum} but total debiti={total_debiti} "
+                f"[{label}] Debt mismatch ({source}): sp16+sp17={debt_sum} but total debiti={total_debiti} "
                 f"(diff={diff}). Correcting sp16 from {sp16} to {new_sp16}"
             )
             balance_sheet_data['sp16_debiti_breve'] = new_sp16
         else:
             # sp17 exceeds total debiti — correct sp17 instead
             logger.warning(
-                f"[{label}] Debt mismatch: sp17={sp17} > total debiti={total_debiti}. "
+                f"[{label}] Debt mismatch ({source}): sp17={sp17} > total debiti={total_debiti}. "
                 f"Correcting sp17 to {total_debiti} and sp16 to 0"
             )
             balance_sheet_data['sp17_debiti_lungo'] = total_debiti
             balance_sheet_data['sp16_debiti_breve'] = Decimal('0')
+
+    # Reconcile creditor-type breakdown against the aggregates.
+    # Any residual (aggregate − sum of a..g) is plugged into the "altri" bucket (g)
+    # so the Rettifiche journal always has a meaningful starting point and sums
+    # back to sp16_debiti_breve / sp17_debiti_lungo.
+    _DEBT_BREVE_GROUPS = ['sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                          'sp16c_debiti_obbligazioni_breve', 'sp16d_debiti_fornitori_breve',
+                          'sp16e_debiti_tributari_breve', 'sp16f_debiti_previdenza_breve',
+                          'sp16g_altri_debiti_breve']
+    _DEBT_LUNGO_GROUPS = ['sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                          'sp17c_debiti_obbligazioni_lungo', 'sp17d_debiti_fornitori_lungo',
+                          'sp17e_debiti_tributari_lungo', 'sp17f_debiti_previdenza_lungo',
+                          'sp17g_altri_debiti_lungo']
+    for aggregate, groups, altri_key in (
+        ('sp16_debiti_breve', _DEBT_BREVE_GROUPS, 'sp16g_altri_debiti_breve'),
+        ('sp17_debiti_lungo', _DEBT_LUNGO_GROUPS, 'sp17g_altri_debiti_lungo'),
+    ):
+        total = balance_sheet_data.get(aggregate, Decimal('0'))
+        breakdown_sum = sum(balance_sheet_data.get(g, Decimal('0')) for g in groups)
+        residual = total - breakdown_sum
+        if abs(residual) > Decimal('1'):
+            logger.info(
+                f"[{label}] Debt breakdown residual for {aggregate}: "
+                f"aggregate={total}, breakdown_sum={breakdown_sum}, plugging {residual} into {altri_key}"
+            )
+            balance_sheet_data[altri_key] = balance_sheet_data.get(altri_key, Decimal('0')) + residual
 
     return balance_sheet_data
 
@@ -1517,14 +1671,14 @@ def extract_pdf_both_years_with_llm(
     logger.info(f"[current] SP totale_attivo={current_bs.get('totale_attivo')}, CE ricavi={current_ce.get('ce01_ricavi_vendite')}")
     logger.info(f"[prior]   SP totale_attivo={prior_bs.get('totale_attivo')}, CE ricavi={prior_ce.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate crediti, then equity (before debiti, since debt validator
-    # derives total_debiti from patrimonio_netto which needs correct sp12 first)
+    # Step 5: Validate crediti; then debiti (using explicit totale_debiti when present);
+    # then equity (which uses the corrected debt aggregate to derive expected equity).
     current_bs = _validate_crediti(current_bs, "current")
     prior_bs = _validate_crediti(prior_bs, "prior")
-    current_bs = _validate_equity(current_bs, "current")
-    prior_bs = _validate_equity(prior_bs, "prior")
     current_bs = _validate_debiti(current_bs, "current")
     prior_bs = _validate_debiti(prior_bs, "prior")
+    current_bs = _validate_equity(current_bs, "current")
+    prior_bs = _validate_equity(prior_bs, "prior")
 
     # Step 6: Cross-check ce20_imposte against BS utile
     current_ce = _validate_ce_imposte(current_ce, current_bs, "current")

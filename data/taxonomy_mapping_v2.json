@@ -209,30 +209,25 @@
       "priority_1": "itcc-ci:DebitiDebitiVersoAltriFinanziatoriEsigibiliOltreEsercizioSuccessivo"
     },
     "sp16d_debiti_fornitori_breve": {
-      "comment": "priority_2 = creditor-type total (no entro/oltre) mapped to breve for PFN subtraction",
-      "priority_1": "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliEntroEsercizioSuccessivo",
-      "priority_2": "itcc-ci:DebitiDebitiVersoFornitoriTotaleDebitiVersoFornitori"
+      "priority_1": "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliEntroEsercizioSuccessivo"
     },
     "sp17d_debiti_fornitori_lungo": {
       "priority_1": "itcc-ci:DebitiDebitiVersoFornitoriEsigibiliOltreEsercizioSuccessivo"
     },
     "sp16e_debiti_tributari_breve": {
-      "priority_1": "itcc-ci:DebitiDebitiTributariEsigibiliEntroEsercizioSuccessivo",
-      "priority_2": "itcc-ci:DebitiDebitiTributariTotaleDebitiTributari"
+      "priority_1": "itcc-ci:DebitiDebitiTributariEsigibiliEntroEsercizioSuccessivo"
     },
     "sp17e_debiti_tributari_lungo": {
       "priority_1": "itcc-ci:DebitiDebitiTributariEsigibiliOltreEsercizioSuccessivo"
     },
     "sp16f_debiti_previdenza_breve": {
-      "priority_1": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliEntroEsercizioSuccessivo",
-      "priority_2": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeTotaleDebitiVersoIstitutiPrevidenzaSicurezzaSociale"
+      "priority_1": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliEntroEsercizioSuccessivo"
     },
     "sp17f_debiti_previdenza_lungo": {
       "priority_1": "itcc-ci:DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeEsigibiliOltreEsercizioSuccessivo"
     },
     "sp16g_altri_debiti_breve": {
-      "priority_1": "itcc-ci:DebitiAltriDebitiEsigibiliEntroEsercizioSuccessivo",
-      "priority_2": "itcc-ci:DebitiAltriDebitiTotaleAltriDebiti"
+      "priority_1": "itcc-ci:DebitiAltriDebitiEsigibiliEntroEsercizioSuccessivo"
     },
     "sp17g_altri_debiti_lungo": {
       "priority_1": "itcc-ci:DebitiAltriDebitiEsigibiliOltreEsercizioSuccessivo"

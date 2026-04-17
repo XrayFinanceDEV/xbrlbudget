@@ -50,7 +50,7 @@ def is_situazione_contabile(text: str) -> bool:
     - DEPI: XX/YY/ZZZ (e.g. 03/05/005)
     - AGO/ERP: 8-digit codes with keywords (e.g. 13065000, 37015000)
     """
-    sample = text[:5000]
+    sample = text[:10000]
     # DEPI format: XX/YY/ZZZ codes
     depi_codes = re.findall(r'\b\d{2}/\d{2}/\d{3}\b', sample)
     if len(depi_codes) >= 10:
@@ -60,6 +60,19 @@ def is_situazione_contabile(text: str) -> bool:
     if len(ago_codes) >= 5 and re.search(r'SITUAZIONE\s+PATRIMONIALE|BILANCIO\s+DI\s+VERIFICA', sample, re.IGNORECASE):
         return True
     return False
+
+
+def is_ago_format(text: str) -> bool:
+    """Detect AGO/ERP 8-digit code trial balance format.
+
+    AGO-style PDFs use 8-digit account codes with no dashes (e.g. 13065000)
+    and a two-column layout per page (ATTIVITA'/PASSIVITA' side by side).
+    """
+    sample = text[:10000]
+    has_marker = bool(re.search(r'BILANCIO\s+DI\s+VERIFIC', sample, re.IGNORECASE))
+    ago_codes = re.findall(r'\b\d{8}\b', sample)
+    depi_codes = re.findall(r'\b\d{2}/\d{2}/\d{3}\b', sample)
+    return has_marker and len(ago_codes) >= 10 and len(depi_codes) < 5
 
 
 def _parse_amount(s: str) -> Decimal:
@@ -199,23 +212,66 @@ _SP_ATTIVO_RULES = [
     (['IMMOBILIZZAZIONI IMMATERIALI'], 'gross_sp02'),
     (['IMMOBILIZZAZIONI MATERIALI'], 'gross_sp03'),
     (['IMMOBILIZZAZIONI FINANZIARIE'], 'gross_sp04'),
+    # AGO-style single-category descriptions (trial balance parent level)
+    (['ONERI', 'PLURIENN'], 'gross_sp02'),
+    (['COSTI', 'PLURIENN'], 'gross_sp02'),
+    (['SOFTWARE'], 'gross_sp02'),
+    (['BREVETT'], 'gross_sp02'),
+    (['MARCHI'], 'gross_sp02'),
+    (['AVVIAMENTO'], 'gross_sp02'),
+    (['LICENZ'], 'gross_sp02'),
+    (['FABBRICAT'], 'gross_sp03'),
+    (['TERREN'], 'gross_sp03'),
+    (['MACCHINAR'], 'gross_sp03'),
+    (['MACCHINE'], 'gross_sp03'),
+    (['IMPIANT'], 'gross_sp03'),
+    (['ATTREZZ'], 'gross_sp03'),
+    (['AUTOMEZZ'], 'gross_sp03'),
+    (['AUTOVEICOL'], 'gross_sp03'),
+    (['AUTOVETTUR'], 'gross_sp03'),
+    (['MEZZI', 'TRASP'], 'gross_sp03'),
+    (['AUTO', 'MOTO'], 'gross_sp03'),
+    (['ARREDAMENT'], 'gross_sp03'),
+    (['MOBILI'], 'gross_sp03'),
+    (['PARTECIPAZ'], 'gross_sp04'),
     # Current assets
     (['RIMANENZE'], 'sp05'),
+    (['MAGAZZIN'], 'sp05'),
     (['RATEI', 'RISCONTI', 'ATTIV'], 'sp10'),
     (['RATEI', 'ATTIV'], 'sp10'),
     (['RISCONTI', 'ATTIV'], 'sp10'),
     (['DISPONIBILIT'], 'sp09'),  # Disponibilità liquide (banks + cash)
+    (['DEPOSIT', 'BANCAR'], 'sp09'),
+    (['DEPOSIT', 'POSTAL'], 'sp09'),
+    (['DENARO'], 'sp09'),
+    (['CASSA'], 'sp09'),
     # Everything else in attivo = crediti (sp06)
 ]
 
 # SP PASSIVO keyword rules
 _SP_PASSIVO_RULES = [
     # Depreciation funds (will be netted against gross assets)
+    # Specific rules first (pluriennali/macchine disambiguate immat vs mat)
+    (['F.DO', 'AMM', 'PLURIENN'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'IMMAT'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'SOFTWARE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'BREVETT'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'MARCHI'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'AVVIAMENTO'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'MACCHINAR'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'IMPIANT'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'ATTREZZ'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'AUTO'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'FABBRICAT'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'MATER'], 'depr_sp03'),
     (['F/AMM', 'IMMAT'], 'depr_sp02'),
     (['F/AMM', 'MATER'], 'depr_sp03'),
     (['AMMORTAM', 'IMMAT'], 'depr_sp02'),
     (['AMMORTAM', 'MATER'], 'depr_sp03'),
+    (['F.DO', 'AMM'], 'depr_sp03'),  # fallback → tangible
     # Crediti deduction
+    (['F.DO', 'SVAL', 'CREDITI'], 'deduct_crediti'),
     (['RISCHI', 'CREDITI'], 'deduct_crediti'),
     (['SVALUT', 'CREDITI'], 'deduct_crediti'),
     # Banks avere = overdrafts
@@ -228,15 +284,22 @@ _SP_PASSIVO_RULES = [
     (['UTILE', 'ESERCIZ'], 'equity_total'),
     (['PERDITA', 'ESERCIZ'], 'equity_total'),
     (['UTILI', 'PORTATI'], 'equity_total'),
+    (['UTILI', 'NUOVO'], 'equity_total'),
+    (['PERDITE', 'PORTATE'], 'equity_total'),
+    (['SOVRAPPREZZO'], 'equity_total'),
     # Fondi
     (['FONDI', 'RISCHI'], 'sp14'),
     (['FONDI', 'ONERI'], 'sp14'),
+    (['FONDO', 'RISCHI'], 'sp14'),
+    (['FONDO', 'ONERI'], 'sp14'),
     # TFR
     (['TFR'], 'sp15'),
     (['TRATTAMENTO', 'FINE', 'RAPPORTO'], 'sp15'),
-    # Debiti v/banche (need entro/oltre split from details)
+    # Debiti v/banche (need entro/oltre split — from details OR from "(EE)"/"(OE)" suffix)
     (['DEBITI', 'BANCH'], 'debt_bank'),
     (['DEBITI', 'FINANZIAT'], 'debt_bank'),
+    (['MUTUI'], 'debt_bank'),
+    (['OBBLIGAZION'], 'debt_bank'),
     # Ratei e risconti passivi
     (['RATEI', 'RISCONTI', 'PASSIV'], 'sp18'),
     (['RATEI', 'PASSIV'], 'sp18'),
@@ -248,12 +311,15 @@ _SP_PASSIVO_RULES = [
     (['DEBITI', 'PREV'], 'sp16'),
     (['DEBITI', 'SICUR'], 'sp16'),
     (['DEBITI', 'INPS'], 'sp16'),
+    (['ISTIT', 'PREV'], 'sp16'),
     # Specific debt categories → sp16 (breve by default)
     (['DEBITI', 'FORNITOR'], 'sp16'),
     (['ACCONTI'], 'sp16'),
     (['ALTRI DEBITI'], 'sp16'),
-    # SBF / crediti ceduti in passivo → sp16
-    (['CREDITI', 'CLIENT'], 'sp16'),
+    (['ALTRI', 'DEBITI'], 'sp16'),
+    # SBF / crediti ceduti in passivo → sp16 (only when explicitly labeled as ceded)
+    (['CREDITI', 'CEDUT'], 'sp16'),
+    (['CREDITI', 'SMOBIL'], 'sp16'),
 ]
 
 # CE keyword rules for COSTI section
@@ -270,22 +336,42 @@ _CE_COSTI_RULES = [
     (['MAT.PRI'], 'ce05'),
     (['SERVIZI'], 'ce06'),
     (['GODIMENTO', 'BENI'], 'ce07'),
+    # Personale sub-fields (more specific than the generic 'PERSONALE' bucket)
+    (['QUOTE', 'FINE', 'RAPPORTO'], 'ce08a_tfr'),
+    (['QUOTE', 'TRATTAMENTO'], 'ce08a_tfr'),
+    (['QUOTE', 'TFR'], 'ce08a_tfr'),
+    (['ACCANTON', 'TFR'], 'ce08a_tfr'),
+    (['TRATT', 'FINE', 'RAPPORTO'], 'ce08a_tfr'),
+    (['SALARI'], 'ce08b'),
+    (['STIPENDI'], 'ce08b'),
+    (['ONERI', 'SOCIAL'], 'ce08c'),
+    (['ONERI', 'PREVIDENZ'], 'ce08c'),
+    (['ALTRI', 'COSTI', 'PERSONALE'], 'ce08d'),
     (['PERSONALE'], 'ce08'),
-    (['AMMORTAM', 'IMMAT'], 'ce09a'),  # Ammort. immateriali
+    # Ammortamenti (more specific keywords first)
+    (['AMMORTAM', 'IMMAT'], 'ce09a'),
+    (['AMM.TO', 'IMMAT'], 'ce09a'),
     (['AMM.T', 'IMM. IMMAT'], 'ce09a'),
     (['AMM.TI', 'IMMAT'], 'ce09a'),
-    (['AMMORTAM', 'MATER'], 'ce09b'),  # Ammort. materiali
+    (['AMMORTAM', 'MATER'], 'ce09b'),
+    (['AMM.TO', 'MATER'], 'ce09b'),
     (['AMM.T', 'IMM. MAT'], 'ce09b'),
     (['AMM.TO', 'MAT'], 'ce09b'),
     (['SVALUT'], 'ce09d'),  # Svalutazioni
     (['ACCANTONAM', 'RISCHI'], 'ce11'),
     (['ALTRI ACCANTONAM'], 'ce11b'),
     (['ONERI DIVERSI'], 'ce12'),
-    (['INTERESSI', 'ONERI'], 'ce15'),
+    (['ONERI', 'DIVERSI', 'GESTIONE'], 'ce12'),
+    (['INTERESSI'], 'ce15'),
+    (['ONERI', 'FINANZ'], 'ce15'),
+    (['ON.FIN'], 'ce15'),
     (['INT. PASS'], 'ce15'),
-    (['ONERI FINANZ'], 'ce15'),
     (['IMPOSTE', 'REDDITO'], 'ce20'),
     (['IMPOSTE', 'ESERC'], 'ce20'),
+    (['IMPOSTE', 'ANTICIP'], 'ce20'),
+    (['IMPOSTE', 'DIFFER'], 'ce20'),
+    (['IRES'], 'ce20'),
+    (['IRAP'], 'ce20'),
     # Proventi/oneri straordinari in costs
     (['ONERI STRAORD'], 'ce19'),
     (['PROVENTI', 'PARTECIP'], 'ce13_cost'),
@@ -386,8 +472,8 @@ def build_iv_cee(entries: List[Entry]) -> Tuple[Dict[str, Decimal], Dict[str, De
         """Process a sub2 or standalone sub3 entry through keyword classification."""
         nonlocal gross_sp02, gross_sp03, depr_sp02, depr_sp03
         nonlocal bank_dare, bank_avere, crediti_deduction, capitale, riserve
-        nonlocal debt_bank_total
-        nonlocal ce09a, ce09b, ce09d
+        nonlocal debt_bank_total, debt_bank_entro, debt_bank_oltre
+        nonlocal ce09a, ce09b, ce09d, ce_tfr_accrual
         nonlocal ce10_opening, ce10_closing, ce01_total, ce01_returns
 
         desc_upper = entry.description.upper()
@@ -424,15 +510,34 @@ def build_iv_cee(entries: List[Entry]) -> Tuple[Dict[str, Decimal], Dict[str, De
                 bank_avere += entry.amount
             elif field == 'equity_total':
                 if entry.level == 2:
-                    return  # skip sub2 total, use sub3 components
-                # sub3: classify
+                    return  # skip sub2 total (DEPI); AGO emits only level=1
+                # Current-year utile/perdita is set from the level-4 pareggio plug;
+                # skip parent-level entries to avoid double-counting
+                if (_kw_match(desc_upper, ['UTILE', 'ESERCIZ']) or
+                        _kw_match(desc_upper, ['PERDITA', 'ESERCIZ'])):
+                    if not _kw_any(desc_upper, ['PORTATI', 'PRECEDENT', 'NUOVO']):
+                        return
                 if _kw_match(desc_upper, ['CAPITALE']):
                     capitale += entry.amount
                 else:
                     riserve += entry.amount
             elif field == 'debt_bank':
                 if entry.level in (1, 2):
-                    debt_bank_total += entry.amount
+                    # Parent-level (EE)/(OE) routing: AGO suffix convention
+                    if '(OE)' in desc_upper or 'OLTRE' in desc_upper:
+                        debt_bank_oltre += entry.amount
+                        debt_bank_total += entry.amount
+                    elif '(EE)' in desc_upper or 'ENTRO' in desc_upper:
+                        debt_bank_entro += entry.amount
+                        debt_bank_total += entry.amount
+                    else:
+                        debt_bank_total += entry.amount
+            elif field == 'sp16':
+                # Non-bank debts with (OE) suffix → long-term (sp17)
+                if '(OE)' in desc_upper or 'OLTRE' in desc_upper:
+                    bs['sp17'] = bs.get('sp17', Decimal('0')) + entry.amount
+                else:
+                    bs['sp16'] = bs.get('sp16', Decimal('0')) + entry.amount
             else:
                 bs[field] = bs.get(field, Decimal('0')) + entry.amount
             return
@@ -452,6 +557,18 @@ def build_iv_cee(entries: List[Entry]) -> Tuple[Dict[str, Decimal], Dict[str, De
                 ce09d += entry.amount
             elif field == 'ce10':
                 ce10_opening += entry.amount
+            elif field == 'ce08a_tfr':
+                ce_tfr_accrual += entry.amount
+                ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+            elif field == 'ce08b':
+                ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+                ce['ce08b_salari_stipendi'] = ce.get('ce08b_salari_stipendi', Decimal('0')) + entry.amount
+            elif field == 'ce08c':
+                ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+                ce['ce08c_oneri_sociali'] = ce.get('ce08c_oneri_sociali', Decimal('0')) + entry.amount
+            elif field == 'ce08d':
+                ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+                ce['ce08d_altri_costi_personale'] = ce.get('ce08d_altri_costi_personale', Decimal('0')) + entry.amount
             elif field == 'ce13_cost':
                 ce['ce13'] = ce.get('ce13', Decimal('0')) - entry.amount
             elif field:
@@ -598,9 +715,270 @@ def build_iv_cee(entries: List[Entry]) -> Tuple[Dict[str, Decimal], Dict[str, De
     return bs, ce
 
 
+# ---------------------------------------------------------------------------
+# AGO / ERP parser — 8-digit codes, 2-column block layout
+# ---------------------------------------------------------------------------
+
+_AGO_PARENT_CODE_RE = re.compile(r'^(\d{8})\s*-\s*(.+?)\s*$')
+_AGO_DETAIL_CODE_RE = re.compile(r'^(\d{6})\s+(\d{3})\b')  # e.g. "100605 000"
+_AGO_AMOUNT_RE = re.compile(r'^\s*(-?[\d]+(?:\.[\d]{3})*,[\d]{2})\s*-?\s*$')
+
+_AGO_SKIP_MARKERS = [
+    "TOTALE A PAREGGIO",
+    "SITUAZIONE PATRIMONIALE",
+    "CONTO ECONOMICO",
+    "BILANCIO DI VERIFIC",
+    "DATI CONTABILI",
+    "PARTITA IVA",
+    "CODICE FISCALE",
+    "ESERCIZIO",
+    "DISSTE",
+]
+
+
+def _extract_amounts_in_order(lines: List[str]) -> List[Decimal]:
+    """Return amounts (in textual order) from a list of block lines."""
+    out: List[Decimal] = []
+    for ln in lines:
+        m = _AGO_AMOUNT_RE.match(ln)
+        if m:
+            out.append(_parse_amount(m.group(1)))
+    return out
+
+
+def _classify_ago_section(desc: str, col1_section: str, col2_section: str) -> str:
+    """Classify a description into a column section by Italian-accounting keywords.
+
+    Returns 'attivo'/'passivo'/'costi'/'ricavi' or '' if ambiguous. Passivo
+    markers take precedence so descriptions like "F.do sval. crediti" resolve
+    correctly despite containing CREDITI.
+    """
+    u = desc.upper()
+    if col1_section == 'attivo':
+        # Strong passivo markers (checked before attivo)
+        if any(k in u for k in ('F.DO', 'F/AMM', 'DEBITI', 'FONDO', 'FONDI',
+                                'CAPITALE', 'RISERVA', 'RISERVE', 'PATRIMONIO',
+                                'SOVRAPPREZZO', 'OBBLIGAZION', 'MUTUI',
+                                'ACCONTI', 'TFR')):
+            return 'passivo'
+        if ('TRATTAMENTO' in u and 'FINE' in u):
+            return 'passivo'
+        if 'UTILI' in u and any(w in u for w in ('PORTATI', 'NUOVO', 'PRECEDENT')):
+            return 'passivo'
+        if 'RATEI' in u and 'PASSIV' in u:
+            return 'passivo'
+        if 'RISCONTI' in u and 'PASSIV' in u:
+            return 'passivo'
+        # Attivo markers
+        if any(k in u for k in ('CREDITI', 'DEPOSIT', 'DENARO', 'CASSA',
+                                'RIMANENZE', 'MAGAZZIN', 'IMMOB',
+                                'ATTREZZ', 'MACCHINE', 'MACCHINAR', 'IMPIANT',
+                                'AUTOVEIC', 'AUTOVETTUR', 'AUTOMEZZ',
+                                'MEZZI TRASP', 'MOBILI', 'ARREDAMENT',
+                                'PARTECIPAZ', 'TERREN', 'FABBRICAT',
+                                'SOFTWARE', 'BREVETT', 'MARCHI', 'AVVIAMENTO',
+                                'LICENZ', 'PLURIENN')):
+            return 'attivo'
+        if 'AUTO' in u or 'MOTO' in u or 'CICLO' in u:
+            return 'attivo'
+        if 'RATEI' in u and 'ATTIV' in u:
+            return 'attivo'
+        if 'RISCONTI' in u and 'ATTIV' in u:
+            return 'attivo'
+        return ''
+    # CE
+    if any(k in u for k in ('RICAVI', 'PROVENTI', 'PLUSVALENZ', 'RIMBORSI', 'CONTRIBUT')):
+        return 'ricavi'
+    if 'SOPRAVVEN' in u and 'ATTIV' in u:
+        return 'ricavi'
+    if 'INTERESSI' in u and 'ATTIV' in u:
+        return 'ricavi'
+    if any(k in u for k in ('COSTI', 'ONERI', 'SALARI', 'STIPENDI', 'AMM', 'SPESE',
+                            'INTERESSI', 'IMPOSTE', 'SVALUTAZ', 'IRAP', 'IRES',
+                            'ACCANTON', 'GODIMENTO', 'MATERIE', 'MERCI', 'QUOTE',
+                            'PERSONALE')):
+        return 'costi'
+    return ''
+
+
+def _guess_ago_column(desc: str, col1_section: str, col2_section: str) -> str:
+    """Pick a column for an orphan single-code block. Falls back to col2 (passivo/ricavi)."""
+    sec = _classify_ago_section(desc, col1_section, col2_section)
+    return sec or col2_section
+
+
+def _any_rule_matches(desc_upper: str, rules: list) -> bool:
+    """True if any (keywords, field) rule matches the description."""
+    for keywords, _ in rules:
+        if _kw_match(desc_upper, keywords):
+            return True
+    return False
+
+
+def _semantic_section_from_desc(desc_upper: str, is_sp: bool) -> str:
+    """Classify a description by keywords into its semantic IV CEE section.
+
+    Returns 'attivo'/'passivo' for SP, 'costi'/'ricavi' for CE, or '' when
+    ambiguous (no rule matches, or both rule-sets match). Passivo/ricavi
+    priority handles "F.do sval. crediti" (passivo wins) and "Ricavi delle
+    vendite" (ricavi wins over the costi-side RICAVI returns rule).
+    """
+    if is_sp:
+        p_match = _any_rule_matches(desc_upper, _SP_PASSIVO_RULES)
+        a_match = _any_rule_matches(desc_upper, _SP_ATTIVO_RULES)
+        if p_match and not a_match:
+            return 'passivo'
+        if a_match and not p_match:
+            return 'attivo'
+        if p_match and a_match:
+            # Both matched — prefer passivo (F.do sval. crediti case)
+            return 'passivo'
+        return ''
+    # CE: check ricavi FIRST since "RICAVI" keyword also appears in the costi
+    # rules (as "returns in cost section"). Genuine Ricavi items win.
+    r_match = _any_rule_matches(desc_upper, _CE_RICAVI_RULES)
+    c_match = _any_rule_matches(desc_upper, _CE_COSTI_RULES)
+    if r_match:
+        return 'ricavi'
+    if c_match:
+        return 'costi'
+    return ''
+
+
+def parse_entries_ago(file_path: str) -> Tuple[List[Entry], Dict[str, Decimal]]:
+    """Parse AGO/ERP trial balance using block-based 2-column layout.
+
+    Each block is a logical row with 1–2 parent codes. Column (left/right) is
+    assigned primarily from description keywords (semantic section). Positional
+    order within the block is used only as a tie-breaker when keywords are
+    ambiguous. Amounts are then summed per IV CEE field during build_iv_cee.
+
+    Returns:
+        (entries, totali) — level-1 parent entries + synthetic level-4 utile;
+        totali has declared 'attivo','passivo','costi','ricavi' totals.
+    """
+    doc = fitz.open(file_path)
+    entries: List[Entry] = []
+    totali: Dict[str, Decimal] = {}
+
+    for page in doc:
+        page_text_upper = page.get_text().upper()
+        is_sp = 'SITUAZIONE PATRIMONIALE' in page_text_upper
+        is_ce = 'CONTO ECONOMICO' in page_text_upper
+        if not (is_sp or is_ce):
+            continue
+
+        col1_section = 'attivo' if is_sp else 'costi'
+        col2_section = 'passivo' if is_sp else 'ricavi'
+
+        blocks = page.get_text('blocks', sort=True)
+        for b in blocks:
+            text = b[4]
+            lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
+            if not lines:
+                continue
+            upper = text.upper()
+
+            # Capture declared totali labels
+            if "TOTALE ATTIVITA" in upper and "TOTALE PASSIVITA" in upper:
+                amts = _extract_amounts_in_order(lines)
+                if len(amts) >= 2:
+                    totali['attivo'] = amts[0]
+                    totali['passivo'] = amts[1]
+                continue
+            if "TOTALE COSTI" in upper and "TOTALE RICAVI" in upper:
+                amts = _extract_amounts_in_order(lines)
+                if len(amts) >= 2:
+                    totali['costi'] = amts[0]
+                    totali['ricavi'] = amts[1]
+                continue
+
+            # Skip structural/metadata blocks
+            if any(m in upper for m in _AGO_SKIP_MARKERS):
+                continue
+            if ("UTILE D" in upper or "PERDITA D" in upper) and not any(
+                _AGO_PARENT_CODE_RE.match(ln) for ln in lines
+            ):
+                continue
+            if all(ln.upper().strip(" '") in ("ATTIVITA", "PASSIVITA", "COSTI", "RICAVI")
+                   for ln in lines):
+                continue
+
+            # Parse lines in order: pair each parent code with the first
+            # following amount not already claimed. Handles both parent-first
+            # blocks ([code1, code2, amt1, amt2]) and mixed blocks with
+            # interleaved detail lines ([detail_code, det_amt, parent_code,
+            # parent_amt]).
+            parent_positions = []  # (line_idx, code, desc)
+            amount_positions = []  # (line_idx, amount)
+            for idx, ln in enumerate(lines):
+                pm = _AGO_PARENT_CODE_RE.match(ln)
+                if pm:
+                    parent_positions.append((idx, pm.group(1), pm.group(2).strip()))
+                    continue
+                am = _AGO_AMOUNT_RE.match(ln)
+                if am:
+                    amount_positions.append((idx, _parse_amount(am.group(1))))
+
+            if not parent_positions:
+                continue
+
+            # Pair: for each parent, take first amount at line_idx >= parent's,
+            # skipping amounts already claimed.
+            pairs: List[Tuple[str, str, Decimal]] = []
+            claimed: set = set()
+            for p_idx, code, desc in parent_positions:
+                chosen_amt = None
+                for a_idx, amt in amount_positions:
+                    if a_idx in claimed:
+                        continue
+                    if a_idx >= p_idx:
+                        chosen_amt = amt
+                        claimed.add(a_idx)
+                        break
+                if chosen_amt is None:
+                    continue
+                pairs.append((code, desc, chosen_amt))
+
+            # Assign section: keyword-first, positional fallback for ambiguity
+            for i, (code, desc, amt) in enumerate(pairs):
+                desc_upper = desc.upper()
+                sec = _semantic_section_from_desc(desc_upper, is_sp)
+                if not sec:
+                    sec = col1_section if i == 0 else col2_section
+                entries.append(Entry(
+                    code=code, description=desc,
+                    amount=amt, level=1, section=sec,
+                ))
+    doc.close()
+
+    # Compute utile from our semantically-classified CE entries — more
+    # reliable than the PDF's declared TOTALE labels, whose column-to-label
+    # pairing can be ambiguous in rotated layouts.
+    ricavi_sum = sum((e.amount for e in entries if e.section == 'ricavi'), Decimal('0'))
+    costi_sum = sum((e.amount for e in entries if e.section == 'costi'), Decimal('0'))
+    utile_signed = ricavi_sum - costi_sum
+
+    if utile_signed >= 0:
+        entries.append(Entry(
+            code='****', description="UTILE D'ESERCIZIO",
+            amount=abs(utile_signed), level=4, section='passivo',
+        ))
+    else:
+        entries.append(Entry(
+            code='****', description="PERDITA D'ESERCIZIO",
+            amount=abs(utile_signed), level=4, section='attivo',
+        ))
+
+    return entries, totali
+
+
 def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """
     Extract IV CEE data from a Situazione Contabile PDF.
+
+    Routes AGO-style (8-digit codes, 2-column layout) to the AGO parser,
+    otherwise falls back to the DEPI parser (XX/YY/ZZZ codes).
 
     Returns:
         (balance_sheet_data, income_data) dicts with Decimal values
@@ -615,10 +993,14 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
         full_text += page.get_text() + "\n"
     doc.close()
 
-    logger.info("Situazione contabile format detected, using deterministic parser")
-
-    entries = parse_entries(full_text)
-    logger.info(f"Parsed {len(entries)} entries from trial balance")
+    if is_ago_format(full_text):
+        logger.info("AGO/ERP format detected, using block-based parser")
+        entries, totali = parse_entries_ago(file_path)
+        logger.info(f"AGO parser: {len(entries)} parent entries, totali={totali}")
+    else:
+        logger.info("DEPI format detected, using text-based parser")
+        entries = parse_entries(full_text)
+        logger.info(f"DEPI parser: {len(entries)} entries")
 
     bs, ce = build_iv_cee(entries)
 

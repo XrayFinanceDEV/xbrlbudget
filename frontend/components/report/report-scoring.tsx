@@ -138,9 +138,9 @@ export function ReportScoring({ data }: ReportScoringProps) {
 
   return (
     <section id="scoring">
-      <div className="space-y-6 print:space-y-1">
+      <div className="space-y-6 print:space-y-2">
         {/* Altman Z-Score */}
-        <Card>
+        <Card className="report-section">
           <CardHeader>
             <CardTitle className="text-lg">Altman Z-Score</CardTitle>
             <div className="flex items-center gap-4">
@@ -262,7 +262,7 @@ export function ReportScoring({ data }: ReportScoringProps) {
         </Card>
 
         {/* EM-Score */}
-        <Card className="print:break-before-page">
+        <Card className="report-section">
           <CardHeader>
             <CardTitle className="text-lg">EM-Score</CardTitle>
           </CardHeader>
@@ -297,7 +297,7 @@ export function ReportScoring({ data }: ReportScoringProps) {
         </Card>
 
         {/* FGPMI */}
-        <div className="print:break-before-page">
+        <div className="report-section">
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Rating FGPMI</CardTitle>

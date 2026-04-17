@@ -563,6 +563,7 @@ class BudgetScenario(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # AI-generated report comments (persisted to avoid re-generation)
+    ai_comment_overall = Column(Text, nullable=True)
     ai_comment_dashboard = Column(Text, nullable=True)
     ai_comment_composition = Column(Text, nullable=True)
     ai_comment_income_margins = Column(Text, nullable=True)

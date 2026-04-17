@@ -141,14 +141,6 @@ const SECTION_COMMENT_MAP: Record<string, keyof ReportAICommentsResponse> = {
   "Indici di Efficienza": "efficiency_comment",
 };
 
-// Sections that should start on a new print page (max 2 chart+table per page)
-const PAGE_BREAK_BEFORE: Set<string> = new Set([
-  "Indici di Solvibilita",
-  "Indici di Redditivita",
-  "Indici di Rotazione",
-  "Indici di Redditivita Estesa",
-]);
-
 export function ReportRatios({ data, aiComments, aiCommentsLoading }: ReportRatiosProps) {
   const allYears = [...data.historical_years, ...data.forecast_years]
     .map((y) => y.year)
@@ -156,12 +148,11 @@ export function ReportRatios({ data, aiComments, aiCommentsLoading }: ReportRati
 
   return (
     <section id="ratios">
-      <div className="space-y-6 print:space-y-1">
+      <div className="space-y-6 print:space-y-2">
         {RATIO_SECTIONS.map((section) => {
           const commentKey = SECTION_COMMENT_MAP[section.title];
-          const breakBefore = PAGE_BREAK_BEFORE.has(section.title);
           return (
-            <div key={section.title} className={`space-y-2 ${breakBefore ? "print:break-before-page" : ""}`}>
+            <div key={section.title} className="report-section space-y-2 print:space-y-1">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">{section.title}</CardTitle>

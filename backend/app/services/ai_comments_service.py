@@ -30,7 +30,10 @@ AI_COMMENTS_MAX_TOKENS = 4000
 
 
 class ReportComments(pydantic.BaseModel):
-    """Structured output for 10 report comments."""
+    """Structured output for 11 report comments."""
+    overall_comment: str = pydantic.Field(
+        description="3-5 frasi di commento complessivo introduttivo: sintesi dello scenario, punti di forza e debolezza principali, tendenza generale storica vs previsionale, prospettive"
+    )
     dashboard_comment: str = pydantic.Field(
         description="2-4 frasi sulla salute complessiva dell'azienda: scoring, Z-Score, rating, tendenza generale"
     )
@@ -70,7 +73,7 @@ def _build_tool_schema(model: type[pydantic.BaseModel], tool_name: str) -> dict:
     schema.pop("description", None)
     return {
         "name": tool_name,
-        "description": "Record the 10 report comments",
+        "description": "Record the report comments",
         "input_schema": schema,
     }
 
@@ -231,10 +234,11 @@ def _build_data_summary(analysis_data: Dict[str, Any]) -> str:
 
 
 SYSTEM_PROMPT = (
-    "Sei un analista finanziario senior italiano. Genera 10 commenti brevi per un report di "
-    "analisi previsionale. Ogni commento: 2-4 frasi, tono professionale, evidenzia punti di "
-    "forza, rischi e tendenze. Non ripetere numeri già visibili nel report — interpreta e "
-    "aggiungi valore con osservazioni qualitative. Usa il tool fornito per strutturare la risposta."
+    "Sei un analista finanziario senior italiano. Genera 11 commenti brevi per un report di "
+    "analisi previsionale. Ogni commento: 2-4 frasi (il commento complessivo 3-5 frasi), "
+    "tono professionale, evidenzia punti di forza, rischi e tendenze. Non ripetere numeri "
+    "già visibili nel report — interpreta e aggiungi valore con osservazioni qualitative. "
+    "Usa il tool fornito per strutturare la risposta."
 )
 
 
@@ -242,9 +246,9 @@ def generate_report_comments(analysis_data: Dict[str, Any]) -> Dict[str, str]:
     """
     Generate AI comments for 10 report sections using Claude Haiku.
 
-    Returns dict with keys: dashboard_comment, composition_comment, income_margins_comment,
-    structural_comment, liquidity_comment, solvency_comment, profitability_comment,
-    efficiency_comment, break_even_comment, cashflow_comment.
+    Returns dict with keys: overall_comment, dashboard_comment, composition_comment,
+    income_margins_comment, structural_comment, liquidity_comment, solvency_comment,
+    profitability_comment, efficiency_comment, break_even_comment, cashflow_comment.
     Returns empty dict if no API key or on any error.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -288,6 +292,7 @@ def generate_report_comments(analysis_data: Dict[str, Any]) -> Dict[str, str]:
 
 # Mapping from comment dict keys to BudgetScenario column names
 _COMMENT_FIELDS = [
+    ("overall_comment", "ai_comment_overall"),
     ("dashboard_comment", "ai_comment_dashboard"),
     ("composition_comment", "ai_comment_composition"),
     ("income_margins_comment", "ai_comment_income_margins"),

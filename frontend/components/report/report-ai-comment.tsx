@@ -12,7 +12,7 @@ interface ReportAICommentProps {
 export function ReportAIComment({ comment, loading }: ReportAICommentProps) {
   if (loading) {
     return (
-      <Card className="border-dashed">
+      <Card className="report-ai-comment border-dashed">
         <CardContent className="flex items-start gap-3 py-4">
           <Sparkles className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
           <div className="flex-1 space-y-2">
@@ -27,7 +27,7 @@ export function ReportAIComment({ comment, loading }: ReportAICommentProps) {
   if (!comment) return null;
 
   return (
-    <Card className="border-dashed bg-muted/30">
+    <Card className="report-ai-comment border-dashed bg-muted/30">
       <CardContent className="flex items-start gap-3 py-4">
         <Sparkles className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
         <p className="text-sm italic text-muted-foreground leading-relaxed">

@@ -624,6 +624,7 @@ export const getScenarioAnalysis = async (
 
 // AI Report Comments
 export interface ReportAICommentsResponse {
+  overall_comment?: string;
   dashboard_comment?: string;
   composition_comment?: string;
   income_margins_comment?: string;
@@ -652,6 +653,18 @@ export const generateReportAIComments = async (
 ): Promise<ReportAICommentsResponse> => {
   const { data } = await api.post<ReportAICommentsResponse>(
     `/companies/${companyId}/scenarios/${scenarioId}/report/ai-comments`
+  );
+  return data;
+};
+
+export const saveReportAIComments = async (
+  companyId: number,
+  scenarioId: number,
+  comments: ReportAICommentsResponse
+): Promise<ReportAICommentsResponse> => {
+  const { data } = await api.put<ReportAICommentsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/report/ai-comments`,
+    comments
   );
   return data;
 };

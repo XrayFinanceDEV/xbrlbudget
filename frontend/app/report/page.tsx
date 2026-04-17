@@ -3,14 +3,16 @@
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
-import { getReportAIComments, generateReportAIComments, type ReportAICommentsResponse } from "@/lib/api";
+import { getReportAIComments, generateReportAIComments, saveReportAIComments, type ReportAICommentsResponse } from "@/lib/api";
 import type { ScenarioAnalysis, BudgetScenario } from "@/types/api";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Textarea } from "@/components/ui/textarea";
 import { FileText, Loader2, AlertTriangle, Sparkles, Printer } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 import { ReportTOC } from "@/components/report/report-toc";
@@ -83,6 +85,20 @@ export default function ReportPage() {
       toast.error("Errore nella generazione dei commenti AI");
     } finally {
       setAiCommentsLoading(false);
+    }
+  };
+
+  // Save AI comments on blur (user edits)
+  const handleCommentChange = (key: keyof ReportAICommentsResponse, value: string) => {
+    setAiComments((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleCommentBlur = async () => {
+    if (!selectedCompanyId || !selectedScenario) return;
+    try {
+      await saveReportAIComments(selectedCompanyId, selectedScenario.id, aiComments);
+    } catch {
+      // silent — toast on repeated failures would be noisy
     }
   };
 
@@ -172,43 +188,70 @@ export default function ReportPage() {
           <div className="print:hidden">
             <ReportTOC />
           </div>
-          <div className="flex-1 min-w-0 space-y-6 print:space-y-1">
-            <ReportCover data={analysisData} />
-            <div className="print-section-group print:space-y-1 space-y-2">
+          <div className="flex-1 min-w-0 space-y-6 print:space-y-2">
+            <div className="report-section">
+              <ReportCover data={analysisData} />
+            </div>
+            {/* Editable overall AI comment — like Stampa tab CommentBlock */}
+            <div className={cn("report-ai-comment rounded-md border border-border/60 bg-muted/20 p-3 print:p-2", !aiComments.overall_comment && !aiCommentsLoading && "print:hidden")}>
+              {aiCommentsLoading ? (
+                <div className="flex items-start gap-3 py-1">
+                  <Sparkles className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0 animate-pulse" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-full bg-muted animate-pulse rounded" />
+                    <div className="h-4 w-3/4 bg-muted animate-pulse rounded" />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Textarea
+                    value={aiComments.overall_comment ?? ""}
+                    onChange={(e) => handleCommentChange("overall_comment", e.target.value)}
+                    onBlur={handleCommentBlur}
+                    placeholder="Commento complessivo sull'analisi (clicca 'Commenti AI' per generare o scrivi manualmente)..."
+                    className="min-h-[80px] resize-y text-sm bg-transparent border-0 focus-visible:ring-1 print:hidden"
+                  />
+                  {aiComments.overall_comment && (
+                    <p className="hidden print:block text-xs leading-relaxed whitespace-pre-wrap m-0">
+                      {aiComments.overall_comment}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="report-section space-y-2 print:space-y-1">
               <ReportDashboard data={analysisData} />
               <ReportAIComment comment={aiComments.dashboard_comment} loading={aiCommentsLoading} />
             </div>
-            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+            <div className="report-section space-y-2 print:space-y-1">
               <ReportComposition data={analysisData} />
               <ReportAIComment comment={aiComments.composition_comment} loading={aiCommentsLoading} />
             </div>
-            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+            <div className="report-section space-y-2 print:space-y-1">
               <ReportIncomeMargins data={analysisData} />
               <ReportAIComment comment={aiComments.income_margins_comment} loading={aiCommentsLoading} />
             </div>
-            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+            <div className="report-section space-y-2 print:space-y-1">
               <ReportStructural data={analysisData} />
               <ReportAIComment comment={aiComments.structural_comment} loading={aiCommentsLoading} />
             </div>
             <ReportRatios data={analysisData} aiComments={aiComments} aiCommentsLoading={aiCommentsLoading} />
-            <div className="print:break-before-page">
-              <ReportScoring data={analysisData} />
-            </div>
-            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+            <ReportScoring data={analysisData} />
+            <div className="report-section space-y-2 print:space-y-1">
               <ReportBreakEven data={analysisData} />
               <ReportAIComment comment={aiComments.break_even_comment} loading={aiCommentsLoading} />
             </div>
-            <div className="print:break-before-page print-section-group print:space-y-1 space-y-2">
+            <div className="report-section space-y-2 print:space-y-1">
               <ReportCashflow data={analysisData} />
               <ReportAIComment comment={aiComments.cashflow_comment} loading={aiCommentsLoading} />
             </div>
-            <div className="print:break-before-page">
+            <div className="report-section print:break-before-page">
               <ReportAppendices data={analysisData} section="bs" />
             </div>
-            <div className="print:break-before-page">
+            <div className="report-section">
               <ReportAppendices data={analysisData} section="is" />
             </div>
-            <div>
+            <div className="report-section print:break-before-page">
               <ReportNotes />
             </div>
           </div>

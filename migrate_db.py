@@ -66,6 +66,7 @@ MIGRATIONS = {
     "budget_scenarios": [
         ("scenario_type",                      "VARCHAR(20) DEFAULT 'budget' NOT NULL"),
         ("period_months",                      "INTEGER"),
+        ("ai_comment_overall",                 "TEXT"),
         ("ai_comment_dashboard",               "TEXT"),
         ("ai_comment_composition",             "TEXT"),
         ("ai_comment_income_margins",          "TEXT"),

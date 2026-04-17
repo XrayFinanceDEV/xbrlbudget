@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function ReportNotes() {
   return (
-    <section id="notes" className="print:break-before-page">
+    <section id="notes">
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Note Metodologiche</CardTitle>

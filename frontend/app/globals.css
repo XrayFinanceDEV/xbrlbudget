@@ -135,10 +135,23 @@
     border-color: hsl(220, 13%, 87%) !important;
   }
 
-  /* Page setup */
+  /* Page setup with page numbers in bottom-right */
   @page {
     size: A4;
-    margin: 12mm 10mm;
+    margin: 12mm 10mm 16mm 10mm;
+    @bottom-right {
+      content: "Pagina " counter(page) " di " counter(pages);
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      font-size: 9px;
+      color: hsl(215.4, 16.3%, 46.9%);
+      margin-top: 4mm;
+    }
+  }
+  /* First page (cover): no page number */
+  @page :first {
+    @bottom-right {
+      content: "";
+    }
   }
 
   /* Constrain content to page width */
@@ -184,6 +197,19 @@
   /* Keep chart+table blocks together when they fit */
   .print-together {
     break-inside: avoid;
+  }
+
+  /* Report sections: keep each section (card + optional AI comment) together.
+     Browser will move a section to the next page rather than split it. */
+  .report-section {
+    break-inside: avoid;
+  }
+
+  /* AI comment blocks must never split across pages and should stay
+     attached to the preceding section whenever possible. */
+  .report-ai-comment {
+    break-inside: avoid;
+    break-before: avoid;
   }
 
   /* Section groups flow naturally */

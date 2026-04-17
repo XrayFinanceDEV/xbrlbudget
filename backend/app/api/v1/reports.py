@@ -1,7 +1,8 @@
 """
 Reports API endpoint - AI comments for report sections
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Dict, Optional
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -63,3 +64,25 @@ def generate_ai_comments(
     if comments:
         save_comments(db, scenario_id, comments)
     return comments
+
+
+@router.put(
+    "/companies/{company_id}/scenarios/{scenario_id}/report/ai-comments",
+    summary="Save user-edited report AI comments",
+    description="Persist user edits to report AI comments (no LLM call).",
+    responses={
+        200: {"description": "Saved comments"},
+        404: {"description": "Company or scenario not found"},
+    }
+)
+def save_ai_comments(
+    company_id: int,
+    scenario_id: int,
+    comments: Dict[str, Optional[str]] = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Save user-edited AI comments to DB without LLM call."""
+    validate_company_owned_by_user(db, company_id, user_id)
+    save_comments(db, scenario_id, comments)
+    return get_stored_comments(db, scenario_id)

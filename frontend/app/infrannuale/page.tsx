@@ -1182,9 +1182,8 @@ function fieldCategory(field: string): AcctCategory | null {
 // Double-entry categories allowed for a given edit direction and mode.
 // "rettifica" = cross-side double-entry (BS↔CE or ATTIVO↔PASSIVO) — affects P&L.
 // "riclassifica" = same-side reclassification (SP→SP or CE→CE) — no P&L impact.
-function allowedCounterpartCategories(editedField: string, delta: number, mode: ProposalMode): Set<AcctCategory> {
+function allowedCounterpartCategories(editedField: string, _delta: number, mode: ProposalMode): Set<AcctCategory> {
   const cat = fieldCategory(editedField);
-  const pos = delta > 0;
   if (mode === "riclassifica") {
     // Same-side only: ATTIVO↔ATTIVO, PASSIVO↔PASSIVO, CE↔CE (any CE sub-type)
     if (cat === "ATTIVO") return new Set<AcctCategory>(["ATTIVO"]);
@@ -1192,11 +1191,23 @@ function allowedCounterpartCategories(editedField: string, delta: number, mode: 
     if (cat === "CE_POS" || cat === "CE_NEG") return new Set<AcctCategory>(["CE_POS", "CE_NEG"]);
     return new Set<AcctCategory>(["ATTIVO", "PASSIVO", "CE_POS", "CE_NEG"]);
   }
-  // "rettifica" — cross-side double-entry (original logic)
-  if (cat === "ATTIVO") return pos ? new Set<AcctCategory>(["PASSIVO", "CE_POS"]) : new Set<AcctCategory>(["PASSIVO", "CE_NEG"]);
-  if (cat === "PASSIVO") return pos ? new Set<AcctCategory>(["ATTIVO", "CE_NEG"]) : new Set<AcctCategory>(["ATTIVO", "CE_POS"]);
+  // "rettifica" — cross-side: show every counterpart category, sign is auto-computed
+  // via computeCpDelta so the user can pick freely without producing an unbalanced posting.
+  if (cat === "ATTIVO") return new Set<AcctCategory>(["PASSIVO", "CE_POS", "CE_NEG"]);
+  if (cat === "PASSIVO") return new Set<AcctCategory>(["ATTIVO", "CE_POS", "CE_NEG"]);
   if (cat === "CE_POS" || cat === "CE_NEG") return new Set<AcctCategory>(["ATTIVO", "PASSIVO"]);
   return new Set<AcctCategory>(["ATTIVO", "PASSIVO", "CE_POS", "CE_NEG"]);
+}
+
+// Double-entry sign rule, derived from A - L - C - R - Rev + Cost = 0.
+// Same coefficient group ({ATTIVO, CE_NEG} vs {PASSIVO, CE_POS}) → opposite delta;
+// cross-group → same delta. Returns the counterpart delta given an edit delta.
+function computeCpDelta(editedField: string, counterpartField: string, editDelta: number): number {
+  const ec = fieldCategory(editedField);
+  const cc = fieldCategory(counterpartField);
+  if (!ec || !cc) return -editDelta;
+  const coeff = (c: AcctCategory) => (c === "ATTIVO" || c === "CE_NEG") ? 1 : -1;
+  return coeff(ec) === coeff(cc) ? -editDelta : editDelta;
 }
 
 // Selectable counterparts grouped for the picker dropdown.
@@ -2376,6 +2387,7 @@ function RettificheTab({
                         {counterpartPicker((newField) => update({
                           counterpartField: newField,
                           counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                          proposedDelta: computeCpDelta(p.editedField, newField, p.delta),
                           splitAlt: undefined,
                         }))}
                         <Input
@@ -2415,6 +2427,7 @@ function RettificheTab({
                       {counterpartPicker((newField) => update({
                         counterpartField: newField,
                         counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                        proposedDelta: computeCpDelta(p.editedField, newField, p.delta),
                       }))}
                       <Input
                         className="h-7 w-36 text-right text-xs font-mono tabular-nums"

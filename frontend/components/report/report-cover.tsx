@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { getSectorName } from "@/lib/formatters";
+import { useAuth } from "@/contexts/AuthContext";
 import type { ScenarioAnalysis } from "@/types/api";
 
 interface ReportCoverProps {
@@ -9,6 +10,7 @@ interface ReportCoverProps {
 }
 
 export function ReportCover({ data }: ReportCoverProps) {
+  const { logoUrl, userName } = useAuth();
   const company = data.scenario.company;
   const allYears = [
     ...data.historical_years.map((y) => y.year),
@@ -31,11 +33,32 @@ export function ReportCover({ data }: ReportCoverProps) {
   return (
     <section id="cover">
       <Card>
-        <CardContent className="py-4 print:py-2">
-          <div className="text-center mb-3 print:mb-2">
-            <h2 className="text-2xl font-bold text-foreground print:text-xl">{company.name}</h2>
-            <p className="text-base text-muted-foreground print:text-sm">
-              Relazione sullo Scenario Economico Finanziario — Anni {minYear} - {maxYear}
+        <CardContent className="py-4 print:py-2 relative">
+          {/* Upper-left: consulting firm branding */}
+          {(logoUrl || userName) && (
+            <div className="absolute left-4 top-4 print:left-2 print:top-2 flex items-center gap-2 max-w-[45%]">
+              {logoUrl && (
+                <img
+                  src={logoUrl}
+                  alt="Logo"
+                  className="h-10 w-auto object-contain print:h-8"
+                />
+              )}
+              {userName && (
+                <span className="text-xs font-medium text-muted-foreground leading-tight">
+                  {userName}
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="text-center mb-3 print:mb-2 pt-12 print:pt-10">
+            <h2 className="text-3xl font-bold text-foreground print:text-2xl">
+              Relazione sullo Scenario Economico Finanziario
+            </h2>
+            <p className="text-lg font-semibold print:text-base mt-1">{company.name}</p>
+            <p className="text-sm text-muted-foreground print:text-xs">
+              Anni {minYear} - {maxYear}
             </p>
           </div>
 

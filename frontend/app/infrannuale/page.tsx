@@ -4894,7 +4894,7 @@ function StampaContent({
 }) {
   const router = useRouter();
   const { refreshCompanies, refreshYears } = useApp();
-  const { logoUrl } = useAuth();
+  const { logoUrl, userName } = useAuth();
   const [promoting, setPromoting] = useState(false);
   const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
@@ -5160,21 +5160,35 @@ function StampaContent({
       </div>
 
       {/* Header */}
-      <div className="text-center space-y-1 print:mb-4">
-        {logoUrl && (
-          <img
-            src={logoUrl}
-            alt="Logo"
-            className="mx-auto h-10 w-auto object-contain print:h-8 mb-2"
-          />
+      <div className="relative print:mb-4">
+        {/* Upper-left: consulting firm branding */}
+        {(logoUrl || userName) && (
+          <div className="absolute left-0 top-0 flex items-center gap-2 max-w-[45%]">
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt="Logo"
+                className="h-10 w-auto object-contain print:h-8"
+              />
+            )}
+            {userName && (
+              <span className="text-xs font-medium text-muted-foreground leading-tight">
+                {userName}
+              </span>
+            )}
+          </div>
         )}
-        <h1 className="text-xl font-bold">{companyName}</h1>
-        <p className="text-sm text-muted-foreground">
-          Analisi Infrannuale {periodMonths === 12 ? "" : `${periodMonths}M `}{partialYear}{periodMonths !== 12 ? ` — Proiezione 12M ${partialYear}` : ""}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Anno di riferimento: {refYear} | Data: {new Date().toLocaleDateString("it-IT")}
-        </p>
+
+        {/* Centered title block */}
+        <div className="text-center space-y-1 pt-12 print:pt-10">
+          <h1 className="text-3xl font-bold print:text-2xl">
+            Analisi Infrannuale {periodMonths === 12 ? "" : `${periodMonths}M `}{partialYear}{periodMonths !== 12 ? ` — Proiezione 12M ${partialYear}` : ""}
+          </h1>
+          <p className="text-lg font-semibold print:text-base">{companyName}</p>
+          <p className="text-xs text-muted-foreground">
+            Anno di riferimento: {refYear} | Data: {new Date().toLocaleDateString("it-IT")}
+          </p>
+        </div>
       </div>
 
       {/* Overall AI commentary — rendered before the first table, editable */}

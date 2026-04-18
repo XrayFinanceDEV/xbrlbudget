@@ -3,9 +3,11 @@
 import { usePathname } from "next/navigation";
 import { BarChart3, CalendarClock } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function AppHeader() {
   const pathname = usePathname();
+  const { logoUrl, userName } = useAuth();
   const isInfrannuale = pathname.startsWith("/infrannuale");
 
   const title = isInfrannuale
@@ -32,7 +34,25 @@ export function AppHeader() {
             </p>
           </div>
         </div>
-        <ModeToggle />
+        <div className="flex items-center gap-3">
+          {(logoUrl || userName) && (
+            <div className="flex items-center gap-2 max-w-[260px]">
+              {logoUrl && (
+                <img
+                  src={logoUrl}
+                  alt="Logo"
+                  className="h-8 w-auto object-contain"
+                />
+              )}
+              {userName && (
+                <span className="text-xs font-medium text-muted-foreground leading-tight truncate">
+                  {userName}
+                </span>
+              )}
+            </div>
+          )}
+          <ModeToggle />
+        </div>
       </div>
     </header>
   );

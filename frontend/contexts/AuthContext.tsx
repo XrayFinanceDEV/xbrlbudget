@@ -9,6 +9,8 @@ interface AuthContextType {
   isLoading: boolean;
   /** Logo URL from parent app (postMessage) or JWT user_metadata */
   logoUrl: string | null;
+  /** Consulting firm / user display name (Ragione Sociale) from parent or JWT */
+  userName: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
 
   // Sync token to API client
   useEffect(() => {
@@ -47,23 +50,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(event.data.token);
         setIsLoading(false);
 
-        // Accept logo_url from parent postMessage (preferred)
-        if (event.data.logo_url) {
-          setLogoUrl(event.data.logo_url);
+        // Accept logo_url + name from parent postMessage (preferred)
+        const parentLogo = event.data.logo_url;
+        const parentName = event.data.ragione_sociale ?? event.data.company_name ?? event.data.name;
+
+        const payload = decodeJwtPayload(event.data.token);
+        const meta = payload?.user_metadata as Record<string, unknown> | undefined;
+
+        if (typeof parentLogo === "string" && parentLogo) {
+          setLogoUrl(parentLogo);
         } else {
-          // Fallback: try to extract from JWT user_metadata
-          const payload = decodeJwtPayload(event.data.token);
-          const meta = payload?.user_metadata as Record<string, unknown> | undefined;
           const logo = meta?.logo_url ?? meta?.avatar_url ?? meta?.logo;
-          if (typeof logo === "string" && logo) {
-            setLogoUrl(logo);
-          }
+          if (typeof logo === "string" && logo) setLogoUrl(logo);
+        }
+
+        if (typeof parentName === "string" && parentName) {
+          setUserName(parentName);
+        } else {
+          const name = meta?.ragione_sociale ?? meta?.company_name ?? meta?.full_name ?? meta?.name;
+          if (typeof name === "string" && name) setUserName(name);
         }
       }
 
       if (event.data?.type === "AUTH_LOGOUT") {
         setToken(null);
         setLogoUrl(null);
+        setUserName(null);
       }
     };
 
@@ -94,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!token,
         isLoading,
         logoUrl,
+        userName,
       }}
     >
       {children}

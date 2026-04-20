@@ -36,6 +36,7 @@ def require_admin(x_admin_key: Optional[str] = Header(None)) -> None:
 @router.get("/admin/uploads", dependencies=[Depends(require_admin)])
 def list_uploads(
     user_id: Optional[str] = Query(None, description="Filter by Supabase user_id"),
+    user_email: Optional[str] = Query(None, description="Filter by email (case-insensitive substring)"),
     file_type: Optional[str] = Query(None, description="xbrl | csv | pdf"),
     status: Optional[str] = Query(None, description="pending | success | error"),
     company_id: Optional[int] = Query(None),
@@ -54,6 +55,8 @@ def list_uploads(
     q = db.query(UploadedFile)
     if user_id:
         q = q.filter(UploadedFile.user_id == user_id)
+    if user_email:
+        q = q.filter(UploadedFile.user_email.ilike(f"%{user_email}%"))
     if file_type:
         q = q.filter(UploadedFile.file_type == file_type)
     if status:
@@ -73,6 +76,7 @@ def list_uploads(
             {
                 "id": r.id,
                 "user_id": r.user_id,
+                "user_email": r.user_email,
                 "company_id": r.company_id,
                 "filename": r.filename,
                 "file_type": r.file_type,
@@ -94,6 +98,7 @@ def get_upload(upload_id: int, db: Session = Depends(get_db)):
     return {
         "id": r.id,
         "user_id": r.user_id,
+        "user_email": r.user_email,
         "company_id": r.company_id,
         "filename": r.filename,
         "file_type": r.file_type,

@@ -40,6 +40,7 @@ def save_upload(
     file_type: str,
     content: bytes,
     company_id: Optional[int] = None,
+    user_email: Optional[str] = None,
 ) -> UploadedFile:
     """
     Persist the uploaded bytes to disk and create a pending UploadedFile row.
@@ -66,6 +67,7 @@ def save_upload(
 
         record = UploadedFile(
             user_id=user_id,
+            user_email=(user_email[:255] if user_email else None),
             company_id=company_id,
             filename=filename[:255],
             file_type=file_type,

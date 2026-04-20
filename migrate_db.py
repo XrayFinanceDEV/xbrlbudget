@@ -141,6 +141,9 @@ MIGRATIONS = {
         ("ce17b_override",                     "NUMERIC(15,2)"),
         ("ce20_override",                      "NUMERIC(15,2)"),
     ],
+    "uploaded_files": [
+        ("user_email",                         "VARCHAR(255)"),
+    ],
 }
 
 NEW_TABLES = {
@@ -156,6 +159,7 @@ NEW_TABLES = {
             status VARCHAR(20) NOT NULL DEFAULT 'pending',
             error_message TEXT,
             error_traceback TEXT,
+            user_email VARCHAR(255),
             uploaded_at DATETIME
         )
     """,

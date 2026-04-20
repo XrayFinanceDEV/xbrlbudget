@@ -4,7 +4,7 @@ Dev mode bypass via DEV_USER_ID environment variable.
 """
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
+from typing import NamedTuple, Optional
 import jwt
 
 from app.core.config import settings
@@ -13,14 +13,19 @@ from app.core.config import settings
 security = HTTPBearer(auto_error=False)
 
 
-def get_current_user_id(
+class CurrentUser(NamedTuple):
+    id: str
+    email: Optional[str]
+
+
+def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> str:
+) -> CurrentUser:
     """
-    Extract user_id from Supabase JWT or dev fallback.
+    Extract user id (+ email when available) from Supabase JWT or dev fallback.
 
     Priority:
-    1. Authorization header present → validate JWT, extract sub claim
+    1. Authorization header present → validate JWT, extract sub + email claims
     2. No header + DEV_USER_ID set → return DEV_USER_ID (dev mode)
     3. Otherwise → 401 Unauthorized
     """
@@ -62,11 +67,12 @@ def get_current_user_id(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        return user_id
+        email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
+        return CurrentUser(id=user_id, email=email)
 
     # Case 2: Dev mode fallback
     if settings.DEV_USER_ID:
-        return settings.DEV_USER_ID
+        return CurrentUser(id=settings.DEV_USER_ID, email=None)
 
     # Case 3: No auth
     raise HTTPException(
@@ -74,3 +80,8 @@ def get_current_user_id(
         detail="Authentication required",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def get_current_user_id(user: CurrentUser = Depends(get_current_user)) -> str:
+    """Backwards-compatible shim — most routes only need the user id."""
+    return user.id

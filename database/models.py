@@ -1115,6 +1115,7 @@ class UploadedFile(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(36), nullable=True, index=True)
+    user_email = Column(String(255), nullable=True, index=True)  # captured from JWT at upload time
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
     file_type = Column(String(10), nullable=False)  # xbrl | csv | pdf

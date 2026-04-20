@@ -12,7 +12,7 @@ import traceback
 logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
-from app.core.auth import get_current_user_id
+from app.core.auth import CurrentUser, get_current_user, get_current_user_id
 from app.core.ownership import validate_company_owned_by_user, check_company_limit
 from app.schemas.imports import XBRLImportResponse, CSVImportResponse, ImportError
 from app.services.upload_tracker import save_upload, mark_success, mark_error
@@ -44,6 +44,7 @@ async def upload_xbrl(
     sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6, used when creating new company)"),
     period_months: Optional[int] = Query(None, ge=1, le=12, description="Months in partial year (1-12). NULL = full 12-month year"),
     user_id: str = Depends(get_current_user_id),
+    user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -96,7 +97,7 @@ async def upload_xbrl(
         raise HTTPException(status_code=400, detail="File is empty")
 
     # Track upload (persist file + DB row BEFORE parsing so hard crashes are captured)
-    upload_record = save_upload(db, user_id, file.filename, "xbrl", content, company_id=company_id)
+    upload_record = save_upload(db, user_id, file.filename, "xbrl", content, company_id=company_id, user_email=user.email)
 
     # Save to temporary file
     tmp_file = None
@@ -200,6 +201,7 @@ async def upload_csv(
     year1: Optional[int] = Query(None, description="First year (most recent, auto-detect if None)"),
     year2: Optional[int] = Query(None, description="Second year (previous, auto-detect if None)"),
     user_id: str = Depends(get_current_user_id),
+    user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -242,7 +244,7 @@ async def upload_csv(
         raise HTTPException(status_code=400, detail="File is empty")
 
     # Track upload
-    upload_record = save_upload(db, user_id, file.filename, "csv", content, company_id=company_id)
+    upload_record = save_upload(db, user_id, file.filename, "csv", content, company_id=company_id, user_email=user.email)
 
     # Save to temporary file
     tmp_file = None
@@ -321,6 +323,7 @@ async def upload_pdf(
     sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6, used when creating new company)"),
     period_months: Optional[int] = Query(None, ge=1, le=12, description="Months in partial year (1-12). NULL = full 12-month year"),
     user_id: str = Depends(get_current_user_id),
+    user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -377,7 +380,7 @@ async def upload_pdf(
         )
 
     # Track upload
-    upload_record = save_upload(db, user_id, file.filename, "pdf", content, company_id=company_id)
+    upload_record = save_upload(db, user_id, file.filename, "pdf", content, company_id=company_id, user_email=user.email)
 
     # Save to temporary file
     tmp_file = None

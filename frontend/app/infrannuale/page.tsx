@@ -3018,9 +3018,17 @@ export default function InfraannualePage() {
         getAdjustableFinancialYear(importResult.companyId, refYear).catch(() => null),
       ]);
       setAdjustableData(data);
-      // Merge reference year BS+IS into a single dict
+      // Merge reference year BS+IS into a single dict. Apply reconcileSubfields
+      // so bilancio abbreviato imports (which populate only aggregates like
+      // sp16_debiti_breve) plug the gap into "altri" sub-fields — otherwise the
+      // reference column shows a total with all detail rows empty.
       if (refData) {
-        setReferenceYearData({ ...refData.balance_sheet, ...refData.income_statement });
+        const refMerged: Record<string, number> = {
+          ...refData.balance_sheet,
+          ...refData.income_statement,
+        };
+        reconcileSubfields(refMerged);
+        setReferenceYearData(refMerged);
       }
       // Initialize corrections from SAVED values (balance_sheet/income_statement),
       // which include any previously applied rettifiche. Original values are used

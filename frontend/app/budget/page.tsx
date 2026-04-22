@@ -96,7 +96,9 @@ export default function BudgetPage() {
     if (!selectedCompanyId) return;
 
     try {
-      await generateForecast(selectedCompanyId, scenarioId, true);
+      // Do NOT clear overrides: Scenari-tab DETTAGLIO CE and /forecast/income
+      // both persist overrides the user expects to keep.
+      await generateForecast(selectedCompanyId, scenarioId, false);
       toast.success("Previsionale ricalcolato con successo!");
       invalidateScenarios(selectedCompanyId);
       invalidateAnalysis(selectedCompanyId, scenarioId);
@@ -561,8 +563,11 @@ function ScenarioForm({
         }
       }
 
-      // Generate forecast (clear_overrides=true resets manual CE edits)
-      await generateForecast(companyId, savedScenario.id, true);
+      // Generate forecast — do NOT pass clear_overrides: the DETTAGLIO CONTO
+      // ECONOMICO section on this tab writes ce02/03/10/11/13-19 overrides via
+      // the assumptions PUT we just made. Clearing them here would wipe the
+      // user's edits before the engine reads them.
+      await generateForecast(companyId, savedScenario.id, false);
 
       toast.success("Scenario salvato e previsionale calcolato con successo!");
       onSaved();

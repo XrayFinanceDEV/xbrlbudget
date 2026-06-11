@@ -11,6 +11,9 @@ DB_PATH = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__f
 print(f"Migrating: {DB_PATH}")
 
 MIGRATIONS = {
+    "companies": [
+        ("user_id", "VARCHAR(36)"),  # multi-tenancy: scope companies per user
+    ],
     "forecast_income_statements": [
         ("ce03a_incrementi_immobilizzazioni",  "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
         ("ce08a_tfr_accrual",                  "NUMERIC(15,2) DEFAULT 0 NOT NULL"),

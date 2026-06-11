@@ -471,22 +471,87 @@ class IVCEEMapper:
         """
         Validate IV CEE fundamental equation:
         Total Assets = Total Liabilities + Equity
+
+        Hardened against false positives:
+        1. A real balance sheet never has zero total assets. If totale_attivo == 0
+           (or both totals are 0, e.g. an empty extraction), validation fails.
+        2. The declared totals must be reconstructable from the AGGREGATE sub-items
+           (sp01..sp10 on the asset side, sp11..sp18 on the liability+equity side).
+           A plug that forced totale_passivo == totale_attivo no longer hides a real
+           imbalance, because each side is also checked against its own aggregates.
+
+        Note: only the OIC aggregates sp01..sp18 are summed here, NOT the detail
+        sub-fields (e.g. sp06a..sp06g). Bilanci abbreviati legitimately populate only
+        the aggregates and leave the detail at 0 — that is normal and must not fail.
         """
         total_attivo = data.get('totale_attivo', Decimal('0'))
         total_passivo = data.get('totale_passivo', Decimal('0'))
-
-        difference = abs(total_attivo - total_passivo)
         tolerance = Decimal('1.00')
 
-        if difference <= tolerance:
-            logger.info(f"Balance verified: Assets={total_attivo}, Liabilities={total_passivo}")
-            return True
-        else:
+        # --- Check 1: empty / zero-asset extraction is never a valid balance sheet ---
+        if total_attivo == Decimal('0'):
+            logger.error(
+                f"Balance FAILED: total assets is zero (Assets={total_attivo}, "
+                f"Liabilities={total_passivo}) — likely an empty extraction."
+            )
+            return False
+
+        # --- Check 2: declared Assets == declared Liabilities+Equity ---
+        difference = abs(total_attivo - total_passivo)
+        if difference > tolerance:
             logger.error(
                 f"Balance FAILED: Assets={total_attivo} != Liabilities={total_passivo} "
                 f"(difference: {difference})"
             )
             return False
+
+        # --- Check 3: aggregates must reconstruct the declared totals (blocking) ---
+        calculated_total_assets = (
+            data.get('sp01_crediti_soci', Decimal('0')) +
+            data.get('sp02_immob_immateriali', Decimal('0')) +
+            data.get('sp03_immob_materiali', Decimal('0')) +
+            data.get('sp04_immob_finanziarie', Decimal('0')) +
+            data.get('sp05_rimanenze', Decimal('0')) +
+            data.get('sp06_crediti_breve', Decimal('0')) +
+            data.get('sp07_crediti_lungo', Decimal('0')) +
+            data.get('sp08_attivita_finanziarie', Decimal('0')) +
+            data.get('sp09_disponibilita_liquide', Decimal('0')) +
+            data.get('sp10_ratei_risconti_attivi', Decimal('0'))
+        )
+
+        if abs(calculated_total_assets - total_attivo) > tolerance:
+            logger.error(
+                f"Balance FAILED: asset aggregates do not reconstruct declared total "
+                f"(sum sp01..sp10={calculated_total_assets}, totale_attivo={total_attivo}, "
+                f"difference: {abs(calculated_total_assets - total_attivo)})"
+            )
+            return False
+
+        calculated_total_liabilities = (
+            data.get('sp11_capitale', Decimal('0')) +
+            data.get('sp12_riserve', Decimal('0')) +
+            data.get('sp13_utile_perdita', Decimal('0')) +
+            data.get('sp14_fondi_rischi', Decimal('0')) +
+            data.get('sp15_tfr', Decimal('0')) +
+            data.get('sp16_debiti_breve', Decimal('0')) +
+            data.get('sp17_debiti_lungo', Decimal('0')) +
+            data.get('sp18_ratei_risconti_passivi', Decimal('0'))
+        )
+
+        if abs(calculated_total_liabilities - total_passivo) > tolerance:
+            logger.error(
+                f"Balance FAILED: liability/equity aggregates do not reconstruct declared total "
+                f"(sum sp11..sp18={calculated_total_liabilities}, totale_passivo={total_passivo}, "
+                f"difference: {abs(calculated_total_liabilities - total_passivo)})"
+            )
+            return False
+
+        logger.info(
+            f"Balance verified: Assets={total_attivo}, Liabilities={total_passivo}; "
+            f"aggregates reconstruct totals (assets={calculated_total_assets}, "
+            f"liab+equity={calculated_total_liabilities})"
+        )
+        return True
 
     def validate_hierarchy(self, data: Dict[str, Decimal]) -> List[str]:
         """

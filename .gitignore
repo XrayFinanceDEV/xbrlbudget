@@ -102,3 +102,9 @@ BKPS.XBRL
 
 # Docker env (contains secrets)
 .env.docker
+
+# Local SSL certs/keys (never commit secrets)
+ssl/
+
+# Local test PDFs (confidential client bilanci) + diagnostic harness
+Test/

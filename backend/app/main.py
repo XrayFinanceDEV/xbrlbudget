@@ -111,9 +111,16 @@ app.include_router(admin.router, prefix=settings.API_V1_PREFIX, tags=["admin"])
 
 if __name__ == "__main__":
     import uvicorn
+
+    ssl_keyfile = os.environ.get("SSL_KEYFILE")
+    ssl_certfile = os.environ.get("SSL_CERTFILE")
+    port = int(os.environ.get("PORT", 8000))
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG
+        port=port,
+        reload=settings.DEBUG,
+        ssl_keyfile=ssl_keyfile,
+        ssl_certfile=ssl_certfile
     )

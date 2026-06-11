@@ -220,6 +220,28 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
 
     # --- SP range ---
     sp_start = _find_start(SP_START_KEYWORDS)
+    # Relaxed SP start (sezioni contrapposte / "dettaglio voci"): some layouts have a
+    # "Stato patrimoniale" header but no plain "Attivo" token (they use ATTIVITA' /
+    # column headers), so the strict two-keyword match fails and the SP section text
+    # never reaches the LLM (empty BS — budget_249/188). Fall back to the
+    # "stato patrimoniale" header alone, on the FIRST page that has it and is not a CE
+    # page (avoid matching a running "...Conto Economico a Sezioni Contrapposte" header).
+    # "situazione patrimoniale" is the SP header used by some trial-balance / "bilancio
+    # di verifica" printouts that have no "Stato patrimoniale"/"Attivo" tokens at all.
+    _SP_HEADER_VARIANTS = ('stato patrimoniale', 'situazione patrimoniale')
+    if sp_start is None:
+        for i in range(total_pages):
+            t = page_texts[i]
+            if any(h in t for h in _SP_HEADER_VARIANTS) and 'conto economico' not in t:
+                sp_start = i
+                break
+        # If every page carries a combined SP+CE running header, accept the first
+        # SP-header page regardless (better than the first-6-pages last resort).
+        if sp_start is None:
+            for i in range(total_pages):
+                if any(h in page_texts[i] for h in _SP_HEADER_VARIANTS):
+                    sp_start = i
+                    break
     sp_end = None
     if sp_start is not None:
         sp_end = _find_end(SP_END_KEYWORDS, sp_start)
@@ -239,6 +261,35 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     # Relaxed: try "valore della produzione" alone after SP end (Dylog)
     if ce_start is None and sp_end is not None:
         ce_start = _find_start(["valore della produzione"], after_page=sp_end)
+
+    # Relaxed (sezioni contrapposte / "dettaglio voci" CE): some layouts have NO
+    # "valore della produzione" line at all — the CE is presented as two columns
+    # (RICAVI / COSTI) under a "Conto economico" header. Detect the CE section by the
+    # ricavi+costi column markers on a page after the SP section, so the CE text
+    # actually reaches the LLM (otherwise CE comes back all zeros — budget_188/338/135).
+    def _has_ce_columns(page_text: str) -> bool:
+        has_rev = ('ricavi' in page_text or 'ricavo' in page_text)
+        has_cost = ('costi' in page_text or 'costo' in page_text)
+        # require a CE section header on the page to avoid matching SP pages that
+        # merely mention "costi"/"ricavi" in a line description
+        has_ce_header = 'conto economico' in page_text
+        return has_rev and has_cost and has_ce_header
+
+    if ce_start is None:
+        search_from = (sp_end + 1) if sp_end is not None else (
+            (sp_start + 1) if sp_start is not None else 0
+        )
+        for i in range(search_from, total_pages):
+            if _has_ce_columns(page_texts[i]):
+                ce_start = i
+                break
+        # If nothing after SP end, retry across the whole document (CE may share a page
+        # with the SP tail in very compact statements)
+        if ce_start is None:
+            for i in range(total_pages):
+                if _has_ce_columns(page_texts[i]):
+                    ce_start = i
+                    break
 
     ce_end = None
     if ce_start is not None:
@@ -931,6 +982,26 @@ EXTRACTION RULES:
 - ce15_oneri_finanziari = item 17) interessi e altri oneri finanziari (total)
 - Items 2) and 3) may be merged; if so put the combined value in ce02_variazioni_rimanenze
 
+SEZIONI CONTRAPPOSTE / "DETTAGLIO VOCI" LAYOUTS (CRITICAL — do NOT return zeros):
+- Some statements do NOT have a classic single-column Conto Economico. Instead they
+  present the income statement as TWO SIDE-BY-SIDE SECTIONS: "RICAVI" (revenues, one side)
+  and "COSTI" (costs, the other side), often under a "Conto Economico" header, with
+  account-level detail lines (e.g. "06.01.01.01.001 Vendita beni ..." or "07.01.01.01.004 Merci").
+- You MUST still extract the CE values from these layouts. Treat the RICAVI side as the
+  revenue items (A) and the COSTI side as the cost items (B):
+  * Sum all "Vendita / Ricavi delle vendite e prestazioni" account lines into ce01_ricavi_vendite.
+  * Sum "Altri ricavi e proventi / contributi / sopravvenienze attive" into ce04_altri_ricavi.
+  * Map purchases of goods/raw materials ("Acquisti", "Merci", "Materie prime") to ce05_materie_prime.
+  * Map "per servizi" costs to ce06_servizi; "godimento beni di terzi"/affitti to ce07_godimento_beni.
+  * Map personnel ("Salari", "Stipendi", "Oneri sociali", "TFR") to ce08_costi_personale.
+  * Map "Ammortamenti"/"Svalutazioni" to ce09_ammortamenti.
+  * Map "Oneri diversi di gestione"/"sopravvenienze passive" to ce12_oneri_diversi.
+  * Map "Interessi"/"oneri finanziari" to ce15_oneri_finanziari; financial income to ce14.
+  * Map "Imposte sul reddito"/"IRES"/"IRAP" to ce20_imposte.
+- If only account-level lines are present (no IV CEE subtotals), AGGREGATE the relevant
+  detail lines yourself into the matching ce* field. NEVER leave the whole CE at zero when
+  revenue and cost lines are clearly present in the text.
+
 Extract the CURRENT YEAR values (the first/leftmost value column, not the prior year)."""
 
 CE_BOTH_YEARS_SYSTEM_PROMPT = """You are an expert Italian accountant specializing in Bilancio IV CEE (Schema di Conto Economico art. 2425 Codice Civile).
@@ -964,6 +1035,28 @@ EXTRACTION RULES:
 - ce11b_altri_accantonamenti = item 13) altri accantonamenti
 - ce15_oneri_finanziari = item 17) interessi e altri oneri finanziari (total)
 - Items 2) and 3) may be merged; if so put the combined value in ce02_variazioni_rimanenze
+
+SEZIONI CONTRAPPOSTE / "DETTAGLIO VOCI" LAYOUTS (CRITICAL — do NOT return zeros):
+- Some statements do NOT have a classic single-column Conto Economico. Instead they
+  present the income statement as TWO SIDE-BY-SIDE SECTIONS: "RICAVI" (revenues, one side)
+  and "COSTI" (costs, the other side), often under a "Conto Economico" header, with
+  account-level detail lines (e.g. "06.01.01.01.001 Vendita beni ..." or "07.01.01.01.004 Merci").
+- You MUST still extract the CE values from these layouts. Treat the RICAVI side as the
+  revenue items (A) and the COSTI side as the cost items (B):
+  * Sum all "Vendita / Ricavi delle vendite e prestazioni" account lines into ce01_ricavi_vendite.
+  * Sum "Altri ricavi e proventi / contributi / sopravvenienze attive" into ce04_altri_ricavi.
+  * Map purchases of goods/raw materials ("Acquisti", "Merci", "Materie prime") to ce05_materie_prime.
+  * Map "per servizi" costs to ce06_servizi; "godimento beni di terzi"/affitti to ce07_godimento_beni.
+  * Map personnel ("Salari", "Stipendi", "Oneri sociali", "TFR") to ce08_costi_personale.
+  * Map "Ammortamenti"/"Svalutazioni" to ce09_ammortamenti.
+  * Map "Oneri diversi di gestione"/"sopravvenienze passive" to ce12_oneri_diversi.
+  * Map "Interessi"/"oneri finanziari" to ce15_oneri_finanziari; financial income to ce14.
+  * Map "Imposte sul reddito"/"IRES"/"IRAP" to ce20_imposte.
+- If only account-level lines are present (no IV CEE subtotals), AGGREGATE the relevant
+  detail lines yourself into the matching ce* field. NEVER leave the whole CE at zero when
+  revenue and cost lines are clearly present in the text. This applies to BOTH year columns
+  when two columns are present; if there is only ONE value column, fill current_year only
+  and leave prior_year at 0.
 
 Extract BOTH columns: current_year (left column) and prior_year (right column)."""
 
@@ -1327,8 +1420,11 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     logger.info(f"SP totale_passivo = {balance_sheet_data.get('totale_passivo')}")
     logger.info(f"CE ce01_ricavi_vendite = {income_data.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate crediti; then debiti (using explicit totale_debiti when present);
-    # then equity (which uses the corrected debt aggregate to derive expected equity).
+    # Step 5: Fold the result into totale_passivo when the layout reports it net of
+    # the year's result (sezioni contrapposte / dettaglio voci); then validate crediti;
+    # then debiti (using explicit totale_debiti when present); then equity (which uses
+    # the corrected debt aggregate to derive expected equity).
+    balance_sheet_data = _reconcile_utile_in_passivo(balance_sheet_data, "single")
     balance_sheet_data = _validate_crediti(balance_sheet_data, "single")
     balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
     balance_sheet_data = _validate_equity(balance_sheet_data, "single")
@@ -1337,6 +1433,74 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
 
     return balance_sheet_data, income_data
+
+
+# Anti-masking guard: a plug correction is rejected (and surfaced as a warning)
+# when it would drive a field negative, or when its magnitude exceeds this fraction
+# of total assets (a correction that large is almost certainly a structural
+# extraction error, not a roundable discrepancy — better to flag than to hide).
+_PLUG_CAP_FRACTION = Decimal('0.05')
+
+
+def _plug_cap(balance_sheet_data: Dict[str, Decimal]) -> Decimal:
+    """Absolute cap on a single plug correction = 5% of totale_attivo (fallback to
+    totale_passivo, then a flat floor) so the cap is meaningful even when one total
+    is missing."""
+    base = abs(balance_sheet_data.get('totale_attivo', Decimal('0')))
+    if base == 0:
+        base = abs(balance_sheet_data.get('totale_passivo', Decimal('0')))
+    cap = base * _PLUG_CAP_FRACTION
+    # never below a flat floor so tiny statements still get a sane allowance
+    return max(cap, Decimal('5000'))
+
+
+def _flag_unbalanced(label: str, reason: str, diff: Decimal) -> None:
+    """Emit an explicit, visible imbalance warning so a rejected/insufficient plug
+    surfaces as an error instead of being silently masked.
+
+    Kept log-only (does not mutate the data dict) so the Dict[str, Decimal] contract
+    consumed by the mapper / harness stays intact."""
+    logger.warning(f"BILANCIO NON QUADRATO [{label}]: {reason} (diff={diff})")
+
+
+def _reconcile_utile_in_passivo(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
+    """Add the result of the year (sp13) into totale_passivo when the layout reports
+    'Totale Passivo' NET of the result.
+
+    In "sezioni contrapposte" / "dettaglio voci" layouts the bottom of the liabilities
+    column shows a 'Totale Passivo' that excludes the 'Utile/Perdita d'esercizio' line
+    (the result sits on its own line, often next to 'Totale a pareggio'). The tell-tale
+    sign is that the balance gap equals exactly the result:
+
+        totale_attivo - totale_passivo == sp13_utile_perdita   (within tolerance)
+
+    When detected, fold sp13 into totale_passivo so the downstream debt/equity
+    validators derive the correct aggregates instead of cannibalising the reserves
+    (budget_188 diff 133.744=utile; budget_249 diff 56.999=utile; budget_338 diff
+    80.228≈utile; budget_213 perdita 90.819).
+    """
+    tot_attivo = balance_sheet_data.get('totale_attivo', Decimal('0'))
+    tot_passivo = balance_sheet_data.get('totale_passivo', Decimal('0'))
+    sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+
+    if tot_attivo == 0 or tot_passivo == 0 or sp13 == 0:
+        return balance_sheet_data
+
+    gap = tot_attivo - tot_passivo
+    # gap must match the result (same sign and magnitude) within a small tolerance.
+    # Use a relative tolerance too, to absorb rounding on large statements.
+    tol = max(Decimal('1'), abs(tot_attivo) * Decimal('0.0005'))
+    if abs(gap - sp13) <= tol and abs(gap) > Decimal('1'):
+        new_passivo = tot_passivo + sp13
+        logger.warning(
+            f"[{label}] Totale Passivo appears NET of result: "
+            f"totale_attivo={tot_attivo}, totale_passivo={tot_passivo}, "
+            f"gap={gap} ≈ utile(sp13)={sp13}. Folding result into totale_passivo "
+            f"({tot_passivo} -> {new_passivo})."
+        )
+        balance_sheet_data['totale_passivo'] = new_passivo
+
+    return balance_sheet_data
 
 
 def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
@@ -1366,34 +1530,37 @@ def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dic
     actual_crediti = sp06 + sp07
 
     diff = actual_crediti - expected_crediti
-    if diff > Decimal('1') and sp07 > 0 and abs(diff - sp07) <= Decimal('1'):
-        # Classic double-count: LLM put total crediti in sp06, then also added sp07
-        new_sp06 = expected_crediti - sp07
+    cap = _plug_cap(balance_sheet_data)
+
+    def _apply_sp06(new_sp06: Decimal, kind: str) -> None:
+        """Apply the sp06 plug only if it passes the anti-masking guards
+        (non-negative result + magnitude under cap); otherwise flag the imbalance."""
+        change = abs(new_sp06 - sp06)
+        if new_sp06 < 0:
+            _flag_unbalanced(label, f"crediti {kind}: refusing sp06 plug -> {new_sp06} (negative)", diff)
+            return
+        if change > cap:
+            _flag_unbalanced(
+                label,
+                f"crediti {kind}: sp06 plug {sp06} -> {new_sp06} exceeds cap {cap}; not applied",
+                diff,
+            )
+            return
         logger.warning(
-            f"[{label}] Crediti double-count detected: sp06+sp07={actual_crediti} but "
-            f"expected={expected_crediti} (diff={diff} ≈ sp07={sp07}). "
-            f"Correcting sp06 from {sp06} to {new_sp06}"
+            f"[{label}] Crediti {kind}: sp06+sp07={actual_crediti} but expected={expected_crediti} "
+            f"(diff={diff}). Correcting sp06 from {sp06} to {new_sp06}"
         )
         balance_sheet_data['sp06_crediti_breve'] = new_sp06
+
+    if diff > Decimal('1') and sp07 > 0 and abs(diff - sp07) <= Decimal('1'):
+        # Classic double-count: LLM put total crediti in sp06, then also added sp07
+        _apply_sp06(expected_crediti - sp07, "double-count")
     elif diff > Decimal('1'):
         # General overshoot — correct sp06
-        new_sp06 = expected_crediti - sp07
-        if new_sp06 >= 0:
-            logger.warning(
-                f"[{label}] Crediti mismatch: sp06+sp07={actual_crediti} but "
-                f"expected={expected_crediti} (diff={diff}). Correcting sp06 to {new_sp06}"
-            )
-            balance_sheet_data['sp06_crediti_breve'] = new_sp06
+        _apply_sp06(expected_crediti - sp07, "overshoot")
     elif diff < Decimal('-1'):
         # Undershoot — LLM likely missed "imposte anticipate" or other crediti items
-        new_sp06 = expected_crediti - sp07
-        if new_sp06 >= 0:
-            logger.warning(
-                f"[{label}] Crediti undershoot: sp06+sp07={actual_crediti} but "
-                f"expected={expected_crediti} (missing={abs(diff)}, likely imposte anticipate). "
-                f"Correcting sp06 from {sp06} to {new_sp06}"
-            )
-            balance_sheet_data['sp06_crediti_breve'] = new_sp06
+        _apply_sp06(expected_crediti - sp07, "undershoot (likely imposte anticipate)")
 
     # Reconcile debtor-type breakdown against the aggregates.
     # Residual (aggregate − sum of a..g) plugs into the "altri" bucket (g), so
@@ -1415,11 +1582,25 @@ def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dic
         breakdown_sum = sum(balance_sheet_data.get(g, Decimal('0')) for g in groups)
         residual = total - breakdown_sum
         if abs(residual) > Decimal('1'):
-            logger.info(
-                f"[{label}] Credit breakdown residual for {aggregate}: "
-                f"aggregate={total}, breakdown_sum={breakdown_sum}, plugging {residual} into {altri_key}"
-            )
-            balance_sheet_data[altri_key] = balance_sheet_data.get(altri_key, Decimal('0')) + residual
+            current_altri = balance_sheet_data.get(altri_key, Decimal('0'))
+            new_altri = current_altri + residual
+            # Anti-masking guard: never let the "altri" bucket go negative. A negative
+            # residual means the typed sub-totals exceed the aggregate; lift the
+            # aggregate to the breakdown sum instead of fabricating a negative credit.
+            if new_altri < 0:
+                _flag_unbalanced(
+                    label,
+                    f"crediti breakdown {aggregate}: residual {residual} would make {altri_key} "
+                    f"negative ({new_altri}); raising aggregate to breakdown_sum {breakdown_sum} instead",
+                    residual,
+                )
+                balance_sheet_data[aggregate] = breakdown_sum
+            else:
+                logger.info(
+                    f"[{label}] Credit breakdown residual for {aggregate}: "
+                    f"aggregate={total}, breakdown_sum={breakdown_sum}, plugging {residual} into {altri_key}"
+                )
+                balance_sheet_data[altri_key] = new_altri
 
     return balance_sheet_data
 
@@ -1453,15 +1634,26 @@ def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
 
     debt_sum = sp16 + sp17
     diff = abs(debt_sum - total_debiti)
+    cap = _plug_cap(balance_sheet_data)
 
     if diff > Decimal('1') and total_debiti > 0:
         new_sp16 = total_debiti - sp17
         if new_sp16 >= 0:
-            logger.warning(
-                f"[{label}] Debt mismatch ({source}): sp16+sp17={debt_sum} but total debiti={total_debiti} "
-                f"(diff={diff}). Correcting sp16 from {sp16} to {new_sp16}"
-            )
-            balance_sheet_data['sp16_debiti_breve'] = new_sp16
+            # Cap guard: a sp16 plug larger than 5% of total assets is almost
+            # certainly a structural error (e.g. inferred total_debiti was wrong
+            # because totale_passivo was net of the result). Flag instead of mask.
+            if source == "inferred" and abs(new_sp16 - sp16) > cap:
+                _flag_unbalanced(
+                    label,
+                    f"debiti (inferred): sp16 plug {sp16} -> {new_sp16} exceeds cap {cap}; not applied",
+                    diff,
+                )
+            else:
+                logger.warning(
+                    f"[{label}] Debt mismatch ({source}): sp16+sp17={debt_sum} but total debiti={total_debiti} "
+                    f"(diff={diff}). Correcting sp16 from {sp16} to {new_sp16}"
+                )
+                balance_sheet_data['sp16_debiti_breve'] = new_sp16
         else:
             # sp17 exceeds total debiti — correct sp17 instead
             logger.warning(
@@ -1491,11 +1683,27 @@ def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
         breakdown_sum = sum(balance_sheet_data.get(g, Decimal('0')) for g in groups)
         residual = total - breakdown_sum
         if abs(residual) > Decimal('1'):
-            logger.info(
-                f"[{label}] Debt breakdown residual for {aggregate}: "
-                f"aggregate={total}, breakdown_sum={breakdown_sum}, plugging {residual} into {altri_key}"
-            )
-            balance_sheet_data[altri_key] = balance_sheet_data.get(altri_key, Decimal('0')) + residual
+            current_altri = balance_sheet_data.get(altri_key, Decimal('0'))
+            new_altri = current_altri + residual
+            # Anti-masking guard: never let the "altri" bucket go negative. A negative
+            # residual means the LLM's typed sub-totals already EXCEED the aggregate
+            # (the breakdown, not the bucket, is wrong) — plugging it would produce an
+            # impossible negative debt (budget_213/249 sp16g/sp17g went negative).
+            # In that case lift the aggregate to the breakdown sum instead and flag.
+            if new_altri < 0:
+                _flag_unbalanced(
+                    label,
+                    f"debiti breakdown {aggregate}: residual {residual} would make {altri_key} "
+                    f"negative ({new_altri}); raising aggregate to breakdown_sum {breakdown_sum} instead",
+                    residual,
+                )
+                balance_sheet_data[aggregate] = breakdown_sum
+            else:
+                logger.info(
+                    f"[{label}] Debt breakdown residual for {aggregate}: "
+                    f"aggregate={total}, breakdown_sum={breakdown_sum}, plugging {residual} into {altri_key}"
+                )
+                balance_sheet_data[altri_key] = new_altri
 
     return balance_sheet_data
 
@@ -1518,12 +1726,38 @@ def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
     equity_diff = abs(computed_equity - expected_equity)
     if equity_diff > Decimal('1'):
         new_sp12 = expected_equity - sp11 - sp13
-        logger.warning(
-            f"[{label}] Equity mismatch: sp11+sp12+sp13={computed_equity} but "
-            f"totale_passivo-liabilities={expected_equity} (diff={equity_diff}). "
-            f"Correcting sp12_riserve from {sp12} to {new_sp12}"
-        )
-        balance_sheet_data['sp12_riserve'] = new_sp12
+        change = abs(new_sp12 - sp12)
+        # Anti-masking guards on the reserves tap:
+        #  * never let reserves go negative (impossible total reserves);
+        #  * never absorb an EGREGIOUS discrepancy into reserves — that signals the
+        #    imbalance is structural (wrong debiti, totale_passivo net of the result,
+        #    missing liabilities) and must surface rather than hide in sp12
+        #    (budget_158/238 inflated reserves by >1 mln; budget_297 prior by ~900k).
+        # The equity cap is intentionally LOOSER than the crediti/debiti cap: moderate
+        # reserve corrections on small companies are legitimate (a €40k plug on a €350k
+        # statement is normal rounding/sub-item absorption — budget_275). We only reject
+        # plugs that are BOTH a large fraction of assets AND large in absolute terms.
+        equity_cap = max(_plug_cap(balance_sheet_data) * Decimal('3'), Decimal('150000'))
+        if new_sp12 < 0:
+            _flag_unbalanced(
+                label,
+                f"equity: refusing sp12 plug {sp12} -> {new_sp12} (negative reserves)",
+                equity_diff,
+            )
+        elif change > equity_cap:
+            _flag_unbalanced(
+                label,
+                f"equity: sp12 plug {sp12} -> {new_sp12} exceeds cap {equity_cap}; not applied "
+                f"(structural imbalance, not a reserve error)",
+                equity_diff,
+            )
+        else:
+            logger.warning(
+                f"[{label}] Equity mismatch: sp11+sp12+sp13={computed_equity} but "
+                f"totale_passivo-liabilities={expected_equity} (diff={equity_diff}). "
+                f"Correcting sp12_riserve from {sp12} to {new_sp12}"
+            )
+            balance_sheet_data['sp12_riserve'] = new_sp12
     return balance_sheet_data
 
 
@@ -1543,7 +1777,7 @@ def _validate_ce_imposte(
     vp = (
         ce_data.get('ce01_ricavi_vendite', Decimal('0'))
         + ce_data.get('ce02_variazioni_rimanenze', Decimal('0'))
-        + ce_data.get('ce03_lavori_in_economia', Decimal('0'))
+        + ce_data.get('ce03_lavori_interni', Decimal('0'))
         + ce_data.get('ce04_altri_ricavi', Decimal('0'))
     )
     copro = (
@@ -1570,15 +1804,104 @@ def _validate_ce_imposte(
     ce20 = ce_data.get('ce20_imposte', Decimal('0'))
     diff = abs(ce20 - expected_imposte)
 
-    if diff > Decimal('1') and abs(expected_imposte) < abs(ce20) + Decimal('1'):
+    # Only overwrite the extracted imposte when we are confident the LLM picked up
+    # the WRONG value (typically the other year's column on multi-year layouts).
+    # Guards against the failure mode where a miscomputed VdP (e.g. ce03 lavori
+    # interni excluded) produces a bogus expected_imposte that clobbers a correctly
+    # extracted ce20 (budget_256 GHEDA: real 117.892 was being forced to 28.421).
+    #
+    # Preconditions for a correction:
+    #   - sp13 must be a real BS anchor (non-zero); without it expected_imposte is
+    #     meaningless and we must not touch the extracted value.
+    #   - expected_imposte must be non-negative (negative => our CE reconstruction
+    #     is off, not the imposte) and smaller in magnitude than the extracted ce20
+    #     (the classic "wrong column was larger" case).
+    #   - the extracted ce20 must NOT already reconcile the BS utile: if
+    #     |risultato_ante - ce20 - sp13| <= 1 then PBT - imposte == utile_BS already,
+    #     so the extracted imposte is internally consistent and must be kept.
+    reconciles_bs = abs(risultato_ante - ce20 - sp13) <= Decimal('1')
+    if (
+        diff > Decimal('1')
+        and sp13 != 0
+        and expected_imposte >= 0
+        and abs(expected_imposte) < abs(ce20) + Decimal('1')
+        and not reconciles_bs
+    ):
         logger.warning(
             f"[{label}] ce20_imposte cross-check: extracted={ce20}, "
             f"expected (risultato_ante {risultato_ante} - utile_BS {sp13})={expected_imposte}. "
             f"Correcting."
         )
         ce_data['ce20_imposte'] = max(expected_imposte, Decimal('0'))
+    elif diff > Decimal('1'):
+        logger.info(
+            f"[{label}] ce20_imposte cross-check skipped (extracted={ce20}, "
+            f"expected={expected_imposte}, sp13={sp13}, reconciles_bs={reconciles_bs}): "
+            f"keeping extracted value."
+        )
 
     return ce_data
+
+
+def _prior_column_is_absent(
+    current_bs: Dict[str, Decimal],
+    current_ce: Dict[str, Decimal],
+    prior_bs: Dict[str, Decimal],
+    prior_ce: Dict[str, Decimal],
+) -> bool:
+    """Detect a MONOCOLUMN (single-year) PDF where the LLM fabricated a prior year.
+
+    On a one-column statement there is no prior column to read, so the model tends to
+    either (a) clone the current values into prior, or (b) leave prior almost empty
+    apart from an orphan figure it carried over. Both produce a bogus prior year that
+    the downstream "prior all zeros" guard in pdf_importer does NOT catch (because the
+    clone isn't zero). We detect the physical absence here and let the caller drop it.
+
+    Heuristics (any one is sufficient):
+      * Prior balance-sheet aggregates are a near-exact clone of current (same totale
+        attivo + same key items) AND prior CE has no revenue — i.e. the BS was copied
+        but there was never a second CE column. Clone of a real two-year statement
+        would have *different* totals, so equality is the tell.
+      * Prior has no meaningful activity at all (no totale_attivo and no CE revenue)
+        beyond a stray orphan value.
+    """
+    def _g(d: Dict[str, Decimal], k: str) -> Decimal:
+        return d.get(k, Decimal('0'))
+
+    cur_attivo = _g(current_bs, 'totale_attivo')
+    pri_attivo = _g(prior_bs, 'totale_attivo')
+    cur_ricavi = _g(current_ce, 'ce01_ricavi_vendite')
+    pri_ricavi = _g(prior_ce, 'ce01_ricavi_vendite')
+
+    # Key BS items to compare for clone detection
+    _KEY_BS = ['totale_attivo', 'totale_passivo', 'sp03_immob_materiali',
+               'sp06_crediti_breve', 'sp09_disponibilita_liquide',
+               'sp11_capitale', 'sp16_debiti_breve']
+
+    def _near(a: Decimal, b: Decimal) -> bool:
+        if a == 0 and b == 0:
+            return True
+        scale = max(abs(a), abs(b), Decimal('1'))
+        return abs(a - b) <= scale * Decimal('0.001')
+
+    bs_is_clone = (
+        cur_attivo != 0
+        and all(_near(_g(current_bs, k), _g(prior_bs, k)) for k in _KEY_BS)
+    )
+
+    # Prior CE essentially empty (no revenue) while current has revenue
+    prior_ce_empty = (pri_ricavi == 0 and cur_ricavi != 0)
+
+    if bs_is_clone and prior_ce_empty:
+        return True
+
+    # Prior has no real substance at all (everything zero apart from possible orphan)
+    prior_no_activity = (pri_attivo == 0 and pri_ricavi == 0)
+    current_has_activity = (cur_attivo != 0 or cur_ricavi != 0)
+    if prior_no_activity and current_has_activity:
+        return True
+
+    return False
 
 
 def extract_pdf_both_years_with_llm(
@@ -1671,8 +1994,25 @@ def extract_pdf_both_years_with_llm(
     logger.info(f"[current] SP totale_attivo={current_bs.get('totale_attivo')}, CE ricavi={current_ce.get('ce01_ricavi_vendite')}")
     logger.info(f"[prior]   SP totale_attivo={prior_bs.get('totale_attivo')}, CE ricavi={prior_ce.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Validate crediti; then debiti (using explicit totale_debiti when present);
-    # then equity (which uses the corrected debt aggregate to derive expected equity).
+    # Step 4b: Drop a fabricated prior year on MONOCOLUMN PDFs. When the source has a
+    # single value column, the LLM clones current into prior (or leaves an orphan), and
+    # the downstream "prior all zeros" guard can't catch a non-zero clone. Returning
+    # empty prior dicts here signals the importer to skip the prior year entirely
+    # (budget_315 BERTELLI provvisorio: prior was a clone of 2025 with CE all-zero and
+    # an orphan sp13).
+    if _prior_column_is_absent(current_bs, current_ce, prior_bs, prior_ce):
+        logger.warning(
+            "Prior-year column appears ABSENT (monocolumn PDF / fabricated prior): "
+            "discarding prior_bs and prior_ce."
+        )
+        return current_bs, current_ce, {}, {}
+
+    # Step 5: Fold the result into totale_passivo when the layout reports it net of
+    # the year's result (sezioni contrapposte / dettaglio voci); then validate crediti;
+    # then debiti (using explicit totale_debiti when present); then equity (which uses
+    # the corrected debt aggregate to derive expected equity).
+    current_bs = _reconcile_utile_in_passivo(current_bs, "current")
+    prior_bs = _reconcile_utile_in_passivo(prior_bs, "prior")
     current_bs = _validate_crediti(current_bs, "current")
     prior_bs = _validate_crediti(prior_bs, "prior")
     current_bs = _validate_debiti(current_bs, "current")

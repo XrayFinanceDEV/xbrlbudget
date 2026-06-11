@@ -6,6 +6,36 @@ Scope: 20 modified files, ~1058 insertions / 202 deletions across backend, front
 
 ---
 
+## 0. Trial-balance format coverage + balance hardening (2026-06-11)
+
+**Problem**: a batch of ~30 client PDFs (folders `Test/errori`, `Test/success`) exposed two classes of bug: (a) several ERP/gestionale trial-balance layouts were mis-detected and routed to the LLM, which mangled them (duplicated assets, scattered crediti/debiti, reserves used as a plug — sometimes negative); (b) the LLM correctors and `validate_balance` silently masked real imbalances, so wrong data passed as "balanced".
+
+**Fix** (importers only; no API/schema changes):
+
+### `importers/situazione_contabile_parser.py`
+- Extended `is_situazione_contabile` detection: TeamSystem `XX/YYYY/YYYY`, 6-digit single-column, DEPI `XX/YYYY`.
+- Flat detail-only DEPI trial balances (no subtotals) now classify level-0 entries; fondi ammortamento netted off assets.
+- New **generic best-effort contrapposte parser** (`extract_contrapposte_best_effort`, `_be_split`, `_be_reclassify`, `is_contrapposte_file`): coordinate column-split + **reconcile mastri/subtotali to IV-CEE by description** (descend the code hierarchy, stop at the coarsest mapped level — no per-gestionale chart-of-accounts mapping). Current-year result from the declared pareggio gap; residual plugged to sp09/sp16 with a `BILANCIO NON QUADRATO` warning for Rettifiche. Detection requires strong markers (SEZIONI CONTRAPPOSTE / BILANCIO DI VERIFICA / TOTALE A PAREGGIO) or upper-case `ATTIVITA'/PASSIVITA'` column headers side-by-side + two code-clusters on the same page (excludes nota-integrativa prose; 0 false positives on clean IV-CEE files).
+
+### `importers/pdf_mapper.py`
+- `validate_balance` now fails on `totale_attivo == 0` and when aggregate sub-totals (sp01–sp10 / sp11–sp18 incl. sp13) don't reconstruct the declared totals (anti false-positive on empty/plugged extractions).
+
+### `importers/pdf_extractor_llm.py`
+- Plug guards: no negative results, magnitude cap, explicit `BILANCIO NON QUADRATO` warning instead of silent masking.
+- Current-year result added to passivo before the balance check (contrapposte/detail layouts).
+- Single-column PDFs no longer fabricate a prior year (was cloning current → orphan sp13).
+- CE section-page detection improved for two-column layouts; `ce03_lavori_interni` included in VdP; extracted imposte no longer overwritten to force the profit cross-check.
+
+### `importers/pdf_importer.py`
+- Routing gate: `is_situazione_contabile(text) or is_contrapposte_file(path)`.
+
+### Validation
+All 14 trial-balance/contrapposte test files balance (`validate_balance=True`): 229/238/243/131/158/159/330/281/249/338/169/309 exact (or near-exact), 213/188 best-effort+flagged. 8 clean IV-CEE files (247/290/305/173/221/275/sangae6/297) unchanged — no routing regression. Source-unbalanced PDFs (289, alma-2024) now correctly flagged instead of silently plugged.
+
+> Note: `Test/` (client bilanci, confidential) and `ssl/` (private key) are git-ignored and intentionally not committed.
+
+---
+
 ## 1. AGO/ERP Trial Balance Parser
 
 **Problem**: `docs/debug2/0_Infra 30.09 elab febb. 2026.pdf` was detected as `Situazione Contabile` but the existing DEPI regex (`XX/YY/ZZZ`) doesn't match AGO's 8-digit codes (`13065000`). Result: zero extraction, balanced but empty BS.

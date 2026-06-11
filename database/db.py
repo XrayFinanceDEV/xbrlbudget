@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker, Session
 # Use absolute path for database to ensure all apps use the same database
 # Database is located in project root directory
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if PROJECT_ROOT.endswith('/database'):
+if PROJECT_ROOT.endswith('/database') or PROJECT_ROOT.endswith('\\database'):
     PROJECT_ROOT = os.path.dirname(PROJECT_ROOT)
 
 DATABASE_PATH = os.environ.get('DATABASE_PATH') or os.path.join(PROJECT_ROOT, "financial_analysis.db")

@@ -309,6 +309,32 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
 - Maps extracted tables to sp01-sp18, ce01-ce20
 - Both single-year and dual-year (both columns) extraction modes
 
+#### Trial-balance / Situazione Contabile parsers (`importers/situazione_contabile_parser.py`)
+Deterministic, no LLM. `is_situazione_contabile(text)` + the coordinate-based
+`is_contrapposte_file(path)` route a PDF to the right sub-parser inside
+`extract_situazione_contabile`:
+- **DEPI** `XX/YY/ZZZ` (incl. flat detail-only trial balances) and 2-part `XX/YYYY` + `XX/****`
+- **AGO/ERP** 8-digit codes (`parse_entries_ago`)
+- **Single-column** 6-digit "Saldo" layout (`parse_entries_single_column`)
+- **TeamSystem** `XX/YYYY/YYYY` (`parse_entries_teamsystem`)
+- **Contrapposte 8-digit** physical 2-column (`parse_entries_contrapposte_8digit`, coordinate split)
+- **Generic contrapposte (best-effort)** for heterogeneous 2-column dumps (`extract_contrapposte_best_effort`):
+  splits columns at the right-code-cluster x, and reconciles **mastri/subtotali to IV-CEE by description**
+  (`_be_reclassify` descends the code hierarchy and stops at the coarsest level that maps to an IV-CEE
+  field — no per-gestionale chart-of-accounts mapping). Fondi ammortamento are netted off assets, the
+  current-year result is taken from the declared pareggio gap, and any residual from imperfect parsing is
+  plugged into sp09/sp16 with a `BILANCIO NON QUADRATO` warning for manual correction in **Rettifiche**.
+
+#### Balance hardening (anti-masking)
+- `pdf_mapper.validate_balance` fails when `totale_attivo == 0` or when the aggregate sub-totals
+  (sp01–sp10 / sp11–sp18 incl. sp13) do not reconstruct the declared totals — no more false positives
+  on empty/plugged extractions.
+- LLM correctors in `pdf_extractor_llm.py` no longer apply negative or oversized plugs silently: they cap
+  the correction, never drive a field below zero, and emit `BILANCIO NON QUADRATO` instead of hiding the gap.
+- Dual-year extraction discards a fabricated prior year when the PDF has a single amount column.
+- `ce03_lavori_interni` is included in the Valore della Produzione (both years); extracted imposte are not
+  overwritten to force the profit cross-check.
+
 ### FGPMI Rating Model
 - Complex multi-table lookup (7 indicators, sector-specific thresholds)
 - Revenue bonus: +2 points if revenue > €500K

@@ -211,11 +211,13 @@ def import_pdf_balance_sheet(
 
         # Auto-detect Situazione Contabile (trial balance) format
         import fitz
-        from importers.situazione_contabile_parser import is_situazione_contabile, extract_situazione_contabile
+        from importers.situazione_contabile_parser import (
+            is_situazione_contabile, is_contrapposte_file, extract_situazione_contabile,
+        )
         doc = fitz.open(file_path)
         sample_text = "".join(page.get_text() for page in doc[:3])
         doc.close()
-        is_trial_balance = is_situazione_contabile(sample_text)
+        is_trial_balance = is_situazione_contabile(sample_text) or is_contrapposte_file(file_path)
 
         if is_trial_balance:
             logger.info("Situazione Contabile format detected — using deterministic parser")

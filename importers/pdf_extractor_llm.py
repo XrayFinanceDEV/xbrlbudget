@@ -1261,15 +1261,11 @@ _POSITIVE_COST_FIELDS = {
     'ce19_oneri_straordinari',
 }
 
-# Ambiguous fields: only flip if the PDF uses "all costs as negative" convention.
-# ce10_var_rimanenze_mat_prime — can be legitimately negative (inventory reduction)
-# ce20_imposte — can be negative (net tax credit)
-# If many core cost fields were negative, the PDF uses a negative convention
-# and these should be flipped too.
-_CONDITIONAL_COST_FIELDS = {
-    'ce10_var_rimanenze_mat_prime',
-    'ce20_imposte',
-}
+# Ambiguous fields handled explicitly in _normalize_ce_signs Pass 2 when the PDF uses
+# the "all costs as negative" convention:
+#   ce10_var_rimanenze_mat_prime — a variation that can be a cost OR a credit; it must
+#     be NEGATED (not abs'd) so an inventory-increase credit shown as +X becomes -X.
+#   ce20_imposte — effectively always an expense; flipped to positive only when negative.
 
 
 def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
@@ -1292,13 +1288,27 @@ def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
             flipped.append(field)
 
     # Pass 2: if many core fields were negative, the PDF uses "costs as negative"
-    # convention — also flip the ambiguous fields
+    # convention — handle the ambiguous fields.
     if len(flipped) >= 3:
-        for field in _CONDITIONAL_COST_FIELDS:
-            val = income_data.get(field, Decimal('0'))
-            if val < 0:
-                income_data[field] = abs(val)
-                flipped.append(field)
+        # ce10 (variazioni rimanenze materie prime) is NOT a pure cost: an inventory
+        # INCREASE is a credit that REDUCES COPRO and is printed with the opposite
+        # sign of the surrounding cost block (i.e. a plain positive number, while the
+        # real costs are in parentheses). The correct transform is therefore to NEGATE
+        # it — the very same flip applied to every cost line — so a +X credit becomes
+        # -X in the positive-cost model and a real cost shown as -X becomes +X. Using
+        # abs() (the old behaviour) left a +X credit untouched and inflated COPRO by 2X,
+        # breaking the CE cross-foot (e.g. ALMA item 11 = +7.831 → CE off by 15.662).
+        ce10 = income_data.get('ce10_var_rimanenze_mat_prime', Decimal('0'))
+        if ce10 != 0:
+            income_data['ce10_var_rimanenze_mat_prime'] = -ce10
+            flipped.append('ce10_var_rimanenze_mat_prime')
+        # ce20 (imposte) is effectively always an expense in these layouts; flip the
+        # parenthesised (negative) presentation to positive, leave an already-positive
+        # value alone (its own cross-check in _validate_ce_imposte guards edge cases).
+        ce20 = income_data.get('ce20_imposte', Decimal('0'))
+        if ce20 < 0:
+            income_data['ce20_imposte'] = abs(ce20)
+            flipped.append('ce20_imposte')
 
     if flipped:
         logger.info(f"CE sign normalization: flipped {len(flipped)} fields to positive: {flipped}")
@@ -1309,12 +1319,19 @@ def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+def extract_pdf_with_llm(
+    file_path: str, force_llm: bool = False
+) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """
     Extract balance sheet and income statement from PDF using PyMuPDF + Claude Haiku 4.5.
 
     For "Situazione Contabile" (trial balance) PDFs with XX/YY/ZZZ account codes,
-    uses a deterministic parser instead of the LLM.
+    uses a deterministic parser instead of the LLM — UNLESS force_llm=True, which skips
+    the trial-balance re-routing. The caller in pdf_importer uses this when the
+    deterministic parser already ran and yielded an empty extraction (a mis-detected
+    bilancio, e.g. budget_313/314): without force_llm the LLM path would re-detect the
+    trial-balance format and bounce straight back to the same empty deterministic parser,
+    defeating the fallback.
 
     Requires ANTHROPIC_API_KEY environment variable (unless situazione contabile).
 
@@ -1341,7 +1358,7 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
         sample_text = ""
 
     from importers.situazione_contabile_parser import is_situazione_contabile, extract_situazione_contabile
-    if is_situazione_contabile(sample_text):
+    if not force_llm and is_situazione_contabile(sample_text):
         logger.info("Situazione contabile (trial balance) format detected, using deterministic parser")
         balance_sheet_data, income_data = extract_situazione_contabile(file_path)
         # Skip LLM validators (_validate_crediti/_validate_debiti/_validate_equity)
@@ -1429,7 +1446,8 @@ def extract_pdf_with_llm(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, 
     balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
     balance_sheet_data = _validate_equity(balance_sheet_data, "single")
 
-    # Step 6: Cross-check ce20_imposte against BS utile
+    # Step 6: Reconcile ce10 sign on the BS utile anchor, then cross-check ce20_imposte
+    income_data = _validate_ce10_against_bs(income_data, balance_sheet_data, "single")
     income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
 
     return balance_sheet_data, income_data
@@ -1501,6 +1519,37 @@ def _reconcile_utile_in_passivo(balance_sheet_data: Dict[str, Decimal], label: s
         balance_sheet_data['totale_passivo'] = new_passivo
 
     return balance_sheet_data
+
+
+def _fit_breakdown_to_aggregate(balance_sheet_data: Dict[str, Decimal], aggregate: str,
+                                groups: list, altri_key: str, label: str) -> None:
+    """Reconcile a balance-relevant aggregate (sp06/sp07/sp16/sp17) DOWN to its typed
+    sub-items when those sub-items overshoot it.
+
+    The aggregate is anchored to the declared totals (totale_attivo / totale_debiti) and
+    is what feeds the balance check, so it must NOT be inflated to a double-counted
+    breakdown sum (that masks an asset/liability over-count and breaks the balance — see
+    budget_208). Instead keep the aggregate fixed, zero the "altri" plug, and scale the
+    remaining typed sub-items proportionally so they sum back to the aggregate. The detail
+    is only a Rettifiche starting point; the aggregate stays correct.
+    """
+    total = balance_sheet_data.get(aggregate, Decimal('0'))
+    others = [g for g in groups if g != altri_key]
+    others_sum = sum(balance_sheet_data.get(g, Decimal('0')) for g in others)
+    balance_sheet_data[altri_key] = Decimal('0')
+    if others_sum > 0 and total > 0:
+        scale = total / others_sum
+        for g in others:
+            balance_sheet_data[g] = balance_sheet_data.get(g, Decimal('0')) * scale
+    elif total <= 0:
+        for g in others:
+            balance_sheet_data[g] = Decimal('0')
+    _flag_unbalanced(
+        label,
+        f"breakdown {aggregate}: typed sub-items ({others_sum}) overshoot aggregate "
+        f"({total}); kept aggregate and scaled sub-items down (no asset/liability inflation)",
+        others_sum - total,
+    )
 
 
 def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
@@ -1588,13 +1637,9 @@ def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dic
             # residual means the typed sub-totals exceed the aggregate; lift the
             # aggregate to the breakdown sum instead of fabricating a negative credit.
             if new_altri < 0:
-                _flag_unbalanced(
-                    label,
-                    f"crediti breakdown {aggregate}: residual {residual} would make {altri_key} "
-                    f"negative ({new_altri}); raising aggregate to breakdown_sum {breakdown_sum} instead",
-                    residual,
-                )
-                balance_sheet_data[aggregate] = breakdown_sum
+                # Sub-items overshoot the aggregate: keep the (declared-total-anchored)
+                # aggregate and scale the breakdown down — never inflate assets.
+                _fit_breakdown_to_aggregate(balance_sheet_data, aggregate, groups, altri_key, label)
             else:
                 logger.info(
                     f"[{label}] Credit breakdown residual for {aggregate}: "
@@ -1691,13 +1736,9 @@ def _validate_debiti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
             # impossible negative debt (budget_213/249 sp16g/sp17g went negative).
             # In that case lift the aggregate to the breakdown sum instead and flag.
             if new_altri < 0:
-                _flag_unbalanced(
-                    label,
-                    f"debiti breakdown {aggregate}: residual {residual} would make {altri_key} "
-                    f"negative ({new_altri}); raising aggregate to breakdown_sum {breakdown_sum} instead",
-                    residual,
-                )
-                balance_sheet_data[aggregate] = breakdown_sum
+                # Sub-items overshoot the aggregate: keep the (declared-total-anchored)
+                # aggregate and scale the breakdown down — never inflate liabilities.
+                _fit_breakdown_to_aggregate(balance_sheet_data, aggregate, groups, altri_key, label)
             else:
                 logger.info(
                     f"[{label}] Debt breakdown residual for {aggregate}: "
@@ -1732,19 +1773,41 @@ def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
         #  * never absorb an EGREGIOUS discrepancy into reserves — that signals the
         #    imbalance is structural (wrong debiti, totale_passivo net of the result,
         #    missing liabilities) and must surface rather than hide in sp12
-        #    (budget_158/238 inflated reserves by >1 mln; budget_297 prior by ~900k).
+        #    (budget_158/238 inflated reserves by >1 mln).
         # The equity cap is intentionally LOOSER than the crediti/debiti cap: moderate
         # reserve corrections on small companies are legitimate (a €40k plug on a €350k
         # statement is normal rounding/sub-item absorption — budget_275). We only reject
         # plugs that are BOTH a large fraction of assets AND large in absolute terms.
         equity_cap = max(_plug_cap(balance_sheet_data) * Decimal('3'), Decimal('150000'))
+
+        # Balance-validated override: when BOTH declared totals are present and equal AND the
+        # asset side already reconstructs totale_attivo, the imbalance lives ENTIRELY in the
+        # equity composition — the LLM mis-extracted reserves (common with NEGATIVE equity:
+        # budget_297 prior 2024 had PN −75.414, riserve extracted as 1.152.513 vs the 152.023
+        # that makes both sides reconcile). The corrected sp12 then makes the whole statement
+        # tie out to the declared totals, so it is a legitimate fix, not masking — apply it even
+        # past the cap. Structural imbalances (asset side NOT reconstructing the total, or the
+        # two declared totals disagreeing) do not qualify and still surface.
+        tot_attivo = balance_sheet_data.get('totale_attivo', Decimal('0'))
+        _ATT_KEYS = ['sp01_crediti_soci', 'sp02_immob_immateriali', 'sp03_immob_materiali',
+                     'sp04_immob_finanziarie', 'sp05_rimanenze', 'sp06_crediti_breve',
+                     'sp07_crediti_lungo', 'sp08_attivita_finanziarie',
+                     'sp09_disponibilita_liquide', 'sp10_ratei_risconti_attivi']
+        att_sum = sum(balance_sheet_data.get(k, Decimal('0')) for k in _ATT_KEYS)
+        balance_validated = (
+            tot_passivo > 0 and tot_attivo > 0
+            and abs(tot_attivo - tot_passivo) <= Decimal('1')
+            and abs(att_sum - tot_attivo) <= Decimal('1')
+            and new_sp12 >= 0
+        )
+
         if new_sp12 < 0:
             _flag_unbalanced(
                 label,
                 f"equity: refusing sp12 plug {sp12} -> {new_sp12} (negative reserves)",
                 equity_diff,
             )
-        elif change > equity_cap:
+        elif change > equity_cap and not balance_validated:
             _flag_unbalanced(
                 label,
                 f"equity: sp12 plug {sp12} -> {new_sp12} exceeds cap {equity_cap}; not applied "
@@ -1752,28 +1815,23 @@ def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
                 equity_diff,
             )
         else:
+            extra = " [balance-validated: asset side ties to declared total]" if (
+                change > equity_cap and balance_validated) else ""
             logger.warning(
                 f"[{label}] Equity mismatch: sp11+sp12+sp13={computed_equity} but "
                 f"totale_passivo-liabilities={expected_equity} (diff={equity_diff}). "
-                f"Correcting sp12_riserve from {sp12} to {new_sp12}"
+                f"Correcting sp12_riserve from {sp12} to {new_sp12}{extra}"
             )
             balance_sheet_data['sp12_riserve'] = new_sp12
     return balance_sheet_data
 
 
-def _validate_ce_imposte(
-    ce_data: Dict[str, Decimal],
-    bs_data: Dict[str, Decimal],
-    label: str,
-) -> Dict[str, Decimal]:
-    """Cross-check ce20_imposte against BS utile and CE risultato ante imposte.
+def _ce_risultato_ante(ce_data: Dict[str, Decimal]) -> Decimal:
+    """Reconstruct 'Risultato prima delle imposte' from the CE fields.
 
-    In multi-column PDFs (e.g. "Stampa dettaglio voci"), when a year has zero
-    imposte the LLM may pick up the other year's value.  Fix by computing:
-      expected_imposte = risultato_ante_imposte - utile_from_BS
+    Mirrors the model convention: costs (incl. ce10) are stored positive and the
+    whole COPRO block is subtracted from the Valore della Produzione.
     """
-    sp13 = bs_data.get('sp13_utile_perdita', Decimal('0'))
-    # Compute risultato ante imposte from CE fields
     vp = (
         ce_data.get('ce01_ricavi_vendite', Decimal('0'))
         + ce_data.get('ce02_variazioni_rimanenze', Decimal('0'))
@@ -1798,7 +1856,82 @@ def _validate_ce_imposte(
         + ce_data.get('ce16_utili_perdite_cambi', Decimal('0'))
         - ce_data.get('ce17_rettifiche_attivita_fin', Decimal('0'))
     )
-    risultato_ante = vp - copro + financial
+    return vp - copro + financial
+
+
+def _validate_ce10_against_bs(
+    ce_data: Dict[str, Decimal],
+    bs_data: Dict[str, Decimal],
+    label: str,
+) -> Dict[str, Decimal]:
+    """Reconcile ce10 (variazioni rimanenze materie prime) against the BS utile anchor.
+
+    item 11 is a VARIATION, not a pure cost: a cost when inventory falls (positive in
+    the model), a CREDIT when inventory rises (negative). The LLM mis-handles it in two
+    recurring ways that throw the whole CE off while the balance-sheet utile (sp13) —
+    independently pinned by a balancing BS — stays correct:
+
+      * WRONG SIGN (convention): the residual gap equals -2*ce10 → flip the sign.
+        (e.g. ALMA budget_271: +7.831 credit stored as a cost → CE off by 2*7.831.)
+      * SPURIOUS VALUE (mis-attributed prior-year/blank column): the residual gap
+        equals -ce10 → the current-year item 11 is really 0 and the LLM grabbed an
+        adjacent column. (e.g. ELLE ERRE budget_144/328: item 11 prints "(300.567)"
+        in the prior column; the PDF's own "Totale costi"/"A-B" totals imply ce10=0,
+        and the booked utile only reconciles at ce10=0.)
+
+    Both are exact-coincidence detectors (tol €2), so an unrelated extraction error
+    never triggers a spurious correction, and they are mutually exclusive for ce10≠0.
+    Gated on a BALANCING BS so sp13 is a trustworthy anchor.
+    """
+    ce10 = ce_data.get('ce10_var_rimanenze_mat_prime', Decimal('0'))
+    sp13 = bs_data.get('sp13_utile_perdita', Decimal('0'))
+    if ce10 == 0 or sp13 == 0:
+        return ce_data
+
+    # sp13 is only a reliable anchor when the BS actually balances.
+    tot_att = bs_data.get('totale_attivo', Decimal('0'))
+    tot_pas = bs_data.get('totale_passivo', Decimal('0'))
+    if tot_att == 0 or abs(tot_att - tot_pas) > Decimal('2'):
+        return ce_data
+
+    utile_ce = _ce_risultato_ante(ce_data) - ce_data.get('ce20_imposte', Decimal('0'))
+    gap = utile_ce - sp13
+    tol = Decimal('2')  # whole-euro reports; allow minor rounding
+    if abs(gap) <= tol:
+        return ce_data
+
+    # Flipping ce10 shifts COPRO by -2*ce10 (utile_ce by +2*ce10); zeroing it shifts
+    # COPRO by +ce10 (utile_ce by -ce10).
+    if abs(gap + 2 * ce10) <= tol:
+        ce_data['ce10_var_rimanenze_mat_prime'] = -ce10
+        logger.warning(
+            f"[{label}] ce10 sign correction: {ce10} -> {-ce10} reconciles CE utile "
+            f"({utile_ce}) with BS sp13 ({sp13}); residual gap was {gap}."
+        )
+    elif abs(gap + ce10) <= tol:
+        ce_data['ce10_var_rimanenze_mat_prime'] = Decimal('0')
+        logger.warning(
+            f"[{label}] ce10 spurious-value correction: {ce10} -> 0 reconciles CE utile "
+            f"({utile_ce}) with BS sp13 ({sp13}); residual gap was {gap} "
+            f"(likely a mis-attributed prior-year column)."
+        )
+    return ce_data
+
+
+def _validate_ce_imposte(
+    ce_data: Dict[str, Decimal],
+    bs_data: Dict[str, Decimal],
+    label: str,
+) -> Dict[str, Decimal]:
+    """Cross-check ce20_imposte against BS utile and CE risultato ante imposte.
+
+    In multi-column PDFs (e.g. "Stampa dettaglio voci"), when a year has zero
+    imposte the LLM may pick up the other year's value.  Fix by computing:
+      expected_imposte = risultato_ante_imposte - utile_from_BS
+    """
+    sp13 = bs_data.get('sp13_utile_perdita', Decimal('0'))
+    # Compute risultato ante imposte from CE fields
+    risultato_ante = _ce_risultato_ante(ce_data)
     expected_imposte = risultato_ante - sp13
 
     ce20 = ce_data.get('ce20_imposte', Decimal('0'))
@@ -1820,6 +1953,33 @@ def _validate_ce_imposte(
     #     |risultato_ante - ce20 - sp13| <= 1 then PBT - imposte == utile_BS already,
     #     so the extracted imposte is internally consistent and must be kept.
     reconciles_bs = abs(risultato_ante - ce20 - sp13) <= Decimal('1')
+
+    # Case 0 — imposte line entirely MISSING. The LLM sometimes drops the
+    # "20) Imposte sul reddito" value (returns ce20≈0) on layouts where the line is
+    # present but visually detached from its amount. The BS utile anchor then implies
+    # a real positive tax (PBT > utile_BS). Fill it in so the CE bottom line reconciles
+    # to sp13. Tightly guarded so a correctly-extracted imposte is never touched:
+    #   - ce20 must be ~0 (nothing to clobber — distinct from the GHEDA "wrong column"
+    #     case where ce20 is a real non-zero value handled below);
+    #   - PBT (risultato_ante) must be positive and the implied tax a plausible
+    #     fraction of it (0 < imposte < PBT), i.e. not a tax credit nor larger than
+    #     the pre-tax profit (which would mean the gap is some other CE error, e.g.
+    #     a fabricated cost like budget_328's ce10 — left untouched on purpose).
+    if (
+        diff > Decimal('1')
+        and sp13 != 0
+        and abs(ce20) <= Decimal('1')
+        and risultato_ante > 0
+        and Decimal('0') < expected_imposte < risultato_ante
+        and not reconciles_bs
+    ):
+        logger.warning(
+            f"[{label}] ce20_imposte missing (extracted={ce20}); filling from BS anchor: "
+            f"risultato_ante {risultato_ante} - utile_BS {sp13} = {expected_imposte}."
+        )
+        ce_data['ce20_imposte'] = expected_imposte
+        return ce_data
+
     if (
         diff > Decimal('1')
         and sp13 != 0
@@ -2020,7 +2180,9 @@ def extract_pdf_both_years_with_llm(
     current_bs = _validate_equity(current_bs, "current")
     prior_bs = _validate_equity(prior_bs, "prior")
 
-    # Step 6: Cross-check ce20_imposte against BS utile
+    # Step 6: Reconcile ce10 sign on the BS utile anchor, then cross-check ce20_imposte
+    current_ce = _validate_ce10_against_bs(current_ce, current_bs, "current")
+    prior_ce = _validate_ce10_against_bs(prior_ce, prior_bs, "prior")
     current_ce = _validate_ce_imposte(current_ce, current_bs, "current")
     prior_ce = _validate_ce_imposte(prior_ce, prior_bs, "prior")
 

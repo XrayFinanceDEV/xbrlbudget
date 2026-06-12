@@ -209,37 +209,100 @@ def import_pdf_balance_sheet(
         prior_bs_data = None
         prior_ce_data = None
 
-        # Auto-detect Situazione Contabile (trial balance) format
+        # Step 1a: classify the document into a macro-area and pick the extraction
+        # route (see importers/bilancio_classifier.py and Test/IMPORT-ROUTING-TAXONOMY.md).
+        #   C  → ROUTE_TRIAL : deterministic situazione-contabile parser (balance via pareggio)
+        #   A/B → ROUTE_IVCEE : IV-CEE extractor anchored on voce totals (keeps Assets=Liab+Equity)
+        # This replaces the old binary is_trial_balance check: it routes IV-CEE bilanci
+        # that merely *contain* account codes (B: budget_313/314) to the IV-CEE path instead
+        # of the empty trial-balance parser, and fails honestly on non-bilancio inputs.
         import fitz
-        from importers.situazione_contabile_parser import (
-            is_situazione_contabile, is_contrapposte_file, extract_situazione_contabile,
+        from importers.situazione_contabile_parser import extract_situazione_contabile
+        from importers.bilancio_classifier import (
+            classify_bilancio, ROUTE_TRIAL, ROUTE_IVCEE, ROUTE_XBRL, ROUTE_UNSUPPORTED,
         )
         doc = fitz.open(file_path)
-        sample_text = "".join(page.get_text() for page in doc[:3])
+        sample_text = "".join(page.get_text() for page in doc[:14])
         doc.close()
-        is_trial_balance = is_situazione_contabile(sample_text) or is_contrapposte_file(file_path)
+        classification = classify_bilancio(file_path=file_path, text=sample_text)
+        logger.info(
+            f"Classificato: macro-area {classification.macro_area} "
+            f"({classification.subcategory}) → rotta {classification.route}; {classification.reason}"
+        )
+
+        if classification.route == ROUTE_XBRL:
+            raise PDFImportError(
+                "Il file è un'istanza XBRL nativa: usa l'import XBRL, non l'import PDF."
+            )
+        if classification.route == ROUTE_UNSUPPORTED:
+            raise PDFImportError(
+                f"Documento non importabile come bilancio completo: {classification.reason}."
+            )
+
+        is_trial_balance = (classification.route == ROUTE_TRIAL)
+
+        def _llm_extract():
+            """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
+            if not api_key:
+                raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
+            logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
+            from importers.pdf_extractor_llm import (
+                extract_pdf_with_llm, extract_pdf_both_years_with_llm,
+            )
+            if period_months:
+                # Infrannuale: current = partial year, prior = reference full year — both
+                # come from the same dual pass (the comparison engine needs them paired).
+                logger.info(f"Dual-year extraction (period_months={period_months})")
+                return extract_pdf_both_years_with_llm(file_path)
+
+            # Budget (full year): take the CURRENT year from the proven single-year extractor
+            # (the both-years prompt occasionally drops a current-year line — budget_227), then
+            # run a dual pass purely to capture the PRIOR (comparative) column. This way a
+            # comparative bilancio imports BOTH years and the user is never asked to re-upload a
+            # year already in the PDF, WITHOUT degrading current-year quality. The dual pass
+            # returns empty prior dicts on monocolumn PDFs (no fabricated prior). The extra
+            # Haiku calls are cheap and PDF import is infrequent.
+            # force_llm=True: this helper is only reached for IV-CEE PDFs or as the
+            # explicit fallback after the deterministic parser returned empty; in the
+            # latter case the document was (mis-)detected as a trial balance, so without
+            # force_llm the single-year extractor would re-route back to that same empty
+            # deterministic parser (budget_313/314).
+            bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+            prior_bs_data = prior_ce_data = None
+            try:
+                _, _, prior_bs_data, prior_ce_data = extract_pdf_both_years_with_llm(file_path)
+            except Exception as prior_err:
+                logger.warning(
+                    f"Prior-year dual extraction failed ({type(prior_err).__name__}: {prior_err}); "
+                    f"importing current year only"
+                )
+            return bs, ce, prior_bs_data, prior_ce_data
 
         if is_trial_balance:
             logger.info("Situazione Contabile format detected — using deterministic parser")
-            sc_bs, sc_ce = extract_situazione_contabile(file_path)
-            # SC parser returns short keys (sp03, ce01); map to full DB field names
-            balance_sheet_data = _map_sc_keys(sc_bs)
-            income_data = _map_sc_keys(sc_ce)
+            # Deterministic-first with LLM fallback: a document can be mis-detected as a
+            # trial balance (e.g. an economic-only prospect, budget_196) or hit a layout the
+            # deterministic parser cannot reconstruct. Rather than hard-fail, fall back to the
+            # LLM extractor when it raises or yields an empty (totale_attivo==0) balance sheet.
+            try:
+                sc_bs, sc_ce = extract_situazione_contabile(file_path)
+                # SC parser returns short keys (sp03, ce01); map to full DB field names
+                sc_bs_mapped = _map_sc_keys(sc_bs)
+                if sc_bs_mapped.get('totale_attivo', Decimal('0')) == 0:
+                    raise ValueError("estrazione deterministica vuota (totale_attivo=0)")
+                balance_sheet_data = sc_bs_mapped
+                income_data = _map_sc_keys(sc_ce)
+            except Exception as sc_err:
+                if not api_key:
+                    raise
+                logger.warning(
+                    f"Deterministic SC parser failed ({type(sc_err).__name__}: {sc_err}); "
+                    f"falling back to LLM extraction"
+                )
+                balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
         else:
             # IV CEE format — use LLM extraction
-            if not api_key:
-                raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
-
-            logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
-            if period_months:
-                # Dual-year extraction for infrannuale: get both columns
-                from importers.pdf_extractor_llm import extract_pdf_both_years_with_llm
-                logger.info(f"Dual-year extraction (period_months={period_months})")
-                balance_sheet_data, income_data, prior_bs_data, prior_ce_data = extract_pdf_both_years_with_llm(file_path)
-            else:
-                # Single-year extraction for budget
-                from importers.pdf_extractor_llm import extract_pdf_with_llm
-                balance_sheet_data, income_data = extract_pdf_with_llm(file_path)
+            balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
@@ -340,47 +403,74 @@ def import_pdf_balance_sheet(
             if not prior_has_data:
                 logger.info("Prior year data is all zeros (single-column PDF), skipping")
             else:
-                # Only import prior year if a full-year record doesn't already exist
+                fresh_prior_balances = mapper.validate_balance(prior_bs_data)
                 existing_prior = db.query(FinancialYear).filter(
                     FinancialYear.company_id == company.id,
                     FinancialYear.year == prior_fiscal_year,
                     FinancialYear.period_months.is_(None),
                 ).first()
 
-                if existing_prior:
-                    logger.info(f"Prior year {prior_fiscal_year} already exists for company {company.id}, skipping")
+                if existing_prior and not fresh_prior_balances:
+                    # A prior year already exists and the freshly extracted one does NOT balance:
+                    # keep the existing record. It may be a manually uploaded full-year statement
+                    # or an already-corrected prior — don't clobber it with a worse extraction.
+                    logger.info(
+                        f"Prior year {prior_fiscal_year} already exists and fresh extraction does not "
+                        f"balance — keeping existing record"
+                    )
                     prior_year_imported = True  # already present
                 else:
-                    # Validate prior year balance sheet
-                    if mapper.validate_balance(prior_bs_data):
-                        prior_fy = FinancialYear(
-                            company_id=company.id,
-                            year=prior_fiscal_year,
-                            period_months=None  # Full 12-month year
+                    # Import (or, on re-import, REPLACE) the prior year. Replacing a stale record with
+                    # a freshly extracted one that BALANCES lets a re-import pick up extractor fixes
+                    # (budget_297 2024: old import had inflated reserves; re-import now refreshes it).
+                    # A non-balancing prior is still imported on FIRST import (no existing record) with
+                    # a BILANCIO NON QUADRATO warning so the user corrects it in Rettifiche rather than
+                    # being forced to re-upload it.
+                    if existing_prior:
+                        logger.info(
+                            f"Prior year {prior_fiscal_year} exists; replacing with fresh balancing extraction"
                         )
-                        db.add(prior_fy)
+                        if existing_prior.balance_sheet:
+                            db.delete(existing_prior.balance_sheet)
+                        if existing_prior.income_statement:
+                            db.delete(existing_prior.income_statement)
+                        db.delete(existing_prior)
                         db.flush()
 
-                        prior_bs = _create_balance_sheet(db, prior_fy.id, prior_bs_data)
-                        prior_ce = _create_income_statement(db, prior_fy.id, prior_ce_data)
-                        prior_year_imported = True
-                        logger.info(
-                            f"Prior year {prior_fiscal_year} imported (BS ID: {prior_bs.id}, CE ID: {prior_ce.id})"
+                    if not fresh_prior_balances:
+                        prior_unbalanced_warning = (
+                            f"BILANCIO NON QUADRATO [{prior_fiscal_year}]: anno precedente estratto dal "
+                            f"PDF non quadra — importato comunque, correggere in Rettifiche"
                         )
+                        logger.warning(prior_unbalanced_warning)
+                        warnings.append(prior_unbalanced_warning)
 
-                        # Cross-check prior year SP utile vs CE net profit
-                        prior_sp_utile = prior_bs.sp13_utile_perdita
-                        prior_ce_utile = prior_ce.net_profit
-                        prior_profit_diff = abs(prior_sp_utile - prior_ce_utile)
-                        if prior_profit_diff > Decimal('1'):
-                            prior_profit_warning = (
-                                f"Prior year net profit mismatch: SP Utile/Perdita = {prior_sp_utile}, "
-                                f"CE Net Profit = {prior_ce_utile} (diff: {prior_profit_diff})"
-                            )
-                            logger.warning(prior_profit_warning)
-                            warnings.append(prior_profit_warning)
-                    else:
-                        logger.warning(f"Prior year {prior_fiscal_year} balance sheet does not balance, skipping")
+                    prior_fy = FinancialYear(
+                        company_id=company.id,
+                        year=prior_fiscal_year,
+                        period_months=None  # Full 12-month year
+                    )
+                    db.add(prior_fy)
+                    db.flush()
+
+                    prior_bs = _create_balance_sheet(db, prior_fy.id, prior_bs_data)
+                    prior_ce = _create_income_statement(db, prior_fy.id, prior_ce_data)
+                    prior_year_imported = True
+                    logger.info(
+                        f"Prior year {prior_fiscal_year} imported (BS ID: {prior_bs.id}, CE ID: {prior_ce.id})"
+                    )
+
+                    # Cross-check prior year SP utile vs CE net profit
+                    prior_sp_utile = prior_bs.sp13_utile_perdita
+                    prior_ce_utile = prior_ce.net_profit
+                    prior_profit_diff = abs(prior_sp_utile - prior_ce_utile)
+                    if prior_profit_diff > Decimal('1'):
+                        prior_profit_warning = (
+                            f"Prior year net profit mismatch: SP Utile/Perdita = {prior_sp_utile}, "
+                            f"CE Net Profit = {prior_ce_utile} (diff: {prior_profit_diff})"
+                        )
+                        logger.warning(prior_profit_warning)
+                        warnings.append(prior_profit_warning)
 
         # Step 8: Commit transaction
         db.commit()
@@ -403,6 +493,8 @@ def import_pdf_balance_sheet(
             "balance_sheet_id": balance_sheet.id,
             "income_statement_id": income_statement.id,
             "format": "micro",  # TODO: Detect format from PDF
+            "macro_area": classification.macro_area,
+            "macro_subcategory": classification.subcategory,
             "confidence_score": 0.95,
             "extraction_method": extraction_method,
             "extraction_time_seconds": round(extraction_time, 2),

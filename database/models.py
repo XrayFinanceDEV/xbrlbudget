@@ -3,7 +3,7 @@ SQLAlchemy ORM Models for Financial Analysis Application
 """
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Enum as SQLEnum, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Boolean, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database.db import Base
 from config import Sector
@@ -627,6 +627,11 @@ class BudgetAssumptions(Base):
 
     # Existing financial debt repayment (NULL = keep constant)
     existing_debt_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay existing fin. debt
+
+    # TFR accrual suspension: companies with >60 employees pay the maturing TFR to the
+    # INPS treasury fund instead of accruing it internally. When True, the TFR fund
+    # (sp15) stops growing for this forecast year (the ce08a cost stays in the P&L).
+    tfr_accrual_suspended = Column(Boolean, default=False, nullable=False)
 
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables

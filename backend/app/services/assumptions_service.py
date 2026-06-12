@@ -124,6 +124,7 @@ def bulk_upsert_assumptions(
             dio_days=assumption_data.get("dio_days", None),
             dpo_days=assumption_data.get("dpo_days", None),
             existing_debt_repayment_years=assumption_data.get("existing_debt_repayment_years", None),
+            tfr_accrual_suspended=assumption_data.get("tfr_accrual_suspended", False) or False,
             interest_rate_receivables=assumption_data.get("interest_rate_receivables", 0.0),
             interest_rate_payables=assumption_data.get("interest_rate_payables", 0.0),
             tax_rate=assumption_data.get("tax_rate", 27.9),

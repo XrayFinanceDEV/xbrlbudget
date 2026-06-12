@@ -5,6 +5,7 @@ import { useApp } from "@/contexts/AppContext";
 import { importXBRL, importCSV, importPDF, type XBRLImportResult, type CSVImportResult, type PDFImportResult } from "@/lib/api";
 import { toast } from "sonner";
 import { Upload, FileText, Info, AlertTriangle, CheckCircle2, Bot } from "lucide-react";
+import { getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -79,7 +80,7 @@ export default function ImportPage() {
       toast.success("Importazione XBRL completata!");
     } catch (err: any) {
       console.error("Import error:", err);
-      setError(err.response?.data?.detail?.error || err.message || "Errore durante l'importazione");
+      setError(getErrorMessage(err, "Errore durante l'importazione"));
     } finally { setLoading(false); }
   };
 
@@ -96,7 +97,7 @@ export default function ImportPage() {
       toast.success("Importazione CSV completata!");
     } catch (err: any) {
       console.error("Import error:", err);
-      setError(err.response?.data?.detail?.error || err.message || "Errore durante l'importazione");
+      setError(getErrorMessage(err, "Errore durante l'importazione"));
     } finally { setLoading(false); }
   };
 
@@ -117,7 +118,7 @@ export default function ImportPage() {
       toast.success("Estrazione PDF completata!");
     } catch (err: any) {
       console.error("Import error:", err);
-      setError(err.response?.data?.detail?.error || err.message || "Errore durante l'importazione");
+      setError(getErrorMessage(err, "Errore durante l'importazione"));
     } finally { setLoading(false); }
   };
 

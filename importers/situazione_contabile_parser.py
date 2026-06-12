@@ -1816,25 +1816,41 @@ def _be_norm(code: str) -> str:
 
 
 def _be_split(words) -> Optional[float]:
-    """Find the column gutter = start of the right-hand code cluster.
+    """Find the column gutter separating two physical (code, amount) columns.
 
-    Left/right account codes form two well-separated x clusters; left-column
-    amounts always fall left of the right column's codes, so the right cluster's
-    minimum x is the safe split point for assigning whole rows to a side.
+    Account codes form two x clusters; the gutter is the gap between them. But
+    repeating page headers/footers (protocol numbers, dates) add spurious code-like
+    tokens on the far right that can create a WIDER gap than the real one — picking
+    the widest code-gap blindly then bisects the right column between its codes and
+    its amounts, merging the two data columns (booking costs as negative revenue).
+
+    So we don't trust the widest gap: we VALIDATE each candidate gutter operationally
+    by running the same row reconstruction (`_be_collect_side`) on both sides and
+    keeping only gutters that yield real (code+amount) rows on BOTH sides — then take
+    the widest of those. Single-column / costs-only pages yield rows on one side only,
+    so no candidate validates and we return None (caller falls back to a centre split).
     """
     xs = sorted((w[0] + w[2]) / 2 for w in words
                 if re.match(r'^\d', w[4]) and not _BE_AMT_RE.match(w[4]))
     if len(xs) < 6:
         return None
-    best_gap, best_i = 0.0, -1
+    # Candidate gutters: gaps between adjacent code-x centres with a real cluster on
+    # each side. Widest first.
+    candidates = []
     for i in range(len(xs) - 1):
         gap = xs[i + 1] - xs[i]
-        # require a real cluster on each side of the candidate gutter
-        if gap > best_gap and (i + 1) >= 3 and (len(xs) - i - 1) >= 3:
-            best_gap, best_i = gap, i
-    if best_i < 0 or best_gap < 25:
-        return None
-    return xs[best_i + 1] - 1.0
+        if gap >= 25 and (i + 1) >= 3 and (len(xs) - i - 1) >= 3:
+            candidates.append((gap, xs[i + 1] - 1.0))
+    candidates.sort(reverse=True)
+    for _gap, split in candidates:
+        left = _be_collect_side(words, -1e9, split)
+        right = _be_collect_side(words, split, 1e9)
+        # A valid gutter splits into two genuine data columns: each side must
+        # reconstruct several (code+amount) rows. The header/footer-polluted gutter
+        # leaves the right side with amounts but no codes → 0 rows → rejected.
+        if len(left) >= 2 and len(right) >= 2:
+            return split
+    return None
 
 
 def _be_collect_side(words, lo: float, hi: float) -> List[Tuple[str, str, Decimal]]:
@@ -1849,7 +1865,12 @@ def _be_collect_side(words, lo: float, hi: float) -> List[Tuple[str, str, Decima
     for y in sorted(rows):
         toks = [w[4] for w in sorted(rows[y], key=lambda w: w[0])]
         i, code_toks = 0, []
-        while i < len(toks) and re.match(r'^[\d./]+$', toks[i]) and not _BE_AMT_RE.match(toks[i]):
+        # Allow '*' so DEPI/AGO rollup codes (e.g. "58/**/***", "58/10/***") are
+        # collected as mastri, not dropped — their named subtotals ("RICAVI DELLE
+        # PRESTAZIONI") let _be_reclassify classify the right IV-CEE field instead of
+        # falling back to the generic bucket on leaf accounts. _be_norm strips to digits,
+        # and pure "***" rows collapse to an empty code that is skipped below.
+        while i < len(toks) and re.match(r'^[\d./*]+$', toks[i]) and not _BE_AMT_RE.match(toks[i]):
             code_toks.append(toks[i])
             i += 1
         if not code_toks:
@@ -1907,13 +1928,21 @@ def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify) -> List[Tupl
         field, specific = classify(d)
         if specific:
             out.append((field, a))
-            return
+            return a
         ch = direct_children(c)
-        if ch:
-            for x in ch:
-                rec(x)
-        else:
+        if not ch:
             out.append((field, a))
+            return a
+        acc = Decimal('0')
+        for x in ch:
+            acc += rec(x)
+        # The collected children may be incomplete (some detail rows not parsed):
+        # preserve the mastro's declared subtotal by booking the shortfall under the
+        # parent's own (generic) field. No-op when children reconcile to the parent.
+        resid = a - acc
+        if abs(resid) > Decimal('0.01'):
+            out.append((field, resid))
+        return a
 
     for r in roots:
         rec(r)
@@ -2015,6 +2044,13 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             if 'PATRIMONIAL' in lu or 'ECONOMIC' in lu:
                 title = lu
                 break
+        # Fiscal-reconciliation appendices ("RIDETERMINAZIONE RISULTATO D'ESERCIZIO"
+        # for II.DD./IRAP, with VARIAZIONI IN AUMENTO/DIMINUZIONE) re-list cost/revenue
+        # accounts but are NOT the income statement — skip them so they don't pollute
+        # the CE (they otherwise match the loose COSTI+RICAVI test below).
+        if ('RIDETERMINAZIONE' in flat or 'REDDITOIMPONIBILE' in flat
+                or ('VARIAZIONIINAUMENTO' in flat and 'VARIAZIONIINDIMINUZIONE' in flat)):
+            continue
         if 'PATRIMONIAL' in title and 'ECONOMIC' not in title:
             is_sp, is_ce = True, False
         elif 'ECONOMIC' in title and 'PATRIMONIAL' not in title:
@@ -2043,6 +2079,17 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
                 ricavi += right
 
     doc.close()
+
+    # A contrapposte trial balance must have a balance-sheet side. Documents that
+    # are economic-only (e.g. "PROSPETTO ECONOMICO per competenza" with just a
+    # COSTI/RICAVI + fiscal-reconciliation table and no Stato Patrimoniale, budget_196)
+    # collect zero attivo/passivo rows: refuse to fabricate a balance sheet by plugging
+    # the pareggio into sp09/sp16 — raise so the caller can fall back to LLM extraction.
+    if not attivo and not passivo:
+        raise ValueError(
+            "contrapposte best-effort: nessuno Stato Patrimoniale rilevato "
+            "(documento solo economico?) — impossibile estrarre un bilancio deterministico"
+        )
 
     Z = Decimal('0')
     bs: Dict[str, Decimal] = {}
@@ -2108,6 +2155,22 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             add(bs, 'sp16', amt)
 
     # --- CE ---
+    # Personale (ce08a-d) and ammortamenti (ce09a-d) are detail ("di cui") lines:
+    # the EBIT/profit formula reads only the aggregates ce08/ce09, so each sub-field
+    # is rolled into its parent aggregate AND stored under its full DB key (mirrors
+    # build_iv_cee). _be_reclassify emits a node at exactly one level (parent OR
+    # children, never both), so this never double-counts.
+    _CE_SUBFIELD_PARENT = {
+        'ce08a_tfr': ('ce08a_tfr_accrual', 'ce08'),
+        'ce08b': ('ce08b_salari_stipendi', 'ce08'),
+        'ce08c': ('ce08c_oneri_sociali', 'ce08'),
+        'ce08d': ('ce08d_altri_costi_personale', 'ce08'),
+        'ce09a': ('ce09a_ammort_immateriali', 'ce09'),
+        'ce09b': ('ce09b_ammort_materiali', 'ce09'),
+        'ce09c': ('ce09c_svalutazioni', 'ce09'),
+        'ce09d': ('ce09d_svalutazione_crediti', 'ce09'),
+    }
+
     def ce_add(tag, amt):
         if tag == 'ce01_return':
             add(ce, 'ce01', -amt)
@@ -2115,6 +2178,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             add(ce, 'ce10', -amt)
         elif tag == 'ce13_cost':
             add(ce, 'ce15', amt)
+        elif tag in _CE_SUBFIELD_PARENT:
+            detail, parent = _CE_SUBFIELD_PARENT[tag]
+            add(ce, parent, amt)      # aggregate read by the EBIT/profit formula
+            add(ce, detail, amt)      # "di cui" detail (full DB key, survives _map_sc_keys)
         else:
             add(ce, tag, amt)
     for tag, amt in _be_reclassify(costi, cl_cos):
@@ -2123,10 +2190,22 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         ce_add(tag, amt)
 
     # --- Declared totals & current-year result ---
+    # Some gestionali letter-space the column headers ("TOTALE  A T T I V I T�"),
+    # which defeats a contiguous-substring search; fall back to a whitespace-stripped
+    # copy so the needle still matches.
     up1 = re.sub(r'\s+', ' ', full.upper())
-    tot_att = _be_amount(up1.split('TOTALE ATTIV', 1)[1][:40]) if 'TOTALE ATTIV' in up1 else None
-    tot_pas = _be_amount(up1.split('TOTALE PASSIV', 1)[1][:40]) if 'TOTALE PASSIV' in up1 else None
-    pareggio = _be_amount(up1.split('TOTALE A PAREGGIO', 1)[1][:40]) if 'TOTALE A PAREGGIO' in up1 else None
+    flat1 = re.sub(r'\s+', '', full.upper())
+
+    def _find_total(spaced, flat):
+        if spaced in up1:
+            return _be_amount(up1.split(spaced, 1)[1][:40])
+        if flat in flat1:
+            return _be_amount(flat1.split(flat, 1)[1][:40])
+        return None
+
+    tot_att = _find_total('TOTALE ATTIV', 'TOTALEATTIV')
+    tot_pas = _find_total('TOTALE PASSIV', 'TOTALEPASSIV')
+    pareggio = _find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO')
 
     if tot_att is not None and tot_pas is not None:
         utile = tot_att - tot_pas                          # +utile / -perdita from section gap
@@ -2234,6 +2313,10 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
     else:
         logger.info("DEPI format detected, using text-based parser")
         entries = parse_entries(full_text)
+        # Unmatched cost/revenue mastri → ce12/ce01 (aligns DEPI with the other
+        # trial-balance parsers); the level-2-vs-level-1 has_sub2 guard in
+        # build_iv_cee prevents double-counting parent + detail lines.
+        default_ce = True
         logger.info(f"DEPI parser: {len(entries)} entries")
 
     bs, ce = build_iv_cee(entries, default_ce=default_ce)

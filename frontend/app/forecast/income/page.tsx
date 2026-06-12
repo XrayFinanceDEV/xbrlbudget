@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
 import { toast } from "sonner";
@@ -159,7 +159,7 @@ export default function ForecastIncomePage() {
       invalidateAnalysis(selectedCompanyId, selectedScenario.id);
       toast.success("Previsionale aggiornato");
     } catch (err: any) {
-      toast.error("Errore: " + (err?.response?.data?.detail || err.message));
+      toast.error("Errore: " + getErrorMessage(err, "aggiornamento previsionale fallito"));
     } finally {
       setSaving(false);
     }

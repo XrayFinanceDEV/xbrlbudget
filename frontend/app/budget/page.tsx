@@ -15,6 +15,7 @@ import {
   getBalanceSheet,
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
+import { getErrorMessage } from "@/lib/utils";
 import type {
   BudgetScenario,
   BudgetScenarioCreate,
@@ -104,9 +105,7 @@ export default function BudgetPage() {
       invalidateAnalysis(selectedCompanyId, scenarioId);
     } catch (err: any) {
       console.error("Error regenerating forecast:", err);
-      toast.error(
-        err.response?.data?.detail || "Impossibile ricalcolare il previsionale"
-      );
+      toast.error(getErrorMessage(err, "Impossibile ricalcolare il previsionale"));
     }
   };
 
@@ -407,6 +406,7 @@ function ScenarioForm({
             dio_days: a.dio_days,
             dpo_days: a.dpo_days,
             existing_debt_repayment_years: a.existing_debt_repayment_years,
+            tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
             receivables_short_growth_pct: a.receivables_short_growth_pct,
             receivables_long_growth_pct: a.receivables_long_growth_pct,
             payables_short_growth_pct: a.payables_short_growth_pct,
@@ -475,6 +475,7 @@ function ScenarioForm({
           dio_days: null,
           dpo_days: null,
           existing_debt_repayment_years: null,
+          tfr_accrual_suspended: false,
           tax_rate: 27.9,
           fixed_materials_percentage: 0,
           fixed_services_percentage: 0,
@@ -504,7 +505,7 @@ function ScenarioForm({
   const [inflationRate, setInflationRate] = useState(2.5);
   const [showAutoGen, setShowAutoGen] = useState(false);
 
-  const updateAssumption = useCallback((year: number, field: string, value: number | null) => {
+  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
     setAssumptions((prev) => ({
       ...prev,
       [year]: {
@@ -573,9 +574,7 @@ function ScenarioForm({
       onSaved();
     } catch (err: any) {
       console.error("Error saving scenario:", err);
-      toast.error(
-        err.response?.data?.detail || "Impossibile salvare lo scenario"
-      );
+      toast.error(getErrorMessage(err, "Impossibile salvare lo scenario"));
     } finally {
       setLoading(false);
     }
@@ -766,7 +765,7 @@ function AutoGeneratorCard({
   setInflationRate: (v: number) => void;
   showAutoGen: boolean;
   setShowAutoGen: (v: boolean) => void;
-  updateAssumption: (year: number, field: string, value: number | null) => void;
+  updateAssumption: (year: number, field: string, value: number | boolean | null) => void;
 }) {
   const n = forecastYears.length;
   const hasTwoYears = historicalYears.length >= 2;
@@ -906,7 +905,7 @@ type AssumptionsTableProps = {
   forecastYears: number[];
   historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
   assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
-  onUpdate: (year: number, field: string, value: number | null) => void;
+  onUpdate: (year: number, field: string, value: number | boolean | null) => void;
 };
 
 // Shared helper: get historical CE value for display
@@ -1440,6 +1439,13 @@ function CEAssumptionsTable({
             <>
               {/* CE Override Rows */}
               {([
+                { field: "ce01_override", histField: "ce01_ricavi_vendite", label: "Ricavi delle vendite e prestazioni (A.1)" },
+                { field: "ce04_override", histField: "ce04_altri_ricavi", label: "Altri ricavi e proventi (A.5)" },
+                { field: "ce05_override", histField: "ce05_materie_prime", label: "Materie prime, suss., consumo (B.6)" },
+                { field: "ce06_override", histField: "ce06_servizi", label: "Costi per servizi (B.7)" },
+                { field: "ce07_override", histField: "ce07_godimento_beni", label: "Godimento beni di terzi (B.8)" },
+                { field: "ce08_override", histField: "ce08_costi_personale", label: "Costi del personale (B.9)" },
+                { field: "ce12_override", histField: "ce12_oneri_diversi", label: "Oneri diversi di gestione (B.14)" },
                 { field: "ce02_override", histField: "ce02_variazioni_rimanenze", label: "Variazioni rimanenze prodotti (A.2)" },
                 { field: "ce03_override", histField: "ce03_lavori_interni", label: "Incrementi immobilizzazioni per lavori interni (A.3)" },
                 { field: "ce10_override", histField: "ce10_var_rimanenze_mat_prime", label: "Variazioni rimanenze materie prime (B.11)" },
@@ -1521,7 +1527,7 @@ function CEAssumptionsTable({
                     min="0"
                     max="365"
                     value={assumptions[year]?.dso_days ?? autoDso}
-                    onChange={(e) => onUpdate(year, "dso_days", parseFloat(e.target.value) || 0)}
+                    onChange={(e) => onUpdate(year, "dso_days", e.target.value === "" ? null : (parseFloat(e.target.value) || 0))}
                     className={inputCls}
                     placeholder={String(autoDso)}
                     title="Giorni medi incasso crediti (0-365)"
@@ -1563,7 +1569,7 @@ function CEAssumptionsTable({
                     min="0"
                     max="365"
                     value={assumptions[year]?.dio_days ?? autoDio}
-                    onChange={(e) => onUpdate(year, "dio_days", parseFloat(e.target.value) || 0)}
+                    onChange={(e) => onUpdate(year, "dio_days", e.target.value === "" ? null : (parseFloat(e.target.value) || 0))}
                     className={inputCls}
                     placeholder={String(autoDio)}
                     title="Giorni medi giacenza magazzino (0-365)"
@@ -1613,7 +1619,7 @@ function CEAssumptionsTable({
                     min="0"
                     max="365"
                     value={assumptions[year]?.dpo_days ?? autoDpo}
-                    onChange={(e) => onUpdate(year, "dpo_days", parseFloat(e.target.value) || 0)}
+                    onChange={(e) => onUpdate(year, "dpo_days", e.target.value === "" ? null : (parseFloat(e.target.value) || 0))}
                     className={inputCls}
                     placeholder={String(autoDpo)}
                     title="Giorni medi pagamento fornitori (0-365)"
@@ -1798,6 +1804,27 @@ function SPAssumptionsTable({
                     onUpdate(year, "existing_debt_repayment_years", val);
                   }}
                   className={inputCls} placeholder="costante" title="Anni per rimborso debito esistente (vuoto = costante)" />
+              </td>
+            ))}
+          </tr>
+
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                TFR VERSATO A INPS (NO ACCANTONAMENTO)
+                <span title="Aziende con >60 dipendenti: dall'anno selezionato il TFR maturando è versato all'INPS e il fondo TFR (sp15) non cresce più. Il costo TFR resta in conto economico."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"—"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10 text-center">
+                <input type="checkbox"
+                  checked={!!assumptions[year]?.tfr_accrual_suspended}
+                  onChange={(e) => onUpdate(year, "tfr_accrual_suspended", e.target.checked)}
+                  className="h-4 w-4 accent-primary cursor-pointer"
+                  title="TFR versato a INPS (fondo non cresce)" />
               </td>
             ))}
           </tr>

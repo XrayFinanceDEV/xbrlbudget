@@ -89,6 +89,7 @@ MIGRATIONS = {
         ("dio_days",                           "NUMERIC(10,2)"),
         ("dpo_days",                           "NUMERIC(10,2)"),
         ("existing_debt_repayment_years",      "NUMERIC(10,2)"),
+        ("tfr_accrual_suspended",              "BOOLEAN DEFAULT 0 NOT NULL"),
         ("sp01_growth_pct",                    "NUMERIC(10,6)"),
         ("sp04_growth_pct",                    "NUMERIC(10,6)"),
         ("sp08_growth_pct",                    "NUMERIC(10,6)"),

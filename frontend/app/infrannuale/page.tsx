@@ -23,7 +23,6 @@ import {
   saveInfrannualeAIComments,
   type InfrannualeAIComments,
 } from "@/lib/api";
-import axios from "axios";
 import type {
   Company,
   BudgetScenario,
@@ -53,7 +52,7 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -191,7 +190,7 @@ function parseInputNumber(formatted: string): string {
 }
 
 // Codes that make up EBITDA: VP items are positive, cost items are negative
-const VP_CODES = ["ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce04_altri_ricavi"];
+const VP_CODES = ["ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce03a_incrementi_immobilizzazioni", "ce04_altri_ricavi"];
 const EBITDA_COST_CODES = [
   "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
   "ce08_costi_personale", "ce10_var_rimanenze_mat_prime",
@@ -278,6 +277,7 @@ function computeIndicators(
     revenue +
     v(is_, "ce02_variazioni_rimanenze") +
     v(is_, "ce03_lavori_interni") +
+    v(is_, "ce03a_incrementi_immobilizzazioni") +
     v(is_, "ce04_altri_ricavi");
   const opCosts =
     v(is_, "ce05_materie_prime") +
@@ -1634,7 +1634,7 @@ function RettificheTab({
     // sp13 from P&L — Risultato calculated first in CE, then set in SP
     const cv = (k: string) => u[k] ?? original[k] ?? 0;
     const vp = cv("ce01_ricavi_vendite") + cv("ce02_variazioni_rimanenze")
-      + cv("ce03_lavori_interni") + cv("ce04_altri_ricavi");
+      + cv("ce03_lavori_interni") + cv("ce03a_incrementi_immobilizzazioni") + cv("ce04_altri_ricavi");
     const costs = cv("ce05_materie_prime") + cv("ce06_servizi") + cv("ce07_godimento_beni")
       + cv("ce08_costi_personale") + cv("ce09_ammortamenti") + cv("ce10_var_rimanenze_mat_prime")
       + cv("ce11_accantonamenti") + cv("ce11b_altri_accantonamenti") + cv("ce12_oneri_diversi");
@@ -2759,6 +2759,12 @@ export default function InfraannualePage() {
   // Step 1: Import
   const [importType, setImportType] = useState<"pdf" | "xbrl">("pdf");
   const [file, setFile] = useState<File | null>(null);
+  // Bumped only when we programmatically clear a file input (reset / new import), to
+  // force the uncontrolled <input type="file"> to remount and drop its displayed name.
+  // It must NOT depend on whether a file is selected: keying on file-presence remounted
+  // the input on the FIRST pick (clearing the shown name), which looked like the upload
+  // failed and only "worked" on the second attempt.
+  const [fileResetKey, setFileResetKey] = useState(0);
   const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear());
   const [periodMonths, setPeriodMonths] = useState(9);
   const [companyMode, setCompanyMode] = useState<"new" | "existing">("new");
@@ -2891,18 +2897,12 @@ export default function InfraannualePage() {
 
       await createScenarioAndAdvance(companyId, companyName);
     } catch (error: unknown) {
-      let msg = "Errore durante l'importazione";
-      if (error && typeof error === "object" && "response" in error) {
-        const resp = (error as { response?: { status?: number; data?: { detail?: string } } }).response;
-        if (resp?.status === 400 || resp?.status === 422) {
-          msg = resp.data?.detail || "Dati non validi. Verificare il file e l'anno fiscale.";
-        } else if (resp?.data?.detail) {
-          msg = resp.data.detail;
-        }
-      } else if (error instanceof Error) {
-        msg = error.message;
-      }
-      toast.error(msg);
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      const fallback =
+        status === 400 || status === 422
+          ? "Dati non validi. Verificare il file e l'anno fiscale."
+          : "Errore durante l'importazione";
+      toast.error(getErrorMessage(error, fallback));
     } finally {
       setImporting(false);
     }
@@ -3385,6 +3385,7 @@ export default function InfraannualePage() {
         setMissingRefYear(null);
         setFile(null);
         setRefFile(null);
+        setFileResetKey((k) => k + 1);
         setAdjustableData(null);
         setReferenceYearData(null);
         setCorrections({});
@@ -3540,6 +3541,7 @@ export default function InfraannualePage() {
               setAdjustableData(null);
               setAnalysis(null);
               setFile(null);
+              setFileResetKey((k) => k + 1);
               setActiveTab("import");
             }}>
               Nuova Importazione
@@ -3578,7 +3580,7 @@ export default function InfraannualePage() {
                 <div>
                   <Label>File</Label>
                   <Input
-                    key={file ? "has-file" : "no-file"}
+                    key={`main-file-${fileResetKey}`}
                     type="file"
                     accept={importType === "pdf" ? ".pdf,.PDF" : ".xbrl,.XBRL,.xml,.XML"}
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -3710,7 +3712,7 @@ export default function InfraannualePage() {
                     </p>
                     <div className="flex items-center gap-3 mt-4">
                       <Input
-                        key={refFile ? "has-ref" : "no-ref"}
+                        key={`ref-file-${fileResetKey}`}
                         type="file"
                         accept=".pdf"
                         className="flex-1"
@@ -3812,8 +3814,7 @@ export default function InfraannualePage() {
               setAdjustmentsApplied(true);
               setComparison(null); // Force reload comparison with corrected data
             } catch (error: unknown) {
-              const msg = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : "Errore nel salvataggio";
-              toast.error(msg);
+              toast.error(getErrorMessage(error, "Errore nel salvataggio"));
             } finally {
               setSavingAdjustments(false);
             }
@@ -5147,10 +5148,7 @@ function StampaContent({
                 toast.success("Proiezione confermata come anno completo");
                 router.push("/budget");
               } catch (err: unknown) {
-                const detail = axios.isAxiosError(err)
-                  ? (err.response?.data?.detail ?? "Errore durante la promozione")
-                  : "Errore durante la promozione";
-                toast.error(detail);
+                toast.error(getErrorMessage(err, "Errore durante la promozione"));
               } finally {
                 setPromoting(false);
               }

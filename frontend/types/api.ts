@@ -381,6 +381,7 @@ export interface BudgetAssumptions {
   dio_days: number | null;
   dpo_days: number | null;
   existing_debt_repayment_years: number | null;
+  tfr_accrual_suspended: boolean;
   interest_rate_receivables: number;
   interest_rate_payables: number;
   tax_rate: number;
@@ -461,6 +462,7 @@ export interface BudgetAssumptionsCreate {
   dio_days?: number | null;
   dpo_days?: number | null;
   existing_debt_repayment_years?: number | null;
+  tfr_accrual_suspended?: boolean;
   interest_rate_receivables?: number;
   interest_rate_payables?: number;
   tax_rate?: number;

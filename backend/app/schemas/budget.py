@@ -83,6 +83,9 @@ class BudgetAssumptionsBase(BaseModel):
     # Existing financial debt repayment (None = keep constant)
     existing_debt_repayment_years: Optional[Decimal] = None
 
+    # TFR accrual suspended (TFR paid to INPS, fund stops growing this year)
+    tfr_accrual_suspended: bool = False
+
     # Financial parameters
     interest_rate_receivables: Decimal = Field(default=Decimal("0"))
     interest_rate_payables: Decimal = Field(default=Decimal("0"))
@@ -177,6 +180,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     dio_days: Optional[Decimal] = None
     dpo_days: Optional[Decimal] = None
     existing_debt_repayment_years: Optional[Decimal] = None
+    tfr_accrual_suspended: Optional[bool] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None

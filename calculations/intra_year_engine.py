@@ -21,6 +21,7 @@ CE_FIELDS = [
     ('ce01_ricavi_vendite', 'Ricavi delle vendite'),
     ('ce02_variazioni_rimanenze', 'Variazioni rimanenze prodotti'),
     ('ce03_lavori_interni', 'Lavori interni capitalizzati'),
+    ('ce03a_incrementi_immobilizzazioni', 'Incrementi di immobilizzazioni per lavori interni'),
     ('ce04_altri_ricavi', 'Altri ricavi e proventi'),
     ('ce05_materie_prime', 'Materie prime e consumo'),
     ('ce06_servizi', 'Costi per servizi'),
@@ -409,6 +410,10 @@ class IntraYearEngine:
         # Items kept from annualization of partial year (less subject to user control)
         ce02 = _get_field(partial_inc, 'ce02_variazioni_rimanenze') * factor
         ce03 = _get_field(partial_inc, 'ce03_lavori_interni') * factor
+        # Incrementi di immobilizzazioni per lavori interni (A.4) — part of the value of
+        # production; must be included so the projected CE utile reconciles with the SP
+        # (which carries the booked profit including this item), avoiding a false sbilancio.
+        ce03a = _get_field(partial_inc, 'ce03a_incrementi_immobilizzazioni') * factor
         ce10 = _get_field(partial_inc, 'ce10_var_rimanenze_mat_prime') * factor
         ce11 = _get_field(partial_inc, 'ce11_accantonamenti') * factor
         ce11b = _get_field(partial_inc, 'ce11b_altri_accantonamenti') * factor
@@ -421,7 +426,7 @@ class IntraYearEngine:
         ce19 = _get_field(partial_inc, 'ce19_oneri_straordinari') * factor
 
         # Taxes - recalculate on projected pre-tax profit
-        production_value = ce01 + ce02 + ce03 + ce04
+        production_value = ce01 + ce02 + ce03 + ce03a + ce04
         production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
         ebit = production_value - production_cost
         financial_result = ce13 + ce14 - ce15 + ce16
@@ -433,6 +438,7 @@ class IntraYearEngine:
             'ce01_ricavi_vendite': ce01,
             'ce02_variazioni_rimanenze': ce02,
             'ce03_lavori_interni': ce03,
+            'ce03a_incrementi_immobilizzazioni': ce03a,
             'ce04_altri_ricavi': ce04,
             'ce05_materie_prime': ce05,
             'ce06_servizi': ce06,
@@ -552,6 +558,7 @@ class IntraYearEngine:
             projected_inc['ce01_ricavi_vendite'] +
             projected_inc['ce02_variazioni_rimanenze'] +
             projected_inc['ce03_lavori_interni'] +
+            projected_inc.get('ce03a_incrementi_immobilizzazioni', Decimal('0')) +
             projected_inc['ce04_altri_ricavi'] -
             projected_inc['ce05_materie_prime'] -
             projected_inc['ce06_servizi'] -

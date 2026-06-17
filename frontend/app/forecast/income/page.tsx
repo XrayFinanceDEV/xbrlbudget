@@ -231,6 +231,17 @@ export default function ForecastIncomePage() {
         </div>
       )}
 
+      {!loading && analysisData && historicalYears.length === 0 && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Nessun dato storico trovato per l&apos;anno base dello scenario. Verifica di aver
+            importato il bilancio dell&apos;anno base (e dell&apos;anno precedente) prima di
+            generare il previsionale.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {!loading && analysisData && historicalYears.length > 0 && (
         <>
           {/* Income Statement Table */}

@@ -116,6 +116,32 @@ export const getIncomeStatement = async (
   return data;
 };
 
+// Create a financial year (auto-creates empty, all-zero BS + IS). Used by the
+// Startup flow to seed a manual base year with no imported bilancio.
+export const createFinancialYear = async (
+  companyId: number,
+  year: number
+): Promise<FinancialYear> => {
+  const { data } = await api.post<FinancialYear>(
+    `/companies/${companyId}/years`,
+    { year }
+  );
+  return data;
+};
+
+// Partial update of an income statement (only provided DB fields are written).
+export const updateIncomeStatement = async (
+  companyId: number,
+  year: number,
+  fields: Record<string, number>
+): Promise<IncomeStatement> => {
+  const { data } = await api.put<IncomeStatement>(
+    `/companies/${companyId}/years/${year}/income-statement`,
+    fields
+  );
+  return data;
+};
+
 // Calculations
 export const getSummaryMetrics = async (
   companyId: number,

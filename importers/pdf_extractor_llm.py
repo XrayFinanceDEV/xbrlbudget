@@ -34,7 +34,55 @@ class PDFImportError(Exception):
 # Pydantic models for structured extraction
 # ---------------------------------------------------------------------------
 
-class BalanceSheetExtraction(pydantic.BaseModel):
+def _coerce_number(v):
+    """Coerce an LLM-returned amount to float, tolerating Italian/mangled formats.
+
+    Claude sometimes serialises a numeric field as a STRING using Italian
+    thousands/decimal separators ("8.144.680,93") or a mangled hybrid where the
+    decimal comma was already turned into a dot but the thousands dots were left
+    in ("8.144.680.93"). Plain pydantic float-parsing rejects both, which made a
+    whole BalanceSheetExtraction fail validation and the extractor return nothing
+    (budget_405). Normalise here so one oddly-formatted field never sinks the
+    whole extraction.
+
+    Rules (no comma vs comma):
+      - comma present  -> Italian: drop '.', then ',' -> '.'   ("1.234,56" -> 1234.56)
+      - >1 dot, no comma -> last 2-digit group is the decimal, others thousands
+                            ("8.144.680.93" -> 8144680.93; "1.234.567" -> 1234567)
+      - <=1 dot         -> leave as-is (normal float / int)
+    Trailing '-' and parentheses denote negatives.
+    """
+    if v is None or isinstance(v, (int, float, dict, list)):
+        return v
+    s = str(v).strip()
+    if not s:
+        return 0
+    neg = s.endswith('-') or (s.startswith('(') and s.endswith(')'))
+    s = s.strip('()').rstrip('-').strip().replace(' ', '').replace(' ', '')
+    if not s:
+        return 0
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    elif s.count('.') > 1:
+        head, _, tail = s.rpartition('.')
+        s = (head.replace('.', '') + '.' + tail) if len(tail) == 2 else s.replace('.', '')
+    try:
+        f = float(s)
+    except ValueError:
+        return 0
+    return -f if neg else f
+
+
+class _ItalianNumberModel(pydantic.BaseModel):
+    """Base model whose float fields tolerate Italian/mangled numeric strings."""
+
+    @pydantic.field_validator('*', mode='before')
+    @classmethod
+    def _coerce_italian_numbers(cls, v):
+        return _coerce_number(v)
+
+
+class BalanceSheetExtraction(_ItalianNumberModel):
     """IV CEE Stato Patrimoniale fields (single year)."""
     sp01_crediti_soci: float = pydantic.Field(0, description="A) Crediti verso soci per versamenti ancora dovuti")
     sp02_immob_immateriali: float = pydantic.Field(0, description="B.I) Immobilizzazioni immateriali")
@@ -92,7 +140,7 @@ class BalanceSheetExtraction(pydantic.BaseModel):
     totale_crediti: float = pydantic.Field(0, description="Totale crediti (C.II) — the explicit 'Totale crediti' line from the PDF, sum of all C.II debtor categories (both entro and oltre). Used for validation.")
 
 
-class IncomeStatementExtraction(pydantic.BaseModel):
+class IncomeStatementExtraction(_ItalianNumberModel):
     """IV CEE Conto Economico fields."""
     ce01_ricavi_vendite: float = pydantic.Field(0, description="A.1) Ricavi delle vendite e delle prestazioni")
     ce02_variazioni_rimanenze: float = pydantic.Field(0, description="A.2) Variazioni delle rimanenze di prodotti in corso di lavorazione, semilavorati e finiti")
@@ -1570,11 +1618,19 @@ MAPPING (description -> field), report NET magnitudes:
 - sp17_debiti_lungo: debiti esigibili OLTRE l'esercizio (mutui, finanziamenti a lungo)
 - sp18_ratei_risconti_passivi: ratei e risconti passivi
 
-CREDITOR / DEBTOR BREAKDOWN (optional but preferred):
-- If you can tell the type, also fill the sub-fields so they sum to the aggregate:
-  * crediti: sp06a/sp07a clienti, sp06e/sp07e tributari, sp06g/sp07g altri
-  * debiti: sp16a/sp17a banche, sp16d/sp17d fornitori, sp16e/sp17e tributari, sp16f/sp17f previdenza, sp16g/sp17g altri
-- If unsure, leave the sub-fields at 0 and only fill the aggregate.
+CREDITOR / DEBTOR BREAKDOWN — PRESERVE THE SOURCE'S DETAIL DEPTH:
+- A trial balance names each account by type (es. "DEBITI V/FORNITORI", "ERARIO C/IVA",
+  "INPS C/CONTRIBUTI", "MUTUO BANCA..."). When the type is determinable from the
+  description, you MUST fill the matching typed sub-field — do NOT collapse everything
+  into the aggregate. The sub-fields must sum to the aggregate:
+  * crediti: sp06a/sp07a clienti, sp06e/sp07e tributari (erario, IVA, ritenute),
+    sp06f imposte anticipate, sp06g/sp07g altri
+  * debiti: sp16a/sp17a banche (mutui, c/c passivi), sp16b/sp17b altri finanziatori,
+    sp16c/sp17c obbligazioni, sp16d/sp17d fornitori, sp16e/sp17e tributari (erario, IVA),
+    sp16f/sp17f previdenza (INPS, INAIL), sp16g/sp17g altri (acconti, c/terzi, ...)
+- Only leave a sub-field at 0 when no account of that type exists. Put a debt/credit
+  whose type you genuinely cannot tell into the 'altri' bucket (sp16g / sp06g), never
+  silently into the bare aggregate.
 
 RESULT OF THE YEAR (sp13) — THE BALANCING RULE:
 - A trial balance usually has NO "utile d'esercizio" account: the profit/loss is implicit.

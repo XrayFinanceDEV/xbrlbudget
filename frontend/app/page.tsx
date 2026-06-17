@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarRange,
@@ -14,16 +15,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useApp } from "@/contexts/AppContext";
 
 export default function Home() {
   const router = useRouter();
+  const { setStartupMode } = useApp();
+
+  // Landing on the home page always exits startup mode.
+  useEffect(() => {
+    setStartupMode(false);
+  }, [setStartupMode]);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card
           className="cursor-pointer transition-colors hover:border-primary/50"
-          onClick={() => router.push("/aziende")}
+          onClick={() => {
+            setStartupMode(false);
+            router.push("/aziende");
+          }}
         >
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -53,7 +64,10 @@ export default function Home() {
 
         <Card
           className="cursor-pointer transition-colors hover:border-primary/50"
-          onClick={() => router.push("/infrannuale")}
+          onClick={() => {
+            setStartupMode(false);
+            router.push("/infrannuale");
+          }}
         >
           <CardHeader>
             <div className="flex items-center gap-3">

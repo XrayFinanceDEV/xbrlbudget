@@ -312,7 +312,7 @@ def calculate_cashflow_multi_year(
     # Get all full-year financial years for company (exclude partial)
     financial_years = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
-        models.FinancialYear.period_months.is_(None),
+        (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12),
     ).order_by(models.FinancialYear.year).all()
 
     if len(financial_years) < 2:
@@ -476,7 +476,7 @@ def calculate_ratios_historical_and_forecast(
     # Get all full-year historical years (exclude partial)
     historical_years = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
-        models.FinancialYear.period_months.is_(None),
+        (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12),
     ).order_by(models.FinancialYear.year).all()
 
     # Get all forecast years
@@ -550,7 +550,7 @@ def calculate_detailed_cashflow_historical_only(
         models.FinancialYear.company_id == company_id,
         models.FinancialYear.year >= start_year - 1,  # Need previous year as base
         models.FinancialYear.year <= end_year,
-        models.FinancialYear.period_months.is_(None),
+        (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12),
     ).order_by(models.FinancialYear.year).all()
 
     if len(financial_years) < 2:

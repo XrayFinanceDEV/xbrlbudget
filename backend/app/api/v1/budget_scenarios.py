@@ -1042,7 +1042,7 @@ def get_forecast_reclassified_data(
     historical_years = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
         models.FinancialYear.year <= base_year,
-        models.FinancialYear.period_months.is_(None),
+        (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12),
     ).order_by(models.FinancialYear.year).all()
 
     # Build result structure

@@ -19,7 +19,7 @@ Account hierarchy (DEPI format):
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Tuple
 
@@ -36,6 +36,7 @@ class Entry:
     amount: Decimal    # single amount (section determines dare/avere)
     level: int = 0     # 0=detail, 1=sub3, 2=sub2, 3=section total, 4=utile, 5=pareggio
     section: str = ""  # 'attivo', 'passivo', 'costi', 'ricavi'
+    amount_prior: Decimal = Decimal('0')  # prior-year column (dual-year trial balances)
 
     @property
     def prefix2(self) -> str:
@@ -223,16 +224,26 @@ def parse_entries(text: str) -> List[Entry]:
                 else:
                     i += 1
 
-            # Next line(s) should be amount(s)
+            # Next line(s) should be amount(s).
+            #   Mono-column layout:  amt1 = saldo
+            #   Dual-year layout:    amt1 = saldo corrente, amt2 = saldo precedente,
+            #                        amt3 = differenza (left as an orphan line, skipped
+            #                        by the main loop), then a % (not an _AMOUNT_RE match).
+            # We capture the SECOND consecutive amount as the prior-year saldo so a
+            # dual-year trial balance (e.g. budget_132) yields both years. Single-column
+            # files have no second consecutive amount → amount_prior stays 0.
             amount = Decimal('0')
+            amount_prior = Decimal('0')
             if i + 1 < len(lines):
                 amt_match = _AMOUNT_RE.match(lines[i + 1].strip())
                 if amt_match:
                     amount = _parse_amount(amt_match.group(1))
                     i += 1
-                    # Skip second amount for pareggio lines
-                    if level == 5 and i + 1 < len(lines):
-                        if _AMOUNT_RE.match(lines[i + 1].strip()):
+                    # Second consecutive amount = prior-year column (dual-year files).
+                    if i + 1 < len(lines):
+                        amt2_match = _AMOUNT_RE.match(lines[i + 1].strip())
+                        if amt2_match:
+                            amount_prior = _parse_amount(amt2_match.group(1))
                             i += 1
 
             entries.append(Entry(
@@ -241,6 +252,7 @@ def parse_entries(text: str) -> List[Entry]:
                 amount=amount,
                 level=level,
                 section=section,
+                amount_prior=amount_prior,
             ))
 
         i += 1
@@ -491,6 +503,107 @@ def _classify_ce_ricavi(desc_upper: str) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Typed sub-field classification (depth preservation)
+# ---------------------------------------------------------------------------
+# When the source distinguishes account TYPES (banche vs fornitori vs tributari,
+# clienti vs altri crediti, riserve per natura), preserve that depth into the
+# IV-CEE typed sub-fields instead of collapsing everything into the aggregate.
+# These return a single OIC sub-letter; the aggregate is computed unchanged, so
+# sub-fields are purely additive (no balance/quadratura impact). The DB field
+# name maps below translate (letter -> full column) for emission.
+
+# OIC art. 2424 D) Debiti — full DB column names per maturity bucket
+_DEBT_FIELD = {
+    'breve': {
+        'a': 'sp16a_debiti_banche_breve',
+        'b': 'sp16b_debiti_altri_finanz_breve',
+        'c': 'sp16c_debiti_obbligazioni_breve',
+        'd': 'sp16d_debiti_fornitori_breve',
+        'e': 'sp16e_debiti_tributari_breve',
+        'f': 'sp16f_debiti_previdenza_breve',
+        'g': 'sp16g_altri_debiti_breve',
+    },
+    'lungo': {
+        'a': 'sp17a_debiti_banche_lungo',
+        'b': 'sp17b_debiti_altri_finanz_lungo',
+        'c': 'sp17c_debiti_obbligazioni_lungo',
+        'd': 'sp17d_debiti_fornitori_lungo',
+        'e': 'sp17e_debiti_tributari_lungo',
+        'f': 'sp17f_debiti_previdenza_lungo',
+        'g': 'sp17g_altri_debiti_lungo',
+    },
+}
+# OIC art. 2424 C.II) Crediti — full DB column names per maturity bucket
+_CREDIT_FIELD = {
+    'breve': {
+        'a': 'sp06a_crediti_clienti_breve',
+        'e': 'sp06e_crediti_tributari_breve',
+        'f': 'sp06f_imposte_anticipate_breve',
+        'g': 'sp06g_crediti_altri_breve',
+    },
+    'lungo': {
+        'a': 'sp07a_crediti_clienti_lungo',
+        'e': 'sp07e_crediti_tributari_lungo',
+        'f': 'sp07f_imposte_anticipate_lungo',
+        'g': 'sp07g_crediti_altri_lungo',
+    },
+}
+# OIC art. 2424 A) Patrimonio netto — riserve breakdown
+_RISERVA_FIELD = {
+    'a': 'sp12a_riserva_sovrapprezzo',
+    'b': 'sp12b_riserve_rivalutazione',
+    'c': 'sp12c_riserva_legale',
+    'd': 'sp12d_riserve_statutarie',
+    'e': 'sp12e_altre_riserve',
+    'g': 'sp12g_utili_perdite_portati',
+}
+
+
+def _debt_type(desc_upper: str) -> str:
+    """Typed-debt OIC sub-letter for a passivo debt line (a..g)."""
+    if _kw_any(desc_upper, ['OBBLIGAZION']):
+        return 'c'
+    if _kw_any(desc_upper, ['BANCH', 'MUTU', 'C/C PASSIV', 'SCOPERT']):
+        return 'a'
+    if _kw_any(desc_upper, ['ALTRI FINANZIAT', 'FINANZIAT', 'SOCI C/FINANZ', 'FACTOR']):
+        return 'b'
+    if _kw_any(desc_upper, ['FORNITOR']):
+        return 'd'
+    if _kw_any(desc_upper, ['TRIBUTAR', 'ERARIO', 'IVA', 'IMPOST', 'F24', 'RITENUT']):
+        return 'e'
+    if _kw_any(desc_upper, ['PREV', 'INPS', 'INAIL', 'SICUR', 'ENPALS', 'INARCASSA']):
+        return 'f'
+    return 'g'  # altri debiti (acconti, clienti c/, movimentazioni c/terzi, ...)
+
+
+def _credit_type(desc_upper: str) -> str:
+    """Typed-credit OIC sub-letter for an attivo credit line (a/e/f/g)."""
+    if _kw_any(desc_upper, ['IMPOSTE ANTICIP', 'IMPOSTA ANTICIP']):
+        return 'f'
+    if _kw_any(desc_upper, ['CLIENT']):
+        return 'a'
+    if _kw_any(desc_upper, ['TRIBUTAR', 'ERARIO', 'IVA', 'IMPOST', 'RITENUT', "CRED. D'IMPOST",
+                            'CREDITO IMPOST', 'F24']):
+        return 'e'
+    return 'g'  # altri crediti
+
+
+def _riserva_type(desc_upper: str) -> str:
+    """Riserve OIC sub-letter for a PN reserve line (a/b/c/d/e/g)."""
+    if _kw_any(desc_upper, ['SOVRAPPREZZO']):
+        return 'a'
+    if _kw_any(desc_upper, ['RIVALUTAZ']):
+        return 'b'
+    if _kw_any(desc_upper, ['LEGALE']):
+        return 'c'
+    if _kw_any(desc_upper, ['STATUTAR']):
+        return 'd'
+    if _kw_any(desc_upper, ['PORTATI', 'PORTATE', 'NUOVO', 'PRECEDENT', 'ESERCIZI PREC']):
+        return 'g'  # utili/(perdite) portati a nuovo
+    return 'e'  # altre riserve (straordinaria, riserva utili, ...)
+
+
 def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Map trial balance entries to IV CEE sp01-sp18 and ce01-ce20 fields.
 
@@ -517,6 +630,15 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     debt_bank_entro = Decimal('0')
     debt_bank_oltre = Decimal('0')
     debt_bank_total = Decimal('0')
+
+    # Typed sub-field accumulators (depth preservation). Mirror the EXACT amounts
+    # that feed the aggregates, so they're purely additive: sub-fields are emitted
+    # at finalization and reconciled to the aggregate, never altering it. Dicts are
+    # mutated in place (no nonlocal needed).
+    typed_debt_breve = {k: Decimal('0') for k in 'abcdefg'}
+    typed_debt_oltre = {k: Decimal('0') for k in 'abcdefg'}
+    typed_credit_breve = {k: Decimal('0') for k in 'aefg'}
+    typed_riserve = {k: Decimal('0') for k in 'abcdeg'}
 
     # CE sub-items
     ce_tfr_accrual = Decimal('0')
@@ -571,6 +693,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                 bank_dare += entry.amount
             else:
                 bs[field] = bs.get(field, Decimal('0')) + entry.amount
+                # Typed depth: crediti breve by debtor type (clienti/tributari/altri)
+                if field == 'sp06':
+                    typed_credit_breve[_credit_type(desc_upper)] += entry.amount
             return
 
         # =================================================================
@@ -599,24 +724,34 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                     capitale += entry.amount
                 else:
                     riserve += entry.amount
+                    typed_riserve[_riserva_type(desc_upper)] += entry.amount
             elif field == 'debt_bank':
                 if entry.level in (0, 1, 2):
                     # Parent/detail (EE)/(OE) routing: AGO suffix convention,
                     # plus DEPI flat-balance ENTRO/OLTRE in the description.
+                    # Typed depth: banche/altri-finanz/obbligazioni by description.
+                    _dt = _debt_type(desc_upper)
                     if '(OE)' in desc_upper or 'OLTRE' in desc_upper:
                         debt_bank_oltre += entry.amount
                         debt_bank_total += entry.amount
+                        typed_debt_oltre[_dt] += entry.amount
                     elif '(EE)' in desc_upper or 'ENTRO' in desc_upper:
                         debt_bank_entro += entry.amount
                         debt_bank_total += entry.amount
+                        typed_debt_breve[_dt] += entry.amount
                     else:
                         debt_bank_total += entry.amount
+                        typed_debt_breve[_dt] += entry.amount
             elif field == 'sp16':
-                # Non-bank debts with (OE) suffix → long-term (sp17)
+                # Non-bank debts with (OE) suffix → long-term (sp17).
+                # Typed depth: fornitori/tributari/previdenza/altri by description.
+                _dt = _debt_type(desc_upper)
                 if '(OE)' in desc_upper or 'OLTRE' in desc_upper:
                     bs['sp17'] = bs.get('sp17', Decimal('0')) + entry.amount
+                    typed_debt_oltre[_dt] += entry.amount
                 else:
                     bs['sp16'] = bs.get('sp16', Decimal('0')) + entry.amount
+                    typed_debt_breve[_dt] += entry.amount
             else:
                 bs[field] = bs.get(field, Decimal('0')) + entry.amount
             return
@@ -715,6 +850,7 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                         capitale += entry.amount
                     else:
                         riserve += entry.amount
+                        typed_riserve[_riserva_type(desc_upper)] += entry.amount
                     continue
             if entry.section == 'costi' and ('TFR' in desc_upper or
                     _kw_match(desc_upper, ['TRATTAMENTO', 'FINE', 'RAPPORTO'])):
@@ -743,6 +879,7 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                     capitale += entry.amount
                 else:
                     riserve += entry.amount
+                    typed_riserve[_riserva_type(desc_upper)] += entry.amount
                 continue
 
         # Orphan detail lines: a level-0 entry whose prefix has NO subtotal
@@ -765,6 +902,7 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                         capitale += entry.amount
                     else:
                         riserve += entry.amount
+                        typed_riserve[_riserva_type(desc_upper)] += entry.amount
                     continue
             _process_category(entry)
             continue
@@ -813,6 +951,42 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
 
     # Bank overdrafts → sp16
     bs['sp16'] += bank_avere
+    # Overdrafts are bank debt: keep them in the typed depth too.
+    typed_debt_breve['a'] += bank_avere
+
+    # -----------------------------------------------------------------
+    # Typed sub-field depth (additive): emit the OIC creditor/debtor/riserve
+    # breakdown the source distinguished, reconciled so the sub-fields sum
+    # EXACTLY to their aggregate. This never changes an aggregate (and thus
+    # never the balance) — it only exposes the detail level present in the
+    # document instead of one lumped voce. When the source carries no type
+    # info, the residual falls into 'altri'/'altre riserve' (same as before).
+    # -----------------------------------------------------------------
+    def _reconcile_typed(aggregate: Decimal, buckets: Dict[str, Decimal], altri: str) -> None:
+        residual = aggregate - sum(buckets.values())
+        buckets[altri] = buckets.get(altri, Decimal('0')) + residual
+        if buckets[altri] < 0:
+            # Contra/deduction exceeded 'altri' (rare) — clamp; the small leftover
+            # gap is reconciled downstream (frontend reconcileSubfields).
+            buckets[altri] = Decimal('0')
+
+    _reconcile_typed(bs.get('sp16', Decimal('0')), typed_debt_breve, 'g')
+    _reconcile_typed(bs.get('sp17', Decimal('0')), typed_debt_oltre, 'g')
+    _reconcile_typed(bs.get('sp06', Decimal('0')), typed_credit_breve, 'g')
+    _reconcile_typed(bs.get('sp12', Decimal('0')), typed_riserve, 'e')
+
+    for letter, amt in typed_debt_breve.items():
+        bs[_DEBT_FIELD['breve'][letter]] = amt
+    for letter, amt in typed_debt_oltre.items():
+        bs[_DEBT_FIELD['lungo'][letter]] = amt
+    for letter, amt in typed_credit_breve.items():
+        bs[_CREDIT_FIELD['breve'][letter]] = amt
+    for letter, amt in typed_riserve.items():
+        bs[_RISERVA_FIELD[letter]] = amt
+    # Crediti lungo (sp07): not typed by this parser — expose the aggregate as 'altri'
+    # so the sub-row reconciles (clienti/tributari lungo are rare in trial balances).
+    if bs.get('sp07', Decimal('0')):
+        bs['sp07g_crediti_altri_lungo'] = bs['sp07']
 
     # Defaults
     for i in range(1, 19):
@@ -2652,7 +2826,30 @@ def _attivo_key(k: str) -> bool:
     return k in _ATTIVO_KEYS
 
 
-def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+def _build_prior_from_entries(entries: List[Entry], default_ce: bool):
+    """Build a prior-year (BS, CE) from the second amount column of a dual-year
+    trial balance, or (None, None) when there is no usable prior column.
+
+    Dual-year DEPI files carry two saldi per line (corrente, precedente). The
+    parser stores the prior saldo in Entry.amount_prior; here we re-run the
+    SAME IV-CEE mapping on the prior column and keep it only if it is non-empty
+    and balances (Attivo == Passivo within €1) — a single-column file has all
+    amount_prior == 0, so this returns (None, None) and nothing changes.
+    """
+    if not any((e.amount_prior or Decimal('0')) != 0 for e in entries):
+        return None, None
+    prior_entries = [replace(e, amount=(e.amount_prior or Decimal('0'))) for e in entries]
+    prior_bs, prior_ce = build_iv_cee(prior_entries, default_ce=default_ce)
+    ta = prior_bs.get('totale_attivo') or Decimal('0')
+    tp = prior_bs.get('totale_passivo') or Decimal('0')
+    if ta <= 0 or abs(ta - tp) > Decimal('1'):
+        logger.info(f"Prior-year column unusable (attivo={ta}, passivo={tp}) — skipping")
+        return None, None
+    logger.info(f"Prior-year column extracted (totale_attivo={ta})")
+    return prior_bs, prior_ce
+
+
+def extract_situazione_contabile(file_path: str, return_prior: bool = False):
     """
     Extract IV CEE data from a Situazione Contabile PDF.
 
@@ -2660,7 +2857,10 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
     otherwise falls back to the DEPI parser (XX/YY/ZZZ codes).
 
     Returns:
-        (balance_sheet_data, income_data) dicts with Decimal values
+        (balance_sheet_data, income_data) dicts with Decimal values.
+        When return_prior=True, returns a 4-tuple
+        (bs, ce, prior_bs, prior_ce) where prior_* is None unless the file is a
+        dual-year trial balance whose prior column balances.
     """
     try:
         doc = fitz.open(file_path)
@@ -2696,7 +2896,8 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
         # Last-resort: an unrecognised 2-physical-column dump (the structured
         # DEPI/single-column/TeamSystem parsers above handle the known schemes).
         logger.info("Generic 2-column contrapposte detected, using best-effort parser")
-        return extract_contrapposte_best_effort(file_path)
+        be_bs, be_ce = extract_contrapposte_best_effort(file_path)
+        return (be_bs, be_ce, None, None) if return_prior else (be_bs, be_ce)
     else:
         logger.info("DEPI format detected, using text-based parser")
         entries = parse_entries(full_text)
@@ -2724,7 +2925,7 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
                 be_bs, be_ce = extract_contrapposte_best_effort(file_path)
                 if (be_bs.get('totale_attivo') or Decimal('0')) != 0:
                     logger.info(f"Best-effort retry recovered totale_attivo={be_bs.get('totale_attivo')}")
-                    return be_bs, be_ce
+                    return (be_bs, be_ce, None, None) if return_prior else (be_bs, be_ce)
         except Exception as be_err:
             logger.warning(f"Best-effort retry failed: {type(be_err).__name__}: {be_err}")
 
@@ -2734,4 +2935,7 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
     logger.info(f"SC parser: ce01={ce.get('ce01')}, ce05={ce.get('ce05')}, ce08={ce.get('ce08')}")
     logger.info(f"SC parser: totale_attivo={bs.get('totale_attivo')}, totale_passivo={bs.get('totale_passivo')}")
 
+    if return_prior:
+        prior_bs, prior_ce = _build_prior_from_entries(entries, default_ce)
+        return bs, ce, prior_bs, prior_ce
     return bs, ce

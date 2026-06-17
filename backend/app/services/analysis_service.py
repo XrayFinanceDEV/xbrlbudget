@@ -108,7 +108,7 @@ def get_complete_analysis(
                 models.FinancialYear.company_id == company_id,
                 models.FinancialYear.year >= scenario.base_year - 1,
                 models.FinancialYear.year <= scenario.base_year,
-                models.FinancialYear.period_months.is_(None),
+                (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12),
             )\
             .order_by(models.FinancialYear.year)\
             .all()

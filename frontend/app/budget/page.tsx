@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useInvalidateScenarios, useInvalidateAnalysis } from "@/hooks/use-queries";
 import {
+  createCompany,
+  createFinancialYear,
+  updateIncomeStatement,
   createBudgetScenario,
   updateBudgetScenario,
   deleteBudgetScenario,
@@ -44,6 +47,7 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
+  Rocket,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,7 +76,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
   parseFloat((Number(v ?? fallback)).toFixed(1));
 
 export default function BudgetPage() {
-  const { selectedCompanyId, selectedCompany, years } = useApp();
+  const { selectedCompanyId, selectedCompany, years, startupMode } = useApp();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -120,6 +124,21 @@ export default function BudgetPage() {
     if (selectedCompanyId) invalidateScenarios(selectedCompanyId);
   };
 
+  // Startup mode has no imported bilancio: when there's no base year yet, show
+  // the from-zero setup that seeds a manual base year.
+  if (startupMode && years.length === 0) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <PageHeader
+          title="Startup"
+          description="Crea il tuo progetto e inserisci i dati di partenza"
+          icon={<Rocket className="h-6 w-6" />}
+        />
+        <StartupSetup />
+      </div>
+    );
+  }
+
   if (!selectedCompanyId) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -150,9 +169,13 @@ export default function BudgetPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <PageHeader
-        title="Budget & Previsionale"
-        description="Crea scenari di budget e previsionali finanziari a 3 anni"
-        icon={<FileSpreadsheet className="h-6 w-6" />}
+        title={startupMode ? "Previsionale Startup" : "Budget & Previsionale"}
+        description={
+          startupMode
+            ? "Definisci la crescita attesa e genera la proiezione a 3-5 anni"
+            : "Crea scenari di budget e previsionali finanziari a 3 anni"
+        }
+        icon={startupMode ? <Rocket className="h-6 w-6" /> : <FileSpreadsheet className="h-6 w-6" />}
       />
 
       {error && (
@@ -186,6 +209,7 @@ export default function BudgetPage() {
           scenario={editingScenario}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          startup={startupMode}
           onSaved={handleScenarioSaved}
           onCancel={() => {
             setEditingScenario(null);
@@ -194,6 +218,128 @@ export default function BudgetPage() {
         />
       )}
     </div>
+  );
+}
+
+// Startup from-zero setup: creates a project (company) + a manual base year
+// seeded with the expected revenue/costs, so the growth-% engine can project.
+function StartupSetup() {
+  const { setSelectedCompanyId, refreshCompanies } = useApp();
+  const currentYear = new Date().getFullYear();
+  const [name, setName] = useState("");
+  const [baseYear, setBaseYear] = useState(currentYear - 1);
+  const [ricavi, setRicavi] = useState(0);
+  const [materie, setMaterie] = useState(0);
+  const [servizi, setServizi] = useState(0);
+  const [personale, setPersonale] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const numCls = "w-full px-3 py-2 text-sm border border-border rounded bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
+
+  const handleCreate = async () => {
+    if (!name.trim()) {
+      toast.error("Inserisci il nome del progetto");
+      return;
+    }
+    setLoading(true);
+    try {
+      const company = await createCompany({ name: name.trim(), sector: 3 });
+      await createFinancialYear(company.id, baseYear);
+      await updateIncomeStatement(company.id, baseYear, {
+        ce01_ricavi_vendite: ricavi || 0,
+        ce05_materie_prime: materie || 0,
+        ce06_servizi: servizi || 0,
+        ce08_costi_personale: personale || 0,
+      });
+      await refreshCompanies();
+      // Selecting the new company loads its years → the scenario form appears.
+      setSelectedCompanyId(company.id);
+      toast.success("Progetto startup creato! Definisci ora lo scenario previsionale.");
+    } catch (err: any) {
+      console.error("Error creating startup project:", err);
+      toast.error(getErrorMessage(err, "Impossibile creare il progetto startup"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Rocket className="h-5 w-5" /> Nuovo progetto Startup
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            Una startup non ha un bilancio storico. Inserisci qui i valori attesi
+            del primo anno: saranno l&apos;anno base da cui generare la proiezione.
+          </AlertDescription>
+        </Alert>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="startup-name">Nome progetto *</Label>
+            <Input
+              id="startup-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="es. La mia Startup S.r.l."
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="startup-year">Primo anno (anno base)</Label>
+            <Input
+              id="startup-year"
+              type="number"
+              value={baseYear}
+              onChange={(e) => setBaseYear(parseInt(e.target.value) || currentYear - 1)}
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-border pt-4">
+          <p className="text-sm font-semibold text-foreground mb-3">
+            Dati di partenza primo anno (importi in €)
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="startup-ricavi">Ricavi attesi</Label>
+              <input id="startup-ricavi" type="number" step="1000" min="0" className={numCls}
+                value={ricavi} onChange={(e) => setRicavi(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="startup-materie">Costi materie prime</Label>
+              <input id="startup-materie" type="number" step="1000" min="0" className={numCls}
+                value={materie} onChange={(e) => setMaterie(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="startup-servizi">Costi servizi</Label>
+              <input id="startup-servizi" type="number" step="1000" min="0" className={numCls}
+                value={servizi} onChange={(e) => setServizi(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="startup-personale">Costi del personale</Label>
+              <input id="startup-personale" type="number" step="1000" min="0" className={numCls}
+                value={personale} onChange={(e) => setPersonale(parseFloat(e.target.value) || 0)} />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button onClick={handleCreate} disabled={loading}>
+            {loading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Creazione...</>
+            ) : (
+              <><Rocket className="h-4 w-4" /> Crea progetto e continua</>
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -329,6 +475,7 @@ function ScenarioForm({
   scenario,
   activeTab,
   setActiveTab,
+  startup,
   onSaved,
   onCancel,
 }: {
@@ -337,6 +484,7 @@ function ScenarioForm({
   scenario: BudgetScenario | null;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  startup: boolean;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -698,6 +846,7 @@ function ScenarioForm({
             historicalData={historicalData}
             assumptions={assumptions}
             onUpdate={updateAssumption}
+            startup={startup}
           />
         </TabsContent>
 
@@ -1020,7 +1169,8 @@ function CEAssumptionsTable({
   historicalData,
   assumptions,
   onUpdate,
-}: AssumptionsTableProps) {
+  startup = false,
+}: AssumptionsTableProps & { startup?: boolean }) {
   const [showCEDetail, setShowCEDetail] = useState(false);
   const totalYears = historicalYears.length + forecastYears.length;
   const baseYear = historicalYears[historicalYears.length - 1];
@@ -1072,6 +1222,7 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && (<>
           {/* Other Revenue Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
@@ -1137,6 +1288,7 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+          </>)}
 
           {/* Variable Materials Growth */}
           <tr className="hover:bg-muted/50">
@@ -1168,6 +1320,7 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && (<>
           {/* Fixed Materials Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
@@ -1230,6 +1383,7 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+          </>)}
 
           {/* Variable Services Growth */}
           <tr className="hover:bg-muted/50">
@@ -1261,6 +1415,7 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && (<>
           {/* Fixed Services Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
@@ -1320,6 +1475,7 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+          </>)}
 
           {/* Personnel Growth */}
           <tr className="hover:bg-muted/50">
@@ -1351,6 +1507,7 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && (<>
           {/* Other Costs Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
@@ -1380,6 +1537,7 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+          </>)}
 
           {/* Tax Rate */}
           <tr className="hover:bg-muted/50">
@@ -1436,6 +1594,7 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && (<>
           {/* DETTAGLIO CONTO ECONOMICO Section (collapsible) */}
           <tr className="bg-muted cursor-pointer" onClick={() => setShowCEDetail(!showCEDetail)}>
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
@@ -1641,6 +1800,7 @@ function CEAssumptionsTable({
               );
             })}
           </tr>
+          </>)}
         </tbody>
       </table>
     </div>

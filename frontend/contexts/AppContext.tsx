@@ -23,9 +23,13 @@ interface AppContextType {
   selectedCompany: Company | null;
   loading: boolean;
   error: string | null;
+  startupMode: boolean;
+  setStartupMode: (v: boolean) => void;
   refreshCompanies: () => Promise<void>;
   refreshYears: () => Promise<void>;
 }
+
+const STARTUP_MODE_KEY = "xbrl_startup_mode";
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -39,6 +43,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Startup mode: simplified budget flow (no import/companies tabs, reduced variables).
+  // Persisted so it survives navigation between pages within a startup session.
+  const [startupMode, setStartupModeState] = useState(false);
+  useEffect(() => {
+    try {
+      setStartupModeState(localStorage.getItem(STARTUP_MODE_KEY) === "1");
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, []);
+  const setStartupMode = useCallback((v: boolean) => {
+    setStartupModeState(v);
+    try {
+      localStorage.setItem(STARTUP_MODE_KEY, v ? "1" : "0");
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, []);
 
   // Ref to read current selectedCompanyId without adding it as a dependency
   const selectedCompanyIdRef = useRef(selectedCompanyId);
@@ -133,6 +156,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedCompany,
       loading,
       error,
+      startupMode,
+      setStartupMode,
       refreshCompanies: loadCompanies,
       refreshYears,
     }),
@@ -144,6 +169,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedCompany,
       loading,
       error,
+      startupMode,
+      setStartupMode,
       loadCompanies,
       refreshYears,
     ]

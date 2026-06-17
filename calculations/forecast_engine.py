@@ -68,6 +68,18 @@ class ForecastEngine:
         base_bs = base_fy.balance_sheet
         base_inc = base_fy.income_statement
 
+        # Guard: a base year with NEGATIVE sales revenue is a broken extraction
+        # (ricavi delle vendite, OIC A.1, can never be < 0). Projecting it produces
+        # garbage — applying a growth % to a negative base inverts the direction
+        # (e.g. +15% makes it MORE negative). Refuse with an honest error pointing to
+        # Rettifiche instead of generating a misleading forecast.
+        if (base_inc.ce01_ricavi_vendite or Decimal('0')) < 0:
+            raise ValueError(
+                f"Anno base {scenario.base_year}: ricavi delle vendite negativi "
+                f"({base_inc.ce01_ricavi_vendite:.0f} €) — estrazione del bilancio non valida. "
+                f"Correggi i ricavi in Rettifiche (o re-importa il bilancio) prima di generare il previsionale."
+            )
+
         # Get all assumptions for this scenario
         assumptions = self.db.query(BudgetAssumptions).filter(
             BudgetAssumptions.scenario_id == scenario_id

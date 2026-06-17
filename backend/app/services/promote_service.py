@@ -46,7 +46,7 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     existing = db.query(FinancialYear).filter(
         FinancialYear.company_id == company_id,
         FinancialYear.year == target_year,
-        FinancialYear.period_months.is_(None),
+        (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
     ).first()
     if existing:
         db.delete(existing)  # cascade removes BS + IS

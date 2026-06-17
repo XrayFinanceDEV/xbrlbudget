@@ -87,19 +87,19 @@ def _create_balance_sheet(db, financial_year_id: int, data: Dict[str, Decimal]) 
         sp16_debiti_breve=data.get('sp16_debiti_breve', Decimal('0')),
         sp17_debiti_lungo=data.get('sp17_debiti_lungo', Decimal('0')),
         sp18_ratei_risconti_passivi=data.get('sp18_ratei_risconti_passivi', Decimal('0')),
-        sp04a_partecipazioni=Decimal('0'),
-        sp04b_crediti_immob_breve=Decimal('0'),
-        sp04c_crediti_immob_lungo=Decimal('0'),
-        sp04d_altri_titoli=Decimal('0'),
-        sp04e_strumenti_derivati_attivi=Decimal('0'),
-        sp12a_riserva_sovrapprezzo=Decimal('0'),
-        sp12b_riserve_rivalutazione=Decimal('0'),
-        sp12c_riserva_legale=Decimal('0'),
-        sp12d_riserve_statutarie=Decimal('0'),
-        sp12e_altre_riserve=Decimal('0'),
-        sp12f_riserva_copertura_flussi=Decimal('0'),
-        sp12g_utili_perdite_portati=Decimal('0'),
-        sp12h_riserva_neg_azioni_proprie=Decimal('0'),
+        sp04a_partecipazioni=data.get('sp04a_partecipazioni', Decimal('0')),
+        sp04b_crediti_immob_breve=data.get('sp04b_crediti_immob_breve', Decimal('0')),
+        sp04c_crediti_immob_lungo=data.get('sp04c_crediti_immob_lungo', Decimal('0')),
+        sp04d_altri_titoli=data.get('sp04d_altri_titoli', Decimal('0')),
+        sp04e_strumenti_derivati_attivi=data.get('sp04e_strumenti_derivati_attivi', Decimal('0')),
+        sp12a_riserva_sovrapprezzo=data.get('sp12a_riserva_sovrapprezzo', Decimal('0')),
+        sp12b_riserve_rivalutazione=data.get('sp12b_riserve_rivalutazione', Decimal('0')),
+        sp12c_riserva_legale=data.get('sp12c_riserva_legale', Decimal('0')),
+        sp12d_riserve_statutarie=data.get('sp12d_riserve_statutarie', Decimal('0')),
+        sp12e_altre_riserve=data.get('sp12e_altre_riserve', Decimal('0')),
+        sp12f_riserva_copertura_flussi=data.get('sp12f_riserva_copertura_flussi', Decimal('0')),
+        sp12g_utili_perdite_portati=data.get('sp12g_utili_perdite_portati', Decimal('0')),
+        sp12h_riserva_neg_azioni_proprie=data.get('sp12h_riserva_neg_azioni_proprie', Decimal('0')),
         sp06a_crediti_clienti_breve=data.get('sp06a_crediti_clienti_breve', Decimal('0')),
         sp07a_crediti_clienti_lungo=data.get('sp07a_crediti_clienti_lungo', Decimal('0')),
         sp06b_crediti_controllate_breve=data.get('sp06b_crediti_controllate_breve', Decimal('0')),
@@ -202,6 +202,12 @@ def import_pdf_balance_sheet(
     Raises:
         PDFImportError: If extraction or validation fails
     """
+
+    # Normalize: 12 (or more) months is a full year — store as NULL per the
+    # FinancialYear convention (NULL = full year, 1-11 = partial). Only 1-11
+    # marks a genuine partial-year (infrannuale) record.
+    if period_months is not None and period_months >= 12:
+        period_months = None
 
     db = SessionLocal()
     extraction_start = datetime.utcnow()
@@ -325,8 +331,16 @@ def import_pdf_balance_sheet(
                         f"({type(coge_err).__name__}: {coge_err})"
                     )
 
+            sc_prior_bs = sc_prior_ce = None
             try:
-                sc_bs, sc_ce = extract_situazione_contabile(file_path)
+                # Dual-year trial balances (e.g. budget_131/132 Oprandi) carry the
+                # prior-year saldo in a second column. Capture it from the deterministic
+                # parser so the prior FinancialYear is created downstream (Step 7) —
+                # the CoGe LLM pass is single-year, so the deterministic dual read is
+                # the source of the prior column regardless of which current-year
+                # candidate wins.
+                sc_bs, sc_ce, sc_prior_bs, sc_prior_ce = extract_situazione_contabile(
+                    file_path, return_prior=True)
                 sc_bs_mapped = _map_sc_keys(sc_bs)   # short keys (sp03) -> full DB names
                 sc_ce_mapped = _map_sc_keys(sc_ce)
                 r = _residual_of(sc_bs_mapped, sc_ce_mapped)
@@ -337,6 +351,12 @@ def import_pdf_balance_sheet(
                     f"Route C: deterministic SC parser failed "
                     f"({type(sc_err).__name__}: {sc_err})"
                 )
+
+            # Prior-year column (dual-year trial balance) → prior FinancialYear.
+            # Mapped to full DB field names; written by the generic Step-7 path.
+            if sc_prior_bs and sc_prior_ce:
+                prior_bs_data = _map_sc_keys(sc_prior_bs)
+                prior_ce_data = _map_sc_keys(sc_prior_ce)
 
             if candidates:
                 # keep the cleaner extractor (smallest unclassified residual)
@@ -474,18 +494,21 @@ def import_pdf_balance_sheet(
         # Step 4: Check if fiscal year already exists (match same type: partial or full)
         if fiscal_year:
             if period_months:
-                # Partial import: only delete existing partial record
+                # Partial import (1-11): only delete existing partial record
+                # (12 counts as full year, so exclude it)
                 existing_year = db.query(FinancialYear).filter(
                     FinancialYear.company_id == company.id,
                     FinancialYear.year == fiscal_year,
                     FinancialYear.period_months.isnot(None),
+                    FinancialYear.period_months != 12,
                 ).first()
             else:
                 # Full-year import: only delete existing full-year record
+                # (NULL or legacy 12, so re-import updates in place)
                 existing_year = db.query(FinancialYear).filter(
                     FinancialYear.company_id == company.id,
                     FinancialYear.year == fiscal_year,
-                    FinancialYear.period_months.is_(None),
+                    (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
                 ).first()
 
             if existing_year:
@@ -544,7 +567,7 @@ def import_pdf_balance_sheet(
                 existing_prior = db.query(FinancialYear).filter(
                     FinancialYear.company_id == company.id,
                     FinancialYear.year == prior_fiscal_year,
-                    FinancialYear.period_months.is_(None),
+                    (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
                 ).first()
 
                 if existing_prior and not fresh_prior_balances:

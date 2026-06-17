@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/contexts/AppContext";
 import {
   Building2,
   Upload,
@@ -42,16 +43,23 @@ const ANALYSIS_TABS = [
 
 export function Navigation() {
   const pathname = usePathname();
+  const { startupMode } = useApp();
   const isForecastActive = pathname.startsWith("/forecast");
 
   // Hide navigation on homepage and infrannuale (has its own nav)
   if (pathname === "/" || pathname.startsWith("/infrannuale")) return null;
 
+  // Startup mode: a startup has no historical bilancio to import, so the
+  // Aziende and Importazione tabs are hidden.
+  const mainTabs = startupMode
+    ? MAIN_TABS.filter((tab) => tab.href !== "/aziende" && tab.href !== "/import")
+    : MAIN_TABS;
+
   return (
     <div className="border-b border-border bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <nav className="flex items-center gap-1 overflow-x-auto" aria-label="Tabs">
-          {MAIN_TABS.map((tab) => {
+          {mainTabs.map((tab) => {
             const isActive = tab.match(pathname);
             const Icon = tab.icon;
             return (

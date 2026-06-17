@@ -616,6 +616,10 @@ class BudgetAssumptions(Base):
     investments = Column(Numeric(15, 2), default=0, nullable=False)  # New investments (legacy: total)
     intangible_investments = Column(Numeric(15, 2), default=0, nullable=False)  # Immobilizzazioni immateriali
     tangible_investments = Column(Numeric(15, 2), default=0, nullable=False)  # Immobilizzazioni materiali
+    # Asset disposal (dismissione/vendita cespite materiale, sp03). NBV leaves the assets;
+    # proceeds - NBV is booked as plus/minusvalenza in the P&L; cash comes in via the plug.
+    asset_disposal_nbv = Column(Numeric(15, 2), nullable=True)        # Valore netto contabile ceduto
+    asset_disposal_proceeds = Column(Numeric(15, 2), nullable=True)  # Corrispettivo di vendita
     receivables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Legacy: Crediti breve growth %
     receivables_long_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Crediti lungo
     payables_short_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # Legacy: Debiti breve growth %
@@ -625,8 +629,19 @@ class BudgetAssumptions(Base):
     dio_days = Column(Numeric(10, 2), nullable=True)  # Days Inventory Outstanding
     dpo_days = Column(Numeric(10, 2), nullable=True)  # Days Payable Outstanding
 
-    # Existing financial debt repayment (NULL = keep constant)
-    existing_debt_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay existing fin. debt
+    # Existing financial debt repayment (NULL = keep constant).
+    # existing_debt_repayment_years repays BANK + BONDS long-term debt (sp17a + sp17c).
+    # altri_finanz_repayment_years repays "debiti v/altri finanziatori" (sp17b) — e.g. an
+    # intra-group loan — INDEPENDENTLY of the bank debt, so it can be reduced on its own
+    # schedule without being shifted under the banks.
+    existing_debt_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay bank/bonds fin. debt
+    altri_finanz_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay sp17b (altri finanziatori)
+
+    # Cash sweep (opt-in, per forecast year): when enabled, cash generated above the
+    # minimum floor is used to pay down short-term then long-term BANK debt instead of
+    # accumulating as idle cash. Default OFF → existing scenarios are unaffected.
+    cash_sweep_enabled = Column(Boolean, default=False, nullable=False)
+    cash_sweep_min_cash = Column(Numeric(15, 2), nullable=True)  # Cash floor to keep (NULL = 0)
 
     # TFR accrual suspension: companies with >60 employees pay the maturing TFR to the
     # INPS treasury fund instead of accruing it internally. When True, the TFR fund
@@ -666,7 +681,8 @@ class BudgetAssumptions(Base):
 
     # CE line item overrides (absolute EUR values, nullable = use base year value)
     ce02_override = Column(Numeric(15, 2), nullable=True)  # Variazioni rimanenze prodotti
-    ce03_override = Column(Numeric(15, 2), nullable=True)  # Incrementi immobilizzazioni per lavori interni
+    ce03_override = Column(Numeric(15, 2), nullable=True)  # Variazioni lavori in corso su ordinazione (A.3)
+    ce03a_override = Column(Numeric(15, 2), nullable=True)  # Incrementi di immobilizzazioni per lavori interni (A.4)
     ce10_override = Column(Numeric(15, 2), nullable=True)  # Variazioni rimanenze materie prime
     ce11_override = Column(Numeric(15, 2), nullable=True)  # Accantonamenti per rischi e oneri
     ce13_override = Column(Numeric(15, 2), nullable=True)  # Proventi da partecipazioni

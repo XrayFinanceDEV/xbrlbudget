@@ -932,6 +932,16 @@ class EnhancedXBRLParser:
                 facts_by_year[year]
             )
 
+            # GENERAL rule (same as the PDF routes): enforce the CE↔SP identity
+            # utile_CE == sp13 so the app's "Verifica CE ↔ SP" passes on XBRL imports too.
+            # sp13 comes from a dedicated XBRL tag (authoritative), so prefer="sp13" and align
+            # the CE to it (plug a CE line). No-op when already consistent.
+            try:
+                from importers.iv_cee_hierarchy import enforce_ce_sp_identity
+                inc_data = enforce_ce_sp_identity(bs_data, inc_data, f"xbrl-{year}", prefer="sp13")
+            except Exception as _ce_sp_err:
+                logger.warning(f"[XBRL] CE↔SP enforcement skipped for year {year}: {_ce_sp_err}")
+
             logger.info(
                 f"[XBRL] Year {year} (pm={detected_pm}): "
                 f"ce08={inc_data.get('ce08_costi_personale', 'MISSING')}, "

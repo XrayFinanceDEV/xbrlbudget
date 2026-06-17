@@ -140,7 +140,22 @@ class TwoYearIncomeStatementExtraction(pydantic.BaseModel):
 
 # SP (Stato Patrimoniale) anchors
 SP_START_KEYWORDS = ["stato patrimoniale", "attivo"]  # both must appear on start page
-SP_END_KEYWORDS = ["totale passivo"]                  # first match after sp_start
+# SP end: the closing "Totale ... passivo/passività" line. Gestionali word it many ways
+# ("Totale passivo", "Totale passività", "Totale STATO PATRIMONIALE passivo",
+# "Totale passivo e patrimonio netto", ...). A plain "totale passivo" substring misses
+# the variants with words in between (e.g. budget_352 "TOTALE STATO PATRIMONIALE PASSIVO"),
+# which truncated the SP window before the passivo pages and broke the balance. Keep this
+# list broad; _find_end scans from sp_start forward so the first SP-closing total wins.
+SP_END_KEYWORDS = [
+    "totale passivo",
+    "totale passività",
+    "totale stato patrimoniale passivo",
+    "totale dello stato patrimoniale passivo",
+    "totale passivo e patrimonio netto",
+    "totale passivo e netto",
+    "totale passività e patrimonio netto",
+    "totale passività e netto",
+]
 
 # CE (Conto Economico) anchors
 CE_START_KEYWORDS = ["conto economico", "valore della produzione"]  # both must appear
@@ -309,6 +324,53 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
 
     sp_pages = _range_to_set(sp_start, sp_end)
     ce_pages = _range_to_set(ce_start, ce_end)
+
+    # Zeroed-leading-section guard (draft "provvisorio" PDFs — budget_355/356):
+    # some exports render the IV-CEE schema (labels + SP/CE headers) with every amount
+    # at "0,00" up front, then put the REAL figures on later pages with no section
+    # header. The header-based detection locks onto the zero copy and the LLM only ever
+    # sees zeros (→ empty BS, "does not balance"). This is SAFE to correct because it
+    # only fires when the selected SP pages carry a negligible amount mass compared with
+    # the largest data page in the document (a normal IV-CEE statement never satisfies
+    # that — its SP pages hold real totals): we slide the SP/CE windows forward, by the
+    # same offset, onto the first later page that begins a substantial data block.
+    def _page_amount_mass(text: str) -> float:
+        s = 0.0
+        for tok in re.findall(r'-?\d[\d.]*,\d{2}', text):
+            try:
+                s += abs(float(tok.replace('.', '').replace(',', '.')))
+            except ValueError:
+                continue
+        return s
+
+    page_mass = [_page_amount_mass(t) for t in page_texts]
+    doc_max_mass = max(page_mass) if page_mass else 0.0
+    sp_mass = sum(page_mass[p] for p in sp_pages)
+    if sp_pages and doc_max_mass > 0 and sp_mass < 0.02 * doc_max_mass:
+        # Only relocate to a GENUINE second copy of the statement that re-states the SP
+        # header AND carries real amounts. We deliberately do NOT relocate to a headerless
+        # number-only data block (e.g. a coordinate-split account dump like budget_355):
+        # the IV-CEE LLM cannot map those columns, so masking them as a "result" would be
+        # worse than failing honestly. Such files must fall through to the honest
+        # "does not balance" error / a dedicated deterministic parser.
+        second_start = next(
+            (i for i in range(max(sp_pages) + 1, total_pages)
+             if all(kw in page_texts[i] for kw in SP_START_KEYWORDS)
+             and page_mass[i] >= 0.20 * doc_max_mass),
+            None,
+        )
+        if second_start is not None:
+            delta = second_start - min(sp_pages)
+            shifted_sp = {min(p + delta, total_pages - 1) for p in sp_pages}
+            shifted_ce = {min(p + delta, total_pages - 1) for p in ce_pages}
+            logger.warning(
+                f"Zeroed leading section detected (sp_mass={sp_mass:.0f} vs "
+                f"doc_max={doc_max_mass:.0f}); a real second copy starts at page "
+                f"{second_start}; shifting SP/CE windows by {delta} pages "
+                f"(SP {sorted(sp_pages)}->{sorted(shifted_sp)})"
+            )
+            sp_pages = shifted_sp
+            ce_pages = shifted_ce or ce_pages
 
     # Fallback: if range-based detection fails, try single-keyword matching + ±1 expansion
     if not sp_pages or not ce_pages:
@@ -1451,6 +1513,459 @@ def extract_pdf_with_llm(
     income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
 
     return balance_sheet_data, income_data
+
+
+# ---------------------------------------------------------------------------
+# Trial-balance (situazione contabile / sezioni contrapposte) CoGe extraction
+# ---------------------------------------------------------------------------
+# Macro-area C documents are NOT legal IV-CEE statements: they are flat lists of
+# general-ledger accounts (conti di contabilita' generale, "CoGe") with Dare/Avere
+# or Saldo balances and NO art.2424/2425 schema. The IV-CEE prompts above read the
+# legal schema and misfire on these. These dedicated prompts teach the model the
+# trial-balance sign convention (Dare=asset/cost, Avere=liability/equity/revenue),
+# contra-account netting (fondi ammortamento / svalutazione), and that the year's
+# result is the Attivo-vs-Passivo gap — so the LLM actually reads the CoGe list.
+
+TRIAL_BALANCE_SP_SYSTEM_PROMPT = """You are an expert Italian accountant reading a TRIAL BALANCE (bilancio di verifica / situazione contabile / saldi di contabilita' generale).
+
+This is NOT a legal IV-CEE statement. It is a flat list of general-ledger accounts (conti CoGe), each with a code and one or two amount columns. Your job: classify the PATRIMONIAL accounts (assets, liabilities, equity) into the IV-CEE Stato Patrimoniale fields (sp01-sp18). IGNORE economic accounts (costi/ricavi) here — they belong to the income statement.
+
+NUMBER RULES:
+- Italian format: dots are thousand separators, commas are decimals (1.234.567,89 = 1234567.89)
+- Parentheses or a trailing minus mean negative
+- Return plain numbers without formatting (no dots, no commas), in full euros
+
+TRIAL-BALANCE LAYOUTS (handle all):
+- Two columns "Dare" (debit) and "Avere" (credit): each account has a balance on ONE side; use that side's amount.
+- A single "Saldo" column, sometimes with a D/A flag or a sign: the flag/sign tells the side.
+- The COLUMN is ground truth for the side. Do NOT move an account to the other side based on its name.
+
+SIGN / SIDE CONVENTION:
+- ATTIVO (assets) accounts normally carry a DARE (debit) balance: cassa, banche c/c attive, crediti verso clienti, immobilizzazioni (immateriali/materiali/finanziarie), rimanenze/magazzino, ratei e risconti attivi, crediti tributari/erario c/, crediti v/altri.
+- PASSIVO + PATRIMONIO NETTO accounts normally carry an AVERE (credit) balance: debiti verso fornitori, banche c/c passive (scoperti), capitale sociale, riserve, fondo rischi, fondo TFR, debiti tributari, debiti v/istituti previdenziali, ratei e risconti passivi.
+- Report every sp* field as a POSITIVE magnitude on its natural side.
+
+CONTRA ACCOUNTS — NET THEM, never put in passivo:
+- "Fondo ammortamento ..." (any: immobilizzazioni immateriali/materiali) is an AVERE account that REDUCES the related asset. Subtract it from the gross asset so sp02/sp03 are reported NET of their fondi ammortamento.
+- "Fondo svalutazione crediti" reduces crediti: report sp06/sp07 NET of it.
+- Do NOT classify these fondi as fondi rischi (sp14) or debiti.
+
+MAPPING (description -> field), report NET magnitudes:
+- sp01_crediti_soci: crediti verso soci per versamenti dovuti
+- sp02_immob_immateriali: immobilizzazioni immateriali (avviamento, software, costi pluriennali) NET of fondo amm.to immateriali
+- sp03_immob_materiali: immobilizzazioni materiali (terreni, fabbricati, impianti, macchinari, attrezzature, automezzi, mobili) NET of fondo amm.to materiali
+- sp04_immob_finanziarie: partecipazioni, crediti immobilizzati, titoli immobilizzati
+- sp05_rimanenze: rimanenze / magazzino (materie prime, prodotti, merci, lavori in corso)
+- sp06_crediti_breve: crediti dell'attivo circolante esigibili ENTRO l'esercizio (clienti, tributari, v/altri) NET of fondo svalutazione
+- sp07_crediti_lungo: crediti dell'attivo circolante esigibili OLTRE l'esercizio
+- sp08_attivita_finanziarie: attivita' finanziarie non immobilizzate (titoli, partecipazioni non durevoli)
+- sp09_disponibilita_liquide: cassa, denaro, banche e poste c/c ATTIVI (saldo Dare)
+- sp10_ratei_risconti_attivi: ratei e risconti attivi
+- sp11_capitale: capitale sociale
+- sp12_riserve: TUTTE le riserve (sovrapprezzo, rivalutazione, legale, statutarie, straordinaria, altre) + utili/(perdite) portati a nuovo. Do NOT include the current-year result here.
+- sp13_utile_perdita: the CURRENT YEAR result — see RESULT rule below
+- sp14_fondi_rischi: fondi per rischi e oneri (NOT fondi ammortamento)
+- sp15_tfr: fondo trattamento di fine rapporto (TFR)
+- sp16_debiti_breve: debiti esigibili ENTRO l'esercizio (fornitori, banche c/c passive, tributari, previdenziali, v/altri)
+- sp17_debiti_lungo: debiti esigibili OLTRE l'esercizio (mutui, finanziamenti a lungo)
+- sp18_ratei_risconti_passivi: ratei e risconti passivi
+
+CREDITOR / DEBTOR BREAKDOWN (optional but preferred):
+- If you can tell the type, also fill the sub-fields so they sum to the aggregate:
+  * crediti: sp06a/sp07a clienti, sp06e/sp07e tributari, sp06g/sp07g altri
+  * debiti: sp16a/sp17a banche, sp16d/sp17d fornitori, sp16e/sp17e tributari, sp16f/sp17f previdenza, sp16g/sp17g altri
+- If unsure, leave the sub-fields at 0 and only fill the aggregate.
+
+RESULT OF THE YEAR (sp13) — THE BALANCING RULE:
+- A trial balance usually has NO "utile d'esercizio" account: the profit/loss is implicit.
+- Compute sp13 so that the sheet balances: sp13 = totale_attivo - (sp11 + sp12 + sp14 + sp15 + sp16 + sp17 + sp18).
+- A POSITIVE sp13 = utile; a NEGATIVE sp13 = perdita. Keep the sign.
+- Only if the trial balance EXPLICITLY shows a separate "Utile/Perdita d'esercizio" account, use that value and verify it equals the gap.
+
+COMPLETENESS — THE MOST IMPORTANT RULE (do not drop accounts):
+- EVERY patrimonial account line in the trial balance must be classified into exactly one sp field. Do not skip lines, do not stop early on long lists, scan ALL pages.
+- The trial balance prints its OWN control total ("TOTALE A PAREGGIO", "TOTALE ATTIVITA'", "TOTALE PASSIVITA'"). Your sum of the asset accounts MUST reconcile to the declared "TOTALE ATTIVITA'" (GROSS, i.e. before you net the fondi). If your running asset total is materially below the printed total, you have MISSED accounts — go back and find them before answering. The single most common error is dropping a whole block of debiti (fornitori, banche, tributari, previdenziali) or a large immobilizzazioni mastro.
+- MASTRO + DOTTED CHILDREN layout: some trial balances print each voce as a level-1 "mastro" WITH its subtotal (e.g. "102 IMMOBILIZZAZIONI IMMATERIALI 2.429.051"), immediately followed by indented dotted children ("102.00002 Software 12.000"). Book the MASTRO SUBTOTAL ONCE. Do NOT also add its children (double-count) and do NOT add only the children while skipping the mastro (drops the rounding/other lines). One amount per voce.
+
+TOTALS:
+- totale_attivo = sum of sp01..sp10 (all NET of contra accounts)
+- totale_passivo = sp11 + sp12 + sp13 + sp14 + sp15 + sp16 + sp17 + sp18
+- totale_attivo MUST equal totale_passivo (sp13 absorbs the difference). Set both fields.
+- Leave totale_debiti and totale_crediti at 0 unless the trial balance prints an explicit "Totale debiti"/"Totale crediti" line."""
+
+TRIAL_BALANCE_CE_SYSTEM_PROMPT = """You are an expert Italian accountant reading a TRIAL BALANCE (bilancio di verifica / situazione contabile / saldi di contabilita' generale).
+
+This is NOT a legal IV-CEE statement. It is a flat list of general-ledger accounts (conti CoGe). Your job: classify the ECONOMIC accounts (costi e ricavi) into the IV-CEE Conto Economico fields (ce01-ce20). IGNORE patrimonial accounts (assets, liabilities, equity) here.
+
+NUMBER RULES:
+- Italian format: dots are thousand separators, commas are decimals (1.234.567,89 = 1234567.89)
+- Parentheses or a trailing minus mean negative
+- Return plain numbers without formatting, in full euros
+- Report ALL COSTS as POSITIVE magnitudes (the model subtracts them). Report revenues as positive.
+
+TRIAL-BALANCE SIGN CONVENTION:
+- RICAVI / PROVENTI (revenue) accounts carry an AVERE (credit) balance.
+- COSTI / ONERI (cost) accounts carry a DARE (debit) balance.
+- Use the account's balance magnitude; the side identifies whether it is a revenue or a cost.
+
+MAPPING (description -> field):
+RICAVI (A — valore della produzione):
+- ce01_ricavi_vendite: ricavi delle vendite e delle prestazioni (vendite merci/prodotti/servizi)
+- ce02_variazioni_rimanenze: variazioni rimanenze di prodotti/semilavorati/lavori in corso
+- ce03_lavori_interni: incrementi di immobilizzazioni per lavori interni
+- ce04_altri_ricavi: altri ricavi e proventi, contributi in conto esercizio, sopravvenienze attive, rimborsi
+COSTI (B — costi della produzione), all positive:
+- ce05_materie_prime: acquisti di materie prime, sussidiarie, di consumo e merci
+- ce06_servizi: costi per servizi (consulenze, utenze, trasporti, provvigioni, manutenzioni, compensi)
+- ce07_godimento_beni: godimento beni di terzi (affitti, leasing, noleggi, royalties)
+- ce08_costi_personale: TOTALE costi del personale (salari, stipendi, oneri sociali, TFR, altri)
+- ce08a_tfr_accrual: quota TFR dell'esercizio (sub-item of ce08)
+- ce09_ammortamenti: ammortamenti e svalutazioni (amm.to immateriali + materiali + svalutazioni crediti)
+- ce10_var_rimanenze_mat_prime: variazioni rimanenze di materie prime/merci (segno: incremento rimanenze RIDUCE i costi)
+- ce11_accantonamenti: accantonamenti per rischi
+- ce11b_altri_accantonamenti: altri accantonamenti
+- ce12_oneri_diversi: oneri diversi di gestione (imposte indirette, IMU, bolli, sopravvenienze passive, perdite su crediti)
+AREA FINANZIARIA (C):
+- ce13_proventi_partecipazioni: proventi da partecipazioni
+- ce14_altri_proventi_finanziari: interessi attivi e altri proventi finanziari
+- ce15_oneri_finanziari: interessi passivi e altri oneri finanziari (positive)
+- ce16_utili_perdite_cambi: utili/perdite su cambi
+RETTIFICHE (D) / STRAORDINARI (E) / IMPOSTE:
+- ce17_rettifiche_attivita_fin: rivalutazioni/svalutazioni di attivita' finanziarie (net)
+- ce18_proventi_straordinari: proventi straordinari
+- ce19_oneri_straordinari: oneri straordinari (positive)
+- ce20_imposte: imposte sul reddito dell'esercizio (IRES + IRAP) (positive)
+
+RULES:
+- AGGREGATE all account lines that map to the same ce* field (a trial balance has many detail accounts per IV-CEE item).
+- NEVER leave the whole CE at zero when revenue and cost accounts are clearly present.
+- Leave a field at 0 if no matching account exists.
+- Extract the CURRENT YEAR values only."""
+
+
+def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
+    """Return the concatenated text of (up to max_pages) PDF pages.
+
+    Trial balances have no IV-CEE section headers to anchor on, so the whole
+    account list is sent to the LLM rather than a detected SP/CE window.
+    """
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        raise PDFImportError(f"Cannot open PDF file: {e}")
+    parts = []
+    for i, page in enumerate(doc):
+        if i >= max_pages:
+            break
+        parts.append(page.get_text())
+    doc.close()
+    return "\n".join(parts)
+
+
+# Completeness retry for the CoGe SP pass: the LLM stochastically drops accounts on
+# long trial-balance lists. Re-run up to N times and keep the lowest-residual draw; stop
+# early once a draw's estimated residual is under _COGE_SP_CLEAN_PCT of total assets.
+_COGE_SP_MAX_ATTEMPTS = 3
+_COGE_SP_CLEAN_PCT = Decimal("0.02")  # 2% of totale_attivo = "clean enough", stop retrying
+
+
+def extract_trial_balance_with_llm(
+    file_path: str,
+) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+    """Extract a macro-area C trial balance (situazione contabile / CoGe accounts)
+    with a dedicated LLM pass that understands Dare/Avere account balances.
+
+    Unlike extract_pdf_with_llm (which reads the legal IV-CEE schema), this sends
+    the FULL trial-balance text and uses CoGe-specific prompts to classify
+    general-ledger accounts into sp01-sp18 / ce01-ce20, netting contra accounts
+    and deriving the year's result as the Attivo-vs-Passivo gap.
+
+    Returns:
+        (balance_sheet_data, income_data) - dicts with full DB field names + Decimal values.
+
+    Raises:
+        PDFImportError: if the API key is missing or extraction fails.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+    except Exception as e:
+        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
+
+    is_image = _is_image_pdf(file_path)
+    images = _render_pdf_pages_as_images(file_path) if is_image else None
+    full_text = None
+    if not is_image:
+        full_text = _extract_full_text(file_path)
+        if not full_text.strip():
+            raise PDFImportError("No text extracted from trial-balance PDF")
+
+    # Declared control totals (TOTALE A PAREGGIO / ATTIVO / explicit Utile-Perdita) read
+    # deterministically from the printed footer — used BOTH as a hint to the LLM AND as
+    # the post-pass reconciliation anchor.
+    try:
+        declared = _declared_control_totals(file_path)
+    except Exception:
+        declared = {}
+    # Inject the declared totals as a completeness anchor in the SP system prompt.
+    sp_prompt = TRIAL_BALANCE_SP_SYSTEM_PROMPT
+    _anchor = declared.get("attivo") or declared.get("pareggio") if declared else None
+    if _anchor:
+        sp_prompt = (TRIAL_BALANCE_SP_SYSTEM_PROMPT
+                     + f"\n\nDOCUMENT CONTROL TOTAL: the printed TOTALE ATTIVITA' / A PAREGGIO of "
+                       f"THIS document is approximately {_anchor:,.0f} euro (gross). Your classified "
+                       f"asset accounts (before netting fondi) must reconcile to this figure — if your "
+                       f"sum is materially lower, you have dropped accounts: re-scan all pages.")
+
+    def _extract_ce():
+        if is_image:
+            return _extract_with_llm_vision(
+                client, images, TRIAL_BALANCE_CE_SYSTEM_PROMPT,
+                IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement")
+        return _extract_with_llm(
+            client, full_text, TRIAL_BALANCE_CE_SYSTEM_PROMPT,
+            IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement")
+
+    def _extract_sp_once():
+        if is_image:
+            res = _extract_with_llm_vision(
+                client, images, sp_prompt,
+                BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet")
+        else:
+            res = _extract_with_llm(
+                client, full_text, sp_prompt,
+                BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet")
+        bs = _model_to_decimal_dict(res)
+        bs = _validate_crediti(bs, "coge")
+        bs = _validate_debiti(bs, "coge")
+        bs = _balance_trial_via_result(bs, "coge")
+        try:
+            bs = _reconcile_trial_to_declared(bs, declared, "coge")
+        except Exception as _rec_err:
+            logger.warning(f"[coge] declared-total reconciliation skipped: {_rec_err}")
+        return bs
+
+    # COMPLETENESS RETRY: the LLM stochastically drops accounts on long lists (proven by
+    # byte-identical files extracting one complete / one short). Run the SP pass up to
+    # _COGE_SP_MAX_ATTEMPTS times and keep the draw with the SMALLEST post-reconcile
+    # _plug_residual (least estimated mass). Stop early once a draw is materially clean.
+    best_bs = None
+    best_resid = None
+    for attempt in range(_COGE_SP_MAX_ATTEMPTS):
+        bs = _extract_sp_once()
+        resid = bs.get("_plug_residual", Decimal("0"))
+        att = bs.get("totale_attivo", Decimal("0")) or Decimal("1")
+        if best_bs is None or resid < best_resid:
+            best_bs, best_resid = bs, resid
+        logger.info(f"[CoGe] SP attempt {attempt + 1}/{_COGE_SP_MAX_ATTEMPTS}: "
+                    f"totale_attivo={bs.get('totale_attivo')} plug_residual={resid}")
+        if resid <= max(Decimal("1"), att * _COGE_SP_CLEAN_PCT):
+            break  # clean enough, no need to retry
+
+    balance_sheet_data = best_bs
+    income_data = _normalize_ce_signs(_model_to_decimal_dict(_extract_ce()))
+
+    logger.info(f"[CoGe] SP totale_attivo = {balance_sheet_data.get('totale_attivo')} "
+                f"(plug_residual={best_resid})")
+
+    income_data = _validate_ce10_against_bs(income_data, balance_sheet_data, "coge")
+    income_data = _validate_ce_imposte(income_data, balance_sheet_data, "coge")
+
+    return balance_sheet_data, income_data
+
+
+# Asset-side sp fields used to recompute totale_attivo for the trial-balance identity.
+_TB_ASSET_KEYS = [
+    'sp01_crediti_soci', 'sp02_immob_immateriali', 'sp03_immob_materiali',
+    'sp04_immob_finanziarie', 'sp05_rimanenze', 'sp06_crediti_breve',
+    'sp07_crediti_lungo', 'sp08_attivita_finanziarie',
+    'sp09_disponibilita_liquide', 'sp10_ratei_risconti_attivi',
+]
+# Passivo/PN fields EXCLUDING sp13 (the result, which absorbs the balancing gap).
+_TB_PASSIVO_KEYS_NO_RESULT = [
+    'sp11_capitale', 'sp12_riserve', 'sp14_fondi_rischi', 'sp15_tfr',
+    'sp16_debiti_breve', 'sp17_debiti_lungo', 'sp18_ratei_risconti_passivi',
+]
+
+
+def _balance_trial_via_result(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
+    """Force the trial-balance identity Attivo == Passivo by deriving sp13 as the gap.
+
+    A CoGe trial balance has no legal totals to anchor on and (almost) never an
+    explicit result account: the year's profit/loss is precisely the amount that
+    makes the two sides tie. We recompute totale_attivo from the asset fields and
+    set sp13 = totale_attivo - (passivo + PN excluding the result). Keeps the sign
+    (positive = utile, negative = perdita). This mirrors the deterministic parser's
+    pareggio logic, so route C stays balanced regardless of which extractor ran.
+    """
+    att = sum(balance_sheet_data.get(k, Decimal('0')) for k in _TB_ASSET_KEYS)
+    pas_no_result = sum(balance_sheet_data.get(k, Decimal('0')) for k in _TB_PASSIVO_KEYS_NO_RESULT)
+    sp13 = att - pas_no_result
+    balance_sheet_data['sp13_utile_perdita'] = sp13
+    balance_sheet_data['totale_attivo'] = att
+    balance_sheet_data['totale_passivo'] = att  # by construction pas_no_result + sp13 == att
+    logger.info(
+        f"[{label}] trial-balance pareggio: attivo={att}, passivo(no result)={pas_no_result}, "
+        f"sp13 (result)={sp13}"
+    )
+    return balance_sheet_data
+
+
+# Italian-number token: 1.234.567,89 | 1234,89 | 1234567,89
+_DECL_NUM_RE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2}")
+
+
+def _declared_control_totals(file_path: str) -> Dict[str, Optional[Decimal]]:
+    """Read a trial balance's OWN declared control totals from the printed footer.
+
+    GENERAL anti-masking anchor (level L2): every situazione contabile / bilancio di
+    verifica prints its own control totals — "TOTALE A PAREGGIO", "TOTALE ATTIVO/
+    ATTIVITA'", "TOTALE PASSIVO/PASSIVITA'", and (usually) an explicit
+    "UTILE/PERDITA D'ESERCIZIO" (also "del periodo" / "in corso di formazione").
+    These are GROUND TRUTH for the magnitude of the sheet. Returned so the extractor
+    can reconcile its classified sums to them instead of silently forcing balance.
+
+    Robust to letter-spaced headers ("T O T A L E   A T T I V O") via a no-spaces
+    variant of the text, and to Italian number formatting. Returns the LARGEST amount
+    found per label (detail lines repeat small partials; the control total is the max).
+    All keys may be None when the document does not print that line.
+    """
+    out: Dict[str, Optional[Decimal]] = {
+        "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
+    }
+    try:
+        text = _extract_full_text(file_path)
+    except Exception:
+        return out
+    low = text.lower()
+    nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
+
+    def _largest_after(markers) -> Optional[Decimal]:
+        """Largest Italian-number amount occurring within ~80 chars after any marker,
+        searched in BOTH the normal and the no-spaces text."""
+        best: Optional[Decimal] = None
+        for hay in (low, nos):
+            for mk in markers:
+                m = mk if " " not in mk else mk
+                for hit in re.finditer(re.escape(mk.replace(" ", "")) if hay is nos else re.escape(mk), hay):
+                    window = hay[hit.end(): hit.end() + 80]
+                    for nm in _DECL_NUM_RE.finditer(window):
+                        try:
+                            v = Decimal(nm.group(0).replace(".", "").replace(",", "."))
+                        except Exception:
+                            continue
+                        av = abs(v)
+                        if av > 0 and (best is None or av > best):
+                            best = av
+                        break  # first number after the marker is the total
+        return best
+
+    out["pareggio"] = _largest_after(["totale a pareggio"])
+    out["attivo"] = _largest_after([
+        "totale attivo", "totale attivita", "totale dell'attivo",
+        "totale stato patrimoniale attivo",
+    ])
+    out["passivo"] = _largest_after([
+        "totale passivo", "totale passivita", "totale a pareggio passivo",
+        "totale passivo e patrimonio netto", "totale passivita e netto",
+    ])
+    out["utile"] = _largest_after([
+        "utile d'esercizio", "utile dell'esercizio", "utile di esercizio",
+        "utile del periodo", "utile in corso di formazione", "utile (perdita) dell'esercizio",
+        "risultato d'esercizio", "risultato dell'esercizio",
+    ])
+    out["perdita"] = _largest_after([
+        "perdita d'esercizio", "perdita dell'esercizio", "perdita di esercizio",
+        "perdita del periodo", "perdita in corso di formazione",
+    ])
+    return out
+
+
+def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
+                                 declared: Dict[str, Optional[Decimal]],
+                                 label: str) -> Dict[str, Decimal]:
+    """Reconcile a forced-balanced trial-balance extraction against the document's OWN
+    declared control totals (anti-masking, level L2).
+
+    `_balance_trial_via_result` always ties the sheet by making sp13 absorb the gap,
+    so a sheet "balances" even when the LLM dropped accounts on one side — the dropped
+    mass becomes a FAKE profit/loss. This step compares the derived result/total against
+    the printed control totals and, when they disagree materially:
+
+      1. RESULT-ANCHORED (preferred): the document prints an explicit Utile/Perdita.
+         residual = derived_sp13 - declared_result.  residual>0 ⇒ the PASSIVO side was
+         short by `residual` (sp13 was inflated): book it into sp16 (debiti) and set
+         sp13 to the declared value.  residual<0 ⇒ the ATTIVO side was short: book it
+         into sp09 (liquidità) and lift both totals.  Either way the pareggio is
+         preserved AND sp13 becomes the document's true result.
+      2. TOTAL-COVERAGE (fallback, flag-only): no usable result anchor but the extracted
+         totale_attivo falls short of the declared TOTALE ATTIVO/PAREGGIO — we cannot
+         know which side, so we only expose the shortfall (no mass moved).
+
+    In both cases the moved/short mass is exposed as `_plug_residual`, which
+    `iv_cee_hierarchy.check_quadratura` reads to raise the QUADRATURA MASCHERATA flag
+    (>1% of total) so the user sees an estimated composition and refines it in Rettifiche,
+    instead of importing a silently-wrong sheet. Purely additive on a correct extraction
+    (residual ≈ 0 ⇒ no-op), so it cannot regress files that already extract cleanly.
+    """
+    att = balance_sheet_data.get('totale_attivo', Decimal('0'))
+    if att <= 0:
+        return balance_sheet_data
+    tol = max(Decimal('50'), abs(att) * Decimal('0.005'))
+
+    # signed declared result: + utile, - perdita (utile wins when both are mis-detected)
+    decl_result: Optional[Decimal] = None
+    if declared.get('utile') is not None:
+        decl_result = declared['utile']
+    elif declared.get('perdita') is not None:
+        decl_result = -declared['perdita']
+
+    sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+
+    # 1) result-anchored reconciliation
+    if decl_result is not None and abs(sp13 - decl_result) > tol:
+        residual = sp13 - decl_result
+        if residual > 0:
+            # passivo undercounted by `residual` (sp13 was inflated by the drop)
+            balance_sheet_data['sp16_debiti_breve'] = (
+                balance_sheet_data.get('sp16_debiti_breve', Decimal('0')) + residual)
+        else:
+            # attivo undercounted: lift assets and both totals
+            add = -residual
+            balance_sheet_data['sp09_disponibilita_liquide'] = (
+                balance_sheet_data.get('sp09_disponibilita_liquide', Decimal('0')) + add)
+            balance_sheet_data['totale_attivo'] = att + add
+            balance_sheet_data['totale_passivo'] = att + add
+        balance_sheet_data['sp13_utile_perdita'] = decl_result
+        # ACCUMULATE (never clobber) — the deterministic parser may already expose its own
+        # _plug_residual; this result-anchoring residual adds to it.
+        balance_sheet_data['_plug_residual'] = (
+            balance_sheet_data.get('_plug_residual', Decimal('0')) + abs(residual))
+        _flag_unbalanced(
+            label,
+            f"sp13 derivato {sp13} != risultato dichiarato {decl_result}: ~{abs(residual)} "
+            f"di massa non classificata (lato {'passivo' if residual > 0 else 'attivo'}) "
+            f"stimata in sp16/sp09 — correggere in Rettifiche",
+            residual,
+        )
+        return balance_sheet_data
+
+    # 2) total-coverage fallback (flag only — side unknown, no mass moved)
+    control = declared.get('attivo') or declared.get('passivo')
+    if control and att + tol < control:
+        gap = control - att
+        balance_sheet_data['_plug_residual'] = max(
+            balance_sheet_data.get('_plug_residual', Decimal('0')), gap)
+        _flag_unbalanced(
+            label,
+            f"attivo estratto {att} < totale dichiarato {control}: ~{gap} di conti non "
+            f"classificati (estrazione incompleta) — verificare in Rettifiche",
+            gap,
+        )
+    return balance_sheet_data
 
 
 # Anti-masking guard: a plug correction is rejected (and surfaced as a warning)

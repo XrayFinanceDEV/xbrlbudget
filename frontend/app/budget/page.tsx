@@ -402,10 +402,15 @@ function ScenarioForm({
             investments: a.investments,
             intangible_investments: a.intangible_investments,
             tangible_investments: a.tangible_investments,
+            asset_disposal_nbv: a.asset_disposal_nbv,
+            asset_disposal_proceeds: a.asset_disposal_proceeds,
             dso_days: a.dso_days,
             dio_days: a.dio_days,
             dpo_days: a.dpo_days,
             existing_debt_repayment_years: a.existing_debt_repayment_years,
+            altri_finanz_repayment_years: a.altri_finanz_repayment_years,
+            cash_sweep_enabled: a.cash_sweep_enabled ?? false,
+            cash_sweep_min_cash: a.cash_sweep_min_cash,
             tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
             receivables_short_growth_pct: a.receivables_short_growth_pct,
             receivables_long_growth_pct: a.receivables_long_growth_pct,
@@ -433,6 +438,7 @@ function ScenarioForm({
             sp18_growth_pct: a.sp18_growth_pct,
             ce02_override: a.ce02_override,
             ce03_override: a.ce03_override,
+            ce03a_override: a.ce03a_override,
             ce10_override: a.ce10_override,
             ce11_override: a.ce11_override,
             ce13_override: a.ce13_override,
@@ -468,6 +474,8 @@ function ScenarioForm({
           investments: 0,
           intangible_investments: 0,
           tangible_investments: 0,
+          asset_disposal_nbv: null,
+          asset_disposal_proceeds: null,
           receivables_short_growth_pct: 0,
           receivables_long_growth_pct: 0,
           payables_short_growth_pct: 0,
@@ -475,6 +483,9 @@ function ScenarioForm({
           dio_days: null,
           dpo_days: null,
           existing_debt_repayment_years: null,
+          altri_finanz_repayment_years: null,
+          cash_sweep_enabled: false,
+          cash_sweep_min_cash: null,
           tfr_accrual_suspended: false,
           tax_rate: 27.9,
           fixed_materials_percentage: 0,
@@ -486,6 +497,7 @@ function ScenarioForm({
           financing_interest_rate: 3,
           ce02_override: baseIncome ? parseFloat(baseIncome.ce02_variazioni_rimanenze) : null,
           ce03_override: baseIncome ? parseFloat(baseIncome.ce03_lavori_interni) : null,
+          ce03a_override: baseIncome ? parseFloat(baseIncome.ce03a_incrementi_immobilizzazioni) : null,
           ce10_override: baseIncome ? parseFloat(baseIncome.ce10_var_rimanenze_mat_prime) : null,
           ce11_override: baseIncome ? parseFloat(baseIncome.ce11_accantonamenti) : null,
           ce13_override: baseIncome ? parseFloat(baseIncome.ce13_proventi_partecipazioni) : null,
@@ -1447,7 +1459,8 @@ function CEAssumptionsTable({
                 { field: "ce08_override", histField: "ce08_costi_personale", label: "Costi del personale (B.9)" },
                 { field: "ce12_override", histField: "ce12_oneri_diversi", label: "Oneri diversi di gestione (B.14)" },
                 { field: "ce02_override", histField: "ce02_variazioni_rimanenze", label: "Variazioni rimanenze prodotti (A.2)" },
-                { field: "ce03_override", histField: "ce03_lavori_interni", label: "Incrementi immobilizzazioni per lavori interni (A.3)" },
+                { field: "ce03_override", histField: "ce03_lavori_interni", label: "Variazioni lavori in corso su ordinazione (A.3)" },
+                { field: "ce03a_override", histField: "ce03a_incrementi_immobilizzazioni", label: "Incrementi di immobilizzazioni per lavori interni (A.4)" },
                 { field: "ce10_override", histField: "ce10_var_rimanenze_mat_prime", label: "Variazioni rimanenze materie prime (B.11)" },
                 { field: "ce11_override", histField: "ce11_accantonamenti", label: "Accantonamenti per rischi e oneri (B.12)" },
                 { field: "ce13_override", histField: "ce13_proventi_partecipazioni", label: "Proventi da partecipazioni (C.15)" },
@@ -1752,6 +1765,52 @@ function SPAssumptionsTable({
             ))}
           </tr>
 
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                DISMISSIONE CESPITE — VALORE NETTO CONTABILE (€)
+                <span title="Valore netto contabile del cespite materiale ceduto/venduto nell'anno. Viene tolto dalle immobilizzazioni materiali (sp03). Lascia vuoto se nessuna dismissione."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"—"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                <input type="number" step="1000" min="0"
+                  value={assumptions[year]?.asset_disposal_nbv ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? null : parseFloat(e.target.value) || null;
+                    onUpdate(year, "asset_disposal_nbv", val);
+                  }}
+                  className={inputCls} placeholder="0" title="Valore netto contabile cespite ceduto (EUR)" />
+              </td>
+            ))}
+          </tr>
+
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                DISMISSIONE CESPITE — CORRISPETTIVO DI VENDITA (€)
+                <span title="Prezzo di vendita incassato per il cespite ceduto. La differenza con il valore netto contabile è plusvalenza (altri ricavi A.5) o minusvalenza (oneri diversi B.14). L'incasso entra in cassa."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"—"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                <input type="number" step="1000" min="0"
+                  value={assumptions[year]?.asset_disposal_proceeds ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? null : parseFloat(e.target.value) || null;
+                    onUpdate(year, "asset_disposal_proceeds", val);
+                  }}
+                  className={inputCls} placeholder="0" title="Corrispettivo di vendita cespite (EUR)" />
+              </td>
+            ))}
+          </tr>
+
           {/* DEBITI FINANZIARI Section */}
           <tr className="bg-muted">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
@@ -1788,8 +1847,8 @@ function SPAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                ANNI RIMBORSO DEBITO ESISTENTE
-                <span title="Numero anni per rimborsare il debito finanziario esistente. Vuoto = debito costante"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                ANNI RIMBORSO DEBITO BANCARIO
+                <span title="Numero anni per rimborsare il debito finanziario verso BANCHE e OBBLIGAZIONI a lungo (sp17a/sp17c). Vuoto = debito costante. I debiti v/altri finanziatori si gestiscono nella riga sotto."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1803,7 +1862,30 @@ function SPAssumptionsTable({
                     const val = e.target.value === "" ? null : parseFloat(e.target.value) || null;
                     onUpdate(year, "existing_debt_repayment_years", val);
                   }}
-                  className={inputCls} placeholder="costante" title="Anni per rimborso debito esistente (vuoto = costante)" />
+                  className={inputCls} placeholder="costante" title="Anni per rimborso debito bancario/obbligazioni (vuoto = costante)" />
+              </td>
+            ))}
+          </tr>
+
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                ANNI RIMBORSO ALTRI FINANZIATORI (INFRAGRUPPO)
+                <span title="Numero anni per rimborsare i debiti v/altri finanziatori a lungo (sp17b), es. finanziamento infragruppo. Indipendente dal debito bancario. Vuoto = costante. NB: richiede che il debito infragruppo sia stato distinto da quello bancario (riclassifica in Rettifiche se importi un bilancio abbreviato)."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"\u2014"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                <input type="number" step="1" min="1" max="30"
+                  value={assumptions[year]?.altri_finanz_repayment_years ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? null : parseFloat(e.target.value) || null;
+                    onUpdate(year, "altri_finanz_repayment_years", val);
+                  }}
+                  className={inputCls} placeholder="costante" title="Anni per rimborso debiti v/altri finanziatori (vuoto = costante)" />
               </td>
             ))}
           </tr>
@@ -1825,6 +1907,51 @@ function SPAssumptionsTable({
                   onChange={(e) => onUpdate(year, "tfr_accrual_suspended", e.target.checked)}
                   className="h-4 w-4 accent-primary cursor-pointer"
                   title="TFR versato a INPS (fondo non cresce)" />
+              </td>
+            ))}
+          </tr>
+
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                USA CASSA IN ECCESSO PER RIDURRE DEBITO BANCHE
+                <span title="Se attivo, la cassa generata oltre la soglia minima abbatte il debito v/banche (prima a breve, poi a lungo) invece di accumularsi come liquidità. Default disattivo."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"—"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10 text-center">
+                <input type="checkbox"
+                  checked={!!assumptions[year]?.cash_sweep_enabled}
+                  onChange={(e) => onUpdate(year, "cash_sweep_enabled", e.target.checked)}
+                  className="h-4 w-4 accent-primary cursor-pointer"
+                  title="Usa la cassa in eccesso per ridurre il debito v/banche" />
+              </td>
+            ))}
+          </tr>
+
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
+                CASSA MINIMA DA MANTENERE (€)
+                <span title="Soglia di liquidità da preservare quando 'usa cassa in eccesso' è attivo. Solo la cassa oltre questa soglia abbatte il debito. Vuoto = 0."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"—"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
+                <input type="number" step="1000" min="0"
+                  value={assumptions[year]?.cash_sweep_min_cash ?? ""}
+                  disabled={!assumptions[year]?.cash_sweep_enabled}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? null : parseFloat(e.target.value) || null;
+                    onUpdate(year, "cash_sweep_min_cash", val);
+                  }}
+                  className={inputCls} placeholder="0" title="Cassa minima da mantenere (vuoto = 0)" />
               </td>
             ))}
           </tr>

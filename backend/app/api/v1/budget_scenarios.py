@@ -73,6 +73,36 @@ def validate_base_year_data(company_id: int, base_year: int, db: Session):
         )
 
 
+def validate_scenario_input_data(company_id: int, base_year: int, scenario_type: str, db: Session):
+    """Validate the financial data a scenario needs to exist before use.
+
+    Standard scenarios require the base year to have complete data.
+
+    'infrannuale' scenarios are different: the base_year is the *reference*
+    year, while the data actually imported is the *partial* year (base_year + 1).
+    The reference year is OPTIONAL — when it is missing the engine falls back to
+    pure annualization — so here we only require the partial year to exist.
+    """
+    if scenario_type == "infrannuale":
+        from database.queries import get_fy_partial, get_fy_prefer_full
+        partial_year = base_year + 1
+        financial_year = get_fy_partial(db, company_id, partial_year) or \
+            get_fy_prefer_full(db, company_id, partial_year)
+        if not financial_year:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Partial year {partial_year} not found for company {company_id}"
+            )
+        if not financial_year.balance_sheet or not financial_year.income_statement:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Partial year {partial_year} is missing balance sheet or income statement data"
+            )
+        return
+
+    validate_base_year_data(company_id, base_year, db)
+
+
 def validate_forecast_year_exists(
     scenario_id: int,
     year: int,
@@ -194,8 +224,8 @@ def create_budget_scenario(
     # Validate company exists and belongs to user
     validate_company_exists(company_id, user_id, db)
 
-    # Validate base year has complete data
-    validate_base_year_data(company_id, scenario_create.base_year, db)
+    # Validate the data this scenario needs (base year, or partial year for infrannuale)
+    validate_scenario_input_data(company_id, scenario_create.base_year, scenario_create.scenario_type, db)
 
     # Ensure company_id matches
     if scenario_create.company_id != company_id:
@@ -234,7 +264,7 @@ def update_budget_scenario(
 
     # If base_year is being updated, validate new base year data
     if scenario_update.base_year is not None and scenario_update.base_year != db_scenario.base_year:
-        validate_base_year_data(company_id, scenario_update.base_year, db)
+        validate_scenario_input_data(company_id, scenario_update.base_year, db_scenario.scenario_type, db)
 
     # Update only provided fields
     update_data = scenario_update.model_dump(exclude_unset=True)
@@ -670,7 +700,7 @@ def bulk_upsert_assumptions(
 
 # All CE override fields that can be patched from the forecast income table
 _CE_OVERRIDE_FIELDS = {
-    "ce01_override", "ce02_override", "ce03_override", "ce04_override",
+    "ce01_override", "ce02_override", "ce03_override", "ce03a_override", "ce04_override",
     "ce05_override", "ce06_override", "ce07_override", "ce08_override",
     "ce08a_override", "ce08b_override", "ce08c_override", "ce08d_override",
     "ce09_override", "ce09a_override", "ce09b_override", "ce09c_override", "ce09d_override",
@@ -798,8 +828,8 @@ def generate_forecasts(
     # Validate scenario belongs to company
     scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
-    # Validate base year data
-    validate_base_year_data(company_id, scenario.base_year, db)
+    # Validate the data this scenario needs (base year, or partial year for infrannuale)
+    validate_scenario_input_data(company_id, scenario.base_year, scenario.scenario_type, db)
 
     # Validate at least one assumption exists
     assumptions = db.query(models.BudgetAssumptions).filter(

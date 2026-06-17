@@ -169,7 +169,8 @@ class ForecastEngine:
     def _pbt_from_income(inc) -> Decimal:
         """Pre-tax profit from an IncomeStatement-like object (same formula as the forecast)."""
         g = lambda k: getattr(inc, k, None) or Decimal('0')
-        vp = g('ce01_ricavi_vendite') + g('ce02_variazioni_rimanenze') + g('ce03_lavori_interni') + g('ce04_altri_ricavi')
+        vp = (g('ce01_ricavi_vendite') + g('ce02_variazioni_rimanenze') + g('ce03_lavori_interni')
+              + g('ce03a_incrementi_immobilizzazioni') + g('ce04_altri_ricavi'))
         co = (g('ce05_materie_prime') + g('ce06_servizi') + g('ce07_godimento_beni') + g('ce08_costi_personale')
               + g('ce09_ammortamenti') + g('ce10_var_rimanenze_mat_prime') + g('ce11_accantonamenti')
               + g('ce11b_altri_accantonamenti') + g('ce12_oneri_diversi'))
@@ -308,9 +309,27 @@ class ForecastEngine:
         else:
             ce12 = base_inc.ce12_oneri_diversi * (Decimal('1') + assumption.other_costs_growth_pct / Decimal('100'))
 
+        # Asset disposal (dismissione/vendita cespite): proceeds - net book value = gain/loss.
+        # Post-2016 OIC: plusvalenza ordinaria → A.5 altri ricavi (ce04); minusvalenza → B.14
+        # oneri diversi (ce12). The disposed asset's NBV is removed from sp03 in the balance
+        # sheet and the sale proceeds flow in through the cash plug.
+        disposal_nbv = getattr(assumption, 'asset_disposal_nbv', None) or Decimal('0')
+        disposal_proceeds = getattr(assumption, 'asset_disposal_proceeds', None) or Decimal('0')
+        if disposal_nbv > 0 or disposal_proceeds > 0:
+            disposal_gain = disposal_proceeds - disposal_nbv
+            if disposal_gain >= 0:
+                ce04 = ce04 + disposal_gain
+            else:
+                ce12 = ce12 + (-disposal_gain)
+
         # CE line items: use override if set, otherwise fall back to base year
         ce02 = assumption.ce02_override if assumption.ce02_override is not None else base_inc.ce02_variazioni_rimanenze
         ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
+        # A.4 "Incrementi di immobilizzazioni per lavori interni" — carried as its own line.
+        # Without this the engine silently dropped it from the production value (the client's
+        # "380.423 che sparisce / non si azzera" issue) and it had no override.
+        _base_ce03a = getattr(base_inc, 'ce03a_incrementi_immobilizzazioni', None) or Decimal('0')
+        ce03a = assumption.ce03a_override if getattr(assumption, 'ce03a_override', None) is not None else _base_ce03a
         ce10 = assumption.ce10_override if assumption.ce10_override is not None else base_inc.ce10_var_rimanenze_mat_prime
         ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
         ce11b = assumption.ce11b_override if assumption.ce11b_override is not None else base_inc.ce11b_altri_accantonamenti
@@ -335,7 +354,7 @@ class ForecastEngine:
             ce15 = ce15 + financing_amount * financing_rate
 
         # Taxes - use override if set, otherwise use tax rate
-        production_value = ce01 + ce02 + ce03 + ce04
+        production_value = ce01 + ce02 + ce03 + ce03a + ce04
         production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
         ebit = production_value - production_cost
         financial_result = ce13 + ce14 - ce15 + ce16
@@ -362,6 +381,7 @@ class ForecastEngine:
             'ce01_ricavi_vendite': ce01,
             'ce02_variazioni_rimanenze': ce02,
             'ce03_lavori_interni': ce03,
+            'ce03a_incrementi_immobilizzazioni': ce03a,
             'ce04_altri_ricavi': ce04,
             'ce05_materie_prime': ce05,
             'ce06_servizi': ce06,
@@ -428,8 +448,12 @@ class ForecastEngine:
 
         intangible_inv, tangible_inv = self._get_split_investments(assumption)
 
+        # Asset disposal: remove the disposed cespite's net book value from sp03 (tangible
+        # fixed assets). The proceeds/gain are booked in the P&L; the cash plug brings in
+        # the sale cash automatically, keeping the balance sheet balanced.
+        disposal_nbv = getattr(assumption, 'asset_disposal_nbv', None) or ZERO
         sp02 = max(ZERO, _prev('sp02_immob_immateriali') + intangible_inv - ce09a)
-        sp03 = max(ZERO, _prev('sp03_immob_materiali') + tangible_inv - ce09b)
+        sp03 = max(ZERO, _prev('sp03_immob_materiali') + tangible_inv - ce09b - disposal_nbv)
 
         # Helper for SP growth % fields (nullable → 0% = carry forward)
         def _sp_growth(field_name):
@@ -480,6 +504,7 @@ class ForecastEngine:
             forecast_inc['ce01_ricavi_vendite'] +
             forecast_inc['ce02_variazioni_rimanenze'] +
             forecast_inc['ce03_lavori_interni'] +
+            forecast_inc.get('ce03a_incrementi_immobilizzazioni', Decimal('0')) +
             forecast_inc['ce04_altri_ricavi'] -
             forecast_inc['ce05_materie_prime'] -
             forecast_inc['ce06_servizi'] -
@@ -590,31 +615,40 @@ class ForecastEngine:
         # 8/27 ≈ 30% outstanding, the "residuo" the user reported.)
         if existing_repay_years is not None and D(str(existing_repay_years)) > 0:
             repay_years = D(str(existing_repay_years))
-            # Original financial long-term debt at forecast start (base year), including
+            # Original BANK + BONDS long-term debt at forecast start (base year), including
             # the abbreviato gap that gets allocated to banche when only the aggregate
-            # sp17 is imported (no sub-field detail).
-            base_fin_long = (
+            # sp17 is imported (no sub-field detail). NB: sp17b (altri finanziatori, e.g.
+            # an intra-group loan) is repaid on its OWN schedule below, not here, so it is
+            # no longer shifted under the banks when the user repays the financing.
+            base_bank_bonds_long = (
                 _base('sp17a_debiti_banche_lungo')
-                + _base('sp17b_debiti_altri_finanz_lungo')
                 + _base('sp17c_debiti_obbligazioni_lungo')
             )
             base_other_long = (
-                _base('sp17d_debiti_fornitori_lungo') + _base('sp17e_debiti_tributari_lungo')
+                _base('sp17b_debiti_altri_finanz_lungo')
+                + _base('sp17d_debiti_fornitori_lungo') + _base('sp17e_debiti_tributari_lungo')
                 + _base('sp17f_debiti_previdenza_lungo') + _base('sp17g_altri_debiti_lungo')
             )
-            base_gap_long = _base('sp17_debiti_lungo') - (base_fin_long + base_other_long)
+            base_gap_long = _base('sp17_debiti_lungo') - (base_bank_bonds_long + base_other_long)
             if base_gap_long > ZERO:
-                base_fin_long += base_gap_long
+                base_bank_bonds_long += base_gap_long
 
-            annual_repayment = base_fin_long / repay_years
-            total_fin_long = sp17a + sp17b + sp17c   # current residual, for apportioning
-            if total_fin_long > 0:
-                bank_share = sp17a / total_fin_long
-                other_share = sp17b / total_fin_long
-                bonds_share = sp17c / total_fin_long
+            annual_repayment = base_bank_bonds_long / repay_years
+            total_bank_bonds = sp17a + sp17c   # current residual, for apportioning
+            if total_bank_bonds > 0:
+                bank_share = sp17a / total_bank_bonds
+                bonds_share = sp17c / total_bank_bonds
                 sp17a = max(ZERO, sp17a - annual_repayment * bank_share)
-                sp17b = max(ZERO, sp17b - annual_repayment * other_share)
                 sp17c = max(ZERO, sp17c - annual_repayment * bonds_share)
+
+        # Altri finanziatori (sp17b) — e.g. an intra-group loan — repaid on its OWN fixed
+        # schedule, independent of the bank debt. Fixed instalment on the base-year amount
+        # so it amortises fully to zero after `altri_finanz_repayment_years`.
+        altri_repay_years = getattr(assumption, 'altri_finanz_repayment_years', None)
+        if altri_repay_years is not None and D(str(altri_repay_years)) > 0:
+            a_years = D(str(altri_repay_years))
+            annual_altri = _base('sp17b_debiti_altri_finanz_lungo') / a_years
+            sp17b = max(ZERO, sp17b - annual_altri)
 
         # New financing: add to long-term bank debt
         financing_amount = assumption.financing_amount or ZERO
@@ -637,6 +671,20 @@ class ForecastEngine:
             sp16a = sp16a + abs(sp09)
             sp16 = sp16 + abs(sp09)
             sp09 = ZERO
+        elif bool(getattr(assumption, 'cash_sweep_enabled', False)):
+            # ── CASH SWEEP (opt-in) ── Use cash generated above the minimum floor to pay
+            # down BANK debt — short-term first (sp16a), then long-term (sp17a) — instead
+            # of letting idle cash accumulate while the debt stays flat (the client's
+            # "la cassa cresce ma il debito v/banche resta invariato"). Cash and debt are
+            # reduced by the same amount, so the balance sheet stays balanced.
+            floor = getattr(assumption, 'cash_sweep_min_cash', None)
+            floor = D(str(floor)) if floor is not None else ZERO
+            excess = sp09 - floor
+            if excess > ZERO:
+                pay_short = min(excess, sp16a)
+                sp16a -= pay_short; sp16 -= pay_short; sp09 -= pay_short; excess -= pay_short
+                pay_long = min(excess, sp17a)
+                sp17a -= pay_long; sp17 -= pay_long; sp09 -= pay_long; excess -= pay_long
 
         # ── DETAIL BREAKDOWNS ──
 

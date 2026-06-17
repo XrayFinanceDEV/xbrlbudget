@@ -23,6 +23,13 @@ class PDFImportError(Exception):
     pass
 
 
+# Soglia oltre cui un plug residuo del parser best-effort rende il bilancio inaffidabile
+# (composizione per lo più fabbricata): sopra questa frazione del totale si rifiuta
+# l'estrazione deterministica e si tenta l'LLM. Sotto, si importa con flag "BILANCIO NON
+# QUADRATO" per correzione in Rettifiche (workflow esistente). Vedi iv_cee_hierarchy.
+SC_PLUG_REJECT_PCT = Decimal("0.20")
+
+
 # Map short keys from situazione_contabile_parser to full DB field names
 _SC_KEY_MAP = {
     'sp01': 'sp01_crediti_soci', 'sp02': 'sp02_immob_immateriali', 'sp03': 'sp03_immob_materiali',
@@ -278,38 +285,168 @@ def import_pdf_balance_sheet(
                 )
             return bs, ce, prior_bs_data, prior_ce_data
 
+        sc_quadratura_warnings = []
+        _coge_ok = False
         if is_trial_balance:
-            logger.info("Situazione Contabile format detected — using deterministic parser")
-            # Deterministic-first with LLM fallback: a document can be mis-detected as a
-            # trial balance (e.g. an economic-only prospect, budget_196) or hit a layout the
-            # deterministic parser cannot reconstruct. Rather than hard-fail, fall back to the
-            # LLM extractor when it raises or yields an empty (totale_attivo==0) balance sheet.
+            # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the
+            # CoGe LLM extractor and the deterministic best-effort parser, then keep the
+            # CLEANER one — the candidate whose unclassified residual (_plug_residual, read
+            # by check_quadratura) is smallest. Neither extractor is universally better: the
+            # LLM wins on free-form CoGe lists, while the deterministic parser (with its
+            # dotted-hierarchical/4-sezioni rescue) wins on structured mastro layouts where
+            # the LLM stochastically drops mass. The deterministic pass is free (no LLM), so
+            # always running it costs nothing and strictly improves the result. The IV-CEE
+            # LLM is the last resort ONLY when BOTH come up empty (no Stato Patrimoniale).
+            from importers.iv_cee_hierarchy import check_quadratura
+
+            def _residual_of(bs, ce):
+                """Plug residual (unclassified mass) for a candidate, or None if unusable
+                (empty extraction). Lower = more complete."""
+                try:
+                    if bs.get('totale_attivo', Decimal('0')) <= 0:
+                        return None
+                    q = check_quadratura(bs, ce)
+                    return None if q.is_empty else q.plug_residual
+                except Exception:
+                    return None
+
+            candidates = []  # (residual, bs, ce, source)
+
+            if api_key:
+                try:
+                    from importers.pdf_extractor_llm import extract_trial_balance_with_llm
+                    coge_bs, coge_ce = extract_trial_balance_with_llm(file_path)
+                    r = _residual_of(coge_bs, coge_ce)
+                    if r is not None:
+                        candidates.append((r, coge_bs, coge_ce, "CoGe-LLM"))
+                except Exception as coge_err:
+                    logger.warning(
+                        f"Route C: CoGe LLM extractor failed "
+                        f"({type(coge_err).__name__}: {coge_err})"
+                    )
+
             try:
                 sc_bs, sc_ce = extract_situazione_contabile(file_path)
-                # SC parser returns short keys (sp03, ce01); map to full DB field names
-                sc_bs_mapped = _map_sc_keys(sc_bs)
-                if sc_bs_mapped.get('totale_attivo', Decimal('0')) == 0:
-                    raise ValueError("estrazione deterministica vuota (totale_attivo=0)")
-                balance_sheet_data = sc_bs_mapped
-                income_data = _map_sc_keys(sc_ce)
+                sc_bs_mapped = _map_sc_keys(sc_bs)   # short keys (sp03) -> full DB names
+                sc_ce_mapped = _map_sc_keys(sc_ce)
+                r = _residual_of(sc_bs_mapped, sc_ce_mapped)
+                if r is not None:
+                    candidates.append((r, sc_bs_mapped, sc_ce_mapped, "deterministico"))
             except Exception as sc_err:
-                if not api_key:
-                    raise
                 logger.warning(
-                    f"Deterministic SC parser failed ({type(sc_err).__name__}: {sc_err}); "
-                    f"falling back to LLM extraction"
+                    f"Route C: deterministic SC parser failed "
+                    f"({type(sc_err).__name__}: {sc_err})"
                 )
+
+            if candidates:
+                # keep the cleaner extractor (smallest unclassified residual)
+                candidates.sort(key=lambda c: c[0])
+                residual, balance_sheet_data, income_data, source = candidates[0]
+                _coge_ok = True
+                # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,
+                # whatever extractor produced it (the deterministic parser may leave sp13=0
+                # or unanchored — budget_342/367). Idempotent on the CoGe result (already
+                # reconciled inside the extractor). This makes sp13 = declared before the
+                # CE↔SP identity step aligns the CE to it.
+                try:
+                    from importers.pdf_extractor_llm import (
+                        _declared_control_totals, _reconcile_trial_to_declared,
+                    )
+                    _decl = _declared_control_totals(file_path)
+                    balance_sheet_data = _reconcile_trial_to_declared(
+                        balance_sheet_data, _decl, source)
+                    residual = balance_sheet_data.get('_plug_residual', residual)
+                except Exception as _rc_err:
+                    logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")
+                others = ", ".join(f"{s}={r:,.0f}" for r, _b, _c, s in candidates)
+                logger.info(f"Route C: scelto estrattore '{source}' (residuo minore "
+                            f"{residual:,.0f}); candidati: {others}")
+                # Surface the chosen plug as a NON-blocking flag (never reject): a large
+                # residual means the composition is partly estimated — refined in Rettifiche.
+                _tot = balance_sheet_data.get('totale_attivo', Decimal('0')) or Decimal('1')
+                if residual > Decimal('1'):
+                    _pct = 100 * residual / _tot
+                    _sev = ("prevalentemente stimata"
+                            if residual > SC_PLUG_REJECT_PCT * _tot else "parziale")
+                    sc_quadratura_warnings.append(
+                        f"BILANCIO NON QUADRATO ({_sev}): residuo {residual:,.0f} "
+                        f"({_pct:.0f}% del totale) tamponato in liquidità/debiti — "
+                        f"correggere in Rettifiche"
+                    )
+            elif not api_key:
+                raise PDFImportError(
+                    "Impossibile estrarre la situazione contabile (nessun dato) "
+                    "e ANTHROPIC_API_KEY non impostata."
+                )
+            else:
+                # both extractors empty → IV-CEE LLM as a genuine last resort
+                logger.warning("Route C: entrambi gli estrattori vuoti; "
+                               "ultimo tentativo con l'estrattore IV-CEE LLM")
                 balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
-        else:
-            # IV CEE format — use LLM extraction
+        if not is_trial_balance:
+            # IV CEE format (routes A/B) — use LLM extraction
             balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
+            # GENERAL: make a near-balanced IV-CEE extraction actually balance. The LLM can
+            # drop a few thousand euro on one side of a very detailed bilancio (e.g. the
+            # dual-year extractor on budget_352), which otherwise hard-fails validate_balance.
+            # Anchor to the declared TOTALE ATTIVO and plug the small short side (capped/flagged).
+            try:
+                from importers.iv_cee_hierarchy import reconcile_ivcee_balance
+                from importers.pdf_extractor_llm import _declared_control_totals
+                _decl = _declared_control_totals(file_path)
+                balance_sheet_data = reconcile_ivcee_balance(balance_sheet_data, _decl, "ivcee")
+                if prior_bs_data:
+                    prior_bs_data = reconcile_ivcee_balance(prior_bs_data, None, "ivcee-prior")
+            except Exception as _iv_err:
+                logger.warning(f"IV-CEE balance reconcile skipped: {_iv_err}")
+
+        # GENERAL rule for ALL routes: enforce the accounting identity utile_CE == sp13.
+        # The result of the year is one number that must appear identically on the CE
+        # (bottom line) and the SP (sp13). SP and CE are extracted independently and drift,
+        # so the "Verifica CE ↔ SP" fails on almost every file. sp13 is the authoritative
+        # anchor (pinned by the balance identity, and set to the declared result on route C);
+        # we align the CE to it by plugging the gap into a CE line. Applied to A/B and C alike.
+        # CE↔SP: default to trusting sp13 (balance-anchored, usually correct; = declared
+        # result on route C) and aligning the CE to it. The DECLARED current Utile/Perdita is
+        # the arbiter: it flips the decision to "trust the CE and fix sp13" (moving the
+        # PRIOR-year result into reserves) ONLY when the declared value confirms the CE. This
+        # catches the prior-year-utile case WITHOUT corrupting a correct sp13 when the CE is
+        # garbage (sign/parse bug) and no declared anchor exists (budget_413).
+        try:
+            from importers.iv_cee_hierarchy import enforce_ce_sp_identity
+            from importers.pdf_extractor_llm import _declared_control_totals
+            _decl_ce = _declared_control_totals(file_path)
+            income_data = enforce_ce_sp_identity(
+                balance_sheet_data, income_data, "import",
+                prefer="sp13", declared=_decl_ce)
+            if prior_bs_data and prior_ce_data:
+                prior_ce_data = enforce_ce_sp_identity(
+                    prior_bs_data, prior_ce_data, "import-prior", prefer="sp13")
+        except Exception as _ce_sp_err:
+            logger.warning(f"CE↔SP identity enforcement skipped: {_ce_sp_err}")
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
         if not mapper.validate_balance(balance_sheet_data):
             raise PDFImportError("Balance sheet does not balance (Assets != Liabilities + Equity)")
 
+        # Unified quadratura diagnostic across ALL routes (shared IV-CEE engine):
+        # validate_balance above is the hard structural gate; this adds the CE
+        # utile==sp13 cross-check (which validate_balance lacks) and any plug-masking,
+        # so every route is judged by the same rules. Non-blocking (logged) to avoid
+        # rejecting borderline-but-usable A/B imports.
+        try:
+            from importers.iv_cee_hierarchy import check_quadratura
+            _qd = check_quadratura(balance_sheet_data, income_data)
+            for _w in _qd.warnings:
+                logger.warning(f"quadratura: {_w}")
+        except Exception:
+            pass
+
         warnings = mapper.validate_hierarchy(balance_sheet_data)
+        # Surface the deterministic trial-balance plug flag to the user (Rettifiche cue),
+        # so an imperfect-but-imported situazione contabile is visible rather than silent.
+        warnings.extend(sc_quadratura_warnings)
         if warnings:
             logger.warning(f"Balance sheet hierarchy warnings: {warnings}")
 
@@ -476,7 +613,11 @@ def import_pdf_balance_sheet(
         db.commit()
 
         extraction_time = (datetime.utcnow() - extraction_start).total_seconds()
-        extraction_method = "situazione_contabile" if is_trial_balance else "llm"
+        if is_trial_balance:
+            # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
+            extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
+        else:
+            extraction_method = "llm"
 
         logger.info(
             f"PDF import successful: company={company.name}, "

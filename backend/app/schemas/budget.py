@@ -71,6 +71,8 @@ class BudgetAssumptionsBase(BaseModel):
     investments: Decimal = Field(default=Decimal("0"))  # Legacy total (ignored if split fields provided)
     intangible_investments: Decimal = Field(default=Decimal("0"))
     tangible_investments: Decimal = Field(default=Decimal("0"))
+    asset_disposal_nbv: Optional[Decimal] = None        # Valore netto contabile cespite ceduto
+    asset_disposal_proceeds: Optional[Decimal] = None   # Corrispettivo di vendita
     receivables_short_growth_pct: Decimal = Field(default=Decimal("0"))
     receivables_long_growth_pct: Decimal = Field(default=Decimal("0"))
     payables_short_growth_pct: Decimal = Field(default=Decimal("0"))
@@ -81,7 +83,12 @@ class BudgetAssumptionsBase(BaseModel):
     dpo_days: Optional[Decimal] = None
 
     # Existing financial debt repayment (None = keep constant)
-    existing_debt_repayment_years: Optional[Decimal] = None
+    existing_debt_repayment_years: Optional[Decimal] = None  # repays bank/bonds (sp17a/sp17c)
+    altri_finanz_repayment_years: Optional[Decimal] = None   # repays altri finanziatori (sp17b)
+
+    # Cash sweep (opt-in): excess cash above the floor pays down bank debt
+    cash_sweep_enabled: bool = False
+    cash_sweep_min_cash: Optional[Decimal] = None
 
     # TFR accrual suspended (TFR paid to INPS, fund stops growing this year)
     tfr_accrual_suspended: bool = False
@@ -120,6 +127,7 @@ class BudgetAssumptionsBase(BaseModel):
     # CE line item overrides (absolute EUR values, None = use base year value)
     ce02_override: Optional[Decimal] = None
     ce03_override: Optional[Decimal] = None
+    ce03a_override: Optional[Decimal] = None
     ce10_override: Optional[Decimal] = None
     ce11_override: Optional[Decimal] = None
     ce13_override: Optional[Decimal] = None
@@ -173,6 +181,8 @@ class BudgetAssumptionsUpdate(BaseModel):
     investments: Optional[Decimal] = None
     intangible_investments: Optional[Decimal] = None
     tangible_investments: Optional[Decimal] = None
+    asset_disposal_nbv: Optional[Decimal] = None
+    asset_disposal_proceeds: Optional[Decimal] = None
     receivables_short_growth_pct: Optional[Decimal] = None
     receivables_long_growth_pct: Optional[Decimal] = None
     payables_short_growth_pct: Optional[Decimal] = None
@@ -180,6 +190,9 @@ class BudgetAssumptionsUpdate(BaseModel):
     dio_days: Optional[Decimal] = None
     dpo_days: Optional[Decimal] = None
     existing_debt_repayment_years: Optional[Decimal] = None
+    altri_finanz_repayment_years: Optional[Decimal] = None
+    cash_sweep_enabled: Optional[bool] = None
+    cash_sweep_min_cash: Optional[Decimal] = None
     tfr_accrual_suspended: Optional[bool] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
@@ -210,6 +223,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     # CE line item overrides
     ce02_override: Optional[Decimal] = None
     ce03_override: Optional[Decimal] = None
+    ce03a_override: Optional[Decimal] = None
     ce10_override: Optional[Decimal] = None
     ce11_override: Optional[Decimal] = None
     ce13_override: Optional[Decimal] = None
@@ -300,6 +314,7 @@ class IntraYearComparison(BaseModel):
     partial_year: int
     reference_year: int
     prior_year: Optional[int] = None
+    has_reference: bool = True
     period_months: int
     income_items: List[IntraYearComparisonItem]
     balance_items: List[IntraYearComparisonItem]

@@ -96,6 +96,7 @@ export interface IncomeStatement {
   ce01_ricavi_vendite: string;
   ce02_variazioni_rimanenze: string;
   ce03_lavori_interni: string;
+  ce03a_incrementi_immobilizzazioni: string;
   ce04_altri_ricavi: string;
   // B) Costi della Produzione
   ce05_materie_prime: string;
@@ -353,6 +354,7 @@ export interface IntraYearComparison {
   partial_year: number;
   reference_year: number;
   prior_year: number | null;
+  has_reference: boolean;
   period_months: number;
   income_items: IntraYearComparisonItem[];
   balance_items: IntraYearComparisonItem[];
@@ -374,6 +376,8 @@ export interface BudgetAssumptions {
   investments: number;
   intangible_investments: number;
   tangible_investments: number;
+  asset_disposal_nbv: number | null;
+  asset_disposal_proceeds: number | null;
   receivables_short_growth_pct: number;
   receivables_long_growth_pct: number;
   payables_short_growth_pct: number;
@@ -381,6 +385,9 @@ export interface BudgetAssumptions {
   dio_days: number | null;
   dpo_days: number | null;
   existing_debt_repayment_years: number | null;
+  altri_finanz_repayment_years: number | null;
+  cash_sweep_enabled: boolean;
+  cash_sweep_min_cash: number | null;
   tfr_accrual_suspended: boolean;
   interest_rate_receivables: number;
   interest_rate_payables: number;
@@ -407,6 +414,7 @@ export interface BudgetAssumptions {
   sp18_growth_pct: number | null;
   ce02_override: number | null;
   ce03_override: number | null;
+  ce03a_override: number | null;
   ce10_override: number | null;
   ce11_override: number | null;
   ce13_override: number | null;
@@ -455,6 +463,8 @@ export interface BudgetAssumptionsCreate {
   investments?: number;
   intangible_investments?: number;
   tangible_investments?: number;
+  asset_disposal_nbv?: number | null;
+  asset_disposal_proceeds?: number | null;
   receivables_short_growth_pct?: number;
   receivables_long_growth_pct?: number;
   payables_short_growth_pct?: number;
@@ -462,6 +472,9 @@ export interface BudgetAssumptionsCreate {
   dio_days?: number | null;
   dpo_days?: number | null;
   existing_debt_repayment_years?: number | null;
+  altri_finanz_repayment_years?: number | null;
+  cash_sweep_enabled?: boolean;
+  cash_sweep_min_cash?: number | null;
   tfr_accrual_suspended?: boolean;
   interest_rate_receivables?: number;
   interest_rate_payables?: number;
@@ -488,6 +501,7 @@ export interface BudgetAssumptionsCreate {
   sp18_growth_pct?: number | null;
   ce02_override?: number | null;
   ce03_override?: number | null;
+  ce03a_override?: number | null;
   ce10_override?: number | null;
   ce11_override?: number | null;
   ce13_override?: number | null;

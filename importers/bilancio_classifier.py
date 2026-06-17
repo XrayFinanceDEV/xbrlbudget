@@ -87,6 +87,22 @@ def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, obj
     s["totale_voce"] = len(re.findall(r"totale" + _voci, nos))
     s["legal_skeleton"] = bool(s["valore_produzione"] and s["immobilizzazioni"])
 
+    # presenza di una sezione PATRIMONIALE (per distinguere un documento SOLO economico).
+    # Conservativo: basta UNO qualsiasi di questi marker patrimoniali per dire "ha lo SP".
+    # NB: niente "rimanenze" qui — "variazione delle rimanenze" è una voce di CONTO
+    # ECONOMICO, quindi non è un marker patrimoniale affidabile (regge 196/335 solo-CE).
+    s["sp_present"] = bool(
+        s["stato_patrimoniale"] or s["totale_attivo"] or s["immobilizzazioni"]
+        or has("patrimonio netto") or has("attivo circolante") or has("passivita")
+        or has("disponibilita liquide")
+        or has("debiti verso") or has("crediti verso") or has("capitale sociale")
+    )
+    # contenuto ECONOMICO presente (CE)
+    s["ce_present"] = bool(
+        s["conto_economico"] or s["valore_produzione"] or s["prospetto_economico"]
+        or has("costi della produzione") or has("totale costi") or has("totale ricavi")
+    )
+
     # codici-PATH CEE (B): es. B.II.1.a) , C.II.5 bis , D.12.1.d
     s["cee_path"] = len(re.findall(r"\b[A-E]\.(?:[IVX]{1,4}|\d{1,2})(?:\s?(?:bis|ter|quater))?(?:[\.\s]\w{1,3})*\)", text))
 
@@ -185,12 +201,18 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
         return "C/verifica (generico)"
 
     # ----- Caso speciale: SOLO conto economico, nessuno stato patrimoniale -----
-    # (PROSPETTO ECONOMICO per competenza) → non si può ricostruire il pareggio.
-    if s["prospetto_economico"] and not s["stato_patrimoniale"] and not s["totale_attivo"]:
+    # GENERALE: un documento con contenuto economico (conto economico / costi-ricavi /
+    # valore della produzione) ma SENZA alcun marker patrimoniale non è un bilancio
+    # completo → non si può ricostruire il pareggio. Vale anche quando il file stampa
+    # un "TOTALE A PAREGGIO" che è in realtà il pareggio del SOLO conto economico
+    # (= totale ricavi), un falso-amico che altrimenti lo manderebbe alla rotta C
+    # (budget_376). Errore onesto, mai un plug silenzioso.
+    if s["ce_present"] and not s["sp_present"]:
         return Classification(
             MACRO_C, "C4/solo conto economico (no SP)", ROUTE_UNSUPPORTED, gest,
             "high", s,
-            "prospetto economico senza stato patrimoniale: bilancio non ricostruibile")
+            "documento solo Conto Economico: manca lo Stato Patrimoniale, "
+            "bilancio non ricostruibile")
 
     # ----- Facsimile XBRL itcc senza elenco conti → A1 -----
     # Vince su eventuali menzioni di "bilancio riclassificato" dentro la Nota

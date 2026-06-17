@@ -299,18 +299,80 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
 - Enhanced parser (`xbrl_parser_enhanced.py`) includes hierarchical debt reconciliation
 
 ### PDF Import (Claude LLM)
-- Uses PyMuPDF text extraction + Claude Haiku 4.5 for structured extraction
+- **Routing-first:** every PDF is classified by `bilancio_classifier.classify_bilancio` BEFORE
+  picking an extractor (see the Macro-area router subsection below). The classifier replaces the old
+  binary `is_trial_balance` check.
+- Uses PyMuPDF text extraction + Claude Haiku 4.5 for structured extraction (IV-CEE routes)
 - Processing time: 3-10 seconds per PDF
 - Supports Bilancio Micro, Abbreviato, Ordinario (IV CEE format)
 - Supports "Stampa dettaglio voci" format (ERP detail reports with account-level GL entries)
-- Supports "Situazione Contabile" trial balance format (deterministic parser, no LLM)
+- Supports "Situazione Contabile" trial balance format (CoGe LLM extractor primary, deterministic parser fallback)
 - Pre-filters: Zucchetti, Datev/Koinos, Stampa dettaglio voci, Dylog separator noise
 - Post-extraction validators: crediti, debiti split, equity consistency, ce20_imposte cross-check
 - Maps extracted tables to sp01-sp18, ce01-ce20
 - Both single-year and dual-year (both columns) extraction modes
 
+#### Macro-area router (`importers/bilancio_classifier.py`)
+Runs FIRST in `pdf_importer.import_pdf_balance_sheet` (on the text of the first ~14 pages) and decides
+the extraction **route** — so each file is opened with the right rules and Assets=Liab+Equity does not
+break. Replaces the old binary `is_trial_balance`. Full taxonomy + per-file mapping in
+**`Test/IMPORT-ROUTING-TAXONOMY.md`** (77 unique docs analyzed; the 3 macro-areas cover 96% of real cases).
+
+`classify_bilancio(file_path, text)` → `Classification(macro_area, subcategory, route, gestionale,
+confidence, signals, reason)`. Three macro-areas + OTHER, each mapped to a route:
+- **A** — synthetic IV-CEE (legal voci only, no CoGe account codes) → `ROUTE_IVCEE` (LLM extractor).
+- **B** — same IV-CEE skeleton but exploded into sub-accounts (account codes present) → `ROUTE_IVCEE`
+  (LLM, anchored on the declared **voce totals**; detail sub-accounts are ignored).
+- **C** — sezioni contrapposte / situazione contabile (CoGe accounts Dare/Avere or Saldo, no legal
+  schema) → `ROUTE_TRIAL`. **Primary extractor: a dedicated CoGe LLM pass**
+  (`pdf_extractor_llm.extract_trial_balance_with_llm`) that reads Dare/Avere account balances and
+  classifies general-ledger accounts into sp01–18 / ce01–20; the deterministic
+  `situazione_contabile_parser` (balance via pareggio) is the **fallback** (no api_key, LLM failure, or
+  empty LLM sheet). See the "CoGe LLM extractor" subsection below.
+- **OTHER** — native `.xbrl`/`.xml` → `ROUTE_XBRL` (use the XBRL importer, not the PDF branch);
+  CE-only / non-bilancio / over-aggregated → `ROUTE_UNSUPPORTED` (**honest error, never a silent plug**).
+
+Decision logic (`compute_signals` + ordered rules):
+- **Signals** are text markers (`itcc-ci-`, "TOTALE A PAREGGIO", "BILANCIO DI VERIFICA", "situazione
+  contabile", "valore della produzione"), CoGe-code density (DEPI `XX/YY/ZZZ`, 8-digit, TeamSystem,
+  dotted, BILAGRA `NNN.NNNNN`, single-column 6-digit), dotted CEE-path codes (`B.II.1.a`), and the
+  coordinate detector `is_contrapposte_file` — all robust to letter-spaced headers via a no-spaces variant.
+- **B beats C:** a file with the legal skeleton that *also* carries account codes (e.g. budget_313/314)
+  routes to B (IV-CEE), NOT to the empty trial-balance parser — provided the strong C markers
+  (pareggio/verifica/contrapposte) are absent.
+- **C LLM-first with deterministic fallback:** `pdf_importer` runs the dedicated CoGe LLM extractor
+  (`extract_trial_balance_with_llm`) FIRST when `api_key` is set; only if it is unavailable, errors, or
+  returns an empty sheet (`totale_attivo==0`) does it fall back to the deterministic
+  `situazione_contabile_parser`. That parser, when it in turn returns empty, still falls back to the
+  IV-CEE LLM (`force_llm=True`). A no-key environment runs the deterministic parser as before (no
+  regression). The deterministic plug-masking flag (`SC_PLUG_REJECT_PCT` = 20%, see the quadratura
+  engine) still scales the `BILANCIO NON QUADRATO` warning severity on either route.
+- `is_trial_balance = (classification.route == ROUTE_TRIAL)`. The result dict carries `macro_area` +
+  `macro_subcategory` (logged + returned) so new formats surface as an area, not as a crash.
+
+#### CoGe LLM extractor for trial balances (`importers/pdf_extractor_llm.py`)
+`extract_trial_balance_with_llm(file_path)` is the route-C PRIMARY extractor. Unlike
+`extract_pdf_with_llm` (which reads the legal IV-CEE schema), it sends the FULL trial-balance text
+(`_extract_full_text`, no SP/CE section windowing — trial balances have no IV-CEE headers to anchor on)
+and runs two Claude Haiku passes with **CoGe-specific system prompts**:
+- `TRIAL_BALANCE_SP_SYSTEM_PROMPT` — teaches the Dare/Avere sign convention (Dare = asset/cost balance,
+  Avere = liability/equity/revenue balance), contra-account **netting** (fondo ammortamento / fondo
+  svalutazione crediti subtracted from the gross asset, never booked to passivo), the description→sp01–18
+  mapping, and that the **year's result is implicit** (no result account → it is the Attivo-vs-Passivo gap).
+- `TRIAL_BALANCE_CE_SYSTEM_PROMPT` — classifies economic accounts into ce01–20, all costs reported positive.
+
+Output reuses the same `BalanceSheetExtraction`/`IncomeStatementExtraction` schemas (full DB field names),
+then post-processes: `_normalize_ce_signs`, `_validate_crediti`/`_validate_debiti` (breakdown→aggregate
+reconciliation), `_validate_ce10_against_bs`/`_validate_ce_imposte`, and finally
+**`_balance_trial_via_result`** which enforces the pareggio identity by deriving `sp13` as
+`totale_attivo − (passivo + PN excluding the result)` and recomputing the totals — so the sheet always
+ties (`validate_balance` passes), mirroring the deterministic parser's pareggio. Scanned/image trial
+balances are handled via `_extract_with_llm_vision` with the same CoGe prompts. Single-year only (trial
+balances are rarely comparative); `prior_bs_data`/`prior_ce_data` stay `None`.
+
 #### Trial-balance / Situazione Contabile parsers (`importers/situazione_contabile_parser.py`)
-Deterministic, no LLM. `is_situazione_contabile(text)` + the coordinate-based
+Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor above).
+`is_situazione_contabile(text)` + the coordinate-based
 `is_contrapposte_file(path)` route a PDF to the right sub-parser inside
 `extract_situazione_contabile`:
 - **DEPI** `XX/YY/ZZZ` (incl. flat detail-only trial balances) and 2-part `XX/YYYY` + `XX/****`
@@ -324,6 +386,46 @@ Deterministic, no LLM. `is_situazione_contabile(text)` + the coordinate-based
   field — no per-gestionale chart-of-accounts mapping). Fondi ammortamento are netted off assets, the
   current-year result is taken from the declared pareggio gap, and any residual from imperfect parsing is
   plugged into sp09/sp16 with a `BILANCIO NON QUADRATO` warning for manual correction in **Rettifiche**.
+  - **Gross/net anchoring** (`netted_contra`): when fondi ammortamento / svalutazione crediti are listed as
+    separate PASSIVO accounts (gross presentation), the declared TOTALE ATTIVO / pareggio is GROSS. The
+    netted contra mass is accumulated and subtracted from `iv_total`, so the IV-CEE NET total matches the
+    netted asset/passivo sums (plug ~ 0 instead of ~ fondi). No-op when fondi sit on the asset side. This was
+    the dominant cause of "QUADRATURA MASCHERATA" on gross-presentation trial balances.
+  - **Code-collision aggregation** (`_be_reclassify`): two distinct accounts whose codes normalise to the
+    same digit string are SUMMED, not overwritten (the old `info[c] = (d, a)` silently dropped the earlier
+    amount, unbalancing the sheet and inflating the plug).
+  - **Code-less second pass** (`_be_collect_side(codeless=True)` + `_be_split_codeless`): clean two-column
+    trial balances whose rows are pure `description amount` with NO leading account code (e.g. budget_367:
+    "Cassa 179,90 | Fornitori 296.099,94") collect zero rows in the code-required pass. Retried code-less
+    ONLY when the normal pass found nothing (zero regression on coded files): each code-less row gets a
+    unique non-prefixing synthetic code, the gutter is found by scanning for the most balanced split, and
+    each column is truncated at its first section `TOTALE` so compact single-page SP+CE dumps don't book CE
+    accounts as debts.
+- **Empty→best-effort routing safety net** (`extract_situazione_contabile`): a structured/DEPI sub-parser
+  that comes up EMPTY (`totale_attivo == 0`) on a file that is physically a 2-column contrapposte
+  (`is_contrapposte_file`) has misrouted — `is_situazione_contabile()` matched a marker and shadowed the
+  best-effort route, but no structured parser actually reads the layout (e.g. AITEC PROVVISORIO/BILANCINO,
+  dotted `NNN.NNNNN` codes). The result is retried via `extract_contrapposte_best_effort` and kept only when
+  non-empty. Purely additive (triggers only on an otherwise-empty result), so it cannot regress files the
+  structured parsers already extract. Fixes the "Balance sheet does not balance / Failed to extract data"
+  error on provvisori/infrannuali that the IV-CEE LLM fallback could not read.
+- **Dotted-hierarchical mastri rescue** (`is_dotted_hierarchical` + `_hier_reconstruct`, hooked into the tail
+  of `extract_contrapposte_best_effort`): the Sistemi/DEPI **"BILANCIO 4 SEZIONI"** family (codes `03.01.07`
+  or `3 / 15 / 102`) lists every IV-CEE voce as a LEVEL-1 mastro WITH its correct subtotal, then dotted
+  children. The generic best-effort normalises the code to digits and the deepest detail rows — printed with
+  a TRUNCATED single-digit code (a finance instalment shown as `23`) — collide with a mastro number and
+  inflate it → big sp09/sp16 plug ("QUADRATURA MASCHERATA"). The rescue anchors instead on the level-1 mastri
+  taken in **document order** (a no-separator code is a mastro only when its OWN dotted children `code.` follow
+  it before the next no-separator code, which rejects the truncated leaves), nets fondi ammortamento at any
+  depth (`_is_fondo_amm`, incl. the aggregate "FONDI AMMORTAMENTO IMMOBILIZ" the rule table misses), and lets
+  the current-year result emerge as the attivo/passivo gap (= ricavi − costi). It runs ONLY when the
+  best-effort result is masked (plug > 1%) AND the file is dotted-hierarchical, and its output is kept ONLY
+  when it self-validates: gross attivo (`att_sum + netted`) reconciles to the declared TOTALE ATTIVO within
+  0.5% AND the SP gap equals the CE result within 0.5% — otherwise it returns `None` and the masked
+  best-effort result stands unchanged (so it can never regress a file already balanced). Recovered the
+  "ver_definitiva" 4-sezioni provvisori (budget_343/348) to clean quadratura; non-reconciling siblings
+  (budget_342 partial, the slash-gross 405/338) correctly fall back. Measured on the deterministic corpus the
+  quadratura rate went 17→19 / 28 with zero regressions (`Test/_quadratura_harness.py`).
 
 #### Balance hardening (anti-masking)
 - `pdf_mapper.validate_balance` fails when `totale_attivo == 0` or when the aggregate sub-totals
@@ -334,6 +436,56 @@ Deterministic, no LLM. `is_situazione_contabile(text)` + the coordinate-based
 - Dual-year extraction discards a fabricated prior year when the PDF has a single amount column.
 - `ce03_lavori_interni` is included in the Valore della Produzione (both years); extracted imposte are not
   overwritten to force the profit cross-check.
+- **Malformed Haiku column tolerance** (`pdf_extractor_llm._coerce_year_blob`): with the nested two-year
+  tool schema, Haiku sometimes serialises a whole `current_year`/`prior_year` column as a JSON-ish *string*
+  using Italian number formatting (`1.234.567,89`). A `field_validator(mode="before")` `json.loads` it,
+  retrying after normalising Italian numbers — so one bad column no longer fails the entire import.
+- **Broad SP-window end anchors** (`SP_END_KEYWORDS`): the SP page range closes on any "Totale … passivo/
+  passività" variant ("Totale STATO PATRIMONIALE passivo", "Totale passivo e patrimonio netto", …), not just
+  the literal "totale passivo" — a too-narrow match truncated the SP window before the passivo pages and
+  broke the balance.
+- **Zeroed-leading-section guard** (`find_section_pages`): draft "provvisorio" exports that render the IV-CEE
+  schema with every amount at `0,00` up front, then the real figures later, would lock detection onto the
+  zero copy (→ empty BS). When the selected SP pages carry negligible amount mass vs the largest data page,
+  the SP/CE windows slide forward to a genuine second copy that re-states the SP header AND carries real
+  amounts. Deliberately does NOT relocate to a headerless number-only dump — those fail honestly instead.
+
+#### IV-CEE leveling + quadratura engine (`importers/iv_cee_hierarchy.py`)
+Shared stage DOWNSTREAM of the 4 macro-area routes (A/B/C/OTHER stay separate — this is NOT a
+router). One canonical taxonomy + one quadratura check for every bilancio, not per-file patches.
+- **`data/iv_cee_tree.json`** — canonical IV-CEE statement tree (art. 2424/2425). Each node:
+  `path/level (1=letters,2=roman,3=arabic,4=a/b/c)/side/db_field/aliases/is_legal_leaf/is_total/netting`.
+  Legal leaves cover all sp01–18 + ce01–20. Deliberately LEGAL-LEVEL only (no chart-of-accounts
+  sub-conto aliases — that would double-count in flat A/B aggregation).
+- **`resolve(desc, side)`** — shared description→IV-CEE-node classifier (conservative: `None` when
+  unsure, so `_be_reclassify` descends instead of misrouting). **Do NOT use it to override the
+  attivo/passivo SIDE** of a trial-balance line: the COLUMN is ground truth; ambiguous accounts
+  (`ERARIO C/`, `DEPOSITI BANCARI`=overdraft, `FORNITORI C/ANTICIPI`, `INAIL C/`) flip side by
+  column, not description (tried + reverted — regressed clean files).
+- **`check_quadratura(bs, ce)`** — Attivo==Passivo + CE utile==sp13 cross-check + **anti-masking**:
+  reads `bs['_plug_residual']` (exposed by the best-effort contrapposte parser, survives `_map_sc_keys`);
+  `masked=True` when the plug exceeds 1% of total (the balance only ties because the unclassified
+  residual was swept into sp09/sp16). `is_empty=True` when `totale_attivo ~ 0` — an empty extraction is a
+  FAILURE, not a pass (without this, att==pas==0 gives sbilancio 0 → falsely "quadra", which hid the empty
+  extractions of misrouted contrapposte files). `quadra` requires `not is_empty and not masked`. Used as a
+  unified diagnostic in `pdf_importer` for ALL routes and as the harness's pass/fail signal.
+- **Trial-balance import is never hard-blocked** (`pdf_importer`): a readable route-C situazione
+  contabile ALWAYS imports. The route now tries the dedicated **CoGe LLM extractor first**
+  (`extract_trial_balance_with_llm`, which DOES read CoGe account lists); when that is unavailable or
+  empty, the deterministic best-effort parser plugs to balance (validate_balance passes), so a non-empty
+  result is imported with a `BILANCIO NON QUADRATO` flag scaled to the plug (`SC_PLUG_REJECT_PCT` now
+  only sets the warning severity "parziale" vs "prevalentemente stimata"), for correction in Rettifiche —
+  NOT rejected. NOTE: the distinction is between the two LLM passes — the **IV-CEE** LLM
+  (`extract_pdf_with_llm`, `force_llm=True`) is the WRONG fallback for a trial balance (it reads
+  legal-schema bilanci, not CoGe account lists) and on a contrapposte file returns an unbalanced
+  extraction → the generic "Balance sheet does not balance / Failed to extract data" hard error; so the
+  IV-CEE LLM is the last resort ONLY when the deterministic parse is genuinely EMPTY (no Stato
+  Patrimoniale at all). The new CoGe LLM pass is purpose-built for CoGe lists and is the preferred
+  primary. This is what makes every readable trial balance open instead of erroring.
+- **`Test/_quadratura_harness.py`** — measures the quadratura rate over a corpus (deterministic routes
+  by default; `--llm` to include A/B). Baseline tool for before/after of any import change.
+- `situazione_contabile_parser._be_split` picks the column gutter that BALANCES description-bearing
+  rows on both sides (centre as tiebreaker), not the widest gap (which sliced the passivo column).
 
 ### FGPMI Rating Model
 - Complex multi-table lookup (7 indicators, sector-specific thresholds)

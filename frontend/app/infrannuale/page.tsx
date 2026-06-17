@@ -2845,6 +2845,16 @@ export default function InfraannualePage() {
       return;
     }
 
+    if (companyMode === "new" && !newCompanyName.trim()) {
+      toast.error("Inserisci il nome dell'azienda");
+      return;
+    }
+
+    if (companyMode === "existing" && !selectedCompany) {
+      toast.error("Seleziona un'azienda");
+      return;
+    }
+
     setImporting(true);
     // Clear stale rettifiche state from any previous import
     setAdjustableData(null);
@@ -2935,6 +2945,23 @@ export default function InfraannualePage() {
       await createScenarioAndAdvance(importResult.companyId, importResult.companyName);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nell'importazione del bilancio storico";
+      toast.error(msg);
+    } finally {
+      setImportingRef(false);
+    }
+  };
+
+  // STEP 1c: Proceed WITHOUT the reference year (pure-annualization mode).
+  // The engine falls back to annualizing the partial year (value * 12 / months)
+  // when the prior-year balance sheet is unavailable.
+  const handleSkipRefYear = async () => {
+    if (!importResult) return;
+    setImportingRef(true);
+    try {
+      setMissingRefYear(null);
+      await createScenarioAndAdvance(importResult.companyId, importResult.companyName);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Errore nella creazione dello scenario";
       toast.error(msg);
     } finally {
       setImportingRef(false);
@@ -3122,10 +3149,13 @@ export default function InfraannualePage() {
       ? (refVal("sp05_rimanenze") / refCEVal("ce05_materie_prime")) * 365 : 0;
     const payableDays = refPurchases !== 0 ? (refVal("sp16_debiti_breve") / refPurchases) * 365 : 0;
 
-    // Projected working capital items
-    const sp05 = projMaterials !== 0 ? projMaterials * inventoryDays / 365 : partialVal("sp05_rimanenze");
-    const sp06 = projRevenue !== 0 ? projRevenue * receivableDays / 365 : partialVal("sp06_crediti_breve");
-    let sp16 = projPurchases !== 0 ? projPurchases * payableDays / 365 : partialVal("sp16_debiti_breve");
+    // Projected working capital items. Without a reference year there are no
+    // turnover ratios, so we carry the partial-year stocks (matches the backend
+    // pure-annualization mode).
+    const hasRef = comparison.has_reference;
+    const sp05 = hasRef && projMaterials !== 0 ? projMaterials * inventoryDays / 365 : partialVal("sp05_rimanenze");
+    const sp06 = hasRef && projRevenue !== 0 ? projRevenue * receivableDays / 365 : partialVal("sp06_crediti_breve");
+    let sp16 = hasRef && projPurchases !== 0 ? projPurchases * payableDays / 365 : partialVal("sp16_debiti_breve");
 
     // Other items from infrannuale (partial year)
     const sp01 = partialVal("sp01_crediti_soci");
@@ -3708,7 +3738,9 @@ export default function InfraannualePage() {
                     </div>
                     <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-2">
                       Il PDF infrannuale non conteneva i dati dell&apos;anno precedente.
-                      Carica il bilancio completo {missingRefYear} per procedere con l&apos;analisi.
+                      Carica il bilancio completo {missingRefYear} per un confronto storico
+                      completo, oppure prosegui senza: la proiezione verrà calcolata per
+                      pura annualizzazione del periodo (valore × 12 / mesi).
                     </p>
                     <div className="flex items-center gap-3 mt-4">
                       <Input
@@ -3733,6 +3765,18 @@ export default function InfraannualePage() {
                             Importa {missingRefYear}
                           </>
                         )}
+                      </Button>
+                    </div>
+                    <div className="mt-3">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-yellow-800 dark:text-yellow-300"
+                        onClick={handleSkipRefYear}
+                        disabled={importingRef}
+                      >
+                        <ArrowRight className="h-4 w-4 mr-2" />
+                        Prosegui senza l&apos;anno precedente (solo annualizzazione)
                       </Button>
                     </div>
                   </div>
@@ -3861,6 +3905,16 @@ export default function InfraannualePage() {
             </Card>
           ) : comparison ? (
             <>
+              {!comparison.has_reference && (
+                <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                  <p className="text-sm text-blue-800 dark:text-blue-300">
+                    <strong>Modalità annualizzazione pura:</strong> nessun bilancio
+                    storico {comparison.reference_year} disponibile. La proiezione 12 mesi
+                    è ottenuta annualizzando il periodo (valore × 12 / {comparison.period_months})
+                    e le colonne di confronto con l&apos;anno precedente non sono disponibili.
+                  </p>
+                </div>
+              )}
               {/* Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {["ce01_ricavi_vendite", "ce08_costi_personale", "ce05_materie_prime", "ce06_servizi"].map(
@@ -3878,22 +3932,28 @@ export default function InfraannualePage() {
                           <p className="text-lg font-bold">
                             {formatEuro(item.partial_value)}
                           </p>
-                          <div className="flex items-center gap-1 mt-1">
-                            {isAbove ? (
-                              <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
-                            ) : (
-                              <TrendingDown className="h-3 w-3 text-red-600 dark:text-red-400" />
-                            )}
-                            <span
-                              className={`text-xs ${
-                                isAbove
-                                  ? "text-green-600 dark:text-green-400"
-                                  : "text-red-600 dark:text-red-400"
-                              }`}
-                            >
-                              {formatPct(item.pct_of_reference)} vs storico
-                            </span>
-                          </div>
+                          {comparison.has_reference ? (
+                            <div className="flex items-center gap-1 mt-1">
+                              {isAbove ? (
+                                <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
+                              ) : (
+                                <TrendingDown className="h-3 w-3 text-red-600 dark:text-red-400" />
+                              )}
+                              <span
+                                className={`text-xs ${
+                                  isAbove
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-red-600 dark:text-red-400"
+                                }`}
+                              >
+                                {formatPct(item.pct_of_reference)} vs storico
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              annualizzato: {formatEuro(item.annualized_value)}
+                            </p>
+                          )}
                         </CardContent>
                       </Card>
                     );
@@ -3905,8 +3965,9 @@ export default function InfraannualePage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Conto Economico - Confronto {comparison.period_months}M{" "}
-                    {comparison.partial_year} vs 12M {comparison.reference_year}
+                    {comparison.has_reference
+                      ? `Conto Economico - Confronto ${comparison.period_months}M ${comparison.partial_year} vs 12M ${comparison.reference_year}`
+                      : `Conto Economico - ${comparison.period_months}M ${comparison.partial_year} → annualizzato 12M`}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>

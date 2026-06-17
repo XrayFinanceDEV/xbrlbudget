@@ -321,10 +321,19 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.inc.revenue
         )
 
-        # DDEB = Giorni di Debito = 360 * Debiti / Fatturato
+        # DDEB = Giorni di Debito (dilazione fornitori) = 360 * Debiti v/fornitori / Acquisti.
+        # Must mirror the forecast DPO driver (sp16d = acquisti * dpo/360): use TRADE
+        # payables over PURCHASES (materie + servizi), NOT total debt over revenue — the
+        # latter folded bank/financial debt into the figure, so a DPO of 90 came back as
+        # 357/633 in the report. Fall back to revenue only if purchases are unavailable.
+        trade_payables = (
+            (self.bs.sp16d_debiti_fornitori_breve or Decimal('0')) +
+            (self.bs.sp17d_debiti_fornitori_lungo or Decimal('0'))
+        )
+        purchases = (self.inc.ce05_materie_prime or Decimal('0')) + (self.inc.ce06_servizi or Decimal('0'))
         payables_turnover_days = self.safe_divide(
-            Decimal(days_in_year) * self.bs.total_debt,
-            self.inc.revenue
+            Decimal(days_in_year) * trade_payables,
+            purchases if purchases > 0 else self.inc.revenue
         )
 
         # DCCN = Giorni CCN = 360 * CCN / Fatturato

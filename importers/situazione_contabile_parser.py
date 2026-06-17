@@ -1834,27 +1834,54 @@ def _be_split(words) -> Optional[float]:
                 if re.match(r'^\d', w[4]) and not _BE_AMT_RE.match(w[4]))
     if len(xs) < 6:
         return None
+    # Page-content centre, robust to far-right header/footer outliers (5°/95° percentile).
+    allx = sorted((w[0] + w[2]) / 2 for w in words if w[4].strip())
+    if allx:
+        lo_p = allx[max(0, int(0.05 * len(allx)))]
+        hi_p = allx[min(len(allx) - 1, int(0.95 * len(allx)))]
+        centre = (lo_p + hi_p) / 2
+    else:
+        centre = None
     # Candidate gutters: gaps between adjacent code-x centres with a real cluster on
-    # each side. Widest first.
+    # each side.
     candidates = []
     for i in range(len(xs) - 1):
         gap = xs[i + 1] - xs[i]
         if gap >= 25 and (i + 1) >= 3 and (len(xs) - i - 1) >= 3:
-            candidates.append((gap, xs[i + 1] - 1.0))
-    candidates.sort(reverse=True)
-    for _gap, split in candidates:
+            candidates.append(xs[i + 1] - 1.0)
+    # Score each VALIDATED candidate. The correct gutter splits into two genuine data
+    # columns with DESCRIPTION-bearing rows on BOTH sides; the header/footer-polluted (or
+    # code-vs-amount) gutter is wider but leaves one side with orphan amounts and no
+    # descriptions. So we DON'T pick the widest: we pick the candidate that maximises the
+    # balance of description-bearing rows across the two sides, breaking ties by proximity
+    # to the page centre (the real Attivo|Passivo gutter sits near the middle).
+    scored = []
+    for split in candidates:
         left = _be_collect_side(words, -1e9, split)
         right = _be_collect_side(words, split, 1e9)
-        # A valid gutter splits into two genuine data columns: each side must
-        # reconstruct several (code+amount) rows. The header/footer-polluted gutter
-        # leaves the right side with amounts but no codes → 0 rows → rejected.
-        if len(left) >= 2 and len(right) >= 2:
-            return split
-    return None
+        ld = sum(1 for _c, d, _a in left if d.strip())
+        rd = sum(1 for _c, d, _a in right if d.strip())
+        if len(left) >= 2 and len(right) >= 2 and ld >= 2 and rd >= 2:
+            balance = min(ld, rd)
+            dist = abs(split - centre) if centre is not None else 0.0
+            scored.append((balance, -dist, split))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    return scored[0][2]
 
 
-def _be_collect_side(words, lo: float, hi: float) -> List[Tuple[str, str, Decimal]]:
-    """Reconstruct (norm_code, desc_upper, amount) rows in x-band [lo, hi)."""
+def _be_collect_side(words, lo: float, hi: float,
+                     codeless: bool = False) -> List[Tuple[str, str, Decimal]]:
+    """Reconstruct (norm_code, desc_upper, amount) rows in x-band [lo, hi).
+
+    codeless=True handles two-column trial balances whose rows are pure
+    `description amount` with NO leading account code (e.g. budget_367: "Cassa
+    179,90 | Fornitori 296.099,94"). In that mode a row with a description and an
+    amount is emitted with an EMPTY code (the caller assigns a unique synthetic
+    code so each is its own root in _be_reclassify, classified by description).
+    Default (codeless=False) is unchanged: rows must start with an account code.
+    """
     from collections import defaultdict
     rows: Dict[int, list] = defaultdict(list)
     for w in words:
@@ -1874,17 +1901,72 @@ def _be_collect_side(words, lo: float, hi: float) -> List[Tuple[str, str, Decima
             code_toks.append(toks[i])
             i += 1
         if not code_toks:
-            continue
-        code = _be_norm(''.join(code_toks))
-        if not code:
-            continue
-        rest = toks[i:]
+            if not codeless:
+                continue
+            code = ''               # code-less row: classify by description only
+            rest = toks
+        else:
+            code = _be_norm(''.join(code_toks))
+            if not code:
+                continue
+            rest = toks[i:]
         amts = [_parse_amount(t) for t in rest if _BE_AMT_RE.match(t)]
         if not amts:
             continue
         desc = ' '.join(t for t in rest if not _BE_AMT_RE.match(t)).upper().strip()
+        if codeless and not code:
+            # Noise guard for code-less rows: require a real description and skip
+            # running-total / header artefacts that would otherwise inject phantom
+            # amounts ("A riportare", "Riporto", "Segue", "Importi", "Progressivo").
+            if len(desc) < 3:
+                continue
+            if any(k in desc for k in ('A RIPORT', 'RIPORTO', 'RIPORTARE',
+                                       'SEGUE', 'IMPORTI', 'PROGRESSIV')):
+                continue
+            # Compact code-less trial balances stack the whole statement in one column:
+            # the SP account list, a "TOTALE …" line, THEN the CE account list (costi/
+            # ricavi). Without codes there is nothing to tell a CE revenue ("TRASPORTI DI
+            # MERCE") from a passivo debt, so it would inflate the SP. Truncate the column
+            # at its first section TOTAL: rows below it belong to the next (CE) section.
+            if 'TOTALE' in desc or 'PAREGGIO' in desc:
+                break
         out.append((code, desc, amts[-1]))
     return out
+
+
+def _be_split_codeless(words) -> Optional[float]:
+    """Column gutter for CODE-LESS two-column layouts (description+amount rows).
+
+    With no account codes the gutter is not a code-cluster gap; it sits between the
+    LEFT column's amounts and the RIGHT column's descriptions. We scan candidate
+    gutters across the central half of the page and keep the one that yields the most
+    BALANCED set of well-formed (description+amount) rows on both sides — a wrong split
+    leaves one side with descriptions but no amounts (or vice-versa) and scores low.
+    """
+    xs = [(w[0] + w[2]) / 2 for w in words if w[4].strip()]
+    if len(xs) < 6:
+        return None
+    allx = sorted(xs)
+    centre = (allx[int(0.05 * len(allx))] + allx[min(len(allx) - 1, int(0.95 * len(allx)))]) / 2
+    lo_x, hi_x = allx[0], allx[-1]
+    span = hi_x - lo_x
+    if span <= 0:
+        return None
+    best = None
+    step = max(2.0, span / 80.0)
+    x = lo_x + 0.25 * span
+    end = lo_x + 0.75 * span
+    while x <= end:
+        left = _be_collect_side(words, -1e9, x, codeless=True)
+        right = _be_collect_side(words, x, 1e9, codeless=True)
+        ld = sum(1 for _c, d, _a in left if d.strip())
+        rd = sum(1 for _c, d, _a in right if d.strip())
+        if ld >= 2 and rd >= 2:
+            score = (min(ld, rd), -abs(x - centre))
+            if best is None or score > best[0]:
+                best = (score, x)
+        x += step
+    return best[1] if best else None
 
 
 def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify) -> List[Tuple[str, Decimal]]:
@@ -1910,7 +1992,18 @@ def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify) -> List[Tupl
 
     info = {}
     for c, d, a in rows:
-        info[c] = (d, a)            # last occurrence wins for a repeated code
+        if c in info:
+            # Two DISTINCT accounts whose codes normalise to the same digit string
+            # (e.g. both collapse to "5") would otherwise overwrite each other and
+            # silently DROP the earlier amount — unbalancing the sheet and inflating the
+            # sp09/sp16 plug (budget_343/348/342). Aggregate the amount instead so no mass
+            # is lost; keep the first description for classification (same normalised code
+            # → same gestionale family → same IV-CEE field). Exact (c,d,a) duplicates were
+            # already removed by the `seen` set above, so this only sums genuine distinct rows.
+            pd, pa = info[c]
+            info[c] = (pd, pa + a)
+        else:
+            info[c] = (d, a)
     uniq = list(info.keys())
 
     def direct_children(c):
@@ -2016,6 +2109,232 @@ def looks_contrapposte(text: str) -> bool:
     return len(codes) >= 8
 
 
+# ---------------------------------------------------------------------------
+# Hierarchical-mastri reconstruction (dotted "BILANCIO 4 SEZIONI" family)
+# ---------------------------------------------------------------------------
+# A whole sub-family of trial balances (Sistemi/DEPI "bilancio 4 sezioni",
+# code 03.01.07 / 3 / 15 / 102) lists, for every IV-CEE voce, the LEVEL-1 mastro
+# with its already-correct subtotal (e.g. "05 IMMOBILIZZAZIONI MATERIALI
+# 1.293.041,01"), then its dotted children. The generic best-effort parser
+# normalises the code to digits and the DEEPEST detail rows (printed with a
+# truncated single-digit code, e.g. a finance instalment shown as "23") then
+# COLLIDE with a mastro number and inflate it → large sp09/sp16 plug ("QUADRATURA
+# MASCHERATA"). Anchoring instead on the level-1 mastri (taken in DOCUMENT ORDER,
+# so a no-separator code is a mastro only when its own dotted children follow it)
+# makes the attivo reconcile to the declared total exactly and the current-year
+# result emerge as the attivo/passivo gap (which equals ricavi-costi). This runs
+# ONLY as a rescue when the best-effort result is masked, and its output is kept
+# ONLY when it reconciles (gross attivo vs declared total AND SP gap vs CE result),
+# so it can never regress a file the best-effort already balances.
+_DOTTED_HIER_RE = re.compile(r'\b\d{1,3}\.\d{2}\.\d{2,3}\b')
+
+
+def is_dotted_hierarchical(text: str) -> bool:
+    """True when the document is dominated by dotted hierarchical account codes
+    (NN.NN.NN), the signature of the 'bilancio 4 sezioni' mastri layout."""
+    return len(_DOTTED_HIER_RE.findall(text)) >= 12
+
+
+def _hier_canon(raw: str) -> str:
+    """Canonicalise a hierarchical code to dotted form: '3 / 15 / 102' -> '3.15.102',
+    '05.03.05' unchanged. Depth = number of '.'-separated segments."""
+    s = raw.replace('/', '.')
+    s = re.sub(r'\.+', '.', s).strip('.')
+    return s
+
+
+def _hier_collect(words, lo: float, hi: float) -> List[Tuple[str, str, Decimal]]:
+    """Collect (canon_code, desc_upper, amount) rows in x-band [lo, hi), preserving
+    the hierarchical code structure and DOCUMENT (top-to-bottom) order."""
+    from collections import defaultdict
+    rows: Dict[int, list] = defaultdict(list)
+    for w in words:
+        cx = (w[0] + w[2]) / 2
+        if lo <= cx < hi:
+            rows[round(w[1] / 2.0)].append(w)
+    out = []
+    for y in sorted(rows):
+        toks = [w[4] for w in sorted(rows[y], key=lambda w: w[0])]
+        i, code_toks = 0, []
+        while i < len(toks) and re.match(r'^[\d./*]+$', toks[i]) and not _BE_AMT_RE.match(toks[i]):
+            code_toks.append(toks[i])
+            i += 1
+        if not code_toks:
+            continue
+        cc = _hier_canon(''.join(code_toks))
+        if not cc or not cc[0].isdigit():
+            continue
+        rest = toks[i:]
+        amts = [_parse_amount(t) for t in rest if _BE_AMT_RE.match(t)]
+        if not amts:
+            continue
+        desc = ' '.join(t for t in rest if not _BE_AMT_RE.match(t)).upper().strip()
+        out.append((cc, desc, amts[-1]))
+    return out
+
+
+def _hier_lvl1(rows: List[Tuple[str, str, Decimal]]) -> List[Tuple[str, str, Decimal]]:
+    """Level-1 mastri in document order: a no-'.' code is a mastro only when its OWN
+    dotted children (code + '.') follow it before the next no-'.' code. This rejects
+    the truncated deep-detail leaves whose code collides with a real mastro number."""
+    n = len(rows)
+    res = []
+    for i, (c, d, a) in enumerate(rows):
+        if '.' in c or 'TOTALE' in d or 'PAREGGIO' in d:
+            continue
+        is_mastro = False
+        for j in range(i + 1, n):
+            cj = rows[j][0]
+            if cj.startswith(c + '.'):
+                is_mastro = True
+                break
+            if '.' not in cj:
+                break
+        if is_mastro:
+            res.append((c, d, a))
+    return res
+
+
+def _is_fondo_amm(desc_upper: str) -> bool:
+    """Recognise depreciation/amortisation funds at any aggregation level, incl. the
+    aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses."""
+    d = desc_upper
+    return (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
+            and ('FOND' in d or 'F.DO' in d or 'F/' in d))
+
+
+def _hier_reconstruct(pages_data, full: str):
+    """Reconstruct a balanced IV-CEE sheet from level-1 mastri. Returns (bs, ce) or
+    None when the layout does not reconcile (caller then keeps the best-effort result).
+    """
+    Z = Decimal('0')
+    att, pas, cos, ric = [], [], [], []
+    for words, is_sp, is_ce, up, width in pages_data:
+        split = _be_split(words)
+        if split is None:
+            split = width / 2
+        left = _hier_collect(words, -1e9, split)
+        right = _hier_collect(words, split, 1e9)
+        if is_sp and not is_ce:
+            att += left
+            pas += right
+        elif is_ce and not is_sp:
+            if ('COSTI' in up[:400] and 'RICAVI' in up[:400]
+                    and up[:400].find('RICAVI') < up[:400].find('COSTI')):
+                cos += right
+                ric += left
+            else:
+                cos += left
+                ric += right
+
+    ma, mp = _hier_lvl1(att), _hier_lvl1(pas)
+    mc, mr = _hier_lvl1(cos), _hier_lvl1(ric)
+    if len(ma) < 4 or len(mp) < 4:
+        return None                       # not a clean two-column mastri layout
+
+    bs: Dict[str, Decimal] = {}
+    netted = Z
+
+    def addb(k, v):
+        bs[k] = bs.get(k, Z) + v
+
+    for _c, d, a in ma:
+        if _is_fondo_amm(d):
+            addb('sp03', -a)
+            netted += a
+        else:
+            f = _classify_sp_attivo(d)
+            addb({'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f), a)
+    for _c, d, a in mp:
+        if _is_fondo_amm(d):
+            addb('sp03', -a)
+            netted += a
+            continue
+        t = _classify_sp_passivo(d)
+        if t == 'equity_total':
+            addb('sp11' if (_kw_match(d, ['CAPITALE']) and 'RISERV' not in d) else 'sp12', a)
+        elif t in ('depr_sp02', 'depr_sp03', 'depr_sp04'):
+            addb(t.replace('depr_', ''), -a)
+            netted += a
+        elif t == 'deduct_crediti':
+            addb('sp06', -a)
+            netted += a
+        elif t in ('sp14', 'sp15', 'sp18'):
+            addb(t, a)
+        else:
+            addb('sp16', a)
+
+    # CE: every cost mastro lands in a cost field and every revenue mastro in a
+    # revenue field, so the net (ricavi - costi) is sign-correct regardless of the
+    # exact bucket (used both for the import P&L and for the reconciliation check).
+    ce: Dict[str, Decimal] = {}
+
+    def adde(k, v):
+        ce[k] = ce.get(k, Z) + v
+
+    for _c, d, a in mc:
+        f = _classify_ce_costi(d) or 'ce12'
+        if f == 'ce01_return':
+            adde('ce01', -a)
+        elif f == 'ce10_close':
+            adde('ce10', -a)
+        elif f == 'ce13_cost':
+            adde('ce15', a)
+        elif f in _CE_HIER_SUBPARENT:
+            adde(_CE_HIER_SUBPARENT[f], a)
+        else:
+            adde(f, a)
+    for _c, d, a in mr:
+        f = _classify_ce_ricavi(d) or 'ce04'
+        if f == 'ce10_close':
+            adde('ce10', -a)
+        else:
+            adde(f, a)
+
+    att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
+    pas_sum = sum((bs.get(k, Z) for k in ('sp11', 'sp12', 'sp14', 'sp15', 'sp16', 'sp17', 'sp18')), Z)
+    sp13 = att_sum - pas_sum               # result as the SP gap → attivo == passivo
+
+    # --- validation: keep ONLY when it genuinely reconciles ---
+    up1 = re.sub(r'\s+', ' ', full.upper())
+    flat1 = re.sub(r'\s+', '', full.upper())
+
+    def _ft(spaced, flat):
+        if spaced in up1:
+            return _be_amount(up1.split(spaced, 1)[1][:40])
+        if flat in flat1:
+            return _be_amount(flat1.split(flat, 1)[1][:40])
+        return None
+
+    tot_att = _ft('TOTALE ATTIV', 'TOTALEATTIV')
+    if not tot_att or tot_att <= 0:
+        return None
+    tol = max(Decimal('50'), Decimal('0.005') * tot_att)
+    # (1) gross attivo (net classified + fondi netted back) matches the declared total
+    if abs((att_sum + netted) - tot_att) > tol:
+        return None
+    # (2) the SP result gap equals the CE result (ricavi - costi); otherwise the
+    #     passivo composition is wrong and we must not trust the gap as sp13.
+    ce_result = sum(ric_a for _c, _d, ric_a in mr) - sum(cos_a for _c, _d, cos_a in mc)
+    if abs(sp13 - ce_result) > tol:
+        return None
+
+    bs['sp13'] = sp13
+    bs['totale_attivo'] = att_sum
+    bs['totale_passivo'] = att_sum
+    bs['_plug_residual'] = Z
+    return bs, ce
+
+
+# CE sub-field → parent aggregate (the EBIT/profit formula reads the parent). Mirrors
+# the mapping in extract_contrapposte_best_effort so a personale/ammortamenti detail
+# rolls into ce08/ce09 instead of being lost.
+_CE_HIER_SUBPARENT = {
+    'ce08a_tfr': 'ce08', 'ce08b': 'ce08', 'ce08c': 'ce08', 'ce08d': 'ce08',
+    'ce09a': 'ce09', 'ce09b': 'ce09', 'ce09c': 'ce09', 'ce09d': 'ce09',
+}
+
+
 def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Best-effort extraction of a 2-column contrapposte trial balance.
 
@@ -2024,11 +2343,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     user can correct it via the Rettifiche journal.
     """
     doc = fitz.open(file_path)
-    attivo: List[Tuple[str, str, Decimal]] = []
-    passivo: List[Tuple[str, str, Decimal]] = []
-    costi: List[Tuple[str, str, Decimal]] = []
-    ricavi: List[Tuple[str, str, Decimal]] = []
     full = ""
+    # Capture per-page (words, is_sp, is_ce, up, width) so the column collection can
+    # be re-run in a code-less second pass without re-opening the PDF.
+    pages_data: List[tuple] = []
 
     for page in doc:
         ptext = page.get_text()
@@ -2061,24 +2379,58 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         words = page.get_text('words')
         if not words:
             continue
-        split = _be_split(words)
-        if split is None:
-            split = page.rect.width / 2
-        left = _be_collect_side(words, -1e9, split)
-        right = _be_collect_side(words, split, 1e9)
-        if is_sp and not is_ce:
-            attivo += left
-            passivo += right
-        elif is_ce and not is_sp:
-            # left=costi, right=ricavi (typical); swap if headers say otherwise
-            if 'RICAVI' in up[:400] and up[:400].find('RICAVI') < up[:400].find('COSTI') if 'COSTI' in up[:400] else False:
-                costi += right
-                ricavi += left
-            else:
-                costi += left
-                ricavi += right
+        pages_data.append((words, is_sp, is_ce, up, page.rect.width))
 
     doc.close()
+
+    def _collect_all(codeless: bool):
+        """Collect attivo/passivo/costi/ricavi rows across all pages. In code-less
+        mode each rowless-code row gets a globally-unique, fixed-width synthetic code
+        (~NNNNNN) so it is its own non-prefixing root in _be_reclassify."""
+        att: List[Tuple[str, str, Decimal]] = []
+        pas: List[Tuple[str, str, Decimal]] = []
+        cos: List[Tuple[str, str, Decimal]] = []
+        ric: List[Tuple[str, str, Decimal]] = []
+        ctr = [0]
+
+        def _uniq(side_rows):
+            res = []
+            for c, d, a in side_rows:
+                if c == '':
+                    c = f"~{ctr[0]:06d}"
+                    ctr[0] += 1
+                res.append((c, d, a))
+            return res
+
+        for words, is_sp, is_ce, up, width in pages_data:
+            split = _be_split(words)
+            if split is None and codeless:
+                split = _be_split_codeless(words)
+            if split is None:
+                split = width / 2
+            left = _uniq(_be_collect_side(words, -1e9, split, codeless=codeless))
+            right = _uniq(_be_collect_side(words, split, 1e9, codeless=codeless))
+            if is_sp and not is_ce:
+                att += left
+                pas += right
+            elif is_ce and not is_sp:
+                # left=costi, right=ricavi (typical); swap if headers say otherwise
+                if ('COSTI' in up[:400] and 'RICAVI' in up[:400]
+                        and up[:400].find('RICAVI') < up[:400].find('COSTI')):
+                    cos += right
+                    ric += left
+                else:
+                    cos += left
+                    ric += right
+        return att, pas, cos, ric
+
+    attivo, passivo, costi, ricavi = _collect_all(codeless=False)
+    # Code-less second pass: a clean two-column trial balance whose rows carry NO
+    # account code (description+amount only, e.g. budget_367) collects zero rows in
+    # the code-required pass. Retry code-less ONLY when the normal pass found nothing,
+    # so coded files (the entire passing corpus) are never affected.
+    if not attivo and not passivo:
+        attivo, passivo, costi, ricavi = _collect_all(codeless=True)
 
     # A contrapposte trial balance must have a balance-sheet side. Documents that
     # are economic-only (e.g. "PROSPETTO ECONOMICO per competenza" with just a
@@ -2144,11 +2496,22 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         add(bs, field, amt)
 
     # --- Passivo (equity / debts / contra-asset funds) ---
+    # Track the contra-asset mass netted off the asset side. When fondi ammortamento /
+    # svalutazione crediti are listed as separate PASSIVO accounts (GROSS presentation),
+    # the declared TOTALE ATTIVO / pareggio is GROSS. Netting them off the assets while
+    # anchoring the plug to that gross total opens a hole == the fondi magnitude, swept
+    # into sp09/sp16 — the dominant cause of "QUADRATURA MASCHERATA" on gross-presentation
+    # trial balances (budget_395/405/343/348/342). We accumulate the netted mass and
+    # reduce iv_total by it below so the IV-CEE NET total matches the netted sums (plug ~ 0).
+    # No-op when fondi sit on the asset side (e.g. AITEC) → netted_contra stays 0.
+    netted_contra = Z
     for tag, amt in _be_reclassify(passivo, cl_pas):
         if tag in ('depr_sp02', 'depr_sp03', 'depr_sp04'):
             add(bs, tag.replace('depr_', ''), -amt)        # net fondi off the asset
+            netted_contra += amt
         elif tag == 'deduct_crediti':
             add(bs, 'sp06', -amt)
+            netted_contra += amt
         elif tag in ('sp11', 'sp12', 'sp14', 'sp15', 'sp18'):
             add(bs, tag, amt)
         else:                                              # bank_avere / debt_bank / sp16 default
@@ -2222,7 +2585,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         tb_total = tot_att or tot_pas
 
     if tb_total:
-        iv_total = tb_total - (abs(utile) if utile < 0 else Z)
+        # tb_total (pareggio / TOTALE ATTIVO) is GROSS when contra-asset funds sit on the
+        # passivo side; subtract the netted contra mass so the IV-CEE NET total matches the
+        # netted asset/passivo sums (plug ~ 0 instead of ~ fondi). No-op when netted_contra=0.
+        iv_total = tb_total - (abs(utile) if utile < 0 else Z) - netted_contra
         att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
         res_a = iv_total - att_sum
         add(bs, 'sp09', res_a)
@@ -2232,6 +2598,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         bs['totale_attivo'] = iv_total
         bs['totale_passivo'] = iv_total
         worst = max(abs(res_a), abs(res_p))
+        # Expose the plug magnitude so the shared quadratura engine can tell a real
+        # balance from one that only ties because the residual was swept into
+        # sp09/sp16. Survives _map_sc_keys (has '_') and is ignored by the BS builder.
+        bs['_plug_residual'] = worst
         if worst > Decimal('1'):
             logger.warning(
                 f"BILANCIO NON QUADRATO (contrapposte best-effort): residuo attivo={res_a}, "
@@ -2248,11 +2618,28 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         add(bs, 'sp16', iv_total - pas_sum)
         bs['totale_attivo'] = iv_total
         bs['totale_passivo'] = iv_total
+        bs['_plug_residual'] = abs(att_sum - pas_sum)
         if abs(att_sum - pas_sum) > Decimal('1'):
             logger.warning(
                 f"BILANCIO NON QUADRATO (contrapposte best-effort): totali dichiarati non "
                 f"trovati, ancorato a {iv_total} (plug {abs(att_sum - pas_sum)}) — verificare in Rettifiche"
             )
+
+    # Rescue: a MASKED result on a dotted hierarchical ('4 sezioni') layout is the
+    # truncated-deep-code collision described above. Retry via the level-1 mastri
+    # reconstruction and keep it ONLY when it reconciles (self-validated inside
+    # _hier_reconstruct) — so a file the best-effort already balances is untouched.
+    plug_now = bs.get('_plug_residual', Z)
+    total_now = bs.get('totale_attivo', Z) or Z
+    if plug_now > max(Decimal('1'), Decimal('0.01') * total_now) and is_dotted_hierarchical(full):
+        try:
+            rescued = _hier_reconstruct(pages_data, full)
+        except Exception as he:
+            logger.warning(f"Hierarchical reconstruct failed: {type(he).__name__}: {he}")
+            rescued = None
+        if rescued is not None:
+            logger.info("Hierarchical mastri reconstruction reconciled — using it over the masked best-effort")
+            return rescued
 
     return bs, ce
 
@@ -2320,6 +2707,26 @@ def extract_situazione_contabile(file_path: str) -> Tuple[Dict[str, Decimal], Di
         logger.info(f"DEPI parser: {len(entries)} entries")
 
     bs, ce = build_iv_cee(entries, default_ce=default_ce)
+
+    # Safety net (general, not per-file): a structured/DEPI parser that comes up
+    # EMPTY on a file that is physically a 2-column contrapposte (is_contrapposte_file)
+    # has misrouted. This happens when is_situazione_contabile() matches a marker
+    # (e.g. dotted NNN.NNNNN codes + an 8-digit cluster) and shadows the best-effort
+    # route, but no structured sub-parser actually reads the layout — so build_iv_cee
+    # yields nothing (e.g. AITEC PROVVISORIO/BILANCINO). The best-effort coordinate
+    # parser DOES read these layouts, so retry it and keep its result only when it is
+    # genuinely non-empty. Purely additive: triggers only on an otherwise-empty result,
+    # so it cannot regress files the structured parsers already extract.
+    if (bs.get('totale_attivo') or Decimal('0')) == 0:
+        try:
+            if is_contrapposte_file(file_path):
+                logger.info("Structured parser empty on contrapposte file — retrying best-effort")
+                be_bs, be_ce = extract_contrapposte_best_effort(file_path)
+                if (be_bs.get('totale_attivo') or Decimal('0')) != 0:
+                    logger.info(f"Best-effort retry recovered totale_attivo={be_bs.get('totale_attivo')}")
+                    return be_bs, be_ce
+        except Exception as be_err:
+            logger.warning(f"Best-effort retry failed: {type(be_err).__name__}: {be_err}")
 
     logger.info(f"SC parser: sp02={bs.get('sp02')}, sp03={bs.get('sp03')}, sp09={bs.get('sp09')}")
     logger.info(f"SC parser: sp11={bs.get('sp11')}, sp12={bs.get('sp12')}, sp13={bs.get('sp13')}")

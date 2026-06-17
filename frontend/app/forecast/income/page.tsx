@@ -61,6 +61,7 @@ const FIELD_TO_OVERRIDE: Record<string, string> = {
   ce01_ricavi_vendite: "ce01_override",
   ce02_variazioni_rimanenze: "ce02_override",
   ce03_lavori_interni: "ce03_override",
+  ce03a_incrementi_immobilizzazioni: "ce03a_override",
   ce04_altri_ricavi: "ce04_override",
   ce05_materie_prime: "ce05_override",
   ce06_servizi: "ce06_override",
@@ -531,6 +532,7 @@ function IncomeStatementTable({
     { label: "1) Ricavi delle vendite e delle prestazioni", field: "ce01_ricavi_vendite" },
     { label: "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti", field: "ce02_variazioni_rimanenze" },
     { label: "3) Variazioni dei lavori in corso su ordinazione", field: "ce03_lavori_interni" },
+    { label: "4) Incrementi di immobilizzazioni per lavori interni", field: "ce03a_incrementi_immobilizzazioni" },
     { label: "5) Altri ricavi e proventi", field: "ce04_altri_ricavi" },
     { label: "Totale Valore della Produzione", field: "production_value", isSubtotal: true },
     // B) COSTI DELLA PRODUZIONE

@@ -176,10 +176,14 @@ class IntraYearEngine:
         period_months = scenario.period_months
         factor = Decimal('12') / Decimal(str(period_months))
 
+        has_reference = ref_fy is not None
+        ref_inc = ref_fy.income_statement if ref_fy else None
+        ref_bs = ref_fy.balance_sheet if ref_fy else None
+
         income_items = []
         for field_name, label in CE_FIELDS:
             partial_val = _get_field(partial_fy.income_statement, field_name)
-            ref_val = _get_field(ref_fy.income_statement, field_name)
+            ref_val = _get_field(ref_inc, field_name) if ref_inc else Decimal('0')
             prior_val = _get_field(prior_fy.income_statement, field_name) if prior_fy and prior_fy.income_statement else Decimal('0')
             annualized = partial_val * factor
             pct = float(_safe_divide(partial_val * Decimal('100'), ref_val)) if ref_val != 0 else 0.0
@@ -197,7 +201,7 @@ class IntraYearEngine:
         balance_items = []
         for field_name, label in SP_FIELDS:
             partial_val = _get_field(partial_fy.balance_sheet, field_name)
-            ref_val = _get_field(ref_fy.balance_sheet, field_name)
+            ref_val = _get_field(ref_bs, field_name) if ref_bs else Decimal('0')
             prior_val = _get_field(prior_fy.balance_sheet, field_name) if prior_fy and prior_fy.balance_sheet else Decimal('0')
             # BS items are stock (point-in-time), annualization doesn't apply
             # Show partial value as "annualized" for consistency
@@ -217,6 +221,7 @@ class IntraYearEngine:
             'partial_year': scenario.base_year + 1,  # e.g., 2025
             'reference_year': scenario.base_year,     # e.g., 2024
             'prior_year': prior_year_num if prior_fy else None,  # e.g., 2023 or None
+            'has_reference': has_reference,           # False = pure-annualization mode
             'period_months': period_months,
             'income_items': income_items,
             'balance_items': balance_items,
@@ -242,10 +247,14 @@ class IntraYearEngine:
         period_months = scenario.period_months
         projection_year = assumption.forecast_year
 
+        # Reference year may be absent (user chose to proceed without it).
+        ref_inc = ref_fy.income_statement if ref_fy else None
+        ref_bs = ref_fy.balance_sheet if ref_fy else None
+
         # Project income statement
         projected_inc = self._project_income_statement(
             partial_inc=partial_fy.income_statement,
-            ref_inc=ref_fy.income_statement,
+            ref_inc=ref_inc,
             assumption=assumption,
             period_months=period_months
         )
@@ -253,9 +262,9 @@ class IntraYearEngine:
         # Project balance sheet
         projected_bs = self._project_balance_sheet(
             partial_bs=partial_fy.balance_sheet,
-            ref_bs=ref_fy.balance_sheet,
+            ref_bs=ref_bs,
             projected_inc=projected_inc,
-            ref_inc=ref_fy.income_statement,
+            ref_inc=ref_inc,
             assumption=assumption,
             period_months=period_months
         )
@@ -305,14 +314,13 @@ class IntraYearEngine:
                 f"Importare il bilancio {partial_year_num} prima di procedere."
             )
 
-        # Load reference full year
+        # Load reference full year. This is OPTIONAL: when the prior-year balance
+        # sheet was never imported (e.g. single-column PDF, first year of activity),
+        # the user can choose to proceed anyway. In that case ref_fy is None and the
+        # engine falls back to pure annualization (partial * 12 / period_months).
         ref_fy = get_fy_prefer_full(self.db, company_id, ref_year_num)
-
-        if not ref_fy or not ref_fy.balance_sheet or not ref_fy.income_statement:
-            raise ValueError(
-                f"Dati anno di riferimento {ref_year_num} non trovati o incompleti per l'azienda {company_id}. "
-                f"Importare il bilancio storico {ref_year_num} prima di procedere."
-            )
+        if ref_fy and (not ref_fy.balance_sheet or not ref_fy.income_statement):
+            ref_fy = None
 
         return partial_fy, ref_fy
 
@@ -330,7 +338,15 @@ class IntraYearEngine:
         The frontend pre-calculates these rates:
         - Default: growth_pct = (annualized / reference - 1) * 100
         - Override: growth_pct = (user_value / reference - 1) * 100
+
+        When the reference year is absent (ref_inc is None) the growth-based
+        formulas have no base, so we fall back to pure annualization.
         """
+        if ref_inc is None:
+            return self._project_income_statement_annualized(
+                partial_inc, assumption, period_months
+            )
+
         factor = Decimal('12') / Decimal(str(period_months))
 
         # Revenue and other income: apply growth rates to reference year
@@ -467,6 +483,111 @@ class IntraYearEngine:
             'ce20_imposte': ce20,
         }
 
+    def _project_income_statement_annualized(
+        self,
+        partial_inc: IncomeStatement,
+        assumption: BudgetAssumptions,
+        period_months: int
+    ) -> Dict:
+        """
+        Project P&L to 12 months by pure annualization (partial * 12 / period).
+
+        Used when there is no reference year. Growth assumptions cannot apply
+        (they are relative to the reference), but explicit financial overrides
+        (ce14/ce15), new-investment depreciation and financing still take effect,
+        and taxes are recomputed on the projected pre-tax profit.
+        """
+        factor = Decimal('12') / Decimal(str(period_months))
+
+        def ann(code):
+            return _get_field(partial_inc, code) * factor
+
+        ce01 = ann('ce01_ricavi_vendite')
+        ce02 = ann('ce02_variazioni_rimanenze')
+        ce03 = ann('ce03_lavori_interni')
+        ce03a = ann('ce03a_incrementi_immobilizzazioni')
+        ce04 = ann('ce04_altri_ricavi')
+        ce05 = ann('ce05_materie_prime')
+        ce06 = ann('ce06_servizi')
+        ce07 = ann('ce07_godimento_beni')
+        ce08 = ann('ce08_costi_personale')
+        ce08a = ann('ce08a_tfr_accrual')
+        ce08b = ann('ce08b_salari_stipendi')
+        ce08c = ann('ce08c_oneri_sociali')
+        ce08d = ann('ce08d_altri_costi_personale')
+
+        # Depreciation: annualize partial year + depreciation on new investments
+        ce09 = ann('ce09_ammortamenti')
+        ce09a = ann('ce09a_ammort_immateriali')
+        ce09b = ann('ce09b_ammort_materiali')
+        ce09c = ann('ce09c_svalutazioni')
+        ce09d = ann('ce09d_svalutazione_crediti')
+        intangible_inv, tangible_inv = _get_split_investments(assumption)
+        total_investments = intangible_inv + tangible_inv
+        if total_investments > 0:
+            depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
+            depreciation_rate_intangible = (getattr(assumption, 'depreciation_rate_intangible', None) or assumption.depreciation_rate) / Decimal('100')
+            remaining_months = Decimal('12') - Decimal(str(period_months))
+            new_dep_intangible = intangible_inv * depreciation_rate_intangible * remaining_months / Decimal('12')
+            new_dep_tangible = tangible_inv * depreciation_rate_tangible * remaining_months / Decimal('12')
+            ce09a = ce09a + new_dep_intangible
+            ce09b = ce09b + new_dep_tangible
+            ce09 = ce09 + new_dep_intangible + new_dep_tangible
+
+        ce10 = ann('ce10_var_rimanenze_mat_prime')
+        ce11 = ann('ce11_accantonamenti')
+        ce11b = ann('ce11b_altri_accantonamenti')
+        ce12 = ann('ce12_oneri_diversi')
+        ce13 = ann('ce13_proventi_partecipazioni')
+        ce14 = assumption.ce14_override if assumption.ce14_override is not None else ann('ce14_altri_proventi_finanziari')
+        ce15 = assumption.ce15_override if assumption.ce15_override is not None else ann('ce15_oneri_finanziari')
+        ce16 = ann('ce16_utili_perdite_cambi')
+        ce17 = ann('ce17_rettifiche_attivita_fin')
+        ce18 = ann('ce18_proventi_straordinari')
+        ce19 = ann('ce19_oneri_straordinari')
+
+        # Taxes - recalculate on projected pre-tax profit
+        production_value = ce01 + ce02 + ce03 + ce03a + ce04
+        production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
+        ebit = production_value - production_cost
+        financial_result = ce13 + ce14 - ce15 + ce16
+        profit_before_tax = ebit + financial_result + ce17 + (ce18 - ce19)
+        tax_rate = assumption.tax_rate / Decimal('100')
+        ce20 = max(Decimal('0'), profit_before_tax * tax_rate)
+
+        return {
+            'ce01_ricavi_vendite': ce01,
+            'ce02_variazioni_rimanenze': ce02,
+            'ce03_lavori_interni': ce03,
+            'ce03a_incrementi_immobilizzazioni': ce03a,
+            'ce04_altri_ricavi': ce04,
+            'ce05_materie_prime': ce05,
+            'ce06_servizi': ce06,
+            'ce07_godimento_beni': ce07,
+            'ce08_costi_personale': ce08,
+            'ce08a_tfr_accrual': ce08a,
+            'ce08b_salari_stipendi': ce08b,
+            'ce08c_oneri_sociali': ce08c,
+            'ce08d_altri_costi_personale': ce08d,
+            'ce09_ammortamenti': ce09,
+            'ce09a_ammort_immateriali': ce09a,
+            'ce09b_ammort_materiali': ce09b,
+            'ce09c_svalutazioni': ce09c,
+            'ce09d_svalutazione_crediti': ce09d,
+            'ce10_var_rimanenze_mat_prime': ce10,
+            'ce11_accantonamenti': ce11,
+            'ce11b_altri_accantonamenti': ce11b,
+            'ce12_oneri_diversi': ce12,
+            'ce13_proventi_partecipazioni': ce13,
+            'ce14_altri_proventi_finanziari': ce14,
+            'ce15_oneri_finanziari': ce15,
+            'ce16_utili_perdite_cambi': ce16,
+            'ce17_rettifiche_attivita_fin': ce17,
+            'ce18_proventi_straordinari': ce18,
+            'ce19_oneri_straordinari': ce19,
+            'ce20_imposte': ce20,
+        }
+
     def _project_balance_sheet(
         self,
         partial_bs: BalanceSheet,
@@ -483,7 +604,16 @@ class IntraYearEngine:
         Working capital: turnover ratios from reference year applied to projected P&L.
         Equity: capital constant, reserves + previous profit, current profit from projection.
         Cash: plug variable.
+
+        When the reference year is absent (ref_bs is None) we cannot derive
+        turnover ratios, so we fall back to using the partial-year stocks as the
+        year-end basis (see _project_balance_sheet_annualized).
         """
+        if ref_bs is None:
+            return self._project_balance_sheet_annualized(
+                partial_bs, projected_inc, assumption, period_months
+            )
+
         remaining_months = Decimal('12') - Decimal(str(period_months))
 
         # FIXED ASSETS - keep partial year values, adjust for remaining depreciation
@@ -554,30 +684,7 @@ class IntraYearEngine:
         sp12 = _get_field(ref_bs, 'sp12_riserve') + ref_profit
 
         # Current year projected net profit
-        net_profit = (
-            projected_inc['ce01_ricavi_vendite'] +
-            projected_inc['ce02_variazioni_rimanenze'] +
-            projected_inc['ce03_lavori_interni'] +
-            projected_inc.get('ce03a_incrementi_immobilizzazioni', Decimal('0')) +
-            projected_inc['ce04_altri_ricavi'] -
-            projected_inc['ce05_materie_prime'] -
-            projected_inc['ce06_servizi'] -
-            projected_inc['ce07_godimento_beni'] -
-            projected_inc['ce08_costi_personale'] -
-            projected_inc['ce09_ammortamenti'] -
-            projected_inc['ce10_var_rimanenze_mat_prime'] -
-            projected_inc['ce11_accantonamenti'] -
-            projected_inc['ce12_oneri_diversi'] +
-            projected_inc['ce13_proventi_partecipazioni'] +
-            projected_inc['ce14_altri_proventi_finanziari'] -
-            projected_inc['ce15_oneri_finanziari'] +
-            projected_inc['ce16_utili_perdite_cambi'] +
-            projected_inc['ce17_rettifiche_attivita_fin'] +
-            projected_inc['ce18_proventi_straordinari'] -
-            projected_inc['ce19_oneri_straordinari'] -
-            projected_inc['ce20_imposte']
-        )
-        sp13 = net_profit
+        sp13 = self._net_profit_from_projection(projected_inc)
 
         # Reserve details
         sp12a = _get_field(ref_bs, 'sp12a_riserva_sovrapprezzo')
@@ -620,6 +727,164 @@ class IntraYearEngine:
         sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(ref_bs, sp04)
         sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(ref_bs, sp16)
         sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(ref_bs, sp17)
+
+        return {
+            'sp01_crediti_soci': sp01,
+            'sp02_immob_immateriali': sp02,
+            'sp03_immob_materiali': sp03,
+            'sp04_immob_finanziarie': sp04,
+            'sp04a_partecipazioni': sp04a,
+            'sp04b_crediti_immob_breve': sp04b,
+            'sp04c_crediti_immob_lungo': sp04c,
+            'sp04d_altri_titoli': sp04d,
+            'sp04e_strumenti_derivati_attivi': sp04e,
+            'sp05_rimanenze': sp05,
+            'sp06_crediti_breve': sp06,
+            'sp07_crediti_lungo': sp07,
+            'sp08_attivita_finanziarie': sp08,
+            'sp09_disponibilita_liquide': sp09,
+            'sp10_ratei_risconti_attivi': sp10,
+            'sp11_capitale': sp11,
+            'sp12_riserve': sp12,
+            'sp12a_riserva_sovrapprezzo': sp12a,
+            'sp12b_riserve_rivalutazione': sp12b,
+            'sp12c_riserva_legale': sp12c,
+            'sp12d_riserve_statutarie': sp12d,
+            'sp12e_altre_riserve': sp12e,
+            'sp12f_riserva_copertura_flussi': sp12f,
+            'sp12g_utili_perdite_portati': sp12g,
+            'sp12h_riserva_neg_azioni_proprie': sp12h,
+            'sp13_utile_perdita': sp13,
+            'sp14_fondi_rischi': sp14,
+            'sp15_tfr': sp15,
+            'sp16_debiti_breve': sp16,
+            'sp17_debiti_lungo': sp17,
+            'sp16a_debiti_banche_breve': sp16a,
+            'sp17a_debiti_banche_lungo': sp17a,
+            'sp16b_debiti_altri_finanz_breve': sp16b,
+            'sp17b_debiti_altri_finanz_lungo': sp17b,
+            'sp16c_debiti_obbligazioni_breve': sp16c,
+            'sp17c_debiti_obbligazioni_lungo': sp17c,
+            'sp16d_debiti_fornitori_breve': sp16d,
+            'sp17d_debiti_fornitori_lungo': sp17d,
+            'sp16e_debiti_tributari_breve': sp16e,
+            'sp17e_debiti_tributari_lungo': sp17e,
+            'sp16f_debiti_previdenza_breve': sp16f,
+            'sp17f_debiti_previdenza_lungo': sp17f,
+            'sp16g_altri_debiti_breve': sp16g,
+            'sp17g_altri_debiti_lungo': sp17g,
+            'sp18_ratei_risconti_passivi': sp18,
+        }
+
+    def _net_profit_from_projection(self, projected_inc: Dict) -> Decimal:
+        """Net profit = value of production - costs +/- financial/extraordinary - taxes."""
+        return (
+            projected_inc['ce01_ricavi_vendite'] +
+            projected_inc['ce02_variazioni_rimanenze'] +
+            projected_inc['ce03_lavori_interni'] +
+            projected_inc.get('ce03a_incrementi_immobilizzazioni', Decimal('0')) +
+            projected_inc['ce04_altri_ricavi'] -
+            projected_inc['ce05_materie_prime'] -
+            projected_inc['ce06_servizi'] -
+            projected_inc['ce07_godimento_beni'] -
+            projected_inc['ce08_costi_personale'] -
+            projected_inc['ce09_ammortamenti'] -
+            projected_inc['ce10_var_rimanenze_mat_prime'] -
+            projected_inc['ce11_accantonamenti'] -
+            projected_inc['ce12_oneri_diversi'] +
+            projected_inc['ce13_proventi_partecipazioni'] +
+            projected_inc['ce14_altri_proventi_finanziari'] -
+            projected_inc['ce15_oneri_finanziari'] +
+            projected_inc['ce16_utili_perdite_cambi'] +
+            projected_inc['ce17_rettifiche_attivita_fin'] +
+            projected_inc['ce18_proventi_straordinari'] -
+            projected_inc['ce19_oneri_straordinari'] -
+            projected_inc['ce20_imposte']
+        )
+
+    def _project_balance_sheet_annualized(
+        self,
+        partial_bs: BalanceSheet,
+        projected_inc: Dict,
+        assumption: BudgetAssumptions,
+        period_months: int
+    ) -> Dict:
+        """
+        Project BS to year-end when there is no reference year.
+
+        Without a reference year we cannot apply turnover ratios, so the
+        partial-year stocks are carried to year-end as-is, except:
+        - fixed assets are reduced by the remaining-months depreciation,
+        - new investments / financing are added,
+        - current-year profit is the projected (annualized) net profit,
+        - TFR adds the remaining-months accrual,
+        - cash is the balancing plug.
+        Sub-item breakdowns are distributed proportionally from the partial year.
+        """
+        remaining_months = Decimal('12') - Decimal(str(period_months))
+
+        # FIXED ASSETS - partial values reduced by remaining depreciation
+        partial_sp02 = _get_field(partial_bs, 'sp02_immob_immateriali')
+        partial_sp03 = _get_field(partial_bs, 'sp03_immob_materiali')
+        partial_sp04 = _get_field(partial_bs, 'sp04_immob_finanziarie')
+
+        total_dep = projected_inc['ce09_ammortamenti']
+        remaining_dep = total_dep * remaining_months / Decimal('12')
+        total_fixed = partial_sp02 + partial_sp03 + partial_sp04
+        if total_fixed > 0:
+            sp02 = max(Decimal('0'), partial_sp02 - remaining_dep * partial_sp02 / total_fixed)
+            sp03 = max(Decimal('0'), partial_sp03 - remaining_dep * partial_sp03 / total_fixed)
+            sp04 = max(Decimal('0'), partial_sp04 - remaining_dep * partial_sp04 / total_fixed)
+        else:
+            sp02, sp03, sp04 = partial_sp02, partial_sp03, partial_sp04
+
+        intangible_inv, tangible_inv = _get_split_investments(assumption)
+        if intangible_inv > 0 or tangible_inv > 0:
+            sp02 = sp02 + intangible_inv
+            sp03 = sp03 + tangible_inv
+
+        # WORKING CAPITAL and other current assets - carry partial year stocks
+        sp01 = _get_field(partial_bs, 'sp01_crediti_soci')
+        sp05 = _get_field(partial_bs, 'sp05_rimanenze')
+        sp06 = _get_field(partial_bs, 'sp06_crediti_breve')
+        sp07 = _get_field(partial_bs, 'sp07_crediti_lungo')
+        sp08 = _get_field(partial_bs, 'sp08_attivita_finanziarie')
+        sp10 = _get_field(partial_bs, 'sp10_ratei_risconti_attivi')
+
+        # EQUITY - capital and reserves from partial year, profit from projection
+        sp11 = _get_field(partial_bs, 'sp11_capitale')
+        sp12 = _get_field(partial_bs, 'sp12_riserve')
+        sp13 = self._net_profit_from_projection(projected_inc)
+        sp12a = _get_field(partial_bs, 'sp12a_riserva_sovrapprezzo')
+        sp12b = _get_field(partial_bs, 'sp12b_riserve_rivalutazione')
+        sp12c = _get_field(partial_bs, 'sp12c_riserva_legale')
+        sp12d = _get_field(partial_bs, 'sp12d_riserve_statutarie')
+        sp12e = _get_field(partial_bs, 'sp12e_altre_riserve')
+        sp12f = _get_field(partial_bs, 'sp12f_riserva_copertura_flussi')
+        sp12g = _get_field(partial_bs, 'sp12g_utili_perdite_portati')
+        sp12h = _get_field(partial_bs, 'sp12h_riserva_neg_azioni_proprie')
+
+        # LIABILITIES - carry partial year, add remaining TFR accrual / financing
+        sp14 = _get_field(partial_bs, 'sp14_fondi_rischi')
+        sp15 = _get_field(partial_bs, 'sp15_tfr') + projected_inc.get('ce08a_tfr_accrual', Decimal('0')) * remaining_months / Decimal('12')
+        sp16 = _get_field(partial_bs, 'sp16_debiti_breve')
+        sp17 = _get_field(partial_bs, 'sp17_debiti_lungo')
+        if assumption.financing_amount > 0:
+            sp17 = sp17 + assumption.financing_amount
+        sp18 = _get_field(partial_bs, 'sp18_ratei_risconti_passivi')
+
+        # CASH PLUG - balance the sheet
+        total_assets_no_cash = sp01 + sp02 + sp03 + sp04 + sp05 + sp06 + sp07 + sp08 + sp10
+        total_liabilities = sp11 + sp12 + sp13 + sp14 + sp15 + sp16 + sp17 + sp18
+        sp09 = total_liabilities - total_assets_no_cash
+        if sp09 < 0:
+            sp16 = sp16 + abs(sp09)
+            sp09 = Decimal('0')
+
+        # Sub-item breakdowns proportional to the partial year
+        sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(partial_bs, sp04)
+        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(partial_bs, sp16)
+        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(partial_bs, sp17)
 
         return {
             'sp01_crediti_soci': sp01,

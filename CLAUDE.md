@@ -18,7 +18,7 @@ Both applications share the same core modules (`database/`, `calculations/`, `im
 
 ## Quick Reference
 
-**Project Root:** `/home/peter/DEV/budget/`
+**Project Root:** `C:\DEV\xbrlbudget-main\xbrlbudget` (Windows). On the original author's machine it was `/home/peter/DEV/budget/`; paths below using POSIX (`source venv/bin/activate`, `/home/peter/...`) are illustrative — use Windows equivalents (`venv\Scripts\activate`).
 
 **Key Directories:**
 - `backend/` - FastAPI REST API (uses shared modules from root)
@@ -227,11 +227,11 @@ from app.core.ownership import validate_company_owned_by_user  # Ownership check
 
 ### Database Schema
 
-**Location:** `/home/peter/DEV/budget/financial_analysis.db` (shared by all apps)
+**Location:** `financial_analysis.db` in the project root (shared by all apps)
 
 **Core Models:**
 - `Company` - Master data (name, tax_id, sector 1-6, user_id). Composite unique on (user_id, tax_id).
-- `FinancialYear` - Links company to financial statements for a year. `period_months` (NULL=full year, 1-11=partial)
+- `FinancialYear` - Links company to financial statements for a year. `period_months` (**NULL or 12 = full year**, 1-11 = partial). Some importers historically wrote `12`; `pdf_importer` now normalizes `>= 12 → None` on write, and every "full-year" query accepts `NULL` **or** `12` (see coexistence note below).
 - `BalanceSheet` - sp01-sp18 (Italian civil code art. 2424) + hierarchical debts
 - `IncomeStatement` - ce01-ce20 (Italian civil code art. 2425)
 
@@ -242,6 +242,8 @@ from app.core.ownership import validate_company_owned_by_user  # Ownership check
 - `ForecastBalanceSheet`, `ForecastIncomeStatement` - Projected financials
 
 **FinancialYear coexistence:** A company+year can have both a partial-year record (`period_months` 1-11) and a promoted full-year record (`period_months` NULL). All queries use `database/queries.py` helpers (`get_fy_prefer_full`, `get_fy_partial`) to select the correct record. Importers match by `period_months` when deleting/updating to avoid clobbering the wrong record.
+
+**`period_months` full-year convention (NULL or 12):** Several imports historically saved `12` instead of `NULL` for annual statements. "Historical year" queries that filtered only `period_months IS NULL` excluded those records → the **Previsionale page rendered empty** (no base year found). Fixed on both sides: **write** — `pdf_importer` normalizes `period_months >= 12 → None`; **read** — every full-year query accepts `NULL` **or** `12` (`analysis_service`, `calculation_service`, `budget_scenarios`, `promote_service`, `financial_years`, `queries.get_fy_prefer_full`); `get_fy_partial` excludes `12`.
 
 **Relationships:** All use cascade="all, delete-orphan" (deleting company removes all child records)
 
@@ -449,6 +451,25 @@ Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor abo
   zero copy (→ empty BS). When the selected SP pages carry negligible amount mass vs the largest data page,
   the SP/CE windows slide forward to a genuine second copy that re-states the SP header AND carries real
   amounts. Deliberately does NOT relocate to a headerless number-only dump — those fail honestly instead.
+
+#### CE↔SP identity enforcement (`enforce_ce_sp_identity`, `importers/iv_cee_hierarchy.py`)
+The year's result is ONE number: it appears as `sp13` in the balance sheet AND as the last line of
+the income statement. SP and CE are extracted separately and can diverge → the app's "Verifica CE↔SP"
+fails. `enforce_ce_sp_identity(bs, ce, prefer=…, declared=…)` runs in `pdf_importer.import_pdf_balance_sheet`
+**after every route's block and BEFORE `validate_balance`** (route C, route A/B, AND native XBRL — the
+`utile_CE` rebuilt from CE tags can diverge from the tagged `sp13`, e.g. budget_361/404). It forces
+`utile_CE == sp13` with direction decided by route + an arbiter:
+- **Default** `prefer="sp13"`: trust `sp13` (anchored to pareggio; on route C already = declared result)
+  and align the CE — plug into `ce12_oneri_diversi` if the CE is too high / `ce04_altri_ricavi` if too low —
+  with a `_ce_sp_plug` flag.
+- **Arbiter = declared result** (`declared=…`): whichever of `sp13`/`utile_CE` is closest to the declared
+  Utile/Perdita wins.
+  - declared confirms the **CE** → `sp13` held the **prior** year's result: move it to `utile_CE` and route
+    the difference into reserves (`sp12`) — total PN and Attivo=Passivo unchanged (relabel within PN only).
+    Cap 10% of passivo, reserves stay non-negative, else fall back to aligning the CE.
+  - declared confirms **`sp13`** → the CE is wrong (sign/parse bug, e.g. budget_402/413) → align the CE,
+    `sp13` is NOT touched.
+- No-op when they already coincide. Guarantees CE↔SP on every file without corrupting a correct `sp13`.
 
 #### IV-CEE leveling + quadratura engine (`importers/iv_cee_hierarchy.py`)
 Shared stage DOWNSTREAM of the 4 macro-area routes (A/B/C/OTHER stay separate — this is NOT a

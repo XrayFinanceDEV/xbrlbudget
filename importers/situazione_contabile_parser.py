@@ -341,6 +341,11 @@ _SP_PASSIVO_RULES = [
     (['F/AMM', 'MATER'], 'depr_sp03'),
     (['AMMORTAM', 'IMMAT'], 'depr_sp02'),
     (['AMMORTAM', 'MATER'], 'depr_sp03'),
+    # "FONDI/FONDO AMM.TO IMMOB. (IM)MATERIALI" — no 'F.DO' token, 'AMM.TO' not 'AMMORTAM'
+    # (BILAGRA "BILANCIO DI VERIFICA", e.g. AITEC). IMMAT must precede MATER because
+    # "IMMATERIALI" also contains the "MATER" substring.
+    (['FOND', 'AMM', 'IMMAT'], 'depr_sp02'),
+    (['FOND', 'AMM', 'MATER'], 'depr_sp03'),
     (['F.DO', 'AMM'], 'depr_sp03'),  # fallback → tangible
     # Crediti deduction
     (['F.DO', 'SVAL', 'CREDITI'], 'deduct_crediti'),

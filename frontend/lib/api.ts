@@ -124,7 +124,7 @@ export const createFinancialYear = async (
 ): Promise<FinancialYear> => {
   const { data } = await api.post<FinancialYear>(
     `/companies/${companyId}/years`,
-    { year }
+    { company_id: companyId, year }
   );
   return data;
 };
@@ -137,6 +137,20 @@ export const updateIncomeStatement = async (
 ): Promise<IncomeStatement> => {
   const { data } = await api.put<IncomeStatement>(
     `/companies/${companyId}/years/${year}/income-statement`,
+    fields
+  );
+  return data;
+};
+
+// Partial update of a balance sheet (only provided DB fields are written).
+// Used by the Startup flow to seed the opening capital (sp11 + balancing sp09).
+export const updateBalanceSheet = async (
+  companyId: number,
+  year: number,
+  fields: Record<string, number>
+): Promise<BalanceSheet> => {
+  const { data } = await api.put<BalanceSheet>(
+    `/companies/${companyId}/years/${year}/balance-sheet`,
     fields
   );
   return data;

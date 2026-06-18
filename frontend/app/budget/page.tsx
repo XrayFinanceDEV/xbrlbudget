@@ -7,6 +7,7 @@ import {
   createCompany,
   createFinancialYear,
   updateIncomeStatement,
+  updateBalanceSheet,
   createBudgetScenario,
   updateBudgetScenario,
   deleteBudgetScenario,
@@ -76,7 +77,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
   parseFloat((Number(v ?? fallback)).toFixed(1));
 
 export default function BudgetPage() {
-  const { selectedCompanyId, selectedCompany, years, startupMode } = useApp();
+  const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -125,16 +126,33 @@ export default function BudgetPage() {
   };
 
   // Startup mode has no imported bilancio: when there's no base year yet, show
-  // the from-zero setup that seeds a manual base year.
+  // the from-zero business-plan wizard that seeds a manual base year, scenario
+  // and per-year assumptions, then opens the scenario on the Patrimoniali tab.
   if (startupMode && years.length === 0) {
+    // After creation we set editingScenario but the founding-year FinancialYear
+    // may not have propagated into `years` yet — show a loader until it does so
+    // ScenarioForm doesn't render with an empty `years` array.
+    if (editingScenario) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+          <p className="mt-4 text-muted-foreground">Apertura business plan...</p>
+        </div>
+      );
+    }
     return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
-          title="Startup"
-          description="Crea il tuo progetto e inserisci i dati di partenza"
+          title="Crea Previsione"
+          description="Business plan startup: dati di base, periodo e driver economici attesi"
           icon={<Rocket className="h-6 w-6" />}
         />
-        <StartupSetup />
+        <StartupSetup
+          onCreated={(sc) => {
+            setEditingScenario(sc);
+            setActiveTab("sp");
+          }}
+        />
       </div>
     );
   }
@@ -188,10 +206,26 @@ export default function BudgetPage() {
       {activeTab === "list" ? (
         <>
           <div className="flex justify-end mb-4">
-            <Button onClick={() => setActiveTab("info")}>
-              <Plus className="h-4 w-4" />
-              Nuovo Scenario
-            </Button>
+            {startupMode ? (
+              // In startup mode each business plan is its own project: starting a
+              // new one must reset the company selection so the from-zero wizard
+              // reappears, instead of adding another scenario to the same startup.
+              <Button
+                onClick={() => {
+                  setEditingScenario(null);
+                  setActiveTab("list");
+                  setSelectedCompanyId(null);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Nuovo business plan
+              </Button>
+            ) : (
+              <Button onClick={() => setActiveTab("info")}>
+                <Plus className="h-4 w-4" />
+                Nuovo Scenario
+              </Button>
+            )}
           </div>
           <ScenariosList
             scenarios={scenarios}
@@ -221,43 +255,162 @@ export default function BudgetPage() {
   );
 }
 
-// Startup from-zero setup: creates a project (company) + a manual base year
-// seeded with the expected revenue/costs, so the growth-% engine can project.
-function StartupSetup() {
+// Per-year economic driver entered in the startup business-plan wizard.
+// `dipendenti` (headcount) is planning-only info — not persisted.
+type StartupYearDriver = { ricavi: number; margine: number; personale: number; dipendenti: number };
+
+// Build a complete BudgetAssumptionsCreate with neutral defaults. The startup
+// flow drives the P&L with absolute CE overrides (ce01/ce06/ce08) instead of
+// growth %, so every growth field is left at 0 — the overrides win in the engine.
+function buildStartupAssumption(
+  scenarioId: number,
+  year: number,
+  overrides: { ce01: number; ce06: number; ce08: number }
+): BudgetAssumptionsCreate {
+  return {
+    scenario_id: scenarioId,
+    forecast_year: year,
+    revenue_growth_pct: 0,
+    other_revenue_growth_pct: 0,
+    variable_materials_growth_pct: 0,
+    fixed_materials_growth_pct: 0,
+    variable_services_growth_pct: 0,
+    fixed_services_growth_pct: 0,
+    rent_growth_pct: 0,
+    personnel_growth_pct: 0,
+    other_costs_growth_pct: 0,
+    investments: 0,
+    intangible_investments: 0,
+    tangible_investments: 0,
+    asset_disposal_nbv: null,
+    asset_disposal_proceeds: null,
+    receivables_short_growth_pct: 0,
+    receivables_long_growth_pct: 0,
+    payables_short_growth_pct: 0,
+    dso_days: null,
+    dio_days: null,
+    dpo_days: null,
+    existing_debt_repayment_years: null,
+    altri_finanz_repayment_years: null,
+    cash_sweep_enabled: false,
+    cash_sweep_min_cash: null,
+    tfr_accrual_suspended: false,
+    tax_rate: 27.9,
+    fixed_materials_percentage: 0,
+    fixed_services_percentage: 0,
+    depreciation_rate: 20,
+    depreciation_rate_intangible: 20,
+    financing_amount: 0,
+    financing_duration_years: 5,
+    financing_interest_rate: 3,
+    ce01_override: overrides.ce01,
+    ce06_override: overrides.ce06,
+    ce08_override: overrides.ce08,
+  };
+}
+
+// Startup business-plan wizard: collects identity (name, description), opening
+// capital and the planning horizon (3 or 5 years), then a per-year grid of the
+// three economic drivers (revenue, EBITDA margin %, personnel). From these it
+// creates the company, the founding-year statements, the scenario and one
+// assumptions row per following year (driven by absolute CE overrides), then
+// generates the forecast and opens the scenario on the Patrimoniali tab.
+function StartupSetup({ onCreated }: { onCreated: (sc: BudgetScenario) => void }) {
   const { setSelectedCompanyId, refreshCompanies } = useApp();
   const currentYear = new Date().getFullYear();
   const [name, setName] = useState("");
-  const [baseYear, setBaseYear] = useState(currentYear - 1);
-  const [ricavi, setRicavi] = useState(0);
-  const [materie, setMaterie] = useState(0);
-  const [servizi, setServizi] = useState(0);
-  const [personale, setPersonale] = useState(0);
+  const [description, setDescription] = useState("");
+  const [capitale, setCapitale] = useState(0);
+  // Planning horizon, current year INCLUDED: 3 → current + 2 following,
+  // 5 → current + 4 following.
+  const [period, setPeriod] = useState<3 | 5>(3);
+  const [drivers, setDrivers] = useState<Record<number, StartupYearDriver>>({});
   const [loading, setLoading] = useState(false);
 
+  const years = Array.from({ length: period }, (_, i) => currentYear + i);
+
+  const getVal = (year: number, key: keyof StartupYearDriver): number =>
+    drivers[year]?.[key] ?? 0;
+  const setVal = (year: number, key: keyof StartupYearDriver, v: number) =>
+    setDrivers((prev) => {
+      const cur = prev[year] ?? { ricavi: 0, margine: 0, personale: 0, dipendenti: 0 };
+      return { ...prev, [year]: { ...cur, [key]: v } };
+    });
+
+  // Derive EBITDA (€) and the implied non-personnel operating cost from the
+  // three drivers. The residual is booked entirely to Costi per servizi (B.7).
+  const deriveYear = (year: number) => {
+    const ricavi = getVal(year, "ricavi");
+    const margine = getVal(year, "margine");
+    const personale = getVal(year, "personale");
+    const ebitda = (ricavi * margine) / 100;
+    const servizi = Math.max(0, ricavi - ebitda - personale);
+    return { ricavi, margine, personale, ebitda, servizi };
+  };
+
   const numCls = "w-full px-3 py-2 text-sm border border-border rounded bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
+  const cellCls = "w-full px-2 py-1 text-xs text-right border border-primary/50 rounded bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary";
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      toast.error("Inserisci il nome del progetto");
+      toast.error("Inserisci il nome della startup");
+      return;
+    }
+    if ((capitale || 0) <= 0) {
+      toast.error("Inserisci il capitale sociale di partenza");
       return;
     }
     setLoading(true);
     try {
+      const foundingYear = years[0];
       const company = await createCompany({ name: name.trim(), sector: 3 });
-      await createFinancialYear(company.id, baseYear);
-      await updateIncomeStatement(company.id, baseYear, {
-        ce01_ricavi_vendite: ricavi || 0,
-        ce05_materie_prime: materie || 0,
-        ce06_servizi: servizi || 0,
-        ce08_costi_personale: personale || 0,
+      await createFinancialYear(company.id, foundingYear);
+
+      // Founding year → actual statements (the scenario base year).
+      const f = deriveYear(foundingYear);
+      await updateIncomeStatement(company.id, foundingYear, {
+        ce01_ricavi_vendite: f.ricavi,
+        ce06_servizi: f.servizi,
+        ce08_costi_personale: f.personale,
       });
+      // Opening balance sheet: founders' capital contributed as cash.
+      // sp11 (capitale sociale) on equity side, sp09 (disponibilità liquide)
+      // on asset side → the day-1 balance sheet balances.
+      await updateBalanceSheet(company.id, foundingYear, {
+        sp11_capitale: capitale || 0,
+        sp09_disponibilita_liquide: capitale || 0,
+      });
+
+      const scenario = await createBudgetScenario(company.id, {
+        company_id: company.id,
+        name: name.trim(),
+        base_year: foundingYear,
+        description: description.trim() || undefined,
+        is_active: 1,
+      });
+
+      // Following years → one assumptions row each, driven by absolute overrides.
+      for (const year of years.slice(1)) {
+        const d = deriveYear(year);
+        await createBudgetAssumptions(
+          company.id,
+          scenario.id,
+          buildStartupAssumption(scenario.id, year, {
+            ce01: d.ricavi,
+            ce06: d.servizi,
+            ce08: d.personale,
+          })
+        );
+      }
+
+      await generateForecast(company.id, scenario.id, false);
       await refreshCompanies();
-      // Selecting the new company loads its years → the scenario form appears.
       setSelectedCompanyId(company.id);
-      toast.success("Progetto startup creato! Definisci ora lo scenario previsionale.");
+      toast.success("Business plan creato! Completa le variabili patrimoniali.");
+      onCreated(scenario);
     } catch (err: any) {
-      console.error("Error creating startup project:", err);
-      toast.error(getErrorMessage(err, "Impossibile creare il progetto startup"));
+      console.error("Error creating startup business plan:", err);
+      toast.error(getErrorMessage(err, "Impossibile creare il business plan"));
     } finally {
       setLoading(false);
     }
@@ -267,21 +420,23 @@ function StartupSetup() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Rocket className="h-5 w-5" /> Nuovo progetto Startup
+          <Rocket className="h-5 w-5" /> Nuovo business plan startup
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-6">
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            Una startup non ha un bilancio storico. Inserisci qui i valori attesi
-            del primo anno: saranno l&apos;anno base da cui generare la proiezione.
+            Una startup non ha un bilancio storico. Inserisci l&apos;identità, il
+            capitale di partenza e i driver economici attesi per ogni anno: le
+            variabili economiche del previsionale vengono generate in automatico.
           </AlertDescription>
         </Alert>
 
+        {/* Identity */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="startup-name">Nome progetto *</Label>
+            <Label htmlFor="startup-name">Nome startup *</Label>
             <Input
               id="startup-name"
               type="text"
@@ -291,42 +446,134 @@ function StartupSetup() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="startup-year">Primo anno (anno base)</Label>
-            <Input
-              id="startup-year"
-              type="number"
-              value={baseYear}
-              onChange={(e) => setBaseYear(parseInt(e.target.value) || currentYear - 1)}
+            <Label htmlFor="startup-desc">Descrizione</Label>
+            <Textarea
+              id="startup-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Breve descrizione dell'attività..."
+              rows={2}
             />
           </div>
         </div>
 
+        {/* Technical: capital + horizon */}
+        <div className="border-t border-border pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="startup-capitale">Capitale sociale di partenza (€) *</Label>
+            <input id="startup-capitale" type="number" step="1000" min="0" className={numCls}
+              value={capitale} onChange={(e) => setCapitale(parseFloat(e.target.value) || 0)} />
+            <p className="text-xs text-muted-foreground">
+              Conferito come liquidità: costituisce il patrimonio netto e la cassa
+              dello stato patrimoniale di partenza.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Periodo di piano</Label>
+            <div className="flex gap-2">
+              {([3, 5] as const).map((p) => (
+                <Button
+                  key={p}
+                  type="button"
+                  variant={period === p ? "default" : "outline"}
+                  onClick={() => setPeriod(p)}
+                  className="flex-1"
+                >
+                  {p} anni
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {period === 3
+                ? `Anno corrente (${currentYear}) e i 2 successivi.`
+                : `Anno corrente (${currentYear}) e i 4 successivi.`}
+            </p>
+          </div>
+        </div>
+
+        {/* Per-year economic drivers */}
         <div className="border-t border-border pt-4">
           <p className="text-sm font-semibold text-foreground mb-3">
-            Dati di partenza primo anno (importi in €)
+            Driver economici attesi per anno
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="startup-ricavi">Ricavi attesi</Label>
-              <input id="startup-ricavi" type="number" step="1000" min="0" className={numCls}
-                value={ricavi} onChange={(e) => setRicavi(parseFloat(e.target.value) || 0)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="startup-materie">Costi materie prime</Label>
-              <input id="startup-materie" type="number" step="1000" min="0" className={numCls}
-                value={materie} onChange={(e) => setMaterie(parseFloat(e.target.value) || 0)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="startup-servizi">Costi servizi</Label>
-              <input id="startup-servizi" type="number" step="1000" min="0" className={numCls}
-                value={servizi} onChange={(e) => setServizi(parseFloat(e.target.value) || 0)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="startup-personale">Costi del personale</Label>
-              <input id="startup-personale" type="number" step="1000" min="0" className={numCls}
-                value={personale} onChange={(e) => setPersonale(parseFloat(e.target.value) || 0)} />
-            </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs border border-border divide-y divide-border">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold text-foreground border-r border-border">Voce</th>
+                  {years.map((year, i) => (
+                    <th key={year} className="px-3 py-2 text-center font-semibold text-foreground border-r border-border" style={{ minWidth: "120px" }}>
+                      {year}
+                      {i === 0 && <span className="block text-[10px] font-normal text-muted-foreground">anno corrente</span>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-card divide-y divide-border">
+                <tr>
+                  <td className="px-3 py-2 font-medium text-foreground border-r border-border">Ricavi (€)</td>
+                  {years.map((year) => (
+                    <td key={year} className="px-2 py-1 border-r border-border">
+                      <input type="number" step="1000" min="0" className={cellCls}
+                        value={getVal(year, "ricavi")}
+                        onChange={(e) => setVal(year, "ricavi", parseFloat(e.target.value) || 0)} />
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 font-medium text-foreground border-r border-border">Margine EBITDA (%)</td>
+                  {years.map((year) => (
+                    <td key={year} className="px-2 py-1 border-r border-border">
+                      <input type="number" step="0.5" className={cellCls}
+                        value={getVal(year, "margine")}
+                        onChange={(e) => setVal(year, "margine", parseFloat(e.target.value) || 0)} />
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 font-medium text-foreground border-r border-border">Costi del personale (€)</td>
+                  {years.map((year) => (
+                    <td key={year} className="px-2 py-1 border-r border-border">
+                      <input type="number" step="1000" min="0" className={cellCls}
+                        value={getVal(year, "personale")}
+                        onChange={(e) => setVal(year, "personale", parseFloat(e.target.value) || 0)} />
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 font-medium text-foreground border-r border-border">Numero dipendenti</td>
+                  {years.map((year) => (
+                    <td key={year} className="px-2 py-1 border-r border-border">
+                      <input type="number" step="1" min="0" className={cellCls}
+                        value={getVal(year, "dipendenti")}
+                        onChange={(e) => setVal(year, "dipendenti", parseInt(e.target.value) || 0)} />
+                    </td>
+                  ))}
+                </tr>
+                {/* Derived read-only preview */}
+                <tr className="bg-muted/40">
+                  <td className="px-3 py-2 text-muted-foreground border-r border-border">EBITDA (€) — calcolato</td>
+                  {years.map((year) => (
+                    <td key={year} className="px-3 py-2 text-right text-muted-foreground border-r border-border">
+                      {formatCurrency(deriveYear(year).ebitda)}
+                    </td>
+                  ))}
+                </tr>
+                <tr className="bg-muted/40">
+                  <td className="px-3 py-2 text-muted-foreground border-r border-border">Costi per servizi (€) — residuo</td>
+                  {years.map((year) => (
+                    <td key={year} className="px-3 py-2 text-right text-muted-foreground border-r border-border">
+                      {formatCurrency(deriveYear(year).servizi)}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
           </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            EBITDA = Ricavi × Margine%. I costi operativi residui (Ricavi − EBITDA
+            − Personale) sono imputati ai Costi per servizi (B.7).
+          </p>
         </div>
 
         <div className="flex justify-end pt-2">
@@ -334,7 +581,7 @@ function StartupSetup() {
             {loading ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> Creazione...</>
             ) : (
-              <><Rocket className="h-4 w-4" /> Crea progetto e continua</>
+              <><Rocket className="h-4 w-4" /> Crea business plan e continua</>
             )}
           </Button>
         </div>
@@ -584,6 +831,11 @@ function ScenarioForm({
             sp17f_growth_pct: a.sp17f_growth_pct,
             sp17g_growth_pct: a.sp17g_growth_pct,
             sp18_growth_pct: a.sp18_growth_pct,
+            ce01_override: a.ce01_override,
+            ce05_override: a.ce05_override,
+            ce06_override: a.ce06_override,
+            ce07_override: a.ce07_override,
+            ce08_override: a.ce08_override,
             ce02_override: a.ce02_override,
             ce03_override: a.ce03_override,
             ce03a_override: a.ce03a_override,
@@ -809,45 +1061,66 @@ function ScenarioForm({
                 </div>
               </div>
 
-              <div className="border-t border-border pt-6 mb-6">
-                <Label htmlFor="num-years" className="font-semibold text-foreground">
-                  Numero di anni da prevedere
-                </Label>
-                <Input
-                  id="num-years"
-                  type="number"
-                  min={1}
-                  max={5}
-                  value={numYears}
-                  onChange={(e) => setNumYears(parseInt(e.target.value) || 3)}
-                  className="w-32 mt-2"
-                />
-              </div>
+              {startup ? (
+                <div className="border-t border-border pt-6 mb-6">
+                  <p className="text-sm text-muted-foreground">
+                    Periodo di piano: <strong>{numYears + 1} anni</strong> (anno
+                    corrente {baseYear} e i {numYears} successivi). Le variabili
+                    economiche sono generate automaticamente dai driver inseriti.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="border-t border-border pt-6 mb-6">
+                    <Label htmlFor="num-years" className="font-semibold text-foreground">
+                      Numero di anni da prevedere
+                    </Label>
+                    <Input
+                      id="num-years"
+                      type="number"
+                      min={1}
+                      max={5}
+                      value={numYears}
+                      onChange={(e) => setNumYears(parseInt(e.target.value) || 3)}
+                      className="w-32 mt-2"
+                    />
+                  </div>
 
-              {/* Auto-Generator Card */}
-              <AutoGeneratorCard
-                historicalYears={historicalYears}
-                forecastYears={forecastYears}
-                historicalData={historicalData}
-                inflationRate={inflationRate}
-                setInflationRate={setInflationRate}
-                showAutoGen={showAutoGen}
-                setShowAutoGen={setShowAutoGen}
-                updateAssumption={updateAssumption}
-              />
+                  {/* Auto-Generator Card */}
+                  <AutoGeneratorCard
+                    historicalYears={historicalYears}
+                    forecastYears={forecastYears}
+                    historicalData={historicalData}
+                    inflationRate={inflationRate}
+                    setInflationRate={setInflationRate}
+                    showAutoGen={showAutoGen}
+                    setShowAutoGen={setShowAutoGen}
+                    updateAssumption={updateAssumption}
+                  />
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="ce">
-          <CEAssumptionsTable
-            historicalYears={historicalYears}
-            forecastYears={forecastYears}
-            historicalData={historicalData}
-            assumptions={assumptions}
-            onUpdate={updateAssumption}
-            startup={startup}
-          />
+          {startup ? (
+            <StartupEconomicsRecap
+              baseYear={baseYear}
+              forecastYears={forecastYears}
+              historicalData={historicalData}
+              assumptions={assumptions}
+            />
+          ) : (
+            <CEAssumptionsTable
+              historicalYears={historicalYears}
+              forecastYears={forecastYears}
+              historicalData={historicalData}
+              assumptions={assumptions}
+              onUpdate={updateAssumption}
+              startup={startup}
+            />
+          )}
         </TabsContent>
 
         <TabsContent value="sp">
@@ -874,6 +1147,90 @@ function ScenarioForm({
             <><Save className="h-4 w-4" /> Salva e Calcola Previsionale</>
           )}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// Startup economics recap (read-only): the economic variables of a startup
+// business plan are generated automatically from the per-year drivers entered
+// in the wizard (revenue / EBITDA margin / personnel, stored as absolute CE
+// overrides). This shows the resulting P&L drivers per year — no editing here.
+function StartupEconomicsRecap({
+  baseYear,
+  forecastYears,
+  historicalData,
+  assumptions,
+}: {
+  baseYear: number;
+  forecastYears: number[];
+  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
+  assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
+}) {
+  const years = [baseYear, ...forecastYears];
+
+  const valuesFor = (year: number) => {
+    let ricavi = 0, servizi = 0, personale = 0;
+    if (year === baseYear) {
+      const inc = historicalData[baseYear]?.income;
+      ricavi = inc ? parseFloat(inc.ce01_ricavi_vendite) : 0;
+      servizi = inc ? parseFloat(inc.ce06_servizi) : 0;
+      personale = inc ? parseFloat(inc.ce08_costi_personale) : 0;
+    } else {
+      const a = assumptions[year];
+      ricavi = Number(a?.ce01_override ?? 0);
+      servizi = Number(a?.ce06_override ?? 0);
+      personale = Number(a?.ce08_override ?? 0);
+    }
+    const ebitda = ricavi - servizi - personale;
+    const margine = ricavi ? (ebitda / ricavi) * 100 : 0;
+    return { ricavi, servizi, personale, ebitda, margine };
+  };
+
+  const rows: { label: string; get: (v: ReturnType<typeof valuesFor>) => string; strong?: boolean }[] = [
+    { label: "Ricavi", get: (v) => formatCurrency(v.ricavi) },
+    { label: "Costi per servizi (B.7)", get: (v) => formatCurrency(v.servizi) },
+    { label: "Costi del personale (B.9)", get: (v) => formatCurrency(v.personale) },
+    { label: "EBITDA", get: (v) => formatCurrency(v.ebitda), strong: true },
+    { label: "Margine EBITDA %", get: (v) => `${v.margine.toFixed(1)}%`, strong: true },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertDescription>
+          Le variabili economiche sono generate automaticamente dai driver
+          inseriti nel business plan. Per modificarle, agisci sui driver o edita
+          le voci di conto economico dalla pagina Previsionale &gt; Conto Economico.
+        </AlertDescription>
+      </Alert>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-xs border border-border divide-y divide-border">
+          <thead className="bg-muted">
+            <tr>
+              <th className="px-3 py-2 text-left font-semibold text-foreground border-r border-border">Voce</th>
+              {years.map((year, i) => (
+                <th key={year} className="px-3 py-2 text-center font-semibold text-foreground border-r border-border" style={{ minWidth: "120px" }}>
+                  {year}
+                  {i === 0 && <span className="block text-[10px] font-normal text-muted-foreground">anno corrente</span>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="bg-card divide-y divide-border">
+            {rows.map((row) => (
+              <tr key={row.label} className={row.strong ? "bg-muted/40" : ""}>
+                <td className={`px-3 py-2 border-r border-border ${row.strong ? "font-semibold text-foreground" : "text-foreground"}`}>{row.label}</td>
+                {years.map((year) => (
+                  <td key={year} className={`px-3 py-2 text-right border-r border-border ${row.strong ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+                    {row.get(valuesFor(year))}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1196,7 +1553,7 @@ function CEAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % RICAVI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % RICAVI{startup ? "" : ` RISPETTO ALL'ANNO ${Math.max(...historicalYears)}`}
                 <span title="Variazione percentuale dei ricavi rispetto all'anno base. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1294,7 +1651,7 @@ function CEAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI VARIABILI PER MAT. PRIME RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % COSTI VARIABILI PER MAT. PRIME{startup ? "" : ` RISPETTO ALL'ANNO ${Math.max(...historicalYears)}`}
                 <span title="Variazione percentuale dei costi variabili per materie prime. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1389,7 +1746,7 @@ function CEAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI VARIABILI PER SERVIZI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % COSTI VARIABILI PER SERVIZI{startup ? "" : ` RISPETTO ALL'ANNO ${Math.max(...historicalYears)}`}
                 <span title="Variazione percentuale dei costi variabili per servizi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>

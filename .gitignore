@@ -108,3 +108,16 @@ ssl/
 
 # Local test PDFs (confidential client bilanci) + diagnostic harness
 Test/
+
+# Next.js build artifacts
+.next/
+frontend/.next/
+
+# UI test screenshots at repo root (regenerable)
+/*.png
+
+# Runtime upload storage + debug bilanci (confidential client data, never commit)
+data/uploads/
+docs/debug/
+docs/debug2/
+docs/debug3/

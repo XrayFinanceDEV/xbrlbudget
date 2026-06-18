@@ -841,13 +841,21 @@ budget/
 │   ├── debug_*.py                  # Debug scripts
 │   └── migrate_*.py                # Database migration scripts
 │
-├── docs/                           # 📚 Documentation
+├── docs/                           # 📚 Documentation (see docs/README.md for the map)
+│   └── archive/                    # Superseded/historical docs (not maintained)
+├── IMPORT-OVERVIEW.md              # 📥 Import pipeline: source of truth
 ├── config.py                       # 🔧 SHARED: Configuration constants
 ├── requirements.txt                # Python dependencies (legacy)
 ├── README.md
 ├── CLAUDE.md                       # AI assistant instructions
 └── financial_analysis.db           # SQLite database
 ```
+
+> **Documentation map:** [`docs/README.md`](docs/README.md) lists every current
+> document and its scope. The authoritative sources are this `README.md`,
+> [`CLAUDE.md`](CLAUDE.md) (architecture/dev guide), and
+> [`IMPORT-OVERVIEW.md`](IMPORT-OVERVIEW.md) (import pipeline). Older notes that no
+> longer match the code live in [`docs/archive/`](docs/archive/).
 
 ### Architecture Overview
 

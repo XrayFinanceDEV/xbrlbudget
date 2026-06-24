@@ -1346,6 +1346,60 @@ def _is_image_pdf(file_path: str) -> bool:
         return False
 
 
+def ocr_pdf_sample_text(file_path: str, max_pages: int = 6) -> str:
+    """OCR the first pages of a scanned (image-only) PDF into plain text.
+
+    Scanned bilanci carry NO extractable text, so `bilancio_classifier.classify_bilancio`
+    (which works on text markers) sees an empty string and routes the file to
+    ROUTE_UNSUPPORTED — even though the route-C / IV-CEE extractors are already vision
+    capable. This helper renders the first pages and asks Claude to transcribe them to
+    plain text, so the SAME text-based router can decide the macro-area/route for a scan.
+
+    It deliberately returns FREE TEXT (no tool schema): we only need routing markers
+    ("BILANCIO DI VERIFICA", "STATO PATRIMONIALE", account codes, ...), not structured
+    values — the chosen extractor re-reads the images itself for the real figures.
+
+    Requires ANTHROPIC_API_KEY. Returns "" on any failure (caller decides how to surface).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return ""
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        pages = set(range(max_pages))
+        images = _render_pdf_pages_as_images(file_path, pages=pages, dpi=200)
+        if not images:
+            return ""
+        content: List[dict] = []
+        for img_b64 in images:
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": img_b64},
+            })
+        content.append({
+            "type": "text",
+            "text": (
+                "Trascrivi FEDELMENTE tutto il testo visibile in queste pagine di un "
+                "documento contabile italiano scansionato. Mantieni intestazioni, nomi "
+                "delle voci, codici conto e numeri cosi' come appaiono, riga per riga. "
+                "Non interpretare, non riassumere, non aggiungere commenti: solo il testo "
+                "grezzo (plain text)."
+            ),
+        })
+        response = client.messages.create(
+            model=PDF_LLM_MODEL,
+            max_tokens=PDF_LLM_MAX_TOKENS,
+            messages=[{"role": "user", "content": content}],
+        )
+        parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+        ocr_text = "\n".join(parts).strip()
+        logger.info(f"OCR routing pass: recovered {len(ocr_text)} chars from {len(images)} scanned pages")
+        return ocr_text
+    except Exception as e:
+        logger.warning(f"OCR routing pass failed ({type(e).__name__}: {e})")
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1727,6 +1781,7 @@ _COGE_SP_CLEAN_PCT = Decimal("0.02")  # 2% of totale_attivo = "clean enough", st
 
 def extract_trial_balance_with_llm(
     file_path: str,
+    ocr_text: Optional[str] = None,
 ) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Extract a macro-area C trial balance (situazione contabile / CoGe accounts)
     with a dedicated LLM pass that understands Dare/Avere account balances.
@@ -1751,19 +1806,29 @@ def extract_trial_balance_with_llm(
     except Exception as e:
         raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
-    is_image = _is_image_pdf(file_path)
-    images = _render_pdf_pages_as_images(file_path) if is_image else None
-    full_text = None
-    if not is_image:
-        full_text = _extract_full_text(file_path)
-        if not full_text.strip():
-            raise PDFImportError("No text extracted from trial-balance PDF")
+    # Scanned PDF already OCR'd by the caller: prefer the TEXT path over vision. Vision
+    # mis-parses Italian number formatting on noisy scans (reads "50.704,41" as
+    # 5.070.441, inflating values ~100x and dumping the gap into sp13); the linear OCR
+    # text keeps the decimal comma, so numbers come out right.
+    use_ocr = bool(ocr_text and ocr_text.strip())
+    if use_ocr:
+        is_image = False
+        images = None
+        full_text = ocr_text
+    else:
+        is_image = _is_image_pdf(file_path)
+        images = _render_pdf_pages_as_images(file_path) if is_image else None
+        full_text = None
+        if not is_image:
+            full_text = _extract_full_text(file_path)
+            if not full_text.strip():
+                raise PDFImportError("No text extracted from trial-balance PDF")
 
     # Declared control totals (TOTALE A PAREGGIO / ATTIVO / explicit Utile-Perdita) read
     # deterministically from the printed footer — used BOTH as a hint to the LLM AND as
-    # the post-pass reconciliation anchor.
+    # the post-pass reconciliation anchor. On a scanned PDF read them from the OCR text.
     try:
-        declared = _declared_control_totals(file_path)
+        declared = _declared_control_totals(file_path, text=full_text if use_ocr else None)
     except Exception:
         declared = {}
     # Inject the declared totals as a completeness anchor in the SP system prompt.
@@ -1874,7 +1939,7 @@ def _balance_trial_via_result(balance_sheet_data: Dict[str, Decimal], label: str
 _DECL_NUM_RE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2}")
 
 
-def _declared_control_totals(file_path: str) -> Dict[str, Optional[Decimal]]:
+def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict[str, Optional[Decimal]]:
     """Read a trial balance's OWN declared control totals from the printed footer.
 
     GENERAL anti-masking anchor (level L2): every situazione contabile / bilancio di
@@ -1892,11 +1957,18 @@ def _declared_control_totals(file_path: str) -> Dict[str, Optional[Decimal]]:
     out: Dict[str, Optional[Decimal]] = {
         "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
     }
-    try:
-        text = _extract_full_text(file_path)
-    except Exception:
-        return out
+    # `text` lets the caller supply already-extracted text (e.g. OCR of a scanned PDF,
+    # where _extract_full_text would return nothing). Fall back to reading the file.
+    if text is None:
+        try:
+            text = _extract_full_text(file_path)
+        except Exception:
+            return out
     low = text.lower()
+    # Strip accents so markers without accents ("totale attivita") match accented text
+    # ("Totale attività") — common in trial-balance footers.
+    import unicodedata
+    low = "".join(c for c in unicodedata.normalize("NFKD", low) if not unicodedata.combining(c))
     nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
 
     def _largest_after(markers) -> Optional[Decimal]:
@@ -1919,7 +1991,9 @@ def _declared_control_totals(file_path: str) -> Dict[str, Optional[Decimal]]:
                         break  # first number after the marker is the total
         return best
 
-    out["pareggio"] = _largest_after(["totale a pareggio"])
+    # "totale a quadratura" is a common synonym for "totale a pareggio"; it is printed
+    # for BOTH the SP and CE sections, so _largest_after correctly keeps the SP figure.
+    out["pareggio"] = _largest_after(["totale a pareggio", "totale a quadratura"])
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
         "totale stato patrimoniale attivo",
@@ -1978,6 +2052,15 @@ def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
         decl_result = declared['utile']
     elif declared.get('perdita') is not None:
         decl_result = -declared['perdita']
+    elif declared.get('attivo') is not None and declared.get('passivo') is not None:
+        # No explicit Utile/Perdita line, but the document declares BOTH a gross Totale
+        # Attivo and a Totale Passivo that EXCLUDES the result: the implicit result is
+        # their difference (= ricavi - costi by double-entry). Only when the gap is
+        # material — when passivo already includes the result the two totals coincide
+        # (gap < tol) and we must NOT force a zero result.
+        _gap = declared['attivo'] - declared['passivo']
+        if abs(_gap) > tol:
+            decl_result = _gap
 
     sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
 

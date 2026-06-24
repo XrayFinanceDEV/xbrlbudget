@@ -382,6 +382,19 @@ Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor abo
 - **Single-column** 6-digit "Saldo" layout (`parse_entries_single_column`)
 - **TeamSystem** `XX/YYYY/YYYY` (`parse_entries_teamsystem`)
 - **Contrapposte 8-digit** physical 2-column (`parse_entries_contrapposte_8digit`, coordinate split)
+- **Verifica contrapposte PER SEGNO** (`is_bilancio_verifica_segno` + `parse_bilancio_verifica_segno`,
+  tried FIRST inside `extract_situazione_contabile`): a "Bilancio di verifica" where accounts are placed
+  in the Attività/Passività columns by the SIGN of their balance and the SAME account appears on BOTH
+  sides (e.g. "Disponibilità liquide" = active banks in Attivo AND overdraft in Passivo). Splits the two
+  columns by COORDINATE (gutter = x of the 2nd "Conto"/"Codice" header), classifies the 2-digit MASTRI by
+  NATURE (description, side-aware — never by column), nets fondi ammortamento off sp02/sp03 (descriptions
+  are PDF-truncated → match short substrings like `IMMATER`/`FORNITOR`/`ERARI`), separates overdraft-banks
+  (sp16a) from cash (sp09), breaks debts into fornitori/banche/tributari/previdenza/altri, routes the
+  result account to PN (portati a nuovo sp12g / prior result sp12e), and derives sp13 from the CE. SELF-
+  VALIDATES attivo==passivo (raises `ValueError` → existing fallback, zero regression). Emits short
+  aggregate keys + full-name sub-fields (sp06a, sp16a/d/e/f/g) that survive `_map_sc_keys`, plus
+  `_skip_declared_reconcile=True` so `pdf_importer` skips the declared-result reconcile (which would
+  mistake a prior-year "RISULTATO D'ESERCIZIO" equity account for the period result and inflate cash).
 - **Generic contrapposte (best-effort)** for heterogeneous 2-column dumps (`extract_contrapposte_best_effort`):
   splits columns at the right-code-cluster x, and reconciles **mastri/subtotali to IV-CEE by description**
   (`_be_reclassify` descends the code hierarchy and stops at the coarsest level that maps to an IV-CEE
@@ -451,6 +464,23 @@ Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor abo
   zero copy (→ empty BS). When the selected SP pages carry negligible amount mass vs the largest data page,
   the SP/CE windows slide forward to a genuine second copy that re-states the SP header AND carries real
   amounts. Deliberately does NOT relocate to a headerless number-only dump — those fail honestly instead.
+
+#### IV-CEE detail-line reconciler (`_reconcile_pn_detail` / `_reconcile_personale_detail`, `pdf_extractor_llm.py`)
+Clean IV-CEE statements print every legal sub-line verbatim, but the LLM only captures the AGGREGATES
+(`sp12_riserve`, `ce08_costi_personale`). Two deterministic post-LLM passes (text-path only, hooked into
+BOTH the single-year and the dual-year extractors) re-read the explicit lines and fill the sub-fields:
+- `_reconcile_pn_detail` reads the patrimonio-netto reserve rows **A.II–A.X → sp12a..h** and recomputes
+  `sp12_riserve` as their ALGEBRAIC sum — recovering a dropped NEGATIVE reserve ("A.VIII utili (perdite)
+  portati a nuovo"), which otherwise inflates equity and gets MASKED into cash by the balance reconcile
+  (e.g. LIO 2025 cash 106.156 → 150.156). Applied ONLY when `sp11+Σsp12*+sp13` reconciles to the printed
+  "Totale patrimonio netto" (anti-masking); note `_validate_equity` REFUSES the same correction because it
+  yields negative reserves, so this deterministic pass — anchored on the printed lines — is what fixes it.
+- `_reconcile_personale_detail` reads **B.9 a/b/c/e → ce08b** salari / **ce08c** oneri / **ce08a** TFR /
+  **ce08d** altri (gated on "Totale costi per il personale"), fixing the merged salari+oneri the LLM emits.
+  The CE cost line "c) trattamento di fine rapporto" is disambiguated from the SP fund line "C) Trattamento
+  di fine rapporto di lavoro subordinato" (sp15) via a `(?!\s+di\s+lavoro)` lookahead.
+No-op on layouts without the explicit legal lines / when the control-total gate fails (zero regression).
+`pdf_importer._create_income_statement` now persists ce08b/c/d (DB columns that existed but weren't written).
 
 #### CE↔SP identity enforcement (`enforce_ce_sp_identity`, `importers/iv_cee_hierarchy.py`)
 The year's result is ONE number: it appears as `sp13` in the balance sheet AND as the last line of

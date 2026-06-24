@@ -150,6 +150,9 @@ def _create_income_statement(db, financial_year_id: int, data: Dict[str, Decimal
         ce07_godimento_beni=_ce('ce07_godimento_beni'),
         ce08_costi_personale=_ce('ce08_costi_personale'),
         ce08a_tfr_accrual=_ce('ce08a_tfr_accrual'),
+        ce08b_salari_stipendi=_ce('ce08b_salari_stipendi'),
+        ce08c_oneri_sociali=_ce('ce08c_oneri_sociali'),
+        ce08d_altri_costi_personale=_ce('ce08d_altri_costi_personale'),
         ce09_ammortamenti=_ce('ce09_ammortamenti'),
         ce09a_ammort_immateriali=_ce('ce09a_ammort_immateriali'),
         ce09b_ammort_materiali=_ce('ce09b_ammort_materiali'),
@@ -237,6 +240,33 @@ def import_pdf_balance_sheet(
         doc = fitz.open(file_path)
         sample_text = "".join(page.get_text() for page in doc[:14])
         doc.close()
+
+        # Scanned (image-only) PDF: there is no extractable text, so the text-based
+        # classifier would route the file to UNSUPPORTED even though the route-C and
+        # IV-CEE extractors are already vision-capable. Recover routing text with a
+        # one-off OCR-via-vision pass and feed THAT to the same classifier; the chosen
+        # extractor then re-reads the page images for the real figures. Needs an API key.
+        ocr_text = None
+        is_scanned = len(sample_text.strip()) < 50
+        if is_scanned:
+            logger.info("PDF scansionato (nessun testo estraibile): passaggio OCR per il routing")
+            if not api_key:
+                raise PDFImportError(
+                    "Il PDF è una scansione (nessun testo selezionabile): l'import di "
+                    "documenti scansionati richiede ANTHROPIC_API_KEY per l'OCR."
+                )
+            from importers.pdf_extractor_llm import ocr_pdf_sample_text
+            # OCR enough pages to cover the whole (usually short) document: the same text
+            # drives BOTH routing and the route-C value extraction (text path is far more
+            # reliable than vision on Italian-formatted numbers).
+            ocr_text = ocr_pdf_sample_text(file_path, max_pages=20)
+            sample_text = ocr_text or ""
+            if len(sample_text.strip()) < 50:
+                raise PDFImportError(
+                    "Il PDF è una scansione ma l'OCR non ha riconosciuto testo "
+                    "sufficiente (immagine illeggibile o documento non contabile)."
+                )
+
         classification = classify_bilancio(file_path=file_path, text=sample_text)
         logger.info(
             f"Classificato: macro-area {classification.macro_area} "
@@ -321,7 +351,10 @@ def import_pdf_balance_sheet(
             if api_key:
                 try:
                     from importers.pdf_extractor_llm import extract_trial_balance_with_llm
-                    coge_bs, coge_ce = extract_trial_balance_with_llm(file_path)
+                    # On a scanned PDF, pass the OCR text so the extractor uses the
+                    # reliable text path instead of re-doing vision (which misreads
+                    # Italian-formatted numbers on noisy scans).
+                    coge_bs, coge_ce = extract_trial_balance_with_llm(file_path, ocr_text=ocr_text)
                     r = _residual_of(coge_bs, coge_ce)
                     if r is not None:
                         candidates.append((r, coge_bs, coge_ce, "CoGe-LLM"))
@@ -368,16 +401,21 @@ def import_pdf_balance_sheet(
                 # or unanchored — budget_342/367). Idempotent on the CoGe result (already
                 # reconciled inside the extractor). This makes sp13 = declared before the
                 # CE↔SP identity step aligns the CE to it.
-                try:
-                    from importers.pdf_extractor_llm import (
-                        _declared_control_totals, _reconcile_trial_to_declared,
-                    )
-                    _decl = _declared_control_totals(file_path)
-                    balance_sheet_data = _reconcile_trial_to_declared(
-                        balance_sheet_data, _decl, source)
-                    residual = balance_sheet_data.get('_plug_residual', residual)
-                except Exception as _rc_err:
-                    logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")
+                # A parser that already produced an exact, self-balanced sheet (e.g. the
+                # by-sign verifica parser) flags itself authoritative: skip the declared
+                # reconcile, which would mis-anchor sp13 to a prior-year result account.
+                _authoritative = balance_sheet_data.pop('_skip_declared_reconcile', False)
+                if not _authoritative:
+                    try:
+                        from importers.pdf_extractor_llm import (
+                            _declared_control_totals, _reconcile_trial_to_declared,
+                        )
+                        _decl = _declared_control_totals(file_path, text=ocr_text)
+                        balance_sheet_data = _reconcile_trial_to_declared(
+                            balance_sheet_data, _decl, source)
+                        residual = balance_sheet_data.get('_plug_residual', residual)
+                    except Exception as _rc_err:
+                        logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")
                 others = ", ".join(f"{s}={r:,.0f}" for r, _b, _c, s in candidates)
                 logger.info(f"Route C: scelto estrattore '{source}' (residuo minore "
                             f"{residual:,.0f}); candidati: {others}")

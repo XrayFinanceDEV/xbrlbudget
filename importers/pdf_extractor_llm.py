@@ -1480,6 +1480,180 @@ def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
 
 
 # ---------------------------------------------------------------------------
+# Deterministic IV-CEE detail-line reconciler (clean legal statements)
+# ---------------------------------------------------------------------------
+# A fully-printed IV-CEE bilancio (Micro/Abbreviato/Ordinario) lists every legal
+# sub-line verbatim — including the patrimonio-netto reserve detail (II..X) and the
+# personnel split (B.9 a/b/c/e). The LLM extractor only captures the AGGREGATES
+# (sp12_riserve, ce08_costi_personale), so the sub-fields come back 0 and, worse, a
+# NEGATIVE reserve line (VIII - utili (perdite) portati a nuovo) is dropped from the
+# aggregate — which inflates equity and gets masked into cash by the balance reconcile
+# (and _validate_equity refuses the correct fix because it yields "negative reserves").
+# These helpers read the explicit lines deterministically and, gated on the printed
+# control total (anti-masking), fill the sub-fields and fix the aggregate. Text-path
+# only (the lines are unambiguous in PyMuPDF text); the vision path keeps LLM behaviour.
+
+def _parse_it_number(tok: str) -> Optional[Decimal]:
+    """Parse one Italian-formatted amount token. Parentheses or trailing '-' = negative."""
+    tok = tok.strip()
+    if not tok:
+        return None
+    neg = False
+    if tok.startswith('(') and tok.endswith(')'):
+        neg = True
+        tok = tok[1:-1].strip()
+    if tok.endswith('-'):
+        neg = True
+        tok = tok[:-1].strip()
+    if tok.startswith('-'):
+        neg = True
+        tok = tok[1:].strip()
+    t = tok.replace('.', '').replace(',', '.')
+    if not re.fullmatch(r'\d+(?:\.\d+)?', t):
+        return None
+    v = Decimal(t)
+    return -v if neg else v
+
+
+_DETAIL_TOKEN_RE = re.compile(r'\(?-?[\d.,]+\)?-?')
+
+
+def _values_for_label(lines, idx: int, label_end: int):
+    """Collect up to 2 numeric values for a matched label: first any numbers on the
+    SAME line after the label, then numbers on following (blank-skipped) lines, stopping
+    at the first non-blank non-numeric line. Handles both the 'label\\ncur\\nprior'
+    column layout (PyMuPDF cell-per-line) and the 'label cur prior' single-line layout."""
+    nums = []
+    tail = lines[idx][label_end:]
+    for t in _DETAIL_TOKEN_RE.findall(tail):
+        v = _parse_it_number(t)
+        if v is not None:
+            nums.append(v)
+    j = idx + 1
+    while len(nums) < 2 and j < len(lines):
+        s = lines[j].strip()
+        if not s:
+            j += 1
+            continue
+        v = _parse_it_number(s)
+        if v is None:
+            break
+        nums.append(v)
+        j += 1
+    return nums
+
+
+def _scan_labeled(text: str, specs):
+    """specs: list of (compiled regex anchored at line start, key). Returns
+    {key: [vals...]} for the FIRST line matching each spec, in document order."""
+    lines = text.split('\n')
+    out = {}
+    for i, line in enumerate(lines):
+        for rx, key in specs:
+            if key in out:
+                continue
+            m = rx.match(line)
+            if m:
+                vals = _values_for_label(lines, i, m.end())
+                if vals:
+                    out[key] = vals
+                break
+    return out
+
+
+# Roman-numeral PN reserve lines (art. 2424 A.II..A.X). The dash after the numeral
+# disambiguates 'V'/'VI'/'VII'/'VIII' (e.g. '^V\s*[-–]' cannot match 'VI - ...').
+_PN_DETAIL_SPECS = [
+    (re.compile(r'^\s*II\s*[-–]\s*Riserva da soprapprezzo', re.I), 'sp12a_riserva_sovrapprezzo'),
+    (re.compile(r'^\s*III\s*[-–]\s*Riserve di rivalutazione', re.I), 'sp12b_riserve_rivalutazione'),
+    (re.compile(r'^\s*IV\s*[-–]\s*Riserva legale', re.I), 'sp12c_riserva_legale'),
+    (re.compile(r'^\s*V\s*[-–]\s*Riserve statutarie', re.I), 'sp12d_riserve_statutarie'),
+    (re.compile(r'^\s*VI\s*[-–]\s*Altre riserve', re.I), 'sp12e_altre_riserve'),
+    (re.compile(r'^\s*VII\s*[-–]\s*Riserva per operazioni di copertura', re.I), 'sp12f_riserva_copertura_flussi'),
+    (re.compile(r'^\s*VIII\s*[-–]\s*Util.*portat', re.I), 'sp12g_utili_perdite_portati'),
+    (re.compile(r'^\s*X\s*[-–]\s*Riserva negativa per azioni proprie', re.I), 'sp12h_riserva_neg_azioni_proprie'),
+]
+_PN_TOTAL_SPECS = [(re.compile(r'^\s*Totale patrimonio netto', re.I), 'pn_total')]
+
+# Personnel split (B.9 a/b/c/e). The SPECIFIC single-letter lines only: the combined
+# "c), d), e) trattamento ..." header starts "c)," so it cannot match 'c)\s*trattamento'.
+_PERS_DETAIL_SPECS = [
+    (re.compile(r'^\s*a\)\s*salari', re.I), 'ce08b_salari_stipendi'),
+    (re.compile(r'^\s*b\)\s*oneri sociali', re.I), 'ce08c_oneri_sociali'),
+    # CE cost line "c) trattamento di fine rapporto" — NOT the SP fund line
+    # "C) Trattamento di fine rapporto di lavoro subordinato" (sp15, = 11.561) that
+    # bleeds into the CE text window: the lookahead rejects the "...di lavoro" variant.
+    (re.compile(r'^\s*c\)\s*trattamento di fine rapporto(?!\s+di\s+lavoro)', re.I), 'ce08a_tfr_accrual'),
+    (re.compile(r'^\s*e\)\s*altri costi', re.I), 'ce08d_altri_costi_personale'),
+]
+_PERS_TOTAL_SPECS = [(re.compile(r'^\s*Totale costi per il personale', re.I), 'pers_total')]
+
+
+def _reconcile_pn_detail(bs: Dict[str, Decimal], sp_text: str, label: str,
+                         column: int = 0) -> Dict[str, Decimal]:
+    """Fill sp12a..h from the explicit PN reserve lines and set sp12_riserve to their
+    algebraic sum. Applied ONLY when sp11 + Σsp12* + sp13 reconciles to the printed
+    'Totale patrimonio netto' (anti-masking). Recovers the dropped NEGATIVE reserve
+    (utili/(perdite) portati a nuovo) that otherwise inflates equity → masked into cash."""
+    if not sp_text:
+        return bs
+    found = _scan_labeled(sp_text, _PN_DETAIL_SPECS)
+    subs = {k: v[column] for k, v in found.items() if column < len(v)}
+    if not subs:
+        return bs
+    new_sp12 = sum(subs.values())
+    sp11 = bs.get('sp11_capitale', Decimal('0'))
+    sp13 = bs.get('sp13_utile_perdita', Decimal('0'))
+    pn_tot = _scan_labeled(sp_text, _PN_TOTAL_SPECS).get('pn_total')
+    declared_pn = pn_tot[column] if pn_tot and column < len(pn_tot) else None
+    if declared_pn is None:
+        return bs  # no control total to anchor on -> stay conservative
+    tol = max(Decimal('2'), abs(declared_pn) * Decimal('0.005'))
+    if abs(sp11 + new_sp12 + sp13 - declared_pn) > tol:
+        logger.info(f"[{label}] PN detail: Σsp12*={new_sp12} + sp11 + sp13 does not "
+                    f"reconcile to declared PN {declared_pn}; skipping detail fill")
+        return bs
+    for k, v in subs.items():
+        bs[k] = v
+    bs['sp12_riserve'] = new_sp12
+    logger.info(f"[{label}] PN detail reconciled: sp12_riserve -> {new_sp12} "
+                f"(legale={subs.get('sp12c_riserva_legale')}, "
+                f"altre={subs.get('sp12e_altre_riserve')}, "
+                f"utili a nuovo={subs.get('sp12g_utili_perdite_portati')})")
+    return bs
+
+
+def _reconcile_personale_detail(ce: Dict[str, Decimal], ce_text: str, label: str,
+                                column: int = 0) -> Dict[str, Decimal]:
+    """Fill ce08a/b/c/d from the explicit B.9 a/b/c/e personnel lines, gated on the
+    printed 'Totale costi per il personale'. Fixes the salari/oneri split the LLM merges
+    into ce08b (e.g. salari 214.698 + oneri 60.346 reported as salari 275.044)."""
+    if not ce_text:
+        return ce
+    found = _scan_labeled(ce_text, _PERS_DETAIL_SPECS)
+    subs = {k: v[column] for k, v in found.items() if column < len(v)}
+    if not subs:
+        return ce
+    s = sum(subs.values())
+    tot = _scan_labeled(ce_text, _PERS_TOTAL_SPECS).get('pers_total')
+    declared = (tot[column] if tot and column < len(tot)
+                else ce.get('ce08_costi_personale', Decimal('0')))
+    if declared is None or declared <= 0:
+        return ce
+    tol = max(Decimal('2'), abs(declared) * Decimal('0.02'))
+    if abs(s - declared) > tol:
+        logger.info(f"[{label}] personale detail: Σsub={s} != declared total {declared}; skipping")
+        return ce
+    for k, v in subs.items():
+        ce[k] = v
+    ce['ce08_costi_personale'] = declared  # authoritative total (also fixes an LLM merge)
+    logger.info(f"[{label}] personale split reconciled: salari={subs.get('ce08b_salari_stipendi')}, "
+                f"oneri={subs.get('ce08c_oneri_sociali')}, tfr={subs.get('ce08a_tfr_accrual')}, "
+                f"altri={subs.get('ce08d_altri_costi_personale')}")
+    return ce
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1613,6 +1787,13 @@ def extract_pdf_with_llm(
     # Step 6: Reconcile ce10 sign on the BS utile anchor, then cross-check ce20_imposte
     income_data = _validate_ce10_against_bs(income_data, balance_sheet_data, "single")
     income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
+
+    # Step 7: Deterministic detail-line fill for clean IV-CEE statements (text path only):
+    # PN reserve sub-fields (recovers dropped NEGATIVE reserves → keeps cash correct) +
+    # personnel salari/oneri split. No-op on layouts without the explicit legal lines.
+    if not use_vision:
+        balance_sheet_data = _reconcile_pn_detail(balance_sheet_data, sp_text, "single")
+        income_data = _reconcile_personale_detail(income_data, ce_text, "single")
 
     return balance_sheet_data, income_data
 
@@ -2839,5 +3020,15 @@ def extract_pdf_both_years_with_llm(
     prior_ce = _validate_ce10_against_bs(prior_ce, prior_bs, "prior")
     current_ce = _validate_ce_imposte(current_ce, current_bs, "current")
     prior_ce = _validate_ce_imposte(prior_ce, prior_bs, "prior")
+
+    # Step 7: Deterministic detail-line fill per column (text path only). The dual layout
+    # prints both years side by side ('label\\ncur\\nprior'), so column 0 = current,
+    # column 1 = prior — fixing the SAME dropped-negative-reserve / merged-personale bug
+    # on BOTH years so the Confronto (comparison) columns line up.
+    if not use_vision:
+        current_bs = _reconcile_pn_detail(current_bs, sp_text, "current", column=0)
+        prior_bs = _reconcile_pn_detail(prior_bs, sp_text, "prior", column=1)
+        current_ce = _reconcile_personale_detail(current_ce, ce_text, "current", column=0)
+        prior_ce = _reconcile_personale_detail(prior_ce, ce_text, "prior", column=1)
 
     return current_bs, current_ce, prior_bs, prior_ce

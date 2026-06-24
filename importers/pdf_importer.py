@@ -150,6 +150,9 @@ def _create_income_statement(db, financial_year_id: int, data: Dict[str, Decimal
         ce07_godimento_beni=_ce('ce07_godimento_beni'),
         ce08_costi_personale=_ce('ce08_costi_personale'),
         ce08a_tfr_accrual=_ce('ce08a_tfr_accrual'),
+        ce08b_salari_stipendi=_ce('ce08b_salari_stipendi'),
+        ce08c_oneri_sociali=_ce('ce08c_oneri_sociali'),
+        ce08d_altri_costi_personale=_ce('ce08d_altri_costi_personale'),
         ce09_ammortamenti=_ce('ce09_ammortamenti'),
         ce09a_ammort_immateriali=_ce('ce09a_ammort_immateriali'),
         ce09b_ammort_materiali=_ce('ce09b_ammort_materiali'),
@@ -398,16 +401,21 @@ def import_pdf_balance_sheet(
                 # or unanchored — budget_342/367). Idempotent on the CoGe result (already
                 # reconciled inside the extractor). This makes sp13 = declared before the
                 # CE↔SP identity step aligns the CE to it.
-                try:
-                    from importers.pdf_extractor_llm import (
-                        _declared_control_totals, _reconcile_trial_to_declared,
-                    )
-                    _decl = _declared_control_totals(file_path, text=ocr_text)
-                    balance_sheet_data = _reconcile_trial_to_declared(
-                        balance_sheet_data, _decl, source)
-                    residual = balance_sheet_data.get('_plug_residual', residual)
-                except Exception as _rc_err:
-                    logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")
+                # A parser that already produced an exact, self-balanced sheet (e.g. the
+                # by-sign verifica parser) flags itself authoritative: skip the declared
+                # reconcile, which would mis-anchor sp13 to a prior-year result account.
+                _authoritative = balance_sheet_data.pop('_skip_declared_reconcile', False)
+                if not _authoritative:
+                    try:
+                        from importers.pdf_extractor_llm import (
+                            _declared_control_totals, _reconcile_trial_to_declared,
+                        )
+                        _decl = _declared_control_totals(file_path, text=ocr_text)
+                        balance_sheet_data = _reconcile_trial_to_declared(
+                            balance_sheet_data, _decl, source)
+                        residual = balance_sheet_data.get('_plug_residual', residual)
+                    except Exception as _rc_err:
+                        logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")
                 others = ", ".join(f"{s}={r:,.0f}" for r, _b, _c, s in candidates)
                 logger.info(f"Route C: scelto estrattore '{source}' (residuo minore "
                             f"{residual:,.0f}); candidati: {others}")

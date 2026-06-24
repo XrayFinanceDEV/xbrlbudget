@@ -19,6 +19,7 @@ Account hierarchy (DEPI format):
 
 import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Tuple
@@ -2849,6 +2850,271 @@ def _build_prior_from_entries(entries: List[Entry], default_ce: bool):
     return prior_bs, prior_ce
 
 
+# ===========================================================================
+# Dedicated parser: "Bilancio di verifica a sezioni contrapposte PER SEGNO"
+# ===========================================================================
+# A specific, recognisable trial-balance layout (Zucchetti/DEPI "Bilancio di
+# verifica") where accounts are placed in the Attività / Passività columns by the
+# SIGN of their balance, NOT by their accounting nature — so the SAME account can
+# appear on BOTH sides (e.g. "19 DISPONIBILITA' LIQUIDE" sits in Attività as the
+# positive bank balance AND in Passività as the overdraft). The generic best-effort
+# and the CoGe-LLM extractors both mis-handle this: they lump the asset column into a
+# single crediti bucket, double-count cash, and miss the debt breakdown. This parser
+# reads the two columns by COORDINATE, classifies each 2-digit MASTRO by description
+# (side-aware), nets fondi ammortamento off the gross immobilizzazioni, splits the
+# result account (portati a nuovo vs prior result) into PN, and derives the current
+# result from the CE — yielding a fully-balanced IV-CEE statement (plug 0).
+# Markers: "BILANCIO DI VERIFICA" + "STATO PATRIMONIALE" + "Eccedenza (Perdita)" /
+# "Totale a quadratura", two physical Attività/Passività columns.
+
+_VSEG_CODE_RE = re.compile(r'^\d{2}(?:\.\d{2})?$')
+
+
+def _vseg_num(tok: str) -> Optional[Decimal]:
+    """Parse one Italian amount token; parentheses or trailing '-' = negative."""
+    tok = tok.strip()
+    if not tok:
+        return None
+    neg = False
+    if tok.startswith('(') and tok.endswith(')'):
+        neg = True
+        tok = tok[1:-1].strip()
+    if tok.endswith('-'):
+        neg = True
+        tok = tok[:-1].strip()
+    if tok.startswith('-'):
+        neg = True
+        tok = tok[1:].strip()
+    t = tok.replace('.', '').replace(',', '.')
+    if not re.fullmatch(r'\d+(?:\.\d+)?', t):
+        return None
+    v = Decimal(t)
+    return -v if neg else v
+
+
+def _vseg_up(s: str) -> str:
+    return s.upper().replace("'", " ").replace("`", " ")
+
+
+def is_bilancio_verifica_segno(text: str) -> bool:
+    """Detect the 'Bilancio di verifica a sezioni contrapposte per segno' layout."""
+    nos = re.sub(r"\s+", "", text).upper()
+    if "STATOPATRIMONIALE" not in nos:
+        return False
+    if "BILANCIODIVERIFICA" not in nos and "BILANCINODIVERIFICA" not in nos:
+        return False
+    # the by-sign layout always prints a balancing residual line + a quadratura total
+    return ("ECCEDENZA" in nos or "TOTALEAQUADRATURA" in nos
+            or "TOTALEAPAREGGIO" in nos)
+
+
+def _vseg_split_rows(page) -> Tuple[list, list]:
+    """Split a 2-column page into (left_rows, right_rows). Each row is
+    (code, desc_upper, amount). Columns split at the gutter between the two
+    'Conto'/'Codice' header words (fallback: 290pt)."""
+    words = page.get_text('words')  # (x0,y0,x1,y1,word,block,line,wordno)
+    headers = sorted([w for w in words if w[4] in ('Conto', 'Codice')],
+                     key=lambda w: w[0])
+    gutter = headers[1][0] - 10 if len(headers) >= 2 else page.rect.width * 0.49
+    lines: Dict[int, list] = defaultdict(list)
+    for w in words:
+        lines[round(w[1])].append(w)
+    left, right = [], []
+    for y in sorted(lines):
+        row = lines[y]
+        for side_words, out in (
+            (sorted([w for w in row if w[0] < gutter], key=lambda w: w[0]), left),
+            (sorted([w for w in row if w[0] >= gutter], key=lambda w: w[0]), right),
+        ):
+            if len(side_words) < 2:
+                continue
+            code = side_words[0][4]
+            if not _VSEG_CODE_RE.match(code):
+                continue
+            amt = _vseg_num(side_words[-1][4])
+            if amt is None:
+                continue
+            desc = ' '.join(w[4] for w in side_words[1:-1])
+            out.append((code, _vseg_up(desc), amt))
+    return left, right
+
+
+def _vseg_classify_sp(bs: Dict[str, Decimal], rows: list, side: int) -> None:
+    """Accumulate a column's MASTRO rows into bs (short keys + full sub-field names).
+    side: 0 = Attività, 1 = Passività. Fondi ammortamento (sub-rows) and the result
+    account (25) are handled by the caller via the returned helpers."""
+    for code, u, amt in rows:
+        mastro = '.' not in code
+        if 'FOND' in u and 'AMMORT' in u:        # fondi ammortamento -> netting
+            if not mastro:                        # use sub-rows for immat/mat split
+                if 'IMMATER' in u:                # desc truncated to "...IMMATER"
+                    bs['sp02'] -= amt
+                else:
+                    bs['sp03'] -= amt
+            continue
+        if 'RISULTAT' in u or 'UTILE' in u or 'PERDITE PORTAT' in u or 'PORTATI A NUOVO' in u:
+            # result/retained accounts -> patrimonio netto (sub-rows split the parts)
+            if not mastro:
+                sign = amt if side == 1 else -amt
+                if 'PORTAT' in u:
+                    bs['sp12g_utili_perdite_portati'] = bs.get('sp12g_utili_perdite_portati', Decimal('0')) + sign
+                else:
+                    bs['sp12e_altre_riserve'] = bs.get('sp12e_altre_riserve', Decimal('0')) + sign
+                bs['sp12'] += sign
+            continue
+        if not mastro:
+            continue
+        if side == 0:  # ATTIVO
+            if 'IMMOBILIZZAZIONI IMMATERIAL' in u or ('IMMATERIAL' in u and 'IMMOBIL' in u):
+                bs['sp02'] += amt
+            elif 'IMMOBILIZZAZIONI MATERIAL' in u or ('MATERIAL' in u and 'IMMOBIL' in u):
+                bs['sp03'] += amt
+            elif 'IMMOBILIZZAZIONI FINANZIAR' in u:
+                bs['sp04'] += amt
+            elif 'RIMANENZ' in u or 'MAGAZZIN' in u:
+                bs['sp05'] += amt
+            elif 'CREDITI COMMERCIAL' in u or 'CLIENT' in u:
+                bs['sp06'] += amt
+                bs['sp06a_crediti_clienti_breve'] = bs.get('sp06a_crediti_clienti_breve', Decimal('0')) + amt
+            elif 'ERARI' in u or 'TRIBUTAR' in u or 'IMPOST' in u:
+                bs['sp06'] += amt
+                bs['sp06e_crediti_tributari_breve'] = bs.get('sp06e_crediti_tributari_breve', Decimal('0')) + amt
+            elif 'DISPONIBILITA' in u or 'LIQUID' in u or 'BANCH' in u or 'CASSA' in u or 'POSTA' in u:
+                bs['sp09'] += amt
+            elif 'RATEI' in u or 'RISCONT' in u:
+                bs['sp10'] += amt
+            else:  # crediti vari, enti previdenziali (attivo), altri -> crediti v/altri
+                bs['sp06'] += amt
+                bs['sp06g_crediti_altri_breve'] = bs.get('sp06g_crediti_altri_breve', Decimal('0')) + amt
+        else:  # PASSIVO
+            if 'DISPONIBILITA' in u or 'BANCH' in u or 'POSTA' in u:   # overdraft
+                bs['sp16'] += amt
+                bs['sp16a_debiti_banche_breve'] = bs.get('sp16a_debiti_banche_breve', Decimal('0')) + amt
+            elif 'CAPITALE' in u:
+                bs['sp11'] += amt
+            elif 'FOND' in u and ('RISCHI' in u or 'ONERI' in u):
+                bs['sp14'] += amt
+            elif 'TFR' in u or 'FINE RAPPORTO' in u:
+                bs['sp15'] += amt
+            elif 'DEBITI COMMERCIAL' in u or 'FORNITOR' in u:
+                bs['sp16'] += amt
+                bs['sp16d_debiti_fornitori_breve'] = bs.get('sp16d_debiti_fornitori_breve', Decimal('0')) + amt
+            elif 'ERARI' in u or 'TRIBUTAR' in u:
+                bs['sp16'] += amt
+                bs['sp16e_debiti_tributari_breve'] = bs.get('sp16e_debiti_tributari_breve', Decimal('0')) + amt
+            elif 'PREVIDENZ' in u or 'INPS' in u or 'INAIL' in u:
+                bs['sp16'] += amt
+                bs['sp16f_debiti_previdenza_breve'] = bs.get('sp16f_debiti_previdenza_breve', Decimal('0')) + amt
+            elif 'RATEI' in u or 'RISCONT' in u:
+                bs['sp18'] += amt
+            elif 'RISERV' in u:
+                bs['sp12'] += amt
+                bs['sp12e_altre_riserve'] = bs.get('sp12e_altre_riserve', Decimal('0')) + amt
+            else:  # altri debiti, acconti, ...
+                bs['sp16'] += amt
+                bs['sp16g_altri_debiti_breve'] = bs.get('sp16g_altri_debiti_breve', Decimal('0')) + amt
+
+
+# Ordered by specificity; FIRST match wins. ce14 keyed on FINANZIAR only (NOT generic
+# PROVENTI, which also occurs in "ALTRI RICAVI E PROVENTI" → ce04).
+_VSEG_CE_RICAVI = [
+    (['VENDIT'], 'ce01'), (['RICAVI DELLE'], 'ce01'), (['RICAVI DA PREST'], 'ce01'),
+    (['RIMANENZ'], 'ce02'), (['INCREMENTI'], 'ce03'),
+    (['FINANZIAR'], 'ce14'),
+]
+# "ACQUISTI DI SERVIZI" contains both ACQUIST and SERVIZ → ce05 must require BENI/PRODUZ
+# so it stays goods-only and SERVIZ wins for services.
+_VSEG_CE_COSTI = [
+    (['MATERIE'], 'ce05'), (['MERCI'], 'ce05'),
+    (['ACQUIST', 'BENI'], 'ce05'), (['ACQUIST', 'PRODUZ'], 'ce05'),
+    (['GODIMENTO'], 'ce07'), (['LEASING'], 'ce07'), (['AFFITT'], 'ce07'),
+    (['PERSONALE'], 'ce08'), (['SALAR'], 'ce08'), (['STIPEND'], 'ce08'),
+    (['AMMORTAMENT'], 'ce09'), (['SVALUTAZ'], 'ce09'),
+    (['ACCANTONAMENT'], 'ce11'),
+    (['ONERI FINANZIAR'], 'ce15'), (['INTERESS'], 'ce15'),
+    (['IMPOST'], 'ce20'),
+    (['SERVIZ'], 'ce06'), (['PRESTAZION'], 'ce06'), (['SPESE'], 'ce06'),
+    (['ONERI'], 'ce12'),
+]
+
+
+def _vseg_classify_ce(ce: Dict[str, Decimal], rows: list, side: int) -> None:
+    """side: 0 = Costi, 1 = Ricavi. MASTRO rows only."""
+    table = _VSEG_CE_RICAVI if side == 1 else _VSEG_CE_COSTI
+    default = 'ce04' if side == 1 else 'ce12'
+    for code, u, amt in rows:
+        if '.' in code:
+            continue
+        field = default
+        for kws, f in table:
+            if all(kw in u for kw in kws):
+                field = f
+                break
+        ce[field] = ce.get(field, Decimal('0')) + amt
+
+
+_VSEG_RICAVI_KEYS = ('ce01', 'ce02', 'ce03', 'ce04', 'ce13', 'ce14', 'ce18')
+_VSEG_COSTI_KEYS = ('ce05', 'ce06', 'ce07', 'ce08', 'ce09', 'ce10', 'ce11', 'ce12', 'ce15', 'ce19', 'ce20')
+
+
+def parse_bilancio_verifica_segno(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+    """Parse the by-sign contrapposte bilancio di verifica. Returns (bs, ce) with
+    short aggregate keys (sp02..sp18, ce01..ce20) plus full-name sub-fields, and
+    `_plug_residual` = |attivo - passivo|. Raises ValueError if the layout does not
+    yield a balanced sheet (so the caller can fall back)."""
+    doc = fitz.open(file_path)
+    sp_pages, ce_pages = [], []
+    for i in range(doc.page_count):
+        up = doc[i].get_text().upper()
+        if 'STATO PATRIMONIALE' in up:
+            sp_pages.append(i)
+        if 'CONTO ECONOMICO' in up:
+            ce_pages.append(i)
+    if not sp_pages:
+        doc.close()
+        raise ValueError("verifica-segno: no Stato Patrimoniale page")
+
+    bs: Dict[str, Decimal] = defaultdict(Decimal)
+    for p in sp_pages:
+        left, right = _vseg_split_rows(doc[p])
+        _vseg_classify_sp(bs, left, 0)
+        _vseg_classify_sp(bs, right, 1)
+
+    ce: Dict[str, Decimal] = defaultdict(Decimal)
+    for p in ce_pages:
+        left, right = _vseg_split_rows(doc[p])
+        _vseg_classify_ce(ce, left, 0)
+        _vseg_classify_ce(ce, right, 1)
+    doc.close()
+
+    ricavi = sum(ce.get(k, Decimal('0')) for k in _VSEG_RICAVI_KEYS)
+    costi = sum(ce.get(k, Decimal('0')) for k in _VSEG_COSTI_KEYS)
+    bs['sp13'] = ricavi - costi  # current-period result (= Eccedenza/Perdita)
+
+    att = sum(bs.get(k, Decimal('0')) for k in ('sp01', 'sp02', 'sp03', 'sp04', 'sp05', 'sp06', 'sp07', 'sp08', 'sp09', 'sp10'))
+    pas = sum(bs.get(k, Decimal('0')) for k in ('sp11', 'sp12', 'sp13', 'sp14', 'sp15', 'sp16', 'sp17', 'sp18'))
+    plug = abs(att - pas)
+    tol = max(Decimal('1'), att.copy_abs() * Decimal('0.005'))
+    if att <= 0 or plug > tol:
+        raise ValueError(
+            f"verifica-segno: did not balance (attivo={att}, passivo={pas}, diff={plug})")
+
+    bs['totale_attivo'] = att
+    bs['totale_passivo'] = att
+    bs['_plug_residual'] = plug
+    # This sheet is deterministic, exact and already balanced (plug 0) with sp13 derived
+    # from the CE. Signal pdf_importer to SKIP the LLM-oriented declared-result reconcile:
+    # this layout books the PRIOR year's result in an equity account ("RISULTATO
+    # D'ESERCIZIO"), which _declared_control_totals would mistake for the period result
+    # and use to overwrite sp13 and inflate cash.
+    bs['_skip_declared_reconcile'] = True
+    logger.info(
+        f"verifica-segno parsed: attivo={att}, passivo={pas}, sp13={bs['sp13']}, "
+        f"clienti={bs.get('sp06a_crediti_clienti_breve')}, liquidità={bs.get('sp09')}, "
+        f"debiti={bs.get('sp16')}")
+    return dict(bs), dict(ce)
+
+
 def extract_situazione_contabile(file_path: str, return_prior: bool = False):
     """
     Extract IV CEE data from a Situazione Contabile PDF.
@@ -2871,6 +3137,20 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
     for page in doc:
         full_text += page.get_text() + "\n"
     doc.close()
+
+    # Dedicated by-sign contrapposte "bilancio di verifica" (accounts placed by sign of
+    # balance, same account on both sides). Tried FIRST because its coordinate parser
+    # reads this layout exactly and balances to plug 0, where the generic best-effort /
+    # CoGe-LLM lump the asset column and double-count cash. Falls through on a ValueError
+    # (not this layout, or it didn't balance) so nothing regresses.
+    if is_bilancio_verifica_segno(full_text):
+        try:
+            logger.info("Bilancio di verifica a sezioni contrapposte PER SEGNO detected")
+            vbs, vce = parse_bilancio_verifica_segno(file_path)
+            return (vbs, vce, None, None) if return_prior else (vbs, vce)
+        except Exception as vseg_err:
+            logger.info(f"verifica-segno parser declined ({type(vseg_err).__name__}: "
+                        f"{vseg_err}); falling back to standard routing")
 
     default_ce = False
     if is_ago_format(full_text):

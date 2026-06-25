@@ -41,3 +41,4 @@ Documentazione di progetto **aggiornata**. Gli artefatti storici/superati (desig
 | [README_DEPLOYMENT.md](deployment/README_DEPLOYMENT.md) | Procedura di deploy del frontend |
 | [PRODUCTION_CONFIG.md](deployment/PRODUCTION_CONFIG.md) | Configurazione di produzione (env, URL, porte) |
 | [NETLIFY_CHECKLIST.md](deployment/NETLIFY_CHECKLIST.md) | Checklist specifica Netlify |
+| [IFRAME_INTEGRATION.md](deployment/IFRAME_INTEGRATION.md) | Embedding dell'app via iframe (Formula Finance) + JWT Supabase `postMessage`, CORS, env |

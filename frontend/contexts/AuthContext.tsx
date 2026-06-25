@@ -39,12 +39,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   useEffect(() => {
-    const PARENT_ORIGIN = process.env.NEXT_PUBLIC_PARENT_ORIGIN || "";
+    // Accepts one origin or a comma-separated list (prod + staging parents).
+    const PARENT_ORIGINS = (process.env.NEXT_PUBLIC_PARENT_ORIGIN || "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
+    // Single configured origin → target postMessage precisely; multiple → "*"
+    // (the request carries no secret, only "REQUEST_AUTH_TOKEN").
+    const REQUEST_TARGET = PARENT_ORIGINS.length === 1 ? PARENT_ORIGINS[0] : "*";
 
     // Listen for JWT from parent iframe via postMessage
     const handleMessage = (event: MessageEvent) => {
       // Validate origin in production (skip if not configured)
-      if (PARENT_ORIGIN && event.origin !== PARENT_ORIGIN) return;
+      if (PARENT_ORIGINS.length && !PARENT_ORIGINS.includes(event.origin)) return;
 
       if (event.data?.type === "AUTH_TOKEN" && event.data?.token) {
         setToken(event.data.token);
@@ -83,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Request token from parent (in case we loaded after parent sent it)
     if (window.parent !== window) {
-      window.parent.postMessage({ type: "REQUEST_AUTH_TOKEN" }, PARENT_ORIGIN || "*");
+      window.parent.postMessage({ type: "REQUEST_AUTH_TOKEN" }, REQUEST_TARGET);
     }
 
     // When NOT in iframe (standalone dev mode): short timeout, backend uses DEV_USER_ID fallback

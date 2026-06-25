@@ -841,13 +841,24 @@ budget/
 │   ├── debug_*.py                  # Debug scripts
 │   └── migrate_*.py                # Database migration scripts
 │
-├── docs/                           # 📚 Documentation
+├── docs/                           # 📚 Documentation (see docs/README.md for the map)
+│   ├── import/                     # 📥 Import pipeline: overview + routing/balancing/quadratura
+│   ├── taxonomy/                   # IV-CEE schema + XBRL mapping
+│   ├── budget/                     # Forecasting + report
+│   └── deployment/                 # Deploy, prod config, iframe integration
+├── archive/                        # Superseded/historical docs (not maintained)
 ├── config.py                       # 🔧 SHARED: Configuration constants
 ├── requirements.txt                # Python dependencies (legacy)
 ├── README.md
 ├── CLAUDE.md                       # AI assistant instructions
 └── financial_analysis.db           # SQLite database
 ```
+
+> **Documentation map:** [`docs/README.md`](docs/README.md) lists every current
+> document and its scope. The authoritative sources are this `README.md`,
+> [`CLAUDE.md`](CLAUDE.md) (architecture/dev guide), and
+> [`docs/import/IMPORT-OVERVIEW.md`](docs/import/IMPORT-OVERVIEW.md) (import pipeline). Older notes that no
+> longer match the code live in [`archive/`](archive/).
 
 ### Architecture Overview
 

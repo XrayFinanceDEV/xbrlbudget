@@ -15,6 +15,11 @@ pipeline {
         COMPOSE_PROJECT_NAME = 'budget'
         COMPOSE_FILE = 'docker-compose.yml'
         PORT = '9090'
+        // Public (non-secret) allowed parent-iframe origins, comma-separated.
+        // Must be in environment{} so it is exported to the shell for
+        // `docker compose build` — compose resolves ${PARENT_ORIGIN} from the
+        // shell env / .env, NOT from .env.docker (that is only the backend env_file).
+        PARENT_ORIGIN = 'https://app.formulafinance.it,https://app.kpsfinanciallab.it'
         SUPABASE_JWT_SECRET = credentials('budget-supabase-jwt-secret')
         ANTHROPIC_API_KEY = credentials('budget-anthropic-api-key')
         ADMIN_API_KEY = credentials('budget-admin-api-key')
@@ -33,8 +38,8 @@ pipeline {
 SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 ADMIN_API_KEY=${ADMIN_API_KEY}
-PARENT_ORIGIN=https://app.formulafinance.it
-ALLOWED_ORIGINS=https://app.formulafinance.it
+PARENT_ORIGIN=${PARENT_ORIGIN}
+ALLOWED_ORIGINS=https://app.formulafinance.it,https://app.kpsfinanciallab.it
 MAX_COMPANIES_PER_USER=50
 PORT=9090
 """.stripIndent()

@@ -416,8 +416,32 @@ def import_pdf_balance_sheet(
                 prior_ce_data = _map_sc_keys(sc_prior_ce)
 
             if candidates:
-                # keep the cleaner extractor (smallest unclassified residual)
-                candidates.sort(key=lambda c: c[0])
+                # Pick the more COMPLETE extractor. `_plug_residual` alone is BLIND to
+                # under-extraction: the CoGe LLM can stochastically DROP a block of accounts
+                # and then force-balance via sp13 (residual ~0 → looks clean) while its total
+                # falls well short of the printed TOTALE (AITEC PROVVISORIO: CoGe 9.92M vs the
+                # declared 12.65M). The deterministic parser anchors to that printed total, so
+                # score PRIMARILY by the gap to the declared control total and use the residual
+                # only as the tiebreaker.
+                _decl_tot = None
+                try:
+                    from importers.pdf_extractor_llm import _declared_control_totals
+                    _dc0 = _declared_control_totals(file_path, text=ocr_text)
+                    _decl_tot = (_dc0.get('pareggio') or _dc0.get('passivo')
+                                 or _dc0.get('attivo'))
+                except Exception:
+                    _decl_tot = None
+
+                def _completeness_gap(bs):
+                    """Distance of a candidate's total from the declared control total.
+                    0 when the declared total is unknown or the gap is sub-2% noise — so a
+                    tiny declared-parse difference never overrides the residual tiebreaker."""
+                    if not _decl_tot or _decl_tot <= 0:
+                        return Decimal('0')
+                    gap = abs(_decl_tot - bs.get('totale_attivo', Decimal('0')))
+                    return gap if gap > _decl_tot * Decimal('0.02') else Decimal('0')
+
+                candidates.sort(key=lambda c: (_completeness_gap(c[1]), c[0]))
                 residual, balance_sheet_data, income_data, source = candidates[0]
                 _coge_ok = True
                 # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,

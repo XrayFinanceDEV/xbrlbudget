@@ -565,10 +565,15 @@ def _debt_type(desc_upper: str) -> str:
     """Typed-debt OIC sub-letter for a passivo debt line (a..g)."""
     if _kw_any(desc_upper, ['OBBLIGAZION']):
         return 'c'
-    if _kw_any(desc_upper, ['BANCH', 'MUTU', 'C/C PASSIV', 'SCOPERT']):
-        return 'a'
-    if _kw_any(desc_upper, ['ALTRI FINANZIAT', 'FINANZIAT', 'SOCI C/FINANZ', 'FACTOR']):
+    # Altri finanziatori / soci FIRST, so the generic FINANZ→banche rule below does not
+    # steal "FINANZIATORI" or "SOCI C/FINANZIAMENTO" (D.5, not D.4).
+    if _kw_any(desc_upper, ['ALTRI FINANZIAT', 'FINANZIAT', 'SOCI C/FINANZ', 'V/SOCI', 'FACTOR']):
         return 'b'
+    # Banks (D.4): incl. bank financings ("FINANZIAMENTO <banca>", "FINANZ.<banca>"),
+    # salvo-buon-fine (SBF) and bank-name loans that carry no literal "BANCA" keyword.
+    if _kw_any(desc_upper, ['BANCH', 'BANCAR', 'MUTU', 'C/C PASSIV', 'SCOPERT',
+                            'FINANZIAM', 'FINANZ', 'S.B.F', 'SBF']):
+        return 'a'
     if _kw_any(desc_upper, ['FORNITOR']):
         return 'd'
     if _kw_any(desc_upper, ['TRIBUTAR', 'ERARIO', 'IVA', 'IMPOST', 'F24', 'RITENUT']):
@@ -2638,6 +2643,14 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             if _kw_match(d, ['CAPITALE']):
                 return 'sp11', True
             return 'sp12', True
+        if tag in ('sp16', 'debt_bank', 'bank_avere'):
+            # Split debiti by OIC creditor type from the description (banche / fornitori /
+            # tributari / previdenza / ...) instead of collapsing everything into the sp16
+            # aggregate (which the UI then renders entirely under "altri debiti"). 'debt_bank'
+            # /'bank_avere' are already bank lines; otherwise read _debt_type. A recognised
+            # type stops the descent; an unknown ('g') keeps descending to find a typed child.
+            letter = 'a' if tag in ('debt_bank', 'bank_avere') else _debt_type(d.upper())
+            return 'sp16' + letter, letter != 'g'
         return tag, tag != 'sp16'
 
     def cl_cos(d):
@@ -2689,7 +2702,12 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             netted_contra += amt
         elif tag in ('sp11', 'sp12', 'sp14', 'sp15', 'sp18'):
             add(bs, tag, amt)
-        else:                                              # bank_avere / debt_bank / sp16 default
+        elif len(tag) == 5 and tag.startswith('sp16') and tag[4] in 'abcdefg':
+            # Typed debt: keep the aggregate sp16 (pareggio unchanged) AND emit the typed
+            # sub-field under its full DB name so it survives _map_sc_keys and shows up split.
+            add(bs, 'sp16', amt)
+            add(bs, _DEBT_FIELD['breve'][tag[4]], amt)
+        else:                                              # any unexpected tag → aggregate
             add(bs, 'sp16', amt)
 
     # --- CE ---

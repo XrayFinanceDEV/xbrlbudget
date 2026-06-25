@@ -401,6 +401,13 @@ Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor abo
   field — no per-gestionale chart-of-accounts mapping). Fondi ammortamento are netted off assets, the
   current-year result is taken from the declared pareggio gap, and any residual from imperfect parsing is
   plugged into sp09/sp16 with a `BILANCIO NON QUADRATO` warning for manual correction in **Rettifiche**.
+  - **Typed debiti split (2026-06-25):** the best-effort passivo classifier (`cl_pas`) now resolves each
+    debt mastro's OIC creditor type via `_debt_type` (banche/altri-finanz/obbligazioni/fornitori/tributari/
+    previdenza/altri) and emits the typed sub-field (sp16a..g, full DB name) ALONGSIDE the aggregate sp16 —
+    instead of collapsing every debt into the aggregate, which the UI then renders entirely under "Altri
+    debiti" (AITEC PROVVISORIO: 10.3M all in altri). The aggregate is unchanged (Σ typed == sp16) so the
+    pareggio is untouched; sub-fields are display-only. `_debt_type` also routes bank financings
+    ("FINANZIAMENTO <banca>", "FINANZ.<banca>", SBF) to banche, with soci/altri-finanziatori checked first.
   - **Gross/net anchoring** (`netted_contra`): when fondi ammortamento / svalutazione crediti are listed as
     separate PASSIVO accounts (gross presentation), the declared TOTALE ATTIVO / pareggio is GROSS. The
     netted contra mass is accumulated and subtracted from `iv_total`, so the IV-CEE NET total matches the
@@ -540,6 +547,16 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
   FAILURE, not a pass (without this, att==pas==0 gives sbilancio 0 → falsely "quadra", which hid the empty
   extractions of misrouted contrapposte files). `quadra` requires `not is_empty and not masked`. Used as a
   unified diagnostic in `pdf_importer` for ALL routes and as the harness's pass/fail signal.
+- **Route-C extractor selection by completeness (2026-06-25):** `pdf_importer` runs BOTH the CoGe LLM and
+  the deterministic best-effort parser and keeps the better candidate. The score is now PRIMARILY the gap
+  between each candidate's `totale_attivo` and the **declared control total** (`_declared_control_totals`
+  pareggio/passivo/attivo), with `_plug_residual` only as the tiebreaker. Reason: `_plug_residual` alone is
+  blind to under-extraction — the CoGe LLM (Haiku) can stochastically DROP a block of accounts and then
+  force-balance via sp13 (residual ~0 → looks clean) while its total falls well short of the printed TOTALE
+  (AITEC PROVVISORIO: CoGe 9.92M vs declared 12.65M, so the deterministic parser, which anchors to the
+  printed total AND now splits debiti, correctly wins). The gap is ignored below 2% of the declared total so
+  ordinary noise still defers to the residual tiebreaker; when no declared total is found, behaviour is the
+  old residual-only selection (no regression).
 - **Trial-balance import is never hard-blocked** (`pdf_importer`): a readable route-C situazione
   contabile ALWAYS imports. The route now tries the dedicated **CoGe LLM extractor first**
   (`extract_trial_balance_with_llm`, which DOES read CoGe account lists); when that is unavailable or

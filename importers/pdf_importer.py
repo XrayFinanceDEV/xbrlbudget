@@ -5,6 +5,7 @@ Uses PyMuPDF + Claude Haiku 4.5 (~5s). Requires ANTHROPIC_API_KEY.
 """
 
 import os
+import re
 import logging
 from typing import Dict, Any, Optional
 from decimal import Decimal
@@ -21,6 +22,29 @@ logger = logging.getLogger(__name__)
 class PDFImportError(Exception):
     """Exception raised when PDF import fails."""
     pass
+
+
+def _is_aggregated_summary(text: str) -> bool:
+    """True when the document carries NO legal IV-CEE substructure — only top-level
+    macro-voci (e.g. "Immobilizzazioni: 2.406.946", "B) Patrimonio netto: ..."), with
+    no roman-numeral sub-items, no "esigibili entro/oltre l'esercizio", and no account
+    codes. These are over-aggregated riepiloghi (often AI-generated, e.g. the LUGS /
+    FINALE_CEE test fixtures) that are NOT an importable art. 2424/2425 schema — so the
+    import should say "formato non supportato" rather than the cryptic "does not balance".
+
+    Used ONLY at the validate_balance failure point (a file that already balances never
+    reaches it), so this can never reclassify a correctly-imported bilancio. Gestionali
+    with a real (even abbreviated) schema always carry roman numerals / "esigibili" /
+    account codes, so they keep the "BILANCIO NON QUADRATO" honest-fail path.
+    """
+    if not text:
+        return False
+    # Roman-numeral legal items II..X, optionally prefixed by the section letter (A.II, B) II).
+    romans = re.findall(
+        r'(?im)^\s*(?:[A-D][.\)]\s*)?(?:II|III|IV|VIII|VII|VI|IX|V|X)\b', text)
+    has_esigibili = bool(re.search(r'esigibili\s+(?:entro|oltre)', text, re.I))
+    has_codes = bool(re.search(r'(?m)^\s*\d{4,}\b', text))
+    return len(romans) < 3 and not has_esigibili and not has_codes
 
 
 # Soglia oltre cui un plug residuo del parser best-effort rende il bilancio inaffidabile
@@ -226,7 +250,7 @@ def import_pdf_balance_sheet(
         prior_ce_data = None
 
         # Step 1a: classify the document into a macro-area and pick the extraction
-        # route (see importers/bilancio_classifier.py and Test/IMPORT-ROUTING-TAXONOMY.md).
+        # route (see importers/bilancio_classifier.py and docs/import/IMPORT-ROUTING-TAXONOMY.md).
         #   C  → ROUTE_TRIAL : deterministic situazione-contabile parser (balance via pareggio)
         #   A/B → ROUTE_IVCEE : IV-CEE extractor anchored on voce totals (keeps Assets=Liab+Equity)
         # This replaces the old binary is_trial_balance check: it routes IV-CEE bilanci
@@ -392,8 +416,32 @@ def import_pdf_balance_sheet(
                 prior_ce_data = _map_sc_keys(sc_prior_ce)
 
             if candidates:
-                # keep the cleaner extractor (smallest unclassified residual)
-                candidates.sort(key=lambda c: c[0])
+                # Pick the more COMPLETE extractor. `_plug_residual` alone is BLIND to
+                # under-extraction: the CoGe LLM can stochastically DROP a block of accounts
+                # and then force-balance via sp13 (residual ~0 → looks clean) while its total
+                # falls well short of the printed TOTALE (AITEC PROVVISORIO: CoGe 9.92M vs the
+                # declared 12.65M). The deterministic parser anchors to that printed total, so
+                # score PRIMARILY by the gap to the declared control total and use the residual
+                # only as the tiebreaker.
+                _decl_tot = None
+                try:
+                    from importers.pdf_extractor_llm import _declared_control_totals
+                    _dc0 = _declared_control_totals(file_path, text=ocr_text)
+                    _decl_tot = (_dc0.get('pareggio') or _dc0.get('passivo')
+                                 or _dc0.get('attivo'))
+                except Exception:
+                    _decl_tot = None
+
+                def _completeness_gap(bs):
+                    """Distance of a candidate's total from the declared control total.
+                    0 when the declared total is unknown or the gap is sub-2% noise — so a
+                    tiny declared-parse difference never overrides the residual tiebreaker."""
+                    if not _decl_tot or _decl_tot <= 0:
+                        return Decimal('0')
+                    gap = abs(_decl_tot - bs.get('totale_attivo', Decimal('0')))
+                    return gap if gap > _decl_tot * Decimal('0.02') else Decimal('0')
+
+                candidates.sort(key=lambda c: (_completeness_gap(c[1]), c[0]))
                 residual, balance_sheet_data, income_data, source = candidates[0]
                 _coge_ok = True
                 # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,
@@ -486,6 +534,17 @@ def import_pdf_balance_sheet(
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
         if not mapper.validate_balance(balance_sheet_data):
+            # Honest failure messaging: an over-aggregated macro summary (no IV-CEE
+            # substructure) is a FORMAT problem, not a balancing one — say so clearly
+            # instead of the cryptic "does not balance". Real schemas (incl. drafts that
+            # simply don't tie at source) keep the balance message for Rettifiche triage.
+            if not is_trial_balance and _is_aggregated_summary(sample_text):
+                raise PDFImportError(
+                    "Formato non supportato: il documento è un riepilogo aggregato per "
+                    "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
+                    "importabile. Carica il prospetto di Stato Patrimoniale e Conto "
+                    "Economico completo."
+                )
             raise PDFImportError("Balance sheet does not balance (Assets != Liabilities + Equity)")
 
         # Unified quadratura diagnostic across ALL routes (shared IV-CEE engine):

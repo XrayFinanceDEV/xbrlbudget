@@ -925,10 +925,13 @@ EXTRACTION RULES:
 - Do NOT flip signs - preserve the original sign from the PDF (e.g., losses, negative reserves)
 
 CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
-- sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across ALL crediti categories (verso clienti, tributari, verso altri, etc.)
-  PLUS "imposte anticipate" (deferred tax assets) if shown as a separate line within crediti
-- sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across ALL crediti categories
-- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". If they don't, add the difference to sp06.
+- ONLY the C.II) Crediti of "Attivo circolante" go here. NEVER include B.III.2 "Crediti" (immobilized
+  financial receivables): those belong to sp04_immob_finanziarie. Counting a B.III.2 credito here too
+  double-counts it (it is already inside Immobilizzazioni) and unbalances the sheet by that amount.
+- sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across the C.II crediti categories (verso clienti, tributari, verso altri, etc.)
+  PLUS "imposte anticipate" (deferred tax assets) if shown as a separate line within C.II crediti
+- sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across the C.II crediti categories (Attivo circolante only)
+- CRITICAL: sp06 + sp07 MUST equal "Totale crediti" of C.II (Attivo circolante). If they don't, add the difference to sp06.
   Common cause: "imposte anticipate" is a separate line within crediti that must be included in sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
@@ -1003,10 +1006,13 @@ EXTRACTION RULES:
 - Do NOT flip signs - preserve the original sign from the PDF (e.g., losses, negative reserves)
 
 CREDITI (in ATTIVO section, BEFORE "Totale attivo"):
-- sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across ALL crediti categories (verso clienti, tributari, verso altri, etc.)
-  PLUS "imposte anticipate" (deferred tax assets) if shown as a separate line within crediti
-- sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across ALL crediti categories
-- CRITICAL: sp06 + sp07 MUST equal "Totale crediti". If they don't, add the difference to sp06.
+- ONLY the C.II) Crediti of "Attivo circolante" go here. NEVER include B.III.2 "Crediti" (immobilized
+  financial receivables): those belong to sp04_immob_finanziarie. Counting a B.III.2 credito here too
+  double-counts it (it is already inside Immobilizzazioni) and unbalances the sheet by that amount.
+- sp06_crediti_breve = SUM of ALL "esigibili entro l'esercizio successivo" amounts across the C.II crediti categories (verso clienti, tributari, verso altri, etc.)
+  PLUS "imposte anticipate" (deferred tax assets) if shown as a separate line within C.II crediti
+- sp07_crediti_lungo = SUM of ALL "esigibili oltre l'esercizio successivo" amounts across the C.II crediti categories (Attivo circolante only)
+- CRITICAL: sp06 + sp07 MUST equal "Totale crediti" of C.II (Attivo circolante). If they don't, add the difference to sp06.
   Common cause: "imposte anticipate" is a separate line within crediti that must be included in sp06.
 - If crediti are not split by maturity, put the TOTAL Crediti in sp06_crediti_breve and sp07=0
 
@@ -1530,6 +1536,7 @@ def _values_for_label(lines, idx: int, label_end: int):
         if v is not None:
             nums.append(v)
     j = idx + 1
+    skipped_total = False
     while len(nums) < 2 and j < len(lines):
         s = lines[j].strip()
         if not s:
@@ -1537,6 +1544,15 @@ def _values_for_label(lines, idx: int, label_end: int):
             continue
         v = _parse_it_number(s)
         if v is None:
+            # In detail / Zucchetti layouts the voce value can sit AFTER an interposed
+            # "Totale <voce>" line (the pre-filter reorders the detail block so the
+            # numbers land below the "Totale" structural line). Skip ONE such line
+            # before giving up, so the voce total stays reachable (e.g. budget_331:
+            # "VIII - Utili portati" \n "Totale VIII - Utili portati" \n "(1.520)").
+            if not nums and not skipped_total and s[:6].lower() == 'totale':
+                skipped_total = True
+                j += 1
+                continue
             break
         nums.append(v)
         j += 1
@@ -1561,19 +1577,30 @@ def _scan_labeled(text: str, specs):
     return out
 
 
-# Roman-numeral PN reserve lines (art. 2424 A.II..A.X). The dash after the numeral
-# disambiguates 'V'/'VI'/'VII'/'VIII' (e.g. '^V\s*[-–]' cannot match 'VI - ...').
+# Roman-numeral PN reserve lines (art. 2424 A.II..A.X). The numeral is followed by a
+# separator (dash OR ')') OR just whitespace — `(?:\s*[-–)]\s*|\s+)` — so layouts that
+# print "IV   Riserva legale" with NO separator (budget_315) are matched too. The required
+# whitespace still disambiguates 'V'/'VI'/'VII'/'VIII' ('VII ...' cannot match the 'VI'
+# spec because the char after 'VI' is 'I', not whitespace). An optional 'A.' letter prefix
+# is allowed for gestionali that print the legal path-code ('A.VIII) Utili...' — budget_340/341).
 _PN_DETAIL_SPECS = [
-    (re.compile(r'^\s*II\s*[-–]\s*Riserva da soprapprezzo', re.I), 'sp12a_riserva_sovrapprezzo'),
-    (re.compile(r'^\s*III\s*[-–]\s*Riserve di rivalutazione', re.I), 'sp12b_riserve_rivalutazione'),
-    (re.compile(r'^\s*IV\s*[-–]\s*Riserva legale', re.I), 'sp12c_riserva_legale'),
-    (re.compile(r'^\s*V\s*[-–]\s*Riserve statutarie', re.I), 'sp12d_riserve_statutarie'),
-    (re.compile(r'^\s*VI\s*[-–]\s*Altre riserve', re.I), 'sp12e_altre_riserve'),
-    (re.compile(r'^\s*VII\s*[-–]\s*Riserva per operazioni di copertura', re.I), 'sp12f_riserva_copertura_flussi'),
-    (re.compile(r'^\s*VIII\s*[-–]\s*Util.*portat', re.I), 'sp12g_utili_perdite_portati'),
-    (re.compile(r'^\s*X\s*[-–]\s*Riserva negativa per azioni proprie', re.I), 'sp12h_riserva_neg_azioni_proprie'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*II(?:\s*[-–)]\s*|\s+)Riserva da soprapprezzo', re.I), 'sp12a_riserva_sovrapprezzo'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*III(?:\s*[-–)]\s*|\s+)Riserve di rivalutazione', re.I), 'sp12b_riserve_rivalutazione'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*IV(?:\s*[-–)]\s*|\s+)Riserva legale', re.I), 'sp12c_riserva_legale'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*V(?:\s*[-–)]\s*|\s+)Riserve statutarie', re.I), 'sp12d_riserve_statutarie'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*VI(?:\s*[-–)]\s*|\s+)Altre riserve', re.I), 'sp12e_altre_riserve'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*VII(?:\s*[-–)]\s*|\s+)Ris\w*\.?\s+per\s+operaz', re.I), 'sp12f_riserva_copertura_flussi'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*VIII(?:\s*[-–)]\s*|\s+)Util.*portat', re.I), 'sp12g_utili_perdite_portati'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*X(?:\s*[-–)]\s*|\s+)Riserva negativa per azioni proprie', re.I), 'sp12h_riserva_neg_azioni_proprie'),
 ]
-_PN_TOTAL_SPECS = [(re.compile(r'^\s*Totale patrimonio netto', re.I), 'pn_total')]
+# Declared PN control total. Besides the canonical "Totale patrimonio netto", accept
+# the gestionale variants "A TOTALE PATRIMONIO NETTO" (budget_341) and the section
+# header "A) Patrimonio netto" that itself carries the subtotal (budget_340).
+_PN_TOTAL_SPECS = [
+    (re.compile(r'^\s*Totale patrimonio netto', re.I), 'pn_total'),
+    (re.compile(r'^\s*[A-Z]\s+Totale patrimonio netto', re.I), 'pn_total'),
+    (re.compile(r'^\s*[A-Z][.\)]\s*Patrimonio netto\b', re.I), 'pn_total'),
+]
 
 # Personnel split (B.9 a/b/c/e). The SPECIFIC single-letter lines only: the combined
 # "c), d), e) trattamento ..." header starts "c)," so it cannot match 'c)\s*trattamento'.
@@ -3000,7 +3027,31 @@ def extract_pdf_both_years_with_llm(
             "Prior-year column appears ABSENT (monocolumn PDF / fabricated prior): "
             "discarding prior_bs and prior_ce."
         )
-        return current_bs, current_ce, {}, {}
+        # Empty the prior but DO NOT return early: the current column still needs the
+        # Step 5-7 validators + detail reconciler (so a monocolumn provvisorio like
+        # budget_315 gets its dropped "VIII Utili portati a nuovo" reserve recovered).
+        # Steps below no-op on the now-empty prior dicts.
+        prior_bs, prior_ce = {}, {}
+
+    # Step 4c: ZEROED CURRENT COLUMN (draft / opening exports). Some "provvisorio" PDFs
+    # render the current-year column entirely at 0,00 while the only real figures sit in
+    # the prior column (budget_314: "BILANCIO AL 31/12/2025" with the 2025 column all zero
+    # and every amount in 2024). The current extraction is then empty (totale_attivo ~ 0)
+    # and the file would import as VUOTO. Promote the valued prior column to current and
+    # drop the (now redundant) prior, so the real data is imported instead of nothing.
+    # Symmetric to Step 4b and mutually exclusive with it (that path requires the current
+    # column to HAVE activity), so the two can never both fire.
+    _cur_attivo = current_bs.get('totale_attivo', Decimal('0'))
+    _cur_ricavi = current_ce.get('ce01_ricavi_vendite', Decimal('0'))
+    _pri_attivo = prior_bs.get('totale_attivo', Decimal('0'))
+    if (abs(_cur_attivo) < Decimal('1') and abs(_cur_ricavi) < Decimal('1')
+            and abs(_pri_attivo) >= Decimal('1')):
+        logger.warning(
+            f"Current-year column is ZEROED (draft/opening export) while prior is valued "
+            f"(attivo {_pri_attivo}): promoting prior column to current."
+        )
+        current_bs, current_ce = prior_bs, prior_ce
+        prior_bs, prior_ce = {}, {}
 
     # Step 5: Fold the result into totale_passivo when the layout reports it net of
     # the year's result (sezioni contrapposte / dettaglio voci); then validate crediti;

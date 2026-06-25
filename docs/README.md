@@ -1,35 +1,44 @@
-# Documentation Map
+# Documentazione XBRL Budget
 
-This index lists the **current** documentation and where each topic lives. Docs
-are organized so that behaviour is described in one authoritative place that
-tracks the code; superseded material lives in [`archive/`](archive/).
+Documentazione di progetto **aggiornata**. Gli artefatti storici/superati (design pre-implementazione, snapshot di sessione, dump di test) stanno in [`../archive/`](../archive/README.md), non qui.
 
-## Authoritative sources (repo root)
+> Le istruzioni operative per l'AI assistant e le note granulari per-parser stanno in [`../CLAUDE.md`](../CLAUDE.md).
 
-| Document | Scope |
-|----------|-------|
-| [`README.md`](../README.md) | Project overview, feature list, quick-start, deployment. Start here. |
-| [`CLAUDE.md`](../CLAUDE.md) | Architecture & developer guide: shared modules, DB schema, API design, auth/multi-tenancy, calculators, conventions. Single source of truth for code behaviour. |
-| [`IMPORT-OVERVIEW.md`](../IMPORT-OVERVIEW.md) | The import pipeline end-to-end: macro-area router (routes A/B/C/OTHER), LLM vs deterministic extraction, IV-CEE leveling, quadratura / anti-masking, CE↔SP identity. |
+## Import bilanci (PDF / XBRL) — [`import/`](import/)
 
-## Topic guides (`docs/`)
+| Doc | Cosa copre |
+|-----|------------|
+| [IMPORT-OVERVIEW.md](import/IMPORT-OVERVIEW.md) | Panoramica autorevole dell'architettura di import: router, rotte, validatori, anti-masking, CLI |
+| [IMPORT-ROUTING-TAXONOMY.md](import/IMPORT-ROUTING-TAXONOMY.md) | Tassonomia delle 4 rotte (A sintetico / B dettagliato / C verifica / OTHER) + `bilancio_classifier` |
+| [IMPORT-BALANCING-SCHEME.md](import/IMPORT-BALANCING-SCHEME.md) | Schema di quadratura L0→L5 + identità CE↔SP (`enforce_ce_sp_identity`) |
+| [IMPORT-QUADRATURA-ENGINE.md](import/IMPORT-QUADRATURA-ENGINE.md) | Motore IV-CEE condiviso (`iv_cee_hierarchy`) + anti-masking |
+| [TRIAL-BALANCE-IMPORT.md](import/TRIAL-BALANCE-IMPORT.md) | Parser universale situazioni contabili (rotta C) per sottototali |
 
-| Document | Scope |
-|----------|-------|
-| [`TASSONOMIA.md`](TASSONOMIA.md) | IV-CEE field reference: `sp01`–`sp18`, `ce01`–`ce20` and their detail breakdowns, with XBRL tag coverage (2011–2018). |
-| [`TRIAL-BALANCE-IMPORT.md`](TRIAL-BALANCE-IMPORT.md) | Route-C (situazione contabile / bilancio di verifica) strategy: subtotal-based mapping to IV-CEE rather than per-GL-account. |
-| [`FORECASTING_GUIDE.md`](FORECASTING_GUIDE.md) | End-user guide to budget scenarios: assumptions per year, cost splits, working capital, reviewing forecast output. |
-| [`IFRAME_INTEGRATION.md`](IFRAME_INTEGRATION.md) | Embedding the app in Formula Finance via iframe + Supabase JWT `postMessage`; CORS and env vars. |
-| [`FINAL-REPORT-PDF.md`](FINAL-REPORT-PDF.md) | Scope/gap analysis of the PDF report output vs the on-screen `/report`. |
+## Tassonomia & mapping XBRL — [`taxonomy/`](taxonomy/)
 
-## Archive (`docs/archive/`)
+| Doc | Cosa copre |
+|-----|------------|
+| [TASSONOMIA.md](taxonomy/TASSONOMIA.md) | Schema bilancio IV-CEE (art. 2424/2425): sp01–sp18, ce01–ce20, cross-check |
+| [XBRL_PCI_IV_CEE_Mapping.md](taxonomy/XBRL_PCI_IV_CEE_Mapping.md) | Mapping tassonomia XBRL PCI ↔ struttura IV-CEE |
+| [SCHEMA_ENHANCEMENTS.md](taxonomy/SCHEMA_ENHANCEMENTS.md) | Colonne di dettaglio del DB (sottovoci sp/ce) |
+| [PRIORITY_MAPPING_GUIDE.md](taxonomy/PRIORITY_MAPPING_GUIDE.md) | Risoluzione dei tag XBRL per priorità (v1→v2→detail→reconciliation) |
+| [VBA_AGGREGATE_APPROACH.md](taxonomy/VBA_AGGREGATE_APPROACH.md) | Approccio a totali aggregati per l'import XBRL robusto |
+| [XBRL_AGGREGATE_FALLBACK_EXPLANATION.md](taxonomy/XBRL_AGGREGATE_FALLBACK_EXPLANATION.md) | Perché il fallback aggregato può mostrare "somma voci = €0" |
 
-Historical and superseded documents — kept for provenance, **not** maintained.
-Do not treat them as current; their claims may contradict the code. See
-[`archive/README.md`](archive/README.md) for what each was and which current
-document replaced it.
+## Budget & forecasting — [`budget/`](budget/)
 
-## Reference data & samples
+| Doc | Cosa copre |
+|-----|------------|
+| [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) | Guida utente al modulo Budget & Forecasting (workflow UI) |
+| [TEST_BUDGET_API.md](budget/TEST_BUDGET_API.md) | Riferimento/test degli endpoint REST degli scenari budget |
+| [FINAL-REPORT-PDF.md](budget/FINAL-REPORT-PDF.md) | Specifica del report PDF (gap analysis vs report di riferimento) |
 
-- [`examples/`](examples/) — sample bilanci (XBRL/PDF) across gestionali (Zucchetti, Datev/Koinos, Dylog, DEPI, …).
-- `kps_extracted.md` / `kps_extracted.json` — a worked extraction example.
+## Deployment — [`deployment/`](deployment/)
+
+| Doc | Cosa copre |
+|-----|------------|
+| [DEPLOYMENT_SUMMARY.md](deployment/DEPLOYMENT_SUMMARY.md) | Checklist deploy backend + frontend |
+| [README_DEPLOYMENT.md](deployment/README_DEPLOYMENT.md) | Procedura di deploy del frontend |
+| [PRODUCTION_CONFIG.md](deployment/PRODUCTION_CONFIG.md) | Configurazione di produzione (env, URL, porte) |
+| [NETLIFY_CHECKLIST.md](deployment/NETLIFY_CHECKLIST.md) | Checklist specifica Netlify |
+| [IFRAME_INTEGRATION.md](deployment/IFRAME_INTEGRATION.md) | Embedding dell'app via iframe (Formula Finance) + JWT Supabase `postMessage`, CORS, env |

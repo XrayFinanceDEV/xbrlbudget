@@ -842,8 +842,11 @@ budget/
 │   └── migrate_*.py                # Database migration scripts
 │
 ├── docs/                           # 📚 Documentation (see docs/README.md for the map)
-│   └── archive/                    # Superseded/historical docs (not maintained)
-├── IMPORT-OVERVIEW.md              # 📥 Import pipeline: source of truth
+│   ├── import/                     # 📥 Import pipeline: overview + routing/balancing/quadratura
+│   ├── taxonomy/                   # IV-CEE schema + XBRL mapping
+│   ├── budget/                     # Forecasting + report
+│   └── deployment/                 # Deploy, prod config, iframe integration
+├── archive/                        # Superseded/historical docs (not maintained)
 ├── config.py                       # 🔧 SHARED: Configuration constants
 ├── requirements.txt                # Python dependencies (legacy)
 ├── README.md
@@ -854,8 +857,8 @@ budget/
 > **Documentation map:** [`docs/README.md`](docs/README.md) lists every current
 > document and its scope. The authoritative sources are this `README.md`,
 > [`CLAUDE.md`](CLAUDE.md) (architecture/dev guide), and
-> [`IMPORT-OVERVIEW.md`](IMPORT-OVERVIEW.md) (import pipeline). Older notes that no
-> longer match the code live in [`docs/archive/`](docs/archive/).
+> [`docs/import/IMPORT-OVERVIEW.md`](docs/import/IMPORT-OVERVIEW.md) (import pipeline). Older notes that no
+> longer match the code live in [`archive/`](archive/).
 
 ### Architecture Overview
 

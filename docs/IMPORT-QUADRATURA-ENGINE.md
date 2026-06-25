@@ -1,16 +1,12 @@
-# Sistema di importazione bilanci — routing, motore IV-CEE e quadratura
+# Sistema di importazione bilanci — motore IV-CEE e quadratura
 
-> Specifica e changelog delle modifiche (sessione 2026-06-15).
-> Complementare a [`IMPORT-ROUTING-TAXONOMY.md`](IMPORT-ROUTING-TAXONOMY.md) (le 4 macro-aree)
-> e alle note in `CLAUDE.md` (sezione *PDF Import*).
+> Specifica del motore condiviso e della quadratura (sessioni 2026-06-15 → 2026-06-25).
+> Complementare a [`IMPORT-ROUTING-TAXONOMY.md`](IMPORT-ROUTING-TAXONOMY.md) (il routing nelle 4 rotte)
+> e a [`IMPORT-BALANCING-SCHEME.md`](IMPORT-BALANCING-SCHEME.md) (lo schema di quadratura L0→L5).
+> Note granulari per-parser nel `CLAUDE.md` (sezione *PDF Import*).
 > Obiettivo: gestire la quadratura **per ogni bilancio**, in modo generale, non con patch per-file.
 
 ---
-
-
- 342 (provvisorio parziale): il CE diverge dal gap SP (100k vs 168k) → la validazione lo respinge correttamente, importa col vecchio comportamento.
-- 405/338 (slash gross interleaved): formato più ostico, lo split fisico delle colonne va riscritto — è un secondo intervento dedicato, te l'avevo segnalato come fuori dal "quick win" dei dotted.
-- 330/376: layout non leggibili deterministicamente → per-design vanno al fallback LLM (CLAUDE.md). Forzarli nel parser C produrrebbe dati sbagliati.
 
 ## 1. Principio architetturale
 
@@ -56,14 +52,24 @@ sotto-conti (es. "TERRENI E FABBRICATI"), perché in modalità *flat* (A/B) ciò
 conteggio. I sotto-conti li gestisce la discesa gerarchica nel ramo C.
 
 ### 2.2 Motore — `importers/iv_cee_hierarchy.py`
-- `normalize(text)` — lowercase, accenti rimossi, punteggiatura→spazio.
-- `resolve(desc, side, statement)` — **classificatore condiviso** descrizione→nodo IV-CEE.
-  Prudente: ritorna `None` se incerto (così la discesa gerarchica scende nei figli invece di
-  misroutare). Match: alias esatto → alias più lungo contenuto.
-- `classify_for_reclassify(desc)` — adattatore `(db_field, specific)` per `_be_reclassify`.
-- `aggregate_flat(items)` — aggrega voci già a livello di legge (aree A/B/XBRL): somma le foglie,
-  salta i nodi-totale (anti doppio-conteggio), applica la scadenza entro/oltre a crediti/debiti.
-- `check_quadratura(bs, ce)` — il controllo unico (vedi §3).
+- `load_tree()` — carica `data/iv_cee_tree.json` e costruisce l'indice degli alias.
+- `normalize(text)` — unicode-normalize, lowercase, accenti rimossi, punteggiatura→spazio.
+- `resolve(desc, side=None, statement=None) -> Optional[Node]` — **classificatore condiviso**
+  descrizione→nodo IV-CEE. Prudente: ritorna `None` se incerto (così la discesa gerarchica scende
+  nei figli invece di misroutare). Match: alias esatto → alias più lungo contenuto.
+  **NON** usarlo per ribaltare il LATO attivo/passivo di una riga di verifica: la **colonna è verità**
+  (provato e revertito, vedi §5).
+- `classify_for_reclassify(desc, side=None) -> (Optional[str], bool)` — adattatore `(db_field, specific)`
+  per `situazione_contabile_parser._be_reclassify`.
+- `aggregate_flat(items) -> AggResult` — aggrega voci già a livello di legge (aree A/B/XBRL): somma le
+  foglie, salta i nodi-totale (anti doppio-conteggio), applica la scadenza entro/oltre a crediti/debiti.
+- `check_quadratura(bs, ce=None, tol=Decimal("0.01")) -> Quadratura` — il controllo unico (vedi §3).
+- `reconcile_ivcee_balance(bs, declared=None, label="", cap_frac=Decimal("0.05")) -> bs` — **route A/B**:
+  ancora al `TOTALE ATTIVO` dichiarato e tampona il piccolo lato corto (sp09 se attivo corto, sp16 se
+  passivo corto). Se il gap supera `cap_frac` (5%) → lascia intatto e fallisce onestamente (errore
+  strutturale, non si maschera). Espone `_plug_residual`.
+- `enforce_ce_sp_identity(bs, ce, label="", tol=None, prefer="sp13", declared=None) -> bs` — **tutte le
+  rotte**: forza `utile_CE == sp13` (vedi `IMPORT-BALANCING-SCHEME.md` L2-bis per la logica dell'arbitro).
 
 ### 2.3 Harness di misura — `Test/_quadratura_harness.py`
 Misura il **tasso di quadratura** sul corpus. Scansione **ricorsiva** + **dedup per hash** di
@@ -79,15 +85,32 @@ Colonne: `area | route | mode | quadra(SI/NO/MASK) | plug | note`.
 
 ## 3. Quadratura e anti-masking (il cuore)
 
-`check_quadratura(bs, ce)` verifica:
-1. **Attivo == Passivo** (±0,01) sui 18 aggregati SP.
+`check_quadratura(bs, ce=None, tol=Decimal("0.01"))` verifica:
+1. **Attivo == Passivo** (±`tol`) sui 18 aggregati SP.
 2. **Utile CE == sp13** — cross-check che `validate_balance` NON faceva.
 3. **Anti-masking**: legge `bs['_plug_residual']` (la massa NON classificata che il best-effort
-   tampona in sp09/sp16). Se il plug supera **1% del totale** → `masked=True`: il bilancio "quadra"
-   solo per costruzione, la composizione è inaffidabile.
+   tampona in sp09/sp16). Se il plug supera `_MASK_PCT` = **1% del totale** → `masked=True`: il
+   bilancio "quadra" solo per costruzione, la composizione è inaffidabile.
+4. **Vuoto**: `totale_attivo ~ 0` → `is_empty=True`. Un'estrazione vuota è un **FALLIMENTO**, non un
+   pass (senza questo, att==pas==0 darebbe sbilancio 0 → falso "quadra", che nascondeva le estrazioni
+   vuote dei contrapposte misroutati).
 
-Ritorna `Quadratura(totale_attivo, totale_passivo, sbilancio, quadra, utile_ce, sp13,
-utile_match, plug_residual, masked, warnings)`.
+`quadra` richiede `not is_empty and not masked` (oltre ad attivo==passivo). Ritorna la NamedTuple:
+
+```python
+class Quadratura(NamedTuple):
+    totale_attivo: Decimal
+    totale_passivo: Decimal
+    sbilancio: Decimal          # attivo - passivo
+    quadra: bool
+    utile_ce: Optional[Decimal]
+    sp13: Decimal
+    utile_match: bool
+    plug_residual: Decimal      # massa non classificata tamponata in sp09/sp16
+    masked: bool                # quadra solo grazie al plug (composizione errata)
+    is_empty: bool              # totale attivo ~ 0 → NON quadra
+    warnings: List[str]
+```
 
 **Perché serviva**: il parser best-effort contrapposte impone `totale_attivo == totale_passivo`
 per costruzione e assorbe il residuo in sp09/sp16. Quindi sia `validate_balance` sia un controllo
@@ -138,6 +161,16 @@ li rifiuta (→ LLM/onesto) o, per plug minori, li importa con flag Rettifiche.
 > Il run completo con `--llm` (aree A/B) misura il resto del corpus; i numeri vanno aggiornati qui
 > quando disponibili. `python Test/_quadratura_harness.py Test --llm`.
 
+> **CAVEAT — l'harness è PESSIMISTA, non confonderlo con "importa?".** L'harness esegue
+> `extract → check_quadratura` ma NON le due fasi di produzione che `pdf_importer` esegue subito dopo:
+> `reconcile_ivcee_balance` (ancora al Totale attivo dichiarato, tampona il piccolo arrotondamento →
+> flag Rettifiche) e `enforce_ce_sp_identity`. Quindi un "NO" dell'harness NON è "non importa": molti
+> file A/B segnati NO **importano** in app (es. budget_152/254/289/336). L'harness è autorevole solo
+> per il **masking** (plug > 1% su route C). Inoltre l'estrazione A/B è **non deterministica** (rumore
+> LLM): SI/NO può oscillare tra run sullo stesso file. Per rispondere a "questo PDF importa?" gira il
+> percorso completo di produzione (`extract → reconcile_ivcee_balance → enforce_ce_sp_identity →
+> validate_balance`), non un singolo run dell'harness.
+
 ---
 
 ## 7. Aperto / da fare
@@ -156,5 +189,14 @@ li rifiuta (→ LLM/onesto) o, per plug minori, li importa con flag Rettifiche.
 
 | Parametro | File | Default | Effetto |
 |---|---|---|---|
-| `SC_PLUG_REJECT_PCT` | `importers/pdf_importer.py` | `0.20` | sopra → rifiuta best-effort (LLM/onesto); sotto → import con flag Rettifiche |
-| `_MASK_PCT` | `importers/iv_cee_hierarchy.py` | `0.01` | soglia diagnostica `masked` in `check_quadratura` |
+| `SC_PLUG_REJECT_PCT` | `importers/pdf_importer.py` | `Decimal("0.20")` | scala la severità del warning `BILANCIO NON QUADRATO`: sopra il 20% → "prevalentemente stimata", sotto → "parziale" |
+| `_MASK_PCT` | `importers/iv_cee_hierarchy.py` | `Decimal("0.01")` | soglia diagnostica `masked` in `check_quadratura` (1% del totale attivo) |
+| `_COGE_SP_MAX_ATTEMPTS` | `importers/pdf_extractor_llm.py` | `3` | ritentativi del pass SP CoGe per completezza (tiene il `_plug_residual` minore) |
+| `_COGE_SP_CLEAN_PCT` | `importers/pdf_extractor_llm.py` | `Decimal("0.02")` | residuo < 2% del totale → "abbastanza pulito", stop anticipato dei ritentativi |
+| `cap_frac` (`reconcile_ivcee_balance`) | `importers/iv_cee_hierarchy.py` | `Decimal("0.05")` | gap > 5% del totale → non si tampona, errore onesto |
+
+> **Nota import vs harness:** `validate_balance` (`pdf_mapper`) è il gate hard prima della scrittura DB;
+> controlla (1) `totale_attivo != 0`, (2) `|attivo − passivo| ≤ €1`, (3) gli aggregati sp01–10 e
+> sp11–18 ricostruiscono i totali dichiarati (±€1). `check_quadratura` è invece la **diagnostica
+> unificata** (non bloccante) loggata per tutte le rotte. Una "NO" dell'harness NON significa "non
+> importa": vedi il CAVEAT in §6 e in `IMPORT-BALANCING-SCHEME.md`.

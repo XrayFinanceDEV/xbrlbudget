@@ -6,6 +6,15 @@
 > dato un file in ingresso, ne riconosca la tipologia e lo instradi all'estrattore
 > giusto. Nuovi formati ricadono nella macro-area corretta (e al peggio nel suo
 > fallback) senza rompere gli altri rami.
+>
+> **STATO: implementato.** Il router descritto in §4 è realtà nel modulo
+> [`importers/bilancio_classifier.py`](../importers/bilancio_classifier.py) e gira
+> per primo in `pdf_importer.import_pdf_balance_sheet`. Questo documento copre il
+> **routing** (quale estrattore prende il file); i due documenti complementari coprono:
+> - [`IMPORT-BALANCING-SCHEME.md`](IMPORT-BALANCING-SCHEME.md) — lo **schema di quadratura L0→L5** applicato a valle di ogni rotta.
+> - [`IMPORT-QUADRATURA-ENGINE.md`](IMPORT-QUADRATURA-ENGINE.md) — il **motore IV-CEE condiviso** (`iv_cee_hierarchy`) + anti-masking.
+>
+> La descrizione granulare di ogni singolo parser/fix sta nel `CLAUDE.md`, sezione *PDF Import*.
 
 ## 1. Sintesi
 
@@ -78,46 +87,89 @@ Due assi indipendenti: **layout fisico** (cosa vede il parser) × **codifica ges
 - File **XBRL nativo** (`.xbrl`/`.xml`) → instradare al **parser XBRL**, non al ramo PDF.
 - Documenti **non-bilancio** (email, verbali soli) o **riepiloghi troppo aggregati** → errore esplicito.
 
-## 4. Architettura del router proposta
+## 4. Il router implementato — `importers/bilancio_classifier.py`
 
-Un unico modulo **classificatore** che gira PRIMA di scegliere l'estrattore e
-ritorna `(macro_area, sottocategoria, gestionale, layout, confidence, signals)`.
-La scelta dell'estrattore dipende SOLO dalla macro-area; dentro l'area il
-sub-router sceglie per layout/codifica. Ordine di decisione (dal segnale più
-forte al fallback):
+Un unico modulo **classificatore** gira PRIMA di scegliere l'estrattore. Sostituisce il
+vecchio check binario `is_trial_balance`. La scelta dell'estrattore dipende SOLO dalla
+`route` ritornata; dentro l'area il sub-router (dentro `situazione_contabile_parser`)
+sceglie per layout/codifica.
 
-```
-0.  ext ∈ {.xbrl,.xml}                          → OTHER/XBRL  → parser XBRL nativo
-1.  testo estratto < soglia (PDF scansionato)    → OCR/LLM fallback (o errore se vuoto)
-2.  marker forte C:
-      "TOTALE A PAREGGIO" | "BILANCIO DI VERIFICA" | "SITUAZIONE CONTABILE"
-      | (alta densità codici conto CoGe AND assenza scheletro di legge)
-                                                  → C  → sub-router layout+codifica
-                                                         (riuso situazione_contabile_parser)
-3.  scheletro di legge presente AND codici conto/CoGe presenti
-      (codici-PATH CEE puntati | "dettaglio sottoconti" | header AGO XBRL)
-                                                  → B  → leggi i TOTALI di voce /
-                                                         aggrega sottoconti per prefisso CEE
-4.  scheletro di legge presente AND nessun codice conto
-      (bonus marker: "Conforme alla tassonomia itcc-…", "art. 2435-bis/ter")
-                                                  → A  → estrattore IV CEE (template A1 / LLM)
-5.  nessuno scheletro di legge AND nessun set conti, oppure solo CE
-                                                  → OTHER → errore onesto, messaggio chiaro
+### 4.1 API e costanti
+
+```python
+classify_bilancio(file_path: Optional[str] = None,
+                  text: Optional[str] = None) -> Classification
+
+class Classification(NamedTuple):
+    macro_area: str        # MACRO_A="A" | MACRO_B="B" | MACRO_C="C" | MACRO_OTHER="OTHER"
+    subcategory: str       # es. "A1 facsimile itcc", "B2 dettaglio sottoconti", "C verifica"
+    route: str             # ROUTE_IVCEE | ROUTE_TRIAL | ROUTE_XBRL | ROUTE_UNSUPPORTED
+    gestionale: str        # DEPI / TeamSystem / AGO / Genya / … (best-effort)
+    confidence: str        # "high" | "med" | "low"
+    signals: Dict[str, object]
+    reason: str            # stringa diagnostica loggata
 ```
 
-**Principi anti-regressione** (rispondono alla richiesta "non sistemare per singolo caso"):
-1. **Classifica, poi estrai.** Il singolo file non tocca mai più la logica globale: cambia solo *quale* macro-area lo prende.
-2. **Ogni macro-area ha un fallback interno** che degrada con dignità invece di rompersi:
-   - C → reclassify-by-description best-effort + flag `BILANCIO NON QUADRATO`.
+Costanti **rotta** (l'unica cosa che `pdf_importer` guarda per scegliere l'estrattore):
+
+| Costante | Valore | Estrattore a valle |
+|---|---|---|
+| `ROUTE_IVCEE` | `"IVCEE"` | A/B → LLM IV-CEE (`extract_pdf_with_llm` / `extract_pdf_both_years_with_llm`) |
+| `ROUTE_TRIAL` | `"TRIAL_BALANCE"` | C → CoGe-LLM (`extract_trial_balance_with_llm`) → deterministico (fallback) |
+| `ROUTE_XBRL` | `"XBRL_NATIVE"` | OTHER `.xbrl/.xml` → `xbrl_parser_enhanced` |
+| `ROUTE_UNSUPPORTED` | `"UNSUPPORTED"` | errore onesto, mai un plug silenzioso |
+
+In `pdf_importer`: `is_trial_balance = (classification.route == ROUTE_TRIAL)`. Il dict
+risultato porta `macro_area` + `macro_subcategory` (loggati e ritornati), così un nuovo
+formato emerge come **area**, non come crash.
+
+### 4.2 I segnali — `compute_signals(text, file_path)`
+
+Tutti robusti agli header lettera-spaziati (variante senza spazi). I principali:
+
+- **Marker testuali (bool):** `itcc` (`itcc-ci-`, "conforme alla tassonomia", "generato automaticamente"), `pareggio` ("totale a pareggio"), `verifica` ("bilancio di verifica"), `sit_contabile` ("situazione contabile"), `riclassificata`, `ago_xbrl` ("bilancio schema xbrl" o regex `\bago\s*-\s*\d`), `dettaglio`, `prospetto_economico`, `valore_produzione`, `immobilizzazioni`, `stato_patrimoniale`, `conto_economico`, `totale_attivo`, `dare_avere`.
+- **Derivati (bool):** `legal_skeleton` = `valore_produzione AND immobilizzazioni`; `sp_present` / `ce_present` (presenza dei due prospetti).
+- **Densità codici (conteggi regex):** `cee_path` (`B.II.1.a)`), `depi` (`XX/YY/ZZZ`), `depi2` (`XX/YYYY`), `teamsystem` (`XX/YYYY/YYYY`), `eight` (8-cifre), `dotted` (`10.05.001`), `mastro_sub` (BILAGRA `NNN.NNNNN`), `sixdigit_line` (single-column 6-cifre), `totale_voce` (numero di "Totale immobilizzazioni/attivo/…"). `coge_codes` = somma dei conteggi codice.
+- **Layout fisico:** `contrapposte` = `is_contrapposte_file(file_path)` (detector per coordinate), `is_sc` = `is_situazione_contabile(text)`.
+
+### 4.3 Regole ordinate (dal segnale più forte al fallback)
+
+```
+0.  ext ∈ {.xbrl,.xml}                                   → ROUTE_XBRL / OTHER
+1.  ce_present AND NOT sp_present                         → ROUTE_UNSUPPORTED  (solo CE: errore onesto)
+2.  itcc AND coge_codes<5 AND NOT pareggio AND NOT verifica
+                                                          → ROUTE_IVCEE / A    (facsimile deposito XBRL→PDF)
+3.  legal_skeleton AND coge_codes>=5  (B batte C):       → ROUTE_IVCEE / B
+      ago_xbrl            → "B3 XBRL esteso AGO"
+      riclassificata      → "B1 sit. riclassificata dettagliata"
+      cee_path>=5         → "B1 codici-PATH CEE"
+      dettaglio           → "B2 dettaglio sottoconti"
+4.  legal_skeleton AND totale_voce>=2 AND NOT pareggio
+      AND NOT verifica AND NOT contrapposte               → ROUTE_IVCEE / B    (IV-CEE con sottoconti, conf=med)
+5.  pareggio OR verifica OR is_sc OR contrapposte        → ROUTE_TRIAL / C    (conf high se pareggio/verifica)
+6.  legal_skeleton OR itcc OR (stato_patrimoniale AND totale_attivo)
+                                                          → ROUTE_IVCEE / A
+7.  fallback                                             → ROUTE_UNSUPPORTED / OTHER
+```
+
+> **"B batte C":** un file con lo scheletro di legge che porta *anche* codici conto
+> (es. budget_313/314) va in **B** (IV-CEE), NON nel parser trial-balance vuoto — purché
+> manchino i marker C forti (pareggio/verifica/contrapposte).
+
+**Principi anti-regressione** (rispondono a "non sistemare per singolo caso"):
+1. **Classifica, poi estrai.** Il singolo file non tocca la logica globale: cambia solo *quale* rotta lo prende.
+2. **Ogni rotta ha un fallback interno** che degrada con dignità:
+   - C → CoGe-LLM → deterministico → (se vuoto) IV-CEE LLM; best-effort reclassify-by-description + flag `BILANCIO NON QUADRATO`.
    - B → se i sottoconti non si aggregano, usa i totali di voce di legge.
-   - A → se il template facsimile non combacia, LLM.
-3. **Mai mascherare.** Quando l'estrazione non quadra, errore esplicito (già la direzione presa dal balance-hardening in `pdf_mapper.validate_balance`), non plug silenzioso.
-4. **Confidence + tracciamento.** Il classificatore logga `macro_area/sottocategoria/segnali` (riusa `upload_tracker`) così i nuovi formati si vedono e si assegnano a un'area, non si scoprono da un crash.
+   - A → LLM IV-CEE; reconcile al `TOTALE ATTIVO` dichiarato.
+3. **Mai mascherare.** `pdf_mapper.validate_balance` fallisce su estrazioni vuote/plug-gate; `_is_aggregated_summary` emette "Formato non supportato" su riepiloghi non-2424/2425.
+4. **Confidence + tracciamento.** Il classificatore logga `macro_area/sottocategoria/segnali` (`upload_tracker`): i nuovi formati si vedono e si assegnano a un'area.
 
-### Mappatura sui moduli esistenti
-- **C** è già in gran parte coperto da `importers/situazione_contabile_parser.py` (DEPI, TeamSystem, 8-digit, single-column, contrapposte best-effort). Serve solo spostare la **detection** dentro al classificatore unico.
-- **A** è il ramo `importers/pdf_extractor_llm.py` (oggi LLM). Per A1 (facsimile itcc) si può aggiungere un estrattore a template deterministico.
-- **B** è il **punto più debole** oggi: va consolidato un estrattore "IV CEE + dettaglio" che (a) legge i totali di voce quando presenti, (b) aggrega per prefisso CEE per la famiglia B1. È l'area con più `maybe` (11/21).
+### 4.4 Mappatura sui moduli (stato attuale)
+- **A/B** → `importers/pdf_extractor_llm.py` (LLM IV-CEE + reconciler deterministici delle sotto-righe, §6).
+- **C** → `importers/pdf_extractor_llm.extract_trial_balance_with_llm` (CoGe-LLM, **primario**) con `importers/situazione_contabile_parser.py` come fallback deterministico (DEPI, TeamSystem, 8-digit, single-column, contrapposte best-effort, verifica-per-segno, rescue dotted-hierarchical).
+- **OTHER/XBRL** → `importers/xbrl_parser_enhanced.py`.
+- **Stadio condiviso a valle** (tutte le rotte) → `importers/iv_cee_hierarchy.py` (`check_quadratura`, `enforce_ce_sp_identity`, `reconcile_ivcee_balance`).
 
 ## 5. Mappatura completa dei file
 
@@ -220,7 +272,7 @@ forte al fallback):
 | `Anomalie-budget.pdf` | email di segnalazione bug (no prospetto) | - | altro | nessuno | no | high |
 | `budget_137_Bilancio_LUGS_2025_DEFINITIVO.pdf` | riassunto macro non IV CEE (troppo aggregato) | sconosciuto/AI | single | nessuno | no | med |
 
-## 6. Regole di estrazione consolidate per route (aggiornamento 2026-06-24)
+## 6. Regole di estrazione consolidate per route (aggiornamento 2026-06-25)
 
 Oltre al *routing* (quale macro-area prende il file), ogni route applica **regole di
 estrazione GENERALI** — valide per l'intera famiglia, non per il singolo bilancio. Sono
@@ -283,6 +335,37 @@ bucket crediti (2.419.824, clienti non riconosciuti), **raddoppiavano la cassa**
 
 > Il C1 esistente ("sezioni contrapposte fisiche") resta valido per i layout Dare/Avere classici;
 > la variante **PER SEGNO** (stesso conto sui due lati) è quella nuova qui sopra.
+
+### Route C — estrattore CoGe-LLM primario (`extract_trial_balance_with_llm`)
+La rotta C prova PRIMA un pass LLM dedicato alle liste di conti CoGe (non lo schema di legge):
+manda il **testo completo** (`_extract_full_text`, niente windowing SP/CE — le verifiche non hanno
+header IV-CEE su cui ancorare) e usa due prompt CoGe specifici:
+- `TRIAL_BALANCE_SP_SYSTEM_PROMPT` — convenzione Dare/Avere (Dare = saldo attivo/costo, Avere =
+  passivo/PN/ricavo), **netting** dei conti di rettifica (fondo ammortamento / svalutazione crediti
+  sottratti dal lordo, mai a passivo), mapping descrizione→sp01–18, e che il **risultato è implicito**
+  (= gap Attivo vs Passivo).
+- `TRIAL_BALANCE_CE_SYSTEM_PROMPT` — classifica i conti economici in ce01–20, costi tutti positivi.
+
+Completezza (le liste lunghe fanno droppare conti al LLM in modo non deterministico): il pass SP è
+ritentato fino a `_COGE_SP_MAX_ATTEMPTS = 3`, tenendo la pescata col `_plug_residual` minore e
+fermandosi quando il residuo < `_COGE_SP_CLEAN_PCT = 2%` del totale. Chiude con
+`_balance_trial_via_result` (sp13 = Attivo − (Passivo + PN escluso il risultato)). PDF scansionati →
+`_extract_with_llm_vision` con gli stessi prompt. Solo single-year. Fallback → deterministico
+(`extract_situazione_contabile`) → se vuoto, IV-CEE LLM (`force_llm=True`).
+
+### Route A / B — fix di estrazione aggiuntivi (2026-06-25)
+Stessa classe anti-masking del reconciler PN (sopra), estesa ai formati gestionali:
+- **Copertura formati gestionali del reconciler PN** (`_PN_DETAIL_SPECS`/`_PN_TOTAL_SPECS`): accettano
+  prefisso legale `A.` opzionale e separatore `)`/`-` **o solo spazio** (`IV   Riserva legale` senza
+  separatore — budget_315); recupera la riserva NEGATIVA `A.VIII` su FLUIVER (340/341), Zucchetti
+  holding (331), BERTELLI provvisorio (315) — stessa classe di LIO 2025.
+- **Monocolonna non blocca più il dual-year**: `extract_pdf_both_years_with_llm` non esce più presto su
+  PDF monocolonna; svuota il precedente ma lascia girare i validatori + `_reconcile_pn_detail` sulla
+  colonna corrente (budget_315).
+- **Colonna corrente azzerata** (Step 4c): se la corrente ha `totale_attivo ~ 0` e la precedente è
+  valorizzata, la precedente viene promossa a corrente (budget_314).
+- **Scoping crediti (anti doppio-conteggio):** sp06/sp07 ristretti a **C.II** circolante, esclusi i
+  **B.III.2** crediti immobilizzati (sp04) — contarli due volte sbilanciava (budget_315).
 
 ## 7. Riproducibilità
 

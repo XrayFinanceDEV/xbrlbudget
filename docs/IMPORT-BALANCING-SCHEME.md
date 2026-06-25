@@ -20,6 +20,13 @@ patrimoniale** (`ce_present and not sp_present`) è solo-CE → UNSUPPORTED, non
 "bilancio non quadra". (Es. un export del solo Conto Economico con un "TOTALE A PAREGGIO"
 che è il pareggio del CE = totale ricavi.)
 
+Regola onestà al gate finale (`pdf_importer._is_aggregated_summary`): al fallimento di
+`validate_balance`, un documento SENZA sottostruttura IV-CEE (niente romani, niente "esigibili
+entro/oltre", niente codici conto) — un riepilogo over-aggregato / generato da AI, NON uno schema
+art. 2424/2425 (budget_133/135/137/150) — solleva un chiaro **"Formato non supportato"** invece del
+criptico "does not balance". Gated sul fallimento del bilancio, quindi non può mai riclassificare un
+file che importa.
+
 ## L1 — Pareggio (identità di base)
 `Attivo == Passivo + PN`. Il **risultato d'esercizio** (sp13) è il *gap* quando non è
 stampato esplicitamente. Nelle verifiche CoGe questo è imposto da
@@ -79,6 +86,33 @@ Il `TOTALE ATTIVITA'` dichiarato è allora **lordo**.
 Sottoconti CoGe → voce di legge (sp01–18 / ce01–20). Layout **mastro + figli puntati**:
 si prende il **subtotale del mastro UNA volta** e si ignorano i figli (non sommare entrambi:
 doppio conteggio; non sommare solo i figli: si perde la riga "altri"/arrotondamento).
+
+## L5-bis — Reconciler deterministici delle sotto-righe (route A/B) ★
+Lo schema IV-CEE pulito stampa ogni sotto-riga di legge, ma il LLM cattura solo gli AGGREGATI.
+Due pass deterministici post-LLM (text-path, sia single- sia dual-year) in `pdf_extractor_llm.py`
+ri-leggono le righe esplicite, **gated su un totale di controllo stampato** (anti-masking):
+- `_reconcile_pn_detail` — righe romane **A.II–A.X → sp12a..h** (specs `_PN_DETAIL_SPECS`), ricalcola
+  `sp12_riserve` come somma **ALGEBRICA** → recupera la riserva NEGATIVA `A.VIII` ("Utili/perdite
+  portati a nuovo") che altrimenti gonfia il PN e viene mascherata in cassa. Applicato solo se
+  `sp11 + Σsp12* + sp13` riconcilia al "Totale patrimonio netto" (`_PN_TOTAL_SPECS`).
+- `_reconcile_personale_detail` — **B.9 a/b/c/e → ce08b/c/a/d** (gated su "Totale costi per il
+  personale"); la riga CE "c) trattamento di fine rapporto" è distinta dalla riga SP fondo TFR via
+  lookahead `(?!\s+di\s+lavoro)`.
+- Copertura formati gestionali (2026-06-25): prefisso `A.` opzionale, separatore `)`/`-` **o solo
+  spazio** (`IV   Riserva legale`). `pdf_importer._create_income_statement` ora persiste ce08b/c/d.
+- No-op senza le righe esplicite o se il gate non riconcilia → zero regressione.
+
+## L5-ter — Reti di sicurezza di routing (route C, deterministico) ★
+In `situazione_contabile_parser.py`, additive (scattano solo su risultato altrimenti vuoto/mascherato):
+- **Empty→best-effort**: un sub-parser strutturato che torna vuoto su un file fisicamente a 2 colonne
+  (`is_contrapposte_file`) viene ritentato con `extract_contrapposte_best_effort`.
+- **Verifica PER SEGNO** (`is_bilancio_verifica_segno` + `parse_bilancio_verifica_segno`): stesso conto
+  sui due lati, classificato per NATURA (mai per colonna), auto-valida att==pas o solleva `ValueError`.
+- **Rescue dotted-hierarchical** (`is_dotted_hierarchical` + `_hier_reconstruct`): famiglia "BILANCIO
+  4 SEZIONI" Sistemi/DEPI; àncora sui mastri livello-1 in ordine documento, netta i fondi a qualsiasi
+  profondità (`_is_fondo_amm`), tiene il risultato solo se gross-attivo e SP-gap riconciliano entro 0.5%.
+- **`_be_split`** sceglie il gutter che BILANCIA le righe con descrizione su entrambi i lati (non il gap
+  più largo, che tagliava la colonna passivo → masking).
 
 ## Completezza (estrazione CoGe)  ·  `extract_trial_balance_with_llm`
 Il LLM, su liste lunghe, **droppa conti in modo non deterministico** (provato: file

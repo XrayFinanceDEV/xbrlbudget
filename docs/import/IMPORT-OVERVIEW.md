@@ -3,8 +3,8 @@
 > Documento **autosufficiente**: spiega dall'inizio alla fine **come un bilancio viene
 > importato e analizzato**, con **tutte le regole di ogni route**, **perché** sono fatte così,
 > i parametri configurabili e i file coinvolti. Non è un indice: incorpora il contenuto dei
-> documenti di lavoro (`Test/IMPORT-ROUTING-TAXONOMY.md`, `Test/IMPORT-BALANCING-SCHEME.md`,
-> `Test/IMPORT-QUADRATURA-ENGINE.md`) e della sezione *PDF Import* di `CLAUDE.md`.
+> documenti di lavoro (`IMPORT-ROUTING-TAXONOMY.md`, `IMPORT-BALANCING-SCHEME.md`,
+> `IMPORT-QUADRATURA-ENGINE.md`) e della sezione *PDF Import* di `CLAUDE.md`.
 >
 > Aggiornato alle modifiche delle sessioni 2026-06-15 / 2026-06-17.
 
@@ -258,7 +258,7 @@ dotted `10.05.001` · BILAGRA `NNN.NNNNN` · single-column 6-digit.
 
 > La mappatura completa per-file (77 documenti unici, colonne layout/codifica/parsing-det/
 > confidence) è prodotta automaticamente dagli script di §13 e archiviata in
-> `Test/IMPORT-ROUTING-TAXONOMY.md`.
+> `IMPORT-ROUTING-TAXONOMY.md`.
 
 ---
 
@@ -577,5 +577,5 @@ negativi), distinguendoli da un fallimento del motore.
 | `data/iv_cee_tree.json` | tassonomia IV-CEE canonica |
 | `database/queries.py` | `get_fy_prefer_full` / `get_fy_partial` (coesistenza record annuale/parziale) |
 
-> **Documenti di lavoro** (storia, changelog di sessione, censimento per-file): `Test/IMPORT-ROUTING-TAXONOMY.md`
-> (77 doc, mappatura completa), `Test/IMPORT-BALANCING-SCHEME.md`, `Test/IMPORT-QUADRATURA-ENGINE.md`.
+> **Documenti di lavoro** (storia, changelog di sessione, censimento per-file): `IMPORT-ROUTING-TAXONOMY.md`
+> (77 doc, mappatura completa), `IMPORT-BALANCING-SCHEME.md`, `IMPORT-QUADRATURA-ENGINE.md`.

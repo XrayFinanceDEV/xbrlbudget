@@ -444,6 +444,17 @@ def import_pdf_balance_sheet(
                 candidates.sort(key=lambda c: (_completeness_gap(c[1]), c[0]))
                 residual, balance_sheet_data, income_data, source = candidates[0]
                 _coge_ok = True
+                # Debt-typing overlay: the LLM is strong on totals but can dump the whole
+                # debt mass into 'altri' (sp16g/sp17g). The deterministic parser types each
+                # line via _debt_type (banche/fornitori/tributari/...). When the LLM wins but
+                # its debt split is degenerate, graft the deterministic candidate's typed
+                # proportions onto it — total preserved, only the split is corrected. No-op
+                # when the winner is the deterministic parser or already well-typed.
+                if source != "deterministico":
+                    _det = next((c for c in candidates if c[3] == "deterministico"), None)
+                    if _det is not None:
+                        from importers.situazione_contabile_parser import overlay_debt_typing
+                        balance_sheet_data = overlay_debt_typing(balance_sheet_data, _det[1])
                 # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,
                 # whatever extractor produced it (the deterministic parser may leave sp13=0
                 # or unanchored — budget_342/367). Idempotent on the CoGe result (already

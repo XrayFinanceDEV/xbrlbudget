@@ -1887,9 +1887,19 @@ CREDITOR / DEBTOR BREAKDOWN — PRESERVE THE SOURCE'S DETAIL DEPTH:
   into the aggregate. The sub-fields must sum to the aggregate:
   * crediti: sp06a/sp07a clienti, sp06e/sp07e tributari (erario, IVA, ritenute),
     sp06f imposte anticipate, sp06g/sp07g altri
-  * debiti: sp16a/sp17a banche (mutui, c/c passivi), sp16b/sp17b altri finanziatori,
-    sp16c/sp17c obbligazioni, sp16d/sp17d fornitori, sp16e/sp17e tributari (erario, IVA),
-    sp16f/sp17f previdenza (INPS, INAIL), sp16g/sp17g altri (acconti, c/terzi, ...)
+  * debiti: sp16a/sp17a banche, sp16b/sp17b altri finanziatori, sp16c/sp17c obbligazioni,
+    sp16d/sp17d fornitori, sp16e/sp17e tributari, sp16f/sp17f previdenza, sp16g/sp17g altri
+- RECOGNISE THE DEBT TYPE FROM THE ITALIAN DESCRIPTION (do NOT default to 'altri'):
+  * banche (sp16a/sp17a): any "Banca"/"Banco"/name ending in -banca (EmilBanca), "Banco BPM",
+    "BPER Banca"; a "c/c" or "c.c." account standing on the PASSIVO / Avere side is a bank
+    OVERDRAFT (fido) = debito verso banche, NOT cash; also "mutuo", "finanziamento bancario",
+    "anticipo fatture", "anticipi su crediti", "anticipi s.b.f.", "SBF", "scoperto di c/c".
+  * fornitori (sp16d/sp17d): "fornitori", "debiti commerciali", "fatture da ricevere" / "FDR",
+    "note credito da ricevere".
+  * tributari (sp16e/sp17e): "erario", "erariali", "IVA", "imposte", "ritenute", "F24".
+  * previdenza (sp16f/sp17f): "INPS", "INAIL", "enti previdenziali", "ENPALS", "INARCASSA".
+  * altri finanziatori (sp16b/sp17b): "altri finanziatori", "factor"; "soci c/finanziamento"
+    and "soci c/c" are altri finanziatori (D.3/D.5), NOT bank c/c.
 - Only leave a sub-field at 0 when no account of that type exists. Put a debt/credit
   whose type you genuinely cannot tell into the 'altri' bucket (sp16g / sp06g), never
   silently into the bare aggregate.

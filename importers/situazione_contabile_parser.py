@@ -572,20 +572,86 @@ def _debt_type(desc_upper: str) -> str:
         return 'c'
     # Altri finanziatori / soci FIRST, so the generic FINANZ→banche rule below does not
     # steal "FINANZIATORI" or "SOCI C/FINANZIAMENTO" (D.5, not D.4).
-    if _kw_any(desc_upper, ['ALTRI FINANZIAT', 'FINANZIAT', 'SOCI C/FINANZ', 'V/SOCI', 'FACTOR']):
+    if _kw_any(desc_upper, ['ALTRI FINANZIAT', 'FINANZIAT', 'SOCI C/FINANZ', 'SOCI C/C',
+                            'V/SOCI', 'FACTOR']):
         return 'b'
-    # Banks (D.4): incl. bank financings ("FINANZIAMENTO <banca>", "FINANZ.<banca>"),
-    # salvo-buon-fine (SBF) and bank-name loans that carry no literal "BANCA" keyword.
-    if _kw_any(desc_upper, ['BANCH', 'BANCAR', 'MUTU', 'C/C PASSIV', 'SCOPERT',
-                            'FINANZIAM', 'FINANZ', 'S.B.F', 'SBF']):
+    # Banks (D.4): 'BANC' covers BANCA/BANCO/BANCHE/BANCARIO and bank names ending in
+    # -BANCA (EMILBANCA); incl. bank financings ("FINANZIAMENTO <banca>"), salvo-buon-fine
+    # (SBF), and bank advances against invoices/credits ("ANTICIPO FATTURE", "ANTICIPI SU
+    # CREDITI") which are short-term bank debt even when the bank name carries no 'BANC'.
+    if _kw_any(desc_upper, ['BANC', 'MUTU', 'C/C', 'C.C.', 'SCOPERT',
+                            'FINANZIAM', 'FINANZ', 'S.B.F', 'SBF',
+                            'ANTICIPO FATTUR', 'ANTICIPI SU FATTUR', 'ANTICIPI SU CRED']):
         return 'a'
-    if _kw_any(desc_upper, ['FORNITOR']):
+    # Fornitori (D.7): incl. trade payables ("DEBITI COMMERCIALI") and supplier accruals
+    # ("FATTURE DA RICEVERE").
+    if _kw_any(desc_upper, ['FORNITOR', 'COMMERCIAL', 'FATTURE DA RICEV']):
         return 'd'
-    if _kw_any(desc_upper, ['TRIBUTAR', 'ERARIO', 'IVA', 'IMPOST', 'F24', 'RITENUT']):
+    # Tributari (D.12): 'ERARI' covers ERARIO/ERARIALI/ERARIALE.
+    if _kw_any(desc_upper, ['TRIBUTAR', 'ERARI', 'IVA', 'IMPOST', 'F24', 'RITENUT']):
         return 'e'
     if _kw_any(desc_upper, ['PREV', 'INPS', 'INAIL', 'SICUR', 'ENPALS', 'INARCASSA']):
         return 'f'
     return 'g'  # altri debiti (acconti, clienti c/, movimentazioni c/terzi, ...)
+
+
+# Creditor-type sub-field groups (entro / oltre), aligned to _debt_type letters a..g.
+_DEBT_GROUPS_BREVE = ['sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                      'sp16c_debiti_obbligazioni_breve', 'sp16d_debiti_fornitori_breve',
+                      'sp16e_debiti_tributari_breve', 'sp16f_debiti_previdenza_breve',
+                      'sp16g_altri_debiti_breve']
+_DEBT_GROUPS_LUNGO = ['sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                      'sp17c_debiti_obbligazioni_lungo', 'sp17d_debiti_fornitori_lungo',
+                      'sp17e_debiti_tributari_lungo', 'sp17f_debiti_previdenza_lungo',
+                      'sp17g_altri_debiti_lungo']
+
+
+def overlay_debt_typing(winner_bs: dict, donor_bs: dict,
+                        degenerate_frac: Decimal = Decimal('0.60'),
+                        donor_margin: Decimal = Decimal('0.20')) -> dict:
+    """Route-C post-pass: graft the donor's creditor-type breakdown onto the winner.
+
+    Both route-C extractors run (CoGe LLM + deterministic). The LLM is strong on TOTALS
+    but can dump the whole debt mass into 'altri' (sp16g/sp17g); the deterministic parser
+    types each line via _debt_type (banche/fornitori/tributari/...). When the winning
+    candidate's debt is DEGENERATE (mostly 'altri') and the donor has a meaningfully
+    richer split, redistribute the winner's debt AGGREGATE across a..g using the donor's
+    proportions — the winner's total is preserved, only the split changes.
+
+    Conservative by design (no-op unless clearly beneficial):
+      - skip a group whose aggregate is ~0
+      - skip when the winner is already well-typed (altri share <= degenerate_frac)
+      - skip when the donor is itself degenerate or not at least `donor_margin` better
+    Mutates and returns winner_bs.
+    """
+    for agg, groups, altri_key in (
+        ('sp16_debiti_breve', _DEBT_GROUPS_BREVE, 'sp16g_altri_debiti_breve'),
+        ('sp17_debiti_lungo', _DEBT_GROUPS_LUNGO, 'sp17g_altri_debiti_lungo'),
+    ):
+        w_total = Decimal(str(winner_bs.get(agg, 0) or 0))
+        if w_total <= Decimal('1'):
+            continue
+        w_altri = Decimal(str(winner_bs.get(altri_key, 0) or 0))
+        w_altri_frac = w_altri / w_total
+        if w_altri_frac <= degenerate_frac:
+            continue  # winner already meaningfully typed → leave it
+        d_total = sum((Decimal(str(donor_bs.get(g, 0) or 0)) for g in groups), Decimal('0'))
+        if d_total <= Decimal('1'):
+            continue  # donor has no debt typing to offer
+        d_altri = Decimal(str(donor_bs.get(altri_key, 0) or 0))
+        d_altri_frac = d_altri / d_total
+        if d_altri_frac >= w_altri_frac - donor_margin:
+            continue  # donor not meaningfully richer than the winner
+        # Redistribute the winner's aggregate by the donor's proportions.
+        new_vals = {}
+        for g in groups:
+            share = Decimal(str(donor_bs.get(g, 0) or 0)) / d_total
+            new_vals[g] = (w_total * share).quantize(Decimal('0.01'))
+        # Absorb rounding drift into 'altri' so the split sums back to the aggregate.
+        drift = w_total - sum(new_vals.values(), Decimal('0'))
+        new_vals[altri_key] = new_vals.get(altri_key, Decimal('0')) + drift
+        winner_bs.update(new_vals)
+    return winner_bs
 
 
 def _credit_type(desc_upper: str) -> str:

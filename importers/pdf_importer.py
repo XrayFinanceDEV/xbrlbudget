@@ -5,6 +5,7 @@ Uses PyMuPDF + Claude Haiku 4.5 (~5s). Requires ANTHROPIC_API_KEY.
 """
 
 import os
+import re
 import logging
 from typing import Dict, Any, Optional
 from decimal import Decimal
@@ -21,6 +22,29 @@ logger = logging.getLogger(__name__)
 class PDFImportError(Exception):
     """Exception raised when PDF import fails."""
     pass
+
+
+def _is_aggregated_summary(text: str) -> bool:
+    """True when the document carries NO legal IV-CEE substructure — only top-level
+    macro-voci (e.g. "Immobilizzazioni: 2.406.946", "B) Patrimonio netto: ..."), with
+    no roman-numeral sub-items, no "esigibili entro/oltre l'esercizio", and no account
+    codes. These are over-aggregated riepiloghi (often AI-generated, e.g. the LUGS /
+    FINALE_CEE test fixtures) that are NOT an importable art. 2424/2425 schema — so the
+    import should say "formato non supportato" rather than the cryptic "does not balance".
+
+    Used ONLY at the validate_balance failure point (a file that already balances never
+    reaches it), so this can never reclassify a correctly-imported bilancio. Gestionali
+    with a real (even abbreviated) schema always carry roman numerals / "esigibili" /
+    account codes, so they keep the "BILANCIO NON QUADRATO" honest-fail path.
+    """
+    if not text:
+        return False
+    # Roman-numeral legal items II..X, optionally prefixed by the section letter (A.II, B) II).
+    romans = re.findall(
+        r'(?im)^\s*(?:[A-D][.\)]\s*)?(?:II|III|IV|VIII|VII|VI|IX|V|X)\b', text)
+    has_esigibili = bool(re.search(r'esigibili\s+(?:entro|oltre)', text, re.I))
+    has_codes = bool(re.search(r'(?m)^\s*\d{4,}\b', text))
+    return len(romans) < 3 and not has_esigibili and not has_codes
 
 
 # Soglia oltre cui un plug residuo del parser best-effort rende il bilancio inaffidabile
@@ -486,6 +510,17 @@ def import_pdf_balance_sheet(
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
         if not mapper.validate_balance(balance_sheet_data):
+            # Honest failure messaging: an over-aggregated macro summary (no IV-CEE
+            # substructure) is a FORMAT problem, not a balancing one — say so clearly
+            # instead of the cryptic "does not balance". Real schemas (incl. drafts that
+            # simply don't tie at source) keep the balance message for Rettifiche triage.
+            if not is_trial_balance and _is_aggregated_summary(sample_text):
+                raise PDFImportError(
+                    "Formato non supportato: il documento è un riepilogo aggregato per "
+                    "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
+                    "importabile. Carica il prospetto di Stato Patrimoniale e Conto "
+                    "Economico completo."
+                )
             raise PDFImportError("Balance sheet does not balance (Assets != Liabilities + Equity)")
 
         # Unified quadratura diagnostic across ALL routes (shared IV-CEE engine):

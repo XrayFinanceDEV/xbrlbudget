@@ -481,6 +481,26 @@ BOTH the single-year and the dual-year extractors) re-read the explicit lines an
   di fine rapporto di lavoro subordinato" (sp15) via a `(?!\s+di\s+lavoro)` lookahead.
 No-op on layouts without the explicit legal lines / when the control-total gate fails (zero regression).
 `pdf_importer._create_income_statement` now persists ce08b/c/d (DB columns that existed but weren't written).
+- **Gestionale-format coverage (2026-06-25):** `_PN_DETAIL_SPECS`/`_PN_TOTAL_SPECS` accept an optional `A.`
+  legal-path prefix; the numeral may be followed by a `)`/`-` separator **OR just whitespace**
+  (`(?:\s*[-–)]\s*|\s+)`, so `IV   Riserva legale` with no separator is matched — budget_315); the required
+  whitespace still disambiguates V/VI/VII/VIII. The PN control total also matches `A) Patrimonio netto`
+  (header carrying the subtotal) and `A TOTALE PATRIMONIO NETTO`. `_values_for_label` skips ONE interposed
+  `Totale <voce>` line so the voce amount stays reachable when a pre-filter (Zucchetti) reorders the detail
+  block below its "Totale" line. Recovers the dropped NEGATIVE reserve (`A.VIII` Utili portati a nuovo) on
+  FLUIVER (budget_340/341), Zucchetti holdings (budget_331) and the BERTELLI provvisorio (budget_315) — same
+  masking class as LIO 2025. Still gated by the declared-PN reconcile, so it can never apply wrong values to
+  a balanced file. **Monocolumn fix:** `extract_pdf_both_years_with_llm` no longer RETURNS early on a
+  monocolumn PDF (`_prior_column_is_absent`) — it empties the prior dicts but lets the Step 5-7 validators +
+  `_reconcile_pn_detail` still run on the CURRENT column, so a monocolumn provvisorio (budget_315) gets its
+  reserve recovered on the dual-year path too (the single-year `extract_pdf_with_llm` already did).
+- **Crediti scoping (anti double-count):** the SP prompt now scopes sp06/sp07 to **C.II Attivo circolante
+  only**, explicitly excluding **B.III.2 crediti immobilizzati** (which belong to sp04). Counting a B.III.2
+  credito in sp07 too double-counted it and unbalanced the sheet by that amount (budget_315).
+- **Zeroed CURRENT column (`extract_pdf_both_years_with_llm` Step 4c):** draft exports that render the
+  current-year column at `0,00` with the real figures only in the PRIOR column (budget_314 "anno corrente
+  azzerato") would import as VUOTO. When current `totale_attivo ~ 0` and prior is valued, the prior column
+  is promoted to current. Symmetric to and mutually exclusive with the Step 4b monocolumn guard.
 
 #### CE↔SP identity enforcement (`enforce_ce_sp_identity`, `importers/iv_cee_hierarchy.py`)
 The year's result is ONE number: it appears as `sp13` in the balance sheet AND as the last line of
@@ -535,6 +555,21 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
   primary. This is what makes every readable trial balance open instead of erroring.
 - **`Test/_quadratura_harness.py`** — measures the quadratura rate over a corpus (deterministic routes
   by default; `--llm` to include A/B). Baseline tool for before/after of any import change.
+  **CAVEAT (do NOT confuse with "does it import?"):** the harness runs `extract → check_quadratura` but
+  NOT the two production stages `pdf_importer` runs right after extraction — `reconcile_ivcee_balance`
+  (anchors to the declared Totale attivo, plugs the small source rounding → Rettifiche flag) and
+  `enforce_ce_sp_identity`. So a harness "NO" is NOT "won't import": many route-A/B files the harness
+  marks NO actually IMPORT in the app (e.g. budget_152/254/289/336). The harness is authoritative only
+  for **masking** (plug > 1% on route C). To answer "does this PDF import?", run the full production path
+  (extract → `reconcile_ivcee_balance` → `enforce_ce_sp_identity` → `validate_balance`). Also: route-A/B
+  LLM extraction is **non-deterministic**, so harness SI/NO can flip between runs on the same file (LLM
+  noise, not a regression) — confirm suspected regressions on the production path, not a single harness run.
+- **"Formato non supportato" messaging** (`pdf_importer._is_aggregated_summary`): at the `validate_balance`
+  failure point, a document with NO legal IV-CEE substructure (no roman-numeral sub-items, no "esigibili
+  entro/oltre", no account codes) — an over-aggregated / AI-generated riepilogo, NOT an art. 2424/2425
+  schema (budget_133/135/137/150) — raises a clear "Formato non supportato" error instead of the cryptic
+  "does not balance". Gated on the balance failure, so it can NEVER reclassify a file that imports; real
+  schemas that simply don't tie at source keep the "BILANCIO NON QUADRATO" honest-fail / Rettifiche path.
 - `situazione_contabile_parser._be_split` picks the column gutter that BALANCES description-bearing
   rows on both sides (centre as tiebreaker), not the widest gap (which sliced the passivo column).
 

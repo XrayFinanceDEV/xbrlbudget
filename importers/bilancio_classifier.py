@@ -5,7 +5,7 @@ Dato un PDF (o il suo testo), individua la MACRO-AREA e quindi la ROTTA di
 estrazione corretta, in modo che ogni file venga aperto con le regole giuste
 e il pareggio Attivo = Passivo non salti.
 
-Tre macro-aree (vedi Test/IMPORT-ROUTING-TAXONOMY.md):
+Tre macro-aree (vedi docs/import/IMPORT-ROUTING-TAXONOMY.md):
   A — bilancio sintetico in IV CEE        → solo voci di legge, nessun conto CoGe
   B — dettagliato con macrovoci in IV CEE → scheletro IV CEE + sottoconti
   C — verifica a sezioni contrapposte      → conti CoGe Dare/Avere o Saldo, no schema di legge

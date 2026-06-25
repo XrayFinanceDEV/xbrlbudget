@@ -318,7 +318,7 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
 Runs FIRST in `pdf_importer.import_pdf_balance_sheet` (on the text of the first ~14 pages) and decides
 the extraction **route** — so each file is opened with the right rules and Assets=Liab+Equity does not
 break. Replaces the old binary `is_trial_balance`. Full taxonomy + per-file mapping in
-**`Test/IMPORT-ROUTING-TAXONOMY.md`** (77 unique docs analyzed; the 3 macro-areas cover 96% of real cases).
+**`docs/import/IMPORT-ROUTING-TAXONOMY.md`** (77 unique docs analyzed; the 3 macro-areas cover 96% of real cases).
 
 `classify_bilancio(file_path, text)` → `Classification(macro_area, subcategory, route, gestionale,
 confidence, signals, reason)`. Three macro-areas + OTHER, each mapped to a route:

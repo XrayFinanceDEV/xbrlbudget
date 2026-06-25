@@ -250,7 +250,7 @@ def import_pdf_balance_sheet(
         prior_ce_data = None
 
         # Step 1a: classify the document into a macro-area and pick the extraction
-        # route (see importers/bilancio_classifier.py and Test/IMPORT-ROUTING-TAXONOMY.md).
+        # route (see importers/bilancio_classifier.py and docs/import/IMPORT-ROUTING-TAXONOMY.md).
         #   C  → ROUTE_TRIAL : deterministic situazione-contabile parser (balance via pareggio)
         #   A/B → ROUTE_IVCEE : IV-CEE extractor anchored on voce totals (keeps Assets=Liab+Equity)
         # This replaces the old binary is_trial_balance check: it routes IV-CEE bilanci

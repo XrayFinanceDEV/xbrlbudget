@@ -96,6 +96,7 @@ MIGRATIONS = {
         ("cash_sweep_min_cash",                "NUMERIC(15,2)"),
         ("ce03a_override",                     "NUMERIC(15,2)"),
         ("tfr_accrual_suspended",              "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("previdenza_scales_with_personnel",   "BOOLEAN DEFAULT 0 NOT NULL"),
         ("sp01_growth_pct",                    "NUMERIC(10,6)"),
         ("sp04_growth_pct",                    "NUMERIC(10,6)"),
         ("sp08_growth_pct",                    "NUMERIC(10,6)"),

@@ -130,6 +130,7 @@ def bulk_upsert_assumptions(
             cash_sweep_enabled=assumption_data.get("cash_sweep_enabled", False) or False,
             cash_sweep_min_cash=assumption_data.get("cash_sweep_min_cash", None),
             tfr_accrual_suspended=assumption_data.get("tfr_accrual_suspended", False) or False,
+            previdenza_scales_with_personnel=assumption_data.get("previdenza_scales_with_personnel", False) or False,
             interest_rate_receivables=assumption_data.get("interest_rate_receivables", 0.0),
             interest_rate_payables=assumption_data.get("interest_rate_payables", 0.0),
             tax_rate=assumption_data.get("tax_rate", 27.9),
@@ -137,9 +138,12 @@ def bulk_upsert_assumptions(
             fixed_services_percentage=assumption_data.get("fixed_services_percentage", 40.0),
             depreciation_rate=assumption_data.get("depreciation_rate", 20.0),
             depreciation_rate_intangible=assumption_data.get("depreciation_rate_intangible", 20.0),
-            financing_amount=assumption_data.get("financing_amount", 0.0),
-            financing_duration_years=assumption_data.get("financing_duration_years", 0.0),
-            financing_interest_rate=assumption_data.get("financing_interest_rate", 0.0),
+            # Coalesce null -> 0: the UI now allows clearing these fields (sends null),
+            # but the columns are NOT NULL. 0 == "no financing", the existing default
+            # semantics. (.get(key, 0.0) only defaults on a MISSING key, not an explicit null.)
+            financing_amount=assumption_data.get("financing_amount") or 0.0,
+            financing_duration_years=assumption_data.get("financing_duration_years") or 0.0,
+            financing_interest_rate=assumption_data.get("financing_interest_rate") or 0.0,
             sp01_growth_pct=assumption_data.get("sp01_growth_pct", None),
             sp04_growth_pct=assumption_data.get("sp04_growth_pct", None),
             sp08_growth_pct=assumption_data.get("sp08_growth_pct", None),

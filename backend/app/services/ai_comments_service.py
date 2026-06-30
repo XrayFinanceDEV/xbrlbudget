@@ -233,12 +233,20 @@ def _build_data_summary(analysis_data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_NUMBER_FORMAT_RULE = (
+    "FORMATO NUMERI: quando citi un importo scrivilo SEMPRE per intero in euro con il "
+    "separatore delle migliaia (punto), es. «2.820.468 €» oppure «-57.600 €». NON usare MAI "
+    "abbreviazioni come K, k, M, mln, mld, B, né formati tipo «€2,8M», «€10,3M» o «€-57,6K», "
+    "né notazione scientifica. Le percentuali restano normali (es. «1,8%»)."
+)
+
 SYSTEM_PROMPT = (
     "Sei un analista finanziario senior italiano. Genera 11 commenti brevi per un report di "
     "analisi previsionale. Ogni commento: 2-4 frasi (il commento complessivo 3-5 frasi), "
     "tono professionale, evidenzia punti di forza, rischi e tendenze. Non ripetere numeri "
     "già visibili nel report — interpreta e aggiungi valore con osservazioni qualitative. "
-    "Usa il tool fornito per strutturare la risposta."
+    + _NUMBER_FORMAT_RULE +
+    " Usa il tool fornito per strutturare la risposta."
 )
 
 
@@ -362,7 +370,9 @@ _INFRANNUALE_SYSTEM_PROMPT = (
     "commento per ciascuna delle 5 tabelle (CE confronto, SP confronto, CE proiezione, SP "
     "proiezione, indicatori della crisi d'impresa). Tono professionale, 2-3 frasi ciascuno. "
     "Non elencare numeri già visibili nelle tabelle: interpreta, evidenzia tendenze, rischi "
-    "e punti di forza. Usa il tool fornito."
+    "e punti di forza. "
+    + _NUMBER_FORMAT_RULE +
+    " Usa il tool fornito."
 )
 
 

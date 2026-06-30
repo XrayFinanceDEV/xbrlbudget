@@ -93,6 +93,9 @@ class BudgetAssumptionsBase(BaseModel):
     # TFR accrual suspended (TFR paid to INPS, fund stops growing this year)
     tfr_accrual_suspended: bool = False
 
+    # Previdenza scales with personnel cost (opt-in): sp16f/sp17f move with ce08
+    previdenza_scales_with_personnel: bool = False
+
     # Financial parameters
     interest_rate_receivables: Decimal = Field(default=Decimal("0"))
     interest_rate_payables: Decimal = Field(default=Decimal("0"))
@@ -194,6 +197,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     cash_sweep_enabled: Optional[bool] = None
     cash_sweep_min_cash: Optional[Decimal] = None
     tfr_accrual_suspended: Optional[bool] = None
+    previdenza_scales_with_personnel: Optional[bool] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None

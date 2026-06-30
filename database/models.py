@@ -648,6 +648,12 @@ class BudgetAssumptions(Base):
     # (sp15) stops growing for this forecast year (the ce08a cost stays in the P&L).
     tfr_accrual_suspended = Column(Boolean, default=False, nullable=False)
 
+    # Previdenza scaling (opt-in, per forecast year): when enabled, social-security
+    # payables (sp16f/sp17f) scale with the personnel cost (ce08) relative to the base
+    # year — e.g. personnel 100k→200k ⇒ previdenza 20k→40k. Default OFF (carry forward
+    # / manual sp16f_growth_pct), so existing scenarios are unaffected.
+    previdenza_scales_with_personnel = Column(Boolean, default=False, nullable=False)
+
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables
     interest_rate_payables = Column(Numeric(10, 6), default=0, nullable=False)  # % on payables

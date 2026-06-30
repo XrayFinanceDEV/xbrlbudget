@@ -295,6 +295,7 @@ function buildStartupAssumption(
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
     tfr_accrual_suspended: false,
+    previdenza_scales_with_personnel: false,
     tax_rate: 27.9,
     fixed_materials_percentage: 0,
     fixed_services_percentage: 0,
@@ -807,6 +808,7 @@ function ScenarioForm({
             cash_sweep_enabled: a.cash_sweep_enabled ?? false,
             cash_sweep_min_cash: a.cash_sweep_min_cash,
             tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
+            previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
             receivables_short_growth_pct: a.receivables_short_growth_pct,
             receivables_long_growth_pct: a.receivables_long_growth_pct,
             payables_short_growth_pct: a.payables_short_growth_pct,
@@ -887,6 +889,7 @@ function ScenarioForm({
           cash_sweep_enabled: false,
           cash_sweep_min_cash: null,
           tfr_accrual_suspended: false,
+          previdenza_scales_with_personnel: false,
           tax_rate: 27.9,
           fixed_materials_percentage: 0,
           fixed_services_percentage: 0,
@@ -1538,7 +1541,15 @@ function CEAssumptionsTable({
   const inputCls = "w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary";
 
   return (
-    <div className="overflow-x-auto">
+    <div
+      className="overflow-x-auto"
+      onFocus={(e) => {
+        // Seleziona tutto il contenuto della cella al focus, così digitando si
+        // sostituisce il valore precedente invece di accodarlo (P8).
+        const t = e.target as HTMLElement;
+        if (t instanceof HTMLInputElement && t.type === "number") t.select();
+      }}
+    >
       <table className="min-w-full divide-y divide-border border border-border">
         <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} />
         <tbody className="bg-card divide-y divide-border">
@@ -2179,7 +2190,15 @@ function SPAssumptionsTable({
   const inputCls = "w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary";
 
   return (
-    <div className="overflow-x-auto">
+    <div
+      className="overflow-x-auto"
+      onFocus={(e) => {
+        // Seleziona tutto il contenuto della cella al focus, così digitando si
+        // sostituisce il valore precedente invece di accodarlo (P8).
+        const t = e.target as HTMLElement;
+        if (t instanceof HTMLInputElement && t.type === "number") t.select();
+      }}
+    >
       <table className="min-w-full divide-y divide-border border border-border">
         <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} />
         <tbody className="bg-card divide-y divide-border">
@@ -2431,6 +2450,27 @@ function SPAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
+                DEBITI PREVIDENZIALI ∝ COSTO DEL PERSONALE
+                <span title="Se attivo, i debiti previdenziali (sp16f/sp17f) variano in proporzione al costo del personale (ce08) rispetto all'anno base. Es: personale 100k→200k ⇒ previdenza 20k→40k. Default disattivo (riporto / variazione % manuale)."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+              </div>
+            </td>
+            {historicalYears.map((year) => (
+              <td key={year} className="px-3 py-2 text-xs text-center text-muted-foreground border-r border-border bg-muted/50">{"—"}</td>
+            ))}
+            {forecastYears.map((year) => (
+              <td key={year} className="px-2 py-2 border-r border-border bg-primary/10 text-center">
+                <input type="checkbox"
+                  checked={!!assumptions[year]?.previdenza_scales_with_personnel}
+                  onChange={(e) => onUpdate(year, "previdenza_scales_with_personnel", e.target.checked)}
+                  className="h-4 w-4 accent-primary cursor-pointer"
+                  title="Debiti previdenziali proporzionali al costo del personale" />
+              </td>
+            ))}
+          </tr>
+
+          <tr className="hover:bg-muted/50">
+            <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
+              <div className="font-medium flex items-center gap-1">
                 USA CASSA IN ECCESSO PER RIDURRE DEBITO BANCHE
                 <span title="Se attivo, la cassa generata oltre la soglia minima abbatte il debito v/banche (prima a breve, poi a lungo) invece di accumularsi come liquidità. Default disattivo."><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
@@ -2492,8 +2532,8 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="1000" min="0"
-                  value={assumptions[year]?.financing_amount || 0}
-                  onChange={(e) => onUpdate(year, "financing_amount", parseFloat(e.target.value) || 0)}
+                  value={assumptions[year]?.financing_amount ?? ""}
+                  onChange={(e) => { const v = parseFloat(e.target.value); onUpdate(year, "financing_amount", e.target.value === "" || Number.isNaN(v) ? null : v); }}
                   className={inputCls} placeholder="0" title="Importo nuovo finanziamento (EUR)" />
               </td>
             ))}
@@ -2512,8 +2552,8 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="1" min="1" max="30"
-                  value={assumptions[year]?.financing_duration_years || 5}
-                  onChange={(e) => onUpdate(year, "financing_duration_years", parseFloat(e.target.value) || 5)}
+                  value={assumptions[year]?.financing_duration_years ?? ""}
+                  onChange={(e) => { const v = parseFloat(e.target.value); onUpdate(year, "financing_duration_years", e.target.value === "" || Number.isNaN(v) ? null : v); }}
                   className={inputCls} placeholder="5" title="Durata in anni (1-30)" />
               </td>
             ))}
@@ -2532,8 +2572,8 @@ function SPAssumptionsTable({
             {forecastYears.map((year) => (
               <td key={year} className="px-2 py-2 border-r border-border bg-primary/10">
                 <input type="number" step="0.1" min="0" max="100"
-                  value={fmtPct(assumptions[year]?.financing_interest_rate, 3)}
-                  onChange={(e) => onUpdate(year, "financing_interest_rate", parseFloat(e.target.value) || 3)}
+                  value={assumptions[year]?.financing_interest_rate ?? ""}
+                  onChange={(e) => { const v = parseFloat(e.target.value); onUpdate(year, "financing_interest_rate", e.target.value === "" || Number.isNaN(v) ? null : v); }}
                   className={inputCls} placeholder="3.00%" title="Tasso interesse (0-100%)" />
               </td>
             ))}

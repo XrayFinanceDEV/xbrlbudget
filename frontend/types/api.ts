@@ -389,6 +389,7 @@ export interface BudgetAssumptions {
   cash_sweep_enabled: boolean;
   cash_sweep_min_cash: number | null;
   tfr_accrual_suspended: boolean;
+  previdenza_scales_with_personnel: boolean;
   interest_rate_receivables: number;
   interest_rate_payables: number;
   tax_rate: number;
@@ -476,6 +477,7 @@ export interface BudgetAssumptionsCreate {
   cash_sweep_enabled?: boolean;
   cash_sweep_min_cash?: number | null;
   tfr_accrual_suspended?: boolean;
+  previdenza_scales_with_personnel?: boolean;
   interest_rate_receivables?: number;
   interest_rate_payables?: number;
   tax_rate?: number;

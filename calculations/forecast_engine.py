@@ -10,6 +10,9 @@ from database.models import (
     BudgetScenario, BudgetAssumptions, ForecastYear,
     ForecastBalanceSheet, ForecastIncomeStatement
 )
+from calculations.projection_common import (
+    financial_repayment_instalment, altri_finanz_repayment_instalment,
+)
 
 
 class ForecastEngine:
@@ -599,11 +602,24 @@ class ForecastEngine:
 
         # --- OTHER OPERATING DEBTS: carry forward with optional growth % ---
         sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
-        sp16f = _prev('sp16f_debiti_previdenza_breve') * (D('1') + _sp_growth('sp16f_growth_pct'))
         sp16g = _prev('sp16g_altri_debiti_breve') * (D('1') + _sp_growth('sp16g_growth_pct'))
         sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
-        sp17f = _prev('sp17f_debiti_previdenza_lungo') * (D('1') + _sp_growth('sp17f_growth_pct'))
         sp17g = _prev('sp17g_altri_debiti_lungo') * (D('1') + _sp_growth('sp17g_growth_pct'))
+
+        # Previdenza (sp16f/sp17f): opt-in scaling with the personnel cost (P5).
+        # When enabled, social-security payables move in proportion to ce08 vs the BASE
+        # year (e.g. personnel 100k→200k ⇒ previdenza 20k→40k), anchored on the base-year
+        # amount so multi-year chains stay consistent. Default OFF → carry forward with
+        # the manual sp16f/sp17f_growth_pct, exactly as before (zero regression).
+        if getattr(assumption, 'previdenza_scales_with_personnel', False):
+            base_ce08 = (getattr(base_inc, 'ce08_costi_personale', ZERO) or ZERO)
+            fc_ce08 = (forecast_inc.get('ce08_costi_personale', ZERO) or ZERO)
+            pers_factor = (fc_ce08 / base_ce08) if base_ce08 > 0 else D('1')
+            sp16f = _base('sp16f_debiti_previdenza_breve') * pers_factor
+            sp17f = _base('sp17f_debiti_previdenza_lungo') * pers_factor
+        else:
+            sp16f = _prev('sp16f_debiti_previdenza_breve') * (D('1') + _sp_growth('sp16f_growth_pct'))
+            sp17f = _prev('sp17f_debiti_previdenza_lungo') * (D('1') + _sp_growth('sp17f_growth_pct'))
 
         # Detect abbreviato gap: difference between aggregate and sum of sub-fields.
         # This happens when imported data only has sp16/sp17 totals (abbreviato format)
@@ -626,26 +642,13 @@ class ForecastEngine:
         # is a decreasing instalment that never reaches zero: e.g. over 3 years it leaves
         # 8/27 ≈ 30% outstanding, the "residuo" the user reported.)
         if existing_repay_years is not None and D(str(existing_repay_years)) > 0:
-            repay_years = D(str(existing_repay_years))
-            # Original BANK + BONDS long-term debt at forecast start (base year), including
-            # the abbreviato gap that gets allocated to banche when only the aggregate
-            # sp17 is imported (no sub-field detail). NB: sp17b (altri finanziatori, e.g.
-            # an intra-group loan) is repaid on its OWN schedule below, not here, so it is
-            # no longer shifted under the banks when the user repays the financing.
-            base_bank_bonds_long = (
-                _base('sp17a_debiti_banche_lungo')
-                + _base('sp17c_debiti_obbligazioni_lungo')
-            )
-            base_other_long = (
-                _base('sp17b_debiti_altri_finanz_lungo')
-                + _base('sp17d_debiti_fornitori_lungo') + _base('sp17e_debiti_tributari_lungo')
-                + _base('sp17f_debiti_previdenza_lungo') + _base('sp17g_altri_debiti_lungo')
-            )
-            base_gap_long = _base('sp17_debiti_lungo') - (base_bank_bonds_long + base_other_long)
-            if base_gap_long > ZERO:
-                base_bank_bonds_long += base_gap_long
-
-            annual_repayment = base_bank_bonds_long / repay_years
+            # Fixed instalment on the ORIGINAL (base-year) BANK + BONDS long-term debt,
+            # including the abbreviato gap allocated to banks when only the aggregate sp17
+            # is imported. The instalment FORMULA lives in the shared kernel so it is
+            # identical to the intra-year engine by construction (P2); here it is
+            # apportioned across the current residual bank/bond sub-fields. NB: sp17b
+            # (altri finanziatori) is repaid on its OWN schedule below, not here.
+            annual_repayment = financial_repayment_instalment(_base, existing_repay_years)
             total_bank_bonds = sp17a + sp17c   # current residual, for apportioning
             if total_bank_bonds > 0:
                 bank_share = sp17a / total_bank_bonds
@@ -654,12 +657,11 @@ class ForecastEngine:
                 sp17c = max(ZERO, sp17c - annual_repayment * bonds_share)
 
         # Altri finanziatori (sp17b) — e.g. an intra-group loan — repaid on its OWN fixed
-        # schedule, independent of the bank debt. Fixed instalment on the base-year amount
-        # so it amortises fully to zero after `altri_finanz_repayment_years`.
+        # schedule, independent of the bank debt (shared kernel: fixed instalment on the
+        # base-year amount, amortises fully to zero after `altri_finanz_repayment_years`).
         altri_repay_years = getattr(assumption, 'altri_finanz_repayment_years', None)
         if altri_repay_years is not None and D(str(altri_repay_years)) > 0:
-            a_years = D(str(altri_repay_years))
-            annual_altri = _base('sp17b_debiti_altri_finanz_lungo') / a_years
+            annual_altri = altri_finanz_repayment_instalment(_base, altri_repay_years)
             sp17b = max(ZERO, sp17b - annual_altri)
 
         # New financing: add to long-term bank debt

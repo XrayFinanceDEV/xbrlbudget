@@ -14,6 +14,9 @@ from database.models import (
     BudgetScenario, BudgetAssumptions, ForecastYear,
     ForecastBalanceSheet, ForecastIncomeStatement
 )
+from calculations.projection_common import (
+    financial_repayment_instalment, altri_finanz_repayment_instalment,
+)
 
 
 # P&L line item codes for comparison
@@ -704,11 +707,12 @@ class IntraYearEngine:
         # Short-term debt: proportional to operating costs (turnover ratio)
         sp16 = projected_costs * _safe_divide(ref_sp16, ref_costs, Decimal('0'))
 
-        # Long-term debt: keep from reference (stable)
+        # Long-term debt: keep from reference, then amortise per repayment plan (P2)
         sp17 = _get_field(ref_bs, 'sp17_debiti_lungo')
+        sp17 = self._apply_debt_repayment(ref_bs, sp17, assumption)
 
         # Add new financing if any
-        if assumption.financing_amount > 0:
+        if (assumption.financing_amount or Decimal('0')) > 0:
             sp17 = sp17 + assumption.financing_amount
 
         sp18 = _get_field(ref_bs, 'sp18_ratei_risconti_passivi')
@@ -725,6 +729,7 @@ class IntraYearEngine:
 
         # Debt detail breakdowns (proportional from reference)
         sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(ref_bs, sp04)
+        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(ref_bs, sp06)
         sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(ref_bs, sp16)
         sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(ref_bs, sp17)
 
@@ -740,6 +745,13 @@ class IntraYearEngine:
             'sp04e_strumenti_derivati_attivi': sp04e,
             'sp05_rimanenze': sp05,
             'sp06_crediti_breve': sp06,
+            'sp06a_crediti_clienti_breve': sp06a,
+            'sp06b_crediti_controllate_breve': sp06b,
+            'sp06c_crediti_collegate_breve': sp06c,
+            'sp06d_crediti_controllanti_breve': sp06d,
+            'sp06e_crediti_tributari_breve': sp06e,
+            'sp06f_imposte_anticipate_breve': sp06f,
+            'sp06g_crediti_altri_breve': sp06g,
             'sp07_crediti_lungo': sp07,
             'sp08_attivita_finanziarie': sp08,
             'sp09_disponibilita_liquide': sp09,
@@ -869,7 +881,8 @@ class IntraYearEngine:
         sp15 = _get_field(partial_bs, 'sp15_tfr') + projected_inc.get('ce08a_tfr_accrual', Decimal('0')) * remaining_months / Decimal('12')
         sp16 = _get_field(partial_bs, 'sp16_debiti_breve')
         sp17 = _get_field(partial_bs, 'sp17_debiti_lungo')
-        if assumption.financing_amount > 0:
+        sp17 = self._apply_debt_repayment(partial_bs, sp17, assumption)
+        if (assumption.financing_amount or Decimal('0')) > 0:
             sp17 = sp17 + assumption.financing_amount
         sp18 = _get_field(partial_bs, 'sp18_ratei_risconti_passivi')
 
@@ -883,6 +896,7 @@ class IntraYearEngine:
 
         # Sub-item breakdowns proportional to the partial year
         sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(partial_bs, sp04)
+        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(partial_bs, sp06)
         sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(partial_bs, sp16)
         sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(partial_bs, sp17)
 
@@ -898,6 +912,13 @@ class IntraYearEngine:
             'sp04e_strumenti_derivati_attivi': sp04e,
             'sp05_rimanenze': sp05,
             'sp06_crediti_breve': sp06,
+            'sp06a_crediti_clienti_breve': sp06a,
+            'sp06b_crediti_controllate_breve': sp06b,
+            'sp06c_crediti_collegate_breve': sp06c,
+            'sp06d_crediti_controllanti_breve': sp06d,
+            'sp06e_crediti_tributari_breve': sp06e,
+            'sp06f_imposte_anticipate_breve': sp06f,
+            'sp06g_crediti_altri_breve': sp06g,
             'sp07_crediti_lungo': sp07,
             'sp08_attivita_finanziarie': sp08,
             'sp09_disponibilita_liquide': sp09,
@@ -933,6 +954,55 @@ class IntraYearEngine:
             'sp17g_altri_debiti_lungo': sp17g,
             'sp18_ratei_risconti_passivi': sp18,
         }
+
+    def _apply_debt_repayment(self, base_bs, sp17_long: Decimal, assumption) -> Decimal:
+        """Reduce projected long-term debt by one annual repayment instalment (P2).
+
+        Mirrors the budget engine: a FIXED instalment computed on the base-year
+        financial long-term debt (banks + bonds), so e.g. a 100k loan on a 5-year
+        plan drops to 80k in the projected year (the repayment then surfaces as a
+        financing outflow in the rendiconto finanziario) instead of staying flat.
+        'Altri finanziatori' (sp17b) amortise on their own plan. No-op when the
+        repayment-years assumptions are not set (zero regression on existing files).
+        """
+        # The repayment RULE (fixed instalment on the base-year financial long-term
+        # debt, excluding 'altri finanziatori' and non-financial debts) lives in the
+        # shared kernel so it is identical to the budget engine by construction (P2).
+        # This engine APPLIES it to the aggregate sp17_long; the budget engine
+        # apportions the same instalment across the sp17a/sp17c sub-fields — that
+        # difference is orchestration, the instalment formula is the same.
+        getter = lambda f: _get_field(base_bs, f)
+
+        instalment = financial_repayment_instalment(
+            getter, getattr(assumption, 'existing_debt_repayment_years', None))
+        if instalment > 0:
+            sp17_long = max(Decimal('0'), sp17_long - instalment)
+
+        altri_years = getattr(assumption, 'altri_finanz_repayment_years', None)
+        if altri_years is not None and Decimal(str(altri_years)) > 0:
+            altri_instalment = altri_finanz_repayment_instalment(getter, altri_years)
+            sp17_long = max(Decimal('0'), sp17_long - altri_instalment)
+
+        return sp17_long
+
+    def _distribute_sp06(self, ref_bs, sp06_total):
+        """Distribute sp06 (current receivables) into sub-categories proportionally
+        from the base year, so detail lines — notably 'crediti tributari' (sp06e) —
+        move WITH the projected aggregate instead of staying frozen (P3). Mirrors
+        _distribute_sp16. When the base year has no sub-detail (abbreviato: only the
+        aggregate populated) it returns zeros and the frontend reconciler plugs the
+        gap into 'altri', same as the debiti side."""
+        fields = (
+            'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+            'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+            'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+            'sp06g_crediti_altri_breve',
+        )
+        total = sum((_get_field(ref_bs, f) for f in fields), Decimal('0'))
+        if total > 0:
+            r = sp06_total / total
+            return tuple(_get_field(ref_bs, f) * r for f in fields)
+        return (Decimal('0'),) * 7
 
     def _distribute_sp04(self, ref_bs, sp04_total):
         """Distribute sp04 into sub-categories proportionally from reference."""

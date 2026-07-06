@@ -140,6 +140,13 @@ Route-C block, after the winning candidate is chosen (`pdf_importer.py:445`) and
    declared totals by it** before `_reconcile_trial_to_declared`, so the reconcile plugs to the **net**
    total instead of re-inflating back to gross. (This reuses the existing "reduce anchor by netted
    contra" pattern — cf. best-effort `iv_total = tb_total − netted_contra`.)
+   **Exact patch point** (verified 2026-07-06): the total-coverage fallback branch at
+   `pdf_extractor_llm.py:2313-2325` is the one that compares NET extracted totals to the GROSS declared
+   anchor and would manufacture a false `_plug_residual` ("QUADRATURA MASCHERATA"); the result-anchored
+   branch (`:2286-2311`) uses the attivo−passivo gap, which is invariant under symmetric netting.
+   While wiring, also fix the adjacent pre-existing bug: the `_declared_control_totals` call at
+   `pdf_importer.py:535` omits `text=ocr_text`, so the CE↔SP arbiter loses its declared anchor on
+   scanned PDFs (the `:429` and `:472` calls pass it; consolidate on the `_dc0` fetch).
 6. `enforce_ce_sp_identity` (existing `:533+`) unaffected — `sp13` (result) is untouched by symmetric
    asset/debt netting; the CE is not modified by this stage.
 7. `validate_balance` (existing) — balance preserved; if netting somehow left a residual, the existing
@@ -177,6 +184,21 @@ New test module `tests/test_contra_netting.py`:
    and confirm no already-balanced file changes (self-validation gate must hold them at no-op). Record
    before/after quadratura counts.
 
+**Harness caveat (verified 2026-07-06):** `Test/_quadratura_harness.py` is gitignored and absent from
+this working tree (confidential client bilanci), and `tests/debug/` holds only 6 untracked raw PDFs
+with no runner. The test module must therefore ship its **own thin corpus runner** — a loop of
+`extract → net_contra_accounts → declared reconcile → enforce_ce_sp_identity → validate_balance` over
+`tests/debug/*.pdf` + `docs/examples/612/613` — and the evidence fixtures must be committed (or their
+absence tolerated with skip markers) as part of the implementation plan.
+
+**Scan implementation notes (verified against current code):**
+- `_classify_sp_attivo` (`situazione_contabile_parser.py:480`) returns internal tags
+  (`gross_sp02/gross_sp03/gross_sp04`) and defaults unknown lines to `sp06` — the self-validation
+  gate must sum the **full attivo scan**, not just the two gross tags.
+- Check `_is_fondo_amm` **before** classification, as `_hier_reconstruct` (`:2492-2503`) already does.
+- `_map_sc_keys` passes through any `_`-prefixed key and `_create_balance_sheet` whitelists DB fields,
+  so `_contra_netted` cannot leak into the DB; still pop it before the `check_quadratura` diagnostic.
+
 ## Files touched
 
 - `importers/situazione_contabile_parser.py` — new `net_contra_accounts` + the coordinate/OCR contra-scan
@@ -191,3 +213,5 @@ New test module `tests/test_contra_netting.py`:
 - Deterministic AGO/`build_iv_cee` under-capture + balance bug (so it becomes a reliable fallback).
 - Aggressive/full IVA consolidation beyond the conservative both-sides rule.
 - Netting of other contra accounts (fondo svalutazione beyond crediti, etc.).
+- Consolidating the (now 5) netting loci — `build_iv_cee` accumulators, best-effort `netted_contra`,
+  `_hier_reconstruct`, verifica-per-segno, and this stage — into one shared helper.

@@ -16,6 +16,7 @@ from database.models import (
 )
 from calculations.projection_common import (
     financial_repayment_instalment, altri_finanz_repayment_instalment,
+    tfr_accrual_quota,
 )
 
 
@@ -386,18 +387,21 @@ class IntraYearEngine:
         ref_ce08 = _get_field(ref_inc, 'ce08_costi_personale')
         ce08 = ref_ce08 * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
 
-        # Personnel sub-items - maintain same proportions as reference year
+        # Personnel sub-items - salari/oneri scale with the personnel total; TFR (ce08a)
+        # is the statutory accrual salari/13,5 so the sp15 fund grows even when only the
+        # aggregate personnel cost is available; ce08d absorbs the remainder so the four
+        # sub-items still sum to the personnel total.
         if ref_ce08 > 0:
             growth_factor = ce08 / ref_ce08
-            ce08a = _get_field(ref_inc, 'ce08a_tfr_accrual') * growth_factor
             ce08b = _get_field(ref_inc, 'ce08b_salari_stipendi') * growth_factor
             ce08c = _get_field(ref_inc, 'ce08c_oneri_sociali') * growth_factor
-            ce08d = _get_field(ref_inc, 'ce08d_altri_costi_personale') * growth_factor
         else:
-            ce08a = Decimal('0')
             ce08b = Decimal('0')
             ce08c = Decimal('0')
-            ce08d = Decimal('0')
+        # Cap the derived TFR quota at the remainder left by salari+oneri so the four
+        # sub-items never sum to more than the personnel total.
+        ce08a = min(tfr_accrual_quota(ce08b, ce08), max(Decimal('0'), ce08 - ce08b - ce08c))
+        ce08d = max(Decimal('0'), ce08 - ce08a - ce08b - ce08c)
 
         # Depreciation - annualize (linear accrual) + new investments
         partial_ce09 = _get_field(partial_inc, 'ce09_ammortamenti')
@@ -514,10 +518,15 @@ class IntraYearEngine:
         ce06 = ann('ce06_servizi')
         ce07 = ann('ce07_godimento_beni')
         ce08 = ann('ce08_costi_personale')
-        ce08a = ann('ce08a_tfr_accrual')
+        # TFR (ce08a) is the statutory accrual salari/13,5 so the sp15 fund grows even when
+        # only the aggregate personnel cost is available; ce08d absorbs the remainder so the
+        # four sub-items still sum to the personnel total.
         ce08b = ann('ce08b_salari_stipendi')
         ce08c = ann('ce08c_oneri_sociali')
-        ce08d = ann('ce08d_altri_costi_personale')
+        # Cap the derived TFR quota at the remainder left by salari+oneri so the four
+        # sub-items never sum to more than the personnel total.
+        ce08a = min(tfr_accrual_quota(ce08b, ce08), max(Decimal('0'), ce08 - ce08b - ce08c))
+        ce08d = max(Decimal('0'), ce08 - ce08a - ce08b - ce08c)
 
         # Depreciation: annualize partial year + depreciation on new investments
         ce09 = ann('ce09_ammortamenti')

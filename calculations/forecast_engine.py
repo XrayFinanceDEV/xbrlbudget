@@ -12,6 +12,7 @@ from database.models import (
 )
 from calculations.projection_common import (
     financial_repayment_instalment, altri_finanz_repayment_instalment,
+    tfr_accrual_quota, new_financing_schedule,
 )
 
 
@@ -93,6 +94,23 @@ class ForecastEngine:
 
         forecast_years = []
 
+        # NEW financing raised during the plan: each assumption's financing_amount
+        # is a loan taken THAT year, amortised over its durata with interest on the
+        # residual (shared kernel `new_financing_schedule`). Assembled ONCE from all
+        # years because a single per-year assumption can't see a loan raised earlier
+        # that is still being repaid. Keeps the SP debt (sp17a) and the P&L oneri
+        # finanziari (ce15) in sync — the previous code added the debt but only
+        # charged interest in the year of erogazione.
+        financing_loans = []
+        for a in assumptions:
+            amt = a.financing_amount or Decimal('0')
+            dur = a.financing_duration_years or Decimal('0')
+            rate = (a.financing_interest_rate or Decimal('0')) / Decimal('100')
+            if amt > 0 and dur > 0:
+                financing_loans.append({
+                    'year': a.forecast_year, 'amount': amt, 'duration': dur, 'rate': rate,
+                })
+
         # Generate forecast for each year
         for idx, assumption in enumerate(assumptions):
             year_offset = assumption.forecast_year - scenario.base_year
@@ -102,7 +120,8 @@ class ForecastEngine:
                 base_inc=base_inc,
                 assumption=assumption,
                 previous_inc=forecast_years[-1]['income_statement'] if forecast_years else base_inc,
-                previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs
+                previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs,
+                financing_loans=financing_loans
             )
 
             # Calculate forecasted balance sheet
@@ -112,7 +131,8 @@ class ForecastEngine:
                 forecast_inc=forecast_inc,
                 assumption=assumption,
                 previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs,
-                year_offset=year_offset
+                year_offset=year_offset,
+                financing_loans=financing_loans
             )
 
             # Get or create forecast year
@@ -199,20 +219,31 @@ class ForecastEngine:
         base_inc: IncomeStatement,
         assumption: BudgetAssumptions,
         previous_inc,
-        previous_bs=None
+        previous_bs=None,
+        financing_loans=None
     ) -> Dict:
         """
         Calculate forecasted income statement based on assumptions
         """
-        # Apply growth rates to base year values (overrides take precedence)
+        # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
+        # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
+        # (100 → 105 → 110,25 → 115,76) instead of being flat vs base (105 each
+        # year). For the first forecast year previous_inc IS base_inc, so nothing
+        # changes there. Flat carry-forward lines (ce02/03/10/11/13-19) keep
+        # reading base_inc — with no growth % the two are identical.
+        def _pinc(field):
+            v = getattr(previous_inc, field, None) if previous_inc is not None else None
+            return v if v is not None else Decimal('0')
+
+        # Apply growth rates to the previous year values (overrides take precedence)
         if assumption.ce01_override is not None:
             ce01 = assumption.ce01_override
         else:
-            ce01 = base_inc.ce01_ricavi_vendite * (Decimal('1') + assumption.revenue_growth_pct / Decimal('100'))
+            ce01 = _pinc('ce01_ricavi_vendite') * (Decimal('1') + assumption.revenue_growth_pct / Decimal('100'))
         if assumption.ce04_override is not None:
             ce04 = assumption.ce04_override
         else:
-            ce04 = base_inc.ce04_altri_ricavi * (Decimal('1') + assumption.other_revenue_growth_pct / Decimal('100'))
+            ce04 = _pinc('ce04_altri_ricavi') * (Decimal('1') + assumption.other_revenue_growth_pct / Decimal('100'))
 
         # Calculate costs - split between variable and fixed components based on user-defined percentages
 
@@ -220,7 +251,7 @@ class ForecastEngine:
         if assumption.ce05_override is not None:
             ce05 = assumption.ce05_override
         else:
-            base_materials = base_inc.ce05_materie_prime
+            base_materials = _pinc('ce05_materie_prime')
             fixed_pct_materials = assumption.fixed_materials_percentage / Decimal('100')
             variable_pct_materials = Decimal('1') - fixed_pct_materials
             variable_materials = base_materials * variable_pct_materials
@@ -234,7 +265,7 @@ class ForecastEngine:
         if assumption.ce06_override is not None:
             ce06 = assumption.ce06_override
         else:
-            base_services = base_inc.ce06_servizi
+            base_services = _pinc('ce06_servizi')
             fixed_pct_services = assumption.fixed_services_percentage / Decimal('100')
             variable_pct_services = Decimal('1') - fixed_pct_services
             variable_services = base_services * variable_pct_services
@@ -248,24 +279,31 @@ class ForecastEngine:
         if assumption.ce07_override is not None:
             ce07 = assumption.ce07_override
         else:
-            ce07 = base_inc.ce07_godimento_beni * (Decimal('1') + assumption.rent_growth_pct / Decimal('100'))
+            ce07 = _pinc('ce07_godimento_beni') * (Decimal('1') + assumption.rent_growth_pct / Decimal('100'))
 
         # Personnel
         if assumption.ce08_override is not None:
             ce08 = assumption.ce08_override
         else:
-            ce08 = base_inc.ce08_costi_personale * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
+            ce08 = _pinc('ce08_costi_personale') * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
 
-        # Personnel sub-items — override or maintain same proportions as base year
-        base_ce08 = base_inc.ce08_costi_personale
-        if base_ce08 > 0:
-            growth_factor = ce08 / base_ce08
+        # Personnel sub-items — override or maintain same proportions as the previous year.
+        # Salari/oneri scale with the personnel total; TFR (ce08a) is instead the statutory
+        # accrual salari/13,5 (so the sp15 fund — which reads ce08a — grows every year even
+        # when the base import only carried the aggregate personnel cost); ce08d absorbs the
+        # remainder so the four sub-items still sum to the personnel total.
+        prev_ce08 = _pinc('ce08_costi_personale')
+        if prev_ce08 > 0:
+            growth_factor = ce08 / prev_ce08
         else:
             growth_factor = Decimal('1')
-        ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else (base_inc.ce08a_tfr_accrual or Decimal('0')) * growth_factor
-        ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else (getattr(base_inc, 'ce08b_salari_stipendi', None) or Decimal('0')) * growth_factor
-        ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else (getattr(base_inc, 'ce08c_oneri_sociali', None) or Decimal('0')) * growth_factor
-        ce08d = assumption.ce08d_override if assumption.ce08d_override is not None else (getattr(base_inc, 'ce08d_altri_costi_personale', None) or Decimal('0')) * growth_factor
+        ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else _pinc('ce08b_salari_stipendi') * growth_factor
+        ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else _pinc('ce08c_oneri_sociali') * growth_factor
+        # Cap the derived TFR quota at the remainder left by salari+oneri so the four
+        # sub-items never sum to more than the personnel total (an explicit override is
+        # trusted as-is). ce08d then absorbs the exact remainder.
+        ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else min(tfr_accrual_quota(ce08b, ce08), max(Decimal('0'), ce08 - ce08b - ce08c))
+        ce08d = assumption.ce08d_override if assumption.ce08d_override is not None else max(Decimal('0'), ce08 - ce08a - ce08b - ce08c)
 
         # Depreciation — override total or calculate from investments
         depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
@@ -322,7 +360,7 @@ class ForecastEngine:
         if assumption.ce12_override is not None:
             ce12 = assumption.ce12_override
         else:
-            ce12 = base_inc.ce12_oneri_diversi * (Decimal('1') + assumption.other_costs_growth_pct / Decimal('100'))
+            ce12 = _pinc('ce12_oneri_diversi') * (Decimal('1') + assumption.other_costs_growth_pct / Decimal('100'))
 
         # Asset disposal (dismissione/vendita cespite): proceeds - net book value = gain/loss.
         # Post-2016 OIC: plusvalenza ordinaria → A.5 altri ricavi (ce04); minusvalenza → B.14
@@ -360,13 +398,14 @@ class ForecastEngine:
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else base_inc.ce14_altri_proventi_finanziari
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else base_inc.ce15_oneri_finanziari
 
-        # Add financing interest if new financing is provided
-        financing_amount = assumption.financing_amount or Decimal('0')
-        financing_rate = (assumption.financing_interest_rate or Decimal('0')) / Decimal('100')
-        financing_duration = assumption.financing_duration_years or Decimal('0')
-        if financing_amount > 0 and financing_duration > 0 and financing_rate > 0:
-            # Interest on full amount (first year approximation; BS handles amortization)
-            ce15 = ce15 + financing_amount * financing_rate
+        # Add interest on NEW financing raised during the plan. Charged on the
+        # OUTSTANDING balance at the start of each year (shared kernel), so a loan
+        # raised once keeps generating interest — decreasing as it amortises —
+        # across every year it is on the balance sheet, not only in the year of
+        # erogazione. Interest is 0 automatically once the loan is fully repaid or
+        # when the rate is 0.
+        _, _, financing_interest = new_financing_schedule(financing_loans, assumption.forecast_year)
+        ce15 = ce15 + financing_interest
 
         # Taxes - use override if set, otherwise use tax rate
         production_value = ce01 + ce02 + ce03 + ce03a + ce04
@@ -434,7 +473,8 @@ class ForecastEngine:
         forecast_inc: Dict,
         assumption: BudgetAssumptions,
         previous_bs,
-        year_offset: int = 1
+        year_offset: int = 1,
+        financing_loans=None
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -664,11 +704,15 @@ class ForecastEngine:
             annual_altri = altri_finanz_repayment_instalment(_base, altri_repay_years)
             sp17b = max(ZERO, sp17b - annual_altri)
 
-        # New financing: add to long-term bank debt
-        financing_amount = assumption.financing_amount or ZERO
-        financing_duration = assumption.financing_duration_years or ZERO
-        if financing_amount > 0 and financing_duration > 0:
-            sp17a = sp17a + financing_amount
+        # New financing raised during the plan: add what is raised THIS year to
+        # long-term bank debt, then subtract this year's straight-line instalment
+        # so the loan amortises over its durata (shared kernel, mirrors the
+        # existing-debt plan above). Because sp17a is carried forward via `_prev`,
+        # a loan raised once (e.g. 150k in year 1, then 0) stays on the sheet and
+        # shrinks by its rata each year instead of persisting flat forever.
+        fin_raised, fin_repayment, _ = new_financing_schedule(financing_loans, assumption.forecast_year)
+        sp17a = sp17a + fin_raised
+        sp17a = max(ZERO, sp17a - fin_repayment)
 
         # --- AGGREGATE sp16/sp17 from components ---
         sp16 = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g

@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useInvalidateScenarios, useInvalidateAnalysis } from "@/hooks/use-queries";
 import {
   createCompany,
   createFinancialYear,
-  updateIncomeStatement,
   updateBalanceSheet,
   createBudgetScenario,
   updateBudgetScenario,
@@ -259,6 +258,15 @@ export default function BudgetPage() {
 // `dipendenti` (headcount) is planning-only info — not persisted.
 type StartupYearDriver = { ricavi: number; margine: number; personale: number; dipendenti: number };
 
+// Effective tax rate (IRES + IRAP blend) applied to the whole startup plan: it
+// seeds the founding-year taxes AND is passed as every forecast year's tax_rate,
+// so the base year and the projected years are taxed consistently.
+const STARTUP_TAX_RATE_PCT = 27.9;
+
+// Round a monetary value to 2 decimals, so the seeded statements store exact
+// cents and the founding-year balance sheet ties to its P&L to the cent.
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
 // Build a complete BudgetAssumptionsCreate with neutral defaults. The startup
 // flow drives the P&L with absolute CE overrides (ce01/ce06/ce08) instead of
 // growth %, so every growth field is left at 0 — the overrides win in the engine.
@@ -296,7 +304,7 @@ function buildStartupAssumption(
     cash_sweep_min_cash: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,
-    tax_rate: 27.9,
+    tax_rate: STARTUP_TAX_RATE_PCT,
     fixed_materials_percentage: 0,
     fixed_services_percentage: 0,
     depreciation_rate: 20,
@@ -364,34 +372,34 @@ function StartupSetup({ onCreated }: { onCreated: (sc: BudgetScenario) => void }
     setLoading(true);
     try {
       const foundingYear = years[0];
+      // A startup has no operating history: the scenario base year is a pure
+      // OPENING balance the year BEFORE the plan starts, carrying only the
+      // paid-in capital (cash = capital, no P&L). Every plan year — INCLUDING
+      // the first (founding) year — is then a fully editable forecast column, so
+      // 2026 can be compiled exactly like 2027/2028: economics from the wizard
+      // drivers and patrimonial drivers/TFR from the Patrimoniali tab. The TFR
+      // fund (sp15) therefore starts at 0 and accrues from the first plan year.
+      const openingYear = foundingYear - 1;
+      const cap = round2(capitale || 0);
       const company = await createCompany({ name: name.trim(), sector: 3 });
-      await createFinancialYear(company.id, foundingYear);
-
-      // Founding year → actual statements (the scenario base year).
-      const f = deriveYear(foundingYear);
-      await updateIncomeStatement(company.id, foundingYear, {
-        ce01_ricavi_vendite: f.ricavi,
-        ce06_servizi: f.servizi,
-        ce08_costi_personale: f.personale,
-      });
-      // Opening balance sheet: founders' capital contributed as cash.
-      // sp11 (capitale sociale) on equity side, sp09 (disponibilità liquide)
-      // on asset side → the day-1 balance sheet balances.
-      await updateBalanceSheet(company.id, foundingYear, {
-        sp11_capitale: capitale || 0,
-        sp09_disponibilita_liquide: capitale || 0,
+      await createFinancialYear(company.id, openingYear);
+      // Opening balance sheet: paid-in capital only (Attivo cash == Passivo
+      // capitale, no result). The income statement stays empty.
+      await updateBalanceSheet(company.id, openingYear, {
+        sp11_capitale: cap,
+        sp09_disponibilita_liquide: cap,
       });
 
       const scenario = await createBudgetScenario(company.id, {
         company_id: company.id,
         name: name.trim(),
-        base_year: foundingYear,
+        base_year: openingYear,
         description: description.trim() || undefined,
         is_active: 1,
       });
 
-      // Following years → one assumptions row each, driven by absolute overrides.
-      for (const year of years.slice(1)) {
+      // Every plan year → one assumptions row, driven by absolute CE overrides.
+      for (const year of years) {
         const d = deriveYear(year);
         await createBudgetAssumptions(
           company.id,
@@ -1067,9 +1075,11 @@ function ScenarioForm({
               {startup ? (
                 <div className="border-t border-border pt-6 mb-6">
                   <p className="text-sm text-muted-foreground">
-                    Periodo di piano: <strong>{numYears + 1} anni</strong> (anno
-                    corrente {baseYear} e i {numYears} successivi). Le variabili
-                    economiche sono generate automaticamente dai driver inseriti.
+                    Periodo di piano: <strong>{numYears} anni</strong> (
+                    {forecastYears[0]}–{forecastYears[forecastYears.length - 1]}),
+                    tutti compilabili. Apertura {baseYear}: solo capitale sociale
+                    versato. Le variabili economiche sono generate automaticamente
+                    dai driver inseriti.
                   </p>
                 </div>
               ) : (
@@ -1109,9 +1119,7 @@ function ScenarioForm({
         <TabsContent value="ce">
           {startup ? (
             <StartupEconomicsRecap
-              baseYear={baseYear}
               forecastYears={forecastYears}
-              historicalData={historicalData}
               assumptions={assumptions}
             />
           ) : (
@@ -1133,6 +1141,7 @@ function ScenarioForm({
             historicalData={historicalData}
             assumptions={assumptions}
             onUpdate={updateAssumption}
+            startup={startup}
           />
         </TabsContent>
       </Tabs>
@@ -1160,31 +1169,21 @@ function ScenarioForm({
 // in the wizard (revenue / EBITDA margin / personnel, stored as absolute CE
 // overrides). This shows the resulting P&L drivers per year — no editing here.
 function StartupEconomicsRecap({
-  baseYear,
   forecastYears,
-  historicalData,
   assumptions,
 }: {
-  baseYear: number;
   forecastYears: number[];
-  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
   assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
 }) {
-  const years = [baseYear, ...forecastYears];
+  // Every plan year is now a forecast column (the base year is a capital-only
+  // opening with no economics), so the recap lists the plan years directly.
+  const years = forecastYears;
 
   const valuesFor = (year: number) => {
-    let ricavi = 0, servizi = 0, personale = 0;
-    if (year === baseYear) {
-      const inc = historicalData[baseYear]?.income;
-      ricavi = inc ? parseFloat(inc.ce01_ricavi_vendite) : 0;
-      servizi = inc ? parseFloat(inc.ce06_servizi) : 0;
-      personale = inc ? parseFloat(inc.ce08_costi_personale) : 0;
-    } else {
-      const a = assumptions[year];
-      ricavi = Number(a?.ce01_override ?? 0);
-      servizi = Number(a?.ce06_override ?? 0);
-      personale = Number(a?.ce08_override ?? 0);
-    }
+    const a = assumptions[year];
+    const ricavi = Number(a?.ce01_override ?? 0);
+    const servizi = Number(a?.ce06_override ?? 0);
+    const personale = Number(a?.ce08_override ?? 0);
     const ebitda = ricavi - servizi - personale;
     const margine = ricavi ? (ebitda / ricavi) * 100 : 0;
     return { ricavi, servizi, personale, ebitda, margine };
@@ -1493,7 +1492,7 @@ function getHistoricalBSValue(
 }
 
 // Shared table header component
-function AssumptionsTableHeader({ historicalYears, forecastYears }: { historicalYears: number[]; forecastYears: number[] }) {
+function AssumptionsTableHeader({ historicalYears, forecastYears, startup = false }: { historicalYears: number[]; forecastYears: number[]; startup?: boolean }) {
   return (
     <thead className="bg-muted">
       <tr>
@@ -1505,8 +1504,9 @@ function AssumptionsTableHeader({ historicalYears, forecastYears }: { historical
             key={year}
             className="px-3 py-2 text-center text-xs font-bold text-foreground uppercase border-r border-border"
             style={{minWidth: '120px'}}
+            title={startup ? `Apertura ${year}: solo capitale sociale versato` : undefined}
           >
-            {year}
+            {startup ? "APERTURA" : year}
           </th>
         ))}
         {forecastYears.map((year) => (
@@ -1540,6 +1540,86 @@ function CEAssumptionsTable({
 
   const inputCls = "w-full px-2 py-1 text-xs border border-primary/50 rounded text-center bg-card text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary";
 
+  // Live € projection of each growth-% line, so the user can SEE how many euros
+  // a percentage produces year by year (the raw % alone doesn't show the impact).
+  // Mirrors `forecast_engine._calculate_income_statement` EXACTLY: growth is
+  // compounded YEAR OVER YEAR from the base-year value (not flat vs base), and
+  // materie/servizi split the previous year's total by the fixed % then grow the
+  // variable/fixed portions separately. Costs are read as absolute values.
+  // Preview of the % effect only — it does NOT reflect CE overrides (set on the
+  // /forecast/income page) which take precedence in the real forecast.
+  const num = (v: unknown) => {
+    const n = parseFloat(String(v ?? ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const projected = useMemo(() => {
+    const baseInc = historicalData[baseYear]?.income as unknown as Record<string, unknown> | undefined;
+    const base = {
+      ce01: num(baseInc?.ce01_ricavi_vendite),
+      ce04: num(baseInc?.ce04_altri_ricavi),
+      ce05: Math.abs(num(baseInc?.ce05_materie_prime)),
+      ce06: Math.abs(num(baseInc?.ce06_servizi)),
+      ce07: Math.abs(num(baseInc?.ce07_godimento_beni)),
+      ce08: Math.abs(num(baseInc?.ce08_costi_personale)),
+      ce12: Math.abs(num(baseInc?.ce12_oneri_diversi)),
+    };
+    const byYear: Record<number, {
+      ce01: number; ce04: number; ce05: number; ce05_var: number; ce05_fix: number;
+      ce06: number; ce06_var: number; ce06_fix: number; ce07: number; ce08: number; ce12: number;
+    }> = {};
+    let prev = base;
+    for (const year of forecastYears) {
+      const a = (assumptions[year] || {}) as Record<string, unknown>;
+      const g = (f: string) => num(a[f]) / 100;
+      const fixMat = num(a.fixed_materials_percentage) / 100;
+      const fixSrv = num(a.fixed_services_percentage) / 100;
+      const ce05_var = prev.ce05 * (1 - fixMat) * (1 + g("variable_materials_growth_pct"));
+      const ce05_fix = prev.ce05 * fixMat * (1 + g("fixed_materials_growth_pct"));
+      const ce06_var = prev.ce06 * (1 - fixSrv) * (1 + g("variable_services_growth_pct"));
+      const ce06_fix = prev.ce06 * fixSrv * (1 + g("fixed_services_growth_pct"));
+      const cur = {
+        ce01: prev.ce01 * (1 + g("revenue_growth_pct")),
+        ce04: prev.ce04 * (1 + g("other_revenue_growth_pct")),
+        ce05: ce05_var + ce05_fix, ce05_var, ce05_fix,
+        ce06: ce06_var + ce06_fix, ce06_var, ce06_fix,
+        ce07: prev.ce07 * (1 + g("rent_growth_pct")),
+        ce08: prev.ce08 * (1 + g("personnel_growth_pct")),
+        ce12: prev.ce12 * (1 + g("other_costs_growth_pct")),
+      };
+      byYear[year] = cur;
+      prev = {
+        ce01: cur.ce01, ce04: cur.ce04, ce05: cur.ce05, ce06: cur.ce06,
+        ce07: cur.ce07, ce08: cur.ce08, ce12: cur.ce12,
+      };
+    }
+    return { base, byYear };
+  }, [historicalData, baseYear, forecastYears, assumptions]);
+
+  // Read-only sub-row rendered under a growth-% row: the resulting € value per
+  // forecast year. `baseAnchor` (null → em dash) is shown in the base-year column
+  // as the starting point.
+  const resultRow = (
+    label: string,
+    baseAnchor: number | null,
+    valueForYear: (year: number) => number
+  ) => (
+    <tr className="bg-primary/5 border-b border-border/40">
+      <td className="px-3 py-1.5 text-[11px] italic text-muted-foreground border-r border-border sticky left-0 bg-primary/5 z-10">
+        <span className="pl-3">= {label}</span>
+      </td>
+      {historicalYears.map((year) => (
+        <td key={year} className="px-3 py-1.5 text-[11px] text-center text-muted-foreground border-r border-border">
+          {year === baseYear && baseAnchor != null ? formatCurrency(baseAnchor) : "—"}
+        </td>
+      ))}
+      {forecastYears.map((year) => (
+        <td key={year} className="px-3 py-1.5 text-[11px] text-center font-semibold text-foreground border-r border-border">
+          {formatCurrency(valueForYear(year))}
+        </td>
+      ))}
+    </tr>
+  );
+
   return (
     <div
       className="overflow-x-auto"
@@ -1551,7 +1631,7 @@ function CEAssumptionsTable({
       }}
     >
       <table className="min-w-full divide-y divide-border border border-border">
-        <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} />
+        <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} startup={startup} />
         <tbody className="bg-card divide-y divide-border">
           {/* VARIABILI ECONOMICHE Section */}
           <tr className="bg-muted">
@@ -1564,8 +1644,8 @@ function CEAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % RICAVI{startup ? "" : ` RISPETTO ALL'ANNO ${Math.max(...historicalYears)}`}
-                <span title="Variazione percentuale dei ricavi rispetto all'anno base. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                VAR. % RICAVI{startup ? "" : " ANNO SU ANNO"}
+                <span title="Variazione percentuale dei ricavi rispetto all'anno precedente (anno su anno). Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1590,13 +1670,15 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && resultRow("Ricavi (€)", projected.base.ce01, (y) => projected.byYear[y]?.ce01 ?? 0)}
+
           {!startup && (<>
           {/* Other Revenue Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % ALTRI RICAVI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
-                <span title="Variazione percentuale degli altri ricavi rispetto all'anno base. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
+                VAR. % ALTRI RICAVI ANNO SU ANNO
+                <span title="Variazione percentuale degli altri ricavi rispetto all'anno precedente (anno su anno). Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
             {historicalYears.map((year) => (
@@ -1620,6 +1702,8 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+
+          {resultRow("Altri ricavi (€)", projected.base.ce04, (y) => projected.byYear[y]?.ce04 ?? 0)}
 
           {/* Fixed Materials Percentage */}
           <tr className="hover:bg-muted/50">
@@ -1662,7 +1746,7 @@ function CEAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI VARIABILI PER MAT. PRIME{startup ? "" : ` RISPETTO ALL'ANNO ${Math.max(...historicalYears)}`}
+                VAR. % COSTI VARIABILI PER MAT. PRIME{startup ? "" : " ANNO SU ANNO"}
                 <span title="Variazione percentuale dei costi variabili per materie prime. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1688,12 +1772,14 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && resultRow("Costi variabili mat. prime (€)", null, (y) => projected.byYear[y]?.ce05_var ?? 0)}
+
           {!startup && (<>
           {/* Fixed Materials Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI FISSI PER MAT. PRIME RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % COSTI FISSI PER MAT. PRIME ANNO SU ANNO
                 <span title="Variazione percentuale dei costi fissi per materie prime. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1718,6 +1804,9 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+
+          {resultRow("Costi fissi mat. prime (€)", null, (y) => projected.byYear[y]?.ce05_fix ?? 0)}
+          {resultRow("Totale materie prime (€)", projected.base.ce05, (y) => projected.byYear[y]?.ce05 ?? 0)}
 
           {/* Fixed Services Percentage */}
           <tr className="hover:bg-muted/50">
@@ -1757,7 +1846,7 @@ function CEAssumptionsTable({
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI VARIABILI PER SERVIZI{startup ? "" : ` RISPETTO ALL'ANNO ${Math.max(...historicalYears)}`}
+                VAR. % COSTI VARIABILI PER SERVIZI{startup ? "" : " ANNO SU ANNO"}
                 <span title="Variazione percentuale dei costi variabili per servizi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1783,12 +1872,14 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {!startup && resultRow("Costi variabili servizi (€)", null, (y) => projected.byYear[y]?.ce06_var ?? 0)}
+
           {!startup && (<>
           {/* Fixed Services Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI FISSI PER SERVIZI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % COSTI FISSI PER SERVIZI ANNO SU ANNO
                 <span title="Variazione percentuale dei costi fissi per servizi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1814,11 +1905,14 @@ function CEAssumptionsTable({
             ))}
           </tr>
 
+          {resultRow("Costi fissi servizi (€)", null, (y) => projected.byYear[y]?.ce06_fix ?? 0)}
+          {resultRow("Totale servizi (€)", projected.base.ce06, (y) => projected.byYear[y]?.ce06 ?? 0)}
+
           {/* Rent Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI GODIMENTO BENI DI TERZI RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % COSTI GODIMENTO BENI DI TERZI ANNO SU ANNO
                 <span title="Variazione percentuale dei costi di godimento beni di terzi. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1843,13 +1937,15 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+
+          {resultRow("Costi godimento beni (€)", projected.base.ce07, (y) => projected.byYear[y]?.ce07 ?? 0)}
           </>)}
 
           {/* Personnel Growth */}
           <tr className="hover:bg-muted/50">
             <td className="px-3 py-2 text-xs text-foreground border-r border-border sticky left-0 bg-card z-10">
               <div className="font-medium flex items-center gap-1">
-                VAR. % COSTI DEL PERSONALE RISPETTO ALL&apos;ANNO {Math.max(...historicalYears)}
+                VAR. % COSTI DEL PERSONALE ANNO SU ANNO
                 <span title="Variazione percentuale dei costi del personale. Valori accettati: da -100% a +100%"><Info className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" /></span>
               </div>
             </td>
@@ -1874,6 +1970,8 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+
+          {!startup && resultRow("Costi del personale (€)", projected.base.ce08, (y) => projected.byYear[y]?.ce08 ?? 0)}
 
           {!startup && (<>
           {/* Other Costs Growth */}
@@ -1905,6 +2003,8 @@ function CEAssumptionsTable({
               </td>
             ))}
           </tr>
+
+          {resultRow("Oneri diversi di gestione (€)", projected.base.ce12, (y) => projected.byYear[y]?.ce12 ?? 0)}
           </>)}
 
           {/* Tax Rate */}
@@ -2182,7 +2282,8 @@ function SPAssumptionsTable({
   historicalData,
   assumptions,
   onUpdate,
-}: AssumptionsTableProps) {
+  startup = false,
+}: AssumptionsTableProps & { startup?: boolean }) {
   const [showSPDetail, setShowSPDetail] = useState(false);
   const totalYears = historicalYears.length + forecastYears.length;
 
@@ -2200,7 +2301,7 @@ function SPAssumptionsTable({
       }}
     >
       <table className="min-w-full divide-y divide-border border border-border">
-        <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} />
+        <AssumptionsTableHeader historicalYears={historicalYears} forecastYears={forecastYears} startup={startup} />
         <tbody className="bg-card divide-y divide-border">
           {/* IMMOBILIZZAZIONI Section */}
           <tr className="bg-muted">
@@ -2347,7 +2448,10 @@ function SPAssumptionsTable({
             ))}
           </tr>
 
-          {/* DEBITI FINANZIARI Section */}
+          {/* DEBITI FINANZIARI Section — hidden in startup mode: a startup has no
+              imported debt, TFR accrues automatically (fondo parte da 0) and la
+              cassa non va usata per abbattere un debito inesistente. */}
+          {!startup && (<>
           <tr className="bg-muted">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
               DEBITI FINANZIARI
@@ -2513,6 +2617,9 @@ function SPAssumptionsTable({
             ))}
           </tr>
 
+          </>)}
+          {/* end DEBITI FINANZIARI (startup-hidden) */}
+
           <tr className="bg-muted/70">
             <td colSpan={totalYears + 1} className="px-3 py-2 text-xs font-bold text-foreground text-center">
               NUOVO FINANZIAMENTO
@@ -2579,7 +2686,8 @@ function SPAssumptionsTable({
             ))}
           </tr>
 
-          {/* DETTAGLIO STATO PATRIMONIALE Section (collapsible) */}
+          {/* DETTAGLIO STATO PATRIMONIALE Section (collapsible) — hidden in startup mode */}
+          {!startup && (<>
           <tr className="bg-muted cursor-pointer" onClick={() => setShowSPDetail(!showSPDetail)}>
             <td colSpan={totalYears + 1} className="px-3 py-2 text-sm font-bold text-foreground border-t-2 border-border">
               <div className="flex items-center gap-1">
@@ -2669,6 +2777,8 @@ function SPAssumptionsTable({
               ))}
             </>
           )}
+          </>)}
+          {/* end DETTAGLIO STATO PATRIMONIALE (startup-hidden) */}
         </tbody>
       </table>
     </div>

@@ -424,6 +424,7 @@ def import_pdf_balance_sheet(
                 # score PRIMARILY by the gap to the declared control total and use the residual
                 # only as the tiebreaker.
                 _decl_tot = None
+                _dc0 = {}
                 try:
                     from importers.pdf_extractor_llm import _declared_control_totals
                     _dc0 = _declared_control_totals(file_path, text=ocr_text)
@@ -455,6 +456,22 @@ def import_pdf_balance_sheet(
                     if _det is not None:
                         from importers.situazione_contabile_parser import overlay_debt_typing
                         balance_sheet_data = overlay_debt_typing(balance_sheet_data, _det[1])
+                # Contra-netting overlay (spec 2026-07-06): deterministic post-
+                # extraction netting of fondi ammortamento (+ conservative IVA
+                # offset) on the CHOSEN candidate, whatever extractor produced it.
+                # No-op unless the scan self-validates against the declared gross
+                # total; _contra also reduces the declared anchor below, because
+                # the document's printed totals are GROSS on these files.
+                _contra = Decimal('0')
+                try:
+                    from importers.situazione_contabile_parser import net_contra_accounts
+                    balance_sheet_data, _contra = net_contra_accounts(
+                        balance_sheet_data, file_path, text=ocr_text, declared=_dc0)
+                    if _contra > 0:
+                        logger.info(f"Route C: contra-netting applicato "
+                                    f"({_contra:,.0f} fondi ammortamento/IVA)")
+                except Exception as _cn_err:
+                    logger.warning(f"Route C: contra-netting saltato: {_cn_err}")
                 # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,
                 # whatever extractor produced it (the deterministic parser may leave sp13=0
                 # or unanchored — budget_342/367). Idempotent on the CoGe result (already
@@ -466,10 +483,15 @@ def import_pdf_balance_sheet(
                 _authoritative = balance_sheet_data.pop('_skip_declared_reconcile', False)
                 if not _authoritative:
                     try:
-                        from importers.pdf_extractor_llm import (
-                            _declared_control_totals, _reconcile_trial_to_declared,
-                        )
-                        _decl = _declared_control_totals(file_path, text=ocr_text)
+                        from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+                        _decl = dict(_dc0)
+                        if _contra > 0:
+                            # the printed totals are GROSS on gross-presentation
+                            # files: anchor the reconcile to the NET total so it
+                            # does not re-inflate the netted mass as a false plug
+                            for _k in ('attivo', 'passivo', 'pareggio'):
+                                if _decl.get(_k):
+                                    _decl[_k] = _decl[_k] - _contra
                         balance_sheet_data = _reconcile_trial_to_declared(
                             balance_sheet_data, _decl, source)
                         residual = balance_sheet_data.get('_plug_residual', residual)
@@ -532,7 +554,7 @@ def import_pdf_balance_sheet(
         try:
             from importers.iv_cee_hierarchy import enforce_ce_sp_identity
             from importers.pdf_extractor_llm import _declared_control_totals
-            _decl_ce = _declared_control_totals(file_path)
+            _decl_ce = _declared_control_totals(file_path, text=ocr_text)
             income_data = enforce_ce_sp_identity(
                 balance_sheet_data, income_data, "import",
                 prefer="sp13", declared=_decl_ce)

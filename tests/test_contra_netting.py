@@ -283,3 +283,60 @@ def test_iva_one_sided_left_gross(monkeypatch):
     bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
     assert netted == D("1858799.20")                 # fondi only, no IVA offset
     assert bs["sp06_crediti_breve"] == D("115000")   # untouched
+
+
+# ---------------------------------------------------------------- end-to-end (production path)
+
+def _gross_winner_bs_613():
+    """Observed-failure shape for 613_2024, built from the spec's evidence:
+    equity 2,93M, real debts ~182k, fondi 1.853.799,20 booked as altri debiti,
+    assets gross. Numbers approximate the real file; the scan overwrites the
+    asset side from the document itself, so only the SHAPE matters here."""
+    return {
+        "sp02_immob_immateriali": D("0"),
+        "sp03_immob_materiali": D("4930000"),
+        "sp06_crediti_breve": D("30000"),
+        "sp09_disponibilita_liquide": D("25000"),
+        "sp11_capitale": D("2930000"),
+        "sp13_utile_perdita": D("19590.98"),
+        "sp16_debiti_breve": D("2035409.02"),
+        "sp16g_altri_debiti_breve": D("2035409.02"),
+        "totale_attivo": D("4985000"),
+        "totale_passivo": D("4985000"),
+    }
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_613), reason="evidence PDF not present")
+def test_613_production_path_with_stubbed_gross_llm():
+    """Full route-C post-selection pipeline on the real 613_2024 PDF, with the
+    winning candidate stubbed to the observed LLM failure (gross assets, fondi
+    in debts). No API key needed. Asserts the spec's acceptance numbers."""
+    from importers.pdf_extractor_llm import (
+        _declared_control_totals, _reconcile_trial_to_declared,
+    )
+    from importers.situazione_contabile_parser import net_contra_accounts
+
+    declared = _declared_control_totals(PDF_613)
+    assert declared.get("pareggio") or declared.get("attivo"), \
+        "613 must print its own control totals"
+
+    # stubbed winner reproducing the observed failure: real scan drives the fix
+    bs, netted = net_contra_accounts(_gross_winner_bs_613(), PDF_613,
+                                     declared=declared)
+    assert netted > D("1800000")
+
+    decl = dict(declared)
+    for k in ("attivo", "passivo", "pareggio"):
+        if decl.get(k):
+            decl[k] = decl[k] - netted
+    bs = _reconcile_trial_to_declared(bs, decl, "test-613")
+
+    # Spec acceptance: sp03 ~ 3,08M net; debts ~ real (~182k, fondi removed);
+    # totale_attivo ~ 3,13M net; attivo == passivo
+    assert abs(bs["sp03_immob_materiali"] - D("3080000")) < D("100000")
+    debts = bs.get("sp16_debiti_breve", D("0")) + bs.get("sp17_debiti_lungo", D("0"))
+    assert debts < D("400000")
+    assert abs(bs["totale_attivo"] - D("3130000")) < D("100000")
+    assert abs(bs["totale_attivo"] - bs["totale_passivo"]) <= D("1")
+    # no false plug: the netted mass must NOT resurface as _plug_residual
+    assert bs.get("_plug_residual", D("0")) < bs["totale_attivo"] * D("0.01")

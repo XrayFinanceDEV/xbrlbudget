@@ -2620,6 +2620,123 @@ def _contra_rows(file_path: str, text: Optional[str] = None):
     return None
 
 
+def _reduce_debts(bs: Dict[str, Decimal], amount: Decimal) -> Decimal:
+    """Remove `amount` from the debt buckets: sp16g (altri, where misclassified
+    fondi land) first — mirrored on the sp16 aggregate to keep sub-field
+    consistency — then the sp16 aggregate residual, then the sp17 side. Floors
+    at 0 everywhere; returns the mass actually removed."""
+    Z = Decimal('0')
+    removed = Z
+    for sub, agg in (('sp16g_altri_debiti_breve', 'sp16_debiti_breve'),
+                     ('sp16e_debiti_tributari_breve', 'sp16_debiti_breve'),
+                     ('sp17g_altri_debiti_lungo', 'sp17_debiti_lungo')):
+        if removed >= amount:
+            break
+        take = min(amount - removed, bs.get(sub, Z))
+        if take > Z:
+            bs[sub] = bs.get(sub, Z) - take
+            bs[agg] = max(Z, bs.get(agg, Z) - take)
+            removed += take
+    for agg in ('sp16_debiti_breve', 'sp17_debiti_lungo'):
+        if removed >= amount:
+            break
+        take = min(amount - removed, bs.get(agg, Z))
+        if take > Z:
+            bs[agg] = bs.get(agg, Z) - take
+            removed += take
+    return removed
+
+
+def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
+                        text: Optional[str] = None,
+                        declared: Optional[dict] = None):
+    """Deterministic contra-netting overlay for route-C trial balances.
+
+    Re-reads the source document, sums fondi ammortamento (parent/child
+    deduplicated) and the offsettable IVA position, then — deterministic
+    authority — OVERWRITES sp02/sp03 with the scanned net values and removes
+    from the debt buckets exactly the passivo excess over the new attivo
+    (capped at the fondi mass), so an already-net extraction is passed through
+    untouched (idempotent) and a gross one comes out net and balanced.
+
+    Self-validation gates (either fails -> no-op, sheet returned unchanged):
+      1. netted contra > 1% of the declared total (there is real contra mass);
+      2. the scan's gross attivo reconciles to the declared TOTALE ATTIVO /
+         pareggio within 0.5% (proves we read the right magnitudes).
+
+    Returns (winner_bs, netted_contra). netted_contra > 0 also when the sheet
+    needed no field change (already net): the caller must still reduce the
+    DECLARED anchor by it, because the document's printed totals are GROSS.
+    """
+    Z = Decimal('0')
+    try:
+        decl_total = None
+        if declared:
+            decl_total = (declared.get('pareggio') or declared.get('attivo')
+                          or declared.get('passivo'))
+        if not decl_total or decl_total <= 0:
+            return winner_bs, Z
+        rows = _contra_rows(file_path, text=text)
+        if not rows:
+            return winner_bs, Z
+        scan = _contra_classify(*rows)
+        iva_offset = min(scan.iva_credito, scan.iva_debito)
+        fondi_total = scan.fondi_immat + scan.fondi_mat
+        netted = fondi_total + iva_offset
+        if netted <= decl_total * Decimal('0.01'):
+            return winner_bs, Z                              # gate 1
+        if abs(scan.attivo_total - decl_total) > decl_total * Decimal('0.005'):
+            logger.info(
+                "contra-netting: scan attivo %s non riconcilia col totale "
+                "dichiarato %s — no-op", scan.attivo_total, decl_total)
+            return winner_bs, Z                              # gate 2
+    except Exception as exc:
+        logger.warning("contra-netting: scan fallito (%s) — no-op", exc)
+        return winner_bs, Z
+
+    # ---- apply (deterministic authority) ------------------------------------
+    # IVA gross-evidence gate: the IVA collapse is a DELTA (not idempotent like
+    # the sp02/sp03 overwrite), so it applies only when the winner's pre-apply
+    # total still sits at the declared GROSS magnitude — proof nothing was
+    # collapsed yet. An already-net / partially-net sheet skips the IVA delta.
+    pre_total = winner_bs.get('totale_attivo', Z)
+    apply_iva = (iva_offset > Z
+                 and abs(pre_total - decl_total) <= decl_total * Decimal('0.005'))
+
+    old_02 = winner_bs.get('sp02_immob_immateriali', Z)
+    old_03 = winner_bs.get('sp03_immob_materiali', Z)
+    new_02 = max(Z, scan.gross_sp02 - scan.fondi_immat)
+    new_03 = max(Z, scan.gross_sp03 - scan.fondi_mat)
+    winner_bs['sp02_immob_immateriali'] = new_02
+    winner_bs['sp03_immob_materiali'] = new_03
+    att_delta = (new_02 + new_03) - (old_02 + old_03)
+    winner_bs['totale_attivo'] = winner_bs.get('totale_attivo', Z) + att_delta
+
+    if apply_iva:
+        # collapse the offsettable IVA: net erario position stays on the larger
+        # side, the smaller side is dropped from crediti and debiti tributari.
+        cred = winner_bs.get('sp06_crediti_breve', Z)
+        take = min(iva_offset, cred)
+        winner_bs['sp06_crediti_breve'] = cred - take
+        winner_bs['totale_attivo'] -= take
+        winner_bs['totale_passivo'] = (winner_bs.get('totale_passivo', Z)
+                                       - _reduce_debts(winner_bs, take))
+
+    # balance-invariant fondi removal from the debt buckets: exactly the passivo
+    # excess over the (new, net) attivo, capped at the fondi mass — 0 when the
+    # extractor had already netted, the full fondi mass when it was gross.
+    excess = winner_bs.get('totale_passivo', Z) - winner_bs['totale_attivo']
+    to_remove = min(max(Z, excess), fondi_total)
+    if to_remove > Z:
+        winner_bs['totale_passivo'] = (winner_bs.get('totale_passivo', Z)
+                                       - _reduce_debts(winner_bs, to_remove))
+    logger.info(
+        "contra-netting: nettati %s (fondi immat %s + mat %s + IVA %s); "
+        "sp02 %s→%s, sp03 %s→%s", netted, scan.fondi_immat, scan.fondi_mat,
+        iva_offset, old_02, new_02, old_03, new_03)
+    return winner_bs, netted
+
+
 def _hier_reconstruct(pages_data, full: str):
     """Reconstruct a balanced IV-CEE sheet from level-1 mastri. Returns (bs, ce) or
     None when the layout does not reconcile (caller then keeps the best-effort result).

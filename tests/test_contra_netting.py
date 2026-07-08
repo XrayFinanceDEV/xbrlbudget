@@ -172,3 +172,114 @@ def test_contra_rows_text_mode_classifies_fondi_by_nature():
     assert scan.gross_sp03 == Decimal("3000000.00")
     # the CE line must NOT leak into the attivo total (window cut at CONTO ECONOMICO)
     assert scan.attivo_total == Decimal("3000000.00")
+
+
+# ---------------------------------------------------------------- net_contra_accounts
+
+import importers.situazione_contabile_parser as scp
+
+
+def _gross_winner_bs():
+    """Reproduces the observed CoGe-LLM failure shape on a gross trial balance:
+    assets left GROSS, the whole fondi mass (1.858.799,20) dumped into debts."""
+    return {
+        "sp02_immob_immateriali": D("20000"),
+        "sp03_immob_materiali": D("3500000"),
+        "sp06_crediti_breve": D("115000"),          # incl. 15.000 IVA credit
+        "sp09_disponibilita_liquide": D("50000"),
+        "sp11_capitale": D("1000000"),
+        "sp13_utile_perdita": D("636200.80"),
+        "sp16_debiti_breve": D("2048799.20"),       # 190.000 real + 1.858.799,20 fondi
+        "sp16g_altri_debiti_breve": D("1873799.20"),
+        "totale_attivo": D("3685000"),
+        "totale_passivo": D("3685000"),
+    }
+
+
+DECLARED = {"attivo": D("3685000"), "passivo": D("3685000"),
+            "pareggio": D("3685000"), "utile": None, "perdita": None}
+
+
+def _patch_scan(monkeypatch, attivo, passivo):
+    monkeypatch.setattr(scp, "_contra_rows", lambda fp, text=None: (attivo, passivo))
+
+
+def test_netting_applied_on_gross_extraction(monkeypatch):
+    _patch_scan(monkeypatch, ATTIVO_ROWS, PASSIVO_ROWS)
+    bs = _gross_winner_bs()
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
+    # netted = fondi 1.858.799,20 + IVA offset min(15000, 10000)
+    assert netted == D("1868799.20")
+    assert bs["sp02_immob_immateriali"] == D("15000")       # 20.000 - 5.000
+    assert bs["sp03_immob_materiali"] == D("1646200.80")    # 3.500.000 - 1.853.799,20
+    assert bs["sp06_crediti_breve"] == D("105000")          # IVA credit collapsed
+    assert bs["totale_attivo"] == D("1816200.80")
+    assert bs["totale_passivo"] == bs["totale_attivo"]      # pareggio preserved
+    assert bs["sp16_debiti_breve"] == D("180000")           # only real debts left
+    assert bs["sp13_utile_perdita"] == D("636200.80")       # result untouched
+
+
+def test_noop_when_extractor_already_netted(monkeypatch):
+    """Deterministic authority must be idempotent: a correct (net) sheet passes
+    through with only the anchor-reduction value returned — no field changes."""
+    _patch_scan(monkeypatch, ATTIVO_ROWS, PASSIVO_ROWS)
+    bs = {
+        "sp02_immob_immateriali": D("15000"),
+        "sp03_immob_materiali": D("1646200.80"),
+        "sp06_crediti_breve": D("105000"),
+        "sp09_disponibilita_liquide": D("50000"),
+        "sp11_capitale": D("1000000"),
+        "sp13_utile_perdita": D("636200.80"),
+        "sp16_debiti_breve": D("180000"),
+        "totale_attivo": D("1816200.80"),
+        "totale_passivo": D("1816200.80"),
+    }
+    before = dict(bs)
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
+    assert netted == D("1868799.20")   # still returned: the DECLARED anchor is gross
+    # sp02/sp03 overwritten with the SAME net values; the IVA gross-evidence gate
+    # skips the (non-idempotent) IVA delta because totale_attivo is already at the
+    # NET magnitude; balance-invariant debt reduction sees excess 0 -> no real
+    # debt touched. Net effect: the sheet passes through byte-identical.
+    assert bs == before
+
+
+def test_noop_without_fondi(monkeypatch):
+    _patch_scan(monkeypatch, [("0601", "CREDITI V/CLIENTI", D("3685000"))], [])
+    bs = _gross_winner_bs()
+    before = dict(bs)
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
+    assert netted == D("0")
+    assert bs == before
+
+
+def test_noop_when_scan_does_not_reconcile(monkeypatch):
+    # scan reads only half the attivo -> gate 2 fails -> untouched sheet
+    _patch_scan(monkeypatch, ATTIVO_ROWS[:2], PASSIVO_ROWS)
+    bs = _gross_winner_bs()
+    before = dict(bs)
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
+    assert netted == D("0")
+    assert bs == before
+
+
+def test_noop_without_declared_totals(monkeypatch):
+    _patch_scan(monkeypatch, ATTIVO_ROWS, PASSIVO_ROWS)
+    bs = _gross_winner_bs()
+    before = dict(bs)
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=None)
+    assert netted == D("0")
+    assert bs == before
+
+
+def test_iva_one_sided_left_gross(monkeypatch):
+    # only an IVA credit exists -> offset 0 -> crediti untouched, fondi still netted
+    passivo_no_iva = [r for r in PASSIVO_ROWS if "IVA" not in r[1]]
+    # keep the attivo scan total equal to declared by replacing the IVA row
+    attivo = [r if "IVA" not in r[1] else (r[0], "CREDITI DIVERSI", r[2])
+              for r in ATTIVO_ROWS]
+    _patch_scan(monkeypatch, attivo, passivo_no_iva)
+    bs = _gross_winner_bs()
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
+    assert netted == D("1858799.20")                 # fondi only, no IVA offset
+    assert bs["sp06_crediti_breve"] == D("115000")   # untouched

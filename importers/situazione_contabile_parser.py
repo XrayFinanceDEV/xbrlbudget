@@ -22,7 +22,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import fitz  # PyMuPDF
 
@@ -2452,6 +2452,90 @@ def _is_fondo_amm(desc_upper: str) -> bool:
     d = desc_upper
     return (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
             and ('FOND' in d or 'F.DO' in d or 'F/' in d))
+
+
+# ---------------------------------------------------------------------------
+# Contra-netting overlay (spec docs/superpowers/specs/2026-07-06-contra-netting-
+# overlay-design.md): deterministic post-extraction netting of fondi ammortamento
+# (+ conservative IVA offset) on the CHOSEN route-C candidate, whatever extractor
+# produced it. Pure, no LLM; no-op unless the scan self-validates against the
+# document's own declared gross total.
+# ---------------------------------------------------------------------------
+
+class ContraScan(NamedTuple):
+    gross_sp02: Decimal      # attivo-side immobilizzazioni immateriali (gross)
+    gross_sp03: Decimal      # attivo-side immobilizzazioni materiali (gross)
+    attivo_total: Decimal    # FULL attivo-side sum, fondi excluded (gate anchor)
+    fondi_immat: Decimal     # fondi ammortamento immateriali (either side)
+    fondi_mat: Decimal       # fondi ammortamento materiali (either side)
+    iva_credito: Decimal     # IVA lines on the attivo side
+    iva_debito: Decimal      # IVA lines on the passivo side
+
+
+_IVA_LINE_RE = re.compile(r'\bIVA\b')
+
+
+def _is_iva_line(desc_upper: str) -> bool:
+    """IVA account line ('ERARIO C/IVA', 'IVA C/ACQUISTI', ...). Word-boundary so
+    'RISERVA' (which contains the substring IVA) never matches."""
+    return bool(_IVA_LINE_RE.search(desc_upper))
+
+
+def _dedup_parent_child(rows):
+    """Sum mastri OR leaves, never both. A parent row is dropped when child rows
+    (codes strictly extending its code) are present and sum to its amount within
+    max(2 EUR, 1%) — AGO layouts print the mastro subtotal above its detail
+    accounts on both sides. Code-less rows are always kept."""
+    out = []
+    for code, desc, amount in rows:
+        if code:
+            kids = [a for c, _d, a in rows if c != code and c.startswith(code)]
+            if kids:
+                tol = max(Decimal('2'), abs(amount) * Decimal('0.01'))
+                if abs(sum(kids) - amount) <= tol:
+                    continue  # parent duplicated by its children
+        out.append((code, desc, amount))
+    return out
+
+
+def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
+    """Classify + sum deduplicated scan rows into the contra-netting aggregates.
+    Rows are (code, desc_upper, amount); the SIDE each row came from is ground
+    truth for attivo_total/IVA, while fondi ammortamento count from EITHER side."""
+    Z = Decimal('0')
+    g02 = g03 = att_total = f_im = f_mat = iva_c = iva_d = Z
+
+    def _fondo_bucket(desc):
+        # immat/mat split via the existing passivo rules (depr_sp02/depr_sp03);
+        # unmatched fondi fall to materiali, mirroring the F.DO AMM fallback rule.
+        return 'im' if _classify_sp_passivo(desc) == 'depr_sp02' else 'mat'
+
+    for _c, d, a in _dedup_parent_child(list(attivo_rows)):
+        if _is_fondo_amm(d):
+            if _fondo_bucket(d) == 'im':
+                f_im += abs(a)
+            else:
+                f_mat += abs(a)
+            continue
+        att_total += a
+        if _is_iva_line(d):
+            iva_c += a
+            continue
+        f = _classify_sp_attivo(d)
+        if f == 'gross_sp02':
+            g02 += a
+        elif f == 'gross_sp03':
+            g03 += a
+    for _c, d, a in _dedup_parent_child(list(passivo_rows)):
+        if _is_fondo_amm(d):
+            if _fondo_bucket(d) == 'im':
+                f_im += abs(a)
+            else:
+                f_mat += abs(a)
+            continue
+        if _is_iva_line(d):
+            iva_d += a
+    return ContraScan(g02, g03, att_total, f_im, f_mat, iva_c, iva_d)
 
 
 def _hier_reconstruct(pages_data, full: str):

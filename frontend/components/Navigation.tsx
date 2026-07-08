@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const MAIN_TABS = [
-  { href: "/aziende", label: "Aziende", icon: Building2, match: (path: string) => path.startsWith("/aziende") },
+  { href: "/", label: "Aziende & Pratiche", icon: Building2, match: (path: string) => path === "/" || path.startsWith("/aziende") },
   { href: "/import", label: "Importazione", icon: Upload, match: (path: string) => path.startsWith("/import") },
   { href: "/budget", label: "Scenari", icon: FileSpreadsheet, match: (path: string) => path.startsWith("/budget") },
 ];
@@ -46,13 +46,14 @@ export function Navigation() {
   const { startupMode } = useApp();
   const isForecastActive = pathname.startsWith("/forecast");
 
-  // Hide navigation on homepage and infrannuale (has its own nav)
-  if (pathname === "/" || pathname.startsWith("/infrannuale")) return null;
+  // The home "Aziende & Pratiche" is now a full page, so the nav shows there.
+  // Infrannuale keeps its own wizard nav (until Phase A retires it).
+  if (pathname.startsWith("/infrannuale")) return null;
 
   // Startup mode: a startup has no historical bilancio to import, so the
   // Aziende and Importazione tabs are hidden.
   const mainTabs = startupMode
-    ? MAIN_TABS.filter((tab) => tab.href !== "/aziende" && tab.href !== "/import")
+    ? MAIN_TABS.filter((tab) => tab.href !== "/" && tab.href !== "/import")
     : MAIN_TABS;
 
   return (

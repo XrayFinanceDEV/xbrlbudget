@@ -12,7 +12,7 @@ import {
   deleteBudgetScenario,
   getBudgetAssumptions,
   createBudgetAssumptions,
-  updateBudgetAssumptions,
+  bulkUpsertAssumptions,
   generateForecast,
   getIncomeStatement,
   getBalanceSheet,
@@ -110,19 +110,22 @@ export default function BudgetPage() {
     }
   };
 
-  const handleRegenerateScenario = async (scenarioId: number) => {
-    if (!selectedCompanyId) return;
+  const [regenScenarioId, setRegenScenarioId] = useState<number | null>(null);
+  const [regenClearOverrides, setRegenClearOverrides] = useState(false);
 
+  const handleRegenerateScenario = async () => {
+    if (!selectedCompanyId || regenScenarioId === null) return;
     try {
-      // Do NOT clear overrides: Scenari-tab DETTAGLIO CE and /forecast/income
-      // both persist overrides the user expects to keep.
-      await generateForecast(selectedCompanyId, scenarioId, false);
+      await generateForecast(selectedCompanyId, regenScenarioId, regenClearOverrides);
       toast.success("Previsionale ricalcolato con successo!");
       invalidateScenarios(selectedCompanyId);
-      invalidateAnalysis(selectedCompanyId, scenarioId);
-    } catch (err: any) {
+      invalidateAnalysis(selectedCompanyId, regenScenarioId);
+    } catch (err: unknown) {
       console.error("Error regenerating forecast:", err);
       toast.error(getErrorMessage(err, "Impossibile ricalcolare il previsionale"));
+    } finally {
+      setRegenScenarioId(null);
+      setRegenClearOverrides(false);
     }
   };
 
@@ -245,7 +248,7 @@ export default function BudgetPage() {
             companyName={selectedCompany?.name ?? null}
             onEdit={handleEditScenario}
             onDelete={handleDeleteScenario}
-            onRegenerate={handleRegenerateScenario}
+            onRegenerate={setRegenScenarioId}
           />
         </>
       ) : (
@@ -263,6 +266,31 @@ export default function BudgetPage() {
           }}
         />
       )}
+
+      <AlertDialog open={regenScenarioId !== null} onOpenChange={(open) => !open && setRegenScenarioId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ricalcola previsionale</AlertDialogTitle>
+            <AlertDialogDescription>
+              Il previsionale viene rigenerato dalle ipotesi correnti.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex items-center space-x-2 py-2">
+            <Checkbox
+              id="regen-clear"
+              checked={regenClearOverrides}
+              onCheckedChange={(c) => setRegenClearOverrides(c === true)}
+            />
+            <Label htmlFor="regen-clear" className="text-sm font-normal">
+              Azzera le modifiche manuali del CE previsionale
+            </Label>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRegenerateScenario}>Ricalcola</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -966,33 +994,31 @@ function ScenarioForm({
         savedScenario = await createBudgetScenario(companyId, scenarioData);
       }
 
-      // Save assumptions for each forecast year
-      for (const year of forecastYears) {
-        const assumptionData = assumptions[year];
-        if (assumptionData) {
-          // Check if assumption already exists for this year
-          if (scenario && existingAssumptionYears.has(year)) {
-            // Update existing assumption
-            await updateBudgetAssumptions(companyId, savedScenario.id, year, assumptionData);
-          } else {
-            // Create new assumption
-            const payload: BudgetAssumptionsCreate = {
-              scenario_id: savedScenario.id,
-              forecast_year: year,
-              ...assumptionData,
-            };
-            await createBudgetAssumptions(companyId, savedScenario.id, payload);
-          }
-        }
+      // ONE call: bulk upsert (delete-all + reinsert server-side) + generation.
+      // Rows are FULL objects (hydration map for existing scenarios includes CE
+      // overrides and legacy fields) so overrides made on /forecast/income
+      // survive this save. Never pass clear_overrides here.
+      const rows = forecastYears
+        .filter((year) => assumptions[year])
+        .map((year) => ({
+          ...assumptions[year],
+          scenario_id: savedScenario.id,
+          forecast_year: year,
+        }));
+      const result = await bulkUpsertAssumptions(companyId, savedScenario.id, {
+        assumptions: rows,
+        auto_generate: true,
+      });
+
+      // The backend returns success:true even when generation fails
+      // (assumptions_service.py:210-217) — check the explicit flag.
+      if (result?.forecast_generated === false) {
+        toast.warning(
+          result?.message ?? "Ipotesi salvate, ma il previsionale non è stato generato"
+        );
+      } else {
+        toast.success("Scenario salvato e previsionale calcolato con successo!");
       }
-
-      // Generate forecast — do NOT pass clear_overrides: the DETTAGLIO CONTO
-      // ECONOMICO section on this tab writes ce02/03/10/11/13-19 overrides via
-      // the assumptions PUT we just made. Clearing them here would wipe the
-      // user's edits before the engine reads them.
-      await generateForecast(companyId, savedScenario.id, false);
-
-      toast.success("Scenario salvato e previsionale calcolato con successo!");
       onSaved();
     } catch (err: any) {
       console.error("Error saving scenario:", err);

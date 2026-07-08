@@ -10,6 +10,23 @@ export interface Company {
   updated_at: string;
 }
 
+export interface ScenarioSummary {
+  id: number;
+  name: string;
+  scenario_type: string;
+  base_year: number;
+  period_months: number | null;
+  is_active: number;
+  has_forecast: boolean;
+  source_scenario_id?: number | null;
+  workflow_type?: "infrannuale" | "bilancio" | "startup" | null;
+  created_at: string | null;
+}
+
+export interface CompanyWithScenarios extends Company {
+  scenarios: ScenarioSummary[];
+}
+
 export interface FinancialYear {
   id: number;
   company_id: number;

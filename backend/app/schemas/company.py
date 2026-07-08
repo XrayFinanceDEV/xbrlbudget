@@ -3,7 +3,7 @@ Pydantic schemas for Company model
 """
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 
 class CompanyBase(BaseModel):
@@ -39,3 +39,24 @@ class CompanyInDB(CompanyBase):
 class Company(CompanyInDB):
     """Full Company schema for API responses"""
     pass
+
+
+class ScenarioSummary(BaseModel):
+    """Lightweight scenario summary for the Aziende & Pratiche home."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    scenario_type: str
+    base_year: int
+    period_months: Optional[int] = None
+    is_active: int
+    has_forecast: bool
+    source_scenario_id: Optional[int] = None
+    workflow_type: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class CompanyWithScenarios(Company):
+    """Company plus its budget/infrannuale scenarios (include=scenarios)."""
+    scenarios: List[ScenarioSummary] = []

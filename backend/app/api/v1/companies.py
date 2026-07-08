@@ -1,9 +1,10 @@
 """
 Company API endpoints
 """
-from typing import List
+from datetime import datetime
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import sys
 import os
 
@@ -21,14 +22,46 @@ from database import models
 router = APIRouter()
 
 
-@router.get("/companies", response_model=List[schemas.Company])
+@router.get("/companies", response_model=List[schemas.CompanyWithScenarios])
 def list_companies(
     skip: int = 0,
     limit: int = 100,
+    include: Optional[str] = None,
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Get list of all companies for the current user"""
+    """Get list of all companies for the current user.
+
+    With ?include=scenarios each company also carries a lightweight list of its
+    budget/infrannuale scenarios (one call replaces the per-company loop the
+    Aziende & Pratiche home used to do). Plain calls return an empty scenarios
+    list (backward compatible)."""
+    if include == "scenarios":
+        companies = (
+            db.query(models.Company)
+            .options(joinedload(models.Company.budget_scenarios)
+                     .joinedload(models.BudgetScenario.forecast_years))
+            .filter(models.Company.user_id == user_id)
+            .offset(skip).limit(limit).all()
+        )
+        out = []
+        for c in companies:
+            item = schemas.CompanyWithScenarios.model_validate(c, from_attributes=True)
+            item.scenarios = [
+                schemas.ScenarioSummary(
+                    id=s.id, name=s.name, scenario_type=s.scenario_type,
+                    base_year=s.base_year, period_months=s.period_months,
+                    is_active=s.is_active, has_forecast=len(s.forecast_years) > 0,
+                    source_scenario_id=getattr(s, "source_scenario_id", None),
+                    workflow_type=getattr(s, "workflow_type", None),
+                    created_at=s.created_at,
+                )
+                for s in sorted(c.budget_scenarios,
+                                key=lambda s: s.created_at or datetime.min, reverse=True)
+            ]
+            out.append(item)
+        return out
+
     companies = db.query(models.Company).filter(
         models.Company.user_id == user_id
     ).offset(skip).limit(limit).all()

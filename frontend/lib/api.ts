@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   Company,
+  CompanyWithScenarios,
   FinancialYear,
   BalanceSheet,
   IncomeStatement,
@@ -49,6 +50,14 @@ api.interceptors.response.use(
 // Companies
 export const getCompanies = async (): Promise<Company[]> => {
   const { data } = await api.get<Company[]>('/companies');
+  return data;
+};
+
+// One call for the Aziende & Pratiche home: each company carries its scenarios.
+export const getCompaniesWithScenarios = async (): Promise<CompanyWithScenarios[]> => {
+  const { data } = await api.get<CompanyWithScenarios[]>('/companies', {
+    params: { include: 'scenarios' },
+  });
   return data;
 };
 

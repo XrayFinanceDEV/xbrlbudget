@@ -1374,12 +1374,11 @@ function AutoGeneratorCard({
         }
       });
     }
-    // BS fields: use inflation directly
-    const bsFields = ["receivables_short_growth_pct", "receivables_long_growth_pct", "payables_short_growth_pct"];
+    // BS: only receivables_long has an engine effect (sp07). The old
+    // receivables_short/payables_short fields are dead (no engine reads) —
+    // working capital scales via DSO/DIO/DPO instead.
     for (const year of forecastYears) {
-      for (const field of bsFields) {
-        updateAssumption(year, field, Math.round(inflationRate * 100) / 100);
-      }
+      updateAssumption(year, "receivables_long_growth_pct", Math.round(inflationRate * 100) / 100);
     }
     toast.success("Ipotesi applicate con successo");
   };
@@ -1454,7 +1453,7 @@ function AutoGeneratorCard({
                 ))}
                 {/* BS fields row */}
                 <tr className="hover:bg-muted/50">
-                  <td className="px-3 py-1.5 font-medium text-foreground">Crediti / Debiti breve</td>
+                  <td className="px-3 py-1.5 font-medium text-foreground">Crediti oltre 12 mesi</td>
                   <td className="px-3 py-1.5 text-center text-muted-foreground">{"\u2014"}</td>
                   {forecastYears.map((year) => (
                     <td key={year} className="px-3 py-1.5 text-center font-medium text-primary">

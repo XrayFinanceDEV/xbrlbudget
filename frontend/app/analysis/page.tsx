@@ -77,6 +77,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ScenarioSelector } from "@/components/scenario-selector";
 import {
   Tooltip,
   TooltipContent,
@@ -785,21 +786,11 @@ export default function AnalysisPage() {
                 Indici Finanziari Pluriennali
               </CardTitle>
               {scenarios.length > 0 && (
-                <Select
-                  value={selectedScenario?.toString() || ""}
-                  onValueChange={(value) => setSelectedScenario(Number(value))}
-                >
-                  <SelectTrigger className="w-[220px]">
-                    <SelectValue placeholder="Seleziona scenario" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {scenarios.map((s) => (
-                      <SelectItem key={s.id} value={s.id.toString()}>
-                        {s.name} {s.is_active === 1 && "(Attivo)"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ScenarioSelector
+                  scenarios={scenarios}
+                  selectedScenario={scenarios.find((s) => s.id === selectedScenario) ?? null}
+                  onSelect={(s) => setSelectedScenario(s?.id ?? null)}
+                />
               )}
             </div>
           </CardHeader>

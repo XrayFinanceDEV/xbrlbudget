@@ -7,6 +7,7 @@ import { useScenarios, useDetailedCashflow, getPreferredScenario } from "@/hooks
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+import { ScenarioSelector } from "@/components/scenario-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -89,22 +90,12 @@ export default function CashflowPage() {
         {scenarios.length > 0 && (
           <Card className="mb-6">
             <CardContent className="pt-6">
-              <label className="block text-sm font-medium text-muted-foreground mb-2">
-                Seleziona Scenario:
-              </label>
-              <select
-                className="flex h-9 w-full max-w-md rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={selectedScenarioId || ""}
-                onChange={(e) => setSelectedScenarioId(parseInt(e.target.value))}
-              >
-                <option value="">-- Seleziona uno scenario --</option>
-                {scenarios.map((scenario) => (
-                  <option key={scenario.id} value={scenario.id}>
-                    {scenario.name} (Base: {scenario.base_year})
-                    {scenario.is_active ? " - Attivo" : ""}
-                  </option>
-                ))}
-              </select>
+              <ScenarioSelector
+                scenarios={scenarios}
+                selectedScenario={scenarios.find((s) => s.id === selectedScenarioId) ?? null}
+                onSelect={(s) => setSelectedScenarioId(s?.id ?? null)}
+                label="Seleziona Scenario:"
+              />
             </CardContent>
           </Card>
         )}
@@ -224,21 +215,11 @@ export default function CashflowPage() {
       {scenarios.length > 0 && (
         <Card className="mb-6">
           <CardContent className="pt-6 pb-4">
-            <label className="block text-sm font-medium text-muted-foreground mb-2">
-              Scenario Budget:
-            </label>
-            <select
-              className="flex h-9 w-full max-w-md rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={selectedScenarioId || ""}
-              onChange={(e) => setSelectedScenarioId(parseInt(e.target.value))}
-            >
-              {scenarios.map((scenario) => (
-                <option key={scenario.id} value={scenario.id}>
-                  {scenario.name} - Anno Base: {scenario.base_year}
-                  {scenario.is_active ? " (Attivo)" : ""}
-                </option>
-              ))}
-            </select>
+            <ScenarioSelector
+              scenarios={scenarios}
+              selectedScenario={scenarios.find((s) => s.id === selectedScenarioId) ?? null}
+              onSelect={(s) => setSelectedScenarioId(s?.id ?? null)}
+            />
           </CardContent>
         </Card>
       )}

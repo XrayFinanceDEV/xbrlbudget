@@ -2538,6 +2538,88 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
     return ContraScan(g02, g03, att_total, f_im, f_mat, iva_c, iva_d)
 
 
+_CONTRA_TXT_ROW_RE = re.compile(
+    r'^\s*(?P<code>[\d./*]+)?\s*(?P<desc>[A-ZÀ-Ù][^\d\n]*?)\s+'
+    r'(?P<amt>-?\d{1,3}(?:\.\d{3})*,\d{2})\s*$', re.MULTILINE)
+
+
+def _contra_rows(file_path: str, text: Optional[str] = None):
+    """Acquire (attivo_rows, passivo_rows) for the contra-netting scan.
+
+    Generated PDFs: coordinate mode — the SP pages' two physical columns are
+    split with the same helpers the best-effort parser uses (`_be_split` +
+    `_be_collect_side`), so each row carries its true side. Scanned PDFs (no
+    word layer): line-parse the OCR `text`; the side is unknown, so rows are
+    assigned by NATURE (fondi → passivo bucket, attivo-rule matches → attivo)
+    — lower fidelity, which the caller's self-validation gate absorbs (a
+    misread scan fails reconciliation → no-op, never corruption).
+    Returns None when neither mode yields rows.
+    """
+    # --- coordinate mode -----------------------------------------------------
+    try:
+        import fitz
+        doc = fitz.open(file_path)
+        att, pas = [], []
+        for page in doc:
+            up = page.get_text().upper()
+            flat = re.sub(r'\s+', '', up)
+            # fiscal-reconciliation appendix pages are not the SP
+            if 'RIDETERMINAZIONE' in flat or 'REDDITOIMPONIBILE' in flat:
+                continue
+            is_sp = ('PATRIMONIAL' in flat) or (
+                'ATTIVIT' in up and 'PASSIVIT' in up and 'CONTOECONOMICO' not in flat)
+            is_ce = ('CONTOECONOMICO' in flat) or ('COSTI' in up and 'RICAVI' in up)
+            if not is_sp or is_ce:
+                continue
+            words = page.get_text('words')
+            if not words:
+                continue
+            split = _be_split(words)
+            if split is None:
+                split = page.rect.width / 2
+            att += _be_collect_side(words, -1e9, split)
+            pas += _be_collect_side(words, split, 1e9)
+        doc.close()
+        if att or pas:
+            return att, pas
+    except Exception:
+        pass
+
+    # --- OCR-text fallback (scanned PDFs) ------------------------------------
+    if not text:
+        return None
+    up = text.upper()
+    # keep only the SP region: cut at the CE section header
+    m = re.search(r'CONTO\s+ECONOMICO', up)
+    if m:
+        up = up[:m.start()]
+    att, pas = [], []
+    for row in _CONTRA_TXT_ROW_RE.finditer(up):
+        desc = row.group('desc').strip()
+        if len(desc) < 3 or 'TOTALE' in desc or 'PAREGGIO' in desc:
+            continue
+        try:
+            amount = _parse_amount(row.group('amt'))
+        except Exception:
+            continue
+        code = (row.group('code') or '').strip().strip('./*')
+        entry = (re.sub(r'\D', '', code), desc, abs(amount))
+        if _is_fondo_amm(desc):
+            pas.append(entry)          # side irrelevant for fondi (contra either way)
+        elif _is_iva_line(desc) and ('VENDIT' in desc or 'DEBITO' in desc):
+            pas.append(entry)
+        else:
+            f = _classify_sp_attivo(desc)
+            # text mode has no column ground truth: count ONLY explicit
+            # attivo-rule matches (never the sp06 default, which would suck
+            # passivo/CE lines into the attivo total and defeat the gate)
+            if f != 'sp06' or _is_iva_line(desc):
+                att.append(entry)
+    if att or pas:
+        return att, pas
+    return None
+
+
 def _hier_reconstruct(pages_data, full: str):
     """Reconstruct a balanced IV-CEE sheet from level-1 mastri. Returns (bs, ce) or
     None when the layout does not reconcile (caller then keeps the best-effort result).

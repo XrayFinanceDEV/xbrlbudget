@@ -127,3 +127,48 @@ def test_contra_classify_dedups_before_summing():
     ]
     scan = _contra_classify([], passivo)
     assert scan.fondi_mat == D("1779795.83")
+
+
+# ---------------------------------------------------------------- _contra_rows
+
+EXAMPLES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "docs", "examples")
+PDF_613 = os.path.join(
+    EXAMPLES, "613_2024 Costruzione di edifici residenziali e non residenziali.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_613), reason="evidence PDF not present")
+def test_contra_rows_on_613_finds_the_fondi_mass():
+    from importers.situazione_contabile_parser import _contra_rows, _contra_classify
+
+    rows = _contra_rows(PDF_613)
+    assert rows is not None
+    attivo_rows, passivo_rows = rows
+    scan = _contra_classify(attivo_rows, passivo_rows)
+    # Spec reproduced evidence: fondi ammortamento 1.853.799,20 on this file
+    assert abs(scan.fondi_immat + scan.fondi_mat - Decimal("1853799.20")) \
+        <= Decimal("1853799.20") * Decimal("0.01")
+    # gross attivo scan must land near the file's gross total (~4.99M order of
+    # magnitude: net 3.13M + fondi 1.85M). Loose 2% band — the exact declared
+    # total is asserted in the end-to-end test via _declared_control_totals.
+    assert scan.attivo_total > Decimal("4000000")
+
+
+def test_contra_rows_text_mode_classifies_fondi_by_nature():
+    from importers.situazione_contabile_parser import _contra_rows, _contra_classify
+
+    ocr = (
+        "SITUAZIONE PATRIMONIALE\n"
+        "0201 FABBRICATI INDUSTRIALI 3.000.000,00\n"
+        "0401 F.DO AMM.TO FABBRICATI 1.800.000,00\n"
+        "1601 FORNITORI 180.000,00\n"
+        "CONTO ECONOMICO\n"
+        "3101 RICAVI DELLE VENDITE 900.000,00\n"
+    )
+    rows = _contra_rows("/nonexistent.pdf", text=ocr)
+    assert rows is not None
+    scan = _contra_classify(*rows)
+    assert scan.fondi_mat == Decimal("1800000.00")
+    assert scan.gross_sp03 == Decimal("3000000.00")
+    # the CE line must NOT leak into the attivo total (window cut at CONTO ECONOMICO)
+    assert scan.attivo_total == Decimal("3000000.00")

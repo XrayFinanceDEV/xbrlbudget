@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useInvalidateScenarios, useInvalidateAnalysis } from "@/hooks/use-queries";
 import {
@@ -89,6 +90,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
   parseFloat((Number(v ?? fallback)).toFixed(1));
 
 export default function BudgetPage() {
+  const router = useRouter();
   const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
@@ -138,6 +140,9 @@ export default function BudgetPage() {
     setEditingScenario(null);
     setActiveTab("list");
     if (selectedCompanyId) invalidateScenarios(selectedCompanyId);
+    toast.success("Vai al CE Previsionale per rifinire le voci", {
+      action: { label: "CE Previsionale", onClick: () => router.push("/forecast/income") },
+    });
   };
 
   // Startup mode has no imported bilancio: when there's no base year yet, show

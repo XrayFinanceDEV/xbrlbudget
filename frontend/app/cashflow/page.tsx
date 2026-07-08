@@ -1,17 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useDetailedCashflow, getPreferredScenario } from "@/hooks/use-queries";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Wallet, AlertTriangle, Loader2, CheckCircle2, Info } from "lucide-react";
+import { Wallet, AlertTriangle, Loader2, CheckCircle2, Info, ArrowRight } from "lucide-react";
 import type { MultiYearDetailedCashFlow, DetailedCashFlowStatement } from "@/types/api";
 
 export default function CashflowPage() {
+  const router = useRouter();
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [] } = useScenarios(selectedCompanyId);
   const [selectedScenarioId, setSelectedScenarioId] = useState<number | null>(null);
@@ -210,6 +213,12 @@ export default function CashflowPage() {
         description="Analisi dettagliata dei flussi di cassa secondo principi contabili italiani"
         icon={<Wallet className="h-6 w-6" />}
       />
+
+      <div className="flex justify-end mb-4">
+        <Button variant="outline" size="sm" onClick={() => router.push("/report")}>
+          Vai al Report <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
 
       {/* Scenario Selector */}
       {scenarios.length > 0 && (

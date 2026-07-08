@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
@@ -98,6 +99,7 @@ type YearData = ScenarioAnalysisYearData;
 type PendingEdits = Record<string, number | null>;
 
 export default function ForecastIncomePage() {
+  const router = useRouter();
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
@@ -158,7 +160,9 @@ export default function ForecastIncomePage() {
       await patchCeOverrides(selectedCompanyId, selectedScenario.id, overrides);
       setPendingEdits({});
       invalidateAnalysis(selectedCompanyId, selectedScenario.id);
-      toast.success("Previsionale aggiornato");
+      toast.success("Previsionale aggiornato", {
+        action: { label: "Vai al Rendiconto", onClick: () => router.push("/cashflow") },
+      });
     } catch (err: any) {
       toast.error("Errore: " + getErrorMessage(err, "aggiornamento previsionale fallito"));
     } finally {

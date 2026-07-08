@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { importXBRL, importCSV, importPDF, type XBRLImportResult, type CSVImportResult, type PDFImportResult } from "@/lib/api";
 import { toast } from "sonner";
-import { Upload, FileText, Info, AlertTriangle, CheckCircle2, Bot } from "lucide-react";
+import { Upload, FileText, Info, AlertTriangle, CheckCircle2, Bot, ArrowRight } from "lucide-react";
 import { getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ const SECTOR_OPTIONS: Record<number, string> = {
 type ImportMode = "update" | "create";
 
 export default function ImportPage() {
+  const router = useRouter();
   const { selectedCompanyId, setSelectedCompanyId } = useApp();
 
   const [importMode, setImportMode] = useState<ImportMode>("create");
@@ -349,6 +351,19 @@ export default function ImportPage() {
         <Alert variant="destructive" className="mt-6">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Next-step CTA */}
+      {(xbrlResult || csvResult || pdfResult) && (
+        <Alert className="mt-4">
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>Importazione completata. Prosegui creando uno scenario di budget.</span>
+            <Button size="sm" onClick={() => router.push("/budget")}>
+              Crea scenario <ArrowRight className="h-4 w-4" />
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 

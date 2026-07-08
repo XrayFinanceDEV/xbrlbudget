@@ -1,7 +1,7 @@
 # Contra-netting overlay for route-C trial balances
 
 **Date:** 2026-07-06
-**Status:** Design approved (pending written-spec review)
+**Status:** Implemented (see docs/superpowers/plans/2026-07-06-contra-netting-overlay.md)
 **Area:** `importers/` — PDF route-C (situazione contabile / bilancio di verifica, "sezioni contrapposte")
 
 ## Problem

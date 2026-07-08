@@ -557,6 +557,16 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
   printed total AND now splits debiti, correctly wins). The gap is ignored below 2% of the declared total so
   ordinary noise still defers to the residual tiebreaker; when no declared total is found, behaviour is the
   old residual-only selection (no regression).
+- **Contra-netting overlay (2026-07-06)** (`situazione_contabile_parser.net_contra_accounts`,
+  called in `pdf_importer` route C after `overlay_debt_typing`): deterministic post-extraction
+  netting of fondi ammortamento (+ offsettable IVA, both-sides-only) on the CHOSEN candidate.
+  Re-scans the SP pages (coordinate mode; OCR-text fallback), dedupes mastro/dettaglio, then
+  OVERWRITES sp02/sp03 with net values and removes from the debt buckets exactly the passivo
+  excess over the new attivo (capped at the fondi mass) — idempotent on an already-net sheet.
+  Two gates or no-op: netted > 1% of declared total AND scan gross attivo ≈ declared total
+  (0.5%). The declared anchor passed to `_reconcile_trial_to_declared` is reduced by the netted
+  mass (printed totals are GROSS on these files) so the reconcile cannot re-inflate it as a
+  false plug. Tests: `tests/test_contra_netting.py`; corpus check: `tests/run_contra_regression.py`.
 - **Trial-balance import is never hard-blocked** (`pdf_importer`): a readable route-C situazione
   contabile ALWAYS imports. The route now tries the dedicated **CoGe LLM extractor first**
   (`extract_trial_balance_with_llm`, which DOES read CoGe account lists); when that is unavailable or

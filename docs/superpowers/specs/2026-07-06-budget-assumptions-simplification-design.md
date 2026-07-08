@@ -1,7 +1,7 @@
 # Budget assumptions simplification
 
 **Date:** 2026-07-06
-**Status:** Design approved (pending written-spec review)
+**Status:** Implemented (see docs/superpowers/plans/2026-07-06-budget-assumptions-simplification.md)
 **Area:** `frontend/app/budget/page.tsx` (+ light plumbing hygiene) — Project 2 of the 2026-07-06 reorganization (see `docs/superpowers/2026-07-06-project-analysis.md` §2)
 
 ## Problem

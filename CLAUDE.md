@@ -614,7 +614,7 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
 - Triggered by: bulk assumptions endpoint with `auto_generate=true`
 - **CE overrides**: Every CE field (31 total) can be overridden with an absolute EUR value. Override takes precedence over growth-% calculation. `None` = use engine calculation.
 - **Auto-derived turnover days**: When DSO/DIO/DPO not explicitly set in assumptions, derived from base year ratios (e.g., `DSO = base_sp06 / base_revenue * 360`). Working capital always scales proportionally with revenue/cost changes — including when revenue is changed via CE override.
-- **Override clearing**: `POST /generate?clear_overrides=true` nulls all `*_override` columns on all assumption rows before regenerating. Uses dynamic `__table__.columns` introspection. Called by budget page "Ricalcola" and "Salva e Calcola Previsionale" buttons.
+- **Override clearing**: `POST /generate?clear_overrides=true` nulls all `*_override` columns on all assumption rows before regenerating. Uses dynamic `__table__.columns` introspection. It is triggered ONLY by the budget page "Ricalcola" dialog when the user ticks *"Azzera le modifiche manuali del CE previsionale"* (default off). "Salva e Calcola Previsionale" **never** clears overrides — it saves via the bulk PUT (`auto_generate=true`) sending full hydrated rows, so overrides made on `/forecast/income` survive the save.
 
 ### Editable Forecast Income Statement (CE Overrides)
 User can manually edit any P&L line in forecast year columns on `/forecast/income`. Edits are collected locally, then batch-saved with "Aggiorna Previsionale". The BS adapts automatically: more revenue → more receivables (via DSO), more costs → more payables (via DPO), cash as plug.
@@ -622,7 +622,7 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
 - **Override fields**: 31 `ce*_override` columns on `BudgetAssumptions` — one per editable CE field (ce01–ce20 plus sub-fields ce08a–d, ce09a–d, ce11b, ce17a/b). Nullable; `NULL` = use engine calculation.
 - **Batch endpoint**: `PATCH /scenarios/{id}/ce-override` accepts `{ overrides: [{ forecast_year, field, value }] }`. Applies all overrides to the assumptions rows, then regenerates forecast once.
 - **Frontend flow**: Click forecast cell → inline input → blur/Enter saves to `pendingEdits` state (yellow highlight) → "Aggiorna Previsionale" button appears → click sends all pending edits via batch endpoint → analysis cache invalidated → table refreshes.
-- **Clearing overrides**: Empty a cell's input to send `null` (reverts to engine value). "Ricalcola" and "Salva e Calcola" from `/budget` page both call `POST /generate?clear_overrides=true` to wipe all overrides.
+- **Clearing overrides**: Empty a cell's input to send `null` (reverts to engine value). From `/budget`, "Salva e Calcola" saves via bulk PUT and **preserves** overrides; only the "Ricalcola" dialog's *"Azzera le modifiche manuali del CE previsionale"* checkbox wipes all overrides via `POST /generate?clear_overrides=true`.
 - **Visual indicators**: Pending edits = yellow background + yellow underline. Server-persisted overrides = blue underline. Override status read from `assumptions` object in analysis response.
 - **Key files:**
   - `database/models.py` — `BudgetAssumptions.ce*_override` columns
@@ -630,7 +630,7 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
   - `backend/app/api/v1/budget_scenarios.py` — `PATCH /ce-override`, `POST /generate?clear_overrides=true`
   - `calculations/forecast_engine.py` — Override checks in `_calculate_income_statement`, auto-derived DSO/DIO/DPO in `_calculate_balance_sheet`
   - `frontend/app/forecast/income/page.tsx` — `FIELD_TO_OVERRIDE` map, `EditableCell`, `pendingEdits` state, batch save
-  - `frontend/app/budget/page.tsx` — `generateForecast(..., true)` in Ricalcola + Salva handlers
+  - `frontend/app/budget/page.tsx` — `ScenarioForm` (2 tab: Informazioni / Ipotesi) renders a config-driven `AssumptionsGrid` (`components/budget/AssumptionsGrid.tsx` + `assumption-rows.ts`): ~11 essential rows + an "Avanzate" accordion; "Salva e Calcola" → `bulkUpsertAssumptions(auto_generate=true)`; Ricalcola dialog → `generateForecast(clearOverrides)` only when the azzera checkbox is ticked
   - `frontend/lib/api.ts` — `patchCeOverrides()`, `generateForecast(clearOverrides)`
 
 ### Intra-Year Engine (Infrannuale)

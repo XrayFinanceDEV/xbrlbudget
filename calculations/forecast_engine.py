@@ -527,15 +527,33 @@ class ForecastEngine:
         base_revenue = base_inc.ce01_ricavi_vendite or D('1')
         base_purchases = (base_inc.ce05_materie_prime + base_inc.ce06_servizi) or D('1')
 
-        # DSO → sp06 (trade receivables short-term)
+        # Crediti tributari (sp06e) and imposte anticipate (sp06f) are NOT commercial
+        # receivables and must NOT scale with revenue via DSO (the client's "crediti
+        # tributari / imposte anticipate che salgono coi ricavi — non è corretto"): they
+        # depend on the fiscal position, not on turnover. Carry them forward from the
+        # previous year, with an optional manual % (sp06e_growth_pct / sp06f_growth_pct)
+        # — mirroring the tax/other debts on the passivo (sp16e_growth_pct). Default
+        # (no %) → constant. Only the TRADE buckets (clienti/controllate/collegate/
+        # controllanti/altri) are driven by DSO below.
+        sp06e = _prev('sp06e_crediti_tributari_breve') * (D('1') + _sp_growth('sp06e_growth_pct'))
+        sp06f = _prev('sp06f_imposte_anticipate_breve') * (D('1') + _sp_growth('sp06f_growth_pct'))
+
+        # DSO → sp06 TRADE receivables (short-term). Auto-derive DSO from the base year
+        # TRADE receivables only (sp06 aggregate minus tax credits and deferred taxes),
+        # so carving those out above does not distort the ratio.
         dso = getattr(assumption, 'dso_days', None)
         if dso is not None:
             dso = D(str(dso))
         else:
-            # Auto-derive DSO from base year: base_sp06 / base_revenue * 360
-            base_sp06 = _base('sp06_crediti_breve')
-            dso = (base_sp06 / base_revenue * DAYS) if base_revenue > 0 else ZERO
-        sp06 = forecast_revenue * dso / DAYS
+            base_sp06_trade = max(
+                ZERO,
+                _base('sp06_crediti_breve')
+                - _base('sp06e_crediti_tributari_breve')
+                - _base('sp06f_imposte_anticipate_breve'),
+            )
+            dso = (base_sp06_trade / base_revenue * DAYS) if base_revenue > 0 else ZERO
+        sp06_trade = forecast_revenue * dso / DAYS
+        sp06 = sp06_trade + sp06e + sp06f
 
         # DIO → sp05 (inventory)
         dio = getattr(assumption, 'dio_days', None)
@@ -776,11 +794,14 @@ class ForecastEngine:
             out[primary_idx] = aggregate
             return out
 
-        sp06_fields = ['sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
-                       'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
-                       'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
-                       'sp06g_crediti_altri_breve']
-        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = _alloc(sp06, sp06_fields)
+        # Allocate the DSO-driven TRADE total across the commercial buckets only
+        # (a/b/c/d/g). Crediti tributari (sp06e) and imposte anticipate (sp06f) keep the
+        # carried-forward values computed in the working-capital section above — they do
+        # not scale with revenue.
+        sp06_trade_fields = ['sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                             'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                             'sp06g_crediti_altri_breve']
+        sp06a, sp06b, sp06c, sp06d, sp06g = _alloc(sp06_trade, sp06_trade_fields)
 
         sp05_fields = ['sp05a_materie_prime', 'sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
                        'sp05d_prodotti_finiti', 'sp05e_acconti']

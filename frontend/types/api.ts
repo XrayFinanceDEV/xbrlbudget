@@ -331,6 +331,8 @@ export interface BudgetScenario {
   base_year: number;
   scenario_type: "budget" | "infrannuale";
   period_months: number | null;
+  source_scenario_id?: number | null;
+  workflow_type?: "infrannuale" | "bilancio" | "startup" | null;
   description: string | null;
   is_active: number;
   created_at: string;
@@ -419,6 +421,8 @@ export interface BudgetAssumptions {
   financing_interest_rate: number;
   sp01_growth_pct: number | null;
   sp04_growth_pct: number | null;
+  sp06e_growth_pct: number | null;
+  sp06f_growth_pct: number | null;
   sp08_growth_pct: number | null;
   sp10_growth_pct: number | null;
   sp14_growth_pct: number | null;
@@ -507,6 +511,8 @@ export interface BudgetAssumptionsCreate {
   financing_interest_rate?: number;
   sp01_growth_pct?: number | null;
   sp04_growth_pct?: number | null;
+  sp06e_growth_pct?: number | null;
+  sp06f_growth_pct?: number | null;
   sp08_growth_pct?: number | null;
   sp10_growth_pct?: number | null;
   sp14_growth_pct?: number | null;

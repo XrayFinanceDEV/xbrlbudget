@@ -799,8 +799,12 @@ function ScenarioForm({
     Record<number, { income: IncomeStatement; balance: BalanceSheet }>
   >({});
 
-  // Get base year (latest available year)
-  const baseYear = Math.max(...years);
+  // Base year: for an EXISTING scenario it is the stored base_year (the forecast
+  // horizon must stay aligned with the saved assumption years); only for a NEW
+  // scenario do we default to the latest available historical year. Using
+  // Math.max(...years) unconditionally misaligned the horizon when a newer year was
+  // imported/promoted after the scenario was created, dropping assumption rows on save.
+  const baseYear = scenario?.base_year ?? Math.max(...years);
   const forecastYears = Array.from({ length: numYears }, (_, i) => baseYear + i + 1);
 
   // Load historical data for display
@@ -876,6 +880,8 @@ function ScenarioForm({
             financing_interest_rate: a.financing_interest_rate,
             sp01_growth_pct: a.sp01_growth_pct,
             sp04_growth_pct: a.sp04_growth_pct,
+            sp06e_growth_pct: a.sp06e_growth_pct,
+            sp06f_growth_pct: a.sp06f_growth_pct,
             sp08_growth_pct: a.sp08_growth_pct,
             sp10_growth_pct: a.sp10_growth_pct,
             sp14_growth_pct: a.sp14_growth_pct,
@@ -904,6 +910,25 @@ function ScenarioForm({
             ce17_override: a.ce17_override,
             ce18_override: a.ce18_override,
             ce19_override: a.ce19_override,
+            // Overrides editable ONLY on /forecast/income — must be hydrated here too,
+            // otherwise "Salva e Calcola" (server-side delete+reinsert) drops them and
+            // the user's manual P&L edits are wiped, contradicting the documented
+            // "overrides survive the save" guarantee.
+            ce04_override: a.ce04_override,
+            ce08a_override: a.ce08a_override,
+            ce08b_override: a.ce08b_override,
+            ce08c_override: a.ce08c_override,
+            ce08d_override: a.ce08d_override,
+            ce09_override: a.ce09_override,
+            ce09a_override: a.ce09a_override,
+            ce09b_override: a.ce09b_override,
+            ce09c_override: a.ce09c_override,
+            ce09d_override: a.ce09d_override,
+            ce11b_override: a.ce11b_override,
+            ce12_override: a.ce12_override,
+            ce17a_override: a.ce17a_override,
+            ce17b_override: a.ce17b_override,
+            ce20_override: a.ce20_override,
           };
         });
         setAssumptions(assumptionsMap);

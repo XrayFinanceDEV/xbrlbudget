@@ -55,7 +55,7 @@ export const ESSENTIAL_ROWS: AssumptionRowDef[] = [
   { key: "fin-importo", label: "Nuovo finanziamento €", kind: "eur",
     fields: ["financing_amount"], min: 0, step: "1000" },
   { key: "fin-durata", label: "Nuovo finanziamento: durata (anni)", kind: "years",
-    fields: ["financing_duration_years"], min: 0, max: 30 },
+    fields: ["financing_duration_years"], nullable: true, min: 0, max: 30 },
   pct({ key: "fin-tasso", label: "Nuovo finanziamento: tasso %",
         fields: ["financing_interest_rate"], min: 0, max: 30 }),
 ];
@@ -101,6 +101,10 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
     rows: [
       pct({ key: "sp01", label: "Crediti verso soci %", fields: ["sp01_growth_pct"], nullable: true }),
       pct({ key: "sp04", label: "Immobilizzazioni finanziarie %", fields: ["sp04_growth_pct"], nullable: true }),
+      pct({ key: "sp06e", label: "Crediti tributari %", fields: ["sp06e_growth_pct"], nullable: true,
+            tooltip: "Variazione % anno-su-anno dei crediti tributari (IVA a credito ecc.). Vuoto = costanti. NON legati ai ricavi" }),
+      pct({ key: "sp06f", label: "Imposte anticipate %", fields: ["sp06f_growth_pct"], nullable: true,
+            tooltip: "Variazione % anno-su-anno delle imposte anticipate. Vuoto = costanti. NON legate ai ricavi" }),
       pct({ key: "sp08", label: "Attività finanziarie %", fields: ["sp08_growth_pct"], nullable: true }),
       pct({ key: "sp10", label: "Ratei e risconti attivi %", fields: ["sp10_growth_pct"], nullable: true }),
       pct({ key: "sp14", label: "Fondi per rischi e oneri %", fields: ["sp14_growth_pct"], nullable: true }),
@@ -124,6 +128,8 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
             fields: ["depreciation_rate_intangible"], min: 0, max: 100, step: "1" }),
       { key: "tfr-inps", label: "TFR versato a INPS/fondi (accantonamento sospeso)",
         kind: "bool", fields: ["tfr_accrual_suspended"] },
+      { key: "previdenza-personale", label: "Debiti previdenziali scalano col costo del personale",
+        kind: "bool", fields: ["previdenza_scales_with_personnel"] },
       { key: "cash-sweep", label: "Cash sweep (usa cassa in eccesso per rimborsare debito)",
         kind: "bool", fields: ["cash_sweep_enabled"] },
       { key: "cash-sweep-min", label: "Cash sweep: cassa minima €", kind: "eur",

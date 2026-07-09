@@ -146,6 +146,8 @@ def bulk_upsert_assumptions(
             financing_interest_rate=assumption_data.get("financing_interest_rate") or 0.0,
             sp01_growth_pct=assumption_data.get("sp01_growth_pct", None),
             sp04_growth_pct=assumption_data.get("sp04_growth_pct", None),
+            sp06e_growth_pct=assumption_data.get("sp06e_growth_pct", None),
+            sp06f_growth_pct=assumption_data.get("sp06f_growth_pct", None),
             sp08_growth_pct=assumption_data.get("sp08_growth_pct", None),
             sp10_growth_pct=assumption_data.get("sp10_growth_pct", None),
             sp14_growth_pct=assumption_data.get("sp14_growth_pct", None),

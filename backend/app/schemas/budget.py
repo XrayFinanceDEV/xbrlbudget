@@ -15,6 +15,9 @@ class BudgetScenarioBase(BaseModel):
     base_year: int = Field(..., ge=2000, le=2100)
     scenario_type: str = Field(default="budget")  # "budget" | "infrannuale"
     period_months: Optional[int] = Field(default=None, ge=1, le=12)
+    # Pratica chain / workflow (2026-07-06). Additive, nullable.
+    source_scenario_id: Optional[int] = None
+    workflow_type: Optional[str] = None  # "infrannuale" | "bilancio" | "startup"
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
 
@@ -30,6 +33,8 @@ class BudgetScenarioUpdate(BaseModel):
     base_year: Optional[int] = Field(None, ge=2000, le=2100)
     scenario_type: Optional[str] = None
     period_months: Optional[int] = Field(None, ge=1, le=12)
+    source_scenario_id: Optional[int] = None
+    workflow_type: Optional[str] = None
     description: Optional[str] = None
     is_active: Optional[int] = Field(None, ge=0, le=1)
 
@@ -115,6 +120,8 @@ class BudgetAssumptionsBase(BaseModel):
     # SP line item growth % overrides (None = 0% / carry forward unchanged)
     sp01_growth_pct: Optional[Decimal] = None
     sp04_growth_pct: Optional[Decimal] = None
+    sp06e_growth_pct: Optional[Decimal] = None  # Crediti tributari (breve) — carry-forward + manual %
+    sp06f_growth_pct: Optional[Decimal] = None  # Imposte anticipate (breve) — carry-forward + manual %
     sp08_growth_pct: Optional[Decimal] = None
     sp10_growth_pct: Optional[Decimal] = None
     sp14_growth_pct: Optional[Decimal] = None
@@ -212,6 +219,8 @@ class BudgetAssumptionsUpdate(BaseModel):
     # SP line item growth % overrides
     sp01_growth_pct: Optional[Decimal] = None
     sp04_growth_pct: Optional[Decimal] = None
+    sp06e_growth_pct: Optional[Decimal] = None
+    sp06f_growth_pct: Optional[Decimal] = None
     sp08_growth_pct: Optional[Decimal] = None
     sp10_growth_pct: Optional[Decimal] = None
     sp14_growth_pct: Optional[Decimal] = None

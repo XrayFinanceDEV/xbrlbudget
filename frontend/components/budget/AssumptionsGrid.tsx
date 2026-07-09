@@ -118,6 +118,9 @@ export function AssumptionsGrid({
                             ? `auto: ${computeAutoDays(row.autoPlaceholder, historicalData[baseYear]?.income, historicalData[baseYear]?.balance) ?? "—"}`
                             : row.nullable ? "auto" : "0"
                         }
+                        // Select the current value on focus so typing REPLACES it instead
+                        // of appending — the user no longer has to clear the cell first.
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => {
                           const raw = e.target.value;
                           if (raw === "") {

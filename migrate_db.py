@@ -69,6 +69,8 @@ MIGRATIONS = {
     "budget_scenarios": [
         ("scenario_type",                      "VARCHAR(20) DEFAULT 'budget' NOT NULL"),
         ("period_months",                      "INTEGER"),
+        ("source_scenario_id",                 "INTEGER"),
+        ("workflow_type",                      "VARCHAR(20)"),
         ("ai_comment_overall",                 "TEXT"),
         ("ai_comment_dashboard",               "TEXT"),
         ("ai_comment_composition",             "TEXT"),
@@ -99,6 +101,8 @@ MIGRATIONS = {
         ("previdenza_scales_with_personnel",   "BOOLEAN DEFAULT 0 NOT NULL"),
         ("sp01_growth_pct",                    "NUMERIC(10,6)"),
         ("sp04_growth_pct",                    "NUMERIC(10,6)"),
+        ("sp06e_growth_pct",                   "NUMERIC(10,6)"),
+        ("sp06f_growth_pct",                   "NUMERIC(10,6)"),
         ("sp08_growth_pct",                    "NUMERIC(10,6)"),
         ("sp10_growth_pct",                    "NUMERIC(10,6)"),
         ("sp14_growth_pct",                    "NUMERIC(10,6)"),

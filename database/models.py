@@ -557,6 +557,12 @@ class BudgetScenario(Base):
     base_year = Column(Integer, nullable=False)  # Base year for % calculations (e.g., 2024)
     scenario_type = Column(String(20), nullable=False, default="budget")  # "budget" | "infrannuale"
     period_months = Column(Integer, nullable=True)  # 1-11 for partial year (infrannuale), NULL for budget
+    # Pratica chain: the infrannuale scenario this budget scenario was promoted
+    # from (NULL = head of its own pratica). See spec 2026-07-06-pratica-*.
+    source_scenario_id = Column(Integer, nullable=True, index=True)
+    # Pratica workflow type chosen at creation: "infrannuale" | "bilancio" | "startup".
+    # NULL (legacy) -> derived: scenario_type infrannuale -> infrannuale, else -> bilancio.
+    workflow_type = Column(String(20), nullable=True)
     description = Column(Text, nullable=True)
     is_active = Column(Integer, default=1)  # 1 = active scenario, 0 = archived
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -673,6 +679,11 @@ class BudgetAssumptions(Base):
     # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
     sp01_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti verso soci
     sp04_growth_pct = Column(Numeric(10, 6), nullable=True)  # Immobilizzazioni finanziarie
+    # Crediti tributari (sp06e) and imposte anticipate (sp06f): NON-commercial current
+    # receivables carried forward with an optional manual % (NULL = constant). They do
+    # NOT scale with revenue/DSO (fiscal position, not turnover) — see forecast_engine.
+    sp06e_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti tributari (breve)
+    sp06f_growth_pct = Column(Numeric(10, 6), nullable=True)  # Imposte anticipate (breve)
     sp08_growth_pct = Column(Numeric(10, 6), nullable=True)  # Attività finanziarie correnti
     sp10_growth_pct = Column(Numeric(10, 6), nullable=True)  # Ratei e risconti attivi
     sp14_growth_pct = Column(Numeric(10, 6), nullable=True)  # Fondi per rischi e oneri

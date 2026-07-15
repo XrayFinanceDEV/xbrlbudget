@@ -433,6 +433,31 @@ def import_pdf_balance_sheet(
                 except Exception:
                     _decl_tot = None
 
+                # On GROSS-presentation trial balances the declared pareggio includes the
+                # fondi ammortamento (contra-assets on both sides) and the perdita parked on
+                # the attivo side, so it OVERSTATES the net IV-CEE total. Scoring the net
+                # candidates against that gross anchor penalises the candidate that correctly
+                # netted the fondi (deterministic parser: net 1.22M vs gross pareggio 2.16M),
+                # letting a worse, un-netted LLM candidate win (budget_343/348). Reduce the
+                # anchor by the scanned contra mass + declared perdita so the gap targets the
+                # NET total. No-op when there is no contra mass (already-net sheets: anchor
+                # unchanged, AITEC-style under-extraction guard preserved).
+                if _decl_tot and _decl_tot > 0:
+                    try:
+                        from importers.situazione_contabile_parser import (
+                            _contra_rows, _contra_classify)
+                        _rows = _contra_rows(file_path, text=ocr_text)
+                        if _rows:
+                            _scan = _contra_classify(_rows[0], _rows[1])
+                            _fondi = (_scan.fondi_immat + _scan.fondi_mat
+                                      + _scan.sval_immat + _scan.sval_mat)
+                            _iva = min(_scan.iva_credito, _scan.iva_debito)
+                            if _fondi > _decl_tot * Decimal('0.01'):
+                                _perdita = _dc0.get('perdita') or Decimal('0')
+                                _decl_tot = _decl_tot - _fondi - _iva - _perdita
+                    except Exception:
+                        pass
+
                 def _completeness_gap(bs):
                     """Distance of a candidate's total from the declared control total.
                     0 when the declared total is unknown or the gap is sub-2% noise — so a

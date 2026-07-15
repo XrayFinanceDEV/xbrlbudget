@@ -112,11 +112,40 @@ def test_contra_classify_fondi_on_asset_side():
     assert scan.attivo_total == D("3685000")
 
 
-def test_contra_classify_fondo_svalutazione_left_gross():
-    # fondo svalutazione crediti is OUT of scope (spec §goal 3): not a fondo amm
+def test_contra_classify_fondo_svalutazione_crediti_left_gross():
+    # fondo svalutazione CREDITI reduces crediti, NOT immobilizzazioni: excluded
+    # from every contra-immobilizzazioni bucket (amm and svalutazione).
     scan = _contra_classify([], [("0405", "F.DO SVALUTAZIONE CREDITI", D("9000"))])
     assert scan.fondi_immat == D("0")
     assert scan.fondi_mat == D("0")
+    assert scan.sval_immat == D("0")
+    assert scan.sval_mat == D("0")
+
+
+# ------------------------------ fondo svalutazione immobilizzazioni (user rule)
+
+def test_is_fondo_svalut_immob_recognises_immobilizzazioni_only():
+    from importers.situazione_contabile_parser import _is_fondo_svalut_immob
+    # immobilizzazioni immateriali / materiali write-down funds → in scope
+    assert _is_fondo_svalut_immob("FONDO SVALUTAZIONE MARCHI")
+    assert _is_fondo_svalut_immob("FONDI SVALUTAZIONE IMM.IMMATERIALI")
+    assert _is_fondo_svalut_immob("F.DO SVALUTAZIONE FABBRICATI")
+    # other write-down funds reduce other items → out of scope
+    assert not _is_fondo_svalut_immob("F.DO SVALUTAZIONE CREDITI")
+    assert not _is_fondo_svalut_immob("FONDO SVALUTAZIONE MAGAZZINO")
+    assert not _is_fondo_svalut_immob("FONDO SVALUTAZIONE PARTECIPAZIONI")
+    assert not _is_fondo_svalut_immob("F.DO AMM.TO MARCHI")  # ammortamento, not svalut
+
+
+def test_contra_classify_splits_svalutazione_immat_vs_mat():
+    passivo = [
+        ("0420", "FONDO SVALUTAZIONE MARCHI", D("22220")),        # immateriali
+        ("0421", "F.DO SVALUTAZIONE FABBRICATI", D("5000")),      # materiali
+        ("0405", "F.DO SVALUTAZIONE CREDITI", D("9000")),         # out of scope
+    ]
+    scan = _contra_classify([], passivo)
+    assert scan.sval_immat == D("22220")
+    assert scan.sval_mat == D("5000")
 
 
 def test_contra_classify_dedups_before_summing():
@@ -127,6 +156,103 @@ def test_contra_classify_dedups_before_summing():
     ]
     scan = _contra_classify([], passivo)
     assert scan.fondi_mat == D("1779795.83")
+
+
+# ------------------------------------------ immat/mat split of a known fondo
+# budget_210 (GUSTOPRONTO, BILAGRA verifica): the gestionale prints fondi with
+# BOTH the 'F.DO' and 'FONDO' prefixes and immateriali captions the old F.DO-
+# gated rules missed, so licenze/consulenze/ricerca-sviluppo leaked to materiali.
+
+def test_fondo_bucket_immateriali_captions():
+    from importers.situazione_contabile_parser import _fondo_is_immat
+    # immateriali fondi, regardless of F.DO vs FONDO prefix
+    assert _fondo_is_immat("FONDO AMM.TO LICENZE")
+    assert _fondo_is_immat("F.DO AMM.TO CONSULENZE DA AMMOR.")
+    assert _fondo_is_immat("F.DO AMM.TO COSTI RICERCA SVILUPPO")
+    assert _fondo_is_immat("F.DO AMM.TO SOFTWARE")
+    assert _fondo_is_immat("FONDI AMM.TO IMMOBILIZ.IMMATERIALI")
+    assert _fondo_is_immat("F.DO AMM.TO MARCHI")
+    assert _fondo_is_immat("F.DO AMM.TO SITO WEB")
+
+
+def test_fondo_bucket_materiali_captions():
+    from importers.situazione_contabile_parser import _fondo_is_immat
+    # tangible fondi, both prefixes -> NOT immateriali
+    assert not _fondo_is_immat("FONDO AMM.TO ORD. IMPIANTI")
+    assert not _fondo_is_immat("FONDO AMM.TO ORD. MACCHINARI")
+    assert not _fondo_is_immat("F.DO AMM.TO ATTREZZATURE")
+    assert not _fondo_is_immat("FONDO AMM.TO AUTOCARRI")
+    assert not _fondo_is_immat("F.DO AMM.TO MOBILI ED ARREDI")
+    assert not _fondo_is_immat("F.DO AMM.MACCHINARI RILEV.COMPON.ELE")
+
+
+# ---------------------------------------------------------- budget_210 evidence
+PDF_210 = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "docs", "examples", "budget_210_Bilancio_2025.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_210), reason="evidence PDF not present")
+def test_contra_classify_on_210_splits_fondi_correctly():
+    from importers.situazione_contabile_parser import _contra_rows, _contra_classify
+
+    rows = _contra_rows(PDF_210)
+    assert rows is not None
+    attivo_rows, passivo_rows, _from_ocr = rows
+    scan = _contra_classify(attivo_rows, passivo_rows)
+    # fondo immateriali (411): licenze 17.200 + software 2.240 + consulenze
+    # 1.101,20 + ricerca/sviluppo 24 = 20.565,20
+    assert abs(scan.fondi_immat - D("20565.20")) <= D("2")
+    # fondo materiali (401) = 96.138,83 (no immateriali leakage, no appendix dup)
+    assert abs(scan.fondi_mat - D("96138.83")) <= D("2")
+    # printed gross subtotals used as anchors
+    assert scan.anchor_sp02 == D("223901.20")
+    assert scan.anchor_sp03 == D("196502.74")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_210), reason="evidence PDF not present")
+def test_210_net_contra_produces_correct_immobilizzazioni():
+    from importers.pdf_extractor_llm import _declared_control_totals
+    from importers.situazione_contabile_parser import net_contra_accounts
+
+    declared = _declared_control_totals(PDF_210)
+    # winner shape: gross immobilizzazioni on the attivo (anchors), fondi still
+    # on the passivo — the overlay nets them from the document itself.
+    bs = {
+        "sp02_immob_immateriali": D("223901.20"),
+        "sp03_immob_materiali": D("196502.74"),
+        "totale_attivo": declared.get("attivo") or declared.get("pareggio"),
+        "totale_passivo": declared.get("passivo") or declared.get("pareggio"),
+    }
+    bs, netted = net_contra_accounts(bs, PDF_210, declared=declared)
+    # B.I) immateriali: 223.901,20 - fondo amm 20.565,20 - fondo svalutazione
+    # marchi 33.340,00 = 169.996,00 (was 221.637)
+    assert abs(bs["sp02_immob_immateriali"] - D("169996.00")) <= D("2")
+    # B.II) materiali: 196.502,74 - 96.138,83 = 100.363,91 (~100k, was 82.015)
+    assert abs(bs["sp03_immob_materiali"] - D("100363.91")) <= D("2")
+
+
+PDF_211 = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "docs", "examples", "budget_211_Gustopronto_2024.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_211), reason="evidence PDF not present")
+def test_211_nets_fondo_svalutazione_immateriali():
+    from importers.pdf_extractor_llm import _declared_control_totals
+    from importers.situazione_contabile_parser import net_contra_accounts
+
+    declared = _declared_control_totals(PDF_211)
+    bs = {
+        "sp02_immob_immateriali": D("223901.20"),
+        "sp03_immob_materiali": D("194897.74"),
+        "totale_attivo": declared.get("attivo") or declared.get("pareggio"),
+        "totale_passivo": declared.get("passivo") or declared.get("pareggio"),
+    }
+    bs, netted = net_contra_accounts(bs, PDF_211, declared=declared)
+    # B.I) immateriali: 223.901,20 - fondo amm 19.421,20 - fondo svalutazione
+    # marchi 22.220,00 = 182.260,00 (was 204.480, svalutazione un-netted)
+    assert abs(bs["sp02_immob_immateriali"] - D("182260.00")) <= D("2")
 
 
 # ---------------------------------------------------------------- _contra_rows
@@ -167,7 +293,8 @@ def test_contra_rows_text_mode_classifies_fondi_by_nature():
     )
     rows = _contra_rows("/nonexistent.pdf", text=ocr)
     assert rows is not None
-    scan = _contra_classify(*rows)
+    attivo_rows, passivo_rows, _from_ocr = rows
+    scan = _contra_classify(attivo_rows, passivo_rows)
     assert scan.fondi_mat == Decimal("1800000.00")
     assert scan.gross_sp03 == Decimal("3000000.00")
     # the CE line must NOT leak into the attivo total (window cut at CONTO ECONOMICO)
@@ -200,8 +327,9 @@ DECLARED = {"attivo": D("3685000"), "passivo": D("3685000"),
             "pareggio": D("3685000"), "utile": None, "perdita": None}
 
 
-def _patch_scan(monkeypatch, attivo, passivo):
-    monkeypatch.setattr(scp, "_contra_rows", lambda fp, text=None: (attivo, passivo))
+def _patch_scan(monkeypatch, attivo, passivo, from_ocr=False):
+    monkeypatch.setattr(scp, "_contra_rows",
+                        lambda fp, text=None: (attivo, passivo, from_ocr))
 
 
 def test_netting_applied_on_gross_extraction(monkeypatch):

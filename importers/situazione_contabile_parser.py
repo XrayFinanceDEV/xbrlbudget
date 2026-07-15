@@ -331,6 +331,15 @@ _SP_PASSIVO_RULES = [
     (['F.DO', 'AMM', 'BREVETT'], 'depr_sp02'),
     (['F.DO', 'AMM', 'MARCHI'], 'depr_sp02'),
     (['F.DO', 'AMM', 'AVVIAMENTO'], 'depr_sp02'),
+    # Truncated gestionale captions (budget_343/348, Bilancino GEREVINI): the
+    # column clips the description, so the canonical keywords above never fire
+    # and the fondo fell through to the tangible fallback.
+    (['F.DO', 'AMM', 'SW'], 'depr_sp02'),                  # "F.do amm.sw in concessione capitalizz"
+    (['F.DO', 'AMM', 'COSTI DI IMPIANTO'], 'depr_sp02'),   # B.I.1, before the IMPIANT→sp03 rule
+    (['F.DO', 'AMM', "COSTI D'IMPIANTO"], 'depr_sp02'),
+    (['F.DO', 'AMM', 'MANUT'], 'depr_sp02'),               # "spese di manut.beni di ter(zi)" B.I.7
+    (['F.DO', 'AMM', 'LICENZE'], 'depr_sp02'),
+    (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
     (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
     (['F.DO', 'AMM', 'MACCHINAR'], 'depr_sp03'),
     (['F.DO', 'AMM', 'IMPIANT'], 'depr_sp03'),
@@ -2454,6 +2463,104 @@ def _is_fondo_amm(desc_upper: str) -> bool:
             and ('FOND' in d or 'F.DO' in d or 'F/' in d))
 
 
+# Category qualifiers that make a fondo a SPECIFIC line rather than the grand-total
+# aggregate. '. IMM' / 'IMMAT' mark the immateriali SUB-aggregate (also specific).
+# NB: no 'MOBIL' — it is a substring of 'IMMOBILIZ' and would exclude the grand
+# total itself; 'ARRED' covers "mobili e arredi".
+_FONDO_CATEGORY_KW = (
+    'FABBRICAT', 'IMPIANT', 'ATTREZZ', 'ARRED', 'AUTO', 'MACCHIN',
+    'TERREN', 'MATER', 'SW', 'SOFTWARE', 'BREVETT', 'LICENZ', 'MARCHI',
+    'MANUT', 'PLURIENN', 'COSTI', 'SPESE', 'AVVIAMENTO', 'TELEFON', 'BENI',
+    '. IMM', 'IMMAT',
+)
+
+
+def _is_fondo_aggregate(desc_upper: str) -> bool:
+    """True only for the top-level 'FONDI AMMORTAMENTO IMMOBILIZ(ZAZIONI)' grand
+    total — generic immobilizzazioni, no category qualifier. Used to trust the
+    printed aggregate over incompletely/mis-coded sub-lines on vision-OCR sheets;
+    keyed on description so it never matches a specific leaf/sub-aggregate."""
+    d = desc_upper
+    return (_is_fondo_amm(d) and 'IMMOBILIZ' in d
+            and not any(k in d for k in _FONDO_CATEGORY_KW))
+
+
+# Specific immateriali sub-categories: their fondo is a LEAF, not the immateriali
+# sub-aggregate 'FONDI AMMORT. IMMOBILIZZAZ. IMM(ATERIALI)'.
+_FONDO_IMMAT_LEAF_KW = (
+    'ALTRE', 'LICENZ', 'BREVETT', 'SW', 'SOFTWARE', 'MARCHI', 'COSTI', 'SPESE',
+    'MANUT', 'PLURIENN', 'AVVIAMENTO', 'CONCESS',
+)
+
+
+def _is_fondo_immat_aggregate(desc_upper: str) -> bool:
+    """True only for the generic immateriali SUB-aggregate 'FONDI AMMORT.
+    IMMOBILIZZAZ. IMM' — the immateriali category header, not a specific
+    immateriali leaf (ALTRE IMMOBILIZZ. IMMAT., licenze, software, ...)."""
+    d = desc_upper
+    return (_is_fondo_amm(d) and 'IMMOBILIZ' in d
+            and ('IMMAT' in d or '. IMM' in d or d.rstrip().endswith(' IMM'))
+            and not any(k in d for k in _FONDO_IMMAT_LEAF_KW))
+
+
+# Asset-type markers of an INTANGIBLE (B.I) depreciation fund. The row is already
+# known to be a fondo ammortamento, so these key on the ASSET category only and
+# are prefix-agnostic (they fire on both 'F.DO AMM.TO ...' and 'FONDO AMM.TO ...',
+# which the F.DO-gated _classify_sp_passivo rules missed → immateriali fondi such
+# as LICENZE/CONSULENZE/COSTI RICERCA leaked into the materiali bucket, over-
+# netting materiali and under-netting immateriali — budget_210).
+_FONDO_IMMAT_KW = (
+    'IMMAT', '. IMM', 'PLURIENN', 'SOFTWARE', 'BREVETT', 'MARCHI', 'MARCHIO',
+    'AVVIAMENT', 'LICENZ', 'CONCESSION', 'RICERCA', 'SVILUPPO', 'PUBBLICIT',
+    'WEB', 'PROGETTAZ', 'CONSULENZ', 'DIRITTI', 'INGEGNO', 'KNOW', 'MANUT',
+    'AMPLIAMENT', "COSTI D'IMPIANTO", 'COSTI DI IMPIANTO',
+)
+
+
+def _fondo_is_immat(desc_upper: str) -> bool:
+    """immateriali (True) vs materiali (False) split for a row already known to be
+    a fondo (ammortamento or svalutazione immobilizzazioni). Any intangible
+    asset-type marker → immateriali; the tangible captions (impianti/macchinari/
+    attrezzature/auto/fabbricati/mobili…) carry none, so they fall to materiali by
+    default — mirroring the historical 'F.DO AMM' fallback while no longer
+    depending on the 'F.DO' spelling."""
+    return any(k in desc_upper for k in _FONDO_IMMAT_KW)
+
+
+# Asset-type markers of a TANGIBLE (B.II) fixed asset — used only to recognise a
+# fondo svalutazione as a contra to immobilizzazioni MATERIALI (the immat side is
+# recognised by _fondo_is_immat / 'IMMOBILIZ').
+_FONDO_MAT_KW = (
+    'FABBRICAT', 'IMPIANT', 'ATTREZZ', 'MACCHIN', 'AUTO', 'ARRED', 'TERREN',
+    'AUTOMEZZ', 'AUTOVEIC',
+)
+
+# A fondo svalutazione of these items reduces OTHER balance-sheet lines, NOT the
+# B.I/B.II immobilizzazioni, so it stays OUT of the immobilizzazioni contra-netting
+# (crediti → sp06, rimanenze/magazzino → sp05, titoli/partecipazioni → immob.
+# finanziarie sp04).
+_SVALUT_NON_IMMOB_KW = ('CREDIT', 'RIMANENZ', 'MAGAZZIN', 'TITOL', 'PARTECIP')
+
+
+def _is_fondo_svalut_immob(desc_upper: str) -> bool:
+    """A write-down fund (fondo svalutazione) of an INTANGIBLE or TANGIBLE fixed
+    asset. It is a contra-asset that reduces the B.I/B.II net book value exactly
+    like the depreciation fund, so the overlay nets it TOGETHER with the fondo
+    ammortamento (spec: user rule 2026-07-14, budget_210/211 'FONDO SVALUTAZIONE
+    MARCHI'). Svalutazione of crediti/rimanenze/titoli/partecipazioni is excluded
+    (it reduces other items). Requires a positive immobilizzazione reference so a
+    bare/other 'fondo svalutazione' is never mis-netted onto immobilizzazioni."""
+    d = desc_upper
+    if 'SVALUT' not in d:
+        return False
+    if not ('FOND' in d or 'F.DO' in d or 'F/' in d):
+        return False
+    if any(k in d for k in _SVALUT_NON_IMMOB_KW):
+        return False
+    return (_fondo_is_immat(d) or 'IMMOBILIZ' in d
+            or any(k in d for k in _FONDO_MAT_KW))
+
+
 # ---------------------------------------------------------------------------
 # Contra-netting overlay (spec docs/superpowers/specs/2026-07-06-contra-netting-
 # overlay-design.md): deterministic post-extraction netting of fondi ammortamento
@@ -2470,6 +2577,12 @@ class ContraScan(NamedTuple):
     fondi_mat: Decimal       # fondi ammortamento materiali (either side)
     iva_credito: Decimal     # IVA lines on the attivo side
     iva_debito: Decimal      # IVA lines on the passivo side
+    fondi_att: Decimal       # fondi mass found on the ATTIVO side (already-net docs)
+    anchor_sp02: Optional[Decimal]  # printed IMMOBILIZZAZIONI IMMATERIALI subtotal
+    anchor_sp03: Optional[Decimal]  # printed IMMOBILIZZAZIONI MATERIALI subtotal
+    has_aggregate: bool      # a generic grand-total 'FONDI AMMORTAMENTO IMMOBILIZ' was seen
+    sval_immat: Decimal = Decimal('0')  # fondo svalutazione immobilizz. immateriali
+    sval_mat: Decimal = Decimal('0')    # fondo svalutazione immobilizz. materiali
 
 
 _IVA_LINE_RE = re.compile(r'\bIVA\b')
@@ -2482,14 +2595,21 @@ def _is_iva_line(desc_upper: str) -> bool:
 
 
 def _dedup_parent_child(rows):
-    """Sum mastri OR leaves, never both. A parent row is dropped when child rows
-    (codes strictly extending its code) are present and sum to its amount within
+    """Sum mastri OR leaves, never both. A parent row is dropped when its DIRECT
+    child rows (codes strictly extending its code, with no intermediate ancestor
+    among the descendants) are present and sum to its amount within
     max(2 EUR, 1%) — AGO layouts print the mastro subtotal above its detail
-    accounts on both sides. Code-less rows are always kept."""
+    accounts on both sides. Comparing against ALL descendants would double-count
+    on 3-level layouts (mastro 41 → 41.01 → 41.01.07: intermediates + leaves sum
+    to 2× the mastro, so the root was never dropped — budget_343/348).
+    Code-less rows are always kept."""
     out = []
     for code, desc, amount in rows:
         if code:
-            kids = [a for c, _d, a in rows if c != code and c.startswith(code)]
+            desc_codes = [(c, a) for c, _d, a in rows
+                          if c != code and c.startswith(code)]
+            kids = [a for c, a in desc_codes
+                    if not any(o != c and c.startswith(o) for o, _a in desc_codes)]
             if kids:
                 tol = max(Decimal('2'), abs(amount) * Decimal('0.01'))
                 if abs(sum(kids) - amount) <= tol:
@@ -2501,21 +2621,45 @@ def _dedup_parent_child(rows):
 def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
     """Classify + sum deduplicated scan rows into the contra-netting aggregates.
     Rows are (code, desc_upper, amount); the SIDE each row came from is ground
-    truth for attivo_total/IVA, while fondi ammortamento count from EITHER side."""
+    truth for attivo_total/IVA, while fondi ammortamento count from EITHER side.
+
+    Besides the leaf sums, capture the document's own PRINTED level-1 subtotals
+    ("IMMOBILIZZAZIONI IMMATERIALI/MATERIALI", max amount wins so a fondi-section
+    header reusing the same caption never shadows the gross) — leaf-level sums
+    under-count on layouts with truncated leaf descriptions, the printed anchors
+    do not."""
     Z = Decimal('0')
-    g02 = g03 = att_total = f_im = f_mat = iva_c = iva_d = Z
+    g02 = g03 = att_total = f_im = f_mat = iva_c = iva_d = f_att = Z
+    anch02 = anch03 = None
+
+    # Printed subtotal anchors come from the RAW rows: dedup drops exactly the
+    # mastro rows that carry them (their children reconcile). Skip the B-detail
+    # captions that merely CONTAIN the subtotal phrase — 'ALTRE ...' and
+    # '... IN CORSO' (immobilizzazioni in corso, B.II.5) — so that when the true
+    # subtotal line is dropped by a noisy OCR pass we anchor to nothing (→ no-op)
+    # rather than to a partial sub-line.
+    for _c, d, a in attivo_rows:
+        if _is_fondo_amm(d) or d.startswith('ALTRE') or 'IN CORSO' in d:
+            continue
+        if 'IMMOBILIZZAZIONI IMMATERIALI' in d:
+            anch02 = a if anch02 is None else max(anch02, a)
+        elif 'IMMOBILIZZAZIONI MATERIALI' in d:
+            anch03 = a if anch03 is None else max(anch03, a)
 
     def _fondo_bucket(desc):
-        # immat/mat split via the existing passivo rules (depr_sp02/depr_sp03);
-        # unmatched fondi fall to materiali, mirroring the F.DO AMM fallback rule.
-        return 'im' if _classify_sp_passivo(desc) == 'depr_sp02' else 'mat'
+        # immat/mat split by asset-type marker (prefix-agnostic): the row is
+        # already a fondo, so key on the category alone — unmatched fondi fall to
+        # materiali, mirroring the historical F.DO AMM fallback rule.
+        return 'im' if _fondo_is_immat(desc) else 'mat'
 
+    fondi_att, fondi_pas = [], []       # (abs_amount, desc_upper)
+    sval_rows = []                       # fondo svalutazione immobilizz. (either side)
     for _c, d, a in _dedup_parent_child(list(attivo_rows)):
         if _is_fondo_amm(d):
-            if _fondo_bucket(d) == 'im':
-                f_im += abs(a)
-            else:
-                f_mat += abs(a)
+            fondi_att.append((abs(a), d))
+            continue
+        if _is_fondo_svalut_immob(d):
+            sval_rows.append((abs(a), d))   # contra-asset: exclude from att_total
             continue
         att_total += a
         if _is_iva_line(d):
@@ -2528,31 +2672,81 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
             g03 += a
     for _c, d, a in _dedup_parent_child(list(passivo_rows)):
         if _is_fondo_amm(d):
-            if _fondo_bucket(d) == 'im':
-                f_im += abs(a)
-            else:
-                f_mat += abs(a)
+            fondi_pas.append((abs(a), d))
+            continue
+        if _is_fondo_svalut_immob(d):
+            sval_rows.append((abs(a), d))
             continue
         if _is_iva_line(d):
             iva_d += a
-    return ContraScan(g02, g03, att_total, f_im, f_mat, iva_c, iva_d)
+
+    def _agg_or_sum(rows, is_agg):
+        """Total of a set of fondi rows [(amount, desc)]: a generic AGGREGATE
+        caption (per `is_agg`) wins as its max — its detail lines are components
+        of it — otherwise SUM the leaves. Resolves the parent/child overlap dedup
+        cannot on vision-OCR sheets (shuffled codes). NB a bottom-up leaf sum is
+        only reliable when every leaf was captured; the caller gates the anchored
+        overlay on `has_aggregate` so a partial OCR pass no-ops, never mis-nets."""
+        if not rows:
+            return Z
+        aggs = [a for a, d in rows if is_agg(d)]
+        if aggs:
+            return max(aggs)
+        return sum(a for a, _d in rows)
+
+    def _reduce_fondi(fondi):
+        """(total, immat) for a side. Grand total from the generic aggregate
+        caption (or leaf sum); immat from the immateriali sub-aggregate (or immat
+        leaf sum). Keyed on DESCRIPTION, so on clean layouts (budget_343/348/405,
+        where dedup already removed the mastro) it degrades to a plain leaf sum."""
+        if not fondi:
+            return Z, Z
+        immat_rows = [(a, d) for a, d in fondi if _fondo_bucket(d) == 'im']
+        total = _agg_or_sum(fondi, _is_fondo_aggregate)
+        im = min(_agg_or_sum(immat_rows, _is_fondo_immat_aggregate), total)
+        return total, im
+
+    t_att, im_att = _reduce_fondi(fondi_att)
+    t_pas, im_pas = _reduce_fondi(fondi_pas)
+    f_att = t_att
+    f_im = im_att + im_pas
+    f_mat = (t_att - im_att) + (t_pas - im_pas)
+    has_agg = any(_is_fondo_aggregate(d) for _a, d in fondi_att + fondi_pas)
+    # Fondo svalutazione immobilizzazioni: a plain leaf sum split immat/mat — it
+    # has its own 'FONDI SVALUTAZIONE ...' captions, kept in a SEPARATE stream so
+    # the ammortamento aggregate helpers never shadow a svalutazione leaf.
+    sval_im = sum(a for a, d in sval_rows if _fondo_is_immat(d))
+    sval_mat = sum(a for a, d in sval_rows if not _fondo_is_immat(d))
+    return ContraScan(g02, g03, att_total, f_im, f_mat, iva_c, iva_d,
+                      f_att, anch02, anch03, has_agg, sval_im, sval_mat)
 
 
 _CONTRA_TXT_ROW_RE = re.compile(
     r'^\s*(?P<code>[\d./*]+)?\s*(?P<desc>[A-ZÀ-Ù][^\d\n]*?)\s+'
     r'(?P<amt>-?\d{1,3}(?:\.\d{3})*,\d{2})\s*$', re.MULTILINE)
 
+# Multi-match segment: finds EVERY "code description amount" triple anywhere on a
+# line, not just one anchored at EOL. Vision-OCR of a two-column bilancio di
+# verifica merges attivo+passivo onto one physical line ("35 CONTI ERARIALI
+# 50.794,41  41 FONDI AMMORTAMENTO IMMOBILIZZ 400.473,85"), which the single-row
+# EOL-anchored regex above cannot split. Used only as a fallback when that regex
+# yields nothing (real scanned PDFs), so text-layer scans are unaffected.
+_CONTRA_TXT_SEG_RE = re.compile(
+    r'(?P<code>\d[\d./]*)\s+(?P<desc>[A-ZÀ-Ù][^\d\n]*?)\s+'
+    r'(?P<amt>-?\d{1,3}(?:\.\d{3})*,\d{2})')
+
 
 def _contra_rows(file_path: str, text: Optional[str] = None):
-    """Acquire (attivo_rows, passivo_rows) for the contra-netting scan.
+    """Acquire (attivo_rows, passivo_rows, from_ocr) for the contra-netting scan.
 
     Generated PDFs: coordinate mode — the SP pages' two physical columns are
     split with the same helpers the best-effort parser uses (`_be_split` +
-    `_be_collect_side`), so each row carries its true side. Scanned PDFs (no
-    word layer): line-parse the OCR `text`; the side is unknown, so rows are
-    assigned by NATURE (fondi → passivo bucket, attivo-rule matches → attivo)
-    — lower fidelity, which the caller's self-validation gate absorbs (a
-    misread scan fails reconciliation → no-op, never corruption).
+    `_be_collect_side`), so each row carries its true side (from_ocr=False,
+    complete capture). Scanned PDFs (no word layer): line-parse the OCR `text`;
+    the side is unknown and capture is partial, so rows are assigned by NATURE
+    (fondi → passivo bucket, attivo-rule matches → attivo) and from_ocr=True —
+    lower fidelity, which the caller's self-validation gate absorbs (a misread
+    scan fails reconciliation → no-op, never corruption).
     Returns None when neither mode yields rows.
     """
     # --- coordinate mode -----------------------------------------------------
@@ -2565,6 +2759,19 @@ def _contra_rows(file_path: str, text: Optional[str] = None):
             flat = re.sub(r'\s+', '', up)
             # fiscal-reconciliation appendix pages are not the SP
             if 'RIDETERMINAZIONE' in flat or 'REDDITOIMPONIBILE' in flat:
+                continue
+            # 'Dettaglio ratei, risconti e competenze' breakdown appendices carry
+            # the 'Conti Patrimoniali' header, so they pass the PATRIMONIAL test
+            # below, yet they only RE-LIST fragments already totalled in the main
+            # prospetto — scanning them double-counts (budget_210 reprints the
+            # ricerca-sviluppo fondo on two such pages). Match the specific
+            # appendix title and never a genuine prospetto ('SITUAZIONE/STATO
+            # PATRIMONIALE'), so a real SP page like 'STATO PATRIMONIALE
+            # (DETTAGLIO COMPLETO)' is kept.
+            if ('SITUAZIONEPATRIMONIAL' not in flat
+                    and 'STATOPATRIMONIAL' not in flat
+                    and ('DETTAGLIORATEI' in flat or 'DETTAGLIORISCONT' in flat
+                         or 'DETTAGLIOCOMPETENZE' in flat)):
                 continue
             is_sp = ('PATRIMONIAL' in flat) or (
                 'ATTIVIT' in up and 'PASSIVIT' in up and 'CONTOECONOMICO' not in flat)
@@ -2581,7 +2788,7 @@ def _contra_rows(file_path: str, text: Optional[str] = None):
             pas += _be_collect_side(words, split, 1e9)
         doc.close()
         if att or pas:
-            return att, pas
+            return att, pas, False
     except Exception:
         pass
 
@@ -2589,21 +2796,21 @@ def _contra_rows(file_path: str, text: Optional[str] = None):
     if not text:
         return None
     up = text.upper()
+    # Vision OCR of a two-column sheet emits a markdown-ish table: cells separated
+    # by '|' pipes ("41 | | FONDI AMMORTAMENTO IMMOBILIZZ | 400.473,85"). Collapse
+    # pipes (and other table glyphs) to spaces so the code/desc/amount segment
+    # regex sees a plain "code desc amount" stream on each line.
+    up = re.sub(r'[|＋+]+', ' ', up)
     # keep only the SP region: cut at the CE section header
     m = re.search(r'CONTO\s+ECONOMICO', up)
     if m:
         up = up[:m.start()]
-    att, pas = [], []
-    for row in _CONTRA_TXT_ROW_RE.finditer(up):
-        desc = row.group('desc').strip()
+    def _assign(code, desc, amount, att, pas):
+        desc = desc.strip()
         if len(desc) < 3 or 'TOTALE' in desc or 'PAREGGIO' in desc:
-            continue
-        try:
-            amount = _parse_amount(row.group('amt'))
-        except Exception:
-            continue
-        code = (row.group('code') or '').strip().strip('./*')
-        entry = (re.sub(r'\D', '', code), desc, abs(amount))
+            return
+        code = re.sub(r'\D', '', (code or '').strip().strip('./*'))
+        entry = (code, desc, abs(amount))
         if _is_fondo_amm(desc):
             pas.append(entry)          # side irrelevant for fondi (contra either way)
         elif _is_iva_line(desc) and ('VENDIT' in desc or 'DEBITO' in desc):
@@ -2615,8 +2822,33 @@ def _contra_rows(file_path: str, text: Optional[str] = None):
             # passivo/CE lines into the attivo total and defeat the gate)
             if f != 'sp06' or _is_iva_line(desc):
                 att.append(entry)
+
+    # Multi-match segment extraction: finds every code/desc/amount triple on each
+    # line, so it reads both columns of a two-column vision-OCR sheet AND ordinary
+    # single-column rows. It is a strict superset of the EOL-anchored single-row
+    # regex, so use it as the primary OCR parser (the single-row one returned early
+    # on the first single-column match and never split the merged columns).
+    att, pas = [], []
+    for seg in _CONTRA_TXT_SEG_RE.finditer(up):
+        try:
+            amount = _parse_amount(seg.group('amt'))
+        except Exception:
+            continue
+        _assign(seg.group('code'), seg.group('desc'), amount, att, pas)
     if att or pas:
-        return att, pas
+        return att, pas, True
+
+    # Fallback: EOL-anchored single-row (descriptions that start mid-line without a
+    # leading code — the segment regex requires a leading digit).
+    att, pas = [], []
+    for row in _CONTRA_TXT_ROW_RE.finditer(up):
+        try:
+            amount = _parse_amount(row.group('amt'))
+        except Exception:
+            continue
+        _assign(row.group('code'), row.group('desc'), amount, att, pas)
+    if att or pas:
+        return att, pas, True
     return None
 
 
@@ -2679,17 +2911,62 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
         rows = _contra_rows(file_path, text=text)
         if not rows:
             return winner_bs, Z
-        scan = _contra_classify(*rows)
+        att_rows, pas_rows, from_ocr = rows
+        scan = _contra_classify(att_rows, pas_rows)
         iva_offset = min(scan.iva_credito, scan.iva_debito)
-        fondi_total = scan.fondi_immat + scan.fondi_mat
+        # Contra to immobilizzazioni = fondo ammortamento + fondo svalutazione
+        # immobilizzazioni, per side (both reduce B.I/B.II net book value).
+        immat_contra = scan.fondi_immat + scan.sval_immat
+        mat_contra = scan.fondi_mat + scan.sval_mat
+        fondi_total = immat_contra + mat_contra
         netted = fondi_total + iva_offset
         if netted <= decl_total * Decimal('0.01'):
             return winner_bs, Z                              # gate 1
+        anchored = False
         if abs(scan.attivo_total - decl_total) > decl_total * Decimal('0.005'):
-            logger.info(
-                "contra-netting: scan attivo %s non riconcilia col totale "
-                "dichiarato %s — no-op", scan.attivo_total, decl_total)
-            return winner_bs, Z                              # gate 2
+            # Gate 2 failed: the FULL attivo sum is polluted (4-sezioni layouts
+            # print partitari detail rows whose short codes collide with real
+            # mastri after digit-normalisation). Fall back to ANCHORED mode:
+            # trust the document's own printed IMMOBILIZZAZIONI subtotals as the
+            # gross, provided (a) the fondi sit on the PASSIVO side (an already-
+            # net doc lists them on the attivo → anchors would be NET → double
+            # netting) and (b) each fondi mass fits under its anchor.
+            def _fits(fondi, anchor):
+                if fondi <= Z:
+                    return True
+                return (anchor is not None
+                        and fondi <= anchor + max(Decimal('2'),
+                                                  anchor * Decimal('0.005')))
+            fondi_passivo_only = scan.fondi_att <= fondi_total * Decimal('0.01')
+            # Anchored mode trusts a bottom-up fondi total. From a TEXT-LAYER scan
+            # (from_ocr=False) capture is complete and reliable, so a single anchor
+            # + leaf-summed fondi is enough (budget_405: specific fondi, no
+            # grand-total line). From a SCANNED OCR pass capture is PARTIAL and
+            # stochastic, so demand strong corroboration or NO-OP (→ user corrects
+            # in Rettifiche) — never write a wrong net immobilizzazioni:
+            #   • the printed grand-total aggregate line was captured; AND
+            #   • BOTH printed immobilizzazioni subtotals (immat + mat) are present
+            #     (a missing one means the OCR dropped a subtotal → unreliable); AND
+            #   • the immateriali fondo was actually located (fondi_immat > 0) — else
+            #     the whole aggregate would wrongly net onto materiali only.
+            if from_ocr:
+                reliable = (scan.has_aggregate
+                            and scan.anchor_sp02 is not None
+                            and scan.anchor_sp03 is not None
+                            and scan.fondi_immat > Z)
+            else:
+                reliable = (scan.anchor_sp02 is not None
+                            or scan.anchor_sp03 is not None)
+            if (fondi_passivo_only and reliable
+                    and _fits(immat_contra, scan.anchor_sp02)
+                    and _fits(mat_contra, scan.anchor_sp03)):
+                anchored = True
+            else:
+                logger.info(
+                    "contra-netting: scan attivo %s non riconcilia col totale "
+                    "dichiarato %s e niente anchor affidabili — no-op",
+                    scan.attivo_total, decl_total)
+                return winner_bs, Z                          # gate 2
     except Exception as exc:
         logger.warning("contra-netting: scan fallito (%s) — no-op", exc)
         return winner_bs, Z
@@ -2705,8 +2982,24 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
 
     old_02 = winner_bs.get('sp02_immob_immateriali', Z)
     old_03 = winner_bs.get('sp03_immob_materiali', Z)
-    new_02 = max(Z, scan.gross_sp02 - scan.fondi_immat)
-    new_03 = max(Z, scan.gross_sp03 - scan.fondi_mat)
+    if anchored:
+        # Anchored mode: printed subtotal − (fondo amm + svalutazione). A side
+        # without an anchor is left untouched (never zeroed by an absent leaf sum).
+        new_02 = (max(Z, scan.anchor_sp02 - immat_contra)
+                  if scan.anchor_sp02 is not None else old_02)
+        new_03 = (max(Z, scan.anchor_sp03 - mat_contra)
+                  if scan.anchor_sp03 is not None else old_03)
+    else:
+        # Reconciled scan: prefer the document's PRINTED immobilizzazioni subtotal
+        # (anchor) over the keyword-summed gross. The keyword sum drops sub-lines
+        # the attivo classifier does not recognise (budget_210: SITO WEB,
+        # progettazioni, spese pluriennali → gross_sp02 205.600 vs printed
+        # 223.901,20), which would under-net the net immobilizzazioni. Fall back to
+        # the keyword gross only when the document prints no subtotal.
+        base_02 = scan.anchor_sp02 if scan.anchor_sp02 is not None else scan.gross_sp02
+        base_03 = scan.anchor_sp03 if scan.anchor_sp03 is not None else scan.gross_sp03
+        new_02 = max(Z, base_02 - immat_contra)
+        new_03 = max(Z, base_03 - mat_contra)
     winner_bs['sp02_immob_immateriali'] = new_02
     winner_bs['sp03_immob_materiali'] = new_03
     att_delta = (new_02 + new_03) - (old_02 + old_03)
@@ -2772,17 +3065,41 @@ def _hier_reconstruct(pages_data, full: str):
     def addb(k, v):
         bs[k] = bs.get(k, Z) + v
 
+    def _net_fondo(code, desc, amount, side_rows):
+        """Net a fondi-ammortamento mastro SPLITTING immat/mat: the level-1
+        caption ("FONDI AMMORTAMENTO IMMOBILIZ") is category-blind, so read the
+        split from its DIRECT child rows (level-2 mastri: "FONDI AMMORT.
+        IMMOBILIZZAZ. IMM" → sp02) when they reconcile to the mastro amount;
+        otherwise fall back to the mastro's own classification. Unattributed
+        mass keeps netting sp03 (the historical behaviour)."""
+        nonlocal netted
+        im = Z
+        if code:
+            desc_rows = [(c, d2, a2) for c, d2, a2 in side_rows
+                         if c != code and c.startswith(code)]
+            direct = [(c, d2, a2) for c, d2, a2 in desc_rows
+                      if not any(o != c and c.startswith(o)
+                                 for o, _d3, _a3 in desc_rows)]
+            covered = sum(a2 for _c2, _d2, a2 in direct)
+            tol = max(Decimal('2'), abs(amount) * Decimal('0.01'))
+            if direct and abs(covered - amount) <= tol:
+                im = sum(a2 for _c2, d2, a2 in direct
+                         if _classify_sp_passivo(d2) == 'depr_sp02')
+        if im == Z and _classify_sp_passivo(desc) == 'depr_sp02':
+            im = amount
+        addb('sp02', -im)
+        addb('sp03', -(amount - im))
+        netted += amount
+
     for _c, d, a in ma:
         if _is_fondo_amm(d):
-            addb('sp03', -a)
-            netted += a
+            _net_fondo(_c, d, a, att)
         else:
             f = _classify_sp_attivo(d)
             addb({'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f), a)
     for _c, d, a in mp:
         if _is_fondo_amm(d):
-            addb('sp03', -a)
-            netted += a
+            _net_fondo(_c, d, a, pas)
             continue
         t = _classify_sp_passivo(d)
         if t == 'equity_total':

@@ -511,13 +511,20 @@ def import_pdf_balance_sheet(
                         from importers.pdf_extractor_llm import _reconcile_trial_to_declared
                         from importers.iv_cee_hierarchy import _net_profit_from_ce
                         _decl = dict(_dc0)
-                        if _contra > 0:
-                            # the printed totals are GROSS on gross-presentation
-                            # files: anchor the reconcile to the NET total so it
-                            # does not re-inflate the netted mass as a false plug
+                        # The printed totals are GROSS on gross-presentation files:
+                        # anchor the reconcile to the NET total so it does not
+                        # re-inflate the netted mass as a false plug. net_contra
+                        # (best-effort/CoGe path) exposes the netted mass as _contra;
+                        # the DEPI/AGO/single-column build_iv_cee path nets fondi
+                        # internally and exposes _netted_contra. Prefer _contra when
+                        # net_contra acted (it also overwrote sp02/sp03), else fall
+                        # back to build_iv_cee's — never both (same fondi).
+                        _anchor_cut = _contra if _contra > 0 else balance_sheet_data.get(
+                            '_netted_contra', Decimal('0'))
+                        if _anchor_cut > 0:
                             for _k in ('attivo', 'passivo', 'pareggio'):
                                 if _decl.get(_k):
-                                    _decl[_k] = _decl[_k] - _contra
+                                    _decl[_k] = _decl[_k] - _anchor_cut
                         # CE-derived result: fallback arbiter when a spurious PN
                         # "RISULTATO D'ESERCIZIO" is read as declared utile but the
                         # true result is a perdita (budget_211).

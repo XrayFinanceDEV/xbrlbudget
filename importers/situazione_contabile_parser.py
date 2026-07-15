@@ -1022,6 +1022,18 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     bs['sp02'] = bs.get('sp02', Decimal('0')) + (gross_sp02 - depr_sp02)
     bs['sp03'] = bs.get('sp03', Decimal('0')) + (gross_sp03 - depr_sp03)
 
+    # Immobilizzazioni are presented GROSS on these trial balances (fondi
+    # ammortamento are separate passivo lines, netted just above), so the document's
+    # DECLARED total / pareggio is GROSS. Expose the netted contra mass so the
+    # route-C pipeline can reduce the declared anchor before reconciling — otherwise
+    # the netted fondi resurface as a FALSE plug (budget_131 Oprandi: net attivo
+    # 230.205,93 vs gross pareggio 355.878,76 → spurious 125.672,83 plug). Survives
+    # _map_sc_keys (underscore key). Mirrors net_contra_accounts' returned _contra
+    # for the best-effort path.
+    _netted = depr_sp02 + depr_sp03
+    if _netted > 0:
+        bs['_netted_contra'] = bs.get('_netted_contra', Decimal('0')) + _netted
+
     # Banks
     bs['sp09'] = bs.get('sp09', Decimal('0')) + bank_dare
 

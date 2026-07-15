@@ -29,9 +29,9 @@
       "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_pct_max": 1.0}
     },
     "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {
-      "status": "open", "fixed_by": "PR-7 (deferred)", "tol": 2,
-      "note": "DEPI XX/YYYY layout with THREE saldo columns (30/04/26, 30/04/25, 30/04/24) + % columns. The single-column DEPI sub-parser reads the wrong column -> under-extraction (~35%). Needs a coordinate-based multi-column reader (select column by fiscal_year / most recent), guarded on a multi-date header so single-column DEPI files never regress. Deferred (new parser feature). Imports honestly-flagged meanwhile.",
-      "expect": {"totale_attivo": 355878.76, "sp02": 8069.50, "sp03": 126595.70, "plug_max": 2000}
+      "status": "good", "fixed_by": "PR-7", "tol": 2,
+      "note": "AUDIT WAS WRONG: the document HAS fondi ammortamento (F/AMM immat 8.069,50 + F/AMM materiali 117.603,33 on the passivo). build_iv_cee correctly nets them -> sp02=0, sp03=8.992,37 (NET per art. 2424); the audit's 8.069,50/126.595,70/355.878,76 were the GROSS values. The real bug was a FALSE plug: the reconcile anchored to the GROSS declared total. Fixed by exposing _netted_contra from build_iv_cee and reducing the declared anchor by it (like net_contra_accounts). NOT a multi-column parsing issue.",
+      "expect": {"totale_attivo": 230205.93, "sp02": 0.00, "sp03": 8992.37, "plug_max": 100}
     }
   }
 }

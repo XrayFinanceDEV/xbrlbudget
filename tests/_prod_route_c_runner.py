@@ -65,10 +65,11 @@ def run_prod_route_c(file_path: str, ocr_text=None) -> dict:
     authoritative = bs.pop('_skip_declared_reconcile', False)
     if not authoritative:
         decl = dict(dc0)
-        if contra > 0:
+        anchor_cut = contra if contra > 0 else bs.get('_netted_contra', Z)
+        if anchor_cut > 0:
             for k in ('attivo', 'passivo', 'pareggio'):
                 if decl.get(k):
-                    decl[k] = decl[k] - contra
+                    decl[k] = decl[k] - anchor_cut
         try:
             ce_result = _net_profit_from_ce(ce)
         except Exception:

@@ -24,8 +24,8 @@
       "expect": {"sp02": 169996.00, "sp03": 100363.91, "plug_max": 100}
     },
     "budget_405_all. A - PROGETTO DI BILANCIO.pdf": {
-      "status": "open", "fixed_by": "PR-6 (deferred)", "tol": 2,
-      "note": "sp02/sp03/sp13 already CORRECT in production (netting works); remaining is a diffuse 11% plug. Root cause: the passivo column holds ASSET-NAMED accumulated depreciation ('IMMOBILIZZAZIONI MATERIALI' 8.14M etc.) that _is_fondo_amm misses (no AMM/FONDO token) and the best-effort classifier books as debts, so attivo ends short. Fix needs the contra detector to recognise asset-named passivo depreciation columns on this dotted-hierarchical layout — high risk to the shared classifier, deferred. File imports honestly-flagged (MASK) meanwhile.",
+      "status": "good", "fixed_by": "PR-6", "tol": 2,
+      "note": "The 870k plug was STALE: net_contra_accounts correctly rebuilds sp02/sp03 (0.61 / 5.756.144,64) but the best-effort's pre-netting _plug_residual (which counted the not-yet-netted asset-named passivo depreciation) was kept by the reconcile via max(existing, gap). Fixed by resetting _plug_residual after net_contra acts, so the reconcile recomputes the true residual (the 28k fondo svalutazione crediti gap, within the 0.5% tolerance).",
       "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_pct_max": 1.0}
     },
     "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {

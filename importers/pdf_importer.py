@@ -495,6 +495,14 @@ def import_pdf_balance_sheet(
                     if _contra > 0:
                         logger.info(f"Route C: contra-netting applicato "
                                     f"({_contra:,.0f} fondi ammortamento/IVA)")
+                        # net_contra authoritatively rebuilt sp02/sp03 from the
+                        # document, so any pre-netting _plug_residual the best-effort
+                        # parser exposed is STALE — it counted the not-yet-netted
+                        # fondi as unclassified mass. Reset it so the declared reconcile
+                        # below recomputes the TRUE residual against the NET anchor
+                        # (budget_405: a stale 870k plug is really a 28k fondo
+                        # svalutazione crediti gap, below the masking threshold).
+                        balance_sheet_data['_plug_residual'] = Decimal('0')
                 except Exception as _cn_err:
                     logger.warning(f"Route C: contra-netting saltato: {_cn_err}")
                 # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,

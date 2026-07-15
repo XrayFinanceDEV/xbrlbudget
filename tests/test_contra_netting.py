@@ -546,6 +546,60 @@ def test_reconcile_ce_result_breaks_tie_when_no_gap():
     assert out["sp13_utile_perdita"] == D("-50000")
 
 
+def test_declared_pareggio_scoped_to_sp_section():
+    # "Totale a Pareggio" is printed for BOTH the SP and CE sections; when the CE
+    # total exceeds the SP total (low-margin companies — budget_337: CE 372.733,17
+    # > SP 315.121,19) largest-wins anchored the reconcile to the CE figure. The
+    # pareggio must come from the text BEFORE the "CONTO ECONOMICO" header.
+    from importers.pdf_extractor_llm import _declared_control_totals
+    txt = (
+        "SITUAZIONE PATRIMONIALE\n"
+        "CASSA 100,00\n"
+        "Totale a Pareggio 315.121,19\n"
+        "CONTO ECONOMICO\n"
+        "ACQUISTI 372.000,00\n"
+        "Totale a Pareggio 372.733,17\n"
+    )
+    dc = _declared_control_totals("/nonexistent.pdf", text=txt)
+    assert dc["pareggio"] == D("315121.19")
+
+
+def test_garbled_text_layer_detector():
+    from importers.pdf_extractor_llm import _text_layer_is_garbled
+    # corrupted ToUnicode signature: amounts split around the decimal comma
+    garbled = "\n".join(f"CONTO {i} 1.234 , {10+i}" for i in range(15))
+    assert _text_layer_is_garbled(garbled)
+    # clean Italian formatting -> never triggers
+    clean = "\n".join(f"CONTO {i} 1.234,{10+i}" for i in range(50))
+    assert not _text_layer_is_garbled(clean)
+    # a couple of odd lines on an otherwise clean file stay below the floor
+    mixed = clean + "\nX 9 , 99\nY 8 , 88"
+    assert not _text_layer_is_garbled(mixed)
+    assert not _text_layer_is_garbled("")
+
+
+PDF_337 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "Test", "sez-contrapposte", "budget_337_2023.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_337), reason="corpus PDF not present")
+def test_337_detected_as_garbled_and_pareggio_from_sp_section():
+    import fitz
+    from importers.pdf_extractor_llm import _text_layer_is_garbled, _declared_control_totals
+    text = "\n".join(pg.get_text() for pg in fitz.open(PDF_337))
+    assert _text_layer_is_garbled(text)
+    # the SP pareggio (315.121,19), not the larger CE pareggio (372.733,17)
+    assert _declared_control_totals(PDF_337)["pareggio"] == D("315121.19")
+
+
+def test_declared_pareggio_falls_back_without_ce_header():
+    # no CE header -> full-text search unchanged (legacy behaviour)
+    from importers.pdf_extractor_llm import _declared_control_totals
+    txt = "BILANCIO DI VERIFICA\nTotale a Pareggio 1.000,00\n"
+    dc = _declared_control_totals("/nonexistent.pdf", text=txt)
+    assert dc["pareggio"] == D("1000.00")
+
+
 # ---------------------------------------------------------------- end-to-end (production path)
 
 def _gross_winner_bs_613():

@@ -1352,6 +1352,29 @@ def _is_image_pdf(file_path: str) -> bool:
         return False
 
 
+def _text_layer_is_garbled(text: str) -> bool:
+    """Detect a CORRUPTED (not merely absent) text layer — broken ToUnicode font maps.
+
+    Signature: the printed glyphs are fine but the extracted text splits amounts
+    around the decimal comma ("3.239 , 12", "315.121, 19") and garbles letters
+    ("roNDO AMM.TO", "IMMOBILIZZAZIONI IIa(ATERIALI" — budget_337). Feeding that
+    text to the LLM yields stochastic garbage; the images are clean, so such a file
+    must take the VISION path like a scan.
+
+    Calibrated on the full corpus (2026-07-15): budget_337 scores 60.7% broken
+    amounts, every other file < 5% — threshold 30% with a >= 10 absolute floor so
+    a couple of odd lines on a clean file can never trigger it.
+    """
+    if not text:
+        return False
+    broken = len(re.findall(r'\d\s+,\s*\d{2}\b', text))
+    if broken < 10:
+        return False
+    wellformed = len(re.findall(r'\d,\d{2}\b', text))
+    total = broken + wellformed
+    return total > 0 and (broken / total) > 0.30
+
+
 def ocr_pdf_sample_text(file_path: str, max_pages: int = 6) -> str:
     """OCR the first pages of a scanned (image-only) PDF into plain text.
 
@@ -1859,6 +1882,22 @@ CONTRA ACCOUNTS — NET THEM, never put in passivo:
 - "Fondo ammortamento ..." (any: immobilizzazioni immateriali/materiali) is an AVERE account that REDUCES the related asset. Subtract it from the gross asset so sp02/sp03 are reported NET of their fondi ammortamento.
 - "Fondo svalutazione crediti" reduces crediti: report sp06/sp07 NET of it.
 - Do NOT classify these fondi as fondi rischi (sp14) or debiti.
+- CRITICAL — DO NOT CONFUSE the FONDO with the YEAR'S EXPENSE. Two kinds of
+  "ammortamento" accounts exist and only ONE nets the assets:
+  * FONDO ammortamento (patrimonial, ACCUMULATED depreciation): named "FONDO
+    AMM.TO ..." / "F.DO AMM ..." / "F/AMM ..." and listed AMONG THE PATRIMONIAL
+    accounts (Stato Patrimoniale / Attivita'-Passivita' section). These NET the
+    assets. The Fondo prefix may be OCR-garbled ("roNDO AMM.TO", "FONDa"): an
+    account containing AMM that sits among the SP accounts is a fondo even with a
+    corrupted prefix.
+  * The YEAR'S depreciation EXPENSE: named "AMM.TO ..." / "AMMORTAMENTO ..." /
+    "QUOTA AMMORTAMENTO ..." WITHOUT the Fondo prefix and listed among the COSTI
+    of the CONTO ECONOMICO section. This is an economic account: NEVER subtract it
+    from sp02/sp03 — doing so double-counts (the expense already reduced the
+    year's result) and fabricates a wrong net book value.
+  The reliable discriminator is the SECTION the account appears in (SP vs CE
+  costs), not the exact spelling. If an asset has no patrimonial FONDO account,
+  its net value IS the gross value.
 
 MAPPING (description -> field), report NET magnitudes:
 - sp01_crediti_soci: crediti verso soci per versamenti dovuti
@@ -2041,6 +2080,14 @@ def extract_trial_balance_with_llm(
             full_text = _extract_full_text(file_path)
             if not full_text.strip():
                 raise PDFImportError("No text extracted from trial-balance PDF")
+            # A PRESENT-but-CORRUPTED text layer (broken ToUnicode font map —
+            # budget_337) makes the text path stochastic. Switching to vision was
+            # TRIED (2026-07-15) and is NOT better on these dense layouts (drops
+            # whole blocks, misreads small print); the file is flagged as garbled
+            # by pdf_importer instead, so the user knows every value needs review.
+            if _text_layer_is_garbled(full_text):
+                logger.warning("Trial-balance text layer is GARBLED (broken font "
+                               "map) — extraction will be unreliable")
 
     # Declared control totals (TOTALE A PAREGGIO / ATTIVO / explicit Utile-Perdita) read
     # deterministically from the printed footer — used BOTH as a hint to the LLM AND as
@@ -2189,14 +2236,15 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     low = "".join(c for c in unicodedata.normalize("NFKD", low) if not unicodedata.combining(c))
     nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
 
-    def _largest_after(markers) -> Optional[Decimal]:
-        """Largest Italian-number amount occurring within ~80 chars after any marker,
-        searched in BOTH the normal and the no-spaces text."""
+    def _largest_after(markers, hays=None) -> Optional[Decimal]:
+        """Largest Italian-number amount occurring within ~80 chars after any marker.
+        `hays` = [(text, is_nospaces), ...]; defaults to the full normal + no-spaces
+        text. The no-spaces flag decides which form of the marker to search."""
         best: Optional[Decimal] = None
-        for hay in (low, nos):
+        for hay, is_nos in (hays or ((low, False), (nos, True))):
             for mk in markers:
-                m = mk if " " not in mk else mk
-                for hit in re.finditer(re.escape(mk.replace(" ", "")) if hay is nos else re.escape(mk), hay):
+                pat = re.escape(mk.replace(" ", "")) if is_nos else re.escape(mk)
+                for hit in re.finditer(pat, hay):
                     window = hay[hit.end(): hit.end() + 80]
                     for nm in _DECL_NUM_RE.finditer(window):
                         try:
@@ -2209,9 +2257,20 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
                         break  # first number after the marker is the total
         return best
 
-    # "totale a quadratura" is a common synonym for "totale a pareggio"; it is printed
-    # for BOTH the SP and CE sections, so _largest_after correctly keeps the SP figure.
-    out["pareggio"] = _largest_after(["totale a pareggio", "totale a quadratura"])
+    # "Totale a pareggio" (and its synonym "totale a quadratura") is printed for BOTH
+    # the SP and the CE section of a trial balance. Largest-wins assumed the SP figure
+    # is always the bigger one — FALSE on low-margin/high-turnover companies where the
+    # CE total EXCEEDS the SP total (budget_337: CE 372.733,17 > SP 315.121,19), which
+    # anchored the whole declared-reconcile to the CE figure. Scope the pareggio search
+    # to the text BEFORE the "CONTO ECONOMICO" header (the SP section); fall back to
+    # the full text when no CE header exists or the scoped search finds nothing.
+    _ce_pos_low = low.find("conto economico")
+    _ce_pos_nos = nos.find("contoeconomico")
+    _sp_hays = ((low[:_ce_pos_low] if _ce_pos_low > 0 else low, False),
+                (nos[:_ce_pos_nos] if _ce_pos_nos > 0 else nos, True))
+    _pareggio_markers = ["totale a pareggio", "totale a quadratura"]
+    out["pareggio"] = (_largest_after(_pareggio_markers, hays=_sp_hays)
+                       or _largest_after(_pareggio_markers))
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
         "totale stato patrimoniale attivo",

@@ -346,6 +346,20 @@ def import_pdf_balance_sheet(
             return bs, ce, prior_bs_data, prior_ce_data
 
         sc_quadratura_warnings = []
+        # Corrupted (not merely absent) text layer — broken ToUnicode font map
+        # (budget_337: "3.239 , 12", "roNDO AMM.TO"): every extractor (text AND
+        # vision, both tried) is unreliable on these files. Import proceeds
+        # best-effort, but the user MUST know that every value needs review.
+        try:
+            from importers.pdf_extractor_llm import _text_layer_is_garbled
+            if not is_scanned and _text_layer_is_garbled(sample_text):
+                sc_quadratura_warnings.append(
+                    "TESTO PDF CORROTTO (mappa font danneggiata): l'estrazione è "
+                    "inaffidabile — verificare TUTTI i valori in Rettifiche"
+                )
+                logger.warning("Garbled text layer detected — flagged for Rettifiche")
+        except Exception:
+            pass
         _coge_ok = False
         if is_trial_balance:
             # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the

@@ -158,6 +158,53 @@ def test_contra_classify_dedups_before_summing():
     assert scan.fondi_mat == D("1779795.83")
 
 
+def test_contra_classify_immat_split_via_subaggregate_truncated_leaves():
+    # budget_395 (AGRIMIX): the immateriali sub-aggregate '04 F/AMM IMMOBILIZZAZIONI
+    # IMMAT.' carries the ONLY correct caption; its deepest LEAVES are truncated
+    # ("F/AMM.LIC. D'USO SOF. A TEM. IND", "F/AMM.ALT. COS. AD UT. PLU. AMM") and
+    # self-misclassify to materiali. The split must anchor on the printed sub-
+    # aggregate, not on the leaf captions, so the immat mass stays immateriali.
+    # Complete subtree (parents == sum of their leaves) so dedup collapses cleanly,
+    # mirroring the real document.
+    passivo = [
+        ("04", "F/AMM IMMOBILIZZAZIONI IMMAT.", D("111596.80")),   # immat sub-agg
+        ("0405", "F/AMM COSTI DI IMPIANTO E AMPL.", D("3969.29")),
+        ("0405005", "F/AMM.COSTI IMPIANTO", D("3969.29")),          # truncated leaf
+        ("0415", "F/AMM.DIRITTI DI BREV. E UT. OP.", D("17150.69")),
+        ("0415015", "F/AMM.LIC. D'USO SOF. A TEM. IND", D("17150.69")),  # truncated
+        ("0420", "F/AMM.CONCESS. LICENZE MARCHI", D("13432.00")),
+        ("0420015", "F/AMM.LIC. D'USO SOF. A TEMP.DET", D("13432.00")),  # truncated
+        ("0435", "F/AMM.ALTRE IMMOB. IMMATERIALI", D("77044.82")),
+        ("0435005", "F/AMM. LAV. STR. SU BENI DI TERZ", D("48525.32")),  # truncated
+        ("0435015", "F/AMM.ALT. COS. AD UT. PLU. AMM", D("28519.50")),   # truncated
+        # materiali side: a single mastro (its leaf captions are tangible anyway)
+        ("07", "F/AMM IMMOB. MATERIALI", D("2748604.93")),
+    ]
+    scan = _contra_classify([], passivo)
+    assert scan.fondi_immat == D("111596.80")
+    assert scan.fondi_mat == D("2748604.93")
+
+
+def test_contra_classify_grand_total_over_immat_subaggregate():
+    # budget_343: a GRAND total '41 FONDI AMMORTAMENTO IMMOBILIZ' sits above the
+    # immateriali sub-aggregate '4101 FONDI AMMORT. IMMOBILIZZAZ. IMM'. total comes
+    # from the grand aggregate, immat from the sub-aggregate; mat is the remainder.
+    passivo = [
+        ("41", "FONDI AMMORTAMENTO IMMOBILIZ", D("895336.07")),        # grand total
+        ("4101", "FONDI AMMORT. IMMOBILIZZAZ. IMM", D("55805.16")),    # immat sub-agg
+        ("410107", "F.DO AMM.TO COSTI DI IMPIANTO E AMPLIA", D("7966.59")),
+        ("410123", "F.DO AMM.SW IN CONCESSIONE CAPITALIZZ", D("21102.57")),
+        ("410127", "F.DO AMM.TO SPESE DI MANUT.BENI DI TER", D("24136.00")),
+        ("410153", "F.DO AMM. ALTRE SPESE PLURIENNALI", D("2600.00")),
+        ("4105", "FONDI AMMORTAMENTO IMPIANTI E", D("205818.77")),
+        ("4107", "FONDI AMMORT.ATTREZZ.INDUSTR.", D("470066.22")),
+        ("4109", "FONDI AMMORTAMENTO ALTRI BEN", D("163645.92")),
+    ]
+    scan = _contra_classify([], passivo)
+    assert scan.fondi_immat == D("55805.16")
+    assert scan.fondi_mat == D("839530.91")   # 895336.07 - 55805.16
+
+
 # ------------------------------------------ immat/mat split of a known fondo
 # budget_210 (GUSTOPRONTO, BILAGRA verifica): the gestionale prints fondi with
 # BOTH the 'F.DO' and 'FONDO' prefixes and immateriali captions the old F.DO-

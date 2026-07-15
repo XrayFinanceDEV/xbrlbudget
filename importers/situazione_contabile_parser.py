@@ -2646,18 +2646,10 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
         elif 'IMMOBILIZZAZIONI MATERIALI' in d:
             anch03 = a if anch03 is None else max(anch03, a)
 
-    def _fondo_bucket(desc):
-        # immat/mat split by asset-type marker (prefix-agnostic): the row is
-        # already a fondo, so key on the category alone — unmatched fondi fall to
-        # materiali, mirroring the historical F.DO AMM fallback rule.
-        return 'im' if _fondo_is_immat(desc) else 'mat'
-
-    fondi_att, fondi_pas = [], []       # (abs_amount, desc_upper)
     sval_rows = []                       # fondo svalutazione immobilizz. (either side)
     for _c, d, a in _dedup_parent_child(list(attivo_rows)):
         if _is_fondo_amm(d):
-            fondi_att.append((abs(a), d))
-            continue
+            continue                        # fondi handled from RAW rows below
         if _is_fondo_svalut_immob(d):
             sval_rows.append((abs(a), d))   # contra-asset: exclude from att_total
             continue
@@ -2672,7 +2664,6 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
             g03 += a
     for _c, d, a in _dedup_parent_child(list(passivo_rows)):
         if _is_fondo_amm(d):
-            fondi_pas.append((abs(a), d))
             continue
         if _is_fondo_svalut_immob(d):
             sval_rows.append((abs(a), d))
@@ -2680,38 +2671,46 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
         if _is_iva_line(d):
             iva_d += a
 
-    def _agg_or_sum(rows, is_agg):
-        """Total of a set of fondi rows [(amount, desc)]: a generic AGGREGATE
-        caption (per `is_agg`) wins as its max — its detail lines are components
-        of it — otherwise SUM the leaves. Resolves the parent/child overlap dedup
-        cannot on vision-OCR sheets (shuffled codes). NB a bottom-up leaf sum is
-        only reliable when every leaf was captured; the caller gates the anchored
-        overlay on `has_aggregate` so a partial OCR pass no-ops, never mis-nets."""
-        if not rows:
-            return Z
-        aggs = [a for a, d in rows if is_agg(d)]
-        if aggs:
-            return max(aggs)
-        return sum(a for a, _d in rows)
+    def _reduce_fondi(raw_rows):
+        """(total, immat) for one side's fondi rows [(code, desc, abs_amount)],
+        taken PRE-dedup so the printed sub-aggregate captions survive.
 
-    def _reduce_fondi(fondi):
-        """(total, immat) for a side. Grand total from the generic aggregate
-        caption (or leaf sum); immat from the immateriali sub-aggregate (or immat
-        leaf sum). Keyed on DESCRIPTION, so on clean layouts (budget_343/348/405,
-        where dedup already removed the mastro) it degrades to a plain leaf sum."""
-        if not fondi:
+        total  = the GRAND aggregate ('FONDI AMMORTAMENTO IMMOBILIZ', no category
+                 qualifier) when the document prints one, else the deduplicated leaf
+                 sum (parent/child collapsed so nothing double-counts).
+        immat  = the IMMATERIALI sub-aggregate ('FONDI AMMORT. IMMOBILIZZAZ. IMM' /
+                 'F/AMM IMMOBILIZZAZIONI IMMAT.') when printed, else the immat-
+                 classified leaf sum. mat = total - immat.
+
+        Reading the sub-aggregate from the RAW rows is the fix: the generic
+        _dedup_parent_child keeps children and DROPS the parent, so post-dedup the
+        immat sub-aggregate is gone and the surviving LEAVES are truncated
+        ("F/AMM.LIC. D'USO SOF. A TEM. IND") and self-misclassify to materiali →
+        the whole immateriali fondo leaks into materiali (budget_395). Anchoring on
+        the printed sub-aggregate keeps the split correct without depending on leaf
+        captions, while the deduped leaf sum keeps the TOTAL exact where there is a
+        3-level tree with a grand total too (budget_343: 41 > 4101 > leaves)."""
+        if not raw_rows:
             return Z, Z
-        immat_rows = [(a, d) for a, d in fondi if _fondo_bucket(d) == 'im']
-        total = _agg_or_sum(fondi, _is_fondo_aggregate)
-        im = min(_agg_or_sum(immat_rows, _is_fondo_immat_aggregate), total)
-        return total, im
+        deduped = _dedup_parent_child(list(raw_rows))
+        leaf_total = sum(a for _c, _d, a in deduped)
+        grand_aggs = [a for _c, d, a in raw_rows if _is_fondo_aggregate(d)]
+        total = max(grand_aggs) if grand_aggs else leaf_total
+        immat_aggs = [a for _c, d, a in raw_rows if _is_fondo_immat_aggregate(d)]
+        if immat_aggs:
+            im = min(max(immat_aggs), total)
+        else:
+            im = sum(a for _c, d, a in deduped if _fondo_is_immat(d))
+        return total, min(im, total)
 
-    t_att, im_att = _reduce_fondi(fondi_att)
-    t_pas, im_pas = _reduce_fondi(fondi_pas)
+    fondi_att_raw = [(c, d, abs(a)) for c, d, a in attivo_rows if _is_fondo_amm(d)]
+    fondi_pas_raw = [(c, d, abs(a)) for c, d, a in passivo_rows if _is_fondo_amm(d)]
+    t_att, im_att = _reduce_fondi(fondi_att_raw)
+    t_pas, im_pas = _reduce_fondi(fondi_pas_raw)
     f_att = t_att
     f_im = im_att + im_pas
     f_mat = (t_att - im_att) + (t_pas - im_pas)
-    has_agg = any(_is_fondo_aggregate(d) for _a, d in fondi_att + fondi_pas)
+    has_agg = any(_is_fondo_aggregate(d) for _c, d, _a in fondi_att_raw + fondi_pas_raw)
     # Fondo svalutazione immobilizzazioni: a plain leaf sum split immat/mat — it
     # has its own 'FONDI SVALUTAZIONE ...' captions, kept in a SEPARATE stream so
     # the ammortamento aggregate helpers never shadow a svalutazione leaf.

@@ -11,8 +11,8 @@
       "expect": {"sp02": 27640.60, "sp03": 454300.50, "sp13": -69804.55, "plug_max": 1}
     },
     "budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf": {
-      "status": "open", "fixed_by": "PR-3", "tol": 2,
-      "expect": {"sp02": 39783.68, "sp03": 1862490.15}
+      "status": "good", "fixed_by": "PR-3", "tol": 2,
+      "expect": {"sp02": 39783.68, "sp03": 1862490.15, "plug_max": 1}
     },
     "budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf": {
       "status": "open", "fixed_by": "PR-4", "tol": 3,

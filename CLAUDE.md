@@ -651,7 +651,8 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
 - **Promote** (`POST /scenarios/{id}/promote`): Copies ForecastYear BS/IS into a new FinancialYear (period_months=NULL)
   - Enables using the projected year as base year for a subsequent budget scenario
   - Dynamic column copy via `__table__.columns` intersection (handles missing fields gracefully)
-  - Fails if a full-year FinancialYear already exists for that company+year
+  - REPLACES an existing full-year FinancialYear for that company+year (re-promote); deletes it with cascade before creating the new record — a manually imported full year for the same year is overwritten
+  - Quadratura gate: refuses to promote a projection whose BS is unbalanced (attivo−passivo > €5)
   - Service: `backend/app/services/promote_service.py`
 - Frontend wizard: Import → Rettifiche → Comparison → Projection (editable) → Results → Promote to Budget
 

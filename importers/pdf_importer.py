@@ -632,12 +632,17 @@ def import_pdf_balance_sheet(
         # validate_balance above is the hard structural gate; this adds the CE
         # utile==sp13 cross-check (which validate_balance lacks) and any plug-masking,
         # so every route is judged by the same rules. Non-blocking (logged) to avoid
-        # rejecting borderline-but-usable A/B imports.
+        # rejecting borderline-but-usable A/B imports — but the flags must reach the
+        # USER, not just the log: on route A/B a ≤5% plug fabricated by
+        # reconcile_ivcee_balance used to pass without any visible warning (the
+        # sc_quadratura_warnings below are populated only on route C).
         try:
             from importers.iv_cee_hierarchy import check_quadratura
             _qd = check_quadratura(balance_sheet_data, income_data)
             for _w in _qd.warnings:
                 logger.warning(f"quadratura: {_w}")
+                if _w not in sc_quadratura_warnings:
+                    sc_quadratura_warnings.append(_w)
         except Exception:
             pass
 

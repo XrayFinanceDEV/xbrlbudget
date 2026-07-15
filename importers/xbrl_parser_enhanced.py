@@ -889,6 +889,7 @@ class EnhancedXBRLParser:
         imported_years = []
         financial_year_ids = []
         all_reconciliation_info = {}
+        quadratura_warnings = []  # user-visible, non-blocking (per-year, "[year] msg")
 
         # Apply user-specified period_months to the most recent year if not auto-detected
         if period_months and period_months < 12:
@@ -901,11 +902,15 @@ class EnhancedXBRLParser:
             detected_pm = year_period_months.get(year)  # None = full year, 1-11 = partial
 
             if detected_pm:
-                # Partial year: match existing partial record or create new one
+                # Partial year: match existing partial record or create new one.
+                # period_months == 12 is a FULL year by convention (see CLAUDE.md
+                # "NULL or 12") — exclude it, or an incoming partial import would
+                # overwrite a historical full-year record saved with 12.
                 fy = self.db.query(FinancialYear).filter(
                     FinancialYear.company_id == company_id,
                     FinancialYear.year == year,
                     FinancialYear.period_months.isnot(None),
+                    FinancialYear.period_months != 12,
                 ).first()
 
                 if not fy:
@@ -941,6 +946,22 @@ class EnhancedXBRLParser:
                 inc_data = enforce_ce_sp_identity(bs_data, inc_data, f"xbrl-{year}", prefer="sp13")
             except Exception as _ce_sp_err:
                 logger.warning(f"[XBRL] CE↔SP enforcement skipped for year {year}: {_ce_sp_err}")
+
+            # GENERAL: check the balance-sheet identity too (attivo == passivo). Unlike
+            # the PDF routes, XBRL has no validate_balance gate nor a reconcile/plug
+            # stage, so an unbalanced instance (or one unbalanced by the debt/credit
+            # reconciliation above, which adjusts sp06/sp16 to the declared totals) was
+            # imported SILENTLY. Non-blocking by design (a tagged official filing should
+            # still open, and the user corrects in Rettifiche) — but it must be flagged.
+            try:
+                from importers.iv_cee_hierarchy import check_quadratura
+                _q = check_quadratura(bs_data, inc_data)
+                if not _q.quadra or not _q.utile_match:
+                    for _w in _q.warnings:
+                        quadratura_warnings.append(f"[{year}] {_w}")
+                        logger.warning(f"[XBRL] {year}: {_w}")
+            except Exception as _q_err:
+                logger.warning(f"[XBRL] quadratura check skipped for year {year}: {_q_err}")
 
             logger.info(
                 f"[XBRL] Year {year} (pm={detected_pm}): "
@@ -998,6 +1019,7 @@ class EnhancedXBRLParser:
             'company_created': company_created,
             'reconciliation_info': all_reconciliation_info,
             'year_period_months': year_period_months,  # {year: months} for partial years
+            'warnings': quadratura_warnings,           # non-blocking quadratura flags
         }
 
 

@@ -327,6 +327,23 @@ def get_adjustable_financial_year(
 
 RETTIFICHE_LOG_MAX = 20
 
+# Tolerance for the server-side balance check on PUT /adjustments: the legit
+# frontend keeps edits balanced by double-entry and plugs ≤ €5 import-rounding
+# gaps into sp09 (reconcileSubfields), so €5 of drift per save is normal noise.
+ADJUSTMENTS_BALANCE_TOL = Decimal("5")
+
+
+def _bs_imbalance(bs_fields: Dict[str, Any]) -> Decimal:
+    """|attivo − passivo| of a balance-sheet field dict (full DB field names).
+
+    Uses the shared IV-CEE aggregate field lists so this stays consistent with
+    check_quadratura. Missing/None fields count as 0.
+    """
+    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+    att = sum((Decimal(str(bs_fields.get(f) or 0)) for f in _ATTIVO_FIELDS), Decimal("0"))
+    pas = sum((Decimal(str(bs_fields.get(f) or 0)) for f in _PASSIVO_FIELDS), Decimal("0"))
+    return abs(att - pas)
+
 
 @router.put(
     "/companies/{company_id}/years/{year}/adjustments",
@@ -357,8 +374,28 @@ def save_adjustments(
         fy.original_bs_snapshot = json.dumps(_bs_to_dict(fy.balance_sheet))
         fy.original_is_snapshot = json.dumps(_is_to_dict(fy.income_statement))
 
-    # Update BS fields
+    # Server-side balance validation: the frontend keeps rettifiche balanced by
+    # double-entry, but a direct API client could persist an arbitrarily unbalanced
+    # sheet with no check at all. Merge the payload over the CURRENT record (robust
+    # to partial payloads) and reject a save that WORSENS the imbalance beyond the
+    # tolerance — while still allowing saves on a record that was already unbalanced
+    # at import (the user must be able to work on it, and double-entry edits keep
+    # the gap constant).
     bs_columns = {col.name for col in models.BalanceSheet.__table__.columns} - _BS_SKIP
+    current_bs = _bs_to_dict(fy.balance_sheet)
+    merged_bs = dict(current_bs)
+    merged_bs.update({f: v for f, v in payload.balance_sheet.items() if f in bs_columns})
+    new_imb = _bs_imbalance(merged_bs)
+    cur_imb = _bs_imbalance(current_bs)
+    if new_imb > max(cur_imb, Decimal("0")) + ADJUSTMENTS_BALANCE_TOL:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Rettifiche sbilanciate: attivo−passivo = {new_imb:,.2f} € "
+                f"(prima del salvataggio era {cur_imb:,.2f} €). Ogni rettifica deve "
+                f"essere in partita doppia."
+            ),
+        )
     for field, value in payload.balance_sheet.items():
         if field in bs_columns:
             setattr(fy.balance_sheet, field, Decimal(str(value)))

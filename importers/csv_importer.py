@@ -353,6 +353,31 @@ class CSVImporter:
                         print(f"Warning: Could not import income statement field {field}: {e}")
                         continue
 
+        # GENERAL rule (same as the PDF and XBRL routes): enforce the CE↔SP identity
+        # (utile_CE == sp13) and check the balance identity (attivo == passivo) for
+        # BOTH years. The CSV route previously had NO validation at all — an
+        # unbalanced TEBE file was imported completely silently. Non-blocking (the
+        # file still imports, the user corrects in Rettifiche), but always flagged.
+        quadratura_warnings = []
+        try:
+            from importers.iv_cee_hierarchy import enforce_ce_sp_identity, check_quadratura
+            for _yr, _bs, _inc in ((year1, bs1, inc1), (year2, bs2, inc2)):
+                bs_d = {c.name: (getattr(_bs, c.name, None) or Decimal('0'))
+                        for c in BalanceSheet.__table__.columns if c.name.startswith('sp')}
+                ce_d = {c.name: (getattr(_inc, c.name, None) or Decimal('0'))
+                        for c in IncomeStatement.__table__.columns if c.name.startswith('ce')}
+                ce_d = enforce_ce_sp_identity(bs_d, ce_d, f"csv-{_yr}", prefer="sp13")
+                for _f, _v in ce_d.items():
+                    if _f.startswith('ce'):
+                        setattr(_inc, _f, _v)
+                _q = check_quadratura(bs_d, ce_d)
+                if not _q.quadra or not _q.utile_match:
+                    for _w in _q.warnings:
+                        quadratura_warnings.append(f"[{_yr}] {_w}")
+                        print(f"Warning CSV {_yr}: {_w}")
+        except Exception as _q_err:
+            print(f"Warning: CSV quadratura check skipped: {_q_err}")
+
         # Save to database
         self.db.add(bs1)
         self.db.add(bs2)
@@ -367,7 +392,8 @@ class CSVImporter:
             'rows_processed': len(rows),
             'balance_sheet_fields_imported': imported_bs_fields,
             'income_statement_fields_imported': imported_inc_fields,
-            'financial_year_ids': [fy1.id, fy2.id]
+            'financial_year_ids': [fy1.id, fy2.id],
+            'warnings': quadratura_warnings,
         }
 
 

@@ -36,6 +36,7 @@ class XBRLImportResponse(BaseModel):
     years_imported: int = Field(..., description="Number of years successfully imported")
     company_created: bool = Field(..., description="Whether a new company was created")
     reconciliation_info: Optional[Dict[int, ReconciliationInfo]] = Field(None, description="Reconciliation details per year")
+    warnings: Optional[List[str]] = Field(None, description="Non-blocking quadratura warnings per year ('[year] message')")
 
     class Config:
         json_schema_extra = {
@@ -63,6 +64,7 @@ class CSVImportResponse(BaseModel):
     balance_sheet_fields_imported: int = Field(..., description="Number of balance sheet fields imported")
     income_statement_fields_imported: int = Field(..., description="Number of income statement fields imported")
     financial_year_ids: List[int] = Field(..., description="Financial year record IDs created")
+    warnings: Optional[List[str]] = Field(None, description="Non-blocking quadratura warnings per year ('[year] message')")
 
     class Config:
         json_schema_extra = {

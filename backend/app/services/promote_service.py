@@ -42,6 +42,17 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     target_year = forecast_year.year
     company_id = scenario.company_id
 
+    # 2b. Quadratura gate: never promote an unbalanced projection to a full-year
+    # FinancialYear (it would become the base year of budget scenarios). The
+    # intra-year engine balances by construction (cash plug), so this only fires
+    # on an upstream bug — but promoting silently would propagate it everywhere.
+    imb = _forecast_bs_imbalance(forecast_year.balance_sheet)
+    if imb > Decimal("5"):
+        raise ValueError(
+            f"La proiezione non quadra (attivo − passivo = {imb:,.2f} €): "
+            f"impossibile promuovere. Rigenerare la proiezione."
+        )
+
     # 3. Replace existing full-year FinancialYear if present (re-promote)
     existing = db.query(FinancialYear).filter(
         FinancialYear.company_id == company_id,
@@ -86,6 +97,15 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         "company_id": company_id,
         "message": f"Projection {target_year} promoted to full-year financial data",
     }
+
+
+def _forecast_bs_imbalance(fbs) -> Decimal:
+    """|attivo − passivo| of a ForecastBalanceSheet, from the shared IV-CEE
+    aggregate field lists (consistent with check_quadratura). None fields = 0."""
+    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+    att = sum((Decimal(str(getattr(fbs, f, None) or 0)) for f in _ATTIVO_FIELDS), Decimal("0"))
+    pas = sum((Decimal(str(getattr(fbs, f, None) or 0)) for f in _PASSIVO_FIELDS), Decimal("0"))
+    return abs(att - pas)
 
 
 def _copy_columns(source, source_model, target_model, *, id_field: str, id_value: int):

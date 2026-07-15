@@ -1,0 +1,34 @@
+{
+  "_doc": "Ground-truth values read from the source PDFs (audit 2026-07-14). Checked by tests/test_prod_route_c.py against the deterministic production route-C replica (tests/_prod_route_c_runner.py). The corpus PDFs live in the gitignored Test/sez-contrapposte/, so tests skip when absent. tol = absolute EUR tolerance. 'fixed_by' is the PR that makes the row green; rows with status='open' are xfail(strict) until then.",
+  "corpus_dir": "Test/sez-contrapposte",
+  "files": {
+    "budget_343_Bilancio 2025 ver_definitiva 1-6-2026.pdf": {
+      "status": "good", "tol": 2,
+      "expect": {"sp02": 27640.60, "sp03": 453510.10, "sp13": -41892.29, "plug_max": 1}
+    },
+    "budget_348_Bilancio 2025 ver_definitiva 6-3-2026.pdf": {
+      "status": "good", "tol": 2,
+      "expect": {"sp02": 27640.60, "sp03": 454300.50, "sp13": -69804.55, "plug_max": 1}
+    },
+    "budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf": {
+      "status": "open", "fixed_by": "PR-3", "tol": 2,
+      "expect": {"sp02": 39783.68, "sp03": 1862490.15}
+    },
+    "budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf": {
+      "status": "open", "fixed_by": "PR-4", "tol": 3,
+      "expect": {"sp02": 182260.00, "sp03": 122967.10, "sp13": -90819.92, "plug_max": 2000}
+    },
+    "budget_210_Bilancio 2025--26-05-13.pdf": {
+      "status": "open", "fixed_by": "PR-5", "tol": 2,
+      "expect": {"sp02": 169996.00, "sp03": 100363.91, "plug_max": 100}
+    },
+    "budget_405_all. A - PROGETTO DI BILANCIO.pdf": {
+      "status": "open", "fixed_by": "PR-6", "tol": 2,
+      "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_pct_max": 1.0}
+    },
+    "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {
+      "status": "open", "fixed_by": "PR-7", "tol": 2,
+      "expect": {"totale_attivo": 355878.76, "sp02": 8069.50, "sp03": 126595.70, "plug_max": 2000}
+    }
+  }
+}

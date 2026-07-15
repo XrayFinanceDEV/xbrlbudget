@@ -285,6 +285,18 @@ _SP_ATTIVO_RULES = [
     (['IMMOBILIZZAZIONI IMMATERIALI'], 'gross_sp02'),
     (['IMMOBILIZZAZIONI MATERIALI'], 'gross_sp03'),
     (['IMMOBILIZZAZIONI FINANZIARIE'], 'gross_sp04'),
+    # Immobilizzazioni in corso e acconti (B.II.5 / B.I.6) — a LEGITIMATE fixed
+    # asset. Must precede the ANTICIP→crediti rule below so a real immob. acconto is
+    # not demoted to a credit.
+    (['IMMOBILIZZAZIONI', 'CORSO'], 'gross_sp03'),
+    (['IMMOBILIZZAZIONI', 'ACCONT'], 'gross_sp03'),
+    # Anticipi / acconti to suppliers are CREDITI, not fixed assets — even when the
+    # caption names an asset category ("ANTICIPO X CANONI MACCHINARI" is an advance,
+    # not a machine — budget_210/211). Must precede the MACCHINAR/IMPIANT category
+    # rules below, which would otherwise book it as gross_sp03 and inflate the
+    # materiali the overlay then discards, leaving a plug.
+    (['ANTICIP'], 'sp06'),
+    (['ACCONT', 'FORNITOR'], 'sp06'),
     # AGO-style single-category descriptions (trial balance parent level)
     (['ONERI', 'PLURIENN'], 'gross_sp02'),
     (['COSTI', 'PLURIENN'], 'gross_sp02'),

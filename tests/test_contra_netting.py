@@ -222,6 +222,20 @@ def test_fondo_bucket_immateriali_captions():
     assert _fondo_is_immat("F.DO AMM.TO SITO WEB")
 
 
+def test_classify_anticipo_is_credito_not_machine():
+    # budget_210/211: "ANTICIPO X CANONI MACCHINARI" is an advance to a supplier (a
+    # credit), not a machine — the MACCHINAR category rule must not claim it.
+    from importers.situazione_contabile_parser import _classify_sp_attivo
+    assert _classify_sp_attivo("ANTICIPO X CANONI MACCHINARI") == "sp06"
+    assert _classify_sp_attivo("ANTICIPI A FORNITORI") == "sp06"
+    # legitimate immobilizzazioni in corso e acconti stays materiali (B.II.5)
+    assert _classify_sp_attivo("IMMOBILIZZAZIONI MATERIALI IN CORSO E ACCONTI") == "gross_sp03"
+    assert _classify_sp_attivo("IMMOBILIZZAZIONI IN CORSO E ACCONTI") == "gross_sp03"
+    # plain tangible assets still materiali
+    assert _classify_sp_attivo("MACCHINARI") == "gross_sp03"
+    assert _classify_sp_attivo("IMPIANTI E MACCHINARI") == "gross_sp03"
+
+
 def test_fondo_bucket_materiali_captions():
     from importers.situazione_contabile_parser import _fondo_is_immat
     # tangible fondi, both prefixes -> NOT immateriali

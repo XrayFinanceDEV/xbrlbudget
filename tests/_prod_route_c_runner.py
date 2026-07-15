@@ -53,7 +53,16 @@ def run_prod_route_c(file_path: str, ocr_text=None) -> dict:
     if bs.get('totale_attivo', Z) <= 0:
         raise ValueError("estrazione deterministica vuota (totale_attivo<=0)")
 
-    dc0 = _declared_control_totals(file_path, text=ocr_text)
+    # mirrors pdf_importer: a garbled text layer makes the declared totals garbage
+    # -> they must not drive the reconcile / candidate anchoring.
+    import fitz
+    from importers.pdf_extractor_llm import _text_layer_is_garbled
+    try:
+        _sample = "".join(pg.get_text() for pg in fitz.open(file_path)[:14])
+    except Exception:
+        _sample = ""
+    text_garbled = _text_layer_is_garbled(_sample)
+    dc0 = {} if text_garbled else _declared_control_totals(file_path, text=ocr_text)
 
     # source == deterministico -> overlay_debt_typing is a no-op (skipped in prod).
     contra = Z

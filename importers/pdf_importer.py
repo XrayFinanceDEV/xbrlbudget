@@ -349,15 +349,22 @@ def import_pdf_balance_sheet(
         # Corrupted (not merely absent) text layer — broken ToUnicode font map
         # (budget_337: "3.239 , 12", "roNDO AMM.TO"): every extractor (text AND
         # vision, both tried) is unreliable on these files. Import proceeds
-        # best-effort, but the user MUST know that every value needs review.
+        # best-effort, but the user MUST know that every value needs review — and,
+        # crucially, the DECLARED control totals read from garbled text are garbage
+        # too, so they must NOT drive anything (candidate selection, sp13
+        # anchoring, CE alignment): a misread "perdita 372.733" (the CE section
+        # total) used to flip a profitable company into a huge loss.
+        _text_garbled = False
         try:
             from importers.pdf_extractor_llm import _text_layer_is_garbled
             if not is_scanned and _text_layer_is_garbled(sample_text):
+                _text_garbled = True
                 sc_quadratura_warnings.append(
                     "TESTO PDF CORROTTO (mappa font danneggiata): l'estrazione è "
                     "inaffidabile — verificare TUTTI i valori in Rettifiche"
                 )
-                logger.warning("Garbled text layer detected — flagged for Rettifiche")
+                logger.warning("Garbled text layer detected — declared totals "
+                               "will be IGNORED; flagged for Rettifiche")
         except Exception:
             pass
         _coge_ok = False
@@ -441,7 +448,8 @@ def import_pdf_balance_sheet(
                 _dc0 = {}
                 try:
                     from importers.pdf_extractor_llm import _declared_control_totals
-                    _dc0 = _declared_control_totals(file_path, text=ocr_text)
+                    if not _text_garbled:   # garbled text -> declared is garbage
+                        _dc0 = _declared_control_totals(file_path, text=ocr_text)
                     _decl_tot = (_dc0.get('pareggio') or _dc0.get('passivo')
                                  or _dc0.get('attivo'))
                 except Exception:
@@ -616,7 +624,10 @@ def import_pdf_balance_sheet(
         try:
             from importers.iv_cee_hierarchy import enforce_ce_sp_identity
             from importers.pdf_extractor_llm import _declared_control_totals
-            _decl_ce = _declared_control_totals(file_path, text=ocr_text)
+            # Garbled text layer -> the declared Utile/Perdita is unreliable: do not
+            # let it arbitrate (a misread CE-section total flips the result sign).
+            _decl_ce = (None if _text_garbled
+                        else _declared_control_totals(file_path, text=ocr_text))
             income_data = enforce_ce_sp_identity(
                 balance_sheet_data, income_data, "import",
                 prefer="sp13", declared=_decl_ce)

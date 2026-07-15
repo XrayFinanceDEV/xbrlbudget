@@ -2068,6 +2068,7 @@ def extract_trial_balance_with_llm(
     # 5.070.441, inflating values ~100x and dumping the gap into sp13); the linear OCR
     # text keeps the decimal comma, so numbers come out right.
     use_ocr = bool(ocr_text and ocr_text.strip())
+    text_garbled = False
     if use_ocr:
         is_image = False
         images = None
@@ -2086,14 +2087,18 @@ def extract_trial_balance_with_llm(
             # whole blocks, misreads small print); the file is flagged as garbled
             # by pdf_importer instead, so the user knows every value needs review.
             if _text_layer_is_garbled(full_text):
+                text_garbled = True
                 logger.warning("Trial-balance text layer is GARBLED (broken font "
-                               "map) — extraction will be unreliable")
+                               "map) — extraction unreliable, declared totals ignored")
 
     # Declared control totals (TOTALE A PAREGGIO / ATTIVO / explicit Utile-Perdita) read
     # deterministically from the printed footer — used BOTH as a hint to the LLM AND as
     # the post-pass reconciliation anchor. On a scanned PDF read them from the OCR text.
+    # On a GARBLED text layer the declared totals are misreads (a CE-section total can
+    # land in 'perdita' and flip the result sign) — do not read them at all.
     try:
-        declared = _declared_control_totals(file_path, text=full_text if use_ocr else None)
+        declared = ({} if text_garbled else
+                    _declared_control_totals(file_path, text=full_text if use_ocr else None))
     except Exception:
         declared = {}
     # Inject the declared totals as a completeness anchor in the SP system prompt.

@@ -1018,9 +1018,12 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     # Build final BS
     # =====================================================================
 
-    # Net gross assets against depreciation
-    bs['sp02'] = bs.get('sp02', Decimal('0')) + (gross_sp02 - depr_sp02)
-    bs['sp03'] = bs.get('sp03', Decimal('0')) + (gross_sp03 - depr_sp03)
+    # Net gross assets against depreciation. Clamp at 0: a fondo ammortamento can
+    # never exceed its own gross asset, so a negative net immobilizzazione is always
+    # a misclassification (fondo booked without/over its asset — budget_330/365/435)
+    # and a negative asset is never a valid IV-CEE value.
+    bs['sp02'] = bs.get('sp02', Decimal('0')) + max(Decimal('0'), gross_sp02 - depr_sp02)
+    bs['sp03'] = bs.get('sp03', Decimal('0')) + max(Decimal('0'), gross_sp03 - depr_sp03)
 
     # Immobilizzazioni are presented GROSS on these trial balances (fondi
     # ammortamento are separate passivo lines, netted just above), so the document's
@@ -1029,8 +1032,10 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     # the netted fondi resurface as a FALSE plug (budget_131 Oprandi: net attivo
     # 230.205,93 vs gross pareggio 355.878,76 → spurious 125.672,83 plug). Survives
     # _map_sc_keys (underscore key). Mirrors net_contra_accounts' returned _contra
-    # for the best-effort path.
-    _netted = depr_sp02 + depr_sp03
+    # for the best-effort path. Cap the applied fondi at the gross asset present, so
+    # the anchor reduction never exceeds the gross immobilizzazioni (a fondo without
+    # a matching asset — the clamp case above — must not shrink the declared anchor).
+    _netted = min(depr_sp02, gross_sp02) + min(depr_sp03, gross_sp03)
     if _netted > 0:
         bs['_netted_contra'] = bs.get('_netted_contra', Decimal('0')) + _netted
 
@@ -3463,6 +3468,14 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     else:
         utile = result[0]                                  # fallback: booked result line
     bs['sp13'] = utile
+
+    # A fondo ammortamento can never exceed its own gross asset, so a negative net
+    # immobilizzazione is always a misclassification (fondo netted off the wrong /
+    # a missing gross asset — budget_365/435). Clamp at 0: a negative asset is never
+    # a valid IV-CEE value; the residual then surfaces honestly in the plug below.
+    for _immk in ('sp02', 'sp03', 'sp04'):
+        if bs.get(_immk, Z) < Z:
+            bs[_immk] = Z
 
     # Trial-balance pareggio total; the IV-CEE total removes the perdita that is
     # parked on the attivo side as a balancing item.

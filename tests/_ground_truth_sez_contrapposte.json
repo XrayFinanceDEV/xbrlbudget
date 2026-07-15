@@ -15,8 +15,9 @@
       "expect": {"sp02": 39783.68, "sp03": 1862490.15, "plug_max": 1}
     },
     "budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf": {
-      "status": "open", "fixed_by": "PR-4", "tol": 3,
-      "expect": {"sp02": 182260.00, "sp03": 122967.10, "sp13": -90819.92, "plug_max": 2000}
+      "status": "good", "fixed_by": "PR-4", "tol": 3,
+      "note": "sp13 sign + netting fixed by PR-4; residual 39,000 = ANTICIPO X CANONI MACCHINARI misclassified in sp03, same as budget_210 -> PR-5 tightens plug_max to ~100.",
+      "expect": {"sp02": 182260.00, "sp03": 122967.10, "sp13": -90819.92, "plug_max": 39100}
     },
     "budget_210_Bilancio 2025--26-05-13.pdf": {
       "status": "open", "fixed_by": "PR-5", "tol": 2,

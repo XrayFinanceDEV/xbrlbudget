@@ -2234,7 +2234,8 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
 
 def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
                                  declared: Dict[str, Optional[Decimal]],
-                                 label: str) -> Dict[str, Decimal]:
+                                 label: str,
+                                 ce_result: Optional[Decimal] = None) -> Dict[str, Decimal]:
     """Reconcile a forced-balanced trial-balance extraction against the document's OWN
     declared control totals (anti-masking, level L2).
 
@@ -2264,21 +2265,33 @@ def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
         return balance_sheet_data
     tol = max(Decimal('50'), abs(att) * Decimal('0.005'))
 
-    # signed declared result: + utile, - perdita (utile wins when both are mis-detected)
-    decl_result: Optional[Decimal] = None
+    # signed declared result. A trial balance can print BOTH an "utile" and a
+    # "perdita" line — or a spurious "RISULTATO D'ESERCIZIO" (a PRIOR-year PN
+    # account) that _declared_control_totals reads as 'utile' (budget_211). Blindly
+    # preferring utile then books the wrong sign. Arbitrate with the accounting gap:
+    # when passivo EXCLUDES the result, attivo - passivo == the signed current
+    # result (= ricavi - costi by double entry), so the declared value CLOSEST to
+    # that gap is the true one. The CE-derived result is a fallback arbiter when the
+    # gap is unavailable (passivo already includes the result → gap ~ 0). With no
+    # anchor at all, preserve the legacy order (utile before perdita).
+    candidates = []  # (signed_value, source)
     if declared.get('utile') is not None:
-        decl_result = declared['utile']
-    elif declared.get('perdita') is not None:
-        decl_result = -declared['perdita']
-    elif declared.get('attivo') is not None and declared.get('passivo') is not None:
-        # No explicit Utile/Perdita line, but the document declares BOTH a gross Totale
-        # Attivo and a Totale Passivo that EXCLUDES the result: the implicit result is
-        # their difference (= ricavi - costi by double-entry). Only when the gap is
-        # material — when passivo already includes the result the two totals coincide
-        # (gap < tol) and we must NOT force a zero result.
-        _gap = declared['attivo'] - declared['passivo']
-        if abs(_gap) > tol:
-            decl_result = _gap
+        candidates.append((declared['utile'], 'utile'))
+    if declared.get('perdita') is not None:
+        candidates.append((-declared['perdita'], 'perdita'))
+    gap: Optional[Decimal] = None
+    if declared.get('attivo') is not None and declared.get('passivo') is not None:
+        _g = declared['attivo'] - declared['passivo']
+        if abs(_g) > tol:
+            gap = _g
+    anchor = gap if gap is not None else ce_result
+    decl_result: Optional[Decimal] = None
+    if len(candidates) > 1 and anchor is not None:
+        decl_result = min(candidates, key=lambda c: abs(c[0] - anchor))[0]
+    elif candidates:
+        decl_result = candidates[0][0]  # single candidate, or no anchor: legacy order
+    elif gap is not None:
+        decl_result = gap
 
     sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
 

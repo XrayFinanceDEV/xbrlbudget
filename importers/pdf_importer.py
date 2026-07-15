@@ -509,6 +509,7 @@ def import_pdf_balance_sheet(
                 if not _authoritative:
                     try:
                         from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+                        from importers.iv_cee_hierarchy import _net_profit_from_ce
                         _decl = dict(_dc0)
                         if _contra > 0:
                             # the printed totals are GROSS on gross-presentation
@@ -517,8 +518,15 @@ def import_pdf_balance_sheet(
                             for _k in ('attivo', 'passivo', 'pareggio'):
                                 if _decl.get(_k):
                                     _decl[_k] = _decl[_k] - _contra
+                        # CE-derived result: fallback arbiter when a spurious PN
+                        # "RISULTATO D'ESERCIZIO" is read as declared utile but the
+                        # true result is a perdita (budget_211).
+                        try:
+                            _ce_res = _net_profit_from_ce(income_data)
+                        except Exception:
+                            _ce_res = None
                         balance_sheet_data = _reconcile_trial_to_declared(
-                            balance_sheet_data, _decl, source)
+                            balance_sheet_data, _decl, source, ce_result=_ce_res)
                         residual = balance_sheet_data.get('_plug_residual', residual)
                     except Exception as _rc_err:
                         logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")

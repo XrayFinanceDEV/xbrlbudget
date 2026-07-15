@@ -29,7 +29,9 @@ from importers.situazione_contabile_parser import (  # noqa: E402
     extract_situazione_contabile, net_contra_accounts,
 )
 from importers.pdf_importer import _map_sc_keys  # noqa: E402
-from importers.iv_cee_hierarchy import check_quadratura, enforce_ce_sp_identity  # noqa: E402
+from importers.iv_cee_hierarchy import (  # noqa: E402
+    check_quadratura, enforce_ce_sp_identity, _net_profit_from_ce,
+)
 from importers.pdf_extractor_llm import (  # noqa: E402
     _declared_control_totals, _reconcile_trial_to_declared,
 )
@@ -67,7 +69,11 @@ def run_prod_route_c(file_path: str, ocr_text=None) -> dict:
             for k in ('attivo', 'passivo', 'pareggio'):
                 if decl.get(k):
                     decl[k] = decl[k] - contra
-        bs = _reconcile_trial_to_declared(bs, decl, "prod-replica")
+        try:
+            ce_result = _net_profit_from_ce(ce)
+        except Exception:
+            ce_result = None
+        bs = _reconcile_trial_to_declared(bs, decl, "prod-replica", ce_result=ce_result)
 
     try:
         ce = enforce_ce_sp_identity(bs, ce, "import", prefer="sp13", declared=dc0)

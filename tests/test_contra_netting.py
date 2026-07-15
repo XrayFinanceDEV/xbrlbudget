@@ -460,6 +460,50 @@ def test_iva_one_sided_left_gross(monkeypatch):
     assert bs["sp06_crediti_breve"] == D("115000")   # untouched
 
 
+# ---------------------------------------------------------------- declared-result arbiter
+
+def test_reconcile_prefers_loss_matching_gap_over_spurious_utile():
+    # budget_211 (GUSTOPRONTO): the declared "utile 20.581,27" is a prior-year PN
+    # account ("RISULTATO D'ESERCIZIO"), NOT the current result. The true result is
+    # the perdita 90.819,92, which reconciles attivo (1.623.117,50) vs passivo/
+    # pareggio (1.713.937,42): gap = attivo - passivo = -90.819,92. The arbiter must
+    # pick the loss, not the spurious utile.
+    from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+    declared = {"attivo": D("1623117.50"), "passivo": D("1713937.42"),
+                "pareggio": D("1713937.42"), "utile": D("20581.27"),
+                "perdita": D("90819.92")}
+    bs = {"totale_attivo": D("1623117.50"), "totale_passivo": D("1713937.42"),
+          "sp13_utile_perdita": D("20581.27"),
+          "sp16_debiti_breve": D("500000"), "sp09_disponibilita_liquide": D("100000")}
+    out = _reconcile_trial_to_declared(bs, declared, "t")
+    assert out["sp13_utile_perdita"] == D("-90819.92")
+
+
+def test_reconcile_single_utile_candidate_unchanged():
+    # a genuine profit with only an utile line and no material gap -> utile wins
+    # (legacy behaviour preserved when there is nothing to arbitrate).
+    from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+    declared = {"attivo": D("1000000"), "passivo": D("1000000"),
+                "pareggio": D("1000000"), "utile": D("50000"), "perdita": None}
+    bs = {"totale_attivo": D("1000000"), "totale_passivo": D("1000000"),
+          "sp13_utile_perdita": D("50000"), "sp16_debiti_breve": D("200000")}
+    out = _reconcile_trial_to_declared(bs, declared, "t")
+    assert out["sp13_utile_perdita"] == D("50000")
+
+
+def test_reconcile_ce_result_breaks_tie_when_no_gap():
+    # both utile and perdita printed, passivo INCLUDES the result (gap ~ 0) so the
+    # gap cannot arbitrate; the CE-derived result does.
+    from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+    declared = {"attivo": D("1000000"), "passivo": D("1000000"),
+                "pareggio": D("1000000"), "utile": D("50000"), "perdita": D("50000")}
+    bs = {"totale_attivo": D("1000000"), "totale_passivo": D("1000000"),
+          "sp13_utile_perdita": D("50000"), "sp16_debiti_breve": D("200000"),
+          "sp09_disponibilita_liquide": D("100000")}
+    out = _reconcile_trial_to_declared(bs, declared, "t", ce_result=D("-50000"))
+    assert out["sp13_utile_perdita"] == D("-50000")
+
+
 # ---------------------------------------------------------------- end-to-end (production path)
 
 def _gross_winner_bs_613():

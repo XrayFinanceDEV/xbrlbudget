@@ -36,3 +36,15 @@ Test: `tests/test_quadratura_gates.py` (7 test: `_bs_imbalance`, regola adjustme
 - **`totale_attivo/passivo` dichiarati non persistiti**: i totali a DB sono proprietà calcolate → il DB è auto-coerente by-construction; la fedeltà al documento è responsabilità delle validazioni d'import (ora presenti ovunque).
 - **Pannello quadratura solo nel wizard infrannuale**: `/analysis` e `/report` non mostrano lo stato di quadratura dello storico. Miglioria UI possibile (badge sbilancio in `/analysis`), non un buco dati: con i fix di questa sessione nessun dato sbilanciato entra più senza warning nel result dell'import.
 - **Comparison senza check**: vista pura, nessuna persistenza.
+
+---
+
+## Addendum — fix classe budget_337 (commit 05924ab)
+
+Dalla domanda "perché le immateriali escono 680 e non 3.239?" sono emersi e sono stati chiusi 3 difetti:
+
+1. **Ammortamenti CE nettati come fondi (il "680")**: il CoGe-LLM sottraeva dalle immobilizzazioni anche le QUOTE di ammortamento del Conto Economico (826003 AMMORTAMENTO SOFTWARE 340,00 + 826007 AMM.TO ALTRI ONERI PLURIENNALI 2.219,10): 3.239,12 − 2.559,10 = 680,02. Fix nel prompt (`TRIAL_BALANCE_SP_SYSTEM_PROMPT`): nettano SOLO i conti FONDO patrimoniali; il discriminatore è la SEZIONE (SP vs costi CE), robusto ai prefissi corrotti. Verificato live su 337: sp02 → 3.239,12.
+2. **Ancora pareggio dal CE**: `_declared_control_totals` prendeva il "Totale a Pareggio" più GRANDE — che nelle aziende a basso margine è quello del CE (337: 372.733,17 > SP 315.121,19). Ora il pareggio si cerca solo PRIMA dell'header "CONTO ECONOMICO" (fallback full-text). Vale per tutti i file route-C, non solo per i corrotti.
+3. **Text-layer corrotto ora dichiarato all'utente**: nuovo detector `_text_layer_is_garbled` (numeri spezzati attorno alla virgola; calibrato sul corpus: 337 = 60,7%, tutti gli altri < 5%) → warning "TESTO PDF CORROTTO … verificare TUTTI i valori in Rettifiche" su ogni route. Lo switch a vision è stato PROVATO e scartato (su questi layout densi la vision perde blocchi interi — non migliore del testo).
+
+**Stato finale 337**: resta non auto-importabile in modo affidabile (input illeggibile per qualunque estrattore), ma ora (a) l'errore sistematico 680 è eliminato per la classe di file leggibili, (b) l'ancora dichiarata è giusta, (c) l'utente è avvisato esplicitamente che il file va verificato riga per riga.

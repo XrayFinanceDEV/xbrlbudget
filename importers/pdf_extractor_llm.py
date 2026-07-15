@@ -2284,7 +2284,11 @@ def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
         _g = declared['attivo'] - declared['passivo']
         if abs(_g) > tol:
             gap = _g
-    anchor = gap if gap is not None else ce_result
+    # _net_profit_from_ce returns Decimal('0') (never None) on an empty/zero CE, so
+    # treat a 0 ce_result as "no anchor": otherwise a 0 anchor with candidates that
+    # straddle zero (utile +U / perdita -P) would pick the SMALLER-magnitude one and
+    # move mass. Falling through to `candidates[0]` preserves the legacy order.
+    anchor = gap if gap is not None else (ce_result or None)
     decl_result: Optional[Decimal] = None
     if len(candidates) > 1 and anchor is not None:
         decl_result = min(candidates, key=lambda c: abs(c[0] - anchor))[0]

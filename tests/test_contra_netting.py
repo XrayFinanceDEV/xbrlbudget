@@ -222,18 +222,32 @@ def test_fondo_bucket_immateriali_captions():
     assert _fondo_is_immat("F.DO AMM.TO SITO WEB")
 
 
-def test_classify_anticipo_is_credito_not_machine():
-    # budget_210/211: "ANTICIPO X CANONI MACCHINARI" is an advance to a supplier (a
-    # credit), not a machine — the MACCHINAR category rule must not claim it.
+def test_classify_anticipo_su_canone_is_credito_not_machine():
+    # budget_210/211: "ANTICIPO X CANONI MACCHINARI" is an advance on a lease canone
+    # (a credit), not a machine — the MACCHINAR category rule must not claim it.
     from importers.situazione_contabile_parser import _classify_sp_attivo
     assert _classify_sp_attivo("ANTICIPO X CANONI MACCHINARI") == "sp06"
+    # generic supplier advance -> sp06 via the default (no explicit rule needed)
     assert _classify_sp_attivo("ANTICIPI A FORNITORI") == "sp06"
+    # a genuine acconto to PURCHASE a cespite stays an immobilizzazione (B.II.5) —
+    # the narrow CANON rule must NOT demote it to a credit
+    assert _classify_sp_attivo("ANTICIPI SU MACCHINARI") == "gross_sp03"
     # legitimate immobilizzazioni in corso e acconti stays materiali (B.II.5)
     assert _classify_sp_attivo("IMMOBILIZZAZIONI MATERIALI IN CORSO E ACCONTI") == "gross_sp03"
     assert _classify_sp_attivo("IMMOBILIZZAZIONI IN CORSO E ACCONTI") == "gross_sp03"
     # plain tangible assets still materiali
     assert _classify_sp_attivo("MACCHINARI") == "gross_sp03"
     assert _classify_sp_attivo("IMPIANTI E MACCHINARI") == "gross_sp03"
+
+
+def test_anticip_rule_does_not_hijack_customer_advance_side_guess():
+    # A blanket ['ANTICIP'] rule leaked into _semantic_section_from_desc and guessed
+    # customer advances ("CLIENTI C/ANTICIPI" = a passivo liability) onto the asset
+    # side. The narrow CANON rule must not match these, leaving the side ambiguous
+    # (so the passivo classifier can claim them by column/coordinate).
+    from importers.situazione_contabile_parser import _semantic_section_from_desc
+    assert _semantic_section_from_desc("CLIENTI C/ANTICIPI", True) != "attivo"
+    assert _semantic_section_from_desc("ANTICIPI DA CLIENTI", True) != "attivo"
 
 
 def test_fondo_bucket_materiali_captions():
@@ -503,6 +517,20 @@ def test_reconcile_single_utile_candidate_unchanged():
           "sp13_utile_perdita": D("50000"), "sp16_debiti_breve": D("200000")}
     out = _reconcile_trial_to_declared(bs, declared, "t")
     assert out["sp13_utile_perdita"] == D("50000")
+
+
+def test_reconcile_empty_ce_falls_back_to_legacy_utile():
+    # regression guard: _net_profit_from_ce returns Decimal('0') (never None) on an
+    # empty CE. With gap~0 (passivo includes the result) and both utile+perdita
+    # declared, a 0 anchor must NOT pick the smaller-magnitude candidate — it must
+    # fall back to the legacy order (utile first), not move mass.
+    from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+    declared = {"attivo": D("1000000"), "passivo": D("1000000"), "pareggio": D("1000000"),
+                "utile": D("80000"), "perdita": D("5000")}
+    bs = {"totale_attivo": D("1000000"), "totale_passivo": D("1000000"),
+          "sp13_utile_perdita": D("80000"), "sp16_debiti_breve": D("200000")}
+    out = _reconcile_trial_to_declared(bs, declared, "t", ce_result=D("0"))
+    assert out["sp13_utile_perdita"] == D("80000")
 
 
 def test_reconcile_ce_result_breaks_tie_when_no_gap():

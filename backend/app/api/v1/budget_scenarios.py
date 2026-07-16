@@ -73,7 +73,13 @@ def validate_base_year_data(company_id: int, base_year: int, db: Session):
         )
 
 
-def validate_scenario_input_data(company_id: int, base_year: int, scenario_type: str, db: Session):
+def validate_scenario_input_data(
+    company_id: int,
+    base_year: int,
+    scenario_type: str,
+    db: Session,
+    period_months: Optional[int] = None,
+):
     """Validate the financial data a scenario needs to exist before use.
 
     Standard scenarios require the base year to have complete data.
@@ -81,17 +87,36 @@ def validate_scenario_input_data(company_id: int, base_year: int, scenario_type:
     'infrannuale' scenarios are different: the base_year is the *reference*
     year, while the data actually imported is the *partial* year (base_year + 1).
     The reference year is OPTIONAL — when it is missing the engine falls back to
-    pure annualization — so here we only require the partial year to exist.
+    pure annualization — so here we only require the *exact* partial period to
+    exist.  A full year or a different partial period is never a substitute.
     """
     if scenario_type == "infrannuale":
-        from database.queries import get_fy_partial, get_fy_prefer_full
+        from database.queries import get_fy_full, get_fy_partial
+        if period_months is None or not 1 <= period_months <= 12:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An infrannuale scenario requires period_months between 1 and 12",
+            )
         partial_year = base_year + 1
-        financial_year = get_fy_partial(db, company_id, partial_year) or \
-            get_fy_prefer_full(db, company_id, partial_year)
+        if period_months == 12:
+            # A 12-month infrannuale is a full year: it is stored as a full-year
+            # record (period_months NULL/12), so validate against that.
+            financial_year = get_fy_full(db, company_id, partial_year)
+            missing_detail = (
+                f"Full year {partial_year} not found for company {company_id}"
+            )
+        else:
+            financial_year = get_fy_partial(
+                db, company_id, partial_year, period_months
+            )
+            missing_detail = (
+                f"Partial year {partial_year} ({period_months} months) not found "
+                f"for company {company_id}"
+            )
         if not financial_year:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Partial year {partial_year} not found for company {company_id}"
+                detail=missing_detail,
             )
         if not financial_year.balance_sheet or not financial_year.income_statement:
             raise HTTPException(
@@ -225,7 +250,13 @@ def create_budget_scenario(
     validate_company_exists(company_id, user_id, db)
 
     # Validate the data this scenario needs (base year, or partial year for infrannuale)
-    validate_scenario_input_data(company_id, scenario_create.base_year, scenario_create.scenario_type, db)
+    validate_scenario_input_data(
+        company_id,
+        scenario_create.base_year,
+        scenario_create.scenario_type,
+        db,
+        scenario_create.period_months,
+    )
 
     # Ensure company_id matches
     if scenario_create.company_id != company_id:
@@ -262,9 +293,30 @@ def update_budget_scenario(
     # Validate scenario belongs to company
     db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
-    # If base_year is being updated, validate new base year data
-    if scenario_update.base_year is not None and scenario_update.base_year != db_scenario.base_year:
-        validate_scenario_input_data(company_id, scenario_update.base_year, db_scenario.scenario_type, db)
+    # Validate the resolved scenario, not only a changed base year: changing the
+    # period or switching to infrannuale changes which FinancialYear is required.
+    supplied = scenario_update.model_fields_set
+    resolved_base_year = (
+        scenario_update.base_year if "base_year" in supplied else db_scenario.base_year
+    )
+    resolved_type = (
+        scenario_update.scenario_type
+        if "scenario_type" in supplied
+        else db_scenario.scenario_type
+    )
+    resolved_period = (
+        scenario_update.period_months
+        if "period_months" in supplied
+        else db_scenario.period_months
+    )
+    if supplied.intersection({"base_year", "scenario_type", "period_months"}):
+        validate_scenario_input_data(
+            company_id,
+            resolved_base_year,
+            resolved_type,
+            db,
+            resolved_period,
+        )
 
     # Update only provided fields
     update_data = scenario_update.model_dump(exclude_unset=True)
@@ -829,7 +881,13 @@ def generate_forecasts(
     scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Validate the data this scenario needs (base year, or partial year for infrannuale)
-    validate_scenario_input_data(company_id, scenario.base_year, scenario.scenario_type, db)
+    validate_scenario_input_data(
+        company_id,
+        scenario.base_year,
+        scenario.scenario_type,
+        db,
+        scenario.period_months,
+    )
 
     # Validate at least one assumption exists
     assumptions = db.query(models.BudgetAssumptions).filter(
@@ -897,6 +955,7 @@ def generate_forecasts(
         base_year=scenario.base_year,
         forecast_years=[fy.year for fy in forecast_years],
         summary=summary,
+        diagnostics=result.get("diagnostics", []),
         generated_at=datetime.utcnow()
     )
 

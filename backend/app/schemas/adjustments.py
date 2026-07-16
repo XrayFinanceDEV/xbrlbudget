@@ -1,7 +1,7 @@
 """
 Pydantic schemas for the Rettifiche (Adjustments) feature.
 """
-from typing import Optional, Dict, List
+from typing import Any, Optional, Dict, List
 from pydantic import BaseModel
 
 
@@ -28,6 +28,9 @@ class AdjustableFinancialYear(BaseModel):
     original_balance_sheet: Optional[Dict[str, float]] = None
     original_income_statement: Optional[Dict[str, float]] = None
     rettifiche_log: List[RettificaEntry] = []
+    validation_status: str = "legacy"
+    validation_report: Optional[Dict[str, Any]] = None
+    forecastable: bool = False
 
     model_config = {"from_attributes": True}
 

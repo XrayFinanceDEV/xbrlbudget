@@ -57,20 +57,40 @@ def create_financial_year(
     """Create a new financial year for a company"""
     validate_company_owned_by_user(db, company_id, user_id)
 
-    # Check if year already exists for this company
-    existing = db.query(models.FinancialYear).filter(
+    # A calendar year may contain several exact partial periods and one full
+    # year.  Treat 12 and NULL as the same full-year identity; never let a six-
+    # month record block a nine-month or annual import.
+    normalized_period = None if year_data.period_months in (None, 12) else year_data.period_months
+    existing_query = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
-        models.FinancialYear.year == year_data.year
-    ).first()
+        models.FinancialYear.year == year_data.year,
+    )
+    if normalized_period is None:
+        existing_query = existing_query.filter(
+            (models.FinancialYear.period_months == None)
+            | (models.FinancialYear.period_months == 12)
+        )
+    else:
+        existing_query = existing_query.filter(
+            models.FinancialYear.period_months == normalized_period
+        )
+    existing = existing_query.first()
 
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Year {year_data.year} already exists for company {company_id}"
+            detail=(f"Period {year_data.year}/{normalized_period or 12}M already "
+                    f"exists for company {company_id}")
         )
 
     # Create financial year
-    db_year = models.FinancialYear(company_id=company_id, year=year_data.year)
+    db_year = models.FinancialYear(
+        company_id=company_id,
+        year=year_data.year,
+        period_months=normalized_period,
+        validation_status="draft",
+        forecastable=False,
+    )
     db.add(db_year)
     db.commit()
     db.refresh(db_year)
@@ -322,10 +342,45 @@ def get_adjustable_financial_year(
         original_balance_sheet=original_bs,
         original_income_statement=original_is,
         rettifiche_log=rettifiche_log,
+        validation_status=fy.validation_status or "legacy",
+        validation_report=(json.loads(fy.validation_report) if fy.validation_report else None),
+        forecastable=bool(fy.forecastable),
     )
 
 
 RETTIFICHE_LOG_MAX = 20
+
+# Tolerance for the server-side balance check on PUT /adjustments: the legit
+# frontend keeps edits balanced by double-entry and plugs ≤ €5 import-rounding
+# gaps into sp09 (reconcileSubfields), so €5 of drift per save is normal noise.
+ADJUSTMENTS_BALANCE_TOL = Decimal("5")
+
+
+def _bs_imbalance(bs_fields: Dict[str, Any]) -> Decimal:
+    """|attivo − passivo| of a balance-sheet field dict (full DB field names).
+
+    Uses the shared IV-CEE aggregate field lists so this stays consistent with
+    check_quadratura. Missing/None fields count as 0.
+    """
+    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+    att = sum((Decimal(str(bs_fields.get(f) or 0)) for f in _ATTIVO_FIELDS), Decimal("0"))
+    pas = sum((Decimal(str(bs_fields.get(f) or 0)) for f in _PASSIVO_FIELDS), Decimal("0"))
+    return abs(att - pas)
+
+
+def _validation_magnitudes(bs_fields: Dict[str, Any], ce_fields: Dict[str, Any]):
+    """Comparable SP, CE/SP and hierarchy error magnitudes for adjustments."""
+    from importers.iv_cee_hierarchy import check_quadratura
+
+    q = check_quadratura(bs_fields, ce_fields, tol=Decimal("0.01"))
+    ce_gap = (
+        abs((q.utile_ce or Decimal("0")) - q.sp13)
+        if q.utile_ce is not None else Decimal("0")
+    )
+    hierarchy_gap = sum(
+        (abs(value) for value in q.hierarchy_differences.values()), Decimal("0")
+    )
+    return q, abs(q.sbilancio), ce_gap, hierarchy_gap
 
 
 @router.put(
@@ -357,17 +412,73 @@ def save_adjustments(
         fy.original_bs_snapshot = json.dumps(_bs_to_dict(fy.balance_sheet))
         fy.original_is_snapshot = json.dumps(_is_to_dict(fy.income_statement))
 
-    # Update BS fields
+    # Server-side balance validation: the frontend keeps rettifiche balanced by
+    # double-entry, but a direct API client could persist an arbitrarily unbalanced
+    # sheet with no check at all. Merge the payload over the CURRENT record (robust
+    # to partial payloads) and reject a save that WORSENS the imbalance beyond the
+    # tolerance — while still allowing saves on a record that was already unbalanced
+    # at import (the user must be able to work on it, and double-entry edits keep
+    # the gap constant).
     bs_columns = {col.name for col in models.BalanceSheet.__table__.columns} - _BS_SKIP
+    current_bs = _bs_to_dict(fy.balance_sheet)
+    merged_bs = dict(current_bs)
+    merged_bs.update({f: v for f, v in payload.balance_sheet.items() if f in bs_columns})
+    is_columns = {col.name for col in models.IncomeStatement.__table__.columns} - _IS_SKIP
+    current_is = _is_to_dict(fy.income_statement)
+    merged_is = dict(current_is)
+    merged_is.update({f: v for f, v in payload.income_statement.items() if f in is_columns})
+
+    current_q, cur_imb, cur_ce_gap, cur_hierarchy_gap = _validation_magnitudes(
+        current_bs, current_is
+    )
+    new_q, new_imb, new_ce_gap, new_hierarchy_gap = _validation_magnitudes(
+        merged_bs, merged_is
+    )
+    worsened = []
+    if new_imb > cur_imb + ADJUSTMENTS_BALANCE_TOL:
+        worsened.append(f"Attivo−Passivo {cur_imb:,.2f}→{new_imb:,.2f}")
+    if new_ce_gap > cur_ce_gap + ADJUSTMENTS_BALANCE_TOL:
+        worsened.append(f"CE−SP13 {cur_ce_gap:,.2f}→{new_ce_gap:,.2f}")
+    if new_hierarchy_gap > cur_hierarchy_gap + ADJUSTMENTS_BALANCE_TOL:
+        worsened.append(
+            f"aggregati−dettagli {cur_hierarchy_gap:,.2f}→{new_hierarchy_gap:,.2f}"
+        )
+    if worsened:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Rettifiche contabilmente incoerenti: " + "; ".join(worsened) +
+                ". La modifica non può peggiorare quadratura, risultato CE↔SP o "
+                "coerenza aggregati/dettagli."
+            ),
+        )
     for field, value in payload.balance_sheet.items():
         if field in bs_columns:
             setattr(fy.balance_sheet, field, Decimal(str(value)))
 
     # Update IS fields
-    is_columns = {col.name for col in models.IncomeStatement.__table__.columns} - _IS_SKIP
     for field, value in payload.income_statement.items():
         if field in is_columns:
             setattr(fy.income_statement, field, Decimal(str(value)))
+
+    validation_payload = {
+        "arithmetic_balanced": abs(new_q.sbilancio) <= Decimal("0.01"),
+        "income_result_consistent": new_q.utile_match,
+        "hierarchy_consistent": new_q.hierarchy_consistent,
+        "semantic_valid": new_q.semantic_valid,
+        "masked": new_q.masked,
+        "sbilancio": str(new_q.sbilancio),
+        "utile_ce": None if new_q.utile_ce is None else str(new_q.utile_ce),
+        "sp13": str(new_q.sp13),
+        "hierarchy_differences": {
+            key: str(value) for key, value in new_q.hierarchy_differences.items()
+        },
+        "warnings": list(new_q.warnings),
+    }
+    fy.validation_status = "verified" if new_q.semantic_valid else "review_required"
+    fy.validation_report = json.dumps(validation_payload, ensure_ascii=False)
+    fy.parser_version = "manual-adjustments-semantic-v2"
+    fy.forecastable = new_q.semantic_valid
 
     # Persist rettifiche log if provided (max RETTIFICHE_LOG_MAX entries)
     if payload.rettifiche_log is not None:
@@ -397,4 +508,7 @@ def save_adjustments(
         original_balance_sheet=original_bs,
         original_income_statement=original_is,
         rettifiche_log=rettifiche_log,
+        validation_status=fy.validation_status or "legacy",
+        validation_report=(json.loads(fy.validation_report) if fy.validation_report else None),
+        forecastable=bool(fy.forecastable),
     )

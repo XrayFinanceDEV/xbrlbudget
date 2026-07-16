@@ -1,0 +1,1656 @@
+{
+  "schema_version": 1,
+  "hash_algorithm": "sha256",
+  "scope": "Test/**/*.(pdf|xbrl|xml|csv), excluding Test/_analysis",
+  "summary": {
+    "physical_files": 214,
+    "unique_contents": 137,
+    "formats": {
+      "csv": 1,
+      "pdf": 121,
+      "xbrl": 15
+    },
+    "routes": {
+      "csv": 1,
+      "ivcee": 55,
+      "trial_balance": 19,
+      "unknown": 45,
+      "unsupported": 2,
+      "xbrl": 15
+    },
+    "verified": 1,
+    "truth_orphans": []
+  },
+  "files": [
+    {
+      "sha256": "02ea261c98f73eb784f9cfb75e39bc5a53d0b32bf07571e40d9cee22edfe4a62",
+      "paths": [
+        "june_sample/success/budget_371_BILAQ-001 (3).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22753,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "0388cec9e651a7c86c82dc67a377a072bc0a5d3b8c87802e638c1cf44bbdcad3",
+      "paths": [
+        "errori/budget_133_Bilancio_LUGS_2025_IV_Direttiva.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 2275,
+      "route_expected": "ivcee",
+      "subtype": "sintetico IV CEE ultra-aggregato (solo macrovoci)",
+      "status": "open"
+    },
+    {
+      "sha256": "03e7d36eb03567a2cd51168238e925becc5f20728a56aec30c375e238334a765",
+      "paths": [
+        "successSecondo/budget_164_bilcervi.pdf",
+        "successTerzo/success/budget_164_bilcervi.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 183485,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL abbreviato/ordinario",
+      "status": "open"
+    },
+    {
+      "sha256": "043fa3636e80d9d0c4b22ca1b6812bbf4ebc555377b676d91a47682d1d52eea2",
+      "paths": [
+        "successSecondo/budget_241_02 2024_01 Bilancio.pdf",
+        "successTerzo/success/budget_241_02 2024_01 Bilancio.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 141062,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "063b9d7af39ed7f61a5d573aa2ee2f0149b5a0be9f0080381dcdb73e21a65119",
+      "paths": [
+        "june_sample/success/budget_404_OUT_LASTBIL_IC11702420966 (1).xbrl",
+        "june_xbrl/budget_404_OUT_LASTBIL_IC11702420966 (1).xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 569173,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "08ea4a7d2fa9ef5422d55f1d74dc82b540a5ce5462b5f4a180b72300ecf1b4ae",
+      "paths": [
+        "june_sample/success/budget_368_Bilancio 2022.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 68215,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "09473813ec56f0aaffd40b616ebe9c9a9aa23843121cf3163ff905b4d7000e05",
+      "paths": [
+        "prova_tets/budget_636_Facchinetti_Apr_26.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 296983,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "0e7ffd119e185493c9849c4cc95639f43e85075b897ffd2a374cb513f1a8da88",
+      "paths": [
+        "june_sample/success/budget_414_1742 - Bilancio XBRL 2025.0.XBRL",
+        "june_xbrl/budget_414_1742 - Bilancio XBRL 2025.0.XBRL"
+      ],
+      "format": "xbrl",
+      "size_bytes": 850107,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "0f90de8adb4e886ea453ff0d2de33eba9e6b99ab91bb102beaa1475e55fb3366",
+      "paths": [
+        "successSecondo/budget_227_Bilancio cee 2025+NI+verbale.pdf",
+        "successTerzo/success/budget_227_Bilancio cee 2025+NI+verbale.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 440495,
+      "route_expected": "ivcee",
+      "subtype": "micro art.2435-ter da NI XBRL",
+      "status": "open"
+    },
+    {
+      "sha256": "122c76a22e5b78dcaac404dbc747c8794e4a6e5fff1ab46c3c3ad0b3bf827881",
+      "paths": [
+        "success/budget_207_GCGROUP XBRL 30_09.PDF",
+        "successTerzo/success/budget_207_GCGROUP XBRL 30_09.PDF"
+      ],
+      "format": "pdf",
+      "size_bytes": 215155,
+      "route_expected": "ivcee",
+      "subtype": "bilancio XBRL esteso con sottoconti (infrannuale 9M)",
+      "status": "open"
+    },
+    {
+      "sha256": "1378d87943b29bfc2127d50f5775d0bec0ff617c73b4e8721642869fbb24822b",
+      "paths": [
+        "june_sample/errori/budget_355_Bilancio 31.12.24.pdf",
+        "june_sample/success/budget_356_Bilancio 31.12.24.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 322875,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "141048a6f60d803b06ab89eac17eff351f76878e8e542e03775a71f3d4a40070",
+      "paths": [
+        "june_sample/errori/budget_348_Bilancio 2025 ver_definitiva 6-3-2026.pdf",
+        "sez-contrapposte/budget_348_Bilancio 2025 ver_definitiva 6-3-2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 42344,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "1a81de857cfcfe7c92ee3b4c68ceee8081a411441936dbfaf1091ca917e2aed3",
+      "paths": [
+        "june_sample/success/budget_364_02718750025-20251231.xbrl",
+        "june_xbrl/budget_364_02718750025-20251231.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 130055,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "1ae630a7544effb166e6c244a9fb12a378769e61af942c6cdeee6f5b6054f4f9",
+      "paths": [
+        "june_sample/success/budget_402_BILAQ-001.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 31028,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "1bbc0bb40a0dbd631a47e95845de2ab58cda37db9bfdb5639593c76778ed22ef",
+      "paths": [
+        "june_sample/success/budget_349_nixbrlabbn04457150169.xbrl",
+        "june_xbrl/budget_349_nixbrlabbn04457150169.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 304197,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "1ff8788e59fff901e8e9df372375db46b3fa57f925ce46da0473171776f361eb",
+      "paths": [
+        "budget_297_bilancio cce provvisorio alma srl.pdf",
+        "successSecondo/budget_271_bilancio cce provvisorio alma srl.pdf",
+        "successTerzo/success/budget_271_bilancio cce provvisorio alma srl.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 446351,
+      "route_expected": "ivcee",
+      "subtype": "bilancio XBRL esteso con sottoconti (provvisorio)",
+      "status": "open"
+    },
+    {
+      "sha256": "227e21869e8762507b417f0ee22cdf79b25402faace1907203e2cce0546d4e4e",
+      "paths": [
+        "success/budget_330_KG Project Srl situazione contabile al 31-12-2025.pdf",
+        "successTerzo/success/budget_330_KG Project Srl situazione contabile al 31-12-2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 42281,
+      "route_expected": "trial_balance",
+      "subtype": "sit. contabile contrapposte 8-digit",
+      "status": "open"
+    },
+    {
+      "sha256": "2282a64519f96f60686766c2b29407f6ddb296931254570c213f1ab35fb594d7",
+      "paths": [
+        "successTerzo/success/budget_287_BILANCIO XBRL AL 31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 121636,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "24c1160a64c28a51456ffac709f5037480d850500a2192849b90a4ef3c5f6c21",
+      "paths": [
+        "sez-contrapposte/budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf",
+        "success/budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf",
+        "successTerzo/success/budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 34815,
+      "route_expected": "trial_balance",
+      "subtype": "sit. patrim./econ. a saldi (ditta indiv.) DEPI",
+      "status": "open"
+    },
+    {
+      "sha256": "253391da3725c7fb369fcb89de0239fbb94bebab6c6807d3b3651c6c6a9256e5",
+      "paths": [
+        "errori/budget_290_Bilancio di esercizio 2024.pdf",
+        "june_sample/success/budget_434_Bilancio di esercizio 2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 65959,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL",
+      "status": "open"
+    },
+    {
+      "sha256": "26bcd4e033f8d8c5a1bb725d00f719a9f75d3894169a0d26dfa28988da4e1142",
+      "paths": [
+        "successSecondo/budget_269_BIL+NOTA25.pdf",
+        "successTerzo/success/budget_269_BIL+NOTA25.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 134605,
+      "route_expected": "ivcee",
+      "subtype": "facsimile XBRL ordinario + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "27e5a2565a16dd608c6aba49acaad2b01765592702090cb57d7c2fec1b82ea51",
+      "paths": [
+        "errori/budget_289_Bilancio provvisorio 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 161483,
+      "route_expected": "ivcee",
+      "subtype": "abbreviato con dettaglio conti (flag A/P/R/C)",
+      "status": "open"
+    },
+    {
+      "sha256": "27eec14349d236d397d463e115ea5029d6d41df27bb5f3d485c76953179b689a",
+      "paths": [
+        "errori/budget_158_BILANCIO CONA.pdf",
+        "errori/budget_159_BILAcona.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 98002,
+      "route_expected": "trial_balance",
+      "subtype": "verifica contrapposte TeamSystem",
+      "status": "open"
+    },
+    {
+      "sha256": "28c26c873d9ee05f3cd10f260a5a50b146387e4c84e9c026b241eaadac664d58",
+      "paths": [
+        "june_sample/errori/budget_435_Bilancio di esercizio provvisorio al 31.12.2025.pdf",
+        "june_sample/success/budget_365_Bilancio di esercizio provvisorio al 31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 53130,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "2f2608996c6db9b43a5aecb3f0cf810f590dc9a77e130ff0b09ce8fdc2170580",
+      "paths": [
+        "successTerzo/success/budget_283_detail_riclass - 2026-05-21T101520.941.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 84847,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata (path CEE)",
+      "status": "open"
+    },
+    {
+      "sha256": "2f3963f0cffc03830045e1a256ad581f5961424a97f8765a8d7caca8fb3238bc",
+      "paths": [
+        "errori/budget_253_mbs 2025 parziale.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 291791,
+      "route_expected": "ivcee",
+      "subtype": "bilancio riclassificato abbreviato (voci di legge)",
+      "status": "open"
+    },
+    {
+      "sha256": "2f44398ded277cd7d5a5a3d99bf38ffec51030faa890ddf2b990a219ba0faf6d",
+      "paths": [
+        "sez-contrapposte/Bilancino 31-5-26.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 275481,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "3062293c327f7c26d2773c17cf3065f2cafd7a17f592788cfd59cb7ca7eb75ca",
+      "paths": [
+        "june_sample/success/budget_400_XBRL_BILA0017 (1).PDF",
+        "june_sample/success/budget_401_XBRL_BILA0017 (2).PDF",
+        "june_sample/success/budget_403_XBRL_BILA0017.PDF"
+      ],
+      "format": "pdf",
+      "size_bytes": 176714,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "313c86576e54792a6a69a5c4ed4d1b57b2a4e123b5d6d3b74bed2da0d83021a3",
+      "paths": [
+        "successSecondo/budget_201_New Smile Bil Xbrl 2025.pdf",
+        "successTerzo/success/budget_201_New Smile Bil Xbrl 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 453999,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL abbreviato",
+      "status": "open"
+    },
+    {
+      "sha256": "31696a9689f2206425df83193d1af2e9db9bf0b510c61b177f7cb2b78def50ae",
+      "paths": [
+        "prova_tets/budget_594_INQCEE-001.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 19888,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "31b3e6dca76db2dcf515b8d2a11eb6985586625c73fcb4e56bb42b0835d0d292",
+      "paths": [
+        "successSecondo/budget_215_BILANCIO GUSTOPRONTO 31-12-2024.pdf",
+        "successTerzo/success/budget_215_BILANCIO GUSTOPRONTO 31-12-2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 477155,
+      "route_expected": "trial_balance",
+      "subtype": "verifica contrapposte (Attivita/Passivita)",
+      "status": "open"
+    },
+    {
+      "sha256": "31d114654204ce7898db5e1fa7e9191a5232226990be3d61e61b008a4d4edc50",
+      "paths": [
+        "june_sample/success/budget_417_Nota integrativa al 31.12.2025 9.6.26.xbrl",
+        "june_xbrl/budget_417_Nota integrativa al 31.12.2025 9.6.26.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 159293,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "320b23f53db14509f6ced5f2620f5b18ab5c1df78ee1ff66e624b21201c957a2",
+      "paths": [
+        "june_sample/success/budget_413_Bilancio2025_UpLogSrl.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 62456,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "324c9e44812fef7059d60ffd4d798f2bd52dbdc22227575b8f0cb96f6afdd838",
+      "paths": [
+        "successSecondo/budget_176_2R IMMOBILIARE.pdf",
+        "successTerzo/success/budget_176_2R IMMOBILIARE.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 17533,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata (path CEE)",
+      "status": "open"
+    },
+    {
+      "sha256": "3545cbd3136e9fd9cda12f4592b82221ada7be4a88cf68979631008d00cbc66a",
+      "paths": [
+        "successTerzo/success/budget_313_INQCEED-001.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 26490,
+      "route_expected": "ivcee",
+      "subtype": "IV CEE con dettaglio sottoconti DEPI",
+      "status": "open"
+    },
+    {
+      "sha256": "3614f5c079f7e209155d949eea917a4d824e17cb058ebbe259cac8a474abc786",
+      "paths": [
+        "june_sample/success/budget_407_bila2025sgm.xbrl",
+        "june_xbrl/budget_407_bila2025sgm.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 345740,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "37918327e8ac134274de23567aa5523456dbe6170b2cf8a10df6a3b79a72af71",
+      "paths": [
+        "budget_394_SANTORO BILANCIO FORMULA FINANCE_2025.pdf",
+        "june_sample/success/budget_394_SANTORO BILANCIO FORMULA FINANCE_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 32417,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "3c68843477fad49cf392509e210d4c8d4eafcffef652fa85a59264bfdfca0141",
+      "paths": [
+        "successSecondo/budget_202_New Smile Bil Xbrl 2024.pdf",
+        "successTerzo/success/budget_202_New Smile Bil Xbrl 2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 537857,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL micro/abbreviato",
+      "status": "open"
+    },
+    {
+      "sha256": "42918f7226ec5e5233cafd51577302bdc6b824c544ebdd2ffc26a35344742395",
+      "paths": [
+        "errori/budget_305_Bilancio CEE al 31.12.2025 con dettaglio sottoconti.pdf",
+        "successTerzo/success/budget_302_Bilancio CEE al 31.12.2025 con dettaglio sottoconti.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 49189,
+      "route_expected": "ivcee",
+      "subtype": "CEE con dettaglio sottoconti 7-cifre",
+      "status": "open"
+    },
+    {
+      "sha256": "4c07d5922a1ad54a3078ee7ef77bf15e32033dad55baf911cedc72572151de4e",
+      "paths": [
+        "successTerzo/success/budget_298_notaintegrativaabbreviata (2025).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 148576,
+      "route_expected": "ivcee",
+      "subtype": "facsimile (SP+CE voci di legge) + NI abbreviata",
+      "status": "open"
+    },
+    {
+      "sha256": "4ccec62bdc51b46cccf8633f7bf124c57720dd7e166ae8c5f4c17b339d8ce784",
+      "paths": [
+        "success/budget_256_Bilancio XBRL-PDF GHEDA TM SRL es. 2025 al 31-12-2025 Civilistico.PDF",
+        "successTerzo/success/budget_256_Bilancio XBRL-PDF GHEDA TM SRL es. 2025 al 31-12-2025 Civilistico.PDF"
+      ],
+      "format": "pdf",
+      "size_bytes": 88853,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL abbreviato + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "4ded17cbc5f82c62b9c72f7512cc6e9898bab64ff96ccda90f6a690c838e8c7f",
+      "paths": [
+        "june_sample/success/budget_376_AITEC SRL - BILANCIO PROVV. AL 30 06 2025[5][3].pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 468499,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "53bdb82163e0d78f3dbc61778202f36cdb1a2309c52ceac9b61b84c9f55348f9",
+      "paths": [
+        "june_sample/success/budget_387_02289670164-20251231.xbrl",
+        "june_xbrl/budget_387_02289670164-20251231.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 235390,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "540c3fa3218a89319ed1d9fcbdbf6af1cbd1a2d5d2ca88a83585045b228e8abe",
+      "paths": [
+        "june_sample/success/budget_428_BIL25HYMALAIA.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 135606,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "555882e7e49c2084ea8f3b096145f9f39c0d15e013eceb99de69d39973f06b23",
+      "paths": [
+        "june_sample/success/budget_381_detail_riclass (54).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 19012,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "56c7aa9505296fc2e0d30bb2876d157b7b3721e7f02e3d722c9ebe3d3fe554d8",
+      "paths": [
+        "successTerzo/success/budget_314_2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 24208,
+      "route_expected": "ivcee",
+      "subtype": "CEE dettagliato biennale (anno corr. azzerato)",
+      "status": "open"
+    },
+    {
+      "sha256": "584c912ea3a05fb6ecaaf87c73cc98877deeb2bdb01822ef4e95405824f8337a",
+      "paths": [
+        "successSecondo/budget_138_Bilancio_LUGS_2025_FULL_DETTAGLIATO.pdf",
+        "successTerzo/success/budget_138_Bilancio_LUGS_2025_FULL_DETTAGLIATO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 4853,
+      "route_expected": "ivcee",
+      "subtype": "IV CEE per voci aggregate (riepilogo)",
+      "status": "open"
+    },
+    {
+      "sha256": "58aaac2dde6b778c4430d15ab60d4de4c10214e0dd7c51b1dd6f87a15db204e7",
+      "paths": [
+        "errori/budget_243_MBS 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 302009,
+      "route_expected": "trial_balance",
+      "subtype": "sit. contabile colonna unica Saldo",
+      "status": "open"
+    },
+    {
+      "sha256": "59ad93094cd5d1728ff435b2c6a87eff4e8765a2bd2641e0112abfddf36dee5c",
+      "paths": [
+        "june_sample/success/budget_391_03977430986_BILANCIO 2025_Nota integrativa abbreviata per deposito XBRL.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 411597,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "5d19c387dd239a570bf59e19735e76f605b9806f176fd3ef158dd2d9def88084",
+      "paths": [
+        "june_sample/success/budget_342_BILANCIO PROVVISORIO AL 30-04-2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 38817,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "638b6f36f01b45c42fdc5acafd049f631f88ed3b69a566823f3ab42e08ff5a66",
+      "paths": [
+        "successTerzo/success/budget_328_2025- ELLE ERRE BIL.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 515506,
+      "route_expected": "ivcee",
+      "subtype": "IV CEE ordinario civilistico (voci di legge)",
+      "status": "open"
+    },
+    {
+      "sha256": "6566def4c673b050c814335070c2ba1dcadf118be3f013e5b1672bcca3ca940b",
+      "paths": [
+        "june_sample/success/budget_433_BILGRUPPO2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 126311,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "656e12d47254ab9b1ee08b2b2cc508850249b2a3fcfc459f636efe0c1e4a1475",
+      "paths": [
+        "success/budget_288_teberesponse.pdf",
+        "successTerzo/success/budget_288_teberesponse.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 131091,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "668bcef6e8b9b5caffc25cb0e0f49a04d38244479a0e1a140738804656697846",
+      "paths": [
+        "04171640248-20251231.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 180305,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "677d4c2184eb2a4bb3d315ff24f1cf7d7b99dbb70e69b233825a7e79db0bbe53",
+      "paths": [
+        "prova_tets/budget_599_istanza-08733620960-2025-0-ese-20181104.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 153333,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "67e3cdb3ecc06679a56e72c2e1bbac6d7edb9a7013a9fc7c802e8b1bfc370082",
+      "paths": [
+        "june_sample/errori/budget_405_all. A - PROGETTO DI BILANCIO.pdf",
+        "sez-contrapposte/budget_405_all. A - PROGETTO DI BILANCIO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 47366,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "682e81ad0ff2f219b4108ba64a67b00f5d9b3df8c49493b2de235715e8885be7",
+      "paths": [
+        "errori/budget_249_SAMAC APPALTI SRL - BILANCIO AL 31.12.2025.pdf",
+        "successSecondo/budget_246_SAMAC APPALTI SRL - BILANCIO AL 31.12.2025.pdf",
+        "successTerzo/success/budget_246_SAMAC APPALTI SRL - BILANCIO AL 31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22256,
+      "route_expected": "trial_balance",
+      "subtype": "contrapposte fisiche (mastri+sottoconti)",
+      "status": "open"
+    },
+    {
+      "sha256": "6a883c329240647f3a4068c4b21c3ce6b00936590d06710221c45b6b79c3ec75",
+      "paths": [
+        "errori/budget_135_Bilancio_LUGS_2025_COMPLETO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 3466,
+      "route_expected": "ivcee",
+      "subtype": "sintetico riclassificato, macrovoci aggregate",
+      "status": "open"
+    },
+    {
+      "sha256": "6b624a5a500c27d79dd75de377a5e473c59379f49e6f1bc0adc49645aa191a55",
+      "paths": [
+        "errori/budget_152_BILAQ-001.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 27089,
+      "route_expected": "ivcee",
+      "subtype": "CEE riclassificato dettaglio sottoconti (codici CEE puntati)",
+      "status": "open"
+    },
+    {
+      "sha256": "6de45098c57206c04aa8c52da1c4235c4a8f063f07e928fc624a32d79675f229",
+      "paths": [
+        "june_sample/success/budget_392_BILANCIO_2026_GREEN HUB SRL.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 139701,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "6e108fe5be008f8e24d5324a5a58dcb4129fb750fc5785290fb9143ff2d65938",
+      "paths": [
+        "successSecondo/budget_209_nicee.pdf",
+        "successTerzo/success/budget_209_nicee.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 100749,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata + CoGe grezzi",
+      "status": "open"
+    },
+    {
+      "sha256": "70ea0d5277ec4a0ff4fcfa1e7822c0e371d5e6ebd304734985293ec16d177264",
+      "paths": [
+        "sez-contrapposte/budget_337_2023.pdf",
+        "successTerzo/success/budget_337_2023.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 156585,
+      "route_expected": "trial_balance",
+      "subtype": "contrapposte_garbled_text_layer",
+      "status": "verified",
+      "truth": {
+        "entity": null,
+        "year": 2023,
+        "period_months": 12,
+        "source_controls": {
+          "assets_gross": 315121.19,
+          "contra_assets": 62045.1,
+          "assets_net": 253076.09,
+          "liabilities_net_including_result": 253076.09,
+          "income_explicit": 4287.23,
+          "income_recomputed": 4287.23
+        },
+        "fixed_assets": {
+          "intangible_gross": 3239.12,
+          "intangible_funds": 0.0,
+          "intangible_net": 3239.12,
+          "tangible_gross": 67229.83,
+          "tangible_funds": 62045.1,
+          "tangible_net": 5184.73
+        },
+        "expected_fields": {
+          "sp02_immob_immateriali": 3239.12,
+          "sp03_immob_materiali": 5184.73,
+          "sp13_utile_perdita": 4287.23,
+          "totale_attivo": 253076.09
+        },
+        "allowed_negative_fields": [],
+        "max_estimated_amount": 0,
+        "evidence": [
+          {
+            "page": 1,
+            "row": "Totale Attività / Totale Passività / Utile d'esercizio / Totale a Pareggio",
+            "note": "315.121,19 / 310.833,96 / 4.287,23 / 315.121,19"
+          },
+          {
+            "page": 1,
+            "row": "Immobilizzazioni immateriali e materiali con fondi ammortamento",
+            "note": "nessun fondo immateriali; tutti i fondi 62.045,10 appartengono ai materiali"
+          },
+          {
+            "page": 3,
+            "row": "Totale costi / Totale ricavi / Utile d'esercizio",
+            "note": "368.445,94 / 372.733,17 / 4.287,23"
+          }
+        ]
+      }
+    },
+    {
+      "sha256": "71199ec0bc4553b4530079a7cf08437d4056350431c73f74f39eb5553977efcb",
+      "paths": [
+        "june_sample/success/budget_389_Deb Srl SB_bila 2025.xbrl",
+        "june_xbrl/budget_389_Deb Srl SB_bila 2025.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 194190,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "770936cfa6988e8c248bf5f5ebcfffbffe2c0c850a5a23fb8707f2796fd31be3",
+      "paths": [
+        "june_sample/success/budget_431_BIL25HYMA.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 320700,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "776fc5652ce497ff0bf12fec51a7a3bd716ea9ba565a1da8fdc552213c3c2710",
+      "paths": [
+        "success/budget_275_PHOENIX SRL - Bilancio al 31.12.2025.pdf",
+        "successTerzo/success/budget_275_PHOENIX SRL - Bilancio al 31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 34139,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL micro",
+      "status": "open"
+    },
+    {
+      "sha256": "7bf295d489a4091adbb6ec5ca1a50922f3b32a1ec8fafb305a573d962c32b832",
+      "paths": [
+        "prova_tets/budget_638_ellevi cee 31.05.26.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 458351,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "7cc43c2d040513afbcfbba796b26404cf12a12498e9e962b34531a26225ac2df",
+      "paths": [
+        "successTerzo/success/budget_282_MSIT-31 3 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 84226,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata (infrannuale 31/03)",
+      "status": "open"
+    },
+    {
+      "sha256": "81ac04526d0628ebf1c178d114947955995e1639c88e348d5c638c8044cae60e",
+      "paths": [
+        "success/budget_173_BILANCIO CEE AL 31.12.2025.pdf",
+        "successTerzo/success/budget_173_BILANCIO CEE AL 31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 254629,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL abbreviato",
+      "status": "open"
+    },
+    {
+      "sha256": "844370c0e92ce7fbe3ef65f201e62cba94278a708a06e3f2536a9add9e30e7cd",
+      "paths": [
+        "BILANCIO-TEST.pdf",
+        "errori/budget_309_BILANCIO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 35768,
+      "route_expected": "trial_balance",
+      "subtype": "sit. patrim./econ. contrapposte (mastri DEPI)",
+      "status": "open"
+    },
+    {
+      "sha256": "8961432df5728833625bf2c57ce49865126c7d41a0fafcb1223cbb0168a66e6b",
+      "paths": [
+        "prova_tets/budget_703_BILANCIO 2025 CORRETTO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 265399,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "8b47961011d3979f37e0d0c55191c1251c91a5158553d24c488041cdd4add453",
+      "paths": [
+        "budget_115_SANTORO BILANCIO FORMULA FINANCE_2025.pdf",
+        "june_sample/success/budget_393_SANTORO BILANCIO FORMULA FINANCE_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22480,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "8b66fd68374a0d4ff06d78548d9ba8487636d25e11a1c44ed7a50623225e4f6a",
+      "paths": [
+        "errori/budget_229_MBS 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 301564,
+      "route_expected": "trial_balance",
+      "subtype": "sit. contabile colonna unica Saldo",
+      "status": "open"
+    },
+    {
+      "sha256": "8deb3a4926ce6ab52a2385c8d38fe50ec61de597b5741d33ecb38804efd9a5e6",
+      "paths": [
+        "sangae6_bil ue con dettaglio conti da genya 2025.pdf",
+        "successSecondo/budget_208_sangae6_bil ue con dettaglio conti da genya 2025.pdf",
+        "successTerzo/success/budget_208_sangae6_bil ue con dettaglio conti da genya 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 300653,
+      "route_expected": "ivcee",
+      "subtype": "bilancio UE/CEE abbreviato con dettaglio conti",
+      "status": "open"
+    },
+    {
+      "sha256": "8f708c9eee3e1bf0cedb909fbe1b3db98bfe4b772f53f6fed4a07fb87ac136d1",
+      "paths": [
+        "june_sample/success/budget_361_01828640027-20251231.xbrl",
+        "june_xbrl/budget_361_01828640027-20251231.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 199993,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "91850e1e37519bbf8dafdea94d19217511ffa0c7275b50ede97fdc59f6fe5366",
+      "paths": [
+        "successTerzo/success/budget_324_nicee.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 99721,
+      "route_expected": "ivcee",
+      "subtype": "CEE con dettaglio sottoconti 7-cifre",
+      "status": "open"
+    },
+    {
+      "sha256": "92cbdb227eb1381da460b3cf9f80eaaeb808068c5e261d907699dcdb1dbe0cf8",
+      "paths": [
+        "successTerzo/success/budget_320_nicee.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 99193,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata + CoGe grezzi",
+      "status": "open"
+    },
+    {
+      "sha256": "933c75575e6cd53a968c45b052b9e9a362b2914aed8b09e57e06732970ade25a",
+      "paths": [
+        "successTerzo/success/budget_319_detail_riclass - 2026-05-27T125618.533.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 83504,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata (infrannuale 31/03)",
+      "status": "open"
+    },
+    {
+      "sha256": "959c7edaa0214b2da143fa7a4270d4d6fdc9c80b161a2f0cf0ab60c746333fc3",
+      "paths": [
+        "june_sample/errori/budget_352_Bilancio 31.12.25.pdf",
+        "june_sample/success/budget_353_Bilancio 31.12.25.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 185811,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "9c797a078bd4aa7ef67e9091d09787b9746a62b787f119c025200cce9e3b5be2",
+      "paths": [
+        "june_sample/success/budget_385_2025 STC ISTANZA04399920984.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 69284,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "9f1f60c84df6419cfc7f7e677749eecdf693d2094cd8f98c087b006abe171358",
+      "paths": [
+        "june_sample/success/budget_421_nixbrlabbn01465850160.xbrl",
+        "june_xbrl/budget_421_nixbrlabbn01465850160.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 368346,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "a2e6f98b432ed4e32f9aff3ebff8b4059f3db6a9b169d1bec823a3adba6c88ed",
+      "paths": [
+        "errori/budget_238_CARP 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 302028,
+      "route_expected": "trial_balance",
+      "subtype": "sit. contabile colonna unica Saldo",
+      "status": "open"
+    },
+    {
+      "sha256": "a300bf77eb952000ee55ace6c789f6d4eb79a7cfb10b23e57d7e7508d6c8c076",
+      "paths": [
+        "successSecondo/budget_257_bilancio 31.12.2025 forma abbreviata.pdf",
+        "successTerzo/success/budget_257_bilancio 31.12.2025 forma abbreviata.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 227861,
+      "route_expected": "ivcee",
+      "subtype": "IV CEE forma abbreviata art.2435-bis",
+      "status": "open"
+    },
+    {
+      "sha256": "a3b01eabb69938a51ceea243761e52062159d514ada412806d4d85b502c1587c",
+      "paths": [
+        "june_sample/success/budget_409_bila2025ok.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 142158,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "a59d5baf41accd4a7906d62022fae1ed486666ce0f84d8a5bbfb4ffec679a8b3",
+      "paths": [
+        "successSecondo/budget_272_BILANCIO OTTICO 2024.pdf",
+        "successTerzo/success/budget_272_BILANCIO OTTICO 2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 203209,
+      "route_expected": "ivcee",
+      "subtype": "bilancio ottico Cerved + prospetto IV CEE micro",
+      "status": "open"
+    },
+    {
+      "sha256": "a95d7406ce4f362cf67c7d8e7fb14c345b98dd7a2ed7abc13fb33a4fcfb3fca1",
+      "paths": [
+        "june_sample/errori/budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf",
+        "sez-contrapposte/budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 39736,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "aa8cf1d0a7c9efeedc1d953d74d7c5c8b7214b3c92a42ada06797db100a90917",
+      "paths": [
+        "errori/budget_188_Sezioni_Contrapposte(Bilanci)_7GP0QRV4I.frx 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 107712,
+      "route_expected": "trial_balance",
+      "subtype": "verifica contrapposte (FastReport .frx)",
+      "status": "open"
+    },
+    {
+      "sha256": "b09832c5dd1ff6f4ffd5c463eba89a6c80b21ddb1cc97dfc498b0583b053e8c5",
+      "paths": [
+        "successSecondo/budget_144_Elle erre - bilancio 2025.pdf",
+        "successTerzo/success/budget_144_Elle erre - bilancio 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 515465,
+      "route_expected": "ivcee",
+      "subtype": "civilistico ordinario (facsimile deposito)",
+      "status": "open"
+    },
+    {
+      "sha256": "b103337821fab97b06b863fe1dae4e29aca96da2a8bd3e0cda7376af627d6acd",
+      "paths": [
+        "successSecondo/budget_254_bilancio + NI.pdf",
+        "successTerzo/success/budget_254_bilancio + NI.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 336168,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL (IV CEE) + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "b28e698979b53adae78fd249b6b57fc73f53c5b92e5cec5fec19c83691cb116e",
+      "paths": [
+        "successSecondo/budget_171_T03 Bilancio al 31122025.pdf",
+        "successTerzo/success/budget_171_T03 Bilancio al 31122025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 282716,
+      "route_expected": "ivcee",
+      "subtype": "abbreviato con dettaglio conti per descrizione",
+      "status": "open"
+    },
+    {
+      "sha256": "b3eea1da7e396eafa03b532c039436fc51ee9721337bddd0736702c2880c21ee",
+      "paths": [
+        "successSecondo/budget_162_bilxbrl-0002952.pdf",
+        "successTerzo/success/budget_162_bilxbrl-0002952.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 214627,
+      "route_expected": "ivcee",
+      "subtype": "facsimile XBRL micro/abbreviato",
+      "status": "open"
+    },
+    {
+      "sha256": "b426edc108d964ba81e37619590827968c5cf23b74675bc0516d5bf79e966d83",
+      "paths": [
+        "june_sample/success/budget_351_ISTANZA01516570544-DC.XBRL",
+        "june_xbrl/budget_351_ISTANZA01516570544-DC.XBRL"
+      ],
+      "format": "xbrl",
+      "size_bytes": 503924,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "b48bfd9423a58f602d3aa7a3cbaaf02e8e8ce39011b82b4d5546d7a2e8fcccb4",
+      "paths": [
+        "june_sample/success/budget_425_f6123172-4bb3-498e-9e6f-40c1708622da.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 135768,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "b65bd6d256ddacbb5d85e0a937588e933b9f2dd706d40f7454c06e7a13e7a71e",
+      "paths": [
+        "successTerzo/success/budget_340_Bilancio CEE al 31.12.2025 con dettaglio sottoconti.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 43376,
+      "route_expected": "ivcee",
+      "subtype": "CEE con dettaglio sottoconti 7-cifre",
+      "status": "open"
+    },
+    {
+      "sha256": "b666b2cd739c9e20e9a541e3d0fae38cc7bee934caa144245819fad1ec80d9a2",
+      "paths": [
+        "june_sample/success/budget_375_AITEC SRL - BILANCIO ANALITICO 2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 69750,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "b7134200d57f259561c9d9c69d9dd10145310349486a078ce109a5534d0b4d14",
+      "paths": [
+        "successSecondo/budget_255_04.02.2026 BILANCIO + NI DEF.xbrl.pdf",
+        "successTerzo/success/budget_255_04.02.2026 BILANCIO + NI DEF.xbrl.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 268997,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario (voci di legge) + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "c30a1bbd1b0e81a359a17b2a8f5d1c54ab45079efd1e4d17409d0d9800246d5c",
+      "paths": [
+        "successSecondo/budget_137_Bilancio_LUGS_2025_DEFINITIVO.pdf",
+        "successTerzo/success/budget_137_Bilancio_LUGS_2025_DEFINITIVO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 2807,
+      "route_expected": "unsupported",
+      "subtype": "riassunto macro non IV CEE (troppo aggregato)",
+      "status": "open"
+    },
+    {
+      "sha256": "c4a56c6ec14e878517da4255a05962d6ec956959ca8f5eb3967f5d734e193705",
+      "paths": [
+        "successTerzo/success/budget_336_00a2fc11-15fa-4623-9200-fbcea15b618c.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 325277,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "c4d0b7362bf8d79c598bc04a5efdd70a069ec9e87e85b4f42c7c9e4fc4cfd4b8",
+      "paths": [
+        "june_sample/success/budget_372_detail_riclass (53).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 39846,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "c638b73df9e18694755a0f3ba5a1bf098677b74901573288e37b80116cfcac11",
+      "paths": [
+        "june_sample/success/budget_380_BILAQ-001 (5).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 19683,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "c8ceacc682ba9251189bff63738e3a0ed44675be830c83d32308f34d66428639",
+      "paths": [
+        "june_sample/success/budget_350_T24922-514S0021-2026.PDF"
+      ],
+      "format": "pdf",
+      "size_bytes": 71693,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "cb6b72239184a182118bcded4bc0f8a1d2e2805a0e6150a59038edf7c63dc1b3",
+      "paths": [
+        "june_sample/success/budget_373_AITEC SRL - BILANCINO AL 31 12 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 71840,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "cbd98721beae7ae53938d53170319026842ba903084905dda060d0f0eba51279",
+      "paths": [
+        "june_sample/success/budget_374_AITEC SRL - PROVVISORIO 30 06 25.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 498853,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "cc6c09cf4c4f4f9f10074384bb3681551c869c868d58017d29c8c35b8dab30bf",
+      "paths": [
+        "successTerzo/success/budget_329_BILANCIO XBRL 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 135456,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario + NI",
+      "status": "open"
+    },
+    {
+      "sha256": "cd0a6847b33f639914a3d262bad84c9a9e53e2df047f60647436acd880af2580",
+      "paths": [
+        "june_sample/errori/budget_343_Bilancio 2025 ver_definitiva 1-6-2026.pdf",
+        "sez-contrapposte/budget_343_Bilancio 2025 ver_definitiva 1-6-2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 42216,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "d07dbfaa4f87ab00f6b6cea2dd288b714278db3cf199581a0cc8c9410c628bc9",
+      "paths": [
+        "successSecondo/budget_161_BILANCIO CONA.pdf",
+        "successTerzo/success/budget_161_BILANCIO CONA.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 94905,
+      "route_expected": "ivcee",
+      "subtype": "CEE sintetico riclassificato con scostamenti",
+      "status": "open"
+    },
+    {
+      "sha256": "d260e15fcd59750c23220f80437330885fdcce6d0d83c0b542550edddb801368",
+      "paths": [
+        "successSecondo/budget_182_2R IMMOBILIARE1.pdf",
+        "successTerzo/success/budget_182_2R IMMOBILIARE1.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 17732,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. dettagliata (path CEE)",
+      "status": "open"
+    },
+    {
+      "sha256": "d40778d3e95d0e55763c5f5cc8ae3f47c82c0222bcd6c5cb8c6c6ddf0e10a3ff",
+      "paths": [
+        "successSecondo/budget_265_P2195690000400007.pdf",
+        "successTerzo/success/budget_265_P2195690000400007.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 220024,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito abbreviato art.2435-bis",
+      "status": "open"
+    },
+    {
+      "sha256": "d45175b28242224f3949db812ef6fdb5b790a927e81cf457c788111fc0acd7d0",
+      "paths": [
+        "successSecondo/budget_132_Oprandi Fabrizio - 30.04.2026.pdf",
+        "successTerzo/success/budget_132_Oprandi Fabrizio - 30.04.2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22227,
+      "route_expected": "trial_balance",
+      "subtype": "sit. patrim./econ. a saldi (ditta indiv.) DEPI",
+      "status": "open"
+    },
+    {
+      "sha256": "d4c352b55e60f5fbdccaad466348130d18edf4d4ab5dc1cc69f9a08414184882",
+      "paths": [
+        "prova_tets/budget_623_2025 Commercio al dettaglio di ferramenta, vernici, vetro piano e materiale elettrico e termoidraulico  .pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 92167,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "d59a05a36b2cbe811631d3ea718a90fbc0f7cd2a9bbf4766d3b9490857657e71",
+      "paths": [
+        "success/budget_315_BERTELLI_BilancioCEE_PROVV_2025.pdf",
+        "successTerzo/success/budget_315_BERTELLI_BilancioCEE_PROVV_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 82970,
+      "route_expected": "ivcee",
+      "subtype": "provvisorio IV CEE ordinario completo (mono-colonna)",
+      "status": "open"
+    },
+    {
+      "sha256": "d920d72a5a28761486f2b2ee35612a98e2b721c5ccd1ff9be55a111163dbfb7e",
+      "paths": [
+        "june_sample/success/budget_379_BILAQ-001 (4).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 26733,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "db82b7780b3bf44576ec3b04dcdff2fbff270d2ead2a77afb3b0862f022d5ee1",
+      "paths": [
+        "june_sample/success/budget_397_SALETTI MECCANICA SRL BILANCIO E NOTA 2025.pdf",
+        "june_sample/success/budget_398_SALETTI MECCANICA SRL BILANCIO E NOTA 2025 (1).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 308912,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "dc275b449ff591e5490a3219055dc2394bdba3b11aa6d1e9b4d91220fafebe2b",
+      "paths": [
+        "successSecondo/budget_196_teic provvisorio (2).pdf",
+        "successTerzo/success/budget_196_teic provvisorio (2).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 73265,
+      "route_expected": "trial_balance",
+      "subtype": "SOLO conto economico per competenza (no SP)",
+      "status": "open"
+    },
+    {
+      "sha256": "dd0b44f431d3fb9c2f6389d6d09476e627d24272a68c12500cc13b3c9b6520a1",
+      "paths": [
+        "successTerzo/success/budget_341_Bilancio cee per previsionale.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 17918,
+      "route_expected": "ivcee",
+      "subtype": "CEE sintetico riclassificato con scostamenti",
+      "status": "open"
+    },
+    {
+      "sha256": "dd3159f34ed2f3b5b512bd85bcf19e34ef041d34b07fcdfd0e8fc8b74dc83bab",
+      "paths": [
+        "errori/budget_338_Pandoro srl Bilancino 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 41692,
+      "route_expected": "trial_balance",
+      "subtype": "bilancino contrapposte fisiche affiancate",
+      "status": "open"
+    },
+    {
+      "sha256": "dd7c4f8a5dc816ea7ea7721e806fb2347813959c384c04a2ab043f7d146db716",
+      "paths": [
+        "june_sample/errori/budget_370_BILAQ-001.csv"
+      ],
+      "format": "csv",
+      "size_bytes": 25242,
+      "route_expected": "csv",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "ddd4f3b2459562b499dbd6f4b7691b78f947a50edfdab47ad4f25ee7a39419ec",
+      "paths": [
+        "errori/budget_247_BILANCIO 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 131090,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL ordinario completo",
+      "status": "open"
+    },
+    {
+      "sha256": "de99f0515fc2a4b4b4f9b5b407d62b486f253f678196814db390a149b6cf6919",
+      "paths": [
+        "june_sample/success/budget_419_bil2025cona.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 136695,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "e08a30c378251ef06da417f7880f915c2e3293f824468493aaa38197b00c54f3",
+      "paths": [
+        "errori/budget_169_spectra.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 23025,
+      "route_expected": "trial_balance",
+      "subtype": "sit. patrim./econ. contrapposte (mastri DEPI)",
+      "status": "open"
+    },
+    {
+      "sha256": "e6527479ea531fd88af0431f8ff01460aeb67cf5990310ceb7a4d3a6181836e7",
+      "paths": [
+        "june_sample/success/budget_367_Situazione contabile al 30.09.2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 114896,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "e7413666a60e04bc52666ef75f3caf321ecd53b327446c24467ac5586a72daf9",
+      "paths": [
+        "success/budget_147_BILAQ-31.12.2025.pdf",
+        "successTerzo/success/budget_147_BILAQ-31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 31758,
+      "route_expected": "ivcee",
+      "subtype": "sit. contabile riclass. IV CEE con dettaglio sottoconti",
+      "status": "open"
+    },
+    {
+      "sha256": "e8394678452ed3b223ba944f9a60c063b191b66de2a09bf0df6c4b7d78b77434",
+      "paths": [
+        "errori/budget_281_MSIT-31 3 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 20546,
+      "route_expected": "trial_balance",
+      "subtype": "sit. patrimoniale contrapposte Dare/Avere (DEPI)",
+      "status": "open"
+    },
+    {
+      "sha256": "ea99fafa38086733968779cdbc1fa557eb161399945076e2f28340b2664fdb58",
+      "paths": [
+        "errori/budget_213_Gustopronto srl bilancio di verifica dettaglio conti.pdf",
+        "sez-contrapposte/budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf",
+        "successSecondo/budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf",
+        "successTerzo/success/budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 47054,
+      "route_expected": "trial_balance",
+      "subtype": "verifica contrapposte con dettaglio sottoconti",
+      "status": "open"
+    },
+    {
+      "sha256": "ed4bb1eefde6ca3182f026df2e2bbc9006550adf96a4bb482962d95d06a8e472",
+      "paths": [
+        "successSecondo/budget_150_Bilancio_FINALE_CEE_SRL_2025.pdf",
+        "successTerzo/success/budget_150_Bilancio_FINALE_CEE_SRL_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 2776,
+      "route_expected": "ivcee",
+      "subtype": "abbreviato art.2435-bis",
+      "status": "open"
+    },
+    {
+      "sha256": "ee095f13e2fbba2983eba7e27091883f1b54a41bcb1c98aa2a584e2ce06e3554",
+      "paths": [
+        "prova_tets/budget_610_2023 Bar e altri esercizi simili senza cucina.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 264326,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "f0028696e29459ffd984f5081fc4021b31898fe33753bec6c92a7504f37b7bc8",
+      "paths": [
+        "successTerzo/success/budget_335_TEIC ECONOMICO 31.03.26.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 68874,
+      "route_expected": "trial_balance",
+      "subtype": "SOLO prospetto economico contrapposte (no SP)",
+      "status": "open"
+    },
+    {
+      "sha256": "f5fb29c0ff27991d8a54eea5bcf1234d94997218e82bbde245b0613b6befbe41",
+      "paths": [
+        "june_sample/success/budget_418_bil25cona.xbrl",
+        "june_xbrl/budget_418_bil25cona.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 334591,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "f7bbca744a80e43c76b07a8cd36078b5d75f0395381c53b1b19cf6ed50fe14dd",
+      "paths": [
+        "successTerzo/success/budget_280_NICEE.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 104231,
+      "route_expected": "ivcee",
+      "subtype": "CEE riclassificato dettaglio con CoGe 7-cifre",
+      "status": "open"
+    },
+    {
+      "sha256": "f88afecb930be27ed839cae593236be80fbd6f0e432fb5954ea4d227fbac60a7",
+      "paths": [
+        "prova_tets/budget_597_OMM Bilancio al 31122025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 123911,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "f8b780b15728891e2c003d79948e5133ca367a363be451cbd8e1ab17502b948b",
+      "paths": [
+        "sez-contrapposte/budget_210_Bilancio 2025--26-05-13.pdf",
+        "successSecondo/budget_210_Bilancio 2025--26-05-13.pdf",
+        "successTerzo/success/budget_210_Bilancio 2025--26-05-13.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 467537,
+      "route_expected": "trial_balance",
+      "subtype": "verifica contrapposte (Attivita/Passivita)",
+      "status": "open"
+    },
+    {
+      "sha256": "f8c51ee60d9fe096dcdfd9b1495ca21202157eb6e1b403ddb0c8947d2713b153",
+      "paths": [
+        "prova_tets/budget_646_AIC SRL al 31.05.2026 - non completa.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 324294,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "f97afacc9e16de0c735247b5ce097e5ba90227ff59eedd4043d52e78728fb026",
+      "paths": [
+        "june_sample/success/budget_399_OUT_LASTBIL_IC02910150594.xbrl",
+        "june_xbrl/budget_399_OUT_LASTBIL_IC02910150594.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 34423,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "f9a81bd1faeb52ef7c927035e4dca493c273f8c1fecb76d5f34345485af42f2a",
+      "paths": [
+        "success/budget_221_9af1ba15-4a73-4508-afad-58580b962d35.pdf",
+        "successTerzo/success/budget_221_9af1ba15-4a73-4508-afad-58580b962d35.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 92233,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito XBRL",
+      "status": "open"
+    },
+    {
+      "sha256": "fc60175d9bb3fce165b276ffb6dd909a1c9e0b0f37f151f4151c602ba0fb81ed",
+      "paths": [
+        "successTerzo/success/budget_331_bilancio kg con dettagliopdf.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 131846,
+      "route_expected": "ivcee",
+      "subtype": "bilancio XBRL esteso con sottoconti (holding)",
+      "status": "open"
+    },
+    {
+      "sha256": "fd85e3ca473d9244c60a77288e0182c0ace629ff6e6da39d3944138f73a4baf6",
+      "paths": [
+        "june_sample/success/budget_382_bilancio cee al 31 12 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 158147,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "fe9271bc58d80ae3274cf8dd4265679f87116619a8cda8f17a7d617d397bc40e",
+      "paths": [
+        "successSecondo/budget_143_BILCC58E.pdf",
+        "successTerzo/success/budget_143_BILCC58E.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 426657,
+      "route_expected": "ivcee",
+      "subtype": "facsimile deposito abbreviato art.2435-bis",
+      "status": "open"
+    },
+    {
+      "sha256": "ff0d6f8b71bbb784cdba712c99eaadd38cf7c551f5843f652244b4d979b4f0de",
+      "paths": [
+        "Anomalie-budget.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 655108,
+      "route_expected": "unsupported",
+      "subtype": "email di segnalazione bug (no prospetto)",
+      "status": "open"
+    }
+  ]
+}

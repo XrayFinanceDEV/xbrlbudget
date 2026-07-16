@@ -2,6 +2,7 @@
 Promote Service — copies an infrannuale projection (ForecastYear)
 into a proper FinancialYear so it can serve as base year for budget scenarios.
 """
+import json
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
@@ -42,6 +43,19 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     target_year = forecast_year.year
     company_id = scenario.company_id
 
+    # 2b. Full semantic gate: an arithmetic balance is insufficient when CE/SP or
+    # aggregate/detail identities conflict.  Promotion makes the projection a new
+    # accounting source, so it must satisfy the same validator as an import.
+    from importers.iv_cee_hierarchy import check_quadratura
+    bs_values = _statement_values(forecast_year.balance_sheet, "sp")
+    ce_values = _statement_values(forecast_year.income_statement, "ce")
+    validation = check_quadratura(bs_values, ce_values)
+    if not validation.semantic_valid:
+        raise ValueError(
+            "La proiezione non quadra o non è semanticamente valida: "
+            + "; ".join(validation.warnings)
+        )
+
     # 3. Replace existing full-year FinancialYear if present (re-promote)
     existing = db.query(FinancialYear).filter(
         FinancialYear.company_id == company_id,
@@ -57,6 +71,19 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         company_id=company_id,
         year=target_year,
         period_months=None,
+        validation_status="verified",
+        validation_report=json.dumps({
+            "source": "promoted_projection",
+            "quadra": validation.quadra,
+            "semantic_valid": validation.semantic_valid,
+            "totale_attivo": str(validation.totale_attivo),
+            "totale_passivo": str(validation.totale_passivo),
+            "utile_ce": str(validation.utile_ce),
+            "sp13": str(validation.sp13),
+            "warnings": validation.warnings,
+        }, ensure_ascii=False),
+        parser_version="promoted-projection-v2",
+        forecastable=True,
     )
     db.add(new_fy)
     db.flush()  # get new_fy.id
@@ -85,6 +112,24 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         "year": target_year,
         "company_id": company_id,
         "message": f"Projection {target_year} promoted to full-year financial data",
+    }
+
+
+def _forecast_bs_imbalance(fbs) -> Decimal:
+    """|attivo − passivo| of a ForecastBalanceSheet, from the shared IV-CEE
+    aggregate field lists (consistent with check_quadratura). None fields = 0."""
+    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+    att = sum((Decimal(str(getattr(fbs, f, None) or 0)) for f in _ATTIVO_FIELDS), Decimal("0"))
+    pas = sum((Decimal(str(getattr(fbs, f, None) or 0)) for f in _PASSIVO_FIELDS), Decimal("0"))
+    return abs(att - pas)
+
+
+def _statement_values(statement, prefix: str):
+    """Lossless numeric projection snapshot for the shared validator."""
+    return {
+        column.name: Decimal(str(getattr(statement, column.name, None) or 0))
+        for column in statement.__table__.columns
+        if column.name.startswith(prefix)
     }
 
 

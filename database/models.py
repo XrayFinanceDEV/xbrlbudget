@@ -6,6 +6,7 @@ from decimal import Decimal
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Boolean, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database.db import Base
+from calculations.ce_result import calculate_ce_result
 from config import Sector
 import enum
 
@@ -49,6 +50,14 @@ class FinancialYear(Base):
     original_bs_snapshot = Column(Text, nullable=True, default=None)  # JSON: original BS values before rettifiche
     original_is_snapshot = Column(Text, nullable=True, default=None)  # JSON: original IS values before rettifiche
     rettifiche_log = Column(Text, nullable=True, default=None)  # JSON: list of per-edit double-entry rettifiche entries
+    # Import validation is deliberately separate from the technical upload status.
+    # Legacy rows are not silently declared valid: they must be revalidated before
+    # feeding logic that requires a fully typed statement.
+    validation_status = Column(String(30), nullable=False, default="legacy")
+    validation_report = Column(Text, nullable=True, default=None)  # JSON ValidationReport
+    source_sha256 = Column(String(64), nullable=True, default=None, index=True)
+    parser_version = Column(String(50), nullable=True, default=None)
+    forecastable = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -58,7 +67,9 @@ class FinancialYear(Base):
     income_statement = relationship("IncomeStatement", back_populates="financial_year", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<FinancialYear(id={self.id}, company_id={self.company_id}, year={self.year}, period_months={self.period_months})>"
+        return (f"<FinancialYear(id={self.id}, company_id={self.company_id}, "
+                f"year={self.year}, period_months={self.period_months}, "
+                f"validation_status={self.validation_status})>")
 
 
 class BalanceSheet(Base):
@@ -460,28 +471,12 @@ class IncomeStatement(Base):
     @property
     def production_value(self) -> Decimal:
         """Production Value (Valore della Produzione - VP)"""
-        return (
-            self.ce01_ricavi_vendite +
-            self.ce02_variazioni_rimanenze +
-            self.ce03_lavori_interni +
-            self.ce03a_incrementi_immobilizzazioni +
-            self.ce04_altri_ricavi
-        )
+        return calculate_ce_result(self).production_value
 
     @property
     def production_cost(self) -> Decimal:
         """Production Cost (Costi della Produzione - COPRO)"""
-        return (
-            self.ce05_materie_prime +
-            self.ce06_servizi +
-            self.ce07_godimento_beni +
-            self.ce08_costi_personale +
-            self.ce09_ammortamenti +
-            self.ce10_var_rimanenze_mat_prime +
-            self.ce11_accantonamenti +
-            self.ce11b_altri_accantonamenti +
-            self.ce12_oneri_diversi
-        )
+        return calculate_ce_result(self).production_cost
 
     @property
     def ebitda(self) -> Decimal:
@@ -489,51 +484,32 @@ class IncomeStatement(Base):
         EBITDA (Margine Operativo Lordo - MOL)
         Earnings Before Interest, Taxes, Depreciation, and Amortization
         """
-        return self.production_value - (
-            self.ce05_materie_prime +
-            self.ce06_servizi +
-            self.ce07_godimento_beni +
-            self.ce08_costi_personale +
-            self.ce10_var_rimanenze_mat_prime +
-            self.ce11_accantonamenti +
-            self.ce11b_altri_accantonamenti +
-            self.ce12_oneri_diversi
-        )
+        return calculate_ce_result(self).ebitda
 
     @property
     def ebit(self) -> Decimal:
         """EBIT (Risultato Operativo - RO)"""
-        return self.production_value - self.production_cost
+        return calculate_ce_result(self).ebit
 
     @property
     def financial_result(self) -> Decimal:
         """Net Financial Result"""
-        return (
-            self.ce13_proventi_partecipazioni +
-            self.ce14_altri_proventi_finanziari -
-            self.ce15_oneri_finanziari +
-            self.ce16_utili_perdite_cambi
-        )
+        return calculate_ce_result(self).financial_result
 
     @property
     def extraordinary_result(self) -> Decimal:
         """Net Extraordinary Result"""
-        return self.ce18_proventi_straordinari - self.ce19_oneri_straordinari
+        return calculate_ce_result(self).extraordinary_result
 
     @property
     def profit_before_tax(self) -> Decimal:
         """Profit Before Tax (Risultato prima delle imposte)"""
-        return (
-            self.ebit +
-            self.financial_result +
-            self.ce17_rettifiche_attivita_fin +
-            self.extraordinary_result
-        )
+        return calculate_ce_result(self).profit_before_tax
 
     @property
     def net_profit(self) -> Decimal:
         """Net Profit/Loss (Utile/Perdita Netto - UTILE)"""
-        return self.profit_before_tax - self.ce20_imposte
+        return calculate_ce_result(self).net_profit
 
     @property
     def revenue(self) -> Decimal:
@@ -1066,70 +1042,35 @@ class ForecastIncomeStatement(Base):
     # Reuse same properties as IncomeStatement
     @property
     def production_value(self) -> Decimal:
-        return (
-            self.ce01_ricavi_vendite +
-            self.ce02_variazioni_rimanenze +
-            self.ce03_lavori_interni +
-            self.ce03a_incrementi_immobilizzazioni +
-            self.ce04_altri_ricavi
-        )
+        return calculate_ce_result(self).production_value
 
     @property
     def production_cost(self) -> Decimal:
-        return (
-            self.ce05_materie_prime +
-            self.ce06_servizi +
-            self.ce07_godimento_beni +
-            self.ce08_costi_personale +
-            self.ce09_ammortamenti +
-            self.ce10_var_rimanenze_mat_prime +
-            self.ce11_accantonamenti +
-            self.ce11b_altri_accantonamenti +
-            self.ce12_oneri_diversi
-        )
+        return calculate_ce_result(self).production_cost
 
     @property
     def ebitda(self) -> Decimal:
-        return self.production_value - (
-            self.ce05_materie_prime +
-            self.ce06_servizi +
-            self.ce07_godimento_beni +
-            self.ce08_costi_personale +
-            self.ce10_var_rimanenze_mat_prime +
-            self.ce11_accantonamenti +
-            self.ce11b_altri_accantonamenti +
-            self.ce12_oneri_diversi
-        )
+        return calculate_ce_result(self).ebitda
 
     @property
     def ebit(self) -> Decimal:
-        return self.production_value - self.production_cost
+        return calculate_ce_result(self).ebit
 
     @property
     def financial_result(self) -> Decimal:
-        return (
-            self.ce13_proventi_partecipazioni +
-            self.ce14_altri_proventi_finanziari -
-            self.ce15_oneri_finanziari +
-            self.ce16_utili_perdite_cambi
-        )
+        return calculate_ce_result(self).financial_result
 
     @property
     def extraordinary_result(self) -> Decimal:
-        return self.ce18_proventi_straordinari - self.ce19_oneri_straordinari
+        return calculate_ce_result(self).extraordinary_result
 
     @property
     def profit_before_tax(self) -> Decimal:
-        return (
-            self.ebit +
-            self.financial_result +
-            self.ce17_rettifiche_attivita_fin +
-            self.extraordinary_result
-        )
+        return calculate_ce_result(self).profit_before_tax
 
     @property
     def net_profit(self) -> Decimal:
-        return self.profit_before_tax - self.ce20_imposte
+        return calculate_ce_result(self).net_profit
 
     @property
     def revenue(self) -> Decimal:

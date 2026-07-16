@@ -65,6 +65,11 @@ MIGRATIONS = {
         ("original_bs_snapshot",               "TEXT"),
         ("original_is_snapshot",               "TEXT"),
         ("rettifiche_log",                     "TEXT"),
+        ("validation_status",                  "VARCHAR(30) DEFAULT 'legacy' NOT NULL"),
+        ("validation_report",                  "TEXT"),
+        ("source_sha256",                      "VARCHAR(64)"),
+        ("parser_version",                     "VARCHAR(50)"),
+        ("forecastable",                       "BOOLEAN DEFAULT 0 NOT NULL"),
     ],
     "budget_scenarios": [
         ("scenario_type",                      "VARCHAR(20) DEFAULT 'budget' NOT NULL"),

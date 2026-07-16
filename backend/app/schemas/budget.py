@@ -1,7 +1,7 @@
 """
 Pydantic schemas for Budget and Forecast models
 """
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from datetime import datetime
 from typing import Optional, List
 from decimal import Decimal
@@ -20,6 +20,15 @@ class BudgetScenarioBase(BaseModel):
     workflow_type: Optional[str] = None  # "infrannuale" | "bilancio" | "startup"
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_infrannuale_period(self):
+        if self.scenario_type == "infrannuale":
+            if self.period_months is None or not 1 <= self.period_months <= 12:
+                raise ValueError(
+                    "An infrannuale scenario requires period_months between 1 and 12"
+                )
+        return self
 
 
 class BudgetScenarioCreate(BudgetScenarioBase):

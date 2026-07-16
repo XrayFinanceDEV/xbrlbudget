@@ -1,0 +1,42 @@
+{
+  "_doc": "Ground-truth values read from the source PDFs (audit 2026-07-14). Checked by tests/test_prod_route_c.py against the deterministic production route-C replica (tests/_prod_route_c_runner.py). The corpus PDFs live in the gitignored Test/sez-contrapposte/, so tests skip when absent. tol = absolute EUR tolerance. 'fixed_by' is the PR that makes the row green; rows with status='open' are xfail(strict) until then.",
+  "corpus_dir": "Test/sez-contrapposte",
+  "files": {
+    "budget_343_Bilancio 2025 ver_definitiva 1-6-2026.pdf": {
+      "status": "good", "tol": 2,
+      "expect": {"sp02": 27640.60, "sp03": 453510.10, "sp13": -41892.29, "plug_max": 1}
+    },
+    "budget_348_Bilancio 2025 ver_definitiva 6-3-2026.pdf": {
+      "status": "good", "tol": 2,
+      "expect": {"sp02": 27640.60, "sp03": 454300.50, "sp13": -69804.55, "plug_max": 1}
+    },
+    "budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf": {
+      "status": "good", "fixed_by": "PR-3", "tol": 2,
+      "expect": {"sp02": 39783.68, "sp03": 1862490.15, "plug_max": 1}
+    },
+    "budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf": {
+      "status": "good", "fixed_by": "PR-4+PR-5", "tol": 3,
+      "note": "sp13 sign fixed by PR-4; residual 39,000 (ANTICIPO X CANONI MACCHINARI) cleared by PR-5 classifier fix.",
+      "expect": {"sp02": 182260.00, "sp03": 122967.10, "sp13": -90819.92, "plug_max": 100}
+    },
+    "budget_210_Bilancio 2025--26-05-13.pdf": {
+      "status": "good", "fixed_by": "PR-5", "tol": 2,
+      "expect": {"sp02": 169996.00, "sp03": 100363.91, "plug_max": 100}
+    },
+    "budget_405_all. A - PROGETTO DI BILANCIO.pdf": {
+      "status": "review_required", "fixed_by": "phase-3-no-false-ok", "tol": 2,
+      "note": "The fixed-asset net values are source-backed, but the classified statement still has a material unexplained residual. Earlier code erased _plug_residual after contra-netting while leaving compensating values in sp09/sp16, producing a false OK. The residual now remains visible and the record is not forecastable until the missing rows are classified.",
+      "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_min": 1, "quadra": false}
+    },
+    "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {
+      "status": "good", "fixed_by": "PR-7", "tol": 2,
+      "note": "AUDIT WAS WRONG: the document HAS fondi ammortamento (F/AMM immat 8.069,50 + F/AMM materiali 117.603,33 on the passivo). build_iv_cee correctly nets them -> sp02=0, sp03=8.992,37 (NET per art. 2424); the audit's 8.069,50/126.595,70/355.878,76 were the GROSS values. The real bug was a FALSE plug: the reconcile anchored to the GROSS declared total. Fixed by exposing _netted_contra from build_iv_cee and reducing the declared anchor by it (like net_contra_accounts). NOT a multi-column parsing issue.",
+      "expect": {"totale_attivo": 230205.93, "sp02": 0.00, "sp03": 8992.37, "plug_max": 100}
+    },
+    "budget_337_2023.pdf": {
+      "status": "good", "fixed_by": "phase-3-garbled-row-reconstruction", "tol": 0.05,
+      "note": "Verified directly on source pages. Text-layer glyph mapping is damaged, but the printed document is legible. Gross immateriali 3,239.12 with no intangible fund; gross materiali 67,229.83 less material funds 62,045.10; explicit and recomputed profit +4,287.23. Fixed by the generic coordinate row reconstruction.",
+      "expect": {"totale_attivo": 253076.09, "sp02": 3239.12, "sp03": 5184.73, "sp13": 4287.23, "plug_max": 0}
+    }
+  }
+}

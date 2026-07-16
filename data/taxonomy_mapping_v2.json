@@ -40,7 +40,6 @@
       "priority_1": "itcc-ci:TotaleCreditiIscrittiAttivoCircolanteQuotaScadenteEntroEsercizio",
       "priority_2": "itcc-ci:CreditiEsigibiliEntroEsercizioSuccessivo",
       "priority_3": "itcc-ci-2018-11-04:CreditiEsigibiliEntroEsSucc",
-      "priority_4": "itcc-ci:CreditiImposteAnticipateTotaleImposteAnticipate",
       "detail_tags": [
         "itcc-ci:CreditiVersoClientiEsigibiliEntroEsercizioSuccessivo",
         "itcc-ci:CreditiVersoImpreseControllateEsigibiliEntroEsercizioSuccessivo",
@@ -252,7 +251,8 @@
       "priority_1": "itcc-ci:ValoreProduzioneVariazioniRimanenze",
       "priority_2": "itcc-ci-2018-11-04:VariazioniRimanenze",
       "priority_3": "itcc-ci:VariazioniRimanenze",
-      "priority_4": "itcc-ci:ValoreProduzioneVariazioniRimanenzeProdottiCorsoLavorazioneSemilavoratiFiniti"
+      "priority_4": "itcc-ci:ValoreProduzioneVariazioniRimanenzeProdottiCorsoLavorazioneSemilavoratiFinitiLavoriCorsoOrdinazione",
+      "priority_5": "itcc-ci:ValoreProduzioneVariazioniRimanenzeProdottiCorsoLavorazioneSemilavoratiFiniti"
     },
 
     "ce03_lavori_interni": {
@@ -319,6 +319,18 @@
       "priority_3": "itcc-ci-2018-11-04:AmmortImmobilizzazioniMateriali"
     },
 
+    "ce09c_svalutazioni": {
+      "comment": "Detail: altre svalutazioni delle immobilizzazioni (B.10.c)",
+      "priority_1": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniAltreSvalutazioniImmobilizzazioni"
+    },
+
+    "ce09d_svalutazione_crediti": {
+      "comment": "Detail: svalutazioni crediti dell'attivo circolante (B.10.d)",
+      "priority_1": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniSvalutazioniCreditiCompresiAttivoCircolanteDisponibilitaLiquide",
+      "priority_2": "itcc-ci:CostiProduzioneAmmortamentiSvalutazioniSvalutazioniCrediti",
+      "priority_3": "itcc-ci-2018-11-04:SvalutazioniCrediti"
+    },
+
     "ce10_var_rimanenze_mat_prime": {
       "priority_1": "itcc-ci:CostiProduzioneVariazioniRimanenzeMateriePrimeSussidiarieConsumoMerci",
       "priority_2": "itcc-ci-2018-11-04:VariazioniRimanenzeMatPrime",
@@ -329,6 +341,10 @@
       "priority_1": "itcc-ci:CostiProduzioneAccantonamentiRischi",
       "priority_2": "itcc-ci-2018-11-04:AccantonamentiRischi",
       "priority_3": "itcc-ci:AccantonamentiRischi"
+    },
+
+    "ce11b_altri_accantonamenti": {
+      "priority_1": "itcc-ci:CostiProduzioneAltriAccantonamenti"
     },
 
     "ce12_oneri_diversi": {

@@ -17,6 +17,7 @@ python-xbrl==1.1.1
 # PDF extraction (PyMuPDF + Claude Haiku)
 PyMuPDF>=1.25.0
 anthropic>=0.40.0
+rapidocr-onnxruntime>=1.4.4
 
 # PDF report generation
 reportlab==4.2.5

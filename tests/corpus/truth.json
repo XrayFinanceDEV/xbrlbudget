@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "records": {
+    "70ea0d5277ec4a0ff4fcfa1e7822c0e371d5e6ebd304734985293ec16d177264": {
+      "route_expected": "trial_balance",
+      "subtype": "contrapposte_garbled_text_layer",
+      "status": "verified",
+      "entity": null,
+      "year": 2023,
+      "period_months": 12,
+      "source_controls": {
+        "assets_gross": 315121.19,
+        "contra_assets": 62045.10,
+        "assets_net": 253076.09,
+        "liabilities_net_including_result": 253076.09,
+        "income_explicit": 4287.23,
+        "income_recomputed": 4287.23
+      },
+      "fixed_assets": {
+        "intangible_gross": 3239.12,
+        "intangible_funds": 0.00,
+        "intangible_net": 3239.12,
+        "tangible_gross": 67229.83,
+        "tangible_funds": 62045.10,
+        "tangible_net": 5184.73
+      },
+      "expected_fields": {
+        "sp02_immob_immateriali": 3239.12,
+        "sp03_immob_materiali": 5184.73,
+        "sp13_utile_perdita": 4287.23,
+        "totale_attivo": 253076.09
+      },
+      "allowed_negative_fields": [],
+      "max_estimated_amount": 0,
+      "evidence": [
+        {
+          "page": 1,
+          "row": "Totale Attività / Totale Passività / Utile d'esercizio / Totale a Pareggio",
+          "note": "315.121,19 / 310.833,96 / 4.287,23 / 315.121,19"
+        },
+        {
+          "page": 1,
+          "row": "Immobilizzazioni immateriali e materiali con fondi ammortamento",
+          "note": "nessun fondo immateriali; tutti i fondi 62.045,10 appartengono ai materiali"
+        },
+        {
+          "page": 3,
+          "row": "Totale costi / Totale ricavi / Utile d'esercizio",
+          "note": "368.445,94 / 372.733,17 / 4.287,23"
+        }
+      ]
+    }
+  }
+}

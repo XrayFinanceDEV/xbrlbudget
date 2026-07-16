@@ -106,6 +106,7 @@ class ForecastIncomeStatementBase(BaseModel):
     ce01_ricavi_vendite: Decimal = Field(default=Decimal("0"))
     ce02_variazioni_rimanenze: Decimal = Field(default=Decimal("0"))
     ce03_lavori_interni: Decimal = Field(default=Decimal("0"))
+    ce03a_incrementi_immobilizzazioni: Decimal = Field(default=Decimal("0"))
     ce04_altri_ricavi: Decimal = Field(default=Decimal("0"))
 
     # B) Production Costs
@@ -113,9 +114,18 @@ class ForecastIncomeStatementBase(BaseModel):
     ce06_servizi: Decimal = Field(default=Decimal("0"))
     ce07_godimento_beni: Decimal = Field(default=Decimal("0"))
     ce08_costi_personale: Decimal = Field(default=Decimal("0"))
+    ce08a_tfr_accrual: Decimal = Field(default=Decimal("0"))
+    ce08b_salari_stipendi: Decimal = Field(default=Decimal("0"))
+    ce08c_oneri_sociali: Decimal = Field(default=Decimal("0"))
+    ce08d_altri_costi_personale: Decimal = Field(default=Decimal("0"))
     ce09_ammortamenti: Decimal = Field(default=Decimal("0"))
+    ce09a_ammort_immateriali: Decimal = Field(default=Decimal("0"))
+    ce09b_ammort_materiali: Decimal = Field(default=Decimal("0"))
+    ce09c_svalutazioni: Decimal = Field(default=Decimal("0"))
+    ce09d_svalutazione_crediti: Decimal = Field(default=Decimal("0"))
     ce10_var_rimanenze_mat_prime: Decimal = Field(default=Decimal("0"))
     ce11_accantonamenti: Decimal = Field(default=Decimal("0"))
+    ce11b_altri_accantonamenti: Decimal = Field(default=Decimal("0"))
     ce12_oneri_diversi: Decimal = Field(default=Decimal("0"))
 
     # C) Financial Items
@@ -126,6 +136,8 @@ class ForecastIncomeStatementBase(BaseModel):
 
     # D) Financial Assets Adjustments
     ce17_rettifiche_attivita_fin: Decimal = Field(default=Decimal("0"))
+    ce17a_rivalutazioni: Decimal = Field(default=Decimal("0"))
+    ce17b_svalutazioni: Decimal = Field(default=Decimal("0"))
 
     # E) Extraordinary Items
     ce18_proventi_straordinari: Decimal = Field(default=Decimal("0"))
@@ -199,5 +211,12 @@ class ForecastGenerationResult(BaseModel):
     forecast_years: List[int] = Field(description="List of forecast years generated")
     summary: Dict[str, Any] = Field(
         description="Summary statistics per year (net_profit, total_assets, working_capital, etc.)"
+    )
+    diagnostics: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Non-accounting residuals that require an explicit scenario choice "
+            "(for example an uncovered financing requirement)"
+        ),
     )
     generated_at: datetime = Field(default_factory=datetime.utcnow)

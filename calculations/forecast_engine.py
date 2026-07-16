@@ -14,6 +14,7 @@ from calculations.projection_common import (
     financial_repayment_instalment, altri_finanz_repayment_instalment,
     tfr_accrual_quota, new_financing_schedule,
 )
+from calculations.ce_result import calculate_ce_result
 
 
 class ForecastEngine:
@@ -40,9 +41,15 @@ class ForecastEngine:
         tangible = getattr(assumption, 'tangible_investments', None) or Decimal('0')
         if intangible > 0 or tangible > 0:
             return intangible, tangible
-        # Legacy fallback: distribute proportionally (50/50)
+        # A total investment without an asset class cannot be depreciated or rolled
+        # forward faithfully.  The former 50/50 fallback invented both classes.
         total = assumption.investments if assumption.investments else Decimal('0')
-        return total / 2, total / 2
+        if total:
+            raise ValueError(
+                "Investments must be split into intangible_investments and "
+                "tangible_investments; automatic 50/50 allocation is disabled"
+            )
+        return Decimal('0'), Decimal('0')
 
     def generate_forecast(self, scenario_id: int) -> Dict:
         """
@@ -68,6 +75,12 @@ class ForecastEngine:
 
         if not base_fy or not base_fy.balance_sheet or not base_fy.income_statement:
             raise ValueError(f"Base year {scenario.base_year} data not found or incomplete")
+
+        # Reuse the same semantic gate as the infrannuale engine.  A balanced
+        # aggregate with missing debt/credit detail is not safe for DSO/DPO,
+        # repayment schedules or cash-flow projection.
+        from calculations.intra_year_engine import IntraYearEngine
+        IntraYearEngine(self.db)._validate_forecast_source(base_fy, "Base source")
 
         base_bs = base_fy.balance_sheet
         base_inc = base_fy.income_statement
@@ -202,17 +215,8 @@ class ForecastEngine:
 
     @staticmethod
     def _pbt_from_income(inc) -> Decimal:
-        """Pre-tax profit from an IncomeStatement-like object (same formula as the forecast)."""
-        g = lambda k: getattr(inc, k, None) or Decimal('0')
-        vp = (g('ce01_ricavi_vendite') + g('ce02_variazioni_rimanenze') + g('ce03_lavori_interni')
-              + g('ce03a_incrementi_immobilizzazioni') + g('ce04_altri_ricavi'))
-        co = (g('ce05_materie_prime') + g('ce06_servizi') + g('ce07_godimento_beni') + g('ce08_costi_personale')
-              + g('ce09_ammortamenti') + g('ce10_var_rimanenze_mat_prime') + g('ce11_accantonamenti')
-              + g('ce11b_altri_accantonamenti') + g('ce12_oneri_diversi'))
-        fin = (g('ce13_proventi_partecipazioni') + g('ce14_altri_proventi_finanziari') - g('ce15_oneri_finanziari')
-               + g('ce16_utili_perdite_cambi') + g('ce17_rettifiche_attivita_fin')
-               + g('ce18_proventi_straordinari') - g('ce19_oneri_straordinari'))
-        return vp - co + fin
+        """Pre-tax profit through the canonical CE algebra."""
+        return calculate_ce_result(inc).profit_before_tax
 
     def _calculate_income_statement(
         self,
@@ -408,11 +412,23 @@ class ForecastEngine:
         ce15 = ce15 + financing_interest
 
         # Taxes - use override if set, otherwise use tax rate
-        production_value = ce01 + ce02 + ce03 + ce03a + ce04
-        production_cost = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
-        ebit = production_value - production_cost
-        financial_result = ce13 + ce14 - ce15 + ce16
-        profit_before_tax = ebit + financial_result + ce17 + (ce18 - ce19)
+        ce_for_tax = {
+            'ce01_ricavi_vendite': ce01, 'ce02_variazioni_rimanenze': ce02,
+            'ce03_lavori_interni': ce03, 'ce03a_incrementi_immobilizzazioni': ce03a,
+            'ce04_altri_ricavi': ce04, 'ce05_materie_prime': ce05,
+            'ce06_servizi': ce06, 'ce07_godimento_beni': ce07,
+            'ce08_costi_personale': ce08, 'ce09_ammortamenti': ce09,
+            'ce10_var_rimanenze_mat_prime': ce10, 'ce11_accantonamenti': ce11,
+            'ce11b_altri_accantonamenti': ce11b, 'ce12_oneri_diversi': ce12,
+            'ce13_proventi_partecipazioni': ce13,
+            'ce14_altri_proventi_finanziari': ce14,
+            'ce15_oneri_finanziari': ce15, 'ce16_utili_perdite_cambi': ce16,
+            'ce17_rettifiche_attivita_fin': ce17,
+            'ce17a_rivalutazioni': ce17a, 'ce17b_svalutazioni': ce17b,
+            'ce18_proventi_straordinari': ce18, 'ce19_oneri_straordinari': ce19,
+            'ce20_imposte': Decimal('0'),
+        }
+        profit_before_tax = calculate_ce_result(ce_for_tax).profit_before_tax
         if assumption.ce20_override is not None:
             ce20 = assumption.ce20_override
         else:
@@ -573,30 +589,7 @@ class ForecastEngine:
 
         # ── EQUITY ──
 
-        net_profit = (
-            forecast_inc['ce01_ricavi_vendite'] +
-            forecast_inc['ce02_variazioni_rimanenze'] +
-            forecast_inc['ce03_lavori_interni'] +
-            forecast_inc.get('ce03a_incrementi_immobilizzazioni', Decimal('0')) +
-            forecast_inc['ce04_altri_ricavi'] -
-            forecast_inc['ce05_materie_prime'] -
-            forecast_inc['ce06_servizi'] -
-            forecast_inc['ce07_godimento_beni'] -
-            forecast_inc['ce08_costi_personale'] -
-            forecast_inc['ce09_ammortamenti'] -
-            forecast_inc['ce10_var_rimanenze_mat_prime'] -
-            forecast_inc['ce11_accantonamenti'] -
-            forecast_inc['ce11b_altri_accantonamenti'] -
-            forecast_inc['ce12_oneri_diversi'] +
-            forecast_inc['ce13_proventi_partecipazioni'] +
-            forecast_inc['ce14_altri_proventi_finanziari'] -
-            forecast_inc['ce15_oneri_finanziari'] +
-            forecast_inc['ce16_utili_perdite_cambi'] +
-            forecast_inc['ce17_rettifiche_attivita_fin'] +
-            forecast_inc['ce18_proventi_straordinari'] -
-            forecast_inc['ce19_oneri_straordinari'] -
-            forecast_inc['ce20_imposte']
-        )
+        net_profit = calculate_ce_result(forecast_inc).net_profit
 
         sp11 = _base('sp11_capitale')
         previous_profit = _prev('sp13_utile_perdita')
@@ -679,19 +672,18 @@ class ForecastEngine:
             sp16f = _prev('sp16f_debiti_previdenza_breve') * (D('1') + _sp_growth('sp16f_growth_pct'))
             sp17f = _prev('sp17f_debiti_previdenza_lungo') * (D('1') + _sp_growth('sp17f_growth_pct'))
 
-        # Detect abbreviato gap: difference between aggregate and sum of sub-fields.
-        # This happens when imported data only has sp16/sp17 totals (abbreviato format)
-        # but no detail breakdown — sub-fields are all 0 while aggregate is > 0.
-        # Allocate the gap to banche (sp16a/sp17a) as the default financial debt bucket.
+        # A missing breakdown is unknown creditor type, not bank debt.  The source
+        # gate catches this on the base year; retain a local guard for direct calls
+        # and for malformed previous forecast rows.
         prev_sp16_detail = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g
         gap_short = prev_sp16_agg - prev_sp16_detail
-        if gap_short > ZERO:
-            sp16a = sp16a + gap_short
-
         prev_sp17_detail = sp17a + sp17b + sp17c + sp17d + sp17e + sp17f + sp17g
         gap_long = prev_sp17_agg - prev_sp17_detail
-        if gap_long > ZERO:
-            sp17a = sp17a + gap_long
+        if abs(gap_short) > Decimal('0.01') or abs(gap_long) > Decimal('0.01'):
+            raise ValueError(
+                "Debt aggregate/detail mismatch: creditor categories are required; "
+                "the difference was not allocated to banks"
+            )
 
         # Apply repayment schedule to existing financial debt (reduces long-term).
         # The instalment is FIXED on the ORIGINAL (base-year) financial long-term debt
@@ -742,11 +734,13 @@ class ForecastEngine:
 
         sp09 = total_liabilities - total_assets_no_cash
 
-        # If cash is negative, increase short-term bank debt instead
+        # A negative implied cash balance is an uncovered funding requirement.
+        # Creating short-term bank debt here used to hide a missing scenario choice.
         if sp09 < 0:
-            sp16a = sp16a + abs(sp09)
-            sp16 = sp16 + abs(sp09)
-            sp09 = ZERO
+            raise ValueError(
+                f"Unfunded financing requirement {abs(sp09):,.2f}: add an explicit "
+                "financing assumption; no bank debt was created automatically"
+            )
         elif bool(getattr(assumption, 'cash_sweep_enabled', False)):
             # ── CASH SWEEP (opt-in) ── Use cash generated above the minimum floor to pay
             # down BANK debt — short-term first (sp16a), then long-term (sp17a) — instead

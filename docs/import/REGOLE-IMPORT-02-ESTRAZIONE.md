@@ -1,0 +1,224 @@
+# 02 — Estrazione e scelta dell'estrattore
+
+> Torna all'[indice](REGOLE-IMPORT-00-INDICE.md).
+> Motori: `importers/pdf_importer.py`, `importers/pdf_extractor_llm.py`,
+> `importers/xbrl_parser_enhanced.py`, `importers/csv_importer.py`.
+
+## 1. La pipeline in fasi
+
+Ordine reale dei fatti per un PDF caricato (`pdf_importer.import_pdf_balance_sheet`):
+
+| Fase | Cosa succede |
+|---|---|
+| 0 | **Normalizzazione periodo**: `period_months >= 12` diventa "anno pieno" (`NULL`) |
+| 1 | Lettura del testo delle prime 14 pagine |
+| 1-bis | **Ramo scansione**: OCR locale → OCR vision → rifiuto (vedi pagina 01 §5) |
+| 2 | **Routing** (pagina 01). XBRL e UNSUPPORTED escono qui con un errore |
+| 3 | **Rilevamento testo corrotto** → esclude i totali dichiarati da ogni decisione |
+| 4 | **Estrazione**, biforcata per route |
+| 5 | **Identità CE↔SP** (diagnostica, tutte le route) |
+| 6 | **Gate strutturale** `validate_balance` → se fallisce, diagnosi motivata (pagina 04) |
+| 7 | **Gate contabile** `check_quadratura` → se non quadra, import **non salvato** |
+| 8 | Coerenza gerarchica (non bloccante) |
+| 9 | Company: verifica proprietà o creazione |
+| 10 | **Delete omogeneo**: un import parziale cancella solo parziali, un annuale solo annuali |
+| 11 | Hash del file + creazione anno |
+| 12 | Scrittura SP e CE (round-trip lossless, pagina 06) |
+| 13 | Cross-check finale utile vs `sp13` (solo warning) |
+| 14 | **Anno precedente**, con standard di ammissione più severo (§6) |
+| 15 | Commit |
+| 16 | Esito con metodo di estrazione e confidence |
+
+Qualsiasi eccezione → rollback completo. **Non esistono scritture parziali.**
+
+## 2. Route A/B (IV-CEE): il deterministico prima, l'LLM solo se serve
+
+1. **Parser deterministico per primo**, e gratis. Il suo output è accettato **solo se** supera
+   *entrambi* `validate_balance` e `check_quadratura`. Se passa, nessuna chiamata API.
+2. Altrimenti serve la chiave API, altrimenti errore.
+3. **Se il documento è infrannuale** si va direttamente all'estrazione a due anni: il motore di
+   confronto pretende i due anni accoppiati.
+4. **Anno pieno**: l'anno corrente si prende dal pass a singolo anno (più affidabile), l'anno
+   precedente dal pass a due colonne. Se il corrente single-year non quadra e quello dual sì,
+   vince il dual.
+5. **Retry stocastico**: fino a 3 tentativi, si ferma appena corrente e precedente quadrano
+   entrambi; conserva comunque il miglior tentativo.
+6. **Overlay finale**: se dopo 3 tentativi non quadra ancora, si sovrascrivono **solo gli
+   aggregati patrimoniali** con quelli del parser deterministico, e **solo se il risultato
+   quadra**. CE e dettagli tipizzati restano quelli dell'LLM.
+
+## 3. Route C: la scelta del candidato è la regola più importante
+
+Due candidati concorrono: il **CoGe-LLM** e il **parser deterministico**. Il deterministico gira
+sempre, perché è gratuito e non può peggiorare il risultato.
+
+Il CoGe-LLM **non** viene lanciato se l'OCR locale a coordinate ha già letto il file: sarebbe
+aggiungere un candidato stocastico a una lettura deterministica riuscita.
+
+### Perché non si sceglie guardando il residuo
+
+Sembrerebbe naturale preferire il candidato con meno massa non classificata. **È sbagliato, e
+capirlo è la chiave di tutta la route C.**
+
+> Il residuo è **cieco alla sotto-estrazione**. Un estrattore che perde un intero blocco di
+> conti e poi forza il pareggio attraverso il risultato d'esercizio produce un residuo vicino a
+> zero: sembra *più pulito* del candidato corretto, e ha perso metà del bilancio.
+
+Il caso di riferimento è AITEC PROVVISORIO: il CoGe-LLM produce un totale di 9,92 milioni
+contro i 12,65 milioni **stampati dal documento**, con residuo minimo. Il deterministico, che si
+ancora al totale stampato, è quello giusto.
+
+### La regola effettiva
+
+Si ordina per **(distanza dal totale dichiarato, poi residuo)**:
+
+1. Si legge il totale che **il documento stampa da solo** (pareggio, o passivo, o attivo).
+2. Si misura la distanza di ogni candidato da quel totale.
+3. **Sotto il 2% la distanza è considerata rumore e azzerata** — così una piccola differenza di
+   lettura non scavalca mai lo spareggio sul residuo.
+4. A parità, vince il residuo minore.
+
+Se il testo è corrotto, il totale dichiarato **non viene usato affatto**: sarebbe spazzatura.
+
+### La correzione lordo→netto dell'ancora
+
+Su un bilancio a presentazione **lorda** il pareggio stampato include i fondi ammortamento (che
+compaiono su entrambi i lati) e l'eventuale perdita parcheggiata all'attivo. Confrontare un
+candidato correttamente **nettato** con quell'ancora **lorda** lo penalizza e fa vincere il
+candidato non nettato (budget_343/348). Quindi l'ancora viene ridotta di fondi + compensazione
+IVA + perdita dichiarata, ma **solo se i fondi superano l'1%** dell'ancora stessa.
+
+### Cosa succede dopo la scelta, nell'ordine
+
+1. **Tipizzazione debiti in overlay** — solo se ha vinto l'LLM (pagina 03 §4).
+2. **Netting fondi ammortamento** — sul candidato scelto, chiunque l'abbia prodotto (pagina 03 §3).
+3. **Riconciliazione al risultato dichiarato** — saltata se il parser si dichiara autorevole.
+4. **Warning sul residuo** — mai bloccante.
+
+## 4. L'LLM: cosa, quanto, quando
+
+Modello **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), 8192 token di output, chiamato con
+**tool-use forzato** e schema derivato dal modello dati: il modello non produce prosa da
+parsare, riempie campi tipizzati. Retry con backoff esponenziale, massimo 2, sugli errori 500.
+
+**Quando NON viene chiamato** (cioè quando l'import è gratuito):
+
+- route A/B, anno pieno, e il parser deterministico quadra;
+- route C con OCR locale a coordinate riuscito;
+- route C senza chiave API (si usa il solo deterministico, senza regressione);
+- route XBRL o UNSUPPORTED (si esce prima).
+
+**Quante chiamate, quando viene chiamato:**
+
+| Scenario | Chiamate |
+|---|---|
+| Infrannuale | 2 (SP + CE, due anni insieme) |
+| Anno pieno A/B, primo tentativo pulito | 4 |
+| Anno pieno A/B, caso peggiore | 12 |
+| Route C con chiave API | 2 |
+| PDF scansionato | +1 di OCR vision |
+
+La giustificazione dichiarata è che l'import di un PDF è un'operazione rara e le chiamate Haiku
+costano poco.
+
+### I due anni
+
+Una singola coppia di chiamate estrae entrambe le colonne. Due guardie simmetriche:
+
+- **colonna precedente assente** → il "precedente" è un clone fabbricato: si svuota, ma **non**
+  si esce (i validatori devono comunque girare sull'anno corrente);
+- **colonna corrente azzerata** e precedente valorizzato → si **promuove il precedente a
+  corrente**.
+
+## 5. I totali di controllo dichiarati
+
+Sono i totali che il documento **stampa da solo** — l'unica evidenza indipendente
+dall'estrattore, e per questo l'ancora di tutto il sistema anti-masking.
+
+Regole di lettura non ovvie:
+
+- Robusto a intestazioni spaziate e ad accenti.
+- Per ogni etichetta si prende **il valore più grande**: le righe di dettaglio ripetono importi
+  parziali, il totale è il massimo.
+- **Il pareggio si cerca solo prima dell'intestazione "CONTO ECONOMICO"**. Il pareggio è
+  stampato sia per lo SP che per il CE, e "il più grande vince" assumeva che l'SP fosse sempre
+  il maggiore. È falso su aziende ad alta rotazione e basso margine: in budget_337 il CE
+  (372.733) supera l'SP (315.121), e senza questo vincolo tutto veniva ancorato al CE.
+- Il recupero geometrico del risultato è accettato **solo** se la riga esprime un unico importo
+  e se lo stesso valore compare su almeno due righe; gli "utili portati a nuovo" sono
+  deliberatamente esclusi.
+
+### La riconciliazione al dichiarato non muove massa
+
+Espone differenze diagnostiche e **non tocca alcuna voce**. Ha due sole intelligenze:
+
+**Arbitraggio del segno del risultato.** Un bilancio di verifica può stampare *sia* un "utile"
+*sia* una "perdita", oppure un "RISULTATO D'ESERCIZIO" che è in realtà il conto di patrimonio
+netto dell'anno **precedente** (budget_211). Preferire ciecamente l'utile sbaglia il segno. Si
+arbitra col gap contabile: quando il passivo esclude il risultato, `attivo − passivo` **è** il
+risultato firmato. Vince il candidato più vicino. Un risultato CE pari a zero è trattato come
+"nessuna ancora", non come ancora a zero.
+
+**Recupero di un `sp13` omesso.** È l'unica scrittura, e non è un plug: avviene solo quando
+**tre fatti indipendenti concordano entro €2** — la riga stampata, il risultato ricalcolato dal
+CE, e il gap fra i due lati dello SP. Il valore esatto della fonte viene rimesso nel suo campo
+legale; qualunque residuo estraneo resta bloccante.
+
+## 6. L'anno precedente ha uno standard più severo
+
+L'anno corrente viene salvato anche se solo strutturalmente valido. Il **precedente no**: deve
+superare *sia* `validate_balance` *sia* la quadratura piena.
+
+- Se tutti i suoi campi sono zero → PDF monocolonna, scartato in silenzio.
+- Se non supera il gate → **non viene mai persistito**; un record già esistente viene
+  **preservato**; l'utente riceve "ANNO PRECEDENTE NON IMPORTATO [anno]".
+- Se lo supera → sostituisce l'eventuale record esistente, forzato ad anno pieno.
+
+La logica: un anno precedente sbagliato è peggio di un anno precedente assente, perché diventa
+la base di confronto di tutto il previsionale.
+
+## 7. XBRL: l'anno non è l'identità di un periodo
+
+> Un'istanza XBRL può legittimamente contenere **un bilancio annuale e un nove-mesi che
+> finiscono nello stesso anno solare**. Trattare l'anno come identità li fa collassare.
+
+L'identità di un periodo ha **cinque** componenti: schema entità, identificativo entità, data di
+fine, mesi di durata, data di inizio, dimensioni. L'anno *deriva* dalla data di fine, non è la
+chiave. Etichetta risultante: `2025-9M@2025-09-30` contro `2025-12M@2025-12-31` — due periodi
+distinti.
+
+Regole di lettura del contesto:
+
+- `forever` → contesto scartato;
+- data di fine non parsabile → contesto **scartato** (non un anno nullo);
+- durata in mesi accettata solo se compresa fra 1 e 12;
+- un contesto istantaneo non ha durata.
+
+**Selezione:** una sola entità (quella con più fatti, con spareggio lessicale per essere
+indipendenti dall'ordine) e un solo scope dimensionale (**preferito quello senza dimensioni**).
+I fatti di altre entità o dimensioni sono scartati. Un contesto istantaneo viene agganciato a
+tutte le durate con **la stessa data di fine**: così lo SP di fine periodo si unisce al CE della
+durata giusta, mantenendo annuale e infrannuale in contenitori separati.
+
+**Fatti duplicati:** si sceglie per unità (EUR preferito), poi coerenza istante/durata, poi
+precisione, poi due criteri puramente deterministici. Se restano valori distinti, warning.
+
+L'XBRL ha inoltre un blocco **atomico**: se non quadra, rollback e HTTP 422 — non arriva
+nemmeno al database.
+
+## 8. CSV
+
+**Encoding**, in ordine stretto: BOM UTF-8 → BOM UTF-16 LE/BE → tentativo UTF-8 → cp1252 →
+errore. L'ordine non è casuale: cp1252 non fallisce quasi mai, quindi provarlo prima
+produrrebbe sistematicamente mojibake ("Disponibilità").
+
+**Intestazione** normalizzata: accenti rimossi, minuscolo, punteggiatura collassata. Il
+riconoscimento è quindi immune ad accenti, maiuscole e punteggiatura.
+
+**Schema BILAQ**: riconosciuto se le quattro colonne attese sono un **sottoinsieme** delle
+intestazioni — colonne extra ammesse, posizione irrilevante. La mappatura è **per sezione
+semantica IV-CEE, mai per posizione di colonna**.
+
+**Schema TEBE**: prima cella che inizia per "bilancio" e una cella che contiene un anno.
+
+Altrimenti: "Schema CSV non riconosciuto".

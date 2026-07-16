@@ -28,14 +28,40 @@ def get_fy_prefer_full(db: Session, company_id: int, year: int):
     ).first()
 
 
-def get_fy_partial(db: Session, company_id: int, year: int):
-    """Return only the partial-year record (period_months 1-11).
+def get_fy_full(db: Session, company_id: int, year: int):
+    """Return only a full-year record (``period_months`` NULL/12).
 
-    A period_months of 12 is a full year, not a partial, so it is excluded.
+    This strict helper is used where a partial record would change the meaning of
+    a calculation.  ``get_fy_prefer_full`` remains available to legacy display
+    callers that explicitly accept an arbitrary fallback.
     """
     return db.query(FinancialYear).filter(
         FinancialYear.company_id == company_id,
         FinancialYear.year == year,
-        FinancialYear.period_months.isnot(None),
-        FinancialYear.period_months != 12,
+        (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
+    ).first()
+
+
+def get_fy_partial(
+    db: Session,
+    company_id: int,
+    year: int,
+    period_months: int,
+):
+    """Return the *exact* requested partial-year record.
+
+    A company may have several imports for the same calendar year (for example a
+    six-month and a nine-month situation).  Picking an arbitrary partial record
+    makes the annualisation factor unrelated to the data being projected.  Full
+    years (``NULL``/12) are deliberately not a fallback here.
+    """
+    if isinstance(period_months, bool) or not isinstance(period_months, int):
+        raise ValueError("period_months must be an integer between 1 and 11")
+    if not 1 <= period_months <= 11:
+        raise ValueError("period_months must be between 1 and 11 for a partial year")
+
+    return db.query(FinancialYear).filter(
+        FinancialYear.company_id == company_id,
+        FinancialYear.year == year,
+        FinancialYear.period_months == period_months,
     ).first()

@@ -68,10 +68,6 @@ def run_prod_route_c(file_path: str, ocr_text=None) -> dict:
     contra = Z
     try:
         bs, contra = net_contra_accounts(bs, file_path, text=ocr_text, declared=dc0)
-        if contra > 0:
-            # net_contra rebuilt sp02/sp03; drop the best-effort's stale plug so the
-            # reconcile recomputes the true residual against the net anchor.
-            bs['_plug_residual'] = Z
     except Exception as exc:  # pragma: no cover - defensive, mirrors prod
         print(f"  [warn] contra-netting saltato: {exc}", file=sys.stderr)
 

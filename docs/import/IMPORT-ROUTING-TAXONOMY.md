@@ -1,5 +1,14 @@
 # Routing import bilanci per tipologia — analisi e tassonomia
 
+> ⚠️ **Conteggi e sintesi superati (verificato il 2026-07-16).** Il corpus è ora a **214 file
+> fisici / 137 contenuti unici**. Inoltre: la sintesi del blocco B (§4) attribuisce la soglia
+> `coge_codes>=5` a tutto il blocco mentre nel codice la richiede **solo B2**; i segnali
+> `sit_contabile` e `dare_avere` sono elencati fra i discriminanti ma sono **inerti** (calcolati
+> e mai letti); le sottocategorie A4/Cerved, A5/riepiloghi AI, B4, C1b e C5 sono dichiarate ma
+> **il router non le produce mai**. Per le regole di routing effettive vedi
+> [REGOLE-IMPORT-01-ROUTING.md](REGOLE-IMPORT-01-ROUTING.md). Questo documento resta valido come
+> **analisi del corpus e razionale del progetto**.
+
 > Documento generato dall'analisi automatica di **tutti i casi** in `Test/`
 > (124 file totali, **77 documenti unici** dopo dedup per hash di contenuto).
 > Obiettivo: sostituire le patch caso-per-caso con un **router per macro-area** che,

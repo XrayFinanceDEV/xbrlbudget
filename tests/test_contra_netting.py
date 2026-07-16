@@ -490,7 +490,7 @@ def test_iva_one_sided_left_gross(monkeypatch):
 
 # ---------------------------------------------------------------- declared-result arbiter
 
-def test_reconcile_prefers_loss_matching_gap_over_spurious_utile():
+def test_declared_loss_conflict_is_reported_without_rewriting_statement():
     # budget_211 (GUSTOPRONTO): the declared "utile 20.581,27" is a prior-year PN
     # account ("RISULTATO D'ESERCIZIO"), NOT the current result. The true result is
     # the perdita 90.819,92, which reconciles attivo (1.623.117,50) vs passivo/
@@ -503,8 +503,14 @@ def test_reconcile_prefers_loss_matching_gap_over_spurious_utile():
     bs = {"totale_attivo": D("1623117.50"), "totale_passivo": D("1713937.42"),
           "sp13_utile_perdita": D("20581.27"),
           "sp16_debiti_breve": D("500000"), "sp09_disponibilita_liquide": D("100000")}
+    original = dict(bs)
     out = _reconcile_trial_to_declared(bs, declared, "t")
-    assert out["sp13_utile_perdita"] == D("-90819.92")
+    assert bs == original
+    assert out["sp13_utile_perdita"] == D("20581.27")
+    assert out["sp16_debiti_breve"] == D("500000")
+    assert out["sp09_disponibilita_liquide"] == D("100000")
+    assert out["_declared_result_difference"] == D("111401.19")
+    assert out["_plug_residual"] == D("111401.19")
 
 
 def test_reconcile_single_utile_candidate_unchanged():
@@ -533,7 +539,7 @@ def test_reconcile_empty_ce_falls_back_to_legacy_utile():
     assert out["sp13_utile_perdita"] == D("80000")
 
 
-def test_reconcile_ce_result_breaks_tie_when_no_gap():
+def test_ce_result_breaks_declared_tie_diagnostically_without_plug():
     # both utile and perdita printed, passivo INCLUDES the result (gap ~ 0) so the
     # gap cannot arbitrate; the CE-derived result does.
     from importers.pdf_extractor_llm import _reconcile_trial_to_declared
@@ -542,8 +548,13 @@ def test_reconcile_ce_result_breaks_tie_when_no_gap():
     bs = {"totale_attivo": D("1000000"), "totale_passivo": D("1000000"),
           "sp13_utile_perdita": D("50000"), "sp16_debiti_breve": D("200000"),
           "sp09_disponibilita_liquide": D("100000")}
+    original = dict(bs)
     out = _reconcile_trial_to_declared(bs, declared, "t", ce_result=D("-50000"))
-    assert out["sp13_utile_perdita"] == D("-50000")
+    assert bs == original
+    assert out["sp13_utile_perdita"] == D("50000")
+    assert out["sp16_debiti_breve"] == D("200000")
+    assert out["_declared_result_difference"] == D("100000")
+    assert out["_plug_residual"] == D("100000")
 
 
 def test_declared_pareggio_scoped_to_sp_section():

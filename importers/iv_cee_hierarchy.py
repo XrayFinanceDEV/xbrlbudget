@@ -27,6 +27,8 @@ import unicodedata
 from decimal import Decimal
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
+from calculations.ce_result import calculate_ce_result
+
 logger = logging.getLogger(__name__)
 
 _TREE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -260,11 +262,115 @@ class Quadratura(NamedTuple):
     plug_residual: Decimal      # massa non classificata tamponata in sp09/sp16
     masked: bool                # quadra solo grazie al plug (composizione errata)
     is_empty: bool              # estrazione vuota/nulla (totale attivo ~ 0) → NON quadra
+    hierarchy_consistent: bool  # aggregati e dettagli IV-CEE coincidono
+    hierarchy_differences: Dict[str, Decimal]
+    semantic_valid: bool        # tutti gli invarianti richiesti per uso downstream
     warnings: List[str]
 
 
 # soglia oltre cui un plug rende la quadratura "mascherata" (composizione materialmente errata)
 _MASK_PCT = Decimal("0.01")     # 1% del totale attivo
+
+
+# Aggregate/detail relationships used by forecasts, cash flow and Rettifiche.  A
+# positive aggregate with zero details is intentionally reported: it may be legal
+# in an abbreviated source, but it is not safe to silently invent the breakdown
+# required by downstream calculations.
+_DETAIL_GROUPS: Dict[str, Tuple[str, ...]] = {
+    "sp01_crediti_soci": ("sp01a_parte_richiamata", "sp01b_parte_da_richiamare"),
+    "sp02_immob_immateriali": (
+        "sp02a_costi_impianto", "sp02b_costi_sviluppo", "sp02c_brevetti",
+        "sp02d_concessioni", "sp02e_avviamento", "sp02f_immob_in_corso",
+        "sp02g_altre_immob_imm",
+    ),
+    "sp03_immob_materiali": (
+        "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
+        "sp03c_attrezzature", "sp03d_altri_beni", "sp03e_immob_in_corso",
+    ),
+    "sp04_immob_finanziarie": (
+        "sp04a_partecipazioni", "sp04b_crediti_immob_breve",
+        "sp04c_crediti_immob_lungo", "sp04d_altri_titoli",
+        "sp04e_strumenti_derivati_attivi",
+    ),
+    "sp05_rimanenze": (
+        "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+        "sp05c_lavori_in_corso", "sp05d_prodotti_finiti", "sp05e_acconti",
+    ),
+    "sp06_crediti_breve": (
+        "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+        "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
+        "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
+        "sp06g_crediti_altri_breve",
+    ),
+    "sp07_crediti_lungo": (
+        "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+        "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+        "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
+        "sp07g_crediti_altri_lungo",
+    ),
+    "sp12_riserve": (
+        "sp12a_riserva_sovrapprezzo", "sp12b_riserve_rivalutazione",
+        "sp12c_riserva_legale", "sp12d_riserve_statutarie",
+        "sp12e_altre_riserve", "sp12f_riserva_copertura_flussi",
+        "sp12g_utili_perdite_portati", "sp12h_riserva_neg_azioni_proprie",
+    ),
+    "sp14_fondi_rischi": (
+        "sp14a_fondi_trattamento_quiescenza", "sp14b_fondi_imposte",
+        "sp14c_strumenti_derivati_passivi", "sp14d_altri_fondi",
+    ),
+    "sp16_debiti_breve": (
+        "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+        "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+        "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+        "sp16g_altri_debiti_breve",
+    ),
+    "sp17_debiti_lungo": (
+        "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+        "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
+        "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
+        "sp17g_altri_debiti_lungo",
+    ),
+}
+
+_CE_DETAIL_GROUPS: Dict[str, Tuple[str, ...]] = {
+    "ce08_costi_personale": (
+        "ce08a_tfr_accrual", "ce08b_salari_stipendi", "ce08c_oneri_sociali",
+        "ce08d_altri_costi_personale",
+    ),
+    "ce09_ammortamenti": (
+        "ce09a_ammort_immateriali", "ce09b_ammort_materiali",
+        "ce09c_svalutazioni", "ce09d_svalutazione_crediti",
+    ),
+}
+
+
+def _aggregate_detail_differences(
+    bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]], tol: Decimal
+) -> Dict[str, Decimal]:
+    """Return aggregate minus detail for every inconsistent IV-CEE family."""
+    differences: Dict[str, Decimal] = {}
+    for aggregate, details in _DETAIL_GROUPS.items():
+        aggregate_value = _D(bs.get(aggregate, 0))
+        detail_value = sum((_D(bs.get(k, 0)) for k in details), Decimal(0))
+        diff = aggregate_value - detail_value
+        if abs(diff) > tol:
+            differences[aggregate] = diff
+
+    if ce:
+        for aggregate, details in _CE_DETAIL_GROUPS.items():
+            aggregate_value = _D(ce.get(aggregate, 0))
+            detail_value = sum((_D(ce.get(k, 0)) for k in details), Decimal(0))
+            diff = aggregate_value - detail_value
+            if abs(diff) > tol:
+                differences[aggregate] = diff
+
+        d_detail = _D(ce.get("ce17a_rivalutazioni", 0)) - _D(
+            ce.get("ce17b_svalutazioni", 0)
+        )
+        d_aggregate = _D(ce.get("ce17_rettifiche_attivita_fin", 0))
+        if (d_detail != 0 or d_aggregate != 0) and abs(d_aggregate - d_detail) > tol:
+            differences["ce17_rettifiche_attivita_fin"] = d_aggregate - d_detail
+    return differences
 
 
 def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = None,
@@ -285,15 +391,17 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
         warnings.append(f"BILANCIO NON QUADRATO: attivo {att:,.2f} != passivo {pas:,.2f} "
                         f"(sbilancio {sbil:,.2f})")
 
-    # Anti-masking: un best-effort tampona sp09/sp16 cosi att==pas SEMPRE. Il residuo
-    # tamponato (_plug_residual, esposto dall'estrattore) misura la massa NON classificata:
-    # se supera l'1% del totale la composizione e materialmente sbagliata → quadratura finta.
-    plug = _D(bs.get("_plug_residual", 0))
+    # Anti-masking: _plug_residual (esposto dall'estrattore) misura la massa della fonte NON
+    # classificata in alcuna voce IV-CEE. Nessun plug viene applicato — il bilancio resta come
+    # estratto — ma un att==pas ottenuto con una quota rilevante di massa non spiegata e una
+    # quadratura solo apparente: se il residuo supera l'1% del totale la composizione e
+    # materialmente inaffidabile, quale che sia lo sbilancio.
+    plug = abs(_D(bs.get("_plug_residual", 0)))
     masked = False
     if att > 0 and plug > max(tol, _MASK_PCT * att):
         masked = True
         warnings.append(f"QUADRATURA MASCHERATA: residuo {plug:,.2f} ({100 * plug / att:.1f}% "
-                        f"del totale) tamponato in sp09/sp16 — composizione non affidabile")
+                        f"del totale) non classificato — composizione non affidabile")
 
     utile_ce = None
     utile_match = True
@@ -311,76 +419,104 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
             warnings.append(f"Utile CE {utile_ce:,.2f} != sp13 {sp13:,.2f} "
                             f"(diff {utile_ce - sp13:,.2f})")
 
-    quadra = abs(sbil) <= tol and not masked and not is_empty
+    hierarchy_differences = _aggregate_detail_differences(bs, ce, tol)
+    hierarchy_consistent = not hierarchy_differences
+    for aggregate, diff in hierarchy_differences.items():
+        warnings.append(
+            f"GERARCHIA INCOERENTE: {aggregate} differisce dalla somma dettagli "
+            f"di {diff:,.2f}"
+        )
+
+    # ``quadra`` retains its public name but is no longer allowed to hide a CE/SP
+    # mismatch.  ``semantic_valid`` is the stronger downstream gate and also
+    # requires the typed hierarchy used by forecasts and cash-flow calculations.
+    quadra = abs(sbil) <= tol and utile_match and not masked and not is_empty
+    semantic_valid = quadra and hierarchy_consistent and plug <= tol
     return Quadratura(totale_attivo=att, totale_passivo=pas, sbilancio=sbil,
                       quadra=quadra, utile_ce=utile_ce,
                       sp13=_D(bs.get("sp13_utile_perdita", 0)),
                       utile_match=utile_match, plug_residual=plug, masked=masked,
-                      is_empty=is_empty, warnings=warnings)
+                      is_empty=is_empty, hierarchy_consistent=hierarchy_consistent,
+                      hierarchy_differences=hierarchy_differences,
+                      semantic_valid=semantic_valid, warnings=warnings)
 
 
 def _net_profit_from_ce(ce: Dict[str, Decimal]) -> Decimal:
-    g = lambda k: _D(ce.get(k, 0))
-    val_prod = g("ce01_ricavi_vendite") + g("ce02_variazioni_rimanenze") + g("ce03_lavori_interni") + g("ce04_altri_ricavi")
-    costi = (g("ce05_materie_prime") + g("ce06_servizi") + g("ce07_godimento_beni") + g("ce08_costi_personale")
-             + g("ce09_ammortamenti") + g("ce10_var_rimanenze_mat_prime") + g("ce11_accantonamenti")
-             + g("ce11b_altri_accantonamenti") + g("ce12_oneri_diversi"))
-    ro = val_prod - costi
-    fin = (g("ce13_proventi_partecipazioni") + g("ce14_altri_proventi_finanziari") - g("ce15_oneri_finanziari")
-           + g("ce16_utili_perdite_cambi") + g("ce17_rettifiche_attivita_fin")
-           + g("ce18_proventi_straordinari") - g("ce19_oneri_straordinari"))
-    return ro + fin - g("ce20_imposte")
+    """Compatibility wrapper around the single canonical CE formula."""
+    return calculate_ce_result(ce).net_profit
+
+
+# Derived aggregates whose value is, by definition, the sum of their legal
+# sub-details. The IV-CEE schema (art. 2424) lists every debt sub-type under
+# D) with an entro/oltre split but prints NO "totale debiti a breve/lungo"
+# subtotal, so sp16/sp17 are always derived — never a source line. Only debiti
+# are rolled up (as in the XBRL parser): for these the source always enumerates
+# all sub-types, so the detail sum is authoritative. Crediti/riserve details can
+# be partial, so their aggregates are left to the extractor.
+_ROLLUP_AGGREGATES: Tuple[str, ...] = ("sp16_debiti_breve", "sp17_debiti_lungo")
+
+
+def rollup_debiti_aggregates(bs: Dict[str, Decimal]) -> Dict[str, Decimal]:
+    """Realign each debiti aggregate to its sub-detail sum, but only when doing so
+    moves the balance sheet CLOSER to balancing.
+
+    Returns a modified COPY. The aggregate (sp16/sp17) is a schema-derived total
+    with no source line, so aligning it to its extracted parts introduces no
+    invented amount. But the stochastic LLM can be wrong on EITHER side — a good
+    aggregate with over-extracted details, or a good detail set with a drifted
+    aggregate — so a blind rollup would unbalance a year that already tied
+    (budget_585 current 2025: raw extraction balanced, a naive rollup broke it by
+    ~127k). The self-validating guard keeps a change only if |attivo - passivo|
+    does not grow: it fixes the drifted-aggregate case (585 prior 2024) without
+    touching the drifted-detail case. Fires only when the details carry a
+    non-zero sum (an aggregate with no details is a legal leaf, left untouched).
+    """
+    result = dict(bs)
+    att = sum((_D(result.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
+    gap = att - sum((_D(result.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
+    for aggregate in _ROLLUP_AGGREGATES:
+        details = _DETAIL_GROUPS.get(aggregate, ())
+        detail_sum = sum((_D(result.get(k, 0)) for k in details), Decimal(0))
+        current = _D(result.get(aggregate, 0))
+        if detail_sum == 0 or abs(detail_sum - current) <= Decimal("0.01"):
+            continue
+        # Rolling up changes passivo by (detail_sum - current), so the signed gap
+        # (attivo - passivo) shifts by (current - detail_sum). Keep it only if the
+        # magnitude of the imbalance does not increase.
+        new_gap = gap + (current - detail_sum)
+        if abs(new_gap) <= abs(gap):
+            result[aggregate] = detail_sum
+            gap = new_gap
+    return result
 
 
 def reconcile_ivcee_balance(bs: Dict[str, Decimal],
                             declared: Optional[Dict[str, Optional[Decimal]]] = None,
                             label: str = "", cap_frac: Decimal = Decimal("0.05")
                             ) -> Dict[str, Decimal]:
-    """GENERAL rule (routes A/B): make a near-balanced IV-CEE extraction actually balance.
+    """Return an unchanged copy and report, but never plug, a balance difference.
 
-    The LLM occasionally drops a small amount on one side (e.g. a crediti undershoot of a few
-    thousand euro on a very detailed bilancio — budget_352 via the dual-year extractor), so
-    `Attivo != Passivo + PN` and `validate_balance` hard-fails ("Balance sheet does not
-    balance"). This anchors both sides to the DECLARED total (TOTALE ATTIVO, printed in the
-    document) and plugs the SHORT side up to it, so the sheet ties.
-
-      target = max(att, pas, declared_attivo)   # only ever ADD to the short side
-      att short → plug into sp09 (disponibilità liquide); pas short → plug into sp16 (debiti)
-      totale_attivo = totale_passivo = target
-
-    SAFETY: only auto-balances a SMALL slip (gap ≤ cap_frac = 5% of the larger side). A larger
-    gap is a structural extraction error → left untouched so validate_balance fails honestly
-    (never mask a big imbalance). The plug is flagged via `_plug_residual`. No-op when already
-    balanced, so a clean extraction is never touched.
+    ``cap_frac`` is retained for API compatibility only.  Earlier versions inserted
+    the short side in cash or short debt; that made a missing source row look like an
+    accounting fact.  Candidate selection and validation may use the declared total,
+    but reconciliation is now strictly diagnostic.
     """
+    result = dict(bs)
     att = sum((_D(bs.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
     pas = sum((_D(bs.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
-    decl_att = _D(declared.get("attivo")) if (declared and declared.get("attivo")) else Decimal(0)
-    target = max(att, pas, decl_att)
-
-    gap_att = target - att   # ≥ 0
-    gap_pas = target - pas   # ≥ 0
-    base = max(abs(att), abs(pas), Decimal("1"))
-    # nothing to do, or the slip is too big to safely plug (structural error → fail honestly)
-    if gap_att <= Decimal("1") and gap_pas <= Decimal("1"):
-        bs["totale_attivo"] = att
-        bs["totale_passivo"] = pas
-        return bs
-    if max(gap_att, gap_pas) > cap_frac * base:
-        return bs  # let validate_balance reject it honestly
-
-    if gap_att > Decimal("1"):
-        bs["sp09_disponibilita_liquide"] = _D(bs.get("sp09_disponibilita_liquide", 0)) + gap_att
-    if gap_pas > Decimal("1"):
-        bs["sp16_debiti_breve"] = _D(bs.get("sp16_debiti_breve", 0)) + gap_pas
-    bs["totale_attivo"] = target
-    bs["totale_passivo"] = target
-    bs["_plug_residual"] = _D(bs.get("_plug_residual", 0)) + max(gap_att, gap_pas)
-    logger.warning(
-        f"[{label}] IV-CEE pareggio: lato {'attivo' if gap_att > gap_pas else 'passivo'} corto di "
-        f"{max(gap_att, gap_pas):,.0f} su {target:,.0f} — tamponato (verificare in Rettifiche)"
+    gap = att - pas
+    declared_attivo = (
+        _D(declared.get("attivo")) if declared and declared.get("attivo") is not None else None
     )
-    return bs
+    if abs(gap) > Decimal("0.01"):
+        result["_unexplained_balance_difference"] = gap
+        logger.warning(
+            f"[{label}] IV-CEE non quadrato: attivo {att:,.2f}, passivo {pas:,.2f}, "
+            f"differenza {gap:,.2f}; nessun valore contabile è stato modificato"
+        )
+    if declared_attivo is not None and abs(att - declared_attivo) > Decimal("0.01"):
+        result["_declared_assets_difference"] = att - declared_attivo
+    return result
 
 
 def enforce_ce_sp_identity(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]],
@@ -388,74 +524,35 @@ def enforce_ce_sp_identity(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decima
                            prefer: str = "sp13",
                            declared: Optional[Dict[str, Optional[Decimal]]] = None
                            ) -> Dict[str, Decimal]:
-    """GENERAL rule (ALL routes): force the accounting identity utile_CE == sp13.
+    """Diagnose the CE/SP identity without altering either statement.
 
-    The result of the year is ONE number: it is sp13 (utile/perdita) on the Stato
-    Patrimoniale AND the bottom line of the Conto Economico. SP and CE are extracted by
-    independent passes and drift, so the app's "Verifica CE ↔ SP" fails on almost every file.
-    This forces them equal. WHICH side is authoritative depends on the route (`prefer`):
-
-    prefer="sp13" (ROUTE C / trial balances): sp13 has been set to the document's DECLARED
-        current result and is trustworthy. Align the CE to it (plug a CE line):
-          gap = utile_CE - sp13;  gap>0 → +gap to ce12_oneri_diversi;  gap<0 → +|gap| to ce04_altri_ricavi.
-
-    prefer="ce" (ROUTES A/B / IV-CEE): the CE is current-year by construction, while the SP
-        `sp13` may have captured the PRIOR YEAR's result (a common extraction error on
-        dual-column statements). So TRUST THE CE: set sp13 = utile_CE and move the difference
-        (the prior-year result) into the reserves `sp12_riserve` (utili portati a nuovo). This
-        keeps PN total — and therefore Attivo = Passivo — unchanged, only RE-LABELLING within
-        equity. Falls back to aligning the CE (prefer="sp13" behaviour) if the reserves cannot
-        absorb the move (would go negative) or it is implausibly large (structural error).
-
-    No-op when the two already agree within tolerance (a clean extraction is never distorted).
-    Guarantees CE ↔ SP quadra on every route.
+    ``prefer`` and ``declared`` remain accepted so existing callers do not break,
+    but an arbiter may only select/reject a candidate.  It must never create a
+    balancing amount in reserves, other income or other costs.
     """
     if not ce:
         return ce
+    result = dict(ce)
     sp13 = _D(bs.get("sp13_utile_perdita", 0))
     ce_result = _net_profit_from_ce(ce)
-    gap = ce_result - sp13           # >0: CE higher than sp13
+    gap = ce_result - sp13
     if tol is None:
         tol = max(Decimal("2"), abs(sp13) * Decimal("0.001"))
-    if abs(gap) <= tol:
-        return ce
+    if abs(gap) > tol:
+        result["_ce_sp_difference"] = gap
+        logger.warning(
+            f"[{label}] CE↔SP incoerente: utile CE {ce_result:,.2f}, sp13 {sp13:,.2f}, "
+            f"differenza {gap:,.2f}; nessuna voce CE/SP è stata modificata"
+        )
 
-    # ARBITER: when the document prints an explicit current Utile/Perdita, trust whichever of
-    # sp13 / utile_CE is CLOSER to it. This both (a) protects a correct sp13 from a garbage CE
-    # (a CE sign/parse bug can give utile_CE = millions — budget_402/413), and (b) catches the
-    # PRIOR-YEAR case (sp13 holds last year's result, CE holds the current one → declared
-    # confirms the CE → fix sp13). Overrides `prefer` only when a declared result exists.
     if declared:
-        decl = declared.get("utile")
-        if decl is None and declared.get("perdita") is not None:
-            decl = -_D(declared.get("perdita"))
-        if decl is not None:
-            decl = _D(decl)
-            prefer = "sp13" if abs(sp13 - decl) <= abs(ce_result - decl) else "ce"
-
-    if prefer == "ce":
-        # Trust the CE (current year); relabel the SP result. delta moves from sp13 to sp12,
-        # so PN total (and the balance) are unchanged.
-        delta = gap  # = utile_CE - sp13
-        sp12 = _D(bs.get("sp12_riserve", 0))
-        base = max(abs(_D(bs.get("totale_passivo", 0))), Decimal("1"))
-        if (sp12 - delta) >= Decimal("0") and abs(delta) <= Decimal("0.10") * base:
-            bs["sp12_riserve"] = sp12 - delta
-            bs["sp13_utile_perdita"] = ce_result
-            logger.warning(
-                f"[{label}] CE↔SP: sp13 allineato all'utile CE ({sp13:,.0f} -> {ce_result:,.0f}); "
-                f"differenza {delta:,.0f} (utile esercizio precedente?) spostata a riserve"
-            )
-            return ce  # CE unchanged; now sp13 == utile_CE
-        # else: reserves can't absorb it -> fall through and align the CE to sp13 instead
-
-    # prefer == "sp13" (or the IV-CEE fallback): align the CE to sp13 by plugging a CE line
-    if gap > 0:
-        ce["ce12_oneri_diversi"] = _D(ce.get("ce12_oneri_diversi", 0)) + gap
-    else:
-        ce["ce04_altri_ricavi"] = _D(ce.get("ce04_altri_ricavi", 0)) + (-gap)
-    ce["_ce_sp_plug"] = abs(gap)
-    return ce
+        declared_result = declared.get("utile")
+        if declared_result is None and declared.get("perdita") is not None:
+            declared_result = -_D(declared.get("perdita"))
+        if declared_result is not None:
+            result["_declared_result_difference_ce"] = ce_result - _D(declared_result)
+            result["_declared_result_difference_sp"] = sp13 - _D(declared_result)
+    return result
 
 
 # ---------------------------------------------------------------------------

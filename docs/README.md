@@ -6,9 +6,27 @@ Documentazione di progetto **aggiornata**. Gli artefatti storici/superati (desig
 
 ## Import bilanci (PDF / XBRL) — [`import/`](import/)
 
+### Regole di importazione — serie di riferimento (2026-07-16)
+
+Specifica tecnica completa, verificata riga per riga sul codice. **In caso di conflitto con gli
+altri documenti di questa cartella o con `CLAUDE.md`, vale questa serie** (i disallineamenti noti
+sono elencati nel §5 dell'indice).
+
 | Doc | Cosa copre |
 |-----|------------|
-| [IMPORT-OVERVIEW.md](import/IMPORT-OVERVIEW.md) | Panoramica autorevole dell'architettura di import: router, rotte, validatori, anti-masking, CLI |
+| [REGOLE-IMPORT-00-INDICE.md](import/REGOLE-IMPORT-00-INDICE.md) | Indice, principio "diagnosticare mai fabbricare", soglie chiave, **drift doc↔codice** |
+| [REGOLE-IMPORT-01-ROUTING.md](import/REGOLE-IMPORT-01-ROUTING.md) | Riconoscimento route: segnali, albero decisionale, scansione vs testo corrotto, gestionali |
+| [REGOLE-IMPORT-02-ESTRAZIONE.md](import/REGOLE-IMPORT-02-ESTRAZIONE.md) | Pipeline in fasi, deterministico vs LLM, scelta del candidato, XBRL, CSV, politica API |
+| [REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md](import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) | Ricostruzione righe, netting fondi, tipizzazione debiti, entro/oltre, i 15 divieti |
+| [REGOLE-IMPORT-04-QUADRATURE.md](import/REGOLE-IMPORT-04-QUADRATURE.md) | I 5 controlli, tolleranze, ordine dei messaggi di rifiuto, stati, Rettifiche |
+| [REGOLE-IMPORT-05-INFRANNUALE.md](import/REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward SP, gate del previsionale |
+| [REGOLE-IMPORT-06-PERSISTENZA.md](import/REGOLE-IMPORT-06-PERSISTENZA.md) | Round-trip lossless, campi DB, hash e versioni, atomicità |
+
+### Documenti di contesto e di progetto
+
+| Doc | Cosa copre |
+|-----|------------|
+| [IMPORT-OVERVIEW.md](import/IMPORT-OVERVIEW.md) | Panoramica architetturale: router, rotte, validatori, anti-masking, CLI ⚠️ ferma alle sessioni 2026-06-15/17 |
 | [IMPORT-ROUTING-TAXONOMY.md](import/IMPORT-ROUTING-TAXONOMY.md) | Tassonomia delle 4 rotte (A sintetico / B dettagliato / C verifica / OTHER) + `bilancio_classifier` |
 | [IMPORT-BALANCING-SCHEME.md](import/IMPORT-BALANCING-SCHEME.md) | Schema di quadratura L0→L5 + identità CE↔SP (`enforce_ce_sp_identity`) |
 | [IMPORT-QUADRATURA-ENGINE.md](import/IMPORT-QUADRATURA-ENGINE.md) | Motore IV-CEE condiviso (`iv_cee_hierarchy`) + anti-masking |

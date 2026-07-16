@@ -7,12 +7,14 @@ from decimal import Decimal
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 from datetime import datetime
+from dataclasses import dataclass
 from database.models import BalanceSheet, IncomeStatement, Company, FinancialYear
 from database.db import SessionLocal
 from config import SUPPORTED_TAXONOMIES, CSV_HTML_ENTITIES_TO_REPLACE
 import json
 import os
 import logging
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,57 @@ logger = logging.getLogger(__name__)
 class XBRLParseError(Exception):
     """Raised when XBRL parsing fails"""
     pass
+
+
+@dataclass(frozen=True)
+class XBRLPeriodKey:
+    """Identity of one coherent accounting period in an XBRL instance.
+
+    ``year`` alone is not a period identity: an instance may legitimately contain
+    both a full year and a nine-month statement ending in the same calendar year.
+    Entity and dimensions are part of the key so facts from different reporting
+    scopes can never be merged accidentally.
+    """
+
+    entity_scheme: str
+    entity_identifier: str
+    end_date: str
+    period_months: Optional[int]
+    start_date: str = ''
+    dimensions: Tuple[str, ...] = ()
+
+    @property
+    def year(self) -> int:
+        return int(self.end_date[:4])
+
+    @property
+    def is_full_year(self) -> bool:
+        return self.period_months in (None, 12)
+
+    @property
+    def label(self) -> str:
+        months = self.period_months or 12
+        return f"{self.year}-{months}M@{self.end_date}"
+
+    def sort_key(self) -> Tuple[str, str, str, int, str, Tuple[str, ...]]:
+        return (
+            self.entity_scheme,
+            self.entity_identifier,
+            self.end_date,
+            self.period_months or 12,
+            self.start_date,
+            self.dimensions,
+        )
+
+
+@dataclass(frozen=True)
+class _FactCandidate:
+    value: Decimal
+    context_ref: str
+    unit_ref: str
+    unit_signature: Tuple[str, ...]
+    context_kind: str
+    decimals: str
 
 
 class EnhancedXBRLParser:
@@ -222,55 +275,92 @@ class EnhancedXBRLParser:
 
         return SUPPORTED_TAXONOMIES[0]
 
+    @staticmethod
+    def _expanded_qname(value: str, element: etree._Element) -> str:
+        """Return a stable Clark-name for a QName stored in an attribute."""
+        if not value or ':' not in value:
+            return value or ''
+        prefix, local = value.split(':', 1)
+        namespace = element.nsmap.get(prefix)
+        return f'{{{namespace}}}{local}' if namespace else value
+
+    def _context_dimensions(self, ctx: etree._Element) -> Tuple[str, ...]:
+        dimensions = []
+        for node in ctx.iter():
+            try:
+                local = etree.QName(node).localname
+            except (TypeError, ValueError):
+                continue
+            if local == 'explicitMember':
+                dimension = self._expanded_qname(node.get('dimension', ''), node)
+                member = self._expanded_qname((node.text or '').strip(), node)
+                dimensions.append(f'{dimension}={member}')
+            elif local == 'typedMember':
+                dimension = self._expanded_qname(node.get('dimension', ''), node)
+                payload = ''.join(
+                    etree.tostring(child, method='c14n').decode('utf-8')
+                    for child in node
+                )
+                dimensions.append(f'{dimension}={payload}')
+        return tuple(sorted(dimensions))
+
     def extract_contexts(self, root: etree._Element) -> Dict[str, Dict]:
-        """Extract context information (periods) from XBRL"""
-        contexts = {}
+        """Extract complete context identities without collapsing them by year."""
+        contexts: Dict[str, Dict] = {}
 
-        context_elements = root.findall('.//xbrli:context', namespaces=self.XBRL_NAMESPACES)
-
-        for ctx in context_elements:
+        for ctx in root.findall('.//xbrli:context', namespaces=self.XBRL_NAMESPACES):
             ctx_id = ctx.get('id')
             if not ctx_id:
                 continue
 
-            period = ctx.find('.//xbrli:period', namespaces=self.XBRL_NAMESPACES)
+            identifier = ctx.find('.//xbrli:identifier', namespaces=self.XBRL_NAMESPACES)
+            entity_identifier = (identifier.text or '').strip() if identifier is not None else ''
+            entity_scheme = identifier.get('scheme', '') if identifier is not None else ''
+            period = ctx.find('./xbrli:period', namespaces=self.XBRL_NAMESPACES)
+            if period is None:
+                continue
 
-            if period is not None:
-                period_months = None
-                instant = period.find('.//xbrli:instant', namespaces=self.XBRL_NAMESPACES)
-                if instant is not None:
-                    date_str = instant.text
-                    try:
-                        date = datetime.strptime(date_str, '%Y-%m-%d')
-                        year = date.year
-                    except:
-                        year = None
-                else:
-                    start_date_el = period.find('.//xbrli:startDate', namespaces=self.XBRL_NAMESPACES)
-                    end_date = period.find('.//xbrli:endDate', namespaces=self.XBRL_NAMESPACES)
-                    if end_date is not None:
-                        date_str = end_date.text
-                        try:
-                            date = datetime.strptime(date_str, '%Y-%m-%d')
-                            year = date.year
-                            # Detect period_months from startDate..endDate
-                            if start_date_el is not None:
-                                start = datetime.strptime(start_date_el.text, '%Y-%m-%d')
-                                # Calculate months: Jan 1 to Jun 30 = 6 months, Jan 1 to Dec 31 = 12
-                                months = (date.year - start.year) * 12 + (date.month - start.month + 1)
-                                if months >= 1 and months <= 11:
-                                    period_months = months
-                        except:
-                            year = None
-                    else:
-                        year = None
+            instant = period.find('./xbrli:instant', namespaces=self.XBRL_NAMESPACES)
+            start_el = period.find('./xbrli:startDate', namespaces=self.XBRL_NAMESPACES)
+            end_el = period.find('./xbrli:endDate', namespaces=self.XBRL_NAMESPACES)
+            forever = period.find('./xbrli:forever', namespaces=self.XBRL_NAMESPACES)
+            if forever is not None:
+                continue
 
-                contexts[ctx_id] = {
-                    'id': ctx_id,
-                    'year': year,
-                    'date': date_str if 'date_str' in locals() else None,
-                    'period_months': period_months,
-                }
+            kind = 'instant' if instant is not None else 'duration'
+            start_date = (start_el.text or '').strip() if start_el is not None else ''
+            end_date = (
+                (instant.text or '').strip() if instant is not None
+                else (end_el.text or '').strip() if end_el is not None else ''
+            )
+            try:
+                end = datetime.strptime(end_date, '%Y-%m-%d')
+                year = end.year
+            except (TypeError, ValueError):
+                continue
+
+            period_months = None
+            if kind == 'duration' and start_date:
+                try:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    months = (end.year - start.year) * 12 + end.month - start.month + 1
+                    if 1 <= months <= 12:
+                        period_months = months
+                except ValueError:
+                    pass
+
+            contexts[ctx_id] = {
+                'id': ctx_id,
+                'year': year,
+                'date': end_date,
+                'end_date': end_date,
+                'start_date': start_date,
+                'period_months': period_months,
+                'kind': kind,
+                'entity_identifier': entity_identifier,
+                'entity_scheme': entity_scheme,
+                'dimensions': self._context_dimensions(ctx),
+            }
 
         return contexts
 
@@ -319,35 +409,205 @@ class EnhancedXBRLParser:
 
         return entity_info
 
-    def extract_facts(self, root: etree._Element, contexts: Dict[str, Dict]) -> Dict[int, Dict[str, Decimal]]:
-        """Extract financial facts from XBRL"""
-        facts_by_year = {}
+    def _extract_units(self, root: etree._Element) -> Dict[str, Tuple[str, ...]]:
+        units: Dict[str, Tuple[str, ...]] = {}
+        for unit in root.findall('.//xbrli:unit', namespaces=self.XBRL_NAMESPACES):
+            unit_id = unit.get('id')
+            if not unit_id:
+                continue
+            measures = []
+            for measure in unit.findall('.//xbrli:measure', namespaces=self.XBRL_NAMESPACES):
+                measures.append(self._expanded_qname((measure.text or '').strip(), measure))
+            units[unit_id] = tuple(sorted(measures))
+        return units
 
+    @staticmethod
+    def _unit_rank(signature: Tuple[str, ...]) -> int:
+        local_measures = {m.rsplit('}', 1)[-1].upper() for m in signature}
+        if 'EUR' in local_measures:
+            return 0
+        if not signature:
+            return 1
+        if 'PURE' in local_measures:
+            return 2
+        return 3
+
+    @staticmethod
+    def _precision_rank(decimals: str) -> int:
+        if (decimals or '').upper() == 'INF':
+            return -10_000
+        try:
+            return -int(decimals)
+        except (TypeError, ValueError):
+            return 10_000
+
+    def _statement_kind_for_tag(self, full_tag: str) -> Optional[str]:
+        local = etree.QName(full_tag).localname if full_tag.startswith('{') else full_tag.split(':')[-1]
+        bs_locals = {
+            tag.split(':')[-1] for tag in self.bs_mapping_v1
+        }
+        inc_locals = {
+            tag.split(':')[-1] for tag in self.inc_mapping_v1
+        }
+        for config in self.bs_mapping_v2.values():
+            if isinstance(config, dict):
+                bs_locals.update(
+                    str(value).split(':')[-1]
+                    for key, value in config.items()
+                    if key.startswith('priority_')
+                )
+        for config in self.inc_mapping_v2.values():
+            if isinstance(config, dict):
+                inc_locals.update(
+                    str(value).split(':')[-1]
+                    for key, value in config.items()
+                    if key.startswith('priority_')
+                )
+        if local in bs_locals or local in self.AGGREGATE_TAGS:
+            return 'instant'
+        if local in inc_locals:
+            return 'duration'
+        return None
+
+    def _select_fact_candidate(
+        self, full_tag: str, candidates: List[_FactCandidate], period: XBRLPeriodKey
+    ) -> _FactCandidate:
+        expected_kind = self._statement_kind_for_tag(full_tag)
+
+        def rank(candidate: _FactCandidate) -> Tuple[int, int, int, str, str]:
+            kind_rank = 0 if not expected_kind or candidate.context_kind == expected_kind else 1
+            return (
+                self._unit_rank(candidate.unit_signature),
+                kind_rank,
+                self._precision_rank(candidate.decimals),
+                candidate.context_ref,
+                candidate.unit_ref,
+            )
+
+        selected = min(candidates, key=rank)
+        distinct_values = {candidate.value for candidate in candidates}
+        if len(distinct_values) > 1:
+            local = etree.QName(full_tag).localname if full_tag.startswith('{') else full_tag
+            warning = (
+                f"[{period.label}] fact XBRL duplicato {local}: selezionato "
+                f"{selected.value} ({selected.context_ref}/{selected.unit_ref}); "
+                f"scartati {len(candidates) - 1} candidati incompatibili"
+            )
+            self._fact_selection_warnings.append(warning)
+            logger.warning(warning)
+        return selected
+
+    def extract_facts(
+        self, root: etree._Element, contexts: Dict[str, Dict]
+    ) -> Dict[XBRLPeriodKey, Dict[str, Decimal]]:
+        """Extract facts by coherent entity/dimension/period cohorts.
+
+        Instant contexts are attached to duration cohorts with the same entity,
+        dimensions and end date.  This joins the SP at period end to the matching CE
+        duration while keeping annual and interim statements in separate buckets.
+        """
+        self._fact_selection_warnings: List[str] = []
+        units = self._extract_units(root)
+
+        numeric_elements = []
+        context_fact_counts: Dict[str, int] = {}
         for elem in root.iter():
             context_ref = elem.get('contextRef')
-            if not context_ref or context_ref not in contexts:
+            if not context_ref or context_ref not in contexts or not elem.text:
+                continue
+            try:
+                value = Decimal(self.clean_xbrl_text(elem.text).replace(',', '.'))
+            except Exception:
+                continue
+            numeric_elements.append((elem, context_ref, value))
+            context_fact_counts[context_ref] = context_fact_counts.get(context_ref, 0) + 1
+
+        if not numeric_elements:
+            return {}
+
+        # One import must have one reporting entity and one dimensional scope.  Prefer
+        # the dimensionless primary statement; otherwise choose the most populated
+        # scope, with lexical ties for order independence.
+        entity_counts: Dict[Tuple[str, str], int] = {}
+        for context_ref, count in context_fact_counts.items():
+            ctx = contexts[context_ref]
+            entity = (ctx['entity_scheme'], ctx['entity_identifier'])
+            entity_counts[entity] = entity_counts.get(entity, 0) + count
+        primary_entity = min(entity_counts, key=lambda key: (-entity_counts[key], key))
+
+        dimension_counts: Dict[Tuple[str, ...], int] = {}
+        for context_ref, count in context_fact_counts.items():
+            ctx = contexts[context_ref]
+            if (ctx['entity_scheme'], ctx['entity_identifier']) != primary_entity:
+                continue
+            dims = ctx['dimensions']
+            dimension_counts[dims] = dimension_counts.get(dims, 0) + count
+        primary_dimensions = (
+            () if () in dimension_counts
+            else min(dimension_counts, key=lambda key: (-dimension_counts[key], key))
+        )
+
+        duration_keys: Dict[str, XBRLPeriodKey] = {}
+        for context_ref, ctx in contexts.items():
+            if ctx['kind'] != 'duration':
+                continue
+            if (ctx['entity_scheme'], ctx['entity_identifier']) != primary_entity:
+                continue
+            if ctx['dimensions'] != primary_dimensions:
+                continue
+            duration_keys[context_ref] = XBRLPeriodKey(
+                entity_scheme=ctx['entity_scheme'],
+                entity_identifier=ctx['entity_identifier'],
+                end_date=ctx['end_date'],
+                period_months=ctx['period_months'],
+                start_date=ctx['start_date'],
+                dimensions=ctx['dimensions'],
+            )
+
+        candidates: Dict[Tuple[XBRLPeriodKey, str], List[_FactCandidate]] = {}
+        for elem, context_ref, value in numeric_elements:
+            ctx = contexts[context_ref]
+            if (ctx['entity_scheme'], ctx['entity_identifier']) != primary_entity:
+                continue
+            if ctx['dimensions'] != primary_dimensions:
                 continue
 
-            year = contexts[context_ref]['year']
-            if not year:
-                continue
+            if ctx['kind'] == 'duration':
+                period_keys = [duration_keys[context_ref]]
+            else:
+                period_keys = [
+                    key for key in duration_keys.values()
+                    if key.end_date == ctx['end_date']
+                ]
+                if not period_keys:
+                    period_keys = [XBRLPeriodKey(
+                        entity_scheme=ctx['entity_scheme'],
+                        entity_identifier=ctx['entity_identifier'],
+                        end_date=ctx['end_date'],
+                        period_months=None,
+                        dimensions=ctx['dimensions'],
+                    )]
 
-            if year not in facts_by_year:
-                facts_by_year[year] = {}
+            unit_ref = elem.get('unitRef', '')
+            candidate = _FactCandidate(
+                value=value,
+                context_ref=context_ref,
+                unit_ref=unit_ref,
+                unit_signature=units.get(unit_ref, ()),
+                context_kind=ctx['kind'],
+                decimals=elem.get('decimals', ''),
+            )
+            for period_key in period_keys:
+                candidates.setdefault((period_key, elem.tag), []).append(candidate)
 
-            tag = etree.QName(elem).localname
-            full_tag = elem.tag
+        facts_by_period: Dict[XBRLPeriodKey, Dict[str, Decimal]] = {}
+        for (period_key, full_tag), fact_candidates in sorted(
+            candidates.items(), key=lambda item: (item[0][0].sort_key(), str(item[0][1]))
+        ):
+            selected = self._select_fact_candidate(full_tag, fact_candidates, period_key)
+            facts_by_period.setdefault(period_key, {})[full_tag] = selected.value
 
-            value_text = elem.text
-            if value_text:
-                try:
-                    cleaned = self.clean_xbrl_text(value_text)
-                    value = Decimal(cleaned.replace(',', '.'))
-                    facts_by_year[year][full_tag] = value
-                except:
-                    continue
-
-        return facts_by_year
+        return facts_by_period
 
     def _extract_value_by_priority(
         self,
@@ -472,7 +732,11 @@ class EnhancedXBRLParser:
             'unmapped_tags': [],
             'aggregate_totals': {},
             'reconciliation_adjustments': {},
-            'priority_matches': {}
+            'priority_matches': {},
+            'derived_aggregates': {},
+            'source_derivations': {},
+            'aggregate_conflicts': {},
+            'missing_breakdowns': {},
         }
 
         # First pass: Extract aggregate totals for reconciliation
@@ -641,13 +905,138 @@ class EnhancedXBRLParser:
                     'value': float(value)
                 })
 
-        # Third pass: Sum detail fields into aggregates when aggregate is missing
-        # Many XBRL files provide only detail-level Entro/Oltre tags (e.g.
-        # DebitiDebitiVersoBancheEsigibiliEntroEsercizioSuccessivo) without the
-        # aggregate tags (e.g. DebitiEsigibiliEntroEsercizioSuccessivo).
-        # Without this step, sp06/sp07/sp16/sp17 stay at 0 and reconciliation
-        # incorrectly dumps the grand total into the short-term aggregate.
+        # Resolve maturity aggregates only from a closed, source-backed identity.
+        # Some XBRL producers publish C.II/D totals plus one maturity subtotal and
+        # all typed details, while their generic "detail_tags" subtotal omits one
+        # taxonomy variant.  In that case the missing maturity amount is
+        # mathematically determined by published total - published other maturity,
+        # and is corroborated by the typed rows.  This is not a balance plug: both
+        # operands and the corroborating detail live in the instance.
+        def _derive_maturity_pair(total_key, short_field, long_field, short_details, long_details):
+            if total_key not in aggregates:
+                return
+            published = aggregates[total_key]
+            short_value = bs_data.get(short_field, Decimal('0'))
+            long_value = bs_data.get(long_field, Decimal('0'))
+            if abs((short_value + long_value) - published) <= Decimal('0.01'):
+                return
+            short_detail = sum(bs_data.get(field, Decimal('0')) for field in short_details)
+            long_detail = sum(bs_data.get(field, Decimal('0')) for field in long_details)
+            rounding_tol = max(Decimal('1'), abs(published) * Decimal('0.000001'))
+
+            candidates = []
+            # A published maturity subtotal can exclude one separately printed
+            # debtor/creditor row (most often deferred-tax receivables).  When the
+            # exact grand-total residual is independently present in the typed
+            # short/long details, add it to that maturity bucket.  This recovers the
+            # source identity used by budget_041/399/421/431 without treating the
+            # balance-sheet gap itself as evidence.
+            residual = published - short_value - long_value
+            if residual != 0:
+                if short_detail != 0 and abs(residual - short_detail) <= rounding_tol:
+                    candidates.append(
+                        (short_field, short_value + residual, long_field, long_value)
+                    )
+                if long_detail != 0 and abs(residual - long_detail) <= rounding_tol:
+                    candidates.append(
+                        (long_field, long_value + residual, short_field, short_value)
+                    )
+            implied_short = published - long_value
+            if short_detail != 0 and abs(implied_short - short_detail) <= rounding_tol:
+                candidates.append((short_field, implied_short, long_field, long_value))
+            implied_long = published - short_value
+            if long_detail != 0 and abs(implied_long - long_detail) <= rounding_tol:
+                candidates.append((long_field, implied_long, short_field, short_value))
+
+            # If neither mapped maturity subtotal is trustworthy but the complete
+            # typed rows close to the published total, retain the long typed amount
+            # and derive the short amount.  Maturity is still fully source-backed.
+            if not candidates and short_detail != 0 and long_detail != 0:
+                if abs((short_detail + long_detail) - published) <= rounding_tol:
+                    candidates.append(
+                        (short_field, published - long_detail, long_field, long_detail)
+                    )
+            if not candidates:
+                return
+
+            # The source identity must also improve the independent SP invariant.
+            # This rejects comparative/tag variants whose apparent "Totale" belongs
+            # to a different presentation scope.  Quadratura is only a validation
+            # gate here: every candidate amount was already determined above from
+            # explicit source facts.
+            from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+
+            def _gap(values):
+                return (
+                    sum(values.get(field, Decimal('0')) for field in _ATTIVO_FIELDS)
+                    - sum(values.get(field, Decimal('0')) for field in _PASSIVO_FIELDS)
+                )
+
+            before_gap = abs(_gap(bs_data))
+            improving = []
+            for candidate in candidates:
+                target, value, retained_field, retained_value = candidate
+                trial = dict(bs_data)
+                trial[target] = value
+                trial[retained_field] = retained_value
+                after_gap = abs(_gap(trial))
+                if after_gap + Decimal('0.01') < before_gap:
+                    improving.append((after_gap, candidate))
+            if not improving:
+                return
+
+            _, (target, value, retained_field, retained_value) = min(
+                improving,
+                key=lambda item: (
+                    item[0],
+                    abs(bs_data.get(item[1][0], Decimal('0')) - item[1][1]),
+                    item[1][0],
+                ),
+            )
+            bs_data[target] = value
+            bs_data[retained_field] = retained_value
+            reconciliation_info['source_derivations'][target] = {
+                'formula': f"{total_key} - {retained_field}",
+                'published_total': float(published),
+                'retained_amount': float(retained_value),
+                'derived_amount': float(value),
+            }
+
+        _derive_maturity_pair(
+            'total_crediti', 'sp06_crediti_breve', 'sp07_crediti_lungo',
+            tuple(fields[0] for fields in self.CREDIT_FIELDS.values()),
+            tuple(fields[1] for fields in self.CREDIT_FIELDS.values()),
+        )
+        _derive_maturity_pair(
+            'total_debiti', 'sp16_debiti_breve', 'sp17_debiti_lungo',
+            tuple(fields[0] for fields in self.CREDITOR_FIELDS.values()),
+            tuple(fields[1] for fields in self.CREDITOR_FIELDS.values()),
+        )
+
+        # Third pass: derive an aggregate only when the source did not publish it.
+        # Never alter a published aggregate and never scale/invent detail buckets.
         DETAIL_TO_AGGREGATE = {
+            'sp01_crediti_soci': [
+                'sp01a_parte_richiamata', 'sp01b_parte_da_richiamare',
+            ],
+            'sp02_immob_immateriali': [
+                'sp02a_costi_impianto', 'sp02b_costi_sviluppo', 'sp02c_brevetti',
+                'sp02d_concessioni', 'sp02e_avviamento', 'sp02f_immob_in_corso',
+                'sp02g_altre_immob_imm',
+            ],
+            'sp03_immob_materiali': [
+                'sp03a_terreni_fabbricati', 'sp03b_impianti_macchinari',
+                'sp03c_attrezzature', 'sp03d_altri_beni', 'sp03e_immob_in_corso',
+            ],
+            'sp04_immob_finanziarie': [
+                'sp04a_partecipazioni', 'sp04b_crediti_immob_breve',
+                'sp04c_crediti_immob_lungo', 'sp04d_altri_titoli',
+                'sp04e_strumenti_derivati_attivi',
+            ],
+            'sp05_rimanenze': [
+                'sp05a_materie_prime', 'sp05b_prodotti_in_corso',
+                'sp05c_lavori_in_corso', 'sp05d_prodotti_finiti', 'sp05e_acconti',
+            ],
             'sp06_crediti_breve': [
                 'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
                 'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
@@ -672,142 +1061,118 @@ class EnhancedXBRLParser:
                 'sp17e_debiti_tributari_lungo', 'sp17f_debiti_previdenza_lungo',
                 'sp17g_altri_debiti_lungo',
             ],
+            'sp12_riserve': [
+                'sp12a_riserva_sovrapprezzo', 'sp12b_riserve_rivalutazione',
+                'sp12c_riserva_legale', 'sp12d_riserve_statutarie',
+                'sp12e_altre_riserve', 'sp12f_riserva_copertura_flussi',
+                'sp12g_utili_perdite_portati', 'sp12h_riserva_neg_azioni_proprie',
+            ],
+            'sp14_fondi_rischi': [
+                'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
+                'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
+            ],
         }
         for agg_field, detail_fields in DETAIL_TO_AGGREGATE.items():
-            if bs_data.get(agg_field, Decimal('0')) == Decimal('0'):
-                detail_sum = sum(bs_data.get(f, Decimal('0')) for f in detail_fields)
+            detail_sum = sum(bs_data.get(f, Decimal('0')) for f in detail_fields)
+            if agg_field not in bs_data:
                 if detail_sum != Decimal('0'):
                     bs_data[agg_field] = detail_sum
-
-        # 3b: Fill per-creditor debt breakdown from "Totale*" fallback tags.
-        # Runs when the per-creditor Entro/Oltre tags are missing from the XBRL
-        # (typical for COMPARATIVE years in Wolters Kluwer bilanci — the full
-        # detail only gets republished for the current year). Uses the
-        # "DebitiDebitiVerso*Totale*" tags collected in the first pass to seed
-        # sp16x_breve, then redistributes the overall sp17 aggregate into sp17x
-        # (banche priority by default — Italian SMEs usually hold mutuos there).
-        sp16_agg = bs_data.get('sp16_debiti_breve', Decimal('0'))
-        sp17_agg = bs_data.get('sp17_debiti_lungo', Decimal('0'))
-        entro_detail_sum = sum(bs_data.get(f, Decimal('0'))
-                               for (f, _) in self.CREDITOR_FIELDS.values())
-        oltre_detail_sum = sum(bs_data.get(f, Decimal('0'))
-                               for (_, f) in self.CREDITOR_FIELDS.values())
-
-        if creditor_totals and entro_detail_sum == Decimal('0') and oltre_detail_sum == Decimal('0') \
-                and (sp16_agg + sp17_agg) > Decimal('0'):
-            # Seed sp16x with each creditor's total (treat as short-term initially).
-            for bucket, total in creditor_totals.items():
-                if total == Decimal('0'):
-                    continue
-                breve_field, _ = self.CREDITOR_FIELDS[bucket]
-                bs_data[breve_field] = bs_data.get(breve_field, Decimal('0')) + total
-
-            # Move the overall oltre aggregate into sp17a (banche lungo) by default,
-            # spilling to other groups in priority order if banche has less than sp17.
-            priority = ['banche', 'altri_finanz', 'obbligazioni', 'fornitori', 'altri', 'tributari', 'previdenza']
-            remaining_oltre = sp17_agg
-            for bucket in priority:
-                if remaining_oltre <= Decimal('0'):
-                    break
-                breve_field, lungo_field = self.CREDITOR_FIELDS[bucket]
-                available = bs_data.get(breve_field, Decimal('0'))
-                if available <= Decimal('0'):
-                    continue
-                move = min(available, remaining_oltre)
-                bs_data[breve_field] = available - move
-                bs_data[lungo_field] = bs_data.get(lungo_field, Decimal('0')) + move
-                remaining_oltre -= move
-
-            reconciliation_info['reconciliation_adjustments']['debt_creditor_fallback'] = {
-                'source': 'per-creditor Totale* tags (no entro/oltre detail in XBRL)',
-                'sp17_distributed': float(sp17_agg - remaining_oltre),
-                'sp17_unallocated': float(remaining_oltre),
-            }
-
-        # 3c: Same fallback for C.II Crediti — seed sp06x_breve from per-debtor
-        # Totale tags, then redistribute the overall sp07 aggregate into sp07x
-        # (clienti priority by default, since long-term receivables most often
-        # sit under Verso clienti).
-        sp06_agg = bs_data.get('sp06_crediti_breve', Decimal('0'))
-        sp07_agg = bs_data.get('sp07_crediti_lungo', Decimal('0'))
-        cr_entro_detail_sum = sum(bs_data.get(f, Decimal('0'))
-                                  for (f, _) in self.CREDIT_FIELDS.values())
-        cr_oltre_detail_sum = sum(bs_data.get(f, Decimal('0'))
-                                  for (_, f) in self.CREDIT_FIELDS.values())
-
-        if credit_totals and cr_entro_detail_sum == Decimal('0') and cr_oltre_detail_sum == Decimal('0') \
-                and (sp06_agg + sp07_agg) > Decimal('0'):
-            # Seed sp06x with each debtor's total (treat as short-term initially).
-            for bucket, total in credit_totals.items():
-                if total == Decimal('0'):
-                    continue
-                breve_field, _ = self.CREDIT_FIELDS[bucket]
-                bs_data[breve_field] = bs_data.get(breve_field, Decimal('0')) + total
-
-            # Move the overall oltre aggregate into sp07a (clienti lungo) by default,
-            # spilling to other groups in priority order when clienti total is smaller.
-            priority = ['clienti', 'altri', 'tributari', 'imposte_anticipate',
-                        'controllate', 'collegate', 'controllanti']
-            remaining_oltre = sp07_agg
-            for bucket in priority:
-                if remaining_oltre <= Decimal('0'):
-                    break
-                breve_field, lungo_field = self.CREDIT_FIELDS[bucket]
-                available = bs_data.get(breve_field, Decimal('0'))
-                if available <= Decimal('0'):
-                    continue
-                move = min(available, remaining_oltre)
-                bs_data[breve_field] = available - move
-                bs_data[lungo_field] = bs_data.get(lungo_field, Decimal('0')) + move
-                remaining_oltre -= move
-
-            reconciliation_info['reconciliation_adjustments']['credit_debtor_fallback'] = {
-                'source': 'per-debtor Totale* tags (no entro/oltre detail in XBRL)',
-                'sp07_distributed': float(sp07_agg - remaining_oltre),
-                'sp07_unallocated': float(remaining_oltre),
-            }
-
-        # Fourth pass: Reconciliation
-        # Reconcile credits if we have TotaleCrediti
-        if 'total_crediti' in aggregates:
-            total_crediti_xbrl = aggregates['total_crediti']
-
-            # Sum all credit fields we imported
-            imported_crediti = (
-                bs_data.get('sp06_crediti_breve', Decimal('0')) +
-                bs_data.get('sp07_crediti_lungo', Decimal('0'))
-            )
-
-            diff_crediti = total_crediti_xbrl - imported_crediti
-
-            if abs(diff_crediti) > Decimal('0.01'):
-                # Add difference to short-term credits (catch-all)
-                bs_data['sp06_crediti_breve'] = bs_data.get('sp06_crediti_breve', Decimal('0')) + diff_crediti
-                reconciliation_info['reconciliation_adjustments']['crediti'] = {
-                    'xbrl_total': float(total_crediti_xbrl),
-                    'imported_sum': float(imported_crediti),
-                    'adjustment': float(diff_crediti),
-                    'applied_to': 'sp06_crediti_breve'
+                    reconciliation_info['derived_aggregates'][agg_field] = float(detail_sum)
+                continue
+            aggregate_value = bs_data[agg_field]
+            if detail_sum == Decimal('0') and aggregate_value != Decimal('0'):
+                reconciliation_info['missing_breakdowns'][agg_field] = {
+                    'aggregate': float(aggregate_value),
+                    'detail_sum': 0.0,
+                }
+            elif abs(aggregate_value - detail_sum) > Decimal('0.01'):
+                reconciliation_info['aggregate_conflicts'][agg_field] = {
+                    'aggregate': float(aggregate_value),
+                    'detail_sum': float(detail_sum),
+                    'difference': float(aggregate_value - detail_sum),
                 }
 
-        # Reconcile debts if we have TotaleDebiti
-        if 'total_debiti' in aggregates:
-            total_debiti_xbrl = aggregates['total_debiti']
+        for agg_field, detail_fields in {
+            'ce08_costi_personale': [
+                'ce08a_tfr_accrual', 'ce08b_salari_stipendi',
+                'ce08c_oneri_sociali', 'ce08d_altri_costi_personale',
+            ],
+            'ce09_ammortamenti': [
+                'ce09a_ammort_immateriali', 'ce09b_ammort_materiali',
+                'ce09c_svalutazioni', 'ce09d_svalutazione_crediti',
+            ],
+        }.items():
+            detail_sum = sum(inc_data.get(f, Decimal('0')) for f in detail_fields)
+            if agg_field not in inc_data:
+                if detail_sum != Decimal('0'):
+                    inc_data[agg_field] = detail_sum
+                    reconciliation_info['derived_aggregates'][agg_field] = float(detail_sum)
+                continue
+            aggregate_value = inc_data[agg_field]
+            if detail_sum == Decimal('0') and aggregate_value != Decimal('0'):
+                reconciliation_info['missing_breakdowns'][agg_field] = {
+                    'aggregate': float(aggregate_value),
+                    'detail_sum': 0.0,
+                }
+            elif abs(aggregate_value - detail_sum) > Decimal('0.01'):
+                reconciliation_info['aggregate_conflicts'][agg_field] = {
+                    'aggregate': float(aggregate_value),
+                    'detail_sum': float(detail_sum),
+                    'difference': float(aggregate_value - detail_sum),
+                }
 
-            imported_debiti = (
-                bs_data.get('sp16_debiti_breve', Decimal('0')) +
-                bs_data.get('sp17_debiti_lungo', Decimal('0'))
-            )
+        ce17_detail = (
+            inc_data.get('ce17a_rivalutazioni', Decimal('0'))
+            - inc_data.get('ce17b_svalutazioni', Decimal('0'))
+        )
+        if 'ce17_rettifiche_attivita_fin' not in inc_data and ce17_detail != Decimal('0'):
+            inc_data['ce17_rettifiche_attivita_fin'] = ce17_detail
+            reconciliation_info['derived_aggregates']['ce17_rettifiche_attivita_fin'] = float(ce17_detail)
+        elif 'ce17_rettifiche_attivita_fin' in inc_data and abs(
+            inc_data['ce17_rettifiche_attivita_fin'] - ce17_detail
+        ) > Decimal('0.01'):
+            reconciliation_info['aggregate_conflicts']['ce17_rettifiche_attivita_fin'] = {
+                'aggregate': float(inc_data['ce17_rettifiche_attivita_fin']),
+                'detail_sum': float(ce17_detail),
+                'difference': float(inc_data['ce17_rettifiche_attivita_fin'] - ce17_detail),
+            }
 
-            diff_debiti = total_debiti_xbrl - imported_debiti
+        # Per-counterparty totals without maturity detail are retained as evidence
+        # only.  Allocating them to short/long buckets would create facts not present
+        # in the instance.
+        for bucket, total in creditor_totals.items():
+            breve_field, lungo_field = self.CREDITOR_FIELDS[bucket]
+            typed_sum = bs_data.get(breve_field, Decimal('0')) + bs_data.get(lungo_field, Decimal('0'))
+            if abs(total - typed_sum) > Decimal('0.01'):
+                reconciliation_info['aggregate_conflicts'][f'debiti_{bucket}'] = {
+                    'aggregate': float(total),
+                    'detail_sum': float(typed_sum),
+                    'difference': float(total - typed_sum),
+                }
+        for bucket, total in credit_totals.items():
+            breve_field, lungo_field = self.CREDIT_FIELDS[bucket]
+            typed_sum = bs_data.get(breve_field, Decimal('0')) + bs_data.get(lungo_field, Decimal('0'))
+            if abs(total - typed_sum) > Decimal('0.01'):
+                reconciliation_info['aggregate_conflicts'][f'crediti_{bucket}'] = {
+                    'aggregate': float(total),
+                    'detail_sum': float(typed_sum),
+                    'difference': float(total - typed_sum),
+                }
 
-            if abs(diff_debiti) > Decimal('0.01'):
-                bs_data['sp16_debiti_breve'] = bs_data.get('sp16_debiti_breve', Decimal('0')) + diff_debiti
-                reconciliation_info['reconciliation_adjustments']['debiti'] = {
-                    'xbrl_total': float(total_debiti_xbrl),
-                    'imported_sum': float(imported_debiti),
-                    'adjustment': float(diff_debiti),
-                    'applied_to': 'sp16_debiti_breve'
+        # Grand totals are controls, not destinations for a balancing difference.
+        for aggregate_key, fields in {
+            'total_crediti': ('sp06_crediti_breve', 'sp07_crediti_lungo'),
+            'total_debiti': ('sp16_debiti_breve', 'sp17_debiti_lungo'),
+        }.items():
+            if aggregate_key not in aggregates:
+                continue
+            published = aggregates[aggregate_key]
+            mapped = sum(bs_data.get(field, Decimal('0')) for field in fields)
+            if abs(published - mapped) > Decimal('0.01'):
+                reconciliation_info['aggregate_conflicts'][aggregate_key] = {
+                    'aggregate': float(published),
+                    'detail_sum': float(mapped),
+                    'difference': float(published - mapped),
                 }
 
         return bs_data, inc_data, reconciliation_info
@@ -856,8 +1221,7 @@ class EnhancedXBRLParser:
                         user_id=user_id,
                     )
                     self.db.add(company)
-                    self.db.commit()
-                    self.db.refresh(company)
+                    self.db.flush()
                     company_id = company.id
                     company_created = True
             else:
@@ -869,62 +1233,67 @@ class EnhancedXBRLParser:
             if user_id and company.user_id != user_id:
                 raise XBRLParseError(f"Company with ID {company_id} not found")
 
-        facts_by_year = self.extract_facts(root, contexts)
+        facts_by_period = self.extract_facts(root, contexts)
 
-        if not facts_by_year:
+        if not facts_by_period:
             raise XBRLParseError("No financial facts found in XBRL file")
 
-        # Detect period_months per year from duration contexts
-        year_period_months = {}
-        for ctx in contexts.values():
-            yr = ctx.get('year')
-            pm = ctx.get('period_months')
-            if yr and pm:
-                # Keep the period_months (partial year detected)
-                year_period_months[yr] = pm
+        periods = sorted(
+            facts_by_period,
+            key=lambda key: (key.end_date, key.period_months or 12, key.start_date),
+            reverse=True,
+        )
+        year_period_months = {
+            key.year: key.period_months
+            for key in periods if key.period_months and key.period_months < 12
+        }
+        logger.info(
+            "[XBRL] Periods detected: %s",
+            [key.label for key in periods],
+        )
 
-        logger.info(f"[XBRL] Auto-detected period_months: {year_period_months}")
-
-        years = sorted(facts_by_year.keys(), reverse=True)
         imported_years = []
+        imported_periods = []
         financial_year_ids = []
         all_reconciliation_info = {}
-        quadratura_warnings = []  # user-visible, non-blocking (per-year, "[year] msg")
+        quadratura_warnings = list(getattr(self, '_fact_selection_warnings', []))
+        source_sha256 = hashlib.sha256(Path(file_path).read_bytes()).hexdigest()
+        bs_columns = {column.name for column in BalanceSheet.__table__.columns}
+        inc_columns = {column.name for column in IncomeStatement.__table__.columns}
 
-        # Apply user-specified period_months to the most recent year if not auto-detected
-        if period_months and period_months < 12:
-            most_recent = years[0]
-            if most_recent not in year_period_months:
-                year_period_months[most_recent] = period_months
-                logger.info(f"[XBRL] User override: year {most_recent} → period_months={period_months}")
-
-        for year in years:
-            detected_pm = year_period_months.get(year)  # None = full year, 1-11 = partial
+        for index, period_key in enumerate(periods):
+            year = period_key.year
+            detected_pm = period_key.period_months
+            if detected_pm == 12:
+                detected_pm = None
+            # A manual period is only a fallback for an instant-only instance.  It
+            # must never relabel an explicit annual duration as an interim period.
+            if (
+                index == 0 and period_months and period_months < 12
+                and period_key.period_months is None
+            ):
+                detected_pm = period_months
 
             if detected_pm:
-                # Partial year: match existing partial record or create new one.
-                # period_months == 12 is a FULL year by convention (see CLAUDE.md
-                # "NULL or 12") — exclude it, or an incoming partial import would
-                # overwrite a historical full-year record saved with 12.
+                # Match the exact interim duration.  A 6M import must not overwrite
+                # an existing 9M statement from the same calendar year.
                 fy = self.db.query(FinancialYear).filter(
                     FinancialYear.company_id == company_id,
                     FinancialYear.year == year,
-                    FinancialYear.period_months.isnot(None),
-                    FinancialYear.period_months != 12,
+                    FinancialYear.period_months == detected_pm,
                 ).first()
 
                 if not fy:
                     fy = FinancialYear(company_id=company_id, year=year, period_months=detected_pm)
                     self.db.add(fy)
                     self.db.flush()
-                else:
-                    fy.period_months = detected_pm
             else:
                 # Full year: match existing full-year record
                 fy = self.db.query(FinancialYear).filter(
                     FinancialYear.company_id == company_id,
                     FinancialYear.year == year,
-                    FinancialYear.period_months.is_(None),
+                    (FinancialYear.period_months.is_(None)) |
+                    (FinancialYear.period_months == 12),
                 ).first()
 
                 if not fy:
@@ -932,36 +1301,61 @@ class EnhancedXBRLParser:
                     self.db.add(fy)
                     self.db.flush()
 
-            # Map facts with reconciliation
+            # Map facts, but do not reconcile by changing accounting values.
             bs_data, inc_data, reconciliation_info = self.map_facts_to_fields_with_reconciliation(
-                facts_by_year[year]
+                facts_by_period[period_key]
             )
 
-            # GENERAL rule (same as the PDF routes): enforce the CE↔SP identity
-            # utile_CE == sp13 so the app's "Verifica CE ↔ SP" passes on XBRL imports too.
-            # sp13 comes from a dedicated XBRL tag (authoritative), so prefer="sp13" and align
-            # the CE to it (plug a CE line). No-op when already consistent.
-            try:
-                from importers.iv_cee_hierarchy import enforce_ce_sp_identity
-                inc_data = enforce_ce_sp_identity(bs_data, inc_data, f"xbrl-{year}", prefer="sp13")
-            except Exception as _ce_sp_err:
-                logger.warning(f"[XBRL] CE↔SP enforcement skipped for year {year}: {_ce_sp_err}")
+            from importers.iv_cee_hierarchy import check_quadratura
+            q = check_quadratura(bs_data, inc_data)
+            period_label = f"{year}-{detected_pm or 12}M"
+            for warning in q.warnings:
+                quadratura_warnings.append(f"[{period_label}] {warning}")
+                logger.warning("[XBRL] %s: %s", period_label, warning)
+            for field, conflict in reconciliation_info['aggregate_conflicts'].items():
+                warning = (
+                    f"[{period_label}] CONFLITTO AGGREGATO XBRL {field}: "
+                    f"aggregato {conflict['aggregate']:,.2f}, dettagli "
+                    f"{conflict['detail_sum']:,.2f}"
+                )
+                quadratura_warnings.append(warning)
+                logger.warning(warning)
 
-            # GENERAL: check the balance-sheet identity too (attivo == passivo). Unlike
-            # the PDF routes, XBRL has no validate_balance gate nor a reconcile/plug
-            # stage, so an unbalanced instance (or one unbalanced by the debt/credit
-            # reconciliation above, which adjusts sp06/sp16 to the declared totals) was
-            # imported SILENTLY. Non-blocking by design (a tagged official filing should
-            # still open, and the user corrects in Rettifiche) — but it must be flagged.
-            try:
-                from importers.iv_cee_hierarchy import check_quadratura
-                _q = check_quadratura(bs_data, inc_data)
-                if not _q.quadra or not _q.utile_match:
-                    for _w in _q.warnings:
-                        quadratura_warnings.append(f"[{year}] {_w}")
-                        logger.warning(f"[XBRL] {year}: {_w}")
-            except Exception as _q_err:
-                logger.warning(f"[XBRL] quadratura check skipped for year {year}: {_q_err}")
+            # Without a persisted rejected/review staging object, a core-invalid
+            # statement must fail atomically.  It is never committed merely because
+            # a caller wants to inspect it in Rettifiche.
+            if not q.quadra:
+                self.db.rollback()
+                raise XBRLParseError(
+                    f"XBRL {period_label} non valido: " + "; ".join(q.warnings)
+                )
+
+            semantic_valid = (
+                q.semantic_valid
+                and not reconciliation_info['aggregate_conflicts']
+                and not reconciliation_info['missing_breakdowns']
+            )
+            validation_report = {
+                'period': period_label,
+                'totale_attivo': str(q.totale_attivo),
+                'totale_passivo': str(q.totale_passivo),
+                'sbilancio': str(q.sbilancio),
+                'utile_ce': str(q.utile_ce) if q.utile_ce is not None else None,
+                'sp13': str(q.sp13),
+                'quadra': q.quadra,
+                'utile_match': q.utile_match,
+                'hierarchy_consistent': q.hierarchy_consistent,
+                'semantic_valid': semantic_valid,
+                'warnings': q.warnings,
+                'aggregate_conflicts': reconciliation_info['aggregate_conflicts'],
+                'missing_breakdowns': reconciliation_info['missing_breakdowns'],
+                'fact_selection_warnings': getattr(self, '_fact_selection_warnings', []),
+            }
+            fy.validation_status = 'verified' if semantic_valid else 'review_required'
+            fy.validation_report = json.dumps(validation_report, ensure_ascii=False)
+            fy.source_sha256 = source_sha256
+            fy.parser_version = 'xbrl-context-period-v3'
+            fy.forecastable = semantic_valid
 
             logger.info(
                 f"[XBRL] Year {year} (pm={detected_pm}): "
@@ -969,7 +1363,9 @@ class EnhancedXBRLParser:
                 f"sp13={bs_data.get('sp13_utile_perdita', 'MISSING')}"
             )
 
-            all_reconciliation_info[year] = reconciliation_info
+            # The public response schema is historically keyed by year.  Preserve it
+            # while exposing every imported period separately in ``periods_imported``.
+            all_reconciliation_info.setdefault(year, reconciliation_info)
 
             # Update or create balance sheet
             bs = self.db.query(BalanceSheet).filter(
@@ -978,11 +1374,15 @@ class EnhancedXBRLParser:
 
             if bs:
                 for field, value in bs_data.items():
+                    if field not in bs_columns:
+                        continue
                     setattr(bs, field, value)
                 bs.updated_at = datetime.utcnow()
             else:
                 bs = BalanceSheet(financial_year_id=fy.id)
                 for field, value in bs_data.items():
+                    if field not in bs_columns:
+                        continue
                     setattr(bs, field, value)
                 self.db.add(bs)
 
@@ -993,15 +1393,25 @@ class EnhancedXBRLParser:
 
             if inc:
                 for field, value in inc_data.items():
+                    if field not in inc_columns:
+                        continue
                     setattr(inc, field, value)
                 inc.updated_at = datetime.utcnow()
             else:
                 inc = IncomeStatement(financial_year_id=fy.id)
                 for field, value in inc_data.items():
+                    if field not in inc_columns:
+                        continue
                     setattr(inc, field, value)
                 self.db.add(inc)
 
             imported_years.append(year)
+            imported_periods.append({
+                'year': year,
+                'period_months': detected_pm or 12,
+                'end_date': period_key.end_date,
+                'financial_year_id': fy.id,
+            })
             financial_year_ids.append(fy.id)
 
         self.db.commit()
@@ -1019,7 +1429,8 @@ class EnhancedXBRLParser:
             'company_created': company_created,
             'reconciliation_info': all_reconciliation_info,
             'year_period_months': year_period_months,  # {year: months} for partial years
-            'warnings': quadratura_warnings,           # non-blocking quadratura flags
+            'periods_imported': imported_periods,
+            'warnings': quadratura_warnings,
         }
 
 

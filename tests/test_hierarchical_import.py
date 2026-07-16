@@ -4,10 +4,19 @@ Test script for hierarchical debt and depreciation import
 """
 import sys
 import os
+from pathlib import Path
 
-# Change to backend directory to use backend database
-os.chdir(os.path.join(os.path.dirname(__file__), 'backend'))
-sys.path.insert(0, os.getcwd())
+import pytest
+
+# This file predates the current repository layout.  It is a manual integration
+# diagnostic: it imports a real XBRL file and writes to the configured database.
+# Never change process cwd during pytest collection and never run this diagnostic
+# implicitly against the developer database.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+pytestmark = pytest.mark.skip(
+    reason="legacy manual integration diagnostic; writes to the configured database"
+)
 
 from decimal import Decimal
 from database.db import SessionLocal
@@ -22,7 +31,7 @@ def test_hierarchical_import():
     print("=" * 80)
 
     # Re-import the ISTANZA XBRL file
-    xbrl_file = "../ISTANZA02353550391.xbrl"
+    xbrl_file = str(ROOT / "legacy" / "sample_data" / "ISTANZA02353550391.xbrl")
 
     if not os.path.exists(xbrl_file):
         print(f"\n❌ XBRL file not found: {xbrl_file}")

@@ -18,11 +18,13 @@ Account hierarchy (DEPI format):
 """
 
 import logging
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import fitz  # PyMuPDF
 
@@ -301,6 +303,7 @@ _SP_ATTIVO_RULES = [
     # AGO-style single-category descriptions (trial balance parent level)
     (['ONERI', 'PLURIENN'], 'gross_sp02'),
     (['COSTI', 'PLURIENN'], 'gross_sp02'),
+    (['COSTI', 'IMPIANTO'], 'gross_sp02'),
     (['SOFTWARE'], 'gross_sp02'),
     (['BREVETT'], 'gross_sp02'),
     (['MARCHI'], 'gross_sp02'),
@@ -910,6 +913,20 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     # Main processing loop
     for entry in entries:
         desc_upper = entry.description.upper()
+
+        # Page headers are not ledger accounts.  Some codeless/stacked exports put
+        # the company address or fiscal identifier immediately after a numeric
+        # token, so the generic row reader interprets them as a code/description/
+        # amount triple (BILANCIO-TEST: ``5034 / VIA ROMA 162`` -> EUR 1.62;
+        # budget_435/367: P.IVA -> EUR 19,675,904.96).  Exclude only unmistakable
+        # registry metadata; never use the balance gap to compensate it later.
+        if (
+            re.match(r'^(?:VIA|VIALE|V\.LE|PIAZZA|P\.ZZA|CORSO)\b', desc_upper)
+            or 'CODICE FISCALE' in desc_upper
+            or 'PARTITA IVA' in desc_upper
+            or re.match(r'^(?:C\.F\.|P\.IVA|REA)\b', desc_upper)
+        ):
+            continue
 
         # Section totals
         if entry.level == 3:
@@ -1969,6 +1986,19 @@ def parse_entries_teamsystem(text: str) -> List[Entry]:
     declared_utile = None
     declared_perdita = False
 
+    def _level_from_code(code: str) -> int:
+        """Hierarchy encoded by TeamSystem zero-filled account components."""
+        parts = code.split('/')
+        if len(parts) == 3:
+            if parts[1] == '0000' and parts[2] == '0000':
+                return 2
+            if parts[2] == '0000':
+                return 1
+            return 0
+        if len(parts) == 2 and set(parts[1]) == {'0'}:
+            return 2
+        return 0
+
     i = 0
     n = len(lines)
     while i < n:
@@ -2067,7 +2097,8 @@ def parse_entries_teamsystem(text: str) -> List[Entry]:
                         or _kw_match(du, ['RISULTATO', 'ESERCIZ'])):
                     desc = desc + ' (PRECEDENTE)'
                 entries.append(Entry(code=code, description=desc,
-                                     amount=amount, level=1, section=section))
+                                     amount=amount, level=_level_from_code(code),
+                                     section=section))
                 i = j
                 continue
             i += 1
@@ -2098,6 +2129,47 @@ def parse_entries_teamsystem(text: str) -> List[Entry]:
 # ---------------------------------------------------------------------------
 
 _BE_AMT_RE = re.compile(r'^-?\d{1,3}(?:\.\d{3})*,\d{2}-?$')
+
+# A monetary value in a damaged ToUnicode layer is often split into several PDF
+# words (``3.239`` / ``,`` / ``12``) and some separator / zero glyphs are exposed
+# as letters (``42.100,DO``).  Keep this deliberately narrow: it is used only for
+# the right-aligned numeric suffix of a physical row, never for free text.
+_BE_NUMERIC_FRAGMENT_RE = re.compile(r'^[\d.,+\-#rRlLoOdDqQbB()]+$')
+
+
+def _be_is_numeric_fragment(token: str) -> bool:
+    """True for a monetary suffix fragment, excluding words such as ``BOLLO``."""
+    if not _BE_NUMERIC_FRAGMENT_RE.fullmatch(token):
+        return False
+    letters = ''.join(ch for ch in token if ch.isalpha())
+    return len(letters) <= 2
+
+
+@dataclass(frozen=True)
+class ReconstructedRow:
+    """One physical trial-balance row reconstructed from PDF coordinates.
+
+    ``raw_*`` and geometry are retained so a repaired amount never loses its
+    provenance.  The legacy best-effort pipeline still consumes the public
+    ``(code, description, amount)`` projection, while tests / diagnostics can
+    inspect these facts through :func:`reconstruct_contrapposte_rows`.
+    """
+
+    code: str
+    description: str
+    amount: Decimal
+    raw_code: str
+    raw_description: str
+    raw_amount: str
+    normalized_amount: str
+    page: int
+    y: float
+    bbox: Tuple[float, float, float, float]
+    confidence: str = "exact"
+    control: bool = False
+
+    def legacy(self) -> Tuple[str, str, Decimal]:
+        return self.code, self.description, self.amount
 
 
 def _be_norm(code: str) -> str:
@@ -2161,39 +2233,281 @@ def _be_split(words) -> Optional[float]:
     return scored[0][2]
 
 
-def _be_collect_side(words, lo: float, hi: float,
-                     codeless: bool = False) -> List[Tuple[str, str, Decimal]]:
-    """Reconstruct (norm_code, desc_upper, amount) rows in x-band [lo, hi).
+def _be_cluster_physical_rows(words, lo: float, hi: float) -> List[list]:
+    """Cluster words into physical rows using vertical overlap / baseline distance.
 
-    codeless=True handles two-column trial balances whose rows are pure
-    `description amount` with NO leading account code (e.g. budget_367: "Cassa
-    179,90 | Fornitori 296.099,94"). In that mode a row with a description and an
-    amount is emitted with an EMPTY code (the caller assigns a unique synthetic
-    code so each is its own root in _be_reclassify, classified by description).
-    Default (codeless=False) is unchanged: rows must start with an account code.
+    The old ``round(y / 2)`` bucket split a single printed row whenever the PDF
+    producer emitted code, caption, comma and cents with 1--3 pt baseline jitter.
+    Adjacent accounting rows in the local corpus are at least ~9 pt apart, so a
+    3.6 pt tolerance plus an overlap check joins fragments without joining rows.
     """
-    from collections import defaultdict
+    selected = [w for w in words if lo <= (w[0] + w[2]) / 2 < hi and w[4].strip()]
+    selected.sort(key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+    rows: List[dict] = []
+    for word in selected:
+        cy = (word[1] + word[3]) / 2
+        candidates = []
+        # Only the most recent rows can overlap a y-sorted word.
+        start = max(0, len(rows) - 4)
+        for idx in range(start, len(rows)):
+            row = rows[idx]
+            overlap = max(0.0, min(word[3], row['y1']) - max(word[1], row['y0']))
+            min_height = min(word[3] - word[1], row['y1'] - row['y0'])
+            distance = abs(cy - row['cy'])
+            if distance <= 3.6 or (min_height > 0 and overlap >= 0.55 * min_height):
+                candidates.append((distance, idx))
+        if candidates:
+            _distance, idx = min(candidates)
+            row = rows[idx]
+            row['words'].append(word)
+            row['y0'] = min(row['y0'], word[1])
+            row['y1'] = max(row['y1'], word[3])
+            row['cy'] = sum((w[1] + w[3]) / 2 for w in row['words']) / len(row['words'])
+        else:
+            rows.append({'words': [word], 'y0': word[1], 'y1': word[3], 'cy': cy})
+    return [sorted(row['words'], key=lambda w: w[0]) for row in rows]
+
+
+def _be_parse_amount_fragments(parts: List[str]) -> Optional[Tuple[Decimal, str, str]]:
+    """Parse a right-aligned monetary suffix, returning value/text/confidence.
+
+    Italian amounts always carry two decimal digits.  After proving that every
+    suffix token is numeric-context text, punctuation can therefore be rebuilt
+    from the digit stream.  Letter-to-digit repairs are restricted to common
+    damaged-font zero/eight glyphs and never run on descriptions.
+    """
+    if not parts:
+        return None
+    original_parts = [p.strip() for p in parts if p.strip()]
+    if not original_parts:
+        return None
+
+    compact = ''.join(original_parts)
+    canonical = compact.replace(' ', '')
+    exact = re.fullmatch(r'-?\d{1,3}(?:\.\d{3})*,\d{2}-?', canonical)
+    if exact:
+        value = _parse_amount(canonical.rstrip('-'))
+        if canonical.endswith('-'):
+            value = -value
+        return value, canonical, 'exact'
+
+    repaired_parts = list(original_parts)
+    # A broken thousands separator can itself be exposed as a one-digit word
+    # (``100 | 1 | 680 | r | 34``).  It is safe to discard only in this precise
+    # 3+separator+3+separator+2 grouping.
+    if (len(repaired_parts) >= 5
+            and len(re.sub(r'\D', '', repaired_parts[-5])) in (1, 2, 3)
+            and repaired_parts[-4].isdigit() and len(repaired_parts[-4]) == 1
+            and repaired_parts[-3].isdigit() and len(repaired_parts[-3]) == 3
+            and not re.search(r'\d', repaired_parts[-2])
+            and len(re.sub(r'\D', '', repaired_parts[-1])) == 2):
+        del repaired_parts[-4]
+
+    numeric = ''.join(repaired_parts).upper().translate(str.maketrans({
+        'D': '0', 'O': '0', 'Q': '0', 'B': '8',
+    }))
+    negative = numeric.startswith('-') or numeric.endswith('-')
+    digits = ''.join(ch for ch in numeric if ch.isdigit())
+    if len(digits) < 3:
+        return None
+    normalized = ('-' if negative else '') + digits[:-2] + ',' + digits[-2:]
+    try:
+        value = Decimal(digits[:-2] + '.' + digits[-2:])
+    except InvalidOperation:
+        return None
+    return (-value if negative else value), normalized, 'repaired'
+
+
+def _be_normalize_description(description: str) -> str:
+    """Conservative caption repairs supported by the numeric/asset context.
+
+    These variants are recurring damaged-font spellings, not document names or
+    account codes.  Repairs only make an already recognisable depreciation-fund
+    caption canonical; unrelated prose is untouched.
+    """
+    d = re.sub(r'\s+', ' ', description.upper()).strip()
+    if any(k in d for k in ('AMM', 'ANFM', 'AWORT')):
+        d = re.sub(r'\b(?:RONDO|FONDA)\b', 'FONDO', d)
+        d = re.sub(r'\bRANDI\b', 'FONDI', d)
+        d = d.replace('AWORTAMENTO', 'AMMORTAMENTO').replace('ANFM', 'AMM')
+        d = re.sub(r'AMM\s*\.\s*TO', 'AMM.TO', d)
+    return d
+
+
+def _be_code_prefix(tokens: List[str]) -> Tuple[List[str], int]:
+    """Read a possibly garbled account code from the beginning of a row."""
+    code_tokens: List[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if code_tokens and len(_be_normalize_code(''.join(code_tokens))) >= 3:
+            break
+        if not code_tokens:
+            code_like = bool(token and token[0].isdigit())
+        else:
+            # Separator glyphs may be exposed as one/two letters (``1 nD 2``).
+            code_like = len(token) <= 2 or bool(re.fullmatch(r'[\d./*+,#]+', token))
+        if not code_like:
+            break
+        code_tokens.append(token)
+        i += 1
+    return code_tokens, i
+
+
+def _be_normalize_code(raw_code: str) -> str:
+    mapped = raw_code.upper().translate(str.maketrans({
+        'D': '0', 'O': '0', 'Q': '0', 'L': '1', 'A': '0',
+    }))
+    return re.sub(r'\D', '', mapped)
+
+
+def _be_repair_parent_codes(facts: List[ReconstructedRow]) -> List[ReconstructedRow]:
+    """Recover subtotal hierarchy from adjacent children and printed order.
+
+    A damaged separator can turn ``8.33`` into ``8933``.  We only rewrite it
+    when preceding detail rows share a 3-digit prefix and either their exact sum
+    equals the subtotal or the subtotal amount itself required glyph repair.  In
+    the latter case the bottom-up child sum wins and the raw printed value remains
+    available in ``raw_amount`` / ``confidence``.
+    """
+    out = list(facts)
+    for idx, fact in enumerate(out):
+        if fact.control or len(fact.code) >= 6 or idx == 0:
+            continue
+        candidate = None
+        for start in range(max(0, idx - 20), idx):
+            previous = out[start:idx]
+            codes = [r.code for r in previous if len(r.code) >= 3 and not r.control]
+            if not codes:
+                continue
+            common = codes[0]
+            for code in codes[1:]:
+                while common and not code.startswith(common):
+                    common = common[:-1]
+            if len(common) < 3:
+                continue
+            prefix = common[:3]
+            # The printed short code must corroborate the group (first section
+            # digit + final two digits); this prevents unrelated equal amounts
+            # from becoming a hierarchy by coincidence.
+            short = fact.code
+            if not (short == prefix
+                    or (len(short) == 4 and short[0] == prefix[0]
+                        and short[-2:] == prefix[-2:])):
+                continue
+            children = [r for r in previous if r.code.startswith(prefix)]
+            child_sum = sum((r.amount for r in children), Decimal('0'))
+            if not children:
+                continue
+            tolerance = max(Decimal('0.02'), abs(fact.amount) * Decimal('0.001'))
+            if abs(child_sum - fact.amount) <= tolerance:
+                candidate = replace(fact, code=prefix)
+            elif fact.confidence in ('repaired', 'derived_from_children'):
+                candidate = replace(
+                    fact, code=prefix, amount=child_sum,
+                    normalized_amount=str(child_sum), confidence='derived_from_children')
+            if candidate is not None:
+                break
+        if candidate is not None:
+            out[idx] = candidate
+    return out
+
+
+def _be_collect_side_facts(words, lo: float, hi: float, codeless: bool = False,
+                           page: int = 0, include_controls: bool = False
+                           ) -> List[ReconstructedRow]:
+    """Coordinate reconstruction retaining raw text, geometry and confidence."""
+    facts: List[ReconstructedRow] = []
+    for row_words in _be_cluster_physical_rows(words, lo, hi):
+        token_words = [w for w in row_words if w[4].strip()]
+        tokens = [w[4].strip() for w in token_words]
+        if not tokens:
+            continue
+        amount_start = len(tokens)
+        while amount_start > 0 and _be_is_numeric_fragment(tokens[amount_start - 1]):
+            if amount_start < len(tokens):
+                gap = token_words[amount_start][0] - token_words[amount_start - 1][2]
+                # A detached page/column marker before a footer amount is not part
+                # of that amount (e.g. ``Totale Attivita  1    315.121,19``).
+                if gap > 16.0:
+                    break
+            amount_start -= 1
+        if amount_start == len(tokens):
+            continue
+        parsed = _be_parse_amount_fragments(tokens[amount_start:])
+        if parsed is None:
+            continue
+        amount, normalized_amount, confidence = parsed
+        prefix = tokens[:amount_start]
+        code_tokens, description_start = _be_code_prefix(prefix)
+        raw_code = ' '.join(code_tokens)
+        code = _be_normalize_code(raw_code)
+        if not code:
+            if not codeless:
+                continue
+            description_start = 0
+        raw_description = ' '.join(prefix[description_start:]).strip()
+        description = _be_normalize_description(raw_description)
+        if len(description) < 3:
+            continue
+        if (
+            re.match(r'^(?:VIA|VIALE|V\.LE|PIAZZA|P\.ZZA|CORSO)\b', description)
+            or 'CODICE FISCALE' in description
+            or 'PARTITA IVA' in description
+            or re.match(r'^(?:C\.F\.|P\.IVA|REA)\b', description)
+        ):
+            continue
+        if any(k in description for k in ('A RIPORT', 'RIPORTO', 'RIPORTARE',
+                                          'SEGUE', 'IMPORTI', 'PROGRESSIV')):
+            continue
+        is_control = ('TOTALE' in description or 'PAREGGIO' in description
+                      or ('ESERCIZ' in description
+                          and any(k in description for k in ('UTILE', 'PERDIT', 'RISULTAT'))))
+        if is_control and not include_controls:
+            if codeless and not code:
+                break
+            continue
+        if not code and not codeless:
+            continue
+        bbox = (min(w[0] for w in row_words), min(w[1] for w in row_words),
+                max(w[2] for w in row_words), max(w[3] for w in row_words))
+        facts.append(ReconstructedRow(
+            code=code, description=description, amount=amount,
+            raw_code=raw_code, raw_description=raw_description,
+            raw_amount=' '.join(tokens[amount_start:]),
+            normalized_amount=normalized_amount, page=page,
+            y=sum((w[1] + w[3]) / 2 for w in row_words) / len(row_words),
+            bbox=bbox, confidence=confidence, control=is_control,
+        ))
+    return facts
+
+
+def _be_page_needs_coordinate_repair(words) -> bool:
+    """Detect a damaged/split amount layer without depending on a filename."""
+    isolated = sum(1 for w in words if w[4].strip() in {',', '+', '#', 'r'})
+    return isolated >= 3
+
+
+def _be_collect_side_legacy(words, lo: float, hi: float,
+                            codeless: bool = False) -> List[Tuple[str, str, Decimal]]:
+    """Original strict collector retained for healthy PDF text layers."""
     rows: Dict[int, list] = defaultdict(list)
-    for w in words:
-        cx = (w[0] + w[2]) / 2
+    for word in words:
+        cx = (word[0] + word[2]) / 2
         if lo <= cx < hi:
-            rows[round(w[1] / 2.0)].append(w)
+            rows[round(word[1] / 2.0)].append(word)
     out = []
     for y in sorted(rows):
         toks = [w[4] for w in sorted(rows[y], key=lambda w: w[0])]
         i, code_toks = 0, []
-        # Allow '*' so DEPI/AGO rollup codes (e.g. "58/**/***", "58/10/***") are
-        # collected as mastri, not dropped — their named subtotals ("RICAVI DELLE
-        # PRESTAZIONI") let _be_reclassify classify the right IV-CEE field instead of
-        # falling back to the generic bucket on leaf accounts. _be_norm strips to digits,
-        # and pure "***" rows collapse to an empty code that is skipped below.
-        while i < len(toks) and re.match(r'^[\d./*]+$', toks[i]) and not _BE_AMT_RE.match(toks[i]):
+        while (i < len(toks) and re.match(r'^[\d./*]+$', toks[i])
+               and not _BE_AMT_RE.match(toks[i])):
             code_toks.append(toks[i])
             i += 1
         if not code_toks:
             if not codeless:
                 continue
-            code = ''               # code-less row: classify by description only
+            code = ''
             rest = toks
         else:
             code = _be_norm(''.join(code_toks))
@@ -2204,24 +2518,55 @@ def _be_collect_side(words, lo: float, hi: float,
         if not amts:
             continue
         desc = ' '.join(t for t in rest if not _BE_AMT_RE.match(t)).upper().strip()
+        if (
+            re.match(r'^(?:VIA|VIALE|V\.LE|PIAZZA|P\.ZZA|CORSO)\b', desc)
+            or 'CODICE FISCALE' in desc
+            or 'PARTITA IVA' in desc
+            or re.match(r'^(?:C\.F\.|P\.IVA|REA)\b', desc)
+        ):
+            continue
         if codeless and not code:
-            # Noise guard for code-less rows: require a real description and skip
-            # running-total / header artefacts that would otherwise inject phantom
-            # amounts ("A riportare", "Riporto", "Segue", "Importi", "Progressivo").
             if len(desc) < 3:
                 continue
             if any(k in desc for k in ('A RIPORT', 'RIPORTO', 'RIPORTARE',
                                        'SEGUE', 'IMPORTI', 'PROGRESSIV')):
                 continue
-            # Compact code-less trial balances stack the whole statement in one column:
-            # the SP account list, a "TOTALE …" line, THEN the CE account list (costi/
-            # ricavi). Without codes there is nothing to tell a CE revenue ("TRASPORTI DI
-            # MERCE") from a passivo debt, so it would inflate the SP. Truncate the column
-            # at its first section TOTAL: rows below it belong to the next (CE) section.
             if 'TOTALE' in desc or 'PAREGGIO' in desc:
                 break
         out.append((code, desc, amts[-1]))
     return out
+
+
+def _be_collect_side(words, lo: float, hi: float,
+                     codeless: bool = False, page: int = 0
+                     ) -> List[Tuple[str, str, Decimal]]:
+    """Legacy projection of the provenance-preserving coordinate facts."""
+    if not _be_page_needs_coordinate_repair(words):
+        return _be_collect_side_legacy(words, lo, hi, codeless=codeless)
+    facts = _be_repair_parent_codes(_be_collect_side_facts(
+        words, lo, hi, codeless=codeless, page=page))
+    return [fact.legacy() for fact in facts]
+
+
+def reconstruct_contrapposte_rows(file_path: str) -> List[ReconstructedRow]:
+    """Return all reconstructed row facts for local diagnostics / audit tooling."""
+    facts: List[ReconstructedRow] = []
+    doc = fitz.open(file_path)
+    try:
+        for page_number, pdf_page in enumerate(doc, 1):
+            words = pdf_page.get_text('words')
+            if not words:
+                continue
+            split = _be_split(words) or pdf_page.rect.width / 2
+            facts.extend(_be_collect_side_facts(
+                words, -1e9, split, codeless=True, page=page_number,
+                include_controls=True))
+            facts.extend(_be_collect_side_facts(
+                words, split, 1e9, codeless=True, page=page_number,
+                include_controls=True))
+    finally:
+        doc.close()
+    return facts
 
 
 def _be_split_codeless(words) -> Optional[float]:
@@ -2933,7 +3278,10 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
     try:
         decl_total = None
         if declared:
-            decl_total = (declared.get('pareggio') or declared.get('attivo')
+            # Contra-assets reconcile to the printed GROSS ATTIVO. ``Pareggio``
+            # can also include a current loss parked on the asset side, so using
+            # it first overstates the contra anchor (budget_330).
+            decl_total = (declared.get('attivo') or declared.get('pareggio')
                           or declared.get('passivo'))
         if not decl_total or decl_total <= 0:
             return winner_bs, Z
@@ -3186,7 +3534,32 @@ def _hier_reconstruct(pages_data, full: str):
             return _be_amount(flat1.split(flat, 1)[1][:40])
         return None
 
-    tot_att = _ft('TOTALE ATTIV', 'TOTALEATTIV')
+    # Prefer the rightmost coordinate-backed ``TOTALE ATTIVITA`` printed in the
+    # SP footer.  On adjusted four-column statements the linear text is laid out
+    # as ``saldo non rettificato / rettifiche / saldo finale``: ``_ft`` therefore
+    # sees the first (pre-adjustment) value, while every mastro above is read from
+    # the last (final) column.  Comparing those different columns rejects an
+    # otherwise exact reconstruction (budget_588).  Do not use ``PAREGGIO`` here:
+    # on a loss it includes the perdita parked on the attivo side, while the
+    # gross asset mastri correctly reconcile to ``TOTALE ATTIVITA`` (343/348).
+    final_attivi = []
+    for words, is_sp, is_ce, _up, width in pages_data:
+        if not is_sp or is_ce:
+            continue
+        split = _be_split(words) or width / 2
+        for lo, hi in ((-1e9, split), (split, 1e9)):
+            for row_words in _be_cluster_physical_rows(words, lo, hi):
+                tokens = [w[4].strip() for w in row_words if w[4].strip()]
+                caption = ' '.join(tokens).upper()
+                if 'TOTALE' not in caption or 'ATTIVIT' not in caption:
+                    continue
+                amounts = [_parse_amount(token) for token in tokens
+                           if _BE_AMT_RE.fullmatch(token)]
+                if amounts and amounts[-1] > 0:
+                    final_attivi.append(amounts[-1])
+
+    tot_att = final_attivi[-1] if final_attivi else _ft(
+        'TOTALE ATTIV', 'TOTALEATTIV')
     if not tot_att or tot_att <= 0:
         return None
     tol = max(Decimal('50'), Decimal('0.005') * tot_att)
@@ -3203,6 +3576,11 @@ def _hier_reconstruct(pages_data, full: str):
     bs['totale_attivo'] = att_sum
     bs['totale_passivo'] = att_sum
     bs['_plug_residual'] = Z
+    # This result is independently corroborated by final-column SP controls and
+    # the CE result.  Do not let the later generic declared-total reader replace
+    # it with the first (pre-adjustment) column or interpret the adjustment/final
+    # columns as a comparative year.
+    bs['_skip_declared_reconcile'] = True
     return bs, ce
 
 
@@ -3218,9 +3596,10 @@ _CE_HIER_SUBPARENT = {
 def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Best-effort extraction of a 2-column contrapposte trial balance.
 
-    Balances to the declared totals; any residual from imperfect parsing is
-    plugged into sp09 and a 'BILANCIO NON QUADRATO' warning is logged so the
-    user can correct it via the Rettifiche journal.
+    Declared totals are controls only.  Any residual from imperfect parsing is
+    exposed as diagnostic metadata and the classified sides are left unchanged:
+    a missing source row must never become cash or debt just to make the import
+    balance.
     """
     doc = fitz.open(file_path)
     full = ""
@@ -3262,15 +3641,18 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         pages_data.append((words, is_sp, is_ce, up, page.rect.width))
 
     doc.close()
+    use_garbled_reconstruction = any(
+        _be_page_needs_coordinate_repair(words)
+        for words, _is_sp, _is_ce, _up, _width in pages_data)
 
     def _collect_all(codeless: bool):
         """Collect attivo/passivo/costi/ricavi rows across all pages. In code-less
         mode each rowless-code row gets a globally-unique, fixed-width synthetic code
         (~NNNNNN) so it is its own non-prefixing root in _be_reclassify."""
-        att: List[Tuple[str, str, Decimal]] = []
-        pas: List[Tuple[str, str, Decimal]] = []
-        cos: List[Tuple[str, str, Decimal]] = []
-        ric: List[Tuple[str, str, Decimal]] = []
+        att_facts: List[ReconstructedRow] = []
+        pas_facts: List[ReconstructedRow] = []
+        cos_facts: List[ReconstructedRow] = []
+        ric_facts: List[ReconstructedRow] = []
         ctr = [0]
 
         def _uniq(side_rows):
@@ -3282,27 +3664,96 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
                 res.append((c, d, a))
             return res
 
-        for words, is_sp, is_ce, up, width in pages_data:
+        def _ce_side_scores(rows):
+            return (
+                sum(1 for _c, desc, _a in rows if _classify_ce_costi(desc)),
+                sum(1 for _c, desc, _a in rows if _classify_ce_ricavi(desc)),
+            )
+
+        def _ce_columns_are_swapped(left_rows, right_rows):
+            """Choose COSTI/RICAVI from accounting captions, not header text order.
+
+            PyMuPDF's linear text order does not necessarily match physical column
+            order (budget_405 prints the words ``RICAVI COSTI`` but costs are on the
+            left).  Scoring the already separated row descriptions is stable also on
+            continuation pages where one physical column is empty.
+            """
+            left_cost, left_revenue = _ce_side_scores(left_rows)
+            right_cost, right_revenue = _ce_side_scores(right_rows)
+            direct = left_cost + right_revenue
+            swapped = right_cost + left_revenue
+            return swapped > direct
+
+        if not use_garbled_reconstruction:
+            att: List[Tuple[str, str, Decimal]] = []
+            pas: List[Tuple[str, str, Decimal]] = []
+            cos: List[Tuple[str, str, Decimal]] = []
+            ric: List[Tuple[str, str, Decimal]] = []
+            for page_number, (words, is_sp, is_ce, up, width) in enumerate(pages_data, 1):
+                split = _be_split(words)
+                if split is None and codeless:
+                    split = _be_split_codeless(words)
+                if split is None:
+                    split = width / 2
+
+                def _best_side(lo, hi):
+                    legacy = _be_collect_side_legacy(
+                        words, lo, hi, codeless=codeless)
+                    coordinate = [
+                        fact.legacy() for fact in _be_repair_parent_codes(
+                            _be_collect_side_facts(
+                                words, lo, hi, codeless=codeless,
+                                page=page_number)
+                        )
+                    ]
+                    # Coordinate clustering is a recovery path for baseline jitter;
+                    # retain the proven legacy rows unless it recovers more physical
+                    # facts from the same side.
+                    return coordinate if len(coordinate) > len(legacy) else legacy
+
+                left = _uniq(_best_side(-1e9, split))
+                right = _uniq(_best_side(split, 1e9))
+                if is_sp and not is_ce:
+                    att += left
+                    pas += right
+                elif is_ce and not is_sp:
+                    if _ce_columns_are_swapped(left, right):
+                        cos += right
+                        ric += left
+                    else:
+                        cos += left
+                        ric += right
+            return att, pas, cos, ric
+
+        for page_number, (words, is_sp, is_ce, up, width) in enumerate(pages_data, 1):
             split = _be_split(words)
             if split is None and codeless:
                 split = _be_split_codeless(words)
             if split is None:
                 split = width / 2
-            left = _uniq(_be_collect_side(words, -1e9, split, codeless=codeless))
-            right = _uniq(_be_collect_side(words, split, 1e9, codeless=codeless))
+            left = _be_collect_side_facts(
+                words, -1e9, split, codeless=codeless, page=page_number)
+            right = _be_collect_side_facts(
+                words, split, 1e9, codeless=codeless, page=page_number)
             if is_sp and not is_ce:
-                att += left
-                pas += right
+                att_facts += left
+                pas_facts += right
             elif is_ce and not is_sp:
-                # left=costi, right=ricavi (typical); swap if headers say otherwise
-                if ('COSTI' in up[:400] and 'RICAVI' in up[:400]
-                        and up[:400].find('RICAVI') < up[:400].find('COSTI')):
-                    cos += right
-                    ric += left
+                if _ce_columns_are_swapped(
+                        [f.legacy() for f in left], [f.legacy() for f in right]):
+                    cos_facts += right
+                    ric_facts += left
                 else:
-                    cos += left
-                    ric += right
-        return att, pas, cos, ric
+                    cos_facts += left
+                    ric_facts += right
+
+        # Re-run hierarchy repair after concatenating pages: one account family
+        # may start at the foot of page N and print its subtotal on page N+1.
+        def _project(facts):
+            return _uniq([f.legacy() for f in _be_repair_parent_codes(facts)])
+
+        return (_project(att_facts), _project(pas_facts),
+                _project(cos_facts), _project(ric_facts))
 
     attivo, passivo, costi, ricavi = _collect_all(codeless=False)
     # Code-less second pass: a clean two-column trial balance whose rows carry NO
@@ -3311,6 +3762,22 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # so coded files (the entire passing corpus) are never affected.
     if not attivo and not passivo:
         attivo, passivo, costi, ricavi = _collect_all(codeless=True)
+
+    # Control rows are collected separately and never enter account
+    # reclassification.  Their side / page coordinates make them safer than a
+    # substring search over a corrupted linear text layer.
+    controls: List[Tuple[str, str, ReconstructedRow]] = []
+    for page_number, (words, is_sp, is_ce, _up, width) in enumerate(pages_data, 1):
+        split = _be_split(words) or width / 2
+        section = 'sp' if is_sp and not is_ce else ('ce' if is_ce and not is_sp else '')
+        if not section:
+            continue
+        for side, lo, hi in (('left', -1e9, split), ('right', split, 1e9)):
+            for fact in _be_collect_side_facts(
+                    words, lo, hi, codeless=True, page=page_number,
+                    include_controls=True):
+                if fact.control:
+                    controls.append((section, side, fact))
 
     # A contrapposte trial balance must have a balance-sheet side. Documents that
     # are economic-only (e.g. "PROSPETTO ECONOMICO per competenza" with just a
@@ -3333,11 +3800,45 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # Classifiers map a mastro/subtotal DESCRIPTION to an IV-CEE field; the second
     # element flags whether the match is specific enough to stop descending.
     def cl_att(d):
+        # Some TeamSystem/ERP exports append the legal IV-CEE code after a run of
+        # underscores (e.g. ``IMMOBILIZZAZIONI IMMATERIALI______BI``).  It is still
+        # the explicit parent category, not an unknown generic caption: normalize
+        # only these three exact suffixes so the hierarchy does not descend into
+        # children and count the same mass again (AITEC 373/374/375).
+        normalized = re.sub(r'_+(?:BIII|BII|BI)\s*$', '', d).strip()
+        legal_parent = {
+            'IMMOBILIZZAZIONI IMMATERIALI': 'sp02',
+            'IMMOBILIZZAZIONI MATERIALI': 'sp03',
+            'IMMOBILIZZAZIONI FINANZIARIE': 'sp04',
+        }.get(normalized)
+        if legal_parent:
+            return legal_parent, True
+        d = normalized
+        # A malformed generic "IMMOBILIZZAZIONI ..." caption can accidentally
+        # match MOBILI inside IMMOBILIZZAZIONI.  Descend to its specific children
+        # (software/oneri pluriennali/etc.) unless the printed category is exact.
+        if (d.startswith('IMMOBILIZZAZIONI')
+                and d not in ('IMMOBILIZZAZIONI MATERIALI',
+                              'IMMOBILIZZAZIONI IMMATERIALI',
+                              'IMMOBILIZZAZIONI FINANZIARIE')):
+            return 'sp06', False
+        # Side is ground truth in a contrapposte layout: BANCHE on ATTIVO is cash,
+        # not the generic-credit fallback used by the single-column classifier.
+        if 'BANC' in d:
+            return 'sp09', True
+        if ('SCORTE' in d or 'MATERIE PRIME' in d or d == 'IMBALLAGGI'):
+            return 'sp05', True
         f = _classify_sp_attivo(d)
         f = {'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f)
         return f, f != 'sp06'
 
     def cl_pas(d):
+        if _is_fondo_amm(d):
+            field = 'depr_sp02' if _fondo_is_immat(d) else 'depr_sp03'
+            # A category-blind aggregate must descend into children; any uncovered
+            # residual is retained by _be_reclassify under the material fallback.
+            specific = any(k in d for k in _FONDO_CATEGORY_KW)
+            return field, specific
         tag = _classify_sp_passivo(d)
         if tag == 'equity_total':
             if _kw_match(d, ['CAPITALE']):
@@ -3349,7 +3850,8 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             # aggregate (which the UI then renders entirely under "altri debiti"). 'debt_bank'
             # /'bank_avere' are already bank lines; otherwise read _debt_type. A recognised
             # type stops the descent; an unknown ('g') keeps descending to find a typed child.
-            letter = 'a' if tag in ('debt_bank', 'bank_avere') else _debt_type(d.upper())
+            letter = ('a' if tag in ('debt_bank', 'bank_avere') or 'BANC' in d
+                      else _debt_type(d.upper()))
             return 'sp16' + letter, letter != 'g'
         return tag, tag != 'sp16'
 
@@ -3459,14 +3961,52 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             return _be_amount(flat1.split(flat, 1)[1][:40])
         return None
 
-    tot_att = _find_total('TOTALE ATTIV', 'TOTALEATTIV')
-    tot_pas = _find_total('TOTALE PASSIV', 'TOTALEPASSIV')
-    pareggio = _find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO')
+    def _control_amount(section, side, *needles):
+        matches = [fact.amount for sec, sd, fact in controls
+                   if sec == section and (side is None or sd == side)
+                   and all(needle in fact.description for needle in needles)]
+        return max(matches) if matches else None
 
-    if tot_att is not None and tot_pas is not None:
-        utile = tot_att - tot_pas                          # +utile / -perdita from section gap
+    # Coordinate facts first; legacy linear-text lookup remains as a fallback for
+    # layouts whose footer is not physically aligned with either data column.
+    tot_att = ((_control_amount('sp', 'left', 'TOTALE', 'ATTIV')
+                if use_garbled_reconstruction else None)
+               or _find_total('TOTALE ATTIV', 'TOTALEATTIV'))
+    tot_pas = ((_control_amount('sp', 'right', 'TOTALE', 'PASSIV')
+                if use_garbled_reconstruction else None)
+               or _find_total('TOTALE PASSIV', 'TOTALEPASSIV'))
+    pareggio = ((_control_amount('sp', None, 'TOTALE', 'PAREGGIO')
+                 if use_garbled_reconstruction else None)
+                or _find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO'))
+
+    explicit_results = []
+    for sec, _side, fact in controls:
+        if sec != 'sp' or 'ESERCIZ' not in fact.description:
+            continue
+        if 'UTILE' in fact.description:
+            explicit_results.append(fact.amount)
+        elif 'PERDIT' in fact.description:
+            explicit_results.append(-fact.amount)
+    explicit_result = explicit_results[-1] if explicit_results else None
+    total_gap = (tot_att - tot_pas
+                 if tot_att is not None and tot_pas is not None else None)
+    ce_cost_total = _control_amount('ce', 'left', 'TOTALE', 'COST')
+    ce_revenue_total = _control_amount('ce', 'right', 'TOTALE', 'RICAV')
+    ce_control_result = (ce_revenue_total - ce_cost_total
+                         if ce_cost_total is not None and ce_revenue_total is not None
+                         else None)
+
+    independent_results = [v for v in (explicit_result, total_gap, ce_control_result)
+                           if v is not None]
+    result_controls_agree = (len(independent_results) >= 2
+                             and max(independent_results) - min(independent_results)
+                             <= Decimal('0.05'))
+    if use_garbled_reconstruction and result_controls_agree:
+        utile = independent_results[0]
+    elif total_gap is not None:
+        utile = total_gap
     else:
-        utile = result[0]                                  # fallback: booked result line
+        utile = result[0]                                  # booked account fallback
     bs['sp13'] = utile
 
     # A fondo ammortamento can never exceed its own gross asset, so a negative net
@@ -3492,38 +4032,47 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         iv_total = tb_total - (abs(utile) if utile < 0 else Z) - netted_contra
         att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
         res_a = iv_total - att_sum
-        add(bs, 'sp09', res_a)
         pas_sum = sum((bs.get(k, Z) for k in _PASSIVO_KEYS), Z)
         res_p = iv_total - pas_sum
-        add(bs, 'sp16', res_p)
-        bs['totale_attivo'] = iv_total
-        bs['totale_passivo'] = iv_total
+        # Keep the statement exactly as classified.  ``iv_total`` is independent
+        # evidence from the source, not permission to manufacture the missing side.
+        bs['totale_attivo'] = att_sum
+        bs['totale_passivo'] = pas_sum
+        bs['_declared_net_total'] = iv_total
+        bs['_unexplained_asset_difference'] = res_a
+        bs['_unexplained_liability_difference'] = res_p
         worst = max(abs(res_a), abs(res_p))
         # Expose the plug magnitude so the shared quadratura engine can tell a real
         # balance from one that only ties because the residual was swept into
         # sp09/sp16. Survives _map_sc_keys (has '_') and is ignored by the BS builder.
         bs['_plug_residual'] = worst
+        # A geometrically reconstructed statement is authoritative only when
+        # independent source controls agree and both net sides reconcile without
+        # a compensating accounting entry.  This flag merely prevents a later
+        # declared-total mutator from undoing that source-backed result.
+        if (use_garbled_reconstruction and result_controls_agree
+                and worst <= Decimal('0.05')):
+            bs['_plug_residual'] = Z
+            bs['_skip_declared_reconcile'] = True
         if worst > Decimal('1'):
             logger.warning(
                 f"BILANCIO NON QUADRATO (contrapposte best-effort): residuo attivo={res_a}, "
-                f"passivo={res_p} plug in sp09/sp16 — verificare in Rettifiche"
+                f"passivo={res_p}; nessun plug applicato — verificare in Rettifiche"
             )
     else:
-        # No reliable declared total (e.g. code-less footer): anchor to the larger
-        # classified side and plug the other so the import balances (best-effort);
-        # the gap is flagged for manual correction in Rettifiche.
+        # No reliable declared total (e.g. code-less footer): retain both classified
+        # sides and expose their difference.  Anchoring the shorter side to the larger
+        # one used to invent cash/debt and turn incomplete extraction into a false OK.
         att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
         pas_sum = sum((bs.get(k, Z) for k in _PASSIVO_KEYS), Z)
-        iv_total = max(att_sum, pas_sum)
-        add(bs, 'sp09', iv_total - att_sum)
-        add(bs, 'sp16', iv_total - pas_sum)
-        bs['totale_attivo'] = iv_total
-        bs['totale_passivo'] = iv_total
+        bs['totale_attivo'] = att_sum
+        bs['totale_passivo'] = pas_sum
         bs['_plug_residual'] = abs(att_sum - pas_sum)
         if abs(att_sum - pas_sum) > Decimal('1'):
             logger.warning(
                 f"BILANCIO NON QUADRATO (contrapposte best-effort): totali dichiarati non "
-                f"trovati, ancorato a {iv_total} (plug {abs(att_sum - pas_sum)}) — verificare in Rettifiche"
+                f"trovati, differenza non spiegata {abs(att_sum - pas_sum)}; "
+                f"nessun plug applicato — verificare in Rettifiche"
             )
 
     # Rescue: a MASKED result on a dotted hierarchical ('4 sezioni') layout is the
@@ -3596,6 +4145,85 @@ def _build_prior_from_entries(entries: List[Entry], default_ce: bool):
 _VSEG_CODE_RE = re.compile(r'^\d{2}(?:\.\d{2})?$')
 
 
+@lru_cache(maxsize=4)
+def _vseg_rapidocr_pages_cached(
+    file_path: str, size: int, mtime_ns: int
+) -> Optional[Tuple[dict, ...]]:
+    """Return 300-DPI OCR words while preserving their source coordinates.
+
+    ``size`` and ``mtime_ns`` are cache-key provenance only: a replaced scan at
+    the same path is never served stale OCR.  RapidOCR is deliberately optional;
+    deployments without it keep the existing Anthropic scan fallback.
+    """
+    del size, mtime_ns
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except (ImportError, ModuleNotFoundError):
+        return None
+
+    engine = RapidOCR()
+    pages: List[dict] = []
+    try:
+        with fitz.open(file_path) as doc:
+            for page_number, page in enumerate(doc, 1):
+                pix = page.get_pixmap(dpi=300, colorspace=fitz.csGRAY, alpha=False)
+                result, _elapsed = engine(pix.tobytes("png"))
+                words = []
+                texts = []
+                for word_number, item in enumerate(result or []):
+                    if len(item) < 3:
+                        continue
+                    polygon, text, confidence = item
+                    text = str(text or "").strip()
+                    if not text or float(confidence) < 0.45:
+                        continue
+                    x0 = min(float(point[0]) for point in polygon)
+                    y0 = min(float(point[1]) for point in polygon)
+                    x1 = max(float(point[0]) for point in polygon)
+                    y1 = max(float(point[1]) for point in polygon)
+                    # PyMuPDF-compatible projection: all coordinate parsers use
+                    # only x0/y0/x1/y1/text; the trailing indexes retain order.
+                    words.append((x0, y0, x1, y1, text, 0, word_number, 0))
+                    texts.append(text)
+                pages.append({
+                    "page": page_number,
+                    "width": float(pix.width),
+                    "height": float(pix.height),
+                    "words": tuple(words),
+                    "text": "\n".join(texts),
+                })
+    except Exception as exc:
+        logger.warning(
+            "RapidOCR verifica-segno failed (%s: %s)", type(exc).__name__, exc
+        )
+        return None
+    return tuple(pages)
+
+
+def _vseg_rapidocr_pages(file_path: str) -> Optional[Tuple[dict, ...]]:
+    """Cached coordinate OCR for image-only verifica-segno statements."""
+    try:
+        stat = os.stat(file_path)
+    except OSError:
+        return None
+    return _vseg_rapidocr_pages_cached(
+        os.path.abspath(file_path), stat.st_size, stat.st_mtime_ns
+    )
+
+
+def ocr_bilancio_verifica_segno_sample_text(file_path: str) -> str:
+    """Return local OCR routing text only for the supported by-sign layout.
+
+    The same cached OCR pages are later consumed by the deterministic parser, so
+    the scan is rendered once and no temporary files are needed.
+    """
+    pages = _vseg_rapidocr_pages(file_path)
+    if not pages:
+        return ""
+    text = "\n".join(page["text"] for page in pages)
+    return text if is_bilancio_verifica_segno(text) else ""
+
+
 def _vseg_num(tok: str) -> Optional[Decimal]:
     """Parse one Italian amount token; parentheses or trailing '-' = negative."""
     tok = tok.strip()
@@ -3665,20 +4293,248 @@ def _vseg_split_rows(page) -> Tuple[list, list]:
     return left, right
 
 
+def _vseg_ocr_sections(page: dict) -> List[Tuple[str, float, float]]:
+    """Find SP/CE y-regions on one coordinate-OCR page.
+
+    A physical page may contain the tail of Stato Patrimoniale and the beginning
+    of Conto Economico.  Page-level routing would classify both tables twice;
+    section-header coordinates keep the two regions disjoint.
+    """
+    words = page["words"]
+    height = page["height"]
+
+    def _compact(word) -> str:
+        return re.sub(r"\W+", "", _vseg_up(word[4]))
+
+    sp_headers = [
+        (word[1] + word[3]) / 2
+        for word in words
+        if "STATOPATRIMONIALE" in _compact(word)
+    ]
+    ce_headers = [
+        (word[1] + word[3]) / 2
+        for word in words
+        if "CONTOECONOMICO" in _compact(word)
+    ]
+    # OCR occasionally fuses or drops a section title; the paired column
+    # captions still identify the table without using any accounting amount.
+    if not sp_headers:
+        att = [(word[1] + word[3]) / 2 for word in words
+               if _compact(word).startswith("ATTIVIT")]
+        pas = [(word[1] + word[3]) / 2 for word in words
+               if _compact(word).startswith("PASSIVIT")]
+        if att and pas:
+            sp_headers = [min(min(att), min(pas))]
+    if not ce_headers:
+        costs = [(word[1] + word[3]) / 2 for word in words
+                 if _compact(word) == "COSTI"]
+        revenues = [(word[1] + word[3]) / 2 for word in words
+                    if _compact(word) == "RICAVI"]
+        if costs and revenues:
+            ce_headers = [min(min(costs), min(revenues))]
+
+    starts = [(min(sp_headers), "sp") for _ in [0] if sp_headers]
+    starts += [(min(ce_headers), "ce") for _ in [0] if ce_headers]
+    starts.sort()
+    return [
+        (section, start, starts[index + 1][0] if index + 1 < len(starts) else height)
+        for index, (start, section) in enumerate(starts)
+    ]
+
+
+# Level-3+ account codes (31.03.01). They are DETAIL under a level-2 sub-account and
+# must never reach _vseg_classify_sp, which sums mastri: booking them too would double
+# count (the fondi ammortamento tree 41 > 41.01 > 41.01.25 is the obvious victim). They
+# are captured on a separate channel, used only where the mastro alone cannot answer.
+_VSEG_DETAIL_CODE_RE = re.compile(r'^\d{2}(?:\.\d{2,3}){2,}$')
+# A "partitario" row repeats its parent's code and re-lists part of its amount under a
+# counterparty ("1 BANCO BPM SPA"). Summing it with the parent double counts.
+_VSEG_PARTITARIO_RE = re.compile(r'^\d+\s')
+
+
+def _vseg_financing_split(details: list, total: Decimal) -> Optional[Dict[str, Decimal]]:
+    """Split a financing mastro into entro/oltre from its level-3 detail rows.
+
+    A bilancio di verifica prints no "esigibili entro/oltre" column, so the house rule
+    is "no marker -> all short". On this layout the maturity IS printed, one level
+    below the mastro ("Banca c/anticipazioni" vs "Finanz. a medio/lungo termine"), so
+    reading it is reading the document, not inventing a split.
+
+    RapidOCR drops the decimal comma on some rows (243.073,49 arrives as 24307349).
+    Italian amounts always carry two decimals, so an integer-valued row is a repair
+    candidate — but the repair is accepted ONLY when the rows then sum to the printed
+    mastro total, i.e. when the source confirms itself. Returns None on any doubt (no
+    details, an unrecognised caption, no reconciliation): the caller then keeps the
+    aggregate exactly as classified, which is the current behaviour.
+    """
+    if not details:
+        return None
+    typed = []
+    for _code, description, amount in details:
+        field = _vseg_debt_field(description)
+        if field is None:
+            return None  # partial knowledge must not produce a partial split
+        typed.append((field, amount))
+
+    for repair in (False, True):
+        out: Dict[str, Decimal] = defaultdict(Decimal)
+        running = Decimal('0')
+        for field, amount in typed:
+            value = amount
+            if repair and value == value.to_integral_value():
+                value = value / 100
+            out[field] += value
+            running += value
+        if abs(running - total) <= Decimal('0.02'):
+            return dict(out)
+    return None
+
+
+def _vseg_is_financing(u: str) -> bool:
+    """A mastro holding bank financing / mortgages ("FINANZIAMENTI DI TERZI")."""
+    return 'FINANZIAMENT' in u or 'MUTU' in u
+
+
+def _vseg_debt_field(u: str) -> Optional[str]:
+    """IV-CEE field for a financing DETAIL caption, or None when unrecognised.
+
+    Deliberately narrow: an unknown caption must fail the whole split rather than be
+    guessed into a bucket."""
+    if 'SOCIO' in u or 'SOCI ' in u or u.startswith('SOCI'):
+        # A shareholder account inside the financing mastro is a soci loan: D.5, not a
+        # bank. Keyed on SOCIO alone and NOT on 'FINANZ', which the OCR mangles
+        # ("C/FINANZIAMEN" -> "C/FINANANZIAMEN"); the caller has already scoped these
+        # rows to the financing mastro, so the word carries the meaning on its own.
+        return 'sp17b_debiti_altri_finanz_lungo'
+    if 'ANTICIPAZ' in u:
+        return 'sp16a_debiti_banche_breve'          # advances revolve within the year
+    if 'MEDIO/LUNGO' in u or 'MEDIO LUNGO' in u or 'M/L' in u or 'MUTUO' in u:
+        return 'sp17a_debiti_banche_lungo'
+    return None
+
+
+def _vseg_split_ocr_rows(
+    page: dict, y0: float, y1: float
+) -> Tuple[list, list, list, list]:
+    """Split coordinate OCR into left/right account rows, source controls and the
+    level-3 detail rows (see _VSEG_DETAIL_CODE_RE)."""
+    words = [
+        word for word in page["words"]
+        if y0 <= (word[1] + word[3]) / 2 < y1
+    ]
+    # The scan is a symmetric two-half table.  The right ``Conto`` header begins
+    # *after* its narrow code column, while the first right-side account code can
+    # straddle the exact centre.  Reusing the text-PDF ``header.x - 10`` heuristic
+    # therefore puts that code on the left and merges two physical rows.  The
+    # rendered page midpoint is the actual printed gutter and is rotation-safe.
+    gutter = page["width"] / 2
+    left: list = []
+    right: list = []
+    controls: list = []
+    details: list = []
+
+    for side, lo, hi, out in (
+        ("left", -1e9, gutter, left),
+        ("right", gutter, 1e9, right),
+    ):
+        for physical_row in _be_cluster_physical_rows(words, lo, hi):
+            row = sorted(physical_row, key=lambda word: word[0])
+            tokens = [word[4].strip() for word in row if word[4].strip()]
+            if len(tokens) < 2:
+                continue
+            amount_index = None
+            amount = None
+            amount_prefix = ""
+
+            # RapidOCR commonly returns ``caption 1.234,56`` as one detection
+            # box.  Prefer a trailing cents-formatted amount embedded in a token
+            # before considering bare integer tokens: a narrow code belonging to
+            # the opposite half can otherwise be mistaken for this row's amount.
+            fused_amount_re = re.compile(
+                r"(?P<amount>\(?-?\d{1,3}(?:\.\d{3})*,\d{2}\)?-?)\s*$"
+            )
+            for index in range(len(tokens) - 1, 0, -1):
+                match = fused_amount_re.search(tokens[index])
+                if not match:
+                    continue
+                parsed = _vseg_num(match.group("amount"))
+                if parsed is None:
+                    continue
+                amount_index = index
+                amount = parsed
+                amount_prefix = tokens[index][:match.start()].strip()
+                break
+
+            # Text PDFs and some OCR rows keep the amount in its own token.
+            for index in range(len(tokens) - 1, 0, -1):
+                if amount_index is not None:
+                    break
+                amount = _vseg_num(tokens[index])
+                if amount is not None:
+                    amount_index = index
+                    break
+            if amount_index is None or amount is None:
+                continue
+
+            caption_tokens = tokens[:amount_index]
+            if amount_prefix:
+                caption_tokens.append(amount_prefix)
+            raw_code = caption_tokens[0].replace(",", ".")
+            if _VSEG_CODE_RE.match(raw_code):
+                description = " ".join(caption_tokens[1:]).strip()
+                if description:
+                    out.append((raw_code, _vseg_up(description), amount))
+                continue
+
+            # Level-3 detail: kept OUT of `out` (mastri only) on its own channel.
+            if _VSEG_DETAIL_CODE_RE.match(raw_code):
+                description = " ".join(caption_tokens[1:]).strip()
+                if description and not _VSEG_PARTITARIO_RE.match(description):
+                    details.append((side, raw_code, _vseg_up(description), amount))
+                continue
+
+            # Codeless printed controls never become ledger rows.  They are kept
+            # with their physical side and used only for explicit source-backed
+            # facts such as the prior-year excess.
+            description = _vseg_up(" ".join(caption_tokens).strip())
+            if description and any(key in description for key in (
+                "TOTALE", "ECCEDENZA", "UTILE", "PERDITA", "QUADRATURA"
+            )):
+                controls.append((side, description, amount))
+
+    return left, right, controls, details
+
+
 def _vseg_classify_sp(bs: Dict[str, Decimal], rows: list, side: int) -> None:
     """Accumulate a column's MASTRO rows into bs (short keys + full sub-field names).
     side: 0 = Attività, 1 = Passività. Fondi ammortamento (sub-rows) and the result
     account (25) are handled by the caller via the returned helpers."""
     for code, u, amt in rows:
         mastro = '.' not in code
+        if side == 1 and 'FOND' in u and 'SVALUT' in u:
+            # The generic mastro 43 and its specific category 43.09 carry the
+            # same printed amount.  Ignore the generic parent and net the one
+            # category explicitly identified as CREDITI exactly once.
+            if 'CREDIT' in u:
+                bs['sp06'] -= amt
+                bs['sp06a_crediti_clienti_breve'] = (
+                    bs.get('sp06a_crediti_clienti_breve', Decimal('0')) - amt
+                )
+            continue
         if 'FOND' in u and 'AMMORT' in u:        # fondi ammortamento -> netting
             if not mastro:                        # use sub-rows for immat/mat split
-                if 'IMMATER' in u:                # desc truncated to "...IMMATER"
+                if (code == '41.01' or 'IMMATER' in u
+                        or ('IMMOBILIZZ' in u and u.rstrip('.').endswith('IMM'))):
+                    # Some OCR engines preserve only the source code 41.01 and
+                    # the truncated caption ``IMMOBILIZZAZ.IMM``.
                     bs['sp02'] -= amt
                 else:
                     bs['sp03'] -= amt
             continue
-        if 'RISULTAT' in u or 'UTILE' in u or 'PERDITE PORTAT' in u or 'PORTATI A NUOVO' in u:
+        shareholder_current_account = bool(re.search(r'\bC\s*/\s*TO\s+UTILE\b', u))
+        if (not shareholder_current_account
+                and ('RISULTAT' in u or 'UTILE' in u
+                     or 'PERDITE PORTAT' in u or 'PORTATI A NUOVO' in u)):
             # result/retained accounts -> patrimonio netto (sub-rows split the parts)
             if not mastro:
                 sign = amt if side == 1 else -amt
@@ -3716,6 +4572,16 @@ def _vseg_classify_sp(bs: Dict[str, Decimal], rows: list, side: int) -> None:
             if 'DISPONIBILITA' in u or 'BANCH' in u or 'POSTA' in u:   # overdraft
                 bs['sp16'] += amt
                 bs['sp16a_debiti_banche_breve'] = bs.get('sp16a_debiti_banche_breve', Decimal('0')) + amt
+            elif _vseg_is_financing(u):
+                # Bank financing / mortgages. Without this rule the whole mass fell to
+                # the `else` and was booked as generic 'altri debiti' (Bilancino
+                # 31-5-26: 935.528,51 of mutui in sp16g). Maturity is printed only on
+                # the level-3 rows, so default to short here — the house rule for a
+                # verifica with no entro/oltre column — and let the caller refine it
+                # from the details when they reconcile to this total.
+                bs['sp16'] += amt
+                bs['sp16a_debiti_banche_breve'] = bs.get('sp16a_debiti_banche_breve', Decimal('0')) + amt
+                bs['_vseg_financing'] = bs.get('_vseg_financing', Decimal('0')) + amt
             elif 'CAPITALE' in u:
                 bs['sp11'] += amt
             elif 'FOND' in u and ('RISCHI' in u or 'ONERI' in u):
@@ -3783,35 +4649,105 @@ _VSEG_RICAVI_KEYS = ('ce01', 'ce02', 'ce03', 'ce04', 'ce13', 'ce14', 'ce18')
 _VSEG_COSTI_KEYS = ('ce05', 'ce06', 'ce07', 'ce08', 'ce09', 'ce10', 'ce11', 'ce12', 'ce15', 'ce19', 'ce20')
 
 
-def parse_bilancio_verifica_segno(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+def parse_bilancio_verifica_segno(
+    file_path: str, ocr_pages: Optional[Tuple[dict, ...]] = None
+) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Parse the by-sign contrapposte bilancio di verifica. Returns (bs, ce) with
     short aggregate keys (sp02..sp18, ce01..ce20) plus full-name sub-fields, and
     `_plug_residual` = |attivo - passivo|. Raises ValueError if the layout does not
     yield a balanced sheet (so the caller can fall back)."""
-    doc = fitz.open(file_path)
-    sp_pages, ce_pages = [], []
-    for i in range(doc.page_count):
-        up = doc[i].get_text().upper()
-        if 'STATO PATRIMONIALE' in up:
-            sp_pages.append(i)
-        if 'CONTO ECONOMICO' in up:
-            ce_pages.append(i)
-    if not sp_pages:
-        doc.close()
+    bs: Dict[str, Decimal] = defaultdict(Decimal)
+    ce: Dict[str, Decimal] = defaultdict(Decimal)
+    controls: list = []
+    sp_details: list = []
+    sp_fin_codes: set = set()
+    found_sp = False
+
+    if ocr_pages:
+        for page in ocr_pages:
+            for section, y0, y1 in _vseg_ocr_sections(page):
+                left, right, region_controls, region_details = _vseg_split_ocr_rows(
+                    page, y0, y1)
+                controls.extend(
+                    (section, side, description, amount)
+                    for side, description, amount in region_controls
+                )
+                if section == 'sp':
+                    found_sp = True
+                    _vseg_classify_sp(bs, left, 0)
+                    _vseg_classify_sp(bs, right, 1)
+                    sp_fin_codes.update(
+                        code for code, description, _amount in right
+                        if '.' not in code and _vseg_is_financing(description)
+                    )
+                    sp_details.extend(
+                        (code, description, amount)
+                        for side, code, description, amount in region_details
+                        if side == 'right'
+                    )
+                elif section == 'ce':
+                    _vseg_classify_ce(ce, left, 0)
+                    _vseg_classify_ce(ce, right, 1)
+    else:
+        doc = fitz.open(file_path)
+        try:
+            sp_pages, ce_pages = [], []
+            for i in range(doc.page_count):
+                up = doc[i].get_text().upper()
+                if 'STATO PATRIMONIALE' in up:
+                    sp_pages.append(i)
+                if 'CONTO ECONOMICO' in up:
+                    ce_pages.append(i)
+            found_sp = bool(sp_pages)
+            for page_number in sp_pages:
+                left, right = _vseg_split_rows(doc[page_number])
+                _vseg_classify_sp(bs, left, 0)
+                _vseg_classify_sp(bs, right, 1)
+            for page_number in ce_pages:
+                left, right = _vseg_split_rows(doc[page_number])
+                _vseg_classify_ce(ce, left, 0)
+                _vseg_classify_ce(ce, right, 1)
+        finally:
+            doc.close()
+
+    if not found_sp:
         raise ValueError("verifica-segno: no Stato Patrimoniale page")
 
-    bs: Dict[str, Decimal] = defaultdict(Decimal)
-    for p in sp_pages:
-        left, right = _vseg_split_rows(doc[p])
-        _vseg_classify_sp(bs, left, 0)
-        _vseg_classify_sp(bs, right, 1)
+    # This codeless source row sits outside the account hierarchy and is included
+    # in printed passività.  It is prior-year retained profit, not the current
+    # result (which is independently derived from CE below).
+    prior_excesses = [
+        (-amount if 'PERDIT' in description else amount)
+        for section, side, description, amount in controls
+        if section == 'sp' and side == 'right'
+        and 'ECCEDENZA' in description and 'PRECEDENT' in description
+    ]
+    if prior_excesses:
+        prior_excess = prior_excesses[-1]
+        bs['sp12'] += prior_excess
+        bs['sp12g_utili_perdite_portati'] += prior_excess
 
-    ce: Dict[str, Decimal] = defaultdict(Decimal)
-    for p in ce_pages:
-        left, right = _vseg_split_rows(doc[p])
-        _vseg_classify_ce(ce, left, 0)
-        _vseg_classify_ce(ce, right, 1)
-    doc.close()
+    # Refine the financing mastro's entro/oltre from its level-3 rows. _vseg_classify_sp
+    # booked the whole mass short (sp16/sp16a); move only what the detail rows prove is
+    # long. Balance-invariant: sp16 loses exactly what sp17 gains. A source that does
+    # not reconcile to its own printed mastro leaves the short default untouched.
+    financing = bs.pop('_vseg_financing', Decimal('0'))
+    if financing > 0 and sp_fin_codes:
+        # Select the details by CODE PREFIX, never by caption: filtering on "captions we
+        # recognise" would silently drop the unrecognised ones and defeat both the
+        # reconciliation gate and the refusal on an unknown account.
+        split = _vseg_financing_split(
+            [row for row in sp_details
+             if row[0].split('.')[0] in sp_fin_codes],
+            financing,
+        )
+        if split:
+            for field, amount in split.items():
+                if field.startswith('sp17'):
+                    bs['sp16'] -= amount
+                    bs['sp16a_debiti_banche_breve'] -= amount
+                    bs['sp17'] += amount
+                    bs[field] += amount
 
     ricavi = sum(ce.get(k, Decimal('0')) for k in _VSEG_RICAVI_KEYS)
     costi = sum(ce.get(k, Decimal('0')) for k in _VSEG_COSTI_KEYS)
@@ -3835,7 +4771,8 @@ def parse_bilancio_verifica_segno(file_path: str) -> Tuple[Dict[str, Decimal], D
     # and use to overwrite sp13 and inflate cash.
     bs['_skip_declared_reconcile'] = True
     logger.info(
-        f"verifica-segno parsed: attivo={att}, passivo={pas}, sp13={bs['sp13']}, "
+        f"verifica-segno parsed ({'RapidOCR' if ocr_pages else 'text'}): "
+        f"attivo={att}, passivo={pas}, sp13={bs['sp13']}, "
         f"clienti={bs.get('sp06a_crediti_clienti_breve')}, liquidità={bs.get('sp09')}, "
         f"debiti={bs.get('sp16')}")
     return dict(bs), dict(ce)
@@ -3864,6 +4801,18 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
         full_text += page.get_text() + "\n"
     doc.close()
 
+    vseg_ocr_pages = None
+    if len(full_text.strip()) < 50:
+        candidate_pages = _vseg_rapidocr_pages(file_path)
+        if candidate_pages:
+            candidate_text = "\n".join(page["text"] for page in candidate_pages)
+            if is_bilancio_verifica_segno(candidate_text):
+                full_text = candidate_text
+                vseg_ocr_pages = candidate_pages
+                logger.info(
+                    "Image-only verifica-segno detected via local coordinate RapidOCR"
+                )
+
     # Dedicated by-sign contrapposte "bilancio di verifica" (accounts placed by sign of
     # balance, same account on both sides). Tried FIRST because its coordinate parser
     # reads this layout exactly and balances to plug 0, where the generic best-effort /
@@ -3872,7 +4821,9 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
     if is_bilancio_verifica_segno(full_text):
         try:
             logger.info("Bilancio di verifica a sezioni contrapposte PER SEGNO detected")
-            vbs, vce = parse_bilancio_verifica_segno(file_path)
+            vbs, vce = parse_bilancio_verifica_segno(
+                file_path, ocr_pages=vseg_ocr_pages
+            )
             return (vbs, vce, None, None) if return_prior else (vbs, vce)
         except Exception as vseg_err:
             logger.info(f"verifica-segno parser declined ({type(vseg_err).__name__}: "

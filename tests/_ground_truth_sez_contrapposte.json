@@ -24,14 +24,19 @@
       "expect": {"sp02": 169996.00, "sp03": 100363.91, "plug_max": 100}
     },
     "budget_405_all. A - PROGETTO DI BILANCIO.pdf": {
-      "status": "good", "fixed_by": "PR-6", "tol": 2,
-      "note": "The 870k plug was STALE: net_contra_accounts correctly rebuilds sp02/sp03 (0.61 / 5.756.144,64) but the best-effort's pre-netting _plug_residual (which counted the not-yet-netted asset-named passivo depreciation) was kept by the reconcile via max(existing, gap). Fixed by resetting _plug_residual after net_contra acts, so the reconcile recomputes the true residual (the 28k fondo svalutazione crediti gap, within the 0.5% tolerance).",
-      "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_pct_max": 1.0}
+      "status": "review_required", "fixed_by": "phase-3-no-false-ok", "tol": 2,
+      "note": "The fixed-asset net values are source-backed, but the classified statement still has a material unexplained residual. Earlier code erased _plug_residual after contra-netting while leaving compensating values in sp09/sp16, producing a false OK. The residual now remains visible and the record is not forecastable until the missing rows are classified.",
+      "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_min": 1, "quadra": false}
     },
     "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {
       "status": "good", "fixed_by": "PR-7", "tol": 2,
       "note": "AUDIT WAS WRONG: the document HAS fondi ammortamento (F/AMM immat 8.069,50 + F/AMM materiali 117.603,33 on the passivo). build_iv_cee correctly nets them -> sp02=0, sp03=8.992,37 (NET per art. 2424); the audit's 8.069,50/126.595,70/355.878,76 were the GROSS values. The real bug was a FALSE plug: the reconcile anchored to the GROSS declared total. Fixed by exposing _netted_contra from build_iv_cee and reducing the declared anchor by it (like net_contra_accounts). NOT a multi-column parsing issue.",
       "expect": {"totale_attivo": 230205.93, "sp02": 0.00, "sp03": 8992.37, "plug_max": 100}
+    },
+    "budget_337_2023.pdf": {
+      "status": "good", "fixed_by": "phase-3-garbled-row-reconstruction", "tol": 0.05,
+      "note": "Verified directly on source pages. Text-layer glyph mapping is damaged, but the printed document is legible. Gross immateriali 3,239.12 with no intangible fund; gross materiali 67,229.83 less material funds 62,045.10; explicit and recomputed profit +4,287.23. Fixed by the generic coordinate row reconstruction.",
+      "expect": {"totale_attivo": 253076.09, "sp02": 3239.12, "sp03": 5184.73, "sp13": 4287.23, "plug_max": 0}
     }
   }
 }

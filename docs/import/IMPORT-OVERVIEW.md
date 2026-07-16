@@ -1,5 +1,12 @@
 # Importazione bilanci — descrizione completa e dettagliata
 
+> ⚠️ **Parzialmente superato (verificato il 2026-07-16).** Questo documento è fermo alle
+> sessioni 2026-06-15/17 e descrive comportamenti che il codice non ha più — in particolare il
+> *plug* del residuo in `sp09`/`sp16` e l'allineamento CE↔SP con tampone in `ce04`/`ce12`, oggi
+> entrambi **puramente diagnostici**. La specifica di riferimento è la serie
+> [REGOLE-IMPORT-00-INDICE.md](REGOLE-IMPORT-00-INDICE.md), il cui §5 elenca i disallineamenti
+> uno per uno. Questo testo resta utile come contesto architetturale e storico.
+
 > Documento **autosufficiente**: spiega dall'inizio alla fine **come un bilancio viene
 > importato e analizzato**, con **tutte le regole di ogni route**, **perché** sono fatte così,
 > i parametri configurabili e i file coinvolti. Non è un indice: incorpora il contenuto dei

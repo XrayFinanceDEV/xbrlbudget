@@ -21,6 +21,7 @@ import pydantic
 import anthropic
 
 from config import PDF_LLM_MODEL, PDF_LLM_MAX_TOKENS
+from calculations.ce_result import calculate_ce_result
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,497 @@ SP_FALLBACK_KEYWORDS = [
 CE_FALLBACK_KEYWORDS = ["totale valore della produzione", "differenza tra valore e costi", "differ. tra valore e costi"]
 
 
+_DETACHED_AMOUNT_RE = re.compile(r"^-?\d{1,3}(?:\.\d{3})*,\d{2}$|^-?\d+,\d{2}$")
+
+
+def _detached_value_page_texts(doc: fitz.Document) -> Dict[int, str]:
+    """Rejoin labels and amounts split across two physical page layers.
+
+    A few accounting exports print ``N`` normal pages whose amount cells are all
+    ``0,00``, followed by ``N`` headerless pages containing the real amount column.
+    Each value keeps the exact vertical coordinate of its placeholder.  Plain text
+    extraction therefore sends only zeroes to the LLM even though the visible PDF is
+    complete (budget_355/356).
+
+    Return synthetic text for the first half only when the geometry proves this
+    layout: an even page count, amount-only second half, at least 30 matches, >=95%
+    one-to-one Y coverage, and materially non-zero values.  No accounting value is
+    inferred; every replacement comes from one uniquely aligned source cell.
+    """
+    page_count = len(doc)
+    if page_count < 4 or page_count % 2:
+        return {}
+    half = page_count // 2
+    page_words = [page.get_text("words", sort=True) for page in doc]
+
+    value_word_count = sum(len(words) for words in page_words[half:])
+    alpha_value_words = sum(
+        1
+        for words in page_words[half:]
+        for word in words
+        if re.search(r"[A-Za-zÀ-ÿ]", str(word[4]))
+    )
+    if value_word_count == 0 or alpha_value_words > max(5, int(value_word_count * 0.02)):
+        return {}
+
+    replacements_by_page: Dict[int, Dict[int, str]] = {}
+    matched = 0
+    placeholder_count = 0
+    value_count = 0
+    source_mass = Decimal("0")
+
+    for page_index in range(half):
+        labels = page_words[page_index]
+        values = page_words[page_index + half]
+        placeholders = [
+            (idx, word)
+            for idx, word in enumerate(labels)
+            if _DETACHED_AMOUNT_RE.fullmatch(str(word[4]).strip())
+        ]
+        source_values = [
+            word for word in values
+            if _DETACHED_AMOUNT_RE.fullmatch(str(word[4]).strip())
+        ]
+        if not placeholders or not source_values:
+            return {}
+
+        placeholder_count += len(placeholders)
+        value_count += len(source_values)
+        available = set(range(len(placeholders)))
+        page_replacements: Dict[int, str] = {}
+        for value in source_values:
+            candidates = [
+                pos for pos in available
+                if abs(float(placeholders[pos][1][1]) - float(value[1])) <= 1.0
+            ]
+            if not candidates:
+                continue
+            best = min(
+                candidates,
+                key=lambda pos: abs(float(placeholders[pos][1][1]) - float(value[1])),
+            )
+            available.remove(best)
+            word_index = placeholders[best][0]
+            token = str(value[4]).strip()
+            page_replacements[word_index] = token
+            matched += 1
+            parsed = _parse_it_number(token)
+            if parsed is not None:
+                source_mass += abs(parsed)
+        replacements_by_page[page_index] = page_replacements
+
+    coverage = Decimal(matched) / Decimal(max(placeholder_count, value_count, 1))
+    if matched < 30 or coverage < Decimal("0.95") or source_mass < Decimal("1000"):
+        return {}
+
+    def _render_page(words, replacements: Dict[int, str]) -> str:
+        positioned = []
+        for idx, word in enumerate(words):
+            positioned.append((float(word[1]), float(word[0]), replacements.get(idx, str(word[4]))))
+        positioned.sort(key=lambda item: (item[0], item[1]))
+        lines: List[str] = []
+        current: List[Tuple[float, str]] = []
+        line_y: Optional[float] = None
+        for y, x, token in positioned:
+            if line_y is None or abs(y - line_y) <= 1.0:
+                current.append((x, token))
+                if line_y is None:
+                    line_y = y
+                continue
+            lines.append(" ".join(text for _, text in sorted(current)))
+            current = [(x, token)]
+            line_y = y
+        if current:
+            lines.append(" ".join(text for _, text in sorted(current)))
+        return "\n".join(lines)
+
+    logger.warning(
+        "Detached amount pages detected: %s/%s cells matched (%.1f%%); "
+        "rejoining %s page pairs from source coordinates",
+        matched, max(placeholder_count, value_count), float(coverage * 100), half,
+    )
+    return {
+        page_index: _render_page(page_words[page_index], replacements_by_page[page_index])
+        for page_index in range(half)
+    }
+
+
+_GEOMETRIC_NUMBER_RE = re.compile(
+    r"^\(?-?\d{1,3}(?:\.\d{3})*(?:,\d{2})?\)?-?$"
+)
+
+
+def _comparative_column_words(words) -> List[Tuple]:
+    """Return the left-to-right current/prior header words for a table page."""
+    for pattern in (r"\d{2}/\d{2}/20\d{2}", r"20\d{2}"):
+        candidates = sorted(
+            (
+                word for word in words
+                if re.fullmatch(pattern, str(word[4]).strip())
+            ),
+            key=lambda word: (float(word[1]), float(word[0])),
+        )
+        pairs = []
+        for first in candidates:
+            same_line = sorted(
+                (
+                    other for other in candidates
+                    if other is not first
+                    and abs(float(other[1]) - float(first[1])) <= 1
+                    and float(other[0]) > float(first[0]) + 25
+                ),
+                key=lambda word: float(word[0]),
+            )
+            if same_line:
+                pairs.append((first, same_line[0]))
+        if pairs:
+            # Prefer the financial-statement table on the right over small note
+            # tables whose date columns begin near the left margin.
+            return list(max(pairs, key=lambda pair: float(pair[0][0])))
+    return []
+
+
+def _document_comparative_centers(doc: fitz.Document) -> Optional[Tuple[float, float]]:
+    pairs = []
+    for page in doc:
+        headers = _comparative_column_words(page.get_text('words', sort=True))
+        if len(headers) < 2:
+            continue
+        centers = tuple((float(word[0]) + float(word[2])) / 2 for word in headers)
+        if centers[0] > 350 and centers[1] - centers[0] >= 25:
+            pairs.append(centers)
+    return max(pairs, key=lambda pair: pair[0]) if pairs else None
+
+
+def _filter_difference_columns(page: fitz.Page) -> Optional[str]:
+    """Return row-wise text without DIFFERENZA/SCOST. analysis columns.
+
+    Some ERP exports have four numeric columns (current year, prior year,
+    difference, percentage).  The two-year prompt otherwise interprets the
+    repeated difference as another accounting value (budget_314).  Geometry is
+    unambiguous: retain both ``ESERCIZIO`` columns and drop only words at or to the
+    right of the printed ``DIFFERENZA`` header.
+    """
+    words = page.get_text('words', sort=True)
+    difference_headers = [
+        word for word in words if str(word[4]).strip().casefold().startswith('differenza')
+    ]
+    has_deviation = any(
+        str(word[4]).strip().casefold().startswith('scost') for word in words
+    )
+    years = {
+        str(word[4]).strip() for word in words
+        if re.fullmatch(r"20\d{2}", str(word[4]).strip())
+    }
+    if not difference_headers or not has_deviation or len(years) < 2:
+        return None
+    cutoff_x = min(float(word[0]) for word in difference_headers) - 2
+    kept = [word for word in words if float(word[0]) < cutoff_x]
+    positioned = sorted(kept, key=lambda word: (float(word[1]), float(word[0])))
+    lines: List[str] = []
+    current: List[Tuple[float, str]] = []
+    line_y: Optional[float] = None
+    for word in positioned:
+        y, x, token = float(word[1]), float(word[0]), str(word[4])
+        if line_y is None or abs(y - line_y) <= 1.0:
+            current.append((x, token))
+            if line_y is None:
+                line_y = y
+            continue
+        lines.append(' '.join(text for _, text in sorted(current)))
+        current = [(x, token)]
+        line_y = y
+    if current:
+        lines.append(' '.join(text for _, text in sorted(current)))
+    logger.warning(
+        "Filtered DIFFERENZA/SCOST. columns at x>=%.1f from source page %s",
+        cutoff_x, page.number + 1,
+    )
+    return '\n'.join(lines)
+
+
+def _reconcile_blank_current_ce_cells(
+    file_path: str,
+    current_ce: Dict[str, Decimal],
+    prior_ce: Optional[Dict[str, Decimal]] = None,
+) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+    """Clear CE values copied from a prior-year-only visual cell.
+
+    PyMuPDF's linear text loses empty table cells.  On comparative statements this
+    can make a lone prior-year amount look like the current value (budget_391 A.2,
+    budget_328/144 B.11).  Use the printed date-column X coordinates and the legal
+    item row bounds to act only when the current cell is geometrically empty and the
+    prior cell contains an explicit amount.
+    """
+    current = dict(current_ce)
+    prior = dict(prior_ce or {})
+    try:
+        doc = fitz.open(file_path)
+    except Exception:
+        return current, prior
+
+    target_specs = {
+        'ce02_variazioni_rimanenze': (
+            re.compile(r"^2\)[,]?$"),
+            ('variazioni', 'rimanenze', 'prodotti'),
+        ),
+        'ce10_var_rimanenze_mat_prime': (
+            re.compile(r"^11\)[,]?$"),
+            ('variazioni', 'rimanenze', 'materie'),
+        ),
+        'ce11_accantonamenti': (
+            re.compile(r"^(?:B\.)?12\)[,]?$", re.I),
+            ('accanton', 'rischi'),
+        ),
+        'ce15_oneri_finanziari': (
+            re.compile(r"^17\)[,]?$"),
+            ('interessi', 'oneri', 'finanziari'),
+        ),
+        'ce20_imposte': (
+            re.compile(r"^(?:20|22)\)[,]?$"),
+            ('imposte', 'reddito'),
+        ),
+    }
+    cleared: List[Tuple[str, str]] = []
+    document_centers = _document_comparative_centers(doc)
+    try:
+        for page in doc:
+            words = page.get_text('words', sort=True)
+            date_words = _comparative_column_words(words)
+            if len(date_words) >= 2:
+                current_x = (float(date_words[0][0]) + float(date_words[0][2])) / 2
+                prior_x = (float(date_words[1][0]) + float(date_words[1][2])) / 2
+            elif document_centers is not None:
+                current_x, prior_x = document_centers
+            else:
+                continue
+            if prior_x - current_x < 25:
+                continue
+
+            item_words = sorted(
+                (
+                    word for word in words
+                    if float(word[0]) < 125
+                    and re.fullmatch(
+                        r"(?:B\.)?\d+\)[,]?",
+                        str(word[4]).strip(),
+                        re.I,
+                    )
+                ),
+                key=lambda word: float(word[1]),
+            )
+            for position, item_word in enumerate(item_words):
+                start_y = float(item_word[1]) - 1
+                next_item = next(
+                    (
+                        candidate for candidate in item_words[position + 1:]
+                        if float(candidate[1]) > float(item_word[1]) + 2
+                    ),
+                    None,
+                )
+                next_y = (
+                    float(next_item[1]) - 1
+                    if next_item is not None
+                    else float(item_word[3]) + 35
+                )
+                segment = [
+                    word for word in words
+                    if start_y <= float(word[1]) < next_y
+                ]
+                segment_text = ' '.join(str(word[4]).lower() for word in segment)
+                for field, (code_re, required_words) in target_specs.items():
+                    if not code_re.fullmatch(str(item_word[4]).strip()):
+                        continue
+                    if not all(token in segment_text for token in required_words):
+                        continue
+                    numbers = [
+                        word for word in segment
+                        if float(word[0]) > 350
+                        and _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
+                    ]
+                    if field == 'ce20_imposte':
+                        # Item 20 often has a detailed 20.a/20.b breakdown below it.
+                        # The top-level amount on the code baseline is the only value
+                        # that proves whether the current aggregate cell is blank.
+                        same_row = [
+                            word for word in numbers
+                            if abs(float(word[1]) - float(item_word[1])) <= 1
+                        ]
+                        if same_row:
+                            numbers = same_row
+                    elif field == 'ce15_oneri_finanziari':
+                        # The 17) label can be followed by a detail line, its subtotal,
+                        # and then the unrelated C total.  Prefer the explicit subtotal
+                        # row so values from C cannot be mistaken for this item.
+                        line_groups: List[List[Tuple]] = []
+                        for word in sorted(
+                            segment, key=lambda item: (float(item[1]), float(item[0]))
+                        ):
+                            if (
+                                not line_groups
+                                or abs(float(word[1]) - float(line_groups[-1][0][1])) > 1
+                            ):
+                                line_groups.append([word])
+                            else:
+                                line_groups[-1].append(word)
+                        subtotal_numbers: List[Tuple] = []
+                        for line in line_groups:
+                            line_text = ' '.join(
+                                str(word[4]).casefold() for word in line
+                            )
+                            if all(
+                                token in line_text
+                                for token in ('totale', 'interessi', 'oneri', 'finanziari')
+                            ):
+                                subtotal_numbers = [
+                                    word for word in line
+                                    if float(word[0]) > 350
+                                    and _GEOMETRIC_NUMBER_RE.fullmatch(
+                                        str(word[4]).strip()
+                                    )
+                                ]
+                                break
+                        if subtotal_numbers:
+                            numbers = subtotal_numbers
+                    current_numbers = []
+                    prior_numbers = []
+                    for word in numbers:
+                        center_x = (float(word[0]) + float(word[2])) / 2
+                        if abs(center_x - current_x) < abs(center_x - prior_x):
+                            current_numbers.append(word)
+                        else:
+                            prior_numbers.append(word)
+                    if current_numbers or not prior_numbers:
+                        continue
+                    # Repeated rendering of the same row is harmless; all observed
+                    # prior values must agree before the current field is cleared.
+                    parsed = [_parse_it_number(str(word[4])) for word in prior_numbers]
+                    parsed = [value for value in parsed if value is not None]
+                    if not parsed or any(value != parsed[0] for value in parsed[1:]):
+                        continue
+                    extracted = current.get(field, Decimal('0'))
+                    if (
+                        parsed[0] == 0
+                        or extracted == 0
+                        or abs(abs(extracted) - abs(parsed[0])) > Decimal('0.01')
+                    ):
+                        continue
+                    current[field] = Decimal('0')
+                    if prior:
+                        prior[field] = parsed[0]
+                    cleared.append((field, str(parsed[0])))
+    finally:
+        doc.close()
+
+    if cleared:
+        logger.warning(
+            "CE column geometry: cleared prior-only cells from current year: %s",
+            cleared,
+        )
+    return current, prior
+
+
+def _reconcile_blank_current_sp_cells(
+    file_path: str,
+    current_bs: Dict[str, Decimal],
+    prior_bs: Optional[Dict[str, Decimal]] = None,
+) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+    """Clear selected SP fields proven to exist only in the prior column.
+
+    This is the balance-sheet counterpart of
+    :func:`_reconcile_blank_current_ce_cells`.  The target labels are deliberately
+    narrow and legally unambiguous; values are never derived from the balance gap.
+    """
+    current = dict(current_bs)
+    prior = dict(prior_bs or {})
+    specs = {
+        'sp02_immob_immateriali': (('immobilizzazioni', 'immateriali'), re.compile(r"^I[.)]?$", re.I)),
+        'sp14_fondi_rischi': (('fondi', 'rischi', 'oneri'), re.compile(r"^B[.)]?$", re.I)),
+        'sp18_ratei_risconti_passivi': (('ratei', 'risconti'), re.compile(r"^E[.)]?$", re.I)),
+    }
+    try:
+        doc = fitz.open(file_path)
+    except Exception:
+        return current, prior
+    cleared: List[Tuple[str, str]] = []
+    try:
+        selected_sp_pages, _ = find_section_pages(file_path)
+    except Exception:
+        selected_sp_pages = set()
+    document_centers = _document_comparative_centers(doc)
+    try:
+        for page in doc:
+            if selected_sp_pages and page.number not in selected_sp_pages:
+                continue
+            words = page.get_text('words', sort=True)
+            headers = _comparative_column_words(words)
+            if len(headers) >= 2:
+                current_x = (float(headers[0][0]) + float(headers[0][2])) / 2
+                prior_x = (float(headers[1][0]) + float(headers[1][2])) / 2
+            elif document_centers is not None:
+                # Some statement pages repeat the two numeric columns but not the
+                # date header.  Reuse only a document-level pair proven by another
+                # page of the same comparative statement (budget_282/336/397).
+                current_x, prior_x = document_centers
+            else:
+                continue
+            if prior_x - current_x < 25:
+                continue
+
+            line_groups: List[List[Tuple]] = []
+            for word in sorted(words, key=lambda item: (float(item[1]), float(item[0]))):
+                if not line_groups or abs(float(word[1]) - float(line_groups[-1][0][1])) > 1:
+                    line_groups.append([word])
+                else:
+                    line_groups[-1].append(word)
+            for line in line_groups:
+                labels = [word for word in line if float(word[0]) < 350]
+                label_text = ' '.join(str(word[4]).casefold() for word in labels)
+                codes = [str(word[4]).strip() for word in labels if float(word[0]) < 130]
+                for field, (required, code_re) in specs.items():
+                    if not all(token in label_text for token in required):
+                        continue
+                    if not any(code_re.fullmatch(code) for code in codes):
+                        continue
+                    numbers = [
+                        word for word in line
+                        if float(word[0]) > 350
+                        and _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
+                    ]
+                    current_numbers, prior_numbers = [], []
+                    for word in numbers:
+                        center_x = (float(word[0]) + float(word[2])) / 2
+                        if abs(center_x - current_x) < abs(center_x - prior_x):
+                            current_numbers.append(word)
+                        else:
+                            prior_numbers.append(word)
+                    if current_numbers or not prior_numbers:
+                        continue
+                    parsed = [_parse_it_number(str(word[4])) for word in prior_numbers]
+                    parsed = [value for value in parsed if value is not None]
+                    if not parsed or any(value != parsed[0] for value in parsed[1:]):
+                        continue
+                    extracted = current.get(field, Decimal('0'))
+                    if (
+                        parsed[0] == 0
+                        or extracted == 0
+                        or abs(abs(extracted) - abs(parsed[0])) > Decimal('0.01')
+                    ):
+                        continue
+                    current[field] = Decimal('0')
+                    if prior:
+                        prior[field] = parsed[0]
+                    cleared.append((field, str(parsed[0])))
+    finally:
+        doc.close()
+    if cleared:
+        logger.warning(
+            "SP column geometry: cleared prior-only cells from current year: %s",
+            cleared,
+        )
+    return current, prior
+
+
 def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     """
     Scan PDF pages with PyMuPDF to find SP and CE sections using
@@ -259,6 +751,13 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     def _normalize_for_search(text: str) -> str:
         lowered = text.lower()
         lowered = re.sub(r'\b(\w) (?=\w\b)', r'\1', lowered)  # "s t a t o" → "stato"
+        # Collapse a spaced dash used as a label separator so section-total
+        # keywords match regardless of it: "totale stato patrimoniale - passivo"
+        # → "totale stato patrimoniale passivo" (some gestionali print the
+        # closing total with a " - PASSIVO" suffix; without this the SP_END
+        # anchor is missed and the CE bleeds into the SP page range). Only the
+        # spaced form is touched, so account codes like "d-bis" are preserved.
+        lowered = re.sub(r' [-–—] ', ' ', lowered)
         lowered = re.sub(r' {2,}', ' ', lowered)               # collapse multi-spaces
         return lowered
 
@@ -317,7 +816,15 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     # then try "valore della produzione" alone after SP end (Dylog format puts VP on last
     # SP page without a "conto economico" header until a later page).
     ce_after = (sp_start + 1) if sp_start is not None else 0
-    ce_start = _find_start(CE_START_KEYWORDS, after_page=ce_after)
+    # Compact filings can start the CE on the very page that closes the SP.  Prefer
+    # that source page before searching later pages; otherwise a second statement
+    # quoted inside the Nota Integrativa can be selected (budget_336).
+    ce_start = (
+        sp_end
+        if sp_end is not None
+        and all(keyword in page_texts[sp_end] for keyword in CE_START_KEYWORDS)
+        else _find_start(CE_START_KEYWORDS, after_page=ce_after)
+    )
     # If CE start not found after SP, try from the beginning (SP may not exist)
     if ce_start is None and ce_after > 0:
         ce_start = _find_start(CE_START_KEYWORDS)
@@ -384,7 +891,14 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     # same offset, onto the first later page that begins a substantial data block.
     def _page_amount_mass(text: str) -> float:
         s = 0.0
-        for tok in re.findall(r'-?\d[\d.]*,\d{2}', text):
+        # Cerved statements often print rounded totals as Italian integers
+        # (``469.102``), with no decimal comma.  Ignoring those values made a real
+        # SP page look empty and could relocate the section into the notes
+        # (budget_272).  The boundaries deliberately exclude dates and fractions.
+        amount_re = re.compile(
+            r'(?<![\d/])(?:-?\d[\d.]*,\d{2}|-?\d{1,3}(?:\.\d{3})+)(?![\d/])'
+        )
+        for tok in amount_re.findall(text):
             try:
                 s += abs(float(tok.replace('.', '').replace(',', '.')))
             except ValueError:
@@ -394,7 +908,17 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     page_mass = [_page_amount_mass(t) for t in page_texts]
     doc_max_mass = max(page_mass) if page_mass else 0.0
     sp_mass = sum(page_mass[p] for p in sp_pages)
-    if sp_pages and doc_max_mass > 0 and sp_mass < 0.02 * doc_max_mass:
+    selected_sp_text = ' '.join(page_texts[p] for p in sorted(sp_pages))
+    selected_sp_has_controls = (
+        'totale attivo' in selected_sp_text
+        and 'totale passivo' in selected_sp_text
+    )
+    if (
+        sp_pages
+        and not selected_sp_has_controls
+        and doc_max_mass > 0
+        and sp_mass < 0.02 * doc_max_mass
+    ):
         # Only relocate to a GENUINE second copy of the statement that re-states the SP
         # header AND carries real amounts. We deliberately do NOT relocate to a headerless
         # number-only data block (e.g. a coordinate-split account dump like budget_355):
@@ -849,8 +1373,18 @@ def extract_relevant_pages(file_path: str) -> Tuple[str, str]:
     except Exception as e:
         raise PDFImportError(f"Cannot open PDF file: {e}")
 
-    sp_text = "\n".join(doc[p].get_text() for p in sorted(sp_pages))
-    ce_text = "\n".join(doc[p].get_text() for p in sorted(ce_pages))
+    detached_texts = _detached_value_page_texts(doc)
+    def _page_text(page_index: int) -> str:
+        if page_index in detached_texts:
+            return detached_texts[page_index]
+        return _filter_difference_columns(doc[page_index]) or doc[page_index].get_text()
+
+    sp_text = "\n".join(
+        _page_text(p) for p in sorted(sp_pages)
+    )
+    ce_text = "\n".join(
+        _page_text(p) for p in sorted(ce_pages)
+    )
     doc.close()
 
     # Pre-filter ERP account detail lines (no-op for standard PDFs)
@@ -1441,6 +1975,95 @@ def _model_to_decimal_dict(model: pydantic.BaseModel) -> Dict[str, Decimal]:
     return result
 
 
+_CREDIT_BREVE_SOURCE_FIELDS = (
+    'sp06a_crediti_clienti_breve',
+    'sp06b_crediti_controllate_breve',
+    'sp06c_crediti_collegate_breve',
+    'sp06d_crediti_controllanti_breve',
+    'sp06e_crediti_tributari_breve',
+    'sp06f_imposte_anticipate_breve',
+    'sp06g_crediti_altri_breve',
+)
+_CREDIT_LUNGO_SOURCE_FIELDS = (
+    'sp07a_crediti_clienti_lungo',
+    'sp07b_crediti_controllate_lungo',
+    'sp07c_crediti_collegate_lungo',
+    'sp07d_crediti_controllanti_lungo',
+    'sp07e_crediti_tributari_lungo',
+    'sp07f_imposte_anticipate_lungo',
+    'sp07g_crediti_altri_lungo',
+)
+
+
+def _reconcile_credit_aggregates_from_source(
+    balance_sheet_data: Dict[str, Decimal], label: str
+) -> Dict[str, Decimal]:
+    """Rebuild credit aggregates only from corroborated rows in the source.
+
+    The LLM can extract every typed C.II row correctly but make a small arithmetic
+    error in ``sp06_crediti_breve``.  The strict balance gate then rejects an exact
+    statement (budget_594 differs by EUR 22).
+
+    Unlike the historical balance-gap correction, this function never infers an
+    amount from total assets and never creates a plug.  It changes the aggregates
+    only when the extracted short/long details add up to the PDF's explicit
+    ``totale_crediti`` control row.
+    """
+    result = dict(balance_sheet_data)
+    declared_total = result.get('totale_crediti', Decimal('0'))
+    if declared_total <= 0:
+        return result
+
+    short_total = sum(
+        (result.get(key, Decimal('0')) for key in _CREDIT_BREVE_SOURCE_FIELDS),
+        Decimal('0'),
+    )
+    long_total = sum(
+        (result.get(key, Decimal('0')) for key in _CREDIT_LUNGO_SOURCE_FIELDS),
+        Decimal('0'),
+    )
+    detail_total = short_total + long_total
+    old_short = result.get('sp06_crediti_breve', Decimal('0'))
+    old_long = result.get('sp07_crediti_lungo', Decimal('0'))
+
+    # One euro absorbs harmless display rounding without accepting a partial
+    # breakdown as proof of an aggregate. Preserve an aggregate that already
+    # agrees with the printed total: legal detail rows can differ by one euro due
+    # to independent display rounding (budget_394).
+    if (
+        detail_total <= 0
+        or abs(old_short + old_long - declared_total) <= Decimal('1')
+    ):
+        return result
+
+    if abs(detail_total - declared_total) <= Decimal('1'):
+        new_short, new_long = short_total, long_total
+    else:
+        # Some legal layouts print a maturity subtotal that excludes a separate
+        # typed row (typically "imposte anticipate") and then print the complete
+        # C.II total.  Accept the omitted amount only when that exact residual is
+        # independently present in one maturity-specific detail bucket.
+        residual = declared_total - old_short - old_long
+        short_match = short_total != 0 and abs(residual - short_total) <= Decimal('1')
+        long_match = long_total != 0 and abs(residual - long_total) <= Decimal('1')
+        if short_match == long_match:  # neither match, or ambiguous
+            return result
+        if short_match:
+            new_short, new_long = old_short + residual, old_long
+        else:
+            new_short, new_long = old_short, old_long + residual
+
+    if abs(old_short - new_short) > Decimal('0.01') or abs(old_long - new_long) > Decimal('0.01'):
+        logger.warning(
+            f"[{label}] Crediti source-backed: dettagli C.II={detail_total} "
+            f"confermano totale_crediti={declared_total}; "
+            f"sp06 {old_short}->{new_short}, sp07 {old_long}->{new_long}"
+        )
+        result['sp06_crediti_breve'] = new_short
+        result['sp07_crediti_lungo'] = new_long
+    return result
+
+
 # Core cost fields that must always be positive (the model subtracts them).
 # Some PDFs (e.g. Zucchetti, "bilancio riclassificato") show costs as negative.
 _POSITIVE_COST_FIELDS = {
@@ -1506,6 +2129,147 @@ def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
     if flipped:
         logger.info(f"CE sign normalization: flipped {len(flipped)} fields to positive: {flipped}")
     return income_data
+
+
+_CE09_DETAIL_FIELDS = (
+    'ce09a_ammort_immateriali',
+    'ce09b_ammort_materiali',
+    'ce09c_svalutazioni',
+    'ce09d_svalutazione_crediti',
+)
+
+
+def _reconcile_ce09_from_source_details(
+    income_data: Dict[str, Decimal],
+    balance_sheet_data: Dict[str, Decimal],
+    label: str,
+) -> Dict[str, Decimal]:
+    """Select the exhaustive B.10 detail sum when SP independently confirms it.
+
+    The model occasionally scales one B.10 sub-row while computing the aggregate
+    (budget_413: 1,254 becomes 1,254,000) even though every extracted a/b/c/d row is
+    correct.  The four legal detail fields are exhaustive, but a partially printed
+    statement can omit one.  Therefore the roll-up is accepted only when replacing
+    ``ce09`` makes the reconstructed CE result agree with the independently printed
+    SP result; otherwise the source aggregate is left untouched for review.
+    """
+    result = dict(income_data)
+    detail_total = sum(
+        (result.get(field, Decimal('0')) for field in _CE09_DETAIL_FIELDS),
+        Decimal('0'),
+    )
+    aggregate = result.get('ce09_ammortamenti', Decimal('0'))
+    if detail_total <= 0 or abs(aggregate - detail_total) <= Decimal('0.01'):
+        return result
+
+    sp_result = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+    current_result = calculate_ce_result(result).net_profit
+    candidate = dict(result)
+    candidate['ce09_ammortamenti'] = detail_total
+    candidate_result = calculate_ce_result(candidate).net_profit
+    tolerance = max(Decimal('2'), abs(sp_result) * Decimal('0.001'))
+    if (
+        abs(candidate_result - sp_result) <= tolerance
+        and abs(candidate_result - sp_result) + Decimal('0.01')
+        < abs(current_result - sp_result)
+    ):
+        logger.warning(
+            f"[{label}] B.10 source-backed: ce09 {aggregate}->{detail_total}; "
+            f"dettagli a/b/c/d e risultato SP {sp_result} confermano il roll-up"
+        )
+        candidate['_ce09_source_reconciled'] = aggregate - detail_total
+        return candidate
+    return result
+
+
+def _reconcile_isolated_ce_cost_signs(
+    income_data: Dict[str, Decimal],
+    raw_income_data: Dict[str, Decimal],
+    balance_sheet_data: Dict[str, Decimal],
+    label: str,
+) -> Dict[str, Decimal]:
+    """Preserve isolated negative cost rows when the SP result confirms them.
+
+    Three or more negative cost rows signal a presentation convention and are
+    normalized to positive magnitudes.  One or two negative rows can instead be a
+    real reversal (budget_253 B.14 = -1,239).  Try only the explicitly negative
+    source signs and retain a candidate solely when its CE result cross-foots to the
+    independently extracted SP result.
+    """
+    negative_fields = [
+        field for field in _POSITIVE_COST_FIELDS
+        if raw_income_data.get(field, Decimal('0')) < 0
+    ]
+    if not negative_fields or len(negative_fields) >= 3:
+        return dict(income_data)
+
+    sp_result = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+    tolerance = max(Decimal('2'), abs(sp_result) * Decimal('0.001'))
+    baseline_gap = abs(calculate_ce_result(income_data).net_profit - sp_result)
+    candidates = []
+    subsets = [[field] for field in negative_fields]
+    if len(negative_fields) == 2:
+        subsets.append(negative_fields)
+    for fields in subsets:
+        trial = dict(income_data)
+        for field in fields:
+            trial[field] = raw_income_data[field]
+        gap = abs(calculate_ce_result(trial).net_profit - sp_result)
+        if gap <= tolerance and gap + Decimal('0.01') < baseline_gap:
+            candidates.append((gap, tuple(sorted(fields)), trial))
+    if not candidates:
+        return dict(income_data)
+
+    gap, fields, best = min(candidates, key=lambda item: (item[0], len(item[1]), item[1]))
+    logger.warning(
+        f"[{label}] segni CE source-backed: mantenuti negativi {list(fields)}; "
+        f"risultato CE riconciliato a sp13={sp_result} (scarto {gap})"
+    )
+    return best
+
+
+def _reconcile_global_ce_thousand_scale(
+    income_data: Dict[str, Decimal],
+    balance_sheet_data: Dict[str, Decimal],
+    label: str,
+) -> Dict[str, Decimal]:
+    """Correct a whole CE column parsed at 1000x only with SP corroboration.
+
+    A mangled value such as ``542.218.750`` can represent ``542.218,750`` after
+    the decimal comma was converted to a dot.  It is indistinguishable from an
+    integer in isolation.  When at least three CE fields share the scale error,
+    dividing the complete CE by 1000 is accepted only if the resulting net profit
+    matches the independently extracted SP result (budget_305).
+    """
+    result = dict(income_data)
+    ce_fields = [
+        field for field, value in result.items()
+        if field.startswith('ce') and isinstance(value, Decimal) and value != 0
+    ]
+    if len(ce_fields) < 3:
+        return result
+    sp_result = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+    baseline_result = calculate_ce_result(result).net_profit
+    baseline_gap = abs(baseline_result - sp_result)
+    if baseline_gap <= max(Decimal('2'), abs(sp_result) * Decimal('0.001')):
+        return result
+
+    candidate = dict(result)
+    for field in ce_fields:
+        candidate[field] = result[field] / Decimal('1000')
+    candidate_result = calculate_ce_result(candidate).net_profit
+    tolerance = max(Decimal('2'), abs(sp_result) * Decimal('0.001'))
+    # Require a characteristic three-order-of-magnitude mismatch, not merely a
+    # somewhat better result, before treating the punctuation as a scale error.
+    magnitude_floor = max(Decimal('100000'), abs(sp_result) * Decimal('100'))
+    if baseline_gap >= magnitude_floor and abs(candidate_result - sp_result) <= tolerance:
+        logger.warning(
+            f"[{label}] scala CE source-backed: colonna /1000; risultato "
+            f"{baseline_result}->{candidate_result}, confermato da sp13={sp_result}"
+        )
+        candidate['_ce_scale_reconciled'] = Decimal('1000')
+        return candidate
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1817,26 +2581,28 @@ def extract_pdf_with_llm(
             raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
-    balance_sheet_data = _model_to_decimal_dict(sp_result)
-    income_data = _normalize_ce_signs(_model_to_decimal_dict(ce_result))
+    balance_sheet_data = _reconcile_credit_aggregates_from_source(
+        _model_to_decimal_dict(sp_result), "single"
+    )
+    balance_sheet_data, _ = _reconcile_blank_current_sp_cells(
+        file_path, balance_sheet_data
+    )
+    raw_income_data = _model_to_decimal_dict(ce_result)
+    income_data = _normalize_ce_signs(dict(raw_income_data))
+    income_data, _ = _reconcile_blank_current_ce_cells(file_path, income_data)
 
     # Log key values for verification
     logger.info(f"SP totale_attivo = {balance_sheet_data.get('totale_attivo')}")
     logger.info(f"SP totale_passivo = {balance_sheet_data.get('totale_passivo')}")
     logger.info(f"CE ce01_ricavi_vendite = {income_data.get('ce01_ricavi_vendite')}")
 
-    # Step 5: Fold the result into totale_passivo when the layout reports it net of
-    # the year's result (sezioni contrapposte / dettaglio voci); then validate crediti;
-    # then debiti (using explicit totale_debiti when present); then equity (which uses
-    # the corrected debt aggregate to derive expected equity).
+    # Step 5: ``totale_passivo`` is control metadata and can legitimately exclude
+    # the year's result on this layout.  Do not infer crediti, debiti or reserves
+    # from a balance gap: those values must remain tied to source rows.
     balance_sheet_data = _reconcile_utile_in_passivo(balance_sheet_data, "single")
-    balance_sheet_data = _validate_crediti(balance_sheet_data, "single")
-    balance_sheet_data = _validate_debiti(balance_sheet_data, "single")
-    balance_sheet_data = _validate_equity(balance_sheet_data, "single")
 
-    # Step 6: Reconcile ce10 sign on the BS utile anchor, then cross-check ce20_imposte
-    income_data = _validate_ce10_against_bs(income_data, balance_sheet_data, "single")
-    income_data = _validate_ce_imposte(income_data, balance_sheet_data, "single")
+    # Step 6: CE sign/column conflicts are validation errors.  Never flip ce10 or
+    # derive taxes from sp13 solely to make the two statements agree.
 
     # Step 7: Deterministic detail-line fill for clean IV-CEE statements (text path only):
     # PN reserve sub-fields (recovers dropped NEGATIVE reserves → keeps cash correct) +
@@ -1844,6 +2610,15 @@ def extract_pdf_with_llm(
     if not use_vision:
         balance_sheet_data = _reconcile_pn_detail(balance_sheet_data, sp_text, "single")
         income_data = _reconcile_personale_detail(income_data, ce_text, "single")
+    income_data = _reconcile_global_ce_thousand_scale(
+        income_data, balance_sheet_data, "single"
+    )
+    income_data = _reconcile_isolated_ce_cost_signs(
+        income_data, raw_income_data, balance_sheet_data, "single"
+    )
+    income_data = _reconcile_ce09_from_source_details(
+        income_data, balance_sheet_data, "single"
+    )
 
     return balance_sheet_data, income_data
 
@@ -2020,11 +2795,19 @@ def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
         doc = fitz.open(file_path)
     except Exception as e:
         raise PDFImportError(f"Cannot open PDF file: {e}")
+    detached_texts = _detached_value_page_texts(doc)
+    effective_pages = (len(doc) // 2) if detached_texts else len(doc)
     parts = []
     for i, page in enumerate(doc):
+        if i >= effective_pages:
+            break
         if i >= max_pages:
             break
-        parts.append(page.get_text())
+        parts.append(
+            detached_texts.get(i)
+            or _filter_difference_columns(page)
+            or page.get_text()
+        )
     doc.close()
     return "\n".join(parts)
 
@@ -2130,8 +2913,6 @@ def extract_trial_balance_with_llm(
                 client, full_text, sp_prompt,
                 BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet")
         bs = _model_to_decimal_dict(res)
-        bs = _validate_crediti(bs, "coge")
-        bs = _validate_debiti(bs, "coge")
         bs = _balance_trial_via_result(bs, "coge")
         try:
             bs = _reconcile_trial_to_declared(bs, declared, "coge")
@@ -2162,8 +2943,7 @@ def extract_trial_balance_with_llm(
     logger.info(f"[CoGe] SP totale_attivo = {balance_sheet_data.get('totale_attivo')} "
                 f"(plug_residual={best_resid})")
 
-    income_data = _validate_ce10_against_bs(income_data, balance_sheet_data, "coge")
-    income_data = _validate_ce_imposte(income_data, balance_sheet_data, "coge")
+    # CE is left exactly as extracted; canonical validation happens downstream.
 
     return balance_sheet_data, income_data
 
@@ -2183,30 +2963,42 @@ _TB_PASSIVO_KEYS_NO_RESULT = [
 
 
 def _balance_trial_via_result(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict[str, Decimal]:
-    """Force the trial-balance identity Attivo == Passivo by deriving sp13 as the gap.
+    """Expose the balancing-result candidate without writing it into ``sp13``.
 
-    A CoGe trial balance has no legal totals to anchor on and (almost) never an
-    explicit result account: the year's profit/loss is precisely the amount that
-    makes the two sides tie. We recompute totale_attivo from the asset fields and
-    set sp13 = totale_attivo - (passivo + PN excluding the result). Keeps the sign
-    (positive = utile, negative = perdita). This mirrors the deterministic parser's
-    pareggio logic, so route C stays balanced regardless of which extractor ran.
+    The double-entry gap is useful evidence only when extraction coverage is known.
+    Treating it as the actual result made every omitted liability look like profit.
+    The explicit result and the independently reconstructed CE must confirm this
+    candidate before an import can be accepted.
     """
+    result = dict(balance_sheet_data)
     att = sum(balance_sheet_data.get(k, Decimal('0')) for k in _TB_ASSET_KEYS)
     pas_no_result = sum(balance_sheet_data.get(k, Decimal('0')) for k in _TB_PASSIVO_KEYS_NO_RESULT)
-    sp13 = att - pas_no_result
-    balance_sheet_data['sp13_utile_perdita'] = sp13
-    balance_sheet_data['totale_attivo'] = att
-    balance_sheet_data['totale_passivo'] = att  # by construction pas_no_result + sp13 == att
-    logger.info(
-        f"[{label}] trial-balance pareggio: attivo={att}, passivo(no result)={pas_no_result}, "
-        f"sp13 (result)={sp13}"
-    )
-    return balance_sheet_data
+    candidate = att - pas_no_result
+    current_sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
+    result['totale_attivo'] = att
+    result['totale_passivo'] = pas_no_result + current_sp13
+    result['_derived_result_candidate'] = candidate
+    difference = candidate - current_sp13
+    if abs(difference) > Decimal('0.01'):
+        result['_unexplained_result_difference'] = difference
+        result['_plug_residual'] = max(
+            abs(result.get('_plug_residual', Decimal('0'))), abs(difference)
+        )
+        logger.warning(
+            f"[{label}] risultato implicito {candidate:,.2f} non confermato: sp13 "
+            f"estratto {current_sp13:,.2f}; nessun valore è stato modificato"
+        )
+    return result
 
 
-# Italian-number token: 1.234.567,89 | 1234,89 | 1234567,89
-_DECL_NUM_RE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2}")
+# Italian-number control token: decimal cents or whole euros with at least one
+# thousands separator.  Legal IV-CEE statements commonly print rounded totals as
+# ``6.474.612`` (budget_328); accepting only comma-decimal amounts made both source
+# side controls disappear.  Plain unseparated integers stay excluded so years and
+# item numbers in the 80-character label window cannot become accounting totals.
+_DECL_NUM_RE = re.compile(
+    r"-?(?:\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+,\d{2})"
+)
 
 
 def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict[str, Optional[Decimal]]:
@@ -2278,12 +3070,38 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
                        or _largest_after(_pareggio_markers))
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
-        "totale stato patrimoniale attivo",
+        "totale stato patrimoniale attivo", "totale stato patrimoniale - attivo",
     ])
     out["passivo"] = _largest_after([
         "totale passivo", "totale passivita", "totale a pareggio passivo",
         "totale passivo e patrimonio netto", "totale passivita e netto",
+        "totale stato patrimoniale passivo", "totale stato patrimoniale - passivo",
     ])
+
+    # Some detailed reclassified exports print the top-level section total directly
+    # below ``Stato patrimoniale attivo/passivo`` without the word ``Totale``
+    # (BILAQ-001).  Accept that value only when it is the *immediate next non-empty
+    # line*: this deliberately does not treat the first detail amount below a plain
+    # section header as a control total.
+    def _section_heading_total(side: str) -> Optional[Decimal]:
+        pattern = re.compile(
+            rf"(?im)^\s*stato\s+patrimoniale\s+(?:-\s*)?{side}\s*$"
+            rf"[ \t]*\r?\n[ \t]*({_DECL_NUM_RE.pattern})[ \t]*$"
+        )
+        values = []
+        for match in pattern.finditer(low):
+            try:
+                values.append(abs(Decimal(
+                    match.group(1).replace(".", "").replace(",", ".")
+                )))
+            except Exception:
+                continue
+        return max(values) if values else None
+
+    if out["attivo"] is None:
+        out["attivo"] = _section_heading_total("attivo")
+    if out["passivo"] is None:
+        out["passivo"] = _section_heading_total("passivo")
     out["utile"] = _largest_after([
         "utile d'esercizio", "utile dell'esercizio", "utile di esercizio",
         "utile del periodo", "utile in corso di formazione", "utile (perdita) dell'esercizio",
@@ -2293,6 +3111,81 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
         "perdita d'esercizio", "perdita dell'esercizio", "perdita di esercizio",
         "perdita del periodo", "perdita in corso di formazione",
     ])
+
+    # In two-column trial balances PyMuPDF can emit the right-hand amount before
+    # the left-hand label in linear text, so the after-label scan above sees no
+    # result even though both are visibly on the same row (budget_188).  Geometry
+    # is used only as a fallback and only for the explicit current-result label;
+    # retained earnings ("utili portati a nuovo") are deliberately excluded.
+    if out["utile"] is None or out["perdita"] is None:
+        try:
+            with fitz.open(file_path) as document:
+                row_candidates = {"utile": [], "perdita": []}
+                for page in document:
+                    rows: List[List[Tuple]] = []
+                    positioned_words = []
+                    for word in page.get_text('words', sort=True):
+                        rect = fitz.Rect(word[:4]) * page.rotation_matrix
+                        positioned_words.append(
+                            (rect.x0, rect.y0, rect.x1, rect.y1, word[4])
+                        )
+                    for word in sorted(
+                        positioned_words,
+                        key=lambda item: (float(item[1]), float(item[0])),
+                    ):
+                        if (
+                            not rows
+                            or abs(float(word[1]) - float(rows[-1][0][1])) > 2.0
+                        ):
+                            rows.append([word])
+                        else:
+                            rows[-1].append(word)
+                    for row in rows:
+                        caption = ' '.join(str(word[4]).casefold() for word in row)
+                        caption = ''.join(
+                            char for char in unicodedata.normalize('NFKD', caption)
+                            if not unicodedata.combining(char)
+                        )
+                        if not any(term in caption for term in ('esercizio', 'periodo')):
+                            continue
+                        if (
+                            'portat' in caption
+                            or 'precedent' in caption
+                            or 'utile/perdita' in caption
+                        ):
+                            continue
+                        kind = (
+                            'perdita' if 'perdita' in caption
+                            else 'utile' if 'utile' in caption
+                            else None
+                        )
+                        if kind is None:
+                            continue
+                        values = [
+                            _parse_it_number(str(word[4])) for word in row
+                            if _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
+                        ]
+                        values = [abs(value) for value in values if value not in (None, 0)]
+                        unique_values = set(values)
+                        # A comparative result row can carry current and prior
+                        # amounts.  Without a proven current-column anchor choosing
+                        # either would be unsafe (budget_131), so geometry is accepted
+                        # only when the row states one unambiguous amount.
+                        if len(unique_values) == 1:
+                            row_candidates[kind].append(unique_values.pop())
+                for kind in ('utile', 'perdita'):
+                    candidates = row_candidates[kind]
+                    if (
+                        len(candidates) >= 2
+                        and all(value == candidates[0] for value in candidates[1:])
+                    ):
+                        # Require the same explicit result on at least two source
+                        # rows/pages.  This rejects isolated prior-year result rows
+                        # in comparative trial balances while retaining budget_188,
+                        # whose current result is printed twice.
+                        out[kind] = candidates[0]
+        except Exception:
+            pass
     return out
 
 
@@ -2300,33 +3193,16 @@ def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
                                  declared: Dict[str, Optional[Decimal]],
                                  label: str,
                                  ce_result: Optional[Decimal] = None) -> Dict[str, Decimal]:
-    """Reconcile a forced-balanced trial-balance extraction against the document's OWN
-    declared control totals (anti-masking, level L2).
+    """Compare extracted trial-balance controls without changing accounting fields.
 
-    `_balance_trial_via_result` always ties the sheet by making sp13 absorb the gap,
-    so a sheet "balances" even when the LLM dropped accounts on one side — the dropped
-    mass becomes a FAKE profit/loss. This step compares the derived result/total against
-    the printed control totals and, when they disagree materially:
-
-      1. RESULT-ANCHORED (preferred): the document prints an explicit Utile/Perdita.
-         residual = derived_sp13 - declared_result.  residual>0 ⇒ the PASSIVO side was
-         short by `residual` (sp13 was inflated): book it into sp16 (debiti) and set
-         sp13 to the declared value.  residual<0 ⇒ the ATTIVO side was short: book it
-         into sp09 (liquidità) and lift both totals.  Either way the pareggio is
-         preserved AND sp13 becomes the document's true result.
-      2. TOTAL-COVERAGE (fallback, flag-only): no usable result anchor but the extracted
-         totale_attivo falls short of the declared TOTALE ATTIVO/PAREGGIO — we cannot
-         know which side, so we only expose the shortfall (no mass moved).
-
-    In both cases the moved/short mass is exposed as `_plug_residual`, which
-    `iv_cee_hierarchy.check_quadratura` reads to raise the QUADRATURA MASCHERATA flag
-    (>1% of total) so the user sees an estimated composition and refines it in Rettifiche,
-    instead of importing a silently-wrong sheet. Purely additive on a correct extraction
-    (residual ≈ 0 ⇒ no-op), so it cannot regress files that already extract cleanly.
+    Older versions converted a result mismatch into short debt or cash and replaced
+    ``sp13``.  The function now retains only diagnostic metadata: declared totals are
+    independent evidence, never a licence to manufacture the missing side.
     """
+    result = dict(balance_sheet_data)
     att = balance_sheet_data.get('totale_attivo', Decimal('0'))
     if att <= 0:
-        return balance_sheet_data
+        return result
     tol = max(Decimal('50'), abs(att) * Decimal('0.005'))
 
     # signed declared result. A trial balance can print BOTH an "utile" and a
@@ -2363,47 +3239,63 @@ def _reconcile_trial_to_declared(balance_sheet_data: Dict[str, Decimal],
 
     sp13 = balance_sheet_data.get('sp13_utile_perdita', Decimal('0'))
 
-    # 1) result-anchored reconciliation
+    # Recover an omitted SP result only when the source supplies three independent
+    # and concordant facts: an explicit printed utile/perdita row, the CE result,
+    # and the SP side gap before the result.  This is not a balancing plug: the
+    # exact source value is restored to its legal field, and any unrelated residual
+    # remains blocking.
+    if sp13 == 0 and decl_result is not None and ce_result not in (None, 0):
+        passivo_no_result = sum(
+            balance_sheet_data.get(key, Decimal('0'))
+            for key in _TB_PASSIVO_KEYS_NO_RESULT
+        )
+        source_gap = att - passivo_no_result
+        source_tol = Decimal('2')
+        if (
+            abs(source_gap - decl_result) <= source_tol
+            and abs(ce_result - decl_result) <= source_tol
+        ):
+            prior_residual = abs(result.get('_plug_residual', Decimal('0')))
+            result['sp13_utile_perdita'] = decl_result
+            result['totale_passivo'] = passivo_no_result + decl_result
+            result['_source_result_reconciled'] = decl_result
+            if abs(prior_residual - abs(decl_result)) <= source_tol:
+                result['_plug_residual'] = Decimal('0')
+            sp13 = decl_result
+            logger.warning(
+                "[%s] restored explicit source result %s after SP gap and CE "
+                "independently confirmed it", label, decl_result,
+            )
+
+    # 1) Result difference: expose it, do not put it in sp16/sp09/sp13.
     if decl_result is not None and abs(sp13 - decl_result) > tol:
         residual = sp13 - decl_result
-        if residual > 0:
-            # passivo undercounted by `residual` (sp13 was inflated by the drop)
-            balance_sheet_data['sp16_debiti_breve'] = (
-                balance_sheet_data.get('sp16_debiti_breve', Decimal('0')) + residual)
-        else:
-            # attivo undercounted: lift assets and both totals
-            add = -residual
-            balance_sheet_data['sp09_disponibilita_liquide'] = (
-                balance_sheet_data.get('sp09_disponibilita_liquide', Decimal('0')) + add)
-            balance_sheet_data['totale_attivo'] = att + add
-            balance_sheet_data['totale_passivo'] = att + add
-        balance_sheet_data['sp13_utile_perdita'] = decl_result
-        # ACCUMULATE (never clobber) — the deterministic parser may already expose its own
-        # _plug_residual; this result-anchoring residual adds to it.
-        balance_sheet_data['_plug_residual'] = (
-            balance_sheet_data.get('_plug_residual', Decimal('0')) + abs(residual))
+        result['_declared_result_difference'] = residual
+        result['_plug_residual'] = max(
+            abs(result.get('_plug_residual', Decimal('0'))), abs(residual)
+        )
         _flag_unbalanced(
             label,
             f"sp13 derivato {sp13} != risultato dichiarato {decl_result}: ~{abs(residual)} "
-            f"di massa non classificata (lato {'passivo' if residual > 0 else 'attivo'}) "
-            f"stimata in sp16/sp09 — correggere in Rettifiche",
+            f"di massa o risultato non spiegato; nessuna voce è stata modificata",
             residual,
         )
-        return balance_sheet_data
+        return result
 
     # 2) total-coverage fallback (flag only — side unknown, no mass moved)
     control = declared.get('attivo') or declared.get('passivo')
     if control and att + tol < control:
         gap = control - att
-        balance_sheet_data['_plug_residual'] = max(
-            balance_sheet_data.get('_plug_residual', Decimal('0')), gap)
+        result['_declared_total_difference'] = gap
+        result['_plug_residual'] = max(
+            abs(result.get('_plug_residual', Decimal('0'))), abs(gap))
         _flag_unbalanced(
             label,
             f"attivo estratto {att} < totale dichiarato {control}: ~{gap} di conti non "
             f"classificati (estrazione incompleta) — verificare in Rettifiche",
             gap,
         )
-    return balance_sheet_data
+    return result
 
 
 # Anti-masking guard: a plug correction is rejected (and surfaced as a warning)
@@ -2780,36 +3672,8 @@ def _validate_equity(balance_sheet_data: Dict[str, Decimal], label: str) -> Dict
 
 
 def _ce_risultato_ante(ce_data: Dict[str, Decimal]) -> Decimal:
-    """Reconstruct 'Risultato prima delle imposte' from the CE fields.
-
-    Mirrors the model convention: costs (incl. ce10) are stored positive and the
-    whole COPRO block is subtracted from the Valore della Produzione.
-    """
-    vp = (
-        ce_data.get('ce01_ricavi_vendite', Decimal('0'))
-        + ce_data.get('ce02_variazioni_rimanenze', Decimal('0'))
-        + ce_data.get('ce03_lavori_interni', Decimal('0'))
-        + ce_data.get('ce04_altri_ricavi', Decimal('0'))
-    )
-    copro = (
-        ce_data.get('ce05_materie_prime', Decimal('0'))
-        + ce_data.get('ce06_servizi', Decimal('0'))
-        + ce_data.get('ce07_godimento_beni', Decimal('0'))
-        + ce_data.get('ce08_costi_personale', Decimal('0'))
-        + ce_data.get('ce09_ammortamenti', Decimal('0'))
-        + ce_data.get('ce10_var_rimanenze_mat_prime', Decimal('0'))
-        + ce_data.get('ce11_accantonamenti', Decimal('0'))
-        + ce_data.get('ce11b_altri_accantonamenti', Decimal('0'))
-        + ce_data.get('ce12_oneri_diversi', Decimal('0'))
-    )
-    financial = (
-        ce_data.get('ce13_proventi_partecipazioni', Decimal('0'))
-        + ce_data.get('ce14_altri_proventi_finanziari', Decimal('0'))
-        - ce_data.get('ce15_oneri_finanziari', Decimal('0'))
-        + ce_data.get('ce16_utili_perdite_cambi', Decimal('0'))
-        - ce_data.get('ce17_rettifiche_attivita_fin', Decimal('0'))
-    )
-    return vp - copro + financial
+    """Compatibility wrapper around the canonical pre-tax CE formula."""
+    return calculate_ce_result(ce_data).profit_before_tax
 
 
 def _validate_ce10_against_bs(
@@ -3098,10 +3962,22 @@ def extract_pdf_both_years_with_llm(
             raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
-    current_bs = _model_to_decimal_dict(sp_result.current_year)
-    prior_bs = _model_to_decimal_dict(sp_result.prior_year)
-    current_ce = _normalize_ce_signs(_model_to_decimal_dict(ce_result.current_year))
-    prior_ce = _normalize_ce_signs(_model_to_decimal_dict(ce_result.prior_year))
+    current_bs = _reconcile_credit_aggregates_from_source(
+        _model_to_decimal_dict(sp_result.current_year), "current"
+    )
+    prior_bs = _reconcile_credit_aggregates_from_source(
+        _model_to_decimal_dict(sp_result.prior_year), "prior"
+    )
+    current_bs, prior_bs = _reconcile_blank_current_sp_cells(
+        file_path, current_bs, prior_bs
+    )
+    raw_current_ce = _model_to_decimal_dict(ce_result.current_year)
+    raw_prior_ce = _model_to_decimal_dict(ce_result.prior_year)
+    current_ce = _normalize_ce_signs(dict(raw_current_ce))
+    prior_ce = _normalize_ce_signs(dict(raw_prior_ce))
+    current_ce, prior_ce = _reconcile_blank_current_ce_cells(
+        file_path, current_ce, prior_ce
+    )
 
     # Log key values
     logger.info(f"[current] SP totale_attivo={current_bs.get('totale_attivo')}, CE ricavi={current_ce.get('ce01_ricavi_vendite')}")
@@ -3144,24 +4020,13 @@ def extract_pdf_both_years_with_llm(
         current_bs, current_ce = prior_bs, prior_ce
         prior_bs, prior_ce = {}, {}
 
-    # Step 5: Fold the result into totale_passivo when the layout reports it net of
-    # the year's result (sezioni contrapposte / dettaglio voci); then validate crediti;
-    # then debiti (using explicit totale_debiti when present); then equity (which uses
-    # the corrected debt aggregate to derive expected equity).
+    # Step 5: control-total normalization only.  Aggregates and accounting fields
+    # are not inferred from the balance difference.
     current_bs = _reconcile_utile_in_passivo(current_bs, "current")
     prior_bs = _reconcile_utile_in_passivo(prior_bs, "prior")
-    current_bs = _validate_crediti(current_bs, "current")
-    prior_bs = _validate_crediti(prior_bs, "prior")
-    current_bs = _validate_debiti(current_bs, "current")
-    prior_bs = _validate_debiti(prior_bs, "prior")
-    current_bs = _validate_equity(current_bs, "current")
-    prior_bs = _validate_equity(prior_bs, "prior")
 
-    # Step 6: Reconcile ce10 sign on the BS utile anchor, then cross-check ce20_imposte
-    current_ce = _validate_ce10_against_bs(current_ce, current_bs, "current")
-    prior_ce = _validate_ce10_against_bs(prior_ce, prior_bs, "prior")
-    current_ce = _validate_ce_imposte(current_ce, current_bs, "current")
-    prior_ce = _validate_ce_imposte(prior_ce, prior_bs, "prior")
+    # Step 6: leave ce10 and taxes as extracted.  Cross-statement disagreement is
+    # reported, never corrected by replacing a source value.
 
     # Step 7: Deterministic detail-line fill per column (text path only). The dual layout
     # prints both years side by side ('label\\ncur\\nprior'), so column 0 = current,
@@ -3172,5 +4037,18 @@ def extract_pdf_both_years_with_llm(
         prior_bs = _reconcile_pn_detail(prior_bs, sp_text, "prior", column=1)
         current_ce = _reconcile_personale_detail(current_ce, ce_text, "current", column=0)
         prior_ce = _reconcile_personale_detail(prior_ce, ce_text, "prior", column=1)
+    current_ce = _reconcile_global_ce_thousand_scale(current_ce, current_bs, "current")
+    if prior_bs and prior_ce:
+        prior_ce = _reconcile_global_ce_thousand_scale(prior_ce, prior_bs, "prior")
+    current_ce = _reconcile_isolated_ce_cost_signs(
+        current_ce, raw_current_ce, current_bs, "current"
+    )
+    if prior_bs and prior_ce:
+        prior_ce = _reconcile_isolated_ce_cost_signs(
+            prior_ce, raw_prior_ce, prior_bs, "prior"
+        )
+    current_ce = _reconcile_ce09_from_source_details(current_ce, current_bs, "current")
+    if prior_bs and prior_ce:
+        prior_ce = _reconcile_ce09_from_source_details(prior_ce, prior_bs, "prior")
 
     return current_bs, current_ce, prior_bs, prior_ce

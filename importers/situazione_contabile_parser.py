@@ -1803,17 +1803,32 @@ def is_contrapposte_8digit(text: str) -> bool:
     return bool(re.search(r'\b\d{6}\s+\d{3}\b', text))
 
 
-def _c8_parse_side(words, lo: float, hi: float) -> List[Entry]:
-    """Parse one column (words whose split-axis coordinate is in (lo, hi])."""
+def _c8_parse_side(words, lo: float, hi: float, axis: int = 1) -> List[Entry]:
+    """Parse one column (words whose split-axis coordinate is in (lo, hi]).
+
+    ``axis`` is the coordinate that SEPARATES the two contrapposte columns:
+
+    * ``axis=1`` (default) — rotated page: columns are stacked along y and a row
+      runs along x, read bottom-to-top. This is the original behaviour.
+    * ``axis=0`` — unrotated landscape (AGO "Situazione Contabile"): columns sit
+      side by side along x and a row runs along y, read left-to-right.
+
+    Tokens are flattened into one reading-order stream and consumed as
+    ``code -> description -> amount``, so grouping only fixes ORDER: baseline
+    jitter between a code and its amount cannot break the pairing.
+    """
     from collections import defaultdict
     rows: Dict[int, list] = defaultdict(list)
     for w in words:
-        if lo < w[1] <= hi:
-            rows[round(w[0])].append(w)
+        if lo < w[axis] <= hi:
+            rows[round(w[1 - axis])].append(w)
     toks: List[str] = []
-    for x in sorted(rows):
-        rows[x].sort(key=lambda w: -w[1])  # rotated reading order (top→bottom)
-        toks.extend(w[4] for w in rows[x])
+    for key in sorted(rows):
+        if axis == 1:
+            rows[key].sort(key=lambda w: -w[1])  # rotated reading order (top→bottom)
+        else:
+            rows[key].sort(key=lambda w: w[0])   # left→right within the row
+        toks.extend(w[4] for w in rows[key])
 
     out: List[Tuple[str, List[str], Optional[Decimal]]] = []
     cur: Optional[Tuple[str, List[str], list]] = None
@@ -1850,6 +1865,50 @@ def _c8_parse_side(words, lo: float, hi: float) -> List[Entry]:
     return results
 
 
+def _c8_split_columns(words, axis: int, mid: float):
+    """Return (left_side, right_side) entries for one page given the document
+    split axis + gutter, so the header-driven pass and the header-less second
+    pass share EXACTLY the same column geometry.
+
+    'left' is always the ATTIVITA'/COSTI side, 'right' the PASSIVITA'/RICAVI
+    side, regardless of axis: on an unrotated page (axis=0) that is lower-x vs
+    higher-x; on a rotated page (axis=1) the reading coordinate is inverted so
+    the left side is the HIGHER coordinate.
+    """
+    if axis == 0:
+        return (_c8_parse_side(words, -1e9, mid, axis=0),
+                _c8_parse_side(words, mid, 1e9, axis=0))
+    return (_c8_parse_side(words, mid, 1e9, axis=1),
+            _c8_parse_side(words, -1e9, mid, axis=1))
+
+
+def _c8_refine_gutter_x(words, header_mid: float) -> float:
+    """Place the attivo|passivo gutter in the clean vertical gap BEFORE the
+    right-hand code column, on an unrotated page.
+
+    Each contrapposte side is ``code | description | amount`` and the LEFT side's
+    amount column is right-aligned close to the RIGHT side's code column, so the
+    header-word midpoint can fall INSIDE the left amount band and misassign those
+    amounts to the passivo reader (budget_615: header_mid=365 slices the attivo
+    amounts at x=367-379, losing ~260k). The two 8-digit code columns bracket a
+    clean gap; put the gutter at its middle. Returns the header midpoint unchanged
+    when it already sits in that gap, so pages the header split reads correctly
+    are untouched (additive)."""
+    code_xs = sorted(w[0] for w in words if re.fullmatch(r'\d{8}', w[4]))
+    if len(code_xs) < 2:
+        return header_mid
+    gap, gi = max((code_xs[i + 1] - code_xs[i], i) for i in range(len(code_xs) - 1))
+    if gap < 100:                      # a single code column: nothing to split
+        return header_mid
+    right_code_x = code_xs[gi + 1]
+    left_max = max((w[0] for w in words if w[0] < right_code_x), default=header_mid)
+    if left_max >= right_code_x:
+        return header_mid
+    if left_max <= header_mid <= right_code_x:
+        return header_mid              # header gutter already in the clean gap
+    return (left_max + right_code_x) / 2
+
+
 def parse_entries_contrapposte_8digit(file_path: str) -> List[Entry]:
     """Parse a contrapposte 8-digit trial balance using word coordinates."""
     doc = fitz.open(file_path)
@@ -1859,7 +1918,15 @@ def parse_entries_contrapposte_8digit(file_path: str) -> List[Entry]:
     declared_attivo = Decimal('0')
     declared_passivo = Decimal('0')
 
-    for page in doc:
+    # Document-level gutter/axis learned from the page(s) that DO carry live
+    # ATTIVITA'/PASSIVITA' header text tokens, reused by the second pass to read
+    # the pages whose headers are drawn as vectors (budget_615: only page 1 has
+    # live headers, but the SP spills onto page 0 and the CE onto pages 3-7).
+    doc_axis: Optional[int] = None
+    doc_mid: Optional[float] = None
+    read_pages: set = set()
+
+    for pidx, page in enumerate(doc):
         words = page.get_text('words')
         upper = page.get_text().upper()
         is_sp = 'SITUAZIONE PATRIMONIALE' in upper or ("ATTIVITA" in upper and "PASSIVITA" in upper)
@@ -1883,16 +1950,34 @@ def parse_entries_contrapposte_8digit(file_path: str) -> List[Entry]:
             continue
         lx, ly = min(lefts, key=lambda p: p[0])
         rx, ry_ = min(rights, key=lambda p: p[0])
-        mid = (ly + ry_) / 2
-        # left column = higher coordinate on the split axis (rotated page)
-        left = _c8_parse_side(words, mid, 1e9)
-        right = _c8_parse_side(words, -1e9, mid)
+        # Which coordinate SEPARATES the two columns? A rotated contrapposte page
+        # stacks them along y (headers share x); an unrotated landscape export puts
+        # them side by side along x (headers share y — AGO budget_615: ATTIVITA'
+        # x=156.12 y=90.74, PASSIVITA' x=574.55 y=90.74). Assuming "rotated" on an
+        # unrotated page collapsed every word into `left` and left the passivo column
+        # EMPTY (totale_passivo=0). Pick the axis on which the headers actually differ.
+        if abs(rx - lx) >= abs(ry_ - ly):
+            axis, mid = 0, (lx + rx) / 2      # side by side: split by x
+            mid = _c8_refine_gutter_x(words, mid)
+        else:
+            axis, mid = 1, (ly + ry_) / 2     # stacked: split by y (rotated page)
+        left, right = _c8_split_columns(words, axis, mid)
+        # Remember the SP gutter at document level for the header-less pass.
+        if is_sp and doc_mid is None:
+            doc_axis, doc_mid = axis, mid
+        if not (left or right):
+            # The header split yielded nothing — e.g. a CE footer page where the
+            # "TOTALE COSTI/RICAVI" summary labels were mistaken for the column
+            # headers, giving a gutter that splits a code from its amount. Leave
+            # the page for the second pass to read via the document-level gutter.
+            continue
         for e in left:
             e.section = left_sec
         for e in right:
             e.section = right_sec
         entries.extend(left)
         entries.extend(right)
+        read_pages.add(pidx)
 
         # Footer totals. Labels may be stacked ("TOTALE ATTIVITA'\nTOTALE
         # PASSIVITA'\n<attivo>\n<passivo>\n..."), so take the first two amounts
@@ -1914,6 +1999,51 @@ def parse_entries_contrapposte_8digit(file_path: str) -> List[Entry]:
                 if mp:
                     declared_passivo = _parse_amount(mp.group(1))
 
+    # --- Second pass: pages whose ATTIVITA'/PASSIVITA'/COSTI/RICAVI headers are
+    # drawn as VECTORS (no live text token), so the header-driven pass skipped
+    # them and most of the document was lost. Reuse the document-level gutter and
+    # keep the contrapposte COLUMN as ground truth for the side: the left column
+    # is the debit-nature side (attivo / costi), the right the credit-nature side
+    # (passivo / ricavi). Whether a page is SP or CE comes from ACCOUNT
+    # RECOGNITION, not code prefixes (which differ across gestionali): revenue and
+    # cost-of-production accounts resolve to the IV-CEE statement 'ce', SP accounts
+    # to 'bs'. The CE section runs contiguously to the end of the document, so the
+    # first majority-CE page marks the boundary; past it the ammortamento/TFR/
+    # salari lines (which resolve to 'bs' in isolation) are correctly read as CE.
+    # Additive: pages with live headers were all read above (read_pages).
+    if doc_mid is not None:
+        from importers.iv_cee_hierarchy import resolve as _resolve_ivcee
+        pending = []          # (pidx, left, right) for each header-less data page
+        ce_start = None       # first page index whose accounts are majority CE
+        for pidx, page in enumerate(doc):
+            if pidx in read_pages:
+                continue
+            words = page.get_text('words')
+            if not any(re.fullmatch(r'\d{8}', w[4]) for w in words):
+                continue
+            left, right = _c8_split_columns(words, doc_axis, doc_mid)
+            pending.append((pidx, left, right))
+            if ce_start is None:
+                n_ce = sum(1 for e in left + right
+                           if _resolve_ivcee(e.description, statement='ce'))
+                n_bs = sum(1 for e in left + right
+                           if _resolve_ivcee(e.description, statement='bs'))
+                if n_ce > n_bs:
+                    ce_start = pidx
+        for pidx, left, right in pending:
+            if ce_start is not None and pidx >= ce_start:
+                left_sec, right_sec = 'costi', 'ricavi'
+            else:
+                # SP gross presentation: attivo on the left, passivo (incl. fondi
+                # ammortamento shown gross on the passivo side) on the right.
+                left_sec, right_sec = 'attivo', 'passivo'
+            for e in left:
+                e.section = left_sec
+            for e in right:
+                e.section = right_sec
+            entries.extend(left)
+            entries.extend(right)
+
     doc.close()
 
     # Current-year result = the gap between the declared section totals (the
@@ -1927,6 +2057,20 @@ def parse_entries_contrapposte_8digit(file_path: str) -> List[Entry]:
         else:
             declared_utile = -gap         # attivo > passivo → utile on passivo side
             declared_perdita = False
+
+    # When the SP footer TOTALE ATTIVITA'/PASSIVITA' are unreadable (drawn as
+    # vectors — budget_615), the current-year result is still fully determined by
+    # the CE: utile = ricavi - costi. The CE mastri are in the text layer, so this
+    # recovers the result without trusting a corrupt SP footer.
+    if declared_utile is None:
+        ricavi_sum = sum((e.amount for e in entries
+                          if e.section == 'ricavi' and e.amount), Decimal('0'))
+        costi_sum = sum((e.amount for e in entries
+                         if e.section == 'costi' and e.amount), Decimal('0'))
+        if ricavi_sum or costi_sum:
+            res = ricavi_sum - costi_sum
+            declared_utile = abs(res)
+            declared_perdita = res < 0
 
     # Remove the SP-booked utile/perdita account from equity classification by
     # tagging it as prior (the footer plug carries the current-year result).
@@ -1952,6 +2096,156 @@ def parse_entries_contrapposte_8digit(file_path: str) -> List[Entry]:
                                  amount=declared_utile, level=4, section='passivo'))
 
     return entries
+
+
+def _c8_dettaglio_rows(words, doc_mid: float, doc_axis: int):
+    """Yield ``(code, description, amount)`` for the 6-digit DETTAGLIO lines in
+    the PASSIVO (right) column. On these AGO exports the dettaglio amounts carry
+    the underline drawn as interlaced '_' glyphs INSIDE the amount token
+    (``_2_.00_0_,_0_0_`` = 2.000,00); the digits are all present, so the glyphs
+    are stripped before parsing. A token that does not reduce to a clean amount is
+    skipped, never guessed — and the caller self-validates the recovered subset
+    against the balance gap, so any mis-strip is rejected rather than trusted."""
+    from collections import defaultdict
+    if doc_axis == 0:
+        side = [w for w in words if w[0] > doc_mid]
+    else:
+        side = [w for w in words if w[1] <= doc_mid]
+    rows: Dict[int, list] = defaultdict(list)
+    for w in side:
+        rows[round(w[1 - doc_axis])].append(w)
+    toks: List[str] = []
+    for key in sorted(rows):
+        rows[key].sort(key=(lambda w: -w[1]) if doc_axis == 1 else (lambda w: w[0]))
+        toks.extend(w[4] for w in rows[key])
+
+    out: List[Tuple[str, str, Decimal]] = []
+    code: Optional[str] = None
+    desc: List[str] = []
+    amt: Optional[Decimal] = None
+
+    def flush():
+        if code is not None and amt is not None:
+            out.append((code, ' '.join(desc), amt))
+
+    for t in toks:
+        tc = t.replace('_', '')                # remove interlaced underline glyphs
+        if re.fullmatch(r'\d{6}', tc):         # a new dettaglio code (codes are clean)
+            flush()
+            code, desc, amt = tc, [], None
+            continue
+        if code is None:
+            continue
+        if re.fullmatch(r'\d{1,3}(?:\.\d{3})*,\d{2}', tc):  # amount (underline stripped)
+            if amt is None:
+                amt = _parse_amount(tc)
+            continue
+        if tc in ('000', '-', '') or tc.isdigit():
+            continue
+        if amt is None:                        # description precedes the amount;
+            desc.append(t)                     # ignore trailing tokens (footer noise)
+    flush()
+    return out
+
+
+def _unique_subset_summing_to(cands, target: Decimal, tol: Decimal = Decimal('1')):
+    """Return the UNIQUE non-empty subset of ``cands`` (each ``(amount, ...)``)
+    whose amounts sum to ``target`` within ``tol``; ``None`` when there is no such
+    subset or more than one (ambiguous → refuse rather than guess)."""
+    n = len(cands)
+    found = None
+    for mask in range(1, 1 << n):
+        s = Decimal('0')
+        for i in range(n):
+            if mask & (1 << i):
+                s += cands[i][0]
+        if abs(s - target) <= tol:
+            if found is not None:
+                return None                     # ambiguous
+            found = mask
+    if found is None:
+        return None
+    return [cands[i] for i in range(n) if found & (1 << i)]
+
+
+def _c8_recover_orphan_passivo(file_path: str, bs: Dict[str, Decimal]) -> Dict[str, Decimal]:
+    """Recover passivo mastri whose 8-digit total line is drawn as a VECTOR
+    (unreadable) from their CLEAN 6-digit dettagli on a dettaglio-only page.
+
+    Only the mastro totals are trustworthy on these AGO exports (most dettaglio
+    amounts are corrupted), EXCEPT where a mastro total is missing entirely
+    (vector-drawn): there the happens-to-be-clean dettagli are the sole surviving
+    figure. This reads those clean passivo dettagli and adds back ONLY the subset
+    that closes the Attivo-vs-Passivo gap EXACTLY, keeping the result only if the
+    sheet then balances (self-validation). Dettagli whose parent mastro was
+    already captured (e.g. amministratori c/compensi, already inside a read
+    Altri-debiti mastro) do not fit the gap and are excluded. Cannot corrupt a
+    sheet: worst case it returns ``bs`` unchanged."""
+    ta = bs.get('totale_attivo') or Decimal('0')
+    tp = bs.get('totale_passivo') or Decimal('0')
+    gap = ta - tp
+    if gap <= Decimal('1'):
+        return bs                              # passivo not short — nothing to do
+
+    from importers.iv_cee_hierarchy import resolve as _resolve_ivcee
+    doc = fitz.open(file_path)
+    try:
+        doc_axis, doc_mid = 0, None
+        for page in doc:
+            words = page.get_text('words')
+            lefts = [w for w in words if w[4].rstrip("'") == "ATTIVITA"]
+            rights = [w for w in words if w[4].rstrip("'") == "PASSIVITA"]
+            if not lefts or not rights:
+                continue
+            lx = min(lefts, key=lambda w: w[0])
+            rx = min(rights, key=lambda w: w[0])
+            if abs(rx[0] - lx[0]) >= abs(rx[1] - lx[1]):
+                doc_axis, doc_mid = 0, _c8_refine_gutter_x(words, (lx[0] + rx[0]) / 2)
+            else:
+                doc_axis, doc_mid = 1, (lx[1] + rx[1]) / 2
+            break
+        if doc_mid is None:
+            return bs
+        cands = []                             # (amount, db_field, desc)
+        for page in doc:
+            words = page.get_text('words')
+            if any(re.fullmatch(r'\d{8}', w[4]) for w in words):
+                continue                       # not a dettaglio-only page
+            for code, desc, amt in _c8_dettaglio_rows(words, doc_mid, doc_axis):
+                node = _resolve_ivcee(desc, side='passivo', statement='bs')
+                field = node.db_field if (node and node.db_field) else None
+                if field == 'sp13_utile_perdita':
+                    field = None               # a debt is never the year's result
+                cands.append((amt, field, desc))
+    finally:
+        doc.close()
+    if not cands or len(cands) > 18:
+        return bs
+
+    subset = _unique_subset_summing_to(cands, gap)
+    if subset is None:
+        return bs
+
+    def _add(d, key, amt):
+        d[key] = (d.get(key) or Decimal('0')) + amt
+
+    new_bs = dict(bs)
+    for amt, field, desc in subset:
+        if field:                              # resolve() gives a full DB name; the SC
+            m = re.match(r'(sp\d+)', field)    # dict aggregates use the SHORT key (sp18)
+            _add(new_bs, m.group(1) if m else 'sp16', amt)
+        else:                                  # unresolved "altri debiti" → route by
+            du = desc.upper()                  # the entro/oltre marker, keeping the
+            oltre = ('(OE)' in du or 'OLTRE' in du)  # aggregate == Σ sub-fields so the
+            _add(new_bs, 'sp17' if oltre else 'sp16', amt)             # hierarchy check
+            _add(new_bs, 'sp17g_altri_debiti_lungo' if oltre          # stays coherent
+                 else 'sp16g_altri_debiti_breve', amt)
+    new_bs['totale_passivo'] = tp + gap        # subset sums to the gap by construction
+    if abs(ta - new_bs['totale_passivo']) <= Decimal('1'):
+        logger.info(f"Route C: recuperati {len(subset)} mastri passivo orfani "
+                    f"(vettoriali) per {gap:,.2f} — bilancio ora quadrato")
+        return new_bs
+    return bs
 
 
 # ---------------------------------------------------------------------------
@@ -4831,6 +5125,7 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
                         f"{vseg_err}); falling back to standard routing")
 
     default_ce = False
+    used_c8 = False
     if is_ago_format(full_text):
         logger.info("AGO/ERP format detected, using block-based parser")
         entries, totali = parse_entries_ago(file_path)
@@ -4839,6 +5134,7 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
         logger.info("Contrapposte 8-digit detected, using coordinate-based parser")
         entries = parse_entries_contrapposte_8digit(file_path)
         default_ce = True
+        used_c8 = True
         logger.info(f"Contrapposte parser: {len(entries)} entries")
     elif is_teamsystem_sc(full_text):
         logger.info("TeamSystem situazione contabile detected, using TeamSystem parser")
@@ -4866,6 +5162,13 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
         logger.info(f"DEPI parser: {len(entries)} entries")
 
     bs, ce = build_iv_cee(entries, default_ce=default_ce)
+
+    # Recover passivo mastri whose 8-digit total line is drawn as a vector (only
+    # the contrapposte-8digit path exposes this) from their clean dettagli, gated
+    # on the SP balancing exactly. No-op unless the sheet is short on the passivo
+    # side and a clean orphan subset closes the gap.
+    if used_c8:
+        bs = _c8_recover_orphan_passivo(file_path, bs)
 
     # Safety net (general, not per-file): a structured/DEPI parser that comes up
     # EMPTY on a file that is physically a 2-column contrapposte (is_contrapposte_file)

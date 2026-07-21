@@ -25,9 +25,13 @@ from importers.situazione_contabile_parser import (
 # header text tokens — every other page's headers/footers are drawn as vectors, so
 # the parser used to read page 1 ALONE (attivo ~396k vs declared 2.828.226,30).
 # Verified targets from docs/piano-import-2026-07/13-DIAGNOSI-budget_615-AGO-CONTRAPPOSTE.md
-PDF_615 = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests", "debug", "budget_615_2024 Lavori di meccanica generale.pdf")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PDF_615_CANDIDATES = (
+    os.path.join(_ROOT, "tests", "debug", "budget_615_2024 Lavori di meccanica generale.pdf"),
+    os.path.join(_ROOT, "Test", "july_budget", "budget_615_2024 Lavori di meccanica generale.pdf"),
+)
+PDF_615 = next((path for path in _PDF_615_CANDIDATES if os.path.exists(path)),
+               _PDF_615_CANDIDATES[0])
 
 
 def _word(x0, y0, x1, y1, text):

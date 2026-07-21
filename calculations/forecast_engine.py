@@ -2,7 +2,7 @@
 Forecast Calculation Engine
 Generates forecasted Income Statements and Balance Sheets based on budget assumptions
 """
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
 from database.models import (
@@ -11,8 +11,9 @@ from database.models import (
     ForecastBalanceSheet, ForecastIncomeStatement
 )
 from calculations.projection_common import (
-    financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota, new_financing_schedule,
+    base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
+    tfr_accrual_quota, tax_closing_position, deferred_tax_position,
+    new_financing_schedule,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -24,6 +25,186 @@ class ForecastEngine:
 
     def __init__(self, db_session: Session):
         self.db = db_session
+
+    @staticmethod
+    def _quantize_values(values: Dict) -> Dict:
+        """Round projected accounting rows to the database's two-cent scale."""
+        cent = Decimal("0.01")
+        return {
+            field: Decimal(str(value or 0)).quantize(
+                cent, rounding=ROUND_HALF_UP
+            )
+            for field, value in values.items()
+        }
+
+    @classmethod
+    def _normalize_income_statement_cents(cls, values: Dict) -> Dict:
+        """Keep CE aggregate/detail identities exact after cent rounding."""
+        result = cls._quantize_values(values)
+        groups = {
+            "ce08_costi_personale": (
+                "ce08a_tfr_accrual",
+                "ce08b_salari_stipendi",
+                "ce08c_oneri_sociali",
+                "ce08d_altri_costi_personale",
+            ),
+            "ce09_ammortamenti": (
+                "ce09a_ammort_immateriali",
+                "ce09b_ammort_materiali",
+                "ce09c_svalutazioni",
+                "ce09d_svalutazione_crediti",
+            ),
+        }
+        for aggregate, details in groups.items():
+            if aggregate not in result or not all(field in result for field in details):
+                continue
+            residual = result[aggregate] - sum(
+                (result[field] for field in details), Decimal("0")
+            )
+            result[details[-1]] += residual
+
+        # D) Rettifiche is a signed net family: aggregate = rivalutazioni -
+        # svalutazioni.  Keep the stored rows exact when all three are present.
+        if all(
+            field in result
+            for field in (
+                "ce17_rettifiche_attivita_fin",
+                "ce17a_rivalutazioni",
+                "ce17b_svalutazioni",
+            )
+        ):
+            result["ce17b_svalutazioni"] = (
+                result["ce17a_rivalutazioni"]
+                - result["ce17_rettifiche_attivita_fin"]
+            )
+        return result
+
+    @classmethod
+    def _normalize_balance_sheet_cents(cls, values: Dict) -> Dict:
+        """Make persisted SP hierarchy and Attivo/Passivo exact to the cent.
+
+        The engine calculates with higher precision while the ORM stores Numeric(15,2).
+        Rounding every row independently could leave a one-cent mismatch in later
+        forecast years.  Absorb only those rounding residuals in the generic detail
+        bucket, then recompute cash from the rounded aggregate rows.
+        """
+        result = cls._quantize_values(values)
+        groups = {
+            "sp01_crediti_soci": (
+                ("sp01a_parte_richiamata", "sp01b_parte_da_richiamare"),
+                "sp01b_parte_da_richiamare",
+            ),
+            "sp02_immob_immateriali": (
+                (
+                    "sp02a_costi_impianto", "sp02b_costi_sviluppo",
+                    "sp02c_brevetti", "sp02d_concessioni", "sp02e_avviamento",
+                    "sp02f_immob_in_corso", "sp02g_altre_immob_imm",
+                ),
+                "sp02g_altre_immob_imm",
+            ),
+            "sp03_immob_materiali": (
+                (
+                    "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
+                    "sp03c_attrezzature", "sp03d_altri_beni",
+                    "sp03e_immob_in_corso",
+                ),
+                "sp03d_altri_beni",
+            ),
+            "sp04_immob_finanziarie": (
+                (
+                    "sp04a_partecipazioni", "sp04b_crediti_immob_breve",
+                    "sp04c_crediti_immob_lungo", "sp04d_altri_titoli",
+                    "sp04e_strumenti_derivati_attivi",
+                ),
+                "sp04d_altri_titoli",
+            ),
+            "sp05_rimanenze": (
+                (
+                    "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+                    "sp05c_lavori_in_corso", "sp05d_prodotti_finiti",
+                    "sp05e_acconti",
+                ),
+                "sp05e_acconti",
+            ),
+            "sp06_crediti_breve": (
+                (
+                    "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+                    "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
+                    "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
+                    "sp06g_crediti_altri_breve",
+                ),
+                "sp06g_crediti_altri_breve",
+            ),
+            "sp07_crediti_lungo": (
+                (
+                    "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+                    "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+                    "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
+                    "sp07g_crediti_altri_lungo",
+                ),
+                "sp07g_crediti_altri_lungo",
+            ),
+            "sp12_riserve": (
+                (
+                    "sp12a_riserva_sovrapprezzo", "sp12b_riserve_rivalutazione",
+                    "sp12c_riserva_legale", "sp12d_riserve_statutarie",
+                    "sp12e_altre_riserve", "sp12f_riserva_copertura_flussi",
+                    "sp12g_utili_perdite_portati", "sp12h_riserva_neg_azioni_proprie",
+                ),
+                "sp12g_utili_perdite_portati",
+            ),
+            "sp14_fondi_rischi": (
+                (
+                    "sp14a_fondi_trattamento_quiescenza", "sp14b_fondi_imposte",
+                    "sp14c_strumenti_derivati_passivi", "sp14d_altri_fondi",
+                ),
+                "sp14d_altri_fondi",
+            ),
+            "sp16_debiti_breve": (
+                (
+                    "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+                    "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+                    "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+                    "sp16g_altri_debiti_breve",
+                ),
+                "sp16g_altri_debiti_breve",
+            ),
+            "sp17_debiti_lungo": (
+                (
+                    "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+                    "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
+                    "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
+                    "sp17g_altri_debiti_lungo",
+                ),
+                "sp17g_altri_debiti_lungo",
+            ),
+        }
+        for aggregate, (details, residual_field) in groups.items():
+            if aggregate not in result or not all(field in result for field in details):
+                continue
+            residual = result[aggregate] - sum(
+                (result[field] for field in details), Decimal("0")
+            )
+            result[residual_field] += residual
+
+        asset_fields_without_cash = (
+            "sp01_crediti_soci", "sp02_immob_immateriali",
+            "sp03_immob_materiali", "sp04_immob_finanziarie",
+            "sp05_rimanenze", "sp06_crediti_breve", "sp07_crediti_lungo",
+            "sp08_attivita_finanziarie", "sp10_ratei_risconti_attivi",
+        )
+        liability_fields = (
+            "sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
+            "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve",
+            "sp17_debiti_lungo", "sp18_ratei_risconti_passivi",
+        )
+        if all(field in result for field in asset_fields_without_cash + liability_fields):
+            result["sp09_disponibilita_liquide"] = sum(
+                (result[field] for field in liability_fields), Decimal("0")
+            ) - sum(
+                (result[field] for field in asset_fields_without_cash), Decimal("0")
+            )
+        return result
 
     @staticmethod
     def _get_total_investments(assumption) -> Decimal:
@@ -50,6 +231,97 @@ class ForecastEngine:
                 "tangible_investments; automatic 50/50 allocation is disabled"
             )
         return Decimal('0'), Decimal('0')
+
+    @staticmethod
+    def _apply_sp_overrides(result: Dict, assumption) -> Dict:
+        """Apply absolute balance-sheet overrides and rebuild affected totals.
+
+        Overrides target persisted forecast field names.  Detail edits win over
+        their parent aggregate; cash remains the balancing item unless it was
+        explicitly overridden by an API client.
+        """
+        raw_overrides = getattr(assumption, 'sp_overrides', None) or {}
+        if not isinstance(raw_overrides, dict):
+            return result
+
+        applied = set()
+        signed_fields = {'sp13_utile_perdita', 'sp12h_riserva_neg_azioni_proprie'}
+        for field, raw_value in raw_overrides.items():
+            if field not in result or raw_value is None:
+                continue
+            value = Decimal(str(raw_value))
+            result[field] = value if field in signed_fields else max(Decimal('0'), value)
+            applied.add(field)
+
+        detail_groups = {
+            'sp04_immob_finanziarie': (
+                'sp04a_partecipazioni', 'sp04b_crediti_immob_breve',
+                'sp04c_crediti_immob_lungo', 'sp04d_altri_titoli',
+                'sp04e_strumenti_derivati_attivi',
+            ),
+            'sp05_rimanenze': (
+                'sp05a_materie_prime', 'sp05b_prodotti_in_corso',
+                'sp05c_lavori_in_corso', 'sp05d_prodotti_finiti', 'sp05e_acconti',
+            ),
+            'sp06_crediti_breve': (
+                'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+                'sp06g_crediti_altri_breve',
+            ),
+            'sp07_crediti_lungo': (
+                'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+                'sp07g_crediti_altri_lungo',
+            ),
+            'sp12_riserve': (
+                'sp12a_riserva_sovrapprezzo', 'sp12b_riserve_rivalutazione',
+                'sp12c_riserva_legale', 'sp12d_riserve_statutarie',
+                'sp12e_altre_riserve', 'sp12f_riserva_copertura_flussi',
+                'sp12g_utili_perdite_portati', 'sp12h_riserva_neg_azioni_proprie',
+            ),
+            'sp14_fondi_rischi': (
+                'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
+                'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
+            ),
+            'sp16_debiti_breve': (
+                'sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                'sp16c_debiti_obbligazioni_breve', 'sp16d_debiti_fornitori_breve',
+                'sp16e_debiti_tributari_breve', 'sp16f_debiti_previdenza_breve',
+                'sp16g_altri_debiti_breve',
+            ),
+            'sp17_debiti_lungo': (
+                'sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                'sp17c_debiti_obbligazioni_lungo', 'sp17d_debiti_fornitori_lungo',
+                'sp17e_debiti_tributari_lungo', 'sp17f_debiti_previdenza_lungo',
+                'sp17g_altri_debiti_lungo',
+            ),
+        }
+        for parent, details in detail_groups.items():
+            if applied.intersection(details):
+                result[parent] = sum((result.get(field, Decimal('0')) for field in details), Decimal('0'))
+
+        if applied and 'sp09_disponibilita_liquide' not in applied:
+            total_assets_no_cash = sum((
+                result.get(field, Decimal('0')) for field in (
+                    'sp01_crediti_soci', 'sp02_immob_immateriali',
+                    'sp03_immob_materiali', 'sp04_immob_finanziarie',
+                    'sp05_rimanenze', 'sp06_crediti_breve', 'sp07_crediti_lungo',
+                    'sp08_attivita_finanziarie', 'sp10_ratei_risconti_attivi',
+                )
+            ), Decimal('0'))
+            total_liabilities = sum((
+                result.get(field, Decimal('0')) for field in (
+                    'sp11_capitale', 'sp12_riserve', 'sp13_utile_perdita',
+                    'sp14_fondi_rischi', 'sp15_tfr', 'sp16_debiti_breve',
+                    'sp17_debiti_lungo', 'sp18_ratei_risconti_passivi',
+                )
+            ), Decimal('0'))
+            result['sp09_disponibilita_liquide'] = max(
+                Decimal('0'), total_liabilities - total_assets_no_cash
+            )
+        return result
 
     def generate_forecast(self, scenario_id: int) -> Dict:
         """
@@ -115,6 +387,8 @@ class ForecastEngine:
         # finanziari (ce15) in sync — the previous code added the debt but only
         # charged interest in the year of erogazione.
         financing_loans = []
+        detailed_opening_total = Decimal('0')
+        first_forecast_year = assumptions[0].forecast_year
         for a in assumptions:
             amt = a.financing_amount or Decimal('0')
             dur = a.financing_duration_years or Decimal('0')
@@ -123,6 +397,36 @@ class ForecastEngine:
                 financing_loans.append({
                     'year': a.forecast_year, 'amount': amt, 'duration': dur, 'rate': rate,
                 })
+            for loan in (getattr(a, 'financing_loans', None) or []):
+                loan_amount = Decimal(str(loan.get('amount') or 0))
+                opening_residual = Decimal(str(loan.get('opening_residual') or 0))
+                loan_duration = Decimal(str(loan.get('duration_years') or 0))
+                loan_rate = Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100')
+                if opening_residual > 0 and a.forecast_year != first_forecast_year:
+                    raise ValueError(
+                        "opening_residual is allowed only in the first forecast year"
+                    )
+                detailed_opening_total += opening_residual
+                if (loan_amount > 0 or opening_residual > 0) and loan_duration > 0:
+                    financing_loans.append({
+                        'year': a.forecast_year,
+                        'amount': loan_amount,
+                        'opening_residual': opening_residual,
+                        'duration': loan_duration,
+                        'rate': loan_rate,
+                        'grace_years': Decimal(str(loan.get('grace_years') or 0)),
+                        'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
+                    })
+
+        use_detailed_existing_schedule = detailed_opening_total > 0
+        if use_detailed_existing_schedule:
+            getter = lambda field: getattr(base_bs, field, None) or Decimal('0')
+            base_bank_total = base_bank_debt(getter)
+            if abs(base_bank_total - detailed_opening_total) > Decimal('0.01'):
+                raise ValueError(
+                    "The sum of financing opening residuals must equal base-year "
+                    f"bank debt ({detailed_opening_total} != {base_bank_total})"
+                )
 
         # Generate forecast for each year
         for idx, assumption in enumerate(assumptions):
@@ -136,6 +440,7 @@ class ForecastEngine:
                 previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs,
                 financing_loans=financing_loans
             )
+            forecast_inc = self._normalize_income_statement_cents(forecast_inc)
 
             # Calculate forecasted balance sheet
             forecast_bs = self._calculate_balance_sheet(
@@ -145,8 +450,10 @@ class ForecastEngine:
                 assumption=assumption,
                 previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs,
                 year_offset=year_offset,
-                financing_loans=financing_loans
+                financing_loans=financing_loans,
+                use_detailed_existing_schedule=use_detailed_existing_schedule,
             )
+            forecast_bs = self._normalize_balance_sheet_cents(forecast_bs)
 
             # Get or create forecast year
             fy = self.db.query(ForecastYear).filter(
@@ -217,6 +524,41 @@ class ForecastEngine:
     def _pbt_from_income(inc) -> Decimal:
         """Pre-tax profit through the canonical CE algebra."""
         return calculate_ce_result(inc).profit_before_tax
+
+    @classmethod
+    def _tax_components(cls, base_inc, projected_inc, assumption):
+        """Return current tax, deferred-tax position and total P&L tax.
+
+        Current tax is kept separate from deferred tax because only the former
+        participates in the tax-credit/tax-debt settlement.  An explicit CE20
+        override is interpreted as total tax expense and remains authoritative.
+        """
+        zero = Decimal('0')
+        deferred = deferred_tax_position(
+            getattr(assumption, 'tax_temporary_differences', None),
+            assumption.tax_rate,
+        )
+        if assumption.ce20_override is not None:
+            total_tax = Decimal(str(assumption.ce20_override))
+            current_tax = max(zero, total_tax - deferred['deferred_expense'])
+            return current_tax, deferred, total_tax
+
+        profit_before_tax = calculate_ce_result(projected_inc).profit_before_tax
+        base_pbt = cls._pbt_from_income(base_inc)
+        base_tax = getattr(base_inc, 'ce20_imposte', None) or zero
+        effective_rate = None
+        if base_tax > 0 and base_pbt > 0:
+            effective_rate = base_tax / base_pbt
+            if effective_rate <= 0 or effective_rate > Decimal('0.6'):
+                effective_rate = None
+        rate = (
+            effective_rate
+            if effective_rate is not None
+            else Decimal(str(assumption.tax_rate)) / Decimal('100')
+        )
+        current_tax = max(zero, profit_before_tax * rate)
+        total_tax = max(zero, current_tax + deferred['deferred_expense'])
+        return current_tax, deferred, total_tax
 
     def _calculate_income_statement(
         self,
@@ -409,7 +751,15 @@ class ForecastEngine:
         # erogazione. Interest is 0 automatically once the loan is fully repaid or
         # when the rate is 0.
         _, _, financing_interest = new_financing_schedule(financing_loans, assumption.forecast_year)
-        ce15 = ce15 + financing_interest
+        has_detailed_opening = any(
+            Decimal(str(loan.get('opening_residual') or 0)) > 0
+            for loan in (financing_loans or [])
+        )
+        # A detailed opening schedule replaces the historical aggregate interest
+        # carry-forward; otherwise it would be charged twice.  CE15 override stays
+        # the explicit escape hatch for ancillary bank charges.
+        if assumption.ce15_override is None:
+            ce15 = financing_interest if has_detailed_opening else ce15 + financing_interest
 
         # Taxes - use override if set, otherwise use tax rate
         ce_for_tax = {
@@ -428,24 +778,7 @@ class ForecastEngine:
             'ce18_proventi_straordinari': ce18, 'ce19_oneri_straordinari': ce19,
             'ce20_imposte': Decimal('0'),
         }
-        profit_before_tax = calculate_ce_result(ce_for_tax).profit_before_tax
-        if assumption.ce20_override is not None:
-            ce20 = assumption.ce20_override
-        else:
-            # Use the company's EFFECTIVE tax rate derived from the base year (captures
-            # the IRES + IRAP blend on their different bases). A flat IRES-only rate
-            # understates tax and overstates the forecast utile. Fall back to the
-            # explicit assumption.tax_rate when the base year has no usable signal or
-            # the derived rate is implausible (losses, tax credits, deferred taxes).
-            base_pbt = self._pbt_from_income(base_inc)
-            eff_rate = None
-            base_tax = getattr(base_inc, 'ce20_imposte', None) or Decimal('0')
-            if base_tax > 0 and base_pbt > 0:
-                eff_rate = base_tax / base_pbt
-                if eff_rate <= 0 or eff_rate > Decimal('0.6'):
-                    eff_rate = None
-            tax_rate_decimal = eff_rate if eff_rate is not None else (assumption.tax_rate / Decimal('100'))
-            ce20 = max(Decimal('0'), profit_before_tax * tax_rate_decimal)
+        _, _, ce20 = self._tax_components(base_inc, ce_for_tax, assumption)
 
         return {
             'ce01_ricavi_vendite': ce01,
@@ -490,7 +823,8 @@ class ForecastEngine:
         assumption: BudgetAssumptions,
         previous_bs,
         year_offset: int = 1,
-        financing_loans=None
+        financing_loans=None,
+        use_detailed_existing_schedule: bool = False,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -551,8 +885,14 @@ class ForecastEngine:
         # — mirroring the tax/other debts on the passivo (sp16e_growth_pct). Default
         # (no %) → constant. Only the TRADE buckets (clienti/controllate/collegate/
         # controllanti/altri) are driven by DSO below.
+        tax_difference_lines = getattr(assumption, 'tax_temporary_differences', None) or []
+        current_tax, deferred, _ = self._tax_components(base_inc, forecast_inc, assumption)
         sp06e = _prev('sp06e_crediti_tributari_breve') * (D('1') + _sp_growth('sp06e_growth_pct'))
-        sp06f = _prev('sp06f_imposte_anticipate_breve') * (D('1') + _sp_growth('sp06f_growth_pct'))
+        sp06f = (
+            deferred['short_asset']
+            if tax_difference_lines
+            else _prev('sp06f_imposte_anticipate_breve') * (D('1') + _sp_growth('sp06f_growth_pct'))
+        )
 
         # DSO → sp06 TRADE receivables (short-term). Auto-derive DSO from the base year
         # TRADE receivables only (sp06 aggregate minus tax credits and deferred taxes),
@@ -582,7 +922,16 @@ class ForecastEngine:
         sp05 = forecast_revenue * dio / DAYS
 
         # Long-term receivables, other current assets
-        sp07 = _prev('sp07_crediti_lungo') * (D('1') + assumption.receivables_long_growth_pct / D('100'))
+        long_growth = D('1') + assumption.receivables_long_growth_pct / D('100')
+        if tax_difference_lines:
+            sp07_non_deferred = max(
+                ZERO,
+                _prev('sp07_crediti_lungo') - _prev('sp07f_imposte_anticipate_lungo'),
+            ) * long_growth
+            sp07f = deferred['long_asset']
+            sp07 = sp07_non_deferred + sp07f
+        else:
+            sp07 = _prev('sp07_crediti_lungo') * long_growth
         sp08 = _prev('sp08_attivita_finanziarie') * (D('1') + _sp_growth('sp08_growth_pct'))
         sp10 = _prev('sp10_ratei_risconti_attivi') * (D('1') + _sp_growth('sp10_growth_pct'))
         sp01 = _prev('sp01_crediti_soci') * (D('1') + _sp_growth('sp01_growth_pct'))
@@ -609,7 +958,28 @@ class ForecastEngine:
         # ── LIABILITIES (bottom-up from components) ──
 
         # Other liabilities (non-debt)
-        sp14 = _prev('sp14_fondi_rischi') * (D('1') + _sp_growth('sp14_growth_pct'))
+        provision_factor = D('1') + _sp_growth('sp14_growth_pct')
+        if tax_difference_lines:
+            sp14a = _prev('sp14a_fondi_trattamento_quiescenza') * provision_factor
+            sp14b = deferred['liability']
+            sp14c = _prev('sp14c_strumenti_derivati_passivi') * provision_factor
+            sp14d = _prev('sp14d_altri_fondi') * provision_factor
+            sp14 = sp14a + sp14b + sp14c + sp14d
+        else:
+            sp14 = _prev('sp14_fondi_rischi') * provision_factor
+            provision_fields = (
+                'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
+                'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
+            )
+            provision_values = [_prev(field) for field in provision_fields]
+            provision_total = sum(provision_values, ZERO)
+            if provision_total > 0:
+                sp14a, sp14b, sp14c, sp14d = [
+                    sp14 * value / provision_total for value in provision_values
+                ]
+            else:
+                sp14a = sp14b = sp14c = ZERO
+                sp14d = sp14
         # TFR fund: previous fund + accrual. When the accrual is suspended (companies
         # with >60 employees pay the maturing TFR to the INPS treasury fund from a given
         # year rather than accruing it internally), the fund stops growing. The ce08a
@@ -653,6 +1023,24 @@ class ForecastEngine:
 
         # --- OTHER OPERATING DEBTS: carry forward with optional growth % ---
         sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
+
+        # Tax settlement: opening net tax position + current tax expense - advances.
+        # A negative closing liability is reclassified automatically to tax credits;
+        # neither side can become negative. Explicit legacy growth percentages remain
+        # an escape hatch and take precedence over the automatic settlement.
+        manual_tax_position = (
+            getattr(assumption, 'sp06e_growth_pct', None) is not None
+            or getattr(assumption, 'sp16e_growth_pct', None) is not None
+        )
+        if not manual_tax_position:
+            tax_advances = D(str(getattr(assumption, 'tax_advances_paid', ZERO) or ZERO))
+            sp06e, sp16e = tax_closing_position(
+                _prev('sp06e_crediti_tributari_breve'),
+                _prev('sp16e_debiti_tributari_breve'),
+                current_tax,
+                tax_advances,
+            )
+            sp06 = sp06_trade + sp06e + sp06f
         sp16g = _prev('sp16g_altri_debiti_breve') * (D('1') + _sp_growth('sp16g_growth_pct'))
         sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
         sp17g = _prev('sp17g_altri_debiti_lungo') * (D('1') + _sp_growth('sp17g_growth_pct'))
@@ -675,9 +1063,41 @@ class ForecastEngine:
         # A missing breakdown is unknown creditor type, not bank debt.  The source
         # gate catches this on the base year; retain a local guard for direct calls
         # and for malformed previous forecast rows.
-        prev_sp16_detail = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g
+        # Validate like-for-like PREVIOUS values.  The variables above already
+        # contain this forecast year's DPO/tax/growth calculations, so mixing
+        # them with the previous aggregate produced a false mismatch whenever
+        # revenue, taxes or creditor assumptions changed.
+        prev_sp16_detail = sum(
+            (
+                _prev(field)
+                for field in (
+                    'sp16a_debiti_banche_breve',
+                    'sp16b_debiti_altri_finanz_breve',
+                    'sp16c_debiti_obbligazioni_breve',
+                    'sp16d_debiti_fornitori_breve',
+                    'sp16e_debiti_tributari_breve',
+                    'sp16f_debiti_previdenza_breve',
+                    'sp16g_altri_debiti_breve',
+                )
+            ),
+            ZERO,
+        )
         gap_short = prev_sp16_agg - prev_sp16_detail
-        prev_sp17_detail = sp17a + sp17b + sp17c + sp17d + sp17e + sp17f + sp17g
+        prev_sp17_detail = sum(
+            (
+                _prev(field)
+                for field in (
+                    'sp17a_debiti_banche_lungo',
+                    'sp17b_debiti_altri_finanz_lungo',
+                    'sp17c_debiti_obbligazioni_lungo',
+                    'sp17d_debiti_fornitori_lungo',
+                    'sp17e_debiti_tributari_lungo',
+                    'sp17f_debiti_previdenza_lungo',
+                    'sp17g_altri_debiti_lungo',
+                )
+            ),
+            ZERO,
+        )
         gap_long = prev_sp17_agg - prev_sp17_detail
         if abs(gap_short) > Decimal('0.01') or abs(gap_long) > Decimal('0.01'):
             raise ValueError(
@@ -685,26 +1105,24 @@ class ForecastEngine:
                 "the difference was not allocated to banks"
             )
 
-        # Apply repayment schedule to existing financial debt (reduces long-term).
-        # The instalment is FIXED on the ORIGINAL (base-year) financial long-term debt
+        # Apply the bank repayment schedule to total bank debt (entro + oltre).
+        # The instalment is FIXED on the ORIGINAL base-year bank exposure
         # so the debt fully amortises to zero after `existing_repay_years`. (Recomputing
         # the instalment on the shrinking residual each year — the previous behaviour —
         # is a decreasing instalment that never reaches zero: e.g. over 3 years it leaves
         # 8/27 ≈ 30% outstanding, the "residuo" the user reported.)
-        if existing_repay_years is not None and D(str(existing_repay_years)) > 0:
-            # Fixed instalment on the ORIGINAL (base-year) BANK + BONDS long-term debt,
-            # including the abbreviato gap allocated to banks when only the aggregate sp17
-            # is imported. The instalment FORMULA lives in the shared kernel so it is
-            # identical to the intra-year engine by construction (P2); here it is
-            # apportioned across the current residual bank/bond sub-fields. NB: sp17b
-            # (altri finanziatori) is repaid on its OWN schedule below, not here.
+        if (
+            not use_detailed_existing_schedule
+            and existing_repay_years is not None
+            and D(str(existing_repay_years)) > 0
+        ):
+            # Short-term bank debt is repaid first; any residual instalment reduces
+            # long-term bank debt. Bonds and other lenders are left untouched.
             annual_repayment = financial_repayment_instalment(_base, existing_repay_years)
-            total_bank_bonds = sp17a + sp17c   # current residual, for apportioning
-            if total_bank_bonds > 0:
-                bank_share = sp17a / total_bank_bonds
-                bonds_share = sp17c / total_bank_bonds
-                sp17a = max(ZERO, sp17a - annual_repayment * bank_share)
-                sp17c = max(ZERO, sp17c - annual_repayment * bonds_share)
+            short_repayment = min(sp16a, annual_repayment)
+            sp16a = max(ZERO, sp16a - short_repayment)
+            long_repayment = annual_repayment - short_repayment
+            sp17a = max(ZERO, sp17a - long_repayment)
 
         # Altri finanziatori (sp17b) — e.g. an intra-group loan — repaid on its OWN fixed
         # schedule, independent of the bank debt (shared kernel: fixed instalment on the
@@ -722,7 +1140,9 @@ class ForecastEngine:
         # shrinks by its rata each year instead of persisting flat forever.
         fin_raised, fin_repayment, _ = new_financing_schedule(financing_loans, assumption.forecast_year)
         sp17a = sp17a + fin_raised
-        sp17a = max(ZERO, sp17a - fin_repayment)
+        short_fin_repayment = min(sp16a, fin_repayment)
+        sp16a = max(ZERO, sp16a - short_fin_repayment)
+        sp17a = max(ZERO, sp17a - (fin_repayment - short_fin_repayment))
 
         # --- AGGREGATE sp16/sp17 from components ---
         sp16 = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g
@@ -788,6 +1208,26 @@ class ForecastEngine:
             out[primary_idx] = aggregate
             return out
 
+        # Fixed-asset details must travel with their aggregates.  The assumptions
+        # expose aggregate investments/depreciation, not a statutory sub-category,
+        # so preserve the source composition proportionally.  If the source is
+        # abbreviated and has no detail, keep the amount in the generic bucket.
+        sp02_fields = [
+            'sp02a_costi_impianto', 'sp02b_costi_sviluppo', 'sp02c_brevetti',
+            'sp02d_concessioni', 'sp02e_avviamento', 'sp02f_immob_in_corso',
+            'sp02g_altre_immob_imm',
+        ]
+        sp02a, sp02b, sp02c, sp02d, sp02e, sp02f, sp02g = _alloc(
+            sp02, sp02_fields, primary_idx=6
+        )
+        sp03_fields = [
+            'sp03a_terreni_fabbricati', 'sp03b_impianti_macchinari',
+            'sp03c_attrezzature', 'sp03d_altri_beni', 'sp03e_immob_in_corso',
+        ]
+        sp03a, sp03b, sp03c, sp03d, sp03e = _alloc(
+            sp03, sp03_fields, primary_idx=3
+        )
+
         # Allocate the DSO-driven TRADE total across the commercial buckets only
         # (a/b/c/d/g). Crediti tributari (sp06e) and imposte anticipate (sp06f) keep the
         # carried-forward values computed in the working-capital section above — they do
@@ -797,14 +1237,41 @@ class ForecastEngine:
                              'sp06g_crediti_altri_breve']
         sp06a, sp06b, sp06c, sp06d, sp06g = _alloc(sp06_trade, sp06_trade_fields)
 
+        sp07_non_deferred_fields = [
+            'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+            'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+            'sp07e_crediti_tributari_lungo', 'sp07g_crediti_altri_lungo',
+        ]
+        if tax_difference_lines:
+            sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
+                sp07_non_deferred, sp07_non_deferred_fields
+            )
+        else:
+            sp07_fields = sp07_non_deferred_fields[:5] + [
+                'sp07f_imposte_anticipate_lungo', 'sp07g_crediti_altri_lungo'
+            ]
+            sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
+
         sp05_fields = ['sp05a_materie_prime', 'sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
                        'sp05d_prodotti_finiti', 'sp05e_acconti']
         sp05a, sp05b, sp05c, sp05d, sp05e = _alloc(sp05, sp05_fields)
 
-        return {
+        result = {
             'sp01_crediti_soci': sp01,
             'sp02_immob_immateriali': sp02,
+            'sp02a_costi_impianto': sp02a,
+            'sp02b_costi_sviluppo': sp02b,
+            'sp02c_brevetti': sp02c,
+            'sp02d_concessioni': sp02d,
+            'sp02e_avviamento': sp02e,
+            'sp02f_immob_in_corso': sp02f,
+            'sp02g_altre_immob_imm': sp02g,
             'sp03_immob_materiali': sp03,
+            'sp03a_terreni_fabbricati': sp03a,
+            'sp03b_impianti_macchinari': sp03b,
+            'sp03c_attrezzature': sp03c,
+            'sp03d_altri_beni': sp03d,
+            'sp03e_immob_in_corso': sp03e,
             'sp04_immob_finanziarie': sp04,
             'sp04a_partecipazioni': sp04a,
             'sp04b_crediti_immob_breve': sp04b,
@@ -826,6 +1293,13 @@ class ForecastEngine:
             'sp06f_imposte_anticipate_breve': sp06f,
             'sp06g_crediti_altri_breve': sp06g,
             'sp07_crediti_lungo': sp07,
+            'sp07a_crediti_clienti_lungo': sp07a,
+            'sp07b_crediti_controllate_lungo': sp07b,
+            'sp07c_crediti_collegate_lungo': sp07c,
+            'sp07d_crediti_controllanti_lungo': sp07d,
+            'sp07e_crediti_tributari_lungo': sp07e,
+            'sp07f_imposte_anticipate_lungo': sp07f,
+            'sp07g_crediti_altri_lungo': sp07g,
             'sp08_attivita_finanziarie': sp08,
             'sp09_disponibilita_liquide': sp09,
             'sp10_ratei_risconti_attivi': sp10,
@@ -841,6 +1315,10 @@ class ForecastEngine:
             'sp12h_riserva_neg_azioni_proprie': sp12h,
             'sp13_utile_perdita': sp13,
             'sp14_fondi_rischi': sp14,
+            'sp14a_fondi_trattamento_quiescenza': sp14a,
+            'sp14b_fondi_imposte': sp14b,
+            'sp14c_strumenti_derivati_passivi': sp14c,
+            'sp14d_altri_fondi': sp14d,
             'sp15_tfr': sp15,
             'sp16_debiti_breve': sp16,
             'sp17_debiti_lungo': sp17,
@@ -860,6 +1338,7 @@ class ForecastEngine:
             'sp17g_altri_debiti_lungo': sp17g,
             'sp18_ratei_risconti_passivi': sp18
         }
+        return self._apply_sp_overrides(result, assumption)
 
 
 def generate_forecast_for_scenario(scenario_id: int, db_session: Session) -> Dict:

@@ -1306,7 +1306,19 @@ class EnhancedXBRLParser:
                 facts_by_period[period_key]
             )
 
-            from importers.iv_cee_hierarchy import check_quadratura
+            # Bilancio abbreviato XBRL publishes legal aggregates (sp04/sp14/…)
+            # without their typed sub-details. Book the unexplained remainder into
+            # each family's "altri" bucket so the aggregate equals the sum of its
+            # detail — the aggregate and the balance are untouched — otherwise the
+            # forecast engine rejects the year as "aggregate/detail mismatch" and
+            # the company can never be forecast. (This does NOT alter any
+            # accounting value: it only fills detail that reconstructs the
+            # already-published aggregate.)
+            from importers.iv_cee_hierarchy import (
+                check_quadratura,
+                reconcile_source_detail,
+            )
+            reconcile_source_detail(bs_data, inc_data)
             q = check_quadratura(bs_data, inc_data)
             period_label = f"{year}-{detected_pm or 12}M"
             for warning in q.warnings:

@@ -226,7 +226,10 @@ class IVCEEMapper:
                 reserves += value
             elif self._label_contains(label, 'V - Riserve statutarie'):
                 reserves += value
-            elif self._label_contains(label, 'VI - Altre riserve'):
+            elif (
+                self._label_contains(label, 'VI - Altre riserve')
+                or self._label_contains(label, 'VII - Altre riserve')
+            ):
                 reserves += value
             elif self._label_contains(label, 'VII - Riserva per operazioni'):
                 reserves += value

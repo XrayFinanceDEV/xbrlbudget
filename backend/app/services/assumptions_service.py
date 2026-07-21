@@ -6,6 +6,7 @@ Handles bulk insert/update of forecast assumptions with automatic forecast gener
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
+from fastapi.encoders import jsonable_encoder
 import sys
 import os
 
@@ -134,6 +135,10 @@ def bulk_upsert_assumptions(
             interest_rate_receivables=assumption_data.get("interest_rate_receivables", 0.0),
             interest_rate_payables=assumption_data.get("interest_rate_payables", 0.0),
             tax_rate=assumption_data.get("tax_rate", 27.9),
+            tax_advances_paid=assumption_data.get("tax_advances_paid", 0.0) or 0.0,
+            tax_temporary_differences=jsonable_encoder(
+                assumption_data.get("tax_temporary_differences", None)
+            ),
             fixed_materials_percentage=assumption_data.get("fixed_materials_percentage", 40.0),
             fixed_services_percentage=assumption_data.get("fixed_services_percentage", 40.0),
             depreciation_rate=assumption_data.get("depreciation_rate", 20.0),
@@ -144,6 +149,7 @@ def bulk_upsert_assumptions(
             financing_amount=assumption_data.get("financing_amount") or 0.0,
             financing_duration_years=assumption_data.get("financing_duration_years") or 0.0,
             financing_interest_rate=assumption_data.get("financing_interest_rate") or 0.0,
+            financing_loans=jsonable_encoder(assumption_data.get("financing_loans", None)),
             sp01_growth_pct=assumption_data.get("sp01_growth_pct", None),
             sp04_growth_pct=assumption_data.get("sp04_growth_pct", None),
             sp06e_growth_pct=assumption_data.get("sp06e_growth_pct", None),
@@ -159,6 +165,7 @@ def bulk_upsert_assumptions(
             sp17f_growth_pct=assumption_data.get("sp17f_growth_pct", None),
             sp17g_growth_pct=assumption_data.get("sp17g_growth_pct", None),
             sp18_growth_pct=assumption_data.get("sp18_growth_pct", None),
+            sp_overrides=jsonable_encoder(assumption_data.get("sp_overrides", None)),
             ce02_override=assumption_data.get("ce02_override", None),
             ce03_override=assumption_data.get("ce03_override", None),
             ce03a_override=assumption_data.get("ce03a_override", None),

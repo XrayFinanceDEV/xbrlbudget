@@ -102,6 +102,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  BarChart as RechartsBarChart,
+  Bar,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 
 const MONTH_LABELS: Record<number, string> = {
   1: "1 mese (31/01)",
@@ -152,6 +165,50 @@ const EDITABLE_CE_CODES = [
   "ce19_oneri_straordinari",
   "ce20_imposte",
 ];
+
+const CE_OVERRIDE_FIELD_BY_CODE: Record<string, string> = {
+  ce01_ricavi_vendite: "ce01_override",
+  ce02_variazioni_rimanenze: "ce02_override",
+  ce03_lavori_interni: "ce03_override",
+  ce03a_incrementi_immobilizzazioni: "ce03a_override",
+  ce04_altri_ricavi: "ce04_override",
+  ce05_materie_prime: "ce05_override",
+  ce06_servizi: "ce06_override",
+  ce07_godimento_beni: "ce07_override",
+  ce08_costi_personale: "ce08_override",
+  ce08a_tfr_accrual: "ce08a_override",
+  ce08b_salari_stipendi: "ce08b_override",
+  ce08c_oneri_sociali: "ce08c_override",
+  ce08d_altri_costi_personale: "ce08d_override",
+  ce09_ammortamenti: "ce09_override",
+  ce09a_ammort_immateriali: "ce09a_override",
+  ce09b_ammort_materiali: "ce09b_override",
+  ce09c_svalutazioni: "ce09c_override",
+  ce09d_svalutazione_crediti: "ce09d_override",
+  ce10_var_rimanenze_mat_prime: "ce10_override",
+  ce11_accantonamenti: "ce11_override",
+  ce11b_altri_accantonamenti: "ce11b_override",
+  ce12_oneri_diversi: "ce12_override",
+  ce13_proventi_partecipazioni: "ce13_override",
+  ce14_altri_proventi_finanziari: "ce14_override",
+  ce15_oneri_finanziari: "ce15_override",
+  ce16_utili_perdite_cambi: "ce16_override",
+  ce17a_rivalutazioni: "ce17a_override",
+  ce17b_svalutazioni: "ce17b_override",
+  ce18_proventi_straordinari: "ce18_override",
+  ce19_oneri_straordinari: "ce19_override",
+  ce20_imposte: "ce20_override",
+};
+
+function buildCeOverridePayload(values: Record<string, string>): Record<string, number | null> {
+  return Object.fromEntries(
+    Object.entries(CE_OVERRIDE_FIELD_BY_CODE).map(([code, field]) => {
+      const raw = values[code]?.trim();
+      const parsed = raw ? Number.parseFloat(raw) : Number.NaN;
+      return [field, Number.isFinite(parsed) ? parsed : null];
+    })
+  );
+}
 
 // Key BS items the user can override (informational, not directly editable in v1)
 const KEY_BS_CODES = [
@@ -247,6 +304,8 @@ interface IndicatorSet {
   roe: number;
   ros: number;
   of_mol: number;
+  materials_revenue: number;
+  services_revenue: number;
   // Internal fields for scoring
   _ebitda_raw: number;
   _quick_ratio: number;
@@ -373,6 +432,8 @@ function computeIndicators(
     roe: safeDivide(netProfit, equity) * 100,
     ros: safeDivide(ebit, revenue) * 100,
     of_mol: safeDivide(oneriFinanziari, ebitda) * 100,
+    materials_revenue: safeDivide(v(is_, "ce05_materie_prime"), revenue) * 100,
+    services_revenue: safeDivide(v(is_, "ce06_servizi"), revenue) * 100,
     _ebitda_raw: ebitda,
     _quick_ratio: safeDivide(currentAssets - inventory, currentLiabilities),
     _equity_over_fixed: safeDivide(equity, fixedAssets) * 100,
@@ -455,6 +516,18 @@ const INDICATOR_DEFS: Array<{
   { key: "ros", label: "ROS", format: "pct" },
   { key: "of_mol", label: "Oneri Finanziari / MOL", format: "pct" },
 ];
+
+const economicIncidenceChartConfig = {
+  ebitda_margin: { label: "EBITDA / Ricavi", color: "hsl(var(--chart-2))" },
+  materials_revenue: { label: "Materie / Ricavi", color: "hsl(var(--chart-3))" },
+  services_revenue: { label: "Servizi / Ricavi", color: "hsl(var(--chart-4))" },
+} satisfies ChartConfig;
+
+const financialMarginsChartConfig = {
+  mt: { label: "Margine di Tesoreria", color: "hsl(var(--chart-1))" },
+  ms: { label: "Margine di Struttura", color: "hsl(var(--chart-2))" },
+  pfn: { label: "PFN", color: "hsl(var(--chart-5))" },
+} satisfies ChartConfig;
 
 // Dot color and overall rating from score
 function scoreDotColor(score: number): string {
@@ -3219,25 +3292,6 @@ export default function InfraannualePage() {
         return ((overrideVal / refV) - 1) * 100;
       };
 
-      const ovr = (code: string) => {
-        const v = parseFloat(overrides[code] || "0");
-        return isNaN(v) ? null : v;
-      };
-      // ce17 is an aggregate (rivalutazioni - svalutazioni); send the net to the backend
-      const ce17Net = ((): number | null => {
-        const a = ovr("ce17a_rivalutazioni");
-        const b = ovr("ce17b_svalutazioni");
-        if (a === null && b === null) return null;
-        return (a ?? 0) - (b ?? 0);
-      })();
-      // Tax rate derived from projected imposte / PBT (fallback to 27.9 if unavailable)
-      const ce20v = ovr("ce20_imposte");
-      const derivedTaxRate = (() => {
-        if (ce20v === null) return 27.9;
-        const pbt = projIncome - (projCosts - (ovr("ce20_imposte") ?? 0));
-        if (pbt === 0) return 27.9;
-        return (ce20v / pbt) * 100;
-      })();
       await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
         assumptions: [{
           forecast_year: fiscalYear,
@@ -3250,18 +3304,8 @@ export default function InfraannualePage() {
           rent_growth_pct: calcGrowth("ce07_godimento_beni"),
           personnel_growth_pct: calcGrowth("ce08_costi_personale"),
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
-          ce02_override: ovr("ce02_variazioni_rimanenze"),
-          ce03_override: ovr("ce03_lavori_interni"),
-          ce10_override: ovr("ce10_var_rimanenze_mat_prime"),
-          ce11_override: ovr("ce11_accantonamenti"),
-          ce13_override: ovr("ce13_proventi_partecipazioni"),
-          ce14_override: ovr("ce14_altri_proventi_finanziari"),
-          ce15_override: ovr("ce15_oneri_finanziari"),
-          ce16_override: ovr("ce16_utili_perdite_cambi"),
-          ce17_override: ce17Net,
-          ce18_override: ovr("ce18_proventi_straordinari"),
-          ce19_override: ovr("ce19_oneri_straordinari"),
-          tax_rate: derivedTaxRate,
+          ...buildCeOverridePayload(overrides),
+          tax_rate: 27.9,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
           depreciation_rate: 20,
@@ -3298,6 +3342,7 @@ export default function InfraannualePage() {
       }
     }
     setOverrides(defaults);
+    const effectiveOverrides = Object.keys(overrides).length > 0 ? overrides : defaults;
 
     // Set projectedBS from comparison balance items (already full-year values)
     const projItems: IntraYearComparisonItem[] = comparison.balance_items.map((item) => ({
@@ -3331,8 +3376,12 @@ export default function InfraannualePage() {
           rent_growth_pct: calcGrowth("ce07_godimento_beni"),
           personnel_growth_pct: calcGrowth("ce08_costi_personale"),
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
-          ce14_override: comparison.income_items.find(i => i.code === "ce14_altri_proventi_finanziari")?.partial_value ?? null,
-          ce15_override: comparison.income_items.find(i => i.code === "ce15_oneri_finanziari")?.partial_value ?? null,
+          ...buildCeOverridePayload(effectiveOverrides),
+          sp_overrides: Object.fromEntries(
+            comparison.balance_items
+              .filter((item) => item.code.startsWith("sp"))
+              .map((item) => [item.code, item.partial_value])
+          ),
           tax_rate: 27.9,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
@@ -4821,6 +4870,13 @@ function IndicatoriTable({
     : null;
 
   const oltreCount = (scores: number[]) => scores.filter((s) => s < 0.33).length;
+  const indicatorChartData = [
+    { periodo: `Storico ${comparison.reference_year}`, ...storicoInd },
+    { periodo: `Infrann. ${comparison.period_months}M`, ...infraInd },
+    ...(!hideProiezione && proiezioneInd
+      ? [{ periodo: `Proiezione ${comparison.partial_year}`, ...proiezioneInd }]
+      : []),
+  ];
 
   return (
     <div className="space-y-4">
@@ -4868,6 +4924,49 @@ function IndicatoriTable({
           ))}
         </div>
       )}
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Incidenza economica sui ricavi</CardTitle>
+            <CardDescription>EBITDA, materie prime e servizi in percentuale dei ricavi.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ChartContainer config={economicIncidenceChartConfig} className="h-[260px] w-full">
+              <RechartsBarChart data={indicatorChartData}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="periodo" tickLine={false} axisLine={false} />
+                <YAxis tickFormatter={(value) => `${value}%`} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Bar dataKey="ebitda_margin" fill="var(--color-ebitda_margin)" radius={3} />
+                <Bar dataKey="materials_revenue" fill="var(--color-materials_revenue)" radius={3} />
+                <Bar dataKey="services_revenue" fill="var(--color-services_revenue)" radius={3} />
+              </RechartsBarChart>
+            </ChartContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Equilibrio finanziario e strutturale</CardTitle>
+            <CardDescription>Margine di tesoreria, margine di struttura e PFN.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ChartContainer config={financialMarginsChartConfig} className="h-[260px] w-full">
+              <RechartsBarChart data={indicatorChartData}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="periodo" tickLine={false} axisLine={false} />
+                <YAxis tickFormatter={(value) => new Intl.NumberFormat("it-IT", { notation: "compact" }).format(value)} />
+                <ChartTooltip
+                  content={<ChartTooltipContent formatter={(value) => formatEuro(Number(value))} />}
+                />
+                <Bar dataKey="mt" fill="var(--color-mt)" radius={3} />
+                <Bar dataKey="ms" fill="var(--color-ms)" radius={3} />
+                <Bar dataKey="pfn" fill="var(--color-pfn)" radius={3} />
+              </RechartsBarChart>
+            </ChartContainer>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Indicator Detail Table */}
       <Table>
@@ -5249,7 +5348,7 @@ function StampaContent({
         {/* Centered title block */}
         <div className="text-center space-y-1 pt-12 print:pt-10">
           <h1 className="text-3xl font-bold print:text-2xl">
-            Analisi Infrannuale {periodMonths === 12 ? "" : `${periodMonths}M `}{partialYear}{periodMonths !== 12 ? ` — Proiezione 12M ${partialYear}` : ""}
+            Analisi Infrannuale / Consuntivo {periodMonths === 12 ? "" : `${periodMonths}M `}{partialYear}{periodMonths !== 12 ? ` — Proiezione 12M ${partialYear}` : ""}
           </h1>
           <p className="text-lg font-semibold print:text-base">{companyName}</p>
           <p className="text-xs text-muted-foreground">

@@ -23,6 +23,11 @@ class BalanceSheetBase(BaseModel):
     sp04e_strumenti_derivati_attivi: Decimal = Field(default=Decimal("0"))
 
     sp05_rimanenze: Decimal = Field(default=Decimal("0"))
+    sp05a_materie_prime: Decimal = Field(default=Decimal("0"))
+    sp05b_prodotti_in_corso: Decimal = Field(default=Decimal("0"))
+    sp05c_lavori_in_corso: Decimal = Field(default=Decimal("0"))
+    sp05d_prodotti_finiti: Decimal = Field(default=Decimal("0"))
+    sp05e_acconti: Decimal = Field(default=Decimal("0"))
     sp06_crediti_breve: Decimal = Field(default=Decimal("0"))
     sp07_crediti_lungo: Decimal = Field(default=Decimal("0"))
     sp08_attivita_finanziarie: Decimal = Field(default=Decimal("0"))
@@ -45,6 +50,10 @@ class BalanceSheetBase(BaseModel):
 
     sp13_utile_perdita: Decimal = Field(default=Decimal("0"))
     sp14_fondi_rischi: Decimal = Field(default=Decimal("0"))
+    sp14a_fondi_trattamento_quiescenza: Decimal = Field(default=Decimal("0"))
+    sp14b_fondi_imposte: Decimal = Field(default=Decimal("0"))
+    sp14c_strumenti_derivati_passivi: Decimal = Field(default=Decimal("0"))
+    sp14d_altri_fondi: Decimal = Field(default=Decimal("0"))
     sp15_tfr: Decimal = Field(default=Decimal("0"))
     sp16_debiti_breve: Decimal = Field(default=Decimal("0"))
     sp17_debiti_lungo: Decimal = Field(default=Decimal("0"))
@@ -90,6 +99,11 @@ class BalanceSheetUpdate(BaseModel):
     sp04e_strumenti_derivati_attivi: Optional[Decimal] = None
 
     sp05_rimanenze: Optional[Decimal] = None
+    sp05a_materie_prime: Optional[Decimal] = None
+    sp05b_prodotti_in_corso: Optional[Decimal] = None
+    sp05c_lavori_in_corso: Optional[Decimal] = None
+    sp05d_prodotti_finiti: Optional[Decimal] = None
+    sp05e_acconti: Optional[Decimal] = None
     sp06_crediti_breve: Optional[Decimal] = None
     sp07_crediti_lungo: Optional[Decimal] = None
     sp08_attivita_finanziarie: Optional[Decimal] = None
@@ -110,6 +124,10 @@ class BalanceSheetUpdate(BaseModel):
 
     sp13_utile_perdita: Optional[Decimal] = None
     sp14_fondi_rischi: Optional[Decimal] = None
+    sp14a_fondi_trattamento_quiescenza: Optional[Decimal] = None
+    sp14b_fondi_imposte: Optional[Decimal] = None
+    sp14c_strumenti_derivati_passivi: Optional[Decimal] = None
+    sp14d_altri_fondi: Optional[Decimal] = None
     sp15_tfr: Optional[Decimal] = None
     sp16_debiti_breve: Optional[Decimal] = None
     sp17_debiti_lungo: Optional[Decimal] = None

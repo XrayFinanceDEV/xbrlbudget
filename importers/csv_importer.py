@@ -640,6 +640,8 @@ class CSVImporter:
         imported_bs_fields = set()
         imported_ce_fields = set()
 
+        from importers.iv_cee_hierarchy import reconcile_source_detail
+
         for year in years:
             bs_data = data_by_year[year]['bs']
             ce_data = data_by_year[year]['ce']
@@ -650,6 +652,13 @@ class CSVImporter:
                     ce_data.get('ce17a_rivalutazioni', Decimal('0'))
                     - ce_data.get('ce17b_svalutazioni', Decimal('0'))
                 )
+            # The TEBE/BILAQ CSV schema carries only the 18 sp*/20 ce* legal
+            # aggregates — no typed sub-fields at all. Fill each family's "altri"
+            # bucket with the aggregate so detail reconstructs it, otherwise the
+            # forecast engine rejects the year as "aggregate/detail mismatch" for
+            # any company with stock/receivables/payables/reserves/depreciation.
+            # Aggregates and the balance are left untouched.
+            reconcile_source_detail(bs_data, ce_data)
             q = check_quadratura(bs_data, ce_data)
             warnings.extend(f'[{year}] {warning}' for warning in q.warnings)
             if not q.quadra:

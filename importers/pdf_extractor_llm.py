@@ -2375,7 +2375,7 @@ _PN_DETAIL_SPECS = [
     (re.compile(r'^\s*(?:[A-Z]\.)?\s*III(?:\s*[-–)]\s*|\s+)Riserve di rivalutazione', re.I), 'sp12b_riserve_rivalutazione'),
     (re.compile(r'^\s*(?:[A-Z]\.)?\s*IV(?:\s*[-–)]\s*|\s+)Riserva legale', re.I), 'sp12c_riserva_legale'),
     (re.compile(r'^\s*(?:[A-Z]\.)?\s*V(?:\s*[-–)]\s*|\s+)Riserve statutarie', re.I), 'sp12d_riserve_statutarie'),
-    (re.compile(r'^\s*(?:[A-Z]\.)?\s*VI(?:\s*[-–)]\s*|\s+)Altre riserve', re.I), 'sp12e_altre_riserve'),
+    (re.compile(r'^\s*(?:[A-Z]\.)?\s*(?:VI|VII)(?:\s*[-–)]\s*|\s+)Altre riserve', re.I), 'sp12e_altre_riserve'),
     (re.compile(r'^\s*(?:[A-Z]\.)?\s*VII(?:\s*[-–)]\s*|\s+)Ris\w*\.?\s+per\s+operaz', re.I), 'sp12f_riserva_copertura_flussi'),
     (re.compile(r'^\s*(?:[A-Z]\.)?\s*VIII(?:\s*[-–)]\s*|\s+)Util.*portat', re.I), 'sp12g_utili_perdite_portati'),
     (re.compile(r'^\s*(?:[A-Z]\.)?\s*X(?:\s*[-–)]\s*|\s+)Riserva negativa per azioni proprie', re.I), 'sp12h_riserva_neg_azioni_proprie'),

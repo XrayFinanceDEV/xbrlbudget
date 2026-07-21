@@ -292,6 +292,9 @@ _SP_ATTIVO_RULES = [
     # demoted to a credit.
     (['IMMOBILIZZAZIONI', 'CORSO'], 'gross_sp03'),
     (['IMMOBILIZZAZIONI', 'ACCONT'], 'gross_sp03'),
+    # Credits explicitly labelled as immobilised belong to B.III even when the
+    # account number is gestionale-specific (AGO: "Crediti v/altri (EE-immob.)").
+    (['CREDITI', 'IMMOB'], 'gross_sp04'),
     # An advance on a CANONE / lease ("ANTICIPO X CANONI MACCHINARI") is a credit,
     # not the machine — must precede the MACCHINAR category rule. Narrow to CANON on
     # purpose: a blanket ANTICIP rule would (a) demote a genuine acconto to PURCHASE
@@ -322,10 +325,13 @@ _SP_ATTIVO_RULES = [
     (['AUTO', 'MOTO'], 'gross_sp03'),
     (['ARREDAMENT'], 'gross_sp03'),
     (['MOBILI'], 'gross_sp03'),
+    (['ALTRI', 'BENI', 'MATERIAL'], 'gross_sp03'),
     (['PARTECIPAZ'], 'gross_sp04'),
     # Current assets
     (['RIMANENZE'], 'sp05'),
     (['MAGAZZIN'], 'sp05'),
+    # Common trial-balance abbreviation: "Rim. mat. prime, sussid. e consumo".
+    (['RIM', 'MAT', 'PRIM'], 'sp05'),
     (['RATEI', 'RISCONTI', 'ATTIV'], 'sp10'),
     (['RATEI', 'ATTIV'], 'sp10'),
     (['RISCONTI', 'ATTIV'], 'sp10'),
@@ -339,6 +345,11 @@ _SP_ATTIVO_RULES = [
 
 # SP PASSIVO keyword rules
 _SP_PASSIVO_RULES = [
+    # B.1 funds are not depreciation contra-accounts.  Keep these before every
+    # AMM rule: "amministratori" contains the substring "AMM" and previously
+    # made a fondo fine-mandato look like a tangible depreciation fund.
+    (['QUIESCENZA'], 'sp14'),
+    (['INDENNIT', 'MANDATO'], 'sp14'),
     # Depreciation funds (will be netted against gross assets)
     # Specific rules first (pluriennali/macchine disambiguate immat vs mat)
     (['F.DO', 'AMM', 'PLURIENN'], 'depr_sp02'),
@@ -372,7 +383,11 @@ _SP_PASSIVO_RULES = [
     # "IMMATERIALI" also contains the "MATER" substring.
     (['FOND', 'AMM', 'IMMAT'], 'depr_sp02'),
     (['FOND', 'AMM', 'MATER'], 'depr_sp03'),
-    (['F.DO', 'AMM'], 'depr_sp03'),  # fallback → tangible
+    # Safe tangible fallback.  Do not use bare "AMM": it also matches words
+    # such as AMMINISTRATORI.  Real depreciation captions use AMM. / AMM.TO or
+    # the full AMMORT... stem; asset-specific cases were handled above.
+    (['F.DO', 'AMM.'], 'depr_sp03'),
+    (['F.DO', 'AMMORT'], 'depr_sp03'),
     # Crediti deduction
     (['F.DO', 'SVAL', 'CREDITI'], 'deduct_crediti'),
     (['RISCHI', 'CREDITI'], 'deduct_crediti'),
@@ -516,6 +531,85 @@ def _classify_sp_passivo(desc_upper: str) -> str:
         if _kw_match(desc_upper, keywords):
             return field
     return 'sp16'  # default: debiti breve
+
+
+def _sp02_detail_field(desc_upper: str) -> Optional[str]:
+    """Return the B.I detail supported by the source description, if explicit."""
+    if _kw_any(desc_upper, ['COSTI DI IMPIANTO', "COSTI D'IMPIANTO"]):
+        return 'sp02a_costi_impianto'
+    if _kw_any(desc_upper, ['SVILUPP', 'RICERCA']):
+        return 'sp02b_costi_sviluppo'
+    if _kw_any(desc_upper, ['BREVETT', 'SOFTWARE', 'OPERE INGEGNO']):
+        return 'sp02c_brevetti'
+    if _kw_any(desc_upper, ['CONCESS', 'LICENZ', 'MARCHI']):
+        return 'sp02d_concessioni'
+    if 'AVVIAMENTO' in desc_upper:
+        return 'sp02e_avviamento'
+    if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
+        return 'sp02f_immob_in_corso'
+    if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL']):
+        return 'sp02g_altre_immob_imm'
+    return None
+
+
+def _sp03_detail_field(desc_upper: str) -> Optional[str]:
+    """Return the B.II detail from semantics, independently of account codes."""
+    if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
+        return 'sp03e_immob_in_corso'
+    if _kw_any(desc_upper, ['TERREN', 'FABBRICAT']):
+        return 'sp03a_terreni_fabbricati'
+    if 'ATTREZZ' in desc_upper:
+        return 'sp03c_attrezzature'
+    if _kw_any(desc_upper, [
+        "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MOBIL', 'ARRED',
+        'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,',
+        'MEZZI TRASP', 'ALTRI BENI MATERIAL',
+    ]):
+        return 'sp03d_altri_beni'
+    if _kw_any(desc_upper, ['IMPIANT', 'MACCHINAR']):
+        return 'sp03b_impianti_macchinari'
+    return None
+
+
+def _sp04_detail_field(desc_upper: str) -> Optional[str]:
+    if 'PARTECIPAZ' in desc_upper:
+        return 'sp04a_partecipazioni'
+    if 'CREDITI' in desc_upper:
+        if _kw_any(desc_upper, ['(OE', 'OLTRE']):
+            return 'sp04c_crediti_immob_lungo'
+        if _kw_any(desc_upper, ['(EE', 'ENTRO']):
+            return 'sp04b_crediti_immob_breve'
+    if 'TITOL' in desc_upper:
+        return 'sp04d_altri_titoli'
+    if 'DERIVAT' in desc_upper:
+        return 'sp04e_strumenti_derivati_attivi'
+    return None
+
+
+def _sp05_detail_field(desc_upper: str) -> Optional[str]:
+    if _kw_match(desc_upper, ['LAVOR', 'CORSO']):
+        return 'sp05c_lavori_in_corso'
+    if _kw_any(desc_upper, ['SEMILAVOR', 'PRODOTT IN CORSO']):
+        return 'sp05b_prodotti_in_corso'
+    if _kw_match(desc_upper, ['MAT', 'PRIM']):
+        return 'sp05a_materie_prime'
+    if _kw_any(desc_upper, ['PRODOTT FINIT', 'MERCI']):
+        return 'sp05d_prodotti_finiti'
+    if 'ACCONT' in desc_upper:
+        return 'sp05e_acconti'
+    return None
+
+
+def _sp14_detail_field(desc_upper: str) -> Optional[str]:
+    if _kw_any(desc_upper, ['QUIESCENZA', 'INDENNIT', 'FINE MANDATO']):
+        return 'sp14a_fondi_trattamento_quiescenza'
+    if 'IMPOST' in desc_upper:
+        return 'sp14b_fondi_imposte'
+    if 'DERIVAT' in desc_upper:
+        return 'sp14c_strumenti_derivati_passivi'
+    if _kw_any(desc_upper, ['FOND', 'RISCHI', 'ONERI']):
+        return 'sp14d_altri_fondi'
+    return None
 
 
 def _classify_ce_costi(desc_upper: str) -> Optional[str]:
@@ -740,7 +834,14 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     typed_debt_breve = {k: Decimal('0') for k in 'abcdefg'}
     typed_debt_oltre = {k: Decimal('0') for k in 'abcdefg'}
     typed_credit_breve = {k: Decimal('0') for k in 'aefg'}
+    typed_credit_deduction = {k: Decimal('0') for k in 'aefg'}
     typed_riserve = {k: Decimal('0') for k in 'abcdeg'}
+    # Gross fixed-asset details and their matching depreciation funds.  These
+    # remain description-driven: account numbers vary across ERP products.
+    typed_fixed_gross: Dict[str, Decimal] = defaultdict(Decimal)
+    typed_fixed_depr: Dict[str, Decimal] = defaultdict(Decimal)
+    typed_direct_assets: Dict[str, Decimal] = defaultdict(Decimal)
+    typed_fondi_rischi: Dict[str, Decimal] = defaultdict(Decimal)
 
     # CE sub-items
     ce_tfr_accrual = Decimal('0')
@@ -787,10 +888,24 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
             field = _classify_sp_attivo(desc_upper)
             if field == 'gross_sp02':
                 gross_sp02 += entry.amount
+                detail = _sp02_detail_field(desc_upper)
+                if detail:
+                    typed_fixed_gross[detail] += entry.amount
             elif field == 'gross_sp03':
                 gross_sp03 += entry.amount
+                detail = _sp03_detail_field(desc_upper)
+                if detail:
+                    typed_fixed_gross[detail] += entry.amount
             elif field == 'gross_sp04':
                 bs['sp04'] = bs.get('sp04', Decimal('0')) + entry.amount
+                detail = _sp04_detail_field(desc_upper)
+                if detail:
+                    typed_direct_assets[detail] += entry.amount
+            elif field == 'sp05':
+                bs['sp05'] = bs.get('sp05', Decimal('0')) + entry.amount
+                detail = _sp05_detail_field(desc_upper)
+                if detail:
+                    typed_direct_assets[detail] += entry.amount
             elif field == 'sp09':
                 bank_dare += entry.amount
             else:
@@ -807,10 +922,17 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
             field = _classify_sp_passivo(desc_upper)
             if field == 'depr_sp02':
                 depr_sp02 += entry.amount
+                detail = _sp02_detail_field(desc_upper)
+                if detail:
+                    typed_fixed_depr[detail] += entry.amount
             elif field == 'depr_sp03':
                 depr_sp03 += entry.amount
+                detail = _sp03_detail_field(desc_upper)
+                if detail:
+                    typed_fixed_depr[detail] += entry.amount
             elif field == 'deduct_crediti':
                 crediti_deduction += entry.amount
+                typed_credit_deduction[_credit_type(desc_upper)] += entry.amount
             elif field == 'bank_avere':
                 bank_avere += entry.amount
             elif field == 'equity_total':
@@ -854,6 +976,11 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                 else:
                     bs['sp16'] = bs.get('sp16', Decimal('0')) + entry.amount
                     typed_debt_breve[_dt] += entry.amount
+            elif field == 'sp14':
+                bs['sp14'] = bs.get('sp14', Decimal('0')) + entry.amount
+                detail = _sp14_detail_field(desc_upper)
+                if detail:
+                    typed_fondi_rischi[detail] += entry.amount
             else:
                 bs[field] = bs.get(field, Decimal('0')) + entry.amount
             return
@@ -1042,6 +1169,18 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     bs['sp02'] = bs.get('sp02', Decimal('0')) + max(Decimal('0'), gross_sp02 - depr_sp02)
     bs['sp03'] = bs.get('sp03', Decimal('0')) + max(Decimal('0'), gross_sp03 - depr_sp03)
 
+    # Emit only source-supported IV-CEE details.  Each depreciation fund is
+    # subtracted from the same semantic asset family; an unknown caption stays
+    # visible as a hierarchy difference instead of being invented as "altri".
+    for detail, gross in typed_fixed_gross.items():
+        bs[detail] = bs.get(detail, Decimal('0')) + max(
+            Decimal('0'), gross - typed_fixed_depr.get(detail, Decimal('0'))
+        )
+    for detail, amount in typed_direct_assets.items():
+        bs[detail] = bs.get(detail, Decimal('0')) + amount
+    for detail, amount in typed_fondi_rischi.items():
+        bs[detail] = bs.get(detail, Decimal('0')) + amount
+
     # Immobilizzazioni are presented GROSS on these trial balances (fondi
     # ammortamento are separate passivo lines, netted just above), so the document's
     # DECLARED total / pareggio is GROSS. Expose the netted contra mass so the
@@ -1105,6 +1244,14 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
 
     _reconcile_typed(bs.get('sp16', Decimal('0')), typed_debt_breve, 'g')
     _reconcile_typed(bs.get('sp17', Decimal('0')), typed_debt_oltre, 'g')
+    # A fondo svalutazione follows the debtor family it explicitly names.  In
+    # particular, "f.do sval. crediti v/clienti" reduces sp06a rather than being
+    # forced into the residual sp06g bucket (budget_615).
+    for letter, deduction in typed_credit_deduction.items():
+        if deduction:
+            typed_credit_breve[letter] = max(
+                Decimal('0'), typed_credit_breve.get(letter, Decimal('0')) - deduction
+            )
     _reconcile_typed(bs.get('sp06', Decimal('0')), typed_credit_breve, 'g')
     _reconcile_typed(bs.get('sp12', Decimal('0')), typed_riserve, 'e')
 

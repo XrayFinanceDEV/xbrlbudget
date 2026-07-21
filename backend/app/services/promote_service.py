@@ -82,7 +82,7 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
             "sp13": str(validation.sp13),
             "warnings": validation.warnings,
         }, ensure_ascii=False),
-        parser_version="promoted-projection-v2",
+        parser_version="promoted-projection-v3-verified-copy",
         forecastable=True,
     )
     db.add(new_fy)
@@ -104,6 +104,40 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     )
     db.add(new_is)
 
+    # 7. Flush and re-read before commit.  Promotion is an accounting copy, not a
+    # best-effort mapping: every common statement field must be identical and the
+    # target must independently pass the semantic validator.  Any failure rolls
+    # back the replacement as one transaction (including restoration of a prior
+    # full-year record deleted above).
+    db.flush()
+    db.refresh(new_bs)
+    db.refresh(new_is)
+    bs_verification = _verify_copy(
+        forecast_year.balance_sheet, new_bs,
+        ForecastBalanceSheet, BalanceSheet,
+    )
+    is_verification = _verify_copy(
+        forecast_year.income_statement, new_is,
+        ForecastIncomeStatement, IncomeStatement,
+    )
+    mismatches = bs_verification["mismatches"] + is_verification["mismatches"]
+    if mismatches:
+        db.rollback()
+        raise ValueError(
+            "Promotion aborted: field-by-field verification failed for "
+            + ", ".join(mismatches[:10])
+        )
+
+    target_validation = check_quadratura(
+        _statement_values(new_bs, "sp"), _statement_values(new_is, "ce")
+    )
+    if not target_validation.semantic_valid:
+        db.rollback()
+        raise ValueError(
+            "Promotion aborted: copied target failed semantic validation: "
+            + "; ".join(target_validation.warnings)
+        )
+
     db.commit()
 
     return {
@@ -112,6 +146,12 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         "year": target_year,
         "company_id": company_id,
         "message": f"Projection {target_year} promoted to full-year financial data",
+        "verification": {
+            "exact_match": True,
+            "balance_sheet_fields": bs_verification["checked_fields"],
+            "income_statement_fields": is_verification["checked_fields"],
+            "semantic_valid": target_validation.semantic_valid,
+        },
     }
 
 
@@ -152,3 +192,18 @@ def _copy_columns(source, source_model, target_model, *, id_field: str, id_value
             kwargs[col_name] = value
 
     return target_model(**kwargs)
+
+
+def _verify_copy(source, target, source_model, target_model):
+    """Compare every common accounting column after the target has been flushed."""
+    source_cols = {column.name for column in source_model.__table__.columns}
+    target_cols = {column.name for column in target_model.__table__.columns}
+    skip = {"id", "created_at", "updated_at", "financial_year_id", "forecast_year_id"}
+    fields = sorted((source_cols & target_cols) - skip)
+    mismatches = []
+    for field in fields:
+        source_value = Decimal(str(getattr(source, field, None) or 0))
+        target_value = Decimal(str(getattr(target, field, None) or 0))
+        if source_value != target_value:
+            mismatches.append(f"{field} ({source_value} != {target_value})")
+    return {"checked_fields": len(fields), "mismatches": mismatches}

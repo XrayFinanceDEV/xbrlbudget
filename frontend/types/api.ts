@@ -51,6 +51,11 @@ export interface BalanceSheet {
   sp04e_strumenti_derivati_attivi: string;
 
   sp05_rimanenze: string;
+  sp05a_materie_prime: string;
+  sp05b_prodotti_in_corso: string;
+  sp05c_lavori_in_corso: string;
+  sp05d_prodotti_finiti: string;
+  sp05e_acconti: string;
   sp06_crediti_breve: string;
   sp07_crediti_lungo: string;
   sp08_attivita_finanziarie: string;
@@ -71,6 +76,10 @@ export interface BalanceSheet {
 
   sp13_utile_perdita: string;
   sp14_fondi_rischi: string;
+  sp14a_fondi_trattamento_quiescenza: string;
+  sp14b_fondi_imposte: string;
+  sp14c_strumenti_derivati_passivi: string;
+  sp14d_altri_fondi: string;
   sp15_tfr: string;
   sp16_debiti_breve: string;
   sp17_debiti_lungo: string;
@@ -379,6 +388,26 @@ export interface IntraYearComparison {
   balance_items: IntraYearComparisonItem[];
 }
 
+export interface FinancingLoanInput {
+  name?: string | null;
+  amount: number;
+  opening_residual: number;
+  duration_years: number;
+  interest_rate: number;
+  grace_years: number;
+  balloon_pct: number;
+}
+
+export interface TemporaryDifferenceInput {
+  name: string;
+  kind: "deductible" | "taxable";
+  maturity: "short" | "long";
+  opening_amount: number;
+  additions: number;
+  reversals: number;
+  tax_rate?: number | null;
+}
+
 export interface BudgetAssumptions {
   id: number;
   scenario_id: number;
@@ -412,6 +441,8 @@ export interface BudgetAssumptions {
   interest_rate_receivables: number;
   interest_rate_payables: number;
   tax_rate: number;
+  tax_advances_paid: number;
+  tax_temporary_differences: TemporaryDifferenceInput[] | null;
   fixed_materials_percentage: number;
   fixed_services_percentage: number;
   depreciation_rate: number;
@@ -419,6 +450,7 @@ export interface BudgetAssumptions {
   financing_amount: number;
   financing_duration_years: number;
   financing_interest_rate: number;
+  financing_loans: FinancingLoanInput[] | null;
   sp01_growth_pct: number | null;
   sp04_growth_pct: number | null;
   sp06e_growth_pct: number | null;
@@ -434,6 +466,7 @@ export interface BudgetAssumptions {
   sp17f_growth_pct: number | null;
   sp17g_growth_pct: number | null;
   sp18_growth_pct: number | null;
+  sp_overrides: Record<string, number> | null;
   ce02_override: number | null;
   ce03_override: number | null;
   ce03a_override: number | null;
@@ -502,6 +535,8 @@ export interface BudgetAssumptionsCreate {
   interest_rate_receivables?: number;
   interest_rate_payables?: number;
   tax_rate?: number;
+  tax_advances_paid?: number;
+  tax_temporary_differences?: TemporaryDifferenceInput[] | null;
   fixed_materials_percentage?: number;
   fixed_services_percentage?: number;
   depreciation_rate?: number;
@@ -509,6 +544,7 @@ export interface BudgetAssumptionsCreate {
   financing_amount?: number;
   financing_duration_years?: number;
   financing_interest_rate?: number;
+  financing_loans?: FinancingLoanInput[] | null;
   sp01_growth_pct?: number | null;
   sp04_growth_pct?: number | null;
   sp06e_growth_pct?: number | null;
@@ -524,6 +560,7 @@ export interface BudgetAssumptionsCreate {
   sp17f_growth_pct?: number | null;
   sp17g_growth_pct?: number | null;
   sp18_growth_pct?: number | null;
+  sp_overrides?: Record<string, number> | null;
   ce02_override?: number | null;
   ce03_override?: number | null;
   ce03a_override?: number | null;
@@ -574,6 +611,11 @@ export interface ForecastBalanceSheet {
   sp04e_strumenti_derivati_attivi: number;
 
   sp05_rimanenze: number;
+  sp05a_materie_prime: number;
+  sp05b_prodotti_in_corso: number;
+  sp05c_lavori_in_corso: number;
+  sp05d_prodotti_finiti: number;
+  sp05e_acconti: number;
   sp06_crediti_breve: number;
   sp07_crediti_lungo: number;
   sp08_attivita_finanziarie: number;
@@ -594,6 +636,10 @@ export interface ForecastBalanceSheet {
 
   sp13_utile_perdita: number;
   sp14_fondi_rischi: number;
+  sp14a_fondi_trattamento_quiescenza: number;
+  sp14b_fondi_imposte: number;
+  sp14c_strumenti_derivati_passivi: number;
+  sp14d_altri_fondi: number;
   sp15_tfr: number;
   sp16_debiti_breve: number;
   sp17_debiti_lungo: number;
@@ -851,6 +897,9 @@ export interface AdjustableFinancialYear {
   original_balance_sheet: Record<string, number> | null;
   original_income_statement: Record<string, number> | null;
   rettifiche_log: RettificaEntry[];
+  validation_status: string;
+  validation_report: Record<string, unknown> | null;
+  forecastable: boolean;
 }
 
 // ===== Scenario Analysis (comprehensive single-call response) =====

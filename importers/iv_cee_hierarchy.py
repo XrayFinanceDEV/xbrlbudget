@@ -373,6 +373,111 @@ def _aggregate_detail_differences(
     return differences
 
 
+# Residual "other/misc" bucket per IV-CEE family: where an unexplained
+# aggregate-minus-detail remainder is booked so the aggregate equals the sum of
+# its detail. This is the honest "composition unknown" convention already used by
+# the frontend (reconcileSubfields) and by the forecast engine's own output
+# reconciliation. It lets sources that publish only legal aggregates (bilancio
+# abbreviato XBRL, TEBE CSV) clear the forecast engine's aggregate==Σdetail gate
+# WITHOUT inventing a false typed breakdown — the aggregate is untouched and the
+# mass is labelled "altri/other", not mis-attributed to a specific counterpart.
+_RESIDUAL_BUCKET: Dict[str, str] = {
+    "sp01_crediti_soci": "sp01b_parte_da_richiamare",
+    "sp02_immob_immateriali": "sp02g_altre_immob_imm",
+    "sp03_immob_materiali": "sp03d_altri_beni",
+    "sp04_immob_finanziarie": "sp04d_altri_titoli",
+    "sp05_rimanenze": "sp05e_acconti",
+    "sp06_crediti_breve": "sp06g_crediti_altri_breve",
+    "sp07_crediti_lungo": "sp07g_crediti_altri_lungo",
+    "sp12_riserve": "sp12e_altre_riserve",
+    "sp14_fondi_rischi": "sp14d_altri_fondi",
+    "sp16_debiti_breve": "sp16g_altri_debiti_breve",
+    "sp17_debiti_lungo": "sp17g_altri_debiti_lungo",
+}
+
+
+def reconcile_source_detail(
+    bs: Dict[str, Decimal],
+    ce: Optional[Dict[str, Decimal]] = None,
+    tol: Decimal = Decimal("0.01"),
+) -> Dict[str, Decimal]:
+    """Book each family's unexplained aggregate-minus-detail remainder into its
+    residual "altri" bucket so ``aggregate == Σdetail``, mutating ``bs``/``ce`` in
+    place.
+
+    Sources that publish only legal aggregates (bilancio abbreviato XBRL, TEBE
+    CSV) leave the typed sub-fields at zero. The forecast engine REFUSES to
+    project such a year ("aggregate/detail mismatch": ``sp04``/``sp14``/… ) because
+    it scales or carries those breakdowns. Plugging the remainder into the
+    family's "other" bucket is the honest fill: the aggregate is unchanged, the
+    balance is untouched, and the mass is labelled generic rather than
+    mis-classified.
+
+    ``ce09`` (ammortamenti) is split between intangible/tangible depreciation in
+    proportion to the intangible (``sp02``) and tangible (``sp03``) asset base, so
+    the engine's NBV-capped roll-forward stays faithful; with no asset base the
+    whole remainder goes to tangible depreciation.
+
+    Returns ``{field: plugged_amount}`` describing what changed (empty when the
+    source is already consistent). Idempotent — a second call plugs nothing.
+    """
+    report: Dict[str, Decimal] = {}
+    for aggregate, bucket in _RESIDUAL_BUCKET.items():
+        if aggregate not in bs:
+            continue
+        details = _DETAIL_GROUPS[aggregate]
+        detail_sum = sum((_D(bs.get(k, 0)) for k in details), Decimal(0))
+        residual = _D(bs[aggregate]) - detail_sum
+        # POSITIVE remainders only: the target case (abbreviato XBRL / TEBE CSV)
+        # publishes the aggregate with NO detail, so residual >= 0. A NEGATIVE
+        # residual means Σdetail already EXCEEDS the aggregate — an over-extraction
+        # / mis-mapping bug the forecast gate must still catch. Booking it here
+        # would create a nonsensical negative "altri" line and silently swallow
+        # that defect, so it is left for the aggregate/detail-mismatch gate.
+        if residual > tol:
+            bs[bucket] = _D(bs.get(bucket, 0)) + residual
+            report[bucket] = residual
+
+    # Personnel cost published as a single aggregate: the salari/oneri/TFR split
+    # is unknown, so the remainder goes to the generic "altri costi personale"
+    # bucket. TFR accrual (ce08a) is deliberately left at 0 — a source that does
+    # not break out personnel cannot assert a TFR charge.
+    if ce is not None and "ce08_costi_personale" in ce:
+        details = _CE_DETAIL_GROUPS["ce08_costi_personale"]
+        detail_sum = sum((_D(ce.get(k, 0)) for k in details), Decimal(0))
+        residual = _D(ce["ce08_costi_personale"]) - detail_sum
+        if residual > tol:  # positive-only, see the sp loop above
+            ce["ce08d_altri_costi_personale"] = (
+                _D(ce.get("ce08d_altri_costi_personale", 0)) + residual
+            )
+            report["ce08d_altri_costi_personale"] = residual
+
+    if ce is not None and "ce09_ammortamenti" in ce:
+        details = _CE_DETAIL_GROUPS["ce09_ammortamenti"]
+        detail_sum = sum((_D(ce.get(k, 0)) for k in details), Decimal(0))
+        residual = _D(ce["ce09_ammortamenti"]) - detail_sum
+        if residual > tol:  # positive-only, see the sp loop above
+            intangible = _D(bs.get("sp02_immob_immateriali", 0))
+            tangible = _D(bs.get("sp03_immob_materiali", 0))
+            base = intangible + tangible
+            if base > 0:
+                to_intangible = (residual * intangible / base).quantize(Decimal("0.01"))
+                to_tangible = residual - to_intangible
+            else:
+                to_intangible = Decimal(0)
+                to_tangible = residual
+            if to_intangible != 0:
+                ce["ce09a_ammort_immateriali"] = (
+                    _D(ce.get("ce09a_ammort_immateriali", 0)) + to_intangible
+                )
+                report["ce09a_ammort_immateriali"] = to_intangible
+            ce["ce09b_ammort_materiali"] = (
+                _D(ce.get("ce09b_ammort_materiali", 0)) + to_tangible
+            )
+            report["ce09b_ammort_materiali"] = to_tangible
+    return report
+
+
 def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = None,
                      tol: Decimal = Decimal("0.01")) -> Quadratura:
     att = sum((_D(bs.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))

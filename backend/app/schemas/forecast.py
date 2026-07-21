@@ -25,6 +25,11 @@ class ForecastBalanceSheetBase(BaseModel):
 
     # Assets - Current Assets
     sp05_rimanenze: Decimal = Field(default=Decimal("0"))
+    sp05a_materie_prime: Decimal = Field(default=Decimal("0"))
+    sp05b_prodotti_in_corso: Decimal = Field(default=Decimal("0"))
+    sp05c_lavori_in_corso: Decimal = Field(default=Decimal("0"))
+    sp05d_prodotti_finiti: Decimal = Field(default=Decimal("0"))
+    sp05e_acconti: Decimal = Field(default=Decimal("0"))
     sp06_crediti_breve: Decimal = Field(default=Decimal("0"))
     sp07_crediti_lungo: Decimal = Field(default=Decimal("0"))
     sp08_attivita_finanziarie: Decimal = Field(default=Decimal("0"))
@@ -49,6 +54,10 @@ class ForecastBalanceSheetBase(BaseModel):
 
     # Liabilities - Provisions and Debts
     sp14_fondi_rischi: Decimal = Field(default=Decimal("0"))
+    sp14a_fondi_trattamento_quiescenza: Decimal = Field(default=Decimal("0"))
+    sp14b_fondi_imposte: Decimal = Field(default=Decimal("0"))
+    sp14c_strumenti_derivati_passivi: Decimal = Field(default=Decimal("0"))
+    sp14d_altri_fondi: Decimal = Field(default=Decimal("0"))
     sp15_tfr: Decimal = Field(default=Decimal("0"))
     sp16_debiti_breve: Decimal = Field(default=Decimal("0"))
     sp17_debiti_lungo: Decimal = Field(default=Decimal("0"))

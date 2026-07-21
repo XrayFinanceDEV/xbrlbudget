@@ -3,7 +3,7 @@ SQLAlchemy ORM Models for Financial Analysis Application
 """
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Boolean, Enum as SQLEnum, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Boolean, JSON, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database.db import Base
 from calculations.ce_result import calculate_ce_result
@@ -612,11 +612,11 @@ class BudgetAssumptions(Base):
     dpo_days = Column(Numeric(10, 2), nullable=True)  # Days Payable Outstanding
 
     # Existing financial debt repayment (NULL = keep constant).
-    # existing_debt_repayment_years repays BANK + BONDS long-term debt (sp17a + sp17c).
+    # existing_debt_repayment_years repays total BANK debt (sp16a + sp17a).
     # altri_finanz_repayment_years repays "debiti v/altri finanziatori" (sp17b) — e.g. an
     # intra-group loan — INDEPENDENTLY of the bank debt, so it can be reduced on its own
     # schedule without being shifted under the banks.
-    existing_debt_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay bank/bonds fin. debt
+    existing_debt_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay total bank debt
     altri_finanz_repayment_years = Column(Numeric(10, 2), nullable=True)  # Years to repay sp17b (altri finanziatori)
 
     # Cash sweep (opt-in, per forecast year): when enabled, cash generated above the
@@ -642,6 +642,8 @@ class BudgetAssumptions(Base):
 
     # Tax and other parameters
     tax_rate = Column(Numeric(10, 6), default=24, nullable=False)  # IRES/IRAP tax rate %
+    tax_advances_paid = Column(Numeric(15, 2), default=0, nullable=False)  # Acconti d'imposta versati nell'anno
+    tax_temporary_differences = Column(JSON, nullable=True)  # Deferred-tax roll-forward lines
     fixed_materials_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of materials that are fixed costs
     fixed_services_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of services that are fixed costs
     depreciation_rate = Column(Numeric(10, 6), default=20, nullable=False)  # Average depreciation rate % (tangible)
@@ -651,6 +653,7 @@ class BudgetAssumptions(Base):
     financing_amount = Column(Numeric(15, 2), default=0, nullable=False)  # New financing amount
     financing_duration_years = Column(Numeric(10, 2), default=0, nullable=False)  # Loan duration in years
     financing_interest_rate = Column(Numeric(10, 6), default=0, nullable=False)  # Loan interest rate %
+    financing_loans = Column(JSON, nullable=True)  # Additional loans for the same forecast year
 
     # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
     sp01_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti verso soci
@@ -671,6 +674,10 @@ class BudgetAssumptions(Base):
     sp17f_growth_pct = Column(Numeric(10, 6), nullable=True)  # Debiti previdenziali (lungo)
     sp17g_growth_pct = Column(Numeric(10, 6), nullable=True)  # Altri debiti (lungo)
     sp18_growth_pct = Column(Numeric(10, 6), nullable=True)  # Ratei e risconti passivi
+
+    # Absolute SP overrides keyed by forecast-balance field name. JSON keeps the
+    # schema additive while the editor is progressively opened to more leaf rows.
+    sp_overrides = Column(JSON, nullable=True)
 
     # CE line item overrides (absolute EUR values, nullable = use base year value)
     ce02_override = Column(Numeric(15, 2), nullable=True)  # Variazioni rimanenze prodotti

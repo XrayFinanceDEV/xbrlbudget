@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
+import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario } from "@/hooks/use-queries";
+import { generateForecast, getBudgetAssumptions, updateBudgetAssumptions } from "@/lib/api";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
 import type {
   BudgetScenario,
   ScenarioAnalysis,
@@ -20,12 +22,15 @@ import {
   ComposedChart,
   Area,
 } from "recharts";
-import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info, Save } from "lucide-react";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import {
   ChartContainer,
   ChartTooltip,
@@ -85,10 +90,44 @@ type YearData = {
   balance_sheet: Record<string, number>;
 };
 
+const SP_EDITABLE_FIELDS = new Set([
+  "sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
+  "sp04a_partecipazioni", "sp04b_crediti_immob_breve", "sp04c_crediti_immob_lungo",
+  "sp04d_altri_titoli", "sp04e_strumenti_derivati_attivi",
+  "sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso",
+  "sp05d_prodotti_finiti", "sp05e_acconti",
+  "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+  "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
+  "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve",
+  "sp06g_crediti_altri_breve",
+  "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+  "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+  "sp07e_crediti_tributari_lungo", "sp07f_imposte_anticipate_lungo",
+  "sp07g_crediti_altri_lungo", "sp08_attivita_finanziarie", "sp10_ratei_risconti_attivi",
+  "sp11_capitale", "sp12a_riserva_sovrapprezzo", "sp12b_riserve_rivalutazione",
+  "sp12c_riserva_legale", "sp12d_riserve_statutarie", "sp12e_altre_riserve",
+  "sp12f_riserva_copertura_flussi", "sp12g_utili_perdite_portati",
+  "sp12h_riserva_neg_azioni_proprie", "sp14a_fondi_trattamento_quiescenza",
+  "sp14b_fondi_imposte", "sp14c_strumenti_derivati_passivi", "sp14d_altri_fondi", "sp15_tfr",
+  "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+  "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+  "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+  "sp16g_altri_debiti_breve", "sp17a_debiti_banche_lungo",
+  "sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo",
+  "sp17d_debiti_fornitori_lungo", "sp17e_debiti_tributari_lungo",
+  "sp17f_debiti_previdenza_lungo", "sp17g_altri_debiti_lungo",
+  "sp18_ratei_risconti_passivi",
+]);
+
+type PendingSpEdits = Record<string, number | null>;
+
 export default function ForecastBalancePage() {
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
+  const [pendingEdits, setPendingEdits] = useState<PendingSpEdits>({});
+  const [saving, setSaving] = useState(false);
+  const invalidateAnalysis = useInvalidateAnalysis();
 
   // Auto-select preferred scenario when scenarios load
   useEffect(() => {
@@ -104,6 +143,41 @@ export default function ForecastBalancePage() {
   );
   const loading = scenariosLoading || analysisLoading;
   const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
+
+  useEffect(() => setPendingEdits({}), [selectedScenario?.id]);
+
+  const handleSaveOverrides = useCallback(async () => {
+    if (!selectedCompanyId || !selectedScenario || Object.keys(pendingEdits).length === 0) return;
+    setSaving(true);
+    try {
+      const assumptions = await getBudgetAssumptions(selectedCompanyId, selectedScenario.id);
+      const editsByYear = new Map<number, Array<[string, number | null]>>();
+      Object.entries(pendingEdits).forEach(([key, value]) => {
+        const [yearRaw, field] = key.split(":");
+        const year = Number.parseInt(yearRaw, 10);
+        editsByYear.set(year, [...(editsByYear.get(year) ?? []), [field, value]]);
+      });
+      await Promise.all(Array.from(editsByYear.entries()).map(async ([year, edits]) => {
+        const current = assumptions.find((item) => item.forecast_year === year);
+        const spOverrides = { ...(current?.sp_overrides ?? {}) };
+        edits.forEach(([field, value]) => {
+          if (value === null) delete spOverrides[field];
+          else spOverrides[field] = value;
+        });
+        await updateBudgetAssumptions(selectedCompanyId, selectedScenario.id, year, {
+          sp_overrides: Object.keys(spOverrides).length > 0 ? spOverrides : null,
+        });
+      }));
+      await generateForecast(selectedCompanyId, selectedScenario.id);
+      setPendingEdits({});
+      invalidateAnalysis(selectedCompanyId, selectedScenario.id);
+      toast.success("Stato patrimoniale aggiornato");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "aggiornamento dello stato patrimoniale fallito"));
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedCompanyId, selectedScenario, pendingEdits, invalidateAnalysis]);
 
   if (!selectedCompanyId) {
     return (
@@ -177,10 +251,22 @@ export default function ForecastBalancePage() {
         <>
           {/* Balance Sheet Table */}
           <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="text-xl">
-                Stato Patrimoniale: Confronto Storico vs Previsionale
-              </CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-xl">
+                  Stato Patrimoniale: Confronto Storico vs Previsionale
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Le celle di dettaglio previsionali sono modificabili; i totali e la cassa vengono ricalcolati.
+                </p>
+              </div>
+              <Button
+                onClick={handleSaveOverrides}
+                disabled={saving || Object.keys(pendingEdits).length === 0}
+              >
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Salva modifiche
+              </Button>
             </CardHeader>
             <CardContent>
               {/* Balance Check Warning */}
@@ -193,6 +279,10 @@ export default function ForecastBalancePage() {
                 <BalanceSheetTable
                   historicalYears={historicalYears}
                   forecastYears={forecastYears}
+                  pendingEdits={pendingEdits}
+                  onEdit={(year, field, value) => {
+                    setPendingEdits((current) => ({ ...current, [`${year}:${field}`]: value }));
+                  }}
                 />
               </div>
             </CardContent>
@@ -451,124 +541,24 @@ function BalanceCheckWarning({
 function BalanceSheetTable({
   historicalYears,
   forecastYears,
+  pendingEdits,
+  onEdit,
 }: {
   historicalYears: YearData[];
   forecastYears: YearData[];
+  pendingEdits: PendingSpEdits;
+  onEdit: (year: number, field: string, value: number | null) => void;
 }) {
   const getVal = (yearData: YearData, field: string): number => {
     return yearData.balance_sheet[field] || 0;
   };
 
-  const rows: Array<{
-    label: string;
-    field?: string;
-    computed?: (yd: YearData) => number;
-    isTotal?: boolean;
-    isSubtotal?: boolean;
-    indent?: boolean;
-  }> = [
-    // ATTIVO (ASSETS)
-    { label: "ATTIVO", isTotal: true },
-    { label: "A) Crediti verso soci per versamenti ancora dovuti", field: "sp01_crediti_soci" },
-    { label: "B) IMMOBILIZZAZIONI", isSubtotal: true },
-    { label: "I - Immobilizzazioni immateriali", field: "sp02_immob_immateriali", indent: true },
-    { label: "II - Immobilizzazioni materiali", field: "sp03_immob_materiali", indent: true },
-    { label: "III - Immobilizzazioni finanziarie", field: "sp04_immob_finanziarie", indent: true },
-    { label: "1) Partecipazioni", field: "sp04a_partecipazioni", indent: true },
-    { label: "2) Crediti" },
-    { label: "Esigibili entro l'esercizio successivo", field: "sp04b_crediti_immob_breve", indent: true },
-    { label: "Esigibili oltre l'esercizio successivo", field: "sp04c_crediti_immob_lungo", indent: true },
-    {
-      label: "Totale crediti",
-      computed: (yd) => (yd.balance_sheet.sp04b_crediti_immob_breve || 0) + (yd.balance_sheet.sp04c_crediti_immob_lungo || 0),
-      indent: true,
-    },
-    { label: "3) Altri titoli", field: "sp04d_altri_titoli", indent: true },
-    { label: "4) Strumenti finanziari derivati attivi", field: "sp04e_strumenti_derivati_attivi", indent: true },
-    { label: "Totale immobilizzazioni finanziarie", field: "sp04_immob_finanziarie", indent: true },
-    { label: "Totale Immobilizzazioni", field: "fixed_assets", isSubtotal: true },
-    { label: "C) ATTIVO CIRCOLANTE", isSubtotal: true },
-    { label: "I - Rimanenze", field: "sp05_rimanenze", indent: true },
-    { label: "II - Crediti (entro esercizio successivo)", field: "sp06_crediti_breve", indent: true },
-    { label: "  1) Verso clienti", field: "sp06a_crediti_clienti_breve", indent: true },
-    { label: "  2) Verso imprese controllate", field: "sp06b_crediti_controllate_breve", indent: true },
-    { label: "  3) Verso imprese collegate", field: "sp06c_crediti_collegate_breve", indent: true },
-    { label: "  4) Verso controllanti", field: "sp06d_crediti_controllanti_breve", indent: true },
-    { label: "  5-bis) Crediti tributari", field: "sp06e_crediti_tributari_breve", indent: true },
-    { label: "  5-ter) Imposte anticipate", field: "sp06f_imposte_anticipate_breve", indent: true },
-    { label: "  5-quater) Verso altri", field: "sp06g_crediti_altri_breve", indent: true },
-    { label: "II - Crediti (oltre esercizio successivo)", field: "sp07_crediti_lungo", indent: true },
-    { label: "  1) Verso clienti", field: "sp07a_crediti_clienti_lungo", indent: true },
-    { label: "  2) Verso imprese controllate", field: "sp07b_crediti_controllate_lungo", indent: true },
-    { label: "  3) Verso imprese collegate", field: "sp07c_crediti_collegate_lungo", indent: true },
-    { label: "  4) Verso controllanti", field: "sp07d_crediti_controllanti_lungo", indent: true },
-    { label: "  5-bis) Crediti tributari", field: "sp07e_crediti_tributari_lungo", indent: true },
-    { label: "  5-ter) Imposte anticipate", field: "sp07f_imposte_anticipate_lungo", indent: true },
-    { label: "  5-quater) Verso altri", field: "sp07g_crediti_altri_lungo", indent: true },
-    { label: "III - Attività finanziarie che non costituiscono immobilizzazioni", field: "sp08_attivita_finanziarie", indent: true },
-    { label: "IV - Disponibilità liquide", field: "sp09_disponibilita_liquide", indent: true },
-    { label: "Totale Attivo Circolante", field: "current_assets", isSubtotal: true },
-    { label: "D) Ratei e risconti attivi", field: "sp10_ratei_risconti_attivi" },
-    { label: "TOTALE ATTIVO", field: "total_assets", isTotal: true },
-    // PASSIVO (LIABILITIES & EQUITY)
-    { label: "PASSIVO E PATRIMONIO NETTO", isTotal: true },
-    { label: "A) PATRIMONIO NETTO", isSubtotal: true },
-    { label: "I - Capitale", field: "sp11_capitale", indent: true },
-    { label: "II - Riserva da soprapprezzo delle azioni", field: "sp12a_riserva_sovrapprezzo", indent: true },
-    { label: "III - Riserve di rivalutazione", field: "sp12b_riserve_rivalutazione", indent: true },
-    { label: "IV - Riserva legale", field: "sp12c_riserva_legale", indent: true },
-    { label: "V - Riserve statutarie", field: "sp12d_riserve_statutarie", indent: true },
-    { label: "VI - Altre riserve", field: "sp12e_altre_riserve", indent: true },
-    { label: "VII - Riserva per operazioni di copertura dei flussi finanziari attesi", field: "sp12f_riserva_copertura_flussi", indent: true },
-    { label: "VIII - Utili (perdite) portati a nuovo", field: "sp12g_utili_perdite_portati", indent: true },
-    { label: "IX - Utile (perdita) dell'esercizio", field: "sp13_utile_perdita", indent: true },
-    { label: "X - Riserva negativa per azioni proprie in portafoglio", field: "sp12h_riserva_neg_azioni_proprie", indent: true },
-    { label: "Totale Patrimonio Netto", field: "total_equity", isSubtotal: true },
-    { label: "B) Fondi per rischi e oneri", field: "sp14_fondi_rischi" },
-    { label: "C) Trattamento di fine rapporto di lavoro subordinato", field: "sp15_tfr" },
-    { label: "D) DEBITI", isSubtotal: true },
-    // Grouped by creditor type (OIC art. 2424) with entro/oltre sub-rows per group
-    { label: "1) Debiti verso banche", computed: (yd) => (yd.balance_sheet.sp16a_debiti_banche_breve || 0) + (yd.balance_sheet.sp17a_debiti_banche_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16a_debiti_banche_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17a_debiti_banche_lungo", indent: true },
-    { label: "2) Debiti verso altri finanziatori", computed: (yd) => (yd.balance_sheet.sp16b_debiti_altri_finanz_breve || 0) + (yd.balance_sheet.sp17b_debiti_altri_finanz_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16b_debiti_altri_finanz_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17b_debiti_altri_finanz_lungo", indent: true },
-    { label: "3) Debiti obbligazionari", computed: (yd) => (yd.balance_sheet.sp16c_debiti_obbligazioni_breve || 0) + (yd.balance_sheet.sp17c_debiti_obbligazioni_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16c_debiti_obbligazioni_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17c_debiti_obbligazioni_lungo", indent: true },
-    { label: "7) Debiti verso fornitori", computed: (yd) => (yd.balance_sheet.sp16d_debiti_fornitori_breve || 0) + (yd.balance_sheet.sp17d_debiti_fornitori_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16d_debiti_fornitori_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17d_debiti_fornitori_lungo", indent: true },
-    { label: "12) Debiti tributari", computed: (yd) => (yd.balance_sheet.sp16e_debiti_tributari_breve || 0) + (yd.balance_sheet.sp17e_debiti_tributari_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16e_debiti_tributari_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17e_debiti_tributari_lungo", indent: true },
-    { label: "13) Debiti previdenziali", computed: (yd) => (yd.balance_sheet.sp16f_debiti_previdenza_breve || 0) + (yd.balance_sheet.sp17f_debiti_previdenza_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16f_debiti_previdenza_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17f_debiti_previdenza_lungo", indent: true },
-    { label: "14) Altri debiti", computed: (yd) => (yd.balance_sheet.sp16g_altri_debiti_breve || 0) + (yd.balance_sheet.sp17g_altri_debiti_lungo || 0), indent: true },
-    { label: "  entro 12 mesi", field: "sp16g_altri_debiti_breve", indent: true },
-    { label: "  oltre 12 mesi", field: "sp17g_altri_debiti_lungo", indent: true },
-    { label: "Totale Debiti", field: "total_debt", isSubtotal: true },
-    { label: "E) Ratei e risconti passivi", field: "sp18_ratei_risconti_passivi" },
-    {
-      label: "TOTALE PASSIVO E PATRIMONIO NETTO",
-      computed: (yd) => {
-        const bs = yd.balance_sheet;
-        return (bs.total_equity || 0) + (bs.total_debt || 0) + (bs.sp14_fondi_rischi || 0) + (bs.sp15_tfr || 0) + (bs.sp18_ratei_risconti_passivi || 0);
-      },
-      isTotal: true,
-    },
-    {
-      label: "DIFFERENZA (Attivo - Passivo)",
-      computed: (yd) => {
-        const bs = yd.balance_sheet;
-        const totalPassivo = (bs.total_equity || 0) + (bs.total_debt || 0) + (bs.sp14_fondi_rischi || 0) + (bs.sp15_tfr || 0) + (bs.sp18_ratei_risconti_passivi || 0);
-        return (bs.total_assets || 0) - totalPassivo;
-      },
-      isSubtotal: true,
-    },
-  ];
+  const rows = BALANCE_STATEMENT_ROWS.map((row) => ({
+    ...row,
+    computed: row.computed
+      ? (yearData: YearData) => row.computed!(yearData.balance_sheet)
+      : undefined,
+  }));
 
   return (
     <table className="min-w-full divide-y divide-border border border-border">
@@ -641,7 +631,14 @@ function BalanceSheetTable({
                   {value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}
                 </td>
               ))}
-              {fcValues.map((value, i) => (
+              {fcValues.map((value, i) => {
+                const year = forecastYears[i].year;
+                const editKey = row.field ? `${year}:${row.field}` : "";
+                const isEditable = Boolean(row.field && SP_EDITABLE_FIELDS.has(row.field));
+                const displayedValue = Object.prototype.hasOwnProperty.call(pendingEdits, editKey)
+                  ? pendingEdits[editKey]
+                  : value;
+                return (
                 <td
                   key={`forecast-${i}`}
                   className={cn(
@@ -650,9 +647,22 @@ function BalanceSheetTable({
                     (row.isTotal || row.isSubtotal) && "font-semibold"
                   )}
                 >
-                  {value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}
+                  {isEditable ? (
+                    <Input
+                      type="number"
+                      step="100"
+                      className="ml-auto h-8 w-32 text-right"
+                      value={displayedValue ?? ""}
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        onEdit(year, row.field!, raw === "" ? null : Number(raw));
+                      }}
+                      aria-label={`${row.label.trim()} ${year}`}
+                    />
+                  ) : value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}
                 </td>
-              ))}
+                );
+              })}
             </tr>
           );
         })}

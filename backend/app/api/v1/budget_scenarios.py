@@ -3,6 +3,7 @@ Budget Scenarios and Assumptions API endpoints
 """
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 import logging
@@ -25,6 +26,17 @@ from database import models
 from calculations.forecast_engine import ForecastEngine
 
 router = APIRouter()
+
+_ASSUMPTION_JSON_FIELDS = {
+    "financing_loans", "tax_temporary_differences", "sp_overrides",
+}
+
+
+def _json_safe_assumption_fields(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert nested Decimal-bearing assumption structures for JSON columns."""
+    for field in _ASSUMPTION_JSON_FIELDS.intersection(values):
+        values[field] = jsonable_encoder(values[field])
+    return values
 
 
 # ===== Validation Helper Functions =====
@@ -569,7 +581,9 @@ def create_budget_assumptions(
         )
 
     # Create assumptions
-    db_assumptions = models.BudgetAssumptions(**assumptions_create.model_dump())
+    db_assumptions = models.BudgetAssumptions(**_json_safe_assumption_fields(
+        assumptions_create.model_dump()
+    ))
     db.add(db_assumptions)
     db.commit()
     db.refresh(db_assumptions)
@@ -610,7 +624,9 @@ def update_budget_assumptions(
         )
 
     # Update only provided fields
-    update_data = assumptions_update.model_dump(exclude_unset=True)
+    update_data = _json_safe_assumption_fields(
+        assumptions_update.model_dump(exclude_unset=True)
+    )
     for field, value in update_data.items():
         setattr(db_assumptions, field, value)
 

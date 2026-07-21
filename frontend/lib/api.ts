@@ -648,6 +648,12 @@ export interface PromoteResult {
   year: number;
   company_id: number;
   message: string;
+  verification: {
+    exact_match: boolean;
+    balance_sheet_fields: number;
+    income_statement_fields: number;
+    semantic_valid: boolean;
+  };
 }
 
 export const promoteProjection = async (

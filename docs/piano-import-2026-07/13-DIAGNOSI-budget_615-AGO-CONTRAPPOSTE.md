@@ -145,8 +145,26 @@ caso di testo corrotto preesistente che ora non viene più nascosto.
 7. **[DA FARE, opzionale]** Rilevatore garbled: firma `_`-interlacciato (difesa in profondità;
    da solo non fa importare il file — il recupero mirato lo importa già).
 
-**Esito**: `import_pdf_balance_sheet` (deterministico) supera `validate_balance`; attivo=passivo=
-2.096.501,91 (netto); sp13=133.705,26; CE net (chiavi full) = 133.705,26 = sp13 (identità CE↔SP ok).
+### FATTO — 2026-07-20 (correzione semantica post-quadratura)
+
+La prima correzione geometrica faceva quadrare il file a 2.096.501,91, ma il
+pareggio nascondeva ancora una classificazione simmetrica sbagliata:
+
+- `F.do indennità fine mandato amministratori` (20.000,00) conteneva la sottostringa
+  `AMM` dentro `AMMINISTRATORI` e veniva sottratto da B.II anziché restare in B.1;
+- `Altri beni materiali ammortizzabili` (1.352,96) finiva nei crediti;
+- `Rim. mat. prime` (133.204,54) non veniva riconosciuta come rimanenza;
+- i crediti `(EE/OE-immob.)` (31.065,62) non venivano riconosciuti come B.III.
+
+Le regole ora lavorano sulle descrizioni (non sui codici), usano marker di
+ammortamento non ambigui e persistono anche le sottovoci IV-CEE lossless. Il fondo
+svalutazione clienti riduce la relativa sottovoce crediti, non un residuo generico.
+
+**Esito corrente**: `import_pdf_balance_sheet` supera la validazione semantica;
+attivo=passivo=**2.116.501,91** (netto corretto), B.I=6.114,33,
+B.II=1.586.087,17, B.III=31.065,62, rimanenze=133.204,54,
+fondi B.1=20.000,00 e sp13=CE net=133.705,26. Stato `verified`,
+`forecastable=true`, nessun warning di gerarchia.
 
 ## 8. Nota sul corpus / test
 

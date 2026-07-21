@@ -16,9 +16,11 @@ from database.models import (
     ForecastBalanceSheet, ForecastIncomeStatement
 )
 from calculations.projection_common import (
-    financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota,
+    base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
+    tfr_accrual_quota, tax_closing_position, deferred_tax_position,
+    new_financing_schedule,
 )
+from calculations.ce_result import calculate_ce_result
 
 
 # P&L line item codes for comparison
@@ -64,6 +66,11 @@ SP_FIELDS = [
     ('sp03_immob_materiali', 'Immobilizzazioni materiali'),
     ('sp04_immob_finanziarie', 'Immobilizzazioni finanziarie'),
     ('sp05_rimanenze', 'Rimanenze'),
+    ('sp05a_materie_prime', 'Materie prime'),
+    ('sp05b_prodotti_in_corso', 'Prodotti in corso'),
+    ('sp05c_lavori_in_corso', 'Lavori in corso'),
+    ('sp05d_prodotti_finiti', 'Prodotti finiti'),
+    ('sp05e_acconti', 'Acconti'),
     ('sp06_crediti_breve', 'Crediti esigibili entro 12 mesi'),
     ('sp06a_crediti_clienti_breve', 'Verso clienti'),
     ('sp06b_crediti_controllate_breve', 'Verso imprese controllate'),
@@ -87,6 +94,10 @@ SP_FIELDS = [
     ('sp12_riserve', 'Riserve'),
     ('sp13_utile_perdita', 'Utile/Perdita di esercizio'),
     ('sp14_fondi_rischi', 'Fondi per rischi e oneri'),
+    ('sp14a_fondi_trattamento_quiescenza', 'Fondo quiescenza'),
+    ('sp14b_fondi_imposte', 'Fondo imposte, anche differite'),
+    ('sp14c_strumenti_derivati_passivi', 'Derivati passivi'),
+    ('sp14d_altri_fondi', 'Altri fondi'),
     ('sp15_tfr', 'TFR'),
     ('sp16_debiti_breve', 'Debiti esigibili entro 12 mesi'),
     ('sp16a_debiti_banche_breve', 'Debiti verso banche'),
@@ -106,6 +117,63 @@ SP_FIELDS = [
     ('sp17g_altri_debiti_lungo', 'Altri debiti'),
     ('sp18_ratei_risconti_passivi', 'Ratei e risconti passivi'),
 ]
+
+
+# Absolute P&L values entered in the infrannuale workflow must survive the
+# round-trip through BudgetAssumptions.  Keep the mapping in the engine (and not
+# only in the UI) so imports, API clients and the 12-month shortcut all follow
+# the same rule.
+CE_OVERRIDE_FIELDS = {
+    'ce01_ricavi_vendite': 'ce01_override',
+    'ce02_variazioni_rimanenze': 'ce02_override',
+    'ce03_lavori_interni': 'ce03_override',
+    'ce03a_incrementi_immobilizzazioni': 'ce03a_override',
+    'ce04_altri_ricavi': 'ce04_override',
+    'ce05_materie_prime': 'ce05_override',
+    'ce06_servizi': 'ce06_override',
+    'ce07_godimento_beni': 'ce07_override',
+    'ce08_costi_personale': 'ce08_override',
+    'ce08a_tfr_accrual': 'ce08a_override',
+    'ce08b_salari_stipendi': 'ce08b_override',
+    'ce08c_oneri_sociali': 'ce08c_override',
+    'ce08d_altri_costi_personale': 'ce08d_override',
+    'ce09_ammortamenti': 'ce09_override',
+    'ce09a_ammort_immateriali': 'ce09a_override',
+    'ce09b_ammort_materiali': 'ce09b_override',
+    'ce09c_svalutazioni': 'ce09c_override',
+    'ce09d_svalutazione_crediti': 'ce09d_override',
+    'ce10_var_rimanenze_mat_prime': 'ce10_override',
+    'ce11_accantonamenti': 'ce11_override',
+    'ce11b_altri_accantonamenti': 'ce11b_override',
+    'ce12_oneri_diversi': 'ce12_override',
+    'ce13_proventi_partecipazioni': 'ce13_override',
+    'ce14_altri_proventi_finanziari': 'ce14_override',
+    'ce15_oneri_finanziari': 'ce15_override',
+    'ce16_utili_perdite_cambi': 'ce16_override',
+    'ce17_rettifiche_attivita_fin': 'ce17_override',
+    'ce17a_rivalutazioni': 'ce17a_override',
+    'ce17b_svalutazioni': 'ce17b_override',
+    'ce18_proventi_straordinari': 'ce18_override',
+    'ce19_oneri_straordinari': 'ce19_override',
+    'ce20_imposte': 'ce20_override',
+}
+
+
+def apply_ce_overrides(result: Dict, assumption: BudgetAssumptions) -> Dict:
+    """Apply every explicit CE override and keep B.17 internally reconciled."""
+    for result_field, assumption_field in CE_OVERRIDE_FIELDS.items():
+        value = getattr(assumption, assumption_field, None)
+        if value is not None:
+            result[result_field] = Decimal(str(value))
+
+    if getattr(assumption, 'ce17_override', None) is None and (
+        getattr(assumption, 'ce17a_override', None) is not None
+        or getattr(assumption, 'ce17b_override', None) is not None
+    ):
+        result['ce17_rettifiche_attivita_fin'] = (
+            result['ce17a_rivalutazioni'] - result['ce17b_svalutazioni']
+        )
+    return result
 
 
 def _safe_divide(numerator, denominator, default=Decimal('0')):
@@ -131,6 +199,54 @@ def _get_total_investments(assumption) -> Decimal:
         return Decimal(str(intangible)) + Decimal(str(tangible))
     inv = assumption.investments if assumption.investments else Decimal('0')
     return Decimal(str(inv))
+
+
+def _financing_contracts(assumption, include_opening=True):
+    """Normalize legacy and detailed financing inputs for the shared kernel."""
+    year = int(getattr(assumption, 'forecast_year', 0) or 0)
+    loans = []
+    legacy_amount = Decimal(str(getattr(assumption, 'financing_amount', None) or 0))
+    legacy_duration = Decimal(str(getattr(assumption, 'financing_duration_years', None) or 0))
+    if legacy_amount > 0 and legacy_duration > 0:
+        loans.append({
+            'year': year,
+            'amount': legacy_amount,
+            'duration': legacy_duration,
+            'rate': Decimal(str(getattr(assumption, 'financing_interest_rate', None) or 0)) / Decimal('100'),
+        })
+    for loan in (getattr(assumption, 'financing_loans', None) or []):
+        amount = Decimal(str(loan.get('amount') or 0))
+        opening = Decimal(str(loan.get('opening_residual') or 0)) if include_opening else Decimal('0')
+        duration = Decimal(str(loan.get('duration_years') or 0))
+        if (amount > 0 or opening > 0) and duration > 0:
+            loans.append({
+                'year': year,
+                'amount': amount,
+                'opening_residual': opening,
+                'duration': duration,
+                'rate': Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100'),
+                'grace_years': Decimal(str(loan.get('grace_years') or 0)),
+                'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
+            })
+    return loans
+
+
+def _tax_components(projected_inc, assumption):
+    """Separate current and deferred tax for CE and tax-settlement logic."""
+    zero = Decimal('0')
+    deferred = deferred_tax_position(
+        getattr(assumption, 'tax_temporary_differences', None),
+        assumption.tax_rate,
+    )
+    if getattr(assumption, 'ce20_override', None) is not None:
+        total = Decimal(str(assumption.ce20_override))
+        return max(zero, total - deferred['deferred_expense']), deferred, total
+    current = max(
+        zero,
+        calculate_ce_result(projected_inc).profit_before_tax
+        * Decimal(str(assumption.tax_rate)) / Decimal('100'),
+    )
+    return current, deferred, max(zero, current + deferred['deferred_expense'])
 
 
 def _get_split_investments(assumption):
@@ -245,8 +361,11 @@ class IntraYearEngine:
 
         breakdowns_used_by_engine = {
             "sp04_immob_finanziarie",
+            "sp05_rimanenze",
             "sp06_crediti_breve",
+            "sp07_crediti_lungo",
             "sp12_riserve",
+            "sp14_fondi_rischi",
             "sp16_debiti_breve",
             "sp17_debiti_lungo",
             "ce09_ammortamenti",
@@ -376,6 +495,12 @@ class IntraYearEngine:
             assumption=assumption,
             period_months=period_months
         )
+        # Persisted forecast rows are Numeric(15,2).  Normalize the CE before it
+        # drives SP13 so the two statements use the exact same cent values.
+        from calculations.forecast_engine import ForecastEngine
+        projected_inc = ForecastEngine._normalize_income_statement_cents(
+            projected_inc
+        )
 
         # Project balance sheet
         projected_bs = self._project_balance_sheet(
@@ -387,6 +512,18 @@ class IntraYearEngine:
             assumption=assumption,
             period_months=period_months
         )
+        # Use the same absolute-SP override semantics as the multi-year engine.
+        # This is especially important for a 12M consuntivo: its persisted
+        # balance-sheet values must not be reconstructed differently before the
+        # scenario is promoted into the budget workflow.
+        projected_bs = ForecastEngine._apply_sp_overrides(projected_bs, assumption)
+        if not any(
+            diagnostic.get("severity") == "error"
+            for diagnostic in self._diagnostics
+        ):
+            projected_bs = ForecastEngine._normalize_balance_sheet_cents(
+                projected_bs
+            )
 
         # Store as ForecastYear
         self._save_forecast(scenario_id, projection_year, projected_bs, projected_inc)
@@ -570,6 +707,17 @@ class IntraYearEngine:
         ce13 = _get_field(partial_inc, 'ce13_proventi_partecipazioni') * factor
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else _get_field(partial_inc, 'ce14_altri_proventi_finanziari') * factor
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else _get_field(partial_inc, 'ce15_oneri_finanziari') * factor
+        if assumption.ce15_override is None:
+            contracts = _financing_contracts(assumption, include_opening=True)
+            _, _, financing_interest = new_financing_schedule(
+                contracts,
+                int(getattr(assumption, 'forecast_year', 0) or 0),
+            )
+            has_detailed_opening = any(
+                Decimal(str(loan.get('opening_residual') or 0)) > 0
+                for loan in contracts
+            )
+            ce15 = financing_interest if has_detailed_opening else ce15 + financing_interest
         ce16 = _get_field(partial_inc, 'ce16_utili_perdite_cambi') * factor
         ce17a_override = getattr(assumption, 'ce17a_override', None)
         ce17b_override = getattr(assumption, 'ce17b_override', None)
@@ -627,11 +775,8 @@ class IntraYearEngine:
             'ce19_oneri_straordinari': ce19,
             'ce20_imposte': Decimal('0'),
         }
-        from calculations.ce_result import calculate_ce_result
-        tax_rate = assumption.tax_rate / Decimal('100')
-        result['ce20_imposte'] = max(
-            Decimal('0'), calculate_ce_result(result).profit_before_tax * tax_rate
-        )
+        result = apply_ce_overrides(result, assumption)
+        _, _, result['ce20_imposte'] = _tax_components(result, assumption)
         return result
 
     def _project_income_statement_annualized(
@@ -697,6 +842,17 @@ class IntraYearEngine:
         ce13 = ann('ce13_proventi_partecipazioni')
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else ann('ce14_altri_proventi_finanziari')
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else ann('ce15_oneri_finanziari')
+        if assumption.ce15_override is None:
+            contracts = _financing_contracts(assumption, include_opening=True)
+            _, _, financing_interest = new_financing_schedule(
+                contracts,
+                int(getattr(assumption, 'forecast_year', 0) or 0),
+            )
+            has_detailed_opening = any(
+                Decimal(str(loan.get('opening_residual') or 0)) > 0
+                for loan in contracts
+            )
+            ce15 = financing_interest if has_detailed_opening else ce15 + financing_interest
         ce16 = ann('ce16_utili_perdite_cambi')
         ce17a_override = getattr(assumption, 'ce17a_override', None)
         ce17b_override = getattr(assumption, 'ce17b_override', None)
@@ -754,11 +910,8 @@ class IntraYearEngine:
             'ce19_oneri_straordinari': ce19,
             'ce20_imposte': Decimal('0'),
         }
-        from calculations.ce_result import calculate_ce_result
-        tax_rate = assumption.tax_rate / Decimal('100')
-        result['ce20_imposte'] = max(
-            Decimal('0'), calculate_ce_result(result).profit_before_tax * tax_rate
-        )
+        result = apply_ce_overrides(result, assumption)
+        _, _, result['ce20_imposte'] = _tax_components(result, assumption)
         return result
     def _project_balance_sheet(
         self,
@@ -889,13 +1042,63 @@ class IntraYearEngine:
         # Long-term debt starts from the actual YTD balance; only explicit repayment
         # and financing assumptions may change it.
         sp17 = _get_field(partial_bs, 'sp17_debiti_lungo')
-        sp17 = self._apply_debt_repayment(partial_bs, sp17, assumption)
-
-        # Add new financing if any
-        if (assumption.financing_amount or Decimal('0')) > 0:
-            sp17 = sp17 + assumption.financing_amount
-
         sp18 = _get_field(partial_bs, 'sp18_ratei_risconti_passivi')
+
+        # Break down debts before applying creditor-specific movements. The bank
+        # repayment uses total bank exposure and pays the short bucket first;
+        # bonds and operating debts are left untouched.
+        sp02a, sp02b, sp02c, sp02d, sp02e, sp02f, sp02g = self._distribute_sp02(
+            partial_bs, sp02
+        )
+        sp03a, sp03b, sp03c, sp03d, sp03e = self._distribute_sp03(partial_bs, sp03)
+        sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(ref_bs, sp04)
+        sp05a, sp05b, sp05c, sp05d, sp05e = self._distribute_sp05(ref_bs, sp05)
+        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(ref_bs, sp06)
+        sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = self._distribute_sp07(ref_bs, sp07)
+        sp14a, sp14b, sp14c, sp14d = self._distribute_sp14(partial_bs, sp14)
+        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(ref_bs, sp16)
+        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(ref_bs, sp17)
+        sp06g += max(Decimal('0'), sp06 - sum(
+            (sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g), Decimal('0')
+        ))
+        sp07g += max(Decimal('0'), sp07 - sum(
+            (sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g), Decimal('0')
+        ))
+        sp16g += max(Decimal('0'), sp16 - sum(
+            (sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g), Decimal('0')
+        ))
+        sp17g += max(Decimal('0'), sp17 - sum(
+            (sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g), Decimal('0')
+        ))
+
+        current_tax, deferred, _ = _tax_components(projected_inc, assumption)
+        tax_lines = getattr(assumption, 'tax_temporary_differences', None) or []
+        if tax_lines:
+            sp06f = deferred['short_asset']
+            sp07f = deferred['long_asset']
+            sp14b = deferred['liability']
+            sp14 = sp14a + sp14b + sp14c + sp14d
+        manual_tax_position = (
+            getattr(assumption, 'sp06e_growth_pct', None) is not None
+            or getattr(assumption, 'sp16e_growth_pct', None) is not None
+        )
+        if not manual_tax_position:
+            remaining_current_tax = max(
+                Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
+            )
+            sp06e, sp16e = tax_closing_position(
+                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax,
+                Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0)),
+            )
+        sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
+        sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
+        sp16a, sp17a, sp17b = self._apply_debt_repayment(
+            partial_bs, sp16a, sp17a, sp17b, assumption
+        )
+        sp16 = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g
+        sp17 = sp17a + sp17b + sp17c + sp17d + sp17e + sp17f + sp17g
 
         # CASH PLUG - balance the sheet
         total_assets_no_cash = sp01 + sp02 + sp03 + sp04 + sp05 + sp06 + sp07 + sp08 + sp10
@@ -916,16 +1119,22 @@ class IntraYearEngine:
                 ),
             })
 
-        # Debt detail breakdowns (proportional from reference)
-        sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(ref_bs, sp04)
-        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(ref_bs, sp06)
-        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(ref_bs, sp16)
-        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(ref_bs, sp17)
-
         return {
             'sp01_crediti_soci': sp01,
             'sp02_immob_immateriali': sp02,
+            'sp02a_costi_impianto': sp02a,
+            'sp02b_costi_sviluppo': sp02b,
+            'sp02c_brevetti': sp02c,
+            'sp02d_concessioni': sp02d,
+            'sp02e_avviamento': sp02e,
+            'sp02f_immob_in_corso': sp02f,
+            'sp02g_altre_immob_imm': sp02g,
             'sp03_immob_materiali': sp03,
+            'sp03a_terreni_fabbricati': sp03a,
+            'sp03b_impianti_macchinari': sp03b,
+            'sp03c_attrezzature': sp03c,
+            'sp03d_altri_beni': sp03d,
+            'sp03e_immob_in_corso': sp03e,
             'sp04_immob_finanziarie': sp04,
             'sp04a_partecipazioni': sp04a,
             'sp04b_crediti_immob_breve': sp04b,
@@ -933,6 +1142,11 @@ class IntraYearEngine:
             'sp04d_altri_titoli': sp04d,
             'sp04e_strumenti_derivati_attivi': sp04e,
             'sp05_rimanenze': sp05,
+            'sp05a_materie_prime': sp05a,
+            'sp05b_prodotti_in_corso': sp05b,
+            'sp05c_lavori_in_corso': sp05c,
+            'sp05d_prodotti_finiti': sp05d,
+            'sp05e_acconti': sp05e,
             'sp06_crediti_breve': sp06,
             'sp06a_crediti_clienti_breve': sp06a,
             'sp06b_crediti_controllate_breve': sp06b,
@@ -942,6 +1156,13 @@ class IntraYearEngine:
             'sp06f_imposte_anticipate_breve': sp06f,
             'sp06g_crediti_altri_breve': sp06g,
             'sp07_crediti_lungo': sp07,
+            'sp07a_crediti_clienti_lungo': sp07a,
+            'sp07b_crediti_controllate_lungo': sp07b,
+            'sp07c_crediti_collegate_lungo': sp07c,
+            'sp07d_crediti_controllanti_lungo': sp07d,
+            'sp07e_crediti_tributari_lungo': sp07e,
+            'sp07f_imposte_anticipate_lungo': sp07f,
+            'sp07g_crediti_altri_lungo': sp07g,
             'sp08_attivita_finanziarie': sp08,
             'sp09_disponibilita_liquide': sp09,
             'sp10_ratei_risconti_attivi': sp10,
@@ -957,6 +1178,10 @@ class IntraYearEngine:
             'sp12h_riserva_neg_azioni_proprie': sp12h,
             'sp13_utile_perdita': sp13,
             'sp14_fondi_rischi': sp14,
+            'sp14a_fondi_trattamento_quiescenza': sp14a,
+            'sp14b_fondi_imposte': sp14b,
+            'sp14c_strumenti_derivati_passivi': sp14c,
+            'sp14d_altri_fondi': sp14d,
             'sp15_tfr': sp15,
             'sp16_debiti_breve': sp16,
             'sp17_debiti_lungo': sp17,
@@ -1063,10 +1288,62 @@ class IntraYearEngine:
         sp15 = _get_field(partial_bs, 'sp15_tfr') + remaining_tfr_accrual
         sp16 = _get_field(partial_bs, 'sp16_debiti_breve')
         sp17 = _get_field(partial_bs, 'sp17_debiti_lungo')
-        sp17 = self._apply_debt_repayment(partial_bs, sp17, assumption)
-        if (assumption.financing_amount or Decimal('0')) > 0:
-            sp17 = sp17 + assumption.financing_amount
         sp18 = _get_field(partial_bs, 'sp18_ratei_risconti_passivi')
+
+        # Break down first so repayment and new financing affect only the right
+        # creditor and maturity buckets.
+        sp02a, sp02b, sp02c, sp02d, sp02e, sp02f, sp02g = self._distribute_sp02(
+            partial_bs, sp02
+        )
+        sp03a, sp03b, sp03c, sp03d, sp03e = self._distribute_sp03(partial_bs, sp03)
+        sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(partial_bs, sp04)
+        sp05a, sp05b, sp05c, sp05d, sp05e = self._distribute_sp05(partial_bs, sp05)
+        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(partial_bs, sp06)
+        sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = self._distribute_sp07(partial_bs, sp07)
+        sp14a, sp14b, sp14c, sp14d = self._distribute_sp14(partial_bs, sp14)
+        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(partial_bs, sp16)
+        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(partial_bs, sp17)
+        sp06g += max(Decimal('0'), sp06 - sum(
+            (sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g), Decimal('0')
+        ))
+        sp07g += max(Decimal('0'), sp07 - sum(
+            (sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g), Decimal('0')
+        ))
+        sp16g += max(Decimal('0'), sp16 - sum(
+            (sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g), Decimal('0')
+        ))
+        sp17g += max(Decimal('0'), sp17 - sum(
+            (sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g), Decimal('0')
+        ))
+
+        current_tax, deferred, _ = _tax_components(projected_inc, assumption)
+        tax_lines = getattr(assumption, 'tax_temporary_differences', None) or []
+        if tax_lines:
+            sp06f = deferred['short_asset']
+            sp07f = deferred['long_asset']
+            sp14b = deferred['liability']
+            sp14 = sp14a + sp14b + sp14c + sp14d
+        manual_tax_position = (
+            getattr(assumption, 'sp06e_growth_pct', None) is not None
+            or getattr(assumption, 'sp16e_growth_pct', None) is not None
+        )
+        if not manual_tax_position:
+            remaining_current_tax = max(
+                Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
+            )
+            sp06e, sp16e = tax_closing_position(
+                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax,
+                Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0)),
+            )
+        sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
+        sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
+        sp16a, sp17a, sp17b = self._apply_debt_repayment(
+            partial_bs, sp16a, sp17a, sp17b, assumption
+        )
+        sp16 = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g
+        sp17 = sp17a + sp17b + sp17c + sp17d + sp17e + sp17f + sp17g
 
         # CASH PLUG - balance the sheet
         total_assets_no_cash = sp01 + sp02 + sp03 + sp04 + sp05 + sp06 + sp07 + sp08 + sp10
@@ -1085,16 +1362,22 @@ class IntraYearEngine:
                 ),
             })
 
-        # Sub-item breakdowns proportional to the partial year
-        sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(partial_bs, sp04)
-        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(partial_bs, sp06)
-        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(partial_bs, sp16)
-        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(partial_bs, sp17)
-
         return {
             'sp01_crediti_soci': sp01,
             'sp02_immob_immateriali': sp02,
+            'sp02a_costi_impianto': sp02a,
+            'sp02b_costi_sviluppo': sp02b,
+            'sp02c_brevetti': sp02c,
+            'sp02d_concessioni': sp02d,
+            'sp02e_avviamento': sp02e,
+            'sp02f_immob_in_corso': sp02f,
+            'sp02g_altre_immob_imm': sp02g,
             'sp03_immob_materiali': sp03,
+            'sp03a_terreni_fabbricati': sp03a,
+            'sp03b_impianti_macchinari': sp03b,
+            'sp03c_attrezzature': sp03c,
+            'sp03d_altri_beni': sp03d,
+            'sp03e_immob_in_corso': sp03e,
             'sp04_immob_finanziarie': sp04,
             'sp04a_partecipazioni': sp04a,
             'sp04b_crediti_immob_breve': sp04b,
@@ -1102,6 +1385,11 @@ class IntraYearEngine:
             'sp04d_altri_titoli': sp04d,
             'sp04e_strumenti_derivati_attivi': sp04e,
             'sp05_rimanenze': sp05,
+            'sp05a_materie_prime': sp05a,
+            'sp05b_prodotti_in_corso': sp05b,
+            'sp05c_lavori_in_corso': sp05c,
+            'sp05d_prodotti_finiti': sp05d,
+            'sp05e_acconti': sp05e,
             'sp06_crediti_breve': sp06,
             'sp06a_crediti_clienti_breve': sp06a,
             'sp06b_crediti_controllate_breve': sp06b,
@@ -1111,6 +1399,13 @@ class IntraYearEngine:
             'sp06f_imposte_anticipate_breve': sp06f,
             'sp06g_crediti_altri_breve': sp06g,
             'sp07_crediti_lungo': sp07,
+            'sp07a_crediti_clienti_lungo': sp07a,
+            'sp07b_crediti_controllate_lungo': sp07b,
+            'sp07c_crediti_collegate_lungo': sp07c,
+            'sp07d_crediti_controllanti_lungo': sp07d,
+            'sp07e_crediti_tributari_lungo': sp07e,
+            'sp07f_imposte_anticipate_lungo': sp07f,
+            'sp07g_crediti_altri_lungo': sp07g,
             'sp08_attivita_finanziarie': sp08,
             'sp09_disponibilita_liquide': sp09,
             'sp10_ratei_risconti_attivi': sp10,
@@ -1126,6 +1421,10 @@ class IntraYearEngine:
             'sp12h_riserva_neg_azioni_proprie': sp12h,
             'sp13_utile_perdita': sp13,
             'sp14_fondi_rischi': sp14,
+            'sp14a_fondi_trattamento_quiescenza': sp14a,
+            'sp14b_fondi_imposte': sp14b,
+            'sp14c_strumenti_derivati_passivi': sp14c,
+            'sp14d_altri_fondi': sp14d,
             'sp15_tfr': sp15,
             'sp16_debiti_breve': sp16,
             'sp17_debiti_lungo': sp17,
@@ -1146,35 +1445,114 @@ class IntraYearEngine:
             'sp18_ratei_risconti_passivi': sp18,
         }
 
-    def _apply_debt_repayment(self, base_bs, sp17_long: Decimal, assumption) -> Decimal:
-        """Reduce projected long-term debt by one annual repayment instalment (P2).
-
-        Mirrors the budget engine: a FIXED instalment computed on the base-year
-        financial long-term debt (banks + bonds), so e.g. a 100k loan on a 5-year
-        plan drops to 80k in the projected year (the repayment then surfaces as a
-        financing outflow in the rendiconto finanziario) instead of staying flat.
-        'Altri finanziatori' (sp17b) amortise on their own plan. No-op when the
-        repayment-years assumptions are not set (zero regression on existing files).
-        """
-        # The repayment RULE (fixed instalment on the base-year financial long-term
-        # debt, excluding 'altri finanziatori' and non-financial debts) lives in the
-        # shared kernel so it is identical to the budget engine by construction (P2).
-        # This engine APPLIES it to the aggregate sp17_long; the budget engine
-        # apportions the same instalment across the sp17a/sp17c sub-fields — that
-        # difference is orchestration, the instalment formula is the same.
+    def _apply_debt_repayment(
+        self,
+        base_bs,
+        sp16_bank: Decimal,
+        sp17_bank: Decimal,
+        sp17_altri: Decimal,
+        assumption,
+    ):
+        """Apply bank and other-lender plans to their exact debt buckets."""
         getter = lambda f: _get_field(base_bs, f)
-
-        instalment = financial_repayment_instalment(
-            getter, getattr(assumption, 'existing_debt_repayment_years', None))
-        if instalment > 0:
-            sp17_long = max(Decimal('0'), sp17_long - instalment)
+        contracts = _financing_contracts(assumption, include_opening=True)
+        detailed_opening = sum(
+            (Decimal(str(loan.get('opening_residual') or 0)) for loan in contracts),
+            Decimal('0'),
+        )
+        if detailed_opening > 0:
+            bank_debt = base_bank_debt(getter)
+            if abs(bank_debt - detailed_opening) > Decimal('0.01'):
+                raise ValueError(
+                    "The sum of financing opening residuals must equal source bank "
+                    f"debt ({detailed_opening} != {bank_debt})"
+                )
+        else:
+            instalment = financial_repayment_instalment(
+                getter, getattr(assumption, 'existing_debt_repayment_years', None))
+            if instalment > 0:
+                short_repayment = min(sp16_bank, instalment)
+                sp16_bank = max(Decimal('0'), sp16_bank - short_repayment)
+                sp17_bank = max(
+                    Decimal('0'), sp17_bank - (instalment - short_repayment)
+                )
 
         altri_years = getattr(assumption, 'altri_finanz_repayment_years', None)
         if altri_years is not None and Decimal(str(altri_years)) > 0:
             altri_instalment = altri_finanz_repayment_instalment(getter, altri_years)
-            sp17_long = max(Decimal('0'), sp17_long - altri_instalment)
+            sp17_altri = max(Decimal('0'), sp17_altri - altri_instalment)
 
-        return sp17_long
+        raised, repayment, _ = new_financing_schedule(
+            contracts, int(getattr(assumption, 'forecast_year', 0) or 0)
+        )
+        sp17_bank += raised
+        short_repayment = min(sp16_bank, repayment)
+        sp16_bank = max(Decimal('0'), sp16_bank - short_repayment)
+        sp17_bank = max(
+            Decimal('0'), sp17_bank - (repayment - short_repayment)
+        )
+
+        return sp16_bank, sp17_bank, sp17_altri
+
+    @staticmethod
+    def _distribute_fixed_assets(source_bs, total, fields, fallback_index):
+        """Keep a fixed-asset aggregate and its statutory detail exactly aligned."""
+        zero = Decimal('0')
+        values = [_get_field(source_bs, field) for field in fields]
+        source_total = sum(values, zero)
+        if source_total > 0:
+            ratio = total / source_total
+            return tuple(value * ratio for value in values)
+        allocated = [zero] * len(fields)
+        allocated[fallback_index] = total
+        return tuple(allocated)
+
+    def _distribute_sp02(self, source_bs, total):
+        return self._distribute_fixed_assets(
+            source_bs,
+            total,
+            (
+                'sp02a_costi_impianto', 'sp02b_costi_sviluppo', 'sp02c_brevetti',
+                'sp02d_concessioni', 'sp02e_avviamento', 'sp02f_immob_in_corso',
+                'sp02g_altre_immob_imm',
+            ),
+            6,
+        )
+
+    def _distribute_sp03(self, source_bs, total):
+        return self._distribute_fixed_assets(
+            source_bs,
+            total,
+            (
+                'sp03a_terreni_fabbricati', 'sp03b_impianti_macchinari',
+                'sp03c_attrezzature', 'sp03d_altri_beni', 'sp03e_immob_in_corso',
+            ),
+            3,
+        )
+
+    def _distribute_sp14(self, source_bs, sp14_total):
+        """Distribute risk provisions, preserving the IV-CEE categories."""
+        fields = (
+            'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
+            'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
+        )
+        total = sum((_get_field(source_bs, field) for field in fields), Decimal('0'))
+        if total > 0:
+            ratio = sp14_total / total
+            return tuple(_get_field(source_bs, field) * ratio for field in fields)
+        return Decimal('0'), Decimal('0'), Decimal('0'), sp14_total
+
+    def _distribute_sp05(self, source_bs, sp05_total):
+        """Distribute inventory across the statutory IV-CEE categories."""
+        fields = (
+            'sp05a_materie_prime', 'sp05b_prodotti_in_corso',
+            'sp05c_lavori_in_corso', 'sp05d_prodotti_finiti', 'sp05e_acconti',
+        )
+        total = sum((_get_field(source_bs, field) for field in fields), Decimal('0'))
+        if total > 0:
+            ratio = sp05_total / total
+            return tuple(_get_field(source_bs, field) * ratio for field in fields)
+        return (Decimal('0'),) * 5
 
     def _distribute_sp06(self, ref_bs, sp06_total):
         """Distribute sp06 (current receivables) into sub-categories proportionally
@@ -1193,6 +1571,20 @@ class IntraYearEngine:
         if total > 0:
             r = sp06_total / total
             return tuple(_get_field(ref_bs, f) * r for f in fields)
+        return (Decimal('0'),) * 7
+
+    def _distribute_sp07(self, ref_bs, sp07_total):
+        """Distribute long-term receivables without dropping IV-CEE detail."""
+        fields = (
+            'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+            'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+            'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+            'sp07g_crediti_altri_lungo',
+        )
+        total = sum((_get_field(ref_bs, field) for field in fields), Decimal('0'))
+        if total > 0:
+            ratio = sp07_total / total
+            return tuple(_get_field(ref_bs, field) * ratio for field in fields)
         return (Decimal('0'),) * 7
 
     def _distribute_sp04(self, ref_bs, sp04_total):

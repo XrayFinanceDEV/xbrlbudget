@@ -11,8 +11,8 @@ export function AppHeader() {
   const isInfrannuale = pathname.startsWith("/infrannuale");
 
   const title = isInfrannuale
-    ? "Situazione Contabile Infrannuale"
-    : "Simulatore di Scenari Economici Finanziari";
+    ? "Analisi Infrannuale / Consuntivo"
+    : "Simulatore di Scenari a 3/5 anni";
 
   const subtitle = isInfrannuale
     ? "Proiezione da bilancio parziale a 12 mesi"

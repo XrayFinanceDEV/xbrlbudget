@@ -3,7 +3,7 @@ Pydantic schemas for Budget and Forecast models
 """
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 from decimal import Decimal
 
 
@@ -63,6 +63,36 @@ class BudgetScenario(BudgetScenarioInDB):
 
 
 # BudgetAssumptions Schemas
+class FinancingLoanInput(BaseModel):
+    """Financing contract raised or already outstanding in the parent year."""
+    name: Optional[str] = Field(default=None, max_length=100)
+    amount: Decimal = Field(default=Decimal("0"), ge=0)
+    opening_residual: Decimal = Field(default=Decimal("0"), ge=0)
+    duration_years: int = Field(..., gt=0, le=50)
+    interest_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    grace_years: int = Field(default=0, ge=0, le=49)
+    balloon_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_contract(self):
+        if self.amount == 0 and self.opening_residual == 0:
+            raise ValueError("amount or opening_residual must be greater than zero")
+        if self.grace_years >= self.duration_years:
+            raise ValueError("grace_years must be lower than duration_years")
+        return self
+
+
+class TemporaryDifferenceInput(BaseModel):
+    """Tax-base roll-forward used to calculate deferred/anticipated taxes."""
+    name: str = Field(..., min_length=1, max_length=100)
+    kind: str = Field(default="deductible", pattern="^(deductible|taxable)$")
+    maturity: str = Field(default="short", pattern="^(short|long)$")
+    opening_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    additions: Decimal = Field(default=Decimal("0"), ge=0)
+    reversals: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+
+
 class BudgetAssumptionsBase(BaseModel):
     """Base BudgetAssumptions schema"""
     scenario_id: int
@@ -97,7 +127,7 @@ class BudgetAssumptionsBase(BaseModel):
     dpo_days: Optional[Decimal] = None
 
     # Existing financial debt repayment (None = keep constant)
-    existing_debt_repayment_years: Optional[Decimal] = None  # repays bank/bonds (sp17a/sp17c)
+    existing_debt_repayment_years: Optional[Decimal] = None  # repays total bank debt (sp16a/sp17a)
     altri_finanz_repayment_years: Optional[Decimal] = None   # repays altri finanziatori (sp17b)
 
     # Cash sweep (opt-in): excess cash above the floor pays down bank debt
@@ -116,6 +146,8 @@ class BudgetAssumptionsBase(BaseModel):
 
     # Tax and other parameters
     tax_rate: Decimal = Field(default=Decimal("24"))
+    tax_advances_paid: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_temporary_differences: Optional[List[TemporaryDifferenceInput]] = None
     fixed_materials_percentage: Decimal = Field(default=Decimal("40"))
     fixed_services_percentage: Decimal = Field(default=Decimal("40"))
     depreciation_rate: Decimal = Field(default=Decimal("20"))
@@ -125,6 +157,7 @@ class BudgetAssumptionsBase(BaseModel):
     financing_amount: Decimal = Field(default=Decimal("0"))
     financing_duration_years: Decimal = Field(default=Decimal("0"))
     financing_interest_rate: Decimal = Field(default=Decimal("0"))
+    financing_loans: Optional[List[FinancingLoanInput]] = None
 
     # SP line item growth % overrides (None = 0% / carry forward unchanged)
     sp01_growth_pct: Optional[Decimal] = None
@@ -142,6 +175,7 @@ class BudgetAssumptionsBase(BaseModel):
     sp17f_growth_pct: Optional[Decimal] = None
     sp17g_growth_pct: Optional[Decimal] = None
     sp18_growth_pct: Optional[Decimal] = None
+    sp_overrides: Optional[Dict[str, Decimal]] = None
 
     # CE line item overrides (absolute EUR values, None = use base year value)
     ce02_override: Optional[Decimal] = None
@@ -217,6 +251,8 @@ class BudgetAssumptionsUpdate(BaseModel):
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None
+    tax_advances_paid: Optional[Decimal] = Field(None, ge=0)
+    tax_temporary_differences: Optional[List[TemporaryDifferenceInput]] = None
     fixed_materials_percentage: Optional[Decimal] = None
     fixed_services_percentage: Optional[Decimal] = None
     depreciation_rate: Optional[Decimal] = None
@@ -224,6 +260,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     financing_amount: Optional[Decimal] = None
     financing_duration_years: Optional[Decimal] = None
     financing_interest_rate: Optional[Decimal] = None
+    financing_loans: Optional[List[FinancingLoanInput]] = None
 
     # SP line item growth % overrides
     sp01_growth_pct: Optional[Decimal] = None
@@ -241,6 +278,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     sp17f_growth_pct: Optional[Decimal] = None
     sp17g_growth_pct: Optional[Decimal] = None
     sp18_growth_pct: Optional[Decimal] = None
+    sp_overrides: Optional[Dict[str, Decimal]] = None
 
     # CE line item overrides
     ce02_override: Optional[Decimal] = None

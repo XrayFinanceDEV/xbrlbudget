@@ -27,6 +27,8 @@ import type {
   BudgetAssumptionsCreate,
   IncomeStatement,
   BalanceSheet,
+  FinancingLoanInput,
+  TemporaryDifferenceInput,
 } from "@/types/api";
 import { toast } from "sonner";
 import {
@@ -79,6 +81,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { AssumptionsGrid } from "@/components/budget/AssumptionsGrid";
+import { HistoricalBalanceDetailEditor } from "@/components/budget/HistoricalBalanceDetailEditor";
 import {
   ADVANCED_GROUPS,
   ESSENTIAL_ROWS,
@@ -211,7 +214,7 @@ export default function BudgetPage() {
         description={
           startupMode
             ? "Definisci la crescita attesa e genera la proiezione a 3-5 anni"
-            : "Crea scenari di budget e previsionali finanziari a 3 anni"
+            : "Crea scenari di budget e previsionali finanziari a 3/5 anni"
         }
         icon={startupMode ? <Rocket className="h-6 w-6" /> : <FileSpreadsheet className="h-6 w-6" />}
       />
@@ -351,6 +354,7 @@ function buildStartupAssumption(
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,
     tax_rate: STARTUP_TAX_RATE_PCT,
+    tax_advances_paid: 0,
     fixed_materials_percentage: 0,
     fixed_services_percentage: 0,
     depreciation_rate: 20,
@@ -805,7 +809,10 @@ function ScenarioForm({
   // Math.max(...years) unconditionally misaligned the horizon when a newer year was
   // imported/promoted after the scenario was created, dropping assumption rows on save.
   const baseYear = scenario?.base_year ?? Math.max(...years);
-  const forecastYears = Array.from({ length: numYears }, (_, i) => baseYear + i + 1);
+  const forecastYears = useMemo(
+    () => Array.from({ length: numYears }, (_, i) => baseYear + i + 1),
+    [numYears, baseYear]
+  );
 
   // Load historical data for display
   useEffect(() => {
@@ -871,6 +878,8 @@ function ScenarioForm({
             receivables_long_growth_pct: a.receivables_long_growth_pct,
             payables_short_growth_pct: a.payables_short_growth_pct,
             tax_rate: a.tax_rate,
+            tax_advances_paid: a.tax_advances_paid ?? 0,
+            tax_temporary_differences: a.tax_temporary_differences ?? null,
             fixed_materials_percentage: a.fixed_materials_percentage,
             fixed_services_percentage: a.fixed_services_percentage,
             depreciation_rate: a.depreciation_rate,
@@ -878,6 +887,7 @@ function ScenarioForm({
             financing_amount: a.financing_amount,
             financing_duration_years: a.financing_duration_years,
             financing_interest_rate: a.financing_interest_rate,
+            financing_loans: a.financing_loans ?? null,
             sp01_growth_pct: a.sp01_growth_pct,
             sp04_growth_pct: a.sp04_growth_pct,
             sp06e_growth_pct: a.sp06e_growth_pct,
@@ -893,6 +903,7 @@ function ScenarioForm({
             sp17f_growth_pct: a.sp17f_growth_pct,
             sp17g_growth_pct: a.sp17g_growth_pct,
             sp18_growth_pct: a.sp18_growth_pct,
+            sp_overrides: a.sp_overrides ?? null,
             ce01_override: a.ce01_override,
             ce05_override: a.ce05_override,
             ce06_override: a.ce06_override,
@@ -968,6 +979,8 @@ function ScenarioForm({
           tfr_accrual_suspended: false,
           previdenza_scales_with_personnel: false,
           tax_rate: 27.9,
+          tax_advances_paid: 0,
+          tax_temporary_differences: null,
           fixed_materials_percentage: 0,
           fixed_services_percentage: 0,
           depreciation_rate: 20,
@@ -975,11 +988,12 @@ function ScenarioForm({
           financing_amount: 0,
           financing_duration_years: 5,
           financing_interest_rate: 3,
+          financing_loans: null,
         };
       });
       setAssumptions(defaultAssumptions);
     }
-  }, [scenario, companyId]);
+  }, [scenario, companyId, forecastYears]);
 
   // Auto-generator state
   const [inflationRate, setInflationRate] = useState(2.5);
@@ -991,6 +1005,26 @@ function ScenarioForm({
       [year]: {
         ...prev[year],
         [field]: value,
+      },
+    }));
+  }, []);
+
+  const updateFinancingLoans = useCallback((year: number, loans: FinancingLoanInput[]) => {
+    setAssumptions((prev) => ({
+      ...prev,
+      [year]: {
+        ...prev[year],
+        financing_loans: loans.length > 0 ? loans : null,
+      },
+    }));
+  }, []);
+
+  const updateTemporaryDifferences = useCallback((year: number, lines: TemporaryDifferenceInput[]) => {
+    setAssumptions((prev) => ({
+      ...prev,
+      [year]: {
+        ...prev[year],
+        tax_temporary_differences: lines.length > 0 ? lines : null,
       },
     }));
   }, []);
@@ -1176,6 +1210,10 @@ function ScenarioForm({
               />
             )}
 
+            {!startup && (
+              <HistoricalBalanceDetailEditor companyId={companyId} year={baseYear} />
+            )}
+
             <AssumptionsGrid
               rows={startup
                 ? ESSENTIAL_ROWS.filter((r) => r.kind !== "pct" || r.key.startsWith("fin-"))
@@ -1185,6 +1223,12 @@ function ScenarioForm({
               historicalData={historicalData}
               assumptions={assumptions}
               onUpdate={updateAssumption}
+            />
+
+            <FinancingLoansGrid
+              forecastYears={forecastYears}
+              assumptions={assumptions}
+              onUpdate={updateFinancingLoans}
             />
 
             <p className="text-xs text-muted-foreground">
@@ -1227,6 +1271,13 @@ function ScenarioForm({
                         onUpdate={updateAssumption}
                         showHistorical={false}
                       />
+                      {group.title === "Fiscale" && (
+                        <TaxTemporaryDifferencesGrid
+                          forecastYears={forecastYears}
+                          assumptions={assumptions}
+                          onUpdate={updateTemporaryDifferences}
+                        />
+                      )}
                     </div>
                   ))}
                 </AccordionContent>
@@ -1251,6 +1302,257 @@ function ScenarioForm({
         </Button>
       </div>
     </div>
+  );
+}
+
+function FinancingLoansGrid({
+  forecastYears,
+  assumptions,
+  onUpdate,
+}: {
+  forecastYears: number[];
+  assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
+  onUpdate: (year: number, loans: FinancingLoanInput[]) => void;
+}) {
+  const updateLoan = (
+    year: number,
+    index: number,
+    field: keyof FinancingLoanInput,
+    value: string | number
+  ) => {
+    const loans = [...(assumptions[year]?.financing_loans ?? [])];
+    loans[index] = { ...loans[index], [field]: value };
+    onUpdate(year, loans);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Finanziamenti aggiuntivi</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Ogni contratto mantiene residuo iniziale, nuova erogazione, preammortamento,
+          quota balloon e tasso autonomi. Il residuo iniziale è ammesso solo nel primo anno.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {forecastYears.map((year) => {
+          const loans = assumptions[year]?.financing_loans ?? [];
+          return (
+            <div key={year} className="rounded-md border border-border p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h4 className="text-sm font-semibold">{year}</h4>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onUpdate(year, [
+                    ...loans,
+                    {
+                      name: `Finanziamento ${loans.length + 2}`,
+                      amount: 1000,
+                      opening_residual: 0,
+                      duration_years: 5,
+                      interest_rate: 3,
+                      grace_years: 0,
+                      balloon_pct: 0,
+                    },
+                  ])}
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Aggiungi linea
+                </Button>
+              </div>
+              {loans.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nessuna linea aggiuntiva.</p>
+              ) : (
+                <div className="space-y-3">
+                  {loans.map((loan, index) => (
+                    <div key={index} className="rounded-md bg-muted/30 p-2">
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-4 xl:grid-cols-[1.3fr_repeat(6,minmax(7rem,1fr))_auto]">
+                      <Input
+                        value={loan.name ?? ""}
+                        placeholder="Descrizione"
+                        onChange={(event) => updateLoan(year, index, "name", event.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1000}
+                        value={loan.opening_residual}
+                        disabled={year !== forecastYears[0]}
+                        aria-label={`Residuo iniziale finanziamento ${year}`}
+                        placeholder="Residuo iniziale"
+                        onChange={(event) => updateLoan(year, index, "opening_residual", Number(event.target.value))}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1000}
+                        value={loan.amount}
+                        aria-label={`Importo finanziamento ${year}`}
+                        placeholder="Nuova erogazione"
+                        onChange={(event) => updateLoan(year, index, "amount", Number(event.target.value))}
+                      />
+                      <Input
+                        type="number"
+                        min={1}
+                        max={50}
+                        step={1}
+                        value={loan.duration_years}
+                        aria-label={`Durata finanziamento ${year}`}
+                        placeholder="Durata"
+                        onChange={(event) => updateLoan(year, index, "duration_years", Number(event.target.value))}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.1}
+                        value={loan.interest_rate}
+                        aria-label={`Tasso finanziamento ${year}`}
+                        placeholder="Tasso %"
+                        onChange={(event) => updateLoan(year, index, "interest_rate", Number(event.target.value))}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        max={Math.max(0, Number(loan.duration_years) - 1)}
+                        step={1}
+                        value={loan.grace_years}
+                        aria-label={`Preammortamento finanziamento ${year}`}
+                        placeholder="Preamm. anni"
+                        onChange={(event) => updateLoan(year, index, "grace_years", Number(event.target.value))}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={loan.balloon_pct}
+                        aria-label={`Balloon finanziamento ${year}`}
+                        placeholder="Balloon %"
+                        onChange={(event) => updateLoan(year, index, "balloon_pct", Number(event.target.value))}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Rimuovi finanziamento ${index + 1} del ${year}`}
+                        onClick={() => onUpdate(year, loans.filter((_, loanIndex) => loanIndex !== index))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Rata capitale ordinaria stimata: {formatCurrency((() => {
+                        const principal = Number(loan.amount || 0) + Number(loan.opening_residual || 0);
+                        const years = Math.max(1, Number(loan.duration_years || 1) - Number(loan.grace_years || 0));
+                        return principal * (1 - Number(loan.balloon_pct || 0) / 100) / years;
+                      })())}
+                    </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TaxTemporaryDifferencesGrid({
+  forecastYears,
+  assumptions,
+  onUpdate,
+}: {
+  forecastYears: number[];
+  assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
+  onUpdate: (year: number, lines: TemporaryDifferenceInput[]) => void;
+}) {
+  const updateLine = (
+    year: number,
+    index: number,
+    field: keyof TemporaryDifferenceInput,
+    value: string | number | null,
+  ) => {
+    const lines = [...(assumptions[year]?.tax_temporary_differences ?? [])];
+    lines[index] = { ...lines[index], [field]: value };
+    onUpdate(year, lines);
+  };
+
+  return (
+    <Card className="mt-4">
+      <CardHeader>
+        <CardTitle className="text-sm">Mastrino imposte anticipate e differite</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Saldo imponibile = apertura + incrementi − riversamenti. Le differenze deducibili
+          alimentano i crediti per imposte anticipate; le imponibili il fondo imposte differite.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {forecastYears.map((year) => {
+          const lines = assumptions[year]?.tax_temporary_differences ?? [];
+          const defaultRate = Number(assumptions[year]?.tax_rate ?? 0);
+          const totals = lines.reduce((acc, line) => {
+            const base = Math.max(0, Number(line.opening_amount) + Number(line.additions) - Number(line.reversals));
+            const tax = base * Number(line.tax_rate ?? defaultRate) / 100;
+            if (line.kind === "taxable") acc.liability += tax;
+            else if (line.maturity === "long") acc.longAsset += tax;
+            else acc.shortAsset += tax;
+            return acc;
+          }, { shortAsset: 0, longAsset: 0, liability: 0 });
+          return (
+            <div key={year} className="rounded-md border border-border p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h5 className="text-sm font-semibold">{year}</h5>
+                  <p className="text-[11px] text-muted-foreground">
+                    DTA breve {formatCurrency(totals.shortAsset)} · DTA lungo {formatCurrency(totals.longAsset)} · DTL {formatCurrency(totals.liability)}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => onUpdate(year, [
+                  ...lines,
+                  {
+                    name: `Differenza temporanea ${lines.length + 1}`,
+                    kind: "deductible",
+                    maturity: "short",
+                    opening_amount: 0,
+                    additions: 0,
+                    reversals: 0,
+                    tax_rate: null,
+                  },
+                ])}>
+                  <Plus className="mr-1 h-4 w-4" /> Aggiungi differenza
+                </Button>
+              </div>
+              {lines.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nessuna differenza temporanea.</p>
+              ) : lines.map((line, index) => (
+                <div key={index} className="mb-2 grid grid-cols-1 gap-2 rounded-md bg-muted/30 p-2 md:grid-cols-4 xl:grid-cols-[1.4fr_repeat(6,minmax(7rem,1fr))_auto]">
+                  <Input value={line.name} placeholder="Descrizione" onChange={(e) => updateLine(year, index, "name", e.target.value)} />
+                  <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={line.kind} onChange={(e) => updateLine(year, index, "kind", e.target.value)}>
+                    <option value="deductible">Deducibile (DTA)</option>
+                    <option value="taxable">Imponibile (DTL)</option>
+                  </select>
+                  <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={line.maturity} onChange={(e) => updateLine(year, index, "maturity", e.target.value)} disabled={line.kind === "taxable"}>
+                    <option value="short">Entro 12 mesi</option>
+                    <option value="long">Oltre 12 mesi</option>
+                  </select>
+                  <Input type="number" min={0} step={1000} value={line.opening_amount} placeholder="Apertura" onChange={(e) => updateLine(year, index, "opening_amount", Number(e.target.value))} />
+                  <Input type="number" min={0} step={1000} value={line.additions} placeholder="Incrementi" onChange={(e) => updateLine(year, index, "additions", Number(e.target.value))} />
+                  <Input type="number" min={0} step={1000} value={line.reversals} placeholder="Riversamenti" onChange={(e) => updateLine(year, index, "reversals", Number(e.target.value))} />
+                  <Input type="number" min={0} max={100} step={0.1} value={line.tax_rate ?? ""} placeholder={`Aliquota ${defaultRate}%`} onChange={(e) => updateLine(year, index, "tax_rate", e.target.value === "" ? null : Number(e.target.value))} />
+                  <Button type="button" variant="ghost" size="icon" aria-label={`Rimuovi differenza ${index + 1} del ${year}`} onClick={() => onUpdate(year, lines.filter((_, lineIndex) => lineIndex !== index))}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 

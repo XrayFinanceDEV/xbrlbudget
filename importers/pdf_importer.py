@@ -20,7 +20,7 @@ from config import Sector
 
 logger = logging.getLogger(__name__)
 
-_PDF_PARSER_VERSION = "semantic-v2-2026-07-15"
+_PDF_PARSER_VERSION = "semantic-v3-2026-07-20"
 
 
 def _validation_report_payload(q) -> Dict[str, Any]:
@@ -378,6 +378,42 @@ def import_pdf_balance_sheet(
 
         is_trial_balance = (classification.route == ROUTE_TRIAL)
 
+        # Reject an explicitly contradictory legal statement before choosing an
+        # extractor.  Previously this check ran only *after* extraction failed:
+        # on a clean text PDF without an API key, a printed Attivo/Passivo mismatch
+        # therefore surfaced as the unrelated "ANTHROPIC_API_KEY is required"
+        # error.  These are immutable source controls, so no extractor or plug is
+        # allowed to hide the contradiction.
+        if classification.route == ROUTE_IVCEE and not is_scanned:
+            try:
+                from importers.pdf_extractor_llm import _declared_control_totals
+
+                source_controls = _declared_control_totals(
+                    file_path, text=sample_text
+                )
+                source_attivo = source_controls.get("attivo")
+                source_passivo = source_controls.get("passivo")
+                if source_attivo is not None and source_passivo is not None:
+                    source_difference = abs(source_attivo - source_passivo)
+                    if source_difference > Decimal("2"):
+                        raise PDFImportError(
+                            "Il bilancio sorgente non quadra prima dell'importazione: "
+                            f"Totale Attivo €{_euro_it(source_attivo)} != Totale "
+                            f"Passivo €{_euro_it(source_passivo)} (scarto "
+                            f"€{_euro_it(source_difference)}). "
+                            "Correggere il documento contabile originale."
+                        )
+            except PDFImportError:
+                raise
+            except Exception as source_control_error:
+                # Control discovery is best effort.  If totals are not legible,
+                # continue with the existing extraction and semantic gates.
+                logger.info(
+                    "IV-CEE source preflight unavailable (%s: %s)",
+                    type(source_control_error).__name__,
+                    source_control_error,
+                )
+
         def _llm_extract():
             """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
             # A regular comparative legal IV-CEE export has enough independent
@@ -386,54 +422,54 @@ def import_pdf_balance_sheet(
             # evidence-backed path before requiring an API call. It returns data
             # only when SP, CE and CE↔SP all cross-foot; incomplete/ambiguous
             # layouts decline and continue through the established LLM route.
-            # Infrannual imports retain their paired LLM extraction semantics.
-            if not period_months:
-                try:
-                    from importers.iv_cee_hierarchy import check_quadratura
-                    from importers.standard_ivcee_parser import (
-                        extract_standard_ivcee_balances,
-                        extract_standard_ivcee_income,
-                    )
+            # The deterministic source path also supports clean infrannual
+            # monocolumn statements. A prior-year column is optional, never required.
+            try:
+                from importers.iv_cee_hierarchy import check_quadratura
+                from importers.standard_ivcee_parser import (
+                    extract_standard_ivcee_balances,
+                    extract_standard_ivcee_income,
+                )
 
-                    source_bs, source_prior_bs = extract_standard_ivcee_balances(
-                        file_path
+                source_bs, source_prior_bs = extract_standard_ivcee_balances(
+                    file_path
+                )
+                source_ce, source_prior_ce = extract_standard_ivcee_income(
+                    file_path
+                )
+                if source_bs is not None and source_ce is not None:
+                    source_q = check_quadratura(
+                        source_bs, source_ce, tol=Decimal("2")
                     )
-                    source_ce, source_prior_ce = extract_standard_ivcee_income(
-                        file_path
-                    )
-                    if source_bs is not None and source_ce is not None:
-                        source_q = check_quadratura(
-                            source_bs, source_ce, tol=Decimal("2")
+                    if mapper.validate_balance(source_bs) and source_q.quadra:
+                        prior_ok = False
+                        if source_prior_bs is not None and source_prior_ce is not None:
+                            prior_q = check_quadratura(
+                                source_prior_bs,
+                                source_prior_ce,
+                                tol=Decimal("2"),
+                            )
+                            prior_ok = (
+                                mapper.validate_balance(source_prior_bs)
+                                and prior_q.quadra
+                            )
+                        logger.info(
+                            "Using deterministic source-validated IV-CEE "
+                            "extraction (prior_valid=%s)",
+                            prior_ok,
                         )
-                        if mapper.validate_balance(source_bs) and source_q.quadra:
-                            prior_ok = False
-                            if source_prior_bs is not None and source_prior_ce is not None:
-                                prior_q = check_quadratura(
-                                    source_prior_bs,
-                                    source_prior_ce,
-                                    tol=Decimal("2"),
-                                )
-                                prior_ok = (
-                                    mapper.validate_balance(source_prior_bs)
-                                    and prior_q.quadra
-                                )
-                            logger.info(
-                                "Using deterministic source-validated IV-CEE "
-                                "extraction (prior_valid=%s)",
-                                prior_ok,
-                            )
-                            return (
-                                source_bs,
-                                source_ce,
-                                source_prior_bs if prior_ok else None,
-                                source_prior_ce if prior_ok else None,
-                            )
-                except Exception as source_err:
-                    logger.info(
-                        "Deterministic legal IV-CEE extraction declined (%s: %s)",
-                        type(source_err).__name__,
-                        source_err,
-                    )
+                        return (
+                            source_bs,
+                            source_ce,
+                            source_prior_bs if prior_ok else None,
+                            source_prior_ce if prior_ok else None,
+                        )
+            except Exception as source_err:
+                logger.info(
+                    "Deterministic legal IV-CEE extraction declined (%s: %s)",
+                    type(source_err).__name__,
+                    source_err,
+                )
 
             if not api_key:
                 raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
@@ -442,10 +478,20 @@ def import_pdf_balance_sheet(
                 extract_pdf_with_llm, extract_pdf_both_years_with_llm,
             )
             if period_months:
-                # Infrannuale: current = partial year, prior = reference full year — both
-                # come from the same dual pass (the comparison engine needs them paired).
-                logger.info(f"Dual-year extraction (period_months={period_months})")
-                return extract_pdf_both_years_with_llm(file_path)
+                # A prior year is optional. Use the dual prompt only when the source
+                # physically proves two date columns; a monocolumn partial statement
+                # must use the single-year extractor and return no fabricated prior.
+                from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+
+                if has_comparative_ivcee_columns(file_path):
+                    logger.info(f"Dual-year extraction (period_months={period_months})")
+                    return extract_pdf_both_years_with_llm(file_path)
+                logger.info(
+                    f"Single-year infrannual extraction (period_months={period_months}; "
+                    "no prior column detected)"
+                )
+                bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+                return bs, ce, None, None
 
             # Budget (full year): take the CURRENT year from the proven single-year extractor
             # (the both-years prompt occasionally drops a current-year line — budget_227), then
@@ -986,6 +1032,12 @@ def import_pdf_balance_sheet(
             ) from _qd_err
 
         warnings = mapper.validate_hierarchy(balance_sheet_data)
+        if balance_sheet_data.get("_source_maturity_unspecified"):
+            warnings.append(
+                "SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "
+                "sottovoci sono stati conservati nel breve termine; verificare la "
+                "quota oltre 12 mesi in Rettifiche se disponibile."
+            )
         # Surface the deterministic trial-balance plug flag to the user (Rettifiche cue),
         # so an imperfect-but-imported situazione contabile is visible rather than silent.
         warnings.extend(sc_quadratura_warnings)

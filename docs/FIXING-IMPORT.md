@@ -173,6 +173,7 @@ AGO 06.07.00). Before: read only the 1 page with live headers (attivo ≈ 396k v
 | Second pass for vector-header pages + description-based SP→CE boundary | CE pages read; costi 1.323.220,24 / ricavi 1.456.925,50 exact |
 | Don't mark a page read if its split is empty | CE footer page's 1.354 no longer dropped |
 | Utile from CE when SP footer vector | sp13 = 133.705,26 |
-| Targeted self-validated orphan recovery | +55.536,60 (ratei/risconti → sp18, altri debiti OE → sp17) → **attivo == passivo == 2.096.501,91** |
+| Targeted self-validated orphan recovery | +55.536,60 (ratei/risconti → sp18, altri debiti OE → sp17) |
+| Semantic classification hardening | Quiescenza/fine mandato → sp14, altri beni materiali → sp03, crediti immobilizzati → sp04, rimanenze abbreviate → sp05; **attivo == passivo == 2.116.501,91** |
 
 Result: imports cleanly; CE net (full keys) = 133.705,26 = sp13.

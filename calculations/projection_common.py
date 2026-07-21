@@ -22,13 +22,21 @@ from typing import Callable
 
 ZERO = Decimal('0')
 
-# Long-term FINANCIAL debt that the existing-debt repayment plan amortises:
-# banks (sp17a) + bonds (sp17c). 'Altri finanziatori' (sp17b) amortise on their
-# OWN plan (see altri_finanz_repayment_instalment); trade / tax / social-security
-# / other long-term debts are non-financial and are NOT repaid by the plan.
-_FIN_LONG_FIELDS = ('sp17a_debiti_banche_lungo', 'sp17c_debiti_obbligazioni_lungo')
-_NON_FIN_LONG_FIELDS = (
+# Existing-debt repayment is a BANK plan and therefore uses the total bank
+# exposure (entro + oltre 12 mesi). Bonds and other lenders have distinct legal
+# maturities and must never be silently amortised as bank debt.
+_BANK_FIELDS = ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo')
+_NON_BANK_SHORT_FIELDS = (
+    'sp16b_debiti_altri_finanz_breve',
+    'sp16c_debiti_obbligazioni_breve',
+    'sp16d_debiti_fornitori_breve',
+    'sp16e_debiti_tributari_breve',
+    'sp16f_debiti_previdenza_breve',
+    'sp16g_altri_debiti_breve',
+)
+_NON_BANK_LONG_FIELDS = (
     'sp17b_debiti_altri_finanz_lungo',
+    'sp17c_debiti_obbligazioni_lungo',
     'sp17d_debiti_fornitori_lungo',
     'sp17e_debiti_tributari_lungo',
     'sp17f_debiti_previdenza_lungo',
@@ -36,19 +44,27 @@ _NON_FIN_LONG_FIELDS = (
 )
 
 
-def base_financial_long_term_debt(getter: Callable[[str], Decimal]) -> Decimal:
-    """Base-year long-term FINANCIAL debt the repayment plan amortises:
-    banche + obbligazioni, PLUS any positive 'abbreviato gap' (the sp17
-    aggregate minus all known sub-fields — what an abbreviato import leaves when
-    only the total is present, which both engines allocate to banks).
+def base_bank_debt(getter: Callable[[str], Decimal]) -> Decimal:
+    """Base-year bank debt across both maturity buckets.
 
-    Excludes 'altri finanziatori' (repaid on its own plan) and the non-financial
-    long-term debts, so there is no double counting and no over-repayment.
+    Positive aggregate/detail gaps from abbreviated statements are assigned to
+    banks, matching the import/forecast convention used elsewhere in the app.
     """
-    banks_bonds = sum((getter(f) for f in _FIN_LONG_FIELDS), ZERO)
-    non_financial = sum((getter(f) for f in _NON_FIN_LONG_FIELDS), ZERO)
-    gap = getter('sp17_debiti_lungo') - (banks_bonds + non_financial)
-    return banks_bonds + (gap if gap > ZERO else ZERO)
+    explicit_banks = sum((getter(f) for f in _BANK_FIELDS), ZERO)
+    short_gap = getter('sp16_debiti_breve') - (
+        getter('sp16a_debiti_banche_breve')
+        + sum((getter(f) for f in _NON_BANK_SHORT_FIELDS), ZERO)
+    )
+    long_gap = getter('sp17_debiti_lungo') - (
+        getter('sp17a_debiti_banche_lungo')
+        + sum((getter(f) for f in _NON_BANK_LONG_FIELDS), ZERO)
+    )
+    return explicit_banks + max(ZERO, short_gap) + max(ZERO, long_gap)
+
+
+def base_financial_long_term_debt(getter: Callable[[str], Decimal]) -> Decimal:
+    """Backward-compatible alias for the bank-debt repayment base."""
+    return base_bank_debt(getter)
 
 
 def financial_repayment_instalment(getter: Callable[[str], Decimal], repay_years) -> Decimal:
@@ -61,8 +77,8 @@ def financial_repayment_instalment(getter: Callable[[str], Decimal], repay_years
     years = Decimal(str(repay_years))
     if years <= ZERO:
         return ZERO
-    base_fin_long = base_financial_long_term_debt(getter)
-    return base_fin_long / years if base_fin_long > ZERO else ZERO
+    bank_debt = base_bank_debt(getter)
+    return bank_debt / years if bank_debt > ZERO else ZERO
 
 
 def altri_finanz_repayment_instalment(getter: Callable[[str], Decimal], altri_years) -> Decimal:
@@ -99,6 +115,63 @@ def tfr_accrual_quota(salari, personale_totale) -> Decimal:
     return base / TFR_DIVISOR if base > ZERO else ZERO
 
 
+def tax_closing_position(opening_credit, opening_debt, current_tax, advances):
+    """Return ``(closing_credit, closing_debt)`` after annual tax settlement.
+
+    The two sides are mutually exclusive and non-negative; overpayments are
+    reclassified to tax credits instead of producing a negative liability.
+    """
+    opening_net_debt = (opening_debt or ZERO) - (opening_credit or ZERO)
+    closing_net_debt = opening_net_debt + (current_tax or ZERO) - (advances or ZERO)
+    return max(ZERO, -closing_net_debt), max(ZERO, closing_net_debt)
+
+
+def deferred_tax_position(lines, default_tax_rate):
+    """Calculate deferred-tax assets/liabilities from temporary differences.
+
+    Every line contains a tax base roll-forward (opening + additions - reversals),
+    a kind (``deductible`` or ``taxable``), a maturity (``short``/``long``) and
+    an optional percentage tax rate.  Returns closing DTA split by maturity, the
+    closing deferred-tax liability and the P&L deferred-tax expense (negative for
+    a benefit).  Empty input is a strict no-op.
+    """
+    short_asset = ZERO
+    long_asset = ZERO
+    liability = ZERO
+    deferred_expense = ZERO
+    default_rate = Decimal(str(default_tax_rate or ZERO)) / Decimal('100')
+
+    for line in lines or ():
+        opening_base = max(ZERO, Decimal(str(line.get('opening_amount') or ZERO)))
+        additions = max(ZERO, Decimal(str(line.get('additions') or ZERO)))
+        reversals = max(ZERO, Decimal(str(line.get('reversals') or ZERO)))
+        closing_base = max(ZERO, opening_base + additions - reversals)
+        raw_rate = line.get('tax_rate')
+        rate = (
+            Decimal(str(raw_rate)) / Decimal('100')
+            if raw_rate is not None else default_rate
+        )
+        opening_tax = opening_base * rate
+        closing_tax = closing_base * rate
+
+        if line.get('kind', 'deductible') == 'taxable':
+            liability += closing_tax
+            deferred_expense += closing_tax - opening_tax
+        else:
+            if line.get('maturity', 'short') == 'long':
+                long_asset += closing_tax
+            else:
+                short_asset += closing_tax
+            deferred_expense -= closing_tax - opening_tax
+
+    return {
+        'short_asset': short_asset,
+        'long_asset': long_asset,
+        'liability': liability,
+        'deferred_expense': deferred_expense,
+    }
+
+
 # ── NEW financing raised DURING the plan ──
 # Each forecast year's `financing_amount` assumption is a NEW loan raised that
 # year (IMPORTO FINANZIAMENTO), linearly amortised (rata = amount / durata) over
@@ -122,29 +195,41 @@ def new_financing_schedule(loans, target_year):
     - ``interest``   — interest for ``target_year`` = rate × the loan's OPENING
       outstanding; this is what the P&L (ce15) charges.
 
-    Each loan is a dict ``{'year', 'amount', 'duration', 'rate'}`` (rate already a
-    fraction, e.g. 0.05). A loan raised in year R with amount A and duration D
-    pays rata ≈ A/D in years R … R+D-1 and is fully amortised after D years.
-    Interest in year Y (R ≤ Y < R+D) is ``rate × A × (1 - (Y-R)/D)`` — on the
-    balance at the START of Y, so the year it is raised charges interest on the
-    full A. Repayment is clamped to the residual so a fractional D can't push the
-    debt below zero. Returns ``(0, 0, 0)`` for an empty list (no-op)."""
+    In addition to the legacy keys, a loan may contain ``opening_residual``
+    (already present in the base-year bank debt), ``grace_years`` and
+    ``balloon_pct``. Grace years are interest-only; the balloon is paid with the
+    final instalment. Returns ``(0, 0, 0)`` for an empty list (no-op)."""
     raised = ZERO
     repayment = ZERO
     interest = ZERO
     for loan in loans or ():
         raise_year = loan['year']
-        amount = loan['amount'] or ZERO
-        duration = loan['duration'] or ZERO
-        rate = loan['rate'] or ZERO
-        if amount <= ZERO or duration <= ZERO:
+        amount = Decimal(str(loan.get('amount') or ZERO))
+        opening_residual = Decimal(str(loan.get('opening_residual') or ZERO))
+        principal = amount + opening_residual
+        duration = int(Decimal(str(loan.get('duration') or ZERO)))
+        rate = Decimal(str(loan.get('rate') or ZERO))
+        grace_years = int(Decimal(str(loan.get('grace_years') or ZERO)))
+        balloon_pct = Decimal(str(loan.get('balloon_pct') or ZERO)) / Decimal('100')
+        if principal <= ZERO or duration <= 0 or grace_years >= duration:
             continue
         if target_year == raise_year:
             raised += amount
         elapsed = target_year - raise_year           # whole years since raised
-        if 0 <= elapsed < duration:                  # still amortising
-            opening = amount * (Decimal('1') - Decimal(elapsed) / duration)
-            opening = opening if opening > ZERO else ZERO
-            repayment += min(amount / duration, opening)
+        if 0 <= elapsed < duration:
+            balloon = principal * max(ZERO, min(Decimal('1'), balloon_pct))
+            amort_years = duration - grace_years
+            annual_principal = (principal - balloon) / Decimal(amort_years)
+            previous_amort_years = max(0, elapsed - grace_years)
+            opening = max(
+                ZERO,
+                principal - annual_principal * Decimal(previous_amort_years),
+            )
+            current_repayment = ZERO
+            if elapsed >= grace_years:
+                current_repayment = annual_principal
+                if elapsed == duration - 1:
+                    current_repayment += balloon
+            repayment += min(opening, current_repayment)
             interest += opening * rate
     return raised, repayment, interest

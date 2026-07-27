@@ -3273,10 +3273,32 @@ def _hier_lvl1(rows: List[Tuple[str, str, Decimal]]) -> List[Tuple[str, str, Dec
 
 def _is_fondo_amm(desc_upper: str) -> bool:
     """Recognise depreciation/amortisation funds at any aggregation level, incl. the
-    aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses."""
+    aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses.
+
+    Questa funzione governa l'INTERO netting dei fondi, quindi il pareggio di
+    tutta la route C: un fondo non riconosciuto non viene sottratto dal cespite,
+    l'attivo resta lordo e il passivo gonfio della stessa massa, i due lati non
+    tornano e la differenza diventa residuo non classificato -> oltre l'1%
+    scatta QUADRATURA MASCHERATA e l'import viene rifiutato.
+
+    Il test a sottostringhe qui sotto e' tenuto INVARIATO (non puo' regredire
+    nulla) e viene solo AFFIANCATO dalla forma canonica del normalizzatore unico,
+    che collassa `F.di ammor.to`, `Fdo amm`, `Fondo amm.` su `fondo ammortamento`
+    — grafie reali che il solo test a sottostringhe non vede. L'allargamento e'
+    additivo per costruzione: si riconoscono piu' fondi, mai meno.
+    """
     d = desc_upper
-    return (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
-            and ('FOND' in d or 'F.DO' in d or 'F/' in d))
+    if (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
+            and ('FOND' in d or 'F.DO' in d or 'F/' in d)):
+        return True
+    try:
+        from importers.label_semantics import normalize_label
+    except Exception:
+        return False
+    # `fondo ammortamento` CONTIGUO: "Ammortamento immobilizzazioni immateriali" e
+    # "Quota ammortamento esercizio" sono COSTI del conto economico, non fondi
+    # dello stato patrimoniale, e non devono mai essere nettati.
+    return "fondo ammortamento" in normalize_label(d)
 
 
 # Category qualifiers that make a fondo a SPECIFIC line rather than the grand-total
@@ -5220,7 +5242,11 @@ def parse_bilancio_verifica_segno(
     return dict(bs), dict(ce)
 
 
-def extract_situazione_contabile(file_path: str, return_prior: bool = False):
+def extract_situazione_contabile(
+    file_path: str,
+    return_prior: bool = False,
+    text_override: Optional[str] = None,
+):
     """
     Extract IV CEE data from a Situazione Contabile PDF.
 
@@ -5238,13 +5264,14 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
     except Exception as e:
         raise ValueError(f"Cannot open PDF: {e}")
 
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text() + "\n"
+    full_text = text_override or ""
+    if not full_text:
+        for page in doc:
+            full_text += page.get_text() + "\n"
     doc.close()
 
     vseg_ocr_pages = None
-    if len(full_text.strip()) < 50:
+    if text_override is None and len(full_text.strip()) < 50:
         candidate_pages = _vseg_rapidocr_pages(file_path)
         if candidate_pages:
             candidate_text = "\n".join(page["text"] for page in candidate_pages)

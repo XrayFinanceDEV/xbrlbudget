@@ -146,28 +146,18 @@ def resolve(desc: str, side: Optional[str] = None,
     return None
 
 
-# ---------------------------------------------------------------------------
-# Adattatore per _be_reclassify (situazione_contabile_parser)
-# ---------------------------------------------------------------------------
-def classify_for_reclassify(desc: str, side: Optional[str] = None) -> Tuple[Optional[str], bool]:
-    """Contratto richiesto da `_be_reclassify`: (db_field, specific).
+# NOTA 2026-07-27: qui viveva classify_for_reclassify, l'adattatore scritto per
+# collegare il resolver semantico a _be_reclassify della route C. Non ha MAI
+# avuto un chiamante (verificato su tutto il repo): il "motore unico di
+# classificazione" descritto in CLAUDE.md non era in realta' collegato alla
+# route C. Rimosso; il collegamento vero passa da importers/label_semantics
+# (spazio "conto" con il ruolo contabile).
 
-    specific=True  -> ferma la discesa: la descrizione mappa a un campo DB foglia.
-    specific=False -> nodo generico (Immobilizzazioni, Crediti, Debiti, PN, ...):
-                      scendi nei figli per dettagliare.
-    (None, False)  -> non classificabile a questo livello.
-    """
-    node = resolve(desc, side=side, statement="bs")
-    if node is None:
-        return None, False
-    if node.netting:
-        # i fondi vanno nettati dall'attivo: trattali come "specifici" col segno
-        # gestito a monte dal chiamante (qui restituiamo il campo generico None).
-        return None, True
-    if node.db_field and node.is_legal_leaf and not node.is_total:
-        return node.db_field, True
-    # nodo-totale generico: lascia scendere
-    return node.db_field, False
+
+def _D(x) -> Decimal:
+    if isinstance(x, Decimal):
+        return x
+    return Decimal(str(x))
 
 
 # ---------------------------------------------------------------------------
@@ -179,12 +169,6 @@ class AggResult(NamedTuple):
     declared_totals: Dict[str, Decimal]   # totali di sezione dichiarati (per riconciliazione)
     unresolved: List[Tuple[str, Decimal]]  # voci non classificate (descr, importo)
     notes: List[str]
-
-
-def _D(x) -> Decimal:
-    if isinstance(x, Decimal):
-        return x
-    return Decimal(str(x))
 
 
 def aggregate_flat(items: List[dict]) -> AggResult:

@@ -1,0 +1,414 @@
+{
+  "_comment": "Dizionario semantico delle etichette di bilancio. Le chiavi sono in FORMA CANONICA (importers.label_semantics.normalize_label): minuscolo, senza accenti, senza numerazione di voce, abbreviazioni espanse (f.do->fondo, amm.to->ammortamento, v/->verso, c/->conto). Popolato dalle grafie REALMENTE osservate nel corpus, ordinate per numero di documenti in cui compaiono (tests/_label_coverage.py), non a fantasia.",
+  "_spaces": {
+    "marker": "totali di controllo, sezioni, intestazioni di colonna. Non hanno db_field: sono cio' che pilota preflight, netting e selezione candidati.",
+    "conto": "conti del piano dei conti -> db_field + ruolo contabile. SOLO route C: nello spazio 'voce' verrebbero contati due volte."
+  },
+  "_roles": [
+    "contra_immat",
+    "contra_mat",
+    "contra_crediti",
+    "fondo_rischi",
+    "risultato",
+    "totale"
+  ],
+  "marker": {
+    "totale attivo": "__tot_attivo",
+    "totale attivita": "__tot_attivo",
+    "totale dell attivo": "__tot_attivo",
+    "totale stato patrimoniale attivo": "__tot_attivo",
+    "totale generale attivo": "__tot_attivo",
+    "totale passivo": "__tot_passivo",
+    "totale passivita": "__tot_passivo",
+    "totale del passivo": "__tot_passivo",
+    "totale passivita e netto": "__tot_passivo",
+    "totale passivo e patrimonio netto": "__tot_passivo",
+    "totale stato patrimoniale passivo": "__tot_passivo",
+    "totale generale passivo": "__tot_passivo",
+    "totale a pareggio": "__pareggio",
+    "totale a quadratura": "__pareggio",
+    "totale di pareggio": "__pareggio",
+    "sbilancio": "__pareggio",
+    "utile": "__utile",
+    "utile di esercizio": "__utile",
+    "utile dell esercizio": "__utile",
+    "utile esercizio": "__utile",
+    "utile del periodo": "__utile",
+    "utile netto": "__utile",
+    "utile stato patrimoniale": "__utile",
+    "utile conto economico": "__utile",
+    "perdita": "__perdita",
+    "perdita di esercizio": "__perdita",
+    "perdita dell esercizio": "__perdita",
+    "perdita esercizio": "__perdita",
+    "perdita del periodo": "__perdita",
+    "perdita netta": "__perdita",
+    "perdita stato patrimoniale": "__perdita",
+    "perdita conto economico": "__perdita",
+    "risultato": "__risultato",
+    "risultato di esercizio": "__risultato",
+    "risultato dell esercizio": "__risultato",
+    "risultato del periodo": "__risultato",
+    "risultato netto": "__risultato",
+    "stato patrimoniale attivo": "__sez_sp_attivo",
+    "attivita": "__sez_sp_attivo",
+    "attivo": "__sez_sp_attivo",
+    "situazione patrimoniale attivo": "__sez_sp_attivo",
+    "stato patrimoniale passivo": "__sez_sp_passivo",
+    "passivita": "__sez_sp_passivo",
+    "passivo": "__sez_sp_passivo",
+    "passivita e netto": "__sez_sp_passivo",
+    "situazione patrimoniale passivo": "__sez_sp_passivo",
+    "conto economico": "__sez_ce",
+    "situazione economica": "__sez_ce",
+    "differenza": "__col_scostamento",
+    "scost": "__col_scostamento",
+    "scostamento": "__col_scostamento",
+    "variazione": "__col_scostamento",
+    "var": "__col_scostamento",
+    "diff": "__col_scostamento"
+  },
+  "conto": {
+    "clienti": {
+      "target": "sp06_crediti_breve"
+    },
+    "crediti verso clienti": {
+      "target": "sp06_crediti_breve"
+    },
+    "crediti commerciali": {
+      "target": "sp06_crediti_breve"
+    },
+    "fatture da emettere": {
+      "target": "sp06_crediti_breve"
+    },
+    "note credito da emettere": {
+      "target": "sp06_crediti_breve"
+    },
+    "crediti diversi": {
+      "target": "sp06_crediti_breve"
+    },
+    "erario conto acconti": {
+      "target": "sp06_crediti_breve"
+    },
+    "erario conto ritenute subite": {
+      "target": "sp06_crediti_breve"
+    },
+    "crediti tributari": {
+      "target": "sp06_crediti_breve"
+    },
+    "imposte anticipate": {
+      "target": "sp06_crediti_breve"
+    },
+    "depositi cauzionali attivi": {
+      "target": "sp06_crediti_breve"
+    },
+    "depositi cauzionali": {
+      "target": "sp06_crediti_breve"
+    },
+    "fornitori conto anticipi": {
+      "target": "sp06_crediti_breve"
+    },
+    "anticipi a fornitori": {
+      "target": "sp06_crediti_breve"
+    },
+    "cassa": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "cassa contanti": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "denaro e valori in cassa": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "banche conto correnti attivi": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "banche conto c attivi": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "depositi bancari e postali": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "conto corrente postale": {
+      "target": "sp09_disponibilita_liquide"
+    },
+    "risconti attivi": {
+      "target": "sp10_ratei_risconti_attivi"
+    },
+    "ratei attivi": {
+      "target": "sp10_ratei_risconti_attivi"
+    },
+    "ratei e risconti attivi": {
+      "target": "sp10_ratei_risconti_attivi"
+    },
+    "fornitori": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti verso fornitori": {
+      "target": "sp16_debiti_breve"
+    },
+    "fatture da ricevere": {
+      "target": "sp16_debiti_breve"
+    },
+    "note credito da ricevere": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti diversi": {
+      "target": "sp16_debiti_breve"
+    },
+    "banche conto correnti passivi": {
+      "target": "sp16_debiti_breve"
+    },
+    "banche conto anticipi su fattura": {
+      "target": "sp16_debiti_breve"
+    },
+    "banche conto anticipi": {
+      "target": "sp16_debiti_breve"
+    },
+    "banche conto factoring": {
+      "target": "sp16_debiti_breve"
+    },
+    "banche conto sbf": {
+      "target": "sp16_debiti_breve"
+    },
+    "dipendenti conto retribuzioni": {
+      "target": "sp16_debiti_breve"
+    },
+    "dipendenti conto retribuzioni non liquidati": {
+      "target": "sp16_debiti_breve"
+    },
+    "dipendenti conto cessione": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti verso dipendenti": {
+      "target": "sp16_debiti_breve"
+    },
+    "erario conto ritenute da versare": {
+      "target": "sp16_debiti_breve"
+    },
+    "erario conto imposte da versare": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti tributari": {
+      "target": "sp16_debiti_breve"
+    },
+    "inps conto contributi dipendenti": {
+      "target": "sp16_debiti_breve"
+    },
+    "inps conto contributi collaboratori": {
+      "target": "sp16_debiti_breve"
+    },
+    "inail conto premi da versare": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti previdenziali": {
+      "target": "sp16_debiti_breve"
+    },
+    "cassa previdenziale": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti verso istituti previdenziali": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti verso soci": {
+      "target": "sp16_debiti_breve"
+    },
+    "soci conto finanziamento": {
+      "target": "sp16_debiti_breve"
+    },
+    "debiti rappresentati da titoli": {
+      "target": "sp16_debiti_breve"
+    },
+    "obbligazioni": {
+      "target": "sp16_debiti_breve"
+    },
+    "risconti passivi": {
+      "target": "sp18_ratei_risconti_passivi"
+    },
+    "ratei passivi": {
+      "target": "sp18_ratei_risconti_passivi"
+    },
+    "ratei e risconti passivi": {
+      "target": "sp18_ratei_risconti_passivi"
+    },
+    "fondo tfr": {
+      "target": "sp15_tfr"
+    },
+    "trattamento di fine rapporto": {
+      "target": "sp15_tfr"
+    },
+    "fondo trattamento di fine rapporto": {
+      "target": "sp15_tfr"
+    },
+    "debiti per tfr": {
+      "target": "sp15_tfr"
+    },
+    "capitale sociale": {
+      "target": "sp11_capitale_sociale"
+    },
+    "riserva legale": {
+      "target": "sp12_riserve"
+    },
+    "riserva straordinaria": {
+      "target": "sp12_riserve"
+    },
+    "altre riserve": {
+      "target": "sp12_riserve"
+    },
+    "riserva sovrapprezzo azioni": {
+      "target": "sp12_riserve"
+    },
+    "utili portati a nuovo": {
+      "target": "sp12_riserve"
+    },
+    "perdite portate a nuovo": {
+      "target": "sp12_riserve"
+    },
+    "utili perdite portati a nuovo": {
+      "target": "sp12_riserve"
+    },
+    "utile di esercizio": {
+      "target": "sp13_utile_perdita",
+      "role": "risultato"
+    },
+    "perdita di esercizio": {
+      "target": "sp13_utile_perdita",
+      "role": "risultato"
+    },
+    "utile dell esercizio": {
+      "target": "sp13_utile_perdita",
+      "role": "risultato"
+    },
+    "perdita dell esercizio": {
+      "target": "sp13_utile_perdita",
+      "role": "risultato"
+    },
+    "risultato di esercizio": {
+      "target": "sp13_utile_perdita",
+      "role": "risultato"
+    },
+    "risultato del periodo": {
+      "target": "sp13_utile_perdita",
+      "role": "risultato"
+    },
+    "fondo ammortamento": {
+      "target": "sp03_immob_materiali",
+      "role": "contra_mat"
+    },
+    "fondo svalutazione": {
+      "target": "sp03_immob_materiali",
+      "role": "contra_mat"
+    },
+    "fondo svalutazione crediti": {
+      "target": "sp06_crediti_breve",
+      "role": "contra_crediti"
+    },
+    "fondo rischi su crediti": {
+      "target": "sp06_crediti_breve",
+      "role": "contra_crediti"
+    },
+    "fondo svalutazione crediti tassato": {
+      "target": "sp06_crediti_breve",
+      "role": "contra_crediti"
+    },
+    "fondo rischi e oneri": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo per rischi e oneri": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo oneri futuri": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo spese future": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo manutenzioni cicliche": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo indennita suppletiva di clientela": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo garanzia prodotti": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo controversie legali": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo cause in corso": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo quiescenza": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "fondo imposte differite": {
+      "target": "sp14_fondi_rischi",
+      "role": "fondo_rischi"
+    },
+    "merci": {
+      "target": "sp05_rimanenze"
+    },
+    "rimanenze finali": {
+      "target": "sp05_rimanenze"
+    },
+    "rimanenze di magazzino": {
+      "target": "sp05_rimanenze"
+    },
+    "materie prime": {
+      "target": "sp05_rimanenze"
+    },
+    "prodotti finiti": {
+      "target": "sp05_rimanenze"
+    },
+    "partecipazioni": {
+      "target": "sp04_immob_finanziarie"
+    },
+    "partecipazioni in imprese collegate": {
+      "target": "sp04_immob_finanziarie"
+    },
+    "partecipazioni in imprese controllate": {
+      "target": "sp04_immob_finanziarie"
+    },
+    "erario conto iva": {
+      "attivo": {
+        "target": "sp06_crediti_breve"
+      },
+      "passivo": {
+        "target": "sp16_debiti_breve"
+      }
+    },
+    "credito iva": {
+      "target": "sp06_crediti_breve"
+    },
+    "debito iva": {
+      "target": "sp16_debiti_breve"
+    },
+    "banche conto correnti": {
+      "attivo": {
+        "target": "sp09_disponibilita_liquide"
+      },
+      "passivo": {
+        "target": "sp16_debiti_breve"
+      }
+    },
+    "depositi bancari": {
+      "attivo": {
+        "target": "sp09_disponibilita_liquide"
+      },
+      "passivo": {
+        "target": "sp16_debiti_breve"
+      }
+    }
+  },
+  "_sides": "Una entry puo' essere {'attivo': {...}, 'passivo': {...}}: i conti ambigui (erario c/IVA, banche c/c, fornitori c/anticipi) cambiano natura secondo la COLONNA in cui il documento li stampa, mai secondo la descrizione."
+}

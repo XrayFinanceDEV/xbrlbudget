@@ -37,7 +37,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Optional
 
-__all__ = ["normalize_label", "parse_label", "ParsedLabel"]
+__all__ = ["normalize_label", "parse_label", "ParsedLabel",
+           "classify_label", "LabelHit", "ROLES", "MARKERS"]
 
 # --- numerazione di voce ---------------------------------------------------------
 # Un romano/lettera/arabo e' una NUMERAZIONE solo se seguito da un separatore
@@ -98,6 +99,26 @@ def _strip_accents(s: str) -> str:
     return "".join(c for c in s if not unicodedata.combining(c))
 
 
+# Elisioni: l'apostrofo di `d'esercizio` NON e' punteggiatura da buttare, e'
+# una contrazione. Sostituirlo con uno spazio lascia una 'd' orfana
+# (`utile d esercizio`) che non corrisponde a nessuna grafia reale. Va espansa.
+_ELISION = [
+    (re.compile(r"\bdell\s*['’‘`]\s*(?=[a-z])", re.I), "dell "),
+    (re.compile(r"\bnell\s*['’‘`]\s*(?=[a-z])", re.I), "nell "),
+    (re.compile(r"\ball\s*['’‘`]\s*(?=[a-z])", re.I), "all "),
+    (re.compile(r"\bsull\s*['’‘`]\s*(?=[a-z])", re.I), "sull "),
+    (re.compile(r"\bun\s*['’‘`]\s*(?=[a-z])", re.I), "una "),
+    (re.compile(r"\bd\s*['’‘`]\s*(?=[a-z])", re.I), "di "),
+    (re.compile(r"\bl\s*['’‘`]\s*(?=[a-z])", re.I), "la "),
+]
+
+
+def _expand_elisions(s: str) -> str:
+    for pattern, repl in _ELISION:
+        s = pattern.sub(repl, s)
+    return s
+
+
 _DOTTED_ACRONYM_RE = re.compile(r"\b(?:[a-z]\.){2,}", re.IGNORECASE)
 
 
@@ -139,7 +160,9 @@ def normalize_label(desc: Optional[str]) -> str:
     if not desc:
         return ""
     s = _strip_accents(str(desc)).lower().strip()
-    # apostrofi/accenti tipografici finali (attivita' / attivita`) via subito
+    s = _expand_elisions(s)
+    # apostrofi/accenti tipografici FINALI (attivita' / attivita`): ora che le
+    # elisioni sono espanse, quelli rimasti sono solo decorativi
     s = re.sub(r"[`'‘’]", " ", s)
     s = _fuse_dotted_acronyms(s)
     s = _collapse_letter_spacing(s)
@@ -198,9 +221,216 @@ def parse_label(desc: Optional[str]) -> ParsedLabel:
     if not desc:
         return ParsedLabel("", None, False)
     raw = _strip_accents(str(desc)).strip()
+    raw = _expand_elisions(raw)
     raw = re.sub(r"[`'‘’]", " ", raw)
     raw = _fuse_dotted_acronyms(raw)
     raw = _collapse_letter_spacing(raw)
     path, rest = _extract_path(raw)
     canonical = normalize_label(rest if path else raw)
     return ParsedLabel(canonical, path, bool(_TOTAL_RE.match(canonical)))
+
+
+# =================================================================================
+# Tre spazi di target
+# =================================================================================
+#
+#   voce    -> db_field, SOLO livello legale (albero IV-CEE esistente)
+#   marker  -> "__tot_attivo" / "__pareggio" / "__risultato" / ... : non hanno
+#              db_field, e sono cio' che pilota preflight, netting e selezione
+#              candidati. Il vecchio resolver non li aveva affatto: 100% irrisolti.
+#   conto   -> db_field + RUOLO contabile. Solo route C: un conto risolto anche
+#              nello spazio 'voce' verrebbe contato due volte in aggregazione flat.
+
+import json
+import os
+
+ROLES = ("contra_immat", "contra_mat", "contra_crediti", "fondo_rischi",
+         "risultato", "totale")
+
+MARKERS = ("__tot_attivo", "__tot_passivo", "__pareggio", "__utile", "__perdita",
+           "__risultato", "__sez_sp_attivo", "__sez_sp_passivo", "__sez_ce",
+           "__col_scostamento")
+
+_DICT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "label_dictionary.json")
+
+# Soglia sotto la quale si preferisce NON classificare. Un irrisolto e' misurabile
+# (lascia residuo, i gate lo vedono); una classificazione sbagliata no.
+_MIN_SCORE = 0.55
+
+
+@dataclass(frozen=True)
+class LabelHit:
+    """Esito della classificazione, con abbastanza contesto da poterlo giudicare."""
+    target: str
+    role: Optional[str] = None
+    level: Optional[str] = None
+    specificity: float = 1.0
+    confidence: str = "alta"
+    source: str = "dizionario"
+    reason: str = ""
+
+
+_DICT_CACHE = None
+
+
+def _dictionary() -> dict:
+    global _DICT_CACHE
+    if _DICT_CACHE is None:
+        try:
+            with open(_DICT_PATH, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception:
+            raw = {}
+        # le chiavi sono gia' in forma canonica, ma ri-normalizzarle rende il file
+        # tollerante a una svista di battitura
+        markers = {normalize_label(k): v for k, v in (raw.get("marker") or {}).items()}
+        conti = {}
+        for k, v in (raw.get("conto") or {}).items():
+            entry = v if isinstance(v, dict) else {"target": v}
+            conti[normalize_label(k)] = entry
+        _DICT_CACHE = {"marker": markers, "conto": conti}
+    return _DICT_CACHE
+
+
+def _tokens(s: str) -> list:
+    return [t for t in s.split() if t]
+
+
+def _score(label_norm: str, key: str) -> float:
+    """Quanta parte dell'etichetta e' spiegata dalla chiave di dizionario.
+
+    E' il termine che salva dalle corrispondenze FALSE, il difetto simmetrico del
+    mancato riconoscimento: `cassa` spiega 1 token su 2 di `cassa previdenziale`,
+    quindi perde contro una chiave previdenziale e, senza alternative, scende
+    sotto soglia -> None (esito onesto, che lascia residuo e che i gate vedono).
+    Tokenizzare da solo non basterebbe: `cassa` e `titoli` SONO token interi.
+    """
+    lt, kt = _tokens(label_norm), _tokens(key)
+    if not lt or not kt:
+        return 0.0
+    if label_norm == key:
+        return 1.0
+    if not set(kt).issubset(set(lt)):
+        return 0.0                      # la chiave non e' contenuta: non e' un match
+    coverage = len(kt) / len(lt)        # quanta parte dell'etichetta spiega
+    prefix = 0.15 if lt[:len(kt)] == kt else 0.0
+    return min(0.99, coverage + prefix)
+
+
+def _best_dict_hit(label_norm: str, table: dict):
+    """Chiave di dizionario col punteggio piu' alto, se supera la soglia."""
+    best_key, best_score = None, 0.0
+    for key in table:
+        sc = _score(label_norm, key)
+        if sc > best_score:
+            best_key, best_score = key, sc
+    if best_key is None or best_score < _MIN_SCORE:
+        return None, best_score
+    return best_key, best_score
+
+
+def _classify_marker(parsed):
+    table = _dictionary()["marker"]
+    lab = parsed.canonical
+    # I marker si matchano per UGUAGLIANZA. Un marker riconosciuto per substring
+    # produce il bug budget_176: la voce di legge «Differenza tra valore e costi di
+    # produzione» scambiata per l'intestazione di colonna «Differenza», con il
+    # cutoff a x>=115 e l'intera pagina cancellata. Stessa ragione per cui
+    # «Totale attivo circolante» non e' «Totale attivo».
+    target = table.get(lab)
+    if target is None:
+        return None
+    return LabelHit(target=target, specificity=1.0, confidence="alta",
+                    source="dizionario", reason="marker esatto: " + repr(lab))
+
+
+def _classify_voce(parsed, side, statement):
+    from importers.iv_cee_hierarchy import resolve      # import differito: no cicli
+    node = resolve(parsed.canonical, side=side) if side else resolve(parsed.canonical)
+    if node is None and side:
+        node = resolve(parsed.canonical)
+    # Lo spazio `voce` restituisce SOLO foglie legali dell'art. 2424/2425. I nodi
+    # di netting (FONDO.AMM) descrivono una rettifica, non una riga di bilancio:
+    # farli passare di qui significherebbe che un conto del piano dei conti
+    # ("F.do amm.to automezzi") risolve anche come voce, e in aggregazione flat
+    # A/B verrebbe contato due volte. Il ruolo contra vive nello spazio `conto`.
+    if node is not None and getattr(node, "netting", False):
+        node = None
+    if node is not None and getattr(node, "db_field", None):
+        return LabelHit(
+            target=node.db_field,
+            level=str(getattr(node, "level", "") or "") or None,
+            specificity=1.0, confidence="alta", source="dizionario",
+            reason="albero IV-CEE: " + str(getattr(node, "path", "?")))
+    return None
+
+
+_IMMAT_KW = ("immateriale", "immateriali", "impianto", "ampliamento", "sviluppo",
+             "avviamento", "software", "licenz", "brevett", "marchi", "concession",
+             "pluriennal", "disaggi", "manutenzioni e riparazioni")
+
+
+def _split_fondo_ammortamento(label_norm: str, target: str, role: str):
+    """Un fondo ammortamento netta l'immateriale o il materiale secondo il CESPITE.
+
+    Sbagliarlo non altera il totale ma sposta massa fra sp02 e sp03 — invisibile a
+    ogni gate di quadratura (e' il bug budget_395, gia' documentato nel repo).
+    """
+    if any(kw in label_norm for kw in _IMMAT_KW):
+        return "sp02_immob_immateriali", "contra_immat"
+    return "sp03_immob_materiali", "contra_mat"
+
+
+def _classify_conto(parsed, side):
+    if parsed.is_total:
+        return LabelHit(target="__totale", role="totale", specificity=1.0,
+                        confidence="alta", source="dizionario",
+                        reason="riga di totale/subtotale: non va sommata")
+    table = _dictionary()["conto"]
+    key, score = _best_dict_hit(parsed.canonical, table)
+    if key is None:
+        return None
+    entry = table[key]
+    # Conti AMBIGUI (erario c/IVA, banche c/c, depositi bancari): la natura la
+    # decide la COLONNA in cui il documento li stampa, mai la descrizione. E' una
+    # regola gia' consolidata nel repo (dedurre il lato dalla descrizione fu
+    # provato e ritirato: regrediva file puliti).
+    if "attivo" in entry or "passivo" in entry:
+        side_entry = entry.get(side or "")
+        if side_entry is None:
+            return None                 # ambiguo e senza lato: non si indovina
+        entry = side_entry
+    role = entry.get("role")
+    target = entry["target"]
+    if role in ("contra_mat", "contra_immat"):
+        target, role = _split_fondo_ammortamento(parsed.canonical, target, role)
+    return LabelHit(target=target, role=role, specificity=round(score, 3),
+                    confidence="alta" if score >= 0.99 else "media",
+                    source="dizionario",
+                    reason="conto: chiave " + repr(key) + " (specificita' %.2f)" % score)
+
+
+def classify_label(label, space="voce", side=None, statement=None,
+                   path_hint=None, parent=None, use_llm=False):
+    """Classifica un'etichetta in uno dei tre spazi. `None` = non riconosciuta.
+
+    `use_llm` e' il gancio per l'arbitro Haiku (Piano 05B): oggi no-op, cosi'
+    l'attivazione futura non richiede di toccare i chiamanti.
+    """
+    if not label:
+        return None
+    parsed = parse_label(label)
+    if path_hint and not parsed.path_hint:
+        parsed = ParsedLabel(parsed.canonical, path_hint, parsed.is_total)
+    if not parsed.canonical:
+        return None
+
+    if space == "marker":
+        return _classify_marker(parsed)
+    if space == "voce":
+        return _classify_voce(parsed, side, statement)
+    if space == "conto":
+        return _classify_conto(parsed, side)
+    raise ValueError("spazio semantico sconosciuto: " + repr(space))

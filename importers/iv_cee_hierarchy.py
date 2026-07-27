@@ -39,15 +39,19 @@ _TREE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # Normalizzazione descrizioni
 # ---------------------------------------------------------------------------
 def normalize(text: str) -> str:
-    """lowercase, accenti rimossi, punteggiatura→spazio, spazi compattati."""
+    """Forma canonica delle descrizioni — delega al normalizzatore UNICO.
+
+    Prima questa funzione era una delle SEI normalizzazioni incompatibili del
+    sistema. Il difetto pratico: qui `c/c` restava `c/c`, mentre chi interrogava
+    l'albero passando da `label_semantics.normalize_label` mandava `conto c` —
+    due dialetti diversi sullo stesso dizionario, con i match persi in mezzo.
+    Gli alias del tree e le descrizioni interrogate passano ora dalla stessa
+    funzione, quindi non possono piu' divergere.
+    """
     if not text:
         return ""
-    t = unicodedata.normalize("NFKD", str(text))
-    t = "".join(c for c in t if not unicodedata.combining(c))
-    t = t.lower()
-    t = re.sub(r"[^a-z0-9/]+", " ", t)   # tieni '/' (utile per v/clienti, c/c)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    from importers.label_semantics import normalize_label
+    return normalize_label(text)
 
 
 class Node(NamedTuple):

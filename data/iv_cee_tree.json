@@ -1,88 +1,895 @@
 {
-  "comment": "Canonical Italian GAAP IV-CEE statement tree (art. 2424 / 2425 c.c.). Single source of truth for the hierarchical leveling+quadratura engine (importers/iv_cee_hierarchy.py). Each extracted line is resolved to a node; aggregation happens at the LEGAL-LEAF level (db_field). 'side' disambiguates the A/B/C/D paths that mean different things on the asset vs liability side. 'level': 1=letters A/B/C/D, 2=roman I/II/III, 3=arabic 1..n, 4=letters a/b/c (+bis/ter/quater). 'is_legal_leaf'=maps to a DB field; 'is_total'=a declared subtotal node used for reconciliation; 'netting'=this node is subtracted from its asset parent (fondi amm.to/svalutazione).",
-  "version": "1.0",
-
-  "balance_sheet": [
-    {"path": "A", "level": 1, "side": "attivo", "label": "Crediti verso soci per versamenti ancora dovuti", "db_field": "sp01_crediti_soci", "is_legal_leaf": true, "aliases": ["crediti verso soci", "crediti v/soci", "versamenti ancora dovuti", "crediti verso soci per versamenti"]},
-
-    {"path": "B", "level": 1, "side": "attivo", "label": "Immobilizzazioni", "db_field": null, "is_total": true, "aliases": ["immobilizzazioni", "totale immobilizzazioni", "attivo immobilizzato"]},
-    {"path": "B.I", "level": 2, "side": "attivo", "label": "Immobilizzazioni immateriali", "db_field": "sp02_immob_immateriali", "is_legal_leaf": true, "aliases": ["immobilizzazioni immateriali", "immob immateriali", "immobilizz immateriali", "totale immobilizzazioni immateriali"]},
-    {"path": "B.II", "level": 2, "side": "attivo", "label": "Immobilizzazioni materiali", "db_field": "sp03_immob_materiali", "is_legal_leaf": true, "aliases": ["immobilizzazioni materiali", "immob materiali", "immobilizz materiali", "totale immobilizzazioni materiali"]},
-    {"path": "B.III", "level": 2, "side": "attivo", "label": "Immobilizzazioni finanziarie", "db_field": "sp04_immob_finanziarie", "is_legal_leaf": true, "aliases": ["immobilizzazioni finanziarie", "immob finanziarie", "totale immobilizzazioni finanziarie"]},
-    {"path": "B.III.1", "level": 3, "side": "attivo", "label": "Partecipazioni", "db_field": "sp04a_partecipazioni", "is_legal_leaf": true, "parent_field": "sp04_immob_finanziarie", "aliases": ["partecipazioni", "partecipazioni in imprese"]},
-    {"path": "B.III.2", "level": 3, "side": "attivo", "label": "Crediti immobilizzati", "db_field": "sp04_immob_finanziarie", "is_legal_leaf": true, "aliases": ["crediti immobilizzati", "crediti finanziari immobilizzati"]},
-
-    {"path": "C", "level": 1, "side": "attivo", "label": "Attivo circolante", "db_field": null, "is_total": true, "aliases": ["attivo circolante", "totale attivo circolante", "circolante"]},
-    {"path": "C.I", "level": 2, "side": "attivo", "label": "Rimanenze", "db_field": "sp05_rimanenze", "is_legal_leaf": true, "aliases": ["rimanenze", "totale rimanenze", "rimanenze di magazzino", "magazzino"]},
-    {"path": "C.II", "level": 2, "side": "attivo", "label": "Crediti", "db_field": null, "is_total": true, "aliases": ["crediti", "totale crediti", "crediti dell'attivo circolante"]},
-    {"path": "C.II.entro", "level": 3, "side": "attivo", "label": "Crediti esigibili entro l'esercizio", "db_field": "sp06_crediti_breve", "is_legal_leaf": true, "scadenza": "entro", "aliases": ["esigibili entro", "crediti entro", "entro l'esercizio successivo", "entro 12 mesi", "quota entro"]},
-    {"path": "C.II.oltre", "level": 3, "side": "attivo", "label": "Crediti esigibili oltre l'esercizio", "db_field": "sp07_crediti_lungo", "is_legal_leaf": true, "scadenza": "oltre", "aliases": ["esigibili oltre", "crediti oltre", "oltre l'esercizio successivo", "oltre 12 mesi", "quota oltre"]},
-    {"path": "C.II.1", "level": 3, "side": "attivo", "label": "Crediti verso clienti", "db_field": "sp06_crediti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["crediti verso clienti", "crediti v/clienti", "verso clienti"]},
-    {"path": "C.II.5bis", "level": 3, "side": "attivo", "label": "Crediti tributari", "db_field": "sp06_crediti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["crediti tributari", "crediti v/erario", "erario c/", "crediti per imposte"]},
-    {"path": "C.II.5ter", "level": 3, "side": "attivo", "label": "Imposte anticipate", "db_field": "sp06_crediti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["imposte anticipate", "crediti per imposte anticipate", "attivita per imposte anticipate"]},
-    {"path": "C.II.5quater", "level": 3, "side": "attivo", "label": "Crediti verso altri", "db_field": "sp06_crediti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["crediti verso altri", "crediti v/altri", "altri crediti"]},
-    {"path": "C.III", "level": 2, "side": "attivo", "label": "Attivita finanziarie che non costituiscono immobilizzazioni", "db_field": "sp08_attivita_finanziarie", "is_legal_leaf": true, "aliases": ["attivita finanziarie che non costituiscono immobilizzazioni", "attivita finanziarie non immobilizzate", "titoli", "totale attivita finanziarie"]},
-    {"path": "C.IV", "level": 2, "side": "attivo", "label": "Disponibilita liquide", "db_field": "sp09_disponibilita_liquide", "is_legal_leaf": true, "aliases": ["disponibilita liquide", "totale disponibilita liquide", "depositi bancari", "denaro e valori in cassa", "cassa", "banca c/c", "banche c/c attivi"]},
-
-    {"path": "D", "level": 1, "side": "attivo", "label": "Ratei e risconti attivi", "db_field": "sp10_ratei_risconti_attivi", "is_legal_leaf": true, "aliases": ["ratei e risconti attivi", "ratei e risconti", "ratei attivi", "risconti attivi", "totale ratei e risconti"]},
-
-    {"path": "FONDO.AMM", "level": 4, "side": "attivo", "label": "Fondo ammortamento", "db_field": null, "netting": true, "aliases": ["fondo ammortamento", "f.do ammortamento", "f.do amm.to", "fondo amm", "fondi ammortamento", "f.do svalutazione", "fondo svalutazione", "f.do sval"]},
-
-    {"path": "PA", "level": 1, "side": "passivo", "label": "Patrimonio netto", "db_field": null, "is_total": true, "aliases": ["patrimonio netto", "totale patrimonio netto", "patrimonio netto totale", "mezzi propri"]},
-    {"path": "PA.I", "level": 2, "side": "passivo", "label": "Capitale", "db_field": "sp11_capitale", "is_legal_leaf": true, "aliases": ["capitale", "capitale sociale", "capitale sottoscritto", "fondo di dotazione"]},
-    {"path": "PA.II", "level": 2, "side": "passivo", "label": "Riserva da sovrapprezzo azioni", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["riserva da sovrapprezzo", "riserva sovrapprezzo azioni", "sovrapprezzo azioni"]},
-    {"path": "PA.III", "level": 2, "side": "passivo", "label": "Riserve di rivalutazione", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["riserve di rivalutazione", "riserva di rivalutazione"]},
-    {"path": "PA.IV", "level": 2, "side": "passivo", "label": "Riserva legale", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["riserva legale"]},
-    {"path": "PA.V", "level": 2, "side": "passivo", "label": "Riserve statutarie", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["riserve statutarie", "riserva statutaria"]},
-    {"path": "PA.VI", "level": 2, "side": "passivo", "label": "Altre riserve", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["altre riserve", "riserva straordinaria", "riserva facoltativa", "versamenti in conto capitale", "riserva da arrotondamento"]},
-    {"path": "PA.VII", "level": 2, "side": "passivo", "label": "Riserva per operazioni di copertura flussi finanziari attesi", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["riserva per operazioni di copertura", "copertura flussi finanziari attesi"]},
-    {"path": "PA.VIII", "level": 2, "side": "passivo", "label": "Utili (perdite) portati a nuovo", "db_field": "sp12_riserve", "is_legal_leaf": true, "aliases": ["utili portati a nuovo", "perdite portate a nuovo", "utili (perdite) portati a nuovo", "risultati portati a nuovo"]},
-    {"path": "PA.IX", "level": 2, "side": "passivo", "label": "Utile (perdita) dell'esercizio", "db_field": "sp13_utile_perdita", "is_legal_leaf": true, "is_result": true, "aliases": ["utile dell'esercizio", "perdita dell'esercizio", "utile (perdita) dell'esercizio", "risultato dell'esercizio", "utile d'esercizio", "risultato d'esercizio"]},
-
-    {"path": "PB", "level": 1, "side": "passivo", "label": "Fondi per rischi e oneri", "db_field": "sp14_fondi_rischi", "is_legal_leaf": true, "aliases": ["fondi per rischi e oneri", "fondo per rischi e oneri", "totale fondi per rischi e oneri", "fondi rischi e oneri", "fondo imposte"]},
-    {"path": "PC", "level": 1, "side": "passivo", "label": "Trattamento di fine rapporto di lavoro subordinato", "db_field": "sp15_tfr", "is_legal_leaf": true, "aliases": ["trattamento di fine rapporto", "tfr", "t.f.r.", "fondo tfr", "fondo trattamento fine rapporto", "trattamento fine rapporto lavoro subordinato"]},
-
-    {"path": "PD", "level": 1, "side": "passivo", "label": "Debiti", "db_field": null, "is_total": true, "aliases": ["debiti", "totale debiti"]},
-    {"path": "PD.entro", "level": 2, "side": "passivo", "label": "Debiti esigibili entro l'esercizio", "db_field": "sp16_debiti_breve", "is_legal_leaf": true, "scadenza": "entro", "aliases": ["debiti esigibili entro", "debiti entro", "entro l'esercizio successivo", "entro 12 mesi", "quota entro"]},
-    {"path": "PD.oltre", "level": 2, "side": "passivo", "label": "Debiti esigibili oltre l'esercizio", "db_field": "sp17_debiti_lungo", "is_legal_leaf": true, "scadenza": "oltre", "aliases": ["debiti esigibili oltre", "debiti oltre", "oltre l'esercizio successivo", "oltre 12 mesi", "quota oltre"]},
-    {"path": "PD.4", "level": 2, "side": "passivo", "label": "Debiti verso banche", "db_field": "sp16_debiti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["debiti verso banche", "debiti v/banche", "banche c/c passivi", "mutui", "finanziamenti bancari"]},
-    {"path": "PD.7", "level": 2, "side": "passivo", "label": "Debiti verso fornitori", "db_field": "sp16_debiti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["debiti verso fornitori", "debiti v/fornitori", "verso fornitori", "fornitori c/"]},
-    {"path": "PD.12", "level": 2, "side": "passivo", "label": "Debiti tributari", "db_field": "sp16_debiti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["debiti tributari", "erario c/", "debiti v/erario", "debiti per imposte"]},
-    {"path": "PD.13", "level": 2, "side": "passivo", "label": "Debiti verso istituti di previdenza", "db_field": "sp16_debiti_breve", "is_legal_leaf": true, "scadenza_split": true, "aliases": ["debiti verso istituti di previdenza", "debiti previdenziali", "inps", "inail", "istituti previdenziali"]},
-
-    {"path": "PE", "level": 1, "side": "passivo", "label": "Ratei e risconti passivi", "db_field": "sp18_ratei_risconti_passivi", "is_legal_leaf": true, "aliases": ["ratei e risconti passivi", "ratei passivi", "risconti passivi", "totale ratei e risconti passivi"]}
-  ],
-
-  "income_statement": [
-    {"path": "A", "level": 1, "label": "Valore della produzione", "db_field": null, "is_total": true, "aliases": ["valore della produzione", "totale valore della produzione"]},
-    {"path": "A.1", "level": 3, "label": "Ricavi delle vendite e delle prestazioni", "db_field": "ce01_ricavi_vendite", "is_legal_leaf": true, "aliases": ["ricavi delle vendite e delle prestazioni", "ricavi delle vendite", "ricavi vendite e prestazioni", "ricavi per prestazioni"]},
-    {"path": "A.2", "level": 3, "label": "Variazioni delle rimanenze di prodotti", "db_field": "ce02_variazioni_rimanenze", "is_legal_leaf": true, "aliases": ["variazioni delle rimanenze di prodotti", "variazione rimanenze prodotti", "variazioni rimanenze prodotti in corso", "variazioni lavori in corso su ordinazione"]},
-    {"path": "A.4", "level": 3, "label": "Incrementi di immobilizzazioni per lavori interni", "db_field": "ce03_lavori_interni", "is_legal_leaf": true, "aliases": ["incrementi di immobilizzazioni per lavori interni", "lavori interni", "incrementi immobilizzazioni lavori interni", "costi capitalizzati"]},
-    {"path": "A.5", "level": 3, "label": "Altri ricavi e proventi", "db_field": "ce04_altri_ricavi", "is_legal_leaf": true, "aliases": ["altri ricavi e proventi", "altri ricavi", "contributi in conto esercizio", "totale altri ricavi e proventi"]},
-
-    {"path": "B", "level": 1, "label": "Costi della produzione", "db_field": null, "is_total": true, "aliases": ["costi della produzione", "totale costi della produzione"]},
-    {"path": "B.6", "level": 3, "label": "Materie prime, sussidiarie, di consumo e merci", "db_field": "ce05_materie_prime", "is_legal_leaf": true, "aliases": ["materie prime sussidiarie di consumo e merci", "materie prime sussidiarie di consumo", "per materie prime", "acquisti materie prime", "merci c/acquisti"]},
-    {"path": "B.7", "level": 3, "label": "Servizi", "db_field": "ce06_servizi", "is_legal_leaf": true, "aliases": ["per servizi", "costi per servizi", "servizi"]},
-    {"path": "B.8", "level": 3, "label": "Godimento di beni di terzi", "db_field": "ce07_godimento_beni", "is_legal_leaf": true, "aliases": ["godimento di beni di terzi", "per godimento di beni di terzi", "godimento beni di terzi", "canoni di locazione", "fitti passivi", "leasing"]},
-    {"path": "B.9", "level": 3, "label": "Costi per il personale", "db_field": "ce08_costi_personale", "is_legal_leaf": true, "aliases": ["per il personale", "costi per il personale", "costo del personale", "totale costi per il personale", "salari e stipendi"]},
-    {"path": "B.10", "level": 3, "label": "Ammortamenti e svalutazioni", "db_field": "ce09_ammortamenti", "is_legal_leaf": true, "aliases": ["ammortamenti e svalutazioni", "totale ammortamenti e svalutazioni", "ammortamenti", "ammortamento immobilizzazioni"]},
-    {"path": "B.11", "level": 3, "label": "Variazioni delle rimanenze di materie prime", "db_field": "ce10_var_rimanenze_mat_prime", "is_legal_leaf": true, "aliases": ["variazioni delle rimanenze di materie prime", "variazione rimanenze materie prime", "variazioni rimanenze materie"]},
-    {"path": "B.12", "level": 3, "label": "Accantonamenti per rischi", "db_field": "ce11_accantonamenti", "is_legal_leaf": true, "aliases": ["accantonamenti per rischi", "accantonamento per rischi"]},
-    {"path": "B.13", "level": 3, "label": "Altri accantonamenti", "db_field": "ce11b_altri_accantonamenti", "is_legal_leaf": true, "aliases": ["altri accantonamenti", "altri accantonamenti per oneri"]},
-    {"path": "B.14", "level": 3, "label": "Oneri diversi di gestione", "db_field": "ce12_oneri_diversi", "is_legal_leaf": true, "aliases": ["oneri diversi di gestione", "oneri diversi", "imposte e tasse deducibili", "spese varie"]},
-
-    {"path": "C", "level": 1, "label": "Proventi e oneri finanziari", "db_field": null, "is_total": true, "aliases": ["proventi e oneri finanziari", "totale proventi e oneri finanziari"]},
-    {"path": "C.15", "level": 3, "label": "Proventi da partecipazioni", "db_field": "ce13_proventi_partecipazioni", "is_legal_leaf": true, "aliases": ["proventi da partecipazioni", "dividendi"]},
-    {"path": "C.16", "level": 3, "label": "Altri proventi finanziari", "db_field": "ce14_altri_proventi_finanziari", "is_legal_leaf": true, "aliases": ["altri proventi finanziari", "interessi attivi", "proventi finanziari"]},
-    {"path": "C.17", "level": 3, "label": "Interessi e altri oneri finanziari", "db_field": "ce15_oneri_finanziari", "is_legal_leaf": true, "aliases": ["interessi e altri oneri finanziari", "interessi passivi", "oneri finanziari", "interessi e oneri finanziari"]},
-    {"path": "C.17bis", "level": 3, "label": "Utili e perdite su cambi", "db_field": "ce16_utili_perdite_cambi", "is_legal_leaf": true, "aliases": ["utili e perdite su cambi", "utile su cambi", "perdita su cambi", "differenze cambio"]},
-
-    {"path": "D", "level": 1, "label": "Rettifiche di valore di attivita e passivita finanziarie", "db_field": "ce17_rettifiche_attivita_fin", "is_legal_leaf": true, "aliases": ["rettifiche di valore di attivita e passivita finanziarie", "rettifiche di valore di attivita finanziarie", "totale rettifiche", "rivalutazioni", "svalutazioni di partecipazioni"]},
-
-    {"path": "E.20", "level": 3, "label": "Proventi straordinari", "db_field": "ce18_proventi_straordinari", "is_legal_leaf": true, "aliases": ["proventi straordinari", "proventi e oneri straordinari proventi"]},
-    {"path": "E.21", "level": 3, "label": "Oneri straordinari", "db_field": "ce19_oneri_straordinari", "is_legal_leaf": true, "aliases": ["oneri straordinari", "proventi e oneri straordinari oneri"]},
-
-    {"path": "IMP", "level": 3, "label": "Imposte sul reddito dell'esercizio", "db_field": "ce20_imposte", "is_legal_leaf": true, "aliases": ["imposte sul reddito dell'esercizio", "imposte sul reddito", "totale delle imposte", "imposte correnti differite e anticipate", "ires", "irap"]},
-    {"path": "RES", "level": 1, "label": "Utile (perdita) dell'esercizio", "db_field": null, "is_result": true, "aliases": ["utile dell'esercizio", "perdita dell'esercizio", "utile (perdita) dell'esercizio", "risultato dell'esercizio", "21) utile"]}
-  ]
+ "comment": "Canonical Italian GAAP IV-CEE statement tree (art. 2424 / 2425 c.c.). Single source of truth for the hierarchical leveling+quadratura engine (importers/iv_cee_hierarchy.py). Each extracted line is resolved to a node; aggregation happens at the LEGAL-LEAF level (db_field). 'side' disambiguates the A/B/C/D paths that mean different things on the asset vs liability side. 'level': 1=letters A/B/C/D, 2=roman I/II/III, 3=arabic 1..n, 4=letters a/b/c (+bis/ter/quater). 'is_legal_leaf'=maps to a DB field; 'is_total'=a declared subtotal node used for reconciliation; 'netting'=this node is subtracted from its asset parent (fondi amm.to/svalutazione).",
+ "version": "1.0",
+ "balance_sheet": [
+  {
+   "path": "A",
+   "level": 1,
+   "side": "attivo",
+   "label": "Crediti verso soci per versamenti ancora dovuti",
+   "db_field": "sp01_crediti_soci",
+   "is_legal_leaf": true,
+   "aliases": [
+    "crediti verso soci",
+    "crediti v/soci",
+    "versamenti ancora dovuti",
+    "crediti verso soci per versamenti"
+   ]
+  },
+  {
+   "path": "B",
+   "level": 1,
+   "side": "attivo",
+   "label": "Immobilizzazioni",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "immobilizzazioni",
+    "totale immobilizzazioni",
+    "attivo immobilizzato"
+   ]
+  },
+  {
+   "path": "B.I",
+   "level": 2,
+   "side": "attivo",
+   "label": "Immobilizzazioni immateriali",
+   "db_field": "sp02_immob_immateriali",
+   "is_legal_leaf": true,
+   "aliases": [
+    "immobilizzazioni immateriali",
+    "immob immateriali",
+    "immobilizz immateriali",
+    "totale immobilizzazioni immateriali",
+    "immateriali"
+   ]
+  },
+  {
+   "path": "B.II",
+   "level": 2,
+   "side": "attivo",
+   "label": "Immobilizzazioni materiali",
+   "db_field": "sp03_immob_materiali",
+   "is_legal_leaf": true,
+   "aliases": [
+    "immobilizzazioni materiali",
+    "immob materiali",
+    "immobilizz materiali",
+    "totale immobilizzazioni materiali",
+    "materiali"
+   ]
+  },
+  {
+   "path": "B.III",
+   "level": 2,
+   "side": "attivo",
+   "label": "Immobilizzazioni finanziarie",
+   "db_field": "sp04_immob_finanziarie",
+   "is_legal_leaf": true,
+   "aliases": [
+    "immobilizzazioni finanziarie",
+    "immob finanziarie",
+    "totale immobilizzazioni finanziarie"
+   ]
+  },
+  {
+   "path": "B.III.1",
+   "level": 3,
+   "side": "attivo",
+   "label": "Partecipazioni",
+   "db_field": "sp04a_partecipazioni",
+   "is_legal_leaf": true,
+   "parent_field": "sp04_immob_finanziarie",
+   "aliases": [
+    "partecipazioni",
+    "partecipazioni in imprese"
+   ]
+  },
+  {
+   "path": "B.III.2",
+   "level": 3,
+   "side": "attivo",
+   "label": "Crediti immobilizzati",
+   "db_field": "sp04_immob_finanziarie",
+   "is_legal_leaf": true,
+   "aliases": [
+    "crediti immobilizzati",
+    "crediti finanziari immobilizzati"
+   ]
+  },
+  {
+   "path": "C",
+   "level": 1,
+   "side": "attivo",
+   "label": "Attivo circolante",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "attivo circolante",
+    "totale attivo circolante",
+    "circolante"
+   ]
+  },
+  {
+   "path": "C.I",
+   "level": 2,
+   "side": "attivo",
+   "label": "Rimanenze",
+   "db_field": "sp05_rimanenze",
+   "is_legal_leaf": true,
+   "aliases": [
+    "rimanenze",
+    "totale rimanenze",
+    "rimanenze di magazzino",
+    "magazzino"
+   ]
+  },
+  {
+   "path": "C.II",
+   "level": 2,
+   "side": "attivo",
+   "label": "Crediti",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "crediti",
+    "totale crediti",
+    "crediti dell'attivo circolante"
+   ]
+  },
+  {
+   "path": "C.II.entro",
+   "level": 3,
+   "side": "attivo",
+   "label": "Crediti esigibili entro l'esercizio",
+   "db_field": "sp06_crediti_breve",
+   "is_legal_leaf": true,
+   "scadenza": "entro",
+   "aliases": [
+    "esigibili entro",
+    "crediti entro",
+    "entro l'esercizio successivo",
+    "entro 12 mesi",
+    "quota entro"
+   ]
+  },
+  {
+   "path": "C.II.oltre",
+   "level": 3,
+   "side": "attivo",
+   "label": "Crediti esigibili oltre l'esercizio",
+   "db_field": "sp07_crediti_lungo",
+   "is_legal_leaf": true,
+   "scadenza": "oltre",
+   "aliases": [
+    "esigibili oltre",
+    "crediti oltre",
+    "oltre l'esercizio successivo",
+    "oltre 12 mesi",
+    "quota oltre"
+   ]
+  },
+  {
+   "path": "C.II.1",
+   "level": 3,
+   "side": "attivo",
+   "label": "Crediti verso clienti",
+   "db_field": "sp06_crediti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "crediti verso clienti",
+    "crediti v/clienti",
+    "verso clienti"
+   ]
+  },
+  {
+   "path": "C.II.5bis",
+   "level": 3,
+   "side": "attivo",
+   "label": "Crediti tributari",
+   "db_field": "sp06_crediti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "crediti tributari",
+    "crediti v/erario",
+    "erario c/",
+    "crediti per imposte"
+   ]
+  },
+  {
+   "path": "C.II.5ter",
+   "level": 3,
+   "side": "attivo",
+   "label": "Imposte anticipate",
+   "db_field": "sp06_crediti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "imposte anticipate",
+    "crediti per imposte anticipate",
+    "attivita per imposte anticipate"
+   ]
+  },
+  {
+   "path": "C.II.5quater",
+   "level": 3,
+   "side": "attivo",
+   "label": "Crediti verso altri",
+   "db_field": "sp06_crediti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "crediti verso altri",
+    "crediti v/altri",
+    "altri crediti"
+   ]
+  },
+  {
+   "path": "C.III",
+   "level": 2,
+   "side": "attivo",
+   "label": "Attivita finanziarie che non costituiscono immobilizzazioni",
+   "db_field": "sp08_attivita_finanziarie",
+   "is_legal_leaf": true,
+   "aliases": [
+    "attivita finanziarie che non costituiscono immobilizzazioni",
+    "attivita finanziarie non immobilizzate",
+    "titoli",
+    "totale attivita finanziarie"
+   ]
+  },
+  {
+   "path": "C.IV",
+   "level": 2,
+   "side": "attivo",
+   "label": "Disponibilita liquide",
+   "db_field": "sp09_disponibilita_liquide",
+   "is_legal_leaf": true,
+   "aliases": [
+    "disponibilita liquide",
+    "totale disponibilita liquide",
+    "depositi bancari",
+    "denaro e valori in cassa",
+    "cassa",
+    "banca c/c",
+    "banche c/c attivi"
+   ]
+  },
+  {
+   "path": "D",
+   "level": 1,
+   "side": "attivo",
+   "label": "Ratei e risconti attivi",
+   "db_field": "sp10_ratei_risconti_attivi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "ratei e risconti attivi",
+    "ratei e risconti",
+    "ratei attivi",
+    "risconti attivi",
+    "totale ratei e risconti"
+   ]
+  },
+  {
+   "path": "FONDO.AMM",
+   "level": 4,
+   "side": "attivo",
+   "label": "Fondo ammortamento",
+   "db_field": null,
+   "netting": true,
+   "aliases": [
+    "fondo ammortamento",
+    "f.do ammortamento",
+    "f.do amm.to",
+    "fondo amm",
+    "fondi ammortamento",
+    "f.do svalutazione",
+    "fondo svalutazione",
+    "f.do sval"
+   ]
+  },
+  {
+   "path": "PA",
+   "level": 1,
+   "side": "passivo",
+   "label": "Patrimonio netto",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "patrimonio netto",
+    "totale patrimonio netto",
+    "patrimonio netto totale",
+    "mezzi propri"
+   ]
+  },
+  {
+   "path": "PA.I",
+   "level": 2,
+   "side": "passivo",
+   "label": "Capitale",
+   "db_field": "sp11_capitale",
+   "is_legal_leaf": true,
+   "aliases": [
+    "capitale",
+    "capitale sociale",
+    "capitale sottoscritto",
+    "fondo di dotazione"
+   ]
+  },
+  {
+   "path": "PA.II",
+   "level": 2,
+   "side": "passivo",
+   "label": "Riserva da sovrapprezzo azioni",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "riserva da sovrapprezzo",
+    "riserva sovrapprezzo azioni",
+    "sovrapprezzo azioni"
+   ]
+  },
+  {
+   "path": "PA.III",
+   "level": 2,
+   "side": "passivo",
+   "label": "Riserve di rivalutazione",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "riserve di rivalutazione",
+    "riserva di rivalutazione"
+   ]
+  },
+  {
+   "path": "PA.IV",
+   "level": 2,
+   "side": "passivo",
+   "label": "Riserva legale",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "riserva legale"
+   ]
+  },
+  {
+   "path": "PA.V",
+   "level": 2,
+   "side": "passivo",
+   "label": "Riserve statutarie",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "riserve statutarie",
+    "riserva statutaria"
+   ]
+  },
+  {
+   "path": "PA.VI",
+   "level": 2,
+   "side": "passivo",
+   "label": "Altre riserve",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "altre riserve",
+    "riserva straordinaria",
+    "riserva facoltativa",
+    "versamenti in conto capitale",
+    "riserva da arrotondamento"
+   ]
+  },
+  {
+   "path": "PA.VII",
+   "level": 2,
+   "side": "passivo",
+   "label": "Riserva per operazioni di copertura flussi finanziari attesi",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "riserva per operazioni di copertura",
+    "copertura flussi finanziari attesi"
+   ]
+  },
+  {
+   "path": "PA.VIII",
+   "level": 2,
+   "side": "passivo",
+   "label": "Utili (perdite) portati a nuovo",
+   "db_field": "sp12_riserve",
+   "is_legal_leaf": true,
+   "aliases": [
+    "utili portati a nuovo",
+    "perdite portate a nuovo",
+    "utili (perdite) portati a nuovo",
+    "risultati portati a nuovo"
+   ]
+  },
+  {
+   "path": "PA.IX",
+   "level": 2,
+   "side": "passivo",
+   "label": "Utile (perdita) dell'esercizio",
+   "db_field": "sp13_utile_perdita",
+   "is_legal_leaf": true,
+   "is_result": true,
+   "aliases": [
+    "utile dell'esercizio",
+    "perdita dell'esercizio",
+    "utile (perdita) dell'esercizio",
+    "risultato dell'esercizio",
+    "utile d'esercizio",
+    "risultato d'esercizio"
+   ]
+  },
+  {
+   "path": "PB",
+   "level": 1,
+   "side": "passivo",
+   "label": "Fondi per rischi e oneri",
+   "db_field": "sp14_fondi_rischi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "fondi per rischi e oneri",
+    "fondo per rischi e oneri",
+    "totale fondi per rischi e oneri",
+    "fondi rischi e oneri",
+    "fondo imposte"
+   ]
+  },
+  {
+   "path": "PC",
+   "level": 1,
+   "side": "passivo",
+   "label": "Trattamento di fine rapporto di lavoro subordinato",
+   "db_field": "sp15_tfr",
+   "is_legal_leaf": true,
+   "aliases": [
+    "trattamento di fine rapporto",
+    "tfr",
+    "t.f.r.",
+    "fondo tfr",
+    "fondo trattamento fine rapporto",
+    "trattamento fine rapporto lavoro subordinato"
+   ]
+  },
+  {
+   "path": "PD",
+   "level": 1,
+   "side": "passivo",
+   "label": "Debiti",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "debiti",
+    "totale debiti"
+   ]
+  },
+  {
+   "path": "PD.entro",
+   "level": 2,
+   "side": "passivo",
+   "label": "Debiti esigibili entro l'esercizio",
+   "db_field": "sp16_debiti_breve",
+   "is_legal_leaf": true,
+   "scadenza": "entro",
+   "aliases": [
+    "debiti esigibili entro",
+    "debiti entro",
+    "entro l'esercizio successivo",
+    "entro 12 mesi",
+    "quota entro"
+   ]
+  },
+  {
+   "path": "PD.oltre",
+   "level": 2,
+   "side": "passivo",
+   "label": "Debiti esigibili oltre l'esercizio",
+   "db_field": "sp17_debiti_lungo",
+   "is_legal_leaf": true,
+   "scadenza": "oltre",
+   "aliases": [
+    "debiti esigibili oltre",
+    "debiti oltre",
+    "oltre l'esercizio successivo",
+    "oltre 12 mesi",
+    "quota oltre"
+   ]
+  },
+  {
+   "path": "PD.4",
+   "level": 2,
+   "side": "passivo",
+   "label": "Debiti verso banche",
+   "db_field": "sp16_debiti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "debiti verso banche",
+    "debiti v/banche",
+    "banche c/c passivi",
+    "mutui",
+    "finanziamenti bancari"
+   ]
+  },
+  {
+   "path": "PD.7",
+   "level": 2,
+   "side": "passivo",
+   "label": "Debiti verso fornitori",
+   "db_field": "sp16_debiti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "debiti verso fornitori",
+    "debiti v/fornitori",
+    "verso fornitori",
+    "fornitori c/"
+   ]
+  },
+  {
+   "path": "PD.12",
+   "level": 2,
+   "side": "passivo",
+   "label": "Debiti tributari",
+   "db_field": "sp16_debiti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "debiti tributari",
+    "erario c/",
+    "debiti v/erario",
+    "debiti per imposte"
+   ]
+  },
+  {
+   "path": "PD.13",
+   "level": 2,
+   "side": "passivo",
+   "label": "Debiti verso istituti di previdenza",
+   "db_field": "sp16_debiti_breve",
+   "is_legal_leaf": true,
+   "scadenza_split": true,
+   "aliases": [
+    "debiti verso istituti di previdenza",
+    "debiti previdenziali",
+    "inps",
+    "inail",
+    "istituti previdenziali"
+   ]
+  },
+  {
+   "path": "PE",
+   "level": 1,
+   "side": "passivo",
+   "label": "Ratei e risconti passivi",
+   "db_field": "sp18_ratei_risconti_passivi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "ratei e risconti passivi",
+    "ratei passivi",
+    "risconti passivi",
+    "totale ratei e risconti passivi"
+   ]
+  }
+ ],
+ "income_statement": [
+  {
+   "path": "A",
+   "level": 1,
+   "label": "Valore della produzione",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "valore della produzione",
+    "totale valore della produzione"
+   ]
+  },
+  {
+   "path": "A.1",
+   "level": 3,
+   "label": "Ricavi delle vendite e delle prestazioni",
+   "db_field": "ce01_ricavi_vendite",
+   "is_legal_leaf": true,
+   "aliases": [
+    "ricavi delle vendite e delle prestazioni",
+    "ricavi delle vendite",
+    "ricavi vendite e prestazioni",
+    "ricavi per prestazioni"
+   ]
+  },
+  {
+   "path": "A.2",
+   "level": 3,
+   "label": "Variazioni delle rimanenze di prodotti",
+   "db_field": "ce02_variazioni_rimanenze",
+   "is_legal_leaf": true,
+   "aliases": [
+    "variazioni delle rimanenze di prodotti",
+    "variazione rimanenze prodotti",
+    "variazioni rimanenze prodotti in corso",
+    "variazioni lavori in corso su ordinazione"
+   ]
+  },
+  {
+   "path": "A.4",
+   "level": 3,
+   "label": "Incrementi di immobilizzazioni per lavori interni",
+   "db_field": "ce03_lavori_interni",
+   "is_legal_leaf": true,
+   "aliases": [
+    "incrementi di immobilizzazioni per lavori interni",
+    "lavori interni",
+    "incrementi immobilizzazioni lavori interni",
+    "costi capitalizzati"
+   ]
+  },
+  {
+   "path": "A.5",
+   "level": 3,
+   "label": "Altri ricavi e proventi",
+   "db_field": "ce04_altri_ricavi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "altri ricavi e proventi",
+    "altri ricavi",
+    "contributi in conto esercizio",
+    "totale altri ricavi e proventi"
+   ]
+  },
+  {
+   "path": "B",
+   "level": 1,
+   "label": "Costi della produzione",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "costi della produzione",
+    "totale costi della produzione"
+   ]
+  },
+  {
+   "path": "B.6",
+   "level": 3,
+   "label": "Materie prime, sussidiarie, di consumo e merci",
+   "db_field": "ce05_materie_prime",
+   "is_legal_leaf": true,
+   "aliases": [
+    "materie prime sussidiarie di consumo e merci",
+    "materie prime sussidiarie di consumo",
+    "per materie prime",
+    "acquisti materie prime",
+    "merci c/acquisti"
+   ]
+  },
+  {
+   "path": "B.7",
+   "level": 3,
+   "label": "Servizi",
+   "db_field": "ce06_servizi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "per servizi",
+    "costi per servizi",
+    "servizi"
+   ]
+  },
+  {
+   "path": "B.8",
+   "level": 3,
+   "label": "Godimento di beni di terzi",
+   "db_field": "ce07_godimento_beni",
+   "is_legal_leaf": true,
+   "aliases": [
+    "godimento di beni di terzi",
+    "per godimento di beni di terzi",
+    "godimento beni di terzi",
+    "canoni di locazione",
+    "fitti passivi",
+    "leasing"
+   ]
+  },
+  {
+   "path": "B.9",
+   "level": 3,
+   "label": "Costi per il personale",
+   "db_field": "ce08_costi_personale",
+   "is_legal_leaf": true,
+   "aliases": [
+    "per il personale",
+    "costi per il personale",
+    "costo del personale",
+    "totale costi per il personale",
+    "salari e stipendi"
+   ]
+  },
+  {
+   "path": "B.10",
+   "level": 3,
+   "label": "Ammortamenti e svalutazioni",
+   "db_field": "ce09_ammortamenti",
+   "is_legal_leaf": true,
+   "aliases": [
+    "ammortamenti e svalutazioni",
+    "totale ammortamenti e svalutazioni",
+    "ammortamenti",
+    "ammortamento immobilizzazioni"
+   ]
+  },
+  {
+   "path": "B.11",
+   "level": 3,
+   "label": "Variazioni delle rimanenze di materie prime",
+   "db_field": "ce10_var_rimanenze_mat_prime",
+   "is_legal_leaf": true,
+   "aliases": [
+    "variazioni delle rimanenze di materie prime",
+    "variazione rimanenze materie prime",
+    "variazioni rimanenze materie"
+   ]
+  },
+  {
+   "path": "B.12",
+   "level": 3,
+   "label": "Accantonamenti per rischi",
+   "db_field": "ce11_accantonamenti",
+   "is_legal_leaf": true,
+   "aliases": [
+    "accantonamenti per rischi",
+    "accantonamento per rischi"
+   ]
+  },
+  {
+   "path": "B.13",
+   "level": 3,
+   "label": "Altri accantonamenti",
+   "db_field": "ce11b_altri_accantonamenti",
+   "is_legal_leaf": true,
+   "aliases": [
+    "altri accantonamenti",
+    "altri accantonamenti per oneri"
+   ]
+  },
+  {
+   "path": "B.14",
+   "level": 3,
+   "label": "Oneri diversi di gestione",
+   "db_field": "ce12_oneri_diversi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "oneri diversi di gestione",
+    "oneri diversi",
+    "imposte e tasse deducibili",
+    "spese varie"
+   ]
+  },
+  {
+   "path": "C",
+   "level": 1,
+   "label": "Proventi e oneri finanziari",
+   "db_field": null,
+   "is_total": true,
+   "aliases": [
+    "proventi e oneri finanziari",
+    "totale proventi e oneri finanziari"
+   ]
+  },
+  {
+   "path": "C.15",
+   "level": 3,
+   "label": "Proventi da partecipazioni",
+   "db_field": "ce13_proventi_partecipazioni",
+   "is_legal_leaf": true,
+   "aliases": [
+    "proventi da partecipazioni",
+    "dividendi"
+   ]
+  },
+  {
+   "path": "C.16",
+   "level": 3,
+   "label": "Altri proventi finanziari",
+   "db_field": "ce14_altri_proventi_finanziari",
+   "is_legal_leaf": true,
+   "aliases": [
+    "altri proventi finanziari",
+    "interessi attivi",
+    "proventi finanziari"
+   ]
+  },
+  {
+   "path": "C.17",
+   "level": 3,
+   "label": "Interessi e altri oneri finanziari",
+   "db_field": "ce15_oneri_finanziari",
+   "is_legal_leaf": true,
+   "aliases": [
+    "interessi e altri oneri finanziari",
+    "interessi passivi",
+    "oneri finanziari",
+    "interessi e oneri finanziari"
+   ]
+  },
+  {
+   "path": "C.17bis",
+   "level": 3,
+   "label": "Utili e perdite su cambi",
+   "db_field": "ce16_utili_perdite_cambi",
+   "is_legal_leaf": true,
+   "aliases": [
+    "utili e perdite su cambi",
+    "utile su cambi",
+    "perdita su cambi",
+    "differenze cambio"
+   ]
+  },
+  {
+   "path": "D",
+   "level": 1,
+   "label": "Rettifiche di valore di attivita e passivita finanziarie",
+   "db_field": "ce17_rettifiche_attivita_fin",
+   "is_legal_leaf": true,
+   "aliases": [
+    "rettifiche di valore di attivita e passivita finanziarie",
+    "rettifiche di valore di attivita finanziarie",
+    "totale rettifiche",
+    "rivalutazioni",
+    "svalutazioni di partecipazioni"
+   ]
+  },
+  {
+   "path": "E.20",
+   "level": 3,
+   "label": "Proventi straordinari",
+   "db_field": "ce18_proventi_straordinari",
+   "is_legal_leaf": true,
+   "aliases": [
+    "proventi straordinari",
+    "proventi e oneri straordinari proventi"
+   ]
+  },
+  {
+   "path": "E.21",
+   "level": 3,
+   "label": "Oneri straordinari",
+   "db_field": "ce19_oneri_straordinari",
+   "is_legal_leaf": true,
+   "aliases": [
+    "oneri straordinari",
+    "proventi e oneri straordinari oneri"
+   ]
+  },
+  {
+   "path": "IMP",
+   "level": 3,
+   "label": "Imposte sul reddito dell'esercizio",
+   "db_field": "ce20_imposte",
+   "is_legal_leaf": true,
+   "aliases": [
+    "imposte sul reddito dell'esercizio",
+    "imposte sul reddito",
+    "totale delle imposte",
+    "imposte correnti differite e anticipate",
+    "ires",
+    "irap"
+   ]
+  },
+  {
+   "path": "RES",
+   "level": 1,
+   "label": "Utile (perdita) dell'esercizio",
+   "db_field": null,
+   "is_result": true,
+   "aliases": [
+    "utile dell'esercizio",
+    "perdita dell'esercizio",
+    "utile (perdita) dell'esercizio",
+    "risultato dell'esercizio",
+    "21) utile"
+   ]
+  }
+ ]
 }

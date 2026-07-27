@@ -62,6 +62,20 @@ _PROSE_RE = re.compile(
 
 def classify_row_set(label: str, code: str) -> str:
     """A quale insieme appartiene questa riga? (non: quale voce e')."""
+    # Il PATH CIVILISTICO ha la precedenza sul codice di conto: una riga come
+    # "4010 C.II.1) Verso clienti" e' una VOCE DI LEGGE stampata con accanto il
+    # codice del gestionale. Testare prima il codice la mandava nell'insieme
+    # 'account', quindi la si interrogava nello spazio sbagliato — 1.668 righe del
+    # corpus, che e' l'intera differenza fra le due misure.
+    try:
+        from importers.label_semantics import parse_label
+        # il codice del gestionale in testa (4010, 03/35/005) non e' sempre
+        # riconosciuto da _ACCOUNT_CODE_RE: toglierlo prima di cercare il path
+        bare = re.sub(r"^\s*[\d/.\-]{1,12}\s+", "", label)
+        if parse_label(bare).path_hint or parse_label(label).path_hint:
+            return "legal"
+    except Exception:
+        pass
     if _MARKER_RE.match(label):
         return "marker"
     if code and _ACCOUNT_CODE_RE.match(code):
@@ -125,9 +139,13 @@ def _resolver_for(space):
 
     Cosi' la stessa metrica misura il PRIMA e il DOPO senza cambiare strumento.
     """
+    # nome dell'INSIEME misurato -> nome dello SPAZIO del motore semantico
+    space_name = {"legal": "voce", "account": "conto", "marker": "marker"}[space]
     try:
+        if os.environ.get("LABEL_COVERAGE_LEGACY"):
+            raise ImportError("forzato il resolver legacy per il confronto")
         from importers.label_semantics import classify_label
-        return lambda lab, side: classify_label(lab, space=space, side=side)
+        return lambda lab, side: classify_label(lab, space=space_name, side=side)
     except Exception:
         from importers.iv_cee_hierarchy import resolve
         if space == "marker":

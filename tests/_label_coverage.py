@@ -1,16 +1,26 @@
-"""Copertura del resolver semantico sull'intero corpus.
+"""Copertura del riconoscimento etichette, misurata PER SPAZIO SEMANTICO.
 
-Domanda a cui risponde: *quante etichette reali, e quanta massa in euro, il sistema
-NON sa ricondurre a una voce IV-CEE?* — indipendentemente dal singolo file.
+La misura precedente ("58,3% delle righe non risolte") era **sovrastimata e non
+confrontabile**: metteva in un unico denominatore voci civilistiche, conti del
+piano dei conti, marcatori di totale/sezione e prosa di nota integrativa, e
+interrogava solo `iv_cee_hierarchy.resolve` — che per progetto copre SOLO le voci
+legali. Accettare o rifiutare un fix su quel numero non ha senso.
 
-Scorre i PDF di una o piu' cartelle, estrae le righe "etichetta ... importo", e per
-ogni etichetta chiede a `iv_cee_hierarchy.resolve` se la riconosce. Produce:
-  - % di righe e % di massa NON risolte;
-  - classifica delle etichette non risolte per numero di DOCUMENTI in cui compaiono
-    (le prime della lista sono i buchi generali del dizionario, non casi isolati).
+Qui ogni riga con importo viene prima assegnata a uno di quattro insiemi, poi
+interrogata nello spazio corretto:
 
-CLI:  python tests/_label_coverage.py Test/successSecondo Test/june_sample/success ...
+  legal    riga con path civilistico (B.II.1.a) o voce di legge  -> spazio "voce"
+  account  riga con codice di conto (DEPI/8-digit/dotted/...)    -> spazio "conto"
+  marker   totali, sezioni, intestazioni di colonna              -> spazio "marker"
+  other    prosa di nota integrativa, intestazioni documento     -> ESCLUSA dal denominatore
+
+`other` e' il grosso della sovrastima: righe come "i ricavi caratteristici
+crescono di circa il 18%" portano un importo ma non sono voci di bilancio.
+
+CLI:  python tests/_label_coverage.py <cartelle o pdf...>
+      python tests/_label_coverage.py --top 40 Test/june_sample/success
 """
+import argparse
 import glob
 import os
 import re
@@ -24,10 +34,46 @@ if ROOT not in sys.path:
 
 import fitz  # noqa: E402
 
-from importers.iv_cee_hierarchy import resolve  # noqa: E402
-
 _AMOUNT_RE = re.compile(r"-?\(?\d{1,3}(?:[.\s]\d{3})*,\d{2}\)?|-?\d+,\d{2}")
-_NOISE = re.compile(r"^(pag|pagina|data|ditta|cod|codice fiscale|partita iva|\d+)$", re.I)
+
+# --- riconoscimento dell'INSIEME di appartenenza (non della voce) ---------------
+
+# path civilistico: B.II.1.a) / C.II.5 quater) / A.VIII / D.1.2.b)
+_LEGAL_PATH_RE = re.compile(
+    r"^\s*[A-E]\s*[.)]?\s*(?:[IVX]{1,4}|\d{1,2})"
+    r"(?:\s*[.)]\s*[0-9a-z]+|\s+(?:bis|ter|quater|quinquies))*\s*[.)]?",
+    re.I)
+# codice di conto: DEPI 03/35/005, 8-digit, dotted 03.01.07, BILAGRA 123.45678,
+# TeamSystem 12/1234/1234, single-column 6-digit
+_ACCOUNT_CODE_RE = re.compile(
+    r"^\s*(?:\d{2}/\d{2,4}/\d{3,4}|\d{8}\b|\d{1,3}(?:\.\d{2,5}){1,3}\b|\d{6}\b)")
+_MARKER_RE = re.compile(
+    r"^\s*(?:\*+\s*)?(?:tot(?:ale|ali)?\b|t\s+o\s+t\s+a\s+l\s+e"
+    r"|a\s*t\s*t\s*i\s*v\s*i\s*t|p\s*a\s*s\s*s\s*i\s*v\s*i\s*t"
+    r"|stato\s+patrimoniale|conto\s+economico|differenza\b|scost"
+    r"|utile\b|perdita\b|risultato\b|sbilancio\b|pareggio\b)",
+    re.I)
+# prosa: frasi lunghe, verbi, congiunzioni — non sono voci di bilancio
+_PROSE_RE = re.compile(
+    r"\b(?:che|come|sono|viene|vengono|essere|stato|nonche|pari a|circa|rispetto"
+    r"|ammonta|ammontano|calcolat|utilizzabil|compensazione|esercizio precedente"
+    r"|si\s+e\b|e'\s+stat)\b", re.I)
+
+
+def classify_row_set(label: str, code: str) -> str:
+    """A quale insieme appartiene questa riga? (non: quale voce e')."""
+    if _MARKER_RE.match(label):
+        return "marker"
+    if code and _ACCOUNT_CODE_RE.match(code):
+        return "account"
+    if _LEGAL_PATH_RE.match(label):
+        return "legal"
+    words = label.split()
+    if len(words) > 9 or _PROSE_RE.search(label):
+        return "other"                      # prosa di nota integrativa
+    if len(words) <= 6 and re.search(r"[A-Za-z]{4}", label):
+        return "account"                    # voce senza codice: conto o voce breve
+    return "other"
 
 
 def _to_dec(tok: str) -> Decimal:
@@ -38,27 +84,31 @@ def _to_dec(tok: str) -> Decimal:
         return Decimal(0)
 
 
-def _label_of(line: str) -> str:
+def _split_code(line: str):
+    """Separa un eventuale codice di conto in testa dalla descrizione."""
+    m = _ACCOUNT_CODE_RE.match(line)
+    if m:
+        return m.group(0).strip(), line[m.end():].strip(" .-|")
+    return "", line.strip(" .-|")
+
+
+def _label_of(line: str):
     s = _AMOUNT_RE.sub(" ", line)
     s = re.sub(r"[.…]{3,}", " ", s)
-    s = re.sub(r"^\s*[\d/.\-]{2,12}\s+", "", s)      # codice di conto in testa
-    return re.sub(r"\s+", " ", s).strip(" .-|")
+    s = re.sub(r"\s+", " ", s).strip(" .-|")
+    return _split_code(s)
 
 
 def _visual_lines(path: str, ytol: float = 2.5):
-    """Ricostruisce le righe VISIVE (etichetta + importo sulla stessa riga stampata).
-
-    `page.get_text()` su layout a colonne separa spesso l'etichetta dall'importo su
-    righe logiche diverse: contarle cosi' sottostima enormemente le voci. Qui le
-    parole vengono raggruppate per coordinata y, come fanno i parser di produzione.
-    """
+    """Righe VISIVE: `get_text()` su layout a colonne separa spesso l'etichetta
+    dall'importo su righe logiche diverse. Qui si raggruppa per coordinata y,
+    come fanno i parser di produzione."""
     out = []
     doc = fitz.open(path)
     try:
         for page in doc:
-            words = page.get_text("words")  # (x0,y0,x1,y1,word,block,line,word_no)
             buckets = defaultdict(list)
-            for w in words:
+            for w in page.get_text("words"):
                 buckets[round(w[1] / ytol)].append(w)
             for key in sorted(buckets):
                 ws = sorted(buckets[key], key=lambda w: w[0])
@@ -68,20 +118,39 @@ def _visual_lines(path: str, ytol: float = 2.5):
     return out
 
 
-def scan(paths):
-    rows = mass = Decimal(0), Decimal(0)
-    n_rows = n_unres = 0
-    mass_tot = Decimal(0)
-    mass_unres = Decimal(0)
-    per_doc = defaultdict(set)      # etichetta non risolta -> set di documenti
-    freq = Counter()
+# --- interrogazione del riconoscitore ------------------------------------------
+
+def _resolver_for(space):
+    """Usa il motore semantico (Piano 05) se c'e', altrimenti il vecchio resolve.
+
+    Cosi' la stessa metrica misura il PRIMA e il DOPO senza cambiare strumento.
+    """
+    try:
+        from importers.label_semantics import classify_label
+        return lambda lab, side: classify_label(lab, space=space, side=side)
+    except Exception:
+        from importers.iv_cee_hierarchy import resolve
+        if space == "marker":
+            return lambda lab, side: None       # il vecchio resolver non ha marker
+        return lambda lab, side: (resolve(lab, side=None) or resolve(lab, side="attivo")
+                                  or resolve(lab, side="passivo"))
+
+
+def scan(paths, top=40):
     files = []
     for p in paths:
         if os.path.isdir(p):
-            files += [f for f in sorted(glob.glob(os.path.join(p, "*")))
+            files += [f for f in sorted(glob.glob(os.path.join(p, "**", "*"), recursive=True))
                       if f.lower().endswith(".pdf")]
         elif p.lower().endswith(".pdf"):
             files.append(p)
+
+    resolvers = {s: _resolver_for(s) for s in ("legal", "account", "marker")}
+    space_of = {"legal": "voce", "account": "conto", "marker": "marker"}
+    rows = defaultdict(lambda: [0, 0])            # insieme -> [totali, irrisolte]
+    mass = defaultdict(lambda: [Decimal(0), Decimal(0)])
+    per_doc = defaultdict(lambda: defaultdict(set))
+    freq = defaultdict(Counter)
 
     for f in files:
         try:
@@ -93,31 +162,58 @@ def scan(paths):
             amounts = _AMOUNT_RE.findall(line)
             if not amounts:
                 continue
-            lab = _label_of(line)
-            if len(lab) < 4 or not re.search(r"[A-Za-z]{3}", lab) or _NOISE.match(lab):
+            code, lab = _label_of(line)
+            if len(lab) < 3 or not re.search(r"[A-Za-z]{3}", lab):
                 continue
+            group = classify_row_set(lab, code)
+            if group == "other":
+                continue                          # fuori dal denominatore, per progetto
             val = max((_to_dec(a) for a in amounts), default=Decimal(0))
-            n_rows += 1
-            mass_tot += val
-            hit = (resolve(lab, side=None) or resolve(lab, side="attivo")
-                   or resolve(lab, side="passivo"))
+            rows[group][0] += 1
+            mass[group][0] += val
+            hit = None
+            for side in (None, "attivo", "passivo"):
+                hit = resolvers[group](lab, side)
+                if hit:
+                    break
             if not hit:
-                n_unres += 1
-                mass_unres += val
+                rows[group][1] += 1
+                mass[group][1] += val
                 key = re.sub(r"\d", "#", lab.lower())[:60]
-                per_doc[key].add(base)
-                freq[key] += 1
+                per_doc[group][key].add(base)
+                freq[group][key] += 1
 
     print(f"documenti analizzati : {len(files)}")
-    print(f"righe con importo    : {n_rows:,}")
-    print(f"righe NON risolte    : {n_unres:,} ({100 * n_unres / max(1, n_rows):.1f}%)")
-    print(f"massa totale righe   : {mass_tot:,.0f}")
-    print(f"massa NON risolta    : {mass_unres:,.0f} "
-          f"({100 * float(mass_unres) / max(1.0, float(mass_tot)):.1f}%)")
-    print("\n--- etichette NON risolte piu' DIFFUSE (n. documenti / n. occorrenze) ---")
-    for key, docs in sorted(per_doc.items(), key=lambda kv: (-len(kv[1]), -freq[kv[0]]))[:60]:
-        print(f"  doc={len(docs):<3} occ={freq[key]:<5} {key}")
+    print(f"resolver interrogato : {'label_semantics' if _has_engine() else 'iv_cee_hierarchy.resolve (legacy)'}")
+    print(f"\n{'SPAZIO':<10} {'righe':>7} {'irrisolte':>10} {'%':>6}   {'massa':>16} {'% massa':>8}")
+    for group in ("legal", "account", "marker"):
+        tot, unres = rows[group]
+        if not tot:
+            continue
+        mt, mu = mass[group]
+        print(f"{group:<10} {tot:>7,} {unres:>10,} {100*unres/tot:>5.1f}%   "
+              f"{float(mt):>16,.0f} {100*float(mu)/float(mt or 1):>7.1f}%")
+
+    for group in ("marker", "legal", "account"):
+        if not per_doc[group]:
+            continue
+        print(f"\n--- {group}: etichette NON risolte piu' DIFFUSE (n. documenti) ---")
+        for key, docs in sorted(per_doc[group].items(),
+                                key=lambda kv: (-len(kv[1]), -freq[group][kv[0]]))[:top]:
+            print(f"  doc={len(docs):<3} occ={freq[group][key]:<5} {key}")
+
+
+def _has_engine() -> bool:
+    try:
+        import importers.label_semantics  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":
-    scan(sys.argv[1:])
+    ap = argparse.ArgumentParser()
+    ap.add_argument("paths", nargs="+")
+    ap.add_argument("--top", type=int, default=40)
+    a = ap.parse_args()
+    scan(a.paths, a.top)

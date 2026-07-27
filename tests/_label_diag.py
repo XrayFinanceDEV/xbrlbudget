@@ -51,7 +51,12 @@ def diag(path: str, max_pages: int = 14) -> None:
     print(f"REASON : {c.reason[:160]}")
 
     try:
-        dt = _declared_control_totals(full)
+        # ATTENZIONE: la firma e' (file_path, text=...). Passare il testo
+        # POSIZIONALMENTE lo fa finire in file_path, _extract_full_text solleva e la
+        # funzione ritorna tutto None — facendo credere che non sappia leggere i
+        # totali stampati. E' un falso negativo che ho prodotto io: i totali su
+        # 281/342/365/176 vengono letti correttamente.
+        dt = _declared_control_totals(path, text=full)
     except Exception as exc:
         dt = f"ERRORE: {exc}"
     print(f"TOTALI DICHIARATI LETTI: {dt}")

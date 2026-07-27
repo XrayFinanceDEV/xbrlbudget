@@ -110,6 +110,25 @@ Diagnosi verificate durante l'analisi, ognuna riconducibile a una grafia non ric
   lascia `residuo attivo=685.283`. Le etichette di quel documento sono `Fornitori`, `Clienti`,
   `Fatture da ricevere`, `Banche c/anticipi su fattura`, `Dipendenti c/retribuzioni`,
   `F.do amm.to <cespite>` — **tutte irrisolte da `resolve()`** (verificato).
+
+> **CORREZIONE 2026-07-27 (errore mio, non del codice).** Una versione precedente di questo paragrafo
+> affermava che su 342/365 `_declared_control_totals` non leggesse **nessun** totale dichiarato. Falso:
+> era un difetto della mia diagnostica, che passava il testo **posizionalmente** (la firma è
+> `(file_path, text=...)`, quindi il testo finiva in `file_path`, `_extract_full_text` sollevava e la
+> funzione tornava tutto `None`). Chiamata correttamente, legge bene:
+>
+> | file | attivo | passivo | pareggio | utile |
+> |---|---|---|---|---|
+> | budget_281 | 1.833.911,30 | 1.785.703,34 | 1.833.911,30 | 48.207,96 |
+> | budget_342 | 1.999.306,21 | 1.999.306,21 | 1.999.306,21 | 100.046,26 |
+> | budget_365 | 1.119.893,69 | 1.119.893,69 | **1.809.957,59** | 29.707,10 |
+> | budget_176 | 1.116.259,44 | 1.116.259,44 | — | 84.753,38 |
+>
+> **Conseguenza sul Task 4: il suo valore è molto minore di quanto scritto.** La lettura dei totali NON
+> è il collo di bottiglia su questi file. Resta un difetto reale ma circoscritto — il `pareggio` di
+> budget_365 (1.809.957,59) è quello del **Conto Economico**, non dello Stato Patrimoniale: è il
+> largest-wins già noto come bug budget_337, e lo si chiude con lo **scoping del marker per sezione**,
+> non allungando liste. Il Task 4 va quindi **ridimensionato a questo**, e la priorità passa al Task 5.
 - **`_is_fondo_amm`** (`situazione_contabile_parser.py:3274`) è una congiunzione di substring su testo
   solo-`upper()` che governa **l'intero netting dei fondi**, quindi il pareggio di tutta la route C.
   `F.di ammor.to`, `Fdo amm` non matchano → fondo non nettato → attivo lordo vs passivo gonfio → plug →

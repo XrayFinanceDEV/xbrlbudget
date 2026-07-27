@@ -408,6 +408,195 @@
       "passivo": {
         "target": "sp16_debiti_breve"
       }
+    },
+    "energia elettrica": {
+      "target": "ce06_servizi"
+    },
+    "riscaldamento": {
+      "target": "ce06_servizi"
+    },
+    "spese telefoniche": {
+      "target": "ce06_servizi"
+    },
+    "spese postali": {
+      "target": "ce06_servizi"
+    },
+    "spese di trasporto": {
+      "target": "ce06_servizi"
+    },
+    "trasporti su acquisti": {
+      "target": "ce06_servizi"
+    },
+    "pedaggi autostradali": {
+      "target": "ce06_servizi"
+    },
+    "consulenze tecniche": {
+      "target": "ce06_servizi"
+    },
+    "consulenze legali": {
+      "target": "ce06_servizi"
+    },
+    "consulenze fiscali": {
+      "target": "ce06_servizi"
+    },
+    "consulenza marketing": {
+      "target": "ce06_servizi"
+    },
+    "manutenzioni e riparazioni": {
+      "target": "ce06_servizi"
+    },
+    "lavorazioni esterne": {
+      "target": "ce06_servizi"
+    },
+    "altri costi per servizi": {
+      "target": "ce06_servizi"
+    },
+    "commissioni e spese bancarie": {
+      "target": "ce06_servizi"
+    },
+    "oneri bancari": {
+      "target": "ce06_servizi"
+    },
+    "compensi amministratori": {
+      "target": "ce06_servizi"
+    },
+    "assicurazioni": {
+      "target": "ce06_servizi"
+    },
+    "pubblicita": {
+      "target": "ce06_servizi"
+    },
+    "fitti passivi": {
+      "target": "ce07_godimento_beni"
+    },
+    "affitti passivi": {
+      "target": "ce07_godimento_beni"
+    },
+    "canoni di locazione": {
+      "target": "ce07_godimento_beni"
+    },
+    "canoni leasing": {
+      "target": "ce07_godimento_beni"
+    },
+    "leasing": {
+      "target": "ce07_godimento_beni"
+    },
+    "noleggi": {
+      "target": "ce07_godimento_beni"
+    },
+    "salari e stipendi": {
+      "target": "ce08_costi_personale"
+    },
+    "salari stipendi": {
+      "target": "ce08_costi_personale"
+    },
+    "oneri sociali": {
+      "target": "ce08_costi_personale"
+    },
+    "oneri sociali inps": {
+      "target": "ce08_costi_personale"
+    },
+    "oneri sociali inail": {
+      "target": "ce08_costi_personale"
+    },
+    "accantonamento tfr": {
+      "target": "ce08_costi_personale"
+    },
+    "altri costi del personale": {
+      "target": "ce08_costi_personale"
+    },
+    "imposta di bollo": {
+      "target": "ce12_oneri_diversi"
+    },
+    "imposta di registro": {
+      "target": "ce12_oneri_diversi"
+    },
+    "diritti camerali": {
+      "target": "ce12_oneri_diversi"
+    },
+    "diritti mit": {
+      "target": "ce12_oneri_diversi"
+    },
+    "valori bollati": {
+      "target": "ce12_oneri_diversi"
+    },
+    "arrotondamenti passivi": {
+      "target": "ce12_oneri_diversi"
+    },
+    "costi indeducibili": {
+      "target": "ce12_oneri_diversi"
+    },
+    "erogazioni liberali": {
+      "target": "ce12_oneri_diversi"
+    },
+    "oneri tributari": {
+      "target": "ce12_oneri_diversi"
+    },
+    "altre imposte e tasse": {
+      "target": "ce12_oneri_diversi"
+    },
+    "tassa sui rifiuti": {
+      "target": "ce12_oneri_diversi"
+    },
+    "oneri diversi di gestione": {
+      "target": "ce12_oneri_diversi"
+    },
+    "interessi passivi": {
+      "target": "ce15_oneri_finanziari"
+    },
+    "interessi passivi su mutui": {
+      "target": "ce15_oneri_finanziari"
+    },
+    "interessi passivi bancari": {
+      "target": "ce15_oneri_finanziari"
+    },
+    "ricavi delle vendite": {
+      "target": "ce01_ricavi_vendite"
+    },
+    "ricavi delle vendite e delle prestazioni": {
+      "target": "ce01_ricavi_vendite"
+    },
+    "vendite merci": {
+      "target": "ce01_ricavi_vendite"
+    },
+    "corrispettivi": {
+      "target": "ce01_ricavi_vendite"
+    },
+    "altri ricavi e proventi": {
+      "target": "ce04_altri_ricavi"
+    },
+    "arrotondamenti attivi": {
+      "target": "ce04_altri_ricavi"
+    },
+    "sopravvenienze attive": {
+      "target": "ce04_altri_ricavi"
+    },
+    "acquisti merci": {
+      "target": "ce05_materie_prime"
+    },
+    "acquisti materie prime": {
+      "target": "ce05_materie_prime"
+    },
+    "carburanti": {
+      "target": "ce05_materie_prime"
+    },
+    "ammortamento immobilizzazioni immateriali": {
+      "target": "ce09_ammortamenti"
+    },
+    "ammortamento immobilizzazioni materiali": {
+      "target": "ce09_ammortamenti"
+    },
+    "quote di ammortamento": {
+      "target": "ce09_ammortamenti"
+    },
+    "imposte sul reddito": {
+      "target": "ce20_imposte"
+    },
+    "ires": {
+      "target": "ce20_imposte"
+    },
+    "irap": {
+      "target": "ce20_imposte"
     }
   },
   "_sides": "Una entry puo' essere {'attivo': {...}, 'passivo': {...}}: i conti ambigui (erario c/IVA, banche c/c, fornitori c/anticipi) cambiano natura secondo la COLONNA in cui il documento li stampa, mai secondo la descrizione."

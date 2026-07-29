@@ -338,7 +338,42 @@ export interface PDFImportResult {
   warnings: string[];
   prior_year_imported?: boolean;
   prior_fiscal_year?: number | null;
+  // Optional OCR metadata, present only for /import/pdf-ocr (MinerU) imports
+  ocr_engine?: string;
+  ocr_version?: string | null;
+  ocr_pages?: number;
+  ocr_tables?: number;
+  source_detail_fields?: number;
+  detail_level?: 'summary' | 'standard' | 'detailed';
+  extraction_method?: string;
 }
+
+// Shared query-string builder so /import/pdf and /import/pdf-ocr cannot diverge.
+const buildPdfImportParams = (
+  fiscalYear: number,
+  companyName?: string,
+  companyId?: number | null,
+  createCompany: boolean = true,
+  sector?: number,
+  periodMonths?: number
+): string => {
+  const params = new URLSearchParams();
+  params.append('fiscal_year', fiscalYear.toString());
+  params.append('create_company', createCompany.toString());
+  if (companyId !== null && companyId !== undefined) {
+    params.append('company_id', companyId.toString());
+  }
+  if (companyName) {
+    params.append('company_name', companyName);
+  }
+  if (sector) {
+    params.append('sector', sector.toString());
+  }
+  if (periodMonths) {
+    params.append('period_months', periodMonths.toString());
+  }
+  return params.toString();
+};
 
 export const importPDF = async (
   file: File,
@@ -351,29 +386,10 @@ export const importPDF = async (
 ): Promise<PDFImportResult> => {
   const formData = new FormData();
   formData.append('file', file);
-
-  const params = new URLSearchParams();
-  params.append('fiscal_year', fiscalYear.toString());
-  params.append('create_company', createCompany.toString());
-
-  if (companyId !== null && companyId !== undefined) {
-    params.append('company_id', companyId.toString());
-  }
-
-  if (companyName) {
-    params.append('company_name', companyName);
-  }
-
-  if (sector) {
-    params.append('sector', sector.toString());
-  }
-
-  if (periodMonths) {
-    params.append('period_months', periodMonths.toString());
-  }
+  const qs = buildPdfImportParams(fiscalYear, companyName, companyId, createCompany, sector, periodMonths);
 
   const { data } = await api.post<PDFImportResult>(
-    `/import/pdf?${params.toString()}`,
+    `/import/pdf?${qs}`,
     formData,
     {
       headers: {
@@ -382,6 +398,47 @@ export const importPDF = async (
       timeout: 300000, // 5 minutes for PDF processing (Docling model loading + extraction)
     }
   );
+  return data;
+};
+
+// Import a PDF via the MinerU OCR route (scanned / image-only balance sheets).
+// Same signature as importPDF; MUST NOT fall back to /import/pdf on failure.
+// MinerU may consume its full 600s budget before deterministic/LLM accounting
+// validation starts. Keep the browser outside nginx's 1200s synchronous budget.
+export const importOCR = async (
+  file: File,
+  fiscalYear: number,
+  companyName?: string,
+  companyId?: number | null,
+  createCompany: boolean = true,
+  sector?: number,
+  periodMonths?: number
+): Promise<PDFImportResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const qs = buildPdfImportParams(fiscalYear, companyName, companyId, createCompany, sector, periodMonths);
+
+  const { data } = await api.post<PDFImportResult>(
+    `/import/pdf-ocr?${qs}`,
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 1260000,
+    }
+  );
+  return data;
+};
+
+export interface ImportCapabilities {
+  ocr_available: boolean;
+}
+
+// Operational status for clients that want to preflight the OCR endpoint. The
+// infrannual wizard deliberately keeps both PDF choices visible.
+export const getImportCapabilities = async (): Promise<ImportCapabilities> => {
+  const { data } = await api.get<ImportCapabilities>('/import/capabilities');
   return data;
 };
 

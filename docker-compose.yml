@@ -8,6 +8,14 @@ services:
     environment:
       - DATABASE_PATH=/app/data/financial_analysis.db
       - DEBUG=false
+      # MinerU OCR import. Enabled by default so the UI offers both the standard
+      # and MinerU paths. Set MINERU_OCR_ENABLED=false as an emergency kill switch.
+      # The backend reaches MinerU by service name on the
+      # shared compose network. NOTE: no depends_on:mineru here on purpose — a
+      # broken/unhealthy MinerU must NOT prevent the backend (and thus XBRL/CSV
+      # /import/pdf) from starting; availability is checked per-request (503).
+      - MINERU_OCR_ENABLED=${MINERU_OCR_ENABLED:-true}
+      - MINERU_BASE_URL=http://mineru:8000
     volumes:
       - db-data:/app/data
     restart: unless-stopped
@@ -16,6 +24,35 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # MinerU OCR document extractor (pinned to the deployed 3.2.0 image). Not
+  # published to the host and not proxied by nginx — only the backend reaches it
+  # as http://mineru:8000 on the compose network. Healthcheck uses python (the
+  # image has no curl).
+  mineru:
+    build:
+      context: .
+      dockerfile: docker/mineru/Dockerfile
+      args:
+        MINERU_VERSION: "3.2.0"
+    image: ${MINERU_IMAGE:-xbrlbudget-mineru:3.2.0}
+    command: ["mineru-api", "--host", "0.0.0.0", "--port", "8000"]
+    shm_size: "8gb"
+    expose:
+      - "8000"
+    environment:
+      MINERU_MODEL_SOURCE: local
+      MINERU_API_MAX_CONCURRENT_REQUESTS: "1"
+      MINERU_API_TASK_RETENTION_SECONDS: "3600"
+    volumes:
+      - mineru-models:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if b'healthy' in urllib.request.urlopen('http://localhost:8000/health',timeout=5).read() else sys.exit(1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
 
   frontend:
     build:
@@ -38,3 +75,4 @@ services:
 
 volumes:
   db-data:
+  mineru-models:

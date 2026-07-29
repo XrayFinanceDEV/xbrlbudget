@@ -34,7 +34,9 @@ _GT = _GT_DOC["files"]
 
 
 def _check(fname, spec):
-    path = os.path.join(CORPUS, fname)
+    # `dir` per-file: il corpus non e' tutto sotto Test/sez-contrapposte/
+    base = os.path.join(ROOT, *spec["dir"].split("/")) if spec.get("dir") else CORPUS
+    path = os.path.join(base, fname)
     if not os.path.exists(path):
         pytest.skip(f"corpus PDF missing: {fname}")
     r = run_prod_route_c(path)

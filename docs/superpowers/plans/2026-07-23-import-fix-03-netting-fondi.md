@@ -371,6 +371,64 @@ git commit -m "fix(netting): netta il fondo svalut./rischi crediti su sp06 e cla
 
 ### Task 3: fondi ammortamento come conti singoli senza sotto-totale (budget_281)
 
+> ## ✅ CHIUSO 2026-07-28 — la causa era un'ALTRA, misurata conto per conto
+>
+> **Il bilancio di 281 è CORRETTO**, verificato al centesimo sulle coordinate: somma attivo
+> 1.833.911,30 == `TOTALE ATTIVITA'` stampato, somma passivo 1.785.703,34 == `TOTALE PASSIVITA'`,
+> 1.785.703,34 + 48.207,96 == pareggio. È una presentazione **lorda**: i 6 fondi ammortamento
+> (124.936,25) e il fondo rischi su crediti (17.768,10) stanno fra le passività. Nessun errore a monte.
+>
+> **La diagnosi qui sotto (e quella del 2026-07-27) era sbagliata su DUE punti:**
+>
+> 1. *«quello che non scatta è il contra-scan; `net_contra_accounts` netta zero»* — **falso come causa.**
+>    Il netting di questa route non lo fa l'overlay: lo fa `build_iv_cee` tramite `_classify_sp_passivo`.
+>    Instrumentando la classificazione riga per riga: **5 fondi su 6 finivano in `sp16` (debiti a breve)**,
+>    perché `_SP_PASSIVO_RULES` copre la grafia con slash SOLO in coppia con `IMMAT`/`MATER` — parole che
+>    compaiono nei mastri aggregati ma mai nei conti di dettaglio per categoria (`F/AMM.MACCHINARI`).
+>    L'unico nettato era `F.DO AMM.TO TELEFONO CELLULARE`: **42,61 su 124.936,25**. `contra netted = 0.00`
+>    era una *conseguenza*, non la causa — e a fix fatto resta legittimamente 0 (l'overlay è no-op perché
+>    il foglio arriva già netto).
+>    Nota: `_is_fondo_amm` riconosceva tutti e 6 — sono **due riconoscitori diversi** che divergevano.
+>    Per questo il commit `ff2a01b`, che allargava `_is_fondo_amm`, era stato misurato come no-op.
+> 2. *«il gap 0,97% e il plug 17.768,10 sono un problema diverso: conti non classificati, Piano 05»* —
+>    **falso.** Non era materia di sinonimia: è il **fondo svalutazione crediti**, correttamente nettato
+>    dai crediti ma **non sottratto all'ancora lorda**. Il totale dichiarato è lordo anche di lui, quindi
+>    riemergeva come plug falso di importo esattamente pari al fondo.
+>
+> **Fix implementati** (`importers/situazione_contabile_parser.py`):
+> - `_canon_fondo_amm` — un solo canonicalizzatore della testa (`F/AMM`, `FDO AMM`, `FONDO AMMORTAMENTO`,
+>   `F.DI AMMOR.TO` → `F.DO AMM.`) applicato prima della tabella, invece di duplicare le 15 regole di
+>   categoria per ogni grafia. Additivo per costruzione: agisce solo su ciò che `_is_fondo_amm` ha già
+>   dichiarato fondo, così i due riconoscitori non possono più divergere.
+> - `crediti_deduction` entra in `_netted_contra` (stesso cap `min(fondo, lordo)` dei fondi ammortamento).
+> - Simmetria cespite/fondo: categorie riconosciute lato fondo ma assenti lato attivo — `TELEFON`,
+>   `BENI DI TERZ` (B.I.7), `AMPLIAMENT` (B.I.1), `ATTREZ` per prefisso, `ATTR.VARIE E MINUTE`.
+>
+> **Esito misurato** (`tests/_prod_route_c_runner.py`, valori attesi letti dal PDF):
+>
+> | | prima | dopo | atteso |
+> |---|---|---|---|
+> | totale attivo | 1.816.100,59 | **1.691.206,95** | 1.691.206,95 |
+> | sp02 | 0,00 | **2.028,14** | 2.028,14 |
+> | sp03 | 194.895,64 | **72.904,86** | 72.904,86 |
+> | sp13 | 48.207,96 | 48.207,96 | 48.207,96 |
+> | plug | 17.768,10 | **0,00** | 0 |
+>
+> **Regressione**: sweep produzione su **177 PDF** → 9 file distinti cambiati, **5 migliorati**
+> (AIC SRL: plug 1.423.205,61 → 0, da `masked` a quadrato), **0 peggiorati**. Suite: **368 passed**.
+> Fuori da 281 il difetto era ancora più grosso e ugualmente silente: **budget_158/159 CONA** aveva
+> 19 fondi `F/AMM` (603.385,21) contabilizzati come debiti, con immobilizzazioni materiali esposte a
+> 1.162.900,55 invece di 572.667,11 — e il bilancio quadrava lo stesso.
+> Baseline: riga `budget_281` in `tests/_ground_truth_sez_contrapposte.json` (valori `verified`),
+> più `tests/test_fondo_amm_grafie.py::test_i_due_riconoscitori_di_fondo_non_divergono`.
+>
+> Gli Step 1-3 qui sotto **non sono stati eseguiti** e non servono più per 281: `_contra_rows` /
+> `_dedup_parent_child` non erano in causa. Restano validi solo se emerge un file in cui l'overlay
+> `net_contra_accounts` è davvero l'unico che può nettare.
+
+<details>
+<summary>Diagnosi precedente (2026-07-27) — conservata per storico, superata da quella sopra</summary>
+
 > **MISURATO 2026-07-27 — il task è confermato, ma la diagnosi va precisata.**
 >
 > Una revisione indipendente ha sostenuto che il problema di 281 sia a monte: «il parser assegna tutte le
@@ -404,6 +462,8 @@ git commit -m "fix(netting): netta il fondo svalut./rischi crediti su sp06 e cla
 > ("never write a wrong net immobilizzazioni"): allentarlo è una **scelta di rischio**, non un bugfix. Se
 > serve, va motivata contabilmente e accompagnata da un'auto-validazione propria (il netto ricostruito
 > riconcilia col totale dichiarato entro tolleranza), non solo dall'assenza di `from_ocr`.
+
+</details>
 
 **Files:**
 - Modify: `importers/situazione_contabile_parser.py` — `_contra_rows` / `_dedup_parent_child` (riga 3413)

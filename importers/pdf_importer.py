@@ -268,6 +268,7 @@ def import_pdf_balance_sheet(
     sector: Optional[int] = None,
     period_months: Optional[int] = None,
     user_id: Optional[str] = None,
+    extraction_context: Any = None,
 ) -> Dict[str, Any]:
     """
     Import balance sheet from PDF file.
@@ -332,6 +333,35 @@ def import_pdf_balance_sheet(
         ocr_text = None
         local_coordinate_ocr = False
         is_scanned = len(sample_text.strip()) < 50
+
+        # MinerU OCR context (route /import/pdf-ocr): when supplied, MinerU has already
+        # produced document text. Use it for BOTH the classifier routing and the
+        # route-C CoGe LLM extractor (which accepts ocr_text), instead of a second
+        # vision-OCR pass. MinerU is an extractor only — all accounting classification,
+        # reconciliation and quadratura gates below are unchanged and still decide the result.
+        #
+        # _ocr_source marks that sample_text/ocr_text came from OCR (MinerU), NOT a native
+        # text layer. OCR text is noisier: a single garbled totals row (e.g. MinerU reading
+        # "TOTALE ATTIVITA' 56550ont a 53.06941 2.828.226,30" as attivo=53.069) must NOT
+        # trigger the HARD source-contradiction preflight, which is meant for reliable
+        # printed totals and aborts with no Rettifiche fallback. This mirrors how the same
+        # gate is already skipped for is_scanned. is_scanned itself stays False so the
+        # vision-OCR block below is skipped (we already have MinerU text).
+        _ocr_source = False
+        _mineru_full_text = getattr(extraction_context, "full_text", "") if extraction_context is not None else ""
+        if _mineru_full_text and _mineru_full_text.strip():
+            sample_text = _mineru_full_text
+            ocr_text = _mineru_full_text
+            is_scanned = False
+            local_coordinate_ocr = False
+            _ocr_source = True
+            logger.info(
+                "MinerU extraction context in use: text_len=%d tables=%d version=%s",
+                len(sample_text),
+                len(getattr(extraction_context, "tables", ()) or ()),
+                getattr(extraction_context, "mineru_version", None),
+            )
+
         if is_scanned:
             logger.info("PDF scansionato (nessun testo estraibile): passaggio OCR per il routing")
             # The by-sign trial-balance parser can consume local OCR bounding boxes
@@ -384,7 +414,7 @@ def import_pdf_balance_sheet(
         # therefore surfaced as the unrelated "ANTHROPIC_API_KEY is required"
         # error.  These are immutable source controls, so no extractor or plug is
         # allowed to hide the contradiction.
-        if classification.route == ROUTE_IVCEE and not is_scanned:
+        if classification.route == ROUTE_IVCEE and not is_scanned and not _ocr_source:
             try:
                 from importers.pdf_extractor_llm import _declared_control_totals
 
@@ -416,6 +446,60 @@ def import_pdf_balance_sheet(
 
         def _llm_extract():
             """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
+            # /import/pdf-ocr supplies structured MinerU table rows.  Build an
+            # evidence-only IV-CEE candidate from those rows before touching the
+            # original PDF.  It is accepted only through the same structural and
+            # accounting gates as every other extractor; an incomplete or
+            # ambiguous OCR mapping simply declines and the established source
+            # parser / LLM fallbacks continue.
+            if extraction_context is not None:
+                try:
+                    from importers.iv_cee_hierarchy import check_quadratura
+                    from importers.mineru_adapter import extract_ivcee_candidate
+
+                    mineru_candidate = extract_ivcee_candidate(extraction_context)
+                    if mineru_candidate is not None:
+                        mineru_q = check_quadratura(
+                            mineru_candidate.current_bs,
+                            mineru_candidate.current_ce,
+                            tol=Decimal("2"),
+                        )
+                        if mapper.validate_balance(mineru_candidate.current_bs) and mineru_q.quadra:
+                            prior_ok = False
+                            if mineru_candidate.prior_bs and mineru_candidate.prior_ce is not None:
+                                prior_q = check_quadratura(
+                                    mineru_candidate.prior_bs,
+                                    mineru_candidate.prior_ce,
+                                    tol=Decimal("2"),
+                                )
+                                prior_ok = (
+                                    mapper.validate_balance(mineru_candidate.prior_bs)
+                                    and prior_q.quadra
+                                )
+                            logger.info(
+                                "Using source-validated MinerU IV-CEE tables "
+                                "(fields=%d unresolved=%d prior_valid=%s)",
+                                mineru_candidate.source_detail_fields,
+                                len(mineru_candidate.unresolved_rows),
+                                prior_ok,
+                            )
+                            return (
+                                mineru_candidate.current_bs,
+                                mineru_candidate.current_ce,
+                                mineru_candidate.prior_bs if prior_ok else None,
+                                mineru_candidate.prior_ce if prior_ok else None,
+                            )
+                        logger.info(
+                            "Structured MinerU IV-CEE candidate declined by accounting gates: %s",
+                            "; ".join(mineru_q.warnings) or "structural balance mismatch",
+                        )
+                except Exception as mineru_err:
+                    logger.info(
+                        "Structured MinerU IV-CEE extraction declined (%s: %s)",
+                        type(mineru_err).__name__,
+                        mineru_err,
+                    )
+
             # A regular comparative legal IV-CEE export has enough independent
             # source controls to be read deterministically: each section exposes
             # its own subtotal and both sides close to printed totals. Prefer that
@@ -681,8 +765,16 @@ def import_pdf_balance_sheet(
                 # the CoGe LLM pass is single-year, so the deterministic dual read is
                 # the source of the prior column regardless of which current-year
                 # candidate wins.
+                _mineru_deterministic_text = (
+                    getattr(extraction_context, "deterministic_text", None)
+                    if extraction_context is not None
+                    else None
+                )
                 sc_bs, sc_ce, sc_prior_bs, sc_prior_ce = extract_situazione_contabile(
-                    file_path, return_prior=True)
+                    file_path,
+                    return_prior=True,
+                    text_override=_mineru_deterministic_text,
+                )
                 sc_bs_mapped = _map_sc_keys(sc_bs)   # short keys (sp03) -> full DB names
                 sc_ce_mapped = _map_sc_keys(sc_ce)
                 r = _residual_of(sc_bs_mapped, sc_ce_mapped)
@@ -910,7 +1002,11 @@ def import_pdf_balance_sheet(
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
         if not mapper.validate_balance(balance_sheet_data):
-            if is_scanned:
+            if is_scanned or _ocr_source:
+                # OCR-sourced text (scanned or MinerU): a failed reconstruction must NOT
+                # be reported as "the source document does not balance" (blaming the file)
+                # because the totals themselves may be OCR-misread. Report it honestly as
+                # an OCR-reconstruction limitation instead of the hard source-contradiction.
                 raise PDFImportError(
                     "Il documento è una scansione contabile, ma l'OCR non ha "
                     "ricostruito in modo affidabile colonne, gerarchie e totali. "
@@ -1099,6 +1195,41 @@ def import_pdf_balance_sheet(
         with open(file_path, "rb") as _source_file:
             _source_sha256 = hashlib.sha256(_source_file.read()).hexdigest()
         _validation_payload = _validation_report_payload(_qd)
+        _stored_parser_version = _PDF_PARSER_VERSION
+        if extraction_context is not None:
+            _mineru_version = getattr(extraction_context, "mineru_version", None)
+            _source_detail_fields = int(
+                balance_sheet_data.get("_mineru_source_detail_fields", 0) or 0
+            )
+            if _source_detail_fields >= 20:
+                _detail_level = "detailed"
+            elif _source_detail_fields >= 8:
+                _detail_level = "standard"
+            else:
+                _detail_level = "summary"
+            if is_trial_balance:
+                _ocr_accounting_method = (
+                    "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
+                )
+            elif balance_sheet_data.get("_source_mineru_ivcee"):
+                _ocr_accounting_method = "ivcee_deterministic"
+            elif balance_sheet_data.get("_source_standard_ivcee"):
+                _ocr_accounting_method = "ivcee_source"
+            else:
+                _ocr_accounting_method = "llm"
+            _validation_payload["ocr"] = {
+                "engine": "mineru",
+                "version": _mineru_version,
+                "pages": len(getattr(extraction_context, "page_texts", ()) or ()),
+                "tables": len(getattr(extraction_context, "tables", ()) or ()),
+                "accounting_method": _ocr_accounting_method,
+                "source_detail_fields": _source_detail_fields,
+                "detail_level": _detail_level,
+            }
+            if _mineru_version:
+                _stored_parser_version = (
+                    f"{_PDF_PARSER_VERSION}+mineru-{_mineru_version}"
+                )[:50]
         financial_year_obj = FinancialYear(
             company_id=company.id,
             year=current_year_val,
@@ -1106,7 +1237,7 @@ def import_pdf_balance_sheet(
             validation_status=("verified" if _qd.semantic_valid else "review_required"),
             validation_report=json.dumps(_validation_payload, ensure_ascii=False),
             source_sha256=_source_sha256,
-            parser_version=_PDF_PARSER_VERSION,
+            parser_version=_stored_parser_version,
             forecastable=_qd.semantic_valid,
         )
         db.add(financial_year_obj)
@@ -1186,6 +1317,19 @@ def import_pdf_balance_sheet(
                         db.flush()
 
                     _prior_validation = _validation_report_payload(_prior_q)
+                    if extraction_context is not None:
+                        _prior_source_detail_fields = int(
+                            prior_bs_data.get("_mineru_source_detail_fields", 0) or 0
+                        )
+                        _prior_validation["ocr"] = {
+                            **_validation_payload.get("ocr", {}),
+                            "source_detail_fields": _prior_source_detail_fields,
+                            "detail_level": (
+                                "detailed" if _prior_source_detail_fields >= 20
+                                else "standard" if _prior_source_detail_fields >= 8
+                                else "summary"
+                            ),
+                        }
                     prior_fy = FinancialYear(
                         company_id=company.id,
                         year=prior_fiscal_year,
@@ -1195,7 +1339,7 @@ def import_pdf_balance_sheet(
                         ),
                         validation_report=json.dumps(_prior_validation, ensure_ascii=False),
                         source_sha256=_source_sha256,
-                        parser_version=_PDF_PARSER_VERSION,
+                        parser_version=_stored_parser_version,
                         forecastable=_prior_q.semantic_valid,
                     )
                     db.add(prior_fy)
@@ -1227,6 +1371,8 @@ def import_pdf_balance_sheet(
         if is_trial_balance:
             # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
             extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
+        elif balance_sheet_data.get("_source_mineru_ivcee"):
+            extraction_method = "ivcee_deterministic"
         elif balance_sheet_data.get("_source_standard_ivcee"):
             extraction_method = "ivcee_source"
         else:
@@ -1260,11 +1406,28 @@ def import_pdf_balance_sheet(
             "validation_report": _validation_payload,
             "forecastable": financial_year_obj.forecastable,
             "source_sha256": _source_sha256,
-            "parser_version": _PDF_PARSER_VERSION,
+            "parser_version": _stored_parser_version,
         }
 
         result["prior_year_imported"] = prior_year_imported
         result["prior_fiscal_year"] = prior_fiscal_year
+
+        # MinerU OCR metadata (only when the /import/pdf-ocr route supplied a context).
+        # extraction_method already describes the accounting path actually used
+        # (deterministico / CoGe-LLM / IV-CEE LLM); prefix it with the OCR engine so the
+        # full provenance "mineru+<engine>" is visible without a DB migration.
+        if extraction_context is not None:
+            _mineru_version = getattr(extraction_context, "mineru_version", None)
+            _pages = len(getattr(extraction_context, "page_texts", ()) or ())
+            _tables = len(getattr(extraction_context, "tables", ()) or ())
+            _ocr_report = _validation_payload.get("ocr", {})
+            result["ocr_engine"] = "mineru"
+            result["ocr_version"] = _mineru_version
+            result["ocr_pages"] = _pages
+            result["ocr_tables"] = _tables
+            result["source_detail_fields"] = _ocr_report.get("source_detail_fields", 0)
+            result["detail_level"] = _ocr_report.get("detail_level", "summary")
+            result["extraction_method"] = f"mineru+{extraction_method}"
 
         return result
 

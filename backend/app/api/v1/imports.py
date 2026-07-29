@@ -2,6 +2,7 @@
 API endpoints for data import (XBRL, CSV, and PDF)
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import Optional
 import tempfile
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.core.auth import CurrentUser, get_current_user, get_current_user_id
+from app.core.config import settings
 from app.core.ownership import validate_company_owned_by_user, check_company_limit
 from app.schemas.imports import XBRLImportResponse, CSVImportResponse, ImportError
 from app.services.upload_tracker import save_upload, mark_success, mark_error
@@ -21,6 +23,52 @@ from importers.csv_importer import import_csv_file
 from importers.pdf_importer import import_pdf_balance_sheet, PDFImportError
 
 router = APIRouter()
+
+MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
+
+
+async def _read_and_validate_pdf(
+    file: UploadFile,
+    company_id: Optional[int],
+    create_company: bool,
+    company_name: Optional[str],
+) -> bytes:
+    """Shared PDF upload validation for /import/pdf and /import/pdf-ocr.
+
+    Kept in one place so the two routes cannot diverge. Raises HTTPException(400)
+    on any invalid input; returns the raw bytes on success.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    file_ext = file.filename.lower().split('.')[-1]
+    if file_ext != 'pdf':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: .{file_ext}. Only .pdf files are supported.",
+        )
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
+    if len(content) > MAX_PDF_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is 50MB, received {len(content) / 1024 / 1024:.1f}MB",
+        )
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="File is empty")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Invalid PDF: missing %PDF- signature")
+
+    if not company_id and (not create_company or not company_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Either company_id or (create_company=True and company_name) must be provided",
+        )
+    return content
 
 
 @router.post(
@@ -302,12 +350,12 @@ async def upload_csv(
     summary="Import PDF Balance Sheet (IV CEE Format)",
     description="""
     Upload and import an Italian balance sheet PDF file (IV CEE format).
-    
+
     Supports:
     - Bilancio Micro (simplified format for small companies)
-    - Bilancio Abbreviato (abbreviated format)  
+    - Bilancio Abbreviato (abbreviated format)
     - Bilancio Ordinario (full format)
-    
+
     Uses PyMuPDF + Claude Haiku to extract table data from PDF and maps to Italian GAAP schema.
     Requires ANTHROPIC_API_KEY.
 
@@ -452,3 +500,194 @@ async def upload_pdf(
                 os.unlink(tmp_file)
             except Exception:
                 pass  # Ignore cleanup errors
+
+
+@router.get(
+    "/import/capabilities",
+    summary="Import capabilities",
+    description="Reports whether the OCR endpoint is operationally enabled. The UI keeps "
+                "both PDF choices visible; this value is the emergency backend kill switch.",
+)
+async def import_capabilities(
+    user_id: str = Depends(get_current_user_id),
+):
+    return {"ocr_available": bool(settings.MINERU_OCR_ENABLED)}
+
+
+@router.post(
+    "/import/pdf-ocr",
+    summary="Import PDF via MinerU OCR",
+    description="""
+    Import an Italian balance sheet PDF using the MinerU OCR service (Docker), then the
+    existing deterministic + LLM accounting pipeline for classification, reconciliation
+    and quadratura. Use for scanned / image-only PDFs where standard text extraction is
+    insufficient.
+
+    MinerU is an extractor only: it never decides quadrature, invents detail or bypasses
+    the accounting gates. If MinerU is disabled or unreachable there is NO silent fallback
+    to /import/pdf (503). Errors never leave partial FinancialYear records.
+    """,
+)
+async def upload_pdf_ocr(
+    file: UploadFile = File(..., description="PDF balance sheet file (.pdf)"),
+    company_id: Optional[int] = Query(None, description="Existing company ID (optional)"),
+    fiscal_year: int = Query(..., description="Fiscal year of the balance sheet"),
+    company_name: Optional[str] = Query(None, description="Company name (for new company creation)"),
+    create_company: bool = Query(True, description="Create company if not exists"),
+    sector: Optional[int] = Query(None, ge=1, le=6, description="Company sector (1-6)"),
+    period_months: Optional[int] = Query(None, ge=1, le=12, description="Months in partial year (1-12). NULL = full year"),
+    user_id: str = Depends(get_current_user_id),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Import here so a MinerU-less deployment can still import this module.
+    from app.services.mineru_client import (
+        MinerUClient,
+        MinerUUnavailableError,
+        MinerUTimeoutError,
+        MinerUInvalidOutputError,
+        MinerUContractError,
+        MinerUError,
+    )
+    from importers.mineru_adapter import build_extraction_context
+
+    # 1. Feature flag - the only rollback switch.
+    if not settings.MINERU_OCR_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "success": False,
+                "error_code": "MINERU_DISABLED",
+                "message": "L'import OCR (MinerU) non e abilitato.",
+            },
+        )
+
+    # 3-5. Validate PDF + resolve company target BEFORE spending OCR resources.
+    content = await _read_and_validate_pdf(file, company_id, create_company, company_name)
+
+    # Ownership and quota checks precede tracking: an unauthorized request must
+    # not create a pending upload row for a company the caller does not own.
+    if company_id:
+        validate_company_owned_by_user(db, company_id, user_id)
+    elif create_company:
+        check_company_limit(db, user_id)
+
+    # Track the heavy OCR job only after all request-level authorization gates.
+    upload_record = save_upload(
+        db,
+        user_id,
+        file.filename,
+        "pdf_ocr",
+        content,
+        company_id=company_id,
+        user_email=user.email,
+    )
+
+    tmp_file = None
+    try:
+
+        # 7. MinerU: health probe then parse (async I/O - does not block the loop).
+        client = MinerUClient.from_settings(settings)
+        await client.health()
+        raw = await client.parse_pdf(content=content, filename=file.filename)
+
+        # 8. Normalize (CPU-bound) off the event loop.
+        context = await run_in_threadpool(build_extraction_context, raw)
+
+        # 9. Reject an OCR result with no usable text.
+        if not (context.full_text or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "success": False,
+                    "error_code": "MINERU_EMPTY",
+                    "message": "L'OCR non ha prodotto testo sufficiente dal documento.",
+                },
+            )
+
+        # 10. Accounting pipeline (sync, gated) off the event loop.
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            tmp.write(content)
+            tmp_file = tmp.name
+
+        result = await run_in_threadpool(
+            import_pdf_balance_sheet,
+            file_path=tmp_file,
+            company_id=company_id,
+            fiscal_year=fiscal_year,
+            company_name=company_name,
+            create_company=create_company,
+            sector=sector,
+            period_months=period_months,
+            user_id=user_id,
+            extraction_context=context,
+        )
+
+        mark_success(db, upload_record, company_id=result.get("company_id") if isinstance(result, dict) else None)
+        return result
+
+    except MinerUTimeoutError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=504,
+            detail={"success": False, "error_code": "MINERU_TIMEOUT",
+                    "message": "Il servizio OCR non ha completato l'estrazione entro il tempo previsto."},
+        )
+    except MinerUUnavailableError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=503,
+            detail={"success": False, "error_code": "MINERU_UNAVAILABLE",
+                    "message": "Il servizio OCR non e al momento disponibile."},
+        )
+    except MinerUInvalidOutputError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=422,
+            detail={"success": False, "error_code": "MINERU_INVALID_OUTPUT",
+                    "message": "L'OCR non ha prodotto un risultato utilizzabile dal documento."},
+        )
+    except MinerUContractError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=503,
+            detail={"success": False, "error_code": "MINERU_CONTRACT_MISMATCH",
+                    "message": "La versione del servizio OCR non e compatibile con il backend."},
+        )
+    except PDFImportError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=422,
+            detail={"success": False, "error": str(e), "error_type": "PDFImportError",
+                    "details": "Import contabile fallito sul risultato OCR."},
+        )
+    except ValueError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=422,
+            detail={"success": False, "error": str(e), "error_type": "ValueError",
+                    "details": "Dati non validi nel PDF."},
+        )
+    except HTTPException as e:
+        mark_error(db, upload_record, e)
+        raise
+    except MinerUError as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=503,
+            detail={"success": False, "error_code": "MINERU_ERROR",
+                    "message": "Errore del servizio OCR."},
+        )
+    except Exception as e:
+        mark_error(db, upload_record, e)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error_type": type(e).__name__,
+                    "details": "Errore interno durante l'import OCR."},
+        )
+    finally:
+        if tmp_file and os.path.exists(tmp_file):
+            try:
+                os.unlink(tmp_file)
+            except Exception:
+                pass

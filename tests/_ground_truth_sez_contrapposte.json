@@ -3,40 +3,107 @@
   "corpus_dir": "Test/sez-contrapposte",
   "files": {
     "budget_343_Bilancio 2025 ver_definitiva 1-6-2026.pdf": {
-      "status": "good", "tol": 2,
-      "expect": {"sp02": 27640.60, "sp03": 453510.10, "sp13": -41892.29, "plug_max": 1}
+      "status": "good",
+      "tol": 2,
+      "expect": {
+        "sp02": 27640.6,
+        "sp03": 453510.1,
+        "sp13": -41892.29,
+        "plug_max": 1
+      }
     },
     "budget_348_Bilancio 2025 ver_definitiva 6-3-2026.pdf": {
-      "status": "good", "tol": 2,
-      "expect": {"sp02": 27640.60, "sp03": 454300.50, "sp13": -69804.55, "plug_max": 1}
+      "status": "good",
+      "tol": 2,
+      "expect": {
+        "sp02": 27640.6,
+        "sp03": 454300.5,
+        "sp13": -69804.55,
+        "plug_max": 1
+      }
     },
     "budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf": {
-      "status": "good", "fixed_by": "PR-3", "tol": 2,
-      "expect": {"sp02": 39783.68, "sp03": 1862490.15, "plug_max": 1}
+      "status": "good",
+      "fixed_by": "PR-3",
+      "tol": 2,
+      "expect": {
+        "sp02": 39783.68,
+        "sp03": 1862490.15,
+        "plug_max": 1
+      }
     },
     "budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf": {
-      "status": "good", "fixed_by": "PR-4+PR-5", "tol": 3,
+      "status": "good",
+      "fixed_by": "PR-4+PR-5",
+      "tol": 3,
       "note": "sp13 sign fixed by PR-4; residual 39,000 (ANTICIPO X CANONI MACCHINARI) cleared by PR-5 classifier fix.",
-      "expect": {"sp02": 182260.00, "sp03": 122967.10, "sp13": -90819.92, "plug_max": 100}
+      "expect": {
+        "sp02": 182260.0,
+        "sp03": 122967.1,
+        "sp13": -90819.92,
+        "plug_max": 100
+      }
     },
     "budget_210_Bilancio 2025--26-05-13.pdf": {
-      "status": "good", "fixed_by": "PR-5", "tol": 2,
-      "expect": {"sp02": 169996.00, "sp03": 100363.91, "plug_max": 100}
+      "status": "good",
+      "fixed_by": "PR-5",
+      "tol": 2,
+      "expect": {
+        "sp02": 169996.0,
+        "sp03": 100363.91,
+        "plug_max": 100
+      }
     },
     "budget_405_all. A - PROGETTO DI BILANCIO.pdf": {
-      "status": "review_required", "fixed_by": "phase-3-no-false-ok", "tol": 2,
+      "status": "review_required",
+      "fixed_by": "phase-3-no-false-ok",
+      "tol": 2,
       "note": "The fixed-asset net values are source-backed, but the classified statement still has a material unexplained residual. Earlier code erased _plug_residual after contra-netting while leaving compensating values in sp09/sp16, producing a false OK. The residual now remains visible and the record is not forecastable until the missing rows are classified.",
-      "expect": {"sp02": 0.61, "sp03": 5756144.64, "plug_min": 1, "quadra": false}
+      "expect": {
+        "sp02": 0.61,
+        "sp03": 5756144.64,
+        "plug_min": 1,
+        "quadra": false
+      }
     },
     "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {
-      "status": "good", "fixed_by": "PR-7", "tol": 2,
+      "status": "good",
+      "fixed_by": "PR-7",
+      "tol": 2,
       "note": "AUDIT WAS WRONG: the document HAS fondi ammortamento (F/AMM immat 8.069,50 + F/AMM materiali 117.603,33 on the passivo). build_iv_cee correctly nets them -> sp02=0, sp03=8.992,37 (NET per art. 2424); the audit's 8.069,50/126.595,70/355.878,76 were the GROSS values. The real bug was a FALSE plug: the reconcile anchored to the GROSS declared total. Fixed by exposing _netted_contra from build_iv_cee and reducing the declared anchor by it (like net_contra_accounts). NOT a multi-column parsing issue.",
-      "expect": {"totale_attivo": 230205.93, "sp02": 0.00, "sp03": 8992.37, "plug_max": 100}
+      "expect": {
+        "totale_attivo": 230205.93,
+        "sp02": 0.0,
+        "sp03": 8992.37,
+        "plug_max": 100
+      }
     },
     "budget_337_2023.pdf": {
-      "status": "good", "fixed_by": "phase-3-garbled-row-reconstruction", "tol": 0.05,
+      "status": "good",
+      "fixed_by": "phase-3-garbled-row-reconstruction",
+      "tol": 0.05,
       "note": "Verified directly on source pages. Text-layer glyph mapping is damaged, but the printed document is legible. Gross immateriali 3,239.12 with no intangible fund; gross materiali 67,229.83 less material funds 62,045.10; explicit and recomputed profit +4,287.23. Fixed by the generic coordinate row reconstruction.",
-      "expect": {"totale_attivo": 253076.09, "sp02": 3239.12, "sp03": 5184.73, "sp13": 4287.23, "plug_max": 0}
+      "expect": {
+        "totale_attivo": 253076.09,
+        "sp02": 3239.12,
+        "sp03": 5184.73,
+        "sp13": 4287.23,
+        "plug_max": 0
+      }
+    },
+    "budget_281_MSIT-31 3 2026.pdf": {
+      "status": "good",
+      "dir": "Test/errori",
+      "fixed_by": "fondo-amm-grafie-slash + crediti-deduction-anchor",
+      "tol": 0.05,
+      "note": "GI.AL TRASPORTI, situazione patrimoniale al 31/03/2026 (infrannuale 3 mesi). IL DOCUMENTO E' CORRETTO, verificato al centesimo sulle coordinate: somma attivo 1.833.911,30 == TOTALE ATTIVITA' stampato, somma passivo 1.785.703,34 == TOTALE PASSIVITA' stampato, 1.785.703,34 + 48.207,96 utile == pareggio 1.833.911,30. E' una presentazione LORDA a sezioni impilate (ATTIVITA' poi PASSIVITA', UNA sola colonna di conti, importi in SALDO DARE x~270-294 / SALDO AVERE x~333-357): i 6 fondi ammortamento (124.936,25) e il fondo rischi su crediti (17.768,10) stanno sul PASSIVO. Netto atteso: sp02 = 4.500,00 lavori straord. su beni di terzi - 2.471,86 suo fondo = 2.028,14; sp03 = 195.369,25 - 122.464,39 = 72.904,86; crediti clienti 793.817,66 - 17.768,10 = 776.049,56; totale attivo NETTO 1.691.206,95. BUG 1 (silente): _SP_PASSIVO_RULES copriva la grafia con slash solo in coppia con IMMAT/MATER, cosi' 5 fondi su 6 scritti 'F/AMM.<categoria>' cadevano nel default sp16 = DEBITI: attivo lordo, debiti gonfi, bilancio in pareggio lo stesso, nessun avviso. BUG 2: l'ancora lordo/netto sottraeva i fondi ammortamento ma NON il fondo svalutazione crediti -> falso plug di esattamente 17.768,10.",
+      "expect": {
+        "totale_attivo": 1691206.95,
+        "sp02": 2028.14,
+        "sp03": 72904.86,
+        "sp13": 48207.96,
+        "plug_max": 0.05
+      }
     }
   }
 }

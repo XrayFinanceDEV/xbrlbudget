@@ -18,7 +18,7 @@ Ogni pagina è autonoma. L'ordine sotto è quello in cui i fatti accadono a un f
 | # | Pagina | Copre |
 |---|---|---|
 | 01 | [Riconoscimento route](REGOLE-IMPORT-01-ROUTING.md) | Come si decide *che cosa è* un documento e a quale estrattore va |
-| 02 | [Estrazione e scelta dell'estrattore](REGOLE-IMPORT-02-ESTRAZIONE.md) | Deterministico vs LLM, OCR, XBRL, CSV, come si sceglie il candidato |
+| 02 | [Estrazione e scelta dell'estrattore](REGOLE-IMPORT-02-ESTRAZIONE.md) | Ordine di lettura del testo, deterministico vs LLM, OCR, XBRL, CSV, come si sceglie il candidato |
 | 03 | [Spacchettature e netting](REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) | Ricostruzione righe, fondi ammortamento, tipizzazione debiti, entro/oltre |
 | 04 | [Quadrature, gate e rifiuti](REGOLE-IMPORT-04-QUADRATURE.md) | I controlli contabili, le tolleranze, i messaggi di errore e il loro ordine |
 | 05 | [Bilancio infrannuale](REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward, i gate del previsionale |

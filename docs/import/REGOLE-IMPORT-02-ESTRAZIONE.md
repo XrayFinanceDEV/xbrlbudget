@@ -25,13 +25,53 @@ Ordine reale dei fatti per un PDF caricato (`pdf_importer.import_pdf_balance_she
 | 11 | Hash del file + creazione anno |
 | 12 | Scrittura SP e CE (round-trip lossless, pagina 06) |
 | 13 | Cross-check finale utile vs `sp13` (solo warning) |
-| 14 | **Anno precedente**, con standard di ammissione più severo (§6) |
+| 14 | **Anno precedente**, con standard di ammissione più severo (§7) |
 | 15 | Commit |
 | 16 | Esito con metodo di estrazione e confidence |
 
 Qualsiasi eccezione → rollback completo. **Non esistono scritture parziali.**
 
-## 2. Route A/B (IV-CEE): il deterministico prima, l'LLM solo se serve
+## 2. Il testo che arriva all'estrattore: l'ordine di lettura
+
+> `page.get_text()` restituisce il testo nell'ordine in cui il generatore lo ha **scritto** nel
+> content-stream, che non è necessariamente l'ordine in cui il documento si **legge**.
+
+Su un prospetto comparativo questa non è una differenza estetica, è un errore contabile. Se lo
+stream è invertito (righe disegnate dal basso verso l'alto) oppure la seconda colonna importi è
+disegnata come blocco staccato, le etichette si legano agli importi della **colonna sbagliata**.
+I danni sono due, entrambi silenziosi:
+
+- **anno sbagliato** — la colonna dell'esercizio precedente viene importata come esercizio
+  corrente. Nel "Bilancio riclassificato / Fascicolo" la colonna 2024 veniva letta come 2025:
+  utile +17.305 al posto della perdita reale −127.995, attivo 1.836.998 invece di 1.758.609;
+- **voce sbagliata** — un importo di dettaglio finisce sotto la voce di legge che lo *precede
+  nello stream* anziché sotto la propria: gli "altri" oneri finanziari di C.17 attribuiti a
+  D.18 Rivalutazioni, +27.777 sull'utile CE.
+
+Solo il secondo caso si manifesta, come "Utile CE ≠ sp13", e viene fermato dal gate contabile
+(fase 7). **Il primo, da solo, quadrerebbe perfettamente**: un bilancio dell'anno sbagliato è
+internamente coerente. È la ragione per cui il difetto va risolto qui, a monte, e non lasciato
+ai gate.
+
+### La regola
+
+Prima di inviare una pagina all'estrattore si misura se lo stream è fuori ordine: si contano i
+**salti verticali all'indietro** fra blocchi consecutivi presi nell'ordine di stream. Oltre il
+**25% di inversioni**, su almeno 6 blocchi, la pagina viene riletta **ordinata per coordinate**.
+
+Il criterio è deliberatamente geometrico e conservativo — nessuna euristica sul contenuto:
+
+- sulle pagine già in ordine il testo resta **byte-identico** a prima, perché i prompt sono
+  tarati su quel testo: chi non è rotto non cambia;
+- un salto all'indietro isolato è normale (colonne affiancate, note, intestazioni ripetute) e
+  non attiva nulla;
+- misurato sul corpus, **212 documenti su 249 non cambiano di un carattere**.
+
+Il riordino è l'**ultima** sorgente di testo in ordine di precedenza. Restano davanti la
+ricomposizione delle pagine a valori staccati e il filtro delle colonne DIFFERENZA/SCOST., che
+leggono già per coordinate e sanno qualcosa di più del semplice ordine.
+
+## 3. Route A/B (IV-CEE): il deterministico prima, l'LLM solo se serve
 
 1. **Parser deterministico per primo**, e gratis. Il suo output è accettato **solo se** supera
    *entrambi* `validate_balance` e `check_quadratura`. Se passa, nessuna chiamata API.
@@ -47,7 +87,7 @@ Qualsiasi eccezione → rollback completo. **Non esistono scritture parziali.**
    aggregati patrimoniali** con quelli del parser deterministico, e **solo se il risultato
    quadra**. CE e dettagli tipizzati restano quelli dell'LLM.
 
-## 3. Route C: la scelta del candidato è la regola più importante
+## 4. Route C: la scelta del candidato è la regola più importante
 
 Due candidati concorrono: il **CoGe-LLM** e il **parser deterministico**. Il deterministico gira
 sempre, perché è gratuito e non può peggiorare il risultato.
@@ -95,7 +135,7 @@ IVA + perdita dichiarata, ma **solo se i fondi superano l'1%** dell'ancora stess
 3. **Riconciliazione al risultato dichiarato** — saltata se il parser si dichiara autorevole.
 4. **Warning sul residuo** — mai bloccante.
 
-## 4. L'LLM: cosa, quanto, quando
+## 5. L'LLM: cosa, quanto, quando
 
 Modello **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), 8192 token di output, chiamato con
 **tool-use forzato** e schema derivato dal modello dati: il modello non produce prosa da
@@ -130,7 +170,7 @@ Una singola coppia di chiamate estrae entrambe le colonne. Due guardie simmetric
 - **colonna corrente azzerata** e precedente valorizzato → si **promuove il precedente a
   corrente**.
 
-## 5. I totali di controllo dichiarati
+## 6. I totali di controllo dichiarati
 
 Sono i totali che il documento **stampa da solo** — l'unica evidenza indipendente
 dall'estrattore, e per questo l'ancora di tutto il sistema anti-masking.
@@ -164,7 +204,7 @@ risultato firmato. Vince il candidato più vicino. Un risultato CE pari a zero �
 CE, e il gap fra i due lati dello SP. Il valore esatto della fonte viene rimesso nel suo campo
 legale; qualunque residuo estraneo resta bloccante.
 
-## 6. L'anno precedente ha uno standard più severo
+## 7. L'anno precedente ha uno standard più severo
 
 L'anno corrente viene salvato anche se solo strutturalmente valido. Il **precedente no**: deve
 superare *sia* `validate_balance` *sia* la quadratura piena.
@@ -177,7 +217,7 @@ superare *sia* `validate_balance` *sia* la quadratura piena.
 La logica: un anno precedente sbagliato è peggio di un anno precedente assente, perché diventa
 la base di confronto di tutto il previsionale.
 
-## 7. XBRL: l'anno non è l'identità di un periodo
+## 8. XBRL: l'anno non è l'identità di un periodo
 
 > Un'istanza XBRL può legittimamente contenere **un bilancio annuale e un nove-mesi che
 > finiscono nello stesso anno solare**. Trattare l'anno come identità li fa collassare.
@@ -206,7 +246,7 @@ precisione, poi due criteri puramente deterministici. Se restano valori distinti
 L'XBRL ha inoltre un blocco **atomico**: se non quadra, rollback e HTTP 422 — non arriva
 nemmeno al database.
 
-## 8. CSV
+## 9. CSV
 
 **Encoding**, in ordine stretto: BOM UTF-8 → BOM UTF-16 LE/BE → tentativo UTF-8 → cp1252 →
 errore. L'ordine non è casuale: cp1252 non fallisce quasi mai, quindi provarlo prima

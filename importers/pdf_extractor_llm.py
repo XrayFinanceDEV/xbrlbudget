@@ -441,6 +441,62 @@ def _filter_difference_columns(page: fitz.Page) -> Optional[str]:
     return '\n'.join(lines)
 
 
+# Ordine di lettura: minimo di blocchi sotto il quale la statistica non e'
+# significativa, e quota di inversioni verticali oltre la quale lo stream e'
+# considerato fuori ordine (un salto all'indietro isolato e' normale: colonne
+# affiancate, note a pie' di pagina, intestazioni ripetute).
+_SCRAMBLED_MIN_BLOCKS = 6
+_SCRAMBLED_INVERSION_PCT = 0.25
+_SCRAMBLED_LINE_TOL = 1.0
+
+
+def _stream_order_is_scrambled(page: fitz.Page) -> bool:
+    """True quando il content-stream emette il testo fuori dall'ordine di lettura.
+
+    ``page.get_text()`` segue l'ordine in cui il generatore ha SCRITTO il testo,
+    non quello in cui il documento si LEGGE. Alcuni export disegnano il prospetto
+    dal basso verso l'alto, o disegnano la seconda colonna importi come blocco
+    staccato: le etichette si legano allora agli importi della colonna sbagliata
+    e l'anno precedente viene importato come anno corrente (il "Bilancio
+    riclassificato / Fascicolo" leggeva la colonna 2024 come 2025, e attribuiva
+    gli oneri finanziari «altri» alla voce D.18 Rivalutazioni che li precede
+    nello stream, gonfiando l'utile CE).
+
+    Il criterio e' geometrico e deterministico: si contano i salti verticali
+    all'indietro fra blocchi consecutivi nell'ordine di stream.
+    """
+    try:
+        blocks = [b for b in page.get_text("blocks") if str(b[4]).strip()]
+    except Exception:  # pagina illeggibile: nessuna diagnosi, nessun cambiamento
+        return False
+    if len(blocks) < _SCRAMBLED_MIN_BLOCKS:
+        return False
+    tops = [float(b[1]) for b in blocks]
+    inversions = sum(
+        1 for previous, current in zip(tops, tops[1:])
+        if current < previous - _SCRAMBLED_LINE_TOL
+    )
+    return inversions > len(tops) * _SCRAMBLED_INVERSION_PCT
+
+
+def reading_order_text(page: fitz.Page) -> str:
+    """Testo della pagina nell'ordine in cui e' STAMPATA.
+
+    Restituisce il testo grezzo (byte-identico a ``page.get_text()``) quando lo
+    stream e' gia' in ordine — cosi' i PDF ben formati, su cui i prompt sono
+    tarati, non cambiano di un carattere — e passa all'ordinamento per
+    coordinate solo sulle pagine dimostrabilmente scomposte.
+    """
+    if not _stream_order_is_scrambled(page):
+        return page.get_text()
+    logger.warning(
+        "Content-stream fuori ordine di lettura a pagina %s: testo riordinato "
+        "per coordinate (altrimenti etichette e importi si legano alla colonna "
+        "sbagliata)", page.number + 1,
+    )
+    return page.get_text(sort=True)
+
+
 def _reconcile_blank_current_ce_cells(
     file_path: str,
     current_ce: Dict[str, Decimal],
@@ -1377,7 +1433,8 @@ def extract_relevant_pages(file_path: str) -> Tuple[str, str]:
     def _page_text(page_index: int) -> str:
         if page_index in detached_texts:
             return detached_texts[page_index]
-        return _filter_difference_columns(doc[page_index]) or doc[page_index].get_text()
+        page = doc[page_index]
+        return _filter_difference_columns(page) or reading_order_text(page)
 
     sp_text = "\n".join(
         _page_text(p) for p in sorted(sp_pages)
@@ -2806,7 +2863,7 @@ def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
         parts.append(
             detached_texts.get(i)
             or _filter_difference_columns(page)
-            or page.get_text()
+            or reading_order_text(page)
         )
     doc.close()
     return "\n".join(parts)

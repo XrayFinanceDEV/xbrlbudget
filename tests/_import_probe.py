@@ -180,9 +180,12 @@ def probe(file_path: str, method: str = "standard") -> dict:
                 for name, value in (src or {}).items():
                     if not (name.startswith("sp") or name.startswith("ce")):
                         continue
-                    s = _str_dec(value)
-                    if s is not None and s != "0":
-                        rec["fields"][name] = s
+                    # NB: mai riusare `s` qui — e' la sessione DB chiusa nel
+                    # finally; sovrascriverla faceva fallire ogni import RIUSCITO
+                    # con "AttributeError: 'str' object has no attribute 'close'".
+                    amount = _str_dec(value)
+                    if amount is not None and amount != "0":
+                        rec["fields"][name] = amount
         finally:
             s.close()
     except Exception as exc:

@@ -16,7 +16,7 @@ sono elencati nel §5 dell'indice).
 |-----|------------|
 | [REGOLE-IMPORT-00-INDICE.md](import/REGOLE-IMPORT-00-INDICE.md) | Indice, principio "diagnosticare mai fabbricare", soglie chiave, **drift doc↔codice** |
 | [REGOLE-IMPORT-01-ROUTING.md](import/REGOLE-IMPORT-01-ROUTING.md) | Riconoscimento route: segnali, albero decisionale, scansione vs testo corrotto, gestionali |
-| [REGOLE-IMPORT-02-ESTRAZIONE.md](import/REGOLE-IMPORT-02-ESTRAZIONE.md) | Pipeline in fasi, deterministico vs LLM, scelta del candidato, XBRL, CSV, politica API |
+| [REGOLE-IMPORT-02-ESTRAZIONE.md](import/REGOLE-IMPORT-02-ESTRAZIONE.md) | Pipeline in fasi, ordine di lettura del testo, deterministico vs LLM, scelta del candidato, XBRL, CSV, politica API |
 | [REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md](import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) | Ricostruzione righe, netting fondi, tipizzazione debiti, entro/oltre, i 15 divieti |
 | [REGOLE-IMPORT-04-QUADRATURE.md](import/REGOLE-IMPORT-04-QUADRATURE.md) | I 5 controlli, tolleranze, ordine dei messaggi di rifiuto, stati, Rettifiche |
 | [REGOLE-IMPORT-05-INFRANNUALE.md](import/REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward SP, gate del previsionale |

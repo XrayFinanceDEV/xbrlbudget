@@ -718,6 +718,14 @@ def test_balance_sheet_fallback_is_altri_debiti():
     assert field == "sp16g"
 
 
+def test_fallback_field_is_usable_before_the_total_is_known():
+    """A classification loop knows the amount long before the sheet total, so it
+    needs the destination without a materiality verdict."""
+    from importers.situazione_contabile_parser import fallback_field
+    assert fallback_field("ce") == "ce06"
+    assert fallback_field("bs") == "sp16g"
+
+
 @pytest.mark.parametrize("target", ["sp02", "sp03", "sp12", "sp16a", "ce09"])
 def test_tier0_targets_are_refused(target):
     with pytest.raises(ValueError):
@@ -766,6 +774,16 @@ def materiality_threshold(total: Decimal) -> Decimal:
     return max(Decimal('1000'), total * Decimal('0.001'))
 
 
+def fallback_field(statement: str) -> str:
+    """KPI-neutral destination for unrecognised mass in `statement`.
+
+    Separate from fallback_bucket because a classification loop knows the
+    amount long before the sheet total exists: it needs the destination now
+    and the materiality verdict later.
+    """
+    return FALLBACK_FIELDS.get(statement, 'ce06')
+
+
 def fallback_bucket(desc: str, statement: str, amount: Decimal,
                     total: Decimal, target: Optional[str] = None):
     """Destination for mass that was READ but not recognised.
@@ -781,18 +799,17 @@ def fallback_bucket(desc: str, statement: str, amount: Decimal,
         raise ValueError(
             f"fallback vietato verso un conto critico ({target}): "
             f"'{desc}' deve essere segnalato, non indovinato")
-    field = FALLBACK_FIELDS.get(statement, 'ce06')
     severity = ('recorded'
                 if abs(amount or Decimal('0')) > materiality_threshold(total)
                 else 'silent')
-    return field, severity
+    return fallback_field(statement), severity
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `backend/venv/bin/python -m pytest tests/test_fallback_bucket.py -q -p no:randomly`
 
-Expected: 12 passed
+Expected: 13 passed
 
 - [ ] **Step 5: Wire the policy into the two catch-all sites**
 
@@ -815,28 +832,35 @@ to:
 ```python
         f = _classify_ce_costi(d) or _resolve_field(d, 'costi', statement='ce')
         if f is None:
-            f, _sev = fallback_bucket(d, 'ce', a, Z)   # total resolved below
-            unclassified.append((d, a, f))
+            f = fallback_field('ce')
+            unclassified.append((d, a, 'ce'))
 ```
 
-and the revenue line the same way, keeping `ce04` as its destination:
+and the revenue line the same way, keeping `ce04` as its destination (a revenue
+that reaches the catch-all is still revenue — only the sub-line is unknown):
 
 ```python
         f = _classify_ce_ricavi(d) or _resolve_field(d, 'ricavi', statement='ce')
         if f is None:
             f = 'ce04'
-            unclassified.append((d, a, f))
+            unclassified.append((d, a, 'ce'))
 ```
 
-Then, immediately **after** `att_sum` is computed (the line `att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)`), add:
+The materiality verdict cannot be reached inside the loop — the sheet total does not
+exist yet. Resolve it once, immediately **after** `att_sum` is computed (the line
+`att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)`):
 
 ```python
-    # Mass assigned by fallback rather than recognised. Only the MATERIAL part
-    # is reported: below the threshold a generic bucket is a legitimate label,
-    # above it the composition is guesswork and must be visible.
-    _m = materiality_threshold(att_sum)
-    bs['_unclassified_mass'] = sum(
-        (abs(a) for _d, a, _f in unclassified if abs(a) > _m), Z)
+    # Mass assigned by fallback rather than recognised. Only the MATERIAL part is
+    # reported: below the threshold a generic bucket is a legitimate label; above
+    # it the composition is guesswork and must be visible. fallback_bucket is the
+    # single policy entry point, called here where the total is finally known.
+    material = Z
+    for _desc, _amt, _stmt in unclassified:
+        _field, _severity = fallback_bucket(_desc, _stmt, _amt, att_sum)
+        if _severity == 'recorded':
+            material += abs(_amt)
+    bs['_unclassified_mass'] = material
 ```
 
 - [ ] **Step 6: Verify the wiring on budget_342**
@@ -1218,7 +1242,7 @@ from importers.reliability import materiality_threshold  # noqa: E402,F401
 
 Run: `backend/venv/bin/python -m pytest tests/test_reliability.py tests/test_fallback_bucket.py -q -p no:randomly`
 
-Expected: 25 passed. `tests/test_fallback_bucket.py::test_threshold_*` now exercise the
+Expected: 26 passed. `tests/test_fallback_bucket.py::test_threshold_*` now exercise the
 re-exported function, proving the two modules share one rule.
 
 - [ ] **Step 7: Commit**

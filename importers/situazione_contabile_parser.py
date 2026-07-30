@@ -3479,6 +3479,79 @@ def _dedup_parent_child(rows):
     return out
 
 
+def _code_depth(code: str) -> int:
+    """Hierarchy level of an account code.
+
+    Dotted/slashed codes carry their depth explicitly ('03.01.07' -> 3). Flat
+    numeric codes encode it in their LENGTH: AGO prints mastri as 8 digits
+    ('13095000') and their sub-accounts as 9 ('101080000'). A 1-2 character
+    flat code cannot be such an account — it is a bare level-1 mastro of a
+    dotted-family chart ('03'), so it counts as depth 1.
+
+    Depth is only a HINT — the caller must corroborate the chosen partition
+    against a printed total before trusting it (see _select_dedup). Only the
+    ORDER matters: a mastro must never score deeper than its own children.
+    """
+    c = (code or '').strip()
+    if not c:
+        return 0
+    canon = _hier_canon(c)
+    if '.' in canon:
+        return len(canon.split('.'))
+    return 1 if len(canon) <= 2 else len(canon)
+
+
+def _dedup_candidates(rows):
+    """Yield (label, rows) candidate partitions of a scan side.
+
+    No candidate is trusted on its own; _select_dedup scores them against the
+    document's printed total. Includes the historical prefix-based dedup so a
+    file that works today can still win.
+    """
+    yield 'all', list(rows)
+    yield 'existing', _dedup_parent_child(rows)
+    depths = sorted({_code_depth(c) for c, _d, _a in rows if c})
+    for depth in depths:
+        yield (f'depth<={depth}',
+               [r for r in rows if not r[0] or _code_depth(r[0]) <= depth])
+
+
+def _select_dedup(attivo_rows, declared_total: Optional[Decimal]):
+    """Pick the partition whose attivo sum reconciles to the declared total.
+
+    Returns (label, dedup_fn, reconciled). ``dedup_fn`` is applied to BOTH
+    sides so the two are partitioned consistently. When no declared total is
+    available, or none of the candidates reconciles, the historical behaviour
+    is returned with reconciled=False — the caller then records the scan as
+    unreliable instead of silently trusting it.
+    """
+    legacy = ('existing', _dedup_parent_child, False)
+    if not declared_total or declared_total <= 0:
+        return legacy
+    tol = max(Decimal('50'), declared_total * Decimal('0.005'))
+    best = None
+    for label, kept in _dedup_candidates(attivo_rows):
+        total = sum((a for _c, _d, a in kept), Decimal('0'))
+        gap = abs(total - declared_total)
+        if gap > tol:
+            continue
+        # tie-break: drop as few rows as possible
+        key = (gap, -len(kept))
+        if best is None or key < best[0]:
+            best = (key, label)
+    if best is None:
+        return legacy
+    label = best[1]
+
+    def _fn(rows, _label=label):
+        for candidate_label, kept in _dedup_candidates(rows):
+            if candidate_label == _label:
+                return kept
+        return _dedup_parent_child(rows)
+
+    return label, _fn, True
+
+
 def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
     """Classify + sum deduplicated scan rows into the contra-netting aggregates.
     Rows are (code, desc_upper, amount); the SIDE each row came from is ground

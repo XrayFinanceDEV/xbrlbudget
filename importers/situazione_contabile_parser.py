@@ -3271,6 +3271,51 @@ def _hier_lvl1(rows: List[Tuple[str, str, Decimal]]) -> List[Tuple[str, str, Dec
     return res
 
 
+def _is_prior_result_caption(desc_upper: str) -> bool:
+    """True for a PRIOR-year result caption ("Utile esercizio precedente", "Utili
+    portati a nuovo").
+
+    Trial balances frequently do NOT consolidate the previous year's result into
+    the capital/reserve accounts: it is printed as its own row — often CODE-LESS,
+    in the SP footer next to the totals — and belongs to patrimonio netto (utili
+    portati a nuovo). It must be told apart from the CURRENT period result, which
+    is the balancing figure and is derived from the Attivo/Passivo gap.
+    """
+    d = desc_upper
+    if 'TOTALE' in d or 'PAREGGIO' in d:
+        return False
+    if not any(k in d for k in ('UTILE', 'UTILI', 'PERDITA', 'PERDITE', 'RISULTATO')):
+        return False
+    return 'PRECEDENT' in d or 'PORTAT' in d
+
+
+def _hier_prior_result(words, lo: float, hi: float) -> Decimal:
+    """Signed prior-year result printed WITHOUT an account code in x-band [lo, hi).
+
+    Only code-less rows are collected: a prior result that carries a code is
+    already inside a level-1 mastro (e.g. "23 CAPITALE E RISERVE") and counting
+    it again would double it.  The sign follows the caption (perdita -> negative),
+    so the caller can add the value to patrimonio netto on either column.
+    """
+    total = Decimal('0')
+    for row_words in _be_cluster_physical_rows(words, lo, hi):
+        toks = [w[4].strip() for w in sorted(row_words, key=lambda w: w[0]) if w[4].strip()]
+        # a leading account code means the row is already part of a mastro
+        if toks and re.match(r'^[\d./*]+$', toks[0]) and not _BE_AMT_RE.match(toks[0]):
+            continue
+        caption = ' '.join(t for t in toks if not _BE_AMT_RE.fullmatch(t)).upper()
+        if not _is_prior_result_caption(caption):
+            continue
+        amounts = [_parse_amount(t) for t in toks if _BE_AMT_RE.fullmatch(t)]
+        if not amounts:
+            continue
+        amount = abs(amounts[-1])
+        if 'PERDIT' in caption:
+            amount = -amount
+        total += amount
+    return total
+
+
 def _is_fondo_amm(desc_upper: str) -> bool:
     """Recognise depreciation/amortisation funds at any aggregation level, incl. the
     aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses."""
@@ -3854,6 +3899,7 @@ def _hier_reconstruct(pages_data, full: str):
     """
     Z = Decimal('0')
     att, pas, cos, ric = [], [], [], []
+    prior_pn = Z
     for words, is_sp, is_ce, up, width in pages_data:
         split = _be_split(words)
         if split is None:
@@ -3863,6 +3909,13 @@ def _hier_reconstruct(pages_data, full: str):
         if is_sp and not is_ce:
             att += left
             pas += right
+            # A trial balance often does NOT consolidate the previous year's
+            # result into the capital/reserve accounts: it is printed as a
+            # code-less row in the SP footer ("Utile esercizio precedente").
+            # It is patrimonio netto (utili portati a nuovo) — a credit balance
+            # on the passivo side, a debit balance on the attivo side.
+            prior_pn += _hier_prior_result(words, split, 1e9)
+            prior_pn -= _hier_prior_result(words, -1e9, split)
         elif is_ce and not is_sp:
             if ('COSTI' in up[:400] and 'RICAVI' in up[:400]
                     and up[:400].find('RICAVI') < up[:400].find('COSTI')):
@@ -3932,6 +3985,10 @@ def _hier_reconstruct(pages_data, full: str):
             addb(t, a)
         else:
             addb('sp16', a)
+
+    # Unconsolidated prior-year result -> utili (perdite) portati a nuovo.
+    if prior_pn:
+        addb('sp12', prior_pn)
 
     # CE: every cost mastro lands in a cost field and every revenue mastro in a
     # revenue field, so the net (ricavi - costi) is sign-correct regardless of the

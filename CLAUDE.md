@@ -445,9 +445,25 @@ Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor abo
   when it self-validates: gross attivo (`att_sum + netted`) reconciles to the declared TOTALE ATTIVO within
   0.5% AND the SP gap equals the CE result within 0.5% — otherwise it returns `None` and the masked
   best-effort result stands unchanged (so it can never regress a file already balanced). Recovered the
-  "ver_definitiva" 4-sezioni provvisori (budget_343/348) to clean quadratura; non-reconciling siblings
-  (budget_342 partial, the slash-gross 405/338) correctly fall back. Measured on the deterministic corpus the
+  "ver_definitiva" 4-sezioni provvisori (budget_343/348) to clean quadratura; the slash-gross siblings
+  (405/338) correctly fall back. Measured on the deterministic corpus the
   quadratura rate went 17→19 / 28 with zero regressions (`Test/_quadratura_harness.py`).
+- **Unconsolidated prior-year result (2026-07-27)** (`_is_prior_result_caption` + `_hier_prior_result`,
+  called from the SP-pages loop of `_hier_reconstruct`): a trial balance frequently does NOT consolidate
+  the previous year's result into the capital/reserve accounts — it is printed as its OWN row, typically
+  **code-less**, in the SP footer beside the totals ("Utile esercizio precedente 68.228,65"). `_hier_collect`
+  keeps only rows carrying a leading account code, so that amount was dropped from the passivo side; the SP
+  gap then over-stated the period result by exactly the prior-year amount and the rescue's CE cross-check
+  rejected an otherwise EXACT reconstruction (budget_342: gate 1 delta 0,00, gate 2 off by 68.228,65 →
+  fell back to a 60%-masked best-effort → hard "non supera i controlli contabili" import failure). The
+  amount now lands in `sp12` (utili/perdite portati a nuovo). Only **code-less** rows are collected — a
+  coded prior result already sits inside a level-1 mastro (e.g. "23 CAPITALE E RISERVE") and would double-
+  count. Sign follows the caption (perdita → negative) and the column (attivo side → negative, a debit
+  balance). The CURRENT period result ("Utile del periodo", "Utile d'esercizio") is explicitly NOT matched:
+  it stays the balancing figure derived from the Attivo/Passivo gap. Row clustering uses
+  `_be_cluster_physical_rows` because the caption and its amount sit on different baselines (~2 pt apart).
+  Still behind both self-validation gates, so it cannot apply wrong values to a file that already balances.
+  Tests: `tests/test_prior_result_in_pn.py`.
 
 #### Balance hardening (anti-masking)
 - `pdf_mapper.validate_balance` fails when `totale_attivo == 0` or when the aggregate sub-totals

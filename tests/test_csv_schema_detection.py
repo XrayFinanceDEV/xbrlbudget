@@ -28,6 +28,8 @@ def _company(db, name="CSV Test"):
     return company
 
 
+@pytest.mark.skipif(not BILAQ.exists(),
+                    reason="local corpus CSV budget_370 is not available")
 def test_bilaq_header_and_windows_encoding_are_detected():
     parser = CSVImporter(db_session=_session())
     _, rows = parser.read_csv_file(str(BILAQ))
@@ -38,6 +40,8 @@ def test_bilaq_header_and_windows_encoding_are_detected():
     assert len(rows) < 250  # exact duplicate export rows are discarded
 
 
+@pytest.mark.skipif(not BILAQ.exists(),
+                    reason="local corpus CSV budget_370 is not available")
 def test_real_bilaq_is_mapped_by_headers_and_iv_cee_sections():
     db = _session()
     company = _company(db)

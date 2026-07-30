@@ -340,12 +340,20 @@ PDF_613 = os.path.join(
 
 @pytest.mark.skipif(not os.path.exists(PDF_613), reason="evidence PDF not present")
 def test_contra_rows_on_613_finds_the_fondi_mass():
-    from importers.situazione_contabile_parser import _contra_rows, _contra_classify
+    from importers.situazione_contabile_parser import (
+        _contra_rows, _contra_classify, _select_dedup)
+    from importers.pdf_extractor_llm import _declared_control_totals
 
     rows = _contra_rows(PDF_613)
     assert rows is not None
-    attivo_rows, passivo_rows = rows
-    scan = _contra_classify(attivo_rows, passivo_rows)
+    attivo_rows, passivo_rows, _from_ocr = rows
+    # AGO's 8-digit mastri and 9-digit sub-accounts are not prefixes of each
+    # other, so the partition must be chosen by reconciling against the
+    # document's own printed total (production does the same).
+    declared = _declared_control_totals(PDF_613)
+    _label, dedup_fn, _ok = _select_dedup(
+        attivo_rows, declared.get("attivo") or declared.get("pareggio"))
+    scan = _contra_classify(attivo_rows, passivo_rows, dedup=dedup_fn)
     # Spec reproduced evidence: fondi ammortamento 1.853.799,20 on this file
     assert abs(scan.fondi_immat + scan.fondi_mat - Decimal("1853799.20")) \
         <= Decimal("1853799.20") * Decimal("0.01")
@@ -402,6 +410,15 @@ DECLARED = {"attivo": D("3685000"), "passivo": D("3685000"),
             "pareggio": D("3685000"), "utile": None, "perdita": None}
 
 
+def _fields(bs):
+    """The financial part of a sheet: net_contra_accounts also stamps
+    diagnostic `_contra_detected/_contra_applied/_contra_reason` keys on every
+    exit path (so 'no contra mass' is distinguishable from 'mass found but not
+    applied'). Those are not statement values — the no-op assertions below are
+    about the financial fields being untouched."""
+    return {k: v for k, v in bs.items() if not k.startswith("_")}
+
+
 def _patch_scan(monkeypatch, attivo, passivo, from_ocr=False):
     monkeypatch.setattr(scp, "_contra_rows",
                         lambda fp, text=None: (attivo, passivo, from_ocr))
@@ -444,7 +461,7 @@ def test_noop_when_extractor_already_netted(monkeypatch):
     # skips the (non-idempotent) IVA delta because totale_attivo is already at the
     # NET magnitude; balance-invariant debt reduction sees excess 0 -> no real
     # debt touched. Net effect: the sheet passes through byte-identical.
-    assert bs == before
+    assert _fields(bs) == before
 
 
 def test_noop_without_fondi(monkeypatch):
@@ -453,7 +470,7 @@ def test_noop_without_fondi(monkeypatch):
     before = dict(bs)
     bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
     assert netted == D("0")
-    assert bs == before
+    assert _fields(bs) == before
 
 
 def test_noop_when_scan_does_not_reconcile(monkeypatch):
@@ -463,7 +480,10 @@ def test_noop_when_scan_does_not_reconcile(monkeypatch):
     before = dict(bs)
     bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
     assert netted == D("0")
-    assert bs == before
+    assert _fields(bs) == before
+    # gate 2 must still RECORD that contra mass was detected but not applied
+    assert bs["_contra_detected"] > D("0")
+    assert bs["_contra_applied"] == D("0")
 
 
 def test_noop_without_declared_totals(monkeypatch):
@@ -472,7 +492,7 @@ def test_noop_without_declared_totals(monkeypatch):
     before = dict(bs)
     bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=None)
     assert netted == D("0")
-    assert bs == before
+    assert _fields(bs) == before
 
 
 def test_iva_one_sided_left_gross(monkeypatch):

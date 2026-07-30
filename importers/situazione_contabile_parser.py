@@ -3552,7 +3552,7 @@ def _select_dedup(attivo_rows, declared_total: Optional[Decimal]):
     return label, _fn, True
 
 
-def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
+def _contra_classify(attivo_rows, passivo_rows, dedup=None) -> ContraScan:
     """Classify + sum deduplicated scan rows into the contra-netting aggregates.
     Rows are (code, desc_upper, amount); the SIDE each row came from is ground
     truth for attivo_total/IVA, while fondi ammortamento count from EITHER side.
@@ -3561,7 +3561,11 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
     ("IMMOBILIZZAZIONI IMMATERIALI/MATERIALI", max amount wins so a fondi-section
     header reusing the same caption never shadows the gross) — leaf-level sums
     under-count on layouts with truncated leaf descriptions, the printed anchors
-    do not."""
+    do not.
+
+    ``dedup`` partitions the rows into the level actually summed; None keeps
+    the historical prefix-based _dedup_parent_child (see _select_dedup)."""
+    dedup = dedup or _dedup_parent_child
     Z = Decimal('0')
     g02 = g03 = att_total = f_im = f_mat = iva_c = iva_d = f_att = Z
     anch02 = anch03 = None
@@ -3581,7 +3585,7 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
             anch03 = a if anch03 is None else max(anch03, a)
 
     sval_rows = []                       # fondo svalutazione immobilizz. (either side)
-    for _c, d, a in _dedup_parent_child(list(attivo_rows)):
+    for _c, d, a in dedup(list(attivo_rows)):
         if _is_fondo_amm(d):
             continue                        # fondi handled from RAW rows below
         if _is_fondo_svalut_immob(d):
@@ -3596,7 +3600,7 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
             g02 += a
         elif f == 'gross_sp03':
             g03 += a
-    for _c, d, a in _dedup_parent_child(list(passivo_rows)):
+    for _c, d, a in dedup(list(passivo_rows)):
         if _is_fondo_amm(d):
             continue
         if _is_fondo_svalut_immob(d):
@@ -3626,7 +3630,7 @@ def _contra_classify(attivo_rows, passivo_rows) -> ContraScan:
         3-level tree with a grand total too (budget_343: 41 > 4101 > leaves)."""
         if not raw_rows:
             return Z, Z
-        deduped = _dedup_parent_child(list(raw_rows))
+        deduped = dedup(list(raw_rows))
         leaf_total = sum(a for _c, _d, a in deduped)
         grand_aggs = [a for _c, d, a in raw_rows if _is_fondo_aggregate(d)]
         total = max(grand_aggs) if grand_aggs else leaf_total
@@ -3834,6 +3838,19 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
     DECLARED anchor by it, because the document's printed totals are GROSS.
     """
     Z = Decimal('0')
+
+    def _mark(bs, detected, applied, reason):
+        """Record the scan outcome on the sheet so downstream reliability
+        reporting can distinguish 'no contra mass' from 'contra mass found but
+        NOT applied'. Underscore keys are passed through by _map_sc_keys and
+        ignored by _create_balance_sheet (which reads only ORM columns), the
+        same mechanism _plug_residual / _netted_contra already rely on."""
+        bs['_contra_detected'] = detected
+        bs['_contra_applied'] = applied
+        bs['_contra_reason'] = reason
+        return bs
+
+    dedup_label = 'existing'
     try:
         decl_total = None
         if declared:
@@ -3843,12 +3860,19 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
             decl_total = (declared.get('attivo') or declared.get('pareggio')
                           or declared.get('passivo'))
         if not decl_total or decl_total <= 0:
-            return winner_bs, Z
+            return _mark(winner_bs, Z, Z, 'nessun totale dichiarato'), Z
         rows = _contra_rows(file_path, text=text)
         if not rows:
-            return winner_bs, Z
+            return _mark(winner_bs, Z, Z, 'scan non disponibile'), Z
         att_rows, pas_rows, from_ocr = rows
-        scan = _contra_classify(att_rows, pas_rows)
+        # Which hierarchy level to sum is decided by RECONCILIATION against the
+        # document's own printed total, never by code prefixes: AGO uses two
+        # disjoint code families (8-digit mastri, 9-digit sub-accounts) that are
+        # not prefixes of each other, so the historical dedup summed both.
+        dedup_label, dedup_fn, dedup_reconciled = _select_dedup(att_rows, decl_total)
+        scan = _contra_classify(att_rows, pas_rows, dedup=dedup_fn)
+        logger.info("contra-netting: partizione '%s' (riconcilia=%s)",
+                    dedup_label, dedup_reconciled)
         iva_offset = min(scan.iva_credito, scan.iva_debito)
         # Contra to immobilizzazioni = fondo ammortamento + fondo svalutazione
         # immobilizzazioni, per side (both reduce B.I/B.II net book value).
@@ -3857,7 +3881,8 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
         fondi_total = immat_contra + mat_contra
         netted = fondi_total + iva_offset
         if netted <= decl_total * Decimal('0.01'):
-            return winner_bs, Z                              # gate 1
+            return _mark(winner_bs, netted, Z,
+                         'massa contro sotto soglia'), Z     # gate 1
         anchored = False
         if abs(scan.attivo_total - decl_total) > decl_total * Decimal('0.005'):
             # Gate 2 failed: the FULL attivo sum is polluted (4-sezioni layouts
@@ -3902,10 +3927,12 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
                     "contra-netting: scan attivo %s non riconcilia col totale "
                     "dichiarato %s e niente anchor affidabili — no-op",
                     scan.attivo_total, decl_total)
-                return winner_bs, Z                          # gate 2
+                return _mark(
+                    winner_bs, netted, Z,
+                    'contro rilevati ma non applicati: scan non riconcilia'), Z
     except Exception as exc:
         logger.warning("contra-netting: scan fallito (%s) — no-op", exc)
-        return winner_bs, Z
+        return _mark(winner_bs, Z, Z, f'scan fallito: {exc}'), Z
 
     # ---- apply (deterministic authority) ------------------------------------
     # IVA gross-evidence gate: the IVA collapse is a DELTA (not idempotent like
@@ -3963,6 +3990,7 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
         "contra-netting: nettati %s (fondi immat %s + mat %s + IVA %s); "
         "sp02 %s→%s, sp03 %s→%s", netted, scan.fondi_immat, scan.fondi_mat,
         iva_offset, old_02, new_02, old_03, new_03)
+    _mark(winner_bs, netted, netted, f'applicato ({dedup_label})')
     return winner_bs, netted
 
 

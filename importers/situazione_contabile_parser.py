@@ -659,6 +659,62 @@ def _resolve_field(desc: str, side: Optional[str] = None,
     return node.db_field.split('_', 1)[0]
 
 
+# Accounts that decide every KPI. A fallback may NEVER write these: an error
+# here changes a TOTAL (a fondo ammortamento booked as a debt inflates assets
+# and debts together), which breaks PFN, ROI, indipendenza finanziaria and
+# both rating models at once. ce09 is included because EBITDA = EBIT + ce09.
+TIER0_FIELDS = frozenset({
+    'sp02', 'sp03', 'sp04',      # immobilizzazioni nette
+    'sp11', 'sp12', 'sp13',      # patrimonio netto
+    'sp16a', 'sp17a',            # debiti verso banche
+    'ce09',                      # ammortamenti (EBITDA boundary)
+})
+
+# KPI-neutral destinations: moving mass between these changes neither EBIT nor
+# EBITDA (they are all inside 'costi della produzione'), nor any debt/credit
+# total. Always an explicit SUB-field: projection_common.base_bank_debt treats
+# an aggregate/detail gap as BANK debt, so a residual left on an aggregate
+# would silently become phantom bank debt - a tier-0 corruption.
+FALLBACK_FIELDS = {'ce': 'ce06', 'bs': 'sp16g'}
+
+
+def materiality_threshold(total: Decimal) -> Decimal:
+    """M = max(1.000 EUR; 0,1% del totale attivo)."""
+    total = abs(total or Decimal('0'))
+    return max(Decimal('1000'), total * Decimal('0.001'))
+
+
+def fallback_field(statement: str) -> str:
+    """KPI-neutral destination for unrecognised mass in `statement`.
+
+    Separate from fallback_bucket because a classification loop knows the
+    amount long before the sheet total exists: it needs the destination now
+    and the materiality verdict later.
+    """
+    return FALLBACK_FIELDS.get(statement, 'ce06')
+
+
+def fallback_bucket(desc: str, statement: str, amount: Decimal,
+                    total: Decimal, target: Optional[str] = None):
+    """Destination for mass that was READ but not recognised.
+
+    Returns (short_field, severity). severity is 'silent' below the
+    materiality threshold and 'recorded' above it, so the caller can surface
+    material guesswork instead of hiding it.
+
+    Raises ValueError when `target` names a tier-0 field: uncertainty about a
+    critical account must become an UNRELIABLE verdict, never a guess.
+    """
+    if target and target in TIER0_FIELDS:
+        raise ValueError(
+            f"fallback vietato verso un conto critico ({target}): "
+            f"'{desc}' deve essere segnalato, non indovinato")
+    severity = ('recorded'
+                if abs(amount or Decimal('0')) > materiality_threshold(total)
+                else 'silent')
+    return fallback_field(statement), severity
+
+
 # ---------------------------------------------------------------------------
 # Typed sub-field classification (depth preservation)
 # ---------------------------------------------------------------------------
@@ -4047,6 +4103,7 @@ def _hier_reconstruct(pages_data, full: str):
     Z = Decimal('0')
     att, pas, cos, ric = [], [], [], []
     prior_pn = Z
+    unclassified = []          # (desc, amount, assigned_field)
     for words, is_sp, is_ce, up, width in pages_data:
         split = _be_split(words)
         if split is None:
@@ -4146,7 +4203,10 @@ def _hier_reconstruct(pages_data, full: str):
         ce[k] = ce.get(k, Z) + v
 
     for _c, d, a in mc:
-        f = _classify_ce_costi(d) or _resolve_field(d, 'costi', statement='ce') or 'ce12'
+        f = _classify_ce_costi(d) or _resolve_field(d, 'costi', statement='ce')
+        if f is None:
+            f = fallback_field('ce')
+            unclassified.append((d, a, 'ce'))
         if f == 'ce01_return':
             adde('ce01', -a)
         elif f == 'ce10_close':
@@ -4158,13 +4218,28 @@ def _hier_reconstruct(pages_data, full: str):
         else:
             adde(f, a)
     for _c, d, a in mr:
-        f = _classify_ce_ricavi(d) or _resolve_field(d, 'ricavi', statement='ce') or 'ce04'
+        f = _classify_ce_ricavi(d) or _resolve_field(d, 'ricavi', statement='ce')
+        if f is None:
+            f = 'ce04'
+            unclassified.append((d, a, 'ce'))
         if f == 'ce10_close':
             adde('ce10', -a)
         else:
             adde(f, a)
 
     att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
+
+    # Mass assigned by fallback rather than recognised. Only the MATERIAL part is
+    # reported: below the threshold a generic bucket is a legitimate label; above
+    # it the composition is guesswork and must be visible. fallback_bucket is the
+    # single policy entry point, called here where the total is finally known.
+    material = Z
+    for _desc, _amt, _stmt in unclassified:
+        _field, _severity = fallback_bucket(_desc, _stmt, _amt, att_sum)
+        if _severity == 'recorded':
+            material += abs(_amt)
+    bs['_unclassified_mass'] = material
+
     pas_sum = sum((bs.get(k, Z) for k in ('sp11', 'sp12', 'sp14', 'sp15', 'sp16', 'sp17', 'sp18')), Z)
     sp13 = att_sum - pas_sum               # result as the SP gap → attivo == passivo
 

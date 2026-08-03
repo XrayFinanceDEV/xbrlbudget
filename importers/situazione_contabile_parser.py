@@ -23,7 +23,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import fitz  # PyMuPDF
@@ -3501,36 +3501,59 @@ def _code_depth(code: str) -> int:
     return 1 if len(canon) <= 2 else len(canon)
 
 
-def _dedup_candidates(rows):
-    """Yield (label, rows) candidate partitions of a scan side.
+def _depth_partition(rows, max_depth: int):
+    """Keep the rows at or above `max_depth` in the hierarchy; code-less rows
+    are always kept. A pure function of the THRESHOLD, so the same rule applies
+    identically to any row set (see _dedup_rules)."""
+    return [r for r in rows if not r[0] or _code_depth(r[0]) <= max_depth]
+
+
+def _dedup_rules(rows):
+    """Yield (label, rule) candidate partition RULES for a scan side.
+
+    Each ``rule`` is a callable rows -> rows that CARRIES ITS OWN CRITERION, so
+    the winner can be handed any other row set (the passivo side, the fondi
+    subset) and still apply the very same partition. `rows` only generates the
+    hypotheses (which depths exist here); it never parameterises the rules
+    beyond the threshold they close over.
 
     No candidate is trusted on its own; _select_dedup scores them against the
     document's printed total. Includes the historical prefix-based dedup so a
     file that works today can still win.
     """
-    yield 'all', list(rows)
-    yield 'existing', _dedup_parent_child(rows)
+    yield 'all', list
+    yield 'existing', _dedup_parent_child
     depths = sorted({_code_depth(c) for c, _d, _a in rows if c})
     for depth in depths:
-        yield (f'depth<={depth}',
-               [r for r in rows if not r[0] or _code_depth(r[0]) <= depth])
+        yield f'depth<={depth}', partial(_depth_partition, max_depth=depth)
+
+
+def _dedup_candidates(rows):
+    """Yield (label, rows) candidate partitions of a scan side — the rules of
+    _dedup_rules already applied to `rows`."""
+    for label, rule in _dedup_rules(rows):
+        yield label, rule(rows)
 
 
 def _select_dedup(attivo_rows, declared_total: Optional[Decimal]):
     """Pick the partition whose attivo sum reconciles to the declared total.
 
-    Returns (label, dedup_fn, reconciled). ``dedup_fn`` is applied to BOTH
-    sides so the two are partitioned consistently. When no declared total is
-    available, or none of the candidates reconciles, the historical behaviour
-    is returned with reconciled=False — the caller then records the scan as
-    unreliable instead of silently trusting it.
+    Returns (label, dedup_fn, reconciled). ``dedup_fn`` is the WINNING RULE
+    itself, not a label to be re-derived: it is applied unchanged to BOTH sides
+    (and to the fondi subset), so the two are partitioned consistently even when
+    a side happens to contain none of the winning depth's codes. When no
+    declared total is available, or none of the candidates reconciles, the
+    historical behaviour (`_dedup_parent_child`) is returned with
+    reconciled=False — the caller then records the scan as unreliable instead of
+    silently trusting it.
     """
     legacy = ('existing', _dedup_parent_child, False)
     if not declared_total or declared_total <= 0:
         return legacy
     tol = max(Decimal('50'), declared_total * Decimal('0.005'))
     best = None
-    for label, kept in _dedup_candidates(attivo_rows):
+    for label, rule in _dedup_rules(attivo_rows):
+        kept = rule(attivo_rows)
         total = sum((a for _c, _d, a in kept), Decimal('0'))
         gap = abs(total - declared_total)
         if gap > tol:
@@ -3538,18 +3561,10 @@ def _select_dedup(attivo_rows, declared_total: Optional[Decimal]):
         # tie-break: drop as few rows as possible
         key = (gap, -len(kept))
         if best is None or key < best[0]:
-            best = (key, label)
+            best = (key, label, rule)
     if best is None:
         return legacy
-    label = best[1]
-
-    def _fn(rows, _label=label):
-        for candidate_label, kept in _dedup_candidates(rows):
-            if candidate_label == _label:
-                return kept
-        return _dedup_parent_child(rows)
-
-    return label, _fn, True
+    return best[1], best[2], True
 
 
 def _contra_classify(attivo_rows, passivo_rows, dedup=None) -> ContraScan:

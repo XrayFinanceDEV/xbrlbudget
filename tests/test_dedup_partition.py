@@ -17,6 +17,7 @@ sys.path.insert(0, ROOT)
 
 from importers.situazione_contabile_parser import (  # noqa: E402
     _code_depth,
+    _dedup_parent_child,
     _select_dedup,
 )
 
@@ -67,6 +68,64 @@ def test_selection_without_a_declared_total_keeps_legacy_behaviour():
     label, dedup_fn, reconciled = _select_dedup(rows, None)
     assert label == "existing"
     assert reconciled is False
+
+
+def test_winning_rule_applies_to_a_side_that_lacks_the_winning_depth():
+    """The rule chosen on the attivo must apply UNCHANGED to the other sides.
+
+    _select_dedup is scored on the attivo rows, but the callable it returns is
+    also handed the passivo rows and the fondi subset. If the winner is
+    re-derived from whatever rows it is given, a side that happens to contain
+    no code of the winning depth yields no such candidate and the callable
+    silently degrades to the legacy `c.startswith(code)` PREFIX dedup — the
+    very rule this partition exists to eliminate. Depth may only ever be a
+    hypothesis corroborated by a printed total; a prefix must never decide.
+    """
+    attivo = [
+        ("13095000", "ATTREZZATURE", D("300")),
+        ("101080000", "ATTREZZATURA VARIA", D("300")),
+        ("13085000", "FABBRICATI", D("700")),
+    ]
+    label, dedup_fn, reconciled = _select_dedup(attivo, D("1000"))
+    assert (label, reconciled) == ("depth<=8", True)
+
+    # Passivo side of the same scan: only 9-deep codes, no 8-deep one at all.
+    passivo = [
+        ("101080000", "FONDO AMM ATTREZZATURA", D("300")),
+        ("101090000", "FONDO AMM FABBRICATI", D("200")),
+    ]
+    # The legacy prefix dedup finds no parent/child pair here and keeps both
+    # rows — that is exactly the fallback we must NOT get.
+    assert len(_dedup_parent_child(passivo)) == 2
+
+    kept = dedup_fn(passivo)
+    assert kept == [], (
+        "the depth<=8 rule must still be applied to a side with no 8-deep "
+        f"code; got {kept!r} (prefix-dedup fallback)"
+    )
+
+
+def test_winning_rule_applies_to_a_subset_with_no_matching_depth():
+    """Same failure mode one level deeper: _contra_classify re-applies the
+    dedup to the fondi SUBSET of the rows inside _reduce_fondi."""
+    attivo = [
+        ("13095000", "ATTREZZATURE", D("300")),
+        ("101080000", "ATTREZZATURA VARIA", D("300")),
+        ("13085000", "FABBRICATI", D("700")),
+    ]
+    _label, dedup_fn, _ok = _select_dedup(attivo, D("1000"))
+    subset = [r for r in attivo if _code_depth(r[0]) == 9]
+    assert dedup_fn(subset) == []
+
+
+def test_legacy_winner_is_still_the_historical_dedup():
+    """The 'existing' winner legitimately IS _dedup_parent_child — the
+    no-declared-total / nothing-reconciles fallback must keep it."""
+    rows = [("13095000", "ATTREZZATURE", D("300"))]
+    for declared in (None, D("0"), D("999999")):
+        label, dedup_fn, reconciled = _select_dedup(rows, declared)
+        assert (label, dedup_fn, reconciled) == (
+            "existing", _dedup_parent_child, False)
 
 
 @pytest.mark.skipif(not os.path.exists(PDF_613), reason="evidence PDF not present")

@@ -96,6 +96,7 @@ def test_budget_342_ammortamenti_are_not_swallowed_by_oneri_diversi():
     from _prod_route_c_runner import run_prod_route_c
 
     result = run_prod_route_c(pdf)
+    bs = result["bs"]
     ce = result["ce"]
     # declared in the PDF: Totale ammortamenti mastro 80 = 36.500,17
     assert abs(Decimal(ce.get("ce09_ammortamenti", 0)) - D("36500.17")) <= D("1")
@@ -110,3 +111,23 @@ def test_budget_342_ammortamenti_are_not_swallowed_by_oneri_diversi():
     assert Decimal(ce.get("ce12_oneri_diversi", 0)) < D("140000")
     # the result is unchanged by re-labelling costs
     assert abs(Decimal(result["sp13"]) - D("100046.26")) <= D("1")
+
+    # --- Task 3 wiring check: the fallback must actually fire, not just exist ---
+    # The `< 140000` bound above only documents the OLD bug (ammortamenti
+    # leaking into ce12) and would stay green even if _hier_reconstruct's
+    # Step-5 wiring were reverted to `or 'ce12'` / `or 'ce04'` and the
+    # `unclassified` accumulation deleted. These two assertions are the ones
+    # that actually break on a revert: `_unclassified_mass` would vanish
+    # (KeyError -> falsy default, equality fails) and `ce12_oneri_diversi`
+    # would jump back up by the unmapped-mastri mass (97.382,25) because the
+    # four unmapped mastri (ACQUISTI DI BENI, GESTIONE VEICOLI AZIENDALI,
+    # PRESTAZIONI DI LAVORO NON DIPENDENTI, SPESE AMMIN./COMM.) would land
+    # there again, on top of the genuinely-recognised ONERI DIVERSI DI
+    # GESTIONE (7.036,26) that belongs there.
+    #
+    # Measured (not asserted verbatim from the brief): the four unmapped
+    # level-1 cost mastri sum to 58.604,70 + 8.773,07 + 23.172,80 + 6.831,68 =
+    # 97.382,25, matching `_unclassified_mass` exactly.
+    assert isinstance(bs.get("_unclassified_mass"), Decimal)
+    assert abs(bs["_unclassified_mass"] - D("97382.25")) <= D("1")
+    assert abs(Decimal(ce.get("ce12_oneri_diversi", 0)) - D("7036.26")) <= D("1")

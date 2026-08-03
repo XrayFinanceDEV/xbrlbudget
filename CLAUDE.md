@@ -305,6 +305,21 @@ Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_ta
   picking an extractor (see the Macro-area router subsection below). The classifier replaces the old
   binary `is_trial_balance` check.
 - Uses PyMuPDF text extraction + Claude Haiku 4.5 for structured extraction (IV-CEE routes)
+- **Reading order** (`reading_order_text` / `_stream_order_is_scrambled`, `pdf_extractor_llm.py`):
+  `page.get_text()` returns content-stream order, NOT visual reading order. Some generators draw a
+  comparative statement bottom-up or emit the second amount column as a detached block, so labels
+  bind to the WRONG column: the prior year gets imported as the current one (a "Bilancio
+  riclassificato / Fascicolo" read its 2024 column as 2025 — profit +17.305 instead of the real
+  −127.995 loss) and a detail amount is attributed to the legal item that precedes it in the stream
+  (C.17 "altri" financial charges booked to D.18 Rivalutazioni, +27.777 on the CE result). Only the
+  second failure is visible (blocked as "Utile CE != sp13"); **the wrong-year one balances
+  perfectly**, which is why it is fixed upstream instead of at the gates. A page is re-read
+  coordinate-sorted (`get_text(sort=True)`) ONLY when its stream order is demonstrably broken —
+  more than 25% backward vertical jumps between consecutive blocks, min 6 blocks. Well-formed pages
+  keep byte-identical text (212 of 249 corpus files unchanged), so prompts tuned on that text do not
+  move. Applied in `extract_relevant_pages._page_text` and `_extract_full_text`, AFTER
+  `_detached_value_page_texts` and `_filter_difference_columns` (both already coordinate-based).
+  Tests: `tests/test_reading_order.py`. Rules: `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §2.
 - Processing time: 3-10 seconds per PDF
 - Supports Bilancio Micro, Abbreviato, Ordinario (IV CEE format)
 - Supports "Stampa dettaglio voci" format (ERP detail reports with account-level GL entries)

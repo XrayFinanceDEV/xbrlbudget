@@ -1,0 +1,1 @@
+{"status":"healthy","version":"3.2.0","protocol_version":1,"queued_tasks":0,"processing_tasks":0,"completed_tasks":0,"failed_tasks":0,"max_concurrent_requests":3,"processing_window_size":64,"task_retention_seconds":86400,"task_cleanup_interval_seconds":300}

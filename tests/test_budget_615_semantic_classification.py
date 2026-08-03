@@ -111,7 +111,13 @@ def test_budget_615_assets_funds_and_debts_match_the_source():
     assert bs["sp06"] == D("315175.67")
     assert bs["sp14"] == D("20000.00")
     assert bs["sp14a_fondi_trattamento_quiescenza"] == D("20000.00")
-    assert bs["_netted_contra"] == D("698555.96")
+    # `_netted_contra` = massa contra COMPLESSIVA tolta dall'attivo, di cui il
+    # totale dichiarato dal documento e' lordo. Sono i 698.555,96 di fondi
+    # ammortamento PIU' i 13.168,43 del "F.do sval. crediti v/clienti": anche
+    # quest'ultimo e' stampato fra le passivita' e nettato dai crediti, quindi
+    # deve abbassare l'ancora esattamente come i fondi ammortamento — altrimenti
+    # riemerge come plug falso di pari importo (era il caso di budget_281).
+    assert bs["_netted_contra"] == D("698555.96") + D("13168.43")
 
     assert bs["sp16"] == D("220222.57")
     assert bs["sp17"] == D("839488.96")

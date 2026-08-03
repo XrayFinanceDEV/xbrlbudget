@@ -307,17 +307,30 @@ _SP_ATTIVO_RULES = [
     (['ONERI', 'PLURIENN'], 'gross_sp02'),
     (['COSTI', 'PLURIENN'], 'gross_sp02'),
     (['COSTI', 'IMPIANTO'], 'gross_sp02'),
+    (['COSTI', 'AMPLIAMENT'], 'gross_sp02'),   # B.I.1 e' "costi di impianto E DI AMPLIAMENTO"
     (['SOFTWARE'], 'gross_sp02'),
     (['BREVETT'], 'gross_sp02'),
     (['MARCHI'], 'gross_sp02'),
     (['AVVIAMENTO'], 'gross_sp02'),
     (['LICENZ'], 'gross_sp02'),
+    # B.I.7 "costi su beni di terzi" (migliorie/lavori su beni non di proprieta').
+    # Il repo lo tratta gia' come IMMATERIALE sul lato fondo (regola F.DO+AMM+MANUT
+    # "spese di manut.beni di ter(zi)"); senza la regola simmetrica qui il cespite
+    # finiva nei crediti mentre il suo fondo nettava le immobilizzazioni MATERIALI
+    # (budget_281: 4.500,00 in sp06 e 2.471,86 sottratti a sp03).
+    (['BENI DI TERZ'], 'gross_sp02'),
     (['FABBRICAT'], 'gross_sp03'),
     (['TERREN'], 'gross_sp03'),
     (['MACCHINAR'], 'gross_sp03'),
     (['MACCHINE'], 'gross_sp03'),
     (['IMPIANT'], 'gross_sp03'),
-    (['ATTREZZ'], 'gross_sp03'),
+    # 'ATTREZ' e non 'ATTREZZ': "ATTREZ." compare troncato nelle stampe a colonna
+    # stretta. Allargamento per PREFISSO, quindi additivo (ogni ATTREZZ contiene ATTREZ).
+    (['ATTREZ'], 'gross_sp03'),
+    (['ATTR', 'MINUT'], 'gross_sp03'),   # "ATTR.VARIE E MINUTE (<516,46 E.)"
+    # Categorie di cespite gia' riconosciute lato FONDO (_FONDO_CATEGORY_KW) ma
+    # assenti qui: il fondo nettava sp03 mentre il suo cespite finiva nei crediti.
+    (['TELEFON'], 'gross_sp03'),
     (['AUTOMEZZ'], 'gross_sp03'),
     (['AUTOVEICOL'], 'gross_sp03'),
     (['AUTOVETTUR'], 'gross_sp03'),
@@ -364,7 +377,9 @@ _SP_PASSIVO_RULES = [
     (['F.DO', 'AMM', 'SW'], 'depr_sp02'),                  # "F.do amm.sw in concessione capitalizz"
     (['F.DO', 'AMM', 'COSTI DI IMPIANTO'], 'depr_sp02'),   # B.I.1, before the IMPIANT→sp03 rule
     (['F.DO', 'AMM', "COSTI D'IMPIANTO"], 'depr_sp02'),
+    (['F.DO', 'AMM', 'AMPLIAMENT'], 'depr_sp02'),          # idem B.I.1 (budget_158 CONA)
     (['F.DO', 'AMM', 'MANUT'], 'depr_sp02'),               # "spese di manut.beni di ter(zi)" B.I.7
+    (['F.DO', 'AMM', 'BENI DI TERZ'], 'depr_sp02'),        # idem, grafia "lav. str. su beni di terzi"
     (['F.DO', 'AMM', 'LICENZE'], 'depr_sp02'),
     (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
     (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
@@ -525,8 +540,48 @@ def _classify_sp_attivo(desc_upper: str) -> str:
     return 'sp06'  # default: crediti
 
 
+# Testa della dicitura "fondo ammortamento" in TUTTE le grafie reali dei gestionali:
+# `F.DO AMM.TO`, `F/AMM.`, `FDO AMM`, `FONDO AMMORTAMENTO`, `F.DI AMMOR.TO`...
+# Ancorata a inizio riga perche' i conti di fondo esordiscono sempre con la dicitura.
+_FONDO_AMM_HEAD_RE = re.compile(
+    r"^\s*(?:F\s*[./]\s*D[OI]|FD[OI]|FOND[OI]|F)\s*[./]?\s*"
+    r"AMM(?:ORT\w*|\.?\s*TO|\.?\s*NTO)?\s*[./]?\s*"
+)
+
+# Forma canonica contro cui e' scritta l'intera tabella `_SP_PASSIVO_RULES`.
+_FONDO_AMM_CANON = 'F.DO AMM. '
+
+
+def _canon_fondo_amm(desc_upper: str) -> str:
+    """Collassa ogni grafia di "fondo ammortamento" sulla forma canonica `F.DO AMM.`.
+
+    `_SP_PASSIVO_RULES` copre la categoria del cespite (MACCHINAR, ATTREZZ, AUTO,
+    IMMAT...) SOLO in coppia con il token `F.DO`; la grafia con slash e' coperta
+    solo insieme a IMMAT/MATER, parole che compaiono nei mastri aggregati ma MAI
+    nei conti di dettaglio per categoria. Cosi' `F/AMM.MACCHINARI` non matcha
+    nessuna regola, cade nel default `sp16` e diventa un DEBITO: l'attivo resta
+    lordo, il passivo si gonfia della stessa massa, il bilancio pareggia lo stesso
+    e nessun gate protesta (budget_281: 5 fondi su 6, 124.893,64 di 124.936,25).
+
+    Normalizzare la TESTA una volta sola, invece di duplicare le 15 regole di
+    categoria per ogni grafia, e' cio' che tiene allineati i due riconoscitori di
+    fondo (`_is_fondo_amm` e questa tabella) — la loro divergenza E' il bug.
+
+    La riscrittura tocca SOLO le stringhe che `_is_fondo_amm` ha gia' dichiarato
+    fondi, quindi e' additiva per costruzione: si nettano piu' fondi, mai meno,
+    e "AMMINISTRATORI C/COMPENSI" non e' raggiungibile.
+    """
+    if not _is_fondo_amm(desc_upper):
+        return desc_upper
+    canon = _FONDO_AMM_HEAD_RE.sub(_FONDO_AMM_CANON, desc_upper, count=1)
+    # Nessuna testa riconosciuta (dicitura non a inizio riga): meglio la stringa
+    # originale che una riscrittura a caso.
+    return canon if canon != desc_upper else desc_upper
+
+
 def _classify_sp_passivo(desc_upper: str) -> str:
     """Classify a passivo entry by description keywords. Returns field or 'sp16' default."""
+    desc_upper = _canon_fondo_amm(desc_upper)
     for keywords, field in _SP_PASSIVO_RULES:
         if _kw_match(desc_upper, keywords):
             return field
@@ -1330,15 +1385,26 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     # the anchor reduction never exceeds the gross immobilizzazioni (a fondo without
     # a matching asset — the clamp case above — must not shrink the declared anchor).
     _netted = min(depr_sp02, gross_sp02) + min(depr_sp03, gross_sp03)
-    if _netted > 0:
-        bs['_netted_contra'] = bs.get('_netted_contra', Decimal('0')) + _netted
 
     # Banks
     bs['sp09'] = bs.get('sp09', Decimal('0')) + bank_dare
 
-    # Crediti deduction
+    # Crediti deduction. Il fondo svalutazione/rischi su crediti e' un contra dei
+    # CREDITI esposto sul passivo esattamente come i fondi ammortamento lo sono
+    # delle immobilizzazioni: nettarlo abbassa l'attivo senza abbassare il totale
+    # DICHIARATO, che resta lordo. Se non entra anche lui nella massa contra,
+    # riemerge come plug FALSO di importo pari al fondo (budget_281: 17.768,10 su
+    # 1.708.975,05 = 1,04% -> oltre la soglia dell'1% -> QUADRATURA MASCHERATA su
+    # un bilancio che invece e' corretto). Stesso cap dei fondi ammortamento: mai
+    # oltre i crediti lordi presenti, cosi' un fondo senza il suo credito non
+    # puo' restringere l'ancora.
     if crediti_deduction > 0:
-        bs['sp06'] = bs.get('sp06', Decimal('0')) - crediti_deduction
+        _gross_crediti = bs.get('sp06', Decimal('0'))
+        bs['sp06'] = _gross_crediti - crediti_deduction
+        _netted += min(crediti_deduction, max(Decimal('0'), _gross_crediti))
+
+    if _netted > 0:
+        bs['_netted_contra'] = bs.get('_netted_contra', Decimal('0')) + _netted
 
     # Equity
     bs['sp11'] = capitale
@@ -3456,10 +3522,32 @@ def _hier_prior_result(words, lo: float, hi: float) -> Decimal:
 
 def _is_fondo_amm(desc_upper: str) -> bool:
     """Recognise depreciation/amortisation funds at any aggregation level, incl. the
-    aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses."""
+    aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses.
+
+    Questa funzione governa l'INTERO netting dei fondi, quindi il pareggio di
+    tutta la route C: un fondo non riconosciuto non viene sottratto dal cespite,
+    l'attivo resta lordo e il passivo gonfio della stessa massa, i due lati non
+    tornano e la differenza diventa residuo non classificato -> oltre l'1%
+    scatta QUADRATURA MASCHERATA e l'import viene rifiutato.
+
+    Il test a sottostringhe qui sotto e' tenuto INVARIATO (non puo' regredire
+    nulla) e viene solo AFFIANCATO dalla forma canonica del normalizzatore unico,
+    che collassa `F.di ammor.to`, `Fdo amm`, `Fondo amm.` su `fondo ammortamento`
+    — grafie reali che il solo test a sottostringhe non vede. L'allargamento e'
+    additivo per costruzione: si riconoscono piu' fondi, mai meno.
+    """
     d = desc_upper
-    return (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
-            and ('FOND' in d or 'F.DO' in d or 'F/' in d))
+    if (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
+            and ('FOND' in d or 'F.DO' in d or 'F/' in d)):
+        return True
+    try:
+        from importers.label_semantics import normalize_label
+    except Exception:
+        return False
+    # `fondo ammortamento` CONTIGUO: "Ammortamento immobilizzazioni immateriali" e
+    # "Quota ammortamento esercizio" sono COSTI del conto economico, non fondi
+    # dello stato patrimoniale, e non devono mai essere nettati.
+    return "fondo ammortamento" in normalize_label(d)
 
 
 # Category qualifiers that make a fondo a SPECIFIC line rather than the grand-total
@@ -5605,7 +5693,11 @@ def parse_bilancio_verifica_segno(
     return dict(bs), dict(ce)
 
 
-def extract_situazione_contabile(file_path: str, return_prior: bool = False):
+def extract_situazione_contabile(
+    file_path: str,
+    return_prior: bool = False,
+    text_override: Optional[str] = None,
+):
     """
     Extract IV CEE data from a Situazione Contabile PDF.
 
@@ -5623,13 +5715,14 @@ def extract_situazione_contabile(file_path: str, return_prior: bool = False):
     except Exception as e:
         raise ValueError(f"Cannot open PDF: {e}")
 
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text() + "\n"
+    full_text = text_override or ""
+    if not full_text:
+        for page in doc:
+            full_text += page.get_text() + "\n"
     doc.close()
 
     vseg_ocr_pages = None
-    if len(full_text.strip()) < 50:
+    if text_override is None and len(full_text.strip()) < 50:
         candidate_pages = _vseg_rapidocr_pages(file_path)
         if candidate_pages:
             candidate_text = "\n".join(page["text"] for page in candidate_pages)

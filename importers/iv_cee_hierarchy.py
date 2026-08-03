@@ -39,15 +39,19 @@ _TREE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # Normalizzazione descrizioni
 # ---------------------------------------------------------------------------
 def normalize(text: str) -> str:
-    """lowercase, accenti rimossi, punteggiatura→spazio, spazi compattati."""
+    """Forma canonica delle descrizioni — delega al normalizzatore UNICO.
+
+    Prima questa funzione era una delle SEI normalizzazioni incompatibili del
+    sistema. Il difetto pratico: qui `c/c` restava `c/c`, mentre chi interrogava
+    l'albero passando da `label_semantics.normalize_label` mandava `conto c` —
+    due dialetti diversi sullo stesso dizionario, con i match persi in mezzo.
+    Gli alias del tree e le descrizioni interrogate passano ora dalla stessa
+    funzione, quindi non possono piu' divergere.
+    """
     if not text:
         return ""
-    t = unicodedata.normalize("NFKD", str(text))
-    t = "".join(c for c in t if not unicodedata.combining(c))
-    t = t.lower()
-    t = re.sub(r"[^a-z0-9/]+", " ", t)   # tieni '/' (utile per v/clienti, c/c)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    from importers.label_semantics import normalize_label
+    return normalize_label(text)
 
 
 class Node(NamedTuple):
@@ -142,28 +146,18 @@ def resolve(desc: str, side: Optional[str] = None,
     return None
 
 
-# ---------------------------------------------------------------------------
-# Adattatore per _be_reclassify (situazione_contabile_parser)
-# ---------------------------------------------------------------------------
-def classify_for_reclassify(desc: str, side: Optional[str] = None) -> Tuple[Optional[str], bool]:
-    """Contratto richiesto da `_be_reclassify`: (db_field, specific).
+# NOTA 2026-07-27: qui viveva classify_for_reclassify, l'adattatore scritto per
+# collegare il resolver semantico a _be_reclassify della route C. Non ha MAI
+# avuto un chiamante (verificato su tutto il repo): il "motore unico di
+# classificazione" descritto in CLAUDE.md non era in realta' collegato alla
+# route C. Rimosso; il collegamento vero passa da importers/label_semantics
+# (spazio "conto" con il ruolo contabile).
 
-    specific=True  -> ferma la discesa: la descrizione mappa a un campo DB foglia.
-    specific=False -> nodo generico (Immobilizzazioni, Crediti, Debiti, PN, ...):
-                      scendi nei figli per dettagliare.
-    (None, False)  -> non classificabile a questo livello.
-    """
-    node = resolve(desc, side=side, statement="bs")
-    if node is None:
-        return None, False
-    if node.netting:
-        # i fondi vanno nettati dall'attivo: trattali come "specifici" col segno
-        # gestito a monte dal chiamante (qui restituiamo il campo generico None).
-        return None, True
-    if node.db_field and node.is_legal_leaf and not node.is_total:
-        return node.db_field, True
-    # nodo-totale generico: lascia scendere
-    return node.db_field, False
+
+def _D(x) -> Decimal:
+    if isinstance(x, Decimal):
+        return x
+    return Decimal(str(x))
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +169,6 @@ class AggResult(NamedTuple):
     declared_totals: Dict[str, Decimal]   # totali di sezione dichiarati (per riconciliazione)
     unresolved: List[Tuple[str, Decimal]]  # voci non classificate (descr, importo)
     notes: List[str]
-
-
-def _D(x) -> Decimal:
-    if isinstance(x, Decimal):
-        return x
-    return Decimal(str(x))
 
 
 def aggregate_flat(items: List[dict]) -> AggResult:

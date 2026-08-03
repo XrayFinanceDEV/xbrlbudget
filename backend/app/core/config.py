@@ -51,6 +51,23 @@ class Settings(BaseSettings):
     # Anthropic API (for PDF LLM extraction)
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # MinerU OCR import (POST /import/pdf-ocr). Enabled in the integrated Docker
+    # deployment so standard PDF and OCR PDF remain two explicit user choices.
+    # Setting this to false is still the emergency kill switch for the OCR endpoint.
+    # lang_list uses "latin" (MinerU has no standalone "it").
+    MINERU_OCR_ENABLED: bool = True
+    # Local development reaches the already-running MinerU container through a
+    # loopback-only bridge. Docker Compose overrides this with
+    # http://mineru:8000, where service-name DNS is available.
+    MINERU_BASE_URL: str = "http://127.0.0.1:8002"
+    MINERU_EXPECTED_VERSION: str = "3.2.0"
+    MINERU_BACKEND: str = "pipeline"
+    MINERU_PARSE_METHOD: str = "ocr"
+    MINERU_LANGUAGE: str = "latin"
+    MINERU_TIMEOUT_SECONDS: int = 600
+    MINERU_CONNECT_TIMEOUT_SECONDS: int = 10
+    MINERU_MAX_RESPONSE_BYTES: int = 209_715_200
+
     # Application
     DEBUG: bool = True
 

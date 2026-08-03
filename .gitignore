@@ -112,7 +112,9 @@ Test/
 
 # Next.js build artifacts
 .next/
+.next-dev/
 frontend/.next/
+frontend/.next-dev/
 
 # UI test screenshots at repo root (regenerable)
 /*.png
@@ -122,3 +124,9 @@ data/uploads/
 docs/debug/
 docs/debug2/
 docs/debug3/
+
+# Scratch di sessione degli harness OCR/import: log e dump rigenerabili, non specifica
+/_batch_log_*.txt
+/_ocr_all.jsonl
+/_ocr_res_*.jsonl
+/_uniq_pdfs.txt

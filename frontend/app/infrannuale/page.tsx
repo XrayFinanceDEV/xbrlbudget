@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   importXBRL,
   importPDF,
+  importOCR,
   getCompanies,
   getCompanyYears,
   createBudgetScenario,
@@ -2845,9 +2846,17 @@ export default function InfraannualePage() {
   const [newCompanyName, setNewCompanyName] = useState("");
   const [sector, setSector] = useState(1);
   const [importing, setImporting] = useState(false);
+  const [activeImportMethod, setActiveImportMethod] = useState<
+    "pdf" | "pdf_ocr" | "xbrl" | null
+  >(null);
   const [importResult, setImportResult] = useState<{
     companyId: number;
     companyName: string;
+    ocrEngine?: string;
+    ocrVersion?: string | null;
+    extractionMethod?: string;
+    detailLevel?: string;
+    sourceDetailFields?: number;
   } | null>(null);
   const [missingRefYear, setMissingRefYear] = useState<number | null>(null);
 
@@ -2896,7 +2905,17 @@ export default function InfraannualePage() {
   }, [companies, selectedCompany]);
 
   // Helper: create scenario and advance to comparison step
-  const createScenarioAndAdvance = async (companyId: number, companyName: string) => {
+  const createScenarioAndAdvance = async (
+    companyId: number,
+    companyName: string,
+    ocrMetadata?: {
+      ocrEngine?: string;
+      ocrVersion?: string | null;
+      extractionMethod?: string;
+      detailLevel?: string;
+      sourceDetailFields?: number;
+    }
+  ) => {
     const refYear = fiscalYear - 1;
     const scenarioData = await createBudgetScenario(companyId, {
       company_id: companyId,
@@ -2906,13 +2925,23 @@ export default function InfraannualePage() {
       period_months: periodMonths,
     });
     setScenario(scenarioData);
-    setImportResult({ companyId, companyName });
+    setImportResult((previous) => ({
+      companyId,
+      companyName,
+      ocrEngine: ocrMetadata?.ocrEngine ?? previous?.ocrEngine,
+      ocrVersion: ocrMetadata?.ocrVersion ?? previous?.ocrVersion,
+      extractionMethod: ocrMetadata?.extractionMethod ?? previous?.extractionMethod,
+      detailLevel: ocrMetadata?.detailLevel ?? previous?.detailLevel,
+      sourceDetailFields: ocrMetadata?.sourceDetailFields ?? previous?.sourceDetailFields,
+    }));
     toast.success(`Importazione completata: ${companyName}`);
     setActiveTab("rettifiche");
   };
 
   // STEP 1: Import Handler (infra-year PDF/XBRL)
-  const handleImport = async () => {
+  const handleImport = async (
+    requestedMethod: "pdf" | "pdf_ocr" | "xbrl" = importType
+  ) => {
     if (!file) {
       toast.error("Seleziona un file da importare");
       return;
@@ -2929,6 +2958,7 @@ export default function InfraannualePage() {
     }
 
     setImporting(true);
+    setActiveImportMethod(requestedMethod);
     // Clear stale rettifiche state from any previous import
     setAdjustableData(null);
     setReferenceYearData(null);
@@ -2937,9 +2967,19 @@ export default function InfraannualePage() {
     try {
       let companyId: number;
       let companyName: string;
+      let ocrMetadata:
+        | {
+            ocrEngine?: string;
+            ocrVersion?: string | null;
+            extractionMethod?: string;
+            detailLevel?: string;
+            sourceDetailFields?: number;
+          }
+        | undefined;
 
-      if (importType === "pdf") {
-        const result = await importPDF(
+      if (requestedMethod === "pdf" || requestedMethod === "pdf_ocr") {
+        const importFn = requestedMethod === "pdf_ocr" ? importOCR : importPDF;
+        const result = await importFn(
           file,
           fiscalYear,
           companyMode === "new" ? newCompanyName : undefined,
@@ -2950,6 +2990,15 @@ export default function InfraannualePage() {
         );
         companyId = result.company_id;
         companyName = result.company_name;
+        if (requestedMethod === "pdf_ocr") {
+          ocrMetadata = {
+            ocrEngine: result.ocr_engine,
+            ocrVersion: result.ocr_version,
+            extractionMethod: result.extraction_method,
+            detailLevel: result.detail_level,
+            sourceDetailFields: result.source_detail_fields,
+          };
+        }
       } else {
         const result = await importXBRL(
           file,
@@ -2970,7 +3019,7 @@ export default function InfraannualePage() {
       const years = await getCompanyYears(companyId);
       const refYear = fiscalYear - 1;
       if (!years.includes(refYear)) {
-        setImportResult({ companyId, companyName });
+        setImportResult({ companyId, companyName, ...ocrMetadata });
         setMissingRefYear(refYear);
         toast.warning(
           `Dati ${fiscalYear} importati. Serve il bilancio storico ${refYear} per procedere.`
@@ -2978,16 +3027,23 @@ export default function InfraannualePage() {
         return;
       }
 
-      await createScenarioAndAdvance(companyId, companyName);
+      await createScenarioAndAdvance(companyId, companyName, ocrMetadata);
     } catch (error: unknown) {
       const status = (error as { response?: { status?: number } })?.response?.status;
-      const fallback =
-        status === 400 || status === 422
-          ? "Dati non validi. Verificare il file e l'anno fiscale."
-          : "Errore durante l'importazione";
+      let fallback: string;
+      if (status === 503) {
+        fallback = "Il servizio OCR non è disponibile. Riprova più tardi o usa l'import PDF standard.";
+      } else if (status === 504) {
+        fallback = "L'OCR ha impiegato troppo tempo. Riprova con un documento più breve.";
+      } else if (status === 400 || status === 422) {
+        fallback = "Dati non validi. Verificare il file e l'anno fiscale.";
+      } else {
+        fallback = "Errore durante l'importazione";
+      }
       toast.error(getErrorMessage(error, fallback));
     } finally {
       setImporting(false);
+      setActiveImportMethod(null);
     }
   };
 
@@ -3661,7 +3717,7 @@ export default function InfraannualePage() {
                   <Input
                     key={`main-file-${fileResetKey}`}
                     type="file"
-                    accept={importType === "pdf" ? ".pdf,.PDF" : ".xbrl,.XBRL,.xml,.XML"}
+                    accept={importType === "xbrl" ? ".xbrl,.XBRL,.xml,.XML" : ".pdf,.PDF"}
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                   />
                 </div>
@@ -3777,6 +3833,17 @@ export default function InfraannualePage() {
                         Dati infrannuali {fiscalYear} importati per {importResult.companyName}
                       </p>
                     </div>
+                    {importResult.ocrEngine && (
+                      <p className="mt-2 text-sm text-green-700 dark:text-green-400">
+                        OCR {importResult.ocrEngine}
+                        {importResult.ocrVersion ? ` ${importResult.ocrVersion}` : ""}
+                        {importResult.extractionMethod ? ` · ${importResult.extractionMethod}` : ""}
+                        {importResult.detailLevel ? ` · dettaglio ${importResult.detailLevel}` : ""}
+                        {typeof importResult.sourceDetailFields === "number"
+                          ? ` (${importResult.sourceDetailFields} campi dalla fonte)`
+                          : ""}
+                      </p>
+                    )}
                   </div>
                   <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800">
                     <div className="flex items-center gap-2">
@@ -3838,6 +3905,17 @@ export default function InfraannualePage() {
                       Importazione completata: {importResult.companyName}
                     </p>
                   </div>
+                  {importResult.ocrEngine && (
+                    <p className="mt-2 text-sm text-green-700 dark:text-green-400">
+                      OCR {importResult.ocrEngine}
+                      {importResult.ocrVersion ? ` ${importResult.ocrVersion}` : ""}
+                      {importResult.extractionMethod ? ` · ${importResult.extractionMethod}` : ""}
+                      {importResult.detailLevel ? ` · dettaglio ${importResult.detailLevel}` : ""}
+                      {typeof importResult.sourceDetailFields === "number"
+                        ? ` (${importResult.sourceDetailFields} campi dalla fonte)`
+                        : ""}
+                    </p>
+                  )}
                   <Button
                     className="mt-3"
                     onClick={() => setActiveTab("rettifiche")}
@@ -3847,23 +3925,52 @@ export default function InfraannualePage() {
                   </Button>
                 </div>
               ) : (
-                <div className="flex justify-end">
-                <Button
-                  onClick={handleImport}
-                  disabled={importing || !file}
-                >
-                  {importing ? (
+                <div className="flex flex-wrap justify-end gap-3">
+                  {importType === "pdf" ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Importazione in corso...
+                      <Button
+                        variant="outline"
+                        onClick={() => handleImport("pdf")}
+                        disabled={importing || !file}
+                      >
+                        {activeImportMethod === "pdf" ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4 mr-2" />
+                        )}
+                        {activeImportMethod === "pdf"
+                          ? "Importazione standard..."
+                          : "Importa standard e Continua"}
+                      </Button>
+                      <Button
+                        onClick={() => handleImport("pdf_ocr")}
+                        disabled={importing || !file}
+                      >
+                        {activeImportMethod === "pdf_ocr" ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4 mr-2" />
+                        )}
+                        {activeImportMethod === "pdf_ocr"
+                          ? "Estrazione MinerU e analisi contabile..."
+                          : "ImportOCR (MinerU) e Continua"}
+                      </Button>
                     </>
                   ) : (
-                    <>
-                      <Upload className="h-4 w-4 mr-2" />
-                      Importa e Continua
-                    </>
+                    <Button
+                      onClick={() => handleImport("xbrl")}
+                      disabled={importing || !file}
+                    >
+                      {activeImportMethod === "xbrl" ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                      )}
+                      {activeImportMethod === "xbrl"
+                        ? "Importazione XBRL..."
+                        : "Importa XBRL e Continua"}
+                    </Button>
                   )}
-                </Button>
                 </div>
               )}
             </CardContent>

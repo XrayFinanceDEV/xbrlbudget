@@ -55,14 +55,27 @@ class Classification(NamedTuple):
 # Segnali
 # ---------------------------------------------------------------------------
 def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, object]:
-    low = text.lower()
+    # Deaccentazione: i marker cercati piu' avanti sono scritti SENZA accento
+    # ("passivita", "disponibilita liquide"), quindi senza questo passaggio non
+    # matchano mai su un documento che li stampa accentati — e se nessun altro
+    # marker patrimoniale regge, sp_present resta False e il file viene RIFIUTATO
+    # come "solo Conto Economico" pur avendo lo Stato Patrimoniale.
+    # Si usa la deaccentazione del normalizzatore unico (importers/label_semantics).
+    import unicodedata as _ud
+    _t = _ud.normalize("NFKD", text)
+    low = "".join(c for c in _t if not _ud.combining(c)).lower()
     # variante "senza spazi": rende i marker robusti alle intestazioni scritte
     # lettera-spaziata ("S T A T O  P A T R I M O N I A L E"), comuni in questi PDF.
     nos = re.sub(r"\s+", "", low)
 
     def has(marker_spaced: str) -> bool:
-        """True se il marker compare nel testo normale o nella variante senza spazi."""
-        return (marker_spaced in low) or (marker_spaced.replace(" ", "") in nos)
+        """True se il marker compare nel testo normale o nella variante senza spazi.
+
+        Entrambe le varianti sono gia' deaccentate, quindi un marker scritto senza
+        accento trova anche la grafia accentata (e viceversa)."""
+        m = "".join(c for c in _ud.normalize("NFKD", marker_spaced)
+                    if not _ud.combining(c)).lower()
+        return (m in low) or (m.replace(" ", "") in nos)
 
     s: Dict[str, object] = {}
 

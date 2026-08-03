@@ -213,8 +213,8 @@ Emersi dalla copertura delle rotte alternative e poi corretti in modo generale:
   già usata dal frontend (`reconcileSubfields`) e dalla riconciliazione di output del
   motore. Ora il fixture reale `ISTANZA02353550391.xbrl` e un TEBE con working
   capital reale completano il ciclo budget. Test:
-  `tests/test_source_detail_reconcile.py` (7 unit) +
-  `tests/test_xbrl_csv_full_cycle.py` (2 integrazione). Suite completa: **224
+  `tests/test_source_detail_reconcile.py` (8 unit) +
+  `tests/test_xbrl_csv_full_cycle.py` (2 integrazione). Suite completa: **225
   passati, 3 saltati**.
 - **Fixture d'esempio storiche (comportamento onesto, invariato):**
   `legacy/sample_data/sample_data.csv` (e il gemello `.xbrl`) sono sbilanciate alla

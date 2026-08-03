@@ -1,0 +1,15 @@
+{
+  "task_id": "synthetic-fixture",
+  "status": "completed",
+  "backend": "pipeline",
+  "file_names": ["sample"],
+  "error": null,
+  "version": "3.2.0",
+  "results": {
+    "sample": {
+      "md_content": "# Bilancio al 31/12/2024\n\n## Stato Patrimoniale\nImmobilizzazioni - Totale Attivo - Patrimonio netto - Totale Passivo\n\n## Conto Economico\nValore della produzione - Costi della produzione",
+      "middle_json": "{\"_version_name\":\"3.2.0\",\"pdf_info\":[{},{}]}",
+      "content_list": "[{\"type\":\"text\",\"text\":\"Bilancio al 31/12/2024\",\"text_level\":1,\"page_idx\":0},{\"type\":\"table\",\"table_caption\":[\"Stato Patrimoniale\"],\"table_body\":\"<table><tr><th></th><th>31/12/2024</th><th>31/12/2023</th></tr><tr><td>Stato Patrimoniale Attivo</td><td></td><td></td></tr><tr><td>Immobilizzazioni materiali</td><td>40</td><td>35</td></tr><tr><td>Disponibilita liquide</td><td>60</td><td>55</td></tr><tr><td>Totale attivo</td><td>100</td><td>90</td></tr><tr><td>Stato Patrimoniale Passivo</td><td></td><td></td></tr><tr><td>Capitale sociale</td><td>70</td><td>70</td></tr><tr><td>Riserva legale</td><td>10</td><td>5</td></tr><tr><td>Utile dell'esercizio</td><td>20</td><td>15</td></tr><tr><td>Totale passivo</td><td>100</td><td>90</td></tr></table>\",\"page_idx\":0},{\"type\":\"text\",\"text\":\"Conto Economico\",\"text_level\":2,\"page_idx\":1},{\"type\":\"table\",\"table_caption\":[\"Conto Economico\"],\"table_body\":\"<table><tr><th></th><th>31/12/2024</th><th>31/12/2023</th></tr><tr><td>Ricavi delle vendite e delle prestazioni</td><td>30</td><td>25</td></tr><tr><td>Costi per servizi</td><td>10</td><td>10</td></tr><tr><td>Utile dell'esercizio</td><td>20</td><td>15</td></tr></table>\",\"page_idx\":1}]"
+    }
+  }
+}

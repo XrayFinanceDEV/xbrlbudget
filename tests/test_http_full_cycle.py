@@ -356,3 +356,195 @@ def test_adjustments_survives_missing_or_malformed_stored_report(client, tmp_pat
             # since there was nothing usable to carry over, no critical_accounts.
             rebuilt = json.loads(year.validation_report)
             assert "critical_accounts" not in rebuilt
+
+
+def _stored_report(client, company_id):
+    from database.models import FinancialYear
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        return json.loads(year.validation_report)
+
+
+def _set_stored_report(client, company_id, report):
+    from database.models import FinancialYear
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        year.validation_report = json.dumps(report)
+        db.commit()
+
+
+def _put_noop_adjustment(client, company_id, bump=1):
+    """A double-entry rettifica that keeps the sheet balanced and touches
+    nothing a critical-account verdict is about."""
+    adjustable = client.get(
+        f"/api/v1/companies/{company_id}/years/2026/adjustable",
+        params={"period_months": 6},
+        headers=_auth("user-a"),
+    )
+    assert adjustable.status_code == 200, adjustable.text
+    bs = adjustable.json()["balance_sheet"]
+    cash = Decimal(str(bs["sp09_disponibilita_liquide"]))
+    bank = Decimal(str(bs["sp16a_debiti_banche_breve"]))
+    debt = Decimal(str(bs["sp16_debiti_breve"]))
+    return client.put(
+        f"/api/v1/companies/{company_id}/years/2026/adjustments",
+        params={"period_months": 6},
+        json={
+            "balance_sheet": {
+                "sp09_disponibilita_liquide": float(cash + bump),
+                "sp16_debiti_breve": float(debt + bump),
+                "sp16a_debiti_banche_breve": float(bank + bump),
+            },
+            "income_statement": {},
+        },
+        headers=_auth("user-a"),
+    )
+
+
+def test_a_rettifica_cannot_restore_forecastable_over_a_false_verdict(client, tmp_path):
+    """PUT /adjustments used to set validation_status='verified' /
+    forecastable=True from semantic_valid alone, while the PRESERVED
+    critical_accounts still said all_critical_ok=false: a self-contradictory
+    record, and a gate any no-op edit could bypass."""
+    from database.models import FinancialYear
+
+    company_id = _import_pdf(client, tmp_path, "user-a", "VERDICT FALSE SRL")
+
+    report = _stored_report(client, company_id)
+    assert "critical_accounts" in report
+    report["critical_accounts"]["all_critical_ok"] = False
+    report["critical_accounts"]["immobilizzazioni"] = {
+        "status": "unreliable", "reason": "forced for this test"}
+    _set_stored_report(client, company_id, report)
+
+    put = _put_noop_adjustment(client, company_id)
+    assert put.status_code == 200, put.text
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        stored = json.loads(year.validation_report)
+        # the sheet itself is still balanced - only the verdict blocks it
+        assert stored["semantic_valid"] is True
+        assert stored["critical_accounts"]["all_critical_ok"] is False
+        assert year.forecastable is False
+        assert year.validation_status == "review_required"
+
+
+def test_a_rettifica_keeps_forecastable_when_the_verdict_is_true(client, tmp_path):
+    from database.models import FinancialYear
+
+    company_id = _import_pdf(client, tmp_path, "user-a", "VERDICT TRUE SRL")
+    report = _stored_report(client, company_id)
+    assert report["critical_accounts"]["all_critical_ok"] is True
+
+    put = _put_noop_adjustment(client, company_id)
+    assert put.status_code == 200, put.text
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        assert json.loads(year.validation_report)["semantic_valid"] is True
+        assert year.forecastable is True
+        assert year.validation_status == "verified"
+
+
+def test_a_rettifica_without_a_stored_verdict_keeps_legacy_behaviour(client, tmp_path):
+    """No preserved verdict means UNKNOWN, and unknown must never block:
+    forecastable falls back to semantic_valid exactly as before this change."""
+    from database.models import FinancialYear
+
+    company_id = _import_pdf(client, tmp_path, "user-a", "NO VERDICT SRL")
+    report = _stored_report(client, company_id)
+    report.pop("critical_accounts", None)
+    _set_stored_report(client, company_id, report)
+
+    put = _put_noop_adjustment(client, company_id)
+    assert put.status_code == 200, put.text
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        stored = json.loads(year.validation_report)
+        assert "critical_accounts" not in stored
+        assert stored["semantic_valid"] is True
+        assert year.forecastable is True
+        assert year.validation_status == "verified"
+
+
+@pytest.mark.parametrize("broken", [
+    None, "", "not json {{{", "[]", '"a string"', '{"critical_accounts": null}',
+    '{"critical_accounts": []}', '{"critical_accounts": {}}',
+])
+def test_a_malformed_stored_verdict_never_breaks_the_save(client, tmp_path, broken):
+    """Absent / empty / malformed / non-dict / missing-key must never raise and
+    never fail the adjustments save; they all mean UNKNOWN, which never blocks."""
+    from database.models import FinancialYear
+
+    company_id = _import_pdf(client, tmp_path, "user-a", f"BROKEN {abs(hash(broken)) % 9999} SRL")
+    # read the edit values BEFORE corrupting: GET /adjustable itself parses
+    # validation_report on a separate, pre-existing code path.
+    adjustable = client.get(
+        f"/api/v1/companies/{company_id}/years/2026/adjustable",
+        params={"period_months": 6},
+        headers=_auth("user-a"),
+    )
+    assert adjustable.status_code == 200
+    bs = adjustable.json()["balance_sheet"]
+    cash = Decimal(str(bs["sp09_disponibilita_liquide"]))
+    bank = Decimal(str(bs["sp16a_debiti_banche_breve"]))
+    debt = Decimal(str(bs["sp16_debiti_breve"]))
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        year.validation_report = broken
+        db.commit()
+
+    put = client.put(
+        f"/api/v1/companies/{company_id}/years/2026/adjustments",
+        params={"period_months": 6},
+        json={
+            "balance_sheet": {
+                "sp09_disponibilita_liquide": float(cash + 1),
+                "sp16_debiti_breve": float(debt + 1),
+                "sp16a_debiti_banche_breve": float(bank + 1),
+            },
+            "income_statement": {},
+        },
+        headers=_auth("user-a"),
+    )
+    assert put.status_code == 200, f"broken={broken!r}: {put.text}"
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        assert year.forecastable is True          # unknown never blocks
+        assert year.validation_status == "verified"
+
+
+def test_forced_unreliable_verdict_blocks_forecastable_on_the_synthetic_pdf(
+        client, tmp_path, monkeypatch):
+    """Non-skipping CI guard for the wiring at importers/pdf_importer.py
+    (`_critical_ok` / `_forecastable`). The equivalent test in
+    tests/test_reliability_gating.py needs the untracked budget_615 corpus PDF,
+    so it silently skips in a clean checkout; this one runs on the synthetic
+    fixture every time. Reverting the wiring to `forecastable=_qd.semantic_valid`
+    makes it fail, because the synthetic sheet balances on its own."""
+    from database.models import FinancialYear
+    from importers import reliability as reliability_module
+    from importers.reliability import AccountStatus, ReliabilityReport
+
+    monkeypatch.setattr(reliability_module, "assess", lambda *a, **k: ReliabilityReport(
+        immobilizzazioni=AccountStatus.UNRELIABLE,
+        immobilizzazioni_reason="forced unreliable for the CI wiring guard",
+        patrimonio_netto=AccountStatus.DERIVED, patrimonio_netto_reason="n/a",
+        debiti_banche=AccountStatus.DERIVED, debiti_banche_reason="n/a",
+    ))
+
+    company_id = _import_pdf(client, tmp_path, "user-a", "FORCED UNRELIABLE SRL")
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        stored = json.loads(year.validation_report)
+        # the verdict gates the FORECAST, never the SAVE
+        assert year.balance_sheet is not None
+        assert stored["semantic_valid"] is True
+        assert stored["critical_accounts"]["all_critical_ok"] is False
+        assert year.forecastable is False
+        assert year.validation_status == "review_required"

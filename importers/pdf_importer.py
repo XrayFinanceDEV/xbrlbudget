@@ -201,11 +201,17 @@ SC_PLUG_REJECT_PCT = Decimal("0.20")
 _SC_KEY_MAP = {
     'sp01': 'sp01_crediti_soci', 'sp02': 'sp02_immob_immateriali', 'sp03': 'sp03_immob_materiali',
     'sp04': 'sp04_immob_finanziarie', 'sp04a': 'sp04a_partecipazioni', 'sp05': 'sp05_rimanenze',
-    'sp06': 'sp06_crediti_breve', 'sp07': 'sp07_crediti_lungo',
+    'sp06': 'sp06_crediti_breve', 'sp06g': 'sp06g_crediti_altri_breve',
+    'sp07': 'sp07_crediti_lungo',
     'sp08': 'sp08_attivita_finanziarie', 'sp09': 'sp09_disponibilita_liquide',
     'sp10': 'sp10_ratei_risconti_attivi', 'sp11': 'sp11_capitale', 'sp12': 'sp12_riserve',
     'sp13': 'sp13_utile_perdita', 'sp14': 'sp14_fondi_rischi', 'sp15': 'sp15_tfr',
-    'sp16': 'sp16_debiti_breve', 'sp17': 'sp17_debiti_lungo',
+    # sp06g / sp16g are the KPI-neutral catch-all destinations named by
+    # situazione_contabile_parser.FALLBACK_FIELDS. _map_sc_keys SILENTLY DROPS a
+    # short key it does not know, so an unmapped fallback bucket would make read
+    # mass disappear with no gate firing (the sp04a incident).
+    'sp16': 'sp16_debiti_breve', 'sp16g': 'sp16g_altri_debiti_breve',
+    'sp17': 'sp17_debiti_lungo',
     'sp18': 'sp18_ratei_risconti_passivi',
     'ce01': 'ce01_ricavi_vendite', 'ce02': 'ce02_variazioni_rimanenze',
     'ce03': 'ce03_lavori_interni',
@@ -746,19 +752,23 @@ def import_pdf_balance_sheet(
                 # anchor by the scanned contra mass + declared perdita so the gap targets the
                 # NET total. No-op when there is no contra mass (already-net sheets: anchor
                 # unchanged, AITEC-style under-extraction guard preserved).
+                #
+                # contra_scan_mass partitions the scan by RECONCILIATION against
+                # the document's own printed total, exactly as net_contra_accounts
+                # does, and never by code prefixes: AGO's 8-digit mastri and
+                # 9-digit sub-accounts are not prefixes of each other, so the
+                # historical prefix dedup summed BOTH levels and over-read the
+                # fondi (+393.916,50 on 613_2024). Over-reading here understates
+                # the anchor, which is what CHOOSES between the CoGe-LLM and the
+                # deterministic candidate — i.e. it can persist different data.
                 if _decl_tot and _decl_tot > 0:
                     try:
-                        from importers.situazione_contabile_parser import (
-                            _contra_rows, _contra_classify)
-                        _rows = _contra_rows(file_path, text=ocr_text)
-                        if _rows:
-                            _scan = _contra_classify(_rows[0], _rows[1])
-                            _fondi = (_scan.fondi_immat + _scan.fondi_mat
-                                      + _scan.sval_immat + _scan.sval_mat)
-                            _iva = min(_scan.iva_credito, _scan.iva_debito)
-                            if _fondi > _decl_tot * Decimal('0.01'):
-                                _perdita = _dc0.get('perdita') or Decimal('0')
-                                _decl_tot = _decl_tot - _fondi - _iva - _perdita
+                        from importers.situazione_contabile_parser import contra_scan_mass
+                        _fondi, _iva = contra_scan_mass(
+                            file_path, text=ocr_text, declared=_dc0)
+                        if _fondi > _decl_tot * Decimal('0.01'):
+                            _perdita = _dc0.get('perdita') or Decimal('0')
+                            _decl_tot = _decl_tot - _fondi - _iva - _perdita
                     except Exception:
                         pass
 

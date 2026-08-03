@@ -15,7 +15,8 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from importers.situazione_contabile_parser import _resolve_field  # noqa: E402
+from importers.situazione_contabile_parser import (  # noqa: E402
+    FALLBACK_FIELDS, _resolve_field)
 from importers.pdf_importer import _map_sc_keys  # noqa: E402
 from database.models import BalanceSheet, IncomeStatement  # noqa: E402
 
@@ -38,6 +39,98 @@ def test_resolve_field_returns_none_when_unknown():
 def test_resolve_field_rejects_a_node_from_the_wrong_statement():
     # a balance-sheet caption must not be returned when we asked for the CE
     assert _resolve_field("DISPONIBILITA' LIQUIDE", "costi", statement="ce") is None
+
+
+# --------------------------------------------------------------- direction guard
+#
+# `statement='ce'` bounds the tree lookup to the income statement but does NOT
+# constrain the SIGN: Node.side is None for every CE node, so the 'costi' /
+# 'ricavi' argument enforces nothing. _hier_reconstruct adds every mastro
+# POSITIVELY into the field it resolves, so a cost landing in a gain voce moves
+# the result by TWICE the amount (gestione finanziaria = ce13+ce14-ce15+ce16).
+
+
+@pytest.mark.parametrize("desc, wrong_field", [
+    # exactly the two crossings the final review demonstrated
+    ("DIFFERENZE CAMBIO PASSIVE", "ce16"),
+    ("CONTRIBUTI IN CONTO ESERCIZIO", "ce04"),
+    # other revenue/gain voci a cost-column mastro can reach through the tree
+    ("RIVALUTAZIONI", "ce17"),
+    ("PROVENTI STRAORDINARI", "ce18"),
+    ("ALTRI PROVENTI FINANZIARI", "ce14"),
+])
+def test_a_cost_mastro_never_resolves_to_a_revenue_or_gain_voce(desc, wrong_field):
+    from importers.situazione_contabile_parser import _resolve_ce_field
+    # the raw tree lookup still crosses the direction - that is the bug ...
+    assert _resolve_field(desc, "costi", statement="ce") == wrong_field
+    # ... and the direction-constrained wrapper is what blocks it, so the
+    # caller falls through to its KPI-neutral catch-all exactly as before.
+    assert _resolve_ce_field(desc, "costi") is None
+
+
+@pytest.mark.parametrize("desc, wrong_field", [
+    ("INTERESSI PASSIVI SU MUTUI", "ce15"),
+    ("AMMORTAMENTI", "ce09"),
+    ("ONERI STRAORDINARI", "ce19"),
+])
+def test_a_revenue_mastro_never_resolves_to_a_cost_voce(desc, wrong_field):
+    from importers.situazione_contabile_parser import _resolve_ce_field
+    assert _resolve_field(desc, "ricavi", statement="ce") == wrong_field
+    assert _resolve_ce_field(desc, "ricavi") is None
+
+
+def test_the_direction_guard_still_lets_same_direction_lookups_through():
+    from importers.situazione_contabile_parser import _resolve_ce_field
+    # the Task 2 fix (ammortamenti out of the ce12 catch-all) must survive
+    assert _resolve_ce_field("AMMORTAMENTI", "costi") == "ce09"
+    assert _resolve_ce_field("ONERI FINANZIARI", "costi") == "ce15"
+    assert _resolve_ce_field("ALTRI PROVENTI FINANZIARI", "ricavi") == "ce14"
+
+
+def test_signed_voci_are_accepted_only_on_their_positive_side():
+    """ce02, ce16 and ce17 are NET voci: a positive amount RAISES the result, so
+    they may only receive a mastro printed in the revenue column. ce10 is the
+    mirror case (a cost voce), so it may only receive a cost-column mastro."""
+    from importers.situazione_contabile_parser import (
+        _CE_COST_FIELDS, _CE_REVENUE_FIELDS)
+    for signed in ("ce02", "ce16", "ce17"):
+        assert signed in _CE_REVENUE_FIELDS
+        assert signed not in _CE_COST_FIELDS
+    assert "ce10" in _CE_COST_FIELDS
+    assert "ce10" not in _CE_REVENUE_FIELDS
+
+
+def test_hier_reconstruct_calls_the_direction_guarded_lookup():
+    """Wiring guard. Every assertion above exercises _resolve_ce_field directly,
+    so reverting _hier_reconstruct's two CE loops to the unguarded
+    `_resolve_field(d, 'costi', statement='ce')` would leave them all green
+    while re-opening the cost-booked-as-gain hole. Driving _hier_reconstruct for
+    real needs a fully self-consistent synthetic PDF (it is gated on
+    reconciling against the document's own printed totals), so pin the call
+    sites instead - the guard is only worth anything if it is actually called.
+    """
+    import inspect
+    from importers import situazione_contabile_parser as scp
+
+    src = inspect.getsource(scp._hier_reconstruct)
+    assert "_resolve_ce_field(d, 'costi')" in src
+    assert "_resolve_ce_field(d, 'ricavi')" in src
+    assert "_resolve_field(" not in src, (
+        "_hier_reconstruct must go through the direction-guarded wrapper")
+
+
+def test_the_two_allowlists_partition_every_ce_leaf_in_the_tree():
+    """A voce added to data/iv_cee_tree.json without being classified in one of
+    the two direction sets would be silently unreachable from the fallback."""
+    from importers.situazione_contabile_parser import (
+        _CE_COST_FIELDS, _CE_REVENUE_FIELDS)
+    assert not (_CE_COST_FIELDS & _CE_REVENUE_FIELDS)
+    known = _CE_COST_FIELDS | _CE_REVENUE_FIELDS
+    leaves = {db_field.split("_", 1)[0]
+              for statement, db_field in _tree_nodes_with_db_field()
+              if statement == "ce"}
+    assert leaves == known, (
+        f"income-statement leaves not classified by direction: {leaves ^ known}")
 
 
 def _tree_nodes_with_db_field():
@@ -64,7 +157,13 @@ def test_every_tree_short_key_is_routable_by_map_sc_keys():
     a single field.
     """
     model_for_statement = {"bs": BalanceSheet, "ce": IncomeStatement}
-    for statement, db_field in _tree_nodes_with_db_field():
+    # The tree is not the only producer of short keys: FALLBACK_FIELDS names the
+    # catch-all destinations the classification policy writes for mass that was
+    # READ but not recognised. 'sp16g' shipped absent from _SC_KEY_MAP, which is
+    # exactly the sp04a incident again — walk both sources.
+    sources = list(_tree_nodes_with_db_field())
+    sources += [(statement, short) for statement, short in FALLBACK_FIELDS.items()]
+    for statement, db_field in sources:
         short_key = db_field.split("_", 1)[0]
         mapped = _map_sc_keys({short_key: D("1")})
         assert mapped, (

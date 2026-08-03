@@ -487,14 +487,31 @@ def save_adjustments(
             validation_payload["critical_accounts"] = _prior_report["critical_accounts"]
     except Exception:
         pass
-    fy.validation_status = "verified" if new_q.semantic_valid else "review_required"
+    # RULE: a rettifica may NOT restore forecastable while the preserved
+    # verdict still says a critical account is unreliable. Setting
+    # forecastable/validation_status from semantic_valid alone produced a
+    # self-contradictory record (all_critical_ok=false next to
+    # validation_status="verified") and let ANY no-op edit bypass the gate.
+    # So the two AND in the preserved verdict, mirroring the import-time
+    # expression in importers/pdf_importer.py.
+    #
+    # Re-running reliability.assess here is NOT an option: the `_contra_*`
+    # diagnostics it reads are import-time metadata that never reach the
+    # database, so on an ORM sheet it would always return DERIVED and
+    # auto-clear the very flag being protected.
+    #
+    # Read the verdict defensively — absent, empty, non-dict or missing the
+    # key all mean UNKNOWN, and unknown must never block (exactly the legacy
+    # behaviour) nor make the save raise.
+    _preserved = validation_payload.get("critical_accounts")
+    _critical_ok = True
+    if isinstance(_preserved, dict) and "all_critical_ok" in _preserved:
+        _critical_ok = bool(_preserved["all_critical_ok"])
+    _forecastable = bool(new_q.semantic_valid) and _critical_ok
+    fy.validation_status = "verified" if _forecastable else "review_required"
     fy.validation_report = json.dumps(validation_payload, ensure_ascii=False)
     fy.parser_version = "manual-adjustments-semantic-v2"
-    # NOTE: forecastable intentionally still comes from new_q.semantic_valid
-    # alone (unchanged) — whether a manual rettifica should also re-run the
-    # critical-account gate (importers/reliability.assess) is an open policy
-    # question, not decided here.
-    fy.forecastable = new_q.semantic_valid
+    fy.forecastable = _forecastable
 
     # Persist rettifiche log if provided (max RETTIFICHE_LOG_MAX entries)
     if payload.rettifiche_log is not None:

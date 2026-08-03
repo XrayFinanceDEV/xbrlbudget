@@ -410,13 +410,18 @@ DECLARED = {"attivo": D("3685000"), "passivo": D("3685000"),
             "pareggio": D("3685000"), "utile": None, "perdita": None}
 
 
+# Only the three diagnostics net_contra_accounts itself stamps on every exit
+# path (so 'no contra mass' stays distinguishable from 'mass found but not
+# applied'). Deliberately NOT a blanket underscore strip: `_plug_residual`,
+# `_netted_contra` and `_skip_declared_reconcile` are meaningful outputs, and
+# hiding them would let a spurious one slip past the no-op assertions below.
+_CONTRA_DIAGNOSTIC_KEYS = {"_contra_detected", "_contra_applied", "_contra_reason"}
+
+
 def _fields(bs):
-    """The financial part of a sheet: net_contra_accounts also stamps
-    diagnostic `_contra_detected/_contra_applied/_contra_reason` keys on every
-    exit path (so 'no contra mass' is distinguishable from 'mass found but not
-    applied'). Those are not statement values — the no-op assertions below are
-    about the financial fields being untouched."""
-    return {k: v for k, v in bs.items() if not k.startswith("_")}
+    """The financial part of a sheet, plus every non-contra diagnostic — the
+    no-op assertions are about all of that being untouched."""
+    return {k: v for k, v in bs.items() if k not in _CONTRA_DIAGNOSTIC_KEYS}
 
 
 def _patch_scan(monkeypatch, attivo, passivo, from_ocr=False):
@@ -726,3 +731,84 @@ def test_apply_phase_failure_rolls_back_and_is_reported_unreliable(monkeypatch):
     # missing control
     r = assess(bs, {})
     assert r.immobilizzazioni is AccountStatus.UNRELIABLE
+
+
+# ------------------------------------------- extractor-selection scan partition
+
+# Two disjoint code families, exactly the AGO shape: 8-digit mastri and 9-digit
+# sub-accounts that are NOT prefixes of each other. The prefix dedup keeps both
+# levels and double-counts the fondo; the reconciliation-anchored partition
+# keeps only the mastri and reads it once.
+_DISJOINT_ATTIVO = [
+    ("13095000", "FABBRICATI INDUSTRIALI", D("3000000")),
+    ("101080000", "FABBRICATI INDUSTRIALI CAPANNONE", D("3000000")),
+    ("13096000", "IMPIANTI E MACCHINARI", D("500000")),
+    ("101090000", "IMPIANTI E MACCHINARI LINEA A", D("500000")),
+]
+_DISJOINT_PASSIVO = [
+    ("23010000", "F.DO AMM.TO FABBRICATI", D("1200000")),
+    ("201010000", "F.DO AMM.TO FABBRICATI CAPANNONE", D("1200000")),
+]
+# the mastro level (8-digit) reconciles to the printed gross attivo
+_DISJOINT_DECLARED = {"attivo": D("3500000"), "pareggio": D("3500000")}
+
+
+def test_extractor_selection_uses_the_reconciled_partition_not_code_prefixes(monkeypatch):
+    """pdf_importer reduces the declared anchor (which decides WHICH extractor
+    candidate wins) by the fondi mass the netting overlay will remove. That mass
+    must be computed with the SAME reconciliation-anchored partition
+    net_contra_accounts uses - the prefix dedup over-reads it on disjoint code
+    families and can select the wrong extractor, persisting different data."""
+    from importers.situazione_contabile_parser import (
+        contra_scan_mass, _select_dedup, contra_declared_total)
+
+    _patch_scan(monkeypatch, _DISJOINT_ATTIVO, _DISJOINT_PASSIVO)
+
+    # what the legacy prefix dedup reads (the bug): both levels summed
+    prefix_scan = _contra_classify(_DISJOINT_ATTIVO, _DISJOINT_PASSIVO)
+    prefix_fondi = prefix_scan.fondi_immat + prefix_scan.fondi_mat
+    assert prefix_fondi == D("2400000"), "fixture must reproduce the double count"
+
+    # what net_contra_accounts reads
+    _label, dedup_fn, reconciled = _select_dedup(
+        _DISJOINT_ATTIVO, contra_declared_total(_DISJOINT_DECLARED))
+    assert reconciled is True
+    expected_scan = _contra_classify(_DISJOINT_ATTIVO, _DISJOINT_PASSIVO, dedup=dedup_fn)
+    expected_fondi = expected_scan.fondi_immat + expected_scan.fondi_mat
+    assert expected_fondi == D("1200000")
+
+    # what the extractor-selection path reads: it must agree with the overlay
+    fondi, _iva = contra_scan_mass("x.pdf", declared=_DISJOINT_DECLARED)
+    assert fondi == expected_fondi
+    assert fondi != prefix_fondi
+
+
+def test_contra_scan_mass_falls_back_to_history_without_a_declared_total(monkeypatch):
+    """No printed total -> _select_dedup returns the historical rule with
+    reconciled=False; contra_scan_mass must reproduce exactly that, unchanged."""
+    from importers.situazione_contabile_parser import contra_scan_mass
+
+    _patch_scan(monkeypatch, _DISJOINT_ATTIVO, _DISJOINT_PASSIVO)
+    legacy = _contra_classify(_DISJOINT_ATTIVO, _DISJOINT_PASSIVO)
+    fondi, iva = contra_scan_mass("x.pdf", declared=None)
+    assert fondi == legacy.fondi_immat + legacy.fondi_mat + legacy.sval_immat + legacy.sval_mat
+    assert iva == min(legacy.iva_credito, legacy.iva_debito)
+
+
+def test_contra_scan_mass_is_zero_when_the_document_has_no_scannable_rows(monkeypatch):
+    from importers.situazione_contabile_parser import contra_scan_mass
+
+    monkeypatch.setattr(scp, "_contra_rows", lambda fp, text=None: None)
+    assert contra_scan_mass("x.pdf", declared=_DISJOINT_DECLARED) == (D("0"), D("0"))
+
+
+def test_contra_declared_total_prefers_the_gross_attivo():
+    """budget_330: `pareggio` can carry a current loss parked on the asset side,
+    which overstates the contra anchor. One definition, used by both callers."""
+    from importers.situazione_contabile_parser import contra_declared_total
+
+    assert contra_declared_total({"attivo": D("100"), "pareggio": D("120")}) == D("100")
+    assert contra_declared_total({"pareggio": D("120"), "passivo": D("130")}) == D("120")
+    assert contra_declared_total({"passivo": D("130")}) == D("130")
+    assert contra_declared_total({}) is None
+    assert contra_declared_total(None) is None

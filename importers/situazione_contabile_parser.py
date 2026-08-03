@@ -659,6 +659,58 @@ def _resolve_field(desc: str, side: Optional[str] = None,
     return node.db_field.split('_', 1)[0]
 
 
+# The income-statement leaves of data/iv_cee_tree.json, split by the SIGN they
+# carry in calculations/ce_result.py: a positive amount in a COST field lowers
+# the result (production_cost, ce15 oneri finanziari, ce19 oneri straordinari,
+# ce20 imposte), a positive amount in a REVENUE field raises it.
+#
+# The split has to be written down here because the tree cannot express it:
+# Node.side is None for EVERY income-statement node (side is a balance-sheet
+# concept), so _resolve_field's 'costi'/'ricavi' argument enforces nothing and
+# statement='ce' only bounds the lookup to the income statement. Without the
+# allowlists a cost mastro reaches a gain voce -- 'DIFFERENZE CAMBIO PASSIVE'
+# -> ce16 -- and since _hier_reconstruct adds every mastro POSITIVELY, the
+# amount moves gestione finanziaria (ce13+ce14-ce15+ce16) by TWICE its value.
+#
+# The genuinely SIGNED (net) voci -- ce02 variazioni rimanenze prodotti, ce16
+# utili e perdite su cambi, ce17 rettifiche di valore di attivita finanziarie,
+# and their mirror ce10 variazioni rimanenze materie prime -- legitimately
+# appear on either side of a trial balance. Each is listed ONLY under the
+# direction in which a POSITIVE amount is CORRECT: ce02/ce16/ce17 raise the
+# result, so they accept a revenue-column mastro only; ce10 is a cost, so it
+# accepts a cost-column mastro only. A wrong-direction mastro is not guessed at
+# with a sign flip -- it falls through to the KPI-neutral catch-all, which is
+# what it did before the tree fallback existed.
+_CE_COST_FIELDS = frozenset({
+    'ce05', 'ce06', 'ce07', 'ce08', 'ce09', 'ce10', 'ce11', 'ce11b', 'ce12',
+    'ce15',                      # C.17 interessi e altri oneri finanziari
+    'ce19',                      # E.21 oneri straordinari
+    'ce20',                      # imposte sul reddito
+})
+_CE_REVENUE_FIELDS = frozenset({
+    'ce01', 'ce02', 'ce03', 'ce04',   # A) valore della produzione
+    'ce13', 'ce14', 'ce16',           # C) proventi finanziari (ce16 netto)
+    'ce17',                           # D) rettifiche di valore (netto)
+    'ce18',                           # E.20 proventi straordinari
+})
+
+
+def _resolve_ce_field(desc: str, direction: str) -> Optional[str]:
+    """Shared-tree CE classification constrained to `direction`.
+
+    `direction` is 'costi' or 'ricavi'. Returns None when the tree does not
+    know the description OR when it resolves to a voce of the OPPOSITE sign, so
+    the caller falls through to its catch-all exactly as it did before the tree
+    fallback was added. See _CE_COST_FIELDS / _CE_REVENUE_FIELDS for why the
+    tree cannot enforce this on its own.
+    """
+    field = _resolve_field(desc, direction, statement='ce')
+    if field is None:
+        return None
+    allowed = _CE_COST_FIELDS if direction == 'costi' else _CE_REVENUE_FIELDS
+    return field if field in allowed else None
+
+
 # Accounts that decide every KPI. A fallback may NEVER write these: an error
 # here changes a TOTAL (a fondo ammortamento booked as a debt inflates assets
 # and debts together), which breaks PFN, ROI, indipendenza finanziaria and
@@ -3653,6 +3705,47 @@ def _select_dedup(attivo_rows, declared_total: Optional[Decimal]):
     return best[1], best[2], True
 
 
+def contra_declared_total(declared) -> Optional[Decimal]:
+    """The printed total the contra scan must reconcile against.
+
+    Contra-assets reconcile to the printed GROSS ATTIVO; ``pareggio`` can also
+    include a current loss parked on the asset side, so using it first
+    overstates the anchor (budget_330). Written once and shared, so every
+    caller partitions the same document the same way.
+    """
+    if not declared:
+        return None
+    return (declared.get('attivo') or declared.get('pareggio')
+            or declared.get('passivo'))
+
+
+def contra_scan_mass(file_path: str, text: Optional[str] = None,
+                     declared=None):
+    """(fondi, iva_offset) that net_contra_accounts would remove from this doc.
+
+    Exposed because pdf_importer has to reduce the declared anchor by exactly
+    that mass BEFORE it picks between the CoGe-LLM and the deterministic
+    candidate (the printed totals are GROSS on these files). Sharing this
+    helper is what keeps the two sites on the SAME reconciliation-anchored
+    partition: computing the mass with the historical prefix dedup over-reads
+    it on AGO's disjoint code families (8-digit mastri vs 9-digit sub-accounts,
+    neither a prefix of the other) and can hand the win to the wrong extractor.
+
+    Returns (0, 0) when the document has no scannable rows.
+    """
+    Z = Decimal('0')
+    rows = _contra_rows(file_path, text=text)
+    if not rows:
+        return Z, Z
+    att_rows, pas_rows, _from_ocr = rows
+    _label, dedup_fn, _reconciled = _select_dedup(
+        att_rows, contra_declared_total(declared))
+    scan = _contra_classify(att_rows, pas_rows, dedup=dedup_fn)
+    fondi = (scan.fondi_immat + scan.fondi_mat
+             + scan.sval_immat + scan.sval_mat)
+    return fondi, min(scan.iva_credito, scan.iva_debito)
+
+
 def _contra_classify(attivo_rows, passivo_rows, dedup=None) -> ContraScan:
     """Classify + sum deduplicated scan rows into the contra-netting aggregates.
     Rows are (code, desc_upper, amount); the SIDE each row came from is ground
@@ -3953,13 +4046,7 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
 
     dedup_label = 'existing'
     try:
-        decl_total = None
-        if declared:
-            # Contra-assets reconcile to the printed GROSS ATTIVO. ``Pareggio``
-            # can also include a current loss parked on the asset side, so using
-            # it first overstates the contra anchor (budget_330).
-            decl_total = (declared.get('attivo') or declared.get('pareggio')
-                          or declared.get('passivo'))
+        decl_total = contra_declared_total(declared)
         if not decl_total or decl_total <= 0:
             return _mark(winner_bs, Z, Z, 'nessun totale dichiarato'), Z
         rows = _contra_rows(file_path, text=text)
@@ -4107,7 +4194,7 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
         winner_bs.update(_pre_apply)
         logger.warning(
             "contra-netting: applicazione fallita (%s) — rollback allo stato "
-            "pre-apply", exc)
+            "pre-apply", exc, exc_info=True)
         return _mark(winner_bs, netted, Z,
                      f'applicazione fallita: {exc}'), Z
 
@@ -4222,7 +4309,7 @@ def _hier_reconstruct(pages_data, full: str):
         ce[k] = ce.get(k, Z) + v
 
     for _c, d, a in mc:
-        f = _classify_ce_costi(d) or _resolve_field(d, 'costi', statement='ce')
+        f = _classify_ce_costi(d) or _resolve_ce_field(d, 'costi')
         if f is None:
             f = fallback_field('ce')
             unclassified.append((d, a, 'ce'))
@@ -4237,7 +4324,7 @@ def _hier_reconstruct(pages_data, full: str):
         else:
             adde(f, a)
     for _c, d, a in mr:
-        f = _classify_ce_ricavi(d) or _resolve_field(d, 'ricavi', statement='ce')
+        f = _classify_ce_ricavi(d) or _resolve_ce_field(d, 'ricavi')
         if f is None:
             f = 'ce04'
             unclassified.append((d, a, 'ce'))

@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 _PDF_PARSER_VERSION = "semantic-v3-2026-07-20"
 
 
-def _validation_report_payload(q) -> Dict[str, Any]:
+def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
     """JSON-safe persisted form of the immutable accounting validation."""
-    return {
+    payload = {
         "arithmetic_balanced": abs(q.sbilancio) <= Decimal("0.01"),
         "income_result_consistent": q.utile_match,
         "hierarchy_consistent": q.hierarchy_consistent,
@@ -43,6 +43,9 @@ def _validation_report_payload(q) -> Dict[str, Any]:
         },
         "warnings": list(q.warnings),
     }
+    if reliability is not None:
+        payload["critical_accounts"] = reliability.to_dict()
+    return payload
 
 
 class PDFImportError(Exception):
@@ -302,6 +305,9 @@ def import_pdf_balance_sheet(
         logger.info(f"Starting PDF import from {file_path}")
 
         mapper = IVCEEMapper()
+        # Declared control totals, when the route computed any. Initialised here so
+        # the reliability step below is in scope for EVERY route, not just route C.
+        _declared_for_reliability = None
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
 
         # Step 1: Detect format and extract PDF data
@@ -718,6 +724,7 @@ def import_pdf_balance_sheet(
                                  or _dc0.get('attivo'))
                 except Exception:
                     _decl_tot = None
+                _declared_for_reliability = _dc0
 
                 # On GROSS-presentation trial balances the declared pareggio includes the
                 # fondi ammortamento (contra-assets on both sides) and the perdita parked on
@@ -1098,16 +1105,29 @@ def import_pdf_balance_sheet(
         current_year_val = fiscal_year or datetime.now().year
         with open(file_path, "rb") as _source_file:
             _source_sha256 = hashlib.sha256(_source_file.read()).hexdigest()
-        _validation_payload = _validation_report_payload(_qd)
+        # Reliability of the accounts that decide every KPI. Never allowed to
+        # turn a working import into a failure: any error means "unknown".
+        _reliability = None
+        try:
+            from importers.reliability import assess as _assess_reliability
+            _reliability = _assess_reliability(
+                balance_sheet_data, income_data,
+                declared=_declared_for_reliability)
+        except Exception as _rel_err:
+            logger.warning(f"Reliability non calcolata: {_rel_err}")
+
+        _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        _critical_ok = _reliability is None or _reliability.all_critical_ok
+        _forecastable = _qd.semantic_valid and _critical_ok
         financial_year_obj = FinancialYear(
             company_id=company.id,
             year=current_year_val,
             period_months=period_months,  # None for full year, 1-11 for partial
-            validation_status=("verified" if _qd.semantic_valid else "review_required"),
+            validation_status=("verified" if _forecastable else "review_required"),
             validation_report=json.dumps(_validation_payload, ensure_ascii=False),
             source_sha256=_source_sha256,
             parser_version=_PDF_PARSER_VERSION,
-            forecastable=_qd.semantic_valid,
+            forecastable=_forecastable,
         )
         db.add(financial_year_obj)
         db.flush()

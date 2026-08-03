@@ -678,10 +678,9 @@ TIER0_FIELDS = frozenset({
 FALLBACK_FIELDS = {'ce': 'ce06', 'bs': 'sp16g'}
 
 
-def materiality_threshold(total: Decimal) -> Decimal:
-    """M = max(1.000 EUR; 0,1% del totale attivo)."""
-    total = abs(total or Decimal('0'))
-    return max(Decimal('1000'), total * Decimal('0.001'))
+# Canonical definition lives in the dependency-free reliability module so the
+# import pipeline has exactly one materiality rule.
+from importers.reliability import materiality_threshold  # noqa: E402,F401
 
 
 def fallback_field(statement: str) -> str:

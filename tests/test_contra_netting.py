@@ -686,3 +686,43 @@ def test_613_production_path_with_stubbed_gross_llm():
     assert abs(bs["totale_attivo"] - bs["totale_passivo"]) <= D("1")
     # no false plug: the netted mass must NOT resurface as _plug_residual
     assert bs.get("_plug_residual", D("0")) < bs["totale_attivo"] * D("0.01")
+
+
+# ------------------------------------------------------- apply-phase rollback
+
+def test_apply_phase_failure_rolls_back_and_is_reported_unreliable(monkeypatch):
+    """A raise mid-apply (after sp02/sp03/totale_attivo/sp06 were already
+    mutated) must not leave winner_bs half-netted with no _contra_* marker -
+    that would read as 'no scan ran on this route' (DERIVED) downstream,
+    instead of the failed-mid-application UNRELIABLE it actually is.
+
+    _reduce_debts is the narrowest seam genuinely inside the apply phase (it
+    is only ever called after the decision phase has already committed to
+    applying): forcing it to raise reproduces a crash after several fields
+    have already been written but before the function returns/marks."""
+    from importers.reliability import AccountStatus, assess
+
+    _patch_scan(monkeypatch, ATTIVO_ROWS, PASSIVO_ROWS)
+
+    def _boom(bs, amount):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(scp, "_reduce_debts", _boom)
+
+    bs = _gross_winner_bs()
+    before = dict(bs)
+    bs, netted = scp.net_contra_accounts(bs, "x.pdf", declared=DECLARED)
+
+    # exception did not propagate; net_contra_accounts returned normally
+    assert netted == D("0")
+    # every financial field is restored to its exact pre-call value
+    assert _fields(bs) == before
+    # detected > 0 (a real contra scan ran and found mass) but NOT applied
+    assert bs["_contra_detected"] > D("0")
+    assert bs["_contra_applied"] == D("0")
+
+    # the point of the whole fix: reliability.assess must call this UNRELIABLE,
+    # not DERIVED - a half-failed netting is a positive contradiction, not a
+    # missing control
+    r = assess(bs, {})
+    assert r.immobilizzazioni is AccountStatus.UNRELIABLE

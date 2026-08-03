@@ -127,3 +127,13 @@ def test_to_dict_is_json_safe_and_carries_reasons():
                             "debiti_banche", "all_critical_ok"}
     assert payload["immobilizzazioni"]["status"] == "derived"
     assert isinstance(payload["immobilizzazioni"]["reason"], str)
+
+
+def test_unclassified_mass_is_carried_through_and_json_safe():
+    import json
+    bs = _bs(_unclassified_mass=D("4321.55"))
+    r = assess(bs, {})
+    assert r.unclassified_mass == D("4321.55")
+    payload = r.to_dict()
+    json.dumps(payload)          # must not raise
+    assert payload["unclassified_mass"] == "4321.55"

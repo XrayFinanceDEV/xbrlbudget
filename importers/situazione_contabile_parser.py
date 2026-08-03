@@ -4040,57 +4040,77 @@ def net_contra_accounts(winner_bs: Dict[str, Decimal], file_path: str,
     # the sp02/sp03 overwrite), so it applies only when the winner's pre-apply
     # total still sits at the declared GROSS magnitude — proof nothing was
     # collapsed yet. An already-net / partially-net sheet skips the IVA delta.
-    pre_total = winner_bs.get('totale_attivo', Z)
-    apply_iva = (iva_offset > Z
-                 and abs(pre_total - decl_total) <= decl_total * Decimal('0.005'))
+    # Snapshot every field this phase can mutate: a raise mid-apply must never
+    # leave winner_bs half-netted with no _contra_* marker on it (silent
+    # masking) — roll back to this snapshot on failure so the sheet is
+    # byte-identical to its pre-apply state.
+    _pre_apply = dict(winner_bs)
+    try:
+        pre_total = winner_bs.get('totale_attivo', Z)
+        apply_iva = (iva_offset > Z
+                     and abs(pre_total - decl_total) <= decl_total * Decimal('0.005'))
 
-    old_02 = winner_bs.get('sp02_immob_immateriali', Z)
-    old_03 = winner_bs.get('sp03_immob_materiali', Z)
-    if anchored:
-        # Anchored mode: printed subtotal − (fondo amm + svalutazione). A side
-        # without an anchor is left untouched (never zeroed by an absent leaf sum).
-        new_02 = (max(Z, scan.anchor_sp02 - immat_contra)
-                  if scan.anchor_sp02 is not None else old_02)
-        new_03 = (max(Z, scan.anchor_sp03 - mat_contra)
-                  if scan.anchor_sp03 is not None else old_03)
-    else:
-        # Reconciled scan: prefer the document's PRINTED immobilizzazioni subtotal
-        # (anchor) over the keyword-summed gross. The keyword sum drops sub-lines
-        # the attivo classifier does not recognise (budget_210: SITO WEB,
-        # progettazioni, spese pluriennali → gross_sp02 205.600 vs printed
-        # 223.901,20), which would under-net the net immobilizzazioni. Fall back to
-        # the keyword gross only when the document prints no subtotal.
-        base_02 = scan.anchor_sp02 if scan.anchor_sp02 is not None else scan.gross_sp02
-        base_03 = scan.anchor_sp03 if scan.anchor_sp03 is not None else scan.gross_sp03
-        new_02 = max(Z, base_02 - immat_contra)
-        new_03 = max(Z, base_03 - mat_contra)
-    winner_bs['sp02_immob_immateriali'] = new_02
-    winner_bs['sp03_immob_materiali'] = new_03
-    att_delta = (new_02 + new_03) - (old_02 + old_03)
-    winner_bs['totale_attivo'] = winner_bs.get('totale_attivo', Z) + att_delta
+        old_02 = winner_bs.get('sp02_immob_immateriali', Z)
+        old_03 = winner_bs.get('sp03_immob_materiali', Z)
+        if anchored:
+            # Anchored mode: printed subtotal − (fondo amm + svalutazione). A side
+            # without an anchor is left untouched (never zeroed by an absent leaf sum).
+            new_02 = (max(Z, scan.anchor_sp02 - immat_contra)
+                      if scan.anchor_sp02 is not None else old_02)
+            new_03 = (max(Z, scan.anchor_sp03 - mat_contra)
+                      if scan.anchor_sp03 is not None else old_03)
+        else:
+            # Reconciled scan: prefer the document's PRINTED immobilizzazioni subtotal
+            # (anchor) over the keyword-summed gross. The keyword sum drops sub-lines
+            # the attivo classifier does not recognise (budget_210: SITO WEB,
+            # progettazioni, spese pluriennali → gross_sp02 205.600 vs printed
+            # 223.901,20), which would under-net the net immobilizzazioni. Fall back to
+            # the keyword gross only when the document prints no subtotal.
+            base_02 = scan.anchor_sp02 if scan.anchor_sp02 is not None else scan.gross_sp02
+            base_03 = scan.anchor_sp03 if scan.anchor_sp03 is not None else scan.gross_sp03
+            new_02 = max(Z, base_02 - immat_contra)
+            new_03 = max(Z, base_03 - mat_contra)
+        winner_bs['sp02_immob_immateriali'] = new_02
+        winner_bs['sp03_immob_materiali'] = new_03
+        att_delta = (new_02 + new_03) - (old_02 + old_03)
+        winner_bs['totale_attivo'] = winner_bs.get('totale_attivo', Z) + att_delta
 
-    if apply_iva:
-        # collapse the offsettable IVA: net erario position stays on the larger
-        # side, the smaller side is dropped from crediti and debiti tributari.
-        cred = winner_bs.get('sp06_crediti_breve', Z)
-        take = min(iva_offset, cred)
-        winner_bs['sp06_crediti_breve'] = cred - take
-        winner_bs['totale_attivo'] -= take
-        winner_bs['totale_passivo'] = (winner_bs.get('totale_passivo', Z)
-                                       - _reduce_debts(winner_bs, take))
+        if apply_iva:
+            # collapse the offsettable IVA: net erario position stays on the larger
+            # side, the smaller side is dropped from crediti and debiti tributari.
+            cred = winner_bs.get('sp06_crediti_breve', Z)
+            take = min(iva_offset, cred)
+            winner_bs['sp06_crediti_breve'] = cred - take
+            winner_bs['totale_attivo'] -= take
+            winner_bs['totale_passivo'] = (winner_bs.get('totale_passivo', Z)
+                                           - _reduce_debts(winner_bs, take))
 
-    # balance-invariant fondi removal from the debt buckets: exactly the passivo
-    # excess over the (new, net) attivo, capped at the fondi mass — 0 when the
-    # extractor had already netted, the full fondi mass when it was gross.
-    excess = winner_bs.get('totale_passivo', Z) - winner_bs['totale_attivo']
-    to_remove = min(max(Z, excess), fondi_total)
-    if to_remove > Z:
-        winner_bs['totale_passivo'] = (winner_bs.get('totale_passivo', Z)
-                                       - _reduce_debts(winner_bs, to_remove))
-    logger.info(
-        "contra-netting: nettati %s (fondi immat %s + mat %s + IVA %s); "
-        "sp02 %s→%s, sp03 %s→%s", netted, scan.fondi_immat, scan.fondi_mat,
-        iva_offset, old_02, new_02, old_03, new_03)
+        # balance-invariant fondi removal from the debt buckets: exactly the passivo
+        # excess over the (new, net) attivo, capped at the fondi mass — 0 when the
+        # extractor had already netted, the full fondi mass when it was gross.
+        excess = winner_bs.get('totale_passivo', Z) - winner_bs['totale_attivo']
+        to_remove = min(max(Z, excess), fondi_total)
+        if to_remove > Z:
+            winner_bs['totale_passivo'] = (winner_bs.get('totale_passivo', Z)
+                                           - _reduce_debts(winner_bs, to_remove))
+        logger.info(
+            "contra-netting: nettati %s (fondi immat %s + mat %s + IVA %s); "
+            "sp02 %s→%s, sp03 %s→%s", netted, scan.fondi_immat, scan.fondi_mat,
+            iva_offset, old_02, new_02, old_03, new_03)
+    except Exception as exc:
+        # Restore winner_bs to its exact pre-apply state: a partial mutation
+        # here would leave sp02/sp03/totale_attivo/debt buckets half-netted
+        # with NO _contra_* marker set, which downstream reliability reporting
+        # would read as 'no scan ran on this route' (DERIVED) instead of the
+        # failed-mid-application UNRELIABLE it actually is.
+        winner_bs.clear()
+        winner_bs.update(_pre_apply)
+        logger.warning(
+            "contra-netting: applicazione fallita (%s) — rollback allo stato "
+            "pre-apply", exc)
+        return _mark(winner_bs, netted, Z,
+                     f'applicazione fallita: {exc}'), Z
+
     _mark(winner_bs, netted, netted, f'applicato ({dedup_label})')
     return winner_bs, netted
 

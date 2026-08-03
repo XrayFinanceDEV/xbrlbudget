@@ -475,9 +475,25 @@ def save_adjustments(
         },
         "warnings": list(new_q.warnings),
     }
+    # Preserve the import-time reliability verdict (importers/reliability.py):
+    # this endpoint used to rebuild validation_report from scratch, silently
+    # DESTROYING critical_accounts the first time a user touched Rettifiche.
+    # Read the CURRENTLY STORED report defensively — it may be absent, empty,
+    # or (older records) fail to parse — and never let that raise or block
+    # the save; a missing/bad prior report just means nothing to carry over.
+    try:
+        _prior_report = json.loads(fy.validation_report) if fy.validation_report else {}
+        if isinstance(_prior_report, dict) and "critical_accounts" in _prior_report:
+            validation_payload["critical_accounts"] = _prior_report["critical_accounts"]
+    except Exception:
+        pass
     fy.validation_status = "verified" if new_q.semantic_valid else "review_required"
     fy.validation_report = json.dumps(validation_payload, ensure_ascii=False)
     fy.parser_version = "manual-adjustments-semantic-v2"
+    # NOTE: forecastable intentionally still comes from new_q.semantic_valid
+    # alone (unchanged) — whether a manual rettifica should also re-run the
+    # critical-account gate (importers/reliability.assess) is an open policy
+    # question, not decided here.
     fy.forecastable = new_q.semantic_valid
 
     # Persist rettifiche log if provided (max RETTIFICHE_LOG_MAX entries)

@@ -307,6 +307,14 @@ def import_pdf_balance_sheet(
         mapper = IVCEEMapper()
         # Declared control totals, when the route computed any. Initialised here so
         # the reliability step below is in scope for EVERY route, not just route C.
+        # NOTE: `_declared_control_totals` (the only producer of this dict, set below
+        # on route C) never returns a 'patrimonio_netto' key - only attivo/passivo/
+        # pareggio/utile/perdita. So `reliability._assess_patrimonio_netto` currently
+        # ALWAYS sees `declared.get('patrimonio_netto') is None` on every route and
+        # evaluates to DERIVED, never VERIFIED/UNRELIABLE. That is correct behaviour
+        # for a missing control (never block on absence), but the PN limb is inert
+        # until some route is taught to read a printed "Totale patrimonio netto" and
+        # add it to this dict under that key.
         _declared_for_reliability = None
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
 
@@ -724,6 +732,9 @@ def import_pdf_balance_sheet(
                                  or _dc0.get('attivo'))
                 except Exception:
                     _decl_tot = None
+                # See the NOTE at the top of the function: _dc0 has no
+                # 'patrimonio_netto' key, so this only feeds the immobilizzazioni /
+                # debiti_banche limbs of reliability.assess; PN stays DERIVED.
                 _declared_for_reliability = _dc0
 
                 # On GROSS-presentation trial balances the declared pareggio includes the

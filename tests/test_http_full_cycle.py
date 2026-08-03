@@ -1,4 +1,5 @@
 """Full user journey over the REAL HTTP surface, with JWT multi-tenancy."""
+import json
 from decimal import Decimal
 
 import jwt
@@ -254,3 +255,104 @@ def test_delete_company_cascades_everything(client, tmp_path):
         for model in (Company, FinancialYear, BalanceSheet, IncomeStatement,
                       BudgetScenario):
             assert db.query(model).count() == 0, model.__name__
+
+
+def test_adjustments_preserves_critical_accounts_verdict(client, tmp_path):
+    """PUT /adjustments used to rebuild validation_report from scratch, silently
+    DESTROYING the critical_accounts verdict (importers/reliability.py) computed
+    at import time. Confirms backend/app/api/v1/financial_years.py::save_adjustments
+    now carries it over into the rebuilt payload."""
+    from database.models import FinancialYear
+
+    company_id = _import_pdf(client, tmp_path, "user-a", "CRITICAL ACCOUNTS SRL")
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        stored_before = json.loads(year.validation_report)
+        assert "critical_accounts" in stored_before, (
+            "import must populate critical_accounts for this test to be meaningful")
+        critical_before = stored_before["critical_accounts"]
+
+    adjustable = client.get(
+        f"/api/v1/companies/{company_id}/years/2026/adjustable",
+        params={"period_months": 6},
+        headers=_auth("user-a"),
+    )
+    assert adjustable.status_code == 200
+    bs = adjustable.json()["balance_sheet"]
+    cash = Decimal(str(bs["sp09_disponibilita_liquide"]))
+    bank = Decimal(str(bs["sp16a_debiti_banche_breve"]))
+    debt = Decimal(str(bs["sp16_debiti_breve"]))
+
+    put = client.put(
+        f"/api/v1/companies/{company_id}/years/2026/adjustments",
+        params={"period_months": 6},
+        json={
+            "balance_sheet": {
+                "sp09_disponibilita_liquide": float(cash + 10),
+                "sp16_debiti_breve": float(debt + 10),
+                "sp16a_debiti_banche_breve": float(bank + 10),
+            },
+            "income_statement": {},
+        },
+        headers=_auth("user-a"),
+    )
+    assert put.status_code == 200, put.text
+
+    with client.sessions() as db:
+        year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+        stored_after = json.loads(year.validation_report)
+        assert "critical_accounts" in stored_after
+        assert stored_after["critical_accounts"] == critical_before
+
+
+def test_adjustments_survives_missing_or_malformed_stored_report(client, tmp_path):
+    """A FinancialYear whose validation_report is NULL, empty, or not valid JSON
+    (older records / edge cases) must never make PUT /adjustments raise - the
+    critical_accounts preservation step reads the stored report defensively."""
+    from database.models import FinancialYear
+
+    company_id = _import_pdf(client, tmp_path, "user-a", "MALFORMED REPORT SRL")
+
+    # Fetch valid edit values ONCE, before any corruption below - GET /adjustable
+    # itself parses validation_report unconditionally (a separate, pre-existing
+    # code path this task does not touch), so it must not be called again once
+    # validation_report has been corrupted.
+    adjustable = client.get(
+        f"/api/v1/companies/{company_id}/years/2026/adjustable",
+        params={"period_months": 6},
+        headers=_auth("user-a"),
+    )
+    assert adjustable.status_code == 200
+    bs = adjustable.json()["balance_sheet"]
+    cash = Decimal(str(bs["sp09_disponibilita_liquide"]))
+    bank = Decimal(str(bs["sp16a_debiti_banche_breve"]))
+    debt = Decimal(str(bs["sp16_debiti_breve"]))
+
+    for i, broken_report in enumerate((None, "", "not json {{{")):
+        with client.sessions() as db:
+            year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+            year.validation_report = broken_report
+            db.commit()
+
+        put = client.put(
+            f"/api/v1/companies/{company_id}/years/2026/adjustments",
+            params={"period_months": 6},
+            json={
+                "balance_sheet": {
+                    "sp09_disponibilita_liquide": float(cash + i + 1),
+                    "sp16_debiti_breve": float(debt + i + 1),
+                    "sp16a_debiti_banche_breve": float(bank + i + 1),
+                },
+                "income_statement": {},
+            },
+            headers=_auth("user-a"),
+        )
+        assert put.status_code == 200, f"broken_report={broken_report!r}: {put.text}"
+
+        with client.sessions() as db:
+            year = db.query(FinancialYear).filter_by(company_id=company_id).one()
+            # Must be valid JSON (the save always writes a fresh payload) and,
+            # since there was nothing usable to carry over, no critical_accounts.
+            rebuilt = json.loads(year.validation_report)
+            assert "critical_accounts" not in rebuilt

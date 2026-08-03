@@ -11,10 +11,10 @@
 
 | # | Area | Gravità | Stato |
 |---|---|---|---|
-| N1 | Dedup padre/figlio per **prefisso di codice** — fallisce sulle famiglie di codici disgiunte AGO | **alta** | confermato, misurato su 613 |
-| N2 | Il netting di 613 è un **no-op**: 2,25 M di fondi restano nei debiti | **alta** | conseguenza di N1 |
-| N3 | Il netting **non ha copertura di regressione viva**: i due test su 613 sono rotti | **alta** | confermato |
-| C1 | **Due classificatori paralleli** che si contraddicono e si mancano a vicenda | **alta** | confermato |
+| N1 | Dedup padre/figlio per **prefisso di codice** — fallisce sulle famiglie di codici disgiunte AGO | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
+| N2 | Il netting di 613 è un **no-op**: 2,25 M di fondi restano nei debiti | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
+| N3 | Il netting **non ha copertura di regressione viva**: i due test su 613 sono rotti | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
+| C1 | **Due classificatori paralleli** che si contraddicono e si mancano a vicenda | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
 | C2 | Il catch-all `ce12` è **silenzioso**: nessuna diagnostica sulla massa non classificata | media | confermato |
 | D1 | `CLAUDE.md` descrive plug e riallineamenti **che il codice non fa più** | media | confermato |
 | T1 | 2 test CSV falliscono per file di corpus assente (manca lo `skipif`) | bassa | confermato |

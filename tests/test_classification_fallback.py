@@ -5,6 +5,7 @@ that each miss what the other knows. _hier_reconstruct used only the former,
 so a bare 'AMMORTAMENTI' mastro fell into the ce12 catch-all: totals and sp13
 stayed correct (no gate fired) but EBITDA was wrong, because EBITDA = EBIT + ce09.
 """
+import json
 import os
 import sys
 from decimal import Decimal
@@ -15,8 +16,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from importers.situazione_contabile_parser import _resolve_field  # noqa: E402
+from importers.pdf_importer import _map_sc_keys  # noqa: E402
+from database.models import BalanceSheet, IncomeStatement  # noqa: E402
 
 D = Decimal
+TREE_PATH = os.path.join(ROOT, "data", "iv_cee_tree.json")
 
 
 def test_resolve_field_returns_the_short_key():
@@ -34,6 +38,45 @@ def test_resolve_field_returns_none_when_unknown():
 def test_resolve_field_rejects_a_node_from_the_wrong_statement():
     # a balance-sheet caption must not be returned when we asked for the CE
     assert _resolve_field("DISPONIBILITA' LIQUIDE", "costi", statement="ce") is None
+
+
+def _tree_nodes_with_db_field():
+    with open(TREE_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    for statement, rows in (("bs", data["balance_sheet"]), ("ce", data["income_statement"])):
+        for row in rows:
+            db_field = row.get("db_field")
+            if db_field:
+                yield statement, db_field
+
+
+def test_every_tree_short_key_is_routable_by_map_sc_keys():
+    """Guard against a repeat of the sp04a incident.
+
+    _resolve_field derives its short route-C key as db_field.split('_', 1)[0].
+    That split is a mechanical string operation - it does NOT guarantee the
+    result is routable. _map_sc_keys (importers/pdf_importer.py) only maps a
+    short key that is in _SC_KEY_MAP, or passes a key through unchanged when
+    it already contains an underscore; anything else is SILENTLY DROPPED
+    (mass disappearing from the balance sheet with no gate firing). This test
+    walks every node the tree can actually produce and fails loudly, naming
+    the offending short key, instead of relying on a one-off assertion about
+    a single field.
+    """
+    model_for_statement = {"bs": BalanceSheet, "ce": IncomeStatement}
+    for statement, db_field in _tree_nodes_with_db_field():
+        short_key = db_field.split("_", 1)[0]
+        mapped = _map_sc_keys({short_key: D("1")})
+        assert mapped, (
+            f"short key '{short_key}' (from db_field '{db_field}') is not "
+            f"routable by _map_sc_keys - the amount would be silently dropped"
+        )
+        full_key = next(iter(mapped))
+        model = model_for_statement[statement]
+        assert hasattr(model, full_key), (
+            f"'{full_key}' resolved from short key '{short_key}' is not a "
+            f"column on {model.__name__}"
+        )
 
 
 def _budget_342_pdf():

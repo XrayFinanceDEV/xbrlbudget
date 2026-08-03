@@ -634,8 +634,14 @@ def _resolve_field(desc: str, side: Optional[str] = None,
 
     `iv_cee_hierarchy.resolve` reasons in DB column names ('ce09_ammortamenti')
     while the route-C parsers work in short keys ('ce09') until _map_sc_keys.
-    The short key is the db_field prefix up to the first underscore, which is
-    exact for every node ('sp16a_debiti_banche_breve' -> 'sp16a').
+    The short key is the db_field prefix up to the first underscore
+    ('sp04a_partecipazioni' -> 'sp04a'). That split is a mechanical string
+    operation, not a guarantee of routability on its own: every short key the
+    tree can actually produce must also be in `pdf_importer._SC_KEY_MAP` (or
+    already contain an underscore, in which case `_map_sc_keys` passes it
+    through unchanged) — otherwise `_map_sc_keys` silently drops the amount.
+    See `tests/test_classification_fallback.py` for the guard that checks
+    this holds for every node in `data/iv_cee_tree.json`.
 
     Returns None when the tree does not know the description, or when it
     resolves to the OTHER statement — a balance-sheet caption must never be

@@ -197,7 +197,7 @@ SC_PLUG_REJECT_PCT = Decimal("0.20")
 # Map short keys from situazione_contabile_parser to full DB field names
 _SC_KEY_MAP = {
     'sp01': 'sp01_crediti_soci', 'sp02': 'sp02_immob_immateriali', 'sp03': 'sp03_immob_materiali',
-    'sp04': 'sp04_immob_finanziarie', 'sp05': 'sp05_rimanenze',
+    'sp04': 'sp04_immob_finanziarie', 'sp04a': 'sp04a_partecipazioni', 'sp05': 'sp05_rimanenze',
     'sp06': 'sp06_crediti_breve', 'sp07': 'sp07_crediti_lungo',
     'sp08': 'sp08_attivita_finanziarie', 'sp09': 'sp09_disponibilita_liquide',
     'sp10': 'sp10_ratei_risconti_attivi', 'sp11': 'sp11_capitale', 'sp12': 'sp12_riserve',

@@ -413,9 +413,11 @@ Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor abo
 - **Generic contrapposte (best-effort)** for heterogeneous 2-column dumps (`extract_contrapposte_best_effort`):
   splits columns at the right-code-cluster x, and reconciles **mastri/subtotali to IV-CEE by description**
   (`_be_reclassify` descends the code hierarchy and stops at the coarsest level that maps to an IV-CEE
-  field — no per-gestionale chart-of-accounts mapping). Fondi ammortamento are netted off assets, the
-  current-year result is taken from the declared pareggio gap, and any residual from imperfect parsing is
-  plugged into sp09/sp16 with a `BILANCIO NON QUADRATO` warning for manual correction in **Rettifiche**.
+  field — no per-gestionale chart-of-accounts mapping). Fondi ammortamento are netted off assets and the
+  current-year result is taken from the declared pareggio gap. Any residual from imperfect parsing is
+  **measured, not plugged** (corrected 2026-07-29 — audit finding D1): it is exposed as `_plug_residual`
+  with a `BILANCIO NON QUADRATO` warning for manual correction in **Rettifiche**, and the log says
+  *"nessun plug applicato"*. `check_quadratura` reads that residual to set `masked=True` above 1%.
   - **Typed debiti split (2026-06-25):** the best-effort passivo classifier (`cl_pas`) now resolves each
     debt mastro's OIC creditor type via `_debt_type` (banche/altri-finanz/obbligazioni/fornitori/tributari/
     previdenza/altri) and emits the typed sub-field (sp16a..g, full DB name) ALONGSIDE the aggregate sp16 —
@@ -546,18 +548,25 @@ the income statement. SP and CE are extracted separately and can diverge → the
 fails. `enforce_ce_sp_identity(bs, ce, prefer=…, declared=…)` runs in `pdf_importer.import_pdf_balance_sheet`
 **after every route's block and BEFORE `validate_balance`** (route C, route A/B, AND native XBRL — the
 `utile_CE` rebuilt from CE tags can diverge from the tagged `sp13`, e.g. budget_361/404). It forces
-`utile_CE == sp13` with direction decided by route + an arbiter:
-- **Default** `prefer="sp13"`: trust `sp13` (anchored to pareggio; on route C already = declared result)
-  and align the CE — plug into `ce12_oneri_diversi` if the CE is too high / `ce04_altri_ricavi` if too low —
-  with a `_ce_sp_plug` flag.
-- **Arbiter = declared result** (`declared=…`): whichever of `sp13`/`utile_CE` is closest to the declared
-  Utile/Perdita wins.
-  - declared confirms the **CE** → `sp13` held the **prior** year's result: move it to `utile_CE` and route
-    the difference into reserves (`sp12`) — total PN and Attivo=Passivo unchanged (relabel within PN only).
-    Cap 10% of passivo, reserves stay non-negative, else fall back to aligning the CE.
-  - declared confirms **`sp13`** → the CE is wrong (sign/parse bug, e.g. budget_402/413) → align the CE,
-    `sp13` is NOT touched.
-- No-op when they already coincide. Guarantees CE↔SP on every file without corrupting a correct `sp13`.
+it **MEASURES** the divergence.
+
+**⚠️ It no longer mutates anything** (corrected 2026-07-29 — audit finding D1). Earlier versions
+plugged the gap into `ce12_oneri_diversi` / `ce04_altri_ricavi`, or relabelled it into reserves
+(`sp12`) with a 10% cap. **All of that was removed.** The function now returns the CE unchanged plus
+`_ce_sp_difference`, and logs *"nessuna voce CE/SP è stata modificata"*. The `prefer=` / `declared=`
+parameters are retained for API compatibility.
+
+The same correction applies to two sibling functions — the project principle is now **diagnose, never
+fabricate**:
+- `reconcile_ivcee_balance` returns the BS unchanged plus `_declared_assets_difference`; its
+  `cap_frac=0.05` argument is vestigial and does nothing.
+- the best-effort contrapposte parser does **not** plug the residual into `sp09`/`sp16` — it only
+  measures it (`_plug_residual`) and logs *"nessun plug applicato — verificare in Rettifiche"*.
+
+Read this carefully before debugging: for a long time CLAUDE.md described plugs the code had already
+stopped doing, which sent people hunting for a bug inside a plug that does not exist — or worse, made
+them trust a reconciliation that never happens. A divergence is now surfaced to the user for
+correction in **Rettifiche**, and it is what makes `check_quadratura`'s CE↔SP cross-check meaningful.
 
 #### IV-CEE leveling + quadratura engine (`importers/iv_cee_hierarchy.py`)
 Shared stage DOWNSTREAM of the 4 macro-area routes (A/B/C/OTHER stay separate — this is NOT a
@@ -571,6 +580,15 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
   attivo/passivo SIDE** of a trial-balance line: the COLUMN is ground truth; ambiguous accounts
   (`ERARIO C/`, `DEPOSITI BANCARI`=overdraft, `FORNITORI C/ANTICIPI`, `INAIL C/`) flip side by
   column, not description (tried + reverted — regressed clean files).
+  **`side` does nothing for CE nodes**: `Node.side` is populated only for balance-sheet nodes, so
+  passing `'costi'`/`'ricavi'` filters NOTHING and only `statement='ce'` is enforced. A cost caption
+  could therefore resolve to a revenue/gain node — `DIFFERENZE CAMBIO PASSIVE` → `ce16`, added as a
+  gain, moving the amount by **2×** in `gestione finanziaria`. Route C's fallback must go through
+  `situazione_contabile_parser._resolve_ce_field`, which constrains the result to the
+  `_CE_COST_FIELDS` / `_CE_REVENUE_FIELDS` allowlist for the column being read. The two sets are
+  disjoint and their union is exactly the 21 CE leaves, pinned by a test — signed voci are listed
+  only on the side where a positive addend is arithmetically correct (`ce02`/`ce16`/`ce17` raise the
+  result, so revenue-column only; `ce10` lowers it, so cost-column only).
 - **`check_quadratura(bs, ce)`** — Attivo==Passivo + CE utile==sp13 cross-check + **anti-masking**:
   reads `bs['_plug_residual']` (exposed by the best-effort contrapposte parser, survives `_map_sc_keys`);
   `masked=True` when the plug exceeds 1% of total (the balance only ties because the unclassified
@@ -591,20 +609,43 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
 - **Contra-netting overlay (2026-07-06)** (`situazione_contabile_parser.net_contra_accounts`,
   called in `pdf_importer` route C after `overlay_debt_typing`): deterministic post-extraction
   netting of fondi ammortamento (+ offsettable IVA, both-sides-only) on the CHOSEN candidate.
-  Re-scans the SP pages (coordinate mode; OCR-text fallback), dedupes mastro/dettaglio, then
+  Re-scans the SP pages (coordinate mode; OCR-text fallback), dedupes mastro/dettaglio **by
+  reconciliation, never by code prefix** (see the next bullet), then
   OVERWRITES sp02/sp03 with net values and removes from the debt buckets exactly the passivo
   excess over the new attivo (capped at the fondi mass) — idempotent on an already-net sheet.
   Two gates or no-op: netted > 1% of declared total AND scan gross attivo ≈ declared total
   (0.5%). The declared anchor passed to `_reconcile_trial_to_declared` is reduced by the netted
   mass (printed totals are GROSS on these files) so the reconcile cannot re-inflate it as a
   false plug. Tests: `tests/test_contra_netting.py`; corpus check: `tests/run_contra_regression.py`.
+  The apply phase is **atomic**: the sheet is snapshotted before the first write and rolled back
+  completely if anything raises, then marked `detected>0 / applied==0`. Without that, a mid-apply
+  failure left a HALF-netted sheet carrying none of the `_contra_*` markers, which the reliability
+  engine below reads as "no scan runs on this route" — a silent downgrade of a corrupted sheet.
+- **Partition selection by reconciliation, not by code prefix (2026-07-29)**
+  (`_code_depth` / `_dedup_rules` / `_select_dedup`): the scan must sum mastri OR leaves, never both.
+  The old `_dedup_parent_child` decided parentage with `c.startswith(code)`, which **silently no-ops
+  on charts where parent and child codes are disjoint** — AGO prints 8-digit mastri (`13095000`) with
+  9-digit children (`101080000`), neither a prefix of the other, so BOTH levels were summed. On
+  `613_2024` that over-read the attivo by 41.613,46 (0,836%), just past the 0,5% gate, so netting
+  became a no-op and **2,25 M of fondi ammortamento stayed booked among the debts with the assets
+  gross — on a sheet that still balanced**, so every downstream check passed. Now `_dedup_rules`
+  enumerates candidate partitions (`all`, the historical prefix dedup, and one `depth<=N` per observed
+  depth) and `_select_dedup` picks the one reconciling to a total the DOCUMENT printed, tolerance
+  `max(50 €; 0,5%)`. Depth is only a hypothesis generator; the printed total is the judge. With no
+  declared total, or when nothing reconciles, it returns the historical behaviour with
+  `reconciled=False` so the caller learns the scan is unverified instead of trusting it. `_select_dedup`
+  returns the winning **rule** (a threshold closure), not a label — a label would be re-resolved
+  against whatever rows it is handed and could silently fall back to the prefix dedup on the passivo
+  side. **Both** route-C consumers use it: `net_contra_accounts` AND the extractor-selection anchor in
+  `pdf_importer` (`contra_declared_total` / `contra_scan_mass`), which feeds `_completeness_gap` and
+  therefore decides CoGe-LLM vs deterministic. Tests: `tests/test_dedup_partition.py`.
 - **Trial-balance import is never hard-blocked** (`pdf_importer`): a readable route-C situazione
   contabile ALWAYS imports. The route now tries the dedicated **CoGe LLM extractor first**
   (`extract_trial_balance_with_llm`, which DOES read CoGe account lists); when that is unavailable or
-  empty, the deterministic best-effort parser plugs to balance (validate_balance passes), so a non-empty
-  result is imported with a `BILANCIO NON QUADRATO` flag scaled to the plug (`SC_PLUG_REJECT_PCT` now
-  only sets the warning severity "parziale" vs "prevalentemente stimata"), for correction in Rettifiche —
-  NOT rejected. NOTE: the distinction is between the two LLM passes — the **IV-CEE** LLM
+  empty, the deterministic best-effort parser takes over, so a non-empty result is imported with a
+  `BILANCIO NON QUADRATO` flag scaled to the measured `_plug_residual` (`SC_PLUG_REJECT_PCT` now only
+  sets the warning severity "parziale" vs "prevalentemente stimata"), for correction in Rettifiche —
+  NOT rejected. The residual is reported, never invented (see D1 above). NOTE: the distinction is between the two LLM passes — the **IV-CEE** LLM
   (`extract_pdf_with_llm`, `force_llm=True`) is the WRONG fallback for a trial balance (it reads
   legal-schema bilanci, not CoGe account lists) and on a contrapposte file returns an unbalanced
   extraction → the generic "Balance sheet does not balance / Failed to extract data" hard error; so the
@@ -630,6 +671,96 @@ router). One canonical taxonomy + one quadratura check for every bilancio, not p
   schemas that simply don't tie at source keep the "BILANCIO NON QUADRATO" honest-fail / Rettifiche path.
 - `situazione_contabile_parser._be_split` picks the column gutter that BALANCES description-bearing
   rows on both sides (centre as tiebreaker), not the widest gap (which sliced the passivo column).
+
+#### Label semantics — one canonical form for every caption (`importers/label_semantics.py`)
+A legal voce has ONE meaning and N spellings per gestionale (`I. immateriali`,
+`I - Immobilizzazioni immateriali`, `B.I IMMOBILIZZAZIONI IMMATERIALI`). The LLM reading the whole
+document copes with synonyms; what breaks are the **deterministic gates around it** — section
+anchors, declared control totals, fondi netting, the contrapposte reclassifier — which decide whether
+to ACCEPT its output. When one of them fails to recognise a spelling, a CORRECT extraction is rejected.
+- Six mutually incompatible normal forms used to coexist (`iv_cee_hierarchy.normalize`,
+  `standard_ivcee_parser._normalise`, `_normalize_for_search`, the inline one in
+  `_declared_control_totals`, `bilancio_classifier.has`, and bare `.upper()` in the route-C parser).
+  One of them was a live bug: `bilancio_classifier` searched for `passivita` / `disponibilita liquide`
+  **without deaccenting**, so on accented text it NEVER matched and the file fell to `ROUTE_UNSUPPORTED`.
+- `normalize_label` is the single canonical form; it is idempotent and **does not invent words**
+  (`I. immateriali` → `immateriali`; expanding to the full voce is the dictionary's job). The legal
+  path (`B.II.1.a`) is not noise — it is extracted into `path_hint` and used to disambiguate.
+- Three target spaces (voce / marker / conto) in `data/label_dictionary.json`, measured on a
+  72-document corpus: markers were **100% unresolved** before this, accounts 63%, legal 42%.
+- Consumed by `_is_fondo_amm`, which now also recognises `F.di ammor.to` / `Fdo amm` / `Fondo amm.`
+  via the canonical contiguous form `fondo ammortamento`. That function governs the whole route-C
+  netting: an unrecognised fondo is not subtracted from the asset, the attivo stays gross, and past 1%
+  the import is rejected. The CE costs (`Ammortamento immobilizzazioni immateriali`,
+  `Quota ammortamento esercizio`) stay excluded — they are costs, not funds, and must never be netted.
+  Tests: `tests/test_label_semantics_*.py`, `tests/test_fondo_amm_grafie.py`, `tests/test_classifier_accenti.py`.
+
+#### Fallback + materiality policy (`situazione_contabile_parser`)
+Where unrecognised mass may go, and where it may never go. **A plug INVENTS mass and is forbidden; a
+fallback LABELS mass that was actually read and is allowed.**
+- `TIER0_FIELDS` — accounts a fallback may NEVER write: `sp02`/`sp03`/`sp04` (immobilizzazioni nette),
+  `sp11`/`sp12`/`sp13` (patrimonio netto), `sp16a`/`sp17a` (debiti verso banche), and `ce09`
+  (because `EBITDA = EBIT + ce09` makes it the only KPI boundary inside operating costs). An error
+  here changes a TOTAL and breaks PFN, ROI, indipendenza finanziaria and both rating models at once.
+- `FALLBACK_FIELDS = {'ce': 'ce06', 'bs': 'sp16g'}` — KPI-neutral destinations, always an explicit
+  SUB-field. Never an aggregate: `calculations/projection_common.base_bank_debt` assigns any
+  aggregate-vs-detail gap to BANKS, so residual mass left on `sp16` silently becomes phantom bank debt.
+- `materiality_threshold(total) = max(1.000 €; 0,1% dell'attivo)` — the canonical definition lives in
+  the dependency-free `importers/reliability.py`; the parser re-exports it so there is exactly one rule.
+- `fallback_field(statement)` gives the destination inside a classification loop (which knows the
+  amount long before the sheet total exists); `fallback_bucket(...)` adds the materiality verdict once
+  `att_sum` is known and refuses a tier-0 `target`. Material guesswork is accumulated into
+  `bs['_unclassified_mass']` instead of vanishing.
+- **Classification order** in `_hier_reconstruct`: keyword table → shared IV-CEE tree
+  (`_resolve_ce_field`, direction-constrained) → catch-all. Purely additive — the tree only fires where
+  the keyword table returns `None`. This is what stopped `budget_342` burying 36.500,17 of ammortamenti
+  in the `ce12` catch-all: totals and `sp13` stayed correct so no gate fired, but EBITDA was wrong.
+  Imprecision *within* an aggregate is accepted by design (the user fine-tunes it in **Rettifiche**);
+  what is not accepted is mass crossing an aggregate or a KPI boundary.
+  Tests: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
+
+#### Critical-account reliability + the `forecastable` gate (`importers/reliability.py`)
+A pure, dependency-free module (no I/O, no PDF, no DB — reusable by the XBRL/CSV importers) that turns
+evidence the pipeline already computes into a per-account verdict.
+- `AccountStatus` = `VERIFIED` (corroborated by independent source evidence) / `DERIVED` (inferred but
+  internally consistent) / `UNRELIABLE` (evidence says the figure is probably wrong).
+- `assess(bs, ce, declared) -> ReliabilityReport` covers the three groups that decide every KPI:
+  **immobilizzazioni** (from the `_contra_*` markers — contra mass detected but NOT applied means gross
+  assets with fondi among the debts), **patrimonio netto** (reconstructed `sp11+sp12+sp13` vs a printed
+  control total), **debiti banche** (the aggregate-vs-typed-detail gap, mirroring `base_bank_debt`
+  line-for-line, so the verdict describes what the forecast engine will actually do).
+- **`UNRELIABLE` requires a POSITIVE contradiction, never a missing control.** A missing control yields
+  `DERIVED`. Without this rule every route A/B file would be flagged simply because no contra scan runs
+  on those routes.
+- `ReliabilityReport.to_dict()` is published into the persisted `validation_report` JSON under
+  `critical_accounts`, and `forecastable = semantic_valid and all_critical_ok`. **The verdict gates the
+  FORECAST, never the SAVE** — Rettifiche operates on a persisted `FinancialYear`, so refusing to save
+  an unreliable file would make it permanently uncorrectable. Any error computing the verdict means
+  "unknown", and unknown never blocks. `PUT /adjustments` preserves `critical_accounts` and ANDs it back
+  in, so a no-op rettifica cannot clear the flag.
+- **Known limitation:** nothing on any forecast path currently READS `fy.forecastable` —
+  `intra_year_engine` re-derives its own gate from `check_quadratura`, `forecast_engine` has none, and
+  `promote_service` hardcodes `True`. Today this is a persisted *verdict*, not an end-to-end *gate*.
+  `patrimonio_netto` is likewise always `DERIVED`, because `_declared_control_totals` supplies no
+  `patrimonio_netto` key yet. Tests: `tests/test_reliability.py`, `tests/test_reliability_gating.py`.
+
+#### MinerU OCR (`importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`)
+Optional OCR backend for scanned/image PDFs the text layer cannot read, served as a container
+(`docker-compose.yml`, `docker/mineru/Dockerfile`, GPU variant in `docker-compose.gpu.yml`) and
+configured in `backend/app/core/config.py`. When an `extraction_context` is produced, `pdf_importer`
+records provenance in `validation_report["ocr"]` (engine, version, pages, tables, `accounting_method`,
+`source_detail_fields`, `detail_level`) and suffixes `parser_version` with `+mineru-<ver>`, so an OCR
+import is always distinguishable from a text-layer one after the fact.
+Tests: `tests/test_mineru_*.py`, `tests/test_pdf_ocr_endpoint.py`. Plan:
+`docs/piano-import-2026-07/14-PIANO-INTEGRAZIONE-MINERU-OCR.md`.
+
+#### Import regression baseline (`tests/fixtures/import_baseline.json`)
+Versioned, hash-keyed record of what each corpus file imports to, so an extraction change is measured
+rather than argued about. `tests/_import_probe.py` runs the production path faithfully and records the
+full result; `scripts/refresh_import_baseline.py` regenerates the fixture; `tests/test_import_baseline.py`
+asserts field-by-field. Each entry is keyed by the file's content hash and marks whether the values are
+`verified` (checked against the document) or merely `observed`. Use this — not a single harness run —
+to answer "did my change move anything?".
 
 ### FGPMI Rating Model
 - Complex multi-table lookup (7 indicators, sector-specific thresholds)

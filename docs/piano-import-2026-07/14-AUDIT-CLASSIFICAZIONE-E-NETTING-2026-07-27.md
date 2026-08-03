@@ -15,9 +15,9 @@
 | N2 | Il netting di 613 è un **no-op**: 2,25 M di fondi restano nei debiti | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
 | N3 | Il netting **non ha copertura di regressione viva**: i due test su 613 sono rotti | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
 | C1 | **Due classificatori paralleli** che si contraddicono e si mancano a vicenda | **alta** | RISOLTO 2026-07-29 (piano import-critical-accounts) |
-| C2 | Il catch-all `ce12` è **silenzioso**: nessuna diagnostica sulla massa non classificata | media | confermato |
-| D1 | `CLAUDE.md` descrive plug e riallineamenti **che il codice non fa più** | media | confermato |
-| T1 | 2 test CSV falliscono per file di corpus assente (manca lo `skipif`) | bassa | confermato |
+| C2 | Il catch-all `ce12` è **silenzioso**: nessuna diagnostica sulla massa non classificata | media | PARZIALE 2026-07-29 — lato CE risolto (`_unclassified_mass` + `fallback_bucket`); resta da cablare il catch-all del PASSIVO, che scrive ancora l'aggregato `sp16` |
+| D1 | `CLAUDE.md` descrive plug e riallineamenti **che il codice non fa più** | media | RISOLTO 2026-07-29 (§6 riscritta in `CLAUDE.md`: `enforce_ce_sp_identity`, `reconcile_ivcee_balance` e il residuo best-effort ora documentati come misurati, non tamponati) |
+| T1 | 2 test CSV falliscono per file di corpus assente (manca lo `skipif`) | bassa | RISOLTO 2026-07-29 (`skipif` allineato agli altri test dipendenti dal corpus) |
 
 ---
 

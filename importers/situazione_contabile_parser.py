@@ -628,6 +628,31 @@ def _classify_ce_ricavi(desc_upper: str) -> Optional[str]:
     return None
 
 
+def _resolve_field(desc: str, side: Optional[str] = None,
+                   statement: Optional[str] = None) -> Optional[str]:
+    """Shared-tree classification, returned as a SHORT route-C key.
+
+    `iv_cee_hierarchy.resolve` reasons in DB column names ('ce09_ammortamenti')
+    while the route-C parsers work in short keys ('ce09') until _map_sc_keys.
+    The short key is the db_field prefix up to the first underscore, which is
+    exact for every node ('sp16a_debiti_banche_breve' -> 'sp16a').
+
+    Returns None when the tree does not know the description, or when it
+    resolves to the OTHER statement — a balance-sheet caption must never be
+    booked as a cost.
+    """
+    try:
+        from importers.iv_cee_hierarchy import resolve as _tree_resolve
+        node = _tree_resolve(desc, side, statement)
+    except Exception:
+        return None
+    if node is None or not node.db_field:
+        return None
+    if statement and node.statement and node.statement != statement:
+        return None
+    return node.db_field.split('_', 1)[0]
+
+
 # ---------------------------------------------------------------------------
 # Typed sub-field classification (depth preservation)
 # ---------------------------------------------------------------------------
@@ -4115,7 +4140,7 @@ def _hier_reconstruct(pages_data, full: str):
         ce[k] = ce.get(k, Z) + v
 
     for _c, d, a in mc:
-        f = _classify_ce_costi(d) or 'ce12'
+        f = _classify_ce_costi(d) or _resolve_field(d, 'costi', statement='ce') or 'ce12'
         if f == 'ce01_return':
             adde('ce01', -a)
         elif f == 'ce10_close':
@@ -4127,7 +4152,7 @@ def _hier_reconstruct(pages_data, full: str):
         else:
             adde(f, a)
     for _c, d, a in mr:
-        f = _classify_ce_ricavi(d) or 'ce04'
+        f = _classify_ce_ricavi(d) or _resolve_field(d, 'ricavi', statement='ce') or 'ce04'
         if f == 'ce10_close':
             adde('ce10', -a)
         else:

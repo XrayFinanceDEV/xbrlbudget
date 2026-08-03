@@ -745,9 +745,32 @@ evidence the pipeline already computes into a per-account verdict.
   `patrimonio_netto` key yet. Tests: `tests/test_reliability.py`, `tests/test_reliability_gating.py`.
 
 #### MinerU OCR (`importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`)
-Optional OCR backend for scanned/image PDFs the text layer cannot read, served as a container
-(`docker-compose.yml`, `docker/mineru/Dockerfile`, GPU variant in `docker-compose.gpu.yml`) and
-configured in `backend/app/core/config.py`. When an `extraction_context` is produced, `pdf_importer`
+Optional OCR backend for scanned/image PDFs the text layer cannot read, configured in
+`backend/app/core/config.py`.
+
+**⚠️ Developer machine only — MinerU is NEVER deployed on the VPS.** Its image is
+`FROM vllm/vllm-openai` (multi-GB, GPU-oriented). The `mineru` service in `docker-compose.yml`
+sits behind a **compose profile** (`profiles: ["mineru"]`), which excludes it from *every* compose
+command — including `build` — unless the profile is requested. That matters because `Jenkinsfile`
+runs `docker compose build --no-cache --parallel` then `up -d` on the staging VPS: without the
+profile that build pulled gigabytes of vLLM layers onto the server. `MINERU_OCR_ENABLED` also
+defaults to **false** in the compose backend env for the same reason.
+
+To run it locally:
+```bash
+MINERU_OCR_ENABLED=true docker compose --profile mineru up -d
+# with NVIDIA:
+MINERU_OCR_ENABLED=true docker compose --profile mineru \
+  -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+With OCR off the backend is unaffected: `mineru_client` / `mineru_adapter` are imported *inside*
+the endpoint (never at module load), `GET /import/capabilities` returns `ocr_available: false`, and
+`POST /import/pdf-ocr` returns a clean 503 `MINERU_DISABLED` which the UI renders as *"Il servizio
+OCR non è disponibile — usa l'import PDF standard"*. The OCR button stays visible by design (the
+flag is a kill switch, not a UI gate) — `getImportCapabilities` exists in `frontend/lib/api.ts` but
+is not yet wired to hide it.
+
+When an `extraction_context` is produced, `pdf_importer`
 records provenance in `validation_report["ocr"]` (engine, version, pages, tables, `accounting_method`,
 `source_detail_fields`, `detail_level`) and suffixes `parser_version` with `+mineru-<ver>`, so an OCR
 import is always distinguishable from a text-layer one after the fact.

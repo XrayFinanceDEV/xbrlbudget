@@ -1,7 +1,13 @@
-# Optional NVIDIA acceleration:
-# docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Optional NVIDIA acceleration for the LOCAL MinerU container.
+# MinerU is behind the `mineru` compose profile, so the profile is required here too:
+#   MINERU_OCR_ENABLED=true docker compose --profile mineru \
+#     -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Never used on the VPS — MinerU is a developer-machine service.
 services:
   mineru:
+    # Repeated from docker-compose.yml so the merged service keeps the profile
+    # even if this override is ever used on its own.
+    profiles: ["mineru"]
     deploy:
       resources:
         reservations:

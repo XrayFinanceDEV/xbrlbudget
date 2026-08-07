@@ -74,3 +74,23 @@ def test_sbilancio_e_importabile_con_avviso():
     assert verdict.hard_error is None
     assert verdict.warning.startswith(_UNBALANCED_WARNING_PREFIX)
     assert "Rettifiche" in verdict.warning
+
+
+from importers.pdf_importer import _resolve_validation_status
+
+
+def test_status_unbalanced_ha_precedenza_su_review_required():
+    assert _resolve_validation_status(False, False) == "unbalanced"
+
+
+def test_status_unbalanced_anche_se_forecastable_fosse_vero():
+    # Difensivo: un bilancio che non quadra non e' mai "verified".
+    assert _resolve_validation_status(False, True) == "unbalanced"
+
+
+def test_status_verified_solo_se_quadra_ed_e_forecastable():
+    assert _resolve_validation_status(True, True) == "verified"
+
+
+def test_status_review_required_se_quadra_ma_non_forecastable():
+    assert _resolve_validation_status(True, False) == "review_required"

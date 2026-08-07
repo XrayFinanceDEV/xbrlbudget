@@ -508,7 +508,13 @@ def save_adjustments(
     if isinstance(_preserved, dict) and "all_critical_ok" in _preserved:
         _critical_ok = bool(_preserved["all_critical_ok"])
     _forecastable = bool(new_q.semantic_valid) and _critical_ok
-    fy.validation_status = "verified" if _forecastable else "review_required"
+    # Stato a tre vie identico a quello dell'import: senza questo, la PRIMA
+    # rettifica salvata degraderebbe "unbalanced" a "review_required" pur
+    # restando il bilancio sbilanciato, perdendo il segnale per la UI.
+    from importers.pdf_importer import _resolve_validation_status
+    fy.validation_status = _resolve_validation_status(
+        abs(new_q.sbilancio) <= Decimal("0.01"), _forecastable
+    )
     fy.validation_report = json.dumps(validation_payload, ensure_ascii=False)
     fy.parser_version = "manual-adjustments-semantic-v2"
     fy.forecastable = _forecastable

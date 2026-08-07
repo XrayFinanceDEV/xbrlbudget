@@ -163,6 +163,18 @@ def _classify_balance_failure(
     )
 
 
+def _resolve_validation_status(arithmetic_balanced: bool, forecastable: bool) -> str:
+    """Stato di validazione a tre vie.
+
+    ``unbalanced`` ha la precedenza: un bilancio che non quadra non e' mai
+    "verified", e la UI deve poterlo distinguere da un bilancio che quadra ma
+    ha dettagli da rivedere, senza fare string-matching sui warning.
+    """
+    if not arithmetic_balanced:
+        return "unbalanced"
+    return "verified" if forecastable else "review_required"
+
+
 def _is_aggregated_summary(text: str) -> bool:
     """True when the document carries NO legal IV-CEE substructure — only top-level
     macro-voci (e.g. "Immobilizzazioni: 2.406.946", "B) Patrimonio netto: ..."), with
@@ -1179,16 +1191,11 @@ def import_pdf_balance_sheet(
                 logger.warning(f"quadratura: {_w}")
                 if _w not in sc_quadratura_warnings:
                     sc_quadratura_warnings.append(_w)
-            # A CE/SP disagreement or a material plug is not a warning-only
-            # condition: persisting it would let an extraction error feed every
-            # downstream analysis.  Detail coverage remains visible separately via
-            # ``semantic_valid`` because abbreviated legal statements may omit a
-            # breakdown, but the core accounting identities are mandatory.
+            # A CE/SP disagreement or a material plug is surfaced to the user
+            # (unbalanced_reason below) and correctable in Rettifiche, rather
+            # than blocking the import outright — only a genuinely empty
+            # extraction has nothing for the user to act on.
             if not _qd.quadra:
-                # Keep the blocking message focused on the failed accounting
-                # identity. Aggregate/detail coverage is a separate semantic
-                # diagnosis and otherwise buries a clear CE-vs-SP or side-total
-                # contradiction under a long list of secondary warnings.
                 _blocking_warnings = [
                     warning for warning in _qd.warnings
                     if not warning.startswith("GERARCHIA INCOERENTE:")
@@ -1196,10 +1203,24 @@ def import_pdf_balance_sheet(
                 reason = "; ".join(_blocking_warnings) or (
                     f"attivo {_qd.totale_attivo} / passivo {_qd.totale_passivo}"
                 )
-                raise PDFImportError(
-                    "Importazione non salvata: il bilancio estratto non supera i "
-                    f"controlli contabili ({reason})"
-                )
+                if _qd.is_empty:
+                    # Un'estrazione vuota non e' rettificabile: non c'e' alcuna
+                    # voce su cui l'utente possa intervenire.
+                    raise PDFImportError(
+                        "Importazione non salvata: nessun dato contabile "
+                        f"estratto dal documento ({reason})"
+                    )
+                # Sbilancio, mismatch CE/SP o plug mascherato: importabile e
+                # correggibile in Rettifiche. Allinea finalmente il codice a
+                # quanto CLAUDE.md gia' afferma per la rotta C ("Trial-balance
+                # import is never hard-blocked"), che oggi non e' vero perche'
+                # ``quadra`` richiede ``not masked``.
+                if unbalanced_reason is None:
+                    unbalanced_reason = (
+                        f"{_UNBALANCED_WARNING_PREFIX}: {reason}. "
+                        f"{_UNBALANCED_WARNING_SUFFIX}"
+                    )
+                logger.warning(unbalanced_reason)
         except PDFImportError:
             raise
         except Exception as _qd_err:
@@ -1217,6 +1238,8 @@ def import_pdf_balance_sheet(
         # Surface the deterministic trial-balance plug flag to the user (Rettifiche cue),
         # so an imperfect-but-imported situazione contabile is visible rather than silent.
         warnings.extend(sc_quadratura_warnings)
+        if unbalanced_reason:
+            warnings.insert(0, unbalanced_reason)
         if warnings:
             logger.warning(f"Balance sheet hierarchy warnings: {warnings}")
 
@@ -1328,7 +1351,9 @@ def import_pdf_balance_sheet(
             company_id=company.id,
             year=current_year_val,
             period_months=period_months,  # None for full year, 1-11 for partial
-            validation_status=("verified" if _forecastable else "review_required"),
+            validation_status=_resolve_validation_status(
+                bool(_validation_payload["arithmetic_balanced"]), _forecastable
+            ),
             validation_report=json.dumps(_validation_payload, ensure_ascii=False),
             source_sha256=_source_sha256,
             parser_version=_stored_parser_version,

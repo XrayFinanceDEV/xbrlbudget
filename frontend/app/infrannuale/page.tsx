@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +17,6 @@ import {
   getBudgetScenarios,
   promoteProjection,
   deleteCompany,
-  getAdjustableFinancialYear,
   getInfrannualeAIComments,
   generateInfrannualeAIComments,
   saveInfrannualeAIComments,
@@ -2865,7 +2864,6 @@ export default function InfraannualePage() {
   const [importingRef, setImportingRef] = useState(false);
 
   // Step 1b: Rettifiche (Adjustments) — one hook per FinancialYear.
-  const [referenceYearData, setReferenceYearData] = useState<Record<string, number> | null>(null);
   const invalidateDownstream = useCallback(() => {
     setComparison(null); // reload the comparison against the corrected data
   }, []);
@@ -2876,6 +2874,28 @@ export default function InfraannualePage() {
     reconcileSubfields,
     invalidateDownstream,
   );
+  const storico = useRettificheYear(
+    importResult?.companyId ?? null,
+    fiscalYear - 1,
+    undefined,               // full 12-month year
+    reconcileSubfields,
+    invalidateDownstream,
+  );
+
+  // Read-only "Storico" column inside the Bilancio di verifica tab. Derived from
+  // the storico hook so a correction on one tab moves the column on the other
+  // with no refetch. Bilancio abbreviato imports populate only aggregates, so
+  // reconcileSubfields plugs the gap into the "altri" sub-fields — otherwise the
+  // column shows a total with every detail row empty.
+  const referenceYearData = useMemo(() => {
+    if (!storico.data) return null;
+    const merged: Record<string, number> = {
+      ...storico.data.balance_sheet,
+      ...storico.data.income_statement,
+    };
+    reconcileSubfields(merged);
+    return merged;
+  }, [storico.data]);
 
   // Step 2: Comparison
   const [scenario, setScenario] = useState<BudgetScenario | null>(null);
@@ -2966,7 +2986,7 @@ export default function InfraannualePage() {
     setActiveImportMethod(requestedMethod);
     // Clear stale rettifiche state from any previous import
     verifica.clear();
-    setReferenceYearData(null);
+    storico.clear();
     try {
       let companyId: number;
       let companyName: string;
@@ -3162,21 +3182,10 @@ export default function InfraannualePage() {
   }, [importResult, scenario]);
 
   useEffect(() => {
-    if (activeTab === "rettifiche" && !verifica.data && importResult) {
-      verifica.load();
-      // Reference year: still fetched separately here; Task 2 replaces this.
-      getAdjustableFinancialYear(importResult.companyId, fiscalYear - 1)
-        .then((refData) => {
-          const refMerged: Record<string, number> = {
-            ...refData.balance_sheet,
-            ...refData.income_statement,
-          };
-          reconcileSubfields(refMerged);
-          setReferenceYearData(refMerged);
-        })
-        .catch(() => setReferenceYearData(null));
-    }
-  }, [activeTab, verifica.data, verifica.load, importResult, fiscalYear]);
+    if (activeTab !== "rettifiche" || !importResult) return;
+    if (!verifica.data) verifica.load();
+    if (!storico.data && storico.exists) storico.load();
+  }, [activeTab, importResult, verifica.data, verifica.load, storico.data, storico.exists, storico.load]);
 
   useEffect(() => {
     if (activeTab === "rettifiche" && !verifica.exists) {
@@ -3471,7 +3480,7 @@ export default function InfraannualePage() {
     setSelectedCompanyId(comp.id);
     // Clear rettifiche state so it reloads for the new scenario
     verifica.clear();
-    setReferenceYearData(null);
+    storico.clear();
     setComparison(null);
     setAnalysis(null);
     setActiveTab("comparison");
@@ -3498,7 +3507,7 @@ export default function InfraannualePage() {
         setRefFile(null);
         setFileResetKey((k) => k + 1);
         verifica.clear();
-        setReferenceYearData(null);
+        storico.clear();
       }
       toast.success(`"${name}" eliminata`);
     } catch (err: unknown) {

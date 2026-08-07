@@ -57,7 +57,9 @@ cd frontend && npm run dev
 **API Workflow — Infrannuale (5 calls + optional promote + optional AI comments):**
 ```bash
 # 1. INPUT: Upload partial-year data → POST /api/v1/import/{pdf|xbrl} (with period_months)
-# 2. RETTIFICHE (optional): Adjust imported BS/IS with double-entry postings
+# 2. RETTIFICHE (optional): Adjust imported BS/IS with double-entry postings.
+#    Called once PER YEAR — the partial year AND the historical reference year each get their own
+#    tab, their own journal and their own 20-entry cap (period_months omitted = full year).
 #    GET  /api/v1/companies/{id}/years/{year}/adjustable  (seeds original snapshot + returns rettifiche_log)
 #    PUT  /api/v1/companies/{id}/years/{year}/adjustments (persists BS/IS + rettifiche_log, max 20 entries)
 # 3. SCENARIO: Create infrannuale scenario → POST /companies/{id}/scenarios (scenario_type="infrannuale")
@@ -744,6 +746,32 @@ evidence the pipeline already computes into a per-account verdict.
   `patrimonio_netto` is likewise always `DERIVED`, because `_declared_control_totals` supplies no
   `patrimonio_netto` key yet. Tests: `tests/test_reliability.py`, `tests/test_reliability_gating.py`.
 
+#### The intra-year forecast gate (`intra_year_engine._validate_forecast_source`)
+The gate `intra_year_engine` re-derives for itself (see the limitation above). It blocks an empty
+sheet, an SP imbalance, a CE/SP profit mismatch, a persisted source plug, and an aggregate/detail
+mismatch on the nine breakdowns the engine scales or carries.
+
+**A MISSING breakdown is not a mismatch (2026-08-07).** A bilancio abbreviato states only the
+aggregate, and the distributors already handle that by returning zeros and carrying the aggregate
+unchanged (`_distribute_sp05`, `_distribute_sp06` — the docstrings say so explicitly): nothing is
+invented. Only a breakdown that IS declared and does not sum to its aggregate blocks — a positive
+contradiction, one of the two figures is wrong. Same rule as `importers/reliability.py`, where
+`UNRELIABLE` also requires a contradiction rather than a missing control. `detail_fields()` in
+`iv_cee_hierarchy` is the public accessor over the mapping `check_quadratura` uses, so the gate does
+not restate it.
+
+**`sp16`/`sp17` are the exception and keep blocking either way:**
+`projection_common.base_bank_debt` assigns the whole aggregate/detail gap to BANKS, so there an
+absent breakdown really does become phantom bank debt and inflate the PFN (this is open finding C2).
+
+Before this, a route-C trial balance with aggregate-only `sp04`/`sp05` was refused; the failure was
+INVISIBLE because `assumptions_service.bulk_upsert_assumptions` catches it and returns **HTTP 200**
+with `forecast_generated: false` and the reason in `message` — no `ForecastYear` was written,
+`analysis.forecast_years` came back `[]`, and the Indicatori tab rendered the **Proiezione column
+empty** under a success toast. **Any caller of the bulk-assumptions endpoint must check
+`forecast_generated`, not just the HTTP status** — `/budget` and both `/infrannuale` call sites now
+do. Tests: `tests/test_intra_year_semantics.py` (`test_forecast_gate_*`).
+
 #### MinerU OCR (`importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`)
 Optional OCR backend for scanned/image PDFs the text layer cannot read, configured in
 `backend/app/core/config.py`.
@@ -842,7 +870,46 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
 - Frontend wizard: Import → Rettifiche → Comparison → Projection (editable) → Results → Promote to Budget
 
 ### Rettifiche (BS/IS Adjustments Journal)
-Journal of double-entry corrections applied to the imported partial-year financials before comparison/projection.
+Journal of double-entry corrections applied to the imported financials before comparison/projection.
+
+**Two sub-tabs, one per year (2026-08-07).** A trial balance almost always arrives with its historical
+reference year (30.06.2026 + 31.12.2025), and **both need rettifiche** — the historical year is the base
+the Confronto, Proiezione and Indicatori compute growth against, so an uncorrected misclassification
+there propagates everywhere. The Rettifiche step holds a shadcn `Tabs` with *Rettifiche Storico
+{refYear}* (default) and *Rettifiche Bil. di verifica {n}M {year}*.
+
+- **No backend work was needed:** `GET /companies/{id}/years/{year}/adjustable` and `PUT .../adjustments`
+  already take `year` + optional `period_months` (`_find_fy`), and the importer already persists a
+  dual-column PDF's prior year as `period_months=None`. The Importazione step already guarantees the
+  reference year exists (`handleImportRefYear`) or was explicitly skipped (`handleSkipRefYear`).
+- **`frontend/hooks/use-rettifiche-year.ts`** holds load/save/reset/corrections for ONE `FinancialYear`;
+  the page instantiates it twice — `storico` (`fiscalYear - 1`, `periodMonths` **undefined** = full year)
+  and `verifica` (`fiscalYear`, `periodMonths < 12 ? periodMonths : undefined`). `RettificheTab` is
+  **unmodified and rendered twice**: it is prop-driven, `hasRef` hides the reference column when
+  `referenceYearData` is `null`, and `periodEndDate` derives 31/12/{refYear} from `(year, 12)`.
+- **⚠️ Never put the whole `verifica`/`storico` object in a `useEffect` dependency array.** The hook
+  returns a fresh object literal every render, so an object-keyed effect re-fires on every re-render —
+  including the one its own `setLoading(true)` causes — and issues a duplicate `GET /adjustable`.
+  Depend on the individual fields (`storico.data`, `storico.load`, …). The `exhaustive-deps` lint
+  warnings on those effects are intentional.
+- **⚠️ The hook resets on identity change** (`[companyId, year, periodMonths]`). Without it, going back
+  to Importazione, switching the period 9 → 12 and returning would keep the 9-month sheet loaded while
+  the save target became the full-year record — writing partial values into the **wrong
+  `FinancialYear`**. The backend cannot catch this: it resolves exactly the record it is asked for and
+  the sheet balances. Remember a partial and a full-year record deliberately coexist for the same
+  company+year.
+- **`referenceYearData`** (the read-only Storico column inside the Bil. di verifica tab) is a `useMemo`
+  over `storico.data`, not its own fetch — so a correction on one tab moves the column on the other.
+- **Downstream invalidation:** a save or reset on **either** year clears `comparison`, `projectedBS` and
+  `analysis`, and toasts *"ricalcola la proiezione"* only when a projection already existed. Nothing is
+  recomputed silently — the user goes back through Confronto → Proiezione. The "did a projection exist?"
+  test reads a **ref**, never a `setState` updater: `reactStrictMode` double-invokes updaters in dev, so
+  a toast inside one fires twice.
+- **No historical year** (import skipped → pure-annualization mode): the Storico trigger is disabled with
+  an explanatory card and the sub-tab defaults to Bil. di verifica. A 404 sets `exists = false` — a
+  legitimate state, not an error.
+- Spec + plan: `docs/superpowers/specs/2026-08-07-rettifiche-storico-design.md`,
+  `docs/superpowers/plans/2026-08-07-rettifiche-storico.md`.
 
 - **Persistence:** `FinancialYear.original_bs_snapshot` + `original_is_snapshot` (pre-rettifiche JSON) and `FinancialYear.rettifiche_log` (JSON array of per-edit entries). Snapshot is created on first GET to `/adjustable`, so `BalanceSheet`/`IncomeStatement` always reflect the *current* corrected state while `original_*_snapshot` is immutable.
 - **Per-edit flow:** typing a new value into any BS/CE input updates a local `pendingEdits` map. On blur / Enter, a single-row proposal dialog opens with a suggested double-entry counterpart (from `PROPOSAL_RULES`) pre-filled. Confirming appends a `RettificaEntry` to the log, applies both deltas to `corrections`, and persists via `PUT /adjustments`. Cancelling reverts.
@@ -855,7 +922,12 @@ Journal of double-entry corrections applied to the imported partial-year financi
   - `database/models.py` — `FinancialYear.rettifiche_log` column
   - `backend/app/schemas/adjustments.py` — `RettificaEntry`, `AdjustableFinancialYear.rettifiche_log`, `AdjustmentsUpdate.rettifiche_log`
   - `backend/app/api/v1/financial_years.py` — `RETTIFICHE_LOG_MAX = 20`, GET `/adjustable`, PUT `/adjustments`
-  - `frontend/app/infrannuale/page.tsx` — `RettificheTab` component, `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`, `recalcAggregates`, `reconcileSubfields`
+  - `frontend/app/infrannuale/page.tsx` — `RettificheTab` component, `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`, `recalcAggregates`, `reconcileSubfields`, the two-tab render block
+  - `frontend/hooks/use-rettifiche-year.ts` — per-year load/save/reset/corrections, one instance per tab
+
+**Known follow-up:** `RettificheTab` still lives inside `page.tsx` (~1.300 lines of a 5.900-line route
+file) because it leans on ~15 module-level constants shared with the Confronto and Proiezione tabs.
+Extracting it needs a shared module first; deliberately deferred, not forgotten.
 
 ### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
 All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable. When adding a new BS/IS sub-field, add rows in all of:

@@ -1722,6 +1722,54 @@ function RettificheTab({
   };
 
   // Confirm the active proposal: write the entry to the log, apply deltas to corrections, persist.
+  // Campi "altri" che reconcileSubfields usa gia' come bucket di plug: imputarci
+  // lo scarto lascia coerenti gli aggregati padre dopo recalcAggregates.
+  // `side` e' esplicito perche' decide il SEGNO del delta (vedi sotto): dedurlo
+  // dal prefisso del codice funzionerebbe oggi ma si romperebbe al primo campo
+  // aggiunto fuori schema.
+  const SBILANCIO_TARGETS: { field: string; label: string; side: "attivo" | "passivo" }[] = [
+    { field: "sp09_disponibilita_liquide", label: "IV) Disponibilità liquide", side: "attivo" },
+    { field: "sp06g_crediti_altri_breve", label: "II) Crediti - altri (entro)", side: "attivo" },
+    { field: "sp05e_acconti", label: "I) Rimanenze - acconti", side: "attivo" },
+    { field: "sp16g_altri_debiti_breve", label: "D) Altri debiti (entro)", side: "passivo" },
+    { field: "sp17g_altri_debiti_lungo", label: "D) Altri debiti (oltre)", side: "passivo" },
+    { field: "sp12e_altre_riserve", label: "A) VI - Altre riserve", side: "passivo" },
+  ];
+
+  // Apre la modalita' "Correggi Import" (partita singola) pre-compilata con lo
+  // scarto esatto. L'importo e' un dato, non una scelta: il dialog lo mostra
+  // come testo, non come input.
+  //
+  // SEGNO. gap = attivo - passivo.
+  //   gap > 0 (l'attivo eccede)  -> ridurre un campo dell'attivo di gap,
+  //                                 oppure aumentare un campo del passivo di gap.
+  //   gap < 0 (il passivo eccede) -> aumentare un campo dell'attivo di |gap|,
+  //                                 oppure ridurre un campo del passivo di |gap|.
+  // In entrambi i casi: delta = -gap su un campo dell'attivo, delta = +gap su un
+  // campo del passivo.
+  const openSbilancioCorrection = () => {
+    const gap = Math.round((totalAttivo - totalPassivo) * 100) / 100;
+    if (Math.abs(gap) < 0.01) return;
+    // Default: l'attivo eccede -> si toglie dalla cassa; il passivo eccede ->
+    // si tolgono altri debiti.
+    const target = gap > 0 ? SBILANCIO_TARGETS[0] : SBILANCIO_TARGETS[3];
+    const delta = target.side === "attivo" ? -gap : gap;
+    setActiveProposal({
+      id: Date.now(),
+      mode: "correggi_import",
+      editedField: target.field,
+      editedLabel: target.label,
+      delta,
+      counterpartField: "",
+      counterpartLabel: "",
+      proposedDelta: 0,
+      accepted: true,
+      explanation:
+        `Correzione di quadratura: scarto di importazione ${formatEuro(Math.abs(gap))} ` +
+        `imputato a ${target.label}`,
+    });
+  };
+
   const confirmActiveEdit = () => {
     if (!activeProposal) return;
     const p = activeProposal;
@@ -1947,7 +1995,12 @@ function RettificheTab({
             {isBalanced ? (
               <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
             ) : (
-              <span className="text-xs font-medium">SBILANCIATO</span>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="text-xs font-medium">SBILANCIATO</span>
+                <Button size="sm" variant="outline" onClick={openSbilancioCorrection}>
+                  Chiudi sbilancio
+                </Button>
+              </div>
             )}
           </div>
 

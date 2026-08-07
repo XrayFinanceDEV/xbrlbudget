@@ -1722,25 +1722,36 @@ function RettificheTab({
   };
 
   // Confirm the active proposal: write the entry to the log, apply deltas to corrections, persist.
-  // Campi "altri" che reconcileSubfields usa gia' come bucket di plug: imputarci
-  // lo scarto lascia coerenti gli aggregati padre dopo recalcAggregates.
-  // `side` e' esplicito perche' decide il SEGNO del delta (vedi sotto): dedurlo
-  // dal prefisso del codice funzionerebbe oggi ma si romperebbe al primo campo
-  // aggiunto fuori schema.
+  // Le due destinazioni di default per la correzione di quadratura a partita
+  // singola: una sul lato attivo, una sul lato passivo (YAGNI: nessun target
+  // picker in questo task, quindi solo i due default usati da
+  // openSbilancioCorrection). Le etichette vengono da RETTIFICHE_LABELS —
+  // la stessa mappa che il pannello journal usa per rendere la voce — cosi'
+  // la spiegazione della rettifica non contraddice la didascalia mostrata
+  // nella tabella sopra. `side` guida il SEGNO del delta (vedi sotto), non
+  // l'indice nell'array: dedurlo dal prefisso del codice funzionerebbe oggi
+  // ma si romperebbe al primo campo aggiunto fuori schema.
   const SBILANCIO_TARGETS: { field: string; label: string; side: "attivo" | "passivo" }[] = [
-    { field: "sp09_disponibilita_liquide", label: "IV) Disponibilità liquide", side: "attivo" },
-    { field: "sp06g_crediti_altri_breve", label: "II) Crediti - altri (entro)", side: "attivo" },
-    { field: "sp05e_acconti", label: "I) Rimanenze - acconti", side: "attivo" },
-    { field: "sp16g_altri_debiti_breve", label: "D) Altri debiti (entro)", side: "passivo" },
-    { field: "sp17g_altri_debiti_lungo", label: "D) Altri debiti (oltre)", side: "passivo" },
-    { field: "sp12e_altre_riserve", label: "A) VI - Altre riserve", side: "passivo" },
+    { field: "sp09_disponibilita_liquide", label: RETTIFICHE_LABELS["sp09_disponibilita_liquide"] ?? "Disponibilità liquide", side: "attivo" },
+    { field: "sp16g_altri_debiti_breve", label: RETTIFICHE_LABELS["sp16g_altri_debiti_breve"] ?? "Altri debiti (entro)", side: "passivo" },
   ];
 
   // Apre la modalita' "Correggi Import" (partita singola) pre-compilata con lo
   // scarto esatto. L'importo e' un dato, non una scelta: il dialog lo mostra
   // come testo, non come input.
   //
-  // SEGNO. gap = attivo - passivo.
+  // Il gap va calcolato sullo stato che esistera' DOPO la conferma, non su
+  // quello del render corrente: confirmActiveEdit chiama SEMPRE
+  // recalcAggregates, che sovrascrive sp13_utile_perdita con il valore
+  // derivato dal CE indipendentemente dal campo corretto qui. Se lo sp13
+  // importato differisce da quello ricalcolato dal CE (bilancio con CE/SP
+  // scollegati — proprio il caso che questo import ora salva invece di
+  // rifiutare), il gap "di rendering" (totalAttivo - totalPassivo) NON e'
+  // quello che restera' dopo la conferma: va ricalcolato sullo snapshot
+  // passato per recalcAggregates, altrimenti la correzione lascia un
+  // residuo pari a (sp13_importato - sp13_CE) invece di azzerare lo scarto.
+  //
+  // SEGNO. gap = attivo_proiettato - passivo_proiettato.
   //   gap > 0 (l'attivo eccede)  -> ridurre un campo dell'attivo di gap,
   //                                 oppure aumentare un campo del passivo di gap.
   //   gap < 0 (il passivo eccede) -> aumentare un campo dell'attivo di |gap|,
@@ -1748,11 +1759,18 @@ function RettificheTab({
   // In entrambi i casi: delta = -gap su un campo dell'attivo, delta = +gap su un
   // campo del passivo.
   const openSbilancioCorrection = () => {
-    const gap = Math.round((totalAttivo - totalPassivo) * 100) / 100;
+    // Copia: recalcAggregates non deve mutare lo stato "corrections" del render.
+    const projected = recalcAggregates({ ...corrections });
+    const pv = (k: string) => projected[k] ?? original[k] ?? 0;
+    const projAttivo = ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + pv(k), 0);
+    const projPN = pnFields.reduce((s, k) => s + pv(k), 0);
+    const projPassivo = projPN + pv("sp14_fondi_rischi") + pv("sp15_tfr")
+      + pv("sp16_debiti_breve") + pv("sp17_debiti_lungo") + pv("sp18_ratei_risconti_passivi");
+    const gap = Math.round((projAttivo - projPassivo) * 100) / 100;
     if (Math.abs(gap) < 0.01) return;
     // Default: l'attivo eccede -> si toglie dalla cassa; il passivo eccede ->
     // si tolgono altri debiti.
-    const target = gap > 0 ? SBILANCIO_TARGETS[0] : SBILANCIO_TARGETS[3];
+    const target = gap > 0 ? SBILANCIO_TARGETS[0] : SBILANCIO_TARGETS[1];
     const delta = target.side === "attivo" ? -gap : gap;
     setActiveProposal({
       id: Date.now(),

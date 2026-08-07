@@ -2865,8 +2865,19 @@ export default function InfraannualePage() {
   const [importingRef, setImportingRef] = useState(false);
 
   // Step 1b: Rettifiche (Adjustments) — one hook per FinancialYear.
+  // A rettifica on EITHER year invalidates everything computed from it: the
+  // comparison, the projection and the analysis. Nothing is recomputed silently
+  // — the user goes back through Confronto → Proiezione. The warning fires only
+  // when a projection already exists, so a first pass isn't nagged.
   const invalidateDownstream = useCallback(() => {
-    setComparison(null); // reload the comparison against the corrected data
+    setComparison(null);
+    setProjectedBS((prev) => {
+      if (prev) {
+        toast.warning("Bilancio modificato — ricalcola la proiezione");
+      }
+      return null;
+    });
+    setAnalysis(null);
   }, []);
   const verifica = useRettificheYear(
     importResult?.companyId ?? null,

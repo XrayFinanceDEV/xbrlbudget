@@ -163,14 +163,21 @@ def _classify_balance_failure(
     )
 
 
-def _resolve_validation_status(arithmetic_balanced: bool, forecastable: bool) -> str:
+def _resolve_validation_status(warning_free: bool, forecastable: bool) -> str:
     """Stato di validazione a tre vie.
 
-    ``unbalanced`` ha la precedenza: un bilancio che non quadra non e' mai
-    "verified", e la UI deve poterlo distinguere da un bilancio che quadra ma
-    ha dettagli da rivedere, senza fare string-matching sui warning.
+    Invariante: lo stato e' ``unbalanced`` esattamente quando all'utente e'
+    stato mostrato un avviso "BILANCIO SBILANCIATO" (``warning_free=False``,
+    cioe' ``unbalanced_reason`` non era ``None``) — stato e avviso non
+    possono mai essere in disaccordo. Deliberatamente NON e' derivato dalla
+    tolleranza rigorosa di ``arithmetic_balanced`` (0,01 €): i gate che
+    generano l'avviso (``validate_balance``, ``check_quadratura(tol=2)``)
+    usano tolleranze piu' larghe, quindi uno sbilancio nella fascia
+    (0,01 €; 2,00 €] — rumore che i gate considerano accettabile (vedi
+    budget_305, scarto 1,82 €) — non deve produrre uno stato "unbalanced"
+    senza alcun avviso a spiegarlo.
     """
-    if not arithmetic_balanced:
+    if not warning_free:
         return "unbalanced"
     return "verified" if forecastable else "review_required"
 
@@ -1352,7 +1359,7 @@ def import_pdf_balance_sheet(
             year=current_year_val,
             period_months=period_months,  # None for full year, 1-11 for partial
             validation_status=_resolve_validation_status(
-                bool(_validation_payload["arithmetic_balanced"]), _forecastable
+                unbalanced_reason is None, _forecastable
             ),
             validation_report=json.dumps(_validation_payload, ensure_ascii=False),
             source_sha256=_source_sha256,

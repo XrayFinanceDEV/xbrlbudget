@@ -80,17 +80,36 @@ from importers.pdf_importer import _resolve_validation_status
 
 
 def test_status_unbalanced_ha_precedenza_su_review_required():
-    assert _resolve_validation_status(False, False) == "unbalanced"
+    assert _resolve_validation_status(warning_free=False, forecastable=False) == "unbalanced"
 
 
 def test_status_unbalanced_anche_se_forecastable_fosse_vero():
-    # Difensivo: un bilancio che non quadra non e' mai "verified".
-    assert _resolve_validation_status(False, True) == "unbalanced"
+    # Difensivo: un bilancio per cui e' stato mostrato un avviso di sbilancio
+    # non e' mai "verified", anche se sarebbe altrimenti forecastable.
+    assert _resolve_validation_status(warning_free=False, forecastable=True) == "unbalanced"
 
 
-def test_status_verified_solo_se_quadra_ed_e_forecastable():
-    assert _resolve_validation_status(True, True) == "verified"
+def test_status_verified_solo_se_nessun_avviso_ed_e_forecastable():
+    assert _resolve_validation_status(warning_free=True, forecastable=True) == "verified"
 
 
-def test_status_review_required_se_quadra_ma_non_forecastable():
-    assert _resolve_validation_status(True, False) == "review_required"
+def test_status_review_required_se_nessun_avviso_ma_non_forecastable():
+    assert _resolve_validation_status(warning_free=True, forecastable=False) == "review_required"
+
+
+def test_status_unbalanced_coincide_sempre_con_avviso_mostrato_allutente():
+    """Invariante del fix: lo stato e' "unbalanced" se e solo se all'utente e'
+    stato mostrato un avviso "BILANCIO SBILANCIATO" (``unbalanced_reason`` non
+    None). Stato e avviso sono derivati dalla STESSA condizione, quindi non
+    possono mai disaccordare — a differenza della vecchia implementazione, che
+    derivava lo stato dalla tolleranza rigorosa di ``arithmetic_balanced``
+    (0,01 €) mentre l'avviso veniva prodotto dai gate con tolleranze piu'
+    larghe (``validate_balance``, ``check_quadratura(tol=2)``), lasciando uno
+    sbilancio nella fascia (0,01 €; 2,00 €] senza alcun avviso a spiegare lo
+    stato "unbalanced"."""
+    for unbalanced_reason in (None, "BILANCIO SBILANCIATO: scarto 1,82"):
+        for forecastable in (True, False):
+            status = _resolve_validation_status(
+                unbalanced_reason is None, forecastable
+            )
+            assert (status == "unbalanced") == (unbalanced_reason is not None)

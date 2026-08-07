@@ -37,22 +37,27 @@ anno di raffronto che non quadra viene **scartato**, non salvato. È il motivo p
 ha risposto `prior_year_imported: false` su questo file (scarto di 40,00 € sul 2025) e per cui
 il wizard infrannuale ha poi preteso un caricamento separato dello storico.
 
-## Vincolo scoperto in fase di analisi
+## Cosa Rettifiche sa già fare
 
-**Rettifiche, così com'è, non può chiudere uno scarto Attivo≠Passivo.**
+La registrazione a **partita singola esiste già**: il dialog delle proposte ha tre modalità
+(`ProposalMode` — `frontend/app/infrannuale/page.tsx:1485`) e la terza, **"Correggi Import"**,
+applica un solo delta senza contropartita (`confirmActiveEdit`, righe 1729-1755), usando il
+sentinella `counterpart_field: "_correzione_import"` con `counterpart_delta: 0`. Il pannello
+journal la rende già in forma dedicata (riga 2288) e `deleteLogEntry` la inverte
+correttamente.
 
-Ogni rettifica passa da `PROPOSAL_RULES` e applica due delta in partita doppia. Una
-scrittura in partita doppia sposta i due lati della stessa quantità: lo scarto resta
-identico, per costruzione. L'unica cosa che oggi chiude uno scarto è `reconcileSubfields`
-(`frontend/app/infrannuale/page.tsx:2821`), che si ferma a **5 €**.
+Quindi **uno scarto Attivo≠Passivo è già chiudibile a mano oggi**, e non serve né una modifica
+di schema né un nuovo tipo di voce di journal.
 
-Quindi rilassare il solo gate di backend non basta: l'utente atterrerebbe su una scheda
-Rettifiche perennemente `SBILANCIATO`, con
-`intra_year_engine._validate_forecast_source` che blocca la proiezione a
-`abs(sbilancio) > 0.01` — bloccato, senza via d'uscita.
+Quello che manca è la **scopribilità**: per chiudere uno scarto l'utente deve indovinare il
+percorso — scegliere una riga, digitarci dentro un valore, aprire il dialog, accorgersi che
+esiste un terzo pulsante di modalità, e calcolarsi da sé l'importo dello scarto. Il banner
+che gli dice `SBILANCIATO` non offre alcuna azione.
 
-Il lavoro è quindi doppio: rilassare il gate **e** dare a Rettifiche una registrazione a
-partita singola.
+Le rettifiche in **partita doppia** invece non possono chiudere lo scarto — spostano i due
+lati della stessa quantità, per costruzione — e `reconcileSubfields`
+(riga 2821) si ferma a **5 €**. Per questo il percorso a partita singola va reso esplicito
+invece che lasciato implicito.
 
 ## Decisioni
 
@@ -166,22 +171,16 @@ Il banner quadratura esiste già e mostra già `SBILANCIATO`
     scarto negativo → `sp16g_altri_debiti_breve`.
   - Nota esplicita: *"Registrazione a partita singola: chiude lo scarto di estrazione, non è
     una scrittura contabile."*
-- Conferma → **una** `RettificaEntry` a partita singola: entra nel journal, conta sul cap di
-  20 (`RETTIFICHE_MAX`), è cancellabile come le altre.
-- Il pannello journal la rende con `— (correzione di quadratura)` al posto della riga di
-  contropartita.
+- Conferma → riusa **il meccanismo esistente**: apre un `DoubleEntryProposal` con
+  `mode: "correggi_import"` già compilato (campo, importo, spiegazione). `confirmActiveEdit`
+  lo registra come voce a partita singola, che entra nel journal, conta sul cap di 20
+  (`RETTIFICHE_MAX`) ed è cancellabile come le altre.
 
-### Schema
+### Schema — nessuna modifica
 
-`backend/app/schemas/adjustments.py`:
-
-```python
-counterpart_field: Optional[str] = None
-counterpart_label: Optional[str] = None
-counterpart_delta: float = 0.0
-```
-
-Retro-compatibile in lettura: i log esistenti hanno tutti e tre i campi valorizzati.
+`RettificaEntry` resta invariato: il sentinella `counterpart_field: "_correzione_import"` con
+`counterpart_delta: 0` è già la convenzione usata dalla modalità Correggi Import, e il
+pannello journal la rende già in forma dedicata.
 
 ### Salvataggio — nessuna modifica al backend
 
@@ -208,8 +207,9 @@ Nuovo `tests/test_unbalanced_import.py`:
   `validation_status="unbalanced"`;
 - anno precedente sbilanciato **con** record esistente → l'esistente è conservato intatto.
 
-Test unitario frontend per la voce di journal a partita singola (delta singolo applicato,
-aggregati ricalcolati, cancellazione che lo inverte).
+Nessun test nuovo serve per la voce di journal a partita singola: il meccanismo
+`correggi_import` è preesistente e invariato. Serve invece un test sul nuovo punto d'ingresso
+— il bottone "Chiudi sbilancio" costruisce una proposta con l'importo e il campo attesi.
 
 ### Baseline di regressione — nota onesta
 

@@ -332,6 +332,17 @@ _CE_DETAIL_GROUPS: Dict[str, Tuple[str, ...]] = {
 }
 
 
+def detail_fields(aggregate: str) -> Tuple[str, ...]:
+    """The IV-CEE detail sub-fields of ``aggregate`` (empty when it has none).
+
+    Public accessor over the same two tables ``_aggregate_detail_differences``
+    uses, so a consumer that needs to tell *no breakdown declared* from *a
+    breakdown that contradicts its aggregate* does not have to restate the
+    mapping.  A difference alone cannot distinguish the two cases.
+    """
+    return _DETAIL_GROUPS.get(aggregate) or _CE_DETAIL_GROUPS.get(aggregate, ())
+
+
 def _aggregate_detail_differences(
     bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]], tol: Decimal
 ) -> Dict[str, Decimal]:

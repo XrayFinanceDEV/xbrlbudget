@@ -326,7 +326,7 @@ class IntraYearEngine:
         hierarchy errors is blocking here because this engine scales or carries
         those breakdowns; proceeding would manufacture a composition.
         """
-        from importers.iv_cee_hierarchy import check_quadratura
+        from importers.iv_cee_hierarchy import check_quadratura, detail_fields
 
         bs = self._statement_values(financial_year.balance_sheet, "sp")
         ce = self._statement_values(financial_year.income_statement, "ce")
@@ -370,10 +370,33 @@ class IntraYearEngine:
             "sp17_debiti_lungo",
             "ce09_ammortamenti",
         }
+        # A missing breakdown is not a contradiction.  A bilancio abbreviato
+        # states only the aggregate, and every distributor here already handles
+        # that by returning zeros and carrying the aggregate unchanged (see
+        # _distribute_sp05 / _distribute_sp06) — nothing is invented, so
+        # blocking would reject a legitimate source.  Only a breakdown that IS
+        # declared and does not sum to its aggregate is a positive
+        # contradiction: one of the two figures is wrong and the engine scales
+        # it.  Mirrors importers/reliability.py, where UNRELIABLE likewise
+        # requires a contradiction rather than a missing control.
+        #
+        # sp16/sp17 are the exception and keep blocking either way:
+        # projection_common.base_bank_debt assigns the whole aggregate/detail
+        # gap to BANKS, so there an absent breakdown IS silently turned into
+        # phantom bank debt (and inflates the PFN) instead of being carried.
+        always_blocking = {"sp16_debiti_breve", "sp17_debiti_lungo"}
+        source = {**bs, **ce}
         unsafe_hierarchy = {
             key: value
             for key, value in result.hierarchy_differences.items()
             if key in breakdowns_used_by_engine
+            and (
+                key in always_blocking
+                or any(
+                    source.get(field, Decimal("0")) != Decimal("0")
+                    for field in detail_fields(key)
+                )
+            )
         }
         if unsafe_hierarchy:
             details = ", ".join(

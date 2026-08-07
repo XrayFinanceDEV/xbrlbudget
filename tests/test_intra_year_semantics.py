@@ -281,6 +281,9 @@ def test_forecast_gate_rejects_persisted_source_plug(db_session):
 
 
 def test_forecast_gate_rejects_debt_aggregate_without_breakdown(db_session):
+    # sp16/sp17 are the exception to the rule below: projection_common.base_bank_debt
+    # attributes the whole aggregate/detail gap to BANKS, so an absent breakdown is
+    # silently turned into phantom bank debt downstream.  It must keep blocking.
     company = _company(db_session)
     fy = _financial_year(db_session, company.id, 2025, 9)
     fy.balance_sheet.sp11_capitale = D("90")
@@ -288,6 +291,34 @@ def test_forecast_gate_rejects_debt_aggregate_without_breakdown(db_session):
     db_session.flush()
 
     with pytest.raises(ValueError, match="sp16_debiti_breve"):
+        IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
+
+
+def test_forecast_gate_allows_an_aggregate_with_no_breakdown_at_all(db_session):
+    """A bilancio abbreviato states only the aggregate.  That is not a contradiction:
+    the engine's distributors return zeros and carry the aggregate unchanged, so
+    nothing is invented and the projection must not be blocked."""
+    company = _company(db_session)
+    fy = _financial_year(db_session, company.id, 2025, 9)
+    fy.balance_sheet.sp05_rimanenze = D("50")      # aggregate only, every sp05x = 0
+    fy.balance_sheet.sp04_immob_finanziarie = D("20")
+    fy.balance_sheet.sp15_tfr = D("70")            # keep the sheet balanced
+    db_session.flush()
+
+    IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
+
+
+def test_forecast_gate_still_rejects_a_contradictory_breakdown(db_session):
+    """Detail that IS declared but does not sum to its aggregate is a positive
+    contradiction — one of the two figures is wrong, and the engine would scale it."""
+    company = _company(db_session)
+    fy = _financial_year(db_session, company.id, 2025, 9)
+    fy.balance_sheet.sp05_rimanenze = D("50")
+    fy.balance_sheet.sp05a_materie_prime = D("20")  # 20 != 50
+    fy.balance_sheet.sp15_tfr = D("50")
+    db_session.flush()
+
+    with pytest.raises(ValueError, match="sp05_rimanenze"):
         IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
 
 

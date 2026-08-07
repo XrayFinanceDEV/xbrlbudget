@@ -2868,16 +2868,18 @@ export default function InfraannualePage() {
   // A rettifica on EITHER year invalidates everything computed from it: the
   // comparison, the projection and the analysis. Nothing is recomputed silently
   // — the user goes back through Confronto → Proiezione. The warning fires only
-  // when a projection already exists, so a first pass isn't nagged.
+  // when a projection already exists, so a first pass isn't nagged. The test
+  // reads a ref, not the closure, so projectedBS stays out of the deps: listing
+  // it would re-create this callback on every projection change and re-run the
+  // hooks' useCallbacks.
   const invalidateDownstream = useCallback(() => {
+    const hadProjection = projectedBSRef.current !== null;
     setComparison(null);
-    setProjectedBS((prev) => {
-      if (prev) {
-        toast.warning("Bilancio modificato — ricalcola la proiezione");
-      }
-      return null;
-    });
+    setProjectedBS(null);
     setAnalysis(null);
+    if (hadProjection) {
+      toast.warning("Bilancio modificato — ricalcola la proiezione");
+    }
   }, []);
   const verifica = useRettificheYear(
     importResult?.companyId ?? null,
@@ -2924,6 +2926,10 @@ export default function InfraannualePage() {
   // Step 3: Projection overrides
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [projectedBS, setProjectedBS] = useState<IntraYearComparisonItem[] | null>(null);
+  const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
+  useEffect(() => {
+    projectedBSRef.current = projectedBS;
+  }, [projectedBS]);
 
   // Step 4: Results
   const [analysis, setAnalysis] = useState<ScenarioAnalysis | null>(null);

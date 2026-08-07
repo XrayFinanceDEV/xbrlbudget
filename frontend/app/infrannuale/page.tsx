@@ -3176,7 +3176,7 @@ export default function InfraannualePage() {
         })
         .catch(() => setReferenceYearData(null));
     }
-  }, [activeTab, verifica, importResult, fiscalYear]);
+  }, [activeTab, verifica.data, verifica.load, importResult, fiscalYear]);
 
   useEffect(() => {
     if (activeTab === "rettifiche" && !verifica.exists) {

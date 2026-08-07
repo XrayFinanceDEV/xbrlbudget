@@ -18,12 +18,12 @@ import {
   promoteProjection,
   deleteCompany,
   getAdjustableFinancialYear,
-  saveAdjustments,
   getInfrannualeAIComments,
   generateInfrannualeAIComments,
   saveInfrannualeAIComments,
   type InfrannualeAIComments,
 } from "@/lib/api";
+import { useRettificheYear } from "@/hooks/use-rettifiche-year";
 import type {
   Company,
   BudgetScenario,
@@ -2864,13 +2864,18 @@ export default function InfraannualePage() {
   const [refFile, setRefFile] = useState<File | null>(null);
   const [importingRef, setImportingRef] = useState(false);
 
-  // Step 1b: Rettifiche (Adjustments)
-  const [adjustableData, setAdjustableData] = useState<AdjustableFinancialYear | null>(null);
+  // Step 1b: Rettifiche (Adjustments) — one hook per FinancialYear.
   const [referenceYearData, setReferenceYearData] = useState<Record<string, number> | null>(null);
-  const [corrections, setCorrections] = useState<Record<string, number>>({});
-  const [loadingAdjustable, setLoadingAdjustable] = useState(false);
-  const [savingAdjustments, setSavingAdjustments] = useState(false);
-  const [adjustmentsApplied, setAdjustmentsApplied] = useState(false);
+  const invalidateDownstream = useCallback(() => {
+    setComparison(null); // reload the comparison against the corrected data
+  }, []);
+  const verifica = useRettificheYear(
+    importResult?.companyId ?? null,
+    fiscalYear,
+    periodMonths < 12 ? periodMonths : undefined,
+    reconcileSubfields,
+    invalidateDownstream,
+  );
 
   // Step 2: Comparison
   const [scenario, setScenario] = useState<BudgetScenario | null>(null);
@@ -2960,10 +2965,8 @@ export default function InfraannualePage() {
     setImporting(true);
     setActiveImportMethod(requestedMethod);
     // Clear stale rettifiche state from any previous import
-    setAdjustableData(null);
+    verifica.clear();
     setReferenceYearData(null);
-    setCorrections({});
-    setAdjustmentsApplied(false);
     try {
       let companyId: number;
       let companyName: string;
@@ -3158,71 +3161,30 @@ export default function InfraannualePage() {
     }
   }, [importResult, scenario]);
 
-  // Load adjustable data when rettifiche tab is active
-  const loadAdjustable = useCallback(async () => {
-    if (!importResult) return;
-    setLoadingAdjustable(true);
-    try {
-      const refYear = fiscalYear - 1;
-      // Fetch current year adjustable data + reference year in parallel
-      const [data, refData] = await Promise.all([
-        getAdjustableFinancialYear(
-          importResult.companyId,
-          fiscalYear,
-          periodMonths < 12 ? periodMonths : undefined
-        ),
-        getAdjustableFinancialYear(importResult.companyId, refYear).catch(() => null),
-      ]);
-      setAdjustableData(data);
-      // Merge reference year BS+IS into a single dict. Apply reconcileSubfields
-      // so bilancio abbreviato imports (which populate only aggregates like
-      // sp16_debiti_breve) plug the gap into "altri" sub-fields — otherwise the
-      // reference column shows a total with all detail rows empty.
-      if (refData) {
-        const refMerged: Record<string, number> = {
-          ...refData.balance_sheet,
-          ...refData.income_statement,
-        };
-        reconcileSubfields(refMerged);
-        setReferenceYearData(refMerged);
-      }
-      // Initialize corrections from SAVED values (balance_sheet/income_statement),
-      // which include any previously applied rettifiche. Original values are used
-      // only for delta display and proposal calculation.
-      const initial: Record<string, number> = {};
-      for (const [k, v] of Object.entries(data.balance_sheet)) initial[k] = v;
-      for (const [k, v] of Object.entries(data.income_statement)) initial[k] = v;
-      reconcileSubfields(initial);
-      setCorrections(initial);
-      // Check if adjustments were previously applied (saved values differ from originals)
-      const hasExisting = data.original_balance_sheet && Object.keys(data.balance_sheet).some(k => {
-        const saved = data.balance_sheet[k] ?? 0;
-        const orig = data.original_balance_sheet![k] ?? 0;
-        return Math.abs(saved - orig) > 0.01;
-      });
-      setAdjustmentsApplied(!!hasExisting);
-    } catch (error: unknown) {
-      // 404 = year not found (user may have entered wrong fiscal year)
-      const is404 = error && typeof error === "object" && "response" in error &&
-        (error as { response?: { status?: number } }).response?.status === 404;
-      if (is404) {
-        toast.error(
-          `Dati per l'anno ${fiscalYear} non trovati. Verificare l'anno fiscale inserito.`
-        );
-      } else {
-        const msg = error instanceof Error ? error.message : "Errore nel caricamento dati";
-        toast.error(msg);
-      }
-    } finally {
-      setLoadingAdjustable(false);
+  useEffect(() => {
+    if (activeTab === "rettifiche" && !verifica.data && importResult) {
+      verifica.load();
+      // Reference year: still fetched separately here; Task 2 replaces this.
+      getAdjustableFinancialYear(importResult.companyId, fiscalYear - 1)
+        .then((refData) => {
+          const refMerged: Record<string, number> = {
+            ...refData.balance_sheet,
+            ...refData.income_statement,
+          };
+          reconcileSubfields(refMerged);
+          setReferenceYearData(refMerged);
+        })
+        .catch(() => setReferenceYearData(null));
     }
-  }, [importResult, fiscalYear, periodMonths]);
+  }, [activeTab, verifica, importResult, fiscalYear]);
 
   useEffect(() => {
-    if (activeTab === "rettifiche" && !adjustableData && importResult) {
-      loadAdjustable();
+    if (activeTab === "rettifiche" && !verifica.exists) {
+      toast.error(
+        `Dati per l'anno ${fiscalYear} non trovati. Verificare l'anno fiscale inserito.`
+      );
     }
-  }, [activeTab, adjustableData, importResult, loadAdjustable]);
+  }, [activeTab, verifica.exists, fiscalYear]);
 
   useEffect(() => {
     if (activeTab === "comparison" && !comparison && scenario) {
@@ -3348,7 +3310,7 @@ export default function InfraannualePage() {
         return ((overrideVal / refV) - 1) * 100;
       };
 
-      await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
+      const result = await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
         assumptions: [{
           forecast_year: fiscalYear,
           revenue_growth_pct: calcGrowth("ce01_ricavi_vendite"),
@@ -3379,7 +3341,17 @@ export default function InfraannualePage() {
         auto_generate: true,
       });
       setAnalysis(null); // Clear stale analysis so Indicatori tab reloads
-      toast.success("Proiezione calcolata e salvata");
+      // The backend returns success:true even when generation fails
+      // (assumptions_service.py:210-217) — check the explicit flag, otherwise
+      // the Indicatori tab silently renders an empty "Proiezione" column after
+      // a success toast, with the real reason only in the response message.
+      if (result?.forecast_generated === false) {
+        toast.warning(
+          result?.message ?? "Ipotesi salvate, ma la proiezione non è stata generata"
+        );
+      } else {
+        toast.success("Proiezione calcolata e salvata");
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nel salvataggio proiezione";
       toast.error(msg);
@@ -3420,7 +3392,7 @@ export default function InfraannualePage() {
         return ((importedVal / refV) - 1) * 100;
       };
 
-      await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
+      const result = await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
         assumptions: [{
           forecast_year: fiscalYear,
           revenue_growth_pct: calcGrowth("ce01_ricavi_vendite"),
@@ -3456,6 +3428,12 @@ export default function InfraannualePage() {
         auto_generate: true,
       });
       setAnalysis(null); // Clear stale analysis so Indicatori tab reloads
+      // Same silent-failure guard as calculateProjectedBS above.
+      if (result?.forecast_generated === false) {
+        toast.warning(
+          result?.message ?? "Ipotesi salvate, ma la proiezione non è stata generata"
+        );
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nel salvataggio proiezione";
       toast.error(msg);
@@ -3492,10 +3470,8 @@ export default function InfraannualePage() {
     setPeriodMonths(s.period_months || 9);
     setSelectedCompanyId(comp.id);
     // Clear rettifiche state so it reloads for the new scenario
-    setAdjustableData(null);
+    verifica.clear();
     setReferenceYearData(null);
-    setCorrections({});
-    setAdjustmentsApplied(false);
     setComparison(null);
     setAnalysis(null);
     setActiveTab("comparison");
@@ -3521,10 +3497,8 @@ export default function InfraannualePage() {
         setFile(null);
         setRefFile(null);
         setFileResetKey((k) => k + 1);
-        setAdjustableData(null);
+        verifica.clear();
         setReferenceYearData(null);
-        setCorrections({});
-        setAdjustmentsApplied(false);
       }
       toast.success(`"${name}" eliminata`);
     } catch (err: unknown) {
@@ -3673,7 +3647,7 @@ export default function InfraannualePage() {
               setImportResult(null);
               setScenario(null);
               setComparison(null);
-              setAdjustableData(null);
+              verifica.clear();
               setAnalysis(null);
               setFile(null);
               setFileResetKey((k) => k + 1);
@@ -3979,74 +3953,18 @@ export default function InfraannualePage() {
 
         {/* STEP 1b: RETTIFICHE */}
         {activeTab === "rettifiche" && <RettificheTab
-          adjustableData={adjustableData}
+          adjustableData={verifica.data}
           referenceYearData={referenceYearData}
           referenceYear={fiscalYear - 1}
           periodMonths={periodMonths}
           fiscalYear={fiscalYear}
-          corrections={corrections}
-          setCorrections={setCorrections}
-          loading={loadingAdjustable}
-          saving={savingAdjustments}
-          adjustmentsApplied={adjustmentsApplied}
-          onSave={async (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => {
-            if (!importResult || !adjustableData) return;
-            setSavingAdjustments(true);
-            try {
-              const corr = finalCorrections ?? corrections;
-              const bs: Record<string, number> = {};
-              const is_: Record<string, number> = {};
-              for (const k of Object.keys(adjustableData.balance_sheet)) {
-                bs[k] = corr[k] ?? adjustableData.balance_sheet[k];
-              }
-              for (const k of Object.keys(adjustableData.income_statement)) {
-                is_[k] = corr[k] ?? adjustableData.income_statement[k];
-              }
-              const result = await saveAdjustments(
-                importResult.companyId,
-                fiscalYear,
-                bs,
-                is_,
-                periodMonths < 12 ? periodMonths : undefined,
-                finalLog
-              );
-              setAdjustableData(result);
-              setAdjustmentsApplied(true);
-              setComparison(null); // Force reload comparison with corrected data
-            } catch (error: unknown) {
-              toast.error(getErrorMessage(error, "Errore nel salvataggio"));
-            } finally {
-              setSavingAdjustments(false);
-            }
-          }}
-          onReset={async () => {
-            if (!importResult || !adjustableData?.original_balance_sheet || !adjustableData?.original_income_statement) return;
-            setSavingAdjustments(true);
-            try {
-              const result = await saveAdjustments(
-                importResult.companyId,
-                fiscalYear,
-                adjustableData.original_balance_sheet,
-                adjustableData.original_income_statement,
-                periodMonths < 12 ? periodMonths : undefined,
-                []  // Clear rettifiche log on reset
-              );
-              setAdjustableData(result);
-              // Reset corrections to original values
-              const initial: Record<string, number> = {};
-              for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
-              for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
-              reconcileSubfields(initial);
-              setCorrections(initial);
-              setAdjustmentsApplied(false);
-              setComparison(null);
-              toast.success("Rettifiche annullate — ripristinati i valori originali");
-            } catch (error: unknown) {
-              toast.error("Errore nel ripristino");
-            } finally {
-              setSavingAdjustments(false);
-            }
-          }}
+          corrections={verifica.corrections}
+          setCorrections={verifica.setCorrections}
+          loading={verifica.loading}
+          saving={verifica.saving}
+          adjustmentsApplied={verifica.applied}
+          onSave={verifica.save}
+          onReset={verifica.reset}
           onNext={() => setActiveTab("comparison")}
         />}
 

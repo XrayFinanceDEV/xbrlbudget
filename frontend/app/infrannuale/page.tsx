@@ -115,6 +115,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MONTH_LABELS: Record<number, string> = {
   1: "1 mese (31/01)",
@@ -2897,6 +2898,13 @@ export default function InfraannualePage() {
     return merged;
   }, [storico.data]);
 
+  // Rettifiche sub-tab (storico vs bilancio di verifica). Default to storico;
+  // fall back to verifica when there is no historical year to correct.
+  const [subTab, setSubTab] = useState<"storico" | "verifica">("storico");
+  useEffect(() => {
+    if (!storico.exists) setSubTab("verifica");
+  }, [storico.exists]);
+
   // Step 2: Comparison
   const [scenario, setScenario] = useState<BudgetScenario | null>(null);
   const [comparison, setComparison] = useState<IntraYearComparison | null>(null);
@@ -3961,21 +3969,61 @@ export default function InfraannualePage() {
         </div>}
 
         {/* STEP 1b: RETTIFICHE */}
-        {activeTab === "rettifiche" && <RettificheTab
-          adjustableData={verifica.data}
-          referenceYearData={referenceYearData}
-          referenceYear={fiscalYear - 1}
-          periodMonths={periodMonths}
-          fiscalYear={fiscalYear}
-          corrections={verifica.corrections}
-          setCorrections={verifica.setCorrections}
-          loading={verifica.loading}
-          saving={verifica.saving}
-          adjustmentsApplied={verifica.applied}
-          onSave={verifica.save}
-          onReset={verifica.reset}
-          onNext={() => setActiveTab("comparison")}
-        />}
+        {activeTab === "rettifiche" && <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "storico" | "verifica")} className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="storico" disabled={!storico.exists}>
+              Rettifiche Storico {fiscalYear - 1}
+            </TabsTrigger>
+            <TabsTrigger value="verifica">
+              Rettifiche Bil. di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}{fiscalYear}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="storico">
+            {storico.exists ? (
+              <RettificheTab
+                adjustableData={storico.data}
+                referenceYearData={null}
+                referenceYear={fiscalYear - 2}
+                periodMonths={12}
+                fiscalYear={fiscalYear - 1}
+                corrections={storico.corrections}
+                setCorrections={storico.setCorrections}
+                loading={storico.loading}
+                saving={storico.saving}
+                adjustmentsApplied={storico.applied}
+                onSave={storico.save}
+                onReset={storico.reset}
+                onNext={() => setSubTab("verifica")}
+              />
+            ) : (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Nessun bilancio storico caricato per il {fiscalYear - 1}. La proiezione
+                  gira in annualizzazione pura sui dati del periodo.
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="verifica">
+            <RettificheTab
+              adjustableData={verifica.data}
+              referenceYearData={referenceYearData}
+              referenceYear={fiscalYear - 1}
+              periodMonths={periodMonths}
+              fiscalYear={fiscalYear}
+              corrections={verifica.corrections}
+              setCorrections={verifica.setCorrections}
+              loading={verifica.loading}
+              saving={verifica.saving}
+              adjustmentsApplied={verifica.applied}
+              onSave={verifica.save}
+              onReset={verifica.reset}
+              onNext={() => setActiveTab("comparison")}
+            />
+          </TabsContent>
+        </Tabs>}
 
         {/* STEP 2: COMPARISON */}
         {activeTab === "comparison" && <div className="space-y-6">

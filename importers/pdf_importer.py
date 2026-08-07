@@ -182,6 +182,23 @@ def _resolve_validation_status(warning_free: bool, forecastable: bool) -> str:
     return "verified" if forecastable else "review_required"
 
 
+def _should_import_prior(
+    fresh_balances: bool, is_empty: bool, *, has_existing: bool
+) -> bool:
+    """Se salvare l'anno di raffronto appena estratto.
+
+    Un anno vuoto non si importa mai: non c'e' nulla da rettificare. Un anno
+    sbilanciato si importa SOLO se non ne esiste gia' uno: meglio uno storico
+    da correggere che nessuno storico (senza anno di raffronto il wizard
+    infrannuale non parte), ma mai al prezzo di degradare un record buono.
+    """
+    if is_empty:
+        return False
+    if fresh_balances:
+        return True
+    return not has_existing
+
+
 def _is_aggregated_summary(text: str) -> bool:
     """True when the document carries NO legal IV-CEE substructure — only top-level
     macro-voci (e.g. "Immobilizzazioni: 2.406.946", "B) Patrimonio netto: ..."), with
@@ -1413,21 +1430,27 @@ def import_pdf_balance_sheet(
                     (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
                 ).first()
 
-                if not fresh_prior_balances:
-                    # Never persist a newly extracted prior year that fails SP or
-                    # CE↔SP.  If a prior already exists, preserve it; otherwise leave
-                    # the year absent and make the review requirement explicit.
+                _prior_ok = _should_import_prior(
+                    fresh_prior_balances, _prior_q.is_empty,
+                    has_existing=existing_prior is not None,
+                )
+                if not _prior_ok:
                     logger.info(
                         f"Prior year {prior_fiscal_year} extraction is not accounting-valid — "
                         f"{'keeping existing record' if existing_prior else 'not importing it'}"
                     )
                     prior_year_imported = existing_prior is not None
-                    prior_unbalanced_warning = (
+                    warnings.append(
                         f"ANNO PRECEDENTE NON IMPORTATO [{prior_fiscal_year}]: "
                         + "; ".join(_prior_q.warnings)
                     )
-                    warnings.append(prior_unbalanced_warning)
                 else:
+                    if not fresh_prior_balances:
+                        warnings.append(
+                            f"{_UNBALANCED_WARNING_PREFIX} [ANNO PRECEDENTE "
+                            f"{prior_fiscal_year}]: " + "; ".join(_prior_q.warnings)
+                            + f". {_UNBALANCED_WARNING_SUFFIX}"
+                        )
                     # Import (or, on re-import, REPLACE) the prior year. Replacing a stale record with
                     # a freshly extracted one that BALANCES lets a re-import pick up extractor fixes
                     # (budget_297 2024: old import had inflated reserves; re-import now refreshes it).
@@ -1460,8 +1483,9 @@ def import_pdf_balance_sheet(
                         company_id=company.id,
                         year=prior_fiscal_year,
                         period_months=None,  # Full 12-month year
-                        validation_status=(
-                            "verified" if _prior_q.semantic_valid else "review_required"
+                        validation_status=_resolve_validation_status(
+                            bool(fresh_prior_balances),
+                            _prior_q.semantic_valid,
                         ),
                         validation_report=json.dumps(_prior_validation, ensure_ascii=False),
                         source_sha256=_source_sha256,

@@ -113,3 +113,26 @@ def test_status_unbalanced_coincide_sempre_con_avviso_mostrato_allutente():
                 unbalanced_reason is None, forecastable
             )
             assert (status == "unbalanced") == (unbalanced_reason is not None)
+
+
+from importers.pdf_importer import _should_import_prior
+
+
+def test_prior_che_quadra_si_importa_sempre():
+    assert _should_import_prior(True, False, has_existing=False) is True
+    assert _should_import_prior(True, False, has_existing=True) is True
+
+
+def test_prior_sbilanciato_si_importa_se_non_ce_n_e_gia_uno():
+    # Meglio uno storico sbilanciato da correggere che nessuno storico:
+    # senza anno di raffronto il wizard infrannuale non parte affatto.
+    assert _should_import_prior(False, False, has_existing=False) is True
+
+
+def test_prior_sbilanciato_non_sovrascrive_un_record_esistente():
+    assert _should_import_prior(False, False, has_existing=True) is False
+
+
+def test_prior_vuoto_non_si_importa_mai():
+    assert _should_import_prior(False, True, has_existing=False) is False
+    assert _should_import_prior(False, True, has_existing=True) is False

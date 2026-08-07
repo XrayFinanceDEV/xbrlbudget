@@ -9,7 +9,7 @@ import re
 import json
 import hashlib
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, NamedTuple, Optional
 from decimal import Decimal
 from datetime import datetime
 
@@ -51,6 +51,116 @@ def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
 class PDFImportError(Exception):
     """Exception raised when PDF import fails."""
     pass
+
+
+_UNBALANCED_WARNING_PREFIX = "BILANCIO SBILANCIATO"
+_UNBALANCED_WARNING_SUFFIX = (
+    "Il bilancio è stato importato così com'è: correggilo in Rettifiche "
+    "prima di calcolare la proiezione."
+)
+
+
+class BalanceFailureVerdict(NamedTuple):
+    """Esito della diagnosi su un bilancio che non supera ``validate_balance``.
+
+    Esattamente uno dei due campi e' valorizzato. ``hard_error`` significa che
+    non c'e' nulla che l'utente possa correggere in Rettifiche (estrazione
+    vuota, documento che non e' uno schema IV-CEE, totali letti dall'OCR e
+    quindi inaffidabili di per se'). ``warning`` significa che il bilancio e'
+    leggibile ma non quadra: si importa e si corregge a mano.
+    """
+    hard_error: Optional[str]
+    warning: Optional[str]
+
+
+def _it_amount(value: Decimal) -> str:
+    """Formattazione italiana: 1.234.567,89."""
+    return f"{value:,.2f}".replace(',', '#').replace('.', ',').replace('#', '.')
+
+
+def _classify_balance_failure(
+    balance_sheet_data: Dict[str, Decimal],
+    *,
+    is_scanned: bool,
+    ocr_source: bool,
+    is_trial_balance: bool,
+    sample_text: str,
+    file_path: str,
+    ocr_text: Optional[str],
+) -> BalanceFailureVerdict:
+    """Decide se un fallimento di ``validate_balance`` blocca o solo avvisa.
+
+    L'ordine conta: le diagnosi irrecuperabili girano per prime, cosi' un
+    documento che non e' importabile non viene salvato come "sbilanciato".
+    """
+    # 1. Testo OCR: i totali stessi possono essere letti male, quindi non si puo'
+    #    dichiarare sbilanciato il documento sorgente.
+    if is_scanned or ocr_source:
+        return BalanceFailureVerdict(
+            "Il documento è una scansione contabile, ma l'OCR non ha "
+            "ricostruito in modo affidabile colonne, gerarchie e totali. "
+            "Il file sorgente non viene dichiarato sbilanciato: serve una "
+            "lettura OCR strutturata oppure un PDF con testo selezionabile.",
+            None,
+        )
+
+    # 2. Estrazione vuota: non c'e' niente da rettificare.
+    if balance_sheet_data.get('totale_attivo', Decimal('0')) == Decimal('0'):
+        return BalanceFailureVerdict(
+            "Nessun dato estratto dal documento: lo Stato Patrimoniale "
+            "risulta vuoto (Totale Attivo pari a zero). Verificare che il "
+            "file contenga un prospetto leggibile.",
+            None,
+        )
+
+    # 3. Riepilogo aggregato: manca lo schema IV-CEE, non la quadratura.
+    if not is_trial_balance and _is_aggregated_summary(sample_text):
+        contradiction = _summary_internal_contradiction(sample_text)
+        if contradiction:
+            return BalanceFailureVerdict(contradiction, None)
+        return BalanceFailureVerdict(
+            "Formato non supportato: il documento è un riepilogo aggregato per "
+            "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
+            "importabile. Carica il prospetto di Stato Patrimoniale e Conto "
+            "Economico completo.",
+            None,
+        )
+
+    # 4. Tutto il resto e' uno sbilancio correggibile. Il messaggio d'errore
+    #    che prima bloccava e' la migliore diagnosi disponibile: diventa il
+    #    testo dell'avviso, cosi' l'utente sa cosa cercare in Rettifiche.
+    try:
+        from importers.pdf_extractor_llm import _declared_control_totals
+        controls = _declared_control_totals(file_path, text=ocr_text)
+        source_attivo = controls.get('attivo')
+        source_passivo = controls.get('passivo')
+    except Exception:
+        source_attivo = source_passivo = None
+
+    if source_attivo is not None and source_passivo is not None:
+        difference = abs(source_attivo - source_passivo)
+        if difference > Decimal('2'):
+            detail = (
+                "il bilancio sorgente non quadra già nel documento: Totale "
+                f"Attivo €{_it_amount(source_attivo)} != Totale Passivo "
+                f"€{_it_amount(source_passivo)} (scarto €{_it_amount(difference)})"
+            )
+        else:
+            detail = (
+                "i totali Attivo e Passivo stampati coincidono, ma le "
+                "componenti patrimoniali estratte non li ricostruiscono"
+            )
+    else:
+        detail = (
+            "il bilancio non quadra oppure il documento non contiene "
+            "dettaglio sufficiente per ricostruire Attivo, Passivo e "
+            "Patrimonio netto"
+        )
+
+    return BalanceFailureVerdict(
+        None,
+        f"{_UNBALANCED_WARNING_PREFIX}: {detail}. {_UNBALANCED_WARNING_SUFFIX}",
+    )
 
 
 def _is_aggregated_summary(text: str) -> bool:
@@ -1029,82 +1139,24 @@ def import_pdf_balance_sheet(
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
+        unbalanced_reason: Optional[str] = None
         if not mapper.validate_balance(balance_sheet_data):
-            if is_scanned or _ocr_source:
-                # OCR-sourced text (scanned or MinerU): a failed reconstruction must NOT
-                # be reported as "the source document does not balance" (blaming the file)
-                # because the totals themselves may be OCR-misread. Report it honestly as
-                # an OCR-reconstruction limitation instead of the hard source-contradiction.
-                raise PDFImportError(
-                    "Il documento è una scansione contabile, ma l'OCR non ha "
-                    "ricostruito in modo affidabile colonne, gerarchie e totali. "
-                    "Il file sorgente non viene dichiarato sbilanciato: serve una "
-                    "lettura OCR strutturata oppure un PDF con testo selezionabile."
-                )
-
-            # Prefer an evidence-based source diagnosis over the generic extractor
-            # failure.  This never changes accounting values: it only compares the
-            # two totals printed by the document itself.
-            try:
-                from importers.pdf_extractor_llm import _declared_control_totals
-                _source_controls = _declared_control_totals(
-                    file_path, text=ocr_text
-                )
-                _source_attivo = _source_controls.get('attivo')
-                _source_passivo = _source_controls.get('passivo')
-            except Exception:
-                _source_attivo = _source_passivo = None
-            if _source_attivo is not None and _source_passivo is not None:
-                _source_difference = abs(_source_attivo - _source_passivo)
-                if _source_difference > Decimal('2'):
-                    def _it_amount(value: Decimal) -> str:
-                        return (
-                            f"{value:,.2f}"
-                            .replace(',', '#')
-                            .replace('.', ',')
-                            .replace('#', '.')
-                        )
-                    raise PDFImportError(
-                        "Il bilancio sorgente non quadra prima dell'importazione: "
-                        f"Totale Attivo €{_it_amount(_source_attivo)} != Totale "
-                        f"Passivo €{_it_amount(_source_passivo)} (scarto "
-                        f"€{_it_amount(_source_difference)}). "
-                        "Correggere il documento contabile originale."
-                    )
-
-            # Honest format diagnosis comes after the source-total check: a short
-            # macro summary can ALSO be explicitly unbalanced (LUGS 133/135), and in
-            # that case the printed accounting contradiction is the most useful error.
-            # If its two printed sides do tie, reject it as too aggregated rather than
-            # pretending that missing IV-CEE allocations can be inferred.
-            if not is_trial_balance and _is_aggregated_summary(sample_text):
-                # A summary whose two sides tie only because a figure was inflated to
-                # make them tie (budget_137) is not merely "too aggregated": it
-                # contradicts its own printed components. Report that first — it is the
-                # defect the sender has to fix. Silent when the print is consistent.
-                _contradiction = _summary_internal_contradiction(sample_text)
-                if _contradiction:
-                    raise PDFImportError(_contradiction)
-                raise PDFImportError(
-                    "Formato non supportato: il documento è un riepilogo aggregato per "
-                    "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
-                    "importabile. Carica il prospetto di Stato Patrimoniale e Conto "
-                    "Economico completo."
-                )
-
-            if _source_attivo is not None and _source_passivo is not None:
-                raise PDFImportError(
-                    "Documento non importabile automaticamente: i totali Attivo e "
-                    "Passivo stampati coincidono, ma le componenti patrimoniali "
-                    "disponibili/estratte non li ricostruiscono. Il prospetto è "
-                    "incompleto oppure il layout non consente una classificazione "
-                    "IV-CEE affidabile."
-                )
-            raise PDFImportError(
-                "Il bilancio non quadra oppure il documento non contiene dettaglio "
-                "sufficiente per ricostruire Attivo, Passivo e Patrimonio netto. "
-                "Verificare il file sorgente e caricare un prospetto completo."
+            _verdict = _classify_balance_failure(
+                balance_sheet_data,
+                is_scanned=is_scanned,
+                ocr_source=bool(_ocr_source),
+                is_trial_balance=is_trial_balance,
+                sample_text=sample_text,
+                file_path=file_path,
+                ocr_text=ocr_text,
             )
+            if _verdict.hard_error:
+                raise PDFImportError(_verdict.hard_error)
+            # Sbilancio: si importa e si corregge in Rettifiche. forecastable
+            # restera' False da solo (semantic_valid include la quadratura),
+            # e _validate_forecast_source blocca comunque la proiezione.
+            unbalanced_reason = _verdict.warning
+            logger.warning(unbalanced_reason)
 
         # Unified quadratura diagnostic across ALL routes (shared IV-CEE engine):
         # validate_balance above is the hard structural gate; this adds the CE

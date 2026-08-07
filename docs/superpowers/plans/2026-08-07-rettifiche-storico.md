@@ -544,19 +544,25 @@ Replace the placeholder from Task 1 with:
   // comparison, the projection and the analysis. Nothing is recomputed silently
   // — the user goes back through Confronto → Proiezione. The warning fires only
   // when a projection already exists, so a first pass isn't nagged.
+  const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
+  useEffect(() => {
+    projectedBSRef.current = projectedBS;
+  }, [projectedBS]);
+
   const invalidateDownstream = useCallback(() => {
+    const hadProjection = projectedBSRef.current !== null;
     setComparison(null);
-    setProjectedBS((prev) => {
-      if (prev) {
-        toast.warning("Bilancio modificato — ricalcola la proiezione");
-      }
-      return null;
-    });
+    setProjectedBS(null);
     setAnalysis(null);
+    if (hadProjection) {
+      toast.warning("Bilancio modificato — ricalcola la proiezione");
+    }
   }, []);
 ```
 
-The toast is emitted from inside the `setProjectedBS` updater so the "did a projection exist?" test reads the current value without adding `projectedBS` to the dependency array (which would re-create the callback on every projection change and re-run the hooks' `useCallback`s).
+The "did a projection exist?" test reads a **ref**, not the closure, so `projectedBS` stays out of the dependency array — listing it would re-create the callback on every projection change and re-run the hooks' `useCallback`s.
+
+Do **not** emit the toast from inside a `setProjectedBS` updater. `next.config.ts` sets `reactStrictMode: true`, and React deliberately double-invokes state updaters in dev to surface impurities, so a single save would toast twice. Updaters must stay pure; the ref keeps the side effect outside them.
 
 - [ ] **Step 2: Verify**
 

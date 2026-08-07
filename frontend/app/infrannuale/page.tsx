@@ -3012,6 +3012,7 @@ export default function InfraannualePage() {
     // Clear stale rettifiche state from any previous import
     verifica.clear();
     storico.clear();
+    setSubTab("storico");
     try {
       let companyId: number;
       let companyName: string;
@@ -3212,11 +3213,20 @@ export default function InfraannualePage() {
     if (!storico.data && storico.exists) storico.load();
   }, [activeTab, importResult, verifica.data, verifica.load, storico.data, storico.exists, storico.load]);
 
+  // Toast once per failed load attempt (tracked by fiscal year), not every
+  // time the user returns to the Rettifiche step for the same missing year.
+  const missingYearToastRef = useRef<number | null>(null);
   useEffect(() => {
-    if (activeTab === "rettifiche" && !verifica.exists) {
-      toast.error(
-        `Dati per l'anno ${fiscalYear} non trovati. Verificare l'anno fiscale inserito.`
-      );
+    if (activeTab !== "rettifiche") return;
+    if (!verifica.exists) {
+      if (missingYearToastRef.current !== fiscalYear) {
+        missingYearToastRef.current = fiscalYear;
+        toast.error(
+          `Dati per l'anno ${fiscalYear} non trovati. Verificare l'anno fiscale inserito.`
+        );
+      }
+    } else {
+      missingYearToastRef.current = null;
     }
   }, [activeTab, verifica.exists, fiscalYear]);
 
@@ -3506,6 +3516,7 @@ export default function InfraannualePage() {
     // Clear rettifiche state so it reloads for the new scenario
     verifica.clear();
     storico.clear();
+    setSubTab("storico");
     setComparison(null);
     setAnalysis(null);
     setActiveTab("comparison");
@@ -3682,6 +3693,8 @@ export default function InfraannualePage() {
               setScenario(null);
               setComparison(null);
               verifica.clear();
+              storico.clear();
+              setSubTab("storico");
               setAnalysis(null);
               setFile(null);
               setFileResetKey((k) => k + 1);
@@ -4024,21 +4037,31 @@ export default function InfraannualePage() {
           </TabsContent>
 
           <TabsContent value="verifica">
-            <RettificheTab
-              adjustableData={verifica.data}
-              referenceYearData={referenceYearData}
-              referenceYear={fiscalYear - 1}
-              periodMonths={periodMonths}
-              fiscalYear={fiscalYear}
-              corrections={verifica.corrections}
-              setCorrections={verifica.setCorrections}
-              loading={verifica.loading}
-              saving={verifica.saving}
-              adjustmentsApplied={verifica.applied}
-              onSave={verifica.save}
-              onReset={verifica.reset}
-              onNext={() => setActiveTab("comparison")}
-            />
+            {verifica.exists ? (
+              <RettificheTab
+                adjustableData={verifica.data}
+                referenceYearData={referenceYearData}
+                referenceYear={fiscalYear - 1}
+                periodMonths={periodMonths}
+                fiscalYear={fiscalYear}
+                corrections={verifica.corrections}
+                setCorrections={verifica.setCorrections}
+                loading={verifica.loading}
+                saving={verifica.saving}
+                adjustmentsApplied={verifica.applied}
+                onSave={verifica.save}
+                onReset={verifica.reset}
+                onNext={() => setActiveTab("comparison")}
+              />
+            ) : (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Dati per il bilancio di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}
+                  {fiscalYear} non trovati. Verificare l&apos;anno fiscale e il periodo (mesi
+                  coperti) inseriti nella scheda Importazione.
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
         </Tabs>}
 

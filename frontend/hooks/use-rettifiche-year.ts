@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getAdjustableFinancialYear, saveAdjustments } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
@@ -41,6 +41,16 @@ export function useRettificheYear(
   const [saving, setSaving] = useState(false);
   const [applied, setApplied] = useState(false);
   const [exists, setExists] = useState(true);
+
+  // Identity change (different company, year or period) invalidates the loaded
+  // sheet: keeping it would let a save post the previous record's values to the
+  // new one — and a partial and a full-year record can coexist for the same year.
+  useEffect(() => {
+    setData(null);
+    setCorrections({});
+    setApplied(false);
+    setExists(true);
+  }, [companyId, year, periodMonths]);
 
   const load = useCallback(async () => {
     if (companyId === null) return;

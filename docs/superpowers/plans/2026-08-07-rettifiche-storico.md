@@ -243,8 +243,10 @@ Delete `loadAdjustable` (`page.tsx:3161-3219`) and replace the effect at `3221-3
         })
         .catch(() => setReferenceYearData(null));
     }
-  }, [activeTab, verifica, importResult, fiscalYear]);
+  }, [activeTab, verifica.data, verifica.load, importResult, fiscalYear]);
 ```
+
+Depend on `verifica.data` and `verifica.load`, **never on the whole `verifica` object**: the hook returns a fresh object literal every render, so an effect keyed on `verifica` re-fires on every re-render — including the one caused by its own `setLoading(true)` — and issues a duplicate `GET /adjustable` before the first resolves. `verifica.load` is a `useCallback` with stable deps, so it is safe in the array.
 
 Re-add the 404 message the hook no longer raises, right after `verifica.load()` is defined — as an effect keyed on `verifica.exists`:
 
@@ -380,8 +382,10 @@ Replace the effect written in Task 1 Step 2 with:
     if (activeTab !== "rettifiche" || !importResult) return;
     if (!verifica.data) verifica.load();
     if (!storico.data && storico.exists) storico.load();
-  }, [activeTab, verifica, storico, importResult]);
+  }, [activeTab, importResult, verifica.data, verifica.load, storico.data, storico.exists, storico.load]);
 ```
+
+Same rule as Task 1: depend on the individual fields, never on the whole `verifica`/`storico` objects — the hook returns a fresh object literal each render, so an object-keyed effect re-fires on every re-render and double-fetches.
 
 In `handleResumeScenario`, replace `setReferenceYearData(null)` with `storico.clear()`.
 

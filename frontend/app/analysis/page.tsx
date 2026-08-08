@@ -7,6 +7,7 @@ import {
   useScenarios,
   useMultiYearRatios,
   getPreferredScenario,
+  usePreferredBudgetScenarioId,
 } from "@/hooks/use-queries";
 
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
@@ -159,15 +160,19 @@ const fgpmiChartConfig = {
 export default function AnalysisPage() {
   const { selectedCompanyId, selectedCompany, selectedYear } = useApp();
   const { data: scenarios = [] } = useScenarios(selectedCompanyId);
+  const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
-  // Auto-select preferred scenario when scenarios load
+  // Auto-select preferred scenario when scenarios load. Inside a pratica this
+  // pins the page to the pratica's own budget scenario (FINDING 2); an
+  // explicit ScenarioSelector pick still wins afterwards since this effect
+  // no-ops once selectedScenario is set.
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenario) {
-      const preferred = getPreferredScenario(scenarios);
+      const preferred = getPreferredScenario(scenarios, preferredScenarioId);
       if (preferred) setSelectedScenario(preferred.id);
     }
     if (!selectedCompanyId) setSelectedScenario(null);
-  }, [scenarios, selectedCompanyId, selectedScenario]);
+  }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
   const { data: analysis, isLoading: analysisLoading, error: analysisError } = useCompleteAnalysis(
     selectedCompanyId,

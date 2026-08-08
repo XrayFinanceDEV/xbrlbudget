@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario } from "@/hooks/use-queries";
+import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import { patchCeOverrides } from "@/lib/api";
 import type {
@@ -102,6 +102,7 @@ export default function ForecastIncomePage() {
   const router = useRouter();
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const invalidateAnalysis = useInvalidateAnalysis();
   const [pendingEdits, setPendingEdits] = useState<PendingEdits>({});
@@ -109,13 +110,16 @@ export default function ForecastIncomePage() {
 
   const hasPendingEdits = Object.keys(pendingEdits).length > 0;
 
-  // Auto-select preferred scenario when scenarios load
+  // Auto-select preferred scenario when scenarios load. Inside a pratica this
+  // pins the page to the pratica's own budget scenario (FINDING 2) rather than
+  // guessing from is_active; an explicit ScenarioSelector pick still wins
+  // afterwards because this effect no-ops once selectedScenario is set.
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenario) {
-      setSelectedScenario(getPreferredScenario(scenarios));
+      setSelectedScenario(getPreferredScenario(scenarios, preferredScenarioId));
     }
     if (!selectedCompanyId) setSelectedScenario(null);
-  }, [scenarios, selectedCompanyId, selectedScenario]);
+  }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
   // Clear pending edits when scenario changes
   useEffect(() => {

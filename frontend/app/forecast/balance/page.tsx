@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario } from "@/hooks/use-queries";
+import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { generateForecast, getBudgetAssumptions, updateBudgetAssumptions } from "@/lib/api";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
@@ -124,18 +124,22 @@ type PendingSpEdits = Record<string, number | null>;
 export default function ForecastBalancePage() {
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [pendingEdits, setPendingEdits] = useState<PendingSpEdits>({});
   const [saving, setSaving] = useState(false);
   const invalidateAnalysis = useInvalidateAnalysis();
 
-  // Auto-select preferred scenario when scenarios load
+  // Auto-select preferred scenario when scenarios load. Inside a pratica this
+  // pins the page to the pratica's own budget scenario (FINDING 2); an
+  // explicit ScenarioSelector pick still wins afterwards since this effect
+  // no-ops once selectedScenario is set.
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenario) {
-      setSelectedScenario(getPreferredScenario(scenarios));
+      setSelectedScenario(getPreferredScenario(scenarios, preferredScenarioId));
     }
     if (!selectedCompanyId) setSelectedScenario(null);
-  }, [scenarios, selectedCompanyId, selectedScenario]);
+  }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
   const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
     selectedCompanyId,

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useDetailedCashflow, getPreferredScenario } from "@/hooks/use-queries";
+import { useScenarios, useDetailedCashflow, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -18,16 +18,20 @@ export default function CashflowPage() {
   const router = useRouter();
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [] } = useScenarios(selectedCompanyId);
+  const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenarioId, setSelectedScenarioId] = useState<number | null>(null);
 
-  // Auto-select preferred scenario when scenarios load
+  // Auto-select preferred scenario when scenarios load. Inside a pratica this
+  // pins the page to the pratica's own budget scenario (FINDING 2); an
+  // explicit ScenarioSelector pick still wins afterwards since this effect
+  // no-ops once selectedScenarioId is set.
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenarioId) {
-      const preferred = getPreferredScenario(scenarios);
+      const preferred = getPreferredScenario(scenarios, preferredScenarioId);
       if (preferred) setSelectedScenarioId(preferred.id);
     }
     if (!selectedCompanyId) setSelectedScenarioId(null);
-  }, [scenarios, selectedCompanyId, selectedScenarioId]);
+  }, [scenarios, selectedCompanyId, selectedScenarioId, preferredScenarioId]);
 
   const { data: cashflowData, isLoading: loading, error: cashflowError } = useDetailedCashflow(
     selectedCompanyId,

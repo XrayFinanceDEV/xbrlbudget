@@ -10,6 +10,7 @@ import {
   getMultiYearRatios,
   getCompleteAnalysis,
 } from "@/lib/api";
+import { usePratica } from "@/contexts/PraticaContext";
 import type { BudgetScenario } from "@/types/api";
 
 // Query key factory — centralizes all cache keys
@@ -52,15 +53,36 @@ export function useAllScenarios(companyId: number | null) {
   });
 }
 
-// Pick active or first scenario from a list
+// Pick active or first scenario from a list. When `preferredId` is given and
+// present in the list, it always wins — used to pin the PREVISIONALE pages to
+// the pratica's own budget scenario instead of guessing from `is_active`
+// (every scenario is created active, so guessing can land on a stale or
+// unrelated scenario — see FINDING 2, 2026-08-08 final review).
 export function getPreferredScenario(
-  scenarios: BudgetScenario[] | undefined
+  scenarios: BudgetScenario[] | undefined,
+  preferredId?: number | null
 ): BudgetScenario | null {
   if (!scenarios?.length) return null;
+  if (preferredId != null) {
+    const preferred = scenarios.find((s) => s.id === preferredId);
+    if (preferred) return preferred;
+  }
   return (
     scenarios.find((s) => s.is_active === 1) ??
     scenarios[0]
   );
+}
+
+// The pratica's own budget scenario id, scoped to `companyId` so browsing a
+// different company (outside the pratica, or a different one) never leaks a
+// stale preference. Returns null outside a pratica, before the bridge has
+// created a budget scenario, or when the caller's company doesn't match.
+export function usePreferredBudgetScenarioId(
+  companyId: number | null
+): number | null {
+  const { pratica } = usePratica();
+  if (!pratica || pratica.companyId !== companyId) return null;
+  return pratica.budgetScenarioId;
 }
 
 // Comprehensive scenario analysis

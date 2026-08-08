@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useReclassifiedData, getPreferredScenario } from "@/hooks/use-queries";
+import { useScenarios, useReclassifiedData, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type { BudgetScenario } from "@/types/api";
 import {
@@ -130,15 +130,19 @@ const solvencyChartConfig = {
 export default function ForecastReclassifiedPage() {
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
 
-  // Auto-select preferred scenario when scenarios load
+  // Auto-select preferred scenario when scenarios load. Inside a pratica this
+  // pins the page to the pratica's own budget scenario (FINDING 2); an
+  // explicit ScenarioSelector pick still wins afterwards since this effect
+  // no-ops once selectedScenario is set.
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenario) {
-      setSelectedScenario(getPreferredScenario(scenarios));
+      setSelectedScenario(getPreferredScenario(scenarios, preferredScenarioId));
     }
     if (!selectedCompanyId) setSelectedScenario(null);
-  }, [scenarios, selectedCompanyId, selectedScenario]);
+  }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
   const { data: reclassifiedData, isLoading: dataLoading, error: dataError } = useReclassifiedData(
     selectedCompanyId,

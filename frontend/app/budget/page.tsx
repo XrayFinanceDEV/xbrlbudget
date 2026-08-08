@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
+import { usePratica } from "@/contexts/PraticaContext";
 import { useScenarios, useInvalidateScenarios, useInvalidateAnalysis } from "@/hooks/use-queries";
 import {
   createCompany,
@@ -81,7 +82,6 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { AssumptionsGrid } from "@/components/budget/AssumptionsGrid";
-import { HistoricalBalanceDetailEditor } from "@/components/budget/HistoricalBalanceDetailEditor";
 import {
   ADVANCED_GROUPS,
   ESSENTIAL_ROWS,
@@ -95,6 +95,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
 export default function BudgetPage() {
   const router = useRouter();
   const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
+  const { pratica } = usePratica();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -200,7 +201,8 @@ export default function BudgetPage() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Nessun anno fiscale trovato. Importa prima i dati del bilancio.
+            Nessun anno fiscale trovato. Avvia una pratica dalla home per importare
+            un bilancio.
           </AlertDescription>
         </Alert>
       </div>
@@ -243,12 +245,12 @@ export default function BudgetPage() {
                 <Plus className="h-4 w-4" />
                 Nuovo business plan
               </Button>
-            ) : (
+            ) : pratica ? (
               <Button onClick={() => setActiveTab("info")}>
                 <Plus className="h-4 w-4" />
                 Nuovo Scenario
               </Button>
-            )}
+            ) : null}
           </div>
           <ScenariosList
             scenarios={scenarios}
@@ -1208,10 +1210,6 @@ function ScenarioForm({
                 forecastYears={forecastYears}
                 assumptions={assumptions}
               />
-            )}
-
-            {!startup && (
-              <HistoricalBalanceDetailEditor companyId={companyId} year={baseYear} />
             )}
 
             <AssumptionsGrid

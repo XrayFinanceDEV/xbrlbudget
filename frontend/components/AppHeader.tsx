@@ -8,17 +8,17 @@ import { useAuth } from "@/contexts/AuthContext";
 export function AppHeader() {
   const pathname = usePathname();
   const { logoUrl, userName } = useAuth();
-  const isInfrannuale = pathname.startsWith("/infrannuale");
+  const isPratica = pathname.startsWith("/pratica");
 
-  const title = isInfrannuale
+  const title = isPratica
     ? "Analisi Infrannuale / Consuntivo"
     : "Simulatore di Scenari a 3/5 anni";
 
-  const subtitle = isInfrannuale
+  const subtitle = isPratica
     ? "Proiezione da bilancio parziale a 12 mesi"
     : "Sistema di Rating - Principi OIC";
 
-  const Icon = isInfrannuale ? CalendarClock : BarChart3;
+  const Icon = isPratica ? CalendarClock : BarChart3;
 
   return (
     <header className="border-b border-border bg-background">

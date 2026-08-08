@@ -95,7 +95,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
 export default function BudgetPage() {
   const router = useRouter();
   const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
-  const { pratica, updatePratica } = usePratica();
+  const { updatePratica } = usePratica();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -233,11 +233,11 @@ export default function BudgetPage() {
 
       {activeTab === "list" ? (
         <>
-          <div className="flex justify-end mb-4">
-            {startupMode ? (
-              // In startup mode each business plan is its own project: starting a
-              // new one must reset the company selection so the from-zero wizard
-              // reappears, instead of adding another scenario to the same startup.
+          {startupMode && (
+            <div className="flex justify-end mb-4">
+              {/* In startup mode each business plan is its own project: starting a
+                  new one must reset the company selection so the from-zero wizard
+                  reappears, instead of adding another scenario to the same startup. */}
               <Button
                 onClick={() => {
                   setEditingScenario(null);
@@ -248,13 +248,15 @@ export default function BudgetPage() {
                 <Plus className="h-4 w-4" />
                 Nuovo business plan
               </Button>
-            ) : pratica ? (
-              <Button onClick={() => setActiveTab("info")}>
-                <Plus className="h-4 w-4" />
-                Nuovo Scenario
-              </Button>
-            ) : null}
-          </div>
+            </div>
+          )}
+          {/* Manual "Nuovo Scenario" creation is intentionally removed outside
+              startupMode (spec 2026-08-08-percorso-unico-pratica-design.md:239-240):
+              base_year here would default to Math.max(...years), which is not tied
+              to the pratica's corrected FinancialYear and can create a budget
+              scenario on data that never passed Rettifiche. Scenarios are created
+              only via the pratica bridge; editing/deleting existing scenarios
+              below is unaffected. */}
           <ScenariosList
             scenarios={scenarios}
             loading={loading}

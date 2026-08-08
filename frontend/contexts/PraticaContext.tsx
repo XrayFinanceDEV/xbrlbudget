@@ -65,13 +65,17 @@ export function PraticaProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Il caso "next non nullo" è coperto dall'useEffect su [pratica] sotto;
+  // qui gestiamo solo la rimozione immediata (uscita dalla pratica), che
+  // quell'effetto — guardato su `if (pratica)` — non farebbe mai da solo.
   const persist = useCallback((next: PraticaState | null) => {
     setPratica(next);
-    try {
-      if (next) localStorage.setItem(PRATICA_KEY, JSON.stringify(next));
-      else localStorage.removeItem(PRATICA_KEY);
-    } catch {
-      /* localStorage non disponibile */
+    if (next === null) {
+      try {
+        localStorage.removeItem(PRATICA_KEY);
+      } catch {
+        /* localStorage non disponibile */
+      }
     }
   }, []);
 
@@ -80,20 +84,35 @@ export function PraticaProvider({ children }: { children: React.ReactNode }) {
     [persist],
   );
 
+  // Il write su localStorage NON deve stare dentro l'updater di setState:
+  // reactStrictMode (next.config.ts) invoca due volte l'updater in dev, quindi
+  // scriverebbe due volte — innocuo qui, ma è un pattern sbagliato in generale
+  // (l'updater deve restare puro). Persistiamo invece in un useEffect su
+  // [pratica], sotto.
   const updatePratica = useCallback<PraticaContextType["updatePratica"]>(
     (patch) =>
       setPratica((prev) => {
-        if (!prev) return prev;
-        const next = { ...prev, ...patch };
-        try {
-          localStorage.setItem(PRATICA_KEY, JSON.stringify(next));
-        } catch {
-          /* localStorage non disponibile */
+        if (!prev) {
+          // Errore di programmazione, non un caso utente da segnalare: nessuna
+          // pratica attiva su cui applicare la patch. Visibile in sviluppo
+          // invece di sparire silenziosamente.
+          console.warn("updatePratica: nessuna pratica attiva, patch ignorata", patch);
+          return prev;
         }
-        return next;
+        return { ...prev, ...patch };
       }),
     [],
   );
+
+  // Persiste ogni cambio di stato (startPratica passa da `persist` sopra, ma
+  // updatePratica e qualunque futuro setPratica diretto passano tutti di qui).
+  useEffect(() => {
+    try {
+      if (pratica) localStorage.setItem(PRATICA_KEY, JSON.stringify(pratica));
+    } catch {
+      /* localStorage non disponibile */
+    }
+  }, [pratica]);
 
   const setAnalysisStep = useCallback(
     (step: string) => updatePratica({ analysisStep: step }),

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { QueryProvider } from "@/components/providers";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { PraticaProvider } from "@/contexts/PraticaContext";
 import { AppProvider } from "@/contexts/AppContext";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Navigation } from "@/components/Navigation";
@@ -29,6 +30,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
+          <PraticaProvider>
           <AppProvider>
             <div className="min-h-screen flex flex-col bg-background print:bg-white">
               {/* Header */}
@@ -50,6 +52,7 @@ export default function RootLayout({
               <Toaster />
             </div>
           </AppProvider>
+          </PraticaProvider>
           </AuthProvider>
         </ThemeProvider>
         </QueryProvider>

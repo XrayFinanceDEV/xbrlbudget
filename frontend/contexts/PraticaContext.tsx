@@ -1,0 +1,119 @@
+"use client";
+
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+export type PraticaWorkflow = "bilancio" | "startup";
+
+export interface PraticaState {
+  workflow: PraticaWorkflow;
+  companyId: number | null;
+  /** Anno del bilancio importato (percorso "bilancio"); null per una startup. */
+  fiscalYear: number | null;
+  /** 1-12; 12 = bilancio annuale. null per una startup. */
+  periodMonths: number | null;
+  infrannualeScenarioId: number | null;
+  budgetScenarioId: number | null;
+  /** Tab attiva della fase ANALISI dentro /pratica. */
+  analysisStep: string;
+  /**
+   * Cache per lo stepper. La verità resta il rettifiche_log sul server, riletto
+   * al mount del wizard: questo evita che lo stepper sfarfalli al primo render.
+   */
+  rettificheConfirmed: { storico: boolean; verifica: boolean };
+}
+
+interface PraticaContextType {
+  pratica: PraticaState | null;
+  startPratica: (init: Partial<PraticaState> & { workflow: PraticaWorkflow }) => void;
+  updatePratica: (patch: Partial<PraticaState>) => void;
+  setAnalysisStep: (step: string) => void;
+  exitPratica: () => void;
+}
+
+const PRATICA_KEY = "xbrl_pratica";
+
+const PraticaContext = createContext<PraticaContextType | undefined>(undefined);
+
+const DEFAULTS: Omit<PraticaState, "workflow"> = {
+  companyId: null,
+  fiscalYear: null,
+  periodMonths: null,
+  infrannualeScenarioId: null,
+  budgetScenarioId: null,
+  analysisStep: "anagrafiche",
+  rettificheConfirmed: { storico: false, verifica: false },
+};
+
+export function PraticaProvider({ children }: { children: React.ReactNode }) {
+  const [pratica, setPratica] = useState<PraticaState | null>(null);
+
+  // Letto DOPO il mount: leggerlo nell'inizializzatore di useState romperebbe
+  // l'idratazione di Next (server e client renderebbero markup diversi).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PRATICA_KEY);
+      if (raw) setPratica({ ...DEFAULTS, ...JSON.parse(raw) } as PraticaState);
+    } catch {
+      /* localStorage non disponibile o JSON corrotto */
+    }
+  }, []);
+
+  const persist = useCallback((next: PraticaState | null) => {
+    setPratica(next);
+    try {
+      if (next) localStorage.setItem(PRATICA_KEY, JSON.stringify(next));
+      else localStorage.removeItem(PRATICA_KEY);
+    } catch {
+      /* localStorage non disponibile */
+    }
+  }, []);
+
+  const startPratica = useCallback<PraticaContextType["startPratica"]>(
+    (init) => persist({ ...DEFAULTS, ...init }),
+    [persist],
+  );
+
+  const updatePratica = useCallback<PraticaContextType["updatePratica"]>(
+    (patch) =>
+      setPratica((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, ...patch };
+        try {
+          localStorage.setItem(PRATICA_KEY, JSON.stringify(next));
+        } catch {
+          /* localStorage non disponibile */
+        }
+        return next;
+      }),
+    [],
+  );
+
+  const setAnalysisStep = useCallback(
+    (step: string) => updatePratica({ analysisStep: step }),
+    [updatePratica],
+  );
+
+  const exitPratica = useCallback(() => persist(null), [persist]);
+
+  const value = useMemo<PraticaContextType>(
+    () => ({ pratica, startPratica, updatePratica, setAnalysisStep, exitPratica }),
+    [pratica, startPratica, updatePratica, setAnalysisStep, exitPratica],
+  );
+
+  return <PraticaContext.Provider value={value}>{children}</PraticaContext.Provider>;
+}
+
+export function usePratica() {
+  const context = useContext(PraticaContext);
+  if (context === undefined) {
+    throw new Error("usePratica deve essere usato dentro un PraticaProvider");
+  }
+  return context;
+}

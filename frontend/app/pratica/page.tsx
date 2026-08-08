@@ -12,6 +12,7 @@ import {
   getCompanies,
   getCompanyYears,
   createBudgetScenario,
+  getBudgetScenarios,
   bulkUpsertAssumptions,
   getIntraYearComparison,
   getScenarioAnalysis,
@@ -5128,6 +5129,7 @@ function StampaContent({
   const router = useRouter();
   const { refreshCompanies, refreshYears } = useApp();
   const { logoUrl, userName } = useAuth();
+  const { updatePratica } = usePratica();
   const [promoting, setPromoting] = useState(false);
   const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
@@ -5365,14 +5367,44 @@ function StampaContent({
             onClick={async () => {
               setPromoting(true);
               try {
-                if (onBeforePromote) await onBeforePromote();
-                await promoteProjection(companyId, scenarioId);
+                const isAnnual = periodMonths === 12;
+                let baseYear: number;
+                if (isAnnual) {
+                  // L'anno importato è già un FinancialYear completo: riscriverlo
+                  // con una copia ricalcolata dal motore sarebbe un rischio inutile.
+                  baseYear = fiscalYear;
+                } else {
+                  if (onBeforePromote) await onBeforePromote();
+                  await promoteProjection(companyId, scenarioId);
+                  baseYear = fiscalYear;
+                }
+
+                // Riuso, non duplicazione: doppio click o ritorno sui propri passi
+                // non devono generare due scenari budget per lo stesso anno base.
+                const existing = await getBudgetScenarios(companyId);
+                const reusable = existing.find(
+                  (s) => s.scenario_type !== "infrannuale" && s.base_year === baseYear,
+                );
+                const budget =
+                  reusable ??
+                  (await createBudgetScenario(companyId, {
+                    company_id: companyId,
+                    name: `Budget ${baseYear + 1}–${baseYear + 3}`,
+                    base_year: baseYear,
+                    scenario_type: "budget",
+                  }));
+
+                updatePratica({ budgetScenarioId: budget.id });
                 await refreshCompanies();
                 await refreshYears();
-                toast.success("Proiezione confermata come anno completo");
+                toast.success(
+                  reusable
+                    ? "Scenario budget esistente riaperto"
+                    : "Scenario budget creato",
+                );
                 router.push("/budget");
               } catch (err: unknown) {
-                toast.error(getErrorMessage(err, "Errore durante la promozione"));
+                toast.error(getErrorMessage(err, "Errore nel passaggio al budget"));
               } finally {
                 setPromoting(false);
               }
@@ -5384,7 +5416,7 @@ function StampaContent({
             ) : (
               <ArrowRight className="h-4 w-4 mr-2" />
             )}
-            {periodMonths === 12 ? "Conferma e passa al Budget" : "Conferma Proiezione e passa al Budget"}
+            Prosegui al Budget
           </Button>
         )}
       </div>

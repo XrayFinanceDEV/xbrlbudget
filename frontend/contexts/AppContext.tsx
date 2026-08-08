@@ -78,6 +78,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const praticaActiveRef = useRef(pratica !== null);
   praticaActiveRef.current = pratica !== null;
 
+  // Tracks whether the MOST RECENT loadCompanies() call actually succeeded.
+  // `companiesLoaded` only says "a load has completed at least once" and stays
+  // true forever after the first success, so a later transient failure (the
+  // catch block below leaves `companies` untouched) is invisible to it. The
+  // deletion-detection effect (FINDING 5, below) needs the freshness signal
+  // too, or it compares a just-set `pratica.companyId` against a stale
+  // `companies` array and wrongly concludes the company was deleted.
+  const lastLoadSucceededRef = useRef(false);
+
   // Stable loadCompanies — no dependencies, reads current selection via ref
   // Skips API call if auth is still loading (prevents 401 in iframe mode)
   const loadCompanies = useCallback(async () => {
@@ -86,6 +95,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const data = await getCompanies();
       setCompanies(data);
       setCompaniesLoaded(true);
+      lastLoadSucceededRef.current = true;
 
       // Fix selection if needed (outside of setCompanies callback)
       const currentId = selectedCompanyIdRef.current;
@@ -103,6 +113,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("Error loading companies:", err);
       setError("Impossibile caricare le aziende");
+      lastLoadSucceededRef.current = false;
     }
   }, []);
 
@@ -131,12 +142,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // must self-clear instead of leaving the stepper and the wizard dead-ending
   // on every page (spec :264-266). Gated on `companiesLoaded` so the very
   // first render — before loadCompanies has resolved and `companies` is still
-  // `[]` — never mistakes "not loaded yet" for "deleted".
+  // `[]` — never mistakes "not loaded yet" for "deleted". Also gated on
+  // `lastLoadSucceededRef`: a transient loadCompanies() failure leaves
+  // `companies` stale (and `companiesLoaded` was already true from an earlier
+  // successful load), so without this a fresh `pratica.companyId` set right
+  // after a failed refresh would look "not in the list" and wrongly exit the
+  // pratica the user just started (see N3, 2026-08-08 residual review).
   useEffect(() => {
     if (!companiesLoaded || !pratica || pratica.companyId === null) return;
+    if (!lastLoadSucceededRef.current) return;
     if (!companies.some((c) => c.id === pratica.companyId)) {
       exitPratica();
     }
+    // Deliberatamente su `pratica?.companyId`, non sull'oggetto `pratica`
+    // intero (un riferimento nuovo a ogni render): dipendere da `pratica`
+    // rifarebbe scattare l'effetto ad ogni updatePratica, anche quando
+    // companyId non cambia (vedi il pattern gemello sopra, effetto FIX 2).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companiesLoaded, companies, pratica?.companyId, exitPratica]);
 
   // Reload years for the currently selected company

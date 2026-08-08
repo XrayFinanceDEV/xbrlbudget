@@ -65,18 +65,11 @@ export function PraticaProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Il caso "next non nullo" è coperto dall'useEffect su [pratica] sotto;
-  // qui gestiamo solo la rimozione immediata (uscita dalla pratica), che
-  // quell'effetto — guardato su `if (pratica)` — non farebbe mai da solo.
+  // La scrittura/rimozione su localStorage è interamente a carico dell'
+  // useEffect su [pratica] sotto (ora gestisce anche il caso null): qui
+  // aggiorniamo solo lo stato in memoria.
   const persist = useCallback((next: PraticaState | null) => {
     setPratica(next);
-    if (next === null) {
-      try {
-        localStorage.removeItem(PRATICA_KEY);
-      } catch {
-        /* localStorage non disponibile */
-      }
-    }
   }, []);
 
   const startPratica = useCallback<PraticaContextType["startPratica"]>(
@@ -106,9 +99,17 @@ export function PraticaProvider({ children }: { children: React.ReactNode }) {
 
   // Persiste ogni cambio di stato (startPratica passa da `persist` sopra, ma
   // updatePratica e qualunque futuro setPratica diretto passano tutti di qui).
+  // Autoritativo per ENTRAMBI i casi: scrive quando `pratica` è valorizzata,
+  // rimuove quando è null — altrimenti un effetto in un componente FIGLIO
+  // (AppContext gira dopo, essendo montato più in basso) che chiama
+  // exitPratica() nello stesso commit vedrebbe questo effetto rieseguirsi
+  // ancora chiuso sul vecchio valore non-null e riscriverebbe la entry appena
+  // rimossa (localStorage sopravviverebbe al reload finché l'effetto in
+  // AppContext non la ripulisce di nuovo al giro successivo).
   useEffect(() => {
     try {
       if (pratica) localStorage.setItem(PRATICA_KEY, JSON.stringify(pratica));
+      else localStorage.removeItem(PRATICA_KEY);
     } catch {
       /* localStorage non disponibile */
     }

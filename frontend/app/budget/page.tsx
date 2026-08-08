@@ -686,7 +686,7 @@ function ScenariosList({
       <Card>
         <CardContent className="py-6 text-center">
           <p className="text-muted-foreground">
-            Nessuno scenario presente. Crea il primo scenario nella tab &quot;Nuovo Scenario&quot;
+            Nessuno scenario presente. Gli scenari si creano dalla pratica guidata, avviabile dalla home.
           </p>
         </CardContent>
       </Card>

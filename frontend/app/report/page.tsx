@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useAnalysis, getPreferredScenario } from "@/hooks/use-queries";
+import { useScenarios, useAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { getReportAIComments, generateReportAIComments, saveReportAIComments, type ReportAICommentsResponse } from "@/lib/api";
 import type { ScenarioAnalysis, BudgetScenario } from "@/types/api";
 import { PageHeader } from "@/components/page-header";
@@ -33,17 +33,21 @@ export default function ReportPage() {
   const { selectedCompanyId, selectedCompany } = useApp();
 
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [aiComments, setAiComments] = useState<ReportAICommentsResponse>({});
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
 
-  // Auto-select preferred scenario when scenarios load
+  // Auto-select preferred scenario when scenarios load. Inside a pratica this
+  // pins the page to the pratica's own budget scenario (FINDING 2); an
+  // explicit ScenarioSelector pick still wins afterwards since this effect
+  // no-ops once selectedScenario is set.
   useEffect(() => {
     if (scenarios.length > 0 && !selectedScenario) {
-      setSelectedScenario(getPreferredScenario(scenarios));
+      setSelectedScenario(getPreferredScenario(scenarios, preferredScenarioId));
     }
     if (!selectedCompanyId) setSelectedScenario(null);
-  }, [scenarios, selectedCompanyId, selectedScenario]);
+  }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
   const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
     selectedCompanyId,

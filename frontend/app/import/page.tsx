@@ -26,9 +26,9 @@ export default function ImportPage() {
         <Alert className="mt-4">
           <CheckCircle2 className="h-4 w-4" />
           <AlertDescription className="flex items-center justify-between gap-4">
-            <span>Importazione completata. Prosegui creando uno scenario di budget.</span>
-            <Button size="sm" onClick={() => router.push("/budget")}>
-              Crea scenario <ArrowRight className="h-4 w-4" />
+            <span>Importazione completata. Prosegui con una pratica guidata dalla home.</span>
+            <Button size="sm" onClick={() => router.push("/")}>
+              Vai alla home <ArrowRight className="h-4 w-4" />
             </Button>
           </AlertDescription>
         </Alert>

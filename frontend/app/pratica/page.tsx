@@ -3444,7 +3444,17 @@ export default function InfraannualePage() {
   }, [activeTab, verifica.exists, fiscalYear]);
 
   useEffect(() => {
-    if (activeTab === "comparison" && !comparison && scenario) {
+    // Confronto, Proiezione, Indicatori e Stampa leggono tutti `comparison` —
+    // non solo la tab "comparison" stessa. Senza coprire anche le altre tre,
+    // un mount (o una riidratazione dopo F5) che atterra direttamente su
+    // "projection"/"results"/"stampa" non lo carica mai: quelle tab
+    // aspettano per sempre un dato che nessun effect va a prendere.
+    const needsComparison =
+      activeTab === "comparison" ||
+      activeTab === "projection" ||
+      activeTab === "results" ||
+      activeTab === "stampa";
+    if (needsComparison && !comparison && scenario) {
       loadComparison();
     }
   }, [activeTab, comparison, scenario, loadComparison]);
@@ -4246,7 +4256,16 @@ export default function InfraannualePage() {
         </div>}
 
         {/* STEP 3: PROJECTION */}
-        {activeTab === "projection" && comparison && <div className="space-y-6">
+        {activeTab === "projection" && <div className="space-y-6">
+          {loadingComparison ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground" />
+              <p className="mt-2 text-muted-foreground">Caricamento confronto...</p>
+            </CardContent>
+          </Card>
+          ) : comparison ? (
+          <>
           {/* P&L Projection */}
           <Card>
             <CardHeader>
@@ -4321,6 +4340,16 @@ export default function InfraannualePage() {
               <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
           </div>
+          </>
+          ) : (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <p className="text-muted-foreground">
+                Completa prima il Confronto nel passaggio 2.
+              </p>
+            </CardContent>
+          </Card>
+          )}
         </div>}
 
         {/* STEP 4: INDICATORI */}

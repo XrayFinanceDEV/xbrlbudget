@@ -1554,6 +1554,12 @@ function RettificheTab({
     setLog(adjustableData?.rettifiche_log ?? []);
   }, [adjustableData]);
 
+  // The gate's "confirm" marker lives in the same log (so the server persists
+  // it and the 20-entry cap logic can see it), but it is not a rettifica the
+  // user made — hide it from the journal panel, the Riepilogo dialog and the
+  // count against RETTIFICHE_MAX.
+  const visibleLog = useMemo(() => log.filter((e) => e.entry_type !== "confirm"), [log]);
+
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
@@ -1640,7 +1646,7 @@ function RettificheTab({
       return;
     }
     // Enforce 20-entry cap before opening dialog
-    if (log.length >= RETTIFICHE_MAX) {
+    if (visibleLog.length >= RETTIFICHE_MAX) {
       toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche. Eliminane qualcuna per aggiungerne altre.`);
       setPendingEdits((prev) => { const u = { ...prev }; delete u[field]; return u; });
       return;
@@ -1803,7 +1809,7 @@ function RettificheTab({
       };
       const final = recalcAggregates(updated);
       const newLog = [...log, newEntry];
-      if (newLog.length > RETTIFICHE_MAX) {
+      if (newLog.filter((e) => e.entry_type !== "confirm").length > RETTIFICHE_MAX) {
         toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
         return;
       }
@@ -1851,7 +1857,7 @@ function RettificheTab({
     }
     const final = recalcAggregates(updated);
     const newLog = [...log, ...newEntries];
-    if (newLog.length > RETTIFICHE_MAX) {
+    if (newLog.filter((e) => e.entry_type !== "confirm").length > RETTIFICHE_MAX) {
       toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
       return;
     }
@@ -2325,7 +2331,7 @@ function RettificheTab({
           <CardTitle className="text-base flex items-center justify-between">
             <span>Rettifiche applicate</span>
             <Badge variant="outline" className="font-mono">
-              {log.length} / {RETTIFICHE_MAX}
+              {visibleLog.length} / {RETTIFICHE_MAX}
             </Badge>
           </CardTitle>
           <CardDescription>
@@ -2333,13 +2339,13 @@ function RettificheTab({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {log.length === 0 ? (
+          {visibleLog.length === 0 ? (
             <div className="p-6 text-center text-sm text-muted-foreground border rounded-lg border-dashed">
               Nessuna rettifica registrata. Modifica un valore nelle tabelle sopra per iniziare.
             </div>
           ) : (
             <div className="space-y-1.5">
-              {log.map((e, i) => (
+              {visibleLog.map((e, i) => (
                 <div key={e.id} className="flex items-center gap-2 border rounded-md px-3 py-2 text-xs">
                   <span className="text-muted-foreground w-5">{i + 1}.</span>
                   <div className="flex-1 min-w-0">
@@ -2585,7 +2591,7 @@ function RettificheTab({
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  Rettifiche registrate: {log.length} / {RETTIFICHE_MAX}
+                  Rettifiche registrate: {visibleLog.length} / {RETTIFICHE_MAX}
                 </p>
               </div>
             );
@@ -2978,6 +2984,24 @@ export default function InfraannualePage() {
     reconcileSubfields(merged);
     return merged;
   }, [storico.data]);
+
+  // Gate: entrambe le schede (storico se esiste, verifica sempre) devono
+  // essere confermate prima di sbloccare gli step successivi.
+  const allRettificheConfirmed = verifica.confirmed && (!storico.exists || storico.confirmed);
+
+  // Il context è una cache; la verità è il log letto dal server. Riallinea lo
+  // stepper quando i dati arrivano (mount, refresh di pagina, cambio anno).
+  useEffect(() => {
+    updatePratica({
+      rettificheConfirmed: {
+        verifica: verifica.confirmed,
+        storico: storico.exists ? storico.confirmed : true,
+      },
+    });
+    // updatePratica è stabile; dipendere dall'oggetto verifica/storico
+    // rifarebbe scattare l'effetto a ogni render (vedi CLAUDE.md, Rettifiche).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifica.confirmed, storico.confirmed, storico.exists]);
 
   // Rettifiche sub-tab (storico vs bilancio di verifica). Default to storico;
   // fall back to verifica when there is no historical year to correct.
@@ -3881,7 +3905,8 @@ export default function InfraannualePage() {
         </div>}
 
         {/* STEP 1b: RETTIFICHE */}
-        {activeTab === "rettifiche" && <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "storico" | "verifica")} className="space-y-4">
+        {activeTab === "rettifiche" && <>
+        <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "storico" | "verifica")} className="space-y-4">
           <TabsList>
             <TabsTrigger value="storico" disabled={!storico.exists}>
               Rettifiche Storico {fiscalYear - 1}
@@ -3945,7 +3970,31 @@ export default function InfraannualePage() {
               </Card>
             )}
           </TabsContent>
-        </Tabs>}
+        </Tabs>
+
+        <div className="mt-6 flex items-center justify-between gap-4 rounded-lg border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">
+            {allRettificheConfirmed
+              ? "Rettifiche confermate. Puoi proseguire con il confronto."
+              : "Conferma le rettifiche per sbloccare gli step successivi. Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta."}
+          </p>
+          <Button
+            onClick={async () => {
+              await verifica.confirm();
+              if (storico.exists) await storico.confirm();
+              updatePratica({
+                // Senza scheda storico non c'è nulla da confermare: vale true,
+                // altrimenti il gate resterebbe chiuso per sempre.
+                rettificheConfirmed: { verifica: true, storico: true },
+              });
+              setActiveTab("comparison");
+            }}
+            disabled={verifica.saving || storico.saving || allRettificheConfirmed}
+          >
+            Conferma e prosegui <ArrowRight className="h-4 w-4 ml-1" />
+          </Button>
+        </div>
+        </>}
 
         {/* STEP 2: COMPARISON */}
         {activeTab === "comparison" && <div className="space-y-6">

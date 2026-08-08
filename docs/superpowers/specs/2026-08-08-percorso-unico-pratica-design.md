@@ -173,8 +173,12 @@ Poi, in entrambi i casi:
 2. **Riuso, non duplicazione:** prima di creare, cerca tra gli scenari dell'azienda uno con
    `scenario_type === "budget"` e lo stesso `base_year`; se c'è lo riusa. Copre il doppio click
    e l'utente che torna indietro e ripassa.
-3. Scrive `budgetScenarioId` nel `PraticaContext`, poi `router.push("/budget")`, che apre già
-   sull'editor ipotesi dello scenario giusto.
+3. Scrive `budgetScenarioId` nel `PraticaContext`, poi `router.push("/budget")`, che apre
+   sull'elenco scenari (`activeTab === "list"`) — non direttamente sull'editor ipotesi. Lo
+   scenario giusto è comunque già selezionato/creato in `PraticaContext`, pronto per essere
+   aperto dall'elenco.
+   **[Corretto 2026-08-08, FINDING 9]:** verificato contro `app/budget/page.tsx` — `activeTab`
+   parte da `"list"`, non da un tab di modifica.
 
 ## Lo stepper condiviso
 
@@ -204,8 +208,12 @@ va **sopra** `AppProvider` in `app/layout.tsx`.
 
 ### `<PraticaStepper>`
 
-Renderizzato in `app/layout.tsx` **al posto di** `<Navigation>` quando `pratica !== null`, mai
-insieme. Fuori dalla pratica la nav attuale resta invariata (modalità "browse" sui dati vecchi).
+Renderizzato **dentro** `<Navigation>` (non al posto suo in `app/layout.tsx`): `Navigation`
+ritorna `<PraticaStepper />` invece della nav piatta quando `pratica !== null` e la rotta non è
+`/`, mai insieme. Fuori dalla pratica la nav attuale resta invariata (modalità "browse" sui dati
+vecchi).
+**[Corretto 2026-08-08, FINDING 9]:** verificato contro `components/Navigation.tsx` — il punto di
+composizione è `Navigation`, non `app/layout.tsx`.
 
 Due fasi in un'unica barra, separate da un divisore:
 
@@ -217,11 +225,16 @@ PREVISIONALE │  Budget › CE Prev. › SP Prev. › Riclassificato › Rendic
 - La fase ANALISI non compare nel workflow **startup**: la barra è
   `Anagrafiche › Budget › CE Prev. › SP Prev. › Riclassificato › Rendiconto › Report`.
 - **Proiezione** compare solo con `periodMonths < 12`.
-- Gli step della fase ANALISI sono tab interne a `/pratica` → cliccarli fa `setActiveTab`.
+- Gli step della fase ANALISI sono tab interne a `/pratica` → cliccarli fa `setAnalysisStep`.
   Quelli della fase PREVISIONALE sono rotte reali → cliccarli fa `router.push`. La distinzione
   vive in una tabella di definizione degli step (`kind: "tab" | "route"`), non in `if` sparsi.
-  Da una rotta della fase PREVISIONALE, cliccare uno step ANALISI naviga a
-  `/pratica?step=<id>` e il wizard apre quella tab.
+  Da una rotta della fase PREVISIONALE, cliccare uno step ANALISI chiama `setAnalysisStep(id)`
+  (scrive `analysisStep` nel `PraticaContext`, persistito in `localStorage`) e poi
+  `router.push("/pratica")` **solo se non si è già lì**; il wizard legge `pratica.analysisStep`
+  al render e apre quella tab. **Non esiste** un contratto URL `/pratica?step=<id>` — non c'è
+  query string coinvolta.
+  **[Corretto 2026-08-08, FINDING 9]:** verificato contro `components/PraticaStepper.tsx`
+  (funzione `go`).
 - Gli step già superati sono cliccabili; quelli non raggiungibili sono disabilitati, con lo
   stesso stile già usato (`text-muted-foreground/40 cursor-not-allowed`).
 - Gli step della fase PREVISIONALE si abilitano quando `budgetScenarioId !== null`;
@@ -252,7 +265,9 @@ ridondante dalla regola generale "stepper *oppure* nav, mai entrambi".
 ## Rotte
 
 - `/infrannuale` → **redirect** a `/pratica` (preserva i link salvati).
-- `/pratica` → il wizard, con `?step=<id>` opzionale per aprire una tab specifica.
+- `/pratica` → il wizard; la tab attiva viene da `pratica.analysisStep` nel `PraticaContext`
+  (`localStorage`), non da una query string — vedi la nota sopra sotto `<PraticaStepper>`.
+  **[Corretto 2026-08-08, FINDING 9]:** non esiste `?step=<id>`.
 - `/aziende`, `/import` → invariate, non più referenziate dalla nav.
 
 ## Casi limite

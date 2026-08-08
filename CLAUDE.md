@@ -769,8 +769,9 @@ INVISIBLE because `assumptions_service.bulk_upsert_assumptions` catches it and r
 with `forecast_generated: false` and the reason in `message` — no `ForecastYear` was written,
 `analysis.forecast_years` came back `[]`, and the Indicatori tab rendered the **Proiezione column
 empty** under a success toast. **Any caller of the bulk-assumptions endpoint must check
-`forecast_generated`, not just the HTTP status** — `/budget` and both `/infrannuale` call sites now
-do. Tests: `tests/test_intra_year_semantics.py` (`test_forecast_gate_*`).
+`forecast_generated`, not just the HTTP status** — `/budget` and both call sites in the pratica
+wizard (`app/pratica/page.tsx`, formerly `app/infrannuale/page.tsx`) now do. Tests:
+`tests/test_intra_year_semantics.py` (`test_forecast_gate_*`).
 
 #### MinerU OCR (`importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`)
 Optional OCR backend for scanned/image PDFs the text layer cannot read, configured in
@@ -922,16 +923,120 @@ there propagates everywhere. The Rettifiche step holds a shadcn `Tabs` with *Ret
   - `database/models.py` — `FinancialYear.rettifiche_log` column
   - `backend/app/schemas/adjustments.py` — `RettificaEntry`, `AdjustableFinancialYear.rettifiche_log`, `AdjustmentsUpdate.rettifiche_log`
   - `backend/app/api/v1/financial_years.py` — `RETTIFICHE_LOG_MAX = 20`, GET `/adjustable`, PUT `/adjustments`
-  - `frontend/app/infrannuale/page.tsx` — `RettificheTab` component, `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`, `recalcAggregates`, `reconcileSubfields`, the two-tab render block
+  - `frontend/app/pratica/page.tsx` — `RettificheTab` component, `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`, `recalcAggregates`, `reconcileSubfields`, the two-tab render block (moved from `app/infrannuale/page.tsx`, see "Il percorso unico Pratica" below)
   - `frontend/hooks/use-rettifiche-year.ts` — per-year load/save/reset/corrections, one instance per tab
 
 **Known follow-up:** `RettificheTab` still lives inside `page.tsx` (~1.300 lines of a 5.900-line route
 file) because it leans on ~15 module-level constants shared with the Confronto and Proiezione tabs.
 Extracting it needs a shared module first; deliberately deferred, not forgotten.
 
+### Il percorso unico "Pratica" (2026-08-08)
+Two workflows for a new pratica, down from three: **Da bilancio** (`/pratica`) and **Startup**
+(`/budget` in `startupMode`). The removed third card was "Budget da bilancio ufficiale, no
+rettifiche" — precisely the path that let a trial balance skip Rettifiche and propagate its errors
+into Confronto, Proiezione, Indicatori and the rating models. `/infrannuale` is now a `redirect()`
+to `/pratica`; the wizard itself (import → Rettifiche → Confronto → Proiezione → Indicatori →
+Stampa, described in the Rettifiche section above) moved file-for-file to `app/pratica/page.tsx`
+with no behaviour change in that move itself — the functional changes below came after.
+Spec: `docs/superpowers/specs/2026-08-08-percorso-unico-pratica-design.md`. Plan:
+`docs/superpowers/plans/2026-08-08-percorso-unico-pratica.md`. Execution ledger (every deviation
+from the plan, found in browser testing rather than in review):
+`.superpowers/sdd/2026-08-08-percorso-unico-pratica/progress.md`.
+
+- **`contexts/PraticaContext.tsx`** — the active pratica (`workflow`, `companyId`, `fiscalYear`,
+  `periodMonths`, `infrannualeScenarioId`, `budgetScenarioId`, `analysisStep`,
+  `rettificheConfirmed`), persisted in `localStorage` (`xbrl_pratica`) with the same pattern as
+  `startupMode`: read in a `useEffect`, never in the `useState` initializer, or Next mis-hydrates.
+  `PraticaProvider` is mounted ABOVE `AppProvider` in `app/layout.tsx` — that ordering is what lets
+  `AppContext` itself call `usePratica()` (see below).
+- **`lib/pratica-steps.ts`** — pure step model, no React: `buildPraticaSteps(pratica, gates)`
+  returns the ordered `PraticaStep[]` for the current workflow. `kind: "tab"` steps are tabs inside
+  `/pratica` (`PraticaStepper` calls `setAnalysisStep` + `router.push("/pratica")` if not already
+  there); `kind: "route"` steps are real Next pages (`router.push(step.route)`).
+- **`components/PraticaStepper.tsx`**, rendered by `components/Navigation.tsx`: `Navigation`
+  returns `<PraticaStepper />` INSTEAD OF the flat nav whenever `pratica !== null` and the path is
+  not `/` — never both bars together. Outside a pratica the flat nav is unchanged (browsing old
+  data), and it lost the Importazione tab (`/import` still works as a route, just unlinked).
+
+**PREVISIONALE has SIX steps, not four.** The design spec originally listed only
+`Budget · CE Previsionale · Rendiconto · Report`. Replacing the flat nav with the stepper made
+`/forecast/balance` and `/forecast/reclassified` unreachable from inside a pratica (they exist as
+pages and are linked from the ordinary nav's "Previsionale" dropdown, but that dropdown disappears
+together with the rest of the flat nav once a pratica is active). This surfaced as an Important
+finding in the Task 4 code review and the user decided, during implementation, to add both steps
+rather than leave them stranded — see the spec's own dated note and
+`.superpowers/sdd/.../progress.md` ("Task 4: DECISIONE UTENTE"). The real PREVISIONALE order is
+**Budget · CE Prev. · SP Prev. · Riclassificato · Rendiconto · Report**, all gated on
+`gates.forecastReady` (`budgetScenarioId !== null`) except Budget itself, gated on
+`gates.budgetScenario` for the `bilancio` workflow and always enabled for `startup`.
+
+**The Rettifiche gate ANDs `gates.rettificheOk` into every step past Rettifiche**, not only
+Confronto: Proiezione, Indicatori and Stampa in `pratica-steps.ts` all require
+`gates.rettificheOk && …`. An earlier version gated only `comparison`, which meant a scenario
+already created at import time (`infrannualeScenarioId` set) was on its own enough to unlock
+Proiezione/Indicatori/Stampa in the stepper even with rettifiche unconfirmed, or after a
+"Ripristina originale" — fixed in commit `71d3303`. Two sub-tabs (Storico + Bilancio di verifica,
+see the Rettifiche section above) each need their own confirmation: `useRettificheYear` exposes
+`confirmed: boolean` and `confirm(): Promise<boolean>`, backed by a `{ entry_type: "confirm" }`
+marker appended to the same `rettifiche_log` (no migration) — idempotent, excluded from the
+journal/Riepilogo UI and from the server's 20-entry cap (`_countable_log_entries` in
+`backend/app/api/v1/financial_years.py`). `handleConfirmRettifiche` in `app/pratica/page.tsx` is
+the SINGLE path both the "Conferma e prosegui" banner and the Riepilogo dialog's own button call —
+an earlier version let the dialog's button reach Confronto through a separate `onNext` that
+bypassed the gate entirely (Task 7 review, Critical finding).
+
+**`reset()` must reconcile the snapshot before sending it, mirroring `load()`.**
+`FinancialYear.original_bs_snapshot`/`original_is_snapshot` are captured server-side RAW, before
+the frontend-only `reconcileSubfields` ever runs. On an aggregate-only import (bilancio abbreviato
+— the common shape) the raw snapshot's detail sub-fields are zero while the currently persisted
+state already went through `reconcile()` at load time; posting the raw snapshot as-is widens the
+aggregate/detail gap and the backend's anti-regression guard deterministically rejects it with 400
+— which made "Ripristina originale" a dead button on exactly the imports that most need it. Fixed
+in `9d7079b`: `reset()` now merges BS+IS, runs the same `reconcile()` over a COPY (never mutating
+`data.original_*`, which is re-read on every subsequent reset), and only then splits and posts it.
+
+**A save or reset the server rejects must never be committed locally.** `useRettificheYear.save()`
+and `.reset()` return `Promise<boolean>` (`false` on any thrown error, toast already shown by the
+hook); every journal-mutating call site in `app/pratica/page.tsx` (`confirmActiveEdit`,
+`deleteLogEntry`, `handleConfirmRettifiche`) awaits the boolean and returns early on `false` instead
+of updating `corrections`/`log`/`confirmed` optimistically. Before this a 400 from the backend still
+rendered as a successful edit in the journal.
+
+**`AppContext` now consumes `usePratica()`** (legal only because `PraticaProvider` sits above
+`AppProvider`), for two behaviours found as real bugs in browser testing, not designed up front:
+- `loadCompanies`'s auto-select-first-company fallback stands down while a pratica is active
+  (`praticaActiveRef`). Without it, `/pratica`'s mount-time `refreshCompanies()` re-selected an
+  unrelated existing company right after the home page's "Da bilancio" card had deliberately called
+  `setSelectedCompanyId(null)` — `AnagraficheStep` opened in EDIT mode and "Salva e prosegui"
+  silently renamed that company.
+- The app-wide `selectedCompanyId` follows `pratica.companyId` (an effect keyed on the scalar, never
+  on the `pratica` object). Without it, `/budget` reached via "Prosegui al Budget" listed the
+  scenarios of whatever company `AppContext` happened to have selected before, not the pratica's.
+
+**The wizard rehydrates after a refresh.** Wizard progress (`importResult`, `scenario`,
+`fiscalYear`, `periodMonths`, …) lives in local `useState` and does not survive F5; only the
+`PraticaContext` (localStorage-backed) does. A `useRef`-guarded effect in `app/pratica/page.tsx`
+runs the rehydration exactly once: if the persisted `analysisStep` is past Import, it re-fetches the
+company and the infrannuale scenario and repopulates the four local states, letting the existing
+auto-load effects (Rettifiche/Confronto/Analisi) take it from there. When the context lacks enough
+data (`companyId`/`infrannualeScenarioId` missing) or the fetch fails, the honest fallback is an
+Italian `Alert` ("Pratica da riaprire" — riparti dall'importazione o riapri la pratica dalla home)
+and a reset to the Import step — never a blank `<main>`.
+
+**Two follow-ups the ledger records as deferred, not fixed:**
+- **The gate is enforced at navigation time, only.** `PraticaStepper` disables a step's button when
+  its gate is false, but the wizard's own render guards (`{activeTab === "projection" && …}`, same
+  for `results`/`stampa`) and the rehydration path do not re-check `gates.rettificheOk` — they key
+  purely off `activeTab`/`analysisStep`. No concretely reachable exploit was found (there is no UI
+  path today that sets `analysisStep` to a gated tab without going through the stepper or
+  `handleConfirmRettifiche`), but it is defense-in-depth debt, not defense-in-depth done.
+- **`app/pratica/page.tsx` is still a ~5.900-line monolith.** Decomposing it (and `app/budget/page.tsx`)
+  was explicitly out of scope for this refactor and remains a pending follow-up — see the "Known
+  follow-up" note in the Rettifiche section above, which describes the same file.
+
 ### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
 All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable. When adding a new BS/IS sub-field, add rows in all of:
-- `frontend/app/infrannuale/page.tsx` — `RETTIFICHE_BS_ATTIVO` / `RETTIFICHE_BS_PN`, `CE_A`–`CE_E`, and the `relabel` map inside `buildBalanceItemsWithTotals` / `buildIncomeItemsWithEbitda` (Confronto)
+- `frontend/app/pratica/page.tsx` — `RETTIFICHE_BS_ATTIVO` / `RETTIFICHE_BS_PN`, `CE_A`–`CE_E`, and the `relabel` map inside `buildBalanceItemsWithTotals` / `buildIncomeItemsWithEbitda` (Confronto)
 - `frontend/app/forecast/balance/page.tsx` — the `rows` array in `BalanceSheetTable`
 - `frontend/app/forecast/income/page.tsx` — the `rows` array in `IncomeStatementTable`
 
@@ -968,7 +1073,7 @@ Editable AI-generated commentary rendered above each table in the Stampa tab. Si
   - `backend/app/services/ai_comments_service.py` — `InfrannualeComments`, `generate_infrannuale_comments`, `get/save_infrannuale_comments`
   - `backend/app/api/v1/budget_scenarios.py` — 3 endpoints under `/infrannuale/ai-comments`
   - `frontend/lib/api.ts` — `InfrannualeAIComments` + `get/generate/saveInfrannualeAIComments`
-  - `frontend/app/infrannuale/page.tsx` — `StampaContent` state, `buildAICtx()`, `CommentBlock`
+  - `frontend/app/pratica/page.tsx` — `StampaContent` state, `buildAICtx()`, `CommentBlock`
 
 ### Upload Tracking (debugging user-reported import problems)
 - Every `/import/{xbrl,csv,pdf}` call persists the raw bytes to `data/uploads/{user_id}/{YYYY-MM}/...` and logs a row in the `uploaded_files` table **before** parsing runs (so parser crashes are still tracked).
@@ -1168,9 +1273,9 @@ POST /companies/{id}/scenarios
 
 **Frontend Pages:**
 - `/` - Home (company list)
-- `/import` - XBRL/CSV/PDF upload
-- `/infrannuale` - Intra-year analysis wizard (import partial year → compare → project → results)
-- `/budget` - Scenario assumptions editor
+- `/import` - XBRL/CSV/PDF upload (not linked from the nav; the pratica wizard's Import step is the normal entry point)
+- `/pratica` - Percorso unico da bilancio: Anagrafiche → Import → Rettifiche → Confronto → [Proiezione] → Indicatori → Stampa → bridge to Budget. `/infrannuale` redirects here. See "Il percorso unico Pratica" below.
+- `/budget` - Scenario assumptions editor (also the Startup workflow's entry point)
 - `/forecast/income` - Forecast P&L (editable: click forecast cells → batch save → BS auto-adapts)
 - `/forecast/balance`, `/forecast/reclassified` - Forecast BS views (read-only, adapts to CE overrides)
 - `/analysis` - Financial ratios & charts

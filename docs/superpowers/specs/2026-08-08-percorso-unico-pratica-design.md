@@ -7,6 +7,18 @@
 (questo design ne sostituisce la Phase A con una versione molto più contenuta, e ne riduce i
 workflow da 3 a 2)
 
+**Nota 2026-08-08 (decisione presa durante l'implementazione, Task 4 del piano):** questo
+documento, nella sua stesura originale, elencava la fase PREVISIONALE con **quattro** voci
+(`Budget › CE Previsionale › Rendiconto › Report`). In fase di implementazione, sostituire la nav
+piatta con lo stepper ha reso `/forecast/balance` e `/forecast/reclassified` — pagine esistenti,
+prima raggiungibili dal dropdown "Previsionale" della nav — irraggiungibili dall'interno di una
+pratica, perché quel dropdown sparisce insieme al resto della nav piatta quando lo stepper è
+attivo. Emerso come finding Important nella review del Task 4, l'utente ha deciso di aggiungere
+entrambi gli step invece di lasciarli isolati. La fase PREVISIONALE ha quindi **sei** voci:
+`Budget › CE Prev. › SP Prev. › Riclassificato › Rendiconto › Report`. Le sezioni sotto sono state
+aggiornate di conseguenza; questo paragrafo resta a futura memoria della decisione. Dettagli:
+`.superpowers/sdd/2026-08-08-percorso-unico-pratica/progress.md` ("Task 4: DECISIONE UTENTE").
+
 ## Problema
 
 1. **Troppe strade per la stessa cosa.** "Nuova pratica" offre 3 card
@@ -73,9 +85,10 @@ e riscriverlo con una copia ricalcolata dal motore è un rischio senza contropar
 
 ### 2. Startup (`/budget` in `startupMode`)
 
-Invariato nella sostanza: `Anagrafiche › Budget › CE Previsionale › Rendiconto › Report`.
-Cambia solo l'ingresso (una delle due card della home) e il fatto che ora è coperto dallo
-stepper condiviso.
+Invariato nella sostanza: `Anagrafiche › Budget › CE Prev. › SP Prev. › Riclassificato ›
+Rendiconto › Report` (sei voci PREVISIONALE, non quattro — vedi la nota 2026-08-08 in testa a
+questo documento). Cambia solo l'ingresso (una delle due card della home) e il fatto che ora è
+coperto dallo stepper condiviso.
 
 Il workflow startup **non passa da `/pratica`**: lo step *Anagrafiche* della sua barra è il form
 "Nuovo business plan startup" già presente in `app/budget/page.tsx:482+` (nome, descrizione,
@@ -198,11 +211,11 @@ Due fasi in un'unica barra, separate da un divisore:
 
 ```
 ANALISI         Anagrafiche › Import › Rettifiche › Confronto › [Proiezione] › Indicatori › Stampa
-PREVISIONALE │  Budget › CE Previsionale › Rendiconto › Report
+PREVISIONALE │  Budget › CE Prev. › SP Prev. › Riclassificato › Rendiconto › Report
 ```
 
 - La fase ANALISI non compare nel workflow **startup**: la barra è
-  `Anagrafiche › Budget › CE Previsionale › Rendiconto › Report`.
+  `Anagrafiche › Budget › CE Prev. › SP Prev. › Riclassificato › Rendiconto › Report`.
 - **Proiezione** compare solo con `periodMonths < 12`.
 - Gli step della fase ANALISI sono tab interne a `/pratica` → cliccarli fa `setActiveTab`.
   Quelli della fase PREVISIONALE sono rotte reali → cliccarli fa `router.push`. La distinzione
@@ -275,7 +288,7 @@ ridondante dalla regola generale "stepper *oppure* nav, mai entrambi".
   `updated_at` / i valori SP prima e dopo il passaggio al budget) e che lo scenario budget abbia
   `base_year` = anno importato.
 - **Percorso 3 (startup)**: home → Startup → Anagrafiche → Budget → CE Previsionale → Report,
-  con lo stepper a 5 voci e senza la fase ANALISI.
+  con lo stepper a 7 voci (Anagrafiche + le sei della fase PREVISIONALE) e senza la fase ANALISI.
 - **Persistenza del gate**: confermate le rettifiche, `F5`; gli step restano sbloccati.
   Poi reset delle rettifiche → gli step si richiudono.
 - **Uscita**: "Esci dalla pratica" → `/`, riappare la nav normale senza Importazione.

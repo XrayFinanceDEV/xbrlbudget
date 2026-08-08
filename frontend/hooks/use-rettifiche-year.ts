@@ -130,11 +130,29 @@ export function useRettificheYear(
     if (companyId === null || !data?.original_balance_sheet || !data?.original_income_statement) return false;
     setSaving(true);
     try {
+      // original_*_snapshot is the RAW import (pre-reconcileSubfields): on an
+      // aggregate-only import (bilancio abbreviato) its detail sub-fields are
+      // zero. The currently persisted state went through reconcile() at load
+      // time, so posting the raw snapshot as-is would WIDEN the
+      // aggregati/dettagli gap and the server's anti-regression guard
+      // legitimately rejects it (400) — reset never applied. Mirror load():
+      // merge BS+IS into one flat record, reconcile that COPY (reconcile
+      // mutates in place; data.original_* must stay untouched — it's re-read
+      // on every subsequent reset), then split back into the two payloads.
+      const merged: Record<string, number> = {
+        ...data.original_balance_sheet,
+        ...data.original_income_statement,
+      };
+      reconcile(merged);
+      const bsPayload: Record<string, number> = {};
+      for (const k of Object.keys(data.original_balance_sheet)) bsPayload[k] = merged[k];
+      const isPayload: Record<string, number> = {};
+      for (const k of Object.keys(data.original_income_statement)) isPayload[k] = merged[k];
       const result = await saveAdjustments(
         companyId,
         year,
-        data.original_balance_sheet,
-        data.original_income_statement,
+        bsPayload,
+        isPayload,
         periodMonths,
         [], // clear the rettifiche log on reset
       );
@@ -150,15 +168,14 @@ export function useRettificheYear(
       toast.success("Rettifiche annullate — ripristinati i valori originali");
       return true;
     } catch (error: unknown) {
-      // Il ripristino manda al server i valori GREZZI dell'import (prima di
-      // reconcileSubfields), che a loro volta possono presentare uno scarto
-      // aggregati/dettagli maggiore di quello dello stato attuale già
-      // riconciliato — la guardia anti-regressione del server rifiuta
-      // legittimamente in quel caso (400). Qui NON tocchiamo data/corrections
-      // /applied/confirmed: il ripristino non è avvenuto, quindi lo stato
-      // (e il gate a valle, vedi rettificheConfirmed) deve restare quello di
-      // prima — nessun rollback locale necessario perché niente è stato
-      // applicato in ottimistico.
+      // Anche riconciliato, il payload può in teoria essere ancora respinto
+      // dalla guardia anti-regressione del server (400) — ad es. per uno
+      // sbilancio Attivo/Passivo o CE↔SP preesistente nell'import grezzo che
+      // reconcile() non tocca. Qui NON tocchiamo data/corrections/applied/
+      // confirmed: il ripristino non è avvenuto, quindi lo stato (e il gate a
+      // valle, vedi rettificheConfirmed) deve restare quello di prima —
+      // nessun rollback locale necessario perché niente è stato applicato in
+      // ottimistico.
       toast.error(getErrorMessage(error, "Errore nel ripristino"));
       return false;
     } finally {

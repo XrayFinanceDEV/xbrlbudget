@@ -9,7 +9,6 @@ import {
   importXBRL,
   importPDF,
   importOCR,
-  getCompanies,
   getCompany,
   getCompanyYears,
   createBudgetScenario,
@@ -2918,7 +2917,6 @@ function reconcileSubfields(data: Record<string, number>) {
 }
 
 export default function InfraannualePage() {
-  const router = useRouter();
   const { companies, refreshCompanies, setSelectedCompanyId } = useApp();
 
   // Wizard state
@@ -3033,10 +3031,26 @@ export default function InfraannualePage() {
   // marker mai persistito.
   const handleConfirmRettifiche = useCallback(async () => {
     const okVerifica = await verifica.confirm();
-    if (!okVerifica) return;
+    if (!okVerifica) {
+      // confirm() resolves false without a toast of its own (data not yet
+      // loaded, or the save it wraps failed and already toasted a generic
+      // message) — this is the headline control, it must never fail quietly.
+      toast.error(
+        "Impossibile confermare le rettifiche del bilancio di verifica. Riprova.",
+      );
+      return;
+    }
     if (storico.exists) {
       const okStorico = await storico.confirm();
-      if (!okStorico) return;
+      if (!okStorico) {
+        // Worst case: verifica is already confirmed and persisted server-side
+        // but storico is not — tell the user plainly so they don't assume
+        // nothing happened and silently proceed on a half-confirmed pratica.
+        toast.error(
+          "Bilancio di verifica confermato, ma le rettifiche dello storico non sono state salvate. Riprova a confermare lo storico prima di proseguire.",
+        );
+        return;
+      }
     }
     updatePratica({ rettificheConfirmed: { verifica: true, storico: true } });
     setActiveTab("comparison");
@@ -4140,7 +4154,14 @@ export default function InfraannualePage() {
           </p>
           <Button
             onClick={handleConfirmRettifiche}
-            disabled={verifica.saving || storico.saving || allRettificheConfirmed}
+            disabled={
+              verifica.saving ||
+              storico.saving ||
+              verifica.loading ||
+              storico.loading ||
+              !verifica.exists ||
+              allRettificheConfirmed
+            }
           >
             Conferma e prosegui <ArrowRight className="h-4 w-4 ml-1" />
           </Button>

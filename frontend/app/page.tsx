@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
+import { usePratica } from "@/contexts/PraticaContext";
 import {
   getCompaniesWithScenarios,
   createCompany,
@@ -21,7 +22,6 @@ import {
   X,
   Loader2,
   CalendarRange,
-  CalendarClock,
   Rocket,
   ArrowRight,
 } from "lucide-react";
@@ -62,6 +62,7 @@ const SECTOR_OPTIONS: Record<number, string> = {
 export default function Home() {
   const router = useRouter();
   const { setStartupMode, setSelectedCompanyId, refreshCompanies } = useApp();
+  const { startPratica } = usePratica();
 
   const [companies, setCompanies] = useState<CompanyWithScenarios[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,11 +165,22 @@ export default function Home() {
     }
   };
 
-  // Resume a pratica: pin the company, jump to the matching workspace.
-  // (Phase A upgrades this to /pratica/{head}/{step}.)
+  // Riprendi una pratica: popola il context, poi apri il posto giusto.
+  // Uno scenario budget legacy non ha una fase ANALISI ricostruibile: si apre
+  // direttamente sul budget, con gli step di analisi disabilitati.
   const resume = (companyId: number, s: ScenarioSummary) => {
     setSelectedCompanyId(companyId);
-    router.push(s.scenario_type === "infrannuale" ? "/pratica" : "/budget");
+    const isInfra = s.scenario_type === "infrannuale";
+    startPratica({
+      workflow: "bilancio",
+      companyId,
+      fiscalYear: isInfra ? s.base_year + 1 : s.base_year,
+      periodMonths: isInfra ? s.period_months ?? 12 : 12,
+      infrannualeScenarioId: isInfra ? s.id : null,
+      budgetScenarioId: isInfra ? null : s.id,
+      analysisStep: isInfra ? "rettifiche" : "anagrafiche",
+    });
+    router.push(isInfra ? "/pratica" : "/budget");
   };
 
   return (
@@ -188,46 +200,42 @@ export default function Home() {
         </div>
       </PageHeader>
 
-      {/* New pratica chooser (pre-Phase-A fork) */}
       {showNewPratica && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <Card className="cursor-pointer transition-colors hover:border-primary/50"
-            onClick={() => { setStartupMode(false); router.push("/import"); }}>
+            onClick={() => {
+              setStartupMode(false);
+              // companyId resta null: l'azienda si sceglie o si crea nello step Anagrafiche.
+              startPratica({ workflow: "bilancio", companyId: null, analysisStep: "anagrafiche" });
+              router.push("/pratica");
+            }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarRange className="h-5 w-5 text-primary" /> Budget da bilancio
+                <CalendarRange className="h-5 w-5 text-primary" /> Da bilancio
               </CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              Importa un bilancio ufficiale e costruisci il budget pluriennale.
+              Bilancio ufficiale o bilancio di verifica infrannuale. Import, rettifiche,
+              confronto e budget in un unico percorso.
               <Button variant="outline" size="sm" className="mt-3 w-full">
-                Importa bilancio <ArrowRight className="h-4 w-4" />
+                Avvia percorso <ArrowRight className="h-4 w-4" />
               </Button>
             </CardContent>
           </Card>
           <Card className="cursor-pointer transition-colors hover:border-primary/50"
-            onClick={() => { setStartupMode(false); router.push("/infrannuale"); }}>
+            onClick={() => {
+              setStartupMode(true);
+              setSelectedCompanyId(null);
+              startPratica({ workflow: "startup", companyId: null, analysisStep: "anagrafiche" });
+              router.push("/budget");
+            }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarClock className="h-5 w-5 text-primary" /> Infrannuale
+                <Rocket className="h-5 w-5 text-primary" /> Startup
               </CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              Situazione contabile parziale proiettata a 12 mesi.
-              <Button variant="outline" size="sm" className="mt-3 w-full">
-                Avvia infrannuale <ArrowRight className="h-4 w-4" />
-              </Button>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer transition-colors hover:border-primary/50"
-            onClick={() => { setStartupMode(true); setSelectedCompanyId(null); router.push("/budget"); }}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Rocket className="h-5 w-5 text-primary" /> Business plan startup
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Previsione da zero, senza bilancio storico.
+              Business plan senza bilancio storico.
               <Button variant="outline" size="sm" className="mt-3 w-full">
                 Crea business plan <ArrowRight className="h-4 w-4" />
               </Button>

@@ -878,6 +878,8 @@ export interface EMScoreResult {
 
 export interface RettificaEntry {
   id: string;
+  /** "confirm" = marker del gate Rettifiche, non una rettifica dell'utente. */
+  entry_type?: string | null;
   edited_field: string;
   edited_label: string;
   edit_delta: number;

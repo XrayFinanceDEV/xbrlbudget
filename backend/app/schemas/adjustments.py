@@ -6,8 +6,14 @@ from pydantic import BaseModel
 
 
 class RettificaEntry(BaseModel):
-    """One per-edit double-entry rettifica, tracked for the log panel."""
+    """One per-edit double-entry rettifica, tracked for the log panel.
+
+    entry_type == "confirm" marks the user's explicit "Conferma e prosegui" on the
+    Rettifiche step: bookkeeping, not a rettifica. It is persisted in the same log
+    so the gate survives a refresh without adding a column.
+    """
     id: str
+    entry_type: Optional[str] = None
     edited_field: str
     edited_label: str
     edit_delta: float

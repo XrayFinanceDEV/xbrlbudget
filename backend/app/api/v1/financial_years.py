@@ -350,6 +350,16 @@ def get_adjustable_financial_year(
 
 RETTIFICHE_LOG_MAX = 20
 
+
+def _countable_log_entries(log) -> int:
+    """Quante voci del log contano contro il cap.
+
+    I marker di conferma (entry_type == "confirm") sono contabilità interna del
+    gate Rettifiche, non correzioni dell'utente: non devono rubargli una riga.
+    """
+    return sum(1 for e in log if getattr(e, "entry_type", None) != "confirm")
+
+
 # Tolerance for the server-side balance check on PUT /adjustments: the legit
 # frontend keeps edits balanced by double-entry and plugs ≤ €5 import-rounding
 # gaps into sp09 (reconcileSubfields), so €5 of drift per save is normal noise.
@@ -521,7 +531,7 @@ def save_adjustments(
 
     # Persist rettifiche log if provided (max RETTIFICHE_LOG_MAX entries)
     if payload.rettifiche_log is not None:
-        if len(payload.rettifiche_log) > RETTIFICHE_LOG_MAX:
+        if _countable_log_entries(payload.rettifiche_log) > RETTIFICHE_LOG_MAX:
             raise HTTPException(
                 status_code=400,
                 detail=f"Massimo {RETTIFICHE_LOG_MAX} rettifiche consentite",

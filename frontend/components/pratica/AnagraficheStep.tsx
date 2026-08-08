@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -40,11 +40,25 @@ export function AnagraficheStep({ onReady }: { onReady: (companyId: number) => v
   const [sector, setSector] = useState(1);
   const [saving, setSaving] = useState(false);
 
+  // Semina il form UNA SOLA VOLTA per azienda. `selectedCompany` cambia identità
+  // a ogni refreshCompanies() — e il wizard lo richiama a ogni focus della
+  // finestra — quindi ri-seminare a ogni cambio di riferimento cancellerebbe
+  // quello che l'utente sta scrivendo.
+  const seededFor = useRef<number | null>(null);
   useEffect(() => {
-    setName(selectedCompany?.name ?? "");
-    setTaxId(selectedCompany?.tax_id ?? "");
-    setSector(selectedCompany?.sector ?? 1);
-  }, [selectedCompany]);
+    // Nessuna azienda selezionata: è il form di creazione, niente da seminare.
+    if (selectedCompanyId === null) {
+      seededFor.current = null;
+      return;
+    }
+    // L'elenco aziende può non essere ancora arrivato: aspetta il prossimo giro.
+    if (!selectedCompany) return;
+    if (seededFor.current === selectedCompanyId) return;
+    seededFor.current = selectedCompanyId;
+    setName(selectedCompany.name);
+    setTaxId(selectedCompany.tax_id ?? "");
+    setSector(selectedCompany.sector);
+  }, [selectedCompanyId, selectedCompany]);
 
   const isNew = selectedCompanyId === null;
 

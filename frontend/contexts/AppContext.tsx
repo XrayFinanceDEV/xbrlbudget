@@ -41,8 +41,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // PraticaProvider is mounted ABOVE AppProvider (see app/layout.tsx), so this
   // is legal. A pratica owns the company selection while it is active — see
   // praticaActiveRef below and the sync effect after loadCompanies.
-  const { pratica } = usePratica();
+  const { pratica, exitPratica } = usePratica();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -84,6 +85,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await getCompanies();
       setCompanies(data);
+      setCompaniesLoaded(true);
 
       // Fix selection if needed (outside of setCompanies callback)
       const currentId = selectedCompanyIdRef.current;
@@ -123,6 +125,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setSelectedCompanyId(pratica.companyId);
     }
   }, [pratica?.companyId]);
+
+  // FINDING 5 (2026-08-08 final review): a pratica pointing at a company that
+  // no longer exists (deleted from another tab, or from /aziende in this one)
+  // must self-clear instead of leaving the stepper and the wizard dead-ending
+  // on every page (spec :264-266). Gated on `companiesLoaded` so the very
+  // first render — before loadCompanies has resolved and `companies` is still
+  // `[]` — never mistakes "not loaded yet" for "deleted".
+  useEffect(() => {
+    if (!companiesLoaded || !pratica || pratica.companyId === null) return;
+    if (!companies.some((c) => c.id === pratica.companyId)) {
+      exitPratica();
+    }
+  }, [companiesLoaded, companies, pratica?.companyId, exitPratica]);
 
   // Reload years for the currently selected company
   const refreshYears = useCallback(async () => {

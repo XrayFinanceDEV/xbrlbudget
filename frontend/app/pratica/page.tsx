@@ -1508,7 +1508,7 @@ interface RettificheTabProps {
   loading: boolean;
   saving: boolean;
   adjustmentsApplied: boolean;
-  onSave: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<void>;
+  onSave: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<boolean>;
   onReset: () => Promise<void>;
   onNext: () => void;
 }
@@ -3003,6 +3003,26 @@ export default function InfraannualePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifica.confirmed, storico.confirmed, storico.exists]);
 
+  // Unica porta verso il Confronto: sia il banner "Conferma e prosegui" sia il
+  // bottone del dialogo Riepilogo (onNext dell'istanza "verifica") passano di
+  // qui, altrimenti si può arrivare al Confronto senza aver mai confermato le
+  // rettifiche. save()/confirm() ora risalgono l'esito: su errore (rete, 500)
+  // non avanziamo e non scriviamo un context che dichiara confermato un
+  // marker mai persistito.
+  const handleConfirmRettifiche = useCallback(async () => {
+    const okVerifica = await verifica.confirm();
+    if (!okVerifica) return;
+    if (storico.exists) {
+      const okStorico = await storico.confirm();
+      if (!okStorico) return;
+    }
+    updatePratica({ rettificheConfirmed: { verifica: true, storico: true } });
+    setActiveTab("comparison");
+    // verifica/storico sono oggetti nuovi a ogni render: dipendere dai singoli
+    // membri usati tiene l'handler stabile senza doverlo ricreare a ogni giro.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifica.confirm, storico.confirm, storico.exists, updatePratica, setActiveTab]);
+
   // Rettifiche sub-tab (storico vs bilancio di verifica). Default to storico;
   // fall back to verifica when there is no historical year to correct.
   const [subTab, setSubTab] = useState<"storico" | "verifica">("storico");
@@ -3958,7 +3978,7 @@ export default function InfraannualePage() {
                 adjustmentsApplied={verifica.applied}
                 onSave={verifica.save}
                 onReset={verifica.reset}
-                onNext={() => setActiveTab("comparison")}
+                onNext={handleConfirmRettifiche}
               />
             ) : (
               <Card>
@@ -3979,16 +3999,7 @@ export default function InfraannualePage() {
               : "Conferma le rettifiche per sbloccare gli step successivi. Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta."}
           </p>
           <Button
-            onClick={async () => {
-              await verifica.confirm();
-              if (storico.exists) await storico.confirm();
-              updatePratica({
-                // Senza scheda storico non c'è nulla da confermare: vale true,
-                // altrimenti il gate resterebbe chiuso per sempre.
-                rettificheConfirmed: { verifica: true, storico: true },
-              });
-              setActiveTab("comparison");
-            }}
+            onClick={handleConfirmRettifiche}
             disabled={verifica.saving || storico.saving || allRettificheConfirmed}
           >
             Conferma e prosegui <ArrowRight className="h-4 w-4 ml-1" />

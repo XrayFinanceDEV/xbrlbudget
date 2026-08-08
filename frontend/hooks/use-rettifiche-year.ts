@@ -17,10 +17,11 @@ export interface RettificheYear {
   exists: boolean;
   /** L'utente ha premuto "Conferma e prosegui" su questo anno. */
   confirmed: boolean;
-  /** Persiste il marker di conferma. Idempotente. */
-  confirm: () => Promise<void>;
+  /** Persiste il marker di conferma. Idempotente. Risolve false se il salvataggio fallisce. */
+  confirm: () => Promise<boolean>;
   load: () => Promise<void>;
-  save: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<void>;
+  /** Risolve false (senza rethrow — errore già mostrato via toast) se il salvataggio fallisce. */
+  save: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<boolean>;
   reset: () => Promise<void>;
   clear: () => void;
 }
@@ -100,8 +101,8 @@ export function useRettificheYear(
   }, [companyId, year, periodMonths, reconcile]);
 
   const save = useCallback(
-    async (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => {
-      if (companyId === null || !data) return;
+    async (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]): Promise<boolean> => {
+      if (companyId === null || !data) return false;
       setSaving(true);
       try {
         const corr = finalCorrections ?? corrections;
@@ -113,8 +114,10 @@ export function useRettificheYear(
         setData(result);
         setApplied(true);
         onSaved();
+        return true;
       } catch (error: unknown) {
         toast.error(getErrorMessage(error, "Errore nel salvataggio"));
+        return false;
       } finally {
         setSaving(false);
       }
@@ -156,15 +159,16 @@ export function useRettificheYear(
     setCorrections({});
     setApplied(false);
     setExists(true);
+    setConfirmed(false);
   }, []);
 
-  const confirm = useCallback(async () => {
-    if (companyId === null || !data) return;
+  const confirm = useCallback(async (): Promise<boolean> => {
+    if (companyId === null || !data) return false;
     const log = data.rettifiche_log ?? [];
     // Idempotente: una seconda conferma non aggiunge una riga né consuma il cap.
     if (log.some((e) => e.entry_type === "confirm")) {
       setConfirmed(true);
-      return;
+      return true;
     }
     const marker: RettificaEntry = {
       id: `confirm-${year}-${periodMonths ?? 12}`,
@@ -177,8 +181,10 @@ export function useRettificheYear(
       counterpart_delta: 0,
       created_at: new Date().toISOString(),
     };
-    await save(undefined, [...log, marker]);
+    const ok = await save(undefined, [...log, marker]);
+    if (!ok) return false;
     setConfirmed(true);
+    return true;
   }, [companyId, data, year, periodMonths, save]);
 
   return { data, corrections, setCorrections, loading, saving, applied, confirmed, exists, load, save, reset, confirm, clear };

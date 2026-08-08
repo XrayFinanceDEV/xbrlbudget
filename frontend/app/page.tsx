@@ -166,8 +166,12 @@ export default function Home() {
   };
 
   // Riprendi una pratica: popola il context, poi apri il posto giusto.
-  // Uno scenario budget legacy non ha una fase ANALISI ricostruibile: si apre
-  // direttamente sul budget, con gli step di analisi disabilitati.
+  // Uno scenario budget legacy non ha una fase ANALISI ricostruibile (nessun
+  // infrannualeScenarioId, quindi nessun rettifiche_log da riaprire): si apre
+  // direttamente sul budget, e lo stepper nasconde del tutto la fase Analisi
+  // invece di mostrarla abilitata-ma-rotta (vedi pratica-steps.ts,
+  // isLegacyBudgetResume). Nota: il gate rettifiche NON si propaga a nessuno
+  // dei 6 step PREVISIONALE per questo percorso — vedi CLAUDE.md.
   const resume = (companyId: number, s: ScenarioSummary) => {
     setSelectedCompanyId(companyId);
     const isInfra = s.scenario_type === "infrannuale";

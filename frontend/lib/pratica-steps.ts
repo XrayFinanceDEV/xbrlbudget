@@ -120,6 +120,22 @@ export function buildPraticaSteps(
     ];
   }
 
+  // A pratica resumed from a LEGACY budget scenario (created before this
+  // refactor, or otherwise never taken through the infrannuale wizard) has
+  // `budgetScenarioId` set but `infrannualeScenarioId` null and stays null —
+  // there is no rettifiche_log / adjustable FinancialYear to rehydrate the
+  // wizard from, so the ANALISI phase can never actually work here (Rettifiche
+  // dead-ends on "Pratica da riaprire"). This is NOT the same state as a brand
+  // new pratica between Anagrafiche and Import, which also has
+  // infrannualeScenarioId === null but budgetScenarioId === null too — those
+  // early steps stay reachable. See FINDING 4, 2026-08-08 final review.
+  const isLegacyBudgetResume =
+    pratica.budgetScenarioId !== null && pratica.infrannualeScenarioId === null;
+
+  if (isLegacyBudgetResume) {
+    return previsionale;
+  }
+
   const isAnnual = pratica.periodMonths === 12;
 
   const analisi: PraticaStep[] = [

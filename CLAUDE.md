@@ -970,12 +970,21 @@ rather than leave them stranded — see the spec's own dated note and
 `gates.forecastReady` (`budgetScenarioId !== null`) except Budget itself, gated on
 `gates.budgetScenario` for the `bilancio` workflow and always enabled for `startup`.
 
-**The Rettifiche gate ANDs `gates.rettificheOk` into every step past Rettifiche**, not only
-Confronto: Proiezione, Indicatori and Stampa in `pratica-steps.ts` all require
-`gates.rettificheOk && …`. An earlier version gated only `comparison`, which meant a scenario
-already created at import time (`infrannualeScenarioId` set) was on its own enough to unlock
-Proiezione/Indicatori/Stampa in the stepper even with rettifiche unconfirmed, or after a
-"Ripristina originale" — fixed in commit `71d3303`. Two sub-tabs (Storico + Bilancio di verifica,
+**The Rettifiche gate ANDs `gates.rettificheOk` into every ANALISI step past Rettifiche** — not,
+as an earlier version of this note claimed, into every step of the pratica: Confronto, Proiezione,
+Indicatori and Stampa in `pratica-steps.ts` all require `gates.rettificheOk && …`. An earlier
+version gated only `comparison`, which meant a scenario already created at import time
+(`infrannualeScenarioId` set) was on its own enough to unlock Proiezione/Indicatori/Stampa in the
+stepper even with rettifiche unconfirmed, or after a "Ripristina originale" — fixed in commit
+`71d3303`. **None of the six PREVISIONALE steps AND `gates.rettificheOk` directly** — they gate on
+`gates.budgetScenario`/`gates.forecastReady` (`budgetScenarioId !== null`) instead. In the
+new-pratica ("bilancio") flow the rettifiche gate still holds transitively, because
+`budgetScenarioId` is only ever set by the promote step, which is reachable only past Rettifiche;
+but a pratica **resumed from a legacy budget scenario** (`budgetScenarioId` set,
+`infrannualeScenarioId` null — no ANALISI phase was ever gone through) has no rettifiche state to
+gate on at all. `pratica-steps.ts`'s `isLegacyBudgetResume` check hides the whole ANALISI phase for
+that case instead of rendering it enabled-but-dead (FINDING 4, 2026-08-08 final review — see
+`app/page.tsx`'s `resume()`). Two sub-tabs (Storico + Bilancio di verifica,
 see the Rettifiche section above) each need their own confirmation: `useRettificheYear` exposes
 `confirmed: boolean` and `confirm(): Promise<boolean>`, backed by a `{ entry_type: "confirm" }`
 marker appended to the same `rettifiche_log` (no migration) — idempotent, excluded from the

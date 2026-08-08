@@ -168,7 +168,7 @@ export default function Home() {
   // (Phase A upgrades this to /pratica/{head}/{step}.)
   const resume = (companyId: number, s: ScenarioSummary) => {
     setSelectedCompanyId(companyId);
-    router.push(s.scenario_type === "infrannuale" ? "/infrannuale" : "/budget");
+    router.push(s.scenario_type === "infrannuale" ? "/pratica" : "/budget");
   };
 
   return (

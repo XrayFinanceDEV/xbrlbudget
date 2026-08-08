@@ -15,9 +15,7 @@ import {
   bulkUpsertAssumptions,
   getIntraYearComparison,
   getScenarioAnalysis,
-  getBudgetScenarios,
   promoteProjection,
-  deleteCompany,
   getInfrannualeAIComments,
   generateInfrannualeAIComments,
   saveInfrannualeAIComments,
@@ -25,7 +23,6 @@ import {
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
 import type {
-  Company,
   BudgetScenario,
   IntraYearComparison,
   IntraYearComparisonItem,
@@ -113,6 +110,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AnagraficheStep } from "@/components/pratica/AnagraficheStep";
 
 const MONTH_LABELS: Record<number, string> = {
   1: "1 mese (31/01)",
@@ -2896,7 +2894,7 @@ export default function InfraannualePage() {
   const { companies, refreshCompanies, setSelectedCompanyId } = useApp();
 
   // Wizard state
-  const { pratica, setAnalysisStep } = usePratica();
+  const { pratica, setAnalysisStep, updatePratica } = usePratica();
   const activeTab = pratica?.analysisStep ?? "anagrafiche";
   const setActiveTab = setAnalysisStep;
 
@@ -3576,165 +3574,19 @@ export default function InfraannualePage() {
     }
   }, [activeTab, analysis, scenario, loadAnalysis]);
 
-  // Also handle resuming an existing infrannuale scenario
-  const handleResumeScenario = async (s: BudgetScenario, comp: Company) => {
-    setImportResult({ companyId: comp.id, companyName: comp.name });
-    setScenario(s);
-    setFiscalYear(s.base_year + 1);
-    setPeriodMonths(s.period_months || 9);
-    setSelectedCompanyId(comp.id);
-    // Clear rettifiche state so it reloads for the new scenario
-    verifica.clear();
-    storico.clear();
-    setSubTab("storico");
-    setComparison(null);
-    setAnalysis(null);
-    setActiveTab("comparison");
-  };
-
-  const handleDeleteCompany = async (id: number, name: string) => {
-    try {
-      await deleteCompany(id);
-      // Immediately remove stale scenarios for this company so the list
-      // doesn't show clickable entries for a deleted company.
-      setExistingScenarios((prev) => prev.filter((e) => e.company.id !== id));
-      await refreshCompanies();
-      if (selectedCompany === id) setSelectedCompany(null);
-      if (importResult?.companyId === id) {
-        // Reset all wizard state tied to the deleted company
-        setImportResult(null);
-        setScenario(null);
-        setComparison(null);
-        setAnalysis(null);
-        setOverrides({});
-        setProjectedBS(null);
-        setMissingRefYear(null);
-        setFile(null);
-        setRefFile(null);
-        setFileResetKey((k) => k + 1);
-        verifica.clear();
-        storico.clear();
-      }
-      toast.success(`"${name}" eliminata`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Errore durante l'eliminazione";
-      toast.error(msg);
-    }
-  };
-
-  // Load existing infrannuale scenarios on mount
-  const [existingScenarios, setExistingScenarios] = useState<
-    Array<{ scenario: BudgetScenario; company: Company }>
-  >([]);
-
-  useEffect(() => {
-    const loadExisting = async () => {
-      const results = await Promise.allSettled(
-        companies.map(async (company) => {
-          const scenarios = await getBudgetScenarios(company.id);
-          return scenarios
-            .filter((s) => s.scenario_type === "infrannuale")
-            .map((scenario) => ({ scenario, company }));
-        })
-      );
-      const allScenarios = results
-        .filter((r): r is PromiseFulfilledResult<Array<{ scenario: BudgetScenario; company: Company }>> => r.status === "fulfilled")
-        .flatMap((r) => r.value);
-      setExistingScenarios(allScenarios);
-    };
-    if (companies.length > 0) {
-      loadExisting();
-    }
-  }, [companies]);
-
   return (
     <>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        {/* STEP 0: AZIENDE */}
-        {activeTab === "aziende" && <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Analisi Infrannuali</CardTitle>
-              <CardDescription>
-                Seleziona un&apos;analisi esistente per riprenderla, oppure importa un nuovo bilancio infrannuale.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {existingScenarios.length > 0 ? (
-                <div className="space-y-2">
-                  {existingScenarios.map(({ scenario: s, company: c }) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer"
-                      onClick={() => handleResumeScenario(s, c)}
-                    >
-                      <div>
-                        <p className="font-medium">{c.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {s.name} - Base: {s.base_year}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Button variant="outline" size="sm" onClick={() => handleResumeScenario(s, c)}>
-                          Riprendi
-                          <ArrowRight className="h-4 w-4 ml-1" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="ghost">
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Elimina azienda</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Eliminare &quot;{c.name}&quot; e tutti i dati associati
-                                (bilanci, scenari, previsioni)? Questa azione non può
-                                essere annullata.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Annulla</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleDeleteCompany(c.id, c.name)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Elimina
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  Nessuna analisi infrannuale presente. Importa un bilancio per iniziare.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-          <div className="flex justify-end">
-            <Button onClick={() => {
-              setImportResult(null);
-              setScenario(null);
-              setComparison(null);
-              verifica.clear();
-              storico.clear();
-              setSubTab("storico");
-              setAnalysis(null);
-              setFile(null);
-              setFileResetKey((k) => k + 1);
+        {/* STEP 0: ANAGRAFICHE */}
+        {activeTab === "anagrafiche" && (
+          <AnagraficheStep
+            onReady={(companyId) => {
+              updatePratica({ companyId });
               setActiveTab("import");
-            }}>
-              Nuova Importazione
-              <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
-          </div>
-        </div>}
+            }}
+          />
+        )}
 
         {/* STEP 1: IMPORT */}
         {activeTab === "import" && <div className="space-y-6">

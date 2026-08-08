@@ -1514,7 +1514,7 @@ interface RettificheTabProps {
   saving: boolean;
   adjustmentsApplied: boolean;
   onSave: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<boolean>;
-  onReset: () => Promise<void>;
+  onReset: () => Promise<boolean>;
   onNext: () => void;
 }
 
@@ -1794,7 +1794,16 @@ function RettificheTab({
     });
   };
 
-  const confirmActiveEdit = () => {
+  // NOTA (task-13, FIX 4): il log/corrections locali si aggiornano SOLO dopo
+  // che onSave ha risolto true. Un save rifiutato dal server (400 — es. la
+  // guardia anti-regressione su Attivo/Passivo, CE↔SP o aggregati/dettagli)
+  // deve lasciare lo stato del form COM'ERA, non farlo sembrare applicato:
+  // il salvataggio ottimistico precedente (setCorrections/setLog PRIMA di
+  // onSave, senza controllarne l'esito) faceva vedere una rettifica "in
+  // giornale" che sul server non esisteva mai. onSave mostra già l'errore
+  // (toast, vedi useRettificheYear.save); qui il proposal resta aperto così
+  // l'utente può ritentare o annullare invece di scoprirlo dopo.
+  const confirmActiveEdit = async () => {
     if (!activeProposal) return;
     const p = activeProposal;
     // Correggi Import: single-entry, no counterpart required
@@ -1818,11 +1827,12 @@ function RettificheTab({
         toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
         return;
       }
+      const ok = await onSave(final, newLog);
+      if (!ok) return;
       setCorrections(final);
       setLog(newLog);
       setPendingEdits((prev) => { const u = { ...prev }; delete u[p.editedField]; return u; });
       setActiveProposal(null);
-      onSave(final, newLog);
       return;
     }
     if (!p.counterpartField) {
@@ -1866,11 +1876,12 @@ function RettificheTab({
       toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
       return;
     }
+    const ok = await onSave(final, newLog);
+    if (!ok) return;
     setCorrections(final);
     setLog(newLog);
     setPendingEdits((prev) => { const u = { ...prev }; delete u[p.editedField]; return u; });
     setActiveProposal(null);
-    onSave(final, newLog);
   };
 
   const cancelActiveEdit = () => {
@@ -1881,7 +1892,9 @@ function RettificheTab({
   };
 
   // Delete one log entry: reverse its deltas in corrections, remove from log, persist.
-  const deleteLogEntry = (entryId: string) => {
+  // Same rollback discipline as confirmActiveEdit: commit locally only once
+  // the server has actually accepted the reversal.
+  const deleteLogEntry = async (entryId: string) => {
     const entry = log.find((e) => e.id === entryId);
     if (!entry) return;
     const updated = { ...corrections };
@@ -1889,9 +1902,10 @@ function RettificheTab({
     updated[entry.counterpart_field] = (updated[entry.counterpart_field] ?? original[entry.counterpart_field] ?? 0) - entry.counterpart_delta;
     const final = recalcAggregates(updated);
     const newLog = log.filter((e) => e.id !== entryId);
+    const ok = await onSave(final, newLog);
+    if (!ok) return;
     setCorrections(final);
     setLog(newLog);
-    onSave(final, newLog);
   };
 
   // Compute totals
@@ -2603,11 +2617,14 @@ function RettificheTab({
           })()}
 
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={cancelActiveEdit}>
+            <Button variant="outline" onClick={cancelActiveEdit} disabled={saving}>
               Annulla
             </Button>
-            <Button onClick={confirmActiveEdit} disabled={activeProposal?.mode !== "correggi_import" && !activeProposal?.counterpartField}>
-              <Check className="h-4 w-4 mr-1.5" />
+            <Button
+              onClick={confirmActiveEdit}
+              disabled={saving || (activeProposal?.mode !== "correggi_import" && !activeProposal?.counterpartField)}
+            >
+              {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
               {activeProposal?.mode === "correggi_import" ? "Applica correzione" : activeProposal?.mode === "riclassifica" ? "Registra riclassifica" : "Registra rettifica"}
             </Button>
           </DialogFooter>

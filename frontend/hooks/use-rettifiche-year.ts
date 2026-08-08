@@ -22,7 +22,8 @@ export interface RettificheYear {
   load: () => Promise<void>;
   /** Risolve false (senza rethrow — errore già mostrato via toast) se il salvataggio fallisce. */
   save: (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]) => Promise<boolean>;
-  reset: () => Promise<void>;
+  /** Risolve false (senza rethrow — errore già mostrato via toast) se il ripristino fallisce. */
+  reset: () => Promise<boolean>;
   clear: () => void;
 }
 
@@ -125,8 +126,8 @@ export function useRettificheYear(
     [companyId, year, periodMonths, data, corrections, onSaved],
   );
 
-  const reset = useCallback(async () => {
-    if (companyId === null || !data?.original_balance_sheet || !data?.original_income_statement) return;
+  const reset = useCallback(async (): Promise<boolean> => {
+    if (companyId === null || !data?.original_balance_sheet || !data?.original_income_statement) return false;
     setSaving(true);
     try {
       const result = await saveAdjustments(
@@ -147,8 +148,19 @@ export function useRettificheYear(
       setConfirmed(false);
       onSaved();
       toast.success("Rettifiche annullate — ripristinati i valori originali");
-    } catch {
-      toast.error("Errore nel ripristino");
+      return true;
+    } catch (error: unknown) {
+      // Il ripristino manda al server i valori GREZZI dell'import (prima di
+      // reconcileSubfields), che a loro volta possono presentare uno scarto
+      // aggregati/dettagli maggiore di quello dello stato attuale già
+      // riconciliato — la guardia anti-regressione del server rifiuta
+      // legittimamente in quel caso (400). Qui NON tocchiamo data/corrections
+      // /applied/confirmed: il ripristino non è avvenuto, quindi lo stato
+      // (e il gate a valle, vedi rettificheConfirmed) deve restare quello di
+      // prima — nessun rollback locale necessario perché niente è stato
+      // applicato in ottimistico.
+      toast.error(getErrorMessage(error, "Errore nel ripristino"));
+      return false;
     } finally {
       setSaving(false);
     }

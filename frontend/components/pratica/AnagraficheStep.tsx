@@ -170,7 +170,15 @@ export function AnagraficheStep({ onReady }: { onReady: (companyId: number) => v
           </div>
         </div>
         <div className="flex justify-end">
-          <Button onClick={handleSave} disabled={saving}>
+          <Button
+            onClick={handleSave}
+            // In EDIT mode (praticaCompanyId set) the form must not be
+            // submittable until the seed effect above has landed — otherwise
+            // a click in that window sends sector=1 (the still-default local
+            // state) and silently resets the company's Altman/FGPMI sector
+            // (FINDING 6, 2026-08-08 final review).
+            disabled={saving || (praticaCompanyId !== null && seededFor.current !== praticaCompanyId)}
+          >
             {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
             Salva e prosegui <ArrowRight className="h-4 w-4 ml-1" />
           </Button>

@@ -50,6 +50,10 @@ export function Navigation() {
   // La home "Aziende & Pratiche" è una pagina intera, quindi la nav resta.
   // Dentro una pratica comanda lo stepper: mai due barre insieme.
   if (pratica && pathname !== "/") return <PraticaStepper />;
+  // Finché /infrannuale ospita il wizard con la sua barra interna, la nav
+  // piatta va soppressa lì. Diventa un no-op quando quella rotta sarà un
+  // semplice redirect verso /pratica.
+  if (pathname.startsWith("/infrannuale")) return null;
 
   // Startup mode: a startup has no historical bilancio to import, so the
   // Aziende tab is hidden.

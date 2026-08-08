@@ -13,6 +13,8 @@ import { buildPraticaSteps, type PraticaGates, type PraticaStep } from "@/lib/pr
  */
 function currentStepId(pathname: string, analysisStep: string): string {
   if (pathname.startsWith("/pratica")) return analysisStep;
+  if (pathname.startsWith("/forecast/balance")) return "sp-previsionale";
+  if (pathname.startsWith("/forecast/reclassified")) return "riclassificato";
   if (pathname.startsWith("/forecast")) return "ce-previsionale";
   if (pathname.startsWith("/cashflow")) return "rendiconto";
   if (pathname.startsWith("/report")) return "report";

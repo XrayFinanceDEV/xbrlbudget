@@ -73,6 +73,22 @@ export function buildPraticaSteps(
       enabled: gates.forecastReady,
     },
     {
+      id: "sp-previsionale",
+      label: "SP Prev.",
+      phase: "previsionale",
+      kind: "route",
+      route: "/forecast/balance",
+      enabled: gates.forecastReady,
+    },
+    {
+      id: "riclassificato",
+      label: "Riclassificato",
+      phase: "previsionale",
+      kind: "route",
+      route: "/forecast/reclassified",
+      enabled: gates.forecastReady,
+    },
+    {
       id: "rendiconto",
       label: "Rendiconto",
       phase: "previsionale",

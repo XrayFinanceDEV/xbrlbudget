@@ -135,16 +135,27 @@ export function buildPraticaSteps(
             label: "Proiezione",
             phase: "analisi" as const,
             kind: "tab" as const,
-            enabled: gates.comparisonReady,
+            // Le rettifiche sono un prerequisito di tutto ciò che segue Confronto,
+            // non solo di Confronto: senza questa AND uno scenario già creato
+            // (infrannualeScenarioId valorizzato all'import) basterebbe da solo a
+            // sbloccare Proiezione/Indicatori/Stampa anche a rettifiche non
+            // confermate (o dopo un "Ripristina originale").
+            enabled: gates.rettificheOk && gates.comparisonReady,
           },
         ]),
-    { id: "results", label: "Indicatori", phase: "analisi", kind: "tab", enabled: gates.comparisonReady },
+    {
+      id: "results",
+      label: "Indicatori",
+      phase: "analisi",
+      kind: "tab",
+      enabled: gates.rettificheOk && gates.comparisonReady,
+    },
     {
       id: "stampa",
       label: "Stampa",
       phase: "analisi",
       kind: "tab",
-      enabled: isAnnual ? gates.comparisonReady : gates.projectionReady,
+      enabled: gates.rettificheOk && (isAnnual ? gates.comparisonReady : gates.projectionReady),
     },
   ];
 

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/contexts/AppContext";
+import { usePratica } from "@/contexts/PraticaContext";
+import { PraticaStepper } from "@/components/PraticaStepper";
 import {
   Building2,
-  Upload,
   FileSpreadsheet,
   TrendingUp,
   BarChart3,
@@ -25,7 +26,6 @@ import {
 
 const MAIN_TABS = [
   { href: "/", label: "Aziende & Pratiche", icon: Building2, match: (path: string) => path === "/" || path.startsWith("/aziende") },
-  { href: "/import", label: "Importazione", icon: Upload, match: (path: string) => path.startsWith("/import") },
   { href: "/budget", label: "Scenari", icon: FileSpreadsheet, match: (path: string) => path.startsWith("/budget") },
 ];
 
@@ -44,16 +44,17 @@ const ANALYSIS_TABS = [
 export function Navigation() {
   const pathname = usePathname();
   const { startupMode } = useApp();
+  const { pratica } = usePratica();
   const isForecastActive = pathname.startsWith("/forecast");
 
-  // The home "Aziende & Pratiche" is now a full page, so the nav shows there.
-  // Infrannuale keeps its own wizard nav (until Phase A retires it).
-  if (pathname.startsWith("/infrannuale")) return null;
+  // La home "Aziende & Pratiche" è una pagina intera, quindi la nav resta.
+  // Dentro una pratica comanda lo stepper: mai due barre insieme.
+  if (pratica && pathname !== "/") return <PraticaStepper />;
 
   // Startup mode: a startup has no historical bilancio to import, so the
-  // Aziende and Importazione tabs are hidden.
+  // Aziende tab is hidden.
   const mainTabs = startupMode
-    ? MAIN_TABS.filter((tab) => tab.href !== "/" && tab.href !== "/import")
+    ? MAIN_TABS.filter((tab) => tab.href !== "/")
     : MAIN_TABS;
 
   return (

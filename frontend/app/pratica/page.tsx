@@ -10,8 +10,10 @@ import {
   importPDF,
   importOCR,
   getCompanies,
+  getCompany,
   getCompanyYears,
   createBudgetScenario,
+  getBudgetScenario,
   getBudgetScenarios,
   bulkUpsertAssumptions,
   getIntraYearComparison,
@@ -46,6 +48,7 @@ import {
   TrendingDown,
   RotateCcw,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -111,6 +114,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { AnagraficheStep } from "@/components/pratica/AnagraficheStep";
 
 const MONTH_LABELS: Record<number, string> = {
@@ -3067,6 +3071,91 @@ export default function InfraannualePage() {
     }
   }, [companies, selectedCompany]);
 
+  // Preseleziona l'azienda già stabilita in Anagrafiche: senza questo il
+  // picker dell'Import riparte da "Nuova azienda" con nome vuoto e invita a
+  // crearne un duplicato. Tenuto sullo scalare pratica?.companyId (mai
+  // sull'oggetto pratica) e SENZA dipendere da selectedCompany, così vince
+  // sempre sull'effetto "auto-seleziona la prima azienda" qui sopra
+  // indipendentemente dall'ordine di flush, e non riparte più dopo — il
+  // picker resta comunque modificabile dall'utente.
+  useEffect(() => {
+    if (pratica?.companyId != null) {
+      setCompanyMode("existing");
+      setSelectedCompany(pratica.companyId);
+    }
+  }, [pratica?.companyId]);
+
+  // Riidratazione dopo refresh (F5). Il progresso del wizard vive in useState
+  // locali (importResult, scenario, fiscalYear, periodMonths, …) che NON
+  // sopravvivono a un refresh, mentre il context (persistito in localStorage)
+  // sì. Senza questo effetto, dopo F5 lo stepper mostra uno step avanzato
+  // (es. "comparison") ma loadComparison/loadAnalysis restano fermi al loro
+  // guard `!importResult || !scenario` — pagina bianca, nessun errore.
+  //
+  // Riidratazione fedele: recupera scenario + azienda dal server e ripopola i
+  // 4 stati locali; gli effetti già esistenti (auto-load Rettifiche, auto-load
+  // Confronto, auto-load Analisi) fanno il resto da soli quando vedono
+  // importResult/scenario valorizzati. Se il context non ha abbastanza dati
+  // (companyId/infrannualeScenarioId mancanti) o la fetch fallisce, fallback
+  // onesto: si torna allo step Import e si spiega perché — mai una pagina
+  // bianca.
+  //
+  // Guardia con useRef (non solo scalari in dep-array): l'effetto deve
+  // tentare la riidratazione ESATTAMENTE una volta, altrimenti un secondo
+  // tentativo potrebbe partire mentre il primo è ancora in corso (dipende da
+  // pratica?.analysisStep, che può cambiare per altri motivi nel frattempo).
+  const rehydrationAttempted = useRef(false);
+  const [rehydrationFailed, setRehydrationFailed] = useState(false);
+  useEffect(() => {
+    if (rehydrationAttempted.current) return;
+    if (!pratica) return; // context non ancora letto da localStorage
+    if (pratica.workflow !== "bilancio") return;
+    if (importResult) return; // stato locale già presente, nessun refresh da recuperare
+
+    const pastImport = pratica.analysisStep !== "anagrafiche" && pratica.analysisStep !== "import";
+    if (!pastImport) return;
+
+    if (pratica.companyId == null || pratica.infrannualeScenarioId == null) {
+      rehydrationAttempted.current = true;
+      setRehydrationFailed(true);
+      setActiveTab("import");
+      return;
+    }
+
+    rehydrationAttempted.current = true;
+    const companyId = pratica.companyId;
+    const infrannualeScenarioId = pratica.infrannualeScenarioId;
+    (async () => {
+      try {
+        const [company, scenarioData] = await Promise.all([
+          getCompany(companyId),
+          getBudgetScenario(companyId, infrannualeScenarioId),
+        ]);
+        setScenario(scenarioData);
+        setImportResult({ companyId, companyName: company.name });
+        setFiscalYear(pratica.fiscalYear ?? scenarioData.base_year + 1);
+        setPeriodMonths(pratica.periodMonths ?? scenarioData.period_months ?? 12);
+      } catch {
+        setRehydrationFailed(true);
+        setActiveTab("import");
+      }
+    })();
+    // Deliberatamente sugli scalari, non sull'oggetto pratica: l'effetto deve
+    // tentare la riidratazione una volta sola (vedi rehydrationAttempted),
+    // dipendere dall'oggetto lo rifarebbe scattare a ogni updatePratica
+    // successivo (es. il salvataggio del rettificheConfirmed poco sopra).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pratica?.workflow,
+    pratica?.companyId,
+    pratica?.infrannualeScenarioId,
+    pratica?.analysisStep,
+    pratica?.fiscalYear,
+    pratica?.periodMonths,
+    importResult,
+    setActiveTab,
+  ]);
+
   // Helper: create scenario and advance to comparison step
   const createScenarioAndAdvance = async (
     companyId: number,
@@ -3097,6 +3186,17 @@ export default function InfraannualePage() {
       detailLevel: ocrMetadata?.detailLevel ?? previous?.detailLevel,
       sourceDetailFields: ocrMetadata?.sourceDetailFields ?? previous?.sourceDetailFields,
     }));
+    // Senza questo lo stepper non sblocca mai Confronto/Proiezione: i suoi gate
+    // leggono infrannualeScenarioId dal context, non dallo state locale del
+    // wizard. periodMonths va scritto per intero (anche 12) — pratica-steps.ts
+    // usa il valore letterale per nascondere lo step Proiezione sul bilancio
+    // annuale; normalizzarlo a undefined (come fa l'hook rettifiche) rompe quel confronto.
+    updatePratica({
+      companyId,
+      fiscalYear,
+      periodMonths,
+      infrannualeScenarioId: scenarioData.id,
+    });
     toast.success(`Importazione completata: ${companyName}`);
     setActiveTab("rettifiche");
   };
@@ -3622,6 +3722,18 @@ export default function InfraannualePage() {
   return (
     <>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {rehydrationFailed && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Pratica da riaprire</AlertTitle>
+            <AlertDescription>
+              Il progresso di questa pratica non è stato ritrovato dopo l&apos;aggiornamento
+              della pagina. Riparti dall&apos;importazione oppure riapri la pratica dalla
+              home.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* STEP 0: ANAGRAFICHE */}
         {activeTab === "anagrafiche" && (

@@ -95,7 +95,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
 export default function BudgetPage() {
   const router = useRouter();
   const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
-  const { pratica } = usePratica();
+  const { pratica, updatePratica } = usePratica();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -173,6 +173,9 @@ export default function BudgetPage() {
         />
         <StartupSetup
           onCreated={(sc) => {
+            // Senza questo lo stepper del percorso non sblocca mai gli step
+            // PREVISIONALE: il context non sa ancora che uno scenario esiste.
+            updatePratica({ companyId: sc.company_id, budgetScenarioId: sc.id });
             setEditingScenario(sc);
             setActiveTab("ipotesi");
           }}

@@ -205,6 +205,10 @@ export default function Home() {
           <Card className="cursor-pointer transition-colors hover:border-primary/50"
             onClick={() => {
               setStartupMode(false);
+              // Riparte da una selezione pulita: senza questo l'auto-selezione di
+              // AppContext (companies[0]) fa aprire Anagrafiche come EDIT di
+              // un'azienda a caso invece che come nuova pratica.
+              setSelectedCompanyId(null);
               // companyId resta null: l'azienda si sceglie o si crea nello step Anagrafiche.
               startPratica({ workflow: "bilancio", companyId: null, analysisStep: "anagrafiche" });
               router.push("/pratica");

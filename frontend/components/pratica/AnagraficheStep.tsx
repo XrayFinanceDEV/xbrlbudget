@@ -145,7 +145,11 @@ export function AnagraficheStep({ onReady }: { onReady: (companyId: number) => v
     label: "Salva e prosegui",
     onClick: handleSave,
     disabled: saving || notSeeded,
-    reason: notSeeded ? "Caricamento dati azienda in corso" : null,
+    reason: saving
+      ? "Salvataggio in corso"
+      : notSeeded
+      ? "Caricamento dati azienda in corso"
+      : null,
   });
 
   return (

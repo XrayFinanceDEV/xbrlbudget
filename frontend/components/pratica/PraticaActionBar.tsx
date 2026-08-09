@@ -8,7 +8,6 @@ import { usePraticaAction } from "@/contexts/PraticaActionContext";
 import {
   buildPraticaSteps,
   currentStepId,
-  firstEnabledStep,
   gateReason,
   nextStep,
   praticaGates,
@@ -26,7 +25,7 @@ export function PraticaActionBar() {
 
   const gates = praticaGates(pratica);
   const steps = buildPraticaSteps(pratica, gates);
-  const currentId = currentStepId(pathname, pratica.analysisStep);
+  const currentId = currentStepId(pathname, pratica.analysisStep, pratica);
   const current = steps.find((s) => s.id === currentId) ?? null;
 
   const go = (step: PraticaStep) => {
@@ -42,18 +41,25 @@ export function PraticaActionBar() {
   const back = prevStep(steps, currentId);
   const next = nextStep(steps, currentId);
 
-  // Cosa mostra il bottone primario, in ordine di precedenza.
-  let label: string;
+  // Cosa mostra il bottone primario, in ordine di precedenza. `null` = nessun
+  // primario (rotta non mappata, nessuna azione registrata): restano solo
+  // Indietro e lo stepper.
+  let label: string | null;
   let disabled: boolean;
   let reason: string | null;
   let run: () => void;
 
-  const rescue = current && !current.enabled ? firstEnabledStep(steps, current.phase) : null;
+  // Cerca sull'INTERO percorso, non nella sola fase corrente: un "Ripristina
+  // originale" azzera rettificheOk, che è in AND su tutti e quattro gli step
+  // della fase ANALISI, quindi la fase intera risulta bloccata e un rescue
+  // ristretto alla fase non troverebbe mai nulla.
+  const rescue = current && !current.enabled ? steps.find((s) => s.enabled) ?? null : null;
 
   if (rescue) {
     // Lo step corrente non è (più) raggiungibile: può succedere rientrando su
     // un analysisStep persistito dopo un "Ripristina originale". Non si propone
-    // un avanzamento da uno step morto, si torna indietro.
+    // un avanzamento da uno step morto, si torna al primo step abilitato del
+    // percorso.
     label = `Torna a ${rescue.label}`;
     disabled = false;
     reason = "Questo passaggio non è più disponibile";
@@ -68,7 +74,12 @@ export function PraticaActionBar() {
     disabled = !next.enabled;
     reason = gateReason(next, gates, pratica);
     run = () => go(next);
-  } else {
+  } else if (current !== null) {
+    // Solo qui siamo davvero sull'ultimo step del percorso: current e next
+    // esistono entrambi e non c'è altro dopo. Se `current` è null (rotta non
+    // mappata, es. /import dentro una pratica) non mostriamo alcun primario:
+    // "Chiudi la pratica" come default accidentale su una rotta ignota
+    // sarebbe un'azione distruttiva non richiesta.
     label = "Chiudi la pratica";
     disabled = false;
     reason = null;
@@ -76,6 +87,13 @@ export function PraticaActionBar() {
       exitPratica();
       router.push("/");
     };
+  } else {
+    // `current` è null: rotta non riconosciuta da currentStepId (es. /import
+    // dentro una pratica). Nessun primario da proporre.
+    label = null;
+    disabled = true;
+    reason = null;
+    run = () => {};
   }
 
   return (
@@ -95,11 +113,15 @@ export function PraticaActionBar() {
         {/* Non `disabled && reason`: nel ramo rescue il bottone è ABILITATO e
             il motivo è l'unica cosa che spiega perché sei stato dirottato. Chi
             registra un'azione mette `reason` non nullo solo quando disabilita. */}
-        {reason && <p className="truncate text-sm text-muted-foreground">{reason}</p>}
-        <Button onClick={run} disabled={disabled}>
-          {label}
-          <ArrowRight className="h-4 w-4 ml-2" />
-        </Button>
+        {label !== null && (
+          <>
+            {reason && <p className="truncate text-sm text-muted-foreground">{reason}</p>}
+            <Button onClick={run} disabled={disabled}>
+              {label}
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

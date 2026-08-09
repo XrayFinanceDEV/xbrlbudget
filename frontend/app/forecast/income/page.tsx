@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
+import { usePratica } from "@/contexts/PraticaContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import { patchCeOverrides } from "@/lib/api";
@@ -100,6 +101,7 @@ type PendingEdits = Record<string, number | null>;
 
 export default function ForecastIncomePage() {
   const router = useRouter();
+  const { pratica } = usePratica();
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
@@ -164,15 +166,21 @@ export default function ForecastIncomePage() {
       await patchCeOverrides(selectedCompanyId, selectedScenario.id, overrides);
       setPendingEdits({});
       invalidateAnalysis(selectedCompanyId, selectedScenario.id);
-      toast.success("Previsionale aggiornato", {
-        action: { label: "Vai al Rendiconto", onClick: () => router.push("/cashflow") },
-      });
+      // Dentro una pratica il "Vai al Rendiconto" duplicherebbe il fallback
+      // della barra azioni ("Avanti: ..."): l'azione del toast resta solo
+      // fuori da una pratica, dove la barra non esiste.
+      toast.success(
+        "Previsionale aggiornato",
+        pratica
+          ? undefined
+          : { action: { label: "Vai al Rendiconto", onClick: () => router.push("/cashflow") } },
+      );
     } catch (err: any) {
       toast.error("Errore: " + getErrorMessage(err, "aggiornamento previsionale fallito"));
     } finally {
       setSaving(false);
     }
-  }, [selectedCompanyId, selectedScenario, pendingEdits, hasPendingEdits, invalidateAnalysis]);
+  }, [selectedCompanyId, selectedScenario, pendingEdits, hasPendingEdits, invalidateAnalysis, pratica, router]);
 
   if (!selectedCompanyId) {
     return (

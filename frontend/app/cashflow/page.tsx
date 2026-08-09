@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
+import { usePratica } from "@/contexts/PraticaContext";
 import { useScenarios, useDetailedCashflow, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ import type { MultiYearDetailedCashFlow, DetailedCashFlowStatement } from "@/typ
 
 export default function CashflowPage() {
   const router = useRouter();
+  const { pratica } = usePratica();
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [] } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
@@ -209,11 +211,13 @@ export default function CashflowPage() {
         icon={<Wallet className="h-6 w-6" />}
       />
 
-      <div className="flex justify-end mb-4">
-        <Button variant="outline" size="sm" onClick={() => router.push("/report")}>
-          Vai al Report <ArrowRight className="h-4 w-4" />
-        </Button>
-      </div>
+      {!pratica && (
+        <div className="flex justify-end mb-4">
+          <Button variant="outline" size="sm" onClick={() => router.push("/report")}>
+            Vai al Report <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Scenario Selector */}
       {scenarios.length > 0 && (

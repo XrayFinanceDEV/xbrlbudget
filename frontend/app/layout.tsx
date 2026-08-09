@@ -4,6 +4,8 @@ import { QueryProvider } from "@/components/providers";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { PraticaProvider } from "@/contexts/PraticaContext";
 import { AppProvider } from "@/contexts/AppContext";
+import { PraticaActionProvider } from "@/contexts/PraticaActionContext";
+import { PraticaActionBar } from "@/components/pratica/PraticaActionBar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Navigation } from "@/components/Navigation";
 import { AppHeader } from "@/components/AppHeader";
@@ -32,6 +34,7 @@ export default function RootLayout({
           <AuthProvider>
           <PraticaProvider>
           <AppProvider>
+          <PraticaActionProvider>
             <div className="min-h-screen flex flex-col bg-background print:bg-white">
               {/* Header */}
               <div className="print:hidden">
@@ -47,10 +50,14 @@ export default function RootLayout({
               <main className="flex-1">
                 {children}
               </main>
+
+              {/* Barra azioni della pratica (null fuori da una pratica) */}
+              <PraticaActionBar />
             </div>
             <div className="print:hidden">
               <Toaster />
             </div>
+          </PraticaActionProvider>
           </AppProvider>
           </PraticaProvider>
           </AuthProvider>

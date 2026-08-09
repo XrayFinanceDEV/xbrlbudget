@@ -1,51 +1,44 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { Check, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
-import { buildPraticaSteps, type PraticaGates, type PraticaStep } from "@/lib/pratica-steps";
-
-/**
- * Quale step è attivo, dedotto dalla rotta corrente (fase PREVISIONALE) o
- * dalla tab del wizard (fase ANALISI).
- */
-function currentStepId(pathname: string, analysisStep: string): string {
-  if (pathname.startsWith("/pratica")) return analysisStep;
-  if (pathname.startsWith("/forecast/balance")) return "sp-previsionale";
-  if (pathname.startsWith("/forecast/reclassified")) return "riclassificato";
-  if (pathname.startsWith("/forecast")) return "ce-previsionale";
-  if (pathname.startsWith("/cashflow")) return "rendiconto";
-  if (pathname.startsWith("/report")) return "report";
-  if (pathname.startsWith("/budget")) return "budget";
-  return "";
-}
+import {
+  buildPraticaSteps,
+  currentStepId,
+  firstEnabledStep,
+  gateReason,
+  phaseStatus,
+  praticaGates,
+  PHASE_LABELS,
+  PHASE_ORDER,
+  type PraticaPhase,
+  type PraticaStep,
+} from "@/lib/pratica-steps";
 
 export function PraticaStepper() {
   const pathname = usePathname();
   const router = useRouter();
+  const { companies } = useApp();
   const { pratica, setAnalysisStep, exitPratica } = usePratica();
 
   // La home è la pagina di uscita: là comanda la nav normale.
   if (!pratica || pathname === "/") return null;
 
-  // I gate derivano da ciò che è già stato raggiunto e persistito nel context.
-  // Il wizard li affina in locale; qui bastano per decidere cosa è cliccabile.
-  const gates: PraticaGates = {
-    imported: pratica.fiscalYear !== null,
-    // storico è true anche quando la scheda storico non esiste (import senza anno
-    // di raffronto): è il wizard a scriverlo così, vedi Task 7 Step 4.
-    rettificheOk:
-      pratica.rettificheConfirmed.verifica && pratica.rettificheConfirmed.storico,
-    comparisonReady: pratica.infrannualeScenarioId !== null,
-    projectionReady: pratica.infrannualeScenarioId !== null,
-    budgetScenario: pratica.budgetScenarioId !== null,
-    forecastReady: pratica.budgetScenarioId !== null,
-  };
-
+  const gates = praticaGates(pratica);
   const steps = buildPraticaSteps(pratica, gates);
   const active = currentStepId(pathname, pratica.analysisStep);
+  const activePhase: PraticaPhase =
+    steps.find((s) => s.id === active)?.phase ?? steps[0]?.phase ?? "dati";
 
   const go = (step: PraticaStep) => {
     if (!step.enabled) return;
@@ -57,58 +50,151 @@ export function PraticaStepper() {
     if (step.route) router.push(step.route);
   };
 
-  const phases: Array<{ key: "analisi" | "previsionale"; label: string }> = [
-    { key: "analisi", label: "Analisi" },
-    { key: "previsionale", label: "Previsionale" },
-  ];
+  const company = companies.find((c) => c.id === pratica.companyId);
+  const periodo =
+    pratica.fiscalYear === null
+      ? null
+      : pratica.periodMonths !== null && pratica.periodMonths < 12
+      ? `Bil. di verifica ${pratica.periodMonths}M ${pratica.fiscalYear}`
+      : `Bilancio ${pratica.fiscalYear}`;
+
+  const phaseSteps = steps.filter((s) => s.phase === activePhase);
+  const azioni = phaseSteps.filter((s) => s.group === "azione");
+  const viste = phaseSteps.filter((s) => s.group === "vista");
 
   return (
-    <div className="border-b border-border bg-background print:hidden">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <nav className="flex items-center gap-1 overflow-x-auto" aria-label="Percorso pratica">
-          {phases.map((phase, phaseIdx) => {
-            const phaseSteps = steps.filter((s) => s.phase === phase.key);
-            if (phaseSteps.length === 0) return null;
-            return (
-              <div key={phase.key} className="flex items-center gap-1">
-                {phaseIdx > 0 && <div className="mx-2 h-6 w-px shrink-0 bg-border" />}
-                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {phase.label}
-                </span>
-                {phaseSteps.map((step) => (
-                  <button
-                    key={step.id}
-                    onClick={() => go(step)}
-                    disabled={!step.enabled}
+    <TooltipProvider delayDuration={200}>
+      <div className="border-b border-border bg-background print:hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Riga 1: identità della pratica, fasi, uscita */}
+          <div className="flex items-center gap-4 py-2">
+            <div className="min-w-0 shrink">
+              <p className="truncate text-sm font-semibold text-foreground">
+                {company?.name ?? "Nuova pratica"}
+              </p>
+              {periodo && (
+                <p className="truncate text-xs text-muted-foreground">{periodo}</p>
+              )}
+            </div>
+
+            <nav className="flex items-center gap-1 overflow-x-auto" aria-label="Fasi della pratica">
+              {PHASE_ORDER.map((phase, i) => {
+                const own = steps.filter((s) => s.phase === phase);
+                if (own.length === 0) return null;
+                const status = phaseStatus(steps, phase, active);
+                const target = firstEnabledStep(steps, phase);
+                const locked = status === "locked" || target === null;
+                const reason = locked && own[0] ? gateReason(own[0], gates, pratica) : null;
+
+                const chip = (
+                  <Button
+                    variant={status === "active" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => target && go(target)}
+                    disabled={locked}
+                    aria-current={status === "active" ? "step" : undefined}
                     className={cn(
-                      "flex items-center gap-1.5 whitespace-nowrap px-3 py-3 text-sm font-medium border-b-2 transition-colors",
-                      active === step.id
-                        ? "border-primary text-foreground"
-                        : step.enabled
-                        ? "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-                        : "border-transparent text-muted-foreground/40 cursor-not-allowed",
+                      "h-7 shrink-0 gap-1.5 rounded-full px-3 text-xs font-semibold uppercase tracking-wide",
+                      status === "done" && "text-foreground",
+                      status === "todo" && "text-muted-foreground",
+                      locked && "text-muted-foreground",
                     )}
                   >
-                    {step.label}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-          <span className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0 text-muted-foreground"
-            onClick={() => {
-              exitPratica();
-              router.push("/");
-            }}
+                    {status === "done" ? (
+                      <Check className="h-3 w-3" />
+                    ) : (
+                      <span
+                        className={cn(
+                          "h-2 w-2 rounded-full border",
+                          status === "active"
+                            ? "border-primary-foreground bg-primary-foreground"
+                            : "border-current",
+                        )}
+                      />
+                    )}
+                    {i + 1} {PHASE_LABELS[phase]}
+                  </Button>
+                );
+
+                return (
+                  <div key={phase} className="flex items-center gap-1">
+                    {i > 0 && <span className="h-px w-4 shrink-0 bg-border" />}
+                    {reason ? (
+                      <Tooltip>
+                        {/* span: un button disabilitato non emette eventi puntatore */}
+                        <TooltipTrigger asChild><span>{chip}</span></TooltipTrigger>
+                        <TooltipContent>{reason}</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      chip
+                    )}
+                  </div>
+                );
+              })}
+            </nav>
+
+            <span className="flex-1" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-muted-foreground"
+              onClick={() => {
+                exitPratica();
+                router.push("/");
+              }}
+            >
+              <LogOut className="h-4 w-4 mr-1" /> Esci dalla pratica
+            </Button>
+          </div>
+
+          {/* Riga 2: gli step della sola fase attiva, azioni ┊ viste */}
+          <nav
+            className="flex items-center gap-1 overflow-x-auto"
+            aria-label={`Passaggi: ${PHASE_LABELS[activePhase]}`}
           >
-            <LogOut className="h-4 w-4 mr-1" /> Esci dalla pratica
-          </Button>
-        </nav>
+            {azioni.map((step) => (
+              <StepTab key={step.id} step={step} active={active === step.id} onClick={() => go(step)} />
+            ))}
+            {azioni.length > 0 && viste.length > 0 && (
+              <span className="mx-2 h-5 w-px shrink-0 bg-border" aria-hidden />
+            )}
+            {viste.map((step) => (
+              <StepTab key={step.id} step={step} active={active === step.id} onClick={() => go(step)} />
+            ))}
+          </nav>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
+  );
+}
+
+function StepTab({
+  step,
+  active,
+  onClick,
+}: {
+  step: PraticaStep;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    // shadcn Button con override: la resa "tab" (bordo inferiore, nessuno
+    // sfondo) non è una variante nativa, ma il vincolo di progetto vieta un
+    // <button> grezzo. `disabled:opacity-50` del Button fa da sé il grigio
+    // degli step non ancora raggiungibili.
+    <Button
+      variant="ghost"
+      onClick={onClick}
+      disabled={!step.enabled}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "h-auto whitespace-nowrap rounded-none border-b-2 px-3 py-2.5 text-sm font-medium hover:bg-transparent",
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+      )}
+    >
+      {step.label}
+    </Button>
   );
 }

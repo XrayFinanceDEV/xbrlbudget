@@ -145,8 +145,8 @@ export default function BudgetPage() {
     setEditingScenario(null);
     setActiveTab("list");
     if (selectedCompanyId) invalidateScenarios(selectedCompanyId);
-    toast.success("Vai al CE Previsionale per rifinire le voci", {
-      action: { label: "CE Previsionale", onClick: () => router.push("/forecast/income") },
+    toast.success("Vai agli Indici per verificare il risultato", {
+      action: { label: "Indici", onClick: () => router.push("/analysis") },
     });
   };
 

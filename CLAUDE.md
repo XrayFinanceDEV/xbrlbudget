@@ -1023,7 +1023,7 @@ see the Rettifiche section above) each need their own confirmation: `useRettific
 marker appended to the same `rettifiche_log` (no migration) — idempotent, excluded from the
 journal/Riepilogo UI and from the server's 20-entry cap (`_countable_log_entries` in
 `backend/app/api/v1/financial_years.py`). `handleConfirmRettifiche` in `app/pratica/page.tsx` is
-the SINGLE path both the "Conferma e prosegui" banner and the Riepilogo dialog's own button call —
+the SINGLE path both the "Conferma e vai al Confronto" primary action bar button and the Riepilogo dialog's own button call —
 an earlier version let the dialog's button reach Confronto through a separate `onNext` that
 bypassed the gate entirely (Task 7 review, Critical finding).
 

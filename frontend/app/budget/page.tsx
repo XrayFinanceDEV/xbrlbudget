@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
+import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import { useScenarios, useInvalidateScenarios, useInvalidateAnalysis } from "@/hooks/use-queries";
 import {
   createCompany,
@@ -801,6 +802,7 @@ function ScenarioForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { pratica } = usePratica();
   const [name, setName] = useState(scenario?.name || "");
   const [description, setDescription] = useState(scenario?.description || "");
   const [isActive, setIsActive] = useState(scenario?.is_active === 1);
@@ -1099,6 +1101,15 @@ function ScenarioForm({
     }
   };
 
+  // Dentro una pratica l'avanzamento passa dalla barra unica; fuori (nav
+  // piatta → Scenari) la barra non esiste e resta il bottone inline.
+  usePrimaryAction({
+    label: pratica ? "Salva e Calcola Previsionale" : null,
+    onClick: handleSave,
+    disabled: loading,
+    reason: loading ? "Calcolo in corso" : null,
+  });
+
   const historicalYears = [...new Set(years)].filter(y => y <= baseYear).sort((a, b) => a - b);
 
   return (
@@ -1296,13 +1307,15 @@ function ScenarioForm({
           <X className="h-4 w-4" />
           {scenario ? "Annulla" : "Indietro"}
         </Button>
-        <Button onClick={handleSave} disabled={loading}>
-          {loading ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...</>
-          ) : (
-            <><Save className="h-4 w-4" /> Salva e Calcola Previsionale</>
-          )}
-        </Button>
+        {!pratica && (
+          <Button onClick={handleSave} disabled={loading}>
+            {loading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...</>
+            ) : (
+              <><Save className="h-4 w-4" /> Salva e Calcola Previsionale</>
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );

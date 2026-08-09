@@ -949,26 +949,57 @@ from the plan, found in browser testing rather than in review):
   `startupMode`: read in a `useEffect`, never in the `useState` initializer, or Next mis-hydrates.
   `PraticaProvider` is mounted ABOVE `AppProvider` in `app/layout.tsx` — that ordering is what lets
   `AppContext` itself call `usePratica()` (see below).
-- **`lib/pratica-steps.ts`** — pure step model, no React: `buildPraticaSteps(pratica, gates)`
-  returns the ordered `PraticaStep[]` for the current workflow. `kind: "tab"` steps are tabs inside
-  `/pratica` (`PraticaStepper` calls `setAnalysisStep` + `router.push("/pratica")` if not already
-  there); `kind: "route"` steps are real Next pages (`router.push(step.route)`).
-- **`components/PraticaStepper.tsx`**, rendered by `components/Navigation.tsx`: `Navigation`
-  returns `<PraticaStepper />` INSTEAD OF the flat nav whenever `pratica !== null` and the path is
-  not `/` — never both bars together. Outside a pratica the flat nav is unchanged (browsing old
-  data), and it lost the Importazione tab (`/import` still works as a route, just unlinked).
 
-**PREVISIONALE has SIX steps, not four.** The design spec originally listed only
-`Budget · CE Previsionale · Rendiconto · Report`. Replacing the flat nav with the stepper made
-`/forecast/balance` and `/forecast/reclassified` unreachable from inside a pratica (they exist as
-pages and are linked from the ordinary nav's "Previsionale" dropdown, but that dropdown disappears
-together with the rest of the flat nav once a pratica is active). This surfaced as an Important
-finding in the Task 4 code review and the user decided, during implementation, to add both steps
-rather than leave them stranded — see the spec's own dated note and
-`.superpowers/sdd/.../progress.md` ("Task 4: DECISIONE UTENTE"). The real PREVISIONALE order is
-**Budget · CE Prev. · SP Prev. · Riclassificato · Rendiconto · Report**, all gated on
-`gates.forecastReady` (`budgetScenarioId !== null`) except Budget itself, gated on
-`gates.budgetScenario` for the `bilancio` workflow and always enabled for `startup`.
+**A three-phase model replaced the earlier flat step list (2026-08-09).** `lib/pratica-steps.ts`
+is the pure, React-free module that decides everything: `buildPraticaSteps(pratica, gates)` returns
+the ordered `PraticaStep[]` for the current workflow, each tagged with a `phase`
+(`"dati" | "analisi" | "previsionale"`, `PHASE_ORDER`) and a `group` (`"azione"` advances the
+pratica, `"vista"` is read-only and can be visited in any order). `kind: "tab"` steps are tabs
+inside `/pratica` (`setAnalysisStep` + `router.push("/pratica")` if not already there); `kind:
+"route"` steps are real Next pages (`router.push(step.route)`). It also owns `praticaGates`
+(the single gate derivation, shared by the stepper and the action bar so they can't diverge),
+`currentStepId`, `nextStep`/`prevStep`, `phaseStatus` (chip state: `done`/`active`/`todo`/`locked`)
+and `gateReason` (the tooltip text for a locked step). **This module has its own test suite,
+`lib/pratica-steps.test.ts` (19 cases) — the first frontend test in the project, run with `npm test`
+(Vitest) from `frontend/`.**
+
+The three phases, for the `bilancio` workflow:
+- **DATI** (tabs inside `/pratica`): Anagrafiche · Import · Rettifiche.
+- **ANALISI** (tabs inside `/pratica`): Confronto · Proiezione (only when `periodMonths !== 12` —
+  an already-annual bilancio is not projected to 12 months) · Indicatori · Stampa.
+- **PREVISIONALE** (real routes): Budget · Indici · CE Prev. · SP Prev. · Riclassificato ·
+  Rendiconto · Report — **seven** steps. `Indici` (`/analysis`) is new versus the previous flat-nav
+  model, where it was unreachable from inside a pratica (see the superseded note below).
+
+All PREVISIONALE steps but Budget are gated on `gates.forecastReady` (`budgetScenarioId !== null`);
+Budget itself gates on `gates.budgetScenario` for the `bilancio` workflow and is always enabled for
+`startup`.
+
+- **`components/PraticaStepper.tsx`**, rendered by `components/Navigation.tsx` instead of the flat
+  nav whenever `pratica !== null` and the path is not `/` (never both bars together). It renders
+  TWO rows: phase chips (`PHASE_ORDER`, status from `phaseStatus`, a `Tooltip` with `gateReason`
+  when locked) and, below, only the steps of the active phase (`azione` steps first, then a
+  separator, then `vista` steps) — so the sub-bar is always short regardless of how many read-only
+  views a phase has. Outside a pratica the flat nav is unchanged, minus the Importazione tab
+  (`/import` still works as a route, just unlinked).
+- **`components/pratica/PraticaActionBar.tsx` + `contexts/PraticaActionContext.tsx`** — the single
+  point of advancement, rendered below the page content (sticky, not fixed, so it never overlaps a
+  long table). A page registers its own primary action with `usePrimaryAction({ label, onClick,
+  disabled, reason })`; passing `label: null` means "this step has no action of its own" and the
+  bar falls back to `"Avanti: <next.label>"`, derived from `nextStep`/`gateReason` in
+  `pratica-steps.ts`. The five read-only PREVISIONALE views register nothing and rely entirely on
+  the fallback. The old per-tab inline CTAs (8 of them, scattered across `app/pratica/page.tsx` and
+  `app/budget/page.tsx`) were removed as those steps were migrated; **`/budget`'s Save button is
+  the only survivor**, because `/budget` is also reachable outside a pratica (nav flat, voce
+  "Scenari") where the action bar does not render at all — there the page registers
+  `label: pratica ? "Salva e Calcola Previsionale" : null` (so inside a pratica the bar drives it)
+  **and** keeps its own `<Button>` rendered only when `!pratica` (so outside a pratica saving still
+  works). The "Ricalcola" button and its confirmation dialog are a distinct secondary action (with
+  the "azzera modifiche manuali CE" checkbox) and were left exactly where they were.
+
+**Superseded note, kept for history:** an earlier version of this section said "PREVISIONALE has
+SIX steps, not four" — `/analysis` (Indici) was still unreachable from inside a pratica at that
+time; that gap is what the `previsionale` list above now closes.
 
 **The Rettifiche gate ANDs `gates.rettificheOk` into every ANALISI step past Rettifiche** — not,
 as an earlier version of this note claimed, into every step of the pratica: Confronto, Proiezione,
@@ -976,7 +1007,7 @@ Indicatori and Stampa in `pratica-steps.ts` all require `gates.rettificheOk && �
 version gated only `comparison`, which meant a scenario already created at import time
 (`infrannualeScenarioId` set) was on its own enough to unlock Proiezione/Indicatori/Stampa in the
 stepper even with rettifiche unconfirmed, or after a "Ripristina originale" — fixed in commit
-`71d3303`. **None of the six PREVISIONALE steps AND `gates.rettificheOk` directly** — they gate on
+`71d3303`. **None of the seven PREVISIONALE steps AND `gates.rettificheOk` directly** — they gate on
 `gates.budgetScenario`/`gates.forecastReady` (`budgetScenarioId !== null`) instead. In the
 new-pratica ("bilancio") flow the rettifiche gate still holds transitively, because
 `budgetScenarioId` is only ever set by the promote step, which is reachable only past Rettifiche;
@@ -1033,12 +1064,19 @@ Italian `Alert` ("Pratica da riaprire" — riparti dall'importazione o riapri la
 and a reset to the Import step — never a blank `<main>`.
 
 **Two follow-ups the ledger records as deferred, not fixed:**
-- **The gate is enforced at navigation time, only.** `PraticaStepper` disables a step's button when
-  its gate is false, but the wizard's own render guards (`{activeTab === "projection" && …}`, same
-  for `results`/`stampa`) and the rehydration path do not re-check `gates.rettificheOk` — they key
-  purely off `activeTab`/`analysisStep`. No concretely reachable exploit was found (there is no UI
-  path today that sets `analysisStep` to a gated tab without going through the stepper or
-  `handleConfirmRettifiche`), but it is defense-in-depth debt, not defense-in-depth done.
+- **The gate is enforced at navigation time, only — and advancement now goes through one point,
+  but the wizard's own render guards do not.** Every user-initiated step change (stepper chip/tab
+  click, or the action bar's fallback `"Avanti: …"`/rescue button) now derives "next step + is it
+  gated" from the same single module, `lib/pratica-steps.ts` (`nextStep`, `gateReason`,
+  `praticaGates`) — so that front, at least, cannot diverge between two separate implementations
+  the way it could before the action bar existed. What is **still** unchanged, and therefore still
+  open: `app/pratica/page.tsx`'s own render guards (`{activeTab === "projection" && …}`, same for
+  `results`/`stampa`) and the rehydration path key purely off `activeTab`/`analysisStep`, without
+  re-checking `gates.rettificheOk` at render time. No concretely reachable exploit was found (there
+  is no UI path today that sets `analysisStep` to a gated tab without going through the stepper,
+  the action bar, or `handleConfirmRettifiche`), but it is defense-in-depth debt, not defense-in-
+  depth done. Do not read the single-point-of-advancement change above as having closed this —
+  it narrows where the gap could be triggered from, it does not add a render-time check.
 - **`app/pratica/page.tsx` is still a ~5.900-line monolith.** Decomposing it (and `app/budget/page.tsx`)
   was explicitly out of scope for this refactor and remains a pending follow-up — see the "Known
   follow-up" note in the Rettifiche section above, which describes the same file.

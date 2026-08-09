@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Tutto il testo UI è in **italiano**. Nessuna emoji: solo icone `lucide-react`.
-- Solo componenti shadcn/ui (`Button`, `Tooltip`, …), mai HTML grezzo per bottoni/tabelle.
+- Solo componenti shadcn/ui (`Button`, `Tooltip`, …), mai HTML grezzo per bottoni/tabelle. **Vale anche per chip di fase e tab dello stepper**, che diventano `Button` con className di override — decisione presa in pre-volo il 2026-08-09, in deroga a come sono scritti oggi `PraticaStepper.tsx` e `Navigation.tsx`.
 - Solo colori semantici (`text-foreground`, `text-muted-foreground`, `bg-card`, `border-border`, `bg-background`): mai hex hardcoded.
 - Stepper e barra azioni sono `print:hidden`.
 - **Nessuna logica di salvataggio esistente va riscritta.** Le migrazioni dei CTA spostano l'handler e le sue condizioni di `disabled` *intatte*.
@@ -758,16 +758,17 @@ export function PraticaStepper() {
                 const reason = locked && own[0] ? gateReason(own[0], gates, pratica) : null;
 
                 const chip = (
-                  <button
+                  <Button
+                    variant={status === "active" ? "default" : "ghost"}
+                    size="sm"
                     onClick={() => target && go(target)}
                     disabled={locked}
                     aria-current={status === "active" ? "step" : undefined}
                     className={cn(
-                      "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide transition-colors",
-                      status === "active" && "bg-primary text-primary-foreground",
-                      status === "done" && "text-foreground hover:bg-muted",
-                      status === "todo" && "text-muted-foreground hover:bg-muted",
-                      locked && "text-muted-foreground/40 cursor-not-allowed",
+                      "h-7 shrink-0 gap-1.5 rounded-full px-3 text-xs font-semibold uppercase tracking-wide",
+                      status === "done" && "text-foreground",
+                      status === "todo" && "text-muted-foreground",
+                      locked && "text-muted-foreground",
                     )}
                   >
                     {status === "done" ? (
@@ -783,7 +784,7 @@ export function PraticaStepper() {
                       />
                     )}
                     {i + 1} {PHASE_LABELS[phase]}
-                  </button>
+                  </Button>
                 );
 
                 return (
@@ -848,21 +849,24 @@ function StepTab({
   onClick: () => void;
 }) {
   return (
-    <button
+    // shadcn Button con override: la resa "tab" (bordo inferiore, nessuno
+    // sfondo) non è una variante nativa, ma il vincolo di progetto vieta un
+    // <button> grezzo. `disabled:opacity-50` del Button fa da sé il grigio
+    // degli step non ancora raggiungibili.
+    <Button
+      variant="ghost"
       onClick={onClick}
       disabled={!step.enabled}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+        "h-auto whitespace-nowrap rounded-none border-b-2 px-3 py-2.5 text-sm font-medium hover:bg-transparent",
         active
           ? "border-primary text-foreground"
-          : step.enabled
-          ? "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-          : "border-transparent text-muted-foreground/40 cursor-not-allowed",
+          : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
       )}
     >
       {step.label}
-    </button>
+    </Button>
   );
 }
 ```

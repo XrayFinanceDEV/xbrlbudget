@@ -37,7 +37,6 @@ import { toast } from "sonner";
 import {
   Upload,
   ArrowRight,
-  ArrowLeft,
   BarChart3,
   FileText,
   Loader2,
@@ -3074,56 +3073,11 @@ export default function InfraannualePage() {
     !verifica.exists ||
     allRettificheConfirmed;
 
-  // Unica registrazione per tutte le tab: `null` lascia il fallback di
-  // navigazione alla barra (Import, Indicatori) o l'azione al componente
-  // figlio (Stampa → StampaContent).
-  const primary = useMemo<{
-    label: string | null;
-    onClick: () => void | Promise<void>;
-    disabled: boolean;
-    reason: string | null;
-  }>(() => {
-    switch (activeTab) {
-      case "rettifiche":
-        // Già confermate: l'azione diventa navigazione, altrimenti il primario
-        // resterebbe disabilitato per sempre (vedi la nota in fondo al passo).
-        if (allRettificheConfirmed) {
-          return {
-            label: "Vai al Confronto",
-            onClick: () => setActiveTab("comparison"),
-            disabled: false,
-            reason: null,
-          };
-        }
-        return {
-          label: "Conferma e vai al Confronto",
-          onClick: handleConfirmRettifiche,
-          disabled: rettificheDisabled,
-          reason: !verifica.exists
-            ? "Bilancio di verifica non caricato"
-            : verifica.saving || storico.saving
-            ? "Salvataggio in corso"
-            : verifica.loading || storico.loading
-            ? "Caricamento in corso"
-            : null,
-        };
-      default:
-        return { label: null, onClick: () => {}, disabled: false, reason: null };
-    }
-  }, [
-    activeTab,
-    setActiveTab,
-    handleConfirmRettifiche,
-    rettificheDisabled,
-    allRettificheConfirmed,
-    verifica.exists,
-    verifica.saving,
-    verifica.loading,
-    storico.saving,
-    storico.loading,
-  ]);
-
-  usePrimaryAction(primary);
+  // La registrazione unica `primary` (comprese le tab Confronto e Proiezione,
+  // Task 5) vive più sotto, dopo `saveProjection12M` — da cui il case
+  // "comparison" dipende — perché uno useMemo eseguito qui sopra non potrebbe
+  // ancora chiudere su un `const` dichiarato più avanti nel componente
+  // (temporal dead zone). Vedi la registrazione subito prima del `return`.
 
   // Rettifiche sub-tab (storico vs bilancio di verifica). Default to storico;
   // fall back to verifica when there is no historical year to correct.
@@ -3826,6 +3780,86 @@ export default function InfraannualePage() {
     }
   }, [activeTab, analysis, scenario, loadAnalysis]);
 
+  const goFromComparison = useCallback(async () => {
+    if (periodMonths === 12) {
+      await saveProjection12M();
+      setActiveTab("results");
+    } else {
+      setActiveTab("projection");
+    }
+  }, [periodMonths, saveProjection12M, setActiveTab]);
+
+  // Unica registrazione per tutte le tab: `null` lascia il fallback di
+  // navigazione alla barra (Import, Indicatori) o l'azione al componente
+  // figlio (Stampa → StampaContent).
+  const primary = useMemo<{
+    label: string | null;
+    onClick: () => void | Promise<void>;
+    disabled: boolean;
+    reason: string | null;
+  }>(() => {
+    switch (activeTab) {
+      case "rettifiche":
+        // Già confermate: l'azione diventa navigazione, altrimenti il primario
+        // resterebbe disabilitato per sempre (vedi la nota in fondo al passo).
+        if (allRettificheConfirmed) {
+          return {
+            label: "Vai al Confronto",
+            onClick: () => setActiveTab("comparison"),
+            disabled: false,
+            reason: null,
+          };
+        }
+        return {
+          label: "Conferma e vai al Confronto",
+          onClick: handleConfirmRettifiche,
+          disabled: rettificheDisabled,
+          reason: !verifica.exists
+            ? "Bilancio di verifica non caricato"
+            : verifica.saving || storico.saving
+            ? "Salvataggio in corso"
+            : verifica.loading || storico.loading
+            ? "Caricamento in corso"
+            : null,
+        };
+      case "comparison":
+        return {
+          label: periodMonths === 12 ? "Vai agli Indicatori" : "Vai alla Proiezione",
+          onClick: goFromComparison,
+          disabled: !comparison,
+          reason: !comparison ? "Confronto non ancora caricato" : null,
+        };
+      case "projection":
+        // Stessa condizione del bottone "Indicatori" che sostituisce
+        // (era app/pratica/page.tsx:4373-4375).
+        return {
+          label: "Vai agli Indicatori",
+          onClick: () => setActiveTab("results"),
+          disabled: !projectedBS,
+          reason: !projectedBS ? "Proiezione non ancora calcolata" : null,
+        };
+      default:
+        return { label: null, onClick: () => {}, disabled: false, reason: null };
+    }
+  }, [
+    activeTab,
+    setActiveTab,
+    handleConfirmRettifiche,
+    rettificheDisabled,
+    allRettificheConfirmed,
+    verifica.exists,
+    verifica.saving,
+    verifica.loading,
+    storico.saving,
+    storico.loading,
+    periodMonths,
+    comparison,
+    projectedBS,
+    goFromComparison,
+  ]);
+
+  usePrimaryAction(primary);
+
   return (
     <>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -4323,20 +4357,6 @@ export default function InfraannualePage() {
                   />
                 </CardContent>
               </Card>
-
-              <div className="flex justify-end">
-                <Button onClick={async () => {
-                  if (periodMonths === 12) {
-                    await saveProjection12M();
-                    setActiveTab("results");
-                  } else {
-                    setActiveTab("projection");
-                  }
-                }}>
-                  {periodMonths === 12 ? "Vai agli Indicatori" : "Vai alla Proiezione"}
-                  <ArrowRight className="h-4 w-4 ml-2" />
-                </Button>
-              </div>
             </>
           ) : null}
         </div>}
@@ -4409,23 +4429,6 @@ export default function InfraannualePage() {
               />
             </CardContent>
           </Card>
-
-          <div className="flex justify-between">
-            <Button
-              variant="outline"
-              onClick={() => setActiveTab("comparison")}
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Torna al Confronto
-            </Button>
-            <Button
-              onClick={() => setActiveTab("results")}
-              disabled={!projectedBS}
-            >
-              Indicatori
-              <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
-          </div>
           </>
           ) : (
           <Card>
@@ -5571,6 +5574,76 @@ function StampaContent({
     );
   };
 
+  const handlePromote = useCallback(async () => {
+    if (!companyId || !scenarioId) return;
+    setPromoting(true);
+    try {
+      const isAnnual = periodMonths === 12;
+      let baseYear: number;
+      if (isAnnual) {
+        // L'anno importato è già un FinancialYear completo: riscriverlo
+        // con una copia ricalcolata dal motore sarebbe un rischio inutile.
+        baseYear = fiscalYear;
+      } else {
+        if (onBeforePromote) await onBeforePromote();
+        await promoteProjection(companyId, scenarioId);
+        baseYear = fiscalYear;
+      }
+
+      // Riuso, non duplicazione: doppio click o ritorno sui propri passi
+      // non devono generare due scenari budget per lo stesso anno base.
+      const existing = await getBudgetScenarios(companyId);
+      const reusable = existing.find(
+        (s) => s.scenario_type !== "infrannuale" && s.base_year === baseYear,
+      );
+      const budget =
+        reusable ??
+        (await createBudgetScenario(companyId, {
+          company_id: companyId,
+          name: `Budget ${baseYear + 1}–${baseYear + 3}`,
+          base_year: baseYear,
+          scenario_type: "budget",
+        }));
+
+      updatePratica({ budgetScenarioId: budget.id });
+      await refreshCompanies();
+      await refreshYears();
+      toast.success(
+        reusable
+          ? "Scenario budget esistente riaperto"
+          : "Scenario budget creato",
+      );
+      router.push("/budget");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Errore nel passaggio al budget"));
+    } finally {
+      setPromoting(false);
+    }
+  }, [
+    companyId,
+    scenarioId,
+    periodMonths,
+    fiscalYear,
+    onBeforePromote,
+    updatePratica,
+    refreshCompanies,
+    refreshYears,
+    router,
+  ]);
+
+  // Il bottone era reso solo dentro `{companyId && scenarioId && (…)}`
+  // (app/pratica/page.tsx:5595): la condizione si conserva come label null.
+  // `companyId`/`scenarioId` sono tipati `number | undefined` (mai `null`,
+  // vedi le prop qui sopra), quindi il confronto usa `!= null` — che copre
+  // sia `undefined` sia `null` — invece di `!== null` come nella bozza del
+  // brief, che con `undefined` risulterebbe sempre vera.
+  usePrimaryAction({
+    label: companyId != null && scenarioId != null ? "Prosegui al Budget" : null,
+    onClick: handlePromote,
+    disabled: promoting,
+    reason: promoting ? "Creazione dello scenario budget in corso" : null,
+  });
+
   return (
     <div id="stampa-content" className="space-y-8 print:space-y-3 bg-white dark:bg-slate-950 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 -mt-8 pt-8 pb-8">
       {/* Action buttons */}
@@ -5589,63 +5662,6 @@ function StampaContent({
           <Printer className="h-4 w-4 mr-2" />
           Stampa PDF
         </Button>
-        {companyId && scenarioId && (
-          <Button
-            onClick={async () => {
-              setPromoting(true);
-              try {
-                const isAnnual = periodMonths === 12;
-                let baseYear: number;
-                if (isAnnual) {
-                  // L'anno importato è già un FinancialYear completo: riscriverlo
-                  // con una copia ricalcolata dal motore sarebbe un rischio inutile.
-                  baseYear = fiscalYear;
-                } else {
-                  if (onBeforePromote) await onBeforePromote();
-                  await promoteProjection(companyId, scenarioId);
-                  baseYear = fiscalYear;
-                }
-
-                // Riuso, non duplicazione: doppio click o ritorno sui propri passi
-                // non devono generare due scenari budget per lo stesso anno base.
-                const existing = await getBudgetScenarios(companyId);
-                const reusable = existing.find(
-                  (s) => s.scenario_type !== "infrannuale" && s.base_year === baseYear,
-                );
-                const budget =
-                  reusable ??
-                  (await createBudgetScenario(companyId, {
-                    company_id: companyId,
-                    name: `Budget ${baseYear + 1}–${baseYear + 3}`,
-                    base_year: baseYear,
-                    scenario_type: "budget",
-                  }));
-
-                updatePratica({ budgetScenarioId: budget.id });
-                await refreshCompanies();
-                await refreshYears();
-                toast.success(
-                  reusable
-                    ? "Scenario budget esistente riaperto"
-                    : "Scenario budget creato",
-                );
-                router.push("/budget");
-              } catch (err: unknown) {
-                toast.error(getErrorMessage(err, "Errore nel passaggio al budget"));
-              } finally {
-                setPromoting(false);
-              }
-            }}
-            disabled={promoting}
-          >
-            {promoting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <ArrowRight className="h-4 w-4 mr-2" />
-            )}
-            Prosegui al Budget
-          </Button>
-        )}
       </div>
 
       {/* Header */}

@@ -74,8 +74,18 @@ export function praticaGates(pratica: PraticaState): PraticaGates {
 /**
  * Quale step è attivo, dedotto dalla rotta corrente (fasi su rotta) o dalla tab
  * del wizard (fase ANALISI dentro /pratica).
+ *
+ * `/budget` è ambigua: nel percorso "startup" è anche la rotta dello step
+ * "anagrafiche" (il form business plan), non solo quella dello step "budget"
+ * vero e proprio. Finché non esiste uno scenario budget della pratica siamo
+ * ancora nello step Anagrafiche — altrimenti il chip "1 DATI" risulterebbe
+ * completato fin dal primo render, prima che l'utente abbia scritto una riga.
  */
-export function currentStepId(pathname: string, analysisStep: string): string {
+export function currentStepId(
+  pathname: string,
+  analysisStep: string,
+  pratica: PraticaState,
+): string {
   if (pathname.startsWith("/pratica")) return analysisStep;
   if (pathname.startsWith("/forecast/balance")) return "sp-previsionale";
   if (pathname.startsWith("/forecast/reclassified")) return "riclassificato";
@@ -83,7 +93,11 @@ export function currentStepId(pathname: string, analysisStep: string): string {
   if (pathname.startsWith("/analysis")) return "indici";
   if (pathname.startsWith("/cashflow")) return "rendiconto";
   if (pathname.startsWith("/report")) return "report";
-  if (pathname.startsWith("/budget")) return "budget";
+  if (pathname.startsWith("/budget")) {
+    return pratica.workflow === "startup" && pratica.budgetScenarioId === null
+      ? "anagrafiche"
+      : "budget";
+  }
   return "";
 }
 

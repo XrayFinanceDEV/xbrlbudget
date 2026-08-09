@@ -189,14 +189,20 @@ describe("praticaGates", () => {
 
 describe("currentStepId", () => {
   it("dentro /pratica vince la tab del wizard, fuori vince la rotta", () => {
-    expect(currentStepId("/pratica", "rettifiche")).toBe("rettifiche");
-    expect(currentStepId("/forecast/balance", "rettifiche")).toBe("sp-previsionale");
-    expect(currentStepId("/forecast/reclassified", "x")).toBe("riclassificato");
-    expect(currentStepId("/forecast/income", "x")).toBe("ce-previsionale");
-    expect(currentStepId("/analysis", "x")).toBe("indici");
-    expect(currentStepId("/cashflow", "x")).toBe("rendiconto");
-    expect(currentStepId("/report", "x")).toBe("report");
-    expect(currentStepId("/budget", "x")).toBe("budget");
-    expect(currentStepId("/", "x")).toBe("");
+    expect(currentStepId("/pratica", "rettifiche", PRATICA)).toBe("rettifiche");
+    expect(currentStepId("/forecast/balance", "rettifiche", PRATICA)).toBe("sp-previsionale");
+    expect(currentStepId("/forecast/reclassified", "x", PRATICA)).toBe("riclassificato");
+    expect(currentStepId("/forecast/income", "x", PRATICA)).toBe("ce-previsionale");
+    expect(currentStepId("/analysis", "x", PRATICA)).toBe("indici");
+    expect(currentStepId("/cashflow", "x", PRATICA)).toBe("rendiconto");
+    expect(currentStepId("/report", "x", PRATICA)).toBe("report");
+    expect(currentStepId("/budget", "x", PRATICA)).toBe("budget");
+    expect(currentStepId("/", "x", PRATICA)).toBe("");
+  });
+
+  it("percorso startup su /budget: anagrafiche finché non c'è uno scenario budget", () => {
+    const startup: PraticaState = { ...PRATICA, workflow: "startup" };
+    expect(currentStepId("/budget", "x", startup)).toBe("anagrafiche");
+    expect(currentStepId("/budget", "x", { ...startup, budgetScenarioId: 5 })).toBe("budget");
   });
 });

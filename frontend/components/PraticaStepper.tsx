@@ -36,7 +36,7 @@ export function PraticaStepper() {
 
   const gates = praticaGates(pratica);
   const steps = buildPraticaSteps(pratica, gates);
-  const active = currentStepId(pathname, pratica.analysisStep);
+  const active = currentStepId(pathname, pratica.analysisStep, pratica);
   const activePhase: PraticaPhase =
     steps.find((s) => s.id === active)?.phase ?? steps[0]?.phase ?? "dati";
 

@@ -1141,9 +1141,10 @@ export function PraticaActionBar() {
           <span />
         )}
         <span className="flex-1" />
-        {disabled && reason && (
-          <p className="truncate text-sm text-muted-foreground">{reason}</p>
-        )}
+        {/* Non `disabled && reason`: nel ramo rescue il bottone è ABILITATO e
+            il motivo è l'unica cosa che spiega perché sei stato dirottato. Chi
+            registra un'azione mette `reason` non nullo solo quando disabilita. */}
+        {reason && <p className="truncate text-sm text-muted-foreground">{reason}</p>}
         <Button onClick={run} disabled={disabled}>
           {label}
           <ArrowRight className="h-4 w-4 ml-2" />

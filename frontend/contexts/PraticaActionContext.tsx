@@ -88,6 +88,13 @@ export function usePraticaAction() {
  * dell'effetto: passare l'handler (una funzione nuova a ogni render) come
  * dipendenza rifarebbe partire la registrazione a ogni ciclo. Stessa ragione
  * per cui `use-rettifiche-year` non va mai messo intero in un dependency array.
+ *
+ * Contratto sugli errori: chi registra un `onClick` è responsabile di gestire
+ * i propri errori (try/catch interno + toast, come fanno tutti gli handler
+ * oggi registrati). Il `.catch()` qui sotto è solo una rete di sicurezza —
+ * evita una unhandled promise rejection muta se una futura registrazione se
+ * ne dimenticasse — non un punto in cui contare per mostrare un errore
+ * all'utente.
  */
 export function usePrimaryAction(opts: {
   /** `null` = questo step non ha un'azione propria: la barra usa il fallback. */
@@ -109,7 +116,15 @@ export function usePrimaryAction(opts: {
   useEffect(() => {
     if (label === null) return;
     register(token, { label, disabled, reason }, () => {
-      void onClickRef.current();
+      // Rete di sicurezza, non il contratto: vedi il JSDoc sopra. try/catch
+      // copre un throw sincrono, .catch() un reject asincrono.
+      try {
+        void Promise.resolve(onClickRef.current()).catch((err) => {
+          console.error("Errore non gestito nell'azione primaria della pratica:", err);
+        });
+      } catch (err) {
+        console.error("Errore non gestito nell'azione primaria della pratica:", err);
+      }
     });
     return () => unregister(token);
   }, [token, label, disabled, reason, register, unregister]);

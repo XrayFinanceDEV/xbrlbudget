@@ -1488,7 +1488,10 @@ Rimuovere il blocco `<div className="flex justify-between"> … </div>` (righe ~
   // Il bottone era reso solo dentro `{companyId && scenarioId && (…)}`
   // (app/pratica/page.tsx:5544): la condizione si conserva come label null.
   usePrimaryAction({
-    label: companyId !== null && scenarioId !== null ? "Prosegui al Budget" : null,
+    // `!= null` e non `!== null`: le prop sono `number | undefined`, mai null,
+    // quindi `!== null` sarebbe sempre vera e il bottone sempre presente —
+    // l'opposto della condizione originale.
+    label: companyId != null && scenarioId != null ? "Prosegui al Budget" : null,
     onClick: handlePromote,
     disabled: promoting,
     reason: promoting ? "Creazione dello scenario budget in corso" : null,

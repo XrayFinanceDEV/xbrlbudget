@@ -3830,13 +3830,27 @@ export default function InfraannualePage() {
           reason: !comparison ? "Confronto non ancora caricato" : null,
         };
       case "projection":
-        // Stessa condizione del bottone "Indicatori" che sostituisce
-        // (era app/pratica/page.tsx:4373-4375).
+        // Un solo primario che calcola E avanza: se la proiezione non è
+        // ancora stata calcolata la calcola, poi passa agli Indicatori. Il
+        // bottone secondario "Calcola Proiezione SP" nell'header della card
+        // resta per il ricalcolo manuale dopo una modifica agli override.
         return {
-          label: "Vai agli Indicatori",
-          onClick: () => setActiveTab("results"),
-          disabled: !projectedBS,
-          reason: !projectedBS ? "Proiezione non ancora calcolata" : null,
+          label: "Calcola e vai agli Indicatori",
+          onClick: async () => {
+            if (!projectedBS) await calculateProjectedBS();
+            setActiveTab("results");
+          },
+          disabled: !comparison,
+          reason: !comparison ? "Confronto non ancora caricato" : null,
+        };
+      case "results":
+        // A 12 mesi non esiste uno step Proiezione (vedi buildPraticaSteps):
+        // lì projectedBS non è un prerequisito per passare alla Stampa.
+        return {
+          label: "Vai alla Stampa",
+          onClick: () => setActiveTab("stampa"),
+          disabled: !projectedBS && periodMonths !== 12,
+          reason: !projectedBS && periodMonths !== 12 ? "Proiezione non calcolata" : null,
         };
       default:
         return { label: null, onClick: () => {}, disabled: false, reason: null };
@@ -3856,6 +3870,7 @@ export default function InfraannualePage() {
     comparison,
     projectedBS,
     goFromComparison,
+    calculateProjectedBS,
   ]);
 
   usePrimaryAction(primary);

@@ -987,9 +987,11 @@ Budget itself gates on `gates.budgetScenario` for the `bilancio` workflow and is
   long table). A page registers its own primary action with `usePrimaryAction({ label, onClick,
   disabled, reason })`; passing `label: null` means "this step has no action of its own" and the
   bar falls back to `"Avanti: <next.label>"`, derived from `nextStep`/`gateReason` in
-  `pratica-steps.ts`. The five read-only PREVISIONALE views register nothing and rely entirely on
-  the fallback. The old per-tab inline CTAs (8 of them, scattered across `app/pratica/page.tsx` and
-  `app/budget/page.tsx`) were removed as those steps were migrated; **`/budget`'s Save button is
+  `pratica-steps.ts`. Of the seven PREVISIONALE steps only Budget registers an action; the other
+  six (Indici, CE Prev., SP Prev., Riclassificato, Rendiconto, Report) are read-only views that
+  register nothing and rely entirely on the fallback. The old per-tab inline CTAs (8 of them,
+  scattered across `app/pratica/page.tsx` and `app/budget/page.tsx`) were removed as those steps
+  were migrated; **`/budget`'s Save button is
   the only survivor**, because `/budget` is also reachable outside a pratica (nav flat, voce
   "Scenari") where the action bar does not render at all — there the page registers
   `label: pratica ? "Salva e Calcola Previsionale" : null` (so inside a pratica the bar drives it)

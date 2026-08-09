@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
+import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import {
   importXBRL,
   importPDF,
@@ -3059,6 +3060,71 @@ export default function InfraannualePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifica.confirm, storico.confirm, storico.exists, updatePratica, setActiveTab]);
 
+  const rettificheDaConfermare =
+    (verifica.exists && !verifica.confirmed ? 1 : 0) +
+    (storico.exists && !storico.confirmed ? 1 : 0);
+
+  // Le condizioni sono copiate INVARIATE dal bottone che questo sostituisce
+  // (era app/pratica/page.tsx:4155-4167).
+  const rettificheDisabled =
+    verifica.saving ||
+    storico.saving ||
+    verifica.loading ||
+    storico.loading ||
+    !verifica.exists ||
+    allRettificheConfirmed;
+
+  // Unica registrazione per tutte le tab: `null` lascia il fallback di
+  // navigazione alla barra (Import, Indicatori) o l'azione al componente
+  // figlio (Stampa → StampaContent).
+  const primary = useMemo<{
+    label: string | null;
+    onClick: () => void | Promise<void>;
+    disabled: boolean;
+    reason: string | null;
+  }>(() => {
+    switch (activeTab) {
+      case "rettifiche":
+        // Già confermate: l'azione diventa navigazione, altrimenti il primario
+        // resterebbe disabilitato per sempre (vedi la nota in fondo al passo).
+        if (allRettificheConfirmed) {
+          return {
+            label: "Vai al Confronto",
+            onClick: () => setActiveTab("comparison"),
+            disabled: false,
+            reason: null,
+          };
+        }
+        return {
+          label: "Conferma e vai al Confronto",
+          onClick: handleConfirmRettifiche,
+          disabled: rettificheDisabled,
+          reason: !verifica.exists
+            ? "Bilancio di verifica non caricato"
+            : verifica.saving || storico.saving
+            ? "Salvataggio in corso"
+            : verifica.loading || storico.loading
+            ? "Caricamento in corso"
+            : null,
+        };
+      default:
+        return { label: null, onClick: () => {}, disabled: false, reason: null };
+    }
+  }, [
+    activeTab,
+    setActiveTab,
+    handleConfirmRettifiche,
+    rettificheDisabled,
+    allRettificheConfirmed,
+    verifica.exists,
+    verifica.saving,
+    verifica.loading,
+    storico.saving,
+    storico.loading,
+  ]);
+
+  usePrimaryAction(primary);
+
   // Rettifiche sub-tab (storico vs bilancio di verifica). Default to storico;
   // fall back to verifica when there is no historical year to correct.
   const [subTab, setSubTab] = useState<"storico" | "verifica">("storico");
@@ -4017,13 +4083,6 @@ export default function InfraannualePage() {
                         : ""}
                     </p>
                   )}
-                  <Button
-                    className="mt-3"
-                    onClick={() => setActiveTab("rettifiche")}
-                  >
-                    Vai alle Rettifiche
-                    <ArrowRight className="h-4 w-4 ml-2" />
-                  </Button>
                 </div>
               ) : (
                 <div className="flex flex-wrap justify-end gap-3">
@@ -4146,25 +4205,14 @@ export default function InfraannualePage() {
           </TabsContent>
         </Tabs>
 
-        <div className="mt-6 flex items-center justify-between gap-4 rounded-lg border border-border bg-card p-4">
+        <div className="mt-6 rounded-lg border border-border bg-card p-4">
           <p className="text-sm text-muted-foreground">
             {allRettificheConfirmed
               ? "Rettifiche confermate. Puoi proseguire con il confronto."
-              : "Conferma le rettifiche per sbloccare gli step successivi. Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta."}
+              : `Conferma le rettifiche per sbloccare gli step successivi (${rettificheDaConfermare} ${
+                  rettificheDaConfermare === 1 ? "scheda" : "schede"
+                } da confermare). Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta.`}
           </p>
-          <Button
-            onClick={handleConfirmRettifiche}
-            disabled={
-              verifica.saving ||
-              storico.saving ||
-              verifica.loading ||
-              storico.loading ||
-              !verifica.exists ||
-              allRettificheConfirmed
-            }
-          >
-            Conferma e prosegui <ArrowRight className="h-4 w-4 ml-1" />
-          </Button>
         </div>
         </>}
 

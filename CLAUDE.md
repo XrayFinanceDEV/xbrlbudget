@@ -999,7 +999,7 @@ Budget itself gates on `gates.budgetScenario` for the `bilancio` workflow and is
   works). The "Ricalcola" button and its confirmation dialog are a distinct secondary action (with
   the "azzera modifiche manuali CE" checkbox) and were left exactly where they were.
 
-**Moduli della pratica (2026-08-10).** `app/pratica/page.tsx` è sceso da 6.019 a 1.792 righe. Le
+**Moduli della pratica (2026-08-10).** `app/pratica/page.tsx` è sceso da 6.019 a 1.810 righe. Le
 funzioni pure stanno in `lib/pratica-format.ts` (formattazione), `lib/pratica-codes.ts` (tabelle di
 codici IV-CEE, `DETAIL_PARENTS`, `EXTRA_ALERT_DEFS`), `lib/pratica-reconcile.ts`
 (`reconcileSubfields`), `lib/pratica-indicators.ts` (indicatori, scoring, `computeCrisisRating`) e
@@ -1101,7 +1101,7 @@ and a reset to the Import step — never a blank `<main>`.
   il server dice il contrario, si passa: **non è un confine di autorizzazione** e non chiude un
   exploit noto (nessuna delle review del 2026-08-08 era riuscita a costruirne uno). Il guadagno è
   che l'invariante non dipende più dal fatto che ogni sito di navigazione se la ricordi.
-- **`app/pratica/page.tsx` non è più da 5.900 righe** (ora ~1.850, vedi "Moduli della pratica" sopra),
+- **`app/pratica/page.tsx` non è più da 5.900 righe** (ora 1.810, vedi "Moduli della pratica" sopra),
   ma la decomposizione del componente wizard stesso in tab-componenti resta esplicitamente non
   fatta — quanto estratto finora sono funzioni pure e i componenti già a foglio (Rettifiche,
   Confronto, Proiezione, Indicatori, Stampa); il corpo del wizard (stato, effetti di caricamento,

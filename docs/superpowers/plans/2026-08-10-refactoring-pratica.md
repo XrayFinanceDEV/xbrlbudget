@@ -4,7 +4,7 @@
 
 **Goal:** Portare `frontend/app/pratica/page.tsx` da 6.019 a ~1.850 righe spostando (non riscrivendo) sei moduli puri in `lib/` e sei componenti in `components/pratica/`, e rendere strutturale il gate di percorso applicandolo al render invece che ai soli siti di navigazione.
 
-**Architecture:** Estrazione meccanica. I moduli puri vanno in file piatti `lib/pratica-*.ts` accanto al `lib/pratica-steps.ts` esistente; i componenti in `components/pratica/`. Dipendenza unidirezionale: `lib/pratica-*` non importa mai da `app/` o `components/`. Il gate diventa una funzione pura `blockedStep()` in `lib/pratica-steps.ts`, testata con Vitest e consumata da una guardia unica che avvolge gli otto rami `activeTab` del wizard.
+**Architecture:** Estrazione meccanica. I moduli puri vanno in file piatti `lib/pratica-*.ts` accanto al `lib/pratica-steps.ts` esistente; i componenti in `components/pratica/`. Dipendenza unidirezionale: `lib/pratica-*` non importa mai da `app/` o `components/`. Il gate diventa una funzione pura `blockedStep()` in `lib/pratica-steps.ts`, testata con Vitest e consumata da una guardia unica che avvolge i sette rami `activeTab` del wizard.
 
 **Tech Stack:** Next.js 15 (app router), React 19, TypeScript 5, Vitest 3, shadcn/ui, Tailwind v3, lucide-react, sonner.
 
@@ -120,7 +120,10 @@ describe("blockedStep", () => {
   });
 
   it("Import senza azienda: blocca e riporta ad Anagrafiche", () => {
-    const p: PraticaState = { ...PRATICA, companyId: null };
+    // fiscalYear azzerato insieme a companyId: senza azienda non può esistere
+    // un anno fiscale importato — altrimenti gates.imported (che guarda solo
+    // fiscalYear) lascerebbe "rettifiche" abilitata da uno stato irrealizzabile.
+    const p: PraticaState = { ...PRATICA, companyId: null, fiscalYear: null };
     const block = blockedStep(p, "import");
     expect(block?.reason).toBe("Completa prima l'anagrafica");
     expect(block?.back?.id).toBe("anagrafiche");
@@ -149,11 +152,18 @@ describe("blockedStep", () => {
   });
 
   it("il ritorno resta dentro il wizard, mai su una rotta previsionale", () => {
+    // infrannualeScenarioId DEVE essere valorizzato: `budgetScenarioId !== null`
+    // insieme a `infrannualeScenarioId === null` è esattamente il trigger di
+    // isLegacyBudgetResume in buildPraticaSteps, che fa sparire "projection"
+    // dalla lista — lo step diventerebbe sconosciuto e blockedStep tornerebbe
+    // null per il motivo 1 del suo JSDoc, vanificando il test. Le rettifiche
+    // restano non confermate (default della fixture) così "projection" è
+    // comunque bloccata, mentre budgetScenarioId abilita gli step-rotta del
+    // previsionale che il "back" deve scartare in favore di una tab.
     const p: PraticaState = {
       ...PRATICA,
-      infrannualeScenarioId: null,
+      infrannualeScenarioId: 7,
       budgetScenarioId: 3,
-      rettificheConfirmed: { storico: true, verifica: true },
     };
     const block = blockedStep(p, "projection");
     expect(block?.back?.kind).toBe("tab");
@@ -238,7 +248,7 @@ Subito prima di `usePrimaryAction(primary);` aggiungere:
   const blocked = useMemo(() => blockedStep(pratica, activeTab), [pratica, activeTab]);
 ```
 
-Nel JSX, subito **dopo** il blocco `{rehydrationFailed && (…)}` e **prima** di `{/* STEP 0: ANAGRAFICHE */}`, aggiungere la guardia. Gli otto rami `activeTab === …` esistenti vanno lasciati esattamente come sono: li si avvolge in un `{!blocked && (<>…</>)}`.
+Nel JSX, subito **dopo** il blocco `{rehydrationFailed && (…)}` e **prima** di `{/* STEP 0: ANAGRAFICHE */}`, aggiungere la guardia. I sette rami `activeTab === …` esistenti vanno lasciati esattamente come sono: li si avvolge in un `{!blocked && (<>…</>)}`.
 
 ```tsx
         {blocked && (
@@ -1280,7 +1290,7 @@ Nella sezione **Il percorso unico "Pratica"**, aggiungere in coda alla mappa dei
 
 Nella stessa sezione, sostituire il primo dei due "follow-up differiti" (quello che dice che il gate è applicato solo in navigazione e che le render guard non lo ricontrollano) con:
 
-> **Il gate è applicato anche al render (2026-08-10).** `blockedStep()` in `lib/pratica-steps.ts` decide se lo step corrente è raggiungibile, e una guardia unica in `app/pratica/page.tsx` avvolge gli otto rami `activeTab`. Due comportamenti deliberati: uno step **sconosciuto non blocca** (i workflow ne omettono di proposito — bloccare creerebbe vicoli ciechi), e il controllo legge **la stessa cache dello stepper**, senza interrogare il server. Quindi se la cache dice "confermato" e il server dice il contrario, si passa: **non è un confine di autorizzazione** e non chiude un exploit noto (nessuna delle review del 2026-08-08 era riuscita a costruirne uno). Il guadagno è che l'invariante non dipende più dal fatto che ogni sito di navigazione se la ricordi.
+> **Il gate è applicato anche al render (2026-08-10).** `blockedStep()` in `lib/pratica-steps.ts` decide se lo step corrente è raggiungibile, e una guardia unica in `app/pratica/page.tsx` avvolge i sette rami `activeTab`. Due comportamenti deliberati: uno step **sconosciuto non blocca** (i workflow ne omettono di proposito — bloccare creerebbe vicoli ciechi), e il controllo legge **la stessa cache dello stepper**, senza interrogare il server. Quindi se la cache dice "confermato" e il server dice il contrario, si passa: **non è un confine di autorizzazione** e non chiude un exploit noto (nessuna delle review del 2026-08-08 era riuscita a costruirne uno). Il guadagno è che l'invariante non dipende più dal fatto che ogni sito di navigazione se la ricordi.
 
 Il secondo follow-up (il monolite) va aggiornato: `page.tsx` non è più da 5.900 righe, ma la decomposizione del componente wizard in tab-componenti resta esplicitamente non fatta.
 

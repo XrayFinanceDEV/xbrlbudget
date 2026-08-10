@@ -17,7 +17,7 @@ Due conseguenze concrete, non estetiche:
    InfraannualePage`. Non sono importabili, quindi non sono coperte da alcun
    test — e sono esattamente quelle da cui dipendono i rating mostrati
    all'utente (`computeIndicators`, `scoreIndicator`, `computeCrisisRating`).
-2. **Il gate di percorso è applicato solo alla navigazione.** Le otto tab si
+2. **Il gate di percorso è applicato solo alla navigazione.** Le sette tab si
    rendono con `{activeTab === "x" && …}` senza consultare `pratica-steps.ts`.
    Ogni sito che chiama `setActiveTab` deve ricordarsi di controllare i gate.
 
@@ -112,7 +112,7 @@ sono confinate al proprio blocco. La nota in `CLAUDE.md` va corretta.
 
 ## Il gate al render
 
-Una guardia sola, prima degli otto rami `{activeTab === "x" && …}` in
+Una guardia sola, prima dei sette rami `{activeTab === "x" && …}` in
 `InfraannualePage`:
 
 ```tsx

@@ -88,4 +88,38 @@ describe("reconcileSubfields", () => {
     expect(data.ce08b_salari_stipendi).toBe(8_000);
     expect(data.ce09c_svalutazioni).toBe(9_000);
   });
+
+  it("gruppi con dettaglio valorizzato: sp04, sp07, sp17, ce08, ce09", () => {
+    const data: Record<string, number> = {
+      // sp04_immob_finanziarie: dettaglio 1.500, aggregato 2.000 -> gap 500 nel plug sp04a
+      sp04_immob_finanziarie: 2_000,
+      sp04b_crediti_immob_breve: 1_000,
+      sp04d_altri_titoli: 500,
+      // sp07_crediti_lungo: dettaglio 3.000, aggregato 3.800 -> gap 800 nel plug sp07g
+      sp07_crediti_lungo: 3_800,
+      sp07a_crediti_clienti_lungo: 2_000,
+      sp07c_crediti_collegate_lungo: 1_000,
+      // sp17_debiti_lungo: dettaglio 7.000, aggregato 7.300 -> gap 300 nel plug sp17g
+      sp17_debiti_lungo: 7_300,
+      sp17a_debiti_banche_lungo: 5_000,
+      sp17d_debiti_fornitori_lungo: 2_000,
+      // ce08_costi_personale: dettaglio 1.500, aggregato 2.000 -> gap 500 nel plug ce08b
+      ce08_costi_personale: 2_000,
+      ce08c_oneri_sociali: 1_200,
+      ce08a_tfr_accrual: 300,
+      // ce09_ammortamenti: dettaglio 2.000, aggregato 2.100 -> gap 100 nel plug ce09c
+      ce09_ammortamenti: 2_100,
+      ce09a_ammort_immateriali: 800,
+      ce09b_ammort_materiali: 1_200,
+    };
+    // Attivo (sp04 2.000 + sp07 3.800 = 5.800) vs Passivo (sp17 7.300) = -1.500:
+    // ben oltre la banda di assorbimento (<= 5 EUR), quindi il passo finale
+    // Attivo/Passivo non tocca sp09 e non puo' perturbare le asserzioni sotto.
+    reconcileSubfields(data);
+    expect(data.sp04a_partecipazioni).toBe(500);
+    expect(data.sp07g_crediti_altri_lungo).toBe(800);
+    expect(data.sp17g_altri_debiti_lungo).toBe(300);
+    expect(data.ce08b_salari_stipendi).toBe(500);
+    expect(data.ce09c_svalutazioni).toBe(100);
+  });
 });

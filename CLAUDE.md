@@ -923,12 +923,12 @@ there propagates everywhere. The Rettifiche step holds a shadcn `Tabs` with *Ret
   - `database/models.py` — `FinancialYear.rettifiche_log` column
   - `backend/app/schemas/adjustments.py` — `RettificaEntry`, `AdjustableFinancialYear.rettifiche_log`, `AdjustmentsUpdate.rettifiche_log`
   - `backend/app/api/v1/financial_years.py` — `RETTIFICHE_LOG_MAX = 20`, GET `/adjustable`, PUT `/adjustments`
-  - `frontend/app/pratica/page.tsx` — `RettificheTab` component, `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`, `recalcAggregates`, `reconcileSubfields`, the two-tab render block (moved from `app/infrannuale/page.tsx`, see "Il percorso unico Pratica" below)
-  - `frontend/hooks/use-rettifiche-year.ts` — per-year load/save/reset/corrections, one instance per tab
+  - `frontend/components/pratica/RettificheTab.tsx` — `RettificheTab` component, `recalcAggregates`, the two-tab render block (moved from `app/infrannuale/page.tsx`, see "Il percorso unico Pratica" below)
+  - `frontend/lib/pratica-rettifiche-rules.ts` — `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`
+  - `frontend/lib/pratica-reconcile.ts` — `reconcileSubfields`
+  - `frontend/hooks/use-rettifiche-year.ts` — per-year load/save/reset/corrections, one instance per tab; imports `reconcileSubfields` directly
 
-**Known follow-up:** `RettificheTab` still lives inside `page.tsx` (~1.300 lines of a 5.900-line route
-file) because it leans on ~15 module-level constants shared with the Confronto and Proiezione tabs.
-Extracting it needs a shared module first; deliberately deferred, not forgotten.
+**Struttura (2026-08-10):** `RettificheTab` vive in `frontend/components/pratica/RettificheTab.tsx`; le sue regole di partita doppia e il layout righe stanno in `frontend/lib/pratica-rettifiche-rules.ts`. La vecchia nota parlava di ~15 costanti condivise con le tab Confronto e Proiezione: verificate una per una, l'unica davvero condivisa era `DETAIL_PARENTS` (ora in `lib/pratica-codes.ts`, usata da tutti e tre — `RettificheTab`, `ComparisonTable`, `ProjectionTable` — per decidere quando mostrare una riga di dettaglio). Non è servito alcun modulo ponte.
 
 ### Il percorso unico "Pratica" (2026-08-08)
 Two workflows for a new pratica, down from three: **Da bilancio** (`/pratica`) and **Startup**
@@ -999,6 +999,16 @@ Budget itself gates on `gates.budgetScenario` for the `bilancio` workflow and is
   works). The "Ricalcola" button and its confirmation dialog are a distinct secondary action (with
   the "azzera modifiche manuali CE" checkbox) and were left exactly where they were.
 
+**Moduli della pratica (2026-08-10).** `app/pratica/page.tsx` è sceso da 6.019 a ~1.850 righe. Le
+funzioni pure stanno in `lib/pratica-format.ts` (formattazione), `lib/pratica-codes.ts` (tabelle di
+codici IV-CEE, `DETAIL_PARENTS`, `EXTRA_ALERT_DEFS`), `lib/pratica-reconcile.ts`
+(`reconcileSubfields`), `lib/pratica-indicators.ts` (indicatori, scoring, `computeCrisisRating`) e
+`lib/pratica-statement-rows.ts` (costruzione righe SP/CE); i componenti in `components/pratica/`.
+Regola: `lib/pratica-*` non importa mai da `app/` o `components/`. Tre suite di caratterizzazione
+(`lib/pratica-reconcile.test.ts`, `lib/pratica-indicators.test.ts`,
+`lib/pratica-statement-rows.test.ts`) fissano il comportamento dei calcoli — fissano quello
+**attuale**, non lo giudicano corretto.
+
 **Superseded note, kept for history:** an earlier version of this section said "PREVISIONALE has
 SIX steps, not four" — `/analysis` (Indici) was still unreachable from inside a pratica at that
 time; that gap is what the `previsionale` list above now closes.
@@ -1066,26 +1076,24 @@ Italian `Alert` ("Pratica da riaprire" — riparti dall'importazione o riapri la
 and a reset to the Import step — never a blank `<main>`.
 
 **Two follow-ups the ledger records as deferred, not fixed:**
-- **The gate is enforced at navigation time, only — and advancement now goes through one point,
-  but the wizard's own render guards do not.** Every user-initiated step change (stepper chip/tab
-  click, or the action bar's fallback `"Avanti: …"`/rescue button) now derives "next step + is it
-  gated" from the same single module, `lib/pratica-steps.ts` (`nextStep`, `gateReason`,
-  `praticaGates`) — so that front, at least, cannot diverge between two separate implementations
-  the way it could before the action bar existed. What is **still** unchanged, and therefore still
-  open: `app/pratica/page.tsx`'s own render guards (`{activeTab === "projection" && …}`, same for
-  `results`/`stampa`) and the rehydration path key purely off `activeTab`/`analysisStep`, without
-  re-checking `gates.rettificheOk` at render time. No concretely reachable exploit was found (there
-  is no UI path today that sets `analysisStep` to a gated tab without going through the stepper,
-  the action bar, or `handleConfirmRettifiche`), but it is defense-in-depth debt, not defense-in-
-  depth done. Do not read the single-point-of-advancement change above as having closed this —
-  it narrows where the gap could be triggered from, it does not add a render-time check.
-- **`app/pratica/page.tsx` is still a ~5.900-line monolith.** Decomposing it (and `app/budget/page.tsx`)
-  was explicitly out of scope for this refactor and remains a pending follow-up — see the "Known
-  follow-up" note in the Rettifiche section above, which describes the same file.
+- **Il gate è applicato anche al render (2026-08-10).** `blockedStep()` in `lib/pratica-steps.ts`
+  decide se lo step corrente è raggiungibile, e una guardia unica in `app/pratica/page.tsx` avvolge
+  i sette rami `activeTab`. Due comportamenti deliberati: uno step **sconosciuto non blocca** (i
+  workflow ne omettono di proposito — bloccare creerebbe vicoli ciechi), e il controllo legge **la
+  stessa cache dello stepper**, senza interrogare il server. Quindi se la cache dice "confermato" e
+  il server dice il contrario, si passa: **non è un confine di autorizzazione** e non chiude un
+  exploit noto (nessuna delle review del 2026-08-08 era riuscita a costruirne uno). Il guadagno è
+  che l'invariante non dipende più dal fatto che ogni sito di navigazione se la ricordi.
+- **`app/pratica/page.tsx` non è più da 5.900 righe** (ora ~1.850, vedi "Moduli della pratica" sopra),
+  ma la decomposizione del componente wizard stesso in tab-componenti resta esplicitamente non
+  fatta — quanto estratto finora sono funzioni pure e i componenti già a foglio (Rettifiche,
+  Confronto, Proiezione, Indicatori, Stampa); il corpo del wizard (stato, effetti di caricamento,
+  i sette rami `activeTab`) vive ancora tutto in `app/pratica/page.tsx`.
 
 ### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
 All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable. When adding a new BS/IS sub-field, add rows in all of:
-- `frontend/app/pratica/page.tsx` — `RETTIFICHE_BS_ATTIVO` / `RETTIFICHE_BS_PN`, `CE_A`–`CE_E`, and the `relabel` map inside `buildBalanceItemsWithTotals` / `buildIncomeItemsWithEbitda` (Confronto)
+- `frontend/lib/pratica-rettifiche-rules.ts` — `RETTIFICHE_BS_ATTIVO` / `RETTIFICHE_BS_PN`, `CE_A`–`CE_E` (Rettifiche row layout)
+- `frontend/lib/pratica-statement-rows.ts` — the `relabel` map inside `buildBalanceItemsWithTotals` / `buildIncomeItemsWithEbitda` (Confronto)
 - `frontend/app/forecast/balance/page.tsx` — the `rows` array in `BalanceSheetTable`
 - `frontend/app/forecast/income/page.tsx` — the `rows` array in `IncomeStatementTable`
 
@@ -1097,6 +1105,10 @@ Detail blocks shared across all views:
 - **P&L:** ce08a–d (personale: TFR, salari, oneri sociali, altri), ce09a–d (ammortamenti/svalutazioni), ce17a/b (rivalutazioni/svalutazioni). EBITDA + EBIT rows shown in all three pages.
 
 **Per-year sub-field reconciliation (Confronto tab):** Bilancio abbreviato imports often populate only parent aggregates (e.g. `sp16_debiti_breve`) leaving detail sub-fields at 0. `buildBalanceItemsWithTotals` applies `reconcileSubfields` to each year column (partial/reference/prior) independently, so the gap is plugged into the "altri" bucket (`sp04a`, `sp05e`, `sp06g`, `sp07g`, `sp12e`, `sp16g`, `sp17g`) before rows are built. This mirrors the Rettifiche load-time reconciliation and prevents detail rows from being hidden by the zero-filter.
+
+**Two known warts, left untouched deliberately (2026-08-10 — found while decomposing `page.tsx`, not fixed as part of that move):**
+- `buildBalanceItemsWithTotals` maps over the CALLER's `rawItems`, so a reconciliation plug computed for a code the caller never sent is silently dropped — it exists in the internal reconciled map but its row never renders. The caller must include the detail rows (even as zeros) in `rawItems` for a plug to be visible.
+- `buildIncomeItemsWithEbitda`'s `periodMonths` parameter is effectively dead: `const factor = 12 / periodMonths` is computed and never read anywhere in the function, so the output does not actually vary with it. Annualisation of CE rows comes entirely from the caller-supplied `annualized_value`, not from this parameter.
 
 **Recap dialog (Riepilogo Rettifiche):** aggregate rows that were updated indirectly by `recalcAggregates` (any field in `NON_POSTABLE_FIELDS`) render in muted-gray italic with a tooltip explaining they are derived totals, so the user doesn't mistake them for duplicated postings.
 

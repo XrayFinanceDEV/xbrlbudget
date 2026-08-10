@@ -34,7 +34,7 @@ Ogni voce ha un'etichetta **autonoma** (auto-esplicativa, usabile senza contesto
 Derivazione dalle fonti attuali, in quest'ordine di precedenza:
 
 ```
-autonoma  = COUNTERPART_PICKER_LABELS[code]        // solo i 14 sotto-conti dei debiti
+autonoma  = COUNTERPART_PICKER_LABELS[code]        // tutte e 38 le sue chiavi
           ?? relabel[code]                          // grafia del Confronto: vince
           ?? RETTIFICHE_LABELS[code]                // per i codici che solo Rettifiche etichetta
 
@@ -336,8 +336,8 @@ Crea `frontend/lib/ivcee-catalog.ts` (CRLF, come gli altri `lib/pratica-*.ts` �
 - **quali codici e in che ordine:** `RETTIFICHE_BS_ATTIVO`, `RETTIFICHE_BS_PN`, `RETTIFICHE_BS_OTHER_PASSIVO`, `DEBT_GROUPS`, `CE_A`…`CE_IMPOSTE` in `lib/pratica-rettifiche-rules.ts` — sono l'elenco più completo dei sei, perché Rettifiche mostra tutto;
 - **il padre:** `DETAIL_PARENTS` in `lib/pratica-codes.ts` mappa già ogni sotto-voce al suo aggregato. Le voci non presenti lì hanno `parent: null`;
 - **la sezione:** `attivo` per i codici in `ATTIVO_CODES` e le loro sotto-voci; `patrimonio` per `sp11`/`sp12*`/`sp13`; `passivo` per il resto degli `sp`; `ce` per i `ce*`;
-- **le etichette:** applica la regola di derivazione. `COUNTERPART_PICKER_LABELS` vince per i 14 sotto-conti dei debiti; altrimenti vince `relabel` (grafia del Confronto); `RETTIFICHE_LABELS` è l'ultima risorsa;
-- **`shortLabel`:** valorizzata **solo** dove `relabel[code]` differisce dall'etichetta autonoma scelta. In pratica: i 14 sotto-conti dei debiti (`entro 12 mesi` / `oltre 12 mesi`). Se ne trovi altri, elencali nel report.
+- **le etichette:** applica la regola di derivazione. `COUNTERPART_PICKER_LABELS` vince per **tutte e 38** le sue chiavi — non solo i debiti: contiene anche i sotto-conti di crediti (sp06a-g, sp07a-g), immobilizzazioni finanziarie (sp04a-e) e rimanenze (sp05a-e), la cui grafia breve è altrettanto ambigua fuori da un prospetto (`1) Verso clienti` non dice se entro o oltre). Altrimenti vince `relabel` (grafia del Confronto); `RETTIFICHE_LABELS` è l'ultima risorsa;
+- **`shortLabel`:** valorizzata **solo** dove `relabel[code]` differisce dall'etichetta autonoma scelta. Attesi circa 38 (i sotto-conti coperti da `COUNTERPART_PICKER_LABELS`), più eventuali altri: elencali tutti nel report.
 
 Le funzioni:
 

@@ -1026,6 +1026,26 @@ non-zero per ogni codice nominato in ogni array sommato, asserzioni per valore e
 perimetro insieme al bug `sp07_crediti_lungo` mancante da `totalAssets`, anch'esso lasciato al
 proprietario del progetto).
 
+**`sp07_crediti_lungo` mancante da `totalAssets` — corretto (2026-08-10).** Il bug appena
+descritto come "lasciato al proprietario del progetto" è stato risolto: `computeIndicators`
+(`lib/pratica-indicators.ts`) escludeva correttamente `sp07_crediti_lungo` (crediti esigibili
+oltre l'esercizio successivo) da `currentAssets` — non è attivo circolante — ma non lo
+riaggiungeva mai a `totalAssets`, disallineandosi da `ATTIVO_CODES` (`lib/pratica-codes.ts`) e da
+`attivoKeys` (`lib/pratica-reconcile.ts`), che lo includono entrambi. L'effetto: su un'azienda con
+crediti a lungo termine significativi, il totale attivo risultava sottostimato, e quindi
+`indipendenza` (equity/TA) e `roi` (EBIT/TA) risultavano SOVRASTIMATI — la direzione sbagliata per
+uno strumento di rischio creditizio. Fix: `sp07_crediti_lungo` è ora sommato a `totalAssets` (non
+a `currentAssets`, che resta invariato per costruzione), con un commento nel codice che spiega
+l'asimmetria. La suite di caratterizzazione esistente NON avrebbe intercettato questo bug (misura
+mutation coverage 3/29 su questo file, vedi sopra); non lo avrebbe nemmeno intercettato una sua
+reintroduzione — il suo fixture `BS_SANA` non contiene affatto `sp07_crediti_lungo` e asserisce
+solo `_ebitda_raw`/`ebitda_margin` per valore. Sono stati aggiunti due test mirati che pinnano
+esattamente questo comportamento: `indipendenza` e `roi` per valore esatto su un fixture con
+`sp07_crediti_lungo` non nullo, più un confronto che il `current_ratio` resta invariato in
+presenza/assenza di `sp07` (pinna la metà "non va in `currentAssets`" della regola). Questo
+corregge una singola omissione — non rende la suite degli indicatori adeguata nel complesso; la
+mutation coverage bassa descritta sopra resta un problema aperto per tutti gli altri campi.
+
 **Superseded note, kept for history:** an earlier version of this section said "PREVISIONALE has
 SIX steps, not four" — `/analysis` (Indici) was still unreachable from inside a pratica at that
 time; that gap is what the `previsionale` list above now closes.

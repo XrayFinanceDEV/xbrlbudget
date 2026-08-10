@@ -61,6 +61,15 @@ describe("safeDivide", () => {
   });
 });
 
+/**
+ * Come BS_SANA ma con crediti esigibili oltre l'esercizio successivo (sp07):
+ * pin per il fix "sp07_crediti_lungo assente dal totale attivo".
+ */
+const BS_CON_SP07: Record<string, number> = {
+  ...BS_SANA,
+  sp07_crediti_lungo: 120_000,
+};
+
 describe("computeIndicators", () => {
   const ind = computeIndicators(BS_SANA, IS_SANA);
 
@@ -90,6 +99,28 @@ describe("computeIndicators", () => {
     for (const value of Object.values(empty)) {
       expect(Number.isFinite(value)).toBe(true);
     }
+  });
+
+  it("sp07_crediti_lungo entra nel totale attivo: indipendenza e ROI per valore esatto", () => {
+    // fixedAssets = 20.000 + 300.000 = 320.000
+    // currentAssets = 150.000 (rimanenze) + 250.000 (sp06) + 80.000 (cassa) = 480.000
+    // totalAssets = fixedAssets + currentAssets + sp07 (120.000) = 920.000
+    // equity = 100.000 + 250.000 + 90.000 = 440.000
+    // indipendenza = equity / totalAssets * 100
+    const conSp07 = computeIndicators(BS_CON_SP07, IS_SANA);
+    expect(conSp07.indipendenza).toBeCloseTo((440_000 / 920_000) * 100, 6);
+    // ebit = ebitda (250.000) - ammortamenti (50.000) = 200.000
+    // roi = ebit / totalAssets * 100
+    expect(conSp07.roi).toBeCloseTo((200_000 / 920_000) * 100, 6);
+  });
+
+  it("sp07_crediti_lungo non entra nell'attivo circolante: current_ratio invariato", () => {
+    // sp07 e' escluso da currentAssets per costruzione: aggiungerlo al bilancio
+    // non deve spostare il current_ratio, solo il totale attivo (test sopra).
+    const senzaSp07 = computeIndicators(BS_SANA, IS_SANA);
+    const conSp07 = computeIndicators(BS_CON_SP07, IS_SANA);
+    expect(conSp07.current_ratio).toBeCloseTo(senzaSp07.current_ratio, 10);
+    expect(conSp07.current_ratio).toBeCloseTo(480_000 / 260_000, 10);
   });
 });
 

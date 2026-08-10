@@ -96,7 +96,14 @@ export function computeIndicators(
     financialAssets +
     cash +
     v(bs, "sp10_ratei_risconti_attivi");
-  const totalAssets = v(bs, "sp01_crediti_soci") + fixedAssets + currentAssets;
+  // sp07_crediti_lungo (crediti esigibili oltre l'esercizio successivo) is deliberately
+  // excluded from currentAssets above (it is not a current asset) but MUST be added back
+  // here: it is still part of Totale Attivo (see ATTIVO_CODES in pratica-codes.ts and
+  // attivoKeys in pratica-reconcile.ts, which both include it). Omitting it here understates
+  // totalAssets and therefore overstates `indipendenza` and `roi` — the wrong direction for
+  // a credit-risk indicator. Do not "simplify" this back out.
+  const totalAssets =
+    v(bs, "sp01_crediti_soci") + fixedAssets + currentAssets + v(bs, "sp07_crediti_lungo");
   const equity =
     v(bs, "sp11_capitale") +
     v(bs, "sp12_riserve") +

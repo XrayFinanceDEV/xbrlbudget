@@ -106,9 +106,17 @@ seguono il componente, non vanno in `lib`.
 `CLAUDE.md` afferma che `RettificheTab` «leans on ~15 module-level constants
 shared with the Confronto and Proiezione tabs», e ne deduce che estrarlo
 richieda prima un modulo condiviso. Verificato identificatore per
-identificatore: **una sola** costante è davvero condivisa (`DETAIL_PARENTS`, usata
-a 4693 e 4917), e non è nemmeno usata dentro `RettificheTab`. Le altre quattordici
-sono confinate al proprio blocco. La nota in `CLAUDE.md` va corretta.
+identificatore: **una sola** costante è davvero condivisa — `DETAIL_PARENTS`, usata
+da `RettificheTab` (originale 1951) e anche da `ComparisonTable` (4693) e
+`ProjectionTable` (4917). Le altre quattordici sono confinate al proprio blocco.
+La nota in `CLAUDE.md` va corretta.
+
+**Correzione del 2026-08-10, emersa eseguendo il Task 9:** una versione precedente di
+questo paragrafo aggiungeva «e non è nemmeno usata dentro `RettificheTab`». Era falso.
+Derivava da un grep che filtrava via l'intervallo di `RettificheTab` — cercava gli usi
+*fuori* da quel blocco — e da quell'assenza si era dedotta un'assenza che il comando non
+poteva misurare. La collocazione in `pratica-codes.ts` resta comunque quella giusta: con
+tre consumatori distinti, un modulo condiviso è esattamente il posto dove va.
 
 ## Il gate al render
 

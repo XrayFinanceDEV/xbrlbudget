@@ -1282,7 +1282,7 @@ Expected: 0 errori, test verdi, build completata.
 
 Nella sezione **Rettifiche (BS/IS Adjustments Journal)**, la nota "Known follow-up" dice che `RettificheTab` vive dentro `page.tsx` perché si appoggia a ~15 costanti condivise. Sostituirla con lo stato reale:
 
-> **Struttura (2026-08-10):** `RettificheTab` vive in `frontend/components/pratica/RettificheTab.tsx`; le sue regole di partita doppia e il layout righe stanno in `frontend/lib/pratica-rettifiche-rules.ts`. La vecchia nota parlava di ~15 costanti condivise con le tab Confronto e Proiezione: verificate una per una, l'unica davvero condivisa era `DETAIL_PARENTS` (che ora vive in `lib/pratica-codes.ts` e non è nemmeno usata dentro `RettificheTab`). Non è servito alcun modulo ponte.
+> **Struttura (2026-08-10):** `RettificheTab` vive in `frontend/components/pratica/RettificheTab.tsx`; le sue regole di partita doppia e il layout righe stanno in `frontend/lib/pratica-rettifiche-rules.ts`. La vecchia nota parlava di ~15 costanti condivise con le tab Confronto e Proiezione: verificate una per una, l'unica davvero condivisa era `DETAIL_PARENTS`, che ora vive in `lib/pratica-codes.ts` ed è usata da `RettificheTab`, `ComparisonTable` e `ProjectionTable`. Non è servito alcun modulo ponte oltre a quello.
 
 Nella sezione **Il percorso unico "Pratica"**, aggiungere in coda alla mappa dei file:
 

@@ -191,7 +191,25 @@ export default function InfraannualePage() {
 
   // Il context è una cache; la verità è il log letto dal server. Riallinea lo
   // stepper quando i dati arrivano (mount, refresh di pagina, cambio anno).
+  //
+  // GUARDIA — non rimuovere: gli hook `useRettificheYear` caricano SOLO sulla
+  // tab Rettifiche (vedi l'effetto poco sotto), quindi su un mount qualunque
+  // (es. rientro su /pratica dallo stepper dopo essere stati su /budget)
+  // `verifica`/`storico` sono ancora a `data: null, confirmed: false` mentre
+  // il context ha già un `rettificheConfirmed` valido da localStorage. Senza
+  // questa guardia l'effetto scriveva incondizionatamente `false` a ogni
+  // mount, cancellando una conferma legittima — e da quando `blockedStep()`
+  // legge la stessa cache per il render gate, questo trasformava il gate in
+  // un falso blocco su Confronto/Proiezione/Indicatori/Stampa per un utente
+  // che AVEVA confermato. "Risolto" = i dati sono arrivati (`data !== null`)
+  // oppure il server ha risposto 404 (`!exists`, storico può non esistere).
+  // Non scrivere PRIMA che l'anno sia risolto; scrivere SEMPRE una volta
+  // risolto (anche `false`, es. dopo "Ripristina originale" che azzera
+  // `confirmed` su un anno già caricato).
+  const verificaResolved = verifica.data !== null || !verifica.exists;
+  const storicoResolved = storico.data !== null || !storico.exists;
   useEffect(() => {
+    if (!verificaResolved || !storicoResolved) return;
     updatePratica({
       rettificheConfirmed: {
         verifica: verifica.confirmed,
@@ -201,7 +219,7 @@ export default function InfraannualePage() {
     // updatePratica è stabile; dipendere dall'oggetto verifica/storico
     // rifarebbe scattare l'effetto a ogni render (vedi CLAUDE.md, Rettifiche).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verifica.confirmed, storico.confirmed, storico.exists]);
+  }, [verifica.confirmed, storico.confirmed, storico.exists, verificaResolved, storicoResolved]);
 
   // Unica porta verso il Confronto: sia il banner "Conferma e prosegui" sia il
   // bottone del dialogo Riepilogo (onNext dell'istanza "verifica") passano di

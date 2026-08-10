@@ -126,15 +126,26 @@ describe("computeCrisisRating", () => {
   });
 
   it("i segnali extracontabili peggiorano il rating", () => {
+    // `!==` da solo sopravvive a una mutazione che invertisse la direzione
+    // (più segnali → rating MIGLIORE): si fissano i due codici concreti letti
+    // dall'implementazione, non solo la loro diversità. I codici sono
+    // ordinati dal migliore al peggiore (A3 > A2 > A1 > B3 > B2 > B1 > C3 >
+    // C2 > C1 > D): "senza" deve restare il migliore possibile, "con" deve
+    // essere effettivamente peggiore, non un codice qualunque diverso.
     const senza = computeCrisisRating([1, 1, 1, 1], 0).code;
     const con = computeCrisisRating([1, 1, 1, 1], 3).code;
-    expect(con).not.toBe(senza);
+    expect(senza).toBe("A3");
+    expect(con).toBe("C3");
   });
 });
 
 describe("scoreDotColor", () => {
   it("verde sopra 0,67, giallo in mezzo, rosso sotto 0,33", () => {
-    expect(scoreDotColor(0.9)).not.toBe(scoreDotColor(0.5));
-    expect(scoreDotColor(0.5)).not.toBe(scoreDotColor(0.1));
+    // Valori esatti, non solo differenza a coppie: una mutazione che
+    // scambiasse verde e rosso (buono↔cattivo su un rating di rischio
+    // creditizio) sopravviverebbe a un semplice `not.toBe`.
+    expect(scoreDotColor(0.9)).toBe("bg-green-500");
+    expect(scoreDotColor(0.5)).toBe("bg-yellow-500");
+    expect(scoreDotColor(0.1)).toBe("bg-red-500");
   });
 });

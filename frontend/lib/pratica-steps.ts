@@ -343,6 +343,24 @@ export function gateReason(
   }
 }
 
+/**
+ * Il punto più avanzato del wizard dove l'utente è legittimamente arrivato:
+ * l'ultima tab abilitata nell'ordine del percorso. Filtrata su
+ * `kind === "tab"` per non spedirlo fuori dal wizard su una rotta
+ * previsionale. `null` quando nessuna tab del wizard è abilitata (percorso
+ * "startup", o rotte PREVISIONALE dove non esiste alcuno step `kind: "tab"`)
+ * — in quel caso il chiamante ricade sul primo step abilitato di qualsiasi
+ * tipo (vedi `PraticaActionBar`, che non deve MAI restare senza un rescue
+ * fuori dal wizard).
+ *
+ * Unica definizione: `blockedStep` (render gate) e `PraticaActionBar`
+ * (bottone "Torna a …") la condividono apposta, così non possono mai
+ * proporre due destinazioni diverse per lo stesso step bloccato.
+ */
+export function rescueStep(steps: PraticaStep[]): PraticaStep | null {
+  return [...steps].reverse().find((s) => s.enabled && s.kind === "tab") ?? null;
+}
+
 export interface StepBlock {
   /** Perché lo step non è raggiungibile. */
   reason: string | null;
@@ -379,10 +397,5 @@ export function blockedStep(
   const steps = buildPraticaSteps(pratica, gates);
   const step = steps.find((s) => s.id === stepId);
   if (!step || step.enabled) return null;
-  // L'ultima tab raggiungibile in ordine di percorso: è il punto più avanzato
-  // dove l'utente è legittimamente arrivato. Filtrata su `kind === "tab"` per
-  // non spedirlo fuori dal wizard su una rotta previsionale.
-  const back =
-    [...steps].reverse().find((s) => s.enabled && s.kind === "tab") ?? null;
-  return { reason: gateReason(step, gates, pratica), back };
+  return { reason: gateReason(step, gates, pratica), back: rescueStep(steps) };
 }

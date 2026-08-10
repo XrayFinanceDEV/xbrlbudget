@@ -10,6 +10,7 @@ import {
   phaseStatus,
   praticaGates,
   prevStep,
+  rescueStep,
   type PraticaGates,
 } from "./pratica-steps";
 
@@ -271,5 +272,34 @@ describe("blockedStep", () => {
     };
     const block = blockedStep(p, "projection");
     expect(block?.back?.kind).toBe("tab");
+  });
+});
+
+describe("rescueStep", () => {
+  it("preferisce l'ultima tab abilitata del percorso, non la prima abilitata in assoluto", () => {
+    const steps = buildPraticaSteps(PRATICA, ALL_GATES);
+    // Con tutti i gate aperti sono abilitate sia tab (anagrafiche..stampa) sia
+    // rotte previsionali (budget..report): deve tornare l'ultima TAB, non la
+    // prima route abilitata dell'intero array.
+    expect(rescueStep(steps)?.id).toBe("stampa");
+    expect(rescueStep(steps)?.kind).toBe("tab");
+  });
+
+  it("null quando nessuna tab è abilitata: il chiamante ricade sul primo step abilitato", () => {
+    // Legacy budget resume: solo la fase PREVISIONALE, tutta a kind "route" —
+    // nessuna tab esiste nell'array, quindi rescueStep non ha nulla da
+    // proporre dentro il wizard.
+    const steps = buildPraticaSteps(
+      { ...PRATICA, budgetScenarioId: 7, infrannualeScenarioId: null },
+      ALL_GATES,
+    );
+    expect(rescueStep(steps)).toBeNull();
+    // Lo stesso pattern usato da PraticaActionBar (`rescueStep(steps) ??
+    // steps.find((s) => s.enabled)`) ricade sul primo step abilitato di
+    // qualsiasi tipo, cosicché la barra azioni non resti mai senza un rescue
+    // fuori dal wizard.
+    const fallback = rescueStep(steps) ?? steps.find((s) => s.enabled) ?? null;
+    expect(fallback?.id).toBe("budget");
+    expect(fallback?.kind).toBe("route");
   });
 });

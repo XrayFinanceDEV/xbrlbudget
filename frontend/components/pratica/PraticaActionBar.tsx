@@ -12,6 +12,7 @@ import {
   nextStep,
   praticaGates,
   prevStep,
+  rescueStep,
   type PraticaStep,
 } from "@/lib/pratica-steps";
 
@@ -49,11 +50,20 @@ export function PraticaActionBar() {
   let reason: string | null;
   let run: () => void;
 
-  // Cerca sull'INTERO percorso, non nella sola fase corrente: un "Ripristina
-  // originale" azzera rettificheOk, che è in AND su tutti e quattro gli step
-  // della fase ANALISI, quindi la fase intera risulta bloccata e un rescue
-  // ristretto alla fase non troverebbe mai nulla.
-  const rescue = current && !current.enabled ? steps.find((s) => s.enabled) ?? null : null;
+  // `rescueStep` cerca sull'INTERO percorso, non nella sola fase corrente: un
+  // "Ripristina originale" azzera rettificheOk, che è in AND su tutti e
+  // quattro gli step della fase ANALISI, quindi la fase intera risulta
+  // bloccata e un rescue ristretto alla fase non troverebbe mai nulla.
+  // Condivisa con `blockedStep` (il render gate del wizard) apposta: le due
+  // non possono proporre due destinazioni diverse per lo stesso step
+  // bloccato (FINDING 2, review finale). `rescueStep` restituisce `null`
+  // fuori dal wizard (rotte PREVISIONALE, nessuno step `kind: "tab"`
+  // abilitato) — lì si ricade sul primo step abilitato di qualsiasi tipo,
+  // altrimenti la barra resterebbe senza rescue proprio dove serve di più.
+  const rescue =
+    current && !current.enabled
+      ? rescueStep(steps) ?? steps.find((s) => s.enabled) ?? null
+      : null;
 
   if (rescue) {
     // Lo step corrente non è (più) raggiungibile: può succedere rientrando su

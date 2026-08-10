@@ -342,3 +342,47 @@ export function gateReason(
       return "Previsionale non generato";
   }
 }
+
+export interface StepBlock {
+  /** Perché lo step non è raggiungibile. */
+  reason: string | null;
+  /** Dove riportare l'utente. Sempre una tab del wizard, mai una rotta. */
+  back: PraticaStep | null;
+}
+
+/**
+ * Lo step è raggiungibile? `null` = sì (o non c'è nulla da decidere).
+ *
+ * Difesa in profondità per il RENDER: i rami `{activeTab === …}` del wizard non
+ * consultano i gate, quindi finora l'invariante dipendeva dal fatto che ogni
+ * sito di navigazione se la ricordasse.
+ *
+ * Due comportamenti deliberati, da non "correggere":
+ *
+ * 1. Uno step SCONOSCIUTO non blocca. `buildPraticaSteps` omette di proposito
+ *    degli step in certi workflow (startup, legacy budget resume): bloccare
+ *    sull'assenza creerebbe vicoli ciechi nuovi.
+ * 2. Si legge lo stesso stato persistito che legge lo stepper, senza
+ *    interrogare il server. Essere più severi dello stepper produrrebbe falsi
+ *    blocchi: gli hook `useRettificheYear` partono a `confirmed: false` e
+ *    caricano SOLO sulla tab Rettifiche, quindi altrove la verità server non è
+ *    disponibile. Conseguenza dichiarata: se la cache dice "confermato" e il
+ *    server dice il contrario, qui si passa — esattamente come prima di questo
+ *    controllo. Non è un confine di autorizzazione.
+ */
+export function blockedStep(
+  pratica: PraticaState | null,
+  stepId: string,
+): StepBlock | null {
+  if (!pratica) return null;
+  const gates = praticaGates(pratica);
+  const steps = buildPraticaSteps(pratica, gates);
+  const step = steps.find((s) => s.id === stepId);
+  if (!step || step.enabled) return null;
+  // L'ultima tab raggiungibile in ordine di percorso: è il punto più avanzato
+  // dove l'utente è legittimamente arrivato. Filtrata su `kind === "tab"` per
+  // non spedirlo fuori dal wizard su una rotta previsionale.
+  const back =
+    [...steps].reverse().find((s) => s.enabled && s.kind === "tab") ?? null;
+  return { reason: gateReason(step, gates, pratica), back };
+}

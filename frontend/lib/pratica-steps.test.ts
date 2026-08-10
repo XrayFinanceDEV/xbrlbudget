@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PraticaState } from "@/contexts/PraticaContext";
 import {
+  blockedStep,
   buildPraticaSteps,
   currentStepId,
   firstEnabledStep,
@@ -204,5 +205,71 @@ describe("currentStepId", () => {
     const startup: PraticaState = { ...PRATICA, workflow: "startup" };
     expect(currentStepId("/budget", "x", startup)).toBe("anagrafiche");
     expect(currentStepId("/budget", "x", { ...startup, budgetScenarioId: 5 })).toBe("budget");
+  });
+});
+
+describe("blockedStep", () => {
+  it("nessuna pratica attiva: non blocca", () => {
+    expect(blockedStep(null, "stampa")).toBeNull();
+  });
+
+  it("step raggiungibile: non blocca", () => {
+    expect(blockedStep(PRATICA, "anagrafiche")).toBeNull();
+  });
+
+  it("step sconosciuto: non blocca (i workflow ne omettono di proposito)", () => {
+    expect(blockedStep(PRATICA, "questo-step-non-esiste")).toBeNull();
+  });
+
+  it("Import senza azienda: blocca e riporta ad Anagrafiche", () => {
+    // fiscalYear azzerato insieme a companyId: senza azienda non può esistere
+    // un anno fiscale importato — altrimenti gates.imported (che guarda solo
+    // fiscalYear) lascerebbe "rettifiche" abilitata da uno stato che non può
+    // verificarsi nel flusso reale.
+    const p: PraticaState = { ...PRATICA, companyId: null, fiscalYear: null };
+    const block = blockedStep(p, "import");
+    expect(block?.reason).toBe("Completa prima l'anagrafica");
+    expect(block?.back?.id).toBe("anagrafiche");
+  });
+
+  it("Stampa con rettifiche non confermate: blocca e riporta a Rettifiche", () => {
+    const p: PraticaState = {
+      ...PRATICA,
+      infrannualeScenarioId: 7,
+      rettificheConfirmed: { storico: false, verifica: false },
+    };
+    const block = blockedStep(p, "stampa");
+    expect(block?.reason).toBe("Rettifiche non confermate");
+    expect(block?.back?.id).toBe("rettifiche");
+  });
+
+  it("Proiezione senza confronto: riporta al Confronto, l'ultima tab raggiungibile", () => {
+    const p: PraticaState = {
+      ...PRATICA,
+      infrannualeScenarioId: null,
+      rettificheConfirmed: { storico: true, verifica: true },
+    };
+    const block = blockedStep(p, "projection");
+    expect(block?.reason).toBe("Confronto non caricato");
+    expect(block?.back?.id).toBe("comparison");
+  });
+
+  it("il ritorno resta dentro il wizard, mai su una rotta previsionale", () => {
+    // infrannualeScenarioId valorizzato (non null): budgetScenarioId!==null
+    // insieme a infrannualeScenarioId===null è esattamente il trigger di
+    // isLegacyBudgetResume (v. buildPraticaSteps), che fa sparire "projection"
+    // dalla lista degli step — lo step diventerebbe "sconosciuto" e
+    // blockedStep non bloccherebbe nulla per il motivo 1 del suo JSDoc,
+    // vanificando questo test. rettificheConfirmed resta quella di default
+    // (non confermate) così "projection" è comunque bloccata, mentre
+    // budgetScenarioId abilita gli step-rotta del previsionale (budget,
+    // indici, …) che il "back" deve scartare in favore di una tab.
+    const p: PraticaState = {
+      ...PRATICA,
+      infrannualeScenarioId: 7,
+      budgetScenarioId: 3,
+    };
+    const block = blockedStep(p, "projection");
+    expect(block?.back?.kind).toBe("tab");
   });
 });

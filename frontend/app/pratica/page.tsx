@@ -25,6 +25,7 @@ import {
   type InfrannualeAIComments,
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
+import { blockedStep } from "@/lib/pratica-steps";
 import type {
   BudgetScenario,
   IntraYearComparison,
@@ -3873,6 +3874,11 @@ export default function InfraannualePage() {
     calculateProjectedBS,
   ]);
 
+  // Difesa in profondità: i rami `activeTab === …` qui sotto non consultano i
+  // gate del percorso. Vedi blockedStep() in lib/pratica-steps.ts per cosa
+  // questo controllo copre e cosa deliberatamente non copre.
+  const blocked = useMemo(() => blockedStep(pratica, activeTab), [pratica, activeTab]);
+
   usePrimaryAction(primary);
 
   return (
@@ -3890,6 +3896,32 @@ export default function InfraannualePage() {
             </AlertDescription>
           </Alert>
         )}
+
+        {blocked && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <AlertTriangle className="h-5 w-5" /> Passaggio non ancora raggiungibile
+              </CardTitle>
+              <CardDescription>
+                {blocked.reason ?? "Completa prima i passaggi precedenti."}
+              </CardDescription>
+            </CardHeader>
+            {blocked.back && (
+              <CardContent>
+                <Button
+                  onClick={() => {
+                    if (blocked.back) setActiveTab(blocked.back.id);
+                  }}
+                >
+                  Torna a {blocked.back.label}
+                </Button>
+              </CardContent>
+            )}
+          </Card>
+        )}
+
+        {!blocked && (<>
 
         {/* STEP 0: ANAGRAFICHE */}
         {activeTab === "anagrafiche" && (
@@ -4571,6 +4603,8 @@ export default function InfraannualePage() {
             </Card>
           )}
         </div>}
+
+        </>)}
 
       </div>
     </>

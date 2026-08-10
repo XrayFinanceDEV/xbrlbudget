@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
+import { VOCI, labelOf } from "@/lib/ivcee-catalog";
 import {
   CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
+  COUNTERPART_PICKER_LABELS,
   DEBT_GROUPS,
   RETTIFICHE_BS_ATTIVO, RETTIFICHE_BS_OTHER_PASSIVO, RETTIFICHE_BS_PN,
+  RETTIFICHE_LABELS,
 } from "@/lib/pratica-rettifiche-rules";
 import {
   buildBalanceItemsWithTotals,
@@ -373,5 +376,32 @@ describe("invariante: nessuna vista perde o riordina righe", () => {
 
   it("Confronto: righe CE costruite dal server", () => {
     expect(buildIncomeItemsWithEbitda(CE_FIXTURE, 9).map((i) => i.code)).toEqual(ATTESI_CONFRONTO_CE);
+  });
+});
+
+describe("cross-check: il catalogo riproduce la regola delle etichette", () => {
+  it("ogni codice etichettato dalle fonti vecchie esiste nel catalogo", () => {
+    const known = new Set(VOCI.map((v) => v.code));
+    const mancanti = Object.keys(RETTIFICHE_LABELS).filter((c) => !known.has(c));
+    expect(mancanti).toEqual([]);
+  });
+
+  it("i 14 sotto-conti dei debiti usano il testo del selettore come etichetta autonoma", () => {
+    // COUNTERPART_PICKER_LABELS oggi ha 38 chiavi (14 debiti + 14 crediti +
+    // 5 immob. finanziarie + 5 rimanenze), non solo le 14 dei debiti: per
+    // quelle 24 extra la regola dei Global Constraints fa vincere `relabel`
+    // (grafia del Confronto), non il selettore — vedi il commento in testa a
+    // lib/ivcee-catalog.ts. Il test resta scoperto ai 14 sotto-conti dei
+    // debiti che il titolo nomina, derivati da DEBT_GROUPS come in
+    // ivcee-catalog.ts, non dall'intera mappa.
+    const debtSubaccounts = DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]);
+    for (const code of debtSubaccounts) {
+      expect(labelOf(code)).toBe(COUNTERPART_PICKER_LABELS[code]);
+    }
+  });
+
+  it("nessuna etichetta del catalogo conserva i rientri delle fonti vecchie", () => {
+    const conRientro = VOCI.filter((v) => v.label.startsWith(" "));
+    expect(conRientro.map((v) => v.code)).toEqual([]);
   });
 });

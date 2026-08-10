@@ -1169,7 +1169,7 @@ Copiare **verbatim** l'intervallo `5346,6019` (fino a fine file).
 git show a981ac8:frontend/app/pratica/page.tsx | sed -n '5346,6019p' > /tmp/stampa.txt
 ```
 
-`StampaContent` usa `IndicatoriTable`: importarlo da `@/components/pratica/IndicatoriTable`. Registra anche la propria azione primaria con `usePrimaryAction` — l'import va da `@/contexts/PraticaActionContext`. Usa `useRouter`, `useApp`, `useAuth`, `usePratica`: importarli rispettivamente da `next/navigation`, `@/contexts/AppContext`, `@/contexts/AuthContext`, `@/contexts/PraticaContext`.
+`StampaContent` **non** rende `IndicatoriTable` (verificato eseguendo il task: entrambi sono resi dal genitore `InfraannualePage`, e `StampaContent` costruisce le proprie tabelle di indicatori) — nessun import fra i due. Registra anche la propria azione primaria con `usePrimaryAction` — l'import va da `@/contexts/PraticaActionContext`. Usa `useRouter`, `useApp`, `useAuth`, `usePratica`: importarli rispettivamente da `next/navigation`, `@/contexts/AppContext`, `@/contexts/AuthContext`, `@/contexts/PraticaContext`.
 
 - [ ] **Step 4: Verificare il diff verbatim**
 

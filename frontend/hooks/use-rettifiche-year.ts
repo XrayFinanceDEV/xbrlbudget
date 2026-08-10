@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getAdjustableFinancialYear, saveAdjustments } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
+import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
 export interface RettificheYear {
@@ -31,14 +32,12 @@ export interface RettificheYear {
  * Rettifiche state for ONE FinancialYear.
  *
  * @param periodMonths undefined = full 12-month year; 1-11 = partial period.
- * @param reconcile    reconcileSubfields, injected to avoid importing from a route module.
  * @param onSaved      invalidation callback, fired after a successful save or reset.
  */
 export function useRettificheYear(
   companyId: number | null,
   year: number,
   periodMonths: number | undefined,
-  reconcile: (data: Record<string, number>) => void,
   onSaved: () => void,
 ): RettificheYear {
   const [data, setData] = useState<AdjustableFinancialYear | null>(null);
@@ -72,7 +71,7 @@ export function useRettificheYear(
       const initial: Record<string, number> = {};
       for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
       for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
-      reconcile(initial);
+      reconcileSubfields(initial);
       setCorrections(initial);
       const hasExisting =
         result.original_balance_sheet &&
@@ -99,7 +98,7 @@ export function useRettificheYear(
     } finally {
       setLoading(false);
     }
-  }, [companyId, year, periodMonths, reconcile]);
+  }, [companyId, year, periodMonths]);
 
   const save = useCallback(
     async (finalCorrections?: Record<string, number>, finalLog?: RettificaEntry[]): Promise<boolean> => {
@@ -132,18 +131,18 @@ export function useRettificheYear(
     try {
       // original_*_snapshot is the RAW import (pre-reconcileSubfields): on an
       // aggregate-only import (bilancio abbreviato) its detail sub-fields are
-      // zero. The currently persisted state went through reconcile() at load
-      // time, so posting the raw snapshot as-is would WIDEN the
+      // zero. The currently persisted state went through reconcileSubfields()
+      // at load time, so posting the raw snapshot as-is would WIDEN the
       // aggregati/dettagli gap and the server's anti-regression guard
       // legitimately rejects it (400) — reset never applied. Mirror load():
-      // merge BS+IS into one flat record, reconcile that COPY (reconcile
+      // merge BS+IS into one flat record, reconcile that COPY (reconcileSubfields
       // mutates in place; data.original_* must stay untouched — it's re-read
       // on every subsequent reset), then split back into the two payloads.
       const merged: Record<string, number> = {
         ...data.original_balance_sheet,
         ...data.original_income_statement,
       };
-      reconcile(merged);
+      reconcileSubfields(merged);
       const bsPayload: Record<string, number> = {};
       for (const k of Object.keys(data.original_balance_sheet)) bsPayload[k] = merged[k];
       const isPayload: Record<string, number> = {};
@@ -160,7 +159,7 @@ export function useRettificheYear(
       const initial: Record<string, number> = {};
       for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
       for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
-      reconcile(initial);
+      reconcileSubfields(initial);
       setCorrections(initial);
       setApplied(false);
       setConfirmed(false);
@@ -171,7 +170,7 @@ export function useRettificheYear(
       // Anche riconciliato, il payload può in teoria essere ancora respinto
       // dalla guardia anti-regressione del server (400) — ad es. per uno
       // sbilancio Attivo/Passivo o CE↔SP preesistente nell'import grezzo che
-      // reconcile() non tocca. Qui NON tocchiamo data/corrections/applied/
+      // reconcileSubfields() non tocca. Qui NON tocchiamo data/corrections/applied/
       // confirmed: il ripristino non è avvenuto, quindi lo stato (e il gate a
       // valle, vedi rettificheConfirmed) deve restare quello di prima —
       // nessun rollback locale necessario perché niente è stato applicato in
@@ -181,7 +180,7 @@ export function useRettificheYear(
     } finally {
       setSaving(false);
     }
-  }, [companyId, year, periodMonths, data, reconcile, onSaved]);
+  }, [companyId, year, periodMonths, data, onSaved]);
 
   const clear = useCallback(() => {
     setData(null);

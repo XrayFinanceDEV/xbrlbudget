@@ -68,15 +68,6 @@ export function buildCeOverridePayload(values: Record<string, string>): Record<s
   );
 }
 
-// Key BS items the user can override (informational, not directly editable in v1)
-export const KEY_BS_CODES = [
-  "sp05_rimanenze",
-  "sp06_crediti_breve",
-  "sp09_disponibilita_liquide",
-  "sp16_debiti_breve",
-  "sp17_debiti_lungo",
-];
-
 // Codes that make up EBITDA: VP items are positive, cost items are negative
 export const VP_CODES = ["ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce03a_incrementi_immobilizzazioni", "ce04_altri_ricavi"];
 export const EBITDA_COST_CODES = [
@@ -113,8 +104,6 @@ export const PASSIVO_CODES = [
   "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve",
   "sp17_debiti_lungo", "sp18_ratei_risconti_passivi",
 ];
-
-// ===== INDICATOR COMPUTATION =====
 
 // Detail fields that should always show when their parent is non-zero
 export const DETAIL_PARENTS: Record<string, string> = {

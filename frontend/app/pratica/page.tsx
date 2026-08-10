@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
@@ -23,7 +23,6 @@ import type {
   IntraYearComparison,
   IntraYearComparisonItem,
   ScenarioAnalysis,
-  AdjustableFinancialYear,
   RettificaEntry,
 } from "@/types/api";
 import { toast } from "sonner";
@@ -41,7 +40,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { getErrorMessage } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -55,7 +53,6 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
   SelectLabel,
   SelectTrigger,
@@ -72,14 +69,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { AnagraficheStep } from "@/components/pratica/AnagraficheStep";
@@ -97,21 +86,13 @@ import {
 } from "@/lib/pratica-format";
 import {
   EDITABLE_CE_CODES,
-  CE_OVERRIDE_FIELD_BY_CODE,
   buildCeOverridePayload,
-  KEY_BS_CODES,
   VP_CODES,
   EBITDA_COST_CODES,
   ATTIVO_CODES,
   PASSIVO_CODES,
 } from "@/lib/pratica-codes";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
-import {
-  safeDivide,
-  linearScore,
-  invertedScore,
-  type IndicatorSet,
-} from "@/lib/pratica-indicators";
 import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
@@ -180,14 +161,12 @@ export default function InfraannualePage() {
     importResult?.companyId ?? null,
     fiscalYear,
     periodMonths < 12 ? periodMonths : undefined,
-    reconcileSubfields,
     invalidateDownstream,
   );
   const storico = useRettificheYear(
     importResult?.companyId ?? null,
     fiscalYear - 1,
     undefined,               // full 12-month year
-    reconcileSubfields,
     invalidateDownstream,
   );
 

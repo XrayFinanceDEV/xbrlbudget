@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -9,7 +9,7 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { cn, getErrorMessage } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

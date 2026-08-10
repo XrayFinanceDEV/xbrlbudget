@@ -31,7 +31,6 @@ export function ComparisonTable({
   showAnnualized: boolean;
   showRevenuePct?: boolean;
 }) {
-  const expectedPct = (periodMonths / 12) * 100;
   const hasPriorYear = priorYear != null && items.some((i) => i.prior_value !== 0);
 
   // Revenue values for % computation

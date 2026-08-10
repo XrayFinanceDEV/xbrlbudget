@@ -999,7 +999,7 @@ Budget itself gates on `gates.budgetScenario` for the `bilancio` workflow and is
   works). The "Ricalcola" button and its confirmation dialog are a distinct secondary action (with
   the "azzera modifiche manuali CE" checkbox) and were left exactly where they were.
 
-**Moduli della pratica (2026-08-10).** `app/pratica/page.tsx` è sceso da 6.019 a ~1.850 righe. Le
+**Moduli della pratica (2026-08-10).** `app/pratica/page.tsx` è sceso da 6.019 a 1.792 righe. Le
 funzioni pure stanno in `lib/pratica-format.ts` (formattazione), `lib/pratica-codes.ts` (tabelle di
 codici IV-CEE, `DETAIL_PARENTS`, `EXTRA_ALERT_DEFS`), `lib/pratica-reconcile.ts`
 (`reconcileSubfields`), `lib/pratica-indicators.ts` (indicatori, scoring, `computeCrisisRating`) e
@@ -1008,6 +1008,23 @@ Regola: `lib/pratica-*` non importa mai da `app/` o `components/`. Tre suite di 
 (`lib/pratica-reconcile.test.ts`, `lib/pratica-indicators.test.ts`,
 `lib/pratica-statement-rows.test.ts`) fissano il comportamento dei calcoli — fissano quello
 **attuale**, non lo giudicano corretto.
+
+**Quanto queste suite proteggono davvero è misurato, non presunto (mutation harness, 2026-08-10
+final review).** Sul totale delle tre suite la mutation coverage misurata è **18% (11/61)**: la
+maggior parte delle mutazioni introdotte nell'implementazione sopravvive ai test invariata. Per
+`lib/pratica-indicators.ts` in particolare è **3/29** — quasi non funzionale come rete di
+regressione: `computeIndicators`'s test asserisce per VALORE solo `_ebitda_raw` e `ebitda_margin`;
+gli altri 17 campi di `IndicatorSet` sono verificati solo con `Number.isFinite(...)`, che nessuna
+mutazione aritmetica (segno scambiato, operando sbagliato, soglia spostata) può violare — il test
+passa comunque. Due asserzioni deboli in quella suite sono state corrette in questa review
+(mutation-proof ora): `scoreDotColor` fissa le stringhe colore esatte invece di limitarsi a "sono
+diverse a coppie", e `computeCrisisRating`'s test sui segnali extracontabili fissa i due codici
+concreti (A3 → C3) invece di limitarsi a "sono diversi". Il resto della suite resta com'era.
+**Non leggere questa nota come "gli indicatori sono coperti":** rafforzarla — valori distinti e
+non-zero per ogni codice nominato in ogni array sommato, asserzioni per valore esatto al posto di
+`Number.isFinite` — è un follow-up noto e deliberatamente non fatto in questa review (fuori
+perimetro insieme al bug `sp07_crediti_lungo` mancante da `totalAssets`, anch'esso lasciato al
+proprietario del progetto).
 
 **Superseded note, kept for history:** an earlier version of this section said "PREVISIONALE has
 SIX steps, not four" — `/analysis` (Indici) was still unreachable from inside a pratica at that
@@ -1108,7 +1125,7 @@ Detail blocks shared across all views:
 
 **Two known warts, left untouched deliberately (2026-08-10 — found while decomposing `page.tsx`, not fixed as part of that move):**
 - `buildBalanceItemsWithTotals` maps over the CALLER's `rawItems`, so a reconciliation plug computed for a code the caller never sent is silently dropped — it exists in the internal reconciled map but its row never renders. The caller must include the detail rows (even as zeros) in `rawItems` for a plug to be visible.
-- `buildIncomeItemsWithEbitda`'s `periodMonths` parameter is effectively dead: `const factor = 12 / periodMonths` is computed and never read anywhere in the function, so the output does not actually vary with it. Annualisation of CE rows comes entirely from the caller-supplied `annualized_value`, not from this parameter.
+- `buildIncomeItemsWithEbitda`'s `periodMonths` parameter is effectively dead: `const factor = 12 / periodMonths` (`lib/pratica-statement-rows.ts:257`) is computed and never read anywhere in the function, so the output does not actually vary with it. Annualisation of CE rows comes entirely from the caller-supplied `annualized_value`, not from this parameter. Two more locals in the same function are dead for the same reason: `partialRevenue` and `refRevenue` (`lib/pratica-statement-rows.ts:337-338`) are computed and never read either.
 
 **Recap dialog (Riepilogo Rettifiche):** aggregate rows that were updated indirectly by `recalcAggregates` (any field in `NON_POSTABLE_FIELDS`) render in muted-gray italic with a tooltip explaining they are derived totals, so the user doesn't mistake them for duplicated postings.
 

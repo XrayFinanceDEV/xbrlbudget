@@ -15,14 +15,14 @@
 //  - la sezione: ATTIVO_CODES per l'attivo (e le sue sotto-voci); sp11/sp12*/
 //    sp13 per il patrimonio netto; il resto degli sp per il passivo; ce* per
 //    il conto economico.
-//  - le etichette: vedi labelFor() più sotto — COUNTERPART_PICKER_LABELS
-//    vince solo per i 14 sotto-conti dei debiti (l'unico caso in cui la
-//    grafia "Confronto" — entro/oltre 12 mesi — non è auto-esplicativa senza
-//    intestazione); altrimenti vince la grafia del Confronto (CONFRONTO_RELABEL,
-//    copiata dalle mappe `relabel` interne — non esportate — di
-//    lib/pratica-statement-rows.ts, righe 52 e 341); RETTIFICHE_LABELS è
-//    l'ultima risorsa per i pochi codici che il Confronto non rietichetta
-//    (sp05a..sp05e, sp12_riserve).
+//  - le etichette: vedi labelFor() più sotto — COUNTERPART_PICKER_LABELS vince
+//    per ognuna delle sue chiavi: sono tutti sotto-conti la cui grafia breve
+//    del Confronto (es. "1) Verso clienti", "entro 12 mesi") non distingue
+//    entro/oltre né la voce padre senza un'intestazione sopra; altrimenti
+//    vince la grafia del Confronto (CONFRONTO_RELABEL, copiata dalle mappe
+//    `relabel` interne — non esportate — di lib/pratica-statement-rows.ts,
+//    righe 52 e 341); RETTIFICHE_LABELS è l'ultima risorsa per i pochi codici
+//    che il Confronto non rietichetta (sp05a..sp05e, sp12_riserve).
 
 import {
   RETTIFICHE_LABELS,
@@ -153,15 +153,9 @@ const CONFRONTO_RELABEL: Record<string, string> = {
   ce20_imposte: "20) Imposte sul reddito dell'esercizio",
 };
 
-// I 14 sotto-conti dei debiti: unico caso in cui COUNTERPART_PICKER_LABELS
-// vince nella derivazione (per gli altri codici che quella mappa contiene —
-// sotto-conti di crediti, immob. finanziarie, rimanenze — vince invece la
-// grafia del Confronto, come da regola dei Global Constraints).
-const DEBT_SUBACCOUNT_CODES = new Set(DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]));
-
 function labelFor(code: string): { label: string; shortLabel?: string } {
   const relabel = CONFRONTO_RELABEL[code];
-  const pickerLabel = DEBT_SUBACCOUNT_CODES.has(code) ? COUNTERPART_PICKER_LABELS[code] : undefined;
+  const pickerLabel = COUNTERPART_PICKER_LABELS[code];
   const label = (pickerLabel ?? relabel ?? RETTIFICHE_LABELS[code]).trim();
   const shortLabel = relabel !== undefined && relabel.trim() !== label ? relabel.trim() : undefined;
   return shortLabel !== undefined ? { label, shortLabel } : { label };

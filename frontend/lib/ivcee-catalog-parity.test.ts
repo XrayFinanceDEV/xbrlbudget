@@ -386,17 +386,9 @@ describe("cross-check: il catalogo riproduce la regola delle etichette", () => {
     expect(mancanti).toEqual([]);
   });
 
-  it("i 14 sotto-conti dei debiti usano il testo del selettore come etichetta autonoma", () => {
-    // COUNTERPART_PICKER_LABELS oggi ha 38 chiavi (14 debiti + 14 crediti +
-    // 5 immob. finanziarie + 5 rimanenze), non solo le 14 dei debiti: per
-    // quelle 24 extra la regola dei Global Constraints fa vincere `relabel`
-    // (grafia del Confronto), non il selettore — vedi il commento in testa a
-    // lib/ivcee-catalog.ts. Il test resta scoperto ai 14 sotto-conti dei
-    // debiti che il titolo nomina, derivati da DEBT_GROUPS come in
-    // ivcee-catalog.ts, non dall'intera mappa.
-    const debtSubaccounts = DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]);
-    for (const code of debtSubaccounts) {
-      expect(labelOf(code)).toBe(COUNTERPART_PICKER_LABELS[code]);
+  it("i sotto-conti coperti dal selettore usano il suo testo come etichetta autonoma", () => {
+    for (const [code, atteso] of Object.entries(COUNTERPART_PICKER_LABELS)) {
+      expect(labelOf(code)).toBe(atteso);
     }
   });
 

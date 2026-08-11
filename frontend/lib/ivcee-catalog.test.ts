@@ -18,6 +18,42 @@ describe("catalogo IV-CEE", () => {
     expect(VOCI.filter((v) => v.parent === v.code).map((v) => v.code)).toEqual([]);
   });
 
+  // subtree()/aggregate()/depthOf() risalgono/scendono il grafo padre-figlio
+  // senza un set di visitati né un limite di profondità (codice verbatim dal
+  // piano): un ciclo introdotto da una futura modifica al catalogo li
+  // manderebbe in ricorsione/loop infinito, senza diagnostica. Il catalogo è
+  // un array statico scritto a mano, quindi un ciclo può nascere solo da una
+  // modifica a VOCI: qui lo si intercetta in CI, prima che possa mai
+  // raggiungere quel codice a runtime. Implementato iterativamente con una
+  // marcatura visti/in-corso propria — MAI chiamando subtree()/depthOf(), che
+  // sono esattamente le funzioni che un ciclo manderebbe in loop.
+  it("il grafo dei padri non ha cicli", () => {
+    const byCode = new Map(VOCI.map((v) => [v.code, v] as const));
+    const state = new Map<string, "in-corso" | "fatto">();
+    const cicli: string[] = [];
+
+    for (const partenza of VOCI) {
+      if (state.get(partenza.code) === "fatto") continue;
+      const cammino: string[] = [];
+      let cur: typeof partenza | undefined = partenza;
+      while (cur) {
+        const s = state.get(cur.code);
+        if (s === "in-corso") {
+          const i = cammino.indexOf(cur.code);
+          cicli.push([...cammino.slice(i), cur.code].join(" -> "));
+          break;
+        }
+        if (s === "fatto") break;
+        state.set(cur.code, "in-corso");
+        cammino.push(cur.code);
+        cur = cur.parent === null ? undefined : byCode.get(cur.parent);
+      }
+      for (const code of cammino) state.set(code, "fatto");
+    }
+
+    expect(cicli).toEqual([]);
+  });
+
   it("l'ordine è totale: nessun pari condivide indice sotto lo stesso padre", () => {
     const visti = new Set<string>();
     const collisioni: string[] = [];

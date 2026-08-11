@@ -76,6 +76,23 @@ import {
 } from "@/lib/pratica-rettifiche-rules";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
+// Intestazioni di raggruppamento dello schema art. 2424, righe di RESA come la
+// fascia di sezione: NON entrano nel catalogo (VOCI) ne' negli elenchi
+// RETTIFICHE_BS_*, che restano l'elenco dei campi che portano un valore.
+// Servono perche' con la grafia autonoma i numeri romani ricominciano dentro
+// ogni lettera — "I - Immobilizzazioni immateriali" e "I - Rimanenze" stanno
+// nella stessa colonna — e senza la riga che apre la lettera il numero non ha
+// un ancoraggio: e' proprio l'ambiguita' che il ruolo autonomo deve togliere.
+// `until` e' ESCLUSIVO: la voce che lo porta apre gia' la propria lettera
+// (sp10 = "D) Ratei e risconti attivi") e non va rientrata sotto la C).
+const GROUP_SPANS: { heading: string; from: string; until?: string }[] = [
+  { heading: "B) Immobilizzazioni", from: "sp02_immob_immateriali", until: "sp05_rimanenze" },
+  { heading: "C) Attivo circolante", from: "sp05_rimanenze", until: "sp10_ratei_risconti_attivi" },
+  // Copre tutto RETTIFICHE_BS_PN (sp11 -> sp12h): sp14/sp15 sono un altro
+  // renderSection e portano gia' la loro lettera.
+  { heading: "A) Patrimonio netto", from: "sp11_capitale" },
+];
+
 interface RettificheTabProps {
   adjustableData: AdjustableFinancialYear | null;
   referenceYearData: Record<string, number> | null;
@@ -497,7 +514,45 @@ export function RettificheTab({
 
   const colCount = hasRef ? 5 : 4;
 
-  const renderSection = (title: string, fields: string[], isCE: boolean = false) => (
+  const isComputedField = (field: string) =>
+    field === "sp04_immob_finanziarie" || field === "sp12_riserve" || field === "sp13_utile_perdita"
+    || field === "sp16_debiti_breve" || field === "sp17_debiti_lungo" || field === "ce09_ammortamenti"
+    || field === "ce17_rettifiche_attivita_fin";
+
+  // Una sola regola di visibilita', usata sia per rendere la riga sia per
+  // sapere quale sia la PRIMA riga visibile di un raggruppamento. Se le due
+  // divergessero, un'intestazione potrebbe restare sopra il vuoto.
+  const isFieldVisible = (field: string) => {
+    if (Math.abs(original[field] ?? 0) >= 0.01 || Math.abs(val(field)) >= 0.01) return true;
+    if (EDITABLE_RETTIFICHE.has(field) || AUTO_ADJUSTED.has(field) || isComputedField(field)) return true;
+    // Le sotto-voci restano visibili quando il loro aggregato non e' a zero.
+    const parent = DETAIL_PARENTS[field];
+    return parent ? Math.abs(val(parent)) > 0.01 || Math.abs(original[parent] ?? 0) > 0.01 : false;
+  };
+
+  const renderSection = (title: string, fields: string[], isCE: boolean = false) => {
+    // A quale raggruppamento appartiene ciascun campo di QUESTO elenco.
+    const groupOf = new Map<string, string>();
+    let span: (typeof GROUP_SPANS)[number] | null = null;
+    for (const field of fields) {
+      const starts = GROUP_SPANS.find((g) => g.from === field);
+      if (starts) span = starts;
+      else if (span && span.until === field) span = null;
+      if (span) groupOf.set(field, span.heading);
+    }
+    // L'intestazione va sopra la prima riga VISIBILE del gruppo: un gruppo
+    // interamente filtrato non lascia un'intestazione orfana, e se sparisce
+    // solo la prima voce l'intestazione scende sulla successiva.
+    const headingOn = new Map<string, string>();
+    const emitted = new Set<string>();
+    for (const field of fields) {
+      const heading = groupOf.get(field);
+      if (heading && !emitted.has(heading) && isFieldVisible(field)) {
+        headingOn.set(field, heading);
+        emitted.add(heading);
+      }
+    }
+    return (
     <>
       {title && (
         <TableRow className="bg-muted/50">
@@ -512,27 +567,36 @@ export function RettificheTab({
         const delta = corrVal - origVal;
         const isEditable = EDITABLE_RETTIFICHE.has(field);
         const isAutoAdj = AUTO_ADJUSTED.has(field);
-        const isComputed = field === "sp04_immob_finanziarie" || field === "sp12_riserve" || field === "sp13_utile_perdita" || field === "sp16_debiti_breve" || field === "sp17_debiti_lungo" || field === "ce09_ammortamenti" || field === "ce17_rettifiche_attivita_fin";
+        const isComputed = isComputedField(field);
         const hasDelta = Math.abs(delta) > 0.01;
         // Rientro (pl-6 + testo attenuato), non etichetta: si legge ancora dai
         // due spazi iniziali di RETTIFICHE_LABELS. DETAIL_PARENTS non e'
         // equivalente — vi compaiono anche sp12a..h e ce17a/b, che questa
         // vista NON rientra — e le etichette del catalogo sono tutte trimmate.
         const isDetail = (RETTIFICHE_LABELS[field] ?? "").startsWith("  ");
+        // Rientro di un livello sotto l'intestazione di raggruppamento (le
+        // sotto-voci di dettaglio scendono di un altro livello con pl-6).
+        const inGroup = groupOf.has(field);
+        const heading = headingOn.get(field);
 
-        // Show detail rows if parent is non-zero; otherwise skip zero rows unless editable/auto/computed
-        const parentField = DETAIL_PARENTS[field];
-        const parentNonZero = parentField ? Math.abs(val(parentField)) > 0.01 || Math.abs(original[parentField] ?? 0) > 0.01 : false;
-        if (Math.abs(origVal) < 0.01 && Math.abs(corrVal) < 0.01 && !isEditable && !isAutoAdj && !isComputed && !parentNonZero) {
+        if (!isFieldVisible(field)) {
           return null;
         }
 
         return (
-          <TableRow key={field} className={cn(
+          <React.Fragment key={field}>
+          {heading && (
+            <TableRow className="bg-muted/30">
+              <TableCell colSpan={colCount} className="text-xs py-1 font-semibold tracking-wide">
+                {heading}
+              </TableCell>
+            </TableRow>
+          )}
+          <TableRow className={cn(
             hasDelta && "bg-yellow-50/50 dark:bg-yellow-950/10",
             isDetail && "text-muted-foreground"
           )}>
-            <TableCell className={cn("text-xs py-1", isDetail ? "pl-6" : "font-medium")}>
+            <TableCell className={cn("text-xs py-1", isDetail ? "pl-6" : inGroup ? "pl-3 font-medium" : "font-medium")}>
               {labelOf(field)}
             </TableCell>
             {hasRef && (
@@ -575,10 +639,12 @@ export function RettificheTab({
               )}
             </TableCell>
           </TableRow>
+          </React.Fragment>
         );
       })}
     </>
-  );
+    );
+  };
 
   return (
     <div className="space-y-4">

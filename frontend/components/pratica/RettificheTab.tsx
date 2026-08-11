@@ -47,7 +47,8 @@ import {
 } from "@/components/ui/dialog";
 import { formatEuro, formatInputNumber, parseInputNumber } from "@/lib/pratica-format";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
-import { DETAIL_PARENTS } from "@/lib/pratica-codes";
+import { ATTIVO_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
+import { labelOf } from "@/lib/ivcee-catalog";
 import {
   type ProposalMode,
   type DoubleEntryProposal,
@@ -246,10 +247,10 @@ export function RettificheTab({
       id: Date.now(),
       mode: "rettifica",
       editedField: field,
-      editedLabel: RETTIFICHE_LABELS[field] ?? field,
+      editedLabel: labelOf(field),
       delta: editDelta,
       counterpartField,
-      counterpartLabel: RETTIFICHE_LABELS[counterpartField] ?? counterpartField,
+      counterpartLabel: labelOf(counterpartField),
       proposedDelta,
       accepted: true,
       explanation,
@@ -302,15 +303,15 @@ export function RettificheTab({
   // Le due destinazioni di default per la correzione di quadratura a partita
   // singola: una sul lato attivo, una sul lato passivo (YAGNI: nessun target
   // picker in questo task, quindi solo i due default usati da
-  // openSbilancioCorrection). Le etichette vengono da RETTIFICHE_LABELS —
-  // la stessa mappa che il pannello journal usa per rendere la voce — cosi'
-  // la spiegazione della rettifica non contraddice la didascalia mostrata
-  // nella tabella sopra. `side` guida il SEGNO del delta (vedi sotto), non
-  // l'indice nell'array: dedurlo dal prefisso del codice funzionerebbe oggi
-  // ma si romperebbe al primo campo aggiunto fuori schema.
+  // openSbilancioCorrection). Le etichette vengono da labelOf() — la stessa
+  // fonte che il pannello journal e la tabella sopra usano per rendere la
+  // voce — cosi' la spiegazione della rettifica non contraddice la
+  // didascalia mostrata nella tabella. `side` guida il SEGNO del delta (vedi
+  // sotto), non l'indice nell'array: dedurlo dal prefisso del codice
+  // funzionerebbe oggi ma si romperebbe al primo campo aggiunto fuori schema.
   const SBILANCIO_TARGETS: { field: string; label: string; side: "attivo" | "passivo" }[] = [
-    { field: "sp09_disponibilita_liquide", label: RETTIFICHE_LABELS["sp09_disponibilita_liquide"] ?? "Disponibilità liquide", side: "attivo" },
-    { field: "sp16g_altri_debiti_breve", label: RETTIFICHE_LABELS["sp16g_altri_debiti_breve"] ?? "Altri debiti (entro)", side: "passivo" },
+    { field: "sp09_disponibilita_liquide", label: labelOf("sp09_disponibilita_liquide"), side: "attivo" },
+    { field: "sp16g_altri_debiti_breve", label: labelOf("sp16g_altri_debiti_breve"), side: "passivo" },
   ];
 
   // Apre la modalita' "Correggi Import" (partita singola) pre-compilata con lo
@@ -339,7 +340,7 @@ export function RettificheTab({
     // Copia: recalcAggregates non deve mutare lo stato "corrections" del render.
     const projected = recalcAggregates({ ...corrections });
     const pv = (k: string) => projected[k] ?? original[k] ?? 0;
-    const projAttivo = ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + pv(k), 0);
+    const projAttivo = ATTIVO_CODES.reduce((s, k) => s + pv(k), 0);
     const projPN = pnFields.reduce((s, k) => s + pv(k), 0);
     const projPassivo = projPN + pv("sp14_fondi_rischi") + pv("sp15_tfr")
       + pv("sp16_debiti_breve") + pv("sp17_debiti_lungo") + pv("sp18_ratei_risconti_passivi");
@@ -483,14 +484,10 @@ export function RettificheTab({
   const val = (k: string) => corrections[k] ?? original[k] ?? 0;
   const refVal = (k: string) => referenceYearData?.[k] ?? 0;
   const hasRef = !!referenceYearData;
-  // Main-level attivo fields only (no detail sub-fields to avoid double-counting)
-  const ATTIVO_TOTAL_FIELDS = [
-    "sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
-    "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve",
-    "sp07_crediti_lungo", "sp08_attivita_finanziarie", "sp09_disponibilita_liquide",
-    "sp10_ratei_risconti_attivi",
-  ];
-  const totalAttivo = ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + val(k), 0);
+  // Solo le voci di primo livello dell'attivo (le sotto-voci di dettaglio
+  // sarebbero contate due volte): ATTIVO_CODES, la stessa lista che usano
+  // Confronto e riconciliazione.
+  const totalAttivo = ATTIVO_CODES.reduce((s, k) => s + val(k), 0);
   const pnFields = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita"];
   const totalPN = pnFields.reduce((s, k) => s + val(k), 0);
   const totalPassivo = totalPN + val("sp14_fondi_rischi") + val("sp15_tfr")
@@ -517,6 +514,10 @@ export function RettificheTab({
         const isAutoAdj = AUTO_ADJUSTED.has(field);
         const isComputed = field === "sp04_immob_finanziarie" || field === "sp12_riserve" || field === "sp13_utile_perdita" || field === "sp16_debiti_breve" || field === "sp17_debiti_lungo" || field === "ce09_ammortamenti" || field === "ce17_rettifiche_attivita_fin";
         const hasDelta = Math.abs(delta) > 0.01;
+        // Rientro (pl-6 + testo attenuato), non etichetta: si legge ancora dai
+        // due spazi iniziali di RETTIFICHE_LABELS. DETAIL_PARENTS non e'
+        // equivalente — vi compaiono anche sp12a..h e ce17a/b, che questa
+        // vista NON rientra — e le etichette del catalogo sono tutte trimmate.
         const isDetail = (RETTIFICHE_LABELS[field] ?? "").startsWith("  ");
 
         // Show detail rows if parent is non-zero; otherwise skip zero rows unless editable/auto/computed
@@ -532,7 +533,7 @@ export function RettificheTab({
             isDetail && "text-muted-foreground"
           )}>
             <TableCell className={cn("text-xs py-1", isDetail ? "pl-6" : "font-medium")}>
-              {RETTIFICHE_LABELS[field] ?? field}
+              {labelOf(field)}
             </TableCell>
             {hasRef && (
               <TableCell className="text-right text-xs py-1 font-mono tabular-nums text-muted-foreground/50">
@@ -647,10 +648,10 @@ export function RettificheTab({
                 <TableRow className="bg-muted font-semibold">
                   <TableCell className="text-xs py-1.5">TOTALE ATTIVO</TableCell>
                   {hasRef && <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/50">
-                    {formatEuro(ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + refVal(k), 0))}
+                    {formatEuro(ATTIVO_CODES.reduce((s, k) => s + refVal(k), 0))}
                   </TableCell>}
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums">
-                    {formatEuro(ATTIVO_TOTAL_FIELDS.reduce((s, k) => s + (original[k] ?? 0), 0))}
+                    {formatEuro(ATTIVO_CODES.reduce((s, k) => s + (original[k] ?? 0), 0))}
                   </TableCell>
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums text-muted-foreground/40">-</TableCell>
                   <TableCell className="text-right text-xs py-1.5 font-mono tabular-nums font-semibold">
@@ -740,9 +741,9 @@ export function RettificheTab({
                   return (
                     <React.Fragment key={group.label}>
                       {debtRow(group.label, group.label, refEntro + refOltre, origTotal, corrTotal, false)}
-                      {debtRow("entro 12 mesi", group.label + "_entro", refEntro, origEntro, corrEntro, true,
+                      {debtRow(labelOf(group.entro[0]), group.label + "_entro", refEntro, origEntro, corrEntro, true,
                         isSingleEntro ? group.entro[0] : undefined)}
-                      {debtRow("oltre 12 mesi", group.label + "_oltre", refOltre, origOltre, corrOltre, true,
+                      {debtRow(labelOf(group.oltre[0]), group.label + "_oltre", refOltre, origOltre, corrOltre, true,
                         isSingleOltre ? group.oltre[0] : undefined)}
                     </React.Fragment>
                   );
@@ -1044,7 +1045,13 @@ export function RettificheTab({
                         <SelectLabel className="text-xs">{g.label}</SelectLabel>
                         {COUNTERPART_OPTIONS.filter((o) => o.category === g.category && o.field !== p.editedField).map((o) => (
                           <SelectItem key={o.field} value={o.field} className="text-xs">
-                            {o.label}
+                            {/* labelOf, non o.label: il selettore prende l'etichetta
+                                autonoma dal catalogo come il resto della scheda.
+                                Non si puo' spostare dentro COUNTERPART_OPTIONS —
+                                lib/pratica-rettifiche-rules.ts importando il
+                                catalogo chiuderebbe un ciclo (il catalogo importa
+                                quel modulo) e il caricamento fallirebbe. */}
+                            {labelOf(o.field)}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -1105,9 +1112,9 @@ export function RettificheTab({
                       <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       {counterpartPicker((newField) => update({
                         counterpartField: newField,
-                        counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                        counterpartLabel: labelOf(newField),
                         proposedDelta: -p.delta,
-                        explanation: `Riclassifica: ${p.editedLabel} → ${RETTIFICHE_LABELS[newField] ?? newField}`,
+                        explanation: `Riclassifica: ${p.editedLabel} → ${labelOf(newField)}`,
                       }))}
                       <span className={cn(
                         "text-sm font-mono tabular-nums font-semibold w-36 text-right",
@@ -1122,7 +1129,7 @@ export function RettificheTab({
                         <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         {counterpartPicker((newField) => update({
                           counterpartField: newField,
-                          counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                          counterpartLabel: labelOf(newField),
                           proposedDelta: computeCpDelta(p.editedField, newField, p.delta),
                           splitAlt: undefined,
                         }))}
@@ -1162,7 +1169,7 @@ export function RettificheTab({
                       <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       {counterpartPicker((newField) => update({
                         counterpartField: newField,
-                        counterpartLabel: RETTIFICHE_LABELS[newField] ?? newField,
+                        counterpartLabel: labelOf(newField),
                         proposedDelta: computeCpDelta(p.editedField, newField, p.delta),
                       }))}
                       <Input
@@ -1269,7 +1276,7 @@ export function RettificheTab({
                 if (Math.abs(d) >= 0.5) {
                   target.push({
                     field: f,
-                    label: RETTIFICHE_LABELS[f] ?? f,
+                    label: labelOf(f),
                     origVal: origV,
                     newVal: corrV,
                     delta: d,

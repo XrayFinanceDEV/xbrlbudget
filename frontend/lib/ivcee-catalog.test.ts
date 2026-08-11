@@ -72,3 +72,53 @@ describe("catalogo IV-CEE", () => {
     expect(voce("codice_inventato")).toBeUndefined();
   });
 });
+
+import { aggregate, childrenOf, sectionRows, subtree } from "./ivcee-catalog";
+
+describe("proiezioni", () => {
+  it("childrenOf restituisce i figli diretti in ordine", () => {
+    const figli = childrenOf("sp16_debiti_breve").map((v) => v.code);
+    expect(figli).toEqual([
+      "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+      "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+      "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+      "sp16g_altri_debiti_breve",
+    ]);
+  });
+
+  it("childrenOf su una foglia restituisce l'elenco vuoto", () => {
+    expect(childrenOf("sp09_disponibilita_liquide")).toEqual([]);
+  });
+
+  it("subtree include il codice stesso e la discendenza", () => {
+    const t = subtree("sp16_debiti_breve").map((v) => v.code);
+    expect(t[0]).toBe("sp16_debiti_breve");
+    expect(t).toHaveLength(8);
+  });
+
+  it("aggregate somma le foglie, non il padre", () => {
+    const values = {
+      sp16_debiti_breve: 999,          // ignorato: il padre ha figli
+      sp16a_debiti_banche_breve: 100,
+      sp16d_debiti_fornitori_breve: 250,
+    };
+    expect(aggregate(values, "sp16_debiti_breve")).toBe(350);
+  });
+
+  it("aggregate su una foglia restituisce il suo valore", () => {
+    expect(aggregate({ sp09_disponibilita_liquide: 42 }, "sp09_disponibilita_liquide")).toBe(42);
+  });
+
+  it("aggregate su valori assenti vale zero, non NaN", () => {
+    expect(aggregate({}, "sp16_debiti_breve")).toBe(0);
+  });
+
+  it("sectionRows limita la profondità", () => {
+    const primoLivello = sectionRows("passivo", 0).map((v) => v.code);
+    expect(primoLivello).toContain("sp16_debiti_breve");
+    expect(primoLivello).not.toContain("sp16a_debiti_banche_breve");
+
+    const tutto = sectionRows("passivo").map((v) => v.code);
+    expect(tutto).toContain("sp16a_debiti_banche_breve");
+  });
+});

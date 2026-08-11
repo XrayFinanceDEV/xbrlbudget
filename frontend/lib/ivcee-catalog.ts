@@ -292,3 +292,62 @@ export function labelOf(code: string, role: "autonoma" | "contestuale" = "autono
   if (!v) return code;
   return role === "contestuale" ? v.shortLabel ?? v.label : v.label;
 }
+
+const CHILDREN = new Map<string, Voce[]>();
+for (const v of VOCI) {
+  if (v.parent === null) continue;
+  const list = CHILDREN.get(v.parent) ?? [];
+  list.push(v);
+  CHILDREN.set(v.parent, list);
+}
+for (const list of CHILDREN.values()) list.sort((a, b) => a.order - b.order);
+
+/** I figli diretti di un aggregato, in ordine. */
+export function childrenOf(code: string): Voce[] {
+  return CHILDREN.get(code) ?? [];
+}
+
+/** Il codice e tutta la sua discendenza, in ordine di resa. */
+export function subtree(code: string): Voce[] {
+  const root = BY_CODE.get(code);
+  if (!root) return [];
+  const out: Voce[] = [root];
+  for (const child of childrenOf(code)) out.push(...subtree(child.code));
+  return out;
+}
+
+/**
+ * Somma le FOGLIE del sottoalbero. Sommare anche i nodi intermedi
+ * conterebbe due volte lo stesso importo: un aggregato È la somma dei figli.
+ */
+export function aggregate(values: Record<string, number>, code: string): number {
+  const figli = childrenOf(code);
+  if (figli.length === 0) return values[code] ?? 0;
+  return figli.reduce((s, f) => s + aggregate(values, f.code), 0);
+}
+
+const depthOf = (v: Voce): number => {
+  let d = 0;
+  let cur = v;
+  while (cur.parent !== null) {
+    const p = BY_CODE.get(cur.parent);
+    if (!p) break;
+    cur = p;
+    d += 1;
+  }
+  return d;
+};
+
+/** Le voci di una sezione, in ordine di resa, fino alla profondità indicata. */
+export function sectionRows(section: IvceeSection, maxDepth?: number): Voce[] {
+  const roots = VOCI.filter((v) => v.section === section && v.parent === null)
+    .sort((a, b) => a.order - b.order);
+  const out: Voce[] = [];
+  const walk = (v: Voce) => {
+    if (maxDepth !== undefined && depthOf(v) > maxDepth) return;
+    out.push(v);
+    for (const c of childrenOf(v.code)) walk(c);
+  };
+  roots.forEach(walk);
+  return out;
+}

@@ -561,10 +561,16 @@ export function sectionRows(section: IvceeSection, maxDepth?: number): Voce[] {
 // VOCI ne ha 7 in più — sp14a..d e ce03a, che nel selettore non sono mai
 // comparse, più sp16_debiti_breve e sp17_debiti_lungo, che sarebbero comunque
 // esclusi da NON_POSTABLE_FIELDS (quindi solo 5 cambierebbero il menu, ma i
-// codici in più sono 7). Il campo `label` non viene reso (RettificheTab usa
-// labelOf sul codice) ma è calcolato come prima, per non cambiare nulla di
-// nascosto.
-export const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field: string; label: string }> = (() => {
+// codici in più sono 7).
+//
+// L'opzione NON porta un'etichetta. Fino al 2026-08-11 ne portava una, calcolata
+// con la regola di prima del catalogo (GRAFIA_SELETTORE ?? GRAFIA_RETTIFICHE),
+// «per non cambiare nulla di nascosto»: ma il selettore rende labelOf(o.field),
+// quel campo non lo leggeva nessuno, e 19 delle 84 opzioni ci tenevano un testo
+// diverso da quello mostrato a schermo — una seconda grafia, muta e già alla
+// deriva, dentro il file che dichiara di essere l'unica fonte del nome di una
+// voce. Tolta invece che allineata: allinearla avrebbe ricreato la copia.
+export const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field: string }> = (() => {
   return Object.keys(GRAFIA_RETTIFICHE)
     .filter((k) => !NON_POSTABLE_FIELDS.has(k))
     .sort()
@@ -572,8 +578,7 @@ export const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory;
       const cat = fieldCategory(field);
       if (!cat) return [];
       const group = COUNTERPART_GROUPS.find((g) => g.category === cat)!.label;
-      const label = GRAFIA_SELETTORE[field] ?? GRAFIA_RETTIFICHE[field].trim();
-      return [{ group, category: cat, field, label }];
+      return [{ group, category: cat, field }];
     });
 })();
 

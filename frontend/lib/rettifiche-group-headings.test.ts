@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { labelOf } from "@/lib/ivcee-catalog";
 import {
-  CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
   DEBT_GROUPS,
-  RETTIFICHE_BS_ATTIVO, RETTIFICHE_BS_OTHER_PASSIVO, RETTIFICHE_BS_PN,
+  RETTIFICHE_BS_ATTIVO,
+  RETTIFICHE_RENDER_SECTIONS,
 } from "@/lib/pratica-rettifiche-rules";
 
 /**
@@ -36,14 +36,10 @@ const spans = [
   ...src.matchAll(/\{ heading: "([^"]+)", from: "([^"]+)"(?:, until: "([^"]+)")? \}/g),
 ].map((m) => ({ heading: m[1], from: m[2], until: m[3] as string | undefined }));
 
-/** Gli elenchi passati a renderSection, uno per chiamata e nell'ordine di resa. */
-const SEZIONI: string[][] = [
-  RETTIFICHE_BS_ATTIVO,
-  RETTIFICHE_BS_PN,
-  RETTIFICHE_BS_OTHER_PASSIVO,
-  ["sp18_ratei_risconti_passivi"],
-  CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
-];
+/** Gli elenchi passati a renderSection, uno per chiamata e nell'ordine di resa.
+ *  Dichiarati dal modulo delle regole, non ricopiati qui: era una delle due
+ *  copie a mano della stessa sequenza, e l'altra aveva perso una riga. */
+const SEZIONI: string[][] = RETTIFICHE_RENDER_SECTIONS;
 /** Le sotto-righe dei debiti, rese fuori da renderSection (blocco "D) Debiti"). */
 const DEBITI = DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]);
 

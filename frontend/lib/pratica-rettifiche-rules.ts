@@ -231,6 +231,10 @@ export const DEBT_GROUPS: Array<{ label: string; entro: string[]; oltre: string[
   { label: "13) Debiti previdenziali", entro: ["sp16f_debiti_previdenza_breve"], oltre: ["sp17f_debiti_previdenza_lungo"] },
   { label: "14) Altri debiti", entro: ["sp16g_altri_debiti_breve"], oltre: ["sp17g_altri_debiti_lungo"] },
 ];
+// E) Ratei e risconti passivi: una sezione a sé, resa DOPO il blocco dei
+// debiti. Era un letterale dentro RettificheTab (renderSection("", ["sp18..."]))
+// e per questo l'elenco di controllo del test di parità non lo contava.
+export const RETTIFICHE_BS_RATEI = ["sp18_ratei_risconti_passivi"];
 // Main-level fields for total calculation (excludes detail sub-fields to avoid double-counting)
 export const PASSIVO_TOTAL_FIELDS = [
   "sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
@@ -263,6 +267,43 @@ export const CE_E = [
   "ce18_proventi_straordinari", "ce19_oneri_straordinari",
 ];
 export const CE_IMPOSTE = ["ce20_imposte"];
+
+// ===== L'ordine di resa di RettificheTab, in un posto solo =====
+// Prima esisteva solo dentro il componente, e i test lo RIDICHIARAVANO a mano:
+// `rettificheCodes()` in ivcee-catalog-parity.test.ts e `SEZIONI` in
+// rettifiche-group-headings.test.ts. Due copie a mano di una sequenza che
+// nessuno teneva allineata — e infatti la prima aveva PERSO
+// sp18_ratei_risconti_passivi: pinnava 91 codici dove la vista ne rende 92.
+// Ora la sequenza degli elenchi è dichiarata qui e la consumano sia il
+// componente sia i due test.
+//
+// LIMITE, da conoscere: questo fissa QUALI elenchi e in che ordine, non che il
+// JSX li renda in quell'ordine. RettificheTab interfoglia intestazioni, totali
+// e il blocco debiti fra una chiamata e l'altra di renderSection, quindi la
+// sequenza delle chiamate resta scritta nel componente. Una riga PERSA o
+// AGGIUNTA non può più sfuggire; una sezione SPOSTATA nel JSX sì.
+
+/** Gli elenchi che RettificheTab passa a renderSection, nell'ordine di resa.
+ *  I debiti non ci sono: hanno un blocco loro (DEBT_GROUPS), reso fra
+ *  RETTIFICHE_BS_OTHER_PASSIVO e RETTIFICHE_BS_RATEI. */
+export const RETTIFICHE_RENDER_SECTIONS: string[][] = [
+  RETTIFICHE_BS_ATTIVO,
+  RETTIFICHE_BS_PN,
+  RETTIFICHE_BS_OTHER_PASSIVO,
+  RETTIFICHE_BS_RATEI,
+  CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
+];
+
+/** Ogni codice che la scheda Rettifiche rende, nell'ordine in cui lo rende,
+ *  debiti compresi al loro posto. */
+export const RETTIFICHE_RENDER_ORDER: string[] = [
+  ...RETTIFICHE_BS_ATTIVO,
+  ...RETTIFICHE_BS_PN,
+  ...RETTIFICHE_BS_OTHER_PASSIVO,
+  ...DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]),
+  ...RETTIFICHE_BS_RATEI,
+  ...CE_A, ...CE_B, ...CE_C, ...CE_D, ...CE_E, ...CE_IMPOSTE,
+];
 
 // Proposal generated for the review dialog
 export type ProposalMode = "rettifica" | "riclassifica" | "correggi_import";

@@ -47,7 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatEuro, formatInputNumber, parseInputNumber } from "@/lib/pratica-format";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
-import { ATTIVO_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
+import { ATTIVO_CODES, PASSIVO_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
 import { COUNTERPART_OPTIONS, isDettaglio, labelOf } from "@/lib/ivcee-catalog";
 import {
   type ProposalMode,
@@ -62,6 +62,7 @@ import {
   RETTIFICHE_BS_ATTIVO,
   RETTIFICHE_BS_PN,
   RETTIFICHE_BS_OTHER_PASSIVO,
+  RETTIFICHE_BS_RATEI,
   DEBT_GROUPS,
   PASSIVO_TOTAL_FIELDS,
   CE_A,
@@ -835,7 +836,7 @@ export function RettificheTab({
                 })()}
 
                 {/* E) Ratei e risconti passivi */}
-                {renderSection("", ["sp18_ratei_risconti_passivi"])}
+                {renderSection("", RETTIFICHE_BS_RATEI)}
 
                 <TableRow className="bg-muted font-semibold">
                   <TableCell className="text-xs py-1.5">TOTALE PASSIVO</TableCell>
@@ -1110,12 +1111,13 @@ export function RettificheTab({
                         <SelectLabel className="text-xs">{g.label}</SelectLabel>
                         {COUNTERPART_OPTIONS.filter((o) => o.category === g.category && o.field !== p.editedField).map((o) => (
                           <SelectItem key={o.field} value={o.field} className="text-xs">
-                            {/* labelOf, non o.label: il selettore prende l'etichetta
-                                autonoma dal catalogo come il resto della scheda.
-                                Non si puo' spostare dentro COUNTERPART_OPTIONS —
-                                lib/pratica-rettifiche-rules.ts importando il
-                                catalogo chiuderebbe un ciclo (il catalogo importa
-                                quel modulo) e il caricamento fallirebbe. */}
+                            {/* L'opzione porta solo il codice: il nome lo risolve
+                                labelOf, come ogni altra riga della scheda. Fino al
+                                2026-08-11 COUNTERPART_OPTIONS portava anche un
+                                proprio campo `label`, calcolato con la regola di
+                                prima del catalogo: nessuno lo rendeva e 19 delle 84
+                                opzioni dicevano una cosa diversa da quella mostrata
+                                qui. È stato tolto, non allineato. */}
                             {labelOf(o.field)}
                           </SelectItem>
                         ))}
@@ -1357,14 +1359,14 @@ export function RettificheTab({
             const totalChanges = bsAttivoChanges.length + bsPassivoChanges.length + ceChanges.length;
 
             // Balance check
-            const ATTIVO_AGG = ["sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
-              "sp04_immob_finanziarie", "sp05_rimanenze", "sp06_crediti_breve",
-              "sp07_crediti_lungo", "sp08_attivita_finanziarie", "sp09_disponibilita_liquide", "sp10_ratei_risconti_attivi"];
-            const PASSIVO_AGG = ["sp11_capitale", "sp12_riserve", "sp13_utile_perdita",
-              "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve", "sp17_debiti_lungo", "sp18_ratei_risconti_passivi"];
+            // Gli stessi elenchi del controllo di quadratura in testa alla scheda
+            // (totalAttivo / totalPassivo): solo le voci di primo livello, o le
+            // sotto-voci verrebbero contate due volte. Erano ricopiati qui parola
+            // per parola — due grafie dello stesso elenco, quindi due modi di
+            // andare alla deriva dal riepilogo che devono concordare.
             const fv = (k: string) => corrections[k] ?? original[k] ?? 0;
-            const tA = ATTIVO_AGG.reduce((s, k) => s + fv(k), 0);
-            const tP = PASSIVO_AGG.reduce((s, k) => s + fv(k), 0);
+            const tA = ATTIVO_CODES.reduce((s, k) => s + fv(k), 0);
+            const tP = PASSIVO_CODES.reduce((s, k) => s + fv(k), 0);
             const balanced = Math.abs(tA - tP) < 1;
 
             const renderSection = (title: string, changes: ChangedField[]) => {

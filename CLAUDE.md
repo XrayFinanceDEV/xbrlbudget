@@ -1146,10 +1146,15 @@ and a reset to the Import step — never a blank `<main>`.
 
 ### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
 All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable.
+Per aggiungere una sotto-voce, l'elenco dei file da toccare è la tabella «Aggiungere una
+sotto-voce tocca QUATTRO file» qui sotto. Sostituisce l'elenco puntato che stava qui prima
+del catalogo, ora inservibile: due delle sue quattro voci non esistono più (le mappe
+`relabel` dentro `pratica-statement-rows.ts`, e gli array `rows` di
+`app/forecast/balance/page.tsx` e `app/forecast/income/page.tsx`, che oggi leggono
+`BALANCE_STATEMENT_ROWS` / `INCOME_STATEMENT_ROWS` dal catalogo).
 
 **Catalogo IV-CEE unico (2026-08-10).** Le righe dei prospetti SP/CE vivono in
-`frontend/lib/ivcee-catalog.ts`. Per aggiungere una sotto-voce si tocca **quel file e
-basta**: le sei viste la ricevono per costruzione. Ogni voce porta il codice, il padre,
+`frontend/lib/ivcee-catalog.ts`. Ogni voce porta il codice, il padre,
 la sezione, l'ordine e **due etichette**: `label` (autonoma, auto-esplicativa — giornale
 rettifiche, selettore contropartita, dialoghi, e ogni riga di Rettifiche) e `shortLabel`
 (contestuale, breve — righe di tabella che stanno sotto l'intestazione del proprio
@@ -1166,6 +1171,26 @@ e su un `BalanceSheet` già aggregato dal backend restituisce 0 — vedi il `des
 editabilità, totali) restano di ciascuna vista; il **rientro** no, l'ha il catalogo
 (`Voce.dettaglio` / `isDettaglio`, vedi la sezione Rettifiche).
 
+**Aggiungere una sotto-voce tocca QUATTRO file, non uno.** Fino al 2026-08-11 questa
+sezione (e il messaggio del commit `d044e06`) diceva che bastava toccare
+`ivcee-catalog.ts` — «le sei viste la ricevono per costruzione». È falso, ed è
+esattamente il genere di documentazione contro cui mette in guardia l'apertura di questo
+file: descriveva un'API che il codice non offre. Per aggiungere, poniamo, `sp05f_nuova`:
+
+| File | Perché |
+|---|---|
+| `frontend/lib/pratica-rettifiche-rules.ts` | `ALL_CODES` si costruisce da `RETTIFICHE_BS_*` / `DEBT_GROUPS` / `CE_*`. Un codice che non è in quegli elenchi **non entra in `VOCI`**: la sola etichetta non produce nulla. |
+| `frontend/lib/pratica-codes.ts` | `parentOf` legge `DETAIL_PARENTS`. Se manca, la voce è trattata come di primo livello → `topLevelOrder` → `indexOf` → `-1`, e il test «nessuna voce resta senza ordine» diventa rosso. |
+| `frontend/lib/ivcee-catalog.ts` | l'etichetta, più la riga in `BALANCE_STATEMENT_ROWS` (o `INCOME_STATEMENT_ROWS`). |
+| `frontend/lib/pratica-statement-rows.ts` | l'elenco righe del Confronto è ancora una sequenza scritta a mano di chiamate `labeled("...")`: nessuno lo deriva dal catalogo. |
+
+Il consolidamento **c'è stato**, e va misurato per quello che è: prima erano cinque file e
+una decina di punti di modifica, e **tre** di quei punti erano tre mappe di etichette
+diverse. Bilancio onesto allo stato attuale — le **etichette** sono passate da tre fonti a
+una (più i letterali dei prospetti, vedi il paragrafo sotto); gli **elenchi di codici**
+sono ancora sparsi su tre file; le **proiezioni dell'albero** (`childrenOf`, `subtree`,
+`aggregate`, `sectionRows`) sono costruite ma nessuna vista le consuma.
+
 Lo stesso file porta anche i **due elenchi di righe già impaginate**,
 `BALANCE_STATEMENT_ROWS` (letto da `/forecast/balance` e da `report-appendices`) e
 `INCOME_STATEMENT_ROWS` (letto da `/forecast/income`): non è solo la tassonomia, è
@@ -1180,14 +1205,39 @@ elenchi di righe `RETTIFICHE_BS_*` / `CE_A`–`CE_E` / `DEBT_GROUPS`); `COUNTERP
 è passato al catalogo perché era l'ultimo consumatore delle due mappe, e la direzione
 opposta (rules → catalogo) chiuderebbe un ciclo di import fatale al caricamento.
 
+**Le etichette dei prospetti sono una TERZA superficie di naming, non ancora unificata.**
+Le righe di `BALANCE_STATEMENT_ROWS` / `INCOME_STATEMENT_ROWS` portano un testo proprio,
+distinto sia dalla grafia autonoma sia dalla contestuale del catalogo: 66 delle 97 righe
+che citano una voce non coincidono con nessuna delle due. `sp04b` è `"2) Crediti entro 12
+mesi"` nel prospetto, `"Crediti immobilizzati (entro)"` autonoma e `"2) Crediti (entro es.
+successivo)"` contestuale — tre nomi per una voce; `ce20_imposte` è numerata `22)` nel
+prospetto e `20)` nel catalogo. Nulla di ciò è una regressione (i testi sono arrivati
+verbatim dalle viste), ma il ramo li ha spostati **dentro** il file che dichiara di essere
+l'unica fonte del nome di una voce, senza armonizzarli. Dal 2026-08-11 sono almeno
+**congelati** (`ATTESI_PROSPETTO_LABELS`, 108 coppie): prima nessun test li leggeva, perché
+`rowKey` usa `r.field ?? "computed:" + r.label` e quindi delle righe che portano un campo
+fissava il codice, non il testo. Un futuro «armonizziamo tutto a `labelOf`» ora si vede.
+
 `frontend/lib/ivcee-catalog-parity.test.ts` fissa, per ogni vista, l'elenco dei codici
 resi e il loro ordine. Se cambia, una vista ha perso o riordinato una riga: quegli
 elenchi non vanno aggiornati per far passare il test. Fissa inoltre, con natura diversa,
 **il testo di ogni etichetta** (`ATTESI_CONFRONTO_LABELS`, 87 grafie contestuali;
-`ATTESI_LABELS_AUTONOME`, tutte e 100 le autonome): lì un cambiamento deliberato è
+`ATTESI_LABELS_AUTONOME`, tutte e 100 le autonome; `ATTESI_PROSPETTO_LABELS`, le 108 righe
+di prospetto che portano un campo): lì un cambiamento deliberato è
 legittimo e si aggiorna la riga nello stesso commit che cambia il testo — quello che non
 è legittimo è aggiornarla per far tornare verde la suite senza sapere perché il testo si
 è mosso.
+
+**L'ordine di resa di Rettifiche è dichiarato una volta sola** (2026-08-11):
+`RETTIFICHE_RENDER_SECTIONS` (gli elenchi passati a `renderSection`, in ordine) e
+`RETTIFICHE_RENDER_ORDER` (ogni codice reso, debiti compresi) in
+`pratica-rettifiche-rules.ts`. Li consumano il componente **e** i due test. Prima ognuno
+dei tre lo riscriveva a mano, e il rifacimento del test di parità aveva **perso**
+`sp18_ratei_risconti_passivi`: pinnava 91 codici dove la vista ne rende 92, quindi non si
+sarebbe accorto della sparizione di sp18. **Limite noto:** questo fissa quali elenchi e in
+che ordine, non che il JSX li renda in quell'ordine — il componente interfoglia
+intestazioni, totali e il blocco debiti fra le chiamate, quindi una riga persa o aggiunta
+non può più sfuggire, una sezione spostata nel JSX sì.
 
 Detail blocks shared across all views:
 - **Immob. finanziarie (sp04):** sp04a_partecipazioni, sp04b/c_crediti_immob_breve/lungo, sp04d_altri_titoli, sp04e_strumenti_derivati_attivi. Aggregate `sp04_immob_finanziarie` is computed from sub-fields.

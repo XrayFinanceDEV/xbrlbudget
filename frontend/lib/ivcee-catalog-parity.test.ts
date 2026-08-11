@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, VOCI, labelOf, voce } from "@/lib/ivcee-catalog";
+import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI, labelOf, voce } from "@/lib/ivcee-catalog";
 import {
   CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
   COUNTERPART_PICKER_LABELS,
@@ -143,6 +143,55 @@ const ATTESI_BALANCE: string[] = [
   "sp18_ratei_risconti_passivi",
   "computed:TOTALE PASSIVO E PATRIMONIO NETTO",
   "computed:DIFFERENZA (Attivo - Passivo)",
+];
+const ATTESI_INCOME: string[] = [
+  "computed:A) VALORE DELLA PRODUZIONE",
+  "ce01_ricavi_vendite",
+  "ce02_variazioni_rimanenze",
+  "ce03_lavori_interni",
+  "ce03a_incrementi_immobilizzazioni",
+  "ce04_altri_ricavi",
+  "production_value",
+  "computed:B) COSTI DELLA PRODUZIONE",
+  "ce05_materie_prime",
+  "ce06_servizi",
+  "ce07_godimento_beni",
+  "ce08_costi_personale",
+  "ce08b_salari_stipendi",
+  "ce08c_oneri_sociali",
+  "ce08a_tfr_accrual",
+  "computed:d) Trattamento di quiescenza e simili",
+  "ce08d_altri_costi_personale",
+  "computed:10) Ammortamenti e svalutazioni:",
+  "ce09a_ammort_immateriali",
+  "ce09b_ammort_materiali",
+  "ce09c_svalutazioni",
+  "ce09d_svalutazione_crediti",
+  "ce09_ammortamenti",
+  "ce10_var_rimanenze_mat_prime",
+  "ce11_accantonamenti",
+  "ce11b_altri_accantonamenti",
+  "ce12_oneri_diversi",
+  "production_cost",
+  "ebitda",
+  "ebit",
+  "computed:C) PROVENTI E ONERI FINANZIARI",
+  "ce13_proventi_partecipazioni",
+  "ce14_altri_proventi_finanziari",
+  "ce15_oneri_finanziari",
+  "ce16_utili_perdite_cambi",
+  "financial_result",
+  "computed:D) RETTIFICHE DI VALORE ATTIVITA' FINANZIARIE",
+  "ce17a_rivalutazioni",
+  "ce17b_svalutazioni",
+  "ce17_rettifiche_attivita_fin",
+  "computed:E) PROVENTI E ONERI STRAORDINARI",
+  "ce18_proventi_straordinari",
+  "ce19_oneri_straordinari",
+  "extraordinary_result",
+  "profit_before_tax",
+  "ce20_imposte",
+  "net_profit",
 ];
 const ATTESI_RETTIFICHE: string[] = [
   "sp01_crediti_soci",
@@ -365,6 +414,10 @@ const ATTESI_CONFRONTO_CE: string[] = [
 describe("invariante: nessuna vista perde o riordina righe", () => {
   it("prospetto SP (forecast/balance e report-appendices)", () => {
     expect(BALANCE_STATEMENT_ROWS.map(rowKey)).toEqual(ATTESI_BALANCE);
+  });
+
+  it("prospetto CE (forecast/income)", () => {
+    expect(INCOME_STATEMENT_ROWS.map(rowKey)).toEqual(ATTESI_INCOME);
   });
 
   it("Rettifiche: ordine di resa completo", () => {

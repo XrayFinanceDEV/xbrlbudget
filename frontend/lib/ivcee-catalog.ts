@@ -570,3 +570,76 @@ export const balanceRowValue = (balance: BalanceValues, row: BalanceStatementRow
   if (row.computed) return row.computed(balance);
   return row.field ? n(balance, row.field) : 0;
 };
+
+// ===== Prospetto CE per riga (forecast/income) =====
+// Spostato verbatim da app/forecast/income/page.tsx (IncomeStatementTable,
+// `const rows` intorno alla riga 549): stessa forma di BALANCE_STATEMENT_ROWS,
+// così i due prospetti si rendono con lo stesso codice. Unico adattamento:
+// `indent: 1` → `indent: true` (il tipo locale del componente portava un
+// livello numerico; BalanceStatementRow porta un booleano) — tocca ce08b/c/a/d,
+// ce09a/b/c/d (+ il suo subtotale "Totale ammortamenti e svalutazioni"),
+// ce17a/ce17b. Nessun'altra proprietà, etichetta o ordine è stata cambiata.
+// NOTA (non risolta qui, per scelta): "4) Incrementi di immobilizzazioni per
+// lavori interni" è la stessa dicitura autonoma già assegnata a
+// ce03_lavori_interni in CONFRONTO_RELABEL più sopra in questo file — il
+// Confronto e questa vista non concordano su quale voce porti quel testo.
+// Spostata così com'era: non è compito di questo task scegliere un vincitore.
+export const INCOME_STATEMENT_ROWS: BalanceStatementRow[] = [
+  // A) VALORE DELLA PRODUZIONE
+  { label: "A) VALORE DELLA PRODUZIONE", isTotal: true },
+  { label: "1) Ricavi delle vendite e delle prestazioni", field: "ce01_ricavi_vendite" },
+  { label: "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti", field: "ce02_variazioni_rimanenze" },
+  { label: "3) Variazioni dei lavori in corso su ordinazione", field: "ce03_lavori_interni" },
+  { label: "4) Incrementi di immobilizzazioni per lavori interni", field: "ce03a_incrementi_immobilizzazioni" },
+  { label: "5) Altri ricavi e proventi", field: "ce04_altri_ricavi" },
+  { label: "Totale Valore della Produzione", field: "production_value", isSubtotal: true },
+  // B) COSTI DELLA PRODUZIONE
+  { label: "B) COSTI DELLA PRODUZIONE", isTotal: true },
+  { label: "6) Materie prime, sussidiarie, di consumo e di merci", field: "ce05_materie_prime" },
+  { label: "7) Servizi", field: "ce06_servizi" },
+  { label: "8) Godimento di beni di terzi", field: "ce07_godimento_beni" },
+  { label: "9) Personale", field: "ce08_costi_personale" },
+  { label: "a) Salari e stipendi", field: "ce08b_salari_stipendi", indent: true },
+  { label: "b) Oneri sociali", field: "ce08c_oneri_sociali", indent: true },
+  { label: "c) Trattamento di fine rapporto", field: "ce08a_tfr_accrual", indent: true },
+  { label: "d) Trattamento di quiescenza e simili" },
+  { label: "e) Altri costi del personale", field: "ce08d_altri_costi_personale", indent: true },
+  { label: "10) Ammortamenti e svalutazioni:" },
+  { label: "a) Ammortamento delle immobilizzazioni immateriali", field: "ce09a_ammort_immateriali", indent: true },
+  { label: "b) Ammortamento delle immobilizzazioni materiali", field: "ce09b_ammort_materiali", indent: true },
+  { label: "c) Altre svalutazioni delle immobilizzazioni", field: "ce09c_svalutazioni", indent: true },
+  { label: "d) Sval. dei crediti compresi nell'attivo circ. e delle disp. liquide", field: "ce09d_svalutazione_crediti", indent: true },
+  { label: "Totale ammortamenti e svalutazioni", field: "ce09_ammortamenti", indent: true },
+  { label: "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci", field: "ce10_var_rimanenze_mat_prime" },
+  { label: "12) Accantonamenti per rischi", field: "ce11_accantonamenti" },
+  { label: "13) Altri accantonamenti", field: "ce11b_altri_accantonamenti" },
+  { label: "14) Oneri diversi di gestione", field: "ce12_oneri_diversi" },
+  { label: "Totale Costi della Produzione", field: "production_cost", isSubtotal: true },
+  // EBITDA
+  { label: "EBITDA (MOL)", field: "ebitda", isSubtotal: true },
+  // EBIT
+  { label: "EBIT (Risultato Operativo)", field: "ebit", isSubtotal: true },
+  // C) PROVENTI E ONERI FINANZIARI
+  { label: "C) PROVENTI E ONERI FINANZIARI", isTotal: true },
+  { label: "15) Proventi da partecipazioni", field: "ce13_proventi_partecipazioni" },
+  { label: "16) Altri proventi finanziari", field: "ce14_altri_proventi_finanziari" },
+  { label: "17) Interessi e altri oneri finanziari", field: "ce15_oneri_finanziari" },
+  { label: "17-bis) Utili e perdite su cambi", field: "ce16_utili_perdite_cambi" },
+  { label: "Totale Proventi/Oneri Finanziari", field: "financial_result", isSubtotal: true },
+  // D) RETTIFICHE DI VALORE
+  { label: "D) RETTIFICHE DI VALORE ATTIVITA' FINANZIARIE", isTotal: true },
+  { label: "18) Rivalutazioni", field: "ce17a_rivalutazioni", indent: true },
+  { label: "19) Svalutazioni", field: "ce17b_svalutazioni", indent: true },
+  { label: "Totale rettifiche di valore", field: "ce17_rettifiche_attivita_fin", isSubtotal: true },
+  // E) PROVENTI E ONERI STRAORDINARI
+  { label: "E) PROVENTI E ONERI STRAORDINARI", isTotal: true },
+  { label: "20) Proventi straordinari", field: "ce18_proventi_straordinari" },
+  { label: "21) Oneri straordinari", field: "ce19_oneri_straordinari" },
+  { label: "Totale Proventi/Oneri Straordinari", field: "extraordinary_result", isSubtotal: true },
+  // RISULTATO PRIMA DELLE IMPOSTE
+  { label: "Risultato prima delle imposte", field: "profit_before_tax", isSubtotal: true },
+  // IMPOSTE
+  { label: "22) Imposte sul reddito", field: "ce20_imposte" },
+  // UTILE/PERDITA
+  { label: "23) UTILE (PERDITA) DELL'ESERCIZIO", field: "net_profit", isTotal: true },
+];

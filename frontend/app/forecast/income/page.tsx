@@ -7,6 +7,7 @@ import { usePratica } from "@/contexts/PraticaContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import { patchCeOverrides } from "@/lib/api";
+import { INCOME_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import type {
   BudgetScenario,
   ScenarioAnalysis,
@@ -546,72 +547,10 @@ function IncomeStatementTable({
     return (yd.assumptions as unknown as Record<string, unknown>)[overrideKey] != null;
   };
 
-  const rows: Array<{
-    label: string;
-    field?: string;
-    calculated?: (yd: YearData) => number;
-    isTotal?: boolean;
-    isSubtotal?: boolean;
-    indent?: number;
-  }> = [
-    // A) VALORE DELLA PRODUZIONE
-    { label: "A) VALORE DELLA PRODUZIONE", isTotal: true },
-    { label: "1) Ricavi delle vendite e delle prestazioni", field: "ce01_ricavi_vendite" },
-    { label: "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti", field: "ce02_variazioni_rimanenze" },
-    { label: "3) Variazioni dei lavori in corso su ordinazione", field: "ce03_lavori_interni" },
-    { label: "4) Incrementi di immobilizzazioni per lavori interni", field: "ce03a_incrementi_immobilizzazioni" },
-    { label: "5) Altri ricavi e proventi", field: "ce04_altri_ricavi" },
-    { label: "Totale Valore della Produzione", field: "production_value", isSubtotal: true },
-    // B) COSTI DELLA PRODUZIONE
-    { label: "B) COSTI DELLA PRODUZIONE", isTotal: true },
-    { label: "6) Materie prime, sussidiarie, di consumo e di merci", field: "ce05_materie_prime" },
-    { label: "7) Servizi", field: "ce06_servizi" },
-    { label: "8) Godimento di beni di terzi", field: "ce07_godimento_beni" },
-    { label: "9) Personale", field: "ce08_costi_personale" },
-    { label: "a) Salari e stipendi", field: "ce08b_salari_stipendi", indent: 1 },
-    { label: "b) Oneri sociali", field: "ce08c_oneri_sociali", indent: 1 },
-    { label: "c) Trattamento di fine rapporto", field: "ce08a_tfr_accrual", indent: 1 },
-    { label: "d) Trattamento di quiescenza e simili" },
-    { label: "e) Altri costi del personale", field: "ce08d_altri_costi_personale", indent: 1 },
-    { label: "10) Ammortamenti e svalutazioni:" },
-    { label: "a) Ammortamento delle immobilizzazioni immateriali", field: "ce09a_ammort_immateriali", indent: 1 },
-    { label: "b) Ammortamento delle immobilizzazioni materiali", field: "ce09b_ammort_materiali", indent: 1 },
-    { label: "c) Altre svalutazioni delle immobilizzazioni", field: "ce09c_svalutazioni", indent: 1 },
-    { label: "d) Sval. dei crediti compresi nell'attivo circ. e delle disp. liquide", field: "ce09d_svalutazione_crediti", indent: 1 },
-    { label: "Totale ammortamenti e svalutazioni", field: "ce09_ammortamenti", indent: 1 },
-    { label: "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci", field: "ce10_var_rimanenze_mat_prime" },
-    { label: "12) Accantonamenti per rischi", field: "ce11_accantonamenti" },
-    { label: "13) Altri accantonamenti", field: "ce11b_altri_accantonamenti" },
-    { label: "14) Oneri diversi di gestione", field: "ce12_oneri_diversi" },
-    { label: "Totale Costi della Produzione", field: "production_cost", isSubtotal: true },
-    // EBITDA
-    { label: "EBITDA (MOL)", field: "ebitda", isSubtotal: true },
-    // EBIT
-    { label: "EBIT (Risultato Operativo)", field: "ebit", isSubtotal: true },
-    // C) PROVENTI E ONERI FINANZIARI
-    { label: "C) PROVENTI E ONERI FINANZIARI", isTotal: true },
-    { label: "15) Proventi da partecipazioni", field: "ce13_proventi_partecipazioni" },
-    { label: "16) Altri proventi finanziari", field: "ce14_altri_proventi_finanziari" },
-    { label: "17) Interessi e altri oneri finanziari", field: "ce15_oneri_finanziari" },
-    { label: "17-bis) Utili e perdite su cambi", field: "ce16_utili_perdite_cambi" },
-    { label: "Totale Proventi/Oneri Finanziari", field: "financial_result", isSubtotal: true },
-    // D) RETTIFICHE DI VALORE
-    { label: "D) RETTIFICHE DI VALORE ATTIVITA' FINANZIARIE", isTotal: true },
-    { label: "18) Rivalutazioni", field: "ce17a_rivalutazioni", indent: 1 },
-    { label: "19) Svalutazioni", field: "ce17b_svalutazioni", indent: 1 },
-    { label: "Totale rettifiche di valore", field: "ce17_rettifiche_attivita_fin", isSubtotal: true },
-    // E) PROVENTI E ONERI STRAORDINARI
-    { label: "E) PROVENTI E ONERI STRAORDINARI", isTotal: true },
-    { label: "20) Proventi straordinari", field: "ce18_proventi_straordinari" },
-    { label: "21) Oneri straordinari", field: "ce19_oneri_straordinari" },
-    { label: "Totale Proventi/Oneri Straordinari", field: "extraordinary_result", isSubtotal: true },
-    // RISULTATO PRIMA DELLE IMPOSTE
-    { label: "Risultato prima delle imposte", field: "profit_before_tax", isSubtotal: true },
-    // IMPOSTE
-    { label: "22) Imposte sul reddito", field: "ce20_imposte" },
-    // UTILE/PERDITA
-    { label: "23) UTILE (PERDITA) DELL'ESERCIZIO", field: "net_profit", isTotal: true },
-  ];
+  // Elenco righe: catalogo condiviso (lib/ivcee-catalog.ts), stessa forma di
+  // BALANCE_STATEMENT_ROWS (forecast/balance). Vedi ivcee-catalog-parity.test.ts
+  // per l'invariante che pin l'ordine/contenuto di questo prospetto.
+  const rows = INCOME_STATEMENT_ROWS;
 
   return (
     <Table>
@@ -667,7 +606,7 @@ function IncomeStatementTable({
             >
               <TableCell
                 className="px-4 py-2 text-sm text-foreground border-r border-border"
-                style={{ paddingLeft: row.indent ? `${1 + row.indent * 1.5}rem` : undefined }}
+                style={{ paddingLeft: row.indent ? "2.5rem" : undefined }}
               >
                 {row.label}
               </TableCell>

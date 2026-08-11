@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI, labelOf, voce } from "@/lib/ivcee-catalog";
+import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI, aggregate, labelOf, voce } from "@/lib/ivcee-catalog";
 import {
   CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
   COUNTERPART_PICKER_LABELS,
@@ -520,5 +520,92 @@ describe("anti-deriva: le copie nel catalogo seguono ancora le fonti vive", () =
       return { code, label: v?.label, parent: v?.parent, order: v?.order };
     });
     expect(ottenuto).toEqual(atteso);
+  });
+});
+
+// ===== Task 6: report-composition — rinuncia documentata =====
+//
+// report-composition.tsx (righe 47-51) somma a mano quattro gruppi di codici
+// SP per un grafico di composizione percentuale. Il piano chiedeva di
+// verificare se quelle quattro somme potessero diventare `aggregate(bs, code)`
+// dal catalogo. Risposta misurata: NO per due dei quattro gruppi, e la
+// sostituzione parziale (solo dove concorda) non vale la doppia via di
+// calcolo che introdurrebbe. `report-composition.tsx` NON è stato toccato.
+//
+// Motivo: `aggregate()` somma le FOGLIE del sottoalbero di un codice (vedi
+// ivcee-catalog.ts:321-329). Il BalanceSheet che report-composition riceve da
+// /analysis è già aggregato dal backend: sp04_immob_finanziarie,
+// sp06_crediti_breve e sp07_crediti_lungo sono valorizzati, le loro
+// sotto-voci (sp04a-e, sp06a-g, sp07a-g — tutte con parent nel catalogo, vedi
+// DETAIL_PARENTS in pratica-codes.ts) no. Su un codice con figli e figli a
+// zero, aggregate() restituisce 0, non il valore del padre — sarebbe uno zero
+// silenzioso nel grafico stampato, peggio della somma a mano che sostituisce
+// (nota del piano: "Un aggregatore che restituisce zero su dati reali è
+// peggio della somma a mano che sostituisce").
+//
+// Valori misurati con la fixture del brief (Task 6, Step 1), aggregati-soli,
+// sotto-voci non valorizzate:
+//   aggregate(BS, "sp04_immob_finanziarie") = 0   (5 figli: sp04a..e)
+//   aggregate(BS, "sp06_crediti_breve")     = 0   (7 figli: sp06a..g)
+//   aggregate(BS, "sp07_crediti_lungo")     = 0   (7 figli: sp07a..g)
+//   aggregate(BS, "sp08_attivita_finanziarie")   = 20  (nessun figlio: foglia)
+//   aggregate(BS, "sp09_disponibilita_liquide")  = 80  (nessun figlio: foglia)
+//   aggregate(BS, "sp01_crediti_soci")      = 10  (foglia)
+//   aggregate(BS, "sp02_immob_immateriali") = 100 (foglia)
+//   aggregate(BS, "sp03_immob_materiali")   = 200 (foglia)
+//
+// Effetto per gruppo (BALANCE_HIERARCHY_GROUPS conferma che sp04/06/07 hanno
+// figli; sp01/02/03/08/09 non compaiono mai come parent, quindi sono foglie):
+//   immobilizzazioni: a mano 360 (100+200+50+10) vs aggregate() 310 — perde
+//     esattamente i 50 di sp04_immob_finanziarie.
+//   crediti:          a mano 460 (400+60)        vs aggregate() 0   — persi
+//     entrambi gli aggregati.
+//   liquidità:        a mano 100 (80+20)          vs aggregate() 100 — qui
+//     concordano perché sp08/sp09 sono foglie senza sotto-voci nel catalogo.
+//
+// Questo test pin-a il comportamento vero (non quello sperato dal Task 6,
+// Step 1 del piano) per impedire che una futura modifica colleghi
+// `aggregate()` a report-composition e azzeri silenziosamente immobilizzazioni
+// e crediti nel grafico.
+describe("report-composition: aggregate() su dati aggregati-soli — rinuncia documentata", () => {
+  const BS: Record<string, number> = {
+    sp01_crediti_soci: 10, sp02_immob_immateriali: 100, sp03_immob_materiali: 200,
+    sp04_immob_finanziarie: 50, sp05_rimanenze: 300,
+    sp06_crediti_breve: 400, sp07_crediti_lungo: 60,
+    sp08_attivita_finanziarie: 20, sp09_disponibilita_liquide: 80,
+  };
+
+  it("sp04/sp06/sp07 hanno figli nel catalogo: aggregate() li azzera su dati solo-aggregato", () => {
+    expect(aggregate(BS, "sp04_immob_finanziarie")).toBe(0);
+    expect(aggregate(BS, "sp06_crediti_breve")).toBe(0);
+    expect(aggregate(BS, "sp07_crediti_lungo")).toBe(0);
+  });
+
+  it("immobilizzazioni: la somma a mano (360) e aggregate() (310) divergono — non sostituibile", () => {
+    const aMano = BS.sp02_immob_immateriali + BS.sp03_immob_materiali
+      + BS.sp04_immob_finanziarie + BS.sp01_crediti_soci;
+    expect(aMano).toBe(360);
+    const viaAggregate = aggregate(BS, "sp02_immob_immateriali")
+      + aggregate(BS, "sp03_immob_materiali")
+      + aggregate(BS, "sp04_immob_finanziarie")
+      + aggregate(BS, "sp01_crediti_soci");
+    expect(viaAggregate).toBe(310);
+    expect(viaAggregate).not.toBe(aMano);
+  });
+
+  it("crediti: la somma a mano (460) e aggregate() (0) divergono — non sostituibile", () => {
+    const aMano = BS.sp06_crediti_breve + BS.sp07_crediti_lungo;
+    expect(aMano).toBe(460);
+    const viaAggregate = aggregate(BS, "sp06_crediti_breve") + aggregate(BS, "sp07_crediti_lungo");
+    expect(viaAggregate).toBe(0);
+    expect(viaAggregate).not.toBe(aMano);
+  });
+
+  it("liquidità: sp08/sp09 sono foglie nel catalogo — qui aggregate() concorda (100)", () => {
+    const aMano = BS.sp09_disponibilita_liquide + BS.sp08_attivita_finanziarie;
+    const viaAggregate = aggregate(BS, "sp09_disponibilita_liquide")
+      + aggregate(BS, "sp08_attivita_finanziarie");
+    expect(aMano).toBe(100);
+    expect(viaAggregate).toBe(aMano);
   });
 });

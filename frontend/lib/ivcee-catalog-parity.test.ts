@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI, aggregate, labelOf, voce } from "@/lib/ivcee-catalog";
 import {
@@ -453,57 +451,53 @@ describe("cross-check: il catalogo riproduce la regola delle etichette", () => {
 });
 
 /**
- * Il catalogo tiene una COPIA a mano di due fonti che restano vive e
- * modificabili fino ai Task 7-9: le mappe `relabel` interne (non esportate) di
- * pratica-statement-rows.ts e il gruppo "Fondi per rischi e oneri" di
- * BALANCE_HIERARCHY_GROUPS (lib/ivcee-catalog.ts, assorbito da
- * ivcee-balance-catalog.ts al Task 4 — le due liste restano due letterali
- * scritti a mano separatamente, non l'una derivata dall'altra, anche se ora
- * vivono nello stesso file). Una copia che nessun test confronta con
- * l'originale è una copia che divergerà. Questi test muoiono con le fonti che
- * sorvegliano.
+ * Il catalogo teneva una COPIA a mano di DUE fonti vive. Al Task 7 una delle
+ * due è sparita: le mappe `relabel` interne di pratica-statement-rows.ts non
+ * esistono più — le due funzioni chiamano `labelOf(code, "contestuale")`, e
+ * `CONFRONTO_RELABEL` dentro il catalogo non è più la copia di niente: è la
+ * fonte. I due test che sorvegliavano quella copia sono stati RIMOSSI qui, e
+ * il motivo è registrato perché una loro sparizione silenziosa si legge come
+ * una perdita di copertura:
+ *
+ *  - "la copia della grafia del Confronto non è andata alla deriva" rileggeva
+ *    le due mappe dal sorgente con una regex. Senza le mappe la regex non
+ *    trova nulla: il test non ha più una fonte indipendente con cui
+ *    confrontare il catalogo, e la duplicazione che sorvegliava non esiste
+ *    più — è risolta, non solo non più testata.
+ *  - "l'etichetta contestuale coincide con quella resa dal Confronto"
+ *    confrontava l'etichetta della riga con `labelOf(code, "contestuale")`.
+ *    Ora la riga PORTA quel valore per costruzione: il test confronterebbe il
+ *    catalogo con se stesso e non potrebbe più fallire. Un test verde che non
+ *    può fallire si legge come copertura e non lo è.
+ *
+ * Restano: l'asserzione che il Task 7 rende davvero necessaria (subito qui
+ * sotto — non tautologica, vedi il commento sul posto) e la sorveglianza sul
+ * gruppo "Fondi per rischi e oneri", la cui fonte (BALANCE_HIERARCHY_GROUPS)
+ * è ancora viva e ancora un letterale scritto a mano separatamente.
  */
 describe("anti-deriva: le copie nel catalogo seguono ancora le fonti vive", () => {
-  /** Rilegge le due mappe `relabel` dal sorgente: non sono esportate. */
-  const relabelVive = (): Record<string, string> => {
-    const src = readFileSync(path.join(__dirname, "pratica-statement-rows.ts"), "utf8");
-    const corpi = [...src.matchAll(/const relabel: Record<string, string> = \{([\s\S]*?)\n {2}\};/g)];
-    expect(corpi).toHaveLength(2); // BS + CE: se cambia, il parsing va rifatto
-    const out: Record<string, string> = {};
-    for (const [, corpo] of corpi) {
-      for (const [, code, testo] of corpo.matchAll(/^\s*(\w+):\s*"((?:[^"\\]|\\.)*)",$/gm)) {
-        out[code] = testo;
-      }
-    }
-    return out;
-  };
-
-  // Copre tutte e 89 le voci, comprese sp16_debiti_breve e sp17_debiti_lungo,
-  // che hanno un `relabel` ma che il Confronto non rende mai come riga propria
-  // (le somma soltanto) e che quindi il test sulle righe rese qui sotto non
-  // raggiunge.
-  it("la copia della grafia del Confronto non è andata alla deriva", () => {
-    const vive = relabelVive();
-    expect(Object.keys(vive)).toHaveLength(89);
-    const derive = Object.entries(vive)
-      .filter(([code, testo]) => labelOf(code, "contestuale") !== testo.trim())
-      .map(([code, testo]) => `${code}: "${labelOf(code, "contestuale")}" ≠ "${testo.trim()}"`);
-    expect(derive).toEqual([]);
-  });
-
-  // Lo stesso invariante visto dal lato del rendering: l'etichetta contestuale
-  // del catalogo è esattamente quella che la vista scrive oggi nella riga.
-  it("l'etichetta contestuale coincide con quella resa dal Confronto", () => {
+  // NON è tautologico, a differenza del test che sostituisce: `labelOf` su un
+  // codice sconosciuto restituisce IL CODICE, e da quando il Confronto non ha
+  // più un `?? orig.label` di riserva (Task 7) una voce tolta dal catalogo — o
+  // una riga aggiunta al prospetto con un codice che il catalogo non conosce —
+  // si renderebbe come "sp05a_materie_prime" dentro la tabella. Nessun'altra
+  // asserzione se ne accorgerebbe: ATTESI_CONFRONTO_* pinna i CODICI, non le
+  // etichette. Le due liste confrontate qui restano indipendenti (l'elenco di
+  // ALL_CODES viene dagli elenchi di Rettifiche; quello reso è scritto a mano
+  // dentro i due builder).
+  it("ogni codice reso dal Confronto esiste nel catalogo", () => {
     const conosciuti = new Set(VOCI.map((v) => v.code));
     const righe = [
       ...buildBalanceItemsWithTotals(BS_FIXTURE),
       ...buildIncomeItemsWithEbitda(CE_FIXTURE, 9),
     ];
-    const derive = righe
-      .filter((r) => conosciuti.has(r.code))
-      .filter((r) => r.label.trim() !== labelOf(r.code, "contestuale"))
-      .map((r) => `${r.code}: "${r.label.trim()}" ≠ "${labelOf(r.code, "contestuale")}"`);
-    expect(derive).toEqual([]);
+    // I codici sintetici ("_hdr_*", "_totale_*", "_debt_*", "_ebitda", ...)
+    // portano un'etichetta letterale e non passano da labelOf; quali siano è
+    // pinnato per intero da ATTESI_CONFRONTO_BS/CE qui sopra.
+    const orfani = righe
+      .map((r) => r.code)
+      .filter((c) => !c.startsWith("_") && !conosciuti.has(c));
+    expect(orfani).toEqual([]);
   });
 
   it("il dettaglio dei fondi rischi riproduce BALANCE_HIERARCHY_GROUPS", () => {

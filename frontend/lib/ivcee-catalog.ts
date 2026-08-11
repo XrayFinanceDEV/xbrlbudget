@@ -20,10 +20,11 @@
 //    per ognuna delle sue chiavi: sono tutti sotto-conti la cui grafia breve
 //    del Confronto (es. "1) Verso clienti", "entro 12 mesi") non distingue
 //    entro/oltre né la voce padre senza un'intestazione sopra; altrimenti
-//    vince la grafia del Confronto (CONFRONTO_RELABEL, copiata dalle mappe
-//    `relabel` interne — non esportate — di lib/pratica-statement-rows.ts,
-//    righe 52 e 341); RETTIFICHE_LABELS è l'ultima risorsa per i pochi codici
-//    che il Confronto non rietichetta (sp05a..sp05e, sp12_riserve); infine
+//    vince la grafia del Confronto (CONFRONTO_RELABEL, che dal Task 7 è la
+//    fonte di quella grafia e non più una copia delle mappe `relabel` un
+//    tempo interne a lib/pratica-statement-rows.ts); RETTIFICHE_LABELS è
+//    l'ultima risorsa per i pochi codici che il Confronto non rietichetta
+//    (sp05a..sp05e, sp12_riserve); infine
 //    EXTRA_LABELS per le cinque voci che nessuna di quelle mappe nomina.
 
 import {
@@ -57,17 +58,20 @@ export interface Voce {
   shortLabel?: string;
 }
 
-// ===== Grafia del Confronto (relabel), copiata da lib/pratica-statement-rows.ts =====
-// Le due mappe `relabel` locali lì (BS riga 52, CE riga 341) non sono esportate;
-// questa è una copia letterale, senza i rientri (" 1) ..." → "1) ..."), che qui
-// vengono strippati a runtime con .trim() per sicurezza.
-// La copia è tenuta allineata alle mappe vive dal test
-// "la copia della grafia del Confronto non è andata alla deriva"
-// (lib/ivcee-catalog-parity.test.ts), che rilegge il sorgente: senza quel test
-// una modifica alle mappe durante i Task 3-8 renderebbe il catalogo sbagliato
-// in silenzio. Test e copia muoiono insieme alle mappe (Task 7/9).
+// ===== Grafia del Confronto (ex `relabel` di lib/pratica-statement-rows.ts) =====
+// NON è più una copia: al Task 7 le due mappe `relabel` locali di
+// pratica-statement-rows.ts (BS e CE) sono state rimosse e i due builder
+// chiamano labelOf(code, "contestuale"). Questa tabella è quindi la FONTE della
+// grafia contestuale, non il suo duplicato, e con essa è sparito il test che ne
+// sorvegliava la deriva ("la copia della grafia del Confronto...").
+// I rientri delle sotto-voci non sono stati riportati (" 1) ..." → "1) ..."):
+// il rientro è resa, non dato — lo applica la vista (pl-6 sui codici di
+// DETAIL_PARENTS). Il .trim() a runtime in labelFor() resta per sicurezza.
+// Due chiavi — sp16_debiti_breve e sp17_debiti_lungo — il Confronto non le ha
+// mai rese come riga propria (le somma soltanto): restano qui perché nessun'altra
+// mappa (RETTIFICHE_LABELS compresa) nomina quei due aggregati.
 const CONFRONTO_RELABEL: Record<string, string> = {
-  // BS — da pratica-statement-rows.ts riga 52
+  // BS
   sp01_crediti_soci: "A) Crediti verso soci per versamenti ancora dovuti",
   sp02_immob_immateriali: "I - Immobilizzazioni immateriali",
   sp03_immob_materiali: "II - Immobilizzazioni materiali",
@@ -126,7 +130,7 @@ const CONFRONTO_RELABEL: Record<string, string> = {
   sp17f_debiti_previdenza_lungo: "oltre 12 mesi",
   sp17g_altri_debiti_lungo: "oltre 12 mesi",
   sp18_ratei_risconti_passivi: "E) Ratei e risconti passivi",
-  // CE — da pratica-statement-rows.ts riga 341
+  // CE
   ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
   ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
   ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",

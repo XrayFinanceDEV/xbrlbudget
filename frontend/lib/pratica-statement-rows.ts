@@ -1,6 +1,7 @@
 import type { IntraYearComparisonItem } from "@/types/api";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { VP_CODES, ATTIVO_CODES, PASSIVO_CODES } from "@/lib/pratica-codes";
+import { labelOf } from "@/lib/ivcee-catalog";
 
 export function buildBalanceItemsWithTotals(
   rawItems: IntraYearComparisonItem[],
@@ -48,72 +49,16 @@ export function buildBalanceItemsWithTotals(
   const item = (code: string): IntraYearComparisonItem =>
     byCode.get(code) ?? { code, label: code, partial_value: 0, reference_value: 0, prior_value: 0, pct_of_reference: 0, annualized_value: 0 };
 
-  // Relabel
-  const relabel: Record<string, string> = {
-    sp01_crediti_soci: "A) Crediti verso soci per versamenti ancora dovuti",
-    sp02_immob_immateriali: "I - Immobilizzazioni immateriali",
-    sp03_immob_materiali: "II - Immobilizzazioni materiali",
-    sp04_immob_finanziarie: "III - Immobilizzazioni finanziarie",
-    sp04a_partecipazioni: "  1) Partecipazioni",
-    sp04b_crediti_immob_breve: "  2) Crediti (entro es. successivo)",
-    sp04c_crediti_immob_lungo: "  2) Crediti (oltre es. successivo)",
-    sp04d_altri_titoli: "  3) Altri titoli",
-    sp04e_strumenti_derivati_attivi: "  4) Strumenti finanziari derivati attivi",
-    sp05_rimanenze: "I - Rimanenze",
-    sp06_crediti_breve: "II - Crediti (entro esercizio successivo)",
-    sp06a_crediti_clienti_breve: "  1) Verso clienti",
-    sp06b_crediti_controllate_breve: "  2) Verso imprese controllate",
-    sp06c_crediti_collegate_breve: "  3) Verso imprese collegate",
-    sp06d_crediti_controllanti_breve: "  4) Verso controllanti",
-    sp06e_crediti_tributari_breve: "  5-bis) Crediti tributari",
-    sp06f_imposte_anticipate_breve: "  5-ter) Imposte anticipate",
-    sp06g_crediti_altri_breve: "  5-quater) Verso altri",
-    sp07_crediti_lungo: "II - Crediti (oltre esercizio successivo)",
-    sp07a_crediti_clienti_lungo: "  1) Verso clienti",
-    sp07b_crediti_controllate_lungo: "  2) Verso imprese controllate",
-    sp07c_crediti_collegate_lungo: "  3) Verso imprese collegate",
-    sp07d_crediti_controllanti_lungo: "  4) Verso controllanti",
-    sp07e_crediti_tributari_lungo: "  5-bis) Crediti tributari",
-    sp07f_imposte_anticipate_lungo: "  5-ter) Imposte anticipate",
-    sp07g_crediti_altri_lungo: "  5-quater) Verso altri",
-    sp08_attivita_finanziarie: "III - Attività finanziarie che non costituiscono immobilizzazioni",
-    sp09_disponibilita_liquide: "IV - Disponibilità liquide",
-    sp10_ratei_risconti_attivi: "D) Ratei e risconti attivi",
-    sp11_capitale: "I - Capitale",
-    sp12a_riserva_sovrapprezzo: "II - Riserva da soprapprezzo delle azioni",
-    sp12b_riserve_rivalutazione: "III - Riserve di rivalutazione",
-    sp12c_riserva_legale: "IV - Riserva legale",
-    sp12d_riserve_statutarie: "V - Riserve statutarie",
-    sp12e_altre_riserve: "VI - Altre riserve",
-    sp12f_riserva_copertura_flussi: "VII - Riserva per copertura flussi finanziari",
-    sp12g_utili_perdite_portati: "VIII - Utili (perdite) portati a nuovo",
-    sp13_utile_perdita: "IX - Utile (perdita) dell'esercizio",
-    sp12h_riserva_neg_azioni_proprie: "X - Riserva negativa per azioni proprie",
-    sp14_fondi_rischi: "B) Fondi per rischi e oneri",
-    sp15_tfr: "C) Trattamento di fine rapporto di lavoro subordinato",
-    sp16_debiti_breve: "Debiti (entro esercizio successivo)",
-    sp16a_debiti_banche_breve: "  entro 12 mesi",
-    sp16b_debiti_altri_finanz_breve: "  entro 12 mesi",
-    sp16c_debiti_obbligazioni_breve: "  entro 12 mesi",
-    sp16d_debiti_fornitori_breve: "  entro 12 mesi",
-    sp16e_debiti_tributari_breve: "  entro 12 mesi",
-    sp16f_debiti_previdenza_breve: "  entro 12 mesi",
-    sp16g_altri_debiti_breve: "  entro 12 mesi",
-    sp17_debiti_lungo: "Debiti (oltre esercizio successivo)",
-    sp17a_debiti_banche_lungo: "  oltre 12 mesi",
-    sp17b_debiti_altri_finanz_lungo: "  oltre 12 mesi",
-    sp17c_debiti_obbligazioni_lungo: "  oltre 12 mesi",
-    sp17d_debiti_fornitori_lungo: "  oltre 12 mesi",
-    sp17e_debiti_tributari_lungo: "  oltre 12 mesi",
-    sp17f_debiti_previdenza_lungo: "  oltre 12 mesi",
-    sp17g_altri_debiti_lungo: "  oltre 12 mesi",
-    sp18_ratei_risconti_passivi: "E) Ratei e risconti passivi",
-  };
-
-  const labeled = (code: string): IntraYearComparisonItem => {
-    const orig = item(code);
-    return { ...orig, label: relabel[code] ?? orig.label };
-  };
+  // Etichetta CONTESTUALE: qui la riga sta in un prospetto, sotto
+  // l'intestazione del proprio aggregato, quindi la forma breve basta.
+  // La forma autonoma serve altrove (giornale rettifiche, selettore).
+  // Il rientro delle sotto-voci NON sta nel testo (le etichette del catalogo
+  // non hanno spazi iniziali): lo applica chi rende la riga — pl-6 sui codici
+  // di DETAIL_PARENTS in ComparisonTable/ProjectionTable.
+  const labeled = (code: string): IntraYearComparisonItem => ({
+    ...item(code),
+    label: labelOf(code, "contestuale"),
+  });
 
   // Subtotals
   const IMMOB_CODES = ["sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie"];
@@ -337,45 +282,16 @@ export function buildIncomeItemsWithEbitda(
   const partialRevenue = v("ce01_ricavi_vendite", "partial_value");
   const refRevenue = v("ce01_ricavi_vendite", "reference_value");
 
-  // Relabel items to match IV CEE format
-  const relabel: Record<string, string> = {
-    ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
-    ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
-    ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",
-    ce04_altri_ricavi: "5) Altri ricavi e proventi",
-    ce05_materie_prime: "6) Per materie prime, sussidiarie, di consumo e di merci",
-    ce06_servizi: "7) Per servizi",
-    ce07_godimento_beni: "8) Per godimento di beni di terzi",
-    ce08_costi_personale: "9) Per il personale",
-    ce08b_salari_stipendi: "  a) Salari e stipendi",
-    ce08c_oneri_sociali: "  b) Oneri sociali",
-    ce08a_tfr_accrual: "  c) Trattamento di fine rapporto",
-    ce08d_altri_costi_personale: "  e) Altri costi del personale",
-    ce09_ammortamenti: "10) Ammortamenti e svalutazioni",
-    ce09a_ammort_immateriali: "  a) Ammortamento immobilizzazioni immateriali",
-    ce09b_ammort_materiali: "  b) Ammortamento immobilizzazioni materiali",
-    ce09c_svalutazioni: "  c) Altre svalutazioni delle immobilizzazioni",
-    ce09d_svalutazione_crediti: "  d) Svalutazione crediti attivo circolante",
-    ce10_var_rimanenze_mat_prime: "11) Var. rimanenze di materie prime, suss., di cons. e merci",
-    ce11_accantonamenti: "12) Accantonamenti per rischi",
-    ce11b_altri_accantonamenti: "13) Altri accantonamenti",
-    ce12_oneri_diversi: "14) Oneri diversi di gestione",
-    ce13_proventi_partecipazioni: "15) Proventi da partecipazioni",
-    ce14_altri_proventi_finanziari: "16) Altri proventi finanziari",
-    ce15_oneri_finanziari: "17) Interessi e altri oneri finanziari",
-    ce16_utili_perdite_cambi: "17-bis) Utili e perdite su cambi",
-    ce17_rettifiche_attivita_fin: "Totale rettifiche di valore (18 - 19)",
-    ce17a_rivalutazioni: "  18) Rivalutazioni",
-    ce17b_svalutazioni: "  19) Svalutazioni",
-    ce18_proventi_straordinari: "Proventi straordinari",
-    ce19_oneri_straordinari: "Oneri straordinari",
-    ce20_imposte: "20) Imposte sul reddito dell'esercizio",
-  };
-
-  const labeled = (code: string): IntraYearComparisonItem => {
-    const orig = item(code);
-    return { ...orig, label: relabel[code] ?? orig.label };
-  };
+  // Etichetta CONTESTUALE: qui la riga sta in un prospetto, sotto
+  // l'intestazione del proprio aggregato, quindi la forma breve basta.
+  // La forma autonoma serve altrove (giornale rettifiche, selettore).
+  // Il rientro delle sotto-voci NON sta nel testo (le etichette del catalogo
+  // non hanno spazi iniziali): lo applica chi rende la riga — pl-6 sui codici
+  // di DETAIL_PARENTS in ComparisonTable/ProjectionTable.
+  const labeled = (code: string): IntraYearComparisonItem => ({
+    ...item(code),
+    label: labelOf(code, "contestuale"),
+  });
 
   return [
     // A) VALORE DELLA PRODUZIONE

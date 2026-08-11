@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
-import { VOCI, labelOf, voce } from "@/lib/ivcee-catalog";
+import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, VOCI, labelOf, voce } from "@/lib/ivcee-catalog";
 import {
   CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
   COUNTERPART_PICKER_LABELS,
@@ -404,8 +403,12 @@ describe("cross-check: il catalogo riproduce la regola delle etichette", () => {
  * Il catalogo tiene una COPIA a mano di due fonti che restano vive e
  * modificabili fino ai Task 7-9: le mappe `relabel` interne (non esportate) di
  * pratica-statement-rows.ts e il gruppo "Fondi per rischi e oneri" di
- * ivcee-balance-catalog.ts. Una copia che nessun test confronta con l'originale
- * è una copia che divergerà. Questi test muoiono con le fonti che sorvegliano.
+ * BALANCE_HIERARCHY_GROUPS (lib/ivcee-catalog.ts, assorbito da
+ * ivcee-balance-catalog.ts al Task 4 — le due liste restano due letterali
+ * scritti a mano separatamente, non l'una derivata dall'altra, anche se ora
+ * vivono nello stesso file). Una copia che nessun test confronta con
+ * l'originale è una copia che divergerà. Questi test muoiono con le fonti che
+ * sorvegliano.
  */
 describe("anti-deriva: le copie nel catalogo seguono ancora le fonti vive", () => {
   /** Rilegge le due mappe `relabel` dal sorgente: non sono esportate. */
@@ -450,7 +453,7 @@ describe("anti-deriva: le copie nel catalogo seguono ancora le fonti vive", () =
     expect(derive).toEqual([]);
   });
 
-  it("il dettaglio dei fondi rischi riproduce ivcee-balance-catalog", () => {
+  it("il dettaglio dei fondi rischi riproduce BALANCE_HIERARCHY_GROUPS", () => {
     const gruppo = BALANCE_HIERARCHY_GROUPS.find((g) => g.aggregate === "sp14_fondi_rischi");
     expect(gruppo).toBeDefined();
     const atteso = gruppo!.details.map(([code, label], i) => ({

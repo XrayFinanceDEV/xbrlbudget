@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/formatters";
-import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
+import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import { IS_LABELS } from "./report-types";
 import type { ScenarioAnalysis } from "@/types/api";
 

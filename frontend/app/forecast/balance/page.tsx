@@ -5,7 +5,7 @@ import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { generateForecast, getBudgetAssumptions, updateBudgetAssumptions } from "@/lib/api";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
-import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
+import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import type {
   BudgetScenario,
   ScenarioAnalysis,

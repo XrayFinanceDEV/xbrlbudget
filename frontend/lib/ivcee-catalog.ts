@@ -356,10 +356,13 @@ export function sectionRows(section: IvceeSection, maxDepth?: number): Voce[] {
 
 // ===== Prospetto SP per riga (forecast/balance, report-appendices) =====
 // Assorbito da lib/ivcee-balance-catalog.ts (Task 4). Tipi, helper e lista
-// copiati senza modifiche di contenuto, salvo la sola sostituzione descritta
-// nel piano: la catena di ternari che ricostruiva i nomi dei campi debiti
-// entro/oltre da un suffisso ora li legge da childrenOf(), che il catalogo
-// già possiede.
+// copiati senza modifiche di contenuto, salvo la sostituzione nel blocco
+// debiti entro/oltre più sotto: la catena di ternari che ricostruiva i nomi
+// dei campi da un suffisso ora li legge da childrenOf(), che il catalogo già
+// possiede. Non è la sostituzione descritta nel piano — quella (etichetta
+// da labelOf().replace(...)) rompeva ATTESI_BALANCE su 4 dei 7 gruppi
+// (labelOf ritorna il testo più lungo del picker, "Debiti vs banche (entro)",
+// non "Banche"); vedi il commento sul posto dove la didascalia è risolta.
 
 export type BalanceValues = Record<string, number | null | undefined>;
 
@@ -529,18 +532,28 @@ export const BALANCE_STATEMENT_ROWS: BalanceStatementRow[] = [
         `catalogo incoerente: ${entroList.length} debiti entro vs ${oltreList.length} oltre`,
       );
     }
-    // Etichetta di gruppo letterale (non da labelOf: il testo del picker è
-    // "Debiti vs banche (entro)", non "Banche" — labelOf serve solo a
-    // verificare l'accoppiamento entro/oltre per posizione, non a fornire
-    // il testo).
-    const GROUP_LABELS = [
-      "Banche", "Altri finanziatori", "Obbligazioni",
-      "Fornitori", "Debiti tributari", "Debiti previdenziali", "Altri debiti",
-    ];
+    // La didascalia di gruppo ("Banche", "Altri finanziatori", ...) non ha
+    // fonte nel catalogo: labelOf(entro.code) risolve al testo del picker
+    // ("Debiti vs banche (entro)"), più lungo; labelOf(..., "contestuale")
+    // risolve a "entro 12 mesi", che è la sotto-riga, non l'intestazione di
+    // gruppo; DEBT_GROUPS (lib/pratica-rettifiche-rules.ts) porta la
+    // numerazione OIC ("1) Debiti verso banche"). Nessuno dei tre coincide
+    // con ATTESI_BALANCE. Manca un terzo ruolo di etichetta (o un
+    // `groupLabel` sull'aggregato sp16/sp17 nel catalogo) — non lo si
+    // aggiunge qui: è una decisione dei task successivi. Fino ad allora la
+    // didascalia si legge dal gruppo che già la porta,
+    // BALANCE_HIERARCHY_GROUPS[6]/[7] poco sopra in questo file, cercando
+    // per CODICE (non per indice: un ottavo figlio in childrenOf non deve
+    // silenziosamente ricevere una didascalia sbagliata o assente).
+    const captionFor = (code: string): string => {
+      const found = BALANCE_HIERARCHY_GROUPS[6].details.find(([f]) => f === code)?.[1];
+      if (!found) throw new Error(`nessuna etichetta di gruppo per ${code}`);
+      return found;
+    };
     return entroList.flatMap((entro, i) => {
       const oltre = oltreList[i];
       return [
-        { label: GROUP_LABELS[i],
+        { label: captionFor(entro.code),
           computed: (b: BalanceValues) => n(b, entro.code) + n(b, oltre.code), indent: true },
         { label: "  entro 12 mesi", field: entro.code, indent: true },
         { label: "  oltre 12 mesi", field: oltre.code, indent: true },

@@ -39,6 +39,21 @@ describe("catalogo IV-CEE", () => {
     expect(inutili.map((v) => v.code)).toEqual([]);
   });
 
+  // `topLevelOrder`/`childOrder` terminano in Array.indexOf: una voce assente
+  // dal rispettivo elenco d'ordine riceve -1 invece di fallire. Il test
+  // sull'"ordine totale" qui sopra non lo vede, perché un solo -1 per padre non
+  // collide con nessuno. Questo lo vede.
+  it("nessuna voce resta senza ordine (-1)", () => {
+    expect(VOCI.filter((v) => v.order < 0).map((v) => v.code)).toEqual([]);
+  });
+
+  // labelFor() degrada al codice stesso quando nessuna fonte etichetta una
+  // voce, per non far esplodere il caricamento del modulo. La degradazione non
+  // deve però restare inosservata: qui è un errore.
+  it("nessuna etichetta è il codice stesso (fonte dell'etichetta mancante)", () => {
+    expect(VOCI.filter((v) => v.label === v.code).map((v) => v.code)).toEqual([]);
+  });
+
   it("copre ogni aggregato di primo livello dello stato patrimoniale", () => {
     const known = new Set(VOCI.map((v) => v.code));
     const mancanti = [...ATTIVO_CODES, ...PASSIVO_CODES].filter((c) => !known.has(c));

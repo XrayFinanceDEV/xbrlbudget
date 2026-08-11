@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
-import { VOCI, labelOf } from "@/lib/ivcee-catalog";
+import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-balance-catalog";
+import { VOCI, labelOf, voce } from "@/lib/ivcee-catalog";
 import {
   CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
   COUNTERPART_PICKER_LABELS,
@@ -395,5 +397,72 @@ describe("cross-check: il catalogo riproduce la regola delle etichette", () => {
   it("nessuna etichetta del catalogo conserva i rientri delle fonti vecchie", () => {
     const conRientro = VOCI.filter((v) => v.label.startsWith(" "));
     expect(conRientro.map((v) => v.code)).toEqual([]);
+  });
+});
+
+/**
+ * Il catalogo tiene una COPIA a mano di due fonti che restano vive e
+ * modificabili fino ai Task 7-9: le mappe `relabel` interne (non esportate) di
+ * pratica-statement-rows.ts e il gruppo "Fondi per rischi e oneri" di
+ * ivcee-balance-catalog.ts. Una copia che nessun test confronta con l'originale
+ * è una copia che divergerà. Questi test muoiono con le fonti che sorvegliano.
+ */
+describe("anti-deriva: le copie nel catalogo seguono ancora le fonti vive", () => {
+  /** Rilegge le due mappe `relabel` dal sorgente: non sono esportate. */
+  const relabelVive = (): Record<string, string> => {
+    const src = readFileSync(path.join(__dirname, "pratica-statement-rows.ts"), "utf8");
+    const corpi = [...src.matchAll(/const relabel: Record<string, string> = \{([\s\S]*?)\n {2}\};/g)];
+    expect(corpi).toHaveLength(2); // BS + CE: se cambia, il parsing va rifatto
+    const out: Record<string, string> = {};
+    for (const [, corpo] of corpi) {
+      for (const [, code, testo] of corpo.matchAll(/^\s*(\w+):\s*"((?:[^"\\]|\\.)*)",$/gm)) {
+        out[code] = testo;
+      }
+    }
+    return out;
+  };
+
+  // Copre tutte e 89 le voci, comprese sp16_debiti_breve e sp17_debiti_lungo,
+  // che hanno un `relabel` ma che il Confronto non rende mai come riga propria
+  // (le somma soltanto) e che quindi il test sulle righe rese qui sotto non
+  // raggiunge.
+  it("la copia della grafia del Confronto non è andata alla deriva", () => {
+    const vive = relabelVive();
+    expect(Object.keys(vive)).toHaveLength(89);
+    const derive = Object.entries(vive)
+      .filter(([code, testo]) => labelOf(code, "contestuale") !== testo.trim())
+      .map(([code, testo]) => `${code}: "${labelOf(code, "contestuale")}" ≠ "${testo.trim()}"`);
+    expect(derive).toEqual([]);
+  });
+
+  // Lo stesso invariante visto dal lato del rendering: l'etichetta contestuale
+  // del catalogo è esattamente quella che la vista scrive oggi nella riga.
+  it("l'etichetta contestuale coincide con quella resa dal Confronto", () => {
+    const conosciuti = new Set(VOCI.map((v) => v.code));
+    const righe = [
+      ...buildBalanceItemsWithTotals(BS_FIXTURE),
+      ...buildIncomeItemsWithEbitda(CE_FIXTURE, 9),
+    ];
+    const derive = righe
+      .filter((r) => conosciuti.has(r.code))
+      .filter((r) => r.label.trim() !== labelOf(r.code, "contestuale"))
+      .map((r) => `${r.code}: "${r.label.trim()}" ≠ "${labelOf(r.code, "contestuale")}"`);
+    expect(derive).toEqual([]);
+  });
+
+  it("il dettaglio dei fondi rischi riproduce ivcee-balance-catalog", () => {
+    const gruppo = BALANCE_HIERARCHY_GROUPS.find((g) => g.aggregate === "sp14_fondi_rischi");
+    expect(gruppo).toBeDefined();
+    const atteso = gruppo!.details.map(([code, label], i) => ({
+      code,
+      label,
+      parent: "sp14_fondi_rischi",
+      order: i,
+    }));
+    const ottenuto = atteso.map(({ code }) => {
+      const v = voce(code);
+      return { code, label: v?.label, parent: v?.parent, order: v?.order };
+    });
+    expect(ottenuto).toEqual(atteso);
   });
 });

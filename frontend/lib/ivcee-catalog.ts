@@ -4,14 +4,15 @@
 // Nessun dato è inventato: tutto è ricavato dalle fonti esistenti.
 //  - quali codici + ordine fra pari: RETTIFICHE_BS_ATTIVO / RETTIFICHE_BS_PN /
 //    RETTIFICHE_BS_OTHER_PASSIVO / DEBT_GROUPS / CE_A..CE_IMPOSTE
-//    (lib/pratica-rettifiche-rules.ts) — l'elenco più completo dei sei,
-//    perché Rettifiche mostra tutto. Quattro aggregati di primo livello
-//    (sp12_riserve, sp16_debiti_breve, sp17_debiti_lungo,
-//    sp18_ratei_risconti_passivi) non sono righe editabili di Rettifiche e
-//    quindi non compaiono in quell'elenco, ma sono richiesti da
-//    ATTIVO_CODES/PASSIVO_CODES (lib/pratica-codes.ts) e vengono aggiunti qui.
-//  - il padre: DETAIL_PARENTS (lib/pratica-codes.ts). Assente = voce di primo
-//    livello.
+//    (lib/pratica-rettifiche-rules.ts). ATTENZIONE: Rettifiche NON è, come si
+//    era supposto, l'elenco più completo dei sei. Mancano:
+//      * quattro aggregati di primo livello (sp12_riserve, sp16_debiti_breve,
+//        sp17_debiti_lungo, sp18_ratei_risconti_passivi), che Rettifiche non
+//        rende come righe editabili ma ATTIVO_CODES/PASSIVO_CODES richiedono;
+//      * cinque voci che altre viste pinnate rendono davvero (sp14a..sp14d e
+//        ce03a_incrementi_immobilizzazioni) — vedi VOCI_NON_IN_RETTIFICHE.
+//  - il padre: DETAIL_PARENTS (lib/pratica-codes.ts), più EXTRA_PARENTS per le
+//    voci che quella mappa non copre. Assente = voce di primo livello.
 //  - la sezione: ATTIVO_CODES per l'attivo (e le sue sotto-voci); sp11/sp12*/
 //    sp13 per il patrimonio netto; il resto degli sp per il passivo; ce* per
 //    il conto economico.
@@ -22,7 +23,8 @@
 //    vince la grafia del Confronto (CONFRONTO_RELABEL, copiata dalle mappe
 //    `relabel` interne — non esportate — di lib/pratica-statement-rows.ts,
 //    righe 52 e 341); RETTIFICHE_LABELS è l'ultima risorsa per i pochi codici
-//    che il Confronto non rietichetta (sp05a..sp05e, sp12_riserve).
+//    che il Confronto non rietichetta (sp05a..sp05e, sp12_riserve); infine
+//    EXTRA_LABELS per le cinque voci che nessuna di quelle mappe nomina.
 
 import {
   RETTIFICHE_LABELS,
@@ -59,6 +61,11 @@ export interface Voce {
 // Le due mappe `relabel` locali lì (BS riga 52, CE riga 341) non sono esportate;
 // questa è una copia letterale, senza i rientri (" 1) ..." → "1) ..."), che qui
 // vengono strippati a runtime con .trim() per sicurezza.
+// La copia è tenuta allineata alle mappe vive dal test
+// "la copia della grafia del Confronto non è andata alla deriva"
+// (lib/ivcee-catalog-parity.test.ts), che rilegge il sorgente: senza quel test
+// una modifica alle mappe durante i Task 3-8 renderebbe il catalogo sbagliato
+// in silenzio. Test e copia muoiono insieme alle mappe (Task 7/9).
 const CONFRONTO_RELABEL: Record<string, string> = {
   // BS — da pratica-statement-rows.ts riga 52
   sp01_crediti_soci: "A) Crediti verso soci per versamenti ancora dovuti",
@@ -153,27 +160,84 @@ const CONFRONTO_RELABEL: Record<string, string> = {
   ce20_imposte: "20) Imposte sul reddito dell'esercizio",
 };
 
+// ===== Voci rese dalle viste pinnate ma assenti da ogni elenco di Rettifiche =====
+// Cinque codici non compaiono in RETTIFICHE_BS_* / DEBT_GROUPS / CE_*, né in
+// RETTIFICHE_LABELS, CONFRONTO_RELABEL, COUNTERPART_PICKER_LABELS o
+// DETAIL_PARENTS: la catena delle etichette e quella dei padri arrivano vuote.
+// Etichetta, padre e ordine relativo sono presi ALLA LETTERA dalla vista che
+// già li rende — nessun testo è inventato.
+
+// Dettaglio dei fondi per rischi e oneri: copia letterale del gruppo
+// "Fondi per rischi e oneri" di BALANCE_HIERARCHY_GROUPS
+// (lib/ivcee-balance-catalog.ts:79-88), che dichiara sia il testo sia
+// l'aggregato di appartenenza (`aggregate: "sp14_fondi_rischi"`). Sono righe
+// vere del prospetto SP: compaiono in ATTESI_BALANCE, l'invariante pinnata.
+// Non si importa da lì per non creare un ciclo quando il Task 4 assorbirà
+// quel modulo nel catalogo; la copia è tenuta allineata dal test
+// "il dettaglio dei fondi rischi riproduce ivcee-balance-catalog".
+const SP14_DETAIL: ReadonlyArray<readonly [string, string]> = [
+  ["sp14a_fondi_trattamento_quiescenza", "Quiescenza"],
+  ["sp14b_fondi_imposte", "Imposte, anche differite"],
+  ["sp14c_strumenti_derivati_passivi", "Derivati passivi"],
+  ["sp14d_altri_fondi", "Altri fondi"],
+];
+
+// Riga resa da /forecast/income (app/forecast/income/page.tsx:562) e sommata
+// nel Valore della Produzione (VP_CODES, lib/pratica-codes.ts:72). `lib/` non
+// può importare da `app/`: il testo è copiato, non derivabile con un test.
+// Nessuna fonte le assegna un padre, quindi è voce di primo livello
+// (regola del brief: fuori da DETAIL_PARENTS ⇒ parent null).
+const CE03A_CODE = "ce03a_incrementi_immobilizzazioni";
+const CE03A_LABEL = "4) Incrementi di immobilizzazioni per lavori interni";
+
+const EXTRA_LABELS: Record<string, string> = {
+  ...Object.fromEntries(SP14_DETAIL),
+  [CE03A_CODE]: CE03A_LABEL,
+};
+
+const EXTRA_PARENTS: Record<string, string> = Object.fromEntries(
+  SP14_DETAIL.map(([code]) => [code, "sp14_fondi_rischi"] as const),
+);
+
+function parentOf(code: string): string | null {
+  return DETAIL_PARENTS[code] ?? EXTRA_PARENTS[code] ?? null;
+}
+
+// L'ultimo `?? code` non è cosmetico: senza di esso un codice che nessuna
+// mappa etichetta fa esplodere .trim() su undefined MENTRE si valuta VOCI, cioè
+// al caricamento del modulo — ogni pagina che importa il catalogo si rompe. Si
+// preferisce la degradazione morbida (stesso contratto di labelOf: mai vuoto)
+// perché un'etichetta mancante non deve poter spegnere l'applicazione; il
+// difetto è comunque intercettato in CI dal test strutturale
+// "nessuna etichetta è il codice stesso".
 function labelFor(code: string): { label: string; shortLabel?: string } {
   const relabel = CONFRONTO_RELABEL[code];
   const pickerLabel = COUNTERPART_PICKER_LABELS[code];
-  const label = (pickerLabel ?? relabel ?? RETTIFICHE_LABELS[code]).trim();
+  const label = (
+    pickerLabel ?? relabel ?? RETTIFICHE_LABELS[code] ?? EXTRA_LABELS[code] ?? code
+  ).trim();
   const shortLabel = relabel !== undefined && relabel.trim() !== label ? relabel.trim() : undefined;
   return shortLabel !== undefined ? { label, shortLabel } : { label };
 }
 
 // ===== Quali codici, in che ordine =====
-// L'elenco più completo (Rettifiche) più i 4 aggregati di primo livello che
-// quella vista non rende come righe proprie (vedi commento in testa al file).
+// L'elenco di Rettifiche più i 4 aggregati di primo livello e le 5 voci che
+// quella vista non rende (vedi commenti in testa al file). Le voci aggiunte
+// sono inserite nel punto in cui la vista che le rende le colloca: sp14a..d
+// subito dopo sp14_fondi_rischi (BALANCE_HIERARCHY_GROUPS), ce03a fra
+// ce03_lavori_interni e ce04_altri_ricavi (app/forecast/income/page.tsx).
 const ALL_CODES: string[] = [
   ...RETTIFICHE_BS_ATTIVO,
   ...RETTIFICHE_BS_PN,
   "sp12_riserve",
-  ...RETTIFICHE_BS_OTHER_PASSIVO,
+  ...RETTIFICHE_BS_OTHER_PASSIVO.flatMap((c) =>
+    c === "sp14_fondi_rischi" ? [c, ...SP14_DETAIL.map(([code]) => code)] : [c],
+  ),
   "sp16_debiti_breve",
   ...DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]),
   "sp17_debiti_lungo",
   "sp18_ratei_risconti_passivi",
-  ...CE_A,
+  ...CE_A.flatMap((c) => (c === "ce03_lavori_interni" ? [c, CE03A_CODE] : [c])),
   ...CE_B,
   ...CE_C,
   ...CE_D,
@@ -188,12 +252,9 @@ function sectionOf(code: string): IvceeSection {
   return "passivo"; // sp14-sp18 e le loro sotto-voci
 }
 
-// Voci di primo livello CE, nell'ordine dichiarato da CE_A..CE_IMPOSTE
-// (le sotto-voci ce08a-d/ce09a-d/ce17a-b hanno un padre in DETAIL_PARENTS
-// e sono escluse qui).
-const CE_TOP_LEVEL = [...CE_A, ...CE_B, ...CE_C, ...CE_D, ...CE_E, ...CE_IMPOSTE].filter(
-  (c) => !(c in DETAIL_PARENTS),
-);
+// Voci di primo livello CE, nell'ordine di ALL_CODES (le sotto-voci
+// ce08a-d/ce09a-d/ce17a-b hanno un padre e sono escluse qui).
+const CE_TOP_LEVEL = ALL_CODES.filter((c) => sectionOf(c) === "ce" && parentOf(c) === null);
 
 function topLevelOrder(code: string, section: IvceeSection): number {
   if (section === "attivo") return ATTIVO_CODES.indexOf(code);
@@ -201,27 +262,20 @@ function topLevelOrder(code: string, section: IvceeSection): number {
   return PASSIVO_CODES.indexOf(code); // patrimonio + passivo condividono l'elenco sp11-sp18
 }
 
-// Pool di tutte le sotto-voci dichiarate, nell'ordine delle rispettive fonti
-// (RETTIFICHE_BS_ATTIVO per sp04/sp05/sp06/sp07, RETTIFICHE_BS_PN per sp12,
-// DEBT_GROUPS per sp16/sp17, CE_B per ce08/ce09, CE_D per ce17). Filtrando
-// per padre si ottiene l'ordine fra pari senza bisogno di elenchi dedicati
-// per ciascun aggregato.
-const CHILD_POOL = [
-  ...RETTIFICHE_BS_ATTIVO,
-  ...RETTIFICHE_BS_PN,
-  ...DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]),
-  ...CE_B,
-  ...CE_D,
-];
-
+// L'ordine fra pari si legge da ALL_CODES, non da un pool separato: ALL_CODES
+// contiene per costruzione OGNI voce del catalogo e vi si riversano interi gli
+// elenchi di origine, quindi filtrarlo per padre restituisce lo stesso ordine
+// relativo delle fonti. Un pool parziale (com'era CHILD_POOL) dimenticava
+// interi aggregati — sp14, sp18, CE_A, CE_C, CE_E — e i loro figli finivano a
+// order -1 senza che nessun test se ne accorgesse.
 function childOrder(code: string, parent: string): number {
-  const siblings = CHILD_POOL.filter((c) => DETAIL_PARENTS[c] === parent);
+  const siblings = ALL_CODES.filter((c) => parentOf(c) === parent);
   return siblings.indexOf(code);
 }
 
 export const VOCI: readonly Voce[] = ALL_CODES.map((code) => {
   const section = sectionOf(code);
-  const parent = DETAIL_PARENTS[code] ?? null;
+  const parent = parentOf(code);
   const order = parent === null ? topLevelOrder(code, section) : childOrder(code, parent);
   const { label, shortLabel } = labelFor(code);
   return { code, parent, section, order, label, shortLabel };

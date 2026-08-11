@@ -925,8 +925,25 @@ there propagates everywhere. The Rettifiche step holds a shadcn `Tabs` with *Ret
   - `backend/app/api/v1/financial_years.py` — `RETTIFICHE_LOG_MAX = 20`, GET `/adjustable`, PUT `/adjustments`
   - `frontend/components/pratica/RettificheTab.tsx` — `RettificheTab` component, `recalcAggregates`, the two-tab render block (moved from `app/infrannuale/page.tsx`, see "Il percorso unico Pratica" below)
   - `frontend/lib/pratica-rettifiche-rules.ts` — `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`
+  - `frontend/lib/ivcee-catalog.ts` — le etichette (`labelOf`), il rientro (`isDettaglio`) e `COUNTERPART_OPTIONS`
   - `frontend/lib/pratica-reconcile.ts` — `reconcileSubfields`
   - `frontend/hooks/use-rettifiche-year.ts` — per-year load/save/reset/corrections, one instance per tab; imports `reconcileSubfields` directly
+
+**Etichette dal catalogo (2026-08-11).** Ogni riga di Rettifiche rende ora `labelOf(field)`, la grafia
+**autonoma** del catalogo. Il cambiamento visibile è sulle sotto-righe dei debiti: mostrano
+`Debiti vs fornitori (entro)` invece di `entro 12 mesi`. La forma breve funziona solo sotto
+un'intestazione che la spieghi — nel prospetto del Confronto c'è, nel giornale delle rettifiche no.
+Il **rientro** delle sotto-voci non si legge più dai due spazi iniziali di un'etichetta: lo dichiara
+il catalogo (`isDettaglio`). Non è `depthOf(code) > 0`: sulle 78 righe passate a `renderSection`,
+la profondità ne selezionerebbe 42 contro 32 — le 10 di scarto sono `sp12a..h` e `ce17a/b`, che hanno
+un padre nel catalogo ma portano già la propria lettera di schema (`A.II)`, `18)`) e restano a filo.
+Il confronto è pinnato in `ivcee-catalog-parity.test.ts`.
+
+Le **intestazioni di raggruppamento** dello schema art. 2424 (`B) Immobilizzazioni`,
+`C) Attivo circolante`, `A) Patrimonio netto`) sono righe di **resa** dichiarate dentro
+`RettificheTab.tsx`, non voci del catalogo: non hanno codice, non sono editabili e non compaiono in
+`VOCI`. Un'intestazione si stampa sopra la prima riga **visibile** del proprio gruppo, così un gruppo
+interamente filtrato non lascia un'intestazione orfana.
 
 **Struttura (2026-08-10):** `RettificheTab` vive in `frontend/components/pratica/RettificheTab.tsx`; le sue regole di partita doppia e il layout righe stanno in `frontend/lib/pratica-rettifiche-rules.ts`. La vecchia nota parlava di ~15 costanti condivise con le tab Confronto e Proiezione: verificate una per una, l'unica davvero condivisa era `DETAIL_PARENTS` (ora in `lib/pratica-codes.ts`, usata da tutti e tre — `RettificheTab`, `ComparisonTable`, `ProjectionTable` — per decidere quando mostrare una riga di dettaglio). Non è servito alcun modulo ponte.
 
@@ -1128,11 +1145,41 @@ and a reset to the Import step — never a blank `<main>`.
   i sette rami `activeTab`) vive ancora tutto in `app/pratica/page.tsx`.
 
 ### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
-All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable. When adding a new BS/IS sub-field, add rows in all of:
-- `frontend/lib/pratica-rettifiche-rules.ts` — `RETTIFICHE_BS_ATTIVO` / `RETTIFICHE_BS_PN`, `CE_A`–`CE_E` (Rettifiche row layout)
-- `frontend/lib/pratica-statement-rows.ts` — the `relabel` map inside `buildBalanceItemsWithTotals` / `buildIncomeItemsWithEbitda` (Confronto)
-- `frontend/app/forecast/balance/page.tsx` — the `rows` array in `BalanceSheetTable`
-- `frontend/app/forecast/income/page.tsx` — the `rows` array in `IncomeStatementTable`
+All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable.
+
+**Catalogo IV-CEE unico (2026-08-10).** Le righe dei prospetti SP/CE vivono in
+`frontend/lib/ivcee-catalog.ts`. Per aggiungere una sotto-voce si tocca **quel file e
+basta**: le sei viste la ricevono per costruzione. Ogni voce porta il codice, il padre,
+la sezione, l'ordine e **due etichette**: `label` (autonoma, auto-esplicativa — giornale
+rettifiche, selettore contropartita, dialoghi, e ogni riga di Rettifiche) e `shortLabel`
+(contestuale, breve — righe di tabella che stanno sotto l'intestazione del proprio
+aggregato). `labelOf(code, "contestuale")` cade sull'autonoma quando la breve non c'è.
+Le viste proiettano l'albero con `sectionRows`, `childrenOf`, `subtree` e `aggregate`;
+le regole di **resa** (filtro degli zeri, editabilità, totali, rientri) restano di
+ciascuna vista.
+
+Lo stesso file porta anche i **due elenchi di righe già impaginate**,
+`BALANCE_STATEMENT_ROWS` (letto da `/forecast/balance` e da `report-appendices`) e
+`INCOME_STATEMENT_ROWS` (letto da `/forecast/income`): non è solo la tassonomia, è
+tassonomia **e** prospetti. Le tre grafie da cui le etichette sono derivate
+(`GRAFIA_RETTIFICHE`, `GRAFIA_SELETTORE`, `CONFRONTO_RELABEL`) sono **private al
+modulo** dal 2026-08-11 — erano due export di `pratica-rettifiche-rules.ts`
+(`RETTIFICHE_LABELS`, `COUNTERPART_PICKER_LABELS`) e una mappa interna a
+`pratica-statement-rows.ts`, cioè tre posti da cui si poteva ribattezzare una voce
+senza passare dal catalogo. `pratica-rettifiche-rules.ts` conserva la **politica**
+(`PROPOSAL_RULES`, `NON_POSTABLE_FIELDS`, `fieldCategory`, `COUNTERPART_GROUPS`, gli
+elenchi di righe `RETTIFICHE_BS_*` / `CE_A`–`CE_E` / `DEBT_GROUPS`); `COUNTERPART_OPTIONS`
+è passato al catalogo perché era l'ultimo consumatore delle due mappe, e la direzione
+opposta (rules → catalogo) chiuderebbe un ciclo di import fatale al caricamento.
+
+`frontend/lib/ivcee-catalog-parity.test.ts` fissa, per ogni vista, l'elenco dei codici
+resi e il loro ordine. Se cambia, una vista ha perso o riordinato una riga: quegli
+elenchi non vanno aggiornati per far passare il test. Fissa inoltre, con natura diversa,
+**il testo di ogni etichetta** (`ATTESI_CONFRONTO_LABELS`, 87 grafie contestuali;
+`ATTESI_LABELS_AUTONOME`, tutte e 100 le autonome): lì un cambiamento deliberato è
+legittimo e si aggiorna la riga nello stesso commit che cambia il testo — quello che non
+è legittimo è aggiornarla per far tornare verde la suite senza sapere perché il testo si
+è mosso.
 
 Detail blocks shared across all views:
 - **Immob. finanziarie (sp04):** sp04a_partecipazioni, sp04b/c_crediti_immob_breve/lungo, sp04d_altri_titoli, sp04e_strumenti_derivati_attivi. Aggregate `sp04_immob_finanziarie` is computed from sub-fields.

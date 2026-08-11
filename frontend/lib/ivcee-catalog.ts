@@ -16,20 +16,28 @@
 //  - la sezione: ATTIVO_CODES per l'attivo (e le sue sotto-voci); sp11/sp12*/
 //    sp13 per il patrimonio netto; il resto degli sp per il passivo; ce* per
 //    il conto economico.
-//  - le etichette: vedi labelFor() più sotto — COUNTERPART_PICKER_LABELS vince
-//    per ognuna delle sue chiavi: sono tutti sotto-conti la cui grafia breve
+//  - le etichette: vedi labelFor() più sotto — GRAFIA_SELETTORE vince per
+//    ognuna delle sue chiavi: sono tutti sotto-conti la cui grafia breve
 //    del Confronto (es. "1) Verso clienti", "entro 12 mesi") non distingue
 //    entro/oltre né la voce padre senza un'intestazione sopra; altrimenti
-//    vince la grafia del Confronto (CONFRONTO_RELABEL, che dal Task 7 è la
-//    fonte di quella grafia e non più una copia delle mappe `relabel` un
-//    tempo interne a lib/pratica-statement-rows.ts); RETTIFICHE_LABELS è
+//    vince la grafia del Confronto (CONFRONTO_RELABEL); GRAFIA_RETTIFICHE è
 //    l'ultima risorsa per i pochi codici che il Confronto non rietichetta
-//    (sp05a..sp05e, sp12_riserve); infine
-//    EXTRA_LABELS per le cinque voci che nessuna di quelle mappe nomina.
+//    (sp05a..sp05e, sp12_riserve); infine EXTRA_LABELS per le cinque voci che
+//    nessuna di quelle mappe nomina.
+//
+// Le TRE grafie vivono tutte qui dentro, private al modulo (Task 9). Erano
+// due export di lib/pratica-rettifiche-rules.ts (RETTIFICHE_LABELS,
+// COUNTERPART_PICKER_LABELS) e una mappa interna a lib/pratica-statement-rows.ts
+// (`relabel`, assorbita al Task 7): tre posti da cui si poteva ribattezzare una
+// voce senza passare da qui. Il testo NON è stato riscritto — i due blocchi
+// sono stati spostati carattere per carattere; ivcee-catalog-parity.test.ts
+// congela ogni etichetta resa (ATTESI_CONFRONTO_LABELS, ATTESI_LABELS_AUTONOME).
 
 import {
-  RETTIFICHE_LABELS,
-  COUNTERPART_PICKER_LABELS,
+  type AcctCategory,
+  COUNTERPART_GROUPS,
+  NON_POSTABLE_FIELDS,
+  fieldCategory,
   RETTIFICHE_BS_ATTIVO,
   RETTIFICHE_BS_PN,
   RETTIFICHE_BS_OTHER_PASSIVO,
@@ -56,7 +64,164 @@ export interface Voce {
   label: string;
   /** breve: presuppone l'intestazione sopra. Assente = usa `label`. */
   shortLabel?: string;
+  /**
+   * Sotto-voce di DETTAGLIO: la vista Rettifiche la rientra di un livello.
+   * NON è la profondità nel grafo dei padri (vedi depthOf, e il commento su
+   * isDettaglio più sotto): sp12a..h e ce17a/b hanno un padre e NON sono
+   * dettaglio. Il dato è quello che GRAFIA_RETTIFICHE portava come due spazi
+   * iniziali nell'etichetta — un dato di resa nascosto dentro il testo.
+   */
+  dettaglio?: true;
 }
+
+// ===== Grafia di Rettifiche (ex RETTIFICHE_LABELS di pratica-rettifiche-rules.ts) =====
+// Spostata qui al Task 9, verbatim. I due spazi iniziali di alcune voci NON
+// sono decorazione: sono il dato di rientro che RettificheTab leggeva
+// direttamente da questa mappa. Ora sono letti UNA volta, in labelFor(), e
+// promossi al campo `dettaglio` della voce; labelFor() trimma l'etichetta.
+const GRAFIA_RETTIFICHE: Record<string, string> = {
+  // SP - Attivo
+  sp01_crediti_soci: "A) Crediti verso soci",
+  sp02_immob_immateriali: "B.I) Immobilizzazioni immateriali",
+  sp03_immob_materiali: "B.II) Immobilizzazioni materiali",
+  sp04_immob_finanziarie: "B.III) Immobilizzazioni finanziarie",
+  sp04a_partecipazioni: "  1) Partecipazioni",
+  sp04b_crediti_immob_breve: "  2) Crediti (entro es. successivo)",
+  sp04c_crediti_immob_lungo: "  2) Crediti (oltre es. successivo)",
+  sp04d_altri_titoli: "  3) Altri titoli",
+  sp04e_strumenti_derivati_attivi: "  4) Strumenti finanziari derivati attivi",
+  sp05_rimanenze: "C.I) Rimanenze",
+  sp05a_materie_prime: "  1) Materie prime, sussidiarie e di consumo",
+  sp05b_prodotti_in_corso: "  2) Prodotti in c/lavorazione e semilavorati",
+  sp05c_lavori_in_corso: "  3) Lavori in corso su ordinazione",
+  sp05d_prodotti_finiti: "  4) Prodotti finiti e merci",
+  sp05e_acconti: "  5) Acconti",
+  sp06_crediti_breve: "C.II) Crediti (entro es. successivo)",
+  sp06a_crediti_clienti_breve: "  1) Verso clienti",
+  sp06b_crediti_controllate_breve: "  2) Verso imprese controllate",
+  sp06c_crediti_collegate_breve: "  3) Verso imprese collegate",
+  sp06d_crediti_controllanti_breve: "  4) Verso controllanti",
+  sp06e_crediti_tributari_breve: "  5-bis) Crediti tributari",
+  sp06f_imposte_anticipate_breve: "  5-ter) Imposte anticipate",
+  sp06g_crediti_altri_breve: "  5-quater) Verso altri",
+  sp07_crediti_lungo: "C.II) Crediti (oltre es. successivo)",
+  sp07a_crediti_clienti_lungo: "  1) Verso clienti",
+  sp07b_crediti_controllate_lungo: "  2) Verso imprese controllate",
+  sp07c_crediti_collegate_lungo: "  3) Verso imprese collegate",
+  sp07d_crediti_controllanti_lungo: "  4) Verso controllanti",
+  sp07e_crediti_tributari_lungo: "  5-bis) Crediti tributari",
+  sp07f_imposte_anticipate_lungo: "  5-ter) Imposte anticipate",
+  sp07g_crediti_altri_lungo: "  5-quater) Verso altri",
+  sp08_attivita_finanziarie: "C.III) Attività finanziarie",
+  sp09_disponibilita_liquide: "C.IV) Disponibilità liquide",
+  sp10_ratei_risconti_attivi: "D) Ratei e risconti attivi",
+  // SP - Passivo
+  sp11_capitale: "A.I) Capitale",
+  sp12a_riserva_sovrapprezzo: "A.II) Riserva da soprapprezzo azioni",
+  sp12b_riserve_rivalutazione: "A.III) Riserve di rivalutazione",
+  sp12c_riserva_legale: "A.IV) Riserva legale",
+  sp12d_riserve_statutarie: "A.V) Riserve statutarie",
+  sp12e_altre_riserve: "A.VI) Altre riserve",
+  sp12f_riserva_copertura_flussi: "A.VII) Riserva per copertura flussi finanziari",
+  sp12_riserve: "A.II-VIII) Totale riserve",
+  sp12g_utili_perdite_portati: "A.VIII) Utili (perdite) portati a nuovo",
+  sp13_utile_perdita: "A.IX) Utile (perdita) esercizio",
+  sp12h_riserva_neg_azioni_proprie: "A.X) Riserva negativa per azioni proprie in portafoglio",
+  sp14_fondi_rischi: "B) Fondi per rischi e oneri",
+  sp15_tfr: "C) Trattamento di fine rapporto di lavoro subordinato",
+  sp16a_debiti_banche_breve: "D) Debiti vs banche (entro)",
+  sp16b_debiti_altri_finanz_breve: "D) Debiti vs altri finanz. (entro)",
+  sp16c_debiti_obbligazioni_breve: "D) Debiti obbligazionari (entro)",
+  sp16d_debiti_fornitori_breve: "D) Debiti vs fornitori (entro)",
+  sp16e_debiti_tributari_breve: "D) Debiti tributari (entro)",
+  sp16f_debiti_previdenza_breve: "D) Debiti previdenziali (entro)",
+  sp16g_altri_debiti_breve: "D) Altri debiti (entro)",
+  sp17a_debiti_banche_lungo: "D) Debiti vs banche (oltre)",
+  sp17b_debiti_altri_finanz_lungo: "D) Debiti vs altri finanz. (oltre)",
+  sp17c_debiti_obbligazioni_lungo: "D) Debiti obbligazionari (oltre)",
+  sp17d_debiti_fornitori_lungo: "D) Debiti vs fornitori (oltre)",
+  sp17e_debiti_tributari_lungo: "D) Debiti tributari (oltre)",
+  sp17f_debiti_previdenza_lungo: "D) Debiti previdenziali (oltre)",
+  sp17g_altri_debiti_lungo: "D) Altri debiti (oltre)",
+  sp18_ratei_risconti_passivi: "E) Ratei e risconti",
+  // CE
+  ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
+  ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
+  ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",
+  ce04_altri_ricavi: "5) Altri ricavi e proventi",
+  ce05_materie_prime: "6) Per materie prime, sussidiarie, di consumo e di merci",
+  ce06_servizi: "7) Per servizi",
+  ce07_godimento_beni: "8) Per godimento di beni di terzi",
+  ce08_costi_personale: "9) Per il personale",
+  ce08b_salari_stipendi: "  a) Salari e stipendi",
+  ce08c_oneri_sociali: "  b) Oneri sociali",
+  ce08a_tfr_accrual: "  c) Trattamento di fine rapporto",
+  ce08d_altri_costi_personale: "  e) Altri costi",
+  ce09_ammortamenti: "10) Ammortamenti e svalutazioni",
+  ce09a_ammort_immateriali: "  a) Ammort. delle immobilizzazioni immateriali",
+  ce09b_ammort_materiali: "  b) Ammort. delle immobilizzazioni materiali",
+  ce09c_svalutazioni: "  c) Altre svalutazioni delle immobilizzazioni",
+  ce09d_svalutazione_crediti: "  d) Svalutazioni dei crediti dell'attivo circ. e disp. liquide",
+  ce10_var_rimanenze_mat_prime: "11) Var. rimanenze di materie prime, suss., di cons. e merci",
+  ce11_accantonamenti: "12) Accantonamenti per rischi",
+  ce11b_altri_accantonamenti: "13) Altri accantonamenti",
+  ce12_oneri_diversi: "14) Oneri diversi di gestione",
+  ce13_proventi_partecipazioni: "15) Proventi da partecipazioni",
+  ce14_altri_proventi_finanziari: "16) Altri proventi finanziari",
+  ce15_oneri_finanziari: "17) Interessi e altri oneri finanziari",
+  ce16_utili_perdite_cambi: "17-bis) Utili e perdite su cambi",
+  ce17a_rivalutazioni: "18) Rivalutazioni",
+  ce17b_svalutazioni: "19) Svalutazioni",
+  ce17_rettifiche_attivita_fin: "Totale rettifiche di valore (18 - 19)",
+  ce18_proventi_straordinari: "Proventi straordinari",
+  ce19_oneri_straordinari: "Oneri straordinari",
+  ce20_imposte: "20) Imposte sul reddito dell'esercizio",
+};
+
+// ===== Grafia del selettore di contropartita (ex COUNTERPART_PICKER_LABELS) =====
+// Spostata qui al Task 9, verbatim. Vince su tutte e 38 le sue chiavi: sono
+// sotto-conti che nel giornale e nel selettore compaiono SENZA l'intestazione
+// del proprio aggregato, quindi la grafia breve del Confronto non basta.
+const GRAFIA_SELETTORE: Record<string, string> = {
+  sp16a_debiti_banche_breve: "Debiti vs banche (entro)",
+  sp16b_debiti_altri_finanz_breve: "Debiti vs altri finanz. (entro)",
+  sp16c_debiti_obbligazioni_breve: "Debiti obbligazionari (entro)",
+  sp16d_debiti_fornitori_breve: "Debiti vs fornitori (entro)",
+  sp16e_debiti_tributari_breve: "Debiti tributari (entro)",
+  sp16f_debiti_previdenza_breve: "Debiti previdenziali (entro)",
+  sp16g_altri_debiti_breve: "Altri debiti (entro)",
+  sp17a_debiti_banche_lungo: "Debiti vs banche (oltre)",
+  sp17b_debiti_altri_finanz_lungo: "Debiti vs altri finanz. (oltre)",
+  sp17c_debiti_obbligazioni_lungo: "Debiti obbligazionari (oltre)",
+  sp17d_debiti_fornitori_lungo: "Debiti vs fornitori (oltre)",
+  sp17e_debiti_tributari_lungo: "Debiti tributari (oltre)",
+  sp17f_debiti_previdenza_lungo: "Debiti previdenziali (oltre)",
+  sp17g_altri_debiti_lungo: "Altri debiti (oltre)",
+  sp06a_crediti_clienti_breve: "Crediti vs clienti (entro)",
+  sp06b_crediti_controllate_breve: "Crediti vs controllate (entro)",
+  sp06c_crediti_collegate_breve: "Crediti vs collegate (entro)",
+  sp06d_crediti_controllanti_breve: "Crediti vs controllanti (entro)",
+  sp06e_crediti_tributari_breve: "Crediti tributari (entro)",
+  sp06f_imposte_anticipate_breve: "Imposte anticipate (entro)",
+  sp06g_crediti_altri_breve: "Altri crediti (entro)",
+  sp07a_crediti_clienti_lungo: "Crediti vs clienti (oltre)",
+  sp07b_crediti_controllate_lungo: "Crediti vs controllate (oltre)",
+  sp07c_crediti_collegate_lungo: "Crediti vs collegate (oltre)",
+  sp07d_crediti_controllanti_lungo: "Crediti vs controllanti (oltre)",
+  sp07e_crediti_tributari_lungo: "Crediti tributari (oltre)",
+  sp07f_imposte_anticipate_lungo: "Imposte anticipate (oltre)",
+  sp07g_crediti_altri_lungo: "Altri crediti (oltre)",
+  sp04a_partecipazioni: "Partecipazioni",
+  sp04b_crediti_immob_breve: "Crediti immobilizzati (entro)",
+  sp04c_crediti_immob_lungo: "Crediti immobilizzati (oltre)",
+  sp04d_altri_titoli: "Altri titoli",
+  sp04e_strumenti_derivati_attivi: "Strumenti finanz. derivati attivi",
+  sp05a_materie_prime: "Rimanenze materie prime",
+  sp05b_prodotti_in_corso: "Prodotti in corso di lavorazione",
+  sp05c_lavori_in_corso: "Lavori in corso su ordinazione",
+  sp05d_prodotti_finiti: "Prodotti finiti e merci",
+  sp05e_acconti: "Acconti (rimanenze)",
+};
 
 // ===== Grafia del Confronto (ex `relabel` di lib/pratica-statement-rows.ts) =====
 // NON è più una copia: al Task 7 le due mappe `relabel` locali di
@@ -69,7 +234,7 @@ export interface Voce {
 // DETAIL_PARENTS). Il .trim() a runtime in labelFor() resta per sicurezza.
 // Due chiavi — sp16_debiti_breve e sp17_debiti_lungo — il Confronto non le ha
 // mai rese come riga propria (le somma soltanto): restano qui perché nessun'altra
-// mappa (RETTIFICHE_LABELS compresa) nomina quei due aggregati.
+// mappa (GRAFIA_RETTIFICHE compresa) nomina quei due aggregati.
 const CONFRONTO_RELABEL: Record<string, string> = {
   // BS
   sp01_crediti_soci: "A) Crediti verso soci per versamenti ancora dovuti",
@@ -166,7 +331,7 @@ const CONFRONTO_RELABEL: Record<string, string> = {
 
 // ===== Voci rese dalle viste pinnate ma assenti da ogni elenco di Rettifiche =====
 // Cinque codici non compaiono in RETTIFICHE_BS_* / DEBT_GROUPS / CE_*, né in
-// RETTIFICHE_LABELS, CONFRONTO_RELABEL, COUNTERPART_PICKER_LABELS o
+// GRAFIA_RETTIFICHE, CONFRONTO_RELABEL, GRAFIA_SELETTORE o
 // DETAIL_PARENTS: la catena delle etichette e quella dei padri arrivano vuote.
 // Etichetta, padre e ordine relativo sono presi ALLA LETTERA dalla vista che
 // già li rende — nessun testo è inventato.
@@ -216,14 +381,21 @@ function parentOf(code: string): string | null {
 // perché un'etichetta mancante non deve poter spegnere l'applicazione; il
 // difetto è comunque intercettato in CI dal test strutturale
 // "nessuna etichetta è il codice stesso".
-function labelFor(code: string): { label: string; shortLabel?: string } {
+function labelFor(code: string): { label: string; shortLabel?: string; dettaglio?: true } {
   const relabel = CONFRONTO_RELABEL[code];
-  const pickerLabel = COUNTERPART_PICKER_LABELS[code];
+  const rettifiche = GRAFIA_RETTIFICHE[code];
+  const pickerLabel = GRAFIA_SELETTORE[code];
   const label = (
-    pickerLabel ?? relabel ?? RETTIFICHE_LABELS[code] ?? EXTRA_LABELS[code] ?? code
+    pickerLabel ?? relabel ?? rettifiche ?? EXTRA_LABELS[code] ?? code
   ).trim();
   const shortLabel = relabel !== undefined && relabel.trim() !== label ? relabel.trim() : undefined;
-  return shortLabel !== undefined ? { label, shortLabel } : { label };
+  // Unico punto in cui i due spazi iniziali di GRAFIA_RETTIFICHE vengono letti.
+  const dettaglio = rettifiche !== undefined && rettifiche.startsWith("  ") ? true : undefined;
+  return {
+    label,
+    ...(shortLabel !== undefined ? { shortLabel } : {}),
+    ...(dettaglio !== undefined ? { dettaglio } : {}),
+  };
 }
 
 // ===== Quali codici, in che ordine =====
@@ -283,8 +455,8 @@ export const VOCI: readonly Voce[] = ALL_CODES.map((code) => {
   const section = sectionOf(code);
   const parent = parentOf(code);
   const order = parent === null ? topLevelOrder(code, section) : childOrder(code, parent);
-  const { label, shortLabel } = labelFor(code);
-  return { code, parent, section, order, label, shortLabel };
+  const { label, shortLabel, dettaglio } = labelFor(code);
+  return { code, parent, section, order, label, shortLabel, dettaglio };
 });
 
 const BY_CODE = new Map(VOCI.map((v) => [v.code, v] as const));
@@ -332,7 +504,7 @@ export function aggregate(values: Record<string, number>, code: string): number 
   return figli.reduce((s, f) => s + aggregate(values, f.code), 0);
 }
 
-const depthOf = (v: Voce): number => {
+const depthOfVoce = (v: Voce): number => {
   let d = 0;
   let cur = v;
   while (cur.parent !== null) {
@@ -344,19 +516,63 @@ const depthOf = (v: Voce): number => {
   return d;
 };
 
+/** Quanti aggregati stanno sopra la voce (0 = voce di primo livello). */
+export function depthOf(code: string): number {
+  const v = BY_CODE.get(code);
+  return v === undefined ? 0 : depthOfVoce(v);
+}
+
+/**
+ * La voce è una sotto-voce di dettaglio, quella che Rettifiche rientra.
+ * NON coincide con depthOf(code) > 0, e la differenza è misurata, non
+ * supposta: sulle 78 righe che RettificheTab rende con renderSection,
+ * depthOf > 0 ne seleziona 42, questa 32. Le 10 di scarto sono sp12a..h e
+ * ce17a/b — voci che il catalogo appende a un aggregato sintetico
+ * (sp12_riserve, ce17_rettifiche_attivita_fin) ma che nello schema art. 2424
+ * stanno al livello dei numeri romani / dei numeri arabi di sezione, portano
+ * già la propria lettera ("A.II)", "18)") e non vanno rientrate.
+ * Il confronto è pinnato in ivcee-catalog-parity.test.ts.
+ */
+export function isDettaglio(code: string): boolean {
+  return BY_CODE.get(code)?.dettaglio === true;
+}
+
 /** Le voci di una sezione, in ordine di resa, fino alla profondità indicata. */
 export function sectionRows(section: IvceeSection, maxDepth?: number): Voce[] {
   const roots = VOCI.filter((v) => v.section === section && v.parent === null)
     .sort((a, b) => a.order - b.order);
   const out: Voce[] = [];
   const walk = (v: Voce) => {
-    if (maxDepth !== undefined && depthOf(v) > maxDepth) return;
+    if (maxDepth !== undefined && depthOfVoce(v) > maxDepth) return;
     out.push(v);
     for (const c of childrenOf(v.code)) walk(c);
   };
   roots.forEach(walk);
   return out;
 }
+
+// ===== Contropartite selezionabili nel picker di Rettifiche =====
+// Arrivava da pratica-rettifiche-rules.ts: era l'ULTIMO consumatore delle due
+// grafie oltre a questo catalogo, e senza di loro non poteva restare là (il
+// catalogo importa quel modulo: la direzione opposta chiuderebbe un ciclo,
+// fatale al caricamento — vedi Task 8). La POLITICA resta di là
+// (NON_POSTABLE_FIELDS, fieldCategory, COUNTERPART_GROUPS): qui c'è solo la
+// proiezione. L'elenco dei codici è quello di GRAFIA_RETTIFICHE, non VOCI:
+// VOCI ne ha 5 in più (sp14a..d, ce03a) che nel selettore non sono mai
+// comparse. Il campo `label` non viene reso (RettificheTab usa labelOf sul
+// codice) ma è calcolato come prima, per non cambiare nulla di nascosto.
+export const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field: string; label: string }> = (() => {
+  return Object.keys(GRAFIA_RETTIFICHE)
+    .filter((k) => !NON_POSTABLE_FIELDS.has(k))
+    .sort()
+    .flatMap((field) => {
+      const cat = fieldCategory(field);
+      if (!cat) return [];
+      const group = COUNTERPART_GROUPS.find((g) => g.category === cat)!.label;
+      const label = GRAFIA_SELETTORE[field] ?? GRAFIA_RETTIFICHE[field].trim();
+      return [{ group, category: cat, field, label }];
+    });
+})();
 
 // ===== Prospetto SP per riga (forecast/balance, report-appendices) =====
 // Assorbito da lib/ivcee-balance-catalog.ts (Task 4). Tipi, helper e lista

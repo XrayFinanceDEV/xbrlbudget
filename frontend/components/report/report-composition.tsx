@@ -44,6 +44,12 @@ function getCompositionData(allYears: ScenarioAnalysisYearData[]) {
     const ta = bs.total_assets || 1;
 
     // Assets as % of total
+    // NON sostituire queste somme con aggregate() del catalogo IV-CEE: qui
+    // il BalanceSheet arriva da /analysis gia' aggregato (sp04/sp06/sp07
+    // valorizzati, sotto-voci a zero) e aggregate() somma le FOGLIE, quindi
+    // restituirebbe 0 su quei tre codici — immobilizzazioni e crediti
+    // azzerati in silenzio nel grafico stampato. Misurato: vedi
+    // lib/ivcee-catalog-parity.test.ts, describe "report-composition".
     const immob = (bs.sp02_immob_immateriali || 0) + (bs.sp03_immob_materiali || 0) +
       (bs.sp04_immob_finanziarie || 0) + (bs.sp01_crediti_soci || 0);
     const rimanenze = bs.sp05_rimanenze || 0;

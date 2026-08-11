@@ -48,7 +48,7 @@ import {
 import { formatEuro, formatInputNumber, parseInputNumber } from "@/lib/pratica-format";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { ATTIVO_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
-import { labelOf } from "@/lib/ivcee-catalog";
+import { COUNTERPART_OPTIONS, isDettaglio, labelOf } from "@/lib/ivcee-catalog";
 import {
   type ProposalMode,
   type DoubleEntryProposal,
@@ -56,11 +56,9 @@ import {
   EDITABLE_RETTIFICHE,
   AUTO_ADJUSTED,
   NON_POSTABLE_FIELDS,
-  RETTIFICHE_LABELS,
   allowedCounterpartCategories,
   computeCpDelta,
   COUNTERPART_GROUPS,
-  COUNTERPART_OPTIONS,
   RETTIFICHE_BS_ATTIVO,
   RETTIFICHE_BS_PN,
   RETTIFICHE_BS_OTHER_PASSIVO,
@@ -569,11 +567,12 @@ export function RettificheTab({
         const isAutoAdj = AUTO_ADJUSTED.has(field);
         const isComputed = isComputedField(field);
         const hasDelta = Math.abs(delta) > 0.01;
-        // Rientro (pl-6 + testo attenuato), non etichetta: si legge ancora dai
-        // due spazi iniziali di RETTIFICHE_LABELS. DETAIL_PARENTS non e'
-        // equivalente — vi compaiono anche sp12a..h e ce17a/b, che questa
-        // vista NON rientra — e le etichette del catalogo sono tutte trimmate.
-        const isDetail = (RETTIFICHE_LABELS[field] ?? "").startsWith("  ");
+        // Rientro (pl-6 + testo attenuato), non etichetta: lo dichiara il
+        // catalogo. Prima si leggeva dai due spazi iniziali di
+        // RETTIFICHE_LABELS, cioe' misurando lo spazio bianco di un testo.
+        // NON e' depthOf(field) > 0 ne' DETAIL_PARENTS: in entrambi
+        // comparirebbero sp12a..h e ce17a/b, che questa vista non rientra.
+        const isDetail = isDettaglio(field);
         // Rientro di un livello sotto l'intestazione di raggruppamento (le
         // sotto-voci di dettaglio scendono di un altro livello con pl-6).
         const inGroup = groupOf.has(field);

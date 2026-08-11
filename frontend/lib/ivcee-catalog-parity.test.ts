@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI, aggregate, labelOf, voce } from "@/lib/ivcee-catalog";
+import {
+  BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI,
+  aggregate, depthOf, isDettaglio, labelOf, voce,
+} from "@/lib/ivcee-catalog";
 import {
   CE_A, CE_B, CE_C, CE_D, CE_E, CE_IMPOSTE,
-  COUNTERPART_PICKER_LABELS,
   DEBT_GROUPS,
   RETTIFICHE_BS_ATTIVO, RETTIFICHE_BS_OTHER_PASSIVO, RETTIFICHE_BS_PN,
-  RETTIFICHE_LABELS,
 } from "@/lib/pratica-rettifiche-rules";
 import {
   buildBalanceItemsWithTotals,
@@ -409,6 +410,225 @@ const ATTESI_CONFRONTO_CE: string[] = [
   "_net_profit",
 ];
 
+/**
+ * Caratterizzazione delle ETICHETTE, generata dallo stato corrente e poi
+ * congelata. Serve una rete diversa da ATTESI_CONFRONTO_BS/CE: quegli elenchi
+ * pinnano i CODICI e il loro ordine, quindi una modifica al TESTO di
+ * un'etichetta li lascia verdi. Dal Task 7 la grafia contestuale non ha piu'
+ * una fonte esterna con cui confrontarsi (le due mappe `relabel` di
+ * pratica-statement-rows.ts non esistono piu': CONFRONTO_RELABEL, dentro
+ * ivcee-catalog.ts, e' la fonte) — un refuso li' cambierebbe in silenzio
+ * Confronto, Proiezione e Stampa.
+ *
+ * ATTENZIONE — natura diversa dagli altri ATTESI_*: un cambiamento
+ * DELIBERATO di un'etichetta e' legittimo, e allora si aggiorna la riga
+ * corrispondente NELLO STESSO commit che cambia il testo. Quello che non e'
+ * mai legittimo e' aggiornarla per far tornare verde la suite senza sapere
+ * perche' il testo si e' mosso.
+ */
+const ATTESI_CONFRONTO_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ["sp01_crediti_soci", "A) Crediti verso soci per versamenti ancora dovuti"],
+  ["sp02_immob_immateriali", "I - Immobilizzazioni immateriali"],
+  ["sp03_immob_materiali", "II - Immobilizzazioni materiali"],
+  ["sp04_immob_finanziarie", "III - Immobilizzazioni finanziarie"],
+  ["sp04a_partecipazioni", "1) Partecipazioni"],
+  ["sp04b_crediti_immob_breve", "2) Crediti (entro es. successivo)"],
+  ["sp04c_crediti_immob_lungo", "2) Crediti (oltre es. successivo)"],
+  ["sp04d_altri_titoli", "3) Altri titoli"],
+  ["sp04e_strumenti_derivati_attivi", "4) Strumenti finanziari derivati attivi"],
+  ["sp05_rimanenze", "I - Rimanenze"],
+  ["sp06_crediti_breve", "II - Crediti (entro esercizio successivo)"],
+  ["sp06a_crediti_clienti_breve", "1) Verso clienti"],
+  ["sp06b_crediti_controllate_breve", "2) Verso imprese controllate"],
+  ["sp06c_crediti_collegate_breve", "3) Verso imprese collegate"],
+  ["sp06d_crediti_controllanti_breve", "4) Verso controllanti"],
+  ["sp06e_crediti_tributari_breve", "5-bis) Crediti tributari"],
+  ["sp06f_imposte_anticipate_breve", "5-ter) Imposte anticipate"],
+  ["sp06g_crediti_altri_breve", "5-quater) Verso altri"],
+  ["sp07_crediti_lungo", "II - Crediti (oltre esercizio successivo)"],
+  ["sp07a_crediti_clienti_lungo", "1) Verso clienti"],
+  ["sp07b_crediti_controllate_lungo", "2) Verso imprese controllate"],
+  ["sp07c_crediti_collegate_lungo", "3) Verso imprese collegate"],
+  ["sp07d_crediti_controllanti_lungo", "4) Verso controllanti"],
+  ["sp07e_crediti_tributari_lungo", "5-bis) Crediti tributari"],
+  ["sp07f_imposte_anticipate_lungo", "5-ter) Imposte anticipate"],
+  ["sp07g_crediti_altri_lungo", "5-quater) Verso altri"],
+  ["sp08_attivita_finanziarie", "III - Attività finanziarie che non costituiscono immobilizzazioni"],
+  ["sp09_disponibilita_liquide", "IV - Disponibilità liquide"],
+  ["sp10_ratei_risconti_attivi", "D) Ratei e risconti attivi"],
+  ["sp11_capitale", "I - Capitale"],
+  ["sp12a_riserva_sovrapprezzo", "II - Riserva da soprapprezzo delle azioni"],
+  ["sp12b_riserve_rivalutazione", "III - Riserve di rivalutazione"],
+  ["sp12c_riserva_legale", "IV - Riserva legale"],
+  ["sp12d_riserve_statutarie", "V - Riserve statutarie"],
+  ["sp12e_altre_riserve", "VI - Altre riserve"],
+  ["sp12f_riserva_copertura_flussi", "VII - Riserva per copertura flussi finanziari"],
+  ["sp12g_utili_perdite_portati", "VIII - Utili (perdite) portati a nuovo"],
+  ["sp13_utile_perdita", "IX - Utile (perdita) dell'esercizio"],
+  ["sp12h_riserva_neg_azioni_proprie", "X - Riserva negativa per azioni proprie"],
+  ["sp14_fondi_rischi", "B) Fondi per rischi e oneri"],
+  ["sp15_tfr", "C) Trattamento di fine rapporto di lavoro subordinato"],
+  ["sp16a_debiti_banche_breve", "entro 12 mesi"],
+  ["sp17a_debiti_banche_lungo", "oltre 12 mesi"],
+  ["sp16b_debiti_altri_finanz_breve", "entro 12 mesi"],
+  ["sp17b_debiti_altri_finanz_lungo", "oltre 12 mesi"],
+  ["sp16c_debiti_obbligazioni_breve", "entro 12 mesi"],
+  ["sp17c_debiti_obbligazioni_lungo", "oltre 12 mesi"],
+  ["sp16d_debiti_fornitori_breve", "entro 12 mesi"],
+  ["sp17d_debiti_fornitori_lungo", "oltre 12 mesi"],
+  ["sp16e_debiti_tributari_breve", "entro 12 mesi"],
+  ["sp17e_debiti_tributari_lungo", "oltre 12 mesi"],
+  ["sp16f_debiti_previdenza_breve", "entro 12 mesi"],
+  ["sp17f_debiti_previdenza_lungo", "oltre 12 mesi"],
+  ["sp16g_altri_debiti_breve", "entro 12 mesi"],
+  ["sp17g_altri_debiti_lungo", "oltre 12 mesi"],
+  ["sp18_ratei_risconti_passivi", "E) Ratei e risconti passivi"],
+  ["ce01_ricavi_vendite", "1) Ricavi delle vendite e delle prestazioni"],
+  ["ce02_variazioni_rimanenze", "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti"],
+  ["ce03_lavori_interni", "4) Incrementi di immobilizzazioni per lavori interni"],
+  ["ce04_altri_ricavi", "5) Altri ricavi e proventi"],
+  ["ce05_materie_prime", "6) Per materie prime, sussidiarie, di consumo e di merci"],
+  ["ce06_servizi", "7) Per servizi"],
+  ["ce07_godimento_beni", "8) Per godimento di beni di terzi"],
+  ["ce08_costi_personale", "9) Per il personale"],
+  ["ce08b_salari_stipendi", "a) Salari e stipendi"],
+  ["ce08c_oneri_sociali", "b) Oneri sociali"],
+  ["ce08a_tfr_accrual", "c) Trattamento di fine rapporto"],
+  ["ce08d_altri_costi_personale", "e) Altri costi del personale"],
+  ["ce09_ammortamenti", "10) Ammortamenti e svalutazioni"],
+  ["ce09a_ammort_immateriali", "a) Ammortamento immobilizzazioni immateriali"],
+  ["ce09b_ammort_materiali", "b) Ammortamento immobilizzazioni materiali"],
+  ["ce09c_svalutazioni", "c) Altre svalutazioni delle immobilizzazioni"],
+  ["ce09d_svalutazione_crediti", "d) Svalutazione crediti attivo circolante"],
+  ["ce10_var_rimanenze_mat_prime", "11) Var. rimanenze di materie prime, suss., di cons. e merci"],
+  ["ce11_accantonamenti", "12) Accantonamenti per rischi"],
+  ["ce11b_altri_accantonamenti", "13) Altri accantonamenti"],
+  ["ce12_oneri_diversi", "14) Oneri diversi di gestione"],
+  ["ce13_proventi_partecipazioni", "15) Proventi da partecipazioni"],
+  ["ce14_altri_proventi_finanziari", "16) Altri proventi finanziari"],
+  ["ce15_oneri_finanziari", "17) Interessi e altri oneri finanziari"],
+  ["ce16_utili_perdite_cambi", "17-bis) Utili e perdite su cambi"],
+  ["ce17a_rivalutazioni", "18) Rivalutazioni"],
+  ["ce17b_svalutazioni", "19) Svalutazioni"],
+  ["ce17_rettifiche_attivita_fin", "Totale rettifiche di valore (18 - 19)"],
+  ["ce18_proventi_straordinari", "Proventi straordinari"],
+  ["ce19_oneri_straordinari", "Oneri straordinari"],
+  ["ce20_imposte", "20) Imposte sul reddito dell'esercizio"],
+];
+
+/**
+ * Le etichette AUTONOME di tutte e 100 le voci del catalogo — quelle che
+ * rendono il giornale delle rettifiche, il selettore di contropartita, i
+ * dialoghi e ogni riga di Rettifiche. Rimpiazza la copertura del cross-check
+ * di transizione rimosso al Task 9 ("i sotto-conti coperti dal selettore usano
+ * il suo testo come etichetta autonoma"), che confrontava 38 di questi testi
+ * con COUNTERPART_PICKER_LABELS: quella mappa non esiste piu' come fonte
+ * separata, quindi il confronto e' con lo stato congelato, non con una copia.
+ * Stessa avvertenza dell'array qui sopra.
+ */
+const ATTESI_LABELS_AUTONOME: ReadonlyArray<readonly [string, string]> = [
+  ["sp01_crediti_soci", "A) Crediti verso soci per versamenti ancora dovuti"],
+  ["sp02_immob_immateriali", "I - Immobilizzazioni immateriali"],
+  ["sp03_immob_materiali", "II - Immobilizzazioni materiali"],
+  ["sp04_immob_finanziarie", "III - Immobilizzazioni finanziarie"],
+  ["sp04a_partecipazioni", "Partecipazioni"],
+  ["sp04b_crediti_immob_breve", "Crediti immobilizzati (entro)"],
+  ["sp04c_crediti_immob_lungo", "Crediti immobilizzati (oltre)"],
+  ["sp04d_altri_titoli", "Altri titoli"],
+  ["sp04e_strumenti_derivati_attivi", "Strumenti finanz. derivati attivi"],
+  ["sp05_rimanenze", "I - Rimanenze"],
+  ["sp05a_materie_prime", "Rimanenze materie prime"],
+  ["sp05b_prodotti_in_corso", "Prodotti in corso di lavorazione"],
+  ["sp05c_lavori_in_corso", "Lavori in corso su ordinazione"],
+  ["sp05d_prodotti_finiti", "Prodotti finiti e merci"],
+  ["sp05e_acconti", "Acconti (rimanenze)"],
+  ["sp06_crediti_breve", "II - Crediti (entro esercizio successivo)"],
+  ["sp06a_crediti_clienti_breve", "Crediti vs clienti (entro)"],
+  ["sp06b_crediti_controllate_breve", "Crediti vs controllate (entro)"],
+  ["sp06c_crediti_collegate_breve", "Crediti vs collegate (entro)"],
+  ["sp06d_crediti_controllanti_breve", "Crediti vs controllanti (entro)"],
+  ["sp06e_crediti_tributari_breve", "Crediti tributari (entro)"],
+  ["sp06f_imposte_anticipate_breve", "Imposte anticipate (entro)"],
+  ["sp06g_crediti_altri_breve", "Altri crediti (entro)"],
+  ["sp07_crediti_lungo", "II - Crediti (oltre esercizio successivo)"],
+  ["sp07a_crediti_clienti_lungo", "Crediti vs clienti (oltre)"],
+  ["sp07b_crediti_controllate_lungo", "Crediti vs controllate (oltre)"],
+  ["sp07c_crediti_collegate_lungo", "Crediti vs collegate (oltre)"],
+  ["sp07d_crediti_controllanti_lungo", "Crediti vs controllanti (oltre)"],
+  ["sp07e_crediti_tributari_lungo", "Crediti tributari (oltre)"],
+  ["sp07f_imposte_anticipate_lungo", "Imposte anticipate (oltre)"],
+  ["sp07g_crediti_altri_lungo", "Altri crediti (oltre)"],
+  ["sp08_attivita_finanziarie", "III - Attività finanziarie che non costituiscono immobilizzazioni"],
+  ["sp09_disponibilita_liquide", "IV - Disponibilità liquide"],
+  ["sp10_ratei_risconti_attivi", "D) Ratei e risconti attivi"],
+  ["sp11_capitale", "I - Capitale"],
+  ["sp12a_riserva_sovrapprezzo", "II - Riserva da soprapprezzo delle azioni"],
+  ["sp12b_riserve_rivalutazione", "III - Riserve di rivalutazione"],
+  ["sp12c_riserva_legale", "IV - Riserva legale"],
+  ["sp12d_riserve_statutarie", "V - Riserve statutarie"],
+  ["sp12e_altre_riserve", "VI - Altre riserve"],
+  ["sp12f_riserva_copertura_flussi", "VII - Riserva per copertura flussi finanziari"],
+  ["sp12g_utili_perdite_portati", "VIII - Utili (perdite) portati a nuovo"],
+  ["sp13_utile_perdita", "IX - Utile (perdita) dell'esercizio"],
+  ["sp12h_riserva_neg_azioni_proprie", "X - Riserva negativa per azioni proprie"],
+  ["sp12_riserve", "A.II-VIII) Totale riserve"],
+  ["sp14_fondi_rischi", "B) Fondi per rischi e oneri"],
+  ["sp14a_fondi_trattamento_quiescenza", "Quiescenza"],
+  ["sp14b_fondi_imposte", "Imposte, anche differite"],
+  ["sp14c_strumenti_derivati_passivi", "Derivati passivi"],
+  ["sp14d_altri_fondi", "Altri fondi"],
+  ["sp15_tfr", "C) Trattamento di fine rapporto di lavoro subordinato"],
+  ["sp16_debiti_breve", "Debiti (entro esercizio successivo)"],
+  ["sp16a_debiti_banche_breve", "Debiti vs banche (entro)"],
+  ["sp17a_debiti_banche_lungo", "Debiti vs banche (oltre)"],
+  ["sp16b_debiti_altri_finanz_breve", "Debiti vs altri finanz. (entro)"],
+  ["sp17b_debiti_altri_finanz_lungo", "Debiti vs altri finanz. (oltre)"],
+  ["sp16c_debiti_obbligazioni_breve", "Debiti obbligazionari (entro)"],
+  ["sp17c_debiti_obbligazioni_lungo", "Debiti obbligazionari (oltre)"],
+  ["sp16d_debiti_fornitori_breve", "Debiti vs fornitori (entro)"],
+  ["sp17d_debiti_fornitori_lungo", "Debiti vs fornitori (oltre)"],
+  ["sp16e_debiti_tributari_breve", "Debiti tributari (entro)"],
+  ["sp17e_debiti_tributari_lungo", "Debiti tributari (oltre)"],
+  ["sp16f_debiti_previdenza_breve", "Debiti previdenziali (entro)"],
+  ["sp17f_debiti_previdenza_lungo", "Debiti previdenziali (oltre)"],
+  ["sp16g_altri_debiti_breve", "Altri debiti (entro)"],
+  ["sp17g_altri_debiti_lungo", "Altri debiti (oltre)"],
+  ["sp17_debiti_lungo", "Debiti (oltre esercizio successivo)"],
+  ["sp18_ratei_risconti_passivi", "E) Ratei e risconti passivi"],
+  ["ce01_ricavi_vendite", "1) Ricavi delle vendite e delle prestazioni"],
+  ["ce02_variazioni_rimanenze", "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti"],
+  ["ce03_lavori_interni", "4) Incrementi di immobilizzazioni per lavori interni"],
+  ["ce03a_incrementi_immobilizzazioni", "4) Incrementi di immobilizzazioni per lavori interni"],
+  ["ce04_altri_ricavi", "5) Altri ricavi e proventi"],
+  ["ce05_materie_prime", "6) Per materie prime, sussidiarie, di consumo e di merci"],
+  ["ce06_servizi", "7) Per servizi"],
+  ["ce07_godimento_beni", "8) Per godimento di beni di terzi"],
+  ["ce08_costi_personale", "9) Per il personale"],
+  ["ce08b_salari_stipendi", "a) Salari e stipendi"],
+  ["ce08c_oneri_sociali", "b) Oneri sociali"],
+  ["ce08a_tfr_accrual", "c) Trattamento di fine rapporto"],
+  ["ce08d_altri_costi_personale", "e) Altri costi del personale"],
+  ["ce09_ammortamenti", "10) Ammortamenti e svalutazioni"],
+  ["ce09a_ammort_immateriali", "a) Ammortamento immobilizzazioni immateriali"],
+  ["ce09b_ammort_materiali", "b) Ammortamento immobilizzazioni materiali"],
+  ["ce09c_svalutazioni", "c) Altre svalutazioni delle immobilizzazioni"],
+  ["ce09d_svalutazione_crediti", "d) Svalutazione crediti attivo circolante"],
+  ["ce10_var_rimanenze_mat_prime", "11) Var. rimanenze di materie prime, suss., di cons. e merci"],
+  ["ce11_accantonamenti", "12) Accantonamenti per rischi"],
+  ["ce11b_altri_accantonamenti", "13) Altri accantonamenti"],
+  ["ce12_oneri_diversi", "14) Oneri diversi di gestione"],
+  ["ce13_proventi_partecipazioni", "15) Proventi da partecipazioni"],
+  ["ce14_altri_proventi_finanziari", "16) Altri proventi finanziari"],
+  ["ce15_oneri_finanziari", "17) Interessi e altri oneri finanziari"],
+  ["ce16_utili_perdite_cambi", "17-bis) Utili e perdite su cambi"],
+  ["ce17a_rivalutazioni", "18) Rivalutazioni"],
+  ["ce17b_svalutazioni", "19) Svalutazioni"],
+  ["ce17_rettifiche_attivita_fin", "Totale rettifiche di valore (18 - 19)"],
+  ["ce18_proventi_straordinari", "Proventi straordinari"],
+  ["ce19_oneri_straordinari", "Oneri straordinari"],
+  ["ce20_imposte", "20) Imposte sul reddito dell'esercizio"],
+];
+
 describe("invariante: nessuna vista perde o riordina righe", () => {
   it("prospetto SP (forecast/balance e report-appendices)", () => {
     expect(BALANCE_STATEMENT_ROWS.map(rowKey)).toEqual(ATTESI_BALANCE);
@@ -431,19 +651,122 @@ describe("invariante: nessuna vista perde o riordina righe", () => {
   });
 });
 
-describe("cross-check: il catalogo riproduce la regola delle etichette", () => {
-  it("ogni codice etichettato dalle fonti vecchie esiste nel catalogo", () => {
-    const known = new Set(VOCI.map((v) => v.code));
-    const mancanti = Object.keys(RETTIFICHE_LABELS).filter((c) => !known.has(c));
-    expect(mancanti).toEqual([]);
+describe("le etichette non si muovono", () => {
+  it("Confronto: la grafia contestuale delle 87 voci rese", () => {
+    const codici = [
+      ...buildBalanceItemsWithTotals(BS_FIXTURE),
+      ...buildIncomeItemsWithEbitda(CE_FIXTURE, 9),
+    ]
+      .map((r) => r.code)
+      .filter((c) => !c.startsWith("_"));
+    expect(codici.map((c) => [c, labelOf(c, "contestuale")])).toEqual(ATTESI_CONFRONTO_LABELS);
   });
 
-  it("i sotto-conti coperti dal selettore usano il suo testo come etichetta autonoma", () => {
-    for (const [code, atteso] of Object.entries(COUNTERPART_PICKER_LABELS)) {
-      expect(labelOf(code)).toBe(atteso);
-    }
+  it("catalogo: la grafia autonoma di tutte le voci", () => {
+    expect(VOCI.map((v) => [v.code, labelOf(v.code)])).toEqual(ATTESI_LABELS_AUTONOME);
+  });
+});
+
+
+/**
+ * Il rientro delle righe di Rettifiche. Fino al Task 9 RettificheTab lo
+ * deduceva da `RETTIFICHE_LABELS[field].startsWith("  ")` — misurava lo spazio
+ * bianco di un'etichetta. Ora lo chiede al catalogo (`isDettaglio`). Le 32
+ * voci qui sotto sono ESATTAMENTE quelle che il vecchio oracolo selezionava,
+ * generate prima della sostituzione: e' la prova che la resa non si e' mossa.
+ */
+const ATTESI_RIENTRATI: string[] = [
+  "sp04a_partecipazioni",
+  "sp04b_crediti_immob_breve",
+  "sp04c_crediti_immob_lungo",
+  "sp04d_altri_titoli",
+  "sp04e_strumenti_derivati_attivi",
+  "sp05a_materie_prime",
+  "sp05b_prodotti_in_corso",
+  "sp05c_lavori_in_corso",
+  "sp05d_prodotti_finiti",
+  "sp05e_acconti",
+  "sp06a_crediti_clienti_breve",
+  "sp06b_crediti_controllate_breve",
+  "sp06c_crediti_collegate_breve",
+  "sp06d_crediti_controllanti_breve",
+  "sp06e_crediti_tributari_breve",
+  "sp06f_imposte_anticipate_breve",
+  "sp06g_crediti_altri_breve",
+  "sp07a_crediti_clienti_lungo",
+  "sp07b_crediti_controllate_lungo",
+  "sp07c_crediti_collegate_lungo",
+  "sp07d_crediti_controllanti_lungo",
+  "sp07e_crediti_tributari_lungo",
+  "sp07f_imposte_anticipate_lungo",
+  "sp07g_crediti_altri_lungo",
+  "ce08b_salari_stipendi",
+  "ce08c_oneri_sociali",
+  "ce08a_tfr_accrual",
+  "ce08d_altri_costi_personale",
+  "ce09a_ammort_immateriali",
+  "ce09b_ammort_materiali",
+  "ce09c_svalutazioni",
+  "ce09d_svalutazione_crediti",
+];
+
+/** Le 78 righe che RettificheTab passa a renderSection (i debiti hanno un
+ *  loro blocco, debtRow, che non chiede il rientro a nessuno). */
+const RIGHE_RENDER_SECTION: string[] = [
+  ...RETTIFICHE_BS_ATTIVO,
+  ...RETTIFICHE_BS_PN,
+  ...RETTIFICHE_BS_OTHER_PASSIVO,
+  "sp18_ratei_risconti_passivi",
+  ...CE_A, ...CE_B, ...CE_C, ...CE_D, ...CE_E, ...CE_IMPOSTE,
+];
+
+describe("Rettifiche: il rientro passa dal catalogo, non dagli spazi", () => {
+  it("isDettaglio seleziona le stesse 32 voci del vecchio oracolo", () => {
+    expect(RIGHE_RENDER_SECTION.filter(isDettaglio)).toEqual(ATTESI_RIENTRATI);
   });
 
+  it("depthOf > 0 NON e' equivalente: ne selezionerebbe 42", () => {
+    const perProfondita = RIGHE_RENDER_SECTION.filter((c) => depthOf(c) > 0);
+    expect(perProfondita).toHaveLength(42);
+    // Le 10 di troppo: voci con un padre nel catalogo che pero' portano gia'
+    // la propria lettera/numero di schema e nella vista restano a filo.
+    expect(perProfondita.filter((c) => !isDettaglio(c))).toEqual([
+      "sp12a_riserva_sovrapprezzo",
+      "sp12b_riserve_rivalutazione",
+      "sp12c_riserva_legale",
+      "sp12d_riserve_statutarie",
+      "sp12e_altre_riserve",
+      "sp12f_riserva_copertura_flussi",
+      "sp12g_utili_perdite_portati",
+      "sp12h_riserva_neg_azioni_proprie",
+      "ce17a_rivalutazioni",
+      "ce17b_svalutazioni",
+    ]);
+    // ...e nessuna voce rientrata sfugge alla profondita': il rientro e' un
+    // sottoinsieme proprio dei figli, non un insieme diverso.
+    expect(ATTESI_RIENTRATI.filter((c) => depthOf(c) === 0)).toEqual([]);
+  });
+});
+
+/**
+ * Il `describe("cross-check: il catalogo riproduce la regola delle etichette")`
+ * che stava qui e' stato rimosso al Task 9 insieme alle sue fonti. Serviva a
+ * garantire che il catalogo riproducesse fedelmente RETTIFICHE_LABELS e
+ * COUNTERPART_PICKER_LABELS mentre le tre mappe coesistevano; ora quelle due
+ * non esistono piu' come export separati (sono private dentro
+ * ivcee-catalog.ts, spostate verbatim), quindi non c'e' piu' una seconda
+ * copia da cui divergere. Delle sue tre asserzioni:
+ *  - "ogni codice etichettato dalle fonti vecchie esiste nel catalogo" muore
+ *    con la fonte: i codici SONO quelli del catalogo, il test sarebbe
+ *    tautologico;
+ *  - "i sotto-conti coperti dal selettore usano il suo testo come etichetta
+ *    autonoma" copriva 38 etichette. Quella copertura NON e' stata persa: e'
+ *    dentro ATTESI_LABELS_AUTONOME, che pinna tutte e 100;
+ *  - "nessuna etichetta conserva i rientri" non dipendeva dalle fonti morte ed
+ *    e' viva qui sotto: vale anche per una voce aggiunta domani.
+ * ("nessuna etichetta e' il codice stesso" vive gia' in ivcee-catalog.test.ts.)
+ */
+describe("struttura delle etichette", () => {
   it("nessuna etichetta del catalogo conserva i rientri delle fonti vecchie", () => {
     const conRientro = VOCI.filter((v) => v.label.startsWith(" "));
     expect(conRientro.map((v) => v.code)).toEqual([]);

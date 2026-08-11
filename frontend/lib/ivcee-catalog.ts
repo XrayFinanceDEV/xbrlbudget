@@ -558,9 +558,12 @@ export function sectionRows(section: IvceeSection, maxDepth?: number): Voce[] {
 // fatale al caricamento — vedi Task 8). La POLITICA resta di là
 // (NON_POSTABLE_FIELDS, fieldCategory, COUNTERPART_GROUPS): qui c'è solo la
 // proiezione. L'elenco dei codici è quello di GRAFIA_RETTIFICHE, non VOCI:
-// VOCI ne ha 5 in più (sp14a..d, ce03a) che nel selettore non sono mai
-// comparse. Il campo `label` non viene reso (RettificheTab usa labelOf sul
-// codice) ma è calcolato come prima, per non cambiare nulla di nascosto.
+// VOCI ne ha 7 in più — sp14a..d e ce03a, che nel selettore non sono mai
+// comparse, più sp16_debiti_breve e sp17_debiti_lungo, che sarebbero comunque
+// esclusi da NON_POSTABLE_FIELDS (quindi solo 5 cambierebbero il menu, ma i
+// codici in più sono 7). Il campo `label` non viene reso (RettificheTab usa
+// labelOf sul codice) ma è calcolato come prima, per non cambiare nulla di
+// nascosto.
 export const COUNTERPART_OPTIONS: Array<{ group: string; category: AcctCategory; field: string; label: string }> = (() => {
   return Object.keys(GRAFIA_RETTIFICHE)
     .filter((k) => !NON_POSTABLE_FIELDS.has(k))

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BALANCE_HIERARCHY_GROUPS, BALANCE_STATEMENT_ROWS, INCOME_STATEMENT_ROWS, VOCI,
+  COUNTERPART_OPTIONS,
   aggregate, depthOf, isDettaglio, labelOf, voce,
 } from "@/lib/ivcee-catalog";
 import {
@@ -756,9 +757,17 @@ describe("Rettifiche: il rientro passa dal catalogo, non dagli spazi", () => {
  * non esistono piu' come export separati (sono private dentro
  * ivcee-catalog.ts, spostate verbatim), quindi non c'e' piu' una seconda
  * copia da cui divergere. Delle sue tre asserzioni:
- *  - "ogni codice etichettato dalle fonti vecchie esiste nel catalogo" muore
- *    con la fonte: i codici SONO quelli del catalogo, il test sarebbe
- *    tautologico;
+ *  - "ogni codice etichettato dalle fonti vecchie esiste nel catalogo" era
+ *    stato tolto come tautologico, con la motivazione "i codici SONO quelli
+ *    del catalogo". La motivazione era FALSA e vale la pena scriverlo:
+ *    ALL_CODES si costruisce da RETTIFICHE_BS_* / DEBT_GROUPS / CE_* piu' gli
+ *    extra, NON da GRAFIA_RETTIFICHE. E COUNTERPART_OPTIONS itera
+ *    Object.keys(GRAFIA_RETTIFICHE), quindi una chiave aggiunta a quella mappa
+ *    e a nessun elenco di righe produrrebbe un'opzione del selettore la cui
+ *    etichetta e' il nome grezzo del campo (labelOf su un codice sconosciuto
+ *    restituisce il codice). Oggi nessuna delle 93 chiavi cade fuori
+ *    dall'universo reso, ma la rete c'era: e' rimessa qui sotto, riformulata
+ *    sul consumatore vero (il selettore) invece che sulla fonte morta;
  *  - "i sotto-conti coperti dal selettore usano il suo testo come etichetta
  *    autonoma" copriva 38 etichette. Quella copertura NON e' stata persa: e'
  *    dentro ATTESI_LABELS_AUTONOME, che pinna tutte e 100;
@@ -767,6 +776,12 @@ describe("Rettifiche: il rientro passa dal catalogo, non dagli spazi", () => {
  * ("nessuna etichetta e' il codice stesso" vive gia' in ivcee-catalog.test.ts.)
  */
 describe("struttura delle etichette", () => {
+  it("ogni opzione del selettore e' una voce vera del catalogo", () => {
+    const conosciuti = new Set(VOCI.map((v) => v.code));
+    const orfani = COUNTERPART_OPTIONS.map((o) => o.field).filter((f) => !conosciuti.has(f));
+    expect(orfani).toEqual([]);
+  });
+
   it("nessuna etichetta del catalogo conserva i rientri delle fonti vecchie", () => {
     const conRientro = VOCI.filter((v) => v.label.startsWith(" "));
     expect(conRientro.map((v) => v.code)).toEqual([]);
@@ -842,15 +857,19 @@ describe("anti-deriva: le copie nel catalogo seguono ancora le fonti vive", () =
 
 // ===== Task 6: report-composition — rinuncia documentata =====
 //
-// report-composition.tsx (righe 47-51) somma a mano quattro gruppi di codici
+// report-composition.tsx (righe 53-57, erano 47-51 prima che il Task 9 vi
+// inserisse il commento di divieto) somma a mano quattro gruppi di codici
 // SP per un grafico di composizione percentuale. Il piano chiedeva di
 // verificare se quelle quattro somme potessero diventare `aggregate(bs, code)`
 // dal catalogo. Risposta misurata: NO per due dei quattro gruppi, e la
 // sostituzione parziale (solo dove concorda) non vale la doppia via di
-// calcolo che introdurrebbe. `report-composition.tsx` NON è stato toccato.
+// calcolo che introdurrebbe. Le quattro somme sono rimaste come erano; al
+// Task 9 il file ha ricevuto SOLO un commento di sei righe che vieta la
+// sostituzione e rimanda a questo describe (prima la ragione viveva solo in
+// un messaggio di commit che quel file non aveva mai toccato).
 //
 // Motivo: `aggregate()` somma le FOGLIE del sottoalbero di un codice (vedi
-// ivcee-catalog.ts:321-329). Il BalanceSheet che report-composition riceve da
+// ivcee-catalog.ts:497-505). Il BalanceSheet che report-composition riceve da
 // /analysis è già aggregato dal backend: sp04_immob_finanziarie,
 // sp06_crediti_breve e sp07_crediti_lungo sono valorizzati, le loro
 // sotto-voci (sp04a-e, sp06a-g, sp07a-g — tutte con parent nel catalogo, vedi

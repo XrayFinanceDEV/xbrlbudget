@@ -1154,9 +1154,17 @@ la sezione, l'ordine e **due etichette**: `label` (autonoma, auto-esplicativa �
 rettifiche, selettore contropartita, dialoghi, e ogni riga di Rettifiche) e `shortLabel`
 (contestuale, breve — righe di tabella che stanno sotto l'intestazione del proprio
 aggregato). `labelOf(code, "contestuale")` cade sull'autonoma quando la breve non c'è.
-Le viste proiettano l'albero con `sectionRows`, `childrenOf`, `subtree` e `aggregate`;
-le regole di **resa** (filtro degli zeri, editabilità, totali, rientri) restano di
-ciascuna vista.
+Quello che le viste consumano davvero è `labelOf` (Confronto/Proiezione/Stampa via
+`pratica-statement-rows.ts`, e ogni riga di Rettifiche), più `isDettaglio` e
+`COUNTERPART_OPTIONS` (Rettifiche) e i due elenchi di righe qui sotto. Gli accessori che
+camminano l'albero — `sectionRows`, `childrenOf`, `subtree`, `voce`, `aggregate` — **esistono
+ma oggi nessuna vista li chiama**: `childrenOf` è usato dal catalogo stesso per costruire il
+blocco debiti di `BALANCE_STATEMENT_ROWS`, e `aggregate` compare in una sola riga di codice
+applicativo, il commento di `report-composition.tsx` che **vieta** di usarlo (somma le foglie,
+e su un `BalanceSheet` già aggregato dal backend restituisce 0 — vedi il `describe`
+"report-composition" nel test di parità). Le regole di **resa** (filtro degli zeri,
+editabilità, totali) restano di ciascuna vista; il **rientro** no, l'ha il catalogo
+(`Voce.dettaglio` / `isDettaglio`, vedi la sezione Rettifiche).
 
 Lo stesso file porta anche i **due elenchi di righe già impaginate**,
 `BALANCE_STATEMENT_ROWS` (letto da `/forecast/balance` e da `report-appendices`) e

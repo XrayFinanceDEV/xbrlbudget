@@ -4563,6 +4563,83 @@ def section_pages(file_path: str) -> Dict[str, List[int]]:
     return out
 
 
+# Classifiers map a mastro/subtotal DESCRIPTION to an IV-CEE field; the second
+# element flags whether the match is specific enough to stop descending.
+# Erano closure dentro extract_contrapposte_best_effort: promosse a funzioni di
+# modulo perche' il riscatto vision (vision_rescue.py) classifica le stesse
+# descrizioni senza ri-eseguire l'estrazione. Nessun cambiamento di regola.
+def classify_attivo(desc_upper: str) -> Tuple[str, bool]:
+    d = desc_upper
+    # Some TeamSystem/ERP exports append the legal IV-CEE code after a run of
+    # underscores (e.g. ``IMMOBILIZZAZIONI IMMATERIALI______BI``).  It is still
+    # the explicit parent category, not an unknown generic caption: normalize
+    # only these three exact suffixes so the hierarchy does not descend into
+    # children and count the same mass again (AITEC 373/374/375).
+    normalized = re.sub(r'_+(?:BIII|BII|BI)\s*$', '', d).strip()
+    legal_parent = {
+        'IMMOBILIZZAZIONI IMMATERIALI': 'sp02',
+        'IMMOBILIZZAZIONI MATERIALI': 'sp03',
+        'IMMOBILIZZAZIONI FINANZIARIE': 'sp04',
+    }.get(normalized)
+    if legal_parent:
+        return legal_parent, True
+    d = normalized
+    # A malformed generic "IMMOBILIZZAZIONI ..." caption can accidentally
+    # match MOBILI inside IMMOBILIZZAZIONI.  Descend to its specific children
+    # (software/oneri pluriennali/etc.) unless the printed category is exact.
+    if (d.startswith('IMMOBILIZZAZIONI')
+            and d not in ('IMMOBILIZZAZIONI MATERIALI',
+                          'IMMOBILIZZAZIONI IMMATERIALI',
+                          'IMMOBILIZZAZIONI FINANZIARIE')):
+        return 'sp06', False
+    # Side is ground truth in a contrapposte layout: BANCHE on ATTIVO is cash,
+    # not the generic-credit fallback used by the single-column classifier.
+    if 'BANC' in d:
+        return 'sp09', True
+    if ('SCORTE' in d or 'MATERIE PRIME' in d or d == 'IMBALLAGGI'):
+        return 'sp05', True
+    f = _classify_sp_attivo(d)
+    f = {'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f)
+    return f, f != 'sp06'
+
+
+def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
+    d = desc_upper
+    if _is_fondo_amm(d):
+        field = 'depr_sp02' if _fondo_is_immat(d) else 'depr_sp03'
+        # A category-blind aggregate must descend into children; any uncovered
+        # residual is retained by _be_reclassify under the material fallback.
+        specific = any(k in d for k in _FONDO_CATEGORY_KW)
+        return field, specific
+    tag = _classify_sp_passivo(d)
+    if tag == 'equity_total':
+        if _kw_match(d, ['CAPITALE']):
+            return 'sp11', True
+        return 'sp12', True
+    if tag in ('sp16', 'debt_bank', 'bank_avere'):
+        # Split debiti by OIC creditor type from the description (banche / fornitori /
+        # tributari / previdenza / ...) instead of collapsing everything into the sp16
+        # aggregate (which the UI then renders entirely under "altri debiti"). 'debt_bank'
+        # /'bank_avere' are already bank lines; otherwise read _debt_type. A recognised
+        # type stops the descent; an unknown ('g') keeps descending to find a typed child.
+        letter = ('a' if tag in ('debt_bank', 'bank_avere') or 'BANC' in d
+                  else _debt_type(d.upper()))
+        return 'sp16' + letter, letter != 'g'
+    return tag, tag != 'sp16'
+
+
+def classify_costi(desc_upper: str) -> Tuple[str, bool]:
+    d = desc_upper
+    f = _classify_ce_costi(d)
+    return (f, True) if f else ('ce12', False)
+
+
+def classify_ricavi(desc_upper: str) -> Tuple[str, bool]:
+    d = desc_upper
+    f = _classify_ce_ricavi(d)
+    return (f, True) if f else ('ce04', False)
+
+
 def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Best-effort extraction of a 2-column contrapposte trial balance.
 
@@ -4747,71 +4824,8 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     def add(d, k, v):
         d[k] = d.get(k, Z) + v
 
-    # Classifiers map a mastro/subtotal DESCRIPTION to an IV-CEE field; the second
-    # element flags whether the match is specific enough to stop descending.
-    def cl_att(d):
-        # Some TeamSystem/ERP exports append the legal IV-CEE code after a run of
-        # underscores (e.g. ``IMMOBILIZZAZIONI IMMATERIALI______BI``).  It is still
-        # the explicit parent category, not an unknown generic caption: normalize
-        # only these three exact suffixes so the hierarchy does not descend into
-        # children and count the same mass again (AITEC 373/374/375).
-        normalized = re.sub(r'_+(?:BIII|BII|BI)\s*$', '', d).strip()
-        legal_parent = {
-            'IMMOBILIZZAZIONI IMMATERIALI': 'sp02',
-            'IMMOBILIZZAZIONI MATERIALI': 'sp03',
-            'IMMOBILIZZAZIONI FINANZIARIE': 'sp04',
-        }.get(normalized)
-        if legal_parent:
-            return legal_parent, True
-        d = normalized
-        # A malformed generic "IMMOBILIZZAZIONI ..." caption can accidentally
-        # match MOBILI inside IMMOBILIZZAZIONI.  Descend to its specific children
-        # (software/oneri pluriennali/etc.) unless the printed category is exact.
-        if (d.startswith('IMMOBILIZZAZIONI')
-                and d not in ('IMMOBILIZZAZIONI MATERIALI',
-                              'IMMOBILIZZAZIONI IMMATERIALI',
-                              'IMMOBILIZZAZIONI FINANZIARIE')):
-            return 'sp06', False
-        # Side is ground truth in a contrapposte layout: BANCHE on ATTIVO is cash,
-        # not the generic-credit fallback used by the single-column classifier.
-        if 'BANC' in d:
-            return 'sp09', True
-        if ('SCORTE' in d or 'MATERIE PRIME' in d or d == 'IMBALLAGGI'):
-            return 'sp05', True
-        f = _classify_sp_attivo(d)
-        f = {'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f)
-        return f, f != 'sp06'
-
-    def cl_pas(d):
-        if _is_fondo_amm(d):
-            field = 'depr_sp02' if _fondo_is_immat(d) else 'depr_sp03'
-            # A category-blind aggregate must descend into children; any uncovered
-            # residual is retained by _be_reclassify under the material fallback.
-            specific = any(k in d for k in _FONDO_CATEGORY_KW)
-            return field, specific
-        tag = _classify_sp_passivo(d)
-        if tag == 'equity_total':
-            if _kw_match(d, ['CAPITALE']):
-                return 'sp11', True
-            return 'sp12', True
-        if tag in ('sp16', 'debt_bank', 'bank_avere'):
-            # Split debiti by OIC creditor type from the description (banche / fornitori /
-            # tributari / previdenza / ...) instead of collapsing everything into the sp16
-            # aggregate (which the UI then renders entirely under "altri debiti"). 'debt_bank'
-            # /'bank_avere' are already bank lines; otherwise read _debt_type. A recognised
-            # type stops the descent; an unknown ('g') keeps descending to find a typed child.
-            letter = ('a' if tag in ('debt_bank', 'bank_avere') or 'BANC' in d
-                      else _debt_type(d.upper()))
-            return 'sp16' + letter, letter != 'g'
-        return tag, tag != 'sp16'
-
-    def cl_cos(d):
-        f = _classify_ce_costi(d)
-        return (f, True) if f else ('ce12', False)
-
-    def cl_ric(d):
-        f = _classify_ce_ricavi(d)
-        return (f, True) if f else ('ce04', False)
+    cl_att, cl_pas = classify_attivo, classify_passivo
+    cl_cos, cl_ric = classify_costi, classify_ricavi
 
     # The current-year result is a pareggio item (utile booked on the passivo
     # side, perdita on the attivo side). Strip it from both columns so it is not

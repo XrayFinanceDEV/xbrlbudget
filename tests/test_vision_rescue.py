@@ -75,3 +75,37 @@ def test_declared_totals_legge_ancora_il_totale_costi_di_una_situazione_contabil
     out = _declared_control_totals("ignorato.pdf", text=text)
     assert out["costi"] == D("2482879.59")
     assert out["ricavi"] == D("2491786.38")
+
+
+from importers.situazione_contabile_parser import (  # noqa: E402
+    classify_attivo,
+    classify_costi,
+    classify_passivo,
+    classify_ricavi,
+)
+
+
+# ------------------------------------------------- classificatori promossi
+
+def test_classify_attivo_banche_e_cassa_sul_lato_attivo():
+    # Nel layout contrapposte il LATO e' verita': BANCHE in colonna attivo e'
+    # liquidita', non il fallback generico dei crediti.
+    assert classify_attivo("BANCHE C/C") == ("sp09", True)
+
+
+def test_classify_attivo_categoria_legale_esatta_ferma_la_discesa():
+    assert classify_attivo("IMMOBILIZZAZIONI MATERIALI") == ("sp03", True)
+
+
+def test_classify_passivo_fondo_ammortamento_e_un_contro_conto():
+    field, _specific = classify_passivo("F.DO AMM.TO IMMOBILIZZAZIONI MATERIALI")
+    assert field == "depr_sp03"
+
+
+def test_classify_passivo_tipizza_i_debiti_per_creditore():
+    assert classify_passivo("DEBITI VERSO FORNITORI")[0].startswith("sp16")
+
+
+def test_classify_costi_e_ricavi_hanno_catch_all_distinti():
+    assert classify_costi("VOCE SCONOSCIUTA XYZ") == ("ce12", False)
+    assert classify_ricavi("VOCE SCONOSCIUTA XYZ") == ("ce04", False)

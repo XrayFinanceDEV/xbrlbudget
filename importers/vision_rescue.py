@@ -119,6 +119,31 @@ def parse_amount(raw: Optional[str]) -> Optional[Decimal]:
     return -value if negative else value
 
 
+_LEFT_TOKENS = ("left", "sinistra", "sx", "dare", "attivo", "costi")
+_RIGHT_TOKENS = ("right", "destra", "dx", "avere", "passivo", "ricavi")
+
+
+def normalize_column(raw: Optional[str]) -> Optional[str]:
+    """'left' / 'right' dalla colonna dichiarata dal modello, None se non riconosciuta.
+
+    Il prompt chiede 'left'/'right', ma il prompt e' in italiano: un modello che
+    risponde 'sinistra' finirebbe su "right" con un confronto per prefisso, e ogni
+    riga dell'attivo si ribalterebbe sul passivo. La colonna e' verita' sul lato
+    (FIXING-IMPORT.md §1.3): se non e' riconoscibile la riga si scarta, non si
+    indovina.
+    """
+    token = (raw or "").strip().lower()
+    if not token:
+        return None
+    for candidate in _LEFT_TOKENS:
+        if token.startswith(candidate):
+            return "left"
+    for candidate in _RIGHT_TOKENS:
+        if token.startswith(candidate):
+            return "right"
+    return None
+
+
 def mastro_level_rows(rows: Sequence[VisionRow]) -> Tuple[VisionRow, ...]:
     """Tiene solo le righe al livello MASTRO: quelle il cui codice ha il minor numero
     di cifre fra quelle lette.
@@ -219,8 +244,8 @@ def read_section(file_path: str, pages: Sequence[int], section: str,
     rows: List[VisionRow] = []
     for m in parsed.mastri:
         amount = parse_amount(m.importo)
-        column = "left" if str(m.colonna).strip().lower().startswith("l") else "right"
-        if amount is None or amount == Z:
+        column = normalize_column(m.colonna)
+        if amount is None or amount == Z or column is None:
             continue
         rows.append(VisionRow(code=(m.codice or "").strip(),
                               description=(m.descrizione or "").strip(),

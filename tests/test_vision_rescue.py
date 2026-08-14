@@ -299,3 +299,37 @@ def test_read_section_fa_un_solo_tentativo():
     fake = _FakeClient(_PAYLOAD_CE)
     vr.read_section("ignorato.pdf", [0], "ce", client=fake, images=["ZmFrZQ=="])
     assert fake.messages.calls == 1
+
+
+def test_normalize_column_riconosce_le_grafie_italiane():
+    assert vr.normalize_column("left") == "left"
+    assert vr.normalize_column("Sinistra") == "left"
+    assert vr.normalize_column("DARE") == "left"
+    assert vr.normalize_column("right") == "right"
+    assert vr.normalize_column("destra") == "right"
+    assert vr.normalize_column("AVERE") == "right"
+
+
+def test_normalize_column_none_quando_non_e_riconoscibile():
+    assert vr.normalize_column("") is None
+    assert vr.normalize_column(None) is None
+    assert vr.normalize_column("boh") is None
+
+
+def test_read_section_scarta_una_riga_senza_colonna_riconoscibile():
+    # La colonna e' verita' sul lato: una riga di cui non si sa il lato non si
+    # indovina, si scarta. Il cancello vedra' il totale piu' corto.
+    payload = {
+        "mastri": [
+            {"codice": "70", "descrizione": "RICAVI", "importo": "100,00",
+             "colonna": "destra"},
+            {"codice": "73", "descrizione": "IGNOTO", "importo": "50,00",
+             "colonna": "boh"},
+        ],
+        "totale_sinistra": "0,00", "totale_destra": "100,00",
+        "utile": None, "perdita": None,
+    }
+    got = vr.read_section("ignorato.pdf", [0], "ce",
+                          client=_FakeClient(payload), images=["ZmFrZQ=="])
+    assert [r.code for r in got.rows] == ["70"]
+    assert got.rows[0].column == "right"

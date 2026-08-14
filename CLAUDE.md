@@ -857,7 +857,13 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
   - Revenue/costs: growth % applied to reference year values (frontend pre-calculates from user overrides)
   - Materials/services: split variable/fixed with separate growth rates
   - Depreciation: annualize partial + new investment depreciation
-  - BS working capital: turnover ratios from reference year applied to projected P&L
+  - BS working capital: turnover ratios from reference year applied to projected P&L.
+    A ratio implying **over a year of stock is DEGENERATE** (`_turnover_ratio` → `None`) and the
+    observed partial-year stock is carried instead, with a `degenerate_turnover_ratio` diagnostic —
+    `_safe_divide` guards a zero denominator, not a negligible one. **The same guard exists on both
+    sides** (`lib/pratica-turnover.ts` mirrors the engine); they must stay in agreement, or the
+    screen and the persisted record show two different balance sheets.
+    → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
   - Equity: capital constant, reserves absorb prior year profit, current year from projection
   - Cash as plug (same as budget engine)
   - Taxes: recalculated on projected pre-tax profit
@@ -1261,6 +1267,16 @@ Expanded `EDITABLE_CE_CODES` to cover **22 CE fields** (ce01–ce20 plus ce08/09
 - **Consistency:** `ProjectionTable`'s `PROJ_COST_CODES_ALL` includes `ce11b_altri_accantonamenti` (matches `calculateProjectedBS`'s `EBITDA_COST_CODES`), and `projRettifiche` is derived from `pv("ce17a") − pv("ce17b")` so edits flow into PBT → net profit. BS `sp13` now always agrees with the P&L utile displayed above it.
 - **Gotcha:** `buildBalanceItemsWithTotals` must NOT overwrite `annualized_value` when called from `calculateProjectedBS` — the Projection tab writes projected BS values into that field. Only `partial_value`, `reference_value`, `prior_value` are reconciled per year.
 
+### Indicatori charts (Indicatori tab + Stampa)
+`components/pratica/IndicatoriCharts.tsx` holds both bar charts ("Incidenza economica sui ricavi",
+"Equilibrio finanziario e strutturale") and is rendered by **both** views — the configs are the
+same object, so they are not duplicated. Series **labels** stay with each caller (`Infrann. 9M` in
+the tab, `Infrann. 9M 2026` in Stampa). `buildIndicatorChartData` (`lib/pratica-indicators.ts`) is
+the pure part and the only testable one — the suite runs `environment: "node"`, no DOM; a `null`
+series is **dropped, not rendered as zero**. Known limit: the percentage indicators divide by
+`ce01_ricavi_vendite` alone, so a company invoicing on `ce04` yields a meaningless axis (AIC SRL:
+EBITDA % 80.395,7%). → `docs/frontend/INDICATORI-E-STAMPA.md`
+
 ### Infrannuale AI Comments (Stampa tab)
 Editable AI-generated commentary rendered above each table in the Stampa tab. Six comments total: **overall** (before the first table) + one per section (`ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`).
 
@@ -1404,6 +1420,15 @@ POST /companies/{id}/scenarios
 - **Charts**: Recharts with `ChartContainer` + CSS variable colors (blue/slate palette)
 - **Status colors**: Altman/FGPMI use explicit green/yellow/red with `dark:` variants
 - **No emojis**: Use lucide-react icons instead
+- **Tailwind `content`**: a class name written in a file `content` does not scan is **never
+  generated** — no error, just an unstyled element. `lib/`, `hooks/` and `contexts/` are in the
+  globs because `lib/pratica-indicators.ts` returns class names; `lib/tailwind-content.test.ts`
+  pins the invariant. Grepping the CSS for `.bg-green-500` also matches `.bg-green-500\/10`, so
+  verify against the exact rule or in the browser. → `docs/frontend/TAILWIND-E-CLASSI.md`
+- **Print/PDF**: verifying a print layout requires **generating the PDF** — `emulateMedia` gives
+  the right measurements but does not paginate, so it never reveals a bad page break. A chart
+  needs `print:break-inside-avoid` on its Card: `globals.css` protects `.recharts-wrapper`, not
+  the card around it. → `docs/frontend/INDICATORI-E-STAMPA.md`
 
 ## Development Workflow
 

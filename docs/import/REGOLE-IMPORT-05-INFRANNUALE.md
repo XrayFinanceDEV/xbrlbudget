@@ -117,7 +117,8 @@ Mai negative: nessun credito d'imposta inventato.
 ### Rimanenze
 Con riferimento: si applica l'**indice di rotazione del magazzino** del riferimento al costo
 materie proiettato. Senza riferimento: la giacenza parziale è portata a fine anno **invariata**.
-Le *variazioni* a CE si annualizzano sempre.
+Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rapporti degeneri
+(§5), che qui può far ricadere le rimanenze sul comportamento "senza riferimento".
 
 ## 5. Il roll-forward dello Stato Patrimoniale
 
@@ -128,17 +129,51 @@ Le *variazioni* a CE si annualizzano sempre.
 |---|---|
 | **Immobilizzazioni immateriali / materiali** | parziale − **ammortamento residuo della propria classe**, clampato a zero, + nuovi investimenti della classe |
 | **Immobilizzazioni finanziarie** | invariate: **mai ammortizzate** |
-| **Crediti a breve** | con riferimento: proporzionali ai ricavi proiettati; poi meno la **svalutazione residua** |
+| **Crediti a breve** | con riferimento: proporzionali ai ricavi proiettati (salvo rapporto degenere, sotto); poi meno la **svalutazione residua** |
 | **Crediti oltre, attività finanziarie, ratei, fondi rischi** | invariati dal parziale |
 | **Capitale e riserve** | **presi dal parziale così come sono** |
 | **Risultato** | = risultato del CE proiettato, per costruzione |
 | **Fondo TFR** | parziale + accantonamento dei mesi residui |
-| **Debiti a breve** | con riferimento: proporzionali ai costi operativi proiettati; senza: invariati |
+| **Debiti a breve** | con riferimento: proporzionali ai costi operativi proiettati (salvo rapporto degenere, sotto); senza: invariati |
 | **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
 
 Ogni classe usa **il proprio** ammortamento: gli immateriali con la quota immateriali, i
 materiali con la quota materiali. Mai incrociati.
+
+### Rapporti di rotazione degeneri: si riporta, non si moltiplica
+
+Le tre voci "proporzionali" della tabella — rimanenze, crediti a breve, debiti a breve — si
+scalano su un rapporto letto dall'anno di riferimento (`giacenza / base economica`). Quel
+rapporto è valido solo se la base **può spiegare** la giacenza.
+
+> **Un rapporto oltre un anno di giacenza è DEGENERE: non descrive l'azienda, descrive il
+> proprio denominatore.** `_turnover_ratio` restituisce `None` e il chiamante riporta la
+> **giacenza infrannuale osservata**, esattamente come nel regime senza riferimento.
+
+`_safe_divide` protegge dal denominatore **zero**, non da quello **trascurabile**, e qui la
+differenza è tutta. Il caso reale (AIC SRL, riferimento 2025):
+
+| | |
+|---|---|
+| `ce01_ricavi_vendite` di riferimento | **100,92 €** (il giro d'affari sta su `ce04_altri_ricavi`, 1.252.849,27) |
+| `sp06_crediti_breve` di riferimento | 1.035.249,26 € |
+| rapporto | **10.258×**, cioè 3,7 milioni di giorni di credito |
+| crediti proiettati | **166.684.157,69 €** su un attivo reale di 1,5 M |
+
+Lo SP persistito non quadrava (attivo 167.054.466,63 contro passivo 1.572.757,71) e il
+promote a budget lo rifiutava — correttamente. Il ripiego emette un diagnostico
+`degenerate_turnover_ratio` di severità *warning*: la voce non è stata proiettata e va
+verificata in **Rettifiche**. È la stessa regola dell'import — *misurare, mai fabbricare*.
+
+Le aziende sane non si muovono: sotto la soglia il calcolo resta quello di prima.
+
+> **La formula è duplicata**: `calculateProjectedBS` (frontend, `app/pratica/page.tsx`) e
+> `_project_balance_sheet` (backend). Devono restare d'accordo. Quando divergevano si otteneva
+> il caso peggiore — il plug di cassa del frontend scaricava i 165 M eccedenti sui debiti a
+> breve e mostrava a schermo un bilancio che "quadra", mentre il record persistito restava
+> sbilanciato e il promote lo rifiutava, senza che nulla spiegasse la differenza. La guardia
+> è implementata su entrambi i lati (`lib/pratica-turnover.ts` per il frontend).
 
 ### Nessuna destinazione implicita dell'utile
 Capitale e riserve si prendono dal parziale invariati. Il commento nel codice è netto: *il

@@ -2,7 +2,10 @@
 
 Documentazione di progetto **aggiornata**. Gli artefatti storici/superati (design pre-implementazione, snapshot di sessione, dump di test) stanno in [`../archive/`](../archive/README.md), non qui.
 
-> Le istruzioni operative per l'AI assistant e le note granulari per-parser stanno in [`../CLAUDE.md`](../CLAUDE.md).
+> [`../CLAUDE.md`](../CLAUDE.md) è l'**istruzione operativa** per l'AI assistant e va tenuto
+> **sintetico**: descrive comandi, convenzioni e invarianti in forma breve, e rimanda qui. La
+> **descrizione accurata** del progetto — meccanismi, casi reali, misure — sta in questa cartella.
+> Quando i due divergono, vale la documentazione qui.
 
 ## Import bilanci (PDF / XBRL) — [`import/`](import/)
 
@@ -50,6 +53,13 @@ sono elencati nel §5 dell'indice).
 | [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) | Guida utente al modulo Budget & Forecasting (workflow UI) |
 | [TEST_BUDGET_API.md](budget/TEST_BUDGET_API.md) | Riferimento/test degli endpoint REST degli scenari budget |
 | [FINAL-REPORT-PDF.md](budget/FINAL-REPORT-PDF.md) | Specifica del report PDF (gap analysis vs report di riferimento) |
+
+## Frontend — [`frontend/`](frontend/)
+
+| Doc | Cosa copre |
+|-----|------------|
+| [TAILWIND-E-CLASSI.md](frontend/TAILWIND-E-CLASSI.md) | Dove possono vivere i nomi di classe: `content`, il fallimento silenzioso, come verificarlo davvero |
+| [INDICATORI-E-STAMPA.md](frontend/INDICATORI-E-STAMPA.md) | I due grafici degli indicatori condivisi fra tab e Stampa, regole di stampa/PDF, limite del denominatore `ce01` |
 
 ## Deployment — [`deployment/`](deployment/)
 

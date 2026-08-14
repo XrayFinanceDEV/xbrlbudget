@@ -24,15 +24,28 @@ ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx"}
 _REGOLE = [
     ("funzione", re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)")),
     ("classe", re.compile(r"^\s*class\s+([A-Za-z_]\w*)")),
+    ("rotta", re.compile(r"^\s*@router\.(?:get|post|put|patch|delete)\(\s*[\"']([^\"']+)")),
+    ("funzione", re.compile(r"^\s*export\s+default\s+(?:async\s+)?function\s+([A-Za-z_]\w*)")),
     ("funzione", re.compile(r"^\s*export\s+(?:async\s+)?function\s+([A-Za-z_]\w*)")),
     ("funzione", re.compile(r"^\s*export\s+const\s+([a-z][A-Za-z0-9_]*)\s*[:=]")),
+    ("costante", re.compile(r"^\s*export\s+const\s+([A-Z][A-Z0-9_]{2,})\s*[:=]")),
+    ("tipo", re.compile(r"^\s*export\s+(?:type|interface)\s+([A-Za-z_]\w*)")),
     ("colonna", re.compile(r"^\s*([a-z_]\w*)\s*=\s*Column\(")),
     ("costante", re.compile(r"^\s*([A-Z][A-Z0-9_]{2,})\s*[:=]")),
 ]
 
+# File rinominato/cancellato: cattura sia il vecchio (a/) sia il nuovo (b/) percorso,
+# perche' su una cancellazione "+++" vale "/dev/null" e il nome va preso da qui.
+_RIGA_DIFF_GIT = re.compile(r"^diff --git a/(.+) b/(.+)$")
+
 
 @dataclass(frozen=True)
 class Simbolo:
+    """Un simbolo che il codice ha spostato (aggiunto o rimosso) in un diff.
+
+    genere ∈ {"funzione", "classe", "costante", "colonna", "rotta", "tipo"}
+    stato  ∈ {"aggiunto", "rimosso"}
+    """
     nome: str
     genere: str
     file: str
@@ -45,14 +58,31 @@ def _e_codice(percorso: str) -> bool:
 
 def simboli_da_diff(diff: str) -> List[Simbolo]:
     """Simboli mossi, letti da un diff unificato. Un rename appare come rimosso +
-    aggiunto: riconoscerlo come tale e' compito dello skill, con `git log -M`."""
+    aggiunto: riconoscerlo come tale e' compito dello skill, con `git log -M`.
+
+    Attribuzione del file: normalmente e' il percorso "b/" (nuovo). Su una
+    cancellazione intera "+++" vale "/dev/null" — in quel caso i simboli rimossi
+    vanno attribuiti al percorso "a/" (vecchio), letto dalla riga "diff --git",
+    altrimenti spariscono o restano agganciati al file precedente nello stesso diff.
+    """
     trovati, visti = [], set()
     file_corrente = ""
+    file_vecchio = ""
     for riga in diff.splitlines():
-        if riga.startswith("+++ b/"):
-            file_corrente = riga[6:].strip()
+        m_git = _RIGA_DIFF_GIT.match(riga)
+        if m_git:
+            file_vecchio, file_corrente = m_git.group(1), m_git.group(2)
             continue
-        if riga.startswith("--- ") or riga.startswith("diff --git"):
+        if riga.startswith("+++ "):
+            percorso = riga[4:].strip()
+            if percorso == "/dev/null":
+                file_corrente = file_vecchio
+            elif percorso.startswith("b/"):
+                file_corrente = percorso[2:]
+            else:
+                file_corrente = percorso
+            continue
+        if riga.startswith("--- "):
             continue
         if not riga or riga[0] not in "+-":
             continue

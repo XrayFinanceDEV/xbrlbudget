@@ -98,3 +98,84 @@ def test_non_duplica_lo_stesso_simbolo():
         "+def stessa(y):\n"
     )
     assert len(simboli_da_diff(diff)) == 1
+
+
+def test_un_file_cancellato_non_perde_i_suoi_simboli():
+    # Un modulo cancellato e' il segnale piu' forte che la documentazione nomini
+    # qualcosa che non esiste piu': e' il caso che va preso per primo.
+    diff = (
+        "diff --git a/importers/vecchio.py b/importers/vecchio.py\n"
+        "deleted file mode 100644\n"
+        "--- a/importers/vecchio.py\n"
+        "+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n"
+        "-def funzione_sparita(x):\n"
+        "-class ClasseSparita:\n"
+    )
+    out = simboli_da_diff(diff)
+    assert _nomi(out, "rimosso") == ["ClasseSparita", "funzione_sparita"]
+    assert {s.file for s in out} == {"importers/vecchio.py"}
+
+
+def test_una_cancellazione_dopo_un_altro_file_non_contamina_il_precedente():
+    # Il bug misurato: file_corrente restava agganciato al file precedente e i
+    # simboli del file cancellato venivano attribuiti a quello sbagliato.
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -0,0 +1 @@\n"
+        "+def resta_qui(x):\n"
+        "diff --git a/b.py b/b.py\ndeleted file mode 100644\n--- a/b.py\n+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-def sparita(x):\n"
+    )
+    per_nome = {s.nome: s.file for s in simboli_da_diff(diff)}
+    assert per_nome["resta_qui"] == "a.py"
+    assert per_nome["sparita"] == "b.py"
+
+
+def test_riconosce_le_costanti_esportate_in_maiuscolo():
+    # Sono proprio i nomi che CLAUDE.md cita per nome (DETAIL_PARENTS,
+    # ATTIVO_CODES, PROPOSAL_RULES...): perderli svuota lo strumento.
+    diff = (
+        "diff --git a/frontend/lib/x.ts b/frontend/lib/x.ts\n"
+        "--- a/frontend/lib/x.ts\n+++ b/frontend/lib/x.ts\n@@ -0,0 +2 @@\n"
+        "+export const DETAIL_PARENTS = {\n"
+        "+export const labelOf = (c: string) => {\n"
+    )
+    out = simboli_da_diff(diff)
+    assert _nomi(out, "aggiunto") == ["DETAIL_PARENTS", "labelOf"]
+    per_genere = {s.nome: s.genere for s in out}
+    assert per_genere["DETAIL_PARENTS"] == "costante"
+    assert per_genere["labelOf"] == "funzione"
+
+
+def test_riconosce_tipi_e_default_export():
+    diff = (
+        "diff --git a/frontend/types/api.ts b/frontend/types/api.ts\n"
+        "--- a/frontend/types/api.ts\n+++ b/frontend/types/api.ts\n@@ -0,0 +3 @@\n"
+        "+export interface AnalysisResponse {\n"
+        "+export type PraticaStep = {\n"
+        "+export default function Pagina() {\n"
+    )
+    out = simboli_da_diff(diff)
+    assert _nomi(out, "aggiunto") == ["AnalysisResponse", "Pagina", "PraticaStep"]
+    assert {s.genere for s in out if s.nome != "Pagina"} == {"tipo"}
+
+
+def test_riconosce_una_rotta_fastapi():
+    # Il genere "rotta" e' dichiarato nel vocabolario di Simbolo ma prima di questo
+    # fix non veniva mai prodotto, mentre CLAUDE.md cita gli endpoint per percorso
+    # in decine di punti (es. "PATCH /scenarios/{id}/ce-override").
+    diff = (
+        "diff --git a/backend/app/api/v1/budget_scenarios.py "
+        "b/backend/app/api/v1/budget_scenarios.py\n"
+        "--- a/backend/app/api/v1/budget_scenarios.py\n"
+        "+++ b/backend/app/api/v1/budget_scenarios.py\n"
+        "@@ -0,0 +2 @@\n"
+        '+    @router.patch("/scenarios/{scenario_id}/ce-override")\n'
+        "+    async def patch_ce_override(scenario_id: int):\n"
+    )
+    out = simboli_da_diff(diff)
+    per_genere = {s.nome: s.genere for s in out}
+    # la rotta e la funzione decorata sotto sono due simboli distinti: vanno entrambi
+    assert per_genere["/scenarios/{scenario_id}/ce-override"] == "rotta"
+    assert per_genere["patch_ce_override"] == "funzione"

@@ -4507,6 +4507,62 @@ _CE_HIER_SUBPARENT = {
 }
 
 
+def classify_page_section(page_text: str) -> Optional[Tuple[bool, bool]]:
+    """(is_sp, is_ce) per una pagina di contrapposte, o None se la pagina va saltata.
+
+    Estratta verbatim dal ciclo pagine di extract_contrapposte_best_effort perché il
+    riscatto vision ha bisogno della stessa classificazione senza ri-eseguire l'intera
+    estrazione. `None` significa "salta la pagina" (appendice fiscale di
+    rideterminazione), che NON e' la stessa cosa di (False, False) — quest'ultima e'
+    una pagina reale che non appartiene a nessuna sezione.
+    """
+    up = page_text.upper()
+    flat = up.replace(' ', '')
+    # Classify the page by its FIRST section title line — a single page may
+    # carry a subtitle naming both ("Stato Patrimoniale e Conto Economico"),
+    # so the title line that comes first decides.
+    title = ''
+    for l in page_text.split('\n'):
+        lu = l.strip().upper()
+        if 'PATRIMONIAL' in lu or 'ECONOMIC' in lu:
+            title = lu
+            break
+    # Fiscal-reconciliation appendices ("RIDETERMINAZIONE RISULTATO D'ESERCIZIO"
+    # for II.DD./IRAP, with VARIAZIONI IN AUMENTO/DIMINUZIONE) re-list cost/revenue
+    # accounts but are NOT the income statement — skip them so they don't pollute
+    # the CE (they otherwise match the loose COSTI+RICAVI test below).
+    if ('RIDETERMINAZIONE' in flat or 'REDDITOIMPONIBILE' in flat
+            or ('VARIAZIONIINAUMENTO' in flat and 'VARIAZIONIINDIMINUZIONE' in flat)):
+        return None
+    if 'PATRIMONIAL' in title and 'ECONOMIC' not in title:
+        return True, False
+    if 'ECONOMIC' in title and 'PATRIMONIAL' not in title:
+        return False, True
+    is_sp = ('PATRIMONIALE' in flat) or ('ATTIVIT' in up and 'PASSIVIT' in up and 'CONTOECONOMICO' not in flat)
+    is_ce = ('CONTOECONOMICO' in flat) or ('COSTI' in up and 'RICAVI' in up)
+    return is_sp, is_ce
+
+
+def section_pages(file_path: str) -> Dict[str, List[int]]:
+    """Indici pagina (0-based) che portano lo Stato Patrimoniale e il Conto Economico.
+
+    Una pagina classificata come entrambe compare in entrambe le liste; una pagina da
+    saltare (classify_page_section -> None) in nessuna.
+    """
+    out: Dict[str, List[int]] = {"sp": [], "ce": []}
+    with fitz.open(file_path) as doc:
+        for idx, page in enumerate(doc):
+            verdict = classify_page_section(page.get_text())
+            if verdict is None:
+                continue
+            is_sp, is_ce = verdict
+            if is_sp:
+                out["sp"].append(idx)
+            if is_ce:
+                out["ce"].append(idx)
+    return out
+
+
 def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Best-effort extraction of a 2-column contrapposte trial balance.
 
@@ -4525,30 +4581,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         ptext = page.get_text()
         full += ptext + "\n"
         up = ptext.upper()
-        flat = up.replace(' ', '')
-        # Classify the page by its FIRST section title line — a single page may
-        # carry a subtitle naming both ("Stato Patrimoniale e Conto Economico"),
-        # so the title line that comes first decides.
-        title = ''
-        for l in ptext.split('\n'):
-            lu = l.strip().upper()
-            if 'PATRIMONIAL' in lu or 'ECONOMIC' in lu:
-                title = lu
-                break
-        # Fiscal-reconciliation appendices ("RIDETERMINAZIONE RISULTATO D'ESERCIZIO"
-        # for II.DD./IRAP, with VARIAZIONI IN AUMENTO/DIMINUZIONE) re-list cost/revenue
-        # accounts but are NOT the income statement — skip them so they don't pollute
-        # the CE (they otherwise match the loose COSTI+RICAVI test below).
-        if ('RIDETERMINAZIONE' in flat or 'REDDITOIMPONIBILE' in flat
-                or ('VARIAZIONIINAUMENTO' in flat and 'VARIAZIONIINDIMINUZIONE' in flat)):
+        verdict = classify_page_section(ptext)
+        if verdict is None:
             continue
-        if 'PATRIMONIAL' in title and 'ECONOMIC' not in title:
-            is_sp, is_ce = True, False
-        elif 'ECONOMIC' in title and 'PATRIMONIAL' not in title:
-            is_sp, is_ce = False, True
-        else:
-            is_sp = ('PATRIMONIALE' in flat) or ('ATTIVIT' in up and 'PASSIVIT' in up and 'CONTOECONOMICO' not in flat)
-            is_ce = ('CONTOECONOMICO' in flat) or ('COSTI' in up and 'RICAVI' in up)
+        is_sp, is_ce = verdict
         words = page.get_text('words')
         if not words:
             continue

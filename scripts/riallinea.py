@@ -158,14 +158,109 @@ def documenti_che_nominano(simboli, radici) -> List[Citazione]:
     return out
 
 
-def _main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("rev_range", help="intervallo di commit, es. HEAD~1..HEAD")
-    parser.add_argument("--cwd", default=".", help="repository su cui operare")
-    args = parser.parse_args()
-    simboli = simboli_mossi(args.rev_range, cwd=args.cwd)
-    print(json.dumps([asdict(s) for s in simboli], ensure_ascii=False, indent=2))
+SOGLIA_GENERICO = 40
+
+
+def riduci_generici(citazioni: List[Citazione]):
+    """Separa i simboli troppo comuni per essere verificati per nome (>= SOGLIA_GENERICO
+    citazioni) dal resto. Non e' un troncamento silenzioso: il simbolo esce da
+    `citazioni` ed entra in `generici` con il proprio conteggio totale e i primi 5
+    file in cui compare, cosi' lo skill puo' dire "troppo comune per essere verificato
+    per nome" invece di sommergere le poche segnalazioni vere di un diff reale sotto
+    centinaia di righe (misurato: 9 nomi generici -> 1147 citazioni in un colpo solo).
+    """
+    per_nome = {}
+    for c in citazioni:
+        per_nome.setdefault(c.simbolo, []).append(c)
+    generici_nomi = {nome for nome, lst in per_nome.items() if len(lst) >= SOGLIA_GENERICO}
+    if not generici_nomi:
+        return citazioni, []
+    ridotte = [c for c in citazioni if c.simbolo not in generici_nomi]
+    generici = []
+    for nome in sorted(generici_nomi):
+        lst = per_nome[nome]
+        file_visti = []
+        for c in lst:
+            if c.file not in file_visti:
+                file_visti.append(c.file)
+            if len(file_visti) >= 5:
+                break
+        generici.append({"nome": nome, "citazioni": len(lst), "file": file_visti})
+    return ridotte, generici
+
+
+RADICI_DOC = ["docs", "CLAUDE.md"]
+RADICE_MEMORIA = str(
+    Path.home() / ".claude" / "projects" / "-home-peter-DEV-budget" / "memory"
+)
+STATO_DEFAULT = "docs/superpowers/allineamento/STATO.json"
+
+
+def carica_stato(percorso: str) -> dict:
+    p = Path(percorso)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def salva_stato(percorso: str, sha: str, modo: str, data: str) -> None:
+    """Uno sweep completo aggiorna ultimo_sha come il modo diff (ha appena verificato
+    tutto) e in piu' segna ultimo_completo, che i rapporti leggono per ricordare da
+    quanto non si lancia una verifica integrale."""
+    p = Path(percorso)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    stato = carica_stato(percorso)
+    stato["ultimo_sha"] = sha
+    stato["modo"] = modo
+    stato["data"] = data
+    if modo == "completo":
+        stato["ultimo_completo"] = data
+    else:
+        stato.setdefault("ultimo_completo", None)
+    p.write_text(json.dumps(stato, ensure_ascii=False, indent=1) + "\n",
+                 encoding="utf-8")
+
+
+# L'albero vuoto di git: diffare da qui equivale a "tutto il codice attuale".
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--da", help="sha di partenza; default: ultimo_sha dello stato")
+    ap.add_argument("--a", default="HEAD")
+    ap.add_argument("--completo", action="store_true",
+                    help="ignora l'intervallo: tutti i simboli del codice attuale")
+    ap.add_argument("--stato", default=STATO_DEFAULT)
+    ap.add_argument("--memoria", default=RADICE_MEMORIA)
+    args = ap.parse_args()
+
+    stato = carica_stato(args.stato)
+    if args.completo:
+        simboli = simboli_mossi(_EMPTY_TREE + ".." + args.a)
+        intervallo = "completo"
+    else:
+        da = args.da or stato.get("ultimo_sha")
+        if not da:
+            ap.error("nessuno sha di partenza: passa --da la prima volta")
+        intervallo = f"{da}..{args.a}"
+        simboli = simboli_mossi(intervallo)
+
+    radici = RADICI_DOC + [args.memoria]
+    citazioni = documenti_che_nominano(simboli, radici)
+    citazioni, generici = riduci_generici(citazioni)
+    print(json.dumps({
+        "intervallo": intervallo,
+        "simboli": [asdict(s) for s in simboli],
+        "citazioni": [asdict(c) for c in citazioni],
+        "generici": generici,
+        "radici": radici,
+        "stato": stato,
+    }, ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":
-    _main()
+    main()

@@ -10,7 +10,16 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.riallinea import Citazione, Simbolo, documenti_che_nominano, simboli_da_diff  # noqa: E402
+from scripts.riallinea import (  # noqa: E402
+    Citazione,
+    Simbolo,
+    SOGLIA_GENERICO,
+    carica_stato,
+    documenti_che_nominano,
+    riduci_generici,
+    salva_stato,
+    simboli_da_diff,
+)
 
 
 def _nomi(simboli, stato=None):
@@ -233,3 +242,73 @@ def test_una_radice_che_e_un_singolo_file_viene_letta(tmp_path):
     cit = documenti_che_nominano(sim, [str(claude_md)])
     assert [c.file for c in cit] == [str(claude_md)]
     assert cit[0].riga == 1
+
+
+# --- riduci_generici -------------------------------------------------------
+# Misurato sul repo vero: nove nomi generici plausibili producono 1147 citazioni
+# in un colpo solo. Un simbolo comune fra i ~40 di un diff reale seppellirebbe
+# le segnalazioni vere, quindi va SEPARATO (mai troncato in silenzio): esce da
+# `citazioni` ed entra in `generici` col proprio conteggio e i primi file.
+
+def test_riduci_generici_lascia_stare_i_simboli_sotto_soglia():
+    citazioni = [Citazione("foo_bar", "docs/a.md", i, "x") for i in range(SOGLIA_GENERICO - 1)]
+    ridotte, generici = riduci_generici(citazioni)
+    assert ridotte == citazioni
+    assert generici == []
+
+
+def test_riduci_generici_sposta_i_simboli_alla_soglia_o_sopra():
+    citazioni = [Citazione("resolve", f"docs/doc{i}.md", 1, "x") for i in range(SOGLIA_GENERICO)]
+    ridotte, generici = riduci_generici(citazioni)
+    assert ridotte == []
+    assert len(generici) == 1
+    assert generici[0]["nome"] == "resolve"
+    assert generici[0]["citazioni"] == SOGLIA_GENERICO
+    assert generici[0]["file"] == [f"docs/doc{i}.md" for i in range(5)]
+
+
+def test_riduci_generici_non_tocca_i_simboli_rari_nello_stesso_elenco():
+    comuni = [Citazione("resolve", f"docs/doc{i}.md", 1, "x") for i in range(SOGLIA_GENERICO)]
+    raro = Citazione("net_contra_accounts", "docs/a.md", 3, "y")
+    ridotte, generici = riduci_generici(comuni + [raro])
+    assert ridotte == [raro]
+    assert [g["nome"] for g in generici] == ["resolve"]
+
+
+def test_riduci_generici_su_elenco_vuoto():
+    assert riduci_generici([]) == ([], [])
+
+
+# --- carica_stato / salva_stato ---------------------------------------------
+
+def test_stato_assente_da_un_dizionario_vuoto(tmp_path):
+    assert carica_stato(str(tmp_path / "STATO.json")) == {}
+
+
+def test_salva_e_rilegge_lo_stato(tmp_path):
+    p = str(tmp_path / "STATO.json")
+    salva_stato(p, sha="abc1234", modo="diff", data="2026-08-21")
+    letto = carica_stato(p)
+    assert letto["ultimo_sha"] == "abc1234"
+    assert letto["modo"] == "diff"
+    assert letto["ultimo_completo"] is None
+
+
+def test_lo_sweep_completo_aggiorna_ultimo_completo_e_lo_sha(tmp_path):
+    # Uno sweep ha appena verificato tutto: il punto di ripartenza e' lo stesso del
+    # modo diff, e in piu' resta traccia di QUANDO si e' fatto l'ultimo integrale.
+    p = str(tmp_path / "STATO.json")
+    salva_stato(p, sha="abc1234", modo="diff", data="2026-08-21")
+    salva_stato(p, sha="def5678", modo="completo", data="2026-08-28")
+    letto = carica_stato(p)
+    assert letto["ultimo_sha"] == "def5678"
+    assert letto["ultimo_completo"] == "2026-08-28"
+
+
+def test_un_diff_successivo_non_cancella_ultimo_completo(tmp_path):
+    p = str(tmp_path / "STATO.json")
+    salva_stato(p, sha="def5678", modo="completo", data="2026-08-28")
+    salva_stato(p, sha="aaa1111", modo="diff", data="2026-09-04")
+    letto = carica_stato(p)
+    assert letto["ultimo_completo"] == "2026-08-28"
+    assert letto["ultimo_sha"] == "aaa1111"

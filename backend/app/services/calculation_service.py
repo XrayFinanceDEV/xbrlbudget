@@ -473,9 +473,15 @@ def calculate_ratios_historical_and_forecast(
     if not scenario:
         raise ValueError(f"Scenario {scenario_id} not found for company {company_id}")
 
-    # Get all full-year historical years (exclude partial)
+    # Get all full-year historical years (exclude partial) UP TO the base year.
+    # La timeline e' "storico -> previsione": oltre il base_year comanda lo
+    # scenario. Senza questo limite un anno promosso (la proiezione infrannuale
+    # copiata su FinancialYear) comparirebbe sia come storico sia come anno di
+    # previsione dello scenario che lo ha generato, cioe' due colonne con lo
+    # stesso anno.
     historical_years = db.query(models.FinancialYear).filter(
         models.FinancialYear.company_id == company_id,
+        models.FinancialYear.year <= base_year,
         (models.FinancialYear.period_months == None) | (models.FinancialYear.period_months == 12),
     ).order_by(models.FinancialYear.year).all()
 

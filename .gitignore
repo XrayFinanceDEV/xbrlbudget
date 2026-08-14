@@ -56,8 +56,9 @@ tmp/
 temp/
 *.tmp
 
-# Claude Code
-.claude/
+# Claude Code (local settings/config stay untracked; project skills are versioned)
+.claude/*
+!.claude/skills/
 .playwright-mcp/
 
 # Test outputs

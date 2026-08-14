@@ -938,9 +938,15 @@ MINERU_OCR_ENABLED=true docker compose --profile mineru \
 With OCR off the backend is unaffected: `mineru_client` / `mineru_adapter` are imported *inside*
 the endpoint (never at module load), `GET /import/capabilities` returns `ocr_available: false`, and
 `POST /import/pdf-ocr` returns a clean 503 `MINERU_DISABLED` which the UI renders as *"Il servizio
-OCR non è disponibile — usa l'import PDF standard"*. The OCR button stays visible by design (the
-flag is a kill switch, not a UI gate) — `getImportCapabilities` exists in `frontend/lib/api.ts` but
-is not yet wired to hide it.
+OCR non è disponibile — usa l'import PDF standard"*.
+
+**The OCR button is NOT rendered (2026-08-14).** `/pratica` → Dati → Import shows a single
+"Importa e Continua"; the ImportOCR (MinerU) button was removed because the endpoint is not ready
+and MinerU is never deployed on the VPS. This is a plain non-render, **not** a capability check:
+`getImportCapabilities` still exists in `frontend/lib/api.ts` and is still unwired, so do not go
+looking for the gate that hides the button — there isn't one. The client path is intact
+(`importOCR`, `handleImport("pdf_ocr")`), so re-exposing it is putting the button back, not
+rebuilding the branch.
 
 When an `extraction_context` is produced, `pdf_importer`
 records provenance in `validation_report["ocr"]` (engine, version, pages, tables, `accounting_method`,

@@ -112,6 +112,52 @@ def simboli_mossi(rev_range: str, cwd: str = ".") -> List[Simbolo]:
     return simboli_da_diff(diff)
 
 
+@dataclass(frozen=True)
+class Citazione:
+    simbolo: str
+    file: str
+    riga: int
+    testo: str
+
+
+def documenti_che_nominano(simboli, radici) -> List[Citazione]:
+    """Le righe di documentazione che nominano uno dei simboli mossi.
+
+    E' questa fase a rendere il costo proporzionale al CAMBIAMENTO invece che al
+    corpus: solo i documenti che nominano un simbolo mosso entrano in verifica.
+    Il confine di parola (\\b) evita che `resolve` peschi `_resolve_ce_field`.
+
+    `radici` sono percorsi da scandire: una cartella e' scandita ricorsivamente
+    per `*.md`, ma una radice che e' essa stessa un file `.md` (es. CLAUDE.md,
+    che vive nella root e non e' una cartella) viene letta direttamente —
+    altrimenti sparirebbe in silenzio da ogni riallineamento.
+    """
+    if not simboli:
+        return []
+    per_nome = {}
+    for s in simboli:
+        per_nome.setdefault(s.nome, re.compile(r"\b" + re.escape(s.nome) + r"\b"))
+    out = []
+    for radice in radici:
+        base = Path(radice)
+        if not base.exists():
+            continue
+        if base.is_file():
+            candidati = [base] if base.suffix == ".md" else []
+        else:
+            candidati = sorted(base.rglob("*.md"))
+        for md in candidati:
+            try:
+                righe = md.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            for n, testo in enumerate(righe, start=1):
+                for nome, regola in per_nome.items():
+                    if regola.search(testo):
+                        out.append(Citazione(nome, str(md), n, testo.strip()[:200]))
+    return out
+
+
 def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("rev_range", help="intervallo di commit, es. HEAD~1..HEAD")

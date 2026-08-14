@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.riallinea import Simbolo, simboli_da_diff  # noqa: E402
+from scripts.riallinea import Citazione, Simbolo, documenti_che_nominano, simboli_da_diff  # noqa: E402
 
 
 def _nomi(simboli, stato=None):
@@ -179,3 +179,57 @@ def test_riconosce_una_rotta_fastapi():
     # la rotta e la funzione decorata sotto sono due simboli distinti: vanno entrambi
     assert per_genere["/scenarios/{scenario_id}/ce-override"] == "rotta"
     assert per_genere["patch_ce_override"] == "funzione"
+
+
+def _scrivi(tmp_path, nome, testo):
+    p = tmp_path / nome
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(testo, encoding="utf-8")
+    return p
+
+
+def test_trova_chi_nomina_un_simbolo(tmp_path):
+    _scrivi(tmp_path, "docs/a.md", "Il netting usa `net_contra_accounts` due volte.\n")
+    _scrivi(tmp_path, "docs/b.md", "Niente di rilevante qui.\n")
+    sim = [Simbolo("net_contra_accounts", "funzione", "x.py", "rimosso")]
+    cit = documenti_che_nominano(sim, [str(tmp_path)])
+    assert [c.file for c in cit] == [str(tmp_path / "docs/a.md")]
+    assert cit[0].riga == 1
+    assert cit[0].simbolo == "net_contra_accounts"
+
+
+def test_ignora_una_sottostringa_dentro_un_nome_piu_lungo(tmp_path):
+    # `resolve` non deve pescare `_resolve_ce_field`: sarebbe rumore su ogni giro.
+    _scrivi(tmp_path, "docs/a.md", "Usa `_resolve_ce_field` e non altro.\n")
+    sim = [Simbolo("resolve", "funzione", "x.py", "rimosso")]
+    assert documenti_che_nominano(sim, [str(tmp_path)]) == []
+
+
+def test_legge_solo_i_markdown(tmp_path):
+    _scrivi(tmp_path, "docs/a.py", "net_contra_accounts\n")
+    sim = [Simbolo("net_contra_accounts", "funzione", "x.py", "rimosso")]
+    assert documenti_che_nominano(sim, [str(tmp_path)]) == []
+
+
+def test_piu_citazioni_dello_stesso_simbolo(tmp_path):
+    _scrivi(tmp_path, "docs/a.md", "`foo_bar` qui\ne ancora `foo_bar` qui\n")
+    sim = [Simbolo("foo_bar", "funzione", "x.py", "rimosso")]
+    cit = documenti_che_nominano(sim, [str(tmp_path)])
+    assert [c.riga for c in cit] == [1, 2]
+
+
+def test_una_radice_inesistente_non_esplode(tmp_path):
+    sim = [Simbolo("foo_bar", "funzione", "x.py", "rimosso")]
+    assert documenti_che_nominano(sim, [str(tmp_path / "non-esiste")]) == []
+
+
+def test_una_radice_che_e_un_singolo_file_viene_letta(tmp_path):
+    # RADICI_DOC contiene anche "CLAUDE.md", che e' un FILE, non una cartella:
+    # Path("CLAUDE.md").rglob("*.md") non rende nulla, quindi il documento piu'
+    # importante di tutti verrebbe saltato in silenzio se radice fosse trattata
+    # solo come directory.
+    claude_md = _scrivi(tmp_path, "CLAUDE.md", "Nomina `foo_bar` qui.\n")
+    sim = [Simbolo("foo_bar", "funzione", "x.py", "rimosso")]
+    cit = documenti_che_nominano(sim, [str(claude_md)])
+    assert [c.file for c in cit] == [str(claude_md)]
+    assert cit[0].riga == 1

@@ -389,6 +389,84 @@ ties (`validate_balance` passes), mirroring the deterministic parser's pareggio.
 balances are handled via `_extract_with_llm_vision` with the same CoGe prompts. Single-year only (trial
 balances are rarely comparative); `prior_bs_data`/`prior_ce_data` stay `None`.
 
+#### Riscatto vision per sezione (`importers/vision_rescue.py`)
+Terzo candidato route C, prodotto **solo su richiesta** e alla FINE della catena
+(`overlay_debt_typing` → `net_contra_accounts` → `_reconcile_trial_to_declared`), quando
+`check_quadratura` sul foglio FINITO dice `is_empty` / sbilancio / `masked` / utile CE ≠ sp13.
+La posizione in coda è deliberata: innescare prima del netting farebbe scattare il riscatto su un
+attivo ancora lordo, cioè su un divario che il netting dei fondi chiude da solo. **L'innesco è
+gated su `api_key`** — senza chiave non si parte nemmeno, perché `render_section_images` gira
+PRIMA che `read_section` istanzi il client e si renderizzerebbero pagine a 200 dpi per buttarle.
+Le pagine della sola sezione che non torna (`situazione_contabile_parser.section_pages`) sono rese
+a 200 dpi e rilette in vision (Haiku, due prompt CoGe distinti SP/CE): su questi file il numero
+giusto è STAMPATO ma il text layer non ci arriva — su budget_624 i mastri di costo sono disegnati
+come VETTORI e in `page.get_text()` non esistono affatto. La sezione è **ricostruita da zero** dai
+mastri letti (`build_sp_from_vision` / `build_ce_from_vision`), mai sommata a quelli già estratti:
+sommare richiederebbe di sapere che cosa era già dentro e conta due volte un mastro (è l'errore che
+fece revertare il tentativo del 14/07). Solo i **mastri**: i dettagli a codice più lungo la vision
+li sbaglia e non servono, il mastro porta già l'intero importo della voce.
+
+**`mastro_level_rows` sceglie il livello per RICONCILIAZIONE, non per profondità.** La profondità
+del codice è solo un generatore di ipotesi; il totale di colonna stampato è il giudice — stessa
+regola di `_select_dedup`. Prendere il minimo di cifre e basta si è rotto sul file vero: la vision
+trascrive i peer di uno stesso livello con un numero di cifre diverso (`7301500` accanto a
+`73015005`), il minimo scartava due mastri buoni per 46.110,67 e il cancello respingeva un riscatto
+corretto in 2 esecuzioni su 3. Senza totali leggibili, o se nessuna partizione riconcilia, resta il
+minimo di prima e a decidere è il cancello.
+
+**Il cancello** (`accept_rescue`) tiene il riscatto solo se TUTTE: riconcilia al totale stampato
+entro `max(50 €; 0,5%)`; i totali letti dalla vision sono coerenti fra loro (`attivo + perdita ==
+passivo`, `costi + utile == ricavi`) — è questa coerenza che autorizza a preferirli alle ancore di
+testo quando quelle si contraddicono; l'estrazione non è vuota; il riscatto non spegne un'identità
+utile CE = sp13 che prima reggeva; e la quadratura risultante è **strettamente migliore**, misurata
+come `|sbilancio| + |residuo|` (sbilancio e massa non classificata sono la stessa specie di male e
+si sommano). Il cancello prende una bandiera **`residual_measured`**: il residuo del foglio
+riscattato è una MISURA solo se esisteva un'ancora di testo INDIPENDENTE contro cui farla —
+`build_sp_from_vision` asserisce `_plug_residual = 0`, non lo misura, e un controllo che manca non
+è un controllo superato, quindi in quel caso si porta avanti il residuo di prima (stessa regola di
+`importers/reliability.py`: un verdetto negativo vuole una contraddizione, non un controllo
+assente). Riparare l'identità CE/SP è un miglioramento reale ma non una licenza illimitata: ha per
+tetto la stessa tolleranza di riconciliazione.
+
+Il risultato d'esercizio viene da **`vision_result`**, che prende il SEGNO dall'identità che ha
+validato i totali, non dall'ordine delle chiavi: un documento stampa spesso sia una riga "utile" sia
+una "perdita" (una delle due del periodo precedente, o una didascalia a zero), e preferire l'utile
+per primo ribalta il risultato quando è il ramo della perdita a tornare.
+**`build_sp_from_vision` alza `_source_maturity_unspecified`**: i mastri non dicono se un debito è
+entro o oltre l'esercizio, quindi finiscono tutti a breve e l'import espone
+`SCADENZA DEBITI NON DISTINTA` — sp16 e sp17 stanno entrambi nel passivo, quindi il pareggio non se
+ne accorge, ma CCN, current ratio e il capitale circolante di Altman sì.
+**Un solo tentativo per sezione**, tetto `MAX_RESCUE_PAGES = 8`, ogni errore non fatale: se il
+riscatto non riesce il foglio resta esattamente com'è oggi, coi suoi warning. Le due sezioni si
+innescano indipendentemente; il riscatto del CE non tocca `sp13` e quello dell'SP non tocca il conto
+economico. Un import riscattato è riconoscibile a posteriori dal suffisso `+vision-<sezioni>` su
+`parser_version` (`semantic-v3-2026-07-20+vision-ce-sp`), assente quando non si è riscattato nulla.
+Costo misurato: ~4.500 token in / ~1.000-2.000 out e 8-16 s per sezione (≈ 1-2 centesimi).
+
+**Esito sui due file veri** (misurato su 6 esecuzioni, `tests/test_vision_rescue.py`):
+- **budget_624** — il CE chiudeva con 1.553.019,59 di utile contro gli 8.906,79 stampati. Riscattato
+  il CE, utile CE = sp13 = 8.906,79, `validation_status: verified`. Chiuso 3/3 dopo le due
+  correzioni descritte qui (la partizione per riconciliazione, e il ripiego per direzione qui sotto).
+- **budget_623** — obiettivo dichiarato INCERTO dalla spec, e **non chiuso**. Il riscatto SP viene
+  accettato 6/6 e riporta l'attivo al totale stampato di 2.420.397,40 LORDO con scarto 0,00
+  (2.130.609,37 nettati i fondi), il residuo non classificato passa da ~350.000 a 0 e la QUADRATURA
+  MASCHERATA sparisce. Ma lo sbilancio finale **non è deterministico**: 0,00 / 9.079,77 / 139.079,77
+  fra le esecuzioni, perché sulla colonna del PASSIVO ogni tanto alla vision sfugge un mastro
+  (l'attivo invece torna al centesimo ogni volta). Il file va ancora chiuso in Rettifiche. Il test
+  su 623 asserisce quindi l'invariante misurata (attivo riconciliato, niente mascheratura), non
+  l'obiettivo sperato: una soglia sullo sbilancio lo renderebbe un dado.
+
+**Il ripiego del CE va scelto per DIREZIONE** (`build_ce_from_vision`). `FALLBACK_FIELDS['ce']` è
+`ce06`, neutro per i KPI solo DENTRO i costi della produzione: su una riga della colonna RICAVI è un
+COSTO, e la massa non riconosciuta sposta il risultato di **2x** il proprio importo — lo stesso
+errore che `_resolve_ce_field` esiste per impedire. Su budget_624 ci finivano rimanenze finali e
+proventi finanziari letti a destra (1.479.943,47) e il CE chiudeva a 0,00 invece che a 8.906,79. A
+destra si tiene il default del classificatore (`ce04`), che è del segno giusto — la stessa scelta
+che fa `_be_reclassify` con `cl_ric` sul percorso deterministico.
+
+Tests: `tests/test_vision_rescue.py` (unitari con doppio + i due PDF veri, gated su chiave E
+presenza del documento), `tests/test_section_pages.py`.
+
 #### Trial-balance / Situazione Contabile parsers (`importers/situazione_contabile_parser.py`)
 Deterministic, no LLM (now the route-C FALLBACK after the CoGe LLM extractor above).
 `is_situazione_contabile(text)` + the coordinate-based

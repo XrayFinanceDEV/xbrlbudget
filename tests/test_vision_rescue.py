@@ -3,8 +3,10 @@
 Spec: docs/superpowers/specs/2026-08-14-riscatto-vision-route-c-design.md
 Run:  python -m pytest tests/test_vision_rescue.py -v
 
-Nessun test in questo file effettua una chiamata di rete: la risposta vision e'
-sempre passata con un doppio.
+I test unitari non effettuano alcuna chiamata di rete: la risposta vision e' sempre
+passata con un doppio. Fanno eccezione i DUE test in coda al file, sui due PDF veri
+per cui il riscatto e' stato costruito: sono gated sulla chiave E sulla presenza del
+documento (che sta fuori dal repo), quindi in CI non partono.
 """
 import os
 import sys
@@ -174,6 +176,31 @@ def test_build_ce_non_manda_un_costo_su_una_voce_di_ricavo():
     assert sum(v for k, v in ce.items() if k.startswith("ce")) >= D("90.00")
 
 
+def test_build_ce_non_manda_un_ricavo_sconosciuto_su_una_voce_di_costo():
+    # Il gemello del precedente, e il difetto che ha tenuto chiuso budget_624.
+    # 'Rim.fin.mat.prime' non e' nella tabella a parole chiave e l'albero non la
+    # risolve: il ripiego generico e' 'ce06' (COSTI PER SERVIZI), scelto neutro
+    # DENTRO i costi della produzione. Su una riga della colonna RICAVI quel
+    # ripiego e' del segno sbagliato e sposta il risultato di 2x l'importo.
+    rows = [
+        ("71", "RICAVI DELLE VENDITE", D("800.00"), "right"),
+        ("73", "RIM.FIN.MAT.PRIME, SUSSID, CONS.E MERCI", D("200.00"), "right"),
+    ]
+    ce = build_ce_from_vision(rows)
+    assert ce.get("ce06", D("0")) == D("0")
+    # Il totale della colonna e' conservato, tutto sul lato dei ricavi.
+    assert ce["ce01"] + ce["ce04"] == D("1000.00")
+
+
+def test_build_ce_il_ripiego_dei_costi_resta_quello_neutro():
+    # L'altra meta' della regola: sulla colonna dei COSTI il ripiego resta
+    # FALLBACK_FIELDS['ce'], non il catch-all 'ce12' del classificatore.
+    from importers.situazione_contabile_parser import fallback_field
+    rows = [("79", "VOCE SCONOSCIUTA XYZ", D("90.00"), "left")]
+    ce = build_ce_from_vision(rows)
+    assert ce[fallback_field("ce")] == D("90.00")
+
+
 def test_build_ce_arrotola_i_sottocampi_sul_padre():
     rows = [("64", "SALARI E STIPENDI", D("300.00"), "left")]
     ce = build_ce_from_vision(rows)
@@ -255,6 +282,55 @@ def test_mastro_level_rows_ignora_le_righe_senza_codice():
         vr.VisionRow("", "TOTALE COSTI", D("2482879.59"), "left"),
     ]
     assert [r.code for r in vr.mastro_level_rows(rows)] == ["73020005"]
+
+
+def test_mastro_level_rows_il_totale_stampato_batte_la_profondita():
+    # Il caso vero di budget_624: la vision trascrive due peer dello stesso livello
+    # con una cifra in piu' ('7301500' accanto a '73015005'). Il solo minimo li
+    # scartava, e i costi ricostruiti mancavano 46.110,67 sul totale stampato.
+    rows = [
+        vr.VisionRow("7300000", "Costi mat.prime", D("450814.94"), "left"),
+        vr.VisionRow("7301500", "Salari e stipendi", D("147463.60"), "left"),
+        vr.VisionRow("73015005", "Oneri sociali", D("41453.72"), "left"),
+        vr.VisionRow("7100000", "Ricavi delle vendite", D("639732.26"), "right"),
+    ]
+    totali = {"left": D("639732.26"), "right": D("639732.26")}
+    kept = vr.mastro_level_rows(rows, totali)
+    assert sum(r.amount for r in kept if r.column == "left") == D("639732.26")
+    assert len(kept) == 4
+
+
+def test_mastro_level_rows_col_totale_preferisce_comunque_i_mastri():
+    # L'altra meta': quando SONO i soli mastri a ricostruire il totale, i dettagli
+    # restano fuori — altrimenti si conterebbe due volte la stessa voce.
+    rows = [
+        vr.VisionRow("7300000", "Costi mat.prime", D("100.00"), "left"),
+        vr.VisionRow("730000010", "di cui acquisti ferramenta", D("60.00"), "left"),
+        vr.VisionRow("730000020", "di cui acquisti vernici", D("40.00"), "left"),
+    ]
+    kept = vr.mastro_level_rows(rows, {"left": D("100.00")})
+    assert [r.code for r in kept] == ["7300000"]
+
+
+def test_mastro_level_rows_senza_totali_resta_il_minimo():
+    rows = [
+        vr.VisionRow("7300000", "Costi mat.prime", D("100.00"), "left"),
+        vr.VisionRow("730000010", "di cui acquisti", D("60.00"), "left"),
+    ]
+    assert [r.code for r in vr.mastro_level_rows(rows, None)] == ["7300000"]
+    assert [r.code for r in vr.mastro_level_rows(rows, {"left": None})] == ["7300000"]
+
+
+def test_mastro_level_rows_se_nulla_riconcilia_resta_il_minimo():
+    # Un totale che nessuna partizione ricostruisce non deve far passare la
+    # partizione piu' larga per disperazione: si torna al minimo e a decidere e'
+    # il cancello.
+    rows = [
+        vr.VisionRow("7300000", "Costi mat.prime", D("100.00"), "left"),
+        vr.VisionRow("730000010", "dettaglio", D("60.00"), "left"),
+    ]
+    kept = vr.mastro_level_rows(rows, {"left": D("999999.00")})
+    assert [r.code for r in kept] == ["7300000"]
 
 
 def test_read_section_monta_righe_e_totali():
@@ -1079,3 +1155,80 @@ def test_con_ancore_di_testo_lo_stesso_riscatto_e_accettato(monkeypatch):
         declared={"attivo": D("1000"), "passivo": D("1000")},
         donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == ["sp"]
+
+
+# ------------------------------------------------- i due PDF veri (gated)
+#
+# Questi due test chiamano la rete. Sono doppiamente gated (chiave + presenza del
+# PDF, che e' fuori dal repo) cosi' la CI resta verde senza nessuno dei due.
+# `probe` esegue il percorso di produzione completo (classificazione -> estrazione
+# -> catena route C -> riscatto -> reconcile -> validate) e non solleva mai.
+
+_DEBUG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
+# NB: i nomi hanno spazi in coda voluti (623 ne ha DUE prima di '.pdf').
+_PDF_624 = os.path.join(_DEBUG, "budget_624_2024 Commercio al dettaglio di ferramenta, "
+                                "vernici, vetro piano e materiale elettrico e "
+                                "termoidraulico .pdf")
+_PDF_623 = os.path.join(_DEBUG, "budget_623_2025 Commercio al dettaglio di ferramenta, "
+                                "vernici, vetro piano e materiale elettrico e "
+                                "termoidraulico  .pdf")
+
+
+def _api_key_disponibile() -> bool:
+    """La chiave sta in backend/.env, non nell'ambiente: e' da li' che la legge il
+    backend, ed e' da li' che la legge _import_probe. Chiedere solo os.environ
+    salterebbe questi test su una macchina che invece puo' eseguirli."""
+    try:
+        from tests._import_probe import _load_env
+        _load_env()
+    except Exception:
+        pass
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+_needs_live = pytest.mark.skipif(
+    not _api_key_disponibile(),
+    reason="riscatto vision: serve ANTHROPIC_API_KEY (nessuna chiamata in CI)",
+)
+
+
+@_needs_live
+@pytest.mark.skipif(not os.path.exists(_PDF_624), reason="PDF di debug non presente")
+def test_budget_624_il_conto_economico_torna():
+    """I mastri di costo sono disegnati come VETTORI: nel text layer non esistono, e
+    il CE chiudeva con 1.553.019,59 di utile contro gli 8.906,79 stampati. Il
+    patrimoniale di questo file va gia' bene e non deve muoversi."""
+    from tests._import_probe import probe
+    rec = probe(_PDF_624)
+    assert rec["error"] is None, rec.get("traceback", rec["error"])
+    assert rec["utile_ce"] == pytest.approx(8906.79, abs=1.0)
+    assert rec["sp13"] == pytest.approx(8906.79, abs=1.0)
+
+
+@_needs_live
+@pytest.mark.skipif(not os.path.exists(_PDF_623), reason="PDF di debug non presente")
+def test_budget_623_il_patrimoniale_migliora_e_non_peggiora():
+    """Obiettivo 2, dichiarato INCERTO dalla spec (§Rischi noti 2): l'evidenza
+    raccolta prima del progetto copriva solo la pagina 1 del patrimoniale.
+
+    Misurato su 6 esecuzioni del percorso di produzione. Invariante 6/6: il riscatto
+    SP viene ACCETTATO, l'attivo ricostruito riconcilia al totale stampato di
+    2.420.397,40 LORDO con scarto 0,00 (2.130.609,37 una volta nettati i 289.788,03
+    di fondi ammortamento, che questo documento espone sul passivo), il residuo non
+    classificato passa da ~350.000 a 0 e la QUADRATURA MASCHERATA sparisce. Prima del
+    riscatto l'attivo si fermava a ~2.07 M con ~350.000 di massa non classificata.
+
+    NON invariante, e per questo non asserito: lo sbilancio finale, misurato a 0,00 /
+    9.079,77 / 139.079,77 nelle sei esecuzioni. La vision riconduce l'ATTIVO al
+    centesimo ogni volta, ma sulla colonna del passivo ogni tanto le sfugge un mastro;
+    l'estrazione vision non e' deterministica. Asserire una soglia sullo sbilancio
+    renderebbe questo test un dado, e sceglierne una che copra 139.079,77 non
+    misurerebbe piu' nulla. L'obiettivo 2 e' quindi raggiunto in sostanza (l'attivo
+    torna al totale stampato, la composizione non e' piu' mascherata) ma NON al
+    centesimo: il bilancio resta da chiudere in Rettifiche."""
+    from tests._import_probe import probe
+    rec = probe(_PDF_623)
+    assert rec["error"] is None, rec.get("traceback", rec["error"])
+    assert not rec["masked"], "la quadratura torna mascherata: riscatto non applicato"
+    assert rec["plug_residual"] in (None, "0")
+    assert rec["totale_attivo"] == pytest.approx(2130609.37, abs=100.0)

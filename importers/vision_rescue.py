@@ -144,15 +144,31 @@ def normalize_column(raw: Optional[str]) -> Optional[str]:
     return None
 
 
-def mastro_level_rows(rows: Sequence[VisionRow]) -> Tuple[VisionRow, ...]:
-    """Tiene solo le righe al livello MASTRO: quelle il cui codice ha il minor numero
-    di cifre fra quelle lette.
+def mastro_level_rows(rows: Sequence[VisionRow],
+                      totals: Optional[Dict[str, Optional[Decimal]]] = None
+                      ) -> Tuple[VisionRow, ...]:
+    """Tiene le righe al livello MASTRO, scartando i dettagli.
 
     I dettagli (codice piu' lungo) la vision li sbaglia — sono le righe con gli importi
     corrotti nel testo sorgente — e non servono, perche' il mastro porta gia' l'intero
     importo della voce. Il filtro e' deterministico e non si fida della sola obbedienza
     del modello alla regola 2 del prompt. Le righe senza codice (totali intercettati per
     errore) sono scartate.
+
+    **La profondita' del codice e' solo un'ipotesi; il totale stampato e' il giudice.**
+    Stessa regola di `_select_dedup` in situazione_contabile_parser: si enumerano le
+    partizioni candidate (una per ogni lunghezza di codice osservata, dalla piu' corta)
+    e si tiene la prima che ricostruisce i totali di colonna LETTI sulla pagina. Prendere
+    il minimo e basta si e' rotto sul file vero: su budget_624 la vision trascrive i
+    peer di uno stesso livello con un numero di cifre diverso (`7301500` accanto a
+    `73015005`), il minimo scartava due mastri buoni — 'Oneri sociali' 41.453,72 e
+    'Amm.to immobilizzazioni materiali' 4.656,95 — e i costi ricostruiti mancavano
+    46.110,67 sul totale stampato, quindi il cancello respingeva un riscatto corretto
+    in 2 esecuzioni su 3. Non e' un allentamento: la partizione scelta deve ora tornare
+    ai totali del documento, che e' un vincolo in PIU', non in meno.
+
+    Senza totali utilizzabili (o se nessuna partizione riconcilia) resta il minimo di
+    prima, e a decidere e' il cancello di accettazione come sempre.
     """
     digits = {}
     for idx, row in enumerate(rows):
@@ -161,8 +177,21 @@ def mastro_level_rows(rows: Sequence[VisionRow]) -> Tuple[VisionRow, ...]:
             digits[idx] = len(only)
     if not digits:
         return ()
-    level = min(digits.values())
-    return tuple(r for idx, r in enumerate(rows) if digits.get(idx) == level)
+
+    def _upto(max_len: int) -> Tuple[VisionRow, ...]:
+        return tuple(r for idx, r in enumerate(rows)
+                     if idx in digits and digits[idx] <= max_len)
+
+    levels = sorted(set(digits.values()))
+    anchors = [(side, (totals or {}).get(side)) for side in ("left", "right")]
+    anchors = [(side, value) for side, value in anchors if value]
+    if anchors:
+        for level in levels:
+            kept = _upto(level)
+            if all(abs(sum((r.amount for r in kept if r.column == side), Z) - value)
+                   <= reconcile_tolerance(value) for side, value in anchors):
+                return kept
+    return _upto(levels[0])
 
 
 def render_section_images(file_path: str, pages: Sequence[int],
@@ -250,16 +279,17 @@ def read_section(file_path: str, pages: Sequence[int], section: str,
         rows.append(VisionRow(code=(m.codice or "").strip(),
                               description=(m.descrizione or "").strip(),
                               amount=amount, column=column))
-    return VisionSection(
-        section=section,
-        rows=mastro_level_rows(rows),
-        totals={
-            "left": parse_amount(parsed.totale_sinistra),
-            "right": parse_amount(parsed.totale_destra),
-            "utile": parse_amount(parsed.utile),
-            "perdita": parse_amount(parsed.perdita),
-        },
-    )
+    totals = {
+        "left": parse_amount(parsed.totale_sinistra),
+        "right": parse_amount(parsed.totale_destra),
+        "utile": parse_amount(parsed.utile),
+        "perdita": parse_amount(parsed.perdita),
+    }
+    # I totali si leggono PRIMA delle righe perche' sono loro a giudicare quale
+    # partizione di codici e' il livello mastro (vedi mastro_level_rows).
+    return VisionSection(section=section,
+                         rows=mastro_level_rows(rows, totals),
+                         totals=totals)
 
 
 # --------------------------------------------------------------- il cancello

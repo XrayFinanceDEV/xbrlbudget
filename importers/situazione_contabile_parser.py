@@ -5154,7 +5154,17 @@ def build_ce_from_vision(rows) -> Dict[str, Decimal]:
             # l'albero condiviso, VINCOLATO alla direzione. iv_cee_hierarchy.resolve
             # non filtra per segno sui nodi CE — _resolve_ce_field si'.
             resolved = _resolve_ce_field(d, direction)
-            tag = resolved if resolved else fallback_field('ce')
+            # Ultimo ripiego, e va scelto per DIREZIONE. FALLBACK_FIELDS['ce'] e'
+            # 'ce06': neutro per i KPI solo DENTRO i costi della produzione. Su una
+            # riga della colonna RICAVI e' un COSTO, quindi la massa non riconosciuta
+            # sposta il risultato di 2x il proprio importo — lo stesso errore che
+            # _resolve_ce_field esiste per impedire. Su budget_624 ci finivano le
+            # rimanenze finali e i proventi finanziari letti a destra (1.479.943,47):
+            # il conto economico chiudeva a 0,00 invece che agli 8.906,79 stampati.
+            # A destra si tiene il default del classificatore ('ce04'), che e' del
+            # segno giusto: e' la stessa scelta che fa _be_reclassify con cl_ric sul
+            # percorso deterministico, non una regola nuova.
+            tag = resolved or (fallback_field('ce') if direction == 'costi' else tag)
         if tag == 'ce01_return':
             add('ce01', -amount)
         elif tag == 'ce10_close':

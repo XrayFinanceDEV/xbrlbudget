@@ -34,8 +34,16 @@ nessuno la rilegge. Nel dubbio si segnala.
 5. **Correggi solo dentro la lista chiusa** (sotto). Tutto il resto va in «Da decidere».
 6. **Verifica anche la memoria**, ma non modificarla: solo riferimenti morti a rapporto.
 7. **Scrivi il rapporto**, sempre, anche a esito nullo.
-8. **Committa in due volte**: prima le correzioni, poi il rapporto.
-9. **Aggiorna** `STATO.json`.
+8. **Committa in due volte**: prima le correzioni con il messaggio
+   `docs(allineamento): correzioni dimostrabili`, poi il rapporto con
+   `docs(allineamento): rapporto AAAA-MM-GG` (data del rapporto, non del giorno in cui
+   giri lo skill se sono diversi). Letterali: non improvvisare un formato diverso, o i
+   commit di riallineamento smettono di essere riconoscibili nel log.
+9. **Aggiorna** `STATO.json`: `ultimo_sha`, `modo`, `data`, `ultimo_completo` come
+   già fa `salva_stato`; se hai girato il Livello 3, aggiungi anche
+   `"ripresa_l3": "<percorso dell'ultimo documento verificato al Livello 3>"` —
+   `salva_stato` carica lo stato esistente e vi scrive sopra solo le chiavi che
+   conosce, quindi una chiave in più sopravvive senza toccare `scripts/riallinea.py`.
 
 ## Strategia per lo sweep completo (`--completo`)
 
@@ -70,12 +78,25 @@ Tre livelli, in quest'ordine, senza eccezioni:
    invece di un rename mancato.
 3. **Livello 3 — il resto, fino a un tetto dichiarato di 300 citazioni lette a
    fondo.** Filtrate le citazioni già coperte dai livelli 1 e 2, ordina i documenti
-   rimanenti per percorso (ordine alfabetico, deterministico e riproducibile) e
-   verifica citazione per citazione finché non raggiungi 300 verifiche di livello 3 in
-   questa esecuzione. 300 è scelto per stare comodamente dentro una sessione (in linea
+   rimanenti per percorso (ordine alfabetico, deterministico e riproducibile). **La
+   ripresa è vera, non solo dichiarata:** leggi `ripresa_l3` da `STATO.json` (scritto
+   al passo 9) e parti dal documento **successivo** a quello nell'ordinamento — non
+   dalla testa alfabetica. Se `ripresa_l3` è assente (è il primo sweep, o `STATO.json`
+   non l'ha ancora mai scritta), parti dall'inizio: dillo esplicitamente nel rapporto,
+   così un'esecuzione successiva non trova un caso ambiguo. Verifica citazione per
+   citazione finché non raggiungi 300 verifiche di livello 3 in questa esecuzione; se
+   arrivi in fondo all'elenco dei documenti prima del tetto, **riavvolgi** all'inizio
+   e continua da lì. 300 è scelto per stare comodamente dentro una sessione (in linea
    con le poche decine tipiche di un `diff`, moltiplicate per un fattore che lascia
    margine senza pretendere l'impossibile) — non è calibrato su una misura di tempo,
    è un tetto esplicito che chiunque legga lo skill può cambiare consapevolmente.
+
+**Con un tetto di 300 su ~5714 citazioni candidate, uno sweep guarda circa il 5% del
+corpo al Livello 3.** Servono all'incirca 19 sweep perché il giro dell'alfabeto si
+chiuda e si ricominci da dove si era partiti la prima volta — la ripresa fa
+avanzare la copertura sweep dopo sweep invece di rileggere sempre la stessa testa,
+ma resta un giro lento: chi decide se e quando lanciare lo sweep completo deve saperlo
+prima di lanciarlo, non dedurlo dal rapporto dopo.
 
 **Cosa NON è stato guardato va dichiarato, non taciuto.** Il rapporto elenca i
 documenti (percorso + numero di citazioni residue) che restavano fuori dal tetto di
@@ -88,6 +109,7 @@ riportano nel rapporto con il conteggio, non si aprono uno per uno.
 **In testa a ogni rapporto di uno sweep completo:**
 ```
 Candidate: 5714 · Verificate a fondo: <L1 + L2 + L3> (L1 CLAUDE.md: N · L2 MORTO: N · L3: N/300)
+Livello 3 ripartito da: <ripresa_l3 dello stato, o «inizio (nessuna ripresa salvata)»> · arrivato a: <ultimo documento verificato>
 Non esaminate questa esecuzione: <conteggio> citazioni in <elenco documenti>
 ```
 

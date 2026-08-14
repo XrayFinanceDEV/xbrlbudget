@@ -23,6 +23,11 @@ router **non legge importi**: guarda solo la forma del documento.
 La finestra di lettura è di **14 pagine** (`:179-182`). Un documento la cui natura si rivela
 solo a pagina 15 non è classificabile correttamente: è un limite noto e accettato.
 
+A valle, `pdf_importer` non conserva la route come tale: ne deriva il solo booleano
+`is_trial_balance = (route == TRIAL_BALANCE)` (`pdf_importer.py:742`). `macro_area` e
+`subcategory` viaggiano però fino all'esito dell'import e ai log, ed è deliberato: un formato
+mai visto si presenta come **un'area con una sottocategoria**, non come un'eccezione.
+
 ## 2. Come viene letto il testo
 
 Prima di ogni valutazione il testo è ridotto a due viste (`:57-66`):
@@ -34,10 +39,17 @@ Un marcatore è considerato presente se compare in **almeno una** delle due. Il 
 concreto: questi PDF stampano spesso le intestazioni lettera-spaziate
 (`S T A T O   P A T R I M O N I A L E`), che nella vista normale non corrispondono a nulla.
 
-**Attenzione agli accenti.** I marcatori sono scritti senza accento (`passivita`,
-`disponibilita liquide`), ma il testo **non è normalizzato per gli accenti**. Un documento che
-stampa "Passività" con l'accento non attiva quel particolare marcatore; funziona lo stesso solo
-perché i marcatori alternativi sono nove. È una fragilità latente, non un design.
+**Gli accenti sono normalizzati via** (aggiornato 2026-08-14). I marcatori sono scritti senza
+accento (`passivita`, `disponibilita liquide`), e **il testo viene deaccentato** prima di
+costruire le due viste: decomposizione NFKD e rimozione dei segni combinanti, la stessa regola
+del normalizzatore unico `importers/label_semantics.py`. Anche il marcatore cercato passa dalla
+stessa riduzione, quindi una grafia accentata trova quella senza accento e viceversa
+(`bilancio_classifier.py:57-79`).
+
+Prima di questa correzione il difetto era vivo e non latente: su un documento che stampava
+"Passività" nessun marcatore patrimoniale scattava, `sp_present` restava falso e il file veniva
+**rifiutato come "solo Conto Economico"** (regola 1) pur avendo lo Stato Patrimoniale.
+Test: `tests/test_classifier_accenti.py`.
 
 ## 3. L'albero decisionale
 

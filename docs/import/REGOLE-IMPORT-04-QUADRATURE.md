@@ -188,9 +188,12 @@ disattivati in tre punti: selezione dei candidati, ancoraggio del risultato, arb
 | `legacy` + non forecastable | **default di colonna**: i record importati prima del versionamento non sono dichiarati validi d'ufficio |
 | `draft` | anno creato a mano |
 
-`forecastable` è **sempre uguale** a `semantic_valid`: solo un bilancio semanticamente valido
-alimenta il previsionale. L'XBRL rafforza il criterio, aggiungendo l'assenza di conflitti
-aggregato/dettaglio e di breakdown mancanti.
+`forecastable` **non** è più uguale a `semantic_valid` (aggiornato 2026-08-14). Sul percorso PDF è
+`semantic_valid` **e** il verdetto sui conti critici (§9-bis): `pdf_importer.py:1534`. Resta vero
+che un bilancio non semanticamente valido non alimenta mai il previsionale — è solo che ora non
+basta. L'anno **precedente** fa eccezione e usa il solo `semantic_valid`. L'XBRL rafforza il
+criterio da un'altra parte, aggiungendo l'assenza di conflitti aggregato/dettaglio e di breakdown
+mancanti.
 
 ### Dell'audit di corpus (diagnostici, non persistiti)
 
@@ -204,6 +207,44 @@ aggregato/dettaglio e di breakdown mancanti.
 | `NOT_REEXECUTED_NO_API` | route LLM senza chiave |
 
 `MASK` **non è uno stato**: è un flag, e per policy **non va mai contato come successo**.
+
+## 9-bis. L'affidabilità dei conti che decidono i KPI
+
+> Motore: `importers/reliability.py` — modulo **puro**, senza I/O, PDF o DB, così anche gli
+> importer XBRL e CSV possono usarlo.
+
+Trasforma l'evidenza che la pipeline ha già calcolato in un verdetto **per conto**, su tre gruppi
+scelti perché decidono ogni indicatore:
+
+| Gruppo | Evidenza letta |
+|---|---|
+| **Immobilizzazioni** | i marcatori `_contra_*`: massa di contro-conti *rilevata ma non applicata* significa attivo lordo con i fondi fra i debiti |
+| **Patrimonio netto** | `sp11 + sp12 + sp13` ricostruito contro un totale di controllo stampato |
+| **Debiti verso banche** | lo scarto aggregato/dettaglio, calcolato **come lo calcola `base_bank_debt`**, così il verdetto descrive ciò che il motore previsionale farà davvero |
+
+Tre stati: `VERIFIED` (corroborato da evidenza indipendente), `DERIVED` (dedotto ma internamente
+coerente), `UNRELIABLE` (l'evidenza dice che il numero è probabilmente sbagliato).
+
+> **`UNRELIABLE` richiede una contraddizione POSITIVA, mai un controllo assente.** Un controllo che
+> manca dà `DERIVED`. Senza questa regola ogni file di route A/B verrebbe segnalato solo perché su
+> quelle route non gira nessuna scansione dei contro-conti.
+
+Il report finisce nel `validation_report` persistito sotto `critical_accounts`, e
+`PUT /adjustments` lo conserva e lo riapplica: una rettifica a vuoto non può ripulire il flag.
+
+**Il verdetto gate il previsionale, mai il salvataggio.** Le Rettifiche operano su un
+`FinancialYear` già persistito: rifiutare il salvataggio di un file inaffidabile lo renderebbe
+incorreggibile per sempre. Qualunque errore nel calcolo del verdetto vale "non lo so", e "non lo
+so" non blocca.
+
+**Due limiti dichiarati.** Nessun percorso di previsionale legge oggi `fy.forecastable`:
+l'infrannuale ri-deriva il proprio gate dai valori correnti (pagina 05 §6, e lì è **necessario**,
+perché le Rettifiche cambiano il record dopo l'import), il budget non ne ha uno, e la promozione
+scrive `True` fisso. Ed è per costruzione che `patrimonio_netto` risulta **sempre** `DERIVED`: la
+lettura dei totali dichiarati non produce (ancora) una chiave `patrimonio_netto`, quindi il
+controllo manca — e un controllo che manca non condanna.
+
+Test: `tests/test_reliability.py`, `tests/test_reliability_gating.py`.
 
 ## 10. Le Rettifiche: la regola di monotonia
 

@@ -81,14 +81,28 @@ tributari, previdenza, altri.
 |---|---|
 | `period_months` | `NULL` o `12` = anno pieno; `1`–`11` = infrannuale |
 | `validation_status` | `verified` / `review_required` / `legacy` / `draft` |
-| `validation_report` | JSON immutabile dei controlli contabili |
+| `validation_report` | JSON immutabile dei controlli contabili, più le chiavi di provenienza (sotto) |
 | `source_sha256` | **SHA-256 dei byte del file** |
-| `parser_version` | `semantic-v2-2026-07-15` (PDF), `xbrl-context-period-v3` (XBRL) |
-| `forecastable` | = `semantic_valid` |
+| `parser_version` | `semantic-v3-2026-07-20` (PDF), `xbrl-context-period-v3` (XBRL), con i suffissi di provenienza (sotto) |
+| `forecastable` | `semantic_valid` **e** il verdetto sui conti critici — vedi pagina 04 §9/§9-bis |
 | `original_bs_snapshot` / `original_is_snapshot` / `rettifiche_log` | stato pre-rettifiche e giornale (massimo 20 voci) |
 
 Nel report di validazione ogni importo è serializzato **come stringa**: nessuna perdita di
 precisione passando da decimale a virgola mobile.
+
+### La provenienza si legge a posteriori
+
+Un import non ordinario resta riconoscibile **dopo**, senza rieseguirlo, da due posti:
+
+| Percorso | Nel `validation_report` | Sul `parser_version` |
+|---|---|---|
+| Conti critici (sempre) | `critical_accounts` — i tre verdetti e le loro motivazioni (pagina 04 §9-bis) | — |
+| OCR MinerU | `ocr` — engine, versione, pagine, tabelle, `accounting_method`, `source_detail_fields`, `detail_level` | suffisso `+mineru-<ver>` |
+| Riscatto vision (pagina 02 §4-bis) | `vision_rescue` — engine, sezioni accettate, sezioni tentate, e **il motivo del cancello per ogni sezione**, accettata o scartata | suffisso `+vision-<sezioni>` |
+
+La ridondanza è voluta e asimmetrica: il `parser_version` è troncato a 50 caratteri e non può
+portare i motivi, e una sezione **scartata** non lascia traccia nel suffisso. Per sapere *perché*
+un riscatto non è stato tenuto si guarda il report, mai il suffisso.
 
 ## 3. Hash e versione: provenienza, non cache
 
@@ -138,3 +152,23 @@ e un punteggio di confidenza derivato dalla confidence del router (alta 0,95 / m
 0,40).
 
 Quel punteggio è **informativo**: nessuna decisione dipende da esso.
+
+## 7. La baseline di regressione dell'import
+
+`tests/fixtures/import_baseline.json` è il registro **versionato** di ciò a cui ogni file del
+corpus importa: un record per file, indicizzato dall'**hash del contenuto**. Serve a rispondere
+con una misura, non con un'opinione, alla sola domanda che conta dopo una modifica
+all'estrazione: *ha spostato qualcosa?*
+
+| Pezzo | Ruolo |
+|---|---|
+| `tests/_import_probe.py` | esegue **fedelmente il percorso di produzione** e ne registra il risultato completo |
+| `scripts/refresh_import_baseline.py` | rigenera il fixture |
+| `tests/test_import_baseline.py` | verifica campo per campo |
+
+Ogni voce dichiara la propria natura: i valori sono `verified` (confrontati col documento) oppure
+soltanto `observed` (registrati così com'erano). La distinzione va rispettata — un `observed` è una
+fotografia del comportamento, non una prova che quel numero sia giusto.
+
+È **questa**, e non una singola esecuzione dell'harness (pagina 03 §9), la fonte da guardare per un
+prima/dopo: l'harness misura la quadratura dell'estrazione, la baseline misura i valori persistiti.

@@ -42,6 +42,17 @@ Invece: ogni candidato confine viene **validato operativamente**, rieseguendo la
 righe. Vince quello che **massimizza il bilanciamento delle righe con descrizione sui due lati**;
 a parità, il più vicino al centro robusto della pagina. Se nessuno è valido → si usa il centro.
 
+### Il secondo passaggio, per le righe senza codice
+
+Alcune verifiche a due colonne sono pulitissime e non hanno codice conto: la riga è
+`descrizione importo` e basta ("Cassa 179,90 | Fornitori 296.099,94", budget_367). La raccolta
+normale, che pretende un codice in testa, non trova **nulla**. Solo allora — e solo allora, così i
+file con codice non possono regredire — la raccolta viene ripetuta in modalità **senza codice**:
+ogni riga riceve un codice sintetico che non è prefisso di nessun altro, il gutter si cerca fra le
+divisioni possibili scegliendo la più bilanciata, e ciascuna colonna viene troncata al proprio
+primo `TOTALE` di sezione — altrimenti su un dump compatto SP+CE in una pagina i conti economici
+finirebbero bookati come debiti.
+
 ### Ricomposizione degli importi spezzati
 
 Su text-layer corrotti un importo arriva a frammenti. Si concatena e:
@@ -135,6 +146,32 @@ Un mastro viene scartato quando i suoi figli **diretti** sommano al suo importo 
 raddoppierebbe su alberi a tre livelli (mastro → intermedio → foglia), e la radice non verrebbe
 mai scartata (budget_343/348).
 
+**Ma la parentela non si deduce dal codice.** La regola storica confrontava i prefissi
+(`c.startswith(code)`), e su un piano dei conti con famiglie **disgiunte** non deduplica nulla in
+silenzio: AGO stampa mastri a 8 cifre (`13095000`) e figli a 9 (`101080000`), e nessuno dei due è
+prefisso dell'altro, quindi venivano sommati entrambi. Su `613_2024` questo sovra-leggeva l'attivo
+di 41.613,46 (**0,836%**), appena oltre il gate dello 0,5%: il netting diventava un no-op e 2,25 M
+di fondi ammortamento restavano fra i debiti con l'attivo lordo — **su un foglio che quadrava**, e
+quindi con ogni controllo a valle soddisfatto.
+
+Oggi si enumerano più **partizioni candidate** (tutte le righe; il dedup storico per prefisso; una
+per ciascuna profondità osservata) e si tiene quella che riconcilia a un totale **che il documento
+ha stampato**, con tolleranza `max(€50; 0,5%)`. La profondità del codice è solo un generatore di
+ipotesi: il totale stampato è il giudice. Senza totale dichiarato, o se nessuna partizione
+riconcilia, si torna al comportamento storico ma marcato `reconciled=False` — così il chiamante
+**sa** che la scansione non è verificata invece di fidarsene.
+
+Due dettagli che sembrano cosmetici e non lo sono:
+
+- la selezione restituisce la **regola vincente**, non la sua etichetta. Un'etichetta verrebbe
+  risolta di nuovo sulle righe che le vengono passate, e potrebbe ricadere in silenzio sul dedup
+  per prefisso sul lato passivo;
+- la usano **entrambi** i consumatori di route C: il netting *e* l'ancora con cui si sceglie fra
+  CoGe-LLM e deterministico (pagina 02 §4). Sbagliarla lì non produce un warning: produce **dati
+  diversi persistiti**.
+
+Test: `tests/test_dedup_partition.py`.
+
 Regola gemella nella riclassificazione: si emette **una riga al livello più grossolano la cui
 descrizione mappa a una voce IV-CEE specifica**, e si scende nei figli solo se la descrizione
 del nodo è generica. Un padre classificato *sta per* la somma dei suoi figli.
@@ -197,6 +234,46 @@ valore IV-CEE valido.
 
 Specularmente, la riduzione dell'ancora è cappata ai lordi presenti: un fondo senza il suo
 asset non deve restringere l'ancora.
+
+### L'applicazione è atomica
+
+Il netting scrive su più campi (sp02, sp03, i secchi dei debiti). La fase di scrittura fotografa
+il foglio prima della prima modifica e, se qualcosa solleva, **lo ripristina per intero** e si
+dichiara `detected > 0 / applied == 0`. Senza questo, un errore a metà lasciava un foglio **mezzo
+nettato** che non portava nessuno dei marcatori `_contra_*` — e il motore di affidabilità
+(pagina 04 §9) legge quell'assenza come "su questa route non gira nessuna scansione", cioè
+declassa in silenzio un foglio corrotto a foglio normale.
+
+## 3-bis. Le grafie: una forma canonica per ogni didascalia
+
+> Motore: `importers/label_semantics.py`, dizionario `data/label_dictionary.json`.
+
+Una voce di legge ha **un** significato e **N** grafie per gestionale: `I. immateriali`,
+`I - Immobilizzazioni immateriali`, `B.I IMMOBILIZZAZIONI IMMATERIALI`. L'LLM, che legge il
+documento intero, i sinonimi li regge. A rompersi sono i **cancelli deterministici** che stanno
+intorno — le ancore di sezione, i totali di controllo dichiarati, il netting dei fondi, il
+riclassificatore delle contrapposte — perché sono loro a decidere se **accettare** l'output. Quando
+uno di essi non riconosce una grafia, a essere rifiutata è un'estrazione **corretta**.
+
+Coesistevano sei forme normali reciprocamente incompatibili, e una era un difetto vivo: quella del
+router, che cercava marcatori non accentati su testo accentato (vedi pagina 01 §2). `normalize_label`
+è ora la forma canonica unica: idempotente, e **non inventa parole** (`I. immateriali` →
+`immateriali`; espandere alla voce completa è compito del dizionario). Il path civilistico
+(`B.II.1.a`) non è rumore: viene estratto in `path_hint` e usato per disambiguare.
+
+Il dizionario ha tre spazi target — **voce**, **marcatore**, **conto** — misurati su un corpus di
+72 documenti: prima di questo lavoro i marcatori erano irrisolti al **100%**, i conti al 63%, le
+grafie legali al 42%.
+
+Il consumatore che conta di più è `_is_fondo_amm`, che ora riconosce `F.di ammor.to`, `Fdo amm`,
+`Fondo amm.` attraverso la forma contigua `fondo ammortamento`. Quella funzione governa **tutto**
+il netting di route C: un fondo non riconosciuto non viene sottratto dall'immobilizzazione,
+l'attivo resta lordo, e oltre l'1% l'import viene rifiutato. I costi di Conto Economico
+("Ammortamento immobilizzazioni immateriali", "Quota ammortamento esercizio") restano
+deliberatamente **fuori**: sono costi, non fondi, e nettarli doppia il conteggio (§3).
+
+Test: `tests/test_label_semantics_normalize.py`, `tests/test_label_semantics_spaces.py`,
+`tests/test_fondo_amm_grafie.py`, `tests/test_classifier_accenti.py`.
 
 ## 4. Tipizzazione dei debiti
 
@@ -300,6 +377,30 @@ già bilanciato**.
 Qui è **vietato usare il pareggio** come ancora: su una perdita include la perdita parcheggiata
 sull'attivo, mentre i mastri lordi riconciliano correttamente al TOTALE ATTIVITA (343/348).
 
+### Il risultato dell'anno precedente non consolidato
+
+Una verifica spesso **non** consolida il risultato dell'esercizio precedente nei conti di capitale
+e riserve: lo stampa come riga a sé, tipicamente **senza codice conto**, nel footer dello Stato
+Patrimoniale accanto ai totali ("Utile esercizio precedente 68.228,65"). La raccolta tiene solo le
+righe con un codice in testa, quindi quell'importo spariva dal passivo: il gap dello SP
+sovrastimava il risultato di periodo **esattamente di quella cifra**, e il secondo cancello di
+auto-validazione rigettava una ricostruzione per il resto **esatta** (budget_342: primo cancello
+scarto 0,00, secondo fuori di 68.228,65 → ripiego su un best-effort mascherato al 60% → import
+fallito con "non supera i controlli contabili").
+
+Ora quell'importo finisce in `sp12` (utili/perdite portati a nuovo). Tre vincoli:
+
+- si raccolgono **solo** le righe senza codice: una riga con codice sta già dentro un mastro di
+  livello 1 (es. "23 CAPITALE E RISERVE") e verrebbe contata due volte;
+- il segno segue la didascalia (perdita → negativo) e la colonna (lato attivo → negativo, è un
+  saldo Dare);
+- il risultato **corrente** ("Utile del periodo", "Utile d'esercizio") non è mai agganciato: resta
+  la figura di pareggio derivata dal gap Attivo/Passivo.
+
+Le righe si raggruppano per posizione fisica, perché didascalia e importo stanno su due linee di
+base diverse (~2 pt). Il tutto resta dietro entrambi i cancelli di auto-validazione, quindi non può
+applicare valori sbagliati a un file che già quadra. Test: `tests/test_prior_result_in_pn.py`.
+
 ## 8. I quindici divieti
 
 Raccolti perché sono la spina dorsale del sistema. Ognuno esiste per un bug reale.
@@ -320,6 +421,53 @@ Raccolti perché sono la spina dorsale del sistema. Ognuno esiste per un bug rea
 14. **I sotto-campi non alterano mai un aggregato**.
 15. **Mai trattare attivo = passivo = 0 come una quadratura**.
 
+## 8-bis. Dove può finire la massa che non si è saputa classificare
+
+> Implementata in `situazione_contabile_parser` (`TIER0_FIELDS`, `FALLBACK_FIELDS`,
+> `fallback_field`, `fallback_bucket`); la soglia di materialità vive in `importers/reliability.py`.
+> Questa sezione descrive **il codice**, non la proposta: `SCHEMA-RICONOSCIMENTO-CLASSIFICAZIONE-NETTING.md`
+> Parte III/IV la presenta ancora come opzione da valutare, perché è anteriore all'implementazione.
+
+Il divieto 1 (*mai un plug*) non vieta di **etichettare**. La distinzione è tutta qui:
+
+> **Un plug INVENTA massa ed è vietato. Un fallback ETICHETTA massa che è stata davvero letta ed
+> è ammesso.**
+
+**Dove non può mai finire — `TIER0_FIELDS`:** `sp02`/`sp03`/`sp04` (immobilizzazioni nette),
+`sp11`/`sp12`/`sp13` (patrimonio netto), `sp16a`/`sp17a` (debiti verso banche) e `ce09`. I primi
+tre gruppi spostano un **totale**; `ce09` c'è perché `EBITDA = EBIT + ce09` ne fa l'unico confine
+di KPI dentro i costi operativi. Un errore qui rompe insieme PFN, ROI, indipendenza finanziaria e
+i due modelli di rating.
+
+**Dove può finire — `FALLBACK_FIELDS = {'ce': 'ce06', 'bs': 'sp16g'}`:** destinazioni neutre per i
+KPI, e **sempre un sotto-campo esplicito, mai un aggregato**. La ragione è specifica e non ovvia:
+`calculations/projection_common.base_bank_debt` assegna alle **banche** qualunque scarto fra
+`sp16`/`sp17` e la somma dei loro dettagli, quindi massa lasciata sull'aggregato diventa **debito
+bancario fantasma**, con piano di rimborso e oneri finanziari proiettati sopra.
+
+**Quando è silenzioso — la materialità:** `M = max(1.000 €; 0,1% del totale attivo)`. La
+definizione canonica sta nel modulo puro `importers/reliability.py` e il parser la ri-esporta, così
+la regola esiste in un posto solo. Sotto `M` il ripiego è silenzioso; sopra, l'importo si accumula
+in `_unclassified_mass` invece di sparire.
+
+Due funzioni distinte, e il motivo è pratico: `fallback_field(statement)` dà la destinazione dentro
+un ciclo di classificazione, che conosce l'importo molto prima che il totale del foglio esista;
+`fallback_bucket(...)` aggiunge il verdetto di materialità quando il totale è noto, e **rifiuta**
+un target di tier 0.
+
+**L'ordine di classificazione** nella ricostruzione gerarchica è: tabella di keyword → albero
+IV-CEE condiviso (attraverso `_resolve_ce_field`, vincolato per direzione) → catch-all. È
+puramente additivo, l'albero interviene solo dove la tabella restituisce `None`. È ciò che ha
+smesso di seppellire 36.500,17 di ammortamenti nel catch-all `ce12` di budget_342: totali e `sp13`
+restavano corretti, **nessun cancello scattava**, e l'EBITDA era sbagliato.
+
+Il criterio di accettabilità che ne discende:
+
+> L'imprecisione **dentro** un aggregato è accettata per progetto — l'utente la rifinisce in
+> Rettifiche. Ciò che non è accettato è massa che **attraversa** un aggregato o un confine di KPI.
+
+Test: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
+
 ## 9. Test di riferimento
 
 - `tests/test_contra_netting.py` — il file di riferimento (668 righe): dedup padre/figlio,
@@ -330,3 +478,14 @@ Raccolti perché sono la spina dorsale del sistema. Ognuno esiste per un bug rea
 - `tests/test_prod_route_c.py` — ground truth campo per campo. La premessa è esplicita:
   *la quadratura da sola non basta, budget_395 quadra con residuo zero e ha `sp02`/`sp03`
   entrambi sbagliati*.
+
+**L'harness di quadratura** (`Test/_quadratura_harness.py`) misura il tasso di quadratura su un
+corpus: route deterministiche di default, `--llm` per includere A/B. È lo strumento di riferimento
+per il prima/dopo di una modifica all'estrazione — con due avvertenze:
+
+- **`Test/` è in `.gitignore`**: l'harness e il suo corpus sono strumenti **locali**, non fanno
+  parte del repository e in un clone pulito non ci sono. Molti documenti di questa cartella li
+  citano come se ci fossero;
+- un "NO" dell'harness **non** significa "non importa": vedi `docs/FIXING-IMPORT.md` §0. Per
+  rispondere a *"la mia modifica ha spostato qualcosa?"* la fonte versionata è la baseline di
+  regressione (pagina 06 §7), non una singola esecuzione dell'harness.

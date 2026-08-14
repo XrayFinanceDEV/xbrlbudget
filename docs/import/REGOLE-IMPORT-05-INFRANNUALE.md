@@ -226,7 +226,33 @@ Applicato **prima di ogni calcolo**, al parziale sempre e al riferimento se pres
 
 **G5 opera su un insieme chiuso**: immobilizzazioni finanziarie, crediti a breve, riserve, debiti
 a breve, debiti a lungo, ammortamenti. Solo su queste il disallineamento blocca, perché sono le
-voci che il motore **scala o riporta**: procedere fabbricherebbe una composizione.
+voci che il motore **scala o riporta**: procedere fabbricherebbe una composizione. L'elenco dei
+dettagli di ciascun aggregato non è riscritto qui: il gate legge `detail_fields()` di
+`iv_cee_hierarchy`, la stessa mappa che usa `check_quadratura`.
+
+> **Una ripartizione ASSENTE non è un disallineamento** (dal 2026-08-07). Un bilancio abbreviato
+> dichiara solo l'aggregato, e i distributori lo sanno già fare: restituiscono zeri e riportano
+> l'aggregato invariato, senza inventare nulla. A bloccare è solo una ripartizione **dichiarata**
+> che non somma al proprio aggregato — cioè una contraddizione: una delle due cifre è sbagliata.
+> È la stessa regola di `importers/reliability.py` (pagina 04 §9-bis), dove anche `UNRELIABLE`
+> vuole una contraddizione e non l'assenza di un controllo.
+
+**`sp16`/`sp17` sono l'eccezione e bloccano comunque**, dichiarati o no: lì
+`projection_common.base_bank_debt` assegna alle banche l'intero scarto aggregato/dettaglio, quindi
+una ripartizione assente diventa davvero debito bancario fantasma e gonfia la PFN. È una falla
+nota, non una scelta.
+
+**Come si manifestava il rifiuto, prima di quella correzione — e perché era invisibile.** Una
+verifica di route C con `sp04`/`sp05` solo aggregati veniva respinta, ma
+`bulk_upsert_assumptions` **cattura** l'errore e risponde **HTTP 200** con
+`forecast_generated: false` e la ragione in `message`: nessun `ForecastYear` scritto,
+`analysis.forecast_years` vuoto, e la colonna Proiezione della tab Indicatori vuota **sotto un
+toast di successo**.
+
+> **Chi chiama l'endpoint bulk delle assumptions deve leggere `forecast_generated`, non lo stato
+> HTTP.** Oggi lo fanno `/budget` ed entrambi i punti di chiamata del wizard della pratica.
+
+Test: `tests/test_intra_year_semantics.py` (`test_forecast_gate_*`).
 
 **G4 è anti-elusione, ed è sottile.** Le diagnostiche di import non sono colonne del database:
 vengono ripescate dallo snapshot originale e reiniettate prima della validazione, *"so a

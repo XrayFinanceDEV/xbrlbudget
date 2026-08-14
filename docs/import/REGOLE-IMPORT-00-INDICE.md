@@ -18,11 +18,11 @@ Ogni pagina è autonoma. L'ordine sotto è quello in cui i fatti accadono a un f
 | # | Pagina | Copre |
 |---|---|---|
 | 01 | [Riconoscimento route](REGOLE-IMPORT-01-ROUTING.md) | Come si decide *che cosa è* un documento e a quale estrattore va |
-| 02 | [Estrazione e scelta dell'estrattore](REGOLE-IMPORT-02-ESTRAZIONE.md) | Ordine di lettura del testo, deterministico vs LLM, OCR, XBRL, CSV, come si sceglie il candidato |
-| 03 | [Spacchettature e netting](REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) | Ricostruzione righe, fondi ammortamento, tipizzazione debiti, entro/oltre |
-| 04 | [Quadrature, gate e rifiuti](REGOLE-IMPORT-04-QUADRATURE.md) | I controlli contabili, le tolleranze, i messaggi di errore e il loro ordine |
+| 02 | [Estrazione e scelta dell'estrattore](REGOLE-IMPORT-02-ESTRAZIONE.md) | Ordine di lettura del testo, deterministico vs LLM, riscatto vision, OCR, XBRL, CSV, come si sceglie il candidato |
+| 03 | [Spacchettature e netting](REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) | Ricostruzione righe, fondi ammortamento, grafie, tipizzazione debiti, entro/oltre, dove può finire la massa non classificata |
+| 04 | [Quadrature, gate e rifiuti](REGOLE-IMPORT-04-QUADRATURE.md) | I controlli contabili, le tolleranze, i messaggi di errore e il loro ordine, l'affidabilità dei conti critici |
 | 05 | [Bilancio infrannuale](REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward, i gate del previsionale |
-| 06 | [Persistenza e round-trip](REGOLE-IMPORT-06-PERSISTENZA.md) | Cosa finisce sul DB, stati di validazione, hash, versioni |
+| 06 | [Persistenza e round-trip](REGOLE-IMPORT-06-PERSISTENZA.md) | Cosa finisce sul DB, stati di validazione, hash, versioni, provenienza, baseline di regressione |
 
 Documenti preesistenti nella stessa cartella ([IMPORT-OVERVIEW](IMPORT-OVERVIEW.md),
 [IMPORT-ROUTING-TAXONOMY](IMPORT-ROUTING-TAXONOMY.md),
@@ -106,7 +106,11 @@ descrivendo un'operazione che non avviene più. Ora dicono **"non classificato i
 e **"non classificato"**: il residuo misura massa che non è stata attribuita a nessuna voce
 IV-CEE, e il bilancio resta esattamente come è stato letto. Le etichette `BILANCIO NON QUADRATO`
 e `QUADRATURA MASCHERATA` sono invariate — restano vere e sono citate in tutta la documentazione.
-Resta da ripulire `CLAUDE.md`, che descrive ancora il plug.
+
+**`CLAUDE.md` è stato ripulito** (2026-08-14): il blocco di 661 righe sull'import è stato sostituito
+da una sezione breve che rimanda a questa serie, e le affermazioni superate sono registrate una per
+una in `docs/superpowers/2026-08-14-inventario-claude-md.md`. Da lì in avanti, **questa cartella è
+la sede dell'import**: una regola nuova si scrive qui, non là.
 
 ## 6. Codice dichiarato morto
 

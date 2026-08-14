@@ -305,8 +305,10 @@ post-processing: `_normalize_ce_signs`, `_validate_crediti`/`_validate_debiti`
 `_extract_with_llm_vision` con gli stessi prompt CoGe. Single-year (i trial balance sono
 raramente comparativi): `prior_bs_data`/`prior_ce_data` restano `None`.
 
-In `pdf_importer` la scelta C è **LLM-first con confronto**: si estrae con l'LLM CoGe E con il
-deterministico, e si tiene il candidato con **scarto di quadratura minore** (`_plug_residual`).
+In `pdf_importer` i due estrattori di route C **girano entrambi** e si tiene il migliore. La regola
+di scelta è cambiata dopo la stesura di questa pagina: **non** vince il `_plug_residual` minore, che
+è cieco alla sotto-estrazione, ma il candidato più vicino al **totale di controllo dichiarato**, col
+residuo solo come spareggio. Regola corrente e motivazione: `REGOLE-IMPORT-02-ESTRAZIONE.md` §4.
 
 ### Completezza dell'estrazione CoGe (non-determinismo)
 L'LLM, su liste lunghe, **droppa conti in modo non deterministico** (provato: file
@@ -473,8 +475,10 @@ numeri falsi".
 - `_be_split` sceglie il gutter che **bilancia le righe con descrizione** su entrambi i lati
   (centro come spareggio), non il gap più largo (che tagliava la colonna passivo → masking
   343/348/405).
-- **Gate `SC_PLUG_REJECT_PCT = 0.20`** in `pdf_importer`: best-effort con plug > 20% del totale →
-  rifiutato (fallback LLM/onesto); sotto → import con flag `BILANCIO NON QUADRATO` per Rettifiche.
+- **`SC_PLUG_REJECT_PCT = 0.20`** in `pdf_importer`: **non rifiuta nulla** (il nome inganna, ed è
+  il disallineamento D2 di `REGOLE-IMPORT-00-INDICE.md` §5). Scala solo la severità del testo del
+  warning `BILANCIO NON QUADRATO` fra "parziale" e "prevalentemente stimata"; una verifica
+  leggibile si importa comunque, per la correzione in Rettifiche.
 
 **Learning REVERTITO (non ritentare).** Far sovrascrivere il *lato* attivo/passivo dalla descrizione
 dell'albero (`resolve`) per togliere il default "sconosciuto → sp16" è **sbagliato**: la COLONNA è

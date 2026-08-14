@@ -7,6 +7,14 @@
 >
 > Fonti verificate sperimentalmente il 2026-07-27 (vedi
 > `docs/piano-import-2026-07/14-AUDIT-CLASSIFICAZIONE-E-NETTING-2026-07-27.md`).
+>
+> ⚠️ **Stato (2026-08-14): le Parti III e IV sono state IMPLEMENTATE e non sono più proposte.**
+> La politica di fallback e materialità (soglia `M`, secchi neutri, divieti di classe 1), la
+> partentela mastro/dettaglio per riconciliazione anziché per prefisso, il ripiego sull'albero
+> IV-CEE e la diagnostica della massa non classificata vivono nel codice. Le regole correnti,
+> con i nomi effettivi (`TIER0_FIELDS`, `FALLBACK_FIELDS`, `materiality_threshold`), stanno in
+> `REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md` §3 e §8-bis. Leggere le Parti III/IV come il
+> **ragionamento** che ha portato lì, non come lavoro da fare.
 
 ---
 

@@ -42,6 +42,12 @@ deterministic parser may not be the one that produced the numbers you are lookin
 Print both candidates before blaming either (`extract_contrapposte_best_effort` alone is
 easy to run; the LLM one needs `ANTHROPIC_API_KEY`).
 
+**The harness is not in the repo.** `Test/` is listed in `.gitignore`, so
+`Test/_quadratura_harness.py` and its corpus are local tools on the author's machine: several
+documents in `docs/import/` cite them as if a clone had them. The versioned equivalent for
+"did my change move anything?" is `tests/fixtures/import_baseline.json`
+(`docs/import/REGOLE-IMPORT-06-PERSISTENZA.md` §7).
+
 **"Does the harness say NO" ≠ "won't import".** The quadratura harness runs
 `extract → check_quadratura` but NOT the production `reconcile`/`enforce` stages, so a
 harness NO can still import. To answer "does this PDF import?", run the real
@@ -260,3 +266,31 @@ fine (2.181.734,09 net, balanced). Two things are wrong and only one is recovera
 - `ce01` also absorbed rimanenze finali 1.468.999,24 and proventi finanziari 10.944,23 —
   they sit in the RICAVI column but are not ricavi delle vendite. Column is ground truth
   for the *side* (§1.3), never for the *voce*.
+
+### Update 2026-08-14 — what the per-section vision rescue changed
+
+Both files are what motivated the **vision rescue** (`importers/vision_rescue.py`, rules in
+`docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §4-bis): the right number IS printed on the page,
+the text layer just does not reach it. The rescue re-reads, in vision, only the pages of the
+section that does not tie, and rebuilds that section from its **mastri**.
+
+**budget_624 — closed.** The CE was rescued: utile CE = `sp13` = **8.906,79**, matching the
+printed figure, `validation_status: verified`. It took two corrections that are general, not
+file-specific: choosing the mastro level by **reconciliation** to the printed column total
+(taking the fewest digits dropped two good mastri worth 46.110,67), and picking the CE fallback
+**by direction** — `ce06` on a row read in the REVENUE column is a cost, and moves the result by
+2× (that is what booked rimanenze finali + proventi finanziari, 1.479.943,47, and closed the CE
+at 0,00). Measured 3/3 after both.
+
+**budget_623 — improved, still open.** The SP rescue reconciles the attivo to the printed
+2.420.397,40 GROSS with a 0,00 gap (2.130.609,37 once the fondi are netted), the unclassified
+residual goes from ~350.000 to 0, and QUADRATURA MASCHERATA disappears. But the final sbilancio
+is **not deterministic**: vision occasionally drops a mastro on the PASSIVO column (the attivo
+comes back to the cent every time). Since the gate now also measures the rebuilt passivo against
+its own printed total, those runs are **rejected** and the file stays exactly as it was, with its
+warnings — the intended behaviour (a sheet declared broken beats a patched one), but it means the
+rescue is no longer accepted on every run here. One live run after that change (1/1, not 6/6 —
+live runs cost an API call each): SP rescue accepted, not masked, attivo 2.130.609,37. **A sample
+of one is not a frequency.** The file still has to be finished in Rettifiche, where 873.205,40 of
+bank debt currently sits under *entro* until the user reclassifies it (maturity is not stated in
+the mastri, and undated debt is booked short-term on purpose).

@@ -71,6 +71,14 @@ Il riordino è l'**ultima** sorgente di testo in ordine di precedenza. Restano d
 ricomposizione delle pagine a valori staccati e il filtro delle colonne DIFFERENZA/SCOST., che
 leggono già per coordinate e sanno qualcosa di più del semplice ordine.
 
+### I pre-filtri per gestionale
+
+Sul testo così ottenuto agiscono alcuni pre-filtri, ciascuno legato a una **stampa** e non a
+un'azienda: **Zucchetti** (le righe di sottoconto, che in quel layout portano l'importo sulla riga
+*precedente*), **Datev/Koinos**, **"Stampa dettaglio voci"** (report ERP con i movimenti di
+partitario sotto ogni voce) e il rumore dei separatori **Dylog**. Tolgono righe di dettaglio che
+ripetono massa già totalizzata: lasciarle passare la fa contare due volte.
+
 ## 3. Route A/B (IV-CEE): il deterministico prima, l'LLM solo se serve
 
 1. **Parser deterministico per primo**, e gratis. Il suo output è accettato **solo se** supera
@@ -133,7 +141,117 @@ IVA + perdita dichiarata, ma **solo se i fondi superano l'1%** dell'ancora stess
 1. **Tipizzazione debiti in overlay** — solo se ha vinto l'LLM (pagina 03 §4).
 2. **Netting fondi ammortamento** — sul candidato scelto, chiunque l'abbia prodotto (pagina 03 §3).
 3. **Riconciliazione al risultato dichiarato** — saltata se il parser si dichiara autorevole.
-4. **Warning sul residuo** — mai bloccante.
+4. **Riscatto vision della sezione che non torna** — solo con chiave API (§4-bis).
+5. **Warning sul residuo** — mai bloccante.
+
+## 4-bis. Il riscatto vision per sezione
+
+> Motore: `importers/vision_rescue.py` + `situazione_contabile_parser.build_sp_from_vision` /
+> `build_ce_from_vision`. Introdotto il 2026-08-14.
+
+Il terzo candidato di route C non è un estrattore alternativo: è un **riscatto**, prodotto solo
+su richiesta e solo per la sezione che non torna. Il caso che lo motiva è preciso: **il numero
+giusto è stampato sulla pagina, ma il text layer non ci arriva**. Su budget_624 i mastri di costo
+dell'ultima pagina di CE sono disegnati come *vettori* e in `page.get_text()` non esistono affatto.
+
+**Quando scatta.** Alla **fine** della catena — dopo tipizzazione, netting e riconciliazione al
+dichiarato — quando `check_quadratura` sul foglio *finito* dice vuoto, sbilanciato, mascherato, o
+con utile CE diverso da `sp13`. La posizione in coda è deliberata: innescarlo prima del netting lo
+farebbe scattare su un attivo ancora lordo, cioè su un divario che il netting chiude da solo.
+L'innesco è **gated sulla chiave API**: senza chiave non si parte nemmeno, perché le pagine
+verrebbero rese a 200 dpi per poi essere buttate.
+
+**Che cosa legge.** Le sole pagine della sezione mancante (`situazione_contabile_parser.section_pages`),
+rese a 200 dpi e rilette in vision con i due prompt CoGe distinti SP/CE. Un solo tentativo per
+sezione, tetto di **8 pagine**, ogni errore non fatale: se il riscatto non riesce il foglio resta
+esattamente com'era, coi suoi warning. Le due sezioni si innescano in modo indipendente, e il
+riscatto del CE non tocca `sp13` come quello dell'SP non tocca il conto economico.
+Costo misurato: ~4.500 token in, 1.000-2.000 out, 8-16 s per sezione.
+
+**Solo i mastri, e la sezione si ricostruisce da zero.** I dettagli a codice più lungo la vision li
+sbaglia e non servono: il mastro porta già l'intero importo della voce. La sezione riscattata
+**sostituisce** quella estratta, non le si somma — sommare richiederebbe di sapere che cosa c'era
+già dentro, e conta due volte un mastro (è l'errore che fece revertare il tentativo del 14/07).
+
+**Il livello dei mastri si sceglie per riconciliazione, non per profondità** (`mastro_level_rows`).
+La profondità del codice genera le ipotesi; il **totale di colonna stampato** è il giudice — la
+stessa regola di `_select_dedup` (pagina 03 §3). Prendere il minimo di cifre e basta si è rotto sul
+file vero: la vision trascrive i peer di uno stesso livello con un numero di cifre diverso
+(`7301500` accanto a `73015005`), e il minimo scartava due mastri buoni per 46.110,67. Senza totali
+leggibili, o se nessuna partizione riconcilia, resta il minimo e a decidere è il cancello.
+
+### Il cancello (`accept_rescue`)
+
+Il riscatto si tiene solo se valgono **tutte**:
+
+| # | Condizione |
+|---|---|
+| 1 | la **colonna di sinistra** ricostruita riconcilia al totale stampato entro `max(50 €; 0,5%)` |
+| 2 | la **colonna di destra** fa altrettanto contro il proprio totale stampato, quando la quantità è misurabile — **saltata sul percorso CE**, che non la passa |
+| 3 | l'estrazione non è vuota |
+| 4 | il riscatto non spegne un'identità utile CE = `sp13` che prima reggeva |
+| 5 | la quadratura risultante è **strettamente migliore**, misurata come la somma dei valori assoluti di sbilancio e residuo (sono la stessa specie di male e si sommano) |
+
+Il cancello riceve una bandiera **`residual_measured`**: il residuo del foglio riscattato è una
+*misura* solo se esisteva un'ancora di testo indipendente contro cui farla. `build_sp_from_vision`
+**asserisce** `_plug_residual = 0`, non lo misura, e un controllo che manca non è un controllo
+superato: in quel caso si porta avanti il residuo di prima. È la stessa regola di
+`importers/reliability.py` — un verdetto vuole una contraddizione, non l'assenza di prove.
+Riparare l'identità CE/SP è un miglioramento reale ma non una licenza illimitata: ha per tetto la
+stessa tolleranza di riconciliazione.
+
+**La coerenza dei totali vision NON è una condizione del cancello.** Serve solo a scegliere quale
+ancora usare: `section_anchor` preferisce il totale letto in vision quando i totali vision tornano
+fra loro (`attivo + perdita == passivo`, `costi + utile == ricavi`), e altrimenti ricade sulle
+ancore di testo. Su un riscatto **CE** con totali incoerenti l'incoerenza in sé non scarta nulla:
+restano da superare la riconciliazione sull'ancora di testo e le altre condizioni. Sul percorso
+**SP** la coerenza è necessaria di fatto, ma per un motivo diverso e altrove: `pdf_importer`
+rinuncia al riscatto quando `vision_result` è nullo, perché senza un'identità che torni il segno
+del risultato sarebbe da indovinare — quindi una sezione SP incoerente non arriva mai al cancello.
+
+**Perché il passivo ha bisogno della sua ancora** (condizione 2, aggiunta il 2026-08-14). Misurando
+la sola colonna di sinistra, questo riscatto poteva produrre un foglio **sbagliato** invece che
+incompleto: quando `net_contra_accounts` ha una scansione disponibile su quel file, una sovra-lettura
+del passivo non si vede nello sbilancio, perché a valle viene **assorbita** cancellando debiti fino
+alla massa dei fondi. Il foglio torna a quadrare, il residuo va a zero, il cancello vede un riscatto
+perfetto — e il debito persistito resta sottostimato senza un solo avviso. La quantità misurata è
+costruita per essere confrontabile con il totale *stampato*: `totale_passivo − utile + massa nettata`
+(il risultato è esposto dal documento come riga di pareggio fuori dal totale di colonna; i fondi sono
+righe della colonna destra che la ricostruzione porta in detrazione dell'attivo).
+
+**Il segno del risultato viene dall'identità che ha validato i totali**, non dall'ordine delle
+chiavi: un documento stampa spesso sia una riga "utile" sia una "perdita" (una delle due dell'anno
+precedente, o una didascalia a zero), e preferire l'utile ribalta il risultato quando è il ramo
+della perdita a tornare.
+
+### Le due regole di merito della ricostruzione
+
+**Scadenza non determinata → a breve, per prudenza.** I mastri non dicono se un debito è entro o
+oltre l'esercizio. In assenza di un segno che li distingua i debiti vanno **a breve**: anticipare
+una scadenza peggiora gli indici di liquidità e non li abbellisce, ed è l'utente a spostarli in
+Rettifiche quando sa che sono a lungo. Non è un ripiego dell'estrattore vision, è la regola del
+progetto (la segue anche il best-effort di route C, che pure emette solo `sp16`). La ricostruzione
+alza `_source_maturity_unspecified`, che l'import espone come `SCADENZA DEBITI NON DISTINTA`:
+**è una stringa di avviso, non un verdetto** — nessun cancello la legge, né qui né a valle, e non
+deve leggerla, perché un import prudenzialmente a breve è valido, non sospetto.
+
+**Il ripiego del CE si sceglie per direzione.** La destinazione neutra `ce06` (pagina 03 §8-bis) è
+neutra solo *dentro* i costi della produzione: su una riga della colonna RICAVI è un costo, e la
+massa non riconosciuta sposta il risultato di **2×** il proprio importo. A destra si tiene il
+default del classificatore (`ce04`), che è del segno giusto. Su budget_624 ci finivano rimanenze
+finali e proventi finanziari letti a destra (1.479.943,47) e il CE chiudeva a 0,00 invece che a
+8.906,79.
+
+**Immobilizzazione netta negativa: azzerata, e la correzione parla.** Quando un fondo letto supera
+il proprio cespite lordo, `sp02`/`sp03`/`sp04` risulterebbero negative — mai un valore IV-CEE
+valido. Vengono azzerate, ma poiché sono campi di tier 0 la correzione **logga a warning** campo e
+importo e somma l'eccedenza tagliata a `_unclassified_mass`. Quella chiave è dichiarata **sempre**,
+anche a zero: `reliability.assess` la legge, e una chiave assente lì vale zero — un foglio
+riscattato si sarebbe dichiarato pulito solo perché il montatore vision non aveva un secchio.
+
+Provenienza: pagina 06 §2. Test: `tests/test_vision_rescue.py` (unitari con doppio, più i due PDF
+veri, gated su chiave e sulla presenza del documento), `tests/test_section_pages.py`. Il caso reale
+dei due file è in `docs/FIXING-IMPORT.md` §6.
 
 ## 5. L'LLM: cosa, quanto, quando
 
@@ -159,7 +277,7 @@ parsare, riempie campi tipizzati. Retry con backoff esponenziale, massimo 2, sug
 | PDF scansionato | +1 di OCR vision |
 
 La giustificazione dichiarata è che l'import di un PDF è un'operazione rara e le chiamate Haiku
-costano poco.
+costano poco. In tempo: **3-10 secondi** per PDF sul percorso normale.
 
 ### I due anni
 
@@ -169,6 +287,47 @@ Una singola coppia di chiamate estrae entrambe le colonne. Due guardie simmetric
   si esce (i validatori devono comunque girare sull'anno corrente);
 - **colonna corrente azzerata** e precedente valorizzato → si **promuove il precedente a
   corrente**.
+
+## 5-bis. MinerU: l'OCR opzionale, e perché non è in produzione
+
+> Motori: `importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`, configurazione
+> in `backend/app/core/config.py`. Endpoint dedicato: `POST /import/pdf-ocr`.
+
+Backend OCR alternativo per i PDF scansionati che il text layer non riesce a leggere. È un
+**percorso separato** da quello descritto a pagina 01 §5 (OCR locale a coordinate → OCR vision),
+con un endpoint proprio.
+
+> ⚠️ **Solo macchina di sviluppo. MinerU non va MAI sul VPS.** La sua immagine è
+> `FROM vllm/vllm-openai`: gigabyte di layer orientati alla GPU. Il servizio sta dietro il
+> **compose profile** `mineru`, che lo esclude da *ogni* comando compose — **`build` compreso** —
+> se il profile non viene richiesto. È ciò che conta, perché il `Jenkinsfile` esegue
+> `docker compose build --no-cache --parallel` e poi `up -d` sul VPS di staging: senza il profile
+> quel build si tirava dietro vLLM. Per la stessa ragione `MINERU_OCR_ENABLED` è **false** di
+> default nell'env del backend in compose.
+
+In locale:
+
+```bash
+MINERU_OCR_ENABLED=true docker compose --profile mineru up -d
+# con NVIDIA:
+MINERU_OCR_ENABLED=true docker compose --profile mineru \
+  -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+Con l'OCR spento il backend è indifferente: `mineru_client` e `mineru_adapter` sono importati
+**dentro** l'endpoint e mai a caricamento del modulo, `GET /import/capabilities` risponde
+`ocr_available: false`, e `POST /import/pdf-ocr` restituisce un 503 `MINERU_DISABLED` pulito, reso
+dall'interfaccia come *"Il servizio OCR non è disponibile — usa l'import PDF standard"*.
+
+**Nell'interfaccia il pulsante OCR non è reso** (2026-08-14): è una rimozione semplice, **non** un
+controllo di capability. `getImportCapabilities` esiste in `frontend/lib/api.ts` e non è cablato a
+nulla — non cercare il cancello che nasconde il pulsante, non c'è. Il percorso client è intatto
+(`importOCR`, `handleImport("pdf_ocr")`): riesporlo significa rimettere il pulsante, non
+ricostruire il ramo.
+
+Test: `tests/test_mineru_adapter.py`, `tests/test_mineru_client.py`,
+`tests/test_mineru_import_integration.py`, `tests/test_pdf_ocr_endpoint.py`. Piano di
+integrazione: `docs/piano-import-2026-07/14-PIANO-INTEGRAZIONE-MINERU-OCR.md`.
 
 ## 6. I totali di controllo dichiarati
 

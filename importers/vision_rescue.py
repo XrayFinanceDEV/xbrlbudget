@@ -260,3 +260,103 @@ def read_section(file_path: str, pages: Sequence[int], section: str,
             "perdita": parse_amount(parsed.perdita),
         },
     )
+
+
+# --------------------------------------------------------------- il cancello
+
+# La stessa tolleranza di _select_dedup / _reconcile_trial_to_declared: non una nuova.
+_TOL_ABS = Decimal("50")
+_TOL_PCT = Decimal("0.005")
+# I totali stampati o tornano al centesimo o sono stati letti male: qui non si
+# tollera nulla, e' un'identita' contabile, non una riconciliazione.
+_COHERENCE_TOL = Decimal("0.05")
+
+
+def reconcile_tolerance(total: Decimal) -> Decimal:
+    return max(_TOL_ABS, abs(total) * _TOL_PCT)
+
+
+def totals_are_coherent(sec: VisionSection) -> bool:
+    """I totali LETTI dalla vision tornano fra loro?
+
+    SP: attivo + perdita == passivo, oppure attivo == passivo + utile.
+    CE: costi + utile == ricavi, oppure costi == ricavi + perdita.
+
+    E' questa coerenza interna che autorizza a preferirli alle ancore di testo quando
+    quelle si contraddicono (budget_623: il testo legge un passivo che il PDF non
+    stampa). Senza entrambi i totali di colonna non c'e' identita' da verificare.
+    """
+    left, right = sec.totals.get("left"), sec.totals.get("right")
+    if left is None or right is None:
+        return False
+    utile = sec.totals.get("utile") or Z
+    perdita = sec.totals.get("perdita") or Z
+    if sec.section == "sp":
+        # attivo + perdita == passivo, oppure attivo == passivo + utile.
+        return (abs((left + perdita) - right) <= _COHERENCE_TOL
+                or abs(left - (right + utile)) <= _COHERENCE_TOL)
+    # ce: costi + utile == ricavi, oppure costi == ricavi + perdita — la
+    # convenzione di segno e' l'opposto dello SP (qui e' il "right" a crescere
+    # con l'utile, non il "left"), non la stessa formula riusata.
+    return (abs((left + utile) - right) <= _COHERENCE_TOL
+            or abs(left - (right + perdita)) <= _COHERENCE_TOL)
+
+
+def section_anchor(sec: VisionSection,
+                   declared: Dict[str, Optional[Decimal]]) -> Optional[Decimal]:
+    """Il totale stampato contro cui misurare la sezione ricostruita.
+
+    Preferisce il totale letto in vision quando i totali vision sono coerenti fra loro;
+    altrimenti ricade sulle ancore di testo. None quando nessuno dei due insiemi e'
+    utilizzabile — e allora il riscatto si scarta, non si accetta al buio.
+    """
+    if totals_are_coherent(sec):
+        left = sec.totals.get("left")
+        if left:
+            return left
+    if sec.section == "sp":
+        for key in ("attivo", "pareggio", "passivo"):
+            value = (declared or {}).get(key)
+            if value:
+                return value
+        return None
+    value = (declared or {}).get("costi")
+    return value or None
+
+
+def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
+                  declared: Dict[str, Optional[Decimal]],
+                  before, after) -> Tuple[bool, str]:
+    """Tre condizioni, tutte necessarie (spec §3). Ritorna (accettato, motivo).
+
+    `rebuilt_total` e' il totale LORDO della sezione ricostruita — per lo SP la somma
+    dell'attivo netto PIU' la massa dei fondi nettati, perche' il totale stampato su
+    questi file e' lordo (stessa aritmetica del cancello 1 di _hier_reconstruct).
+    `before`/`after` sono i Quadratura del foglio prima e dopo il riscatto.
+    """
+    anchor = section_anchor(sec, declared)
+    if anchor is None or anchor <= 0:
+        return False, "nessuna ancora utilizzabile (ne' i totali vision ne' quelli di testo)"
+
+    delta = abs(anchor - rebuilt_total)
+    tol = reconcile_tolerance(anchor)
+    if delta > tol:
+        return False, (f"non riconcilia al totale stampato: ricostruito {rebuilt_total:,.2f} "
+                       f"contro {anchor:,.2f} (scarto {delta:,.2f} > {tol:,.2f})")
+
+    if after.is_empty:
+        return False, "il riscatto produce un'estrazione vuota"
+
+    improved = (abs(after.sbilancio) < abs(before.sbilancio)
+                or after.plug_residual < before.plug_residual
+                or (not before.utile_match and after.utile_match))
+    worsened = (abs(after.sbilancio) > abs(before.sbilancio)
+                or after.plug_residual > before.plug_residual
+                or (before.utile_match and not after.utile_match))
+    if worsened or not improved:
+        return False, (f"peggiora o non migliora la quadratura: sbilancio "
+                       f"{before.sbilancio:,.2f} -> {after.sbilancio:,.2f}, residuo "
+                       f"{before.plug_residual:,.2f} -> {after.plug_residual:,.2f}")
+
+    return True, (f"riconcilia a {anchor:,.2f} (scarto {delta:,.2f}); sbilancio "
+                  f"{before.sbilancio:,.2f} -> {after.sbilancio:,.2f}")

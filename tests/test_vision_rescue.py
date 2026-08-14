@@ -333,3 +333,115 @@ def test_read_section_scarta_una_riga_senza_colonna_riconoscibile():
                           client=_FakeClient(payload), images=["ZmFrZQ=="])
     assert [r.code for r in got.rows] == ["70"]
     assert got.rows[0].column == "right"
+
+
+from importers.iv_cee_hierarchy import check_quadratura  # noqa: E402
+
+
+def _sezione(section, left, right, utile=None, perdita=None):
+    return vr.VisionSection(section=section, rows=(),
+                            totals={"left": left, "right": right,
+                                    "utile": utile, "perdita": perdita})
+
+
+# ------------------------------------------------- cancello: coerenza interna
+
+def test_coerenza_sp_attivo_uguale_passivo_piu_utile():
+    assert vr.totals_are_coherent(_sezione("sp", D("1000"), D("950"), utile=D("50")))
+
+
+def test_coerenza_sp_attivo_piu_perdita_uguale_passivo():
+    assert vr.totals_are_coherent(_sezione("sp", D("950"), D("1000"), perdita=D("50")))
+
+
+def test_coerenza_ce_costi_piu_utile_uguale_ricavi():
+    assert vr.totals_are_coherent(
+        _sezione("ce", D("2482879.59"), D("2491786.38"), utile=D("8906.79")))
+
+
+def test_incoerenza_quando_i_totali_non_tornano():
+    assert not vr.totals_are_coherent(
+        _sezione("ce", D("2482879.59"), D("2491786.38"), utile=D("1000")))
+
+
+def test_incoerenza_quando_manca_un_totale():
+    assert not vr.totals_are_coherent(_sezione("sp", D("1000"), None, utile=D("50")))
+
+
+# ------------------------------------------------- cancello: scelta dell'ancora
+
+def test_ancora_preferisce_i_totali_vision_quando_sono_coerenti():
+    # budget_623: le ancore di TESTO si contraddicono (il passivo letto dal testo e'
+    # 2.420.397,40 mentre il PDF stampa 2.454.987,65). La coerenza interna dei totali
+    # vision e' cio' che autorizza a preferirli.
+    sec = _sezione("sp", D("2420397.40"), D("2370397.40"), utile=D("50000"))
+    declared = {"attivo": D("2420397.40"), "passivo": D("2454987.65"), "pareggio": None}
+    assert vr.section_anchor(sec, declared) == D("2420397.40")
+
+
+def test_ancora_ricade_sul_testo_quando_i_totali_vision_non_sono_coerenti():
+    sec = _sezione("sp", D("999"), D("111"), utile=D("1"))
+    declared = {"attivo": D("2000"), "passivo": None, "pareggio": None}
+    assert vr.section_anchor(sec, declared) == D("2000")
+
+
+def test_ancora_none_quando_nessun_insieme_e_utilizzabile():
+    sec = _sezione("sp", None, None)
+    assert vr.section_anchor(sec, {"attivo": None, "passivo": None, "pareggio": None}) is None
+
+
+# ------------------------------------------------- cancello: verdetto
+
+_BS_ROTTO = {"sp09_disponibilita_liquide": D("700"), "sp16_debiti_breve": D("1000"),
+             "totale_attivo": D("700"), "totale_passivo": D("1000")}
+_BS_SANO = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+            "totale_attivo": D("1000"), "totale_passivo": D("1000")}
+
+
+def test_accetta_un_riscatto_che_riconcilia_e_migliora():
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(_BS_ROTTO), after=check_quadratura(_BS_SANO))
+    assert ok, motivo
+
+
+def test_rifiuta_un_riscatto_che_non_riconcilia_al_totale_stampato():
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("600"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(_BS_ROTTO), after=check_quadratura(_BS_SANO))
+    assert not ok
+    assert "riconcilia" in motivo
+
+
+def test_rifiuta_un_riscatto_che_peggiora_la_quadratura():
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(_BS_SANO), after=check_quadratura(_BS_ROTTO))
+    assert not ok
+    assert "peggiora" in motivo
+
+
+def test_rifiuta_un_riscatto_vuoto():
+    vuoto = {"totale_attivo": D("0"), "totale_passivo": D("0")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("0"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(_BS_ROTTO), after=check_quadratura(vuoto))
+    assert not ok
+
+
+def test_rifiuta_quando_non_c_e_nessuna_ancora():
+    sec = _sezione("sp", None, None)
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": None, "passivo": None, "pareggio": None},
+        before=check_quadratura(_BS_ROTTO), after=check_quadratura(_BS_SANO))
+    assert not ok
+    assert "ancora" in motivo

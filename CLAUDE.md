@@ -465,13 +465,19 @@ Il risultato d'esercizio viene da **`vision_result`**, che prende il SEGNO dall'
 validato i totali, non dall'ordine delle chiavi: un documento stampa spesso sia una riga "utile" sia
 una "perdita" (una delle due del periodo precedente, o una didascalia a zero), e preferire l'utile
 per primo ribalta il risultato quando è il ramo della perdita a tornare.
-**`build_sp_from_vision` alza `_source_maturity_unspecified`**: i mastri non dicono se un debito è
-entro o oltre l'esercizio, quindi finiscono tutti a breve e l'import espone
-`SCADENZA DEBITI NON DISTINTA` — sp16 e sp17 stanno entrambi nel passivo, quindi il pareggio non se
-ne accorge, ma CCN, current ratio e il capitale circolante di Altman sì. **È una stringa di avviso,
-non un verdetto**: nessun cancello la legge, né qui né a valle. Su budget_623 significa che
-873.205,40 di debito bancario a lungo diventano a breve, e la conseguenza sui KPI resta in carico
-all'utente, da correggere in **Rettifiche**.
+**Scadenza non determinata → a breve, per prudenza.** I mastri non dicono se un debito è entro o
+oltre l'esercizio. In assenza di un segno che li distingua i debiti vanno classificati **a breve**:
+è la lettura prudenziale — anticipare una scadenza peggiora gli indici di liquidità e non li
+abbellisce — ed è l'utente a spostarli in **Rettifiche** quando sa che sono a lungo. Non è un
+ripiego dell'estrattore vision: è la regola del progetto, e la segue anche il parser best-effort
+della rotta C, che pure emette solo `sp16`.
+`build_sp_from_vision` alza comunque **`_source_maturity_unspecified`**, così l'import espone
+`SCADENZA DEBITI NON DISTINTA` e l'utente sa che quella ripartizione è da guardare — sp16 e sp17
+stanno entrambi nel passivo, quindi il pareggio non se ne accorge, mentre CCN, current ratio e il
+capitale circolante di Altman sì. **È una stringa di avviso, non un verdetto**: nessun cancello la
+legge, né qui né a valle, e non deve leggerla — un import prudenzialmente a breve è valido, non
+sospetto. Su budget_623 significa che 873.205,40 di debito bancario finiscono a breve finché
+l'utente non li riclassifica.
 
 **Il clamp sulle immobilizzazioni negative** (`build_sp_from_vision`): quando un fondo letto supera
 il proprio cespite lordo, `sp02`/`sp03`/`sp04` risulterebbero negative — mai un valore IV-CEE

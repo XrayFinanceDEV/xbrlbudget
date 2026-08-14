@@ -416,8 +416,9 @@ minimo di prima e a decidere è il cancello.
 
 **Il cancello** (`accept_rescue`) tiene il riscatto solo se TUTTE: **la colonna di sinistra**
 ricostruita riconcilia al totale stampato entro `max(50 €; 0,5%)`; **la colonna di destra** fa
-altrettanto contro il proprio totale stampato (vedi il paragrafo qui sotto); l'estrazione non è
-vuota; il riscatto non spegne un'identità utile CE = sp13 che prima reggeva; e la quadratura
+altrettanto contro il proprio totale stampato, quando la quantità è misurabile — condizione
+**saltata sul percorso CE**, che non passa `rebuilt_passivo` (vedi il paragrafo qui sotto);
+l'estrazione non è vuota; il riscatto non spegne un'identità utile CE = sp13 che prima reggeva; e la quadratura
 risultante è **strettamente migliore**, misurata
 come `|sbilancio| + |residuo|` (sbilancio e massa non classificata sono la stessa specie di male e
 si sommano). Il cancello prende una bandiera **`residual_measured`**: il residuo del foglio
@@ -432,22 +433,26 @@ tetto la stessa tolleranza di riconciliazione.
 questa sezione lo affermava, e mandava a cercare un controllo che nel codice non c'è. `accept_rescue`
 la usa solo per scegliere QUALE ancora: `section_anchor` preferisce il totale letto in vision quando
 i totali vision tornano fra loro (`attivo + perdita == passivo`, `costi + utile == ricavi`), e
-altrimenti **ricade sulle ancore di testo**. Un riscatto **CE** con totali vision incoerenti viene
-quindi accettato ogni volta che `declared["costi"]` esiste: è per il CE, e solo per il CE, che la
-ricaduta della spec §3 condizione 2 è davvero implementata. Sul percorso **SP** la coerenza è
+altrimenti **ricade sulle ancore di testo**. Su un riscatto **CE** con totali vision incoerenti
+l'incoerenza in sé non è motivo di scarto — ma restano da superare la riconciliazione sull'ancora di
+testo (`declared["costi"]`, quando esiste) e le altre condizioni del cancello: è per il CE, e solo per
+il CE, che la ricaduta della spec §3 condizione 2 è davvero implementata. Sul percorso **SP** la coerenza è
 necessaria di fatto, ma per un motivo diverso e altrove: `pdf_importer` rinuncia al riscatto quando
 `vision_result(sec)` è `None`, perché senza un'identità che torni il segno del risultato sarebbe da
 indovinare — quindi una sezione SP incoerente non arriva mai al cancello.
 
 **Il passivo ricostruito ha la sua ancora** (review finale, 2026-08-14). Il gate 1 misurava la sola
 colonna di sinistra, ed era l'unico modo in cui questo riscatto poteva produrre un foglio
-**sbagliato** invece che incompleto: una sovra-lettura del passivo non si vede nello sbilancio,
-perché a valle `net_contra_accounts` la assorbe cancellando debiti fino alla massa dei fondi
+**sbagliato** invece che incompleto: quando `net_contra_accounts` ha una scansione disponibile su
+quel file (`_contra_rows` trova righe da leggere), una sovra-lettura del passivo non si vede nello
+sbilancio, perché a valle viene assorbita cancellando debiti fino alla massa dei fondi
 (`excess = totale_passivo − totale_attivo`, `to_remove = min(excess, fondi)` → `_reduce_debts`). Il
-foglio tornava a quadrare, il residuo a zero, il cancello vedeva un riscatto perfetto e il debito
-persistito era sottostimato fino alla massa dei fondi (289.788,03 su budget_623), **senza un solo
-avviso** — e poiché `_reduce_debts` riduce anche l'aggregato nudo, `projection_common.base_bank_debt`
-leggeva poi lo scarto aggregato/dettaglio come debito **bancario**. Ora `pdf_importer` passa
+foglio torna a quadrare, il residuo a zero, il cancello vede un riscatto perfetto e il debito
+persistito resta sottostimato fino alla massa dei fondi, **senza un solo avviso**. (Su **budget_623**
+questo non può accadere: `_contra_rows` non trova nulla da leggere su quel file — verificato con i
+totali dichiarati reali, con `text=None` e con il testo PyMuPDF — e `net_contra_accounts` no-oppa con
+`_contra_reason='scan non disponibile'`; prima della correzione una sovra-lettura del passivo lì
+restava un semplice sbilancio VISIBILE, già catturato dal gate 3.) Ora `pdf_importer` passa
 `rebuilt_passivo` e il cancello lo misura contro `sec.totals["right"]` con la stessa tolleranza. La
 quantità è costruita per essere confrontabile con il totale STAMPATO:
 `totale_passivo − utile + _netted_contra` — si sottrae il risultato perché il documento lo espone

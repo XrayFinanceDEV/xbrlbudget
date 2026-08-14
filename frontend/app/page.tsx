@@ -165,6 +165,27 @@ export default function Home() {
     }
   };
 
+  // Avvia una pratica SU un'azienda che esiste già.
+  //
+  // Senza questo, un'azienda creata da "Nuova azienda" (o importata e poi
+  // rimasta senza scenari) era irraggiungibile: le due card di "Nuova pratica"
+  // partono per forza da `companyId: null`, AnagraficheStep con companyId null
+  // è un form di CREAZIONE (ne avrebbe creata una seconda) e lo step Import è
+  // bloccato finché `pratica.companyId` è null. L'unico bottone sulla scheda
+  // azienda era "Riprendi", che esiste solo per gli scenari già creati.
+  // AnagraficheStep dice "la scelta è già avvenuta sulla home": questo è il
+  // punto in cui avviene.
+  const startForCompany = (companyId: number) => {
+    setStartupMode(false);
+    setSelectedCompanyId(companyId);
+    startPratica({
+      workflow: "bilancio",
+      companyId,
+      analysisStep: "anagrafiche",
+    });
+    router.push("/pratica");
+  };
+
   // Riprendi una pratica: popola il context, poi apri il posto giusto.
   // Uno scenario budget legacy non ha una fase ANALISI ricostruibile (nessun
   // infrannualeScenarioId, quindi nessun rettifiche_log da riaprire): si apre
@@ -339,7 +360,10 @@ export default function Home() {
                         <Badge variant="secondary">{getSectorName(company.sector)}</Badge>
                         {company.tax_id && <span className="text-xs font-normal text-muted-foreground">P.IVA {company.tax_id}</span>}
                       </CardTitle>
-                      <div className="flex gap-1">
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="outline" onClick={() => startForCompany(company.id)}>
+                          <Plus className="h-3 w-3 mr-1" /> Nuova pratica
+                        </Button>
                         <Button size="sm" variant="ghost" onClick={() => handleStartEdit(company)}>
                           <Pencil className="h-3 w-3" />
                         </Button>
@@ -371,7 +395,8 @@ export default function Home() {
                 <CardContent className="pt-0">
                   {company.scenarios.length === 0 ? (
                     <p className="text-sm text-muted-foreground border-t border-dashed border-border pt-3">
-                      Nessuna pratica. Importa un bilancio o avvia una nuova pratica.
+                      Nessuna pratica. Usa &quot;Nuova pratica&quot; qui sopra per importare un
+                      bilancio di questa azienda.
                     </p>
                   ) : (
                     company.scenarios.map((s) => (

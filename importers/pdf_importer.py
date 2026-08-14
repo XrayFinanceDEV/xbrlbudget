@@ -480,6 +480,22 @@ def _apply_vision_rescue(file_path: str,
                         new_bs, file_path, text=ocr_text, declared=declared)
                     from importers.pdf_extractor_llm import _reconcile_trial_to_declared
                     _decl = dict(declared or {})
+                    # Su un layer di testo illeggibile le ancore dichiarate sono vuote
+                    # (route C le azzera di proposito), e senza ancora
+                    # _reconcile_trial_to_declared non misura NULLA: lo zero asserito da
+                    # build_sp_from_vision sopravvivrebbe fino al cancello, regalandogli
+                    # un miglioramento che nessuno ha verificato. I totali letti in
+                    # vision hanno gia' superato il controllo di coerenza interna
+                    # (vision_result), quindi qui valgono da ancora — e' la stessa
+                    # sanzione per cui section_anchor li preferisce.
+                    if not any(_decl.get(_k) for _k in ('attivo', 'passivo', 'pareggio')):
+                        _vis_att, _vis_pas = sec.totals.get("left"), sec.totals.get("right")
+                        if _vis_att:
+                            _decl['attivo'] = _vis_att
+                        if _vis_pas:
+                            _decl['passivo'] = _vis_pas
+                    # La riduzione vale anche per le ancore vision: sono LORDE quanto
+                    # quelle stampate, quindi passano di qui prima del confronto.
                     _cut = _contra if _contra > 0 else netted
                     if _cut > 0:
                         for _k in ('attivo', 'passivo', 'pareggio'):
@@ -1217,16 +1233,22 @@ def import_pdf_balance_sheet(
                 # arrivarci. Rilegge in vision le sole pagine della sezione che non
                 # torna. La posizione in coda alla catena e' deliberata: prima del
                 # netting il riscatto scatterebbe su un attivo ancora lordo.
-                try:
-                    _donor = next((c[1] for c in candidates if c[3] == "deterministico"), None)
-                    balance_sheet_data, income_data, _rescued_sections = _apply_vision_rescue(
-                        file_path, balance_sheet_data, income_data,
-                        declared=_dc0, donor_bs=_donor, ocr_text=ocr_text)
-                    if _rescued_sections:
-                        residual = balance_sheet_data.get('_plug_residual', residual)
-                        source = f"{source}+vision({'+'.join(_rescued_sections)})"
-                except Exception as _vr_err:
-                    logger.warning(f"Route C: riscatto vision saltato: {_vr_err}")
+                # Senza chiave non si parte nemmeno: render_section_images gira PRIMA di
+                # istanziare il client dentro read_section, quindi un'installazione senza
+                # chiave renderizzerebbe le pagine a 200 DPI per poi buttarle.
+                if api_key:
+                    try:
+                        _donor = next(
+                            (c[1] for c in candidates if c[3] == "deterministico"), None)
+                        (balance_sheet_data, income_data,
+                         _rescued_sections) = _apply_vision_rescue(
+                            file_path, balance_sheet_data, income_data,
+                            declared=_dc0, donor_bs=_donor, ocr_text=ocr_text)
+                        if _rescued_sections:
+                            residual = balance_sheet_data.get('_plug_residual', residual)
+                            source = f"{source}+vision({'+'.join(_rescued_sections)})"
+                    except Exception as _vr_err:
+                        logger.warning(f"Route C: riscatto vision saltato: {_vr_err}")
                 others = ", ".join(f"{s}={r:,.0f}" for r, _b, _c, s in candidates)
                 logger.info(f"Route C: scelto estrattore '{source}' (residuo minore "
                             f"{residual:,.0f}); candidati: {others}")

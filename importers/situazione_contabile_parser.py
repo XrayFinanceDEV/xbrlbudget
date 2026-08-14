@@ -5116,6 +5116,12 @@ def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
 
     bs['sp13'] = utile
     bs['_netted_contra'] = netted
+    # Il riscatto legge i mastri, non la scadenza: nessun conto dice se un debito e'
+    # entro o oltre l'esercizio, quindi finiscono tutti a breve. Non e' un errore da
+    # nascondere — sp16 e sp17 stanno entrambi nel passivo, quindi il pareggio non
+    # se ne accorge, ma CCN, current ratio e il termine di capitale circolante di
+    # Altman si'. Stessa bandiera che alzano standard_ivcee_parser e mineru_adapter.
+    bs['_source_maturity_unspecified'] = Decimal('1')
     bs['totale_attivo'] = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
     bs['totale_passivo'] = sum((bs.get(k, Z) for k in _PASSIVO_KEYS), Z)
     bs['_plug_residual'] = Z

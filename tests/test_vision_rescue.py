@@ -770,3 +770,217 @@ def test_totali_vision_incoerenti_non_producono_un_riscatto_sp(monkeypatch):
         declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == []
     assert bs == _BS_SBILANCIATO
+
+
+# ---------------------------------------- scadenza dei debiti non determinata
+
+def test_build_sp_from_vision_dichiara_la_scadenza_non_determinata():
+    # La vision legge i mastri, non la scadenza: ogni debito finisce a breve. sp16 e
+    # sp17 stanno entrambi nel passivo, quindi il pareggio NON se ne accorge — ma CCN,
+    # current ratio e il capitale circolante di Altman si'. La bandiera e' l'unico
+    # segnale che resta.
+    rows = [("01", "CASSA", D("1000.00"), "left"),
+            ("20", "DEBITI VERSO FORNITORI", D("1000.00"), "right")]
+    bs = build_sp_from_vision(rows, utile=D("0"))
+    assert bs["_source_maturity_unspecified"] == D("1")
+    assert bs.get("sp17", D("0")) == D("0")
+
+
+# ------------------------------------- il cablaggio dell'helper (mutation net)
+
+_BS_ROTTO_SP = {"sp09_disponibilita_liquide": D("1000"),
+                "sp16_debiti_breve": D("800"),
+                "sp13_utile_perdita": D("0")}
+# Coerente con sp13 = 0, cosi' il ramo CE non si innesca e il test isola l'SP.
+_CE_QUALSIASI = {"ce01_ricavi_vendite": D("500"), "ce05_materie_prime": D("500")}
+
+_SEZIONE_SP_PIATTA = vr.VisionSection(
+    section="sp",
+    rows=(vr.VisionRow("01", "CASSA", D("1000.00"), "left"),
+          vr.VisionRow("20", "DEBITI VERSO FORNITORI", D("1000.00"), "right")),
+    totals={"left": D("1000.00"), "right": D("1000.00"),
+            "utile": D("0"), "perdita": None},
+)
+
+
+def test_riscatto_sp_senza_ancore_di_testo_usa_i_totali_letti_in_vision(monkeypatch):
+    # Su un layer di testo illeggibile declared e' vuoto: senza questa ricaduta il
+    # reconcile non misurerebbe nulla e lo zero asserito da build_sp_from_vision
+    # regalerebbe al cancello un miglioramento non verificato.
+    visti = {}
+
+    def _spia(bs, decl, label, **kw):
+        visti.update(decl or {})
+        return bs
+
+    monkeypatch.setattr(
+        "importers.pdf_extractor_llm._reconcile_trial_to_declared", _spia)
+    _patch_pagine(monkeypatch)
+    _apply_vision_rescue("ignorato.pdf", dict(_BS_ROTTO_SP), dict(_CE_QUALSIASI),
+                         declared={}, donor_bs=None, ocr_text=None,
+                         reader=lambda *a, **kw: _SEZIONE_SP_PIATTA)
+    assert visti.get("attivo") == D("1000.00")
+    assert visti.get("passivo") == D("1000.00")
+
+
+def test_un_riscatto_sp_accettato_porta_la_bandiera_della_scadenza(monkeypatch):
+    # La bandiera deve sopravvivere a _map_sc_keys e arrivare al foglio restituito:
+    # e' quella che pdf_importer legge per alzare l'avviso di Rettifiche.
+    _patch_pagine(monkeypatch)
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_ROTTO_SP), dict(_CE_QUALSIASI),
+        declared={}, donor_bs=None, ocr_text=None,
+        reader=lambda *a, **kw: _SEZIONE_SP_PIATTA)
+    assert riscattate == ["sp"]
+    assert bs["_source_maturity_unspecified"] == D("1")
+
+
+def test_ogni_quadratura_e_calcolata_con_il_conto_economico(monkeypatch):
+    # Con ce=None `utile_match` vale True per difetto: il ramo `fixed_identity` del
+    # cancello scatterebbe a vuoto e un riscatto che NON ripara nulla passerebbe.
+    from importers import iv_cee_hierarchy
+
+    vera = iv_cee_hierarchy.check_quadratura
+    chiamate = []
+
+    def _spia(*args, **kwargs):
+        chiamate.append((args, kwargs))
+        return vera(*args, **kwargs)
+
+    monkeypatch.setattr(iv_cee_hierarchy, "check_quadratura", _spia)
+    _patch_pagine(monkeypatch)
+
+    sezioni = {
+        "ce": vr.VisionSection(
+            section="ce",
+            rows=(vr.VisionRow("73", "ACQUISTI MATERIE PRIME", D("900"), "left"),
+                  vr.VisionRow("70", "RICAVI DELLE VENDITE", D("1100"), "right")),
+            totals={"left": D("900"), "right": D("1100"),
+                    "utile": D("200"), "perdita": None}),
+        "sp": _SEZIONE_SP_PIATTA,
+    }
+    # SP sbilanciato E utile CE (400) diverso da sp13 (0): entrambi i rami partono.
+    _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_ROTTO_SP),
+        {"ce01_ricavi_vendite": D("1000"), "ce05_materie_prime": D("600")},
+        declared={}, donor_bs=None, ocr_text=None,
+        reader=lambda _p, _pg, section, **kw: sezioni[section])
+
+    assert len(chiamate) >= 3, "before + after CE + after SP"
+    for args, kwargs in chiamate:
+        assert len(args) == 2, f"check_quadratura chiamata con {len(args)} argomenti"
+        assert args[1] is not None, "il conto economico non puo' essere None"
+
+
+def test_il_totale_ricostruito_dello_sp_si_misura_al_LORDO_dei_fondi(monkeypatch):
+    # Presentazione LORDA: i fondi ammortamento stanno sul passivo, quindi il TOTALE
+    # ATTIVITA' stampato (1.200) e' lordo mentre il foglio ricostruito e' netto (900).
+    # Senza risommare la massa nettata il cancello misurerebbe 900 contro 1.200 e
+    # scarterebbe un riscatto corretto.
+    _patch_pagine(monkeypatch)
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("01", "IMPIANTI E MACCHINARI", D("1000"), "left"),
+              vr.VisionRow("02", "CASSA", D("200"), "left"),
+              vr.VisionRow("30", "FONDO AMMORTAMENTO IMPIANTI", D("300"), "right"),
+              vr.VisionRow("20", "DEBITI VERSO FORNITORI", D("900"), "right")),
+        totals={"left": D("1200"), "right": D("1200"),
+                "utile": D("0"), "perdita": None},
+    )
+    prima = {"sp09_disponibilita_liquide": D("900"),
+             "sp16_debiti_breve": D("700"),
+             "sp13_utile_perdita": D("0")}
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(prima), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["sp"]
+    assert bs["sp03_immob_materiali"] == D("700"), "l'attivo persistito e' NETTO"
+
+
+# ------------------------------- il sito di innesco, sul vero percorso di import
+
+# Fixture di corpus locale (non versionata), come nel resto di tests/.
+PDF_615 = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "debug", "budget_615_2024 Lavori di meccanica generale.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_615), reason="corpus budget_615 assente")
+def test_le_sezioni_riscattate_finiscono_nel_parser_version(monkeypatch):
+    """Esercita il SITO DI INNESCO dentro import_pdf_balance_sheet, non l'helper.
+
+    Il riscatto e' doppiato (nessuna chiamata di rete): quello che si fissa e' il
+    cablaggio a valle — che la lista di sezioni restituita diventi il suffisso
+    '+vision-<sezioni>' del parser_version persistito, con la stessa convenzione di
+    '+mineru-<ver>'. Togliendo quel blocco il test fallisce.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from database.db import Base
+    from database.models import FinancialYear
+    from importers import pdf_importer
+    from importers import pdf_extractor_llm
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "chiave-finta-nessuna-rete")
+
+    # Nessun estrattore LLM deve partire: l'unico percorso che potrebbe fare rete
+    # su questo file e' l'estrattore CoGe, qui neutralizzato.
+    def _niente_rete(*a, **kw):
+        raise RuntimeError("nessuna chiamata di rete nei test")
+
+    monkeypatch.setattr(
+        pdf_extractor_llm, "extract_trial_balance_with_llm", _niente_rete)
+
+    visto = {}
+
+    def _riscatto_finto(file_path, bs, ce, declared, donor_bs, ocr_text, reader=None):
+        visto["chiamato"] = True
+        return bs, ce, ["ce"]
+
+    monkeypatch.setattr(pdf_importer, "_apply_vision_rescue", _riscatto_finto)
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", session_factory)
+
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=PDF_615, fiscal_year=2024,
+        company_name="Innesco riscatto vision", create_company=True, sector=1,
+        user_id="test-riscatto", period_months=12)
+
+    assert visto.get("chiamato"), "l'innesco non ha chiamato il riscatto"
+    assert result["parser_version"].endswith("+vision-ce")
+    with session_factory() as db:
+        anno = db.query(FinancialYear).filter_by(
+            company_id=result["company_id"]).one()
+        assert anno.parser_version.endswith("+vision-ce")
+
+
+@pytest.mark.skipif(not os.path.exists(PDF_615), reason="corpus budget_615 assente")
+def test_senza_chiave_il_riscatto_non_viene_nemmeno_tentato(monkeypatch):
+    # render_section_images gira PRIMA di istanziare il client: senza il cancello
+    # sulla chiave un'installazione senza API renderizzerebbe le pagine a 200 DPI
+    # per poi buttarle.
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from database.db import Base
+    from importers import pdf_importer
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    chiamate = []
+    monkeypatch.setattr(
+        pdf_importer, "_apply_vision_rescue",
+        lambda *a, **kw: chiamate.append(a) or (a[1], a[2], []))
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", sessionmaker(bind=engine))
+
+    pdf_importer.import_pdf_balance_sheet(
+        file_path=PDF_615, fiscal_year=2024, company_name="Senza chiave",
+        create_company=True, sector=1, user_id="test-senza-chiave",
+        period_months=12)
+    assert chiamate == []

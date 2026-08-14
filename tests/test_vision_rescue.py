@@ -109,3 +109,73 @@ def test_classify_passivo_tipizza_i_debiti_per_creditore():
 def test_classify_costi_e_ricavi_hanno_catch_all_distinti():
     assert classify_costi("VOCE SCONOSCIUTA XYZ") == ("ce12", False)
     assert classify_ricavi("VOCE SCONOSCIUTA XYZ") == ("ce04", False)
+
+
+from importers.situazione_contabile_parser import (  # noqa: E402
+    build_ce_from_vision,
+    build_sp_from_vision,
+)
+
+
+# ------------------------------------------------- montaggio di una sezione
+
+def test_build_sp_netta_i_fondi_dall_attivo():
+    rows = [
+        ("01", "IMMOBILIZZAZIONI MATERIALI", D("1000.00"), "left"),
+        ("02", "F.DO AMM.TO IMMOBILIZZAZIONI MATERIALI", D("400.00"), "right"),
+        ("20", "DEBITI VERSO FORNITORI", D("600.00"), "right"),
+    ]
+    bs = build_sp_from_vision(rows, utile=D("0"))
+    assert bs["sp03"] == D("600.00")          # 1000 lordo - 400 fondo
+    assert bs["_netted_contra"] == D("400.00")
+    assert bs["totale_attivo"] == D("600.00")
+    assert bs["totale_passivo"] == D("600.00")
+
+
+def test_build_sp_scrive_il_risultato_ricevuto_e_non_lo_inventa():
+    rows = [
+        ("01", "CASSA", D("150.00"), "left"),
+        ("20", "DEBITI VERSO FORNITORI", D("100.00"), "right"),
+    ]
+    bs = build_sp_from_vision(rows, utile=D("50.00"))
+    assert bs["sp13"] == D("50.00")
+    assert bs["totale_passivo"] == D("150.00")   # 100 debiti + 50 utile
+
+
+def test_build_sp_tipizza_i_debiti_per_creditore():
+    rows = [
+        ("01", "CASSA", D("300.00"), "left"),
+        ("20", "DEBITI VERSO FORNITORI", D("200.00"), "right"),
+        ("21", "BANCHE C/C PASSIVI", D("100.00"), "right"),
+    ]
+    bs = build_sp_from_vision(rows, utile=D("0"))
+    assert bs["sp16"] == D("300.00")                       # aggregato invariato
+    assert bs["sp16d_debiti_fornitori_breve"] == D("200.00")
+    assert bs["sp16a_debiti_banche_breve"] == D("100.00")
+
+
+def test_build_ce_usa_la_colonna_come_direzione():
+    rows = [
+        ("60", "ACQUISTI MATERIE PRIME", D("500.00"), "left"),
+        ("70", "RICAVI DELLE VENDITE", D("800.00"), "right"),
+    ]
+    ce = build_ce_from_vision(rows)
+    assert ce["ce05"] == D("500.00")
+    assert ce["ce01"] == D("800.00")
+
+
+def test_build_ce_non_manda_un_costo_su_una_voce_di_ricavo():
+    # DIFFERENZE CAMBIO PASSIVE risolve su un nodo di GUADAGNO nell'albero
+    # condiviso: sulla colonna dei costi deve cadere sul catch-all neutro, mai
+    # su ce16 (che ALZEREBBE il risultato, spostandolo di 2x).
+    rows = [("75", "DIFFERENZE CAMBIO PASSIVE", D("90.00"), "left")]
+    ce = build_ce_from_vision(rows)
+    assert ce.get("ce16", D("0")) == D("0")
+    assert sum(v for k, v in ce.items() if k.startswith("ce")) >= D("90.00")
+
+
+def test_build_ce_arrotola_i_sottocampi_sul_padre():
+    rows = [("64", "SALARI E STIPENDI", D("300.00"), "left")]
+    ce = build_ce_from_vision(rows)
+    assert ce["ce08"] == D("300.00")
+    assert ce["ce08b_salari_stipendi"] == D("300.00")

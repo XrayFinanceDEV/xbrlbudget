@@ -4507,6 +4507,24 @@ _CE_HIER_SUBPARENT = {
 }
 
 
+# CE sub-field -> (full DB detail key, parent aggregate). Personale (ce08a-d) and
+# ammortamenti (ce09a-d) are detail ("di cui") lines: the EBIT/profit formula reads
+# only the aggregates ce08/ce09, so each sub-field is rolled into its parent
+# aggregate AND stored under its full DB key (mirrors build_iv_cee). Promoted to
+# module level (was a local dict inside extract_contrapposte_best_effort) so
+# build_ce_from_vision reads the same single definition.
+_CE_SUBFIELD_PARENT = {
+    'ce08a_tfr': ('ce08a_tfr_accrual', 'ce08'),
+    'ce08b': ('ce08b_salari_stipendi', 'ce08'),
+    'ce08c': ('ce08c_oneri_sociali', 'ce08'),
+    'ce08d': ('ce08d_altri_costi_personale', 'ce08'),
+    'ce09a': ('ce09a_ammort_immateriali', 'ce09'),
+    'ce09b': ('ce09b_ammort_materiali', 'ce09'),
+    'ce09c': ('ce09c_svalutazioni', 'ce09'),
+    'ce09d': ('ce09d_svalutazione_crediti', 'ce09'),
+}
+
+
 def classify_page_section(page_text: str) -> Optional[Tuple[bool, bool]]:
     """(is_sp, is_ce) per una pagina di contrapposte, o None se la pagina va saltata.
 
@@ -4881,18 +4899,9 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # the EBIT/profit formula reads only the aggregates ce08/ce09, so each sub-field
     # is rolled into its parent aggregate AND stored under its full DB key (mirrors
     # build_iv_cee). _be_reclassify emits a node at exactly one level (parent OR
-    # children, never both), so this never double-counts.
-    _CE_SUBFIELD_PARENT = {
-        'ce08a_tfr': ('ce08a_tfr_accrual', 'ce08'),
-        'ce08b': ('ce08b_salari_stipendi', 'ce08'),
-        'ce08c': ('ce08c_oneri_sociali', 'ce08'),
-        'ce08d': ('ce08d_altri_costi_personale', 'ce08'),
-        'ce09a': ('ce09a_ammort_immateriali', 'ce09'),
-        'ce09b': ('ce09b_ammort_materiali', 'ce09'),
-        'ce09c': ('ce09c_svalutazioni', 'ce09'),
-        'ce09d': ('ce09d_svalutazione_crediti', 'ce09'),
-    }
-
+    # children, never both), so this never double-counts. _CE_SUBFIELD_PARENT is a
+    # module-level constant (defined next to _CE_HIER_SUBPARENT) so build_ce_from_vision
+    # reads the same single definition.
     def ce_add(tag, amt):
         if tag == 'ce01_return':
             add(ce, 'ce01', -amt)
@@ -5056,6 +5065,103 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             return rescued
 
     return bs, ce
+
+
+def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
+    """Monta lo Stato Patrimoniale da righe MASTRO piatte lette in vision.
+
+    `rows` = [(codice, descrizione, importo, colonna)], colonna in {'left','right'}.
+    La colonna e' verita' sul lato (FIXING-IMPORT.md §1.3); la descrizione decide la
+    voce. `utile` e' il risultato LETTO dal documento, non derivato qui: questa
+    funzione non inventa il pareggio.
+
+    Le righe sono gia' al livello mastro, quindi non passano da _be_reclassify (che
+    serve a scegliere fra padre e figli in una gerarchia): ogni riga vale per se'.
+    Chiavi corte come il best-effort — il chiamante applica _map_sc_keys.
+    """
+    Z = Decimal('0')
+    bs: Dict[str, Decimal] = {}
+    netted = Z
+
+    def add(k, v):
+        bs[k] = bs.get(k, Z) + v
+
+    for _code, desc, amount, column in rows:
+        d = (desc or '').upper()
+        if column == 'left':
+            field, _specific = classify_attivo(d)
+            add({'gross_sp02': 'sp02', 'gross_sp03': 'sp03',
+                 'gross_sp04': 'sp04'}.get(field, field), amount)
+            continue
+        tag, _specific = classify_passivo(d)
+        if tag in ('depr_sp02', 'depr_sp03', 'depr_sp04'):
+            add(tag.replace('depr_', ''), -amount)     # netta il fondo dall'attivo
+            netted += amount
+        elif tag == 'deduct_crediti':
+            add('sp06', -amount)
+            netted += amount
+        elif tag in ('sp11', 'sp12', 'sp14', 'sp15', 'sp18'):
+            add(tag, amount)
+        elif len(tag) == 5 and tag.startswith('sp16') and tag[4] in 'abcdefg':
+            add('sp16', amount)                        # aggregato: pareggio invariato
+            add(_DEBT_FIELD['breve'][tag[4]], amount)  # tipizzato, nome pieno
+        else:
+            add('sp16', amount)
+
+    # Un fondo non puo' mai superare il proprio cespite lordo: un'immobilizzazione
+    # netta negativa e' sempre una misclassificazione. Il cancello vedra' il divario.
+    for k in ('sp02', 'sp03', 'sp04'):
+        if bs.get(k, Z) < Z:
+            bs[k] = Z
+
+    bs['sp13'] = utile
+    bs['_netted_contra'] = netted
+    bs['totale_attivo'] = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
+    bs['totale_passivo'] = sum((bs.get(k, Z) for k in _PASSIVO_KEYS), Z)
+    bs['_plug_residual'] = Z
+    return bs
+
+
+def build_ce_from_vision(rows) -> Dict[str, Decimal]:
+    """Monta il Conto Economico da righe MASTRO piatte lette in vision.
+
+    La colonna decide la DIREZIONE (sinistra = costi, destra = ricavi) e la direzione
+    vincola la risoluzione: _resolve_ce_field rifiuta una voce del segno opposto, cosi'
+    un costo non puo' finire su un nodo di ricavo (che sposterebbe il risultato di 2x).
+    Ordine: tabella a parole chiave -> albero IV-CEE vincolato -> catch-all neutro.
+    """
+    Z = Decimal('0')
+    ce: Dict[str, Decimal] = {}
+
+    def add(k, v):
+        ce[k] = ce.get(k, Z) + v
+
+    for _code, desc, amount, column in rows:
+        d = (desc or '').upper()
+        direction = 'costi' if column == 'left' else 'ricavi'
+        if direction == 'costi':
+            tag, specific = classify_costi(d)
+        else:
+            tag, specific = classify_ricavi(d)
+        if not specific:
+            # La tabella a parole chiave non conosce questa descrizione: prova
+            # l'albero condiviso, VINCOLATO alla direzione. iv_cee_hierarchy.resolve
+            # non filtra per segno sui nodi CE — _resolve_ce_field si'.
+            resolved = _resolve_ce_field(d, direction)
+            tag = resolved if resolved else fallback_field('ce')
+        if tag == 'ce01_return':
+            add('ce01', -amount)
+        elif tag == 'ce10_close':
+            add('ce10', -amount)
+        elif tag == 'ce13_cost':
+            add('ce15', amount)
+        elif tag in _CE_SUBFIELD_PARENT:
+            detail, parent = _CE_SUBFIELD_PARENT[tag]
+            add(parent, amount)
+            add(detail, amount)
+        else:
+            add(tag, amount)
+    return ce
 
 
 _ATTIVO_KEYS = ['sp01', 'sp02', 'sp03', 'sp04', 'sp05', 'sp06', 'sp07', 'sp08', 'sp09', 'sp10']

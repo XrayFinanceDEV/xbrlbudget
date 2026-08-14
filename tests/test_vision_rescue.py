@@ -179,3 +179,123 @@ def test_build_ce_arrotola_i_sottocampi_sul_padre():
     ce = build_ce_from_vision(rows)
     assert ce["ce08"] == D("300.00")
     assert ce["ce08b_salari_stipendi"] == D("300.00")
+
+
+from importers import vision_rescue as vr  # noqa: E402
+
+
+class _FakeBlock:
+    type = "tool_use"
+
+    def __init__(self, payload):
+        self.input = payload
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.content = [_FakeBlock(payload)]
+
+
+class _FakeMessages:
+    def __init__(self, payload_or_exc):
+        self._p = payload_or_exc
+        self.calls = 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        if isinstance(self._p, Exception):
+            raise self._p
+        return _FakeResponse(self._p)
+
+
+class _FakeClient:
+    """Doppio del client anthropic: nessuna chiamata di rete."""
+
+    def __init__(self, payload_or_exc):
+        self.messages = _FakeMessages(payload_or_exc)
+
+
+_PAYLOAD_CE = {
+    "mastri": [
+        {"codice": "73020005", "descrizione": "Amm.to immobilizzazioni materiali",
+         "importo": "4.656,95", "colonna": "left"},
+        {"codice": "706440000", "descrizione": "amm.to fabbricati",
+         "importo": "486,93", "colonna": "left"},
+        {"codice": "70000005", "descrizione": "Ricavi delle vendite",
+         "importo": "2.491.786,38", "colonna": "right"},
+    ],
+    "totale_sinistra": "2.482.879,59",
+    "totale_destra": "2.491.786,38",
+    "utile": "8.906,79",
+    "perdita": None,
+}
+
+
+def test_parse_amount_formato_italiano():
+    assert vr.parse_amount("1.426.002,20") == D("1426002.20")
+    assert vr.parse_amount("4.656,95") == D("4656.95")
+    assert vr.parse_amount("") is None
+    assert vr.parse_amount("n.d.") is None
+
+
+def test_mastro_level_rows_scarta_i_dettagli_piu_lunghi():
+    # I dettagli a 9 cifre la vision li sbaglia (spec, sezione Evidenza) e non
+    # servono: il mastro porta gia' l'intero importo della voce.
+    rows = [
+        vr.VisionRow("73020005", "Amm.to", D("4656.95"), "left"),
+        vr.VisionRow("706440000", "amm.to fabbricati", D("486.93"), "left"),
+    ]
+    kept = vr.mastro_level_rows(rows)
+    assert [r.code for r in kept] == ["73020005"]
+
+
+def test_mastro_level_rows_ignora_le_righe_senza_codice():
+    rows = [
+        vr.VisionRow("73020005", "Amm.to", D("4656.95"), "left"),
+        vr.VisionRow("", "TOTALE COSTI", D("2482879.59"), "left"),
+    ]
+    assert [r.code for r in vr.mastro_level_rows(rows)] == ["73020005"]
+
+
+def test_read_section_monta_righe_e_totali():
+    got = vr.read_section("ignorato.pdf", [0], "ce",
+                          client=_FakeClient(_PAYLOAD_CE),
+                          images=["ZmFrZQ=="])
+    assert got is not None
+    assert got.section == "ce"
+    assert [r.code for r in got.rows] == ["73020005", "70000005"]
+    assert got.totals["left"] == D("2482879.59")
+    assert got.totals["right"] == D("2491786.38")
+    assert got.totals["utile"] == D("8906.79")
+    assert got.totals["perdita"] is None
+
+
+def test_read_section_rifiuta_una_sezione_oltre_il_tetto_di_pagine():
+    fake = _FakeClient(_PAYLOAD_CE)
+    assert vr.read_section("ignorato.pdf", list(range(vr.MAX_RESCUE_PAGES + 1)), "ce",
+                           client=fake, images=["ZmFrZQ=="]) is None
+    assert fake.messages.calls == 0, "il tetto deve fermare PRIMA di spendere una chiamata"
+
+
+def test_read_section_senza_pagine_non_chiama_il_modello():
+    fake = _FakeClient(_PAYLOAD_CE)
+    assert vr.read_section("ignorato.pdf", [], "ce", client=fake, images=[]) is None
+    assert fake.messages.calls == 0
+
+
+def test_read_section_restituisce_none_se_il_modello_esplode():
+    fake = _FakeClient(RuntimeError("API irraggiungibile"))
+    assert vr.read_section("ignorato.pdf", [0], "ce",
+                           client=fake, images=["ZmFrZQ=="]) is None
+
+
+def test_read_section_restituisce_none_su_risposta_malformata():
+    fake = _FakeClient({"mastri": "non e' una lista"})
+    assert vr.read_section("ignorato.pdf", [0], "ce",
+                           client=fake, images=["ZmFrZQ=="]) is None
+
+
+def test_read_section_fa_un_solo_tentativo():
+    fake = _FakeClient(_PAYLOAD_CE)
+    vr.read_section("ignorato.pdf", [0], "ce", client=fake, images=["ZmFrZQ=="])
+    assert fake.messages.calls == 1

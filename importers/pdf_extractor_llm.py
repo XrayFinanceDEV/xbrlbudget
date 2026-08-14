@@ -3091,6 +3091,7 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     """
     out: Dict[str, Optional[Decimal]] = {
         "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
+        "costi": None, "ricavi": None,
     }
     # `text` lets the caller supply already-extracted text (e.g. OCR of a scanned PDF,
     # where _extract_full_text would return nothing). Fall back to reading the file.
@@ -3183,6 +3184,18 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     out["perdita"] = _largest_after([
         "perdita d'esercizio", "perdita dell'esercizio", "perdita di esercizio",
         "perdita del periodo", "perdita in corso di formazione",
+    ])
+
+    # Ancore della sezione economica. Servono al riscatto vision, che misura un CE
+    # ricostruito contro il totale che il documento stampa: senza queste il CE non ha
+    # alcun controllo indipendente (lo SP ha pareggio/attivo/passivo, il CE nulla).
+    out["costi"] = _largest_after([
+        "totale costi", "totale dei costi", "totale costi e oneri",
+        "totale a pareggio costi",
+    ])
+    out["ricavi"] = _largest_after([
+        "totale ricavi", "totale dei ricavi", "totale ricavi e proventi",
+        "totale a pareggio ricavi",
     ])
 
     # In two-column trial balances PyMuPDF can emit the right-hand amount before

@@ -424,17 +424,24 @@ def test_rifiuta_un_riscatto_che_peggiora_la_quadratura():
         declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
         before=check_quadratura(_BS_SANO), after=check_quadratura(_BS_ROTTO))
     assert not ok
-    assert "peggiora" in motivo
+    # Fix round 1: il messaggio unificato del gate 3 (badness scalare) e' "non
+    # migliora", non piu' "peggiora" — vedi test_rifiuta_quando_nulla_e_cambiato
+    # e i test badness sotto per la distinzione fra i due casi.
+    assert "non migliora" in motivo
 
 
 def test_rifiuta_un_riscatto_vuoto():
+    # Deve cadere sul controllo del VUOTO, non su quello del totale stampato: percio'
+    # il totale ricostruito coincide con l'ancora e l'unica cosa che non va e' che il
+    # foglio risultante e' vuoto.
     vuoto = {"totale_attivo": D("0"), "totale_passivo": D("0")}
     sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
     ok, motivo = vr.accept_rescue(
-        section="sp", rebuilt_total=D("0"), sec=sec,
+        section="sp", rebuilt_total=D("1000"), sec=sec,
         declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
         before=check_quadratura(_BS_ROTTO), after=check_quadratura(vuoto))
     assert not ok
+    assert "vuota" in motivo
 
 
 def test_rifiuta_quando_non_c_e_nessuna_ancora():
@@ -445,3 +452,114 @@ def test_rifiuta_quando_non_c_e_nessuna_ancora():
         before=check_quadratura(_BS_ROTTO), after=check_quadratura(_BS_SANO))
     assert not ok
     assert "ancora" in motivo
+
+
+# ------------------------------------------------- fix round 1: gate 3 come badness scalare
+
+def test_accetta_un_riscatto_che_smaschera_anche_se_lascia_un_piccolo_sbilancio():
+    # QUADRATURA MASCHERATA e' uno dei quattro inneschi del riscatto: un riscatto che
+    # azzera il residuo non classificato deve poter passare anche se lascia uno
+    # sbilancio molto piu' piccolo del residuo che ha tolto.
+    mascherato = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+                  "totale_attivo": D("1000"), "totale_passivo": D("1000"),
+                  "_plug_residual": D("200")}
+    onesto = {"sp09_disponibilita_liquide": D("990"), "sp16_debiti_breve": D("1000"),
+              "totale_attivo": D("990"), "totale_passivo": D("1000")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(mascherato), after=check_quadratura(onesto))
+    assert ok, motivo
+
+
+def test_rifiuta_un_riscatto_che_dimezza_il_residuo_triplicando_lo_sbilancio():
+    # sbilancio -30 -> -90 (triplicato), residuo 100 -> 50 (dimezzato): la somma
+    # peggiora comunque (130 -> 140), perche' l'aumento dello sbilancio (60) supera
+    # la riduzione del residuo (50).
+    prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1030"),
+             "totale_attivo": D("1000"), "totale_passivo": D("1030"),
+             "_plug_residual": D("100")}
+    dopo = {"sp09_disponibilita_liquide": D("940"), "sp16_debiti_breve": D("1030"),
+            "totale_attivo": D("940"), "totale_passivo": D("1030"),
+            "_plug_residual": D("50")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(prima), after=check_quadratura(dopo))
+    assert not ok
+    assert "non migliora" in motivo
+
+
+def test_rifiuta_un_riscatto_che_rompe_l_identita_utile_ce_sp13():
+    bs = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("900"),
+          "sp13_utile_perdita": D("100"), "totale_attivo": D("1000"),
+          "totale_passivo": D("1000")}
+    ce_ok = {"ce01_ricavi_vendite": D("1100"), "ce05_materie_prime": D("1000")}
+    ce_rotto = {"ce01_ricavi_vendite": D("5000"), "ce05_materie_prime": D("1000")}
+    sec = _sezione("ce", D("1000"), D("1100"), utile=D("100"))
+    ok, motivo = vr.accept_rescue(
+        section="ce", rebuilt_total=D("1000"), sec=sec,
+        declared={"costi": D("1000"), "ricavi": D("1100")},
+        before=check_quadratura(bs, ce_ok), after=check_quadratura(bs, ce_rotto))
+    assert not ok
+    assert "identita" in motivo
+
+
+def test_rifiuta_quando_nulla_e_cambiato():
+    # Tutte e tre le metriche identiche: non e' un miglioramento, quindi si scarta.
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    q = check_quadratura(_BS_ROTTO)
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=q, after=q)
+    assert not ok
+    assert "non migliora" in motivo
+
+
+def test_ancora_ce_ricade_sui_costi_dichiarati():
+    sec = _sezione("ce", D("999"), D("111"), utile=D("1"))   # incoerenti
+    assert vr.section_anchor(sec, {"costi": D("2000"), "ricavi": D("2100")}) == D("2000")
+
+
+def test_reconcile_tolerance_e_la_regola_del_repo():
+    assert vr.reconcile_tolerance(D("1000")) == D("50")        # pavimento assoluto
+    assert vr.reconcile_tolerance(D("1000000")) == D("5000")   # 0,5%
+
+
+# ------------------------------------------------- fix round 1: vision_result
+
+def test_vision_result_segue_il_ramo_che_valida_non_l_ordine_delle_chiavi():
+    # Il documento stampa ENTRAMBE le didascalie: solo il ramo della perdita torna.
+    sec = _sezione("sp", D("950"), D("1000"), utile=D("70"), perdita=D("50"))
+    assert vr.vision_result(sec) == D("-50")
+
+
+def test_vision_result_utile_quando_e_il_ramo_dell_utile_a_tornare():
+    sec = _sezione("sp", D("1000"), D("950"), utile=D("50"), perdita=D("70"))
+    assert vr.vision_result(sec) == D("50")
+
+
+def test_vision_result_ce_perdita():
+    # costi == ricavi + perdita
+    sec = _sezione("ce", D("1000"), D("950"), perdita=D("50"))
+    assert vr.vision_result(sec) == D("-50")
+
+
+def test_vision_result_none_se_i_totali_non_sono_coerenti():
+    assert vr.vision_result(_sezione("sp", D("1000"), D("111"), utile=D("1"))) is None
+
+
+def test_totals_are_coherent_e_vision_result_non_divergono():
+    casi = [
+        _sezione("sp", D("1000"), D("950"), utile=D("50")),
+        _sezione("sp", D("950"), D("1000"), perdita=D("50")),
+        _sezione("ce", D("1000"), D("1100"), utile=D("100")),
+        _sezione("ce", D("1000"), D("950"), perdita=D("50")),
+        _sezione("sp", D("1000"), D("111"), utile=D("1")),
+        _sezione("sp", None, None),
+    ]
+    for sec in casi:
+        assert vr.totals_are_coherent(sec) == (vr.vision_result(sec) is not None)

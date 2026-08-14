@@ -276,6 +276,38 @@ def reconcile_tolerance(total: Decimal) -> Decimal:
     return max(_TOL_ABS, abs(total) * _TOL_PCT)
 
 
+def vision_result(sec: VisionSection) -> Optional[Decimal]:
+    """Il risultato d'esercizio con segno, dedotto dall'identita' che ha VALIDATO.
+
+    Un documento puo' stampare sia una riga "utile" sia una riga "perdita" (una delle
+    due e' spesso del periodo precedente, o e' una didascalia sempre presente col
+    valore a zero). Scegliere l'utile per primo e' indovinare: se la coerenza dei
+    totali e' stata verificata dal ramo della PERDITA, il risultato ha segno opposto e
+    il foglio ne esce con l'utile ribaltato. Qui il segno lo decide l'identita' che
+    torna, non l'ordine delle chiavi. None quando i totali non sono coerenti.
+    """
+    left, right = sec.totals.get("left"), sec.totals.get("right")
+    if left is None or right is None:
+        return None
+    utile = sec.totals.get("utile") or Z
+    perdita = sec.totals.get("perdita") or Z
+    if sec.section == "sp":
+        # attivo + perdita == passivo, oppure attivo == passivo + utile.
+        if abs((left + perdita) - right) <= _COHERENCE_TOL:
+            return -perdita
+        if abs(left - (right + utile)) <= _COHERENCE_TOL:
+            return utile
+        return None
+    # ce: costi + utile == ricavi, oppure costi == ricavi + perdita — la
+    # convenzione di segno e' l'opposto dello SP (qui e' il "right" a crescere
+    # con l'utile, non il "left"), non la stessa formula riusata.
+    if abs((left + utile) - right) <= _COHERENCE_TOL:
+        return utile
+    if abs(left - (right + perdita)) <= _COHERENCE_TOL:
+        return -perdita
+    return None
+
+
 def totals_are_coherent(sec: VisionSection) -> bool:
     """I totali LETTI dalla vision tornano fra loro?
 
@@ -285,21 +317,9 @@ def totals_are_coherent(sec: VisionSection) -> bool:
     E' questa coerenza interna che autorizza a preferirli alle ancore di testo quando
     quelle si contraddicono (budget_623: il testo legge un passivo che il PDF non
     stampa). Senza entrambi i totali di colonna non c'e' identita' da verificare.
+    Definita su vision_result cosi' le due non possono divergere.
     """
-    left, right = sec.totals.get("left"), sec.totals.get("right")
-    if left is None or right is None:
-        return False
-    utile = sec.totals.get("utile") or Z
-    perdita = sec.totals.get("perdita") or Z
-    if sec.section == "sp":
-        # attivo + perdita == passivo, oppure attivo == passivo + utile.
-        return (abs((left + perdita) - right) <= _COHERENCE_TOL
-                or abs(left - (right + utile)) <= _COHERENCE_TOL)
-    # ce: costi + utile == ricavi, oppure costi == ricavi + perdita — la
-    # convenzione di segno e' l'opposto dello SP (qui e' il "right" a crescere
-    # con l'utile, non il "left"), non la stessa formula riusata.
-    return (abs((left + utile) - right) <= _COHERENCE_TOL
-            or abs(left - (right + perdita)) <= _COHERENCE_TOL)
+    return vision_result(sec) is not None
 
 
 def section_anchor(sec: VisionSection,
@@ -322,6 +342,26 @@ def section_anchor(sec: VisionSection,
         return None
     value = (declared or {}).get("costi")
     return value or None
+
+
+def _badness(q) -> Decimal:
+    """Quanto un foglio e' lontano dall'essere in ordine, in una cifra sola.
+
+    Sbilancio e residuo non classificato sono la stessa specie di male — massa che
+    non si spiega — e vanno sommati, non confrontati uno a uno. Trattandoli come tre
+    confronti indipendenti, un riscatto che azzera il residuo ma lascia un piccolo
+    sbilancio veniva RIFIUTATO: cioe' proprio il caso "QUADRATURA MASCHERATA" per cui
+    il riscatto esiste. Sommandoli, 200 di residuo che diventano 10 di sbilancio sono
+    un miglioramento, mentre dimezzare il residuo triplicando lo sbilancio non lo e'.
+
+    Nota su _plug_residual: `build_sp_from_vision` lo azzera per costruzione, ma sul
+    percorso SP il chiamante (pdf_importer, Task 7) lo ricalcola con
+    `_reconcile_trial_to_declared` PRIMA che `check_quadratura` lo veda, quindi lo zero
+    asserito qui non e' mai cio' che questa funzione confronta. Sul percorso CE il
+    foglio non viene toccato, quindi il residuo e' identico su before/after e non pesa
+    nel confronto. Non e' un segnale gratis: non c'e' nulla da correggere.
+    """
+    return abs(q.sbilancio) + abs(q.plug_residual)
 
 
 def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
@@ -347,16 +387,17 @@ def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
     if after.is_empty:
         return False, "il riscatto produce un'estrazione vuota"
 
-    improved = (abs(after.sbilancio) < abs(before.sbilancio)
-                or after.plug_residual < before.plug_residual
-                or (not before.utile_match and after.utile_match))
-    worsened = (abs(after.sbilancio) > abs(before.sbilancio)
-                or after.plug_residual > before.plug_residual
-                or (before.utile_match and not after.utile_match))
-    if worsened or not improved:
-        return False, (f"peggiora o non migliora la quadratura: sbilancio "
-                       f"{before.sbilancio:,.2f} -> {after.sbilancio:,.2f}, residuo "
-                       f"{before.plug_residual:,.2f} -> {after.plug_residual:,.2f}")
+    # Un riscatto che spegne l'identita' CE/SP non e' mai un miglioramento, per quanto
+    # migliori i totali: e' l'utile che smette di essere un solo numero.
+    if before.utile_match and not after.utile_match:
+        return False, "il riscatto rompe l'identita' utile CE = sp13"
+
+    before_bad, after_bad = _badness(before), _badness(after)
+    fixed_identity = after.utile_match and not before.utile_match
+    if after_bad >= before_bad and not fixed_identity:
+        return False, (f"non migliora la quadratura: sbilancio {before.sbilancio:,.2f} -> "
+                       f"{after.sbilancio:,.2f}, residuo {before.plug_residual:,.2f} -> "
+                       f"{after.plug_residual:,.2f}")
 
     return True, (f"riconcilia a {anchor:,.2f} (scarto {delta:,.2f}); sbilancio "
                   f"{before.sbilancio:,.2f} -> {after.sbilancio:,.2f}")

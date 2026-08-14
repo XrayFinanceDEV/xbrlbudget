@@ -602,3 +602,171 @@ def test_accetta_un_riscatto_ce_che_ripara_l_identita_senza_toccare_lo_sp():
         declared={"costi": D("1000"), "ricavi": D("1100")},
         before=check_quadratura(bs, ce_rotto), after=check_quadratura(bs, ce_giusto))
     assert ok, motivo
+
+
+# ------------------------------------------------- innesco in pdf_importer
+
+from importers.pdf_importer import _apply_vision_rescue  # noqa: E402
+
+
+_BS_624 = {   # SP corretto: quadra. Il rotto e' il CE.
+    "sp09_disponibilita_liquide": D("2181734.09"),
+    "sp16_debiti_breve": D("2172827.30"),
+    "sp13_utile_perdita": D("8906.79"),
+    "totale_attivo": D("2181734.09"), "totale_passivo": D("2181734.09"),
+}
+_CE_624_ROTTO = {"ce01_ricavi_vendite": D("2491786.38"),
+                 "ce05_materie_prime": D("938766.79")}
+
+
+def test_non_viene_invocato_su_un_foglio_che_gia_quadra():
+    chiamate = []
+
+    def _reader(*a, **kw):
+        chiamate.append(a)
+        return None
+
+    ce_ok = {"ce01_ricavi_vendite": D("2491786.38"),
+             "ce05_materie_prime": D("2482879.59")}
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_624), dict(ce_ok),
+        declared={}, donor_bs=None, ocr_text=None, reader=_reader)
+    assert riscattate == []
+    assert chiamate == [], "nessuna chiamata vision su un foglio sano"
+    assert ce == ce_ok
+
+
+def test_un_eccezione_nel_riscatto_lascia_il_foglio_intatto(monkeypatch):
+    # section_pages e' doppiata perche' l'eccezione arrivi DAVVERO dal lettore:
+    # con un percorso inesistente il riscatto uscirebbe prima di chiamarlo, e il
+    # test passerebbe senza aver mai esercitato il ramo che dichiara di provare.
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.section_pages",
+        lambda _p: {"sp": [0], "ce": [1]},
+    )
+
+    def _reader(*a, **kw):
+        raise RuntimeError("boom")
+
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
+        declared={}, donor_bs=None, ocr_text=None, reader=_reader)
+    assert riscattate == []
+    assert bs == _BS_624
+    assert ce == _CE_624_ROTTO
+
+
+def test_un_riscatto_ce_che_riconcilia_sostituisce_il_conto_economico(monkeypatch):
+    # La sezione CE riletta chiude il divario misurato: costi 2.482.879,59 contro i
+    # 938.766,79 letti dal testo, utile 8.906,79 = sp13.
+    sec = vr.VisionSection(
+        section="ce",
+        rows=(vr.VisionRow("73", "ACQUISTI MATERIE PRIME", D("2482879.59"), "left"),
+              vr.VisionRow("70", "RICAVI DELLE VENDITE", D("2491786.38"), "right")),
+        totals={"left": D("2482879.59"), "right": D("2491786.38"),
+                "utile": D("8906.79"), "perdita": None},
+    )
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.section_pages",
+        lambda _p: {"sp": [0], "ce": [1]},
+    )
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
+        declared={"costi": D("2482879.59"), "ricavi": D("2491786.38")},
+        donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["ce"]
+    assert ce["ce05_materie_prime"] == D("2482879.59")
+    assert bs == _BS_624, "il riscatto del CE non tocca lo stato patrimoniale"
+
+
+def test_un_riscatto_ce_che_non_riconcilia_viene_scartato(monkeypatch):
+    sec = vr.VisionSection(
+        section="ce",
+        rows=(vr.VisionRow("73", "ACQUISTI MATERIE PRIME", D("100000.00"), "left"),
+              vr.VisionRow("70", "RICAVI DELLE VENDITE", D("2491786.38"), "right")),
+        totals={"left": D("2482879.59"), "right": D("2491786.38"),
+                "utile": D("8906.79"), "perdita": None},
+    )
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.section_pages",
+        lambda _p: {"sp": [0], "ce": [1]},
+    )
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
+        declared={"costi": D("2482879.59"), "ricavi": D("2491786.38")},
+        donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == []
+    assert ce == _CE_624_ROTTO
+
+
+# --- lo stato patrimoniale -------------------------------------------------
+
+_BS_SBILANCIATO = {"sp09_disponibilita_liquide": D("1000"),
+                   "sp16_debiti_breve": D("900"),
+                   "sp13_utile_perdita": D("0")}
+
+
+def _patch_pagine(monkeypatch):
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.section_pages",
+        lambda _p: {"sp": [0], "ce": [1]},
+    )
+
+
+def test_un_riscatto_sp_che_riconcilia_sostituisce_lo_stato_patrimoniale(monkeypatch):
+    _patch_pagine(monkeypatch)
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("10", "CASSA", D("1000"), "left"),
+              vr.VisionRow("20", "DEBITI V/FORNITORI", D("900"), "right")),
+        totals={"left": D("1000"), "right": D("900"),
+                "utile": D("100"), "perdita": None},
+    )
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_SBILANCIATO), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["sp"]
+    assert bs["sp13_utile_perdita"] == D("100")
+    assert bs["sp09_disponibilita_liquide"] == D("1000")
+    assert ce == {}, "il riscatto dello SP non tocca il conto economico"
+
+
+def test_il_segno_del_risultato_sp_lo_decide_l_identita_che_valida(monkeypatch):
+    # Il documento stampa SIA un utile SIA una perdita: e' il ramo della perdita
+    # che fa tornare i totali (attivo + perdita == passivo). Prendere l'utile per
+    # primo bookerebbe +100 al posto di -100 — un errore di 2x sul risultato che il
+    # primo cancello, che misura la sola colonna di sinistra, non vedrebbe.
+    _patch_pagine(monkeypatch)
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("10", "CASSA", D("900"), "left"),
+              vr.VisionRow("20", "DEBITI V/FORNITORI", D("1000"), "right")),
+        totals={"left": D("900"), "right": D("1000"),
+                "utile": D("100"), "perdita": D("100")},
+    )
+    prima = {"sp09_disponibilita_liquide": D("900"),
+             "sp16_debiti_breve": D("1000"),
+             "sp13_utile_perdita": D("0")}
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(prima), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["sp"]
+    assert bs["sp13_utile_perdita"] == D("-100")
+
+
+def test_totali_vision_incoerenti_non_producono_un_riscatto_sp(monkeypatch):
+    # Nessuna delle due identita' torna: il risultato non si indovina, il foglio
+    # resta com'e'.
+    _patch_pagine(monkeypatch)
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("10", "CASSA", D("1000"), "left"),
+              vr.VisionRow("20", "DEBITI V/FORNITORI", D("900"), "right")),
+        totals={"left": D("1000"), "right": D("900"),
+                "utile": None, "perdita": None},
+    )
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_SBILANCIATO), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == []
+    assert bs == _BS_SBILANCIATO

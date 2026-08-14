@@ -9,7 +9,7 @@ import re
 import json
 import hashlib
 import logging
-from typing import Dict, Any, NamedTuple, Optional
+from typing import Dict, Any, List, NamedTuple, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime
 
@@ -386,6 +386,121 @@ def _map_sc_keys(data: Dict[str, Decimal]) -> Dict[str, Decimal]:
             result[_SC_KEY_MAP[k]] = v
         # else: skip (totale_attivo, totale_passivo, etc.)
     return result
+
+
+def _apply_vision_rescue(file_path: str,
+                         balance_sheet_data: Dict[str, Decimal],
+                         income_data: Dict[str, Decimal],
+                         declared: Dict[str, Optional[Decimal]],
+                         donor_bs: Optional[Dict[str, Decimal]],
+                         ocr_text: Optional[str],
+                         reader=None) -> Tuple[Dict[str, Decimal], Dict[str, Decimal], List[str]]:
+    """Riscatto vision per sezione, in coda alla catena route C.
+
+    Innesco: check_quadratura sul foglio FINITO. La posizione e' deliberata — innescare
+    prima del netting farebbe scattare il riscatto su un attivo ancora lordo, un divario
+    che il netting dei fondi chiude da solo. Le due sezioni si innescano in modo
+    indipendente: un file puo' riscattare il CE e lasciare l'SP com'e'.
+
+    Ogni errore e' NON fatale: si logga e si tiene il candidato precedente. Se il
+    riscatto non riesce, il foglio resta esattamente com'e' oggi.
+    """
+    from importers import vision_rescue as vr
+    from importers.iv_cee_hierarchy import check_quadratura
+    from importers import situazione_contabile_parser as scp
+
+    read = reader or vr.read_section
+    rescued: List[str] = []
+    try:
+        before = check_quadratura(balance_sheet_data, income_data)
+    except Exception as err:
+        logger.warning(f"Riscatto vision: quadratura iniziale non calcolabile ({err})")
+        return balance_sheet_data, income_data, rescued
+
+    sp_broken = before.is_empty or abs(before.sbilancio) > Decimal("0.01") or before.masked
+    ce_broken = not before.utile_match
+    if not sp_broken and not ce_broken:
+        return balance_sheet_data, income_data, rescued
+
+    try:
+        pages = scp.section_pages(file_path)
+    except Exception as err:
+        logger.warning(f"Riscatto vision: pagine per sezione non determinabili ({err})")
+        return balance_sheet_data, income_data, rescued
+
+    # --- Conto economico ---------------------------------------------------
+    if ce_broken:
+        try:
+            sec = read(file_path, pages.get("ce", []), "ce")
+            if sec is not None and sec.rows:
+                new_ce = _map_sc_keys(scp.build_ce_from_vision(
+                    [(r.code, r.description, r.amount, r.column) for r in sec.rows]))
+                rebuilt = sum((r.amount for r in sec.rows if r.column == "left"),
+                              Decimal("0"))
+                # Il CE non tocca il bilancio: lo si passa immutato su entrambi i lati
+                # del confronto. Con ce=None `utile_match` varrebbe True per difetto e
+                # il ramo `fixed_identity` del cancello scatterebbe a vuoto.
+                after = check_quadratura(balance_sheet_data, new_ce)
+                ok, why = vr.accept_rescue("ce", rebuilt, sec, declared, before, after)
+                logger.info(f"Riscatto vision CE: {'accettato' if ok else 'scartato'} — {why}")
+                if ok:
+                    income_data = new_ce
+                    before = after
+                    rescued.append("ce")
+        except Exception as err:
+            logger.warning(f"Riscatto vision CE fallito ({type(err).__name__}: {err})")
+
+    # --- Stato patrimoniale ------------------------------------------------
+    if sp_broken:
+        try:
+            sec = read(file_path, pages.get("sp", []), "sp")
+            if sec is not None and sec.rows:
+                # Il segno del risultato lo decide l'identita' che ha VALIDATO i totali
+                # letti, non l'ordine delle chiavi: un documento stampa spesso sia un
+                # "utile" sia una "perdita" e preferire il primo ribalta il risultato
+                # quando e' il ramo della perdita a tornare.
+                utile = vr.vision_result(sec)
+                if utile is None:
+                    logger.info("Riscatto vision SP: totali letti non coerenti — non tentato")
+                else:
+                    new_bs = _map_sc_keys(scp.build_sp_from_vision(
+                        [(r.code, r.description, r.amount, r.column) for r in sec.rows],
+                        utile=utile))
+                    # Letto PRIMA della catena: dopo net_contra_accounts questa chiave
+                    # non descrive piu' la stessa massa.
+                    netted = new_bs.get('_netted_contra', Decimal('0'))
+                    # Il totale stampato e' LORDO quando i fondi stanno sul passivo: si
+                    # misura il lordo contro il lordo (stesso cancello di _hier_reconstruct).
+                    rebuilt = new_bs.get('totale_attivo', Decimal('0')) + netted
+
+                    # Stessa post-elaborazione degli altri candidati.
+                    if donor_bs is not None:
+                        new_bs = scp.overlay_debt_typing(new_bs, donor_bs)
+                    new_bs, _contra = scp.net_contra_accounts(
+                        new_bs, file_path, text=ocr_text, declared=declared)
+                    from importers.pdf_extractor_llm import _reconcile_trial_to_declared
+                    _decl = dict(declared or {})
+                    _cut = _contra if _contra > 0 else netted
+                    if _cut > 0:
+                        for _k in ('attivo', 'passivo', 'pareggio'):
+                            if _decl.get(_k):
+                                _decl[_k] = _decl[_k] - _cut
+                    # Indispensabile: build_sp_from_vision ASSERISCE _plug_residual = 0,
+                    # non lo misura. E' questa chiamata a sostituirlo con il divario
+                    # misurato contro il totale dichiarato — senza, ogni riscatto SP
+                    # entrerebbe nel cancello con un miglioramento regalato.
+                    new_bs = _reconcile_trial_to_declared(new_bs, _decl, "vision")
+
+                    after = check_quadratura(new_bs, income_data)
+                    ok, why = vr.accept_rescue("sp", rebuilt, sec, declared, before, after)
+                    logger.info(f"Riscatto vision SP: {'accettato' if ok else 'scartato'} — {why}")
+                    if ok:
+                        balance_sheet_data = new_bs
+                        rescued.append("sp")
+        except Exception as err:
+            logger.warning(f"Riscatto vision SP fallito ({type(err).__name__}: {err})")
+
+    return balance_sheet_data, income_data, rescued
 
 
 def _create_balance_sheet(db, financial_year_id: int, data: Dict[str, Decimal]) -> 'BalanceSheet':
@@ -878,6 +993,11 @@ def import_pdf_balance_sheet(
         except Exception:
             pass
         _coge_ok = False
+        # Sezioni riscattate in vision (route C). Inizializzata QUI, fuori da ogni
+        # ramo: il blocco del parser_version la legge su OGNI route, mentre
+        # l'assegnazione vive dentro `if candidates:` — una route A/B solleverebbe
+        # NameError.
+        _rescued_sections = []
         if is_trial_balance:
             # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the
             # CoGe LLM extractor and the deterministic best-effort parser, then keep the
@@ -1092,6 +1212,21 @@ def import_pdf_balance_sheet(
                         residual = balance_sheet_data.get('_plug_residual', residual)
                     except Exception as _rc_err:
                         logger.warning(f"Route C: declared-result reconcile skipped: {_rc_err}")
+                # Riscatto vision (spec 2026-08-14): il foglio FINITO non quadra ma il
+                # numero giusto e' stampato sulla pagina — e' il text layer a non
+                # arrivarci. Rilegge in vision le sole pagine della sezione che non
+                # torna. La posizione in coda alla catena e' deliberata: prima del
+                # netting il riscatto scatterebbe su un attivo ancora lordo.
+                try:
+                    _donor = next((c[1] for c in candidates if c[3] == "deterministico"), None)
+                    balance_sheet_data, income_data, _rescued_sections = _apply_vision_rescue(
+                        file_path, balance_sheet_data, income_data,
+                        declared=_dc0, donor_bs=_donor, ocr_text=ocr_text)
+                    if _rescued_sections:
+                        residual = balance_sheet_data.get('_plug_residual', residual)
+                        source = f"{source}+vision({'+'.join(_rescued_sections)})"
+                except Exception as _vr_err:
+                    logger.warning(f"Route C: riscatto vision saltato: {_vr_err}")
                 others = ", ".join(f"{s}={r:,.0f}" for r, _b, _c, s in candidates)
                 logger.info(f"Route C: scelto estrattore '{source}' (residuo minore "
                             f"{residual:,.0f}); candidati: {others}")
@@ -1371,6 +1506,13 @@ def import_pdf_balance_sheet(
                 _stored_parser_version = (
                     f"{_PDF_PARSER_VERSION}+mineru-{_mineru_version}"
                 )[:50]
+        # Provenienza del riscatto, con la stessa convenzione di '+mineru-<ver>': dopo
+        # il fatto si deve poter distinguere un foglio riletto in vision da uno letto
+        # dal solo text layer.
+        if _rescued_sections:
+            _stored_parser_version = (
+                f"{_stored_parser_version}+vision-{'-'.join(_rescued_sections)}"
+            )[:50]
         financial_year_obj = FinancialYear(
             company_id=company.id,
             year=current_year_val,

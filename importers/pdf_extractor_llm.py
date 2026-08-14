@@ -3189,14 +3189,24 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     # Ancore della sezione economica. Servono al riscatto vision, che misura un CE
     # ricostruito contro il totale che il documento stampa: senza queste il CE non ha
     # alcun controllo indipendente (lo SP ha pareggio/attivo/passivo, il CE nulla).
+    # "Totale costi della produzione (B)" e "Totale valore della produzione (A)" sono
+    # SUBTOTALI di sezione dello schema IV-CEE, non i totali di colonna di una situazione
+    # contabile: neutralizzali prima di cercare, o su un bilancio ordinario (che un totale
+    # costi complessivo non lo stampa affatto) l'ancora tornerebbe sbagliata invece che None.
+    _CE_SUBTOTAL_CAPTIONS = ("totale costi della produzione", "totale valore della produzione")
+    _ce_low, _ce_nos = low, nos
+    for _cap in _CE_SUBTOTAL_CAPTIONS:
+        _ce_low = _ce_low.replace(_cap, "@")
+        _ce_nos = _ce_nos.replace(_cap.replace(" ", ""), "@")
+    _ce_hays = ((_ce_low, False), (_ce_nos, True))
     out["costi"] = _largest_after([
         "totale costi", "totale dei costi", "totale costi e oneri",
         "totale a pareggio costi",
-    ])
+    ], hays=_ce_hays)
     out["ricavi"] = _largest_after([
         "totale ricavi", "totale dei ricavi", "totale ricavi e proventi",
         "totale a pareggio ricavi",
-    ])
+    ], hays=_ce_hays)
 
     # In two-column trial balances PyMuPDF can emit the right-hand amount before
     # the left-hand label in linear text, so the after-label scan above sees no

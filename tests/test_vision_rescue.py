@@ -47,3 +47,31 @@ def test_declared_totals_costi_ricavi_tollerano_le_intestazioni_spaziate():
     out = _declared_control_totals("ignorato.pdf", text=text)
     assert out["costi"] == D("1234.56")
     assert out["ricavi"] == D("2345.67")
+
+
+def test_declared_totals_non_scambia_il_subtotale_b_per_il_totale_costi():
+    # "Totale costi della produzione (B)" e' un subtotale di sezione dello schema
+    # IV-CEE. Un bilancio ordinario non stampa affatto un totale costi complessivo:
+    # l'ancora deve tornare None, non il subtotale.
+    text = (
+        "Totale valore della produzione (A) 392.761,56\n"
+        "Totale costi della produzione (B) 311.646,32\n"
+        "Utile dell'esercizio 45.000,00\n"
+    )
+    out = _declared_control_totals("ignorato.pdf", text=text)
+    assert out["costi"] is None
+    assert out["ricavi"] is None
+
+
+def test_declared_totals_legge_ancora_il_totale_costi_di_una_situazione_contabile():
+    # Il caso che serve: una situazione contabile stampa i totali di colonna, e
+    # quelli devono continuare a leggersi anche se il documento cita altrove i
+    # subtotali di schema.
+    text = (
+        "Totale costi della produzione (B) 311.646,32\n"
+        "TOTALE COSTI 2.482.879,59\n"
+        "TOTALE RICAVI 2.491.786,38\n"
+    )
+    out = _declared_control_totals("ignorato.pdf", text=text)
+    assert out["costi"] == D("2482879.59")
+    assert out["ricavi"] == D("2491786.38")

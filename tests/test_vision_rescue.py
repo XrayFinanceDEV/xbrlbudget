@@ -543,8 +543,9 @@ def test_vision_result_utile_quando_e_il_ramo_dell_utile_a_tornare():
 
 
 def test_vision_result_ce_perdita():
+    # Il documento stampa entrambe le didascalie: solo il ramo della perdita torna.
     # costi == ricavi + perdita
-    sec = _sezione("ce", D("1000"), D("950"), perdita=D("50"))
+    sec = _sezione("ce", D("1000"), D("950"), utile=D("60"), perdita=D("50"))
     assert vr.vision_result(sec) == D("-50")
 
 
@@ -563,3 +564,41 @@ def test_totals_are_coherent_e_vision_result_non_divergono():
     ]
     for sec in casi:
         assert vr.totals_are_coherent(sec) == (vr.vision_result(sec) is not None)
+
+
+# ------------------------------------------------- fix round 2: il tetto su fixed_identity
+
+def test_rifiuta_un_riscatto_che_ripara_l_identita_ma_sbilancia_il_foglio():
+    # Riparare sp13 non e' una licenza illimitata: il gate 1 misura la sola colonna
+    # di sinistra, quindi un passivo ricostruito male non lo vedrebbe nessuno.
+    bs_prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+                "sp13_utile_perdita": D("0"),
+                "totale_attivo": D("1000"), "totale_passivo": D("1000")}
+    bs_dopo = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1400"),
+               "sp13_utile_perdita": D("100"),
+               "totale_attivo": D("1000"), "totale_passivo": D("1500")}
+    ce = {"ce01_ricavi_vendite": D("1100"), "ce05_materie_prime": D("1000")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(bs_prima, ce), after=check_quadratura(bs_dopo, ce))
+    assert not ok
+    assert "sbilancia" in motivo
+
+
+def test_accetta_un_riscatto_ce_che_ripara_l_identita_senza_toccare_lo_sp():
+    # Il caso budget_624: lo SP quadra gia', il CE no. Il bilancio non cambia, quindi
+    # lo scarto complessivo resta identico: solo la riparazione dell'identita' puo'
+    # far passare questo riscatto, e deve passare.
+    bs = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("900"),
+          "sp13_utile_perdita": D("100"),
+          "totale_attivo": D("1000"), "totale_passivo": D("1000")}
+    ce_rotto = {"ce01_ricavi_vendite": D("1100"), "ce05_materie_prime": D("400")}
+    ce_giusto = {"ce01_ricavi_vendite": D("1100"), "ce05_materie_prime": D("1000")}
+    sec = _sezione("ce", D("1000"), D("1100"), utile=D("100"))
+    ok, motivo = vr.accept_rescue(
+        section="ce", rebuilt_total=D("1000"), sec=sec,
+        declared={"costi": D("1000"), "ricavi": D("1100")},
+        before=check_quadratura(bs, ce_rotto), after=check_quadratura(bs, ce_giusto))
+    assert ok, motivo

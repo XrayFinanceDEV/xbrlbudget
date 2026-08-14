@@ -399,5 +399,17 @@ def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
                        f"{after.sbilancio:,.2f}, residuo {before.plug_residual:,.2f} -> "
                        f"{after.plug_residual:,.2f}")
 
+    # Riparare l'identita' CE/SP e' un miglioramento reale, ma non e' una licenza
+    # illimitata: senza un tetto, un riscatto che sistema sp13 e insieme sbilancia il
+    # foglio di mezzo milione passerebbe, perche' il gate 1 misura la sola colonna di
+    # sinistra e non vede il passivo. Il tetto e' la stessa tolleranza di riconciliazione
+    # del gate 1, non una nuova.
+    if fixed_identity:
+        slack = reconcile_tolerance(after.totale_attivo or before.totale_attivo)
+        if after_bad > before_bad + slack:
+            return False, (f"ripara l'identita' utile CE = sp13 ma sbilancia il foglio: "
+                           f"scarto complessivo {before_bad:,.2f} -> {after_bad:,.2f} "
+                           f"(oltre {slack:,.2f})")
+
     return True, (f"riconcilia a {anchor:,.2f} (scarto {delta:,.2f}); sbilancio "
                   f"{before.sbilancio:,.2f} -> {after.sbilancio:,.2f}")

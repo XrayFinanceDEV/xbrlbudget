@@ -306,6 +306,15 @@ risulta troppo alto e il ribilancio lo **maschera gonfiando la liquidità** (es.
 - `_reconcile_pn_detail` legge le righe romane **A.II–A.X → sp12a…sp12h** e ricalcola
   `sp12_riserve` come somma **ALGEBRICA** (i negativi inclusi). Applicata SOLO se
   `sp11 + Σsp12* + sp13` riconcilia al "Totale patrimonio netto" stampato → **anti-masking**.
+
+  > **Non è ridondante rispetto a `_validate_equity`, ed è il fatto da non perdere.** I due
+  > passaggi sembrano fare la stessa cosa — entrambi rimettono a posto `sp12` — e non la fanno.
+  > Il validatore *rifiuta* proprio questa correzione, perché la sua prima guardia vieta le
+  > riserve negative (`IMPORT-OVERVIEW.md` §5) ed è esattamente una riserva negativa il numero
+  > giusto nel caso LIO. Solo il passaggio deterministico, **ancorato alle righe stampate** invece
+  > che al pareggio, arriva al valore vero. Il commento a `pdf_extractor_llm.py:2357` lo dice
+  > esplicitamente. Chi in futuro pensasse di cancellare uno dei due come duplicato deve partire
+  > da qui (tanto più che `_validate_equity` oggi non è nemmeno agganciato a un percorso).
 - `_reconcile_personale_detail` legge **B.9 a/b/c/e → ce08b** salari / **ce08c** oneri /
   **ce08a** TFR / **ce08d** altri, gated su "Totale costi per il personale". Gotcha: la riga
   CE "c) trattamento di fine rapporto" va distinta dalla riga SP "C) Trattamento di fine

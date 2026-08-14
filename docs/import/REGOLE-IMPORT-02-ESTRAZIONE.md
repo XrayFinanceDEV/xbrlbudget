@@ -16,7 +16,7 @@ Ordine reale dei fatti per un PDF caricato (`pdf_importer.import_pdf_balance_she
 | 2 | **Routing** (pagina 01). XBRL e UNSUPPORTED escono qui con un errore |
 | 3 | **Rilevamento testo corrotto** → esclude i totali dichiarati da ogni decisione |
 | 4 | **Estrazione**, biforcata per route |
-| 5 | **Identità CE↔SP** (diagnostica, tutte le route) |
+| 5 | **Identità CE↔SP** — `enforce_ce_sp_identity`, diagnostica, su **tutte** le route, XBRL nativo compreso: l'utile ricostruito dai tag CE può divergere dallo `sp13` taggato (budget_361/404) |
 | 6 | **Gate strutturale** `validate_balance` → se fallisce, diagnosi motivata (pagina 04) |
 | 7 | **Gate contabile** `check_quadratura` → se non quadra, import **non salvato** |
 | 8 | Coerenza gerarchica (non bloccante) |
@@ -214,7 +214,18 @@ la sola colonna di sinistra, questo riscatto poteva produrre un foglio **sbaglia
 incompleto: quando `net_contra_accounts` ha una scansione disponibile su quel file, una sovra-lettura
 del passivo non si vede nello sbilancio, perché a valle viene **assorbita** cancellando debiti fino
 alla massa dei fondi. Il foglio torna a quadrare, il residuo va a zero, il cancello vede un riscatto
-perfetto — e il debito persistito resta sottostimato senza un solo avviso. La quantità misurata è
+perfetto — e il debito persistito resta sottostimato senza un solo avviso.
+
+> **Su budget_623, però, quel meccanismo non può scattare, e conviene registrarlo perché è stato
+> raccontato al contrario.** Su quel file `_contra_rows` **non trova nulla da leggere** — verificato
+> con i totali dichiarati reali, con `text=None` e con il testo PyMuPDF — quindi
+> `net_contra_accounts` esce subito con `_contra_reason='scan non disponibile'` e netta zero. Non
+> c'è alcuna massa di fondi che possa assorbire una sovra-lettura: lì una lettura in eccesso del
+> passivo resta un **semplice sbilancio visibile**, già catturato dalla condizione 3 del cancello.
+> Una versione precedente della documentazione attribuiva a questo file 289.788,03 di fondi
+> ammortamento nettati: su budget_623 il netting non parte nemmeno.
+
+La quantità misurata dalla condizione 2 è
 costruita per essere confrontabile con il totale *stampato*: `totale_passivo − utile + massa nettata`
 (il risultato è esposto dal documento come riga di pareggio fuori dal totale di colonna; i fondi sono
 righe della colonna destra che la ricostruzione porta in detrazione dell'attivo).

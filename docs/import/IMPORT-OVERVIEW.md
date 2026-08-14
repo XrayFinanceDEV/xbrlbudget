@@ -305,6 +305,34 @@ post-processing: `_normalize_ce_signs`, `_validate_crediti`/`_validate_debiti`
 `_extract_with_llm_vision` con gli stessi prompt CoGe. Single-year (i trial balance sono
 raramente comparativi): `prior_bs_data`/`prior_ce_data` restano `None`.
 
+#### Il quinto validatore: `_validate_equity` (e il suo stato reale)
+
+Accanto ai quattro sopra esiste un validatore del **patrimonio netto**
+(`pdf_extractor_llm.py:3693`): confronta `sp11 + sp12 + sp13` con `totale_passivo` meno le
+passività, e quando le due grandezze divergono oltre €1 correggerebbe le **riserve** (`sp12`), il
+solo campo del PN che può assorbire uno scarto di composizione. Il rubinetto ha tre guardie
+anti-masking, e sono la parte che vale la pena conoscere:
+
+1. **Mai riserve negative.** Se la correzione porterebbe `sp12` sotto zero, non si applica: un
+   totale riserve negativo non esiste, quindi lo scarto sta altrove.
+2. **Mai assorbire uno scarto egregio.** Sopra `max(3 × cap di plug; 150.000 €)` la correzione è
+   rifiutata e lo squilibrio **emerge**: uno scarto di quella taglia è strutturale (debiti
+   sbagliati, `totale_passivo` al netto del risultato, passività mancanti), non un errore di
+   riserve. Il caso che l'ha motivata: budget_158/238, riserve gonfiate di oltre un milione. Il
+   cap è deliberatamente **più largo** di quello di crediti/debiti, perché su una società piccola
+   una correzione moderata delle riserve è legittima (€40k su un bilancio da €350k — budget_275).
+3. **Deroga validata dal pareggio.** Quando entrambi i totali dichiarati esistono, coincidono, e
+   il lato attivo ricostruisce già `totale_attivo`, lo squilibrio vive **per intero** nella
+   composizione del PN: lì la correzione si applica anche oltre il cap, perché fa tornare l'intero
+   prospetto sui totali dichiarati (budget_297, PN negativo con riserve estratte a 1.152.513
+   invece di 152.023). Uno squilibrio strutturale non qualifica e continua a emergere.
+
+> ⚠️ **Oggi questa funzione non gira su nessun percorso.** Nel codice il nome compare tre volte: la
+> definizione e **due commenti** che la descrivono come attiva (`:2357`, `:2589`). Nessuna riga la
+> chiama. Le sue guardie restano un pezzo di progettazione valido — e la #1 spiega perché il
+> reconciler deterministico del PN esiste (vedi `IMPORT-ROUTING-TAXONOMY.md` §6) — ma non
+> descrivono un controllo in funzione. Vedi `REGOLE-IMPORT-00-INDICE.md` §6.
+
 In `pdf_importer` i due estrattori di route C **girano entrambi** e si tiene il migliore. La regola
 di scelta è cambiata dopo la stesura di questa pagina: **non** vince il `_plug_residual` minore, che
 è cieco alla sotto-estrazione, ma il candidato più vicino al **totale di controllo dichiarato**, col

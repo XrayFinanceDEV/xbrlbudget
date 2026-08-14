@@ -279,6 +279,12 @@ Test: `tests/test_label_semantics_normalize.py`, `tests/test_label_semantics_spa
 
 ### L'ordine delle regole è la regola
 
+Il tipo di creditore si risolve in `_debt_type`, che emette il **sotto-campo tipizzato**
+(`sp16a`..`sp16g` a breve, `sp17a`..`sp17g` a lungo, coi nomi DB pieni) **accanto** all'aggregato.
+I sotto-campi sono **display-only**: l'aggregato non cambia (Σ tipi = `sp16`), quindi la
+ripartizione non può toccare il pareggio. Senza tipizzazione l'interfaccia rende l'intera massa
+sotto "Altri debiti" (AITEC PROVVISORIO: 10,3 M tutti negli altri).
+
 Primo match vince, e l'ordine non è negoziabile:
 
 | # | Riconosce | Va in | Perché in questa posizione |
@@ -367,7 +373,9 @@ gonfia.
 
 **La soluzione**: un codice senza separatore è un mastro **solo quando i suoi figli puntati lo
 seguono prima del prossimo codice senza separatore**, in ordine di documento. Questo rigetta le
-foglie profonde troncate.
+foglie profonde troncate. I fondi ammortamento vengono nettati **a qualsiasi profondità**
+(`_is_fondo_amm`), compreso l'aggregato "FONDI AMMORTAMENTO IMMOBILIZ" che la tabella delle regole
+non intercetta.
 
 **Tenuto solo se auto-validante** — entrambe: il lordo riconcilia col TOTALE ATTIVITA dichiarato
 entro `max(€50; 0,5%)`, **e** il gap dello SP coincide col risultato del CE. Altrimenti si
@@ -445,9 +453,9 @@ KPI, e **sempre un sotto-campo esplicito, mai un aggregato**. La ragione è spec
 `sp16`/`sp17` e la somma dei loro dettagli, quindi massa lasciata sull'aggregato diventa **debito
 bancario fantasma**, con piano di rimborso e oneri finanziari proiettati sopra.
 
-**Quando è silenzioso — la materialità:** `M = max(1.000 €; 0,1% del totale attivo)`. La
-definizione canonica sta nel modulo puro `importers/reliability.py` e il parser la ri-esporta, così
-la regola esiste in un posto solo. Sotto `M` il ripiego è silenzioso; sopra, l'importo si accumula
+**Quando è silenzioso — la materialità:** `materiality_threshold(total)` =
+`max(1.000 €; 0,1% del totale attivo)`. La definizione canonica sta nel modulo puro
+`importers/reliability.py` e il parser la **ri-esporta**, così la regola esiste in un posto solo. Sotto `M` il ripiego è silenzioso; sopra, l'importo si accumula
 in `_unclassified_mass` invece di sparire.
 
 Due funzioni distinte, e il motivo è pratico: `fallback_field(statement)` dà la destinazione dentro
@@ -470,6 +478,9 @@ Test: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
 
 ## 9. Test di riferimento
 
+- `tests/run_contra_regression.py` — il controllo di **corpus** del netting: rigira il netting
+  sui file disponibili e confronta l'esito, per rispondere a "questa modifica al netting ha
+  cambiato qualcosa altrove?". Complementare ai casi unitari qui sotto.
 - `tests/test_contra_netting.py` — il file di riferimento (668 righe): dedup padre/figlio,
   classificazione dei contro-conti in 8 varianti, split immateriali/materiali, i casi reali
   210/211/613, la modalità OCR, e **cinque no-op** (già netto, senza fondi, scan che non

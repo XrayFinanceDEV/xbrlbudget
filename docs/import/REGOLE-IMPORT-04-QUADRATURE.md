@@ -109,7 +109,7 @@ formato.
 | 1 | il documento è una scansione | "*Il documento è una scansione contabile, ma l'OCR non ha ricostruito in modo affidabile colonne, gerarchie e totali…*" — il file **non** viene dichiarato sbilanciato |
 | 2 | i due totali **stampati** differiscono oltre €2 | "***Il bilancio sorgente non quadra prima dell'importazione**: Totale Attivo … != Totale Passivo … (scarto …). Correggere il documento contabile originale.*" |
 | 3 | riepilogo aggregato **che contraddice se stesso** | "***Il documento sorgente è internamente incoerente**: le componenti del Conto Economico non ricostruiscono il risultato netto dichiarato (scarto …) e le componenti dell'Attivo non coincidono con il totale stampato (scarto …). Correggere il documento contabile originale.*" |
-| 4 | riepilogo aggregato la cui stampa è coerente | "***Formato non supportato**: il documento è un riepilogo aggregato per macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) importabile…*" |
+| 4 | riepilogo aggregato la cui stampa è coerente (`_is_aggregated_summary`: nessun sotto-item in numero romano, nessun "esigibili entro/oltre", nessun codice conto) | "***Formato non supportato**: il documento è un riepilogo aggregato per macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) importabile…*" |
 | 5 | totali stampati coincidenti, ma componenti che non li ricostruiscono | "*Documento non importabile automaticamente: i totali Attivo e Passivo stampati coincidono, ma le componenti… non li ricostruiscono.*" |
 | 6 | nessuna delle precedenti | messaggio generico |
 

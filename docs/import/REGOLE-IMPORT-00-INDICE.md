@@ -122,6 +122,11 @@ Da non documentare come funzionalità:
   codice si autodichiara inutilizzato (`:1655-1658`).
 - `xbrl_parser.py` (legacy) — riduce ogni contesto al solo anno, quindi collassa annuale e
   infrannuale dello stesso anno. Il parser di produzione è `xbrl_parser_enhanced.py`.
+- `_validate_equity` (`pdf_extractor_llm.py:3693`) — **definita e mai chiamata**: le uniche altre
+  occorrenze del nome sono due commenti (`:2357`, `:2589`) che la descrivono come attiva. Le sue
+  guardie anti-masking sono documentate in [IMPORT-OVERVIEW](IMPORT-OVERVIEW.md) §5 perché
+  spiegano una decisione ancora viva (perché il reconciler deterministico del PN esiste), ma **non
+  vanno raccontate come un controllo in funzione**. Rilevato il 2026-08-14.
 - `tests/test_hierarchical_import.py` — il nome inganna: è un diagnostico manuale **XBRL**,
   interamente skippato (`pytestmark = pytest.mark.skip`). Non copre la gerarchia dotted. Il
   riferimento corretto è `tests/test_prod_route_c.py`.

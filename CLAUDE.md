@@ -318,6 +318,7 @@ snellimento non è concluso, in `docs/superpowers/2026-08-14-inventario-claude-m
 
 | Domanda | Pagina |
 |---|---|
+| Devi orientarti nella serie, o sapere quali disallineamenti sono già noti? | [REGOLE-IMPORT-00-INDICE](docs/import/REGOLE-IMPORT-00-INDICE.md) |
 | Come si decide che cosa è un documento e a quale estrattore va? | [REGOLE-IMPORT-01-ROUTING](docs/import/REGOLE-IMPORT-01-ROUTING.md) |
 | Come si estrae, quando entra l'LLM, quanto costa, come si sceglie fra due candidati? | [REGOLE-IMPORT-02-ESTRAZIONE](docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md) |
 | Una riga di conto in che voce di legge va, un fondo si netta, e dove finisce ciò che non si è saputo classificare? | [REGOLE-IMPORT-03-SPACCHETTATURE-NETTING](docs/import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) |
@@ -822,6 +823,14 @@ Editable AI-generated commentary rendered above each table in the Stampa tab. Si
   - `scripts/cleanup_uploads.py` — retention cron job
 
 ### Bulk Assumptions Workflow
+
+> ⚠️ **Leggi `forecast_generated`, non l'HTTP 200.** Quando il previsionale viene rifiutato (gate
+> semantico sulla fonte), `bulk_upsert_assumptions` **cattura** l'errore e risponde comunque
+> **200**, con `forecast_generated: false` e la ragione in `message`: nessun `ForecastYear`
+> scritto, `analysis.forecast_years` vuoto, e la colonna Proiezione resta **vuota sotto un toast
+> di successo**. Ogni chiamante deve controllare il campo (`/budget` e i due punti di chiamata del
+> wizard della pratica lo fanno). → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6
+
 ```python
 # Budget: Multiple years
 PUT /scenarios/{id}/assumptions
@@ -924,6 +933,11 @@ POST /companies/{id}/scenarios
 ## Technical Constraints
 
 - **SQLite database**: Single-file, no concurrent writes (use transactions carefully)
+- **MinerU non va MAI sul VPS**: la sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
+  GPU). Sta dietro il compose profile `mineru`, che la esclude da **ogni** comando compose —
+  `build` compreso — perché il `Jenkinsfile` esegue `docker compose build --no-cache --parallel`
+  sullo staging. `MINERU_OCR_ENABLED` è `false` di default per la stessa ragione. Toglierlo dal
+  profile trascina vLLM sul server. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis
 - **Decimal precision**: Numeric(15, 2) - max 9,999,999,999,999.99
 - **JSON serialization**: Backend uses custom `DecimalJSONResponse` (Decimal → float)
 - **Italian locale**: UI text in Italian, European number formatting

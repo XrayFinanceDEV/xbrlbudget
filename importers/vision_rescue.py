@@ -398,17 +398,31 @@ def _badness(q) -> Decimal:
 def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
                   declared: Dict[str, Optional[Decimal]],
                   before, after,
-                  residual_measured: bool = True) -> Tuple[bool, str]:
+                  residual_measured: bool = True,
+                  rebuilt_passivo: Optional[Decimal] = None) -> Tuple[bool, str]:
     """Tre condizioni, tutte necessarie (spec §3). Ritorna (accettato, motivo).
 
     `rebuilt_total` e' il totale LORDO della sezione ricostruita — per lo SP la somma
     dell'attivo netto PIU' la massa dei fondi nettati, perche' il totale stampato su
     questi file e' lordo (stessa aritmetica del cancello 1 di _hier_reconstruct).
+    `rebuilt_passivo` e' l'omologo della colonna di DESTRA, sempre LORDO e sempre al
+    netto del risultato d'esercizio (che il documento stampa come riga di pareggio,
+    fuori dal totale di colonna). None = non misurabile, e allora il controllo si
+    salta: un confronto sbagliato sarebbe peggio di un controllo assente.
     `before`/`after` sono i Quadratura del foglio prima e dopo il riscatto.
 
     `residual_measured` dice se il residuo di `after` e' una MISURA o un asserto: falso
     quando il documento non stampa alcun totale contro cui verificarlo.
     """
+    # `section` e `sec.section` devono essere lo stesso: il corpo si dirama su
+    # `sec.section` (vision_result, section_anchor), quindi un chiamante che passa
+    # 'ce' con una VisionSection 'sp' applicherebbe in silenzio le formule dello SP.
+    # ValueError e non assert: gli assert spariscono sotto -O, e il chiamante ha gia'
+    # un try che degrada il riscatto a non-tentato.
+    if section != sec.section:
+        raise ValueError(f"sezione incoerente: richiesta '{section}', "
+                         f"ricevuta '{sec.section}'")
+
     anchor = section_anchor(sec, declared)
     if anchor is None or anchor <= 0:
         return False, "nessuna ancora utilizzabile (ne' i totali vision ne' quelli di testo)"
@@ -418,6 +432,24 @@ def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
     if delta > tol:
         return False, (f"non riconcilia al totale stampato: ricostruito {rebuilt_total:,.2f} "
                        f"contro {anchor:,.2f} (scarto {delta:,.2f} > {tol:,.2f})")
+
+    # Il gate 1 misurava la sola colonna di sinistra. Il passivo la vision lo ha
+    # trascritto e la coerenza interna lo ha gia' attraversato: non usarlo lasciava
+    # scoperto l'unico modo in cui questo riscatto puo' produrre un foglio SBAGLIATO
+    # invece che incompleto. Una sovra-lettura del passivo non si vede nello sbilancio,
+    # perche' net_contra_accounts la assorbe cancellando debiti fino alla massa dei
+    # fondi: il foglio torna a quadrare e il debito risulta sottostimato, senza un
+    # avviso. Qui il totale ricostruito del passivo si misura contro quello stampato,
+    # con la stessa tolleranza.
+    if rebuilt_passivo is not None:
+        anchor_pas = sec.totals.get("right")
+        if anchor_pas and anchor_pas > 0:
+            delta_pas = abs(anchor_pas - rebuilt_passivo)
+            tol_pas = reconcile_tolerance(anchor_pas)
+            if delta_pas > tol_pas:
+                return False, (f"il passivo ricostruito non riconcilia al totale stampato: "
+                               f"{rebuilt_passivo:,.2f} contro {anchor_pas:,.2f} "
+                               f"(scarto {delta_pas:,.2f} > {tol_pas:,.2f})")
 
     if after.is_empty:
         return False, "il riscatto produce un'estrazione vuota"

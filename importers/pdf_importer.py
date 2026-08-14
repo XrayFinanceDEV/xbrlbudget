@@ -394,8 +394,13 @@ def _apply_vision_rescue(file_path: str,
                          declared: Dict[str, Optional[Decimal]],
                          donor_bs: Optional[Dict[str, Decimal]],
                          ocr_text: Optional[str],
-                         reader=None) -> Tuple[Dict[str, Decimal], Dict[str, Decimal], List[str]]:
+                         reader=None) -> Tuple[Dict[str, Decimal], Dict[str, Decimal],
+                                               List[str], Dict[str, str]]:
     """Riscatto vision per sezione, in coda alla catena route C.
+
+    Ritorna (bilancio, conto economico, sezioni riscattate, motivi). I `motivi` sono
+    la stringa che il cancello ha prodotto per OGNI sezione tentata, accettata o no:
+    e' la provenienza che finisce nel validation_report persistito (spec §5).
 
     Innesco: check_quadratura sul foglio FINITO. La posizione e' deliberata — innescare
     prima del netting farebbe scattare il riscatto su un attivo ancora lordo, un divario
@@ -411,22 +416,23 @@ def _apply_vision_rescue(file_path: str,
 
     read = reader or vr.read_section
     rescued: List[str] = []
+    reasons: Dict[str, str] = {}
     try:
         before = check_quadratura(balance_sheet_data, income_data)
     except Exception as err:
         logger.warning(f"Riscatto vision: quadratura iniziale non calcolabile ({err})")
-        return balance_sheet_data, income_data, rescued
+        return balance_sheet_data, income_data, rescued, reasons
 
     sp_broken = before.is_empty or abs(before.sbilancio) > Decimal("0.01") or before.masked
     ce_broken = not before.utile_match
     if not sp_broken and not ce_broken:
-        return balance_sheet_data, income_data, rescued
+        return balance_sheet_data, income_data, rescued, reasons
 
     try:
         pages = scp.section_pages(file_path)
     except Exception as err:
         logger.warning(f"Riscatto vision: pagine per sezione non determinabili ({err})")
-        return balance_sheet_data, income_data, rescued
+        return balance_sheet_data, income_data, rescued, reasons
 
     # --- Conto economico ---------------------------------------------------
     if ce_broken:
@@ -446,6 +452,7 @@ def _apply_vision_rescue(file_path: str,
                 # parametro non cambierebbe nulla in nessuno dei due valori.
                 ok, why = vr.accept_rescue("ce", rebuilt, sec, declared, before, after)
                 logger.info(f"Riscatto vision CE: {'accettato' if ok else 'scartato'} — {why}")
+                reasons["ce"] = why
                 if ok:
                     income_data = new_ce
                     before = after
@@ -473,15 +480,30 @@ def _apply_vision_rescue(file_path: str,
                 if utile is None:
                     logger.info("Riscatto vision SP: totali letti non coerenti — non tentato")
                 else:
-                    new_bs = _map_sc_keys(scp.build_sp_from_vision(
+                    _raw_bs = scp.build_sp_from_vision(
                         [(r.code, r.description, r.amount, r.column) for r in sec.rows],
-                        utile=utile))
+                        utile=utile)
+                    new_bs = _map_sc_keys(_raw_bs)
                     # Letto PRIMA della catena: dopo net_contra_accounts questa chiave
                     # non descrive piu' la stessa massa.
                     netted = new_bs.get('_netted_contra', Decimal('0'))
                     # Il totale stampato e' LORDO quando i fondi stanno sul passivo: si
                     # misura il lordo contro il lordo (stesso cancello di _hier_reconstruct).
                     rebuilt = new_bs.get('totale_attivo', Decimal('0')) + netted
+                    # L'omologo della colonna di destra, costruito per essere
+                    # confrontabile con il TOTALE PASSIVITA' stampato:
+                    #   totale_passivo somma _PASSIVO_KEYS, sp13 COMPRESO, mentre il
+                    #   totale di colonna stampato NON comprende il risultato (che il
+                    #   documento espone come riga di pareggio: attivo == passivo +
+                    #   utile, oppure attivo + perdita == passivo) -> si sottrae `utile`;
+                    #   i fondi ammortamento sono righe della colonna DESTRA che
+                    #   build_sp_from_vision sottrae dall'attivo, quindi non sono in
+                    #   totale_passivo mentre sono nel totale stampato -> si risomma
+                    #   `netted`, esattamente come per l'attivo qui sopra.
+                    # Il risultato e' la somma delle righe lette a destra: la stessa
+                    # cosa che il documento stampa come totale di colonna.
+                    rebuilt_pas = (_raw_bs.get('totale_passivo', Decimal('0'))
+                                   - utile + netted)
 
                     # Stessa post-elaborazione degli altri candidati.
                     if donor_bs is not None:
@@ -520,15 +542,17 @@ def _apply_vision_rescue(file_path: str,
                     after = check_quadratura(new_bs, income_data)
                     ok, why = vr.accept_rescue("sp", rebuilt, sec, declared, before,
                                                after,
-                                               residual_measured=_has_text_anchor)
+                                               residual_measured=_has_text_anchor,
+                                               rebuilt_passivo=rebuilt_pas)
                     logger.info(f"Riscatto vision SP: {'accettato' if ok else 'scartato'} — {why}")
+                    reasons["sp"] = why
                     if ok:
                         balance_sheet_data = new_bs
                         rescued.append("sp")
         except Exception as err:
             logger.warning(f"Riscatto vision SP fallito ({type(err).__name__}: {err})")
 
-    return balance_sheet_data, income_data, rescued
+    return balance_sheet_data, income_data, rescued, reasons
 
 
 def _create_balance_sheet(db, financial_year_id: int, data: Dict[str, Decimal]) -> 'BalanceSheet':
@@ -1026,6 +1050,10 @@ def import_pdf_balance_sheet(
         # l'assegnazione vive dentro `if candidates:` — una route A/B solleverebbe
         # NameError.
         _rescued_sections = []
+        # Motivi del cancello per sezione tentata (accettata o no): provenienza
+        # persistita nel validation_report. Inizializzata QUI per la stessa ragione
+        # di _rescued_sections — il blocco che la legge sta fuori da `if candidates:`.
+        _rescue_reasons: Dict[str, str] = {}
         if is_trial_balance:
             # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the
             # CoGe LLM extractor and the deterministic best-effort parser, then keep the
@@ -1252,8 +1280,8 @@ def import_pdf_balance_sheet(
                     try:
                         _donor = next(
                             (c[1] for c in candidates if c[3] == "deterministico"), None)
-                        (balance_sheet_data, income_data,
-                         _rescued_sections) = _apply_vision_rescue(
+                        (balance_sheet_data, income_data, _rescued_sections,
+                         _rescue_reasons) = _apply_vision_rescue(
                             file_path, balance_sheet_data, income_data,
                             declared=_dc0, donor_bs=_donor, ocr_text=ocr_text)
                         if _rescued_sections:
@@ -1542,11 +1570,20 @@ def import_pdf_balance_sheet(
                 )[:50]
         # Provenienza del riscatto, con la stessa convenzione di '+mineru-<ver>': dopo
         # il fatto si deve poter distinguere un foglio riletto in vision da uno letto
-        # dal solo text layer.
+        # dal solo text layer. Il parser_version e' troncato a 50 caratteri e non
+        # porta i motivi: la registrazione completa sta nel validation_report, come
+        # per l'OCR MinerU qui sopra (spec §5).
         if _rescued_sections:
             _stored_parser_version = (
                 f"{_stored_parser_version}+vision-{'-'.join(_rescued_sections)}"
             )[:50]
+        if _rescued_sections or _rescue_reasons:
+            _validation_payload["vision_rescue"] = {
+                "engine": "vision",
+                "sections": list(_rescued_sections),
+                "attempted": sorted(_rescue_reasons),
+                "reasons": dict(_rescue_reasons),
+            }
         financial_year_obj = FinancialYear(
             company_id=company.id,
             year=current_year_val,

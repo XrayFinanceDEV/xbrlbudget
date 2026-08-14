@@ -5078,10 +5078,18 @@ def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
     Le righe sono gia' al livello mastro, quindi non passano da _be_reclassify (che
     serve a scegliere fra padre e figli in una gerarchia): ogni riga vale per se'.
     Chiavi corte come il best-effort — il chiamante applica _map_sc_keys.
+
+    Dichiara sempre `_unclassified_mass`: la massa letta ma finita in un secchio
+    generico (sopra la soglia di materialita') piu' l'eccedenza tagliata dal clamp
+    sulle immobilizzazioni negative. Zero e' un'affermazione, non un'assenza.
     """
     Z = Decimal('0')
     bs: Dict[str, Decimal] = {}
     netted = Z
+    # Massa LETTA ma non riconosciuta: la riga e' finita in un secchio generico
+    # (sp06 sull'attivo, sp16 sul passivo) perche' il classificatore non ha saputo
+    # dire di piu'. Si accumula qui e si pesa in fondo, quando il totale esiste.
+    unclassified: List[Tuple[str, Decimal]] = []
 
     def add(k, v):
         bs[k] = bs.get(k, Z) + v
@@ -5090,10 +5098,14 @@ def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
         d = (desc or '').upper()
         if column == 'left':
             field, _specific = classify_attivo(d)
+            if not _specific:
+                unclassified.append((d, amount))
             add({'gross_sp02': 'sp02', 'gross_sp03': 'sp03',
                  'gross_sp04': 'sp04'}.get(field, field), amount)
             continue
         tag, _specific = classify_passivo(d)
+        if not _specific:
+            unclassified.append((d, amount))
         if tag in ('depr_sp02', 'depr_sp03', 'depr_sp04'):
             add(tag.replace('depr_', ''), -amount)     # netta il fondo dall'attivo
             netted += amount
@@ -5110,8 +5122,18 @@ def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
 
     # Un fondo non puo' mai superare il proprio cespite lordo: un'immobilizzazione
     # netta negativa e' sempre una misclassificazione. Il cancello vedra' il divario.
+    # La correzione pero' deve PARLARE: sp02/sp03/sp04 sono TIER0_FIELDS, e azzerare
+    # in silenzio un valore negativo trasforma una contraddizione in un numero
+    # plausibile. L'eccedenza tagliata e' massa che non si e' saputa collocare, quindi
+    # va nello stesso canale del resto: _unclassified_mass.
+    clamped = Z
     for k in ('sp02', 'sp03', 'sp04'):
         if bs.get(k, Z) < Z:
+            clamped += -bs[k]
+            logger.warning(
+                f"Riscatto vision: {k} negativo ({bs[k]}) — il fondo supera il cespite "
+                f"lordo, azzerato; {-bs[k]} di massa non collocata (verificare in "
+                f"Rettifiche)")
             bs[k] = Z
 
     bs['sp13'] = utile
@@ -5125,6 +5147,19 @@ def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
     bs['totale_attivo'] = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
     bs['totale_passivo'] = sum((bs.get(k, Z) for k in _PASSIVO_KEYS), Z)
     bs['_plug_residual'] = Z
+    # Massa non collocata, DICHIARATA anche quando e' zero: reliability.assess legge
+    # questa chiave, e una chiave assente li' vale zero — cioe' un foglio riscattato
+    # si dichiarerebbe pulito solo perche' questo montatore non ha un secchio. Sopra
+    # la soglia di materialita' si conta l'importo, sotto e' un'etichetta generica
+    # legittima (stessa politica di fallback_bucket nel percorso best-effort);
+    # l'eccedenza tagliata dal clamp si conta SEMPRE, perche' non e' un'etichetta
+    # imprecisa ma una contraddizione contabile.
+    material = clamped
+    for _desc, _amt in unclassified:
+        _field, _severity = fallback_bucket(_desc, 'bs', _amt, bs['totale_attivo'])
+        if _severity == 'recorded':
+            material += abs(_amt)
+    bs['_unclassified_mass'] = material
     return bs
 
 

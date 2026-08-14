@@ -704,7 +704,7 @@ def test_non_viene_invocato_su_un_foglio_che_gia_quadra():
 
     ce_ok = {"ce01_ricavi_vendite": D("2491786.38"),
              "ce05_materie_prime": D("2482879.59")}
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_624), dict(ce_ok),
         declared={}, donor_bs=None, ocr_text=None, reader=_reader)
     assert riscattate == []
@@ -724,7 +724,7 @@ def test_un_eccezione_nel_riscatto_lascia_il_foglio_intatto(monkeypatch):
     def _reader(*a, **kw):
         raise RuntimeError("boom")
 
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
         declared={}, donor_bs=None, ocr_text=None, reader=_reader)
     assert riscattate == []
@@ -746,7 +746,7 @@ def test_un_riscatto_ce_che_riconcilia_sostituisce_il_conto_economico(monkeypatc
         "importers.situazione_contabile_parser.section_pages",
         lambda _p: {"sp": [0], "ce": [1]},
     )
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
         declared={"costi": D("2482879.59"), "ricavi": D("2491786.38")},
         donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
@@ -767,7 +767,7 @@ def test_un_riscatto_ce_che_non_riconcilia_viene_scartato(monkeypatch):
         "importers.situazione_contabile_parser.section_pages",
         lambda _p: {"sp": [0], "ce": [1]},
     )
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
         declared={"costi": D("2482879.59"), "ricavi": D("2491786.38")},
         donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
@@ -798,7 +798,7 @@ def test_un_riscatto_sp_che_riconcilia_sostituisce_lo_stato_patrimoniale(monkeyp
         totals={"left": D("1000"), "right": D("900"),
                 "utile": D("100"), "perdita": None},
     )
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_SBILANCIATO), {},
         declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == ["sp"]
@@ -823,7 +823,7 @@ def test_il_segno_del_risultato_sp_lo_decide_l_identita_che_valida(monkeypatch):
     prima = {"sp09_disponibilita_liquide": D("900"),
              "sp16_debiti_breve": D("1000"),
              "sp13_utile_perdita": D("0")}
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(prima), {},
         declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == ["sp"]
@@ -841,7 +841,7 @@ def test_totali_vision_incoerenti_non_producono_un_riscatto_sp(monkeypatch):
         totals={"left": D("1000"), "right": D("900"),
                 "utile": None, "perdita": None},
     )
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_SBILANCIATO), {},
         declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == []
@@ -903,7 +903,7 @@ def test_un_riscatto_sp_accettato_porta_la_bandiera_della_scadenza(monkeypatch):
     # La bandiera deve sopravvivere a _map_sc_keys e arrivare al foglio restituito:
     # e' quella che pdf_importer legge per alzare l'avviso di Rettifiche.
     _patch_pagine(monkeypatch)
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(_BS_ROTTO_SP), dict(_CE_QUALSIASI),
         declared={}, donor_bs=None, ocr_text=None,
         reader=lambda *a, **kw: _SEZIONE_SP_PIATTA)
@@ -966,7 +966,7 @@ def test_il_totale_ricostruito_dello_sp_si_misura_al_LORDO_dei_fondi(monkeypatch
     prima = {"sp09_disponibilita_liquide": D("900"),
              "sp16_debiti_breve": D("700"),
              "sp13_utile_perdita": D("0")}
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(prima), {},
         declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == ["sp"]
@@ -1012,7 +1012,7 @@ def test_le_sezioni_riscattate_finiscono_nel_parser_version(monkeypatch):
 
     def _riscatto_finto(file_path, bs, ce, declared, donor_bs, ocr_text, reader=None):
         visto["chiamato"] = True
-        return bs, ce, ["ce"]
+        return bs, ce, ["ce"], {"ce": "riconcilia (doppio di test)"}
 
     monkeypatch.setattr(pdf_importer, "_apply_vision_rescue", _riscatto_finto)
 
@@ -1032,6 +1032,14 @@ def test_le_sezioni_riscattate_finiscono_nel_parser_version(monkeypatch):
         anno = db.query(FinancialYear).filter_by(
             company_id=result["company_id"]).one()
         assert anno.parser_version.endswith("+vision-ce")
+        # Provenienza (spec §5): il parser_version e' troncato a 50 caratteri e non
+        # puo' portare i motivi. La registrazione completa sta nel validation_report,
+        # con la stessa forma della voce "ocr" di MinerU.
+        import json as _json
+        prov = _json.loads(anno.validation_report)["vision_rescue"]
+        assert prov["engine"] == "vision"
+        assert prov["sections"] == ["ce"]
+        assert prov["reasons"]["ce"]
 
 
 @pytest.mark.skipif(not os.path.exists(PDF_615), reason="corpus budget_615 assente")
@@ -1049,7 +1057,7 @@ def test_senza_chiave_il_riscatto_non_viene_nemmeno_tentato(monkeypatch):
     chiamate = []
     monkeypatch.setattr(
         pdf_importer, "_apply_vision_rescue",
-        lambda *a, **kw: chiamate.append(a) or (a[1], a[2], []))
+        lambda *a, **kw: chiamate.append(a) or (a[1], a[2], [], {}))
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -1130,7 +1138,7 @@ def test_senza_ancore_di_testo_un_riscatto_che_azzera_solo_il_residuo_e_rifiutat
         totals={"left": D("1000"), "right": D("1000"),
                 "utile": D("0"), "perdita": None},
     )
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(prima), {},
         declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == []
@@ -1150,11 +1158,237 @@ def test_con_ancore_di_testo_lo_stesso_riscatto_e_accettato(monkeypatch):
         totals={"left": D("1000"), "right": D("1000"),
                 "utile": D("0"), "perdita": None},
     )
-    bs, ce, riscattate = _apply_vision_rescue(
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
         "ignorato.pdf", dict(prima), {},
         declared={"attivo": D("1000"), "passivo": D("1000")},
         donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
     assert riscattate == ["sp"]
+
+
+# ---------------- il passivo ricostruito ha la sua ancora (review finale, F1)
+
+def test_il_cancello_rifiuta_un_passivo_ricostruito_che_non_riconcilia():
+    # Il gate 1 misurava la sola colonna di sinistra. Una sovra-lettura del PASSIVO
+    # non si vede nello sbilancio (net_contra_accounts la assorbe cancellando debiti
+    # fino alla massa dei fondi): il foglio torna a quadrare e il debito risulta
+    # sottostimato, senza avvisi.
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(_BS_ROTTO), after=check_quadratura(_BS_SANO),
+        rebuilt_passivo=D("1200"))
+    assert not ok
+    assert "passivo ricostruito" in motivo
+
+
+def test_il_cancello_accetta_un_passivo_ricostruito_che_riconcilia():
+    # L'altra meta': col passivo che torna al totale stampato il riscatto passa
+    # esattamente come prima — il controllo nuovo non stringe nulla di corretto.
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(_BS_ROTTO), after=check_quadratura(_BS_SANO),
+        rebuilt_passivo=D("1000"))
+    assert ok, motivo
+
+
+def test_il_passivo_non_misurato_non_blocca_il_riscatto_del_conto_economico():
+    # None = "non misurato": il percorso CE non passa questa quantita' e il cancello
+    # deve comportarsi come prima. Un controllo assente non e' un controllo fallito.
+    sec = _sezione("ce", D("1000"), D("1100"), utile=D("100"))
+    bs = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("900"),
+          "sp13_utile_perdita": D("100"), "totale_attivo": D("1000"),
+          "totale_passivo": D("1000")}
+    ce_rotto = {"ce01_ricavi_vendite": D("1100"), "ce05_materie_prime": D("400")}
+    ce_giusto = {"ce01_ricavi_vendite": D("1100"), "ce05_materie_prime": D("1000")}
+    ok, motivo = vr.accept_rescue(
+        section="ce", rebuilt_total=D("1000"), sec=sec,
+        declared={"costi": D("1000"), "ricavi": D("1100")},
+        before=check_quadratura(bs, ce_rotto), after=check_quadratura(bs, ce_giusto))
+    assert ok, motivo
+
+
+def _netting_che_assorbe(bs, path, text=None, declared=None):
+    """Doppio del bilanciatore di net_contra_accounts (parser, ~riga 4266).
+
+    Cancella dai debiti esattamente l'eccesso del passivo sull'attivo, fino alla
+    massa dei fondi. E' questo comportamento a rendere INVISIBILE una sovra-lettura
+    del passivo: il foglio torna a quadrare, con meno debiti di quanti ne stampa il
+    documento. Sul percorso vero lo fa il netting sul PDF, che qui non esiste.
+    """
+    fondi = bs.get("_netted_contra", D("0"))
+    eccesso = bs.get("totale_passivo", D("0")) - bs.get("totale_attivo", D("0"))
+    taglio = min(max(D("0"), eccesso), fondi)
+    if taglio > D("0"):
+        bs["sp16_debiti_breve"] = bs.get("sp16_debiti_breve", D("0")) - taglio
+        bs["sp16d_debiti_fornitori_breve"] = (
+            bs.get("sp16d_debiti_fornitori_breve", D("0")) - taglio)
+        bs["totale_passivo"] = bs.get("totale_passivo", D("0")) - taglio
+    return bs, taglio
+
+
+def _sezione_sp_lorda(debiti):
+    """Presentazione LORDA: i fondi stanno sul passivo. Totali stampati 1.200/1.200."""
+    righe = [vr.VisionRow("01", "IMPIANTI E MACCHINARI", D("1000"), "left"),
+             vr.VisionRow("02", "CASSA", D("200"), "left"),
+             vr.VisionRow("30", "FONDO AMMORTAMENTO IMPIANTI", D("300"), "right")]
+    righe += [vr.VisionRow(c, d, a, "right") for c, d, a in debiti]
+    return vr.VisionSection(
+        section="sp", rows=tuple(righe),
+        totals={"left": D("1200"), "right": D("1200"),
+                "utile": D("0"), "perdita": None})
+
+
+_BS_PRIMA_LORDO = {"sp09_disponibilita_liquide": D("900"),
+                   "sp16_debiti_breve": D("1100"),
+                   "sp13_utile_perdita": D("0")}
+
+
+def _patch_netting_e_reconcile(monkeypatch):
+    _patch_pagine(monkeypatch)
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.net_contra_accounts",
+        _netting_che_assorbe)
+    # Il reconcile e' l'identita': misura il divario contro il totale dichiarato, e
+    # qui il soggetto del test e' il cancello, non la misura del residuo (coperta dai
+    # test 'residuo non misurato' sopra).
+    monkeypatch.setattr(
+        "importers.pdf_extractor_llm._reconcile_trial_to_declared",
+        lambda bs, decl, label, **kw: bs)
+
+
+def test_un_passivo_sovra_letto_e_rifiutato_anche_se_il_netting_lo_farebbe_quadrare(monkeypatch):
+    # LA regressione di F1. Il documento stampa 1.200 di passivita'; la vision ne
+    # legge 1.400 (un mastro contato due volte). L'attivo riconcilia al centesimo,
+    # quindi il vecchio gate 1 diceva di si'; il netting assorbiva i 200 di troppo
+    # cancellando debiti veri, e il foglio persistito quadrava con 200 di debito in
+    # meno e NESSUN avviso.
+    _patch_netting_e_reconcile(monkeypatch)
+    sec = _sezione_sp_lorda([("20", "DEBITI VERSO FORNITORI", D("900")),
+                             ("21", "DEBITI VERSO FORNITORI", D("200"))])
+    bs, ce, riscattate, motivi = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_PRIMA_LORDO), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == []
+    assert "passivo ricostruito" in motivi["sp"]
+    assert bs == _BS_PRIMA_LORDO
+
+
+def test_lo_stesso_riscatto_col_passivo_giusto_viene_accettato(monkeypatch):
+    # Il gemello: stesse pagine, stessa presentazione lorda, ma il passivo letto
+    # torna ai 1.200 stampati. Il riscatto passa e i debiti restano quelli del
+    # documento — prova che il controllo nuovo non taglia i casi buoni.
+    _patch_netting_e_reconcile(monkeypatch)
+    sec = _sezione_sp_lorda([("20", "DEBITI VERSO FORNITORI", D("900"))])
+    bs, ce, riscattate, _motivi = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_PRIMA_LORDO), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["sp"]
+    assert bs["sp16_debiti_breve"] == D("900")
+    assert bs["sp03_immob_materiali"] == D("700")     # 1.000 lordo - 300 di fondo
+
+
+def test_accept_rescue_rifiuta_una_sezione_di_specie_diversa():
+    # Il corpo si dirama su sec.section: chiamare con 'ce' una sezione 'sp'
+    # applicherebbe in silenzio le formule dello SP. E' un errore di programmazione,
+    # quindi solleva — il chiamante ha gia' un try che degrada il riscatto.
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    with pytest.raises(ValueError):
+        vr.accept_rescue(section="ce", rebuilt_total=D("1000"), sec=sec,
+                         declared={}, before=check_quadratura(_BS_ROTTO),
+                         after=check_quadratura(_BS_SANO))
+
+
+# ------------------- massa non collocata dal montatore vision (F2, F3)
+
+def test_un_fondo_piu_grande_del_cespite_e_azzerato_ma_dichiarato():
+    # Un'immobilizzazione netta negativa non e' un valore IV-CEE valido: si azzera.
+    # Ma sp02/sp03/sp04 sono TIER0_FIELDS, e azzerare in silenzio trasforma una
+    # contraddizione in un numero plausibile. L'eccedenza tagliata resta dichiarata.
+    rows = [("01", "IMPIANTI E MACCHINARI", D("100.00"), "left"),
+            ("30", "FONDO AMMORTAMENTO IMPIANTI", D("400.00"), "right")]
+    bs = build_sp_from_vision(rows, utile=D("0"))
+    assert bs["sp03"] == D("0")
+    assert bs["_unclassified_mass"] == D("300.00")
+
+
+def test_il_montatore_vision_dichiara_sempre_la_massa_non_collocata():
+    # reliability.assess legge questa chiave e una chiave assente li' vale zero: un
+    # foglio riscattato si dichiarerebbe pulito solo perche' il montatore non ha un
+    # secchio. Zero deve essere un'affermazione, non un'assenza.
+    rows = [("01", "CASSA", D("1000.00"), "left"),
+            ("20", "DEBITI VERSO FORNITORI", D("1000.00"), "right")]
+    bs = build_sp_from_vision(rows, utile=D("0"))
+    assert "_unclassified_mass" in bs
+    assert bs["_unclassified_mass"] == D("0")
+
+
+def test_la_massa_materiale_finita_in_un_secchio_generico_e_contata():
+    # Sopra la soglia di materialita' (max 1.000 EUR; 0,1% dell'attivo) la
+    # composizione del secchio generico e' congettura e deve essere visibile.
+    rows = [("01", "CASSA", D("1000000.00"), "left"),
+            ("20", "VOCE IGNOTA XYZ", D("50000.00"), "right")]
+    bs = build_sp_from_vision(rows, utile=D("950000.00"))
+    assert bs["_unclassified_mass"] == D("50000.00")
+
+
+def test_la_massa_immateriale_non_gonfia_il_dichiarato():
+    # Sotto soglia un secchio generico e' un'etichetta legittima, non congettura.
+    rows = [("01", "CASSA", D("1000000.00"), "left"),
+            ("20", "VOCE IGNOTA XYZ", D("500.00"), "right")]
+    bs = build_sp_from_vision(rows, utile=D("999500.00"))
+    assert bs["_unclassified_mass"] == D("0")
+
+
+def test_la_massa_non_collocata_arriva_al_foglio_riscattato(monkeypatch):
+    # Deve sopravvivere a _map_sc_keys: e' li' che reliability.assess la legge.
+    _patch_netting_e_reconcile(monkeypatch)
+    sec = _sezione_sp_lorda([("20", "DEBITI VERSO FORNITORI", D("900"))])
+    bs, _ce, riscattate, _motivi = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_PRIMA_LORDO), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["sp"]
+    assert bs["_unclassified_mass"] == D("0")
+
+
+# ------------------------------------------------- segni di parse_amount (F4)
+
+def test_parse_amount_negativo_col_meno():
+    assert vr.parse_amount("-1.234,56") == D("-1234.56")
+
+
+def test_parse_amount_negativo_fra_parentesi():
+    # Convenzione contabile: (1.234,56) e' un importo negativo.
+    assert vr.parse_amount("(1.234,56)") == D("-1234.56")
+
+
+def test_parse_amount_senza_virgola_il_punto_resta_migliaia():
+    # VOLUTO: un CoGe italiano non stampa i decimali col punto, quindi '1234.56'
+    # e' 123.456 e non 1.234,56. Fissato perche' un cambiamento sia deliberato.
+    assert vr.parse_amount("1234.56") == D("123456")
+
+
+# ---------------------------------- provenienza del riscatto (F6, unita')
+
+def test_il_riscatto_restituisce_il_motivo_di_ogni_sezione_tentata(monkeypatch):
+    # I motivi sono la provenienza che finisce nel validation_report: servono anche
+    # per una sezione SCARTATA, che nel parser_version non lascia traccia.
+    _patch_pagine(monkeypatch)
+    sec = vr.VisionSection(
+        section="ce",
+        rows=(vr.VisionRow("73", "ACQUISTI MATERIE PRIME", D("100000.00"), "left"),
+              vr.VisionRow("70", "RICAVI DELLE VENDITE", D("2491786.38"), "right")),
+        totals={"left": D("2482879.59"), "right": D("2491786.38"),
+                "utile": D("8906.79"), "perdita": None},
+    )
+    _bs, _ce, riscattate, motivi = _apply_vision_rescue(
+        "ignorato.pdf", dict(_BS_624), dict(_CE_624_ROTTO),
+        declared={"costi": D("2482879.59"), "ricavi": D("2491786.38")},
+        donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == []
+    assert "ce" in motivi and motivi["ce"]
 
 
 # ------------------------------------------------- i due PDF veri (gated)

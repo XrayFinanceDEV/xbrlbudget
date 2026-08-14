@@ -64,6 +64,19 @@ def _index_corpus():
     return out
 
 
+# NOTA per chi imposta IMPORT_CORPUS_ROOT per la prima volta (2026-08-14).
+# Questo test fallisce su UN file, `budget_342`, e la fixture NON e' stata
+# rigenerata di proposito: la divergenza PRECEDE il ramo del riscatto vision, e
+# rigenerare la baseline avrebbe consolidato in silenzio un valore che nessuno ha
+# verificato sulla fonte. Tre prove indipendenti, raccolte durante quella review:
+#   1. sul file il riscatto non logga NULLA (non si innesca: la sua quadratura non
+#      lo attiva), quindi non puo' essere lui a spostare i numeri;
+#   2. stubbando `_apply_vision_rescue` l'output e' bit-identico;
+#   3. il commit 36934ca, precedente a tutto il lavoro vision, produce gia' gli
+#      stessi numeri.
+# Rigenerare o no la fixture (`scripts/refresh_import_baseline.py`) e' una
+# decisione del proprietario del progetto, non un passo di manutenzione: prima va
+# stabilito quale delle due letture di budget_342 e' quella giusta.
 @pytest.mark.skipif(not CORPUS, reason="IMPORT_CORPUS_ROOT non impostata (Test/ e' gitignorato)")
 def test_nessuna_regressione_sui_file_di_baseline():
     from tests._import_probe import probe

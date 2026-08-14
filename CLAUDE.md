@@ -414,11 +414,11 @@ trascrive i peer di uno stesso livello con un numero di cifre diverso (`7301500`
 corretto in 2 esecuzioni su 3. Senza totali leggibili, o se nessuna partizione riconcilia, resta il
 minimo di prima e a decidere è il cancello.
 
-**Il cancello** (`accept_rescue`) tiene il riscatto solo se TUTTE: riconcilia al totale stampato
-entro `max(50 €; 0,5%)`; i totali letti dalla vision sono coerenti fra loro (`attivo + perdita ==
-passivo`, `costi + utile == ricavi`) — è questa coerenza che autorizza a preferirli alle ancore di
-testo quando quelle si contraddicono; l'estrazione non è vuota; il riscatto non spegne un'identità
-utile CE = sp13 che prima reggeva; e la quadratura risultante è **strettamente migliore**, misurata
+**Il cancello** (`accept_rescue`) tiene il riscatto solo se TUTTE: **la colonna di sinistra**
+ricostruita riconcilia al totale stampato entro `max(50 €; 0,5%)`; **la colonna di destra** fa
+altrettanto contro il proprio totale stampato (vedi il paragrafo qui sotto); l'estrazione non è
+vuota; il riscatto non spegne un'identità utile CE = sp13 che prima reggeva; e la quadratura
+risultante è **strettamente migliore**, misurata
 come `|sbilancio| + |residuo|` (sbilancio e massa non classificata sono la stessa specie di male e
 si sommano). Il cancello prende una bandiera **`residual_measured`**: il residuo del foglio
 riscattato è una MISURA solo se esisteva un'ancora di testo INDIPENDENTE contro cui farla —
@@ -428,6 +428,34 @@ riscattato è una MISURA solo se esisteva un'ancora di testo INDIPENDENTE contro
 assente). Riparare l'identità CE/SP è un miglioramento reale ma non una licenza illimitata: ha per
 tetto la stessa tolleranza di riconciliazione.
 
+**La coerenza dei totali vision NON è una condizione del cancello** — una versione precedente di
+questa sezione lo affermava, e mandava a cercare un controllo che nel codice non c'è. `accept_rescue`
+la usa solo per scegliere QUALE ancora: `section_anchor` preferisce il totale letto in vision quando
+i totali vision tornano fra loro (`attivo + perdita == passivo`, `costi + utile == ricavi`), e
+altrimenti **ricade sulle ancore di testo**. Un riscatto **CE** con totali vision incoerenti viene
+quindi accettato ogni volta che `declared["costi"]` esiste: è per il CE, e solo per il CE, che la
+ricaduta della spec §3 condizione 2 è davvero implementata. Sul percorso **SP** la coerenza è
+necessaria di fatto, ma per un motivo diverso e altrove: `pdf_importer` rinuncia al riscatto quando
+`vision_result(sec)` è `None`, perché senza un'identità che torni il segno del risultato sarebbe da
+indovinare — quindi una sezione SP incoerente non arriva mai al cancello.
+
+**Il passivo ricostruito ha la sua ancora** (review finale, 2026-08-14). Il gate 1 misurava la sola
+colonna di sinistra, ed era l'unico modo in cui questo riscatto poteva produrre un foglio
+**sbagliato** invece che incompleto: una sovra-lettura del passivo non si vede nello sbilancio,
+perché a valle `net_contra_accounts` la assorbe cancellando debiti fino alla massa dei fondi
+(`excess = totale_passivo − totale_attivo`, `to_remove = min(excess, fondi)` → `_reduce_debts`). Il
+foglio tornava a quadrare, il residuo a zero, il cancello vedeva un riscatto perfetto e il debito
+persistito era sottostimato fino alla massa dei fondi (289.788,03 su budget_623), **senza un solo
+avviso** — e poiché `_reduce_debts` riduce anche l'aggregato nudo, `projection_common.base_bank_debt`
+leggeva poi lo scarto aggregato/dettaglio come debito **bancario**. Ora `pdf_importer` passa
+`rebuilt_passivo` e il cancello lo misura contro `sec.totals["right"]` con la stessa tolleranza. La
+quantità è costruita per essere confrontabile con il totale STAMPATO:
+`totale_passivo − utile + _netted_contra` — si sottrae il risultato perché il documento lo espone
+come riga di pareggio fuori dal totale di colonna, e si risomma la massa nettata perché i fondi sono
+righe della colonna destra che `build_sp_from_vision` porta in detrazione dell'attivo (lo stesso
+lordo/lordo del gate 1). Il risultato è esattamente la somma delle righe lette a destra. `None` =
+non misurato e il controllo si salta: è il caso del percorso CE, che non passa questa quantità.
+
 Il risultato d'esercizio viene da **`vision_result`**, che prende il SEGNO dall'identità che ha
 validato i totali, non dall'ordine delle chiavi: un documento stampa spesso sia una riga "utile" sia
 una "perdita" (una delle due del periodo precedente, o una didascalia a zero), e preferire l'utile
@@ -435,12 +463,31 @@ per primo ribalta il risultato quando è il ramo della perdita a tornare.
 **`build_sp_from_vision` alza `_source_maturity_unspecified`**: i mastri non dicono se un debito è
 entro o oltre l'esercizio, quindi finiscono tutti a breve e l'import espone
 `SCADENZA DEBITI NON DISTINTA` — sp16 e sp17 stanno entrambi nel passivo, quindi il pareggio non se
-ne accorge, ma CCN, current ratio e il capitale circolante di Altman sì.
+ne accorge, ma CCN, current ratio e il capitale circolante di Altman sì. **È una stringa di avviso,
+non un verdetto**: nessun cancello la legge, né qui né a valle. Su budget_623 significa che
+873.205,40 di debito bancario a lungo diventano a breve, e la conseguenza sui KPI resta in carico
+all'utente, da correggere in **Rettifiche**.
+
+**Il clamp sulle immobilizzazioni negative** (`build_sp_from_vision`): quando un fondo letto supera
+il proprio cespite lordo, `sp02`/`sp03`/`sp04` risulterebbero negative — mai un valore IV-CEE
+valido — e vengono azzerate. Sono tutte e tre `TIER0_FIELDS`, quindi la correzione **non è
+silenziosa**: logga a warning il campo e l'importo, e somma l'eccedenza tagliata a
+`_unclassified_mass`, il canale del modulo per la massa che non si è saputa collocare
+(`fallback_bucket` / `materiality_threshold`, letto da `importers/reliability.py`).
+**`build_sp_from_vision` dichiara sempre `_unclassified_mass`**, anche a zero: `reliability.assess`
+legge quella chiave e una chiave assente lì vale zero, quindi un foglio riscattato si sarebbe
+dichiarato pulito solo perché il montatore vision non aveva un secchio. Contiene l'eccedenza del
+clamp (sempre) più la massa finita in un secchio generico sopra la soglia di materialità.
 **Un solo tentativo per sezione**, tetto `MAX_RESCUE_PAGES = 8`, ogni errore non fatale: se il
 riscatto non riesce il foglio resta esattamente com'è oggi, coi suoi warning. Le due sezioni si
 innescano indipendentemente; il riscatto del CE non tocca `sp13` e quello dell'SP non tocca il conto
 economico. Un import riscattato è riconoscibile a posteriori dal suffisso `+vision-<sezioni>` su
 `parser_version` (`semantic-v3-2026-07-20+vision-ce-sp`), assente quando non si è riscattato nulla.
+La **provenienza completa** sta nel `validation_report` persistito, sotto la chiave
+`vision_rescue` (`engine`, `sections` accettate, `attempted`, `reasons` — la stringa del cancello per
+ogni sezione tentata, accettata o scartata), con la stessa forma della voce `ocr` scritta dal
+percorso MinerU: il `parser_version` è troncato a 50 caratteri e non può portare i motivi, e una
+sezione **scartata** non lascia traccia nel suffisso.
 Costo misurato: ~4.500 token in / ~1.000-2.000 out e 8-16 s per sezione (≈ 1-2 centesimi).
 
 **Esito sui due file veri** (misurato su 6 esecuzioni, `tests/test_vision_rescue.py`):
@@ -455,6 +502,13 @@ Costo misurato: ~4.500 token in / ~1.000-2.000 out e 8-16 s per sezione (≈ 1-2
   (l'attivo invece torna al centesimo ogni volta). Il file va ancora chiuso in Rettifiche. Il test
   su 623 asserisce quindi l'invariante misurata (attivo riconciliato, niente mascheratura), non
   l'obiettivo sperato: una soglia sullo sbilancio lo renderebbe un dado.
+  **Dopo l'ancora sul passivo** (paragrafo sopra) le esecuzioni in cui alla vision sfugge un mastro
+  del passivo non vengono più accettate: il riscatto è SCARTATO e il file resta com'era, coi suoi
+  avvisi. È il comportamento voluto — meglio un foglio dichiarato rotto che uno rappezzato — ma
+  significa che su 623 il riscatto SP non è più accettato 6/6: la resa di quel file dipende ora
+  dalla stabilità della trascrizione del passivo. **Una sola esecuzione live dopo la correzione**
+  (1/1, non 6/6: i test live costano una chiamata a testa e non sono stati ripetuti): riscatto SP
+  accettato, `masked` falso, attivo 2.130.609,37. Un campione da uno non è una frequenza.
 
 **Il ripiego del CE va scelto per DIREZIONE** (`build_ce_from_vision`). `FALLBACK_FIELDS['ce']` è
 `ce06`, neutro per i KPI solo DENTRO i costi della produzione: su una riga della colonna RICAVI è un

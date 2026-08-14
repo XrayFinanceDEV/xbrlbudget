@@ -658,7 +658,7 @@ git commit -m "feat(riallinea): lo skill che decide cosa correggere e cosa segna
 Usa l'intervallo del lavoro sul riscatto vision, che ha mosso molti simboli:
 
 ```bash
-python3 scripts/riallinea.py --da 520bf8e --a HEAD > /tmp/riallinea.json
+python3 scripts/riallinea.py --da 520fbe8 --a HEAD > /tmp/riallinea.json
 python3 -c "import json;d=json.load(open('/tmp/riallinea.json'));print(len(d['simboli']),'simboli,',len(d['citazioni']),'citazioni')"
 ```
 

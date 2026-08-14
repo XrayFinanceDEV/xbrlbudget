@@ -41,9 +41,11 @@ nessuno la rilegge. Nel dubbio si segnala.
    commit di riallineamento smettono di essere riconoscibili nel log.
 9. **Aggiorna** `STATO.json`: `ultimo_sha`, `modo`, `data`, `ultimo_completo` come
    già fa `salva_stato`; se hai girato il Livello 3, aggiungi anche
-   `"ripresa_l3": "<percorso dell'ultimo documento verificato al Livello 3>"` —
-   `salva_stato` carica lo stato esistente e vi scrive sopra solo le chiavi che
-   conosce, quindi una chiave in più sopravvive senza toccare `scripts/riallinea.py`.
+   `"ripresa_l3": "<percorso dell'ultimo documento verificato PER INTERO al Livello
+   3>"` — non l'ultimo su cui il tetto ti ha fermato, se lì restavano citazioni non
+   ancora guardate (vedi il Livello 3 sotto per il perché). `salva_stato` carica lo
+   stato esistente e vi scrive sopra solo le chiavi che conosce, quindi una chiave in
+   più sopravvive senza toccare `scripts/riallinea.py`.
 
 ## Strategia per lo sweep completo (`--completo`)
 
@@ -84,12 +86,35 @@ Tre livelli, in quest'ordine, senza eccezioni:
    dalla testa alfabetica. Se `ripresa_l3` è assente (è il primo sweep, o `STATO.json`
    non l'ha ancora mai scritta), parti dall'inizio: dillo esplicitamente nel rapporto,
    così un'esecuzione successiva non trova un caso ambiguo. Verifica citazione per
-   citazione finché non raggiungi 300 verifiche di livello 3 in questa esecuzione; se
-   arrivi in fondo all'elenco dei documenti prima del tetto, **riavvolgi** all'inizio
-   e continua da lì. 300 è scelto per stare comodamente dentro una sessione (in linea
-   con le poche decine tipiche di un `diff`, moltiplicate per un fattore che lascia
-   margine senza pretendere l'impossibile) — non è calibrato su una misura di tempo,
-   è un tetto esplicito che chiunque legga lo skill può cambiare consapevolmente.
+   citazione, documento per documento, finché non raggiungi 300 verifiche di livello 3
+   in questa esecuzione.
+
+   **`ripresa_l3` registra l'ultimo documento verificato PER INTERO — mai un
+   documento su cui il tetto ti ha fermato a metà.** Se le 300 verifiche si esauriscono
+   mentre un documento ha ancora citazioni non guardate, quel documento **non** entra
+   in `ripresa_l3`: lo sweep successivo riparte dal documento dopo l'ultimo
+   completato — che è proprio quello interrotto — e ne riverifica le citazioni da
+   capo. Costa qualche verifica ripetuta; l'alternativa (registrarlo comunque come
+   "ultimo verificato") farebbe sparire per sempre le sue citazioni non ancora
+   guardate, che è il buco che questa regola esiste per chiudere: un documento riletto
+   costa poco, una citazione saltata non si recupera più.
+
+   **Caso limite: il primo documento del giro è più lungo del tetto residuo.** Non
+   completerà mai in una sola esecuzione, quindi `ripresa_l3` non avanzerebbe mai e il
+   giro si bloccherebbe per sempre sullo stesso documento. Non inventare un
+   meccanismo di ripresa parziale dentro un documento: **segnalalo nel rapporto**
+   ("documento X non completabile entro il tetto: N citazioni, tetto residuo M") e
+   registralo comunque come completo in `ripresa_l3`, per lasciare avanzare il giro
+   invece di bloccarlo su un solo documento — è deliberatamente un'eccezione alla
+   regola "mai a metà" appena scritta, e va dichiarata come tale nel rapporto, non
+   applicata in silenzio.
+
+   Se arrivi in fondo all'elenco dei documenti prima del tetto, **riavvolgi**
+   all'inizio e continua da lì. 300 è scelto per stare comodamente dentro una sessione
+   (in linea con le poche decine tipiche di un `diff`, moltiplicate per un fattore che
+   lascia margine senza pretendere l'impossibile) — non è calibrato su una misura di
+   tempo, è un tetto esplicito che chiunque legga lo skill può cambiare
+   consapevolmente.
 
 **Con un tetto di 300 su ~5714 citazioni candidate, uno sweep guarda circa il 5% del
 corpo al Livello 3.** Servono all'incirca 19 sweep perché il giro dell'alfabeto si
@@ -109,7 +134,8 @@ riportano nel rapporto con il conteggio, non si aprono uno per uno.
 **In testa a ogni rapporto di uno sweep completo:**
 ```
 Candidate: 5714 · Verificate a fondo: <L1 + L2 + L3> (L1 CLAUDE.md: N · L2 MORTO: N · L3: N/300)
-Livello 3 ripartito da: <ripresa_l3 dello stato, o «inizio (nessuna ripresa salvata)»> · arrivato a: <ultimo documento verificato>
+Livello 3 ripartito da: <ripresa_l3 dello stato, o «inizio (nessuna ripresa salvata)»>
+Livello 3 arrivato a: <ultimo documento verificato PER INTERO — il nuovo ripresa_l3>
 Non esaminate questa esecuzione: <conteggio> citazioni in <elenco documenti>
 ```
 

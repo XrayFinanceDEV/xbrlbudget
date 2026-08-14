@@ -592,7 +592,13 @@ Expected: FAIL — `ImportError: cannot import name 'build_sp_from_vision'`
 
 - [ ] **Step 3: Implementare le due funzioni**
 
-In `importers/situazione_contabile_parser.py`, **dopo** `extract_contrapposte_best_effort`:
+Prima, **promuovere a costante di modulo** il dizionario `_CE_SUBFIELD_PARENT` che oggi è locale
+dentro `extract_contrapposte_best_effort` (attorno a `:4830`, quello con `'ce08a_tfr':
+('ce08a_tfr_accrual', 'ce08')` e i suoi otto elementi): spostarlo verbatim accanto a
+`_CE_HIER_SUBPARENT`, in cima al modulo, e lasciare la funzione a leggerlo da lì. Deve esistere in
+un posto solo — `build_ce_from_vision` legge lo stesso.
+
+Poi, in `importers/situazione_contabile_parser.py`, **dopo** `extract_contrapposte_best_effort`:
 
 ```python
 def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
@@ -663,17 +669,6 @@ def build_ce_from_vision(rows) -> Dict[str, Decimal]:
 
     def add(k, v):
         ce[k] = ce.get(k, Z) + v
-
-    _CE_SUBFIELD_PARENT = {
-        'ce08a_tfr': ('ce08a_tfr_accrual', 'ce08'),
-        'ce08b': ('ce08b_salari_stipendi', 'ce08'),
-        'ce08c': ('ce08c_oneri_sociali', 'ce08'),
-        'ce08d': ('ce08d_altri_costi_personale', 'ce08'),
-        'ce09a': ('ce09a_ammort_immateriali', 'ce09'),
-        'ce09b': ('ce09b_ammort_materiali', 'ce09'),
-        'ce09c': ('ce09c_svalutazioni', 'ce09'),
-        'ce09d': ('ce09d_svalutazione_crediti', 'ce09'),
-    }
 
     for _code, desc, amount, column in rows:
         d = (desc or '').upper()

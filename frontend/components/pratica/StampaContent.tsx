@@ -37,7 +37,9 @@ import {
   INDICATOR_DEFS,
   scoreDotColor,
   computeCrisisRating,
+  type SerieIndicatori,
 } from "@/lib/pratica-indicators";
+import { IndicatoriCharts } from "@/components/pratica/IndicatoriCharts";
 import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
@@ -161,6 +163,17 @@ export function StampaContent({
   const storicoInd = computeIndicators(storicoBs, storicoIs);
   const infraInd = computeIndicators(infraBs, infraIs);
   const proiezioneInd = computeIndicators(forecastBs, forecastIs);
+
+  // Le etichette sono di questa vista: in Stampa la colonna porta anche
+  // l'anno ("Infrann. 9M 2026"), nella tab Indicatori no.
+  const serieGrafici: SerieIndicatori[] = [
+    { periodo: `Storico ${refYear}`, indicatori: storicoInd },
+    { periodo: `Infrann. ${periodMonths}M ${partialYear}`, indicatori: infraInd },
+    {
+      periodo: `Proiezione ${partialYear}`,
+      indicatori: periodMonths === 12 ? null : proiezioneInd,
+    },
+  ];
 
   const storicoScores = INDICATOR_DEFS.map(d => scoreIndicator(d.key, storicoInd));
   const infraScores = INDICATOR_DEFS.map(d => scoreIndicator(d.key, infraInd));
@@ -639,6 +652,11 @@ export function StampaContent({
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Grafici di sintesi: prima il quadro d'insieme, poi il dettaglio */}
+        <div className="mb-4">
+          <IndicatoriCharts serie={serieGrafici} />
         </div>
 
         {/* Indicator detail table */}

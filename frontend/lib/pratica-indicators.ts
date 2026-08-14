@@ -238,6 +238,34 @@ export const INDICATOR_DEFS: Array<{
 ];
 
 // Dot color and overall rating from score
+/**
+ * Una serie dei grafici della sezione Indicatori: l'etichetta della colonna e
+ * il suo set di indicatori, oppure `null` quando quel periodo non esiste
+ * (bilancio già annuale, o previsionale non ancora generato).
+ */
+export type SerieIndicatori = { periodo: string; indicatori: IndicatorSet | null };
+
+/** Riga appiattita come la vuole Recharts: etichetta + tutti gli indicatori. */
+export type RigaGraficoIndicatori = { periodo: string } & IndicatorSet;
+
+/**
+ * Costruisce le righe dei due grafici (incidenza economica ed equilibrio
+ * finanziario) da un elenco di serie.
+ *
+ * Vive qui, e non dentro il componente, perché la consumano DUE viste — la tab
+ * Indicatori e la Stampa — e perché è l'unica parte testabile: la suite di
+ * questo progetto gira senza DOM (`environment: "node"`), quindi il componente
+ * si verifica nel browser e la logica si verifica qui.
+ *
+ * Una serie assente viene SCARTATA, non resa a zero: una barra a zero sarebbe
+ * indistinguibile da un'azienda con EBITDA nullo.
+ */
+export function buildIndicatorChartData(serie: SerieIndicatori[]): RigaGraficoIndicatori[] {
+  return serie
+    .filter((s): s is { periodo: string; indicatori: IndicatorSet } => s.indicatori !== null)
+    .map((s) => ({ periodo: s.periodo, ...s.indicatori }));
+}
+
 export function scoreDotColor(score: number): string {
   if (score >= 0.67) return "bg-green-500";
   if (score >= 0.33) return "bg-yellow-500";

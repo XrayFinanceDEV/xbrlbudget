@@ -16,19 +16,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  BarChart as RechartsBarChart,
-  Bar,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-} from "recharts";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
 import { formatEuro, formatPct } from "@/lib/pratica-format";
 import {
   computeIndicators,
@@ -36,20 +23,10 @@ import {
   INDICATOR_DEFS,
   scoreDotColor,
   computeCrisisRating,
+  type SerieIndicatori,
 } from "@/lib/pratica-indicators";
+import { IndicatoriCharts } from "@/components/pratica/IndicatoriCharts";
 import type { IntraYearComparison } from "@/types/api";
-
-const economicIncidenceChartConfig = {
-  ebitda_margin: { label: "EBITDA / Ricavi", color: "hsl(var(--chart-2))" },
-  materials_revenue: { label: "Materie / Ricavi", color: "hsl(var(--chart-3))" },
-  services_revenue: { label: "Servizi / Ricavi", color: "hsl(var(--chart-4))" },
-} satisfies ChartConfig;
-
-const financialMarginsChartConfig = {
-  mt: { label: "Margine di Tesoreria", color: "hsl(var(--chart-1))" },
-  ms: { label: "Margine di Struttura", color: "hsl(var(--chart-2))" },
-  pfn: { label: "PFN", color: "hsl(var(--chart-5))" },
-} satisfies ChartConfig;
 
 // Indicatori Table Component
 export function IndicatoriTable({
@@ -118,12 +95,13 @@ export function IndicatoriTable({
     : null;
 
   const oltreCount = (scores: number[]) => scores.filter((s) => s < 0.33).length;
-  const indicatorChartData = [
-    { periodo: `Storico ${comparison.reference_year}`, ...storicoInd },
-    { periodo: `Infrann. ${comparison.period_months}M`, ...infraInd },
-    ...(!hideProiezione && proiezioneInd
-      ? [{ periodo: `Proiezione ${comparison.partial_year}`, ...proiezioneInd }]
-      : []),
+  const serieGrafici: SerieIndicatori[] = [
+    { periodo: `Storico ${comparison.reference_year}`, indicatori: storicoInd },
+    { periodo: `Infrann. ${comparison.period_months}M`, indicatori: infraInd },
+    {
+      periodo: `Proiezione ${comparison.partial_year}`,
+      indicatori: hideProiezione ? null : proiezioneInd,
+    },
   ];
 
   return (
@@ -173,48 +151,7 @@ export function IndicatoriTable({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Incidenza economica sui ricavi</CardTitle>
-            <CardDescription>EBITDA, materie prime e servizi in percentuale dei ricavi.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={economicIncidenceChartConfig} className="h-[260px] w-full">
-              <RechartsBarChart data={indicatorChartData}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="periodo" tickLine={false} axisLine={false} />
-                <YAxis tickFormatter={(value) => `${value}%`} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="ebitda_margin" fill="var(--color-ebitda_margin)" radius={3} />
-                <Bar dataKey="materials_revenue" fill="var(--color-materials_revenue)" radius={3} />
-                <Bar dataKey="services_revenue" fill="var(--color-services_revenue)" radius={3} />
-              </RechartsBarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Equilibrio finanziario e strutturale</CardTitle>
-            <CardDescription>Margine di tesoreria, margine di struttura e PFN.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={financialMarginsChartConfig} className="h-[260px] w-full">
-              <RechartsBarChart data={indicatorChartData}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="periodo" tickLine={false} axisLine={false} />
-                <YAxis tickFormatter={(value) => new Intl.NumberFormat("it-IT", { notation: "compact" }).format(value)} />
-                <ChartTooltip
-                  content={<ChartTooltipContent formatter={(value) => formatEuro(Number(value))} />}
-                />
-                <Bar dataKey="mt" fill="var(--color-mt)" radius={3} />
-                <Bar dataKey="ms" fill="var(--color-ms)" radius={3} />
-                <Bar dataKey="pfn" fill="var(--color-pfn)" radius={3} />
-              </RechartsBarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      </div>
+      <IndicatoriCharts serie={serieGrafici} />
 
       {/* Indicator Detail Table */}
       <Table>

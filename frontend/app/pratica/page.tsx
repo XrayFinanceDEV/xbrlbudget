@@ -93,6 +93,7 @@ import {
   PASSIVO_CODES,
 } from "@/lib/pratica-codes";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
+import { scaledOrCarried } from "@/lib/pratica-turnover";
 import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
@@ -747,22 +748,30 @@ export default function InfraannualePage() {
     );
     const projNetProfit = projIncome - projCosts;
 
-    // Turnover days from historical (reference year = full 12 months)
+    // Turnover ratios from historical (reference year = full 12 months)
     const refRevenue = refCEVal("ce01_ricavi_vendite");
     const refPurchases = refCEVal("ce05_materie_prime") + refCEVal("ce06_servizi");
-
-    const receivableDays = refRevenue !== 0 ? (refVal("sp06_crediti_breve") / refRevenue) * 365 : 0;
-    const inventoryDays = refCEVal("ce05_materie_prime") !== 0
-      ? (refVal("sp05_rimanenze") / refCEVal("ce05_materie_prime")) * 365 : 0;
-    const payableDays = refPurchases !== 0 ? (refVal("sp16_debiti_breve") / refPurchases) * 365 : 0;
 
     // Projected working capital items. Without a reference year there are no
     // turnover ratios, so we carry the partial-year stocks (matches the backend
     // pure-annualization mode).
+    //
+    // Con un anno di riferimento, il rapporto passa comunque da
+    // `scaledOrCarried`: un denominatore trascurabile (AIC SRL fattura su
+    // ce04 e porta ce01 = 100,92 €) genera un moltiplicatore da 10.258x che
+    // gonfiava i crediti a 166,68 M. Stessa regola del backend
+    // (`_turnover_ratio` in intra_year_engine.py), altrimenti lo schermo e il
+    // record persistito raccontano due bilanci diversi.
     const hasRef = comparison.has_reference;
-    const sp05 = hasRef && projMaterials !== 0 ? projMaterials * inventoryDays / 365 : partialVal("sp05_rimanenze");
-    const sp06 = hasRef && projRevenue !== 0 ? projRevenue * receivableDays / 365 : partialVal("sp06_crediti_breve");
-    let sp16 = hasRef && projPurchases !== 0 ? projPurchases * payableDays / 365 : partialVal("sp16_debiti_breve");
+    const sp05 = hasRef && projMaterials !== 0
+      ? scaledOrCarried(refVal("sp05_rimanenze"), refCEVal("ce05_materie_prime"), projMaterials, partialVal("sp05_rimanenze"))
+      : partialVal("sp05_rimanenze");
+    const sp06 = hasRef && projRevenue !== 0
+      ? scaledOrCarried(refVal("sp06_crediti_breve"), refRevenue, projRevenue, partialVal("sp06_crediti_breve"))
+      : partialVal("sp06_crediti_breve");
+    let sp16 = hasRef && projPurchases !== 0
+      ? scaledOrCarried(refVal("sp16_debiti_breve"), refPurchases, projPurchases, partialVal("sp16_debiti_breve"))
+      : partialVal("sp16_debiti_breve");
 
     // Other items from infrannuale (partial year)
     const sp01 = partialVal("sp01_crediti_soci");

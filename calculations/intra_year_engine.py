@@ -183,6 +183,35 @@ def _safe_divide(numerator, denominator, default=Decimal('0')):
     return numerator / denominator
 
 
+# Oltre un anno di giacenza il rapporto di rotazione smette di descrivere
+# l'azienda e descrive il proprio denominatore.
+_MAX_TURNOVER_RATIO = Decimal('1')  # 365 giorni
+
+
+def _turnover_ratio(stock, base):
+    """
+    Rapporto giacenza/base dell'anno di riferimento, oppure ``None`` quando è
+    DEGENERE — cioè quando il denominatore è così piccolo da non poter
+    spiegare la giacenza.
+
+    ``_safe_divide`` protegge dal denominatore ZERO, non da quello
+    TRASCURABILE, e la differenza è tutta qui: AIC SRL fattura su
+    ``ce04_altri_ricavi`` e porta ``ce01_ricavi_vendite`` = 100,92 € contro
+    1.035.249,26 € di crediti. Il rapporto vale 10.258x — 3,7 milioni di
+    giorni di credito — e moltiplicare i ricavi proiettati per quel numero
+    produceva 166,68 M di crediti su un attivo reale di 1,5 M.
+
+    Chi riceve ``None`` riporta la giacenza infrannuale OSSERVATA invece di
+    moltiplicare: misurare, mai fabbricare.
+    """
+    if base is None or base <= 0:
+        return None
+    ratio = stock / base
+    if ratio > _MAX_TURNOVER_RATIO:
+        return None
+    return ratio
+
+
 def _get_field(obj, field_name, default=Decimal('0')):
     """Get a Decimal field from an ORM object, defaulting to 0."""
     val = getattr(obj, field_name, None)
@@ -936,6 +965,37 @@ class IntraYearEngine:
         result = apply_ce_overrides(result, assumption)
         _, _, result['ce20_imposte'] = _tax_components(result, assumption)
         return result
+    def _scaled_or_carried(self, field, ref_stock, ref_base, projected_base, partial_bs):
+        """
+        Scala una giacenza col rapporto di rotazione dell'anno di riferimento;
+        se quel rapporto è DEGENERE riporta la giacenza infrannuale osservata.
+
+        Un rapporto costruito su un denominatore trascurabile (vedi
+        ``_turnover_ratio``) non è una stima imprecisa: è un moltiplicatore
+        arbitrario, e moltiplicare per esso fabbrica massa che non esiste. La
+        giacenza infrannuale è invece un dato letto dal bilancio. Il ripiego
+        viene DICHIARATO fra i diagnostics, così l'utente sa che quella voce
+        non è stata proiettata e può correggerla in Rettifiche.
+        """
+        ratio = _turnover_ratio(ref_stock, ref_base)
+        if ratio is not None:
+            return projected_base * ratio
+
+        carried = _get_field(partial_bs, field)
+        self._diagnostics.append({
+            'code': 'degenerate_turnover_ratio',
+            'severity': 'warning',
+            'field': field,
+            'amount': str(carried),
+            'message': (
+                f"Rapporto di rotazione non calcolabile per {field}: la base "
+                f"dell'anno di riferimento ({ref_base}) non spiega la giacenza "
+                f"({ref_stock}). Riportata la giacenza infrannuale osservata "
+                f"({carried}) invece di proiettarla; da verificare in Rettifiche."
+            ),
+        })
+        return carried
+
     def _project_balance_sheet(
         self,
         partial_bs: BalanceSheet,
@@ -1012,10 +1072,16 @@ class IntraYearEngine:
 
         # Inventory: proportional to cost of materials
         ref_ce05 = _get_field(ref_inc, 'ce05_materie_prime')
-        sp05 = projected_inc['ce05_materie_prime'] * _safe_divide(ref_sp05, ref_ce05, Decimal('0'))
+        sp05 = self._scaled_or_carried(
+            'sp05_rimanenze', ref_sp05, ref_ce05,
+            projected_inc['ce05_materie_prime'], partial_bs,
+        )
 
         # Short-term receivables: proportional to revenue
-        sp06 = projected_revenue * _safe_divide(ref_sp06, ref_revenue, Decimal('0'))
+        sp06 = self._scaled_or_carried(
+            'sp06_crediti_breve', ref_sp06, ref_revenue,
+            projected_revenue, partial_bs,
+        )
         remaining_credit_write_down = max(
             Decimal('0'),
             projected_inc.get('ce09d_svalutazione_crediti', Decimal('0'))
@@ -1060,7 +1126,9 @@ class IntraYearEngine:
         sp15 = _get_field(partial_bs, 'sp15_tfr') + remaining_tfr_accrual
 
         # Short-term debt: proportional to operating costs (turnover ratio)
-        sp16 = projected_costs * _safe_divide(ref_sp16, ref_costs, Decimal('0'))
+        sp16 = self._scaled_or_carried(
+            'sp16_debiti_breve', ref_sp16, ref_costs, projected_costs, partial_bs,
+        )
 
         # Long-term debt starts from the actual YTD balance; only explicit repayment
         # and financing assumptions may change it.

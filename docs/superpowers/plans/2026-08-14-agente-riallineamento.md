@@ -391,7 +391,17 @@ git commit -m "feat(riallinea): trovare chi nomina un simbolo mosso"
 **Interfaces:**
 - Produces:
   - `carica_stato(percorso) -> dict` / `salva_stato(percorso, sha, modo, data)`
-  - CLI: `python3 scripts/riallinea.py --da <sha> [--a HEAD] [--completo]` → stampa su stdout un JSON `{"intervallo","simboli":[…],"citazioni":[…],"radici":[…],"stato":{…}}`
+  - `SOGLIA_GENERICO = 40` e `riduci_generici(citazioni) -> tuple[list[Citazione], list[dict]]`
+  - CLI: `python3 scripts/riallinea.py --da <sha> [--a HEAD] [--completo]` → stampa su stdout un JSON `{"intervallo","simboli":[…],"citazioni":[…],"generici":[…],"radici":[…],"stato":{…}}`
+
+**Nota aggiunta dopo la revisione del Task 2.** Misurato: nove nomi generici plausibili
+(`resolve`, `add`, `main`, `probe`, `data`, `value`, `path`, `get`, `id`) producono **1147
+citazioni** in un colpo solo. Un solo simbolo comune fra i ~40 di un diff reale seppellirebbe
+le segnalazioni vere. La fase B fa bene a includerli — la regola è «in dubbio si include» — ma
+il JSON che arriva allo skill va **ridotto**, non troncato in silenzio: un simbolo con più
+citazioni della soglia esce dall'elenco `citazioni` ed entra in `generici` come
+`{"nome": …, "citazioni": N, "file": [primi 5 file]}`. Lo skill lo riporterà come «troppo
+comune per essere verificato per nome», che è un'informazione, mentre 1147 righe non lo sono.
 
 - [ ] **Step 1: Scrivere i test che falliscono**
 

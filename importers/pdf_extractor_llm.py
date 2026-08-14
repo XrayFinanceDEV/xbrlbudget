@@ -487,14 +487,30 @@ def reading_order_text(page: fitz.Page) -> str:
     tarati, non cambiano di un carattere — e passa all'ordinamento per
     coordinate solo sulle pagine dimostrabilmente scomposte.
     """
+    raw = page.get_text()
     if not _stream_order_is_scrambled(page):
-        return page.get_text()
+        return raw
+    ordered = page.get_text(sort=True)
+    # Riordinare e' SPOSTARE, non riscrivere: se le parole in uscita non sono
+    # piu' quelle della pagina, l'ordinamento ha fatto danni e vale meno dello
+    # stream grezzo. Succede sulle stampe che disegnano la sottolineatura come
+    # glifi `_` su una baseline di pochi punti piu' in basso (situazioni
+    # contabili AGO): l'ordinamento salda la riga di underscore all'importo che
+    # la precede — `1.468.999,24______________` — e quell'importo smette di
+    # essere un numero per chiunque lo legga, LLM compreso.
+    if sorted(ordered.split()) != sorted(raw.split()):
+        logger.warning(
+            "Riordino per coordinate scartato a pagina %s: cambierebbe le parole "
+            "della pagina (importi saldati alla sottolineatura); si tiene il "
+            "content-stream grezzo", page.number + 1,
+        )
+        return raw
     logger.warning(
         "Content-stream fuori ordine di lettura a pagina %s: testo riordinato "
         "per coordinate (altrimenti etichette e importi si legano alla colonna "
         "sbagliata)", page.number + 1,
     )
-    return page.get_text(sort=True)
+    return ordered
 
 
 def _reconcile_blank_current_ce_cells(

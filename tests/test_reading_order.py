@@ -61,6 +61,43 @@ def _write_pdf(path: str, bottom_up: bool) -> str:
     return path
 
 
+def _write_underlined_pdf(path: str) -> str:
+    """Stream fuori ordine E sottolineature disegnate come glifi `_`.
+
+    E' la stampa AGO delle situazioni contabili: ogni importo porta sotto di se'
+    una riga di underscore, disegnata come testo a una baseline di 2 punti piu'
+    in basso. Riordinare per coordinate SALDA quella riga all'importo che la
+    precede (`1.468.999,24______________`), rendendolo illeggibile.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    for index, (label, amount) in list(enumerate(UNDERLINED_ROWS))[::-1]:
+        y = 100 + index * 30
+        page.insert_text((40, y), label, fontsize=9)
+        page.insert_text((600, y), amount, fontsize=9)
+        page.insert_text((600, y + 2), "_" * len(amount), fontsize=9)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+UNDERLINED_ROWS = [
+    ("706385 000 - amm.to oneri pluriennali", "9.113,64"),
+    ("706440 000 - amm.to fabbricati strumentali", "4.656,95"),
+    ("706990 000 - es. iniz. merci", "1.468.999,24"),
+    ("707415 000 - costi indeducibili", "4.340,06"),
+    ("707560 000 - altri oneri diversi di gestione", "9.029,53"),
+    ("709450 000 - interessi passivi c/c bancari", "66.929,07"),
+    ("709660 000 - interessi passivi indeducibili", "5.371,56"),
+    ("709680 000 - oneri bancari", "8.586,80"),
+]
+
+
+@pytest.fixture()
+def underlined_pdf(tmp_path):
+    return _write_underlined_pdf(str(tmp_path / "sottolineato.pdf"))
+
+
 @pytest.fixture()
 def normal_pdf(tmp_path):
     return _write_pdf(str(tmp_path / "normale.pdf"), bottom_up=False)
@@ -115,3 +152,26 @@ def test_importo_resta_legato_alla_propria_voce(scrambled_pdf):
     altri = next(i for i, line in enumerate(lines) if line.strip().startswith("altri"))
     rivalutazioni = next(i for i, line in enumerate(lines) if "18) Rivalutazioni" in line)
     assert oneri < altri < rivalutazioni
+
+
+def test_il_riordino_non_puo_cambiare_le_parole_della_pagina(underlined_pdf):
+    """Riordinare e' spostare, non riscrivere.
+
+    Su queste stampe l'ordinamento per coordinate salda la sottolineatura
+    all'importo: `9.113,64` diventa `9.113,64________`, che nessun parser (ne'
+    l'LLM) legge piu' come un numero. Non e' un'euristica di qualita': e' una
+    contraddizione: le parole in uscita non sono piu' quelle della pagina.
+    Quando succede vale piu' lo stream grezzo del riordino.
+    """
+    page = _page(underlined_pdf)
+    assert _stream_order_is_scrambled(page) is True, "il fixture deve attivare il riordino"
+    assert sorted(reading_order_text(page).split()) == sorted(page.get_text().split())
+
+
+def test_gli_importi_restano_leggibili_come_numeri(underlined_pdf):
+    """Il difetto contabile concreto: senza questo, `es. iniz. merci`
+    1.468.999,24 (le rimanenze iniziali, il costo piu' grande del conto) non e'
+    piu' un numero e sparisce dal CE."""
+    tokens = reading_order_text(_page(underlined_pdf)).split()
+    for _label, amount in UNDERLINED_ROWS:
+        assert amount in tokens, f"{amount} non e' piu' un token a se'"

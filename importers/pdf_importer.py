@@ -441,6 +441,9 @@ def _apply_vision_rescue(file_path: str,
                 # del confronto. Con ce=None `utile_match` varrebbe True per difetto e
                 # il ramo `fixed_identity` del cancello scatterebbe a vuoto.
                 after = check_quadratura(balance_sheet_data, new_ce)
+                # `residual_measured` resta al suo default True: qui il bilancio non
+                # viene toccato, quindi after.plug_residual == before.plug_residual e il
+                # parametro non cambierebbe nulla in nessuno dei due valori.
                 ok, why = vr.accept_rescue("ce", rebuilt, sec, declared, before, after)
                 logger.info(f"Riscatto vision CE: {'accettato' if ok else 'scartato'} — {why}")
                 if ok:
@@ -460,6 +463,13 @@ def _apply_vision_rescue(file_path: str,
                 # "utile" sia una "perdita" e preferire il primo ribalta il risultato
                 # quando e' il ramo della perdita a tornare.
                 utile = vr.vision_result(sec)
+                # Letto sul `declared` COME RICEVUTO, prima che la ricaduta qui sotto
+                # sovrascriva _decl coi totali vision: e' la presenza di un'ancora
+                # INDIPENDENTE (stampata e letta dal testo) a rendere misurabile il
+                # residuo del foglio riscattato. I totali vision non lo sono — sono la
+                # stessa lettura che si sta riscattando.
+                _has_text_anchor = any((declared or {}).get(_k)
+                                       for _k in ('attivo', 'passivo', 'pareggio'))
                 if utile is None:
                     logger.info("Riscatto vision SP: totali letti non coerenti — non tentato")
                 else:
@@ -508,7 +518,9 @@ def _apply_vision_rescue(file_path: str,
                     new_bs = _reconcile_trial_to_declared(new_bs, _decl, "vision")
 
                     after = check_quadratura(new_bs, income_data)
-                    ok, why = vr.accept_rescue("sp", rebuilt, sec, declared, before, after)
+                    ok, why = vr.accept_rescue("sp", rebuilt, sec, declared, before,
+                                               after,
+                                               residual_measured=_has_text_anchor)
                     logger.info(f"Riscatto vision SP: {'accettato' if ok else 'scartato'} — {why}")
                     if ok:
                         balance_sheet_data = new_bs

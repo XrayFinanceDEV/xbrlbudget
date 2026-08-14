@@ -354,25 +354,30 @@ def _badness(q) -> Decimal:
     il riscatto esiste. Sommandoli, 200 di residuo che diventano 10 di sbilancio sono
     un miglioramento, mentre dimezzare il residuo triplicando lo sbilancio non lo e'.
 
-    Nota su _plug_residual: `build_sp_from_vision` lo azzera per costruzione, ma sul
-    percorso SP il chiamante (pdf_importer, Task 7) lo ricalcola con
-    `_reconcile_trial_to_declared` PRIMA che `check_quadratura` lo veda, quindi lo zero
-    asserito qui non e' mai cio' che questa funzione confronta. Sul percorso CE il
-    foglio non viene toccato, quindi il residuo e' identico su before/after e non pesa
-    nel confronto. Non e' un segnale gratis: non c'e' nulla da correggere.
+    Nota su _plug_residual: `build_sp_from_vision` lo AZZERA per costruzione — e' un
+    asserto, non una misura. Sul percorso SP il chiamante (pdf_importer) lo ricalcola con
+    `_reconcile_trial_to_declared`, ma quella funzione misura qualcosa solo se ha
+    un'ancora INDIPENDENTE (i totali stampati letti dal testo). Quando non ce l'ha, lo
+    zero asserito arriva qui intatto: vedi `residual_measured` in accept_rescue, che in
+    quel caso impedisce di incassarlo. Sul percorso CE il foglio non viene toccato,
+    quindi il residuo e' identico su before/after e non pesa nel confronto.
     """
     return abs(q.sbilancio) + abs(q.plug_residual)
 
 
 def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
                   declared: Dict[str, Optional[Decimal]],
-                  before, after) -> Tuple[bool, str]:
+                  before, after,
+                  residual_measured: bool = True) -> Tuple[bool, str]:
     """Tre condizioni, tutte necessarie (spec §3). Ritorna (accettato, motivo).
 
     `rebuilt_total` e' il totale LORDO della sezione ricostruita — per lo SP la somma
     dell'attivo netto PIU' la massa dei fondi nettati, perche' il totale stampato su
     questi file e' lordo (stessa aritmetica del cancello 1 di _hier_reconstruct).
     `before`/`after` sono i Quadratura del foglio prima e dopo il riscatto.
+
+    `residual_measured` dice se il residuo di `after` e' una MISURA o un asserto: falso
+    quando il documento non stampa alcun totale contro cui verificarlo.
     """
     anchor = section_anchor(sec, declared)
     if anchor is None or anchor <= 0:
@@ -392,12 +397,22 @@ def accept_rescue(section: str, rebuilt_total: Decimal, sec: VisionSection,
     if before.utile_match and not after.utile_match:
         return False, "il riscatto rompe l'identita' utile CE = sp13"
 
-    before_bad, after_bad = _badness(before), _badness(after)
+    before_bad = _badness(before)
+    # Il residuo del foglio riscattato e' una MISURA solo quando esisteva un'ancora
+    # indipendente contro cui farla. Senza (layer di testo illeggibile: le ancore
+    # dichiarate sono vuote e il reconcile ricade sugli stessi totali letti in vision),
+    # build_sp_from_vision ha ASSERITO zero e nessuno lo ha verificato. Un controllo
+    # che manca non e' un controllo superato: si porta avanti il residuo di prima,
+    # cosi' il cancello non puo' incassare un miglioramento che nessuno ha misurato.
+    # Stessa regola di importers/reliability.py — UNRELIABLE vuole una contraddizione,
+    # un controllo assente da' "derived", mai un verdetto positivo.
+    after_plug = after.plug_residual if residual_measured else before.plug_residual
+    after_bad = abs(after.sbilancio) + abs(after_plug)
     fixed_identity = after.utile_match and not before.utile_match
     if after_bad >= before_bad and not fixed_identity:
         return False, (f"non migliora la quadratura: sbilancio {before.sbilancio:,.2f} -> "
                        f"{after.sbilancio:,.2f}, residuo {before.plug_residual:,.2f} -> "
-                       f"{after.plug_residual:,.2f}")
+                       f"{after_plug:,.2f}")
 
     # Riparare l'identita' CE/SP e' un miglioramento reale, ma non e' una licenza
     # illimitata: senza un tetto, un riscatto che sistema sp13 e insieme sbilancia il

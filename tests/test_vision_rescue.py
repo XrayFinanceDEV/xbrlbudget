@@ -984,3 +984,98 @@ def test_senza_chiave_il_riscatto_non_viene_nemmeno_tentato(monkeypatch):
         create_company=True, sector=1, user_id="test-senza-chiave",
         period_months=12)
     assert chiamate == []
+
+
+# ------------------- un residuo non misurato non e' un residuo azzerato
+
+def test_un_residuo_non_misurato_non_vale_come_miglioramento():
+    # L'attacco originale: prima quadrava ma era MASCHERATA (residuo 300); il foglio
+    # riscattato asserisce residuo 0 senza che nulla lo abbia misurato. Senza ancora
+    # indipendente quello zero non e' una misura, e il cancello non deve incassarlo.
+    prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+             "totale_attivo": D("1000"), "totale_passivo": D("1000"),
+             "_plug_residual": D("300")}
+    dopo = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+            "totale_attivo": D("1000"), "totale_passivo": D("1000")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec, declared={},
+        before=check_quadratura(prima), after=check_quadratura(dopo),
+        residual_measured=False)
+    assert not ok
+    assert "non migliora" in motivo
+
+
+def test_con_un_ancora_indipendente_lo_stesso_riscatto_passa():
+    # Identico al precedente, ma qui il residuo E' stato misurato contro un'ancora
+    # dichiarata dal documento: allora azzerarlo e' un miglioramento vero.
+    prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+             "totale_attivo": D("1000"), "totale_passivo": D("1000"),
+             "_plug_residual": D("300")}
+    dopo = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+            "totale_attivo": D("1000"), "totale_passivo": D("1000")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec,
+        declared={"attivo": D("1000"), "passivo": D("1000"), "pareggio": None},
+        before=check_quadratura(prima), after=check_quadratura(dopo),
+        residual_measured=True)
+    assert ok, motivo
+
+
+def test_il_motivo_del_rifiuto_riporta_il_residuo_effettivamente_usato():
+    # Se il messaggio dicesse "residuo 300 -> 0" mentre il cancello ha usato 300,
+    # il log racconterebbe una decisione diversa da quella presa.
+    prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+             "totale_attivo": D("1000"), "totale_passivo": D("1000"),
+             "_plug_residual": D("300")}
+    dopo = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+            "totale_attivo": D("1000"), "totale_passivo": D("1000")}
+    sec = _sezione("sp", D("1000"), D("1000"), utile=D("0"))
+    _ok, motivo = vr.accept_rescue(
+        section="sp", rebuilt_total=D("1000"), sec=sec, declared={},
+        before=check_quadratura(prima), after=check_quadratura(dopo),
+        residual_measured=False)
+    assert "residuo 300.00 -> 300.00" in motivo
+
+
+def test_senza_ancore_di_testo_un_riscatto_che_azzera_solo_il_residuo_e_rifiutato(monkeypatch):
+    # L'attacco di F1 sul percorso vero: foglio che gia' quadra ma MASCHERATO
+    # (residuo 300 su 1.000), nessuna ancora dichiarata. Il foglio riscattato
+    # asserisce residuo 0 e per il resto e' identico: non c'e' NIENTE di misurato da
+    # incassare, quindi si tiene il candidato precedente.
+    _patch_pagine(monkeypatch)
+    prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+             "sp13_utile_perdita": D("0"), "_plug_residual": D("300")}
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("01", "CASSA", D("1000"), "left"),
+              vr.VisionRow("20", "DEBITI VERSO FORNITORI", D("1000"), "right")),
+        totals={"left": D("1000"), "right": D("1000"),
+                "utile": D("0"), "perdita": None},
+    )
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(prima), {},
+        declared={}, donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == []
+    assert bs == prima
+
+
+def test_con_ancore_di_testo_lo_stesso_riscatto_e_accettato(monkeypatch):
+    # Il gemello del precedente: qui il documento stampa i propri totali, quindi il
+    # residuo del foglio riscattato E' stato misurato contro qualcosa di indipendente.
+    _patch_pagine(monkeypatch)
+    prima = {"sp09_disponibilita_liquide": D("1000"), "sp16_debiti_breve": D("1000"),
+             "sp13_utile_perdita": D("0"), "_plug_residual": D("300")}
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("01", "CASSA", D("1000"), "left"),
+              vr.VisionRow("20", "DEBITI VERSO FORNITORI", D("1000"), "right")),
+        totals={"left": D("1000"), "right": D("1000"),
+                "utile": D("0"), "perdita": None},
+    )
+    bs, ce, riscattate = _apply_vision_rescue(
+        "ignorato.pdf", dict(prima), {},
+        declared={"attivo": D("1000"), "passivo": D("1000")},
+        donor_bs=None, ocr_text=None, reader=lambda *a, **kw: sec)
+    assert riscattate == ["sp"]

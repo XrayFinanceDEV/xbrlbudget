@@ -11,9 +11,11 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.riallinea import (  # noqa: E402
+    ESTENSIONI_CODICE,
     Citazione,
     Simbolo,
     SOGLIA_GENERICO,
+    _pathspec,
     carica_stato,
     documenti_che_nominano,
     riduci_generici,
@@ -303,6 +305,14 @@ def test_lo_sweep_completo_aggiorna_ultimo_completo_e_lo_sha(tmp_path):
     letto = carica_stato(p)
     assert letto["ultimo_sha"] == "def5678"
     assert letto["ultimo_completo"] == "2026-08-28"
+
+
+def test_il_pathspec_copre_tutte_le_estensioni_di_codice():
+    # Uno sweep completo non deve chiedere a git i PDF tracciati in docs/examples/:
+    # li decodificherebbe per niente, ed e' cosi' che --completo andava in crash.
+    spec = _pathspec()
+    assert {s.lstrip("*") for s in spec} == set(ESTENSIONI_CODICE)
+    assert all(s.startswith("*") for s in spec)
 
 
 def test_un_diff_successivo_non_cancella_ultimo_completo(tmp_path):

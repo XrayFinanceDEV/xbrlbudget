@@ -103,12 +103,24 @@ def simboli_da_diff(diff: str) -> List[Simbolo]:
     return trovati
 
 
+def _pathspec():
+    """Chiedere a git il solo codice: uno sweep completo altrimenti trascina
+    i PDF tracciati in docs/examples/ e li fa decodificare per niente."""
+    return [f"*{e}" for e in sorted(ESTENSIONI_CODICE)]
+
+
 def simboli_mossi(rev_range: str, cwd: str = ".") -> List[Simbolo]:
-    """Come simboli_da_diff, ma prende il diff da git."""
+    """Come simboli_da_diff, ma prende il diff da git.
+
+    Il diff e' letto in bytes e decodificato a mano con errors="replace": un
+    repository che traccia binari (i PDF di docs/examples/) non deve far esplodere
+    l'intero sweep con un UnicodeDecodeError. Il pathspec dopo "--" e' la cura vera:
+    non chiede a git i binari, cosi' non c'e' nulla da decodificare per sbaglio.
+    """
     diff = subprocess.run(
-        ["git", "diff", "-U0", "-M", rev_range],
-        cwd=cwd, capture_output=True, text=True, check=True,
-    ).stdout
+        ["git", "diff", "-U0", "-M", rev_range, "--", *_pathspec()],
+        cwd=cwd, capture_output=True, check=True,
+    ).stdout.decode("utf-8", errors="replace")
     return simboli_da_diff(diff)
 
 

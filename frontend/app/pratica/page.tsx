@@ -1374,35 +1374,25 @@ export default function InfraannualePage() {
               ) : (
                 <div className="flex flex-wrap justify-end gap-3">
                   {importType === "pdf" ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={() => handleImport("pdf")}
-                        disabled={importing || !file}
-                      >
-                        {activeImportMethod === "pdf" ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Upload className="h-4 w-4 mr-2" />
-                        )}
-                        {activeImportMethod === "pdf"
-                          ? "Importazione standard..."
-                          : "Importa standard e Continua"}
-                      </Button>
-                      <Button
-                        onClick={() => handleImport("pdf_ocr")}
-                        disabled={importing || !file}
-                      >
-                        {activeImportMethod === "pdf_ocr" ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Upload className="h-4 w-4 mr-2" />
-                        )}
-                        {activeImportMethod === "pdf_ocr"
-                          ? "Estrazione MinerU e analisi contabile..."
-                          : "ImportOCR (MinerU) e Continua"}
-                      </Button>
-                    </>
+                    /* Il pulsante ImportOCR (MinerU) non si rende: l'endpoint
+                       /import/pdf-ocr non e' pronto e MinerU non e' distribuito sul
+                       VPS (profilo compose, mai in produzione). Il percorso resta
+                       vivo lato client - importOCR e handleImport("pdf_ocr") non
+                       sono stati rimossi - cosi' riesporlo e' rimettere il pulsante,
+                       non riscrivere il ramo. */
+                    <Button
+                      onClick={() => handleImport("pdf")}
+                      disabled={importing || !file}
+                    >
+                      {activeImportMethod === "pdf" ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                      )}
+                      {activeImportMethod === "pdf"
+                        ? "Importazione..."
+                        : "Importa e Continua"}
+                    </Button>
                   ) : (
                     <Button
                       onClick={() => handleImport("xbrl")}

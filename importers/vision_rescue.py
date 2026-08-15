@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import fitz
 import pydantic
@@ -290,6 +290,134 @@ def read_section(file_path: str, pages: Sequence[int], section: str,
     return VisionSection(section=section,
                          rows=mastro_level_rows(rows, totals),
                          totals=totals)
+
+
+# ------------------------------------------------- reintegro dal text layer
+
+# Una riga di conto come la stampano i gestionali: codice, trattino, descrizione,
+# importo. Il codice puo' contenere spazi (AGO stampa i dettagli come `205235 000`).
+_ROW_RE = re.compile(
+    r"(\d[\d ]{5,10})\s*-\s*([^0-9]{3,60}?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})")
+
+
+def find_gap_closer(file_path: str, pages: Sequence[int], gap: Decimal,
+                    column: str, known_codes: Iterable[str] = (),
+                    section: str = "sp") -> Optional[VisionRow]:
+    """La riga del TEXT LAYER che spiega, al centesimo, un divario misurato.
+
+    La vision salta a intermittenza una riga, e la tolleranza del cancello (0,5% del
+    totale stampato) puo' essere piu' larga della riga saltata: il riscatto viene
+    allora accettato con il buco dentro, e quel buco diventa lo sbilancio finale.
+    Misurato su budget_623: colonna destra ricostruita 2.445.907,88 contro i
+    2.454.987,65 stampati, divario 9.079,77 = `37060000 Debiti v/istit.prev.e
+    sicur.sociale`, che il text layer di pagina 1 porta e la vision no.
+
+    **Non e' un plug.** Un plug inventa massa per far quadrare; qui la massa e' letta
+    da una fonte che l'aveva, e si ripesca solo se il suo importo spiega il divario
+    ESATTAMENTE. Nessuna tolleranza: un centesimo di scarto e non e' quella riga.
+
+    Tre condizioni, tutte necessarie:
+
+    1. l'importo coincide col divario al centesimo;
+    2. il codice non e' gia' fra quelli letti in vision — ripescarlo lo conterebbe
+       due volte, l'errore che fece revertare il tentativo del 14/07;
+    3. la descrizione si classifica in modo SPECIFICO sul lato chiesto. La colonna
+       resta la verita' sul lato: un importo che coincide per caso con una riga
+       dell'altro lato viene scartato, mai ribaltato.
+
+    Il classificatore dipende dalla SEZIONE, e non e' un dettaglio: sul conto
+    economico si usa `_resolve_ce_field(desc, direction)`, mai i classificatori
+    dello stato patrimoniale. Su un nodo CE il lato non filtra nulla, quindi un
+    costo puo' risolversi su un ricavo e il risultato si sposta di 2x il suo
+    importo. `_resolve_ce_field` restituisce None anche quando la voce risolve sul
+    segno opposto, ed e' quella la guardia di direzione.
+
+    Se restano piu' candidati con codici diversi si tiene il livello mastro (codice
+    piu' corto), stessa regola di `mastro_level_rows`; se l'ambiguita' resta, si
+    rinuncia. Rinunciare vuol dire il comportamento di oggi, che e' sempre ammissibile.
+    """
+    from importers.situazione_contabile_parser import (
+        _resolve_ce_field, classify_attivo, classify_passivo)
+
+    if gap is None or gap <= Z:
+        return None
+    noti = {re.sub(r"\D", "", c or "") for c in known_codes}
+
+    if section == "ce":
+        direction = "ricavi" if column == "right" else "costi"
+
+        def _riconosciuta(desc: str) -> bool:
+            return _resolve_ce_field(desc, direction) is not None
+    else:
+        _classify = classify_passivo if column == "right" else classify_attivo
+
+        def _riconosciuta(desc: str) -> bool:
+            return _classify(desc)[1]
+
+    candidati: List[VisionRow] = []
+    try:
+        with fitz.open(file_path) as doc:
+            for p in pages:
+                if not (0 <= p < len(doc)):
+                    continue
+                text = " ".join(doc[p].get_text().split())
+                for m in _ROW_RE.finditer(text):
+                    if parse_amount(m.group(3)) != gap:
+                        continue
+                    code = re.sub(r"\D", "", m.group(1))
+                    if not code or code in noti:
+                        continue
+                    desc = m.group(2).strip()
+                    if not _riconosciuta(desc.upper()):
+                        continue
+                    candidati.append(VisionRow(code=code, description=desc,
+                                               amount=gap, column=column))
+    except Exception as err:
+        logger.warning(f"Reintegro dal testo saltato ({type(err).__name__}: {err})")
+        return None
+
+    if not candidati:
+        return None
+    corto = min(len(r.code) for r in candidati)
+    testa = [r for r in candidati if len(r.code) == corto]
+    if len({r.code for r in testa}) > 1:
+        logger.info(f"Reintegro: {len(testa)} righe diverse chiudono {gap} — ambiguo, "
+                    f"non applicato")
+        return None
+    return testa[0]
+
+
+def close_gaps(file_path: str, pages: Sequence[int],
+               sec: VisionSection) -> VisionSection:
+    """Reintegra, colonna per colonna, la riga che spiega il divario dal totale letto.
+
+    Il divario e' una MISURA: totale stampato meno somma delle righe trascritte. Se
+    una riga del testo lo spiega al centesimo (`find_gap_closer`), entra nella
+    sezione; altrimenti la sezione esce identica a com'e' entrata — che e' il
+    comportamento di oggi, sempre ammissibile.
+
+    Il cancello di accettazione resta a valle e non cambia: questo passaggio puo'
+    solo rendere una sezione piu' completa, mai autorizzarla.
+    """
+    righe = list(sec.rows)
+    for column, chiave in (("left", "left"), ("right", "right")):
+        stampato = (sec.totals or {}).get(chiave)
+        if not stampato:
+            continue
+        gap = stampato - sum((r.amount for r in righe if r.column == column), Z)
+        if gap <= Z:
+            continue
+        row = find_gap_closer(file_path, pages, gap, column,
+                              known_codes=[r.code for r in righe],
+                              section=sec.section)
+        if row is None:
+            continue
+        logger.info(f"Reintegro dal testo ({sec.section}/{column}): {row.code} "
+                    f"{row.description} {row.amount:,.2f} chiude il divario")
+        righe.append(row)
+    if len(righe) == len(sec.rows):
+        return sec
+    return VisionSection(section=sec.section, rows=tuple(righe), totals=sec.totals)
 
 
 # --------------------------------------------------------------- il cancello

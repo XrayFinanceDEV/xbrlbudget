@@ -1391,6 +1391,223 @@ def test_il_riscatto_restituisce_il_motivo_di_ogni_sezione_tentata(monkeypatch):
     assert "ce" in motivi and motivi["ce"]
 
 
+# ------------------------------------------------- il reintegro dal text layer
+#
+# La vision salta a intermittenza una riga del passivo, e il cancello la lascia
+# passare perche' la tolleranza (0,5% del totale stampato) e' piu' larga della riga
+# mancante. Quella riga pero' esiste nel text layer: e' il divario MISURATO contro il
+# totale stampato a dire quanto vale, e la si ripesca solo se chiude al centesimo.
+# Non e' un plug — non inventa massa, la ritrova in una fonte che l'aveva letta.
+#
+# Questi test NON chiamano la rete: la ricerca nel testo e' deterministica. Sono
+# gated sul solo PDF, che sta fuori dal repo.
+
+_PDF_623_GATE = pytest.mark.skipif(
+    not os.path.exists(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "debug",
+        "budget_623_2025 Commercio al dettaglio di ferramenta, vernici, vetro piano "
+        "e materiale elettrico e termoidraulico  .pdf")),
+    reason="PDF di debug non presente")
+
+
+@_PDF_623_GATE
+def test_reintegro_trova_la_riga_che_chiude_il_divario():
+    """budget_623, caso misurato: la colonna destra ricostruita si ferma a
+    2.445.907,88 contro i 2.454.987,65 stampati. Il divario di 9.079,77 e' esattamente
+    `37060000 Debiti v/istit.prev.e sicur.sociale`, che la vision non ha trascritto e
+    che il text layer di pagina 1 invece porta."""
+    import importers.vision_rescue as vr
+
+    row = vr.find_gap_closer(_PDF_623, [0, 1], D("9079.77"), "right", known_codes=())
+
+    assert row is not None, "la riga c'e' nel testo: il divario deve chiudersi"
+    assert row.code == "37060000"
+    assert row.amount == D("9079.77")
+    assert row.column == "right"
+
+
+@_PDF_623_GATE
+def test_reintegro_preferisce_il_mastro_al_dettaglio():
+    """Lo stesso importo compare due volte: il mastro AGO a 8 cifre (37060000) e il
+    suo dettaglio a 9 (205235 000 debiti v/INPS). Sommarli conterebbe due volte la
+    stessa voce; si tiene il livello mastro, come fa mastro_level_rows."""
+    import importers.vision_rescue as vr
+
+    row = vr.find_gap_closer(_PDF_623, [0, 1], D("9079.77"), "right", known_codes=())
+
+    assert row is not None
+    assert row.code != "205235000", "il dettaglio non deve vincere sul mastro"
+
+
+@_PDF_623_GATE
+def test_reintegro_non_ripesca_una_riga_gia_letta():
+    """Se il codice e' gia' fra quelli letti in vision, ripescarlo lo conterebbe due
+    volte — l'errore che fece revertare il tentativo del 14/07."""
+    import importers.vision_rescue as vr
+
+    row = vr.find_gap_closer(_PDF_623, [0, 1], D("9079.77"), "right",
+                             known_codes=("37060000", "205235000"))
+
+    assert row is None
+
+
+@_PDF_623_GATE
+def test_reintegro_rinuncia_se_nessuna_riga_chiude_esatto():
+    """Nessuna tolleranza: o il divario si spiega al centesimo con una riga che il
+    documento stampa, o non si tocca nulla e resta il comportamento di oggi."""
+    import importers.vision_rescue as vr
+
+    row = vr.find_gap_closer(_PDF_623, [0, 1], D("1234.56"), "right", known_codes=())
+
+    assert row is None
+
+
+@_PDF_623_GATE
+def test_reintegro_ce_usa_il_resolver_del_conto_economico():
+    """Sul CE la voce si risolve con `_resolve_ce_field(desc, direction)`, mai con i
+    classificatori dello stato patrimoniale: su un nodo CE il lato non filtra nulla e
+    un costo puo' risolversi su un ricavo, spostando il risultato di 2x il suo importo.
+
+    `73010000 Costi per godimento beni di terzi 147.207,80` sta a pagina 2 di 623."""
+    import importers.vision_rescue as vr
+
+    row = vr.find_gap_closer(_PDF_623, [2, 3], D("147207.80"), "left",
+                             known_codes=(), section="ce")
+
+    assert row is not None
+    assert row.code == "73010000"
+    assert row.amount == D("147207.80")
+
+
+@_PDF_623_GATE
+def test_reintegro_ce_rispetta_la_direzione():
+    """Lo stesso costo chiesto per la colonna dei RICAVI non e' un candidato: il
+    resolver risolve su segno opposto e restituisce None, quindi si rinuncia invece
+    di ribaltare la voce."""
+    import importers.vision_rescue as vr
+
+    row = vr.find_gap_closer(_PDF_623, [2, 3], D("147207.80"), "right",
+                             known_codes=(), section="ce")
+
+    assert row is None
+
+
+@_PDF_623_GATE
+def test_il_riscatto_ce_reintegra_la_riga_saltata_dalla_vision(monkeypatch):
+    """Il cablaggio del ramo CE: una lettura corta sui costi entra nella catena e la
+    riga che il documento stampa arriva fino al conto economico prodotto."""
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.section_pages",
+        lambda _p: {"sp": [], "ce": [2, 3]},
+    )
+    corta = vr.VisionSection(
+        section="ce",
+        rows=(vr.VisionRow("11111111", "ACQUISTI MATERIE PRIME", D("1000000.00"), "left"),
+              vr.VisionRow("22222222", "RICAVI DELLE VENDITE", D("1156114.59"), "right")),
+        totals={"left": D("1147207.80"), "right": D("1156114.59"),
+                "utile": D("8906.79"), "perdita": None},
+    )
+
+    _bs, ce, riscattate, _motivi = _apply_vision_rescue(
+        _PDF_623, dict(_BS_624), dict(_CE_624_ROTTO),
+        declared={"costi": D("1147207.80"), "ricavi": D("1156114.59")},
+        donor_bs=None, ocr_text=None, reader=lambda *a, **kw: corta)
+
+    assert riscattate == ["ce"]
+    assert ce.get("ce07_godimento_beni") == D("147207.80"), (
+        "la riga di costo saltata dalla vision dev'essere arrivata al conto economico")
+
+
+@_PDF_623_GATE
+def test_close_gaps_reintegra_la_colonna_corta():
+    """Il divario si MISURA sulla sezione letta: totale stampato meno somma delle
+    righe. Qui la destra si ferma 9.079,77 sotto il suo totale, e quella riga il
+    documento la stampa."""
+    import importers.vision_rescue as vr
+
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("11111111", "CASSA", D("2420397.40"), "left"),
+              vr.VisionRow("99999999", "UN CONTO QUALSIASI", D("2445907.88"), "right")),
+        totals={"left": D("2420397.40"), "right": D("2454987.65"),
+                "utile": None, "perdita": D("34590.25")},
+    )
+
+    fuori = vr.close_gaps(_PDF_623, [0, 1], sec)
+
+    aggiunte = [r for r in fuori.rows if r.code == "37060000"]
+    assert len(aggiunte) == 1, "la riga che chiude il divario dev'essere reintegrata"
+    assert aggiunte[0].amount == D("9079.77")
+    destra = sum(r.amount for r in fuori.rows if r.column == "right")
+    assert destra == D("2454987.65"), "la colonna destra ora torna al totale stampato"
+
+
+@_PDF_623_GATE
+def test_close_gaps_non_tocca_una_sezione_che_gia_torna():
+    """Nessun divario, nessun reintegro: chi gia' quadra non paga nulla e non cambia."""
+    import importers.vision_rescue as vr
+
+    sec = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("11111111", "CASSA", D("2420397.40"), "left"),
+              vr.VisionRow("99999999", "UN CONTO QUALSIASI", D("2454987.65"), "right")),
+        totals={"left": D("2420397.40"), "right": D("2454987.65"),
+                "utile": None, "perdita": D("34590.25")},
+    )
+
+    fuori = vr.close_gaps(_PDF_623, [0, 1], sec)
+
+    assert fuori.rows == sec.rows
+
+
+@_PDF_623_GATE
+def test_il_riscatto_sp_reintegra_la_riga_saltata_dalla_vision(monkeypatch):
+    """Il cablaggio: una lettura vision corta sulla destra entra nella catena, e la
+    riga che il documento stampa arriva fino al foglio prodotto.
+
+    Nessuna rete: il lettore e' un doppio, la ricerca nel testo e' deterministica."""
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.section_pages",
+        lambda _p: {"sp": [0, 1], "ce": []},
+    )
+    corta = vr.VisionSection(
+        section="sp",
+        rows=(vr.VisionRow("11111111", "CASSA", D("1009079.77"), "left"),
+              vr.VisionRow("22222222", "DEBITI V/BANCHE", D("1000000.00"), "right")),
+        totals={"left": D("1009079.77"), "right": D("1009079.77"),
+                "utile": D("0"), "perdita": None},
+    )
+
+    bs, _ce, riscattate, _motivi = _apply_vision_rescue(
+        _PDF_623, dict(_BS_SBILANCIATO), {},
+        declared={"attivo": D("1009079.77"), "passivo": D("1009079.77"),
+                  "pareggio": None},
+        donor_bs=None, ocr_text=None, reader=lambda *a, **kw: corta)
+
+    assert riscattate == ["sp"]
+    assert bs.get("sp16f_debiti_previdenza_breve") == D("9079.77"), (
+        "la riga saltata dalla vision dev'essere arrivata al foglio")
+
+
+@_PDF_623_GATE
+def test_reintegro_rifiuta_una_riga_che_non_e_di_quel_lato():
+    """La colonna resta la verita' sul lato. Un importo che coincide per caso con una
+    riga che la descrizione colloca sull'altro lato non chiude il divario: la si
+    scarta invece di ribaltarla."""
+    import importers.vision_rescue as vr
+
+    # 130.000,00 e' `31030005 Riserva contributi c/capitale`, che classify_passivo
+    # riconosce come voce di patrimonio netto: e' del lato destro, quindi ammessa.
+    ammessa = vr.find_gap_closer(_PDF_623, [0, 1], D("130000.00"), "right",
+                                 known_codes=())
+    assert ammessa is not None and ammessa.code == "31030005"
+
+    # La stessa riga chiesta per la colonna SINISTRA non e' un candidato valido.
+    rifiutata = vr.find_gap_closer(_PDF_623, [0, 1], D("130000.00"), "left",
+                                   known_codes=())
+    assert rifiutata is None
+
+
 # ------------------------------------------------- i due PDF veri (gated)
 #
 # Questi due test chiamano la rete. Sono doppiamente gated (chiave + presenza del

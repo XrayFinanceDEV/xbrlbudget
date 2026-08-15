@@ -438,6 +438,11 @@ def _apply_vision_rescue(file_path: str,
     if ce_broken:
         try:
             sec = read(file_path, pages.get("ce", []), "ce")
+            # Stesso reintegro dello SP (vedi il ramo sotto): la riga saltata dalla
+            # vision si ripesca dal text layer solo se spiega il divario al centesimo.
+            # Qui la voce si risolve con il resolver del CE, non con quelli dell'SP.
+            if sec is not None:
+                sec = vr.close_gaps(file_path, pages.get("ce", []), sec)
             if sec is not None and sec.rows:
                 new_ce = _map_sc_keys(scp.build_ce_from_vision(
                     [(r.code, r.description, r.amount, r.column) for r in sec.rows]))
@@ -464,6 +469,15 @@ def _apply_vision_rescue(file_path: str,
     if sp_broken:
         try:
             sec = read(file_path, pages.get("sp", []), "sp")
+            # La vision salta a intermittenza una riga, e la tolleranza del cancello
+            # (0,5% del totale stampato) puo' essere piu' larga della riga saltata:
+            # il riscatto passerebbe col buco dentro, e quel buco diventerebbe lo
+            # sbilancio finale. Misurato su budget_623 (9.079,77 = i debiti verso
+            # istituti previdenziali). Il reintegro ripesca dal TEXT LAYER solo una
+            # riga che spieghi il divario al centesimo: non inventa massa, e se non
+            # trova nulla la sezione resta com'era.
+            if sec is not None:
+                sec = vr.close_gaps(file_path, pages.get("sp", []), sec)
             if sec is not None and sec.rows:
                 # Il segno del risultato lo decide l'identita' che ha VALIDATO i totali
                 # letti, non l'ordine delle chiavi: un documento stampa spesso sia un

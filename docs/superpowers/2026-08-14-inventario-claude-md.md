@@ -552,3 +552,94 @@ La nota di parzialità in coda alla mappa è stata **riscritta, non rimossa**: o
 doveva avere una pagina ce l'ha, quindi la mappa non è più parziale, ma dire soltanto «non è
 parziale» perderebbe l'informazione che il Task 7 esiste. La nuova formulazione dice che cosa
 resta da fare e che **non produrrà altre pagine**.
+
+## Sezioni generali (Task 7)
+
+Le uniche sezioni mai passate al setaccio: sono le più vecchie del file, e infatti sono quelle con
+la densità di falsi più alta di tutto il lavoro — **quattordici** voci `OBSOLETA` su ventisei
+affermazioni verificate. Perimetro: `Project Overview`, `Quick Reference`, `Development Commands`,
+`Architecture`, `Key Conventions`, le quattro sottosezioni di `Critical Implementation Notes` non
+ancora rimandate (XBRL, FGPMI, Forecasting Engine, Intra-Year Engine), `Common Tasks`,
+`Technical Constraints`, `Development Workflow`, `API Migration Notes`.
+
+### Orientamento: resta, compresso
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 268 | `Project Overview` — due app sullo stesso DB e sugli stessi moduli, legacy Streamlit deprecata, multi-tenancy per `user_id`, max 50 aziende | `RESTA` compresso da 14 a 10 righe. Il tetto è confermato (`MAX_COMPANIES_PER_USER: int = 50`, `backend/app/core/config.py:49`) |
+| 269 | `Quick Reference` — l'elenco puntato di 13 directory | `RESTA` compresso in un capoverso: è orientamento puro («dove stanno le cose»), ma non serviva una riga per voce |
+| 270 | I due blocchi `API Workflow` (budget, infrannuale) da 9 e 19 righe di commenti bash | `RESTA` compressi in due capoversi di 3 e 6 righe. Le sequenze di chiamata sono orientamento; i corpi di richiesta stanno in `docs/budget/API-PREVISIONALE.md` |
+| 271 | `Development Commands` — cinque blocchi di codice (setup backend, avvio, frontend, test, reset DB) | `RESTA` compressi in un blocco solo, accorpato a `Quick Reference`. L'avvio in dev era scritto **due volte**, identico, a 56 righe di distanza |
+| 272 | `Backend Import Pattern` — il blocco Python con `sys.path.insert` e sei `import` d'esempio | `RESTA` compresso a due righe di prosa: il fatto che conta è che i moduli condivisi hanno **una** copia, non la sintassi per importarli |
+| 273 | `Database Schema` — i modelli e le relazioni in cascata | `RESTA` compresso; aggiunti `UploadedFile` (mancava) e `DATABASE_PATH` |
+| 274 | Le due lunghe note su `period_months` (coesistenza + convenzione `NULL`/`12`) | `RESTA` — è un invariante e resta **nella sua sezione**, in un capoverso invece di due |
+| 275 | `Calculator Architecture` — l'elenco numerato a cinque livelli | `RESTA` compresso in una riga, accorpato a «Shared modules» |
+| 276 | `Common Tasks` — quattro procedure numerate | `RESTA` compresse in quattro righe; le regole di stile della «new frontend page» erano **già** in `Technical Constraints` e sono state tolte da qui |
+| 277 | `Technical Constraints` | `RESTA` — quasi tutte trappole con il proprio rimando. Corretta la riga CORS (mancavano `localhost:8000`, l'origine Netlify e la variabile `ALLOWED_ORIGINS`) |
+| 278 | `Frontend Pages` | `RESTA` compresso in un capoverso; aggiunto `/aziende` (è un `redirect()` a `/`, `frontend/app/aziende/page.tsx:1-6`) |
+
+### `OBSOLETA` — quattordici affermazioni false, con la prova
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 279 | «**INPUT (3 endpoints)**: Data import» | **`OBSOLETA`** — sono **quattro**: `grep -n -A3 "@router\.post" backend/app/api/v1/imports.py` dà `/import/xbrl` (:75), `/import/csv` (:236), `/import/pdf` (:349), `/import/pdf-ocr` (:518). C'è anche una quinta rotta, `GET /import/capabilities` (:506), esistente e non cablata al frontend. Era la segnalazione lasciata dal Task 5 (riga 238), qui applicata al conteggio |
+| 280 | «`POST /api/v1/import/pdf` — PDF balance sheets (**Docling AI**)» | **`OBSOLETA`** — l'estrattore è **PyMuPDF + Claude Haiku** (`imports.py:360`, e `pdf_extractor_llm.py:4-6`: «Fast alternative to Docling … ~5s at ~$0.01/PDF vs Docling's ~133s»). Docling non è nemmeno una dipendenza: `importers/pdf_mapper.py:124` dichiara sé stesso «residuo dell'estrazione via Docling. Nessun chiamante in tutto il repo» |
+| 281 | «**Key Simplification:** 1 comprehensive API call replaces 10+ granular endpoints» | **`OBSOLETA`** (per generalizzazione) — `grep -c "@router\." backend/app/api/v1/*.py` = **62** rotte, e le granulari non sono state rimosse né smesse di chiamare: vedi le righe 284-287. La frase descrive un'intenzione di disegno come se fosse lo stato del codice |
+| 282 | (§ Key Conventions) «**Tax Rate**: 24% IRES (Italian corporate tax) used in forecasting» | **`OBSOLETA`** — segnalazione 264 del Task 5, qui risolta leggendo il codice: `24` è il default Pydantic (`backend/app/schemas/budget.py:148`) e **nessuna schermata lo manda**. I chiamanti mandano `27.9` (IRES+IRAP): `STARTUP_TAX_RATE_PCT` (`frontend/app/budget/page.tsx:321`), `:990`, `app/pratica/page.tsx:851` e `:938`. Riscritta dichiarando entrambi i numeri e chi vince |
+| 283 | (§ Sector-Specific Logic) «1. INDUSTRIA — 5-component Altman model / 2. COMMERCIO — 4-component» | **`OBSOLETA`** (per omissione) — la regola non è per settore uno a uno: `calculations/altman.py:42-43, 62-64` dice «Manufacturing (Sector 1): 5-component / Services-Other (**Sectors 2-6**): 4-component». Scritto per com'è |
+| 284 | (§ FGPMI) «Revenue bonus: **+2 points** if revenue > €500K» | **`OBSOLETA`** — sono **+5**: `data/rating_tables.json` → `revenue_adjustments.bonus_points.above_threshold = 5` su `threshold = 500000`, e `rating_fgpmi.py:367` commenta «+5 for revenue bonus» |
+| 285 | (§ FGPMI) «Rating classes: 13 classes (**AAA → B-**)» | **`OBSOLETA`** (il fondo scala) — 13 è giusto, ma l'ultima classe è **BB-**: `rating_classes["13"] = {"rating": "BB-", "risk_level": "Critico"}`, e `rating_fgpmi.py:341` restituisce `13  # BB-`. Sette indicatori confermati (`V1`-`V7`) |
+| 286 | (§ Forecasting Engine) «Base year + **3 or 5** forecast years» | **`OBSOLETA`** (per imprecisione) — il backend non impone nulla (`projection_years` è calcolato a valle, `analysis_service.py:76-77`) e il form dello scenario accetta **1-5** (`min={1} max={5}`, `app/budget/page.tsx:1197-1198`). Solo la scheda Startup offre la scelta secca 3 o 5 (`:541`) |
+| 287 | (§ Intra-Year) «Equity: capital constant, **reserves absorb prior year profit**, current year from projection» | **`OBSOLETA`** — non succede mai. `calculations/intra_year_engine.py:1101-1104`: «Preserve YTD equity movements. The prior-year result is **never** moved to reserves implicitly: that requires a shareholder allocation decision» — capitale **e** riserve si prendono dal parziale così come sono. Concorda `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5 («Capitale e riserve: presi dal parziale così come sono»). **Segnalazione di codice, non corretta:** la docstring del metodo (`:1014`) dice ancora «reserves + previous profit» e contraddice il proprio corpo |
+| 288 | (§ Intra-Year) «Cash as plug (**same as budget engine**)» | **`OBSOLETA`** — è il punto in cui i due motori divergono. Il budget spinge una cassa negativa nei debiti a breve; l'infrannuale la **clampa a zero** e alza un diagnostico `unfunded_financing_requirement` con messaggio «no debt was created automatically» (`intra_year_engine.py:1199-1211`, e di nuovo `:1443`). Un lettore che si fidasse cercherebbe un debito che il motore non crea |
+| 289 | (§ Development Workflow) «Use comprehensive endpoints (call `/analysis` once, cache result) — **All** analysis pages read from same cached response» | **`OBSOLETA`** — tre pagine su sei. Leggono `/analysis`: `/forecast/income`, `/forecast/balance`, `/report`. **Non** lo leggono: `/cashflow` (`useDetailedCashflow` → `/scenarios/{id}/detailed-cashflow`), `/forecast/reclassified` (`useReclassifiedData` → `/scenarios/{id}/reclassified`) e `/analysis` stessa (`useCompleteAnalysis` → `GET /companies/{id}/years/{year}/calculations/complete`, `frontend/lib/api.ts:209-216`). Riscritta come obiettivo dichiarato, non come stato |
+| 290 | (§ API Migration Notes) «❌ `GET /scenarios/{id}/reclassified`» e «❌ `GET /scenarios/{id}/detailed-cashflow`» fra le deprecate, «✅ `/analysis` (returns ALL)» | **`OBSOLETA`** — vive entrambe e **chiamate in produzione** (`hooks/use-queries.ts:107, 119`, dalle pagine `/cashflow` e `/forecast/reclassified`). E `/analysis` non le contiene: `CompleteAnalysisResponse` porta `scenario`, `historical_years`, `forecast_years` e `calculations` (`by_year` con altman/fgpmi/ratios, più `cashflow`) — non il riclassificato (`backend/app/schemas/analysis.py:159-190`) |
+| 291 | (§ API Migration Notes) «❌ `POST /assumptions` (per year)» | **`OBSOLETA`** — è la via con cui il workflow **Startup** crea una riga di ipotesi per anno: `createBudgetAssumptions` in `frontend/app/budget/page.tsx:462`, dentro il ciclo `for (const year of years)` |
+| 292 | (§ API Migration Notes) «❌ `PUT /assumptions/{year}`» | **`OBSOLETA`** — segnalazione 265 del Task 5, qui risolta: `updateBudgetAssumptions` è chiamata da `frontend/app/forecast/balance/page.tsx:171` per salvare `sp_overrides`. Delle sette rotte elencate come deprecate, **cinque sono vive e chiamate**; le uniche tre senza alcun chiamante sono `GET …/calculations/{altman,fgpmi,ratios}` (i wrapper esistono in `lib/api.ts:179-206` e nessuno li importa). La sezione è stata **corretta**, non cancellata, e assorbita in «Architecture › API» |
+
+### Conteggi e nomi ri-verificati, con il comando
+
+| # | affermazione | esito |
+|---|---|---|
+| 293 | «6 taxonomies» | **confermato** — `config.SUPPORTED_TAXONOMIES` ha 6 voci, 2011-01-04 → 2018-11-04 (`config.py:123-130`) |
+| 294 | «`Numeric(15, 2)` — max 9.999.999.999.999,99» | **confermato per le voci monetarie** — `grep -oE "Numeric\([0-9]+, ?[0-9]+\)" database/models.py \| sort \| uniq -c`: 268 × `(15,2)`, più 35 × `(10,6)` e 6 × `(10,2)` che sono aliquote e percentuali |
+| 295 | «Balance Sheet = `sp01-sp18`, Income statement = `ce01-ce20`» | **confermato** — le colonne di `database/models.py` coprono esattamente `sp01`…`sp18` e `ce01`…`ce20` |
+| 296 | «tolerance: €0.01» | **confermato** — `config.py:235`, `"balance_sheet_tolerance": 0.01` |
+| 297 | I moduli nominati in `Shared Module Architecture` | **confermati uno per uno** (`auth.py`, `ownership.py`, `AuthContext.tsx`, `AppContext.tsx`, i cinque calcolatori, `database/queries.py`, `db.py`, `schemas/calculations.py`, `types/api.ts`). L'albero ASCII è stato tolto: duplicava l'elenco directory di `Quick Reference` sei righe più in alto, senza aggiungere nulla |
+| 298 | «`GET /companies/{id}/scenarios`», «`GET /companies`», le tre rotte admin | **confermate** — `admin.py` ne ha 3, `companies.py` 6, `imports.py` 5, `budget_scenarios.py` 24, `calculations.py` 10, `financial_years.py` 9, `analysis.py` 2, `reports.py` 3 |
+| 299 | «Report page (`/report`) … 11 sections», «max 20 rettifiche», «max 50 companies» | **già ri-verificati dal Task 5** (righe 266-267) e lasciati invariati: erano le altre due delle quattro segnalazioni rimandate qui |
+| 300 | «shadcn/ui (new-york style, slate base) + Tailwind CSS v3 + next-themes», «Next.js 15», «Recharts» | **confermati** — `frontend/components.json` (`"style": "new-york"`, `"baseColor": "slate"`) e `package.json` (`next ^15.1.3`, `tailwindcss ^3.4.1`, `recharts ^2.15.4`, `next-themes ^0.4.6`) |
+| 301 | «CORS: localhost:3000-3002, 8501» | **incompleto, corretto** — `BACKEND_CORS_ORIGINS` (`backend/app/core/config.py:34-41`) ha anche `localhost:8000` e `https://xbrlbudget.netlify.app`, e `main.py:47-50` vi concatena la variabile `ALLOWED_ORIGINS` |
+| 302 | «`financial_analysis.db` in the project root (shared)» | **confermato** — `get_database_url()` (`backend/app/core/config.py:10-18`) risale quattro livelli e accetta l'override `DATABASE_PATH`. Attenzione: esiste un `backend/financial_analysis.db` di **0 byte**, artefatto morto che non è quello usato |
+| 303 | «`test_db.py`, `test_calculations.py`, `test_fgpmi.py`, `test_xbrl_import.py`» | **confermati esistenti**; aggiunto `npm test` (Vitest) lato frontend, che `CLAUDE.md` non nominava affatto pur avendo tre suite citate altrove |
+
+### Due precisazioni dentro sezioni non di competenza di questo task
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 304 | (§ Invarianti › Ambiente) «`MINERU_OCR_ENABLED` è `false` di default» | **precisata**, non riscritta: è `false` di default **nel compose** (`docker-compose.yml:19`, `${MINERU_OCR_ENABLED:-false}`), ma il default dello schema Python è `True` (`backend/app/core/config.py:58`). Un `uvicorn` avviato a mano ha quindi l'OCR **acceso**. La sostanza dell'invariante — MinerU non va sul VPS — regge intatta |
+| 305 | Il capoverso introduttivo degli invarianti («restano da setacciare le sezioni generali») e la nota in coda alla mappa («quel che resta è il Task 7») | **aggiornati**, perché questo commit li rende falsi nel momento stesso in cui atterra. Nient'altro è stato toccato nelle due sezioni |
+
+### Sulle 500 righe: non ci si arriva, e il motivo è aritmetico
+
+`CLAUDE.md` chiude a **571** righe, non sotto 500. Il conto:
+
+| parte | righe | di chi è |
+|---|---|---|
+| «Invarianti e trappole» | 188 | prodotto dei Task 1-6, fuori mandato |
+| «Mappa della documentazione» | 32 | idem |
+| i sette blocchi di rimando (Import PDF, Rettifiche, Pratica, Layout, Tab, Upload, API prev.) | 107 | prodotto dei Task 1-5, fuori mandato |
+| **totale intoccabile** | **327** | |
+| tutto il resto: 13 argomenti generali | 244 | perimetro del Task 7 |
+
+Il Task 7 ha portato le sezioni generali da **517 a 244** righe (−53%). Per rientrare sotto 500
+occorrerebbe scendere a 173, cioè ancora −29% su testo già asciutto: significherebbe cancellare
+orientamento che la spec stessa chiede di tenere (§2: «Quick Reference — percorsi, comandi,
+workflow API»; «Architecture — moduli condivisi, sys.path, auth, DB»). La spec aveva stimato la
+sezione invarianti a ~120 righe e la mappa a ~40, per un totale di 160: i Task 1-5 ne hanno
+prodotte 220, più 107 di rimandi che la forma prevista non contava affatto. Lo scarto sulle 500
+è quello, quasi esatto.
+
+Si applica la nota di esecuzione del piano: *«Se al Task 7 il file è a 520 righe e ogni riga supera
+il criterio, va bene: si segnala e si spiega. Tagliare un invariante per rientrare in una soglia è
+il fallimento di questo lavoro, non il suo successo.»*

@@ -302,8 +302,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 
 > Raccolte dall'[inventario dello snellimento](docs/superpowers/2026-08-14-inventario-claude-md.md),
 > che per ciascuna porta la prova nel codice. Coprono i blocchi finora passati al setaccio —
-> **import**, **Rettifiche** e **percorso Pratica**: l'assenza di una regola sul layout SP/CE o sul
-> previsionale non significa che non esista.
+> **import**, **Rettifiche**, **percorso Pratica** e **layout SP/CE**: l'assenza di una regola sul
+> previsionale o sulle tab minori non significa che non esista.
 
 ### Contabilità
 - **La colonna è la verità sul lato; la descrizione decide la voce.** Mai il contrario:
@@ -428,6 +428,28 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   Vale anche per l'oggetto `pratica`: cambia identità a **ogni** `updatePratica`, quindi un effetto
   che lo osserva intero riparte pure quando il campo che gli interessa non si è mosso — si dipende
   dagli scalari (`pratica?.companyId`).
+- **Aggiungere una voce a SP o CE non è un'operazione a un file solo.** Serve il codice negli
+  elenchi, il padre, l'etichetta e la riga del Confronto: saltarne uno produce una voce che non
+  compare da nessuna parte, senza alcun errore. La tabella completa è nella sezione «Layout SP/CE»
+  qui sotto — una versione precedente di questo file diceva che bastava il catalogo, ed era falsa.
+- **Una sotto-voce nuova va aggiunta anche a `reconcileSubfields`.** Se entra in un aggregato
+  riconciliato (`sp04`, `sp05`, `sp06`, `sp07`, `sp12`, `sp16`, `sp17`, `ce08`, `ce09`) ma non nella
+  lista dei dettagli di quell'aggregato, il suo importo viene contato **due volte**: il secchio
+  «altri» riassorbe il divario. Gli aggregati continuano a quadrare e il foglio pareggia; sbagliano
+  solo le righe di dettaglio, cioè quelle che l'utente legge.
+- **I due spazi iniziali di un'etichetta di prospetto sono comportamento, non estetica.**
+  `/forecast/balance` e `report-appendices` leggono `label.startsWith("  ")` per decidere il rientro
+  **e** se nascondere la riga di dettaglio; le etichette del catalogo sono `trim()`ate.
+  Armonizzare i prospetti a `labelOf` farebbe sparire quelle righe senza un solo errore.
+- **`aggregate()` del catalogo IV-CEE somma le FOGLIE.** Sul `BalanceSheet` che arriva da
+  `/analysis`, già aggregato dal backend con le sotto-voci a zero, restituisce **0** su `sp04`,
+  `sp06` e `sp07`: sostituire una somma scritta a mano con `aggregate()` azzera immobilizzazioni e
+  crediti nel grafico stampato, in silenzio.
+- **Gli elenchi di codici congelati in `ivcee-catalog-parity.test.ts` non si aggiornano per far
+  tornare verde la suite.** Se cambiano, una vista ha perso o riordinato una riga: è quello il
+  difetto. L'unica eccezione è una riga aggiunta di proposito, che si aggiorna nello stesso commit.
+  Gli elenchi di **etichette** sono un'altra cosa: lì un cambiamento deliberato è legittimo, purché
+  si sappia perché il testo si è mosso.
 
 ### Ambiente
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
@@ -558,113 +580,21 @@ l'unico punto di avanzamento in `components/pratica/PraticaActionBar.tsx`, il wi
 
 **Lo stepper blocca un passaggio, o il wizard si perde dopo un refresh?** → [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md)
 
-### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
-All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable.
-Per aggiungere una sotto-voce, l'elenco dei file da toccare è la tabella «Aggiungere una
-sotto-voce tocca QUATTRO file» qui sotto. Sostituisce l'elenco puntato che stava qui prima
-del catalogo, ora inservibile: due delle sue quattro voci non esistono più (le mappe
-`relabel` dentro `pratica-statement-rows.ts`, e gli array `rows` di
-`app/forecast/balance/page.tsx` e `app/forecast/income/page.tsx`, che oggi leggono
-`BALANCE_STATEMENT_ROWS` / `INCOME_STATEMENT_ROWS` dal catalogo).
+### Layout SP/CE (Rettifiche · Confronto · /forecast/balance · /forecast/income)
 
-**Catalogo IV-CEE unico (2026-08-10).** Le righe dei prospetti SP/CE vivono in
-`frontend/lib/ivcee-catalog.ts`. Ogni voce porta il codice, il padre,
-la sezione, l'ordine e **due etichette**: `label` (autonoma, auto-esplicativa — giornale
-rettifiche, selettore contropartita, dialoghi, e ogni riga di Rettifiche) e `shortLabel`
-(contestuale, breve — righe di tabella che stanno sotto l'intestazione del proprio
-aggregato). `labelOf(code, "contestuale")` cade sull'autonoma quando la breve non c'è.
-Quello che le viste consumano davvero è `labelOf` (Confronto/Proiezione/Stampa via
-`pratica-statement-rows.ts`, e ogni riga di Rettifiche), più `isDettaglio` e
-`COUNTERPART_OPTIONS` (Rettifiche) e i due elenchi di righe qui sotto. Gli accessori che
-camminano l'albero — `sectionRows`, `childrenOf`, `subtree`, `voce`, `aggregate` — **esistono
-ma oggi nessuna vista li chiama**: `childrenOf` è usato dal catalogo stesso per costruire il
-blocco debiti di `BALANCE_STATEMENT_ROWS`, e `aggregate` compare in una sola riga di codice
-applicativo, il commento di `report-composition.tsx` che **vieta** di usarlo (somma le foglie,
-e su un `BalanceSheet` già aggregato dal backend restituisce 0 — vedi il `describe`
-"report-composition" nel test di parità). Le regole di **resa** (filtro degli zeri,
-editabilità, totali) restano di ciascuna vista; il **rientro** no, l'ha il catalogo
-(`Voce.dettaglio` / `isDettaglio`, vedi la sezione Rettifiche).
+Nome, padre, sezione e ordine di ogni voce vengono dal catalogo `frontend/lib/ivcee-catalog.ts`; le
+righe rese sono quattro elenchi distinti su sette viste. **Aggiungere una sotto-voce tocca QUATTRO
+file** — saltarne uno produce una voce che non compare da nessuna parte, senza alcun errore:
 
-**Aggiungere una sotto-voce tocca QUATTRO file, non uno.** Fino al 2026-08-11 questa
-sezione (e il messaggio del commit `d044e06`) diceva che bastava toccare
-`ivcee-catalog.ts` — «le sei viste la ricevono per costruzione». È falso, ed è
-esattamente il genere di documentazione contro cui mette in guardia l'apertura di questo
-file: descriveva un'API che il codice non offre. Per aggiungere, poniamo, `sp05f_nuova`:
-
-| File | Perché |
+| File | Che cosa |
 |---|---|
-| `frontend/lib/pratica-rettifiche-rules.ts` | `ALL_CODES` si costruisce da `RETTIFICHE_BS_*` / `DEBT_GROUPS` / `CE_*`. Un codice che non è in quegli elenchi **non entra in `VOCI`**: la sola etichetta non produce nulla. |
-| `frontend/lib/pratica-codes.ts` | `parentOf` legge `DETAIL_PARENTS`. Se manca, la voce è trattata come di primo livello → `topLevelOrder` → `indexOf` → `-1`, e il test «nessuna voce resta senza ordine» diventa rosso. |
-| `frontend/lib/ivcee-catalog.ts` | l'etichetta, più la riga in `BALANCE_STATEMENT_ROWS` (o `INCOME_STATEMENT_ROWS`). |
-| `frontend/lib/pratica-statement-rows.ts` | l'elenco righe del Confronto è ancora una sequenza scritta a mano di chiamate `labeled("...")`: nessuno lo deriva dal catalogo. |
+| `lib/pratica-rettifiche-rules.ts` | il codice in `RETTIFICHE_BS_*` / `DEBT_GROUPS` / `CE_*`: fuori di lì non è editabile e non entra in `VOCI` |
+| `lib/pratica-codes.ts` | il padre in `DETAIL_PARENTS`, o il codice in `ATTIVO_CODES`/`PASSIVO_CODES` se è di primo livello |
+| `lib/ivcee-catalog.ts` | l'etichetta, più la riga in `BALANCE_STATEMENT_ROWS` / `INCOME_STATEMENT_ROWS` |
+| `lib/pratica-statement-rows.ts` | la riga del Confronto, che è ancora scritta a mano |
+| *+ `lib/pratica-reconcile.ts`* | se la voce entra in un aggregato riconciliato, o il suo importo viene contato due volte in silenzio (poi gli elenchi congelati di `ivcee-catalog-parity.test.ts`) |
 
-Il consolidamento **c'è stato**, e va misurato per quello che è: prima erano cinque file e
-una decina di punti di modifica, e **tre** di quei punti erano tre mappe di etichette
-diverse. Bilancio onesto allo stato attuale — le **etichette** sono passate da tre fonti a
-una (più i letterali dei prospetti, vedi il paragrafo sotto); gli **elenchi di codici**
-sono ancora sparsi su tre file; le **proiezioni dell'albero** (`childrenOf`, `subtree`,
-`aggregate`, `sectionRows`) sono costruite ma nessuna vista le consuma.
-
-Lo stesso file porta anche i **due elenchi di righe già impaginate**,
-`BALANCE_STATEMENT_ROWS` (letto da `/forecast/balance` e da `report-appendices`) e
-`INCOME_STATEMENT_ROWS` (letto da `/forecast/income`): non è solo la tassonomia, è
-tassonomia **e** prospetti. Le tre grafie da cui le etichette sono derivate
-(`GRAFIA_RETTIFICHE`, `GRAFIA_SELETTORE`, `CONFRONTO_RELABEL`) sono **private al
-modulo** dal 2026-08-11 — erano due export di `pratica-rettifiche-rules.ts`
-(`RETTIFICHE_LABELS`, `COUNTERPART_PICKER_LABELS`) e una mappa interna a
-`pratica-statement-rows.ts`, cioè tre posti da cui si poteva ribattezzare una voce
-senza passare dal catalogo. `pratica-rettifiche-rules.ts` conserva la **politica**
-(`PROPOSAL_RULES`, `NON_POSTABLE_FIELDS`, `fieldCategory`, `COUNTERPART_GROUPS`, gli
-elenchi di righe `RETTIFICHE_BS_*` / `CE_A`–`CE_E` / `DEBT_GROUPS`); `COUNTERPART_OPTIONS`
-è passato al catalogo perché era l'ultimo consumatore delle due mappe, e la direzione
-opposta (rules → catalogo) chiuderebbe un ciclo di import fatale al caricamento.
-
-**Le etichette dei prospetti sono una TERZA superficie di naming, non ancora unificata.**
-Le righe di `BALANCE_STATEMENT_ROWS` / `INCOME_STATEMENT_ROWS` portano un testo proprio,
-distinto sia dalla grafia autonoma sia dalla contestuale del catalogo: 66 delle 97 righe
-che citano una voce non coincidono con nessuna delle due. `sp04b` è `"2) Crediti entro 12
-mesi"` nel prospetto, `"Crediti immobilizzati (entro)"` autonoma e `"2) Crediti (entro es.
-successivo)"` contestuale — tre nomi per una voce; `ce20_imposte` è numerata `22)` nel
-prospetto e `20)` nel catalogo. Nulla di ciò è una regressione (i testi sono arrivati
-verbatim dalle viste), ma il ramo li ha spostati **dentro** il file che dichiara di essere
-l'unica fonte del nome di una voce, senza armonizzarli. Dal 2026-08-11 sono almeno
-**congelati** (`ATTESI_PROSPETTO_LABELS`, 108 coppie): prima nessun test li leggeva, perché
-`rowKey` usa `r.field ?? "computed:" + r.label` e quindi delle righe che portano un campo
-fissava il codice, non il testo. Un futuro «armonizziamo tutto a `labelOf`» ora si vede.
-
-`frontend/lib/ivcee-catalog-parity.test.ts` fissa, per ogni vista, l'elenco dei codici
-resi e il loro ordine. Se cambia, una vista ha perso o riordinato una riga: quegli
-elenchi non vanno aggiornati per far passare il test. Fissa inoltre, con natura diversa,
-**il testo di ogni etichetta** (`ATTESI_CONFRONTO_LABELS`, 87 grafie contestuali;
-`ATTESI_LABELS_AUTONOME`, tutte e 100 le autonome; `ATTESI_PROSPETTO_LABELS`, le 108 righe
-di prospetto che portano un campo): lì un cambiamento deliberato è
-legittimo e si aggiorna la riga nello stesso commit che cambia il testo — quello che non
-è legittimo è aggiornarla per far tornare verde la suite senza sapere perché il testo si
-è mosso.
-
-**L'ordine di resa di Rettifiche è dichiarato una volta sola** (2026-08-11):
-`RETTIFICHE_RENDER_SECTIONS` (gli elenchi passati a `renderSection`, in ordine) e
-`RETTIFICHE_RENDER_ORDER` (ogni codice reso, debiti compresi) in
-`pratica-rettifiche-rules.ts`. Li consumano il componente **e** i due test. Prima ognuno
-dei tre lo riscriveva a mano, e il rifacimento del test di parità aveva **perso**
-`sp18_ratei_risconti_passivi`: pinnava 91 codici dove la vista ne rende 92, quindi non si
-sarebbe accorto della sparizione di sp18. **Limite noto:** questo fissa quali elenchi e in
-che ordine, non che il JSX li renda in quell'ordine — il componente interfoglia
-intestazioni, totali e il blocco debiti fra le chiamate, quindi una riga persa o aggiunta
-non può più sfuggire, una sezione spostata nel JSX sì.
-
-Detail blocks shared across all views:
-- **Immob. finanziarie (sp04):** sp04a_partecipazioni, sp04b/c_crediti_immob_breve/lungo, sp04d_altri_titoli, sp04e_strumenti_derivati_attivi. Aggregate `sp04_immob_finanziarie` is computed from sub-fields.
-- **Crediti (sp06/sp07):** a through g per entro/oltre (clienti, controllate, collegate, controllanti, tributari, imposte anticipate, altri).
-- **Patrimonio netto (sp12):** sp12a (sovrapprezzo) through sp12h (riserva neg. azioni proprie), with sp12g (utili portati) before sp13 and sp12h after. Aggregate `sp12_riserve` is computed from sub-fields.
-- **Debiti (sp16/sp17):** 7 creditor-typed groups (`_debt_banche`, `_debt_altri_finanz`, `_debt_obbligazioni`, `_debt_fornitori`, `_debt_tributari`, `_debt_previdenza`, `_debt_altri`), each rendered as a synthetic total row followed by entro (sp16x) and oltre (sp17x) sub-rows. Group headers are pinned into `ALWAYS_SHOW_CODES` so the full OIC art. 2424 structure shows even when a group is zero; sub-rows follow the standard "hide when all years zero" filter in Confronto/forecast, but are always visible in Rettifiche so they remain editable. Aggregates `sp16_debiti_breve`/`sp17_debiti_lungo` and `total_debt` are computed.
-- **P&L:** ce08a–d (personale: TFR, salari, oneri sociali, altri), ce09a–d (ammortamenti/svalutazioni), ce17a/b (rivalutazioni/svalutazioni). EBITDA + EBIT rows shown in all three pages.
-
-**Per-year sub-field reconciliation (Confronto tab):** Bilancio abbreviato imports often populate only parent aggregates (e.g. `sp16_debiti_breve`) leaving detail sub-fields at 0. `buildBalanceItemsWithTotals` applies `reconcileSubfields` to each year column (partial/reference/prior) independently, so the gap is plugged into the "altri" bucket (`sp04a`, `sp05e`, `sp06g`, `sp07g`, `sp12e`, `sp16g`, `sp17g`) before rows are built. This mirrors the Rettifiche load-time reconciliation and prevents detail rows from being hidden by the zero-filter.
-
-**Two known warts, left untouched deliberately (2026-08-10 — found while decomposing `page.tsx`, not fixed as part of that move):**
-- `buildBalanceItemsWithTotals` maps over the CALLER's `rawItems`, so a reconciliation plug computed for a code the caller never sent is silently dropped — it exists in the internal reconciled map but its row never renders. The caller must include the detail rows (even as zeros) in `rawItems` for a plug to be visible.
-- `buildIncomeItemsWithEbitda`'s `periodMonths` parameter is effectively dead: `const factor = 12 / periodMonths` (`lib/pratica-statement-rows.ts:257`) is computed and never read anywhere in the function, so the output does not actually vary with it. Annualisation of CE rows comes entirely from the caller-supplied `annualized_value`, not from this parameter. Two more locals in the same function are dead for the same reason: `partialRevenue` and `refRevenue` (`lib/pratica-statement-rows.ts:337-338`) are computed and never read either.
+**Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre?** → [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md)
 
 ### Projection Tab (Proiezione P&L editable overrides)
 Expanded `EDITABLE_CE_CODES` to cover **22 CE fields** (ce01–ce20 plus ce08/09/11/17 sub-fields), so the user can override almost every projected P&L line directly in the Proiezione table.
@@ -969,6 +899,7 @@ giusto è il codice, non `/docs`.
 | Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
 | Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
 | Lo stepper della pratica blocca un passaggio, o il wizard si perde dopo un refresh? | [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) |
+| Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre? | [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md) |
 | Un grafico degli Indicatori è sbagliato, o la Stampa impagina male? | [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md) |
 | Una classe Tailwind non produce alcuno stile e non c'è errore? | [docs/frontend/TAILWIND-E-CLASSI.md](docs/frontend/TAILWIND-E-CLASSI.md) |
 | Come si incastra l'app nell'iframe di Formula Finance, JWT compreso? | [docs/deployment/IFRAME_INTEGRATION.md](docs/deployment/IFRAME_INTEGRATION.md) |
@@ -976,7 +907,7 @@ giusto è il codice, non `/docs`.
 | Perché una scelta è stata fatta così? | `docs/superpowers/specs/` (design) e `docs/superpowers/plans/` (esecuzione) |
 | La documentazione dice ancora il vero? | `/riallinea` (`.claude/skills/riallinea/`), rapporti in `docs/superpowers/allineamento/` |
 
-> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Il layout
-> SP/CE, le tab minori, l'upload tracking e le API del budget vivono ancora dentro questo file
-> invece che in una pagina propria
-> (Task 4-5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).
+> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Le tab
+> minori, l'upload tracking e le API del budget vivono ancora dentro questo file invece che in una
+> pagina propria
+> (Task 5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).

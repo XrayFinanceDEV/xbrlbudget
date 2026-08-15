@@ -207,6 +207,14 @@ git commit -m "docs(claude): il percorso pratica ha la sua pagina"
 
 ## Task 4: Layout SP/CE (110 righe) → `docs/frontend/LAYOUT-SP-CE.md`
 
+> **Fatto il 2026-08-15.** Righe 198-222 dell'inventario. Tre `OBSOLETA`: le viste non rendono
+> «lo stesso layout» (quattro elenchi diversi su sette superfici, 92 / 87 / 97 codici); il rientro
+> è del catalogo **solo** in Rettifiche, le altre quattro viste usano tre regole proprie; e
+> `ALL_CODES` non sta nelle rules né è chiuso a quegli elenchi. La tabella dei quattro file regge,
+> ma i file sono **sei**: manca `pratica-reconcile.ts` (una sotto-voce non registrata lì viene
+> contata due volte, misurato) e gli elenchi congelati del test di parità. Otto conteggi
+> ri-verificati, tutti confermati. Cinque righe `RESTA` aggiunte a «Invarianti e trappole».
+
 **Files:**
 - Create: `docs/frontend/LAYOUT-SP-CE.md`
 - Modify: `CLAUDE.md` (`### Shared BS/IS Layout ...`), l'inventario

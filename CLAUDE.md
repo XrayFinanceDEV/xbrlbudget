@@ -301,8 +301,9 @@ nessun controllo se ne accorge. Il resto della documentazione spiega i meccanism
 ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a violarla.
 
 > Raccolte dall'[inventario dello snellimento](docs/superpowers/2026-08-14-inventario-claude-md.md),
-> che per ciascuna porta la prova nel codice. Coprono **l'import**, l'unico blocco finora passato
-> al setaccio: l'assenza di una regola su frontend o previsionale non significa che non esista.
+> che per ciascuna porta la prova nel codice. Coprono i blocchi finora passati al setaccio —
+> **import** e **Rettifiche**: l'assenza di una regola sul resto del frontend o sul previsionale
+> non significa che non esista.
 
 ### Contabilità
 - **La colonna è la verità sul lato; la descrizione decide la voce.** Mai il contrario:
@@ -382,6 +383,33 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   200.** Un previsionale rifiutato torna comunque 200, con la ragione in `message`, nessun
   `ForecastYear` scritto e `forecast_years: []`. Ignorarlo dipinge una colonna Proiezione vuota
   sotto un toast verde. → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6
+
+### Rettifiche e stato del frontend
+- **Un salvataggio che il server ha rifiutato non si applica mai localmente.**
+  `useRettificheYear.save()` e `.reset()` restituiscono `false` (toast già mostrato), e ogni
+  chiamante che muta giornale o stato deve uscire su `false`. Prima di questa regola un 400 del
+  backend compariva nel giornale come una rettifica riuscita.
+- **La guardia su `PUT /adjustments` è relativa, non assoluta**: rifiuta ciò che **peggiora**
+  sbilancio, identità CE↔`sp13` o coerenza aggregati/dettagli, non ciò che è già sbagliato.
+  Renderla assoluta renderebbe incorreggibile per sempre ogni import già sbilanciato — che è
+  esattamente il file per cui le Rettifiche esistono.
+- **`original_*_snapshot` è catturato grezzo dal server**, prima che `reconcileSubfields` giri lato
+  client. Su un import per soli aggregati (abbreviato) rimandarlo tale e quale **allarga** il
+  divario aggregati/dettagli e la guardia lo respinge: `reset()` deve riconciliare una **copia**
+  (mai mutare `data.original_*`, riletto a ogni ripristino successivo) prima di inviare.
+- **Un delta registrato su un campo aggregato viene cancellato in silenzio.** `recalcAggregates`
+  ricostruisce `sp04`, `sp05`, `sp06`, `sp07`, `sp12`, `sp16`, `sp17`, `ce08`, `ce09`, `ce17` dai
+  sotto-campi e `sp13` dal CE: per questo stanno in `NON_POSTABLE_FIELDS`. Toglierne uno produce
+  rettifiche che spariscono senza errore.
+- **Lo stato di un foglio caricato si azzera al cambio di identità** (`[companyId, year,
+  periodMonths]`). Senza, si scrivono i valori di un periodo dentro il `FinancialYear` di un altro:
+  il backend risolve esattamente il record che gli è stato chiesto, il foglio quadra, e nessun
+  controllo se ne accorge — un record parziale e uno annuale **coesistono di proposito** per lo
+  stesso anno.
+- **Un hook che restituisce un oggetto letterale non va mai messo intero in un array di dipendenze
+  `useEffect`**: l'identità cambia a ogni render, l'effetto si ri-innesca da solo — anche per il
+  `setLoading` che lui stesso ha provocato — e raddoppia le chiamate di rete. Dipendere dai singoli
+  campi (`storico.data`, `storico.load`, …); gli `eslint-disable` su quegli effetti sono deliberati.
 
 ### Ambiente
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
@@ -486,81 +514,17 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
 - Frontend wizard: Import → Rettifiche → Comparison → Projection (editable) → Results → Promote to Budget
 
 ### Rettifiche (BS/IS Adjustments Journal)
-Journal of double-entry corrections applied to the imported financials before comparison/projection.
 
-**Two sub-tabs, one per year (2026-08-07).** A trial balance almost always arrives with its historical
-reference year (30.06.2026 + 31.12.2025), and **both need rettifiche** — the historical year is the base
-the Confronto, Proiezione and Indicatori compute growth against, so an uncorrected misclassification
-there propagates everywhere. The Rettifiche step holds a shadcn `Tabs` with *Rettifiche Storico
-{refYear}* (default) and *Rettifiche Bil. di verifica {n}M {year}*.
+Il giornale delle correzioni sul bilancio importato, step DATI › Rettifiche del percorso Pratica.
+Una tab per anno (storico + bilancio di verifica), entrambe da confermare prima di proseguire.
+Tre modi di proposta — rettifica e riclassifica in partita doppia, «Correggi Import» in partita
+singola — con tetto di 20 voci e una guardia anti-regressione lato server.
 
-- **No backend work was needed:** `GET /companies/{id}/years/{year}/adjustable` and `PUT .../adjustments`
-  already take `year` + optional `period_months` (`_find_fy`), and the importer already persists a
-  dual-column PDF's prior year as `period_months=None`. The Importazione step already guarantees the
-  reference year exists (`handleImportRefYear`) or was explicitly skipped (`handleSkipRefYear`).
-- **`frontend/hooks/use-rettifiche-year.ts`** holds load/save/reset/corrections for ONE `FinancialYear`;
-  the page instantiates it twice — `storico` (`fiscalYear - 1`, `periodMonths` **undefined** = full year)
-  and `verifica` (`fiscalYear`, `periodMonths < 12 ? periodMonths : undefined`). `RettificheTab` is
-  **unmodified and rendered twice**: it is prop-driven, `hasRef` hides the reference column when
-  `referenceYearData` is `null`, and `periodEndDate` derives 31/12/{refYear} from `(year, 12)`.
-- **⚠️ Never put the whole `verifica`/`storico` object in a `useEffect` dependency array.** The hook
-  returns a fresh object literal every render, so an object-keyed effect re-fires on every re-render —
-  including the one its own `setLoading(true)` causes — and issues a duplicate `GET /adjustable`.
-  Depend on the individual fields (`storico.data`, `storico.load`, …). The `exhaustive-deps` lint
-  warnings on those effects are intentional.
-- **⚠️ The hook resets on identity change** (`[companyId, year, periodMonths]`). Without it, going back
-  to Importazione, switching the period 9 → 12 and returning would keep the 9-month sheet loaded while
-  the save target became the full-year record — writing partial values into the **wrong
-  `FinancialYear`**. The backend cannot catch this: it resolves exactly the record it is asked for and
-  the sheet balances. Remember a partial and a full-year record deliberately coexist for the same
-  company+year.
-- **`referenceYearData`** (the read-only Storico column inside the Bil. di verifica tab) is a `useMemo`
-  over `storico.data`, not its own fetch — so a correction on one tab moves the column on the other.
-- **Downstream invalidation:** a save or reset on **either** year clears `comparison`, `projectedBS` and
-  `analysis`, and toasts *"ricalcola la proiezione"* only when a projection already existed. Nothing is
-  recomputed silently — the user goes back through Confronto → Proiezione. The "did a projection exist?"
-  test reads a **ref**, never a `setState` updater: `reactStrictMode` double-invokes updaters in dev, so
-  a toast inside one fires twice.
-- **No historical year** (import skipped → pure-annualization mode): the Storico trigger is disabled with
-  an explanatory card and the sub-tab defaults to Bil. di verifica. A 404 sets `exists = false` — a
-  legitimate state, not an error.
-- Spec + plan: `docs/superpowers/specs/2026-08-07-rettifiche-storico-design.md`,
-  `docs/superpowers/plans/2026-08-07-rettifiche-storico.md`.
+Vive in `frontend/components/pratica/RettificheTab.tsx` e `frontend/hooks/use-rettifiche-year.ts`;
+la politica di partita doppia in `frontend/lib/pratica-rettifiche-rules.ts`.
 
-- **Persistence:** `FinancialYear.original_bs_snapshot` + `original_is_snapshot` (pre-rettifiche JSON) and `FinancialYear.rettifiche_log` (JSON array of per-edit entries). Snapshot is created on first GET to `/adjustable`, so `BalanceSheet`/`IncomeStatement` always reflect the *current* corrected state while `original_*_snapshot` is immutable.
-- **Per-edit flow:** typing a new value into any BS/CE input updates a local `pendingEdits` map. On blur / Enter, a single-row proposal dialog opens with a suggested double-entry counterpart (from `PROPOSAL_RULES`) pre-filled. Confirming appends a `RettificaEntry` to the log, applies both deltas to `corrections`, and persists via `PUT /adjustments`. Cancelling reverts.
-- **Counterpart picker** (`COUNTERPART_GROUPS` + `allowedCounterpartCategories`): the dropdown is filtered by double-entry category based on the edited field and sign — e.g. Debito↑ shows only Costi/Oneri + Attivo; Credito↑ shows only Ricavi/Proventi + Passivo. Aggregate/computed fields (`sp04`, `sp05`, `sp06`, `sp07`, `sp12`, `sp13`, `sp16`, `sp17`, `ce08`, `ce09`, `ce17`) are excluded via `NON_POSTABLE_FIELDS` because `recalcAggregates` would overwrite any direct delta.
-- **Journal panel** lists every confirmed entry with a per-row delete (reverses both deltas, filters log, persists). Hard cap of **20 entries** (`RETTIFICHE_MAX`) — enforced both client-side (toast + block) and server-side (400 error on `/adjustments`).
-- **Auto-reconciliation:** `reconcileSubfields(original)` (frontend) plugs small (≤ 5 €) Attivo-vs-Passivo imbalances from import rounding into `sp09_disponibilita_liquide` on load; subsequent rettifiche preserve balance because they're always double-entry.
-- **Hydration:** on tab mount, `corrections` is seeded from `adjustableData.balance_sheet`/`income_statement` (post-rettifiche) and `log` from `adjustableData.rettifiche_log`. Reopening the tab shows the persisted journal.
-- **Reset** (`onReset`): sends `original_*_snapshot` back as BS/IS + empty log to `PUT /adjustments` — wipes all corrections and the journal.
-- Key files:
-  - `database/models.py` — `FinancialYear.rettifiche_log` column
-  - `backend/app/schemas/adjustments.py` — `RettificaEntry`, `AdjustableFinancialYear.rettifiche_log`, `AdjustmentsUpdate.rettifiche_log`
-  - `backend/app/api/v1/financial_years.py` — `RETTIFICHE_LOG_MAX = 20`, GET `/adjustable`, PUT `/adjustments`
-  - `frontend/components/pratica/RettificheTab.tsx` — `RettificheTab` component, `recalcAggregates`, the two-tab render block (moved from `app/infrannuale/page.tsx`, see "Il percorso unico Pratica" below)
-  - `frontend/lib/pratica-rettifiche-rules.ts` — `PROPOSAL_RULES`, `COUNTERPART_GROUPS`, `DEBT_GROUPS`
-  - `frontend/lib/ivcee-catalog.ts` — le etichette (`labelOf`), il rientro (`isDettaglio`) e `COUNTERPART_OPTIONS`
-  - `frontend/lib/pratica-reconcile.ts` — `reconcileSubfields`
-  - `frontend/hooks/use-rettifiche-year.ts` — per-year load/save/reset/corrections, one instance per tab; imports `reconcileSubfields` directly
-
-**Etichette dal catalogo (2026-08-11).** Ogni riga di Rettifiche rende ora `labelOf(field)`, la grafia
-**autonoma** del catalogo. Il cambiamento visibile è sulle sotto-righe dei debiti: mostrano
-`Debiti vs fornitori (entro)` invece di `entro 12 mesi`. La forma breve funziona solo sotto
-un'intestazione che la spieghi — nel prospetto del Confronto c'è, nel giornale delle rettifiche no.
-Il **rientro** delle sotto-voci non si legge più dai due spazi iniziali di un'etichetta: lo dichiara
-il catalogo (`isDettaglio`). Non è `depthOf(code) > 0`: sulle 78 righe passate a `renderSection`,
-la profondità ne selezionerebbe 42 contro 32 — le 10 di scarto sono `sp12a..h` e `ce17a/b`, che hanno
-un padre nel catalogo ma portano già la propria lettera di schema (`A.II)`, `18)`) e restano a filo.
-Il confronto è pinnato in `ivcee-catalog-parity.test.ts`.
-
-Le **intestazioni di raggruppamento** dello schema art. 2424 (`B) Immobilizzazioni`,
-`C) Attivo circolante`, `A) Patrimonio netto`) sono righe di **resa** dichiarate dentro
-`RettificheTab.tsx`, non voci del catalogo: non hanno codice, non sono editabili e non compaiono in
-`VOCI`. Un'intestazione si stampa sopra la prima riga **visibile** del proprio gruppo, così un gruppo
-interamente filtrato non lascia un'intestazione orfana.
-
-**Struttura (2026-08-10):** `RettificheTab` vive in `frontend/components/pratica/RettificheTab.tsx`; le sue regole di partita doppia e il layout righe stanno in `frontend/lib/pratica-rettifiche-rules.ts`. La vecchia nota parlava di ~15 costanti condivise con le tab Confronto e Proiezione: verificate una per una, l'unica davvero condivisa era `DETAIL_PARENTS` (ora in `lib/pratica-codes.ts`, usata da tutti e tre — `RettificheTab`, `ComparisonTable`, `ProjectionTable` — per decidere quando mostrare una riga di dettaglio). Non è servito alcun modulo ponte.
+**Il giornale si comporta male, o non sai che cosa può fare da contropartita?**
+→ [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md)
 
 ### Il percorso unico "Pratica" (2026-08-08)
 Two workflows for a new pratica, down from three: **Da bilancio** (`/pratica`) and **Startup**
@@ -706,23 +670,6 @@ the SINGLE path both the "Conferma e vai al Confronto" primary action bar button
 an earlier version let the dialog's button reach Confronto through a separate `onNext` that
 bypassed the gate entirely (Task 7 review, Critical finding).
 
-**`reset()` must reconcile the snapshot before sending it, mirroring `load()`.**
-`FinancialYear.original_bs_snapshot`/`original_is_snapshot` are captured server-side RAW, before
-the frontend-only `reconcileSubfields` ever runs. On an aggregate-only import (bilancio abbreviato
-— the common shape) the raw snapshot's detail sub-fields are zero while the currently persisted
-state already went through `reconcile()` at load time; posting the raw snapshot as-is widens the
-aggregate/detail gap and the backend's anti-regression guard deterministically rejects it with 400
-— which made "Ripristina originale" a dead button on exactly the imports that most need it. Fixed
-in `9d7079b`: `reset()` now merges BS+IS, runs the same `reconcile()` over a COPY (never mutating
-`data.original_*`, which is re-read on every subsequent reset), and only then splits and posts it.
-
-**A save or reset the server rejects must never be committed locally.** `useRettificheYear.save()`
-and `.reset()` return `Promise<boolean>` (`false` on any thrown error, toast already shown by the
-hook); every journal-mutating call site in `app/pratica/page.tsx` (`confirmActiveEdit`,
-`deleteLogEntry`, `handleConfirmRettifiche`) awaits the boolean and returns early on `false` instead
-of updating `corrections`/`log`/`confirmed` optimistically. Before this a 400 from the backend still
-rendered as a successful edit in the journal.
-
 **`AppContext` now consumes `usePratica()`** (legal only because `PraticaProvider` sits above
 `AppProvider`), for two behaviours found as real bugs in browser testing, not designed up front:
 - `loadCompanies`'s auto-select-first-company fallback stands down while a pratica is active
@@ -866,8 +813,6 @@ Detail blocks shared across all views:
 **Two known warts, left untouched deliberately (2026-08-10 — found while decomposing `page.tsx`, not fixed as part of that move):**
 - `buildBalanceItemsWithTotals` maps over the CALLER's `rawItems`, so a reconciliation plug computed for a code the caller never sent is silently dropped — it exists in the internal reconciled map but its row never renders. The caller must include the detail rows (even as zeros) in `rawItems` for a plug to be visible.
 - `buildIncomeItemsWithEbitda`'s `periodMonths` parameter is effectively dead: `const factor = 12 / periodMonths` (`lib/pratica-statement-rows.ts:257`) is computed and never read anywhere in the function, so the output does not actually vary with it. Annualisation of CE rows comes entirely from the caller-supplied `annualized_value`, not from this parameter. Two more locals in the same function are dead for the same reason: `partialRevenue` and `refRevenue` (`lib/pratica-statement-rows.ts:337-338`) are computed and never read either.
-
-**Recap dialog (Riepilogo Rettifiche):** aggregate rows that were updated indirectly by `recalcAggregates` (any field in `NON_POSTABLE_FIELDS`) render in muted-gray italic with a tooltip explaining they are derived totals, so the user doesn't mistake them for duplicated postings.
 
 ### Projection Tab (Proiezione P&L editable overrides)
 Expanded `EDITABLE_CE_CODES` to cover **22 CE fields** (ce01–ce20 plus ce08/09/11/17 sub-fields), so the user can override almost every projected P&L line directly in the Proiezione table.
@@ -1170,6 +1115,7 @@ giusto è il codice, non `/docs`.
 | Come si costruisce un budget e che cosa fa il motore di previsione? | [docs/budget/FORECASTING_GUIDE.md](docs/budget/FORECASTING_GUIDE.md) |
 | Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
 | Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
+| Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
 | Un grafico degli Indicatori è sbagliato, o la Stampa impagina male? | [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md) |
 | Una classe Tailwind non produce alcuno stile e non c'è errore? | [docs/frontend/TAILWIND-E-CLASSI.md](docs/frontend/TAILWIND-E-CLASSI.md) |
 | Come si incastra l'app nell'iframe di Formula Finance, JWT compreso? | [docs/deployment/IFRAME_INTEGRATION.md](docs/deployment/IFRAME_INTEGRATION.md) |
@@ -1177,6 +1123,6 @@ giusto è il codice, non `/docs`.
 | Perché una scelta è stata fatta così? | `docs/superpowers/specs/` (design) e `docs/superpowers/plans/` (esecuzione) |
 | La documentazione dice ancora il vero? | `/riallinea` (`.claude/skills/riallinea/`), rapporti in `docs/superpowers/allineamento/` |
 
-> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Rettifiche,
-> percorso Pratica e layout SP/CE vivono ancora dentro questo file invece che in una pagina propria
-> (Task 2-5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).
+> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Percorso
+> Pratica e layout SP/CE vivono ancora dentro questo file invece che in una pagina propria
+> (Task 3-5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).

@@ -10,6 +10,7 @@ Solo libreria standard: deve girare con `python3 scripts/riallinea.py`, senza ve
 Spec: docs/superpowers/specs/2026-08-14-agente-riallineamento-design.md
 """
 import argparse
+import datetime
 import json
 import re
 import subprocess
@@ -248,7 +249,27 @@ def main() -> None:
                     help="ignora l'intervallo: tutti i simboli del codice attuale")
     ap.add_argument("--stato", default=STATO_DEFAULT)
     ap.add_argument("--memoria", default=RADICE_MEMORIA)
+    ap.add_argument("--registra", metavar="SHA",
+                    help="registra l'esito nello stato e termina (non raccoglie nulla): "
+                         "lo chiama lo skill DOPO aver verificato")
+    ap.add_argument("--modo", default="diff", choices=["diff", "completo"],
+                    help="modo con cui e' stata condotta la verifica che --registra salva")
+    ap.add_argument("--ripresa-l3", default=None,
+                    help="ultimo documento verificato PER INTERO al Livello 3")
+    ap.add_argument("--data", default=None,
+                    help="data ISO della registrazione (AAAA-MM-GG); default: oggi, "
+                         "calcolata dallo script se lo skill non la passa esplicitamente")
     args = ap.parse_args()
+
+    if args.registra:
+        data = args.data or datetime.date.today().isoformat()
+        salva_stato(args.stato, sha=args.registra, modo=args.modo, data=data)
+        if args.ripresa_l3:
+            stato = carica_stato(args.stato)
+            stato["ripresa_l3"] = args.ripresa_l3
+            Path(args.stato).write_text(
+                json.dumps(stato, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return
 
     stato = carica_stato(args.stato)
     if args.completo:

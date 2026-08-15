@@ -39,19 +39,32 @@ nessuno la rilegge. Nel dubbio si segnala.
    `docs(allineamento): rapporto AAAA-MM-GG` (data del rapporto, non del giorno in cui
    giri lo skill se sono diversi). Letterali: non improvvisare un formato diverso, o i
    commit di riallineamento smettono di essere riconoscibili nel log.
-9. **Aggiorna** `STATO.json`: `ultimo_sha`, `modo`, `data`, `ultimo_completo` come
-   già fa `salva_stato`; se hai girato il Livello 3, aggiungi anche
-   `"ripresa_l3": "<percorso dell'ultimo documento verificato PER INTERO al Livello
-   3>"` — non l'ultimo su cui il tetto ti ha fermato, se lì restavano citazioni non
-   ancora guardate (vedi il Livello 3 sotto per il perché). `salva_stato` carica lo
-   stato esistente e vi scrive sopra solo le chiavi che conosce, quindi una chiave in
-   più sopravvive senza toccare `scripts/riallinea.py`.
+
+   **Aggiungi solo i file toccati, nominandoli uno per uno** (`git add <percorso1>
+   <percorso2> ...`). **`git add -A` e `git add .` sono vietati.** Nel repo convivono
+   backup del database (`financial_analysis.db.bak-*`) e PDF di test non tracciati che
+   non devono finire in un commit — e la convenzione qui è commit diretto su `main`,
+   con Jenkins che builda a ogni push: un `git add` indiscriminato è l'unico modo in
+   cui questo strumento può fare un danno vero.
+9. **Registra l'esito, DOPO aver committato** — mai a mano, mai durante la raccolta
+   (quella avviene prima di sapere com'è andata la verifica):
+   ```bash
+   python3 scripts/riallinea.py --registra <SHA verificato> --modo <diff|completo> \
+       --data <AAAA-MM-GG del rapporto> \
+       [--ripresa-l3 "<ultimo documento verificato PER INTERO al Livello 3>"]
+   ```
+   `--registra` è l'unico ramo della CLI autorizzato a scrivere `STATO.json`. Passa
+   `--ripresa-l3` solo se hai girato il Livello 3, con l'ultimo documento verificato
+   **per intero** — non quello su cui il tetto ti ha fermato a metà, se lì restavano
+   citazioni non ancora guardate (vedi il Livello 3 sotto per il perché). Se lo ometti,
+   la chiave esistente nello stato resta intatta: `salva_stato` scrive sopra solo le
+   chiavi che conosce.
 
 ## Strategia per lo sweep completo (`--completo`)
 
-Un `--completo` sul repo reale produce circa 2722 simboli, 5714 citazioni, 49 nomi
+Un `--completo` sul repo reale produce circa 2722 simboli, 5722 citazioni, 50 nomi
 generici, in circa 45 secondi di sola raccolta. Nessun modello può leggere il codice
-dietro 5714 affermazioni in un'unica esecuzione. Campionare in silenzio sarebbe
+dietro 5722 affermazioni in un'unica esecuzione. Campionare in silenzio sarebbe
 peggio di non verificare affatto: produrrebbe un rapporto che sembra esaustivo e non
 lo è — il guasto stesso che questo strumento esiste per prevenire.
 
@@ -64,10 +77,13 @@ Tre livelli, in quest'ordine, senza eccezioni:
 
 1. **Livello 1 — tutte le citazioni in `CLAUDE.md`.** È il file caricato a ogni
    sessione: un suo errore costa più di qualunque altro. Verifica integrale, sempre,
-   qualunque sia il numero (è un solo file, quindi per costruzione limitato).
+   qualunque sia il numero. **Non è "per costruzione limitato" — è un'affermazione
+   falsa, misurata:** su uno sweep `--completo` reale `CLAUDE.md` da solo porta **332
+   citazioni**, più dell'intero tetto di 300 del Livello 3. È l'unico livello senza un
+   tetto dichiarato proprio per questo: essere un solo file non lo rende piccolo.
 2. **Livello 2 — tutti i candidati `MORTO`, su tutto il repo.** Prima di leggere una
    sola citazione, fai passare **ogni simbolo** (non ogni citazione — molte citazioni
-   condividono lo stesso simbolo, quindi il lavoro è sui ~2722 simboli, non sulle 5714
+   condividono lo stesso simbolo, quindi il lavoro è sui ~2722 simboli, non sulle 5722
    righe) per un controllo meccanico di esistenza:
    ```bash
    git grep -n -w -- '<nome_simbolo>' -- '*.py' '*.ts' '*.tsx' '*.js' '*.jsx'
@@ -116,7 +132,7 @@ Tre livelli, in quest'ordine, senza eccezioni:
    tempo, è un tetto esplicito che chiunque legga lo skill può cambiare
    consapevolmente.
 
-**Con un tetto di 300 su ~5714 citazioni candidate, uno sweep guarda circa il 5% del
+**Con un tetto di 300 su ~5722 citazioni candidate, uno sweep guarda circa il 5% del
 corpo al Livello 3.** Servono all'incirca 19 sweep perché il giro dell'alfabeto si
 chiuda e si ricominci da dove si era partiti la prima volta — la ripresa fa
 avanzare la copertura sweep dopo sweep invece di rileggere sempre la stessa testa,
@@ -126,14 +142,14 @@ prima di lanciarlo, non dedurlo dal rapporto dopo.
 **Cosa NON è stato guardato va dichiarato, non taciuto.** Il rapporto elenca i
 documenti (percorso + numero di citazioni residue) che restavano fuori dal tetto di
 livello 3 quando l'esecuzione si è fermata, così la prossima esecuzione — o una
-persona — sa esattamente da dove riprendere. I 49 nomi generici (`generici` nel JSON,
+persona — sa esattamente da dove riprendere. I 50 nomi generici (`generici` nel JSON,
 citazioni ≥ `SOGLIA_GENERICO`) non entrano MAI nella verifica per nome: sono per
 costruzione troppo comuni per essere affermazioni verificabili individualmente: si
 riportano nel rapporto con il conteggio, non si aprono uno per uno.
 
 **In testa a ogni rapporto di uno sweep completo:**
 ```
-Candidate: 5714 · Verificate a fondo: <L1 + L2 + L3> (L1 CLAUDE.md: N · L2 MORTO: N · L3: N/300)
+Candidate: 5722 · Verificate a fondo: <L1 + L2 + L3> (L1 CLAUDE.md: N · L2 MORTO: N · L3: N/300)
 Livello 3 ripartito da: <ripresa_l3 dello stato, o «inizio (nessuna ripresa salvata)»>
 Livello 3 arrivato a: <ultimo documento verificato PER INTERO — il nuovo ripresa_l3>
 Non esaminate questa esecuzione: <conteggio> citazioni in <elenco documenti>
@@ -152,6 +168,19 @@ Non esaminate questa esecuzione: <conteggio> citazioni in <elenco documenti>
 
 Non correggere mai: una descrizione di comportamento, un ordine di operazioni, una
 motivazione, un numero non ancorato a una costante nominata, un esempio di codice.
+
+### Piani e spec datati non si riscrivono
+
+Un piano o una spec con una data nel nome (`docs/superpowers/plans/AAAA-MM-GG-*.md`,
+`docs/superpowers/specs/AAAA-MM-GG-*.md`) è un **verbale**, non documentazione viva:
+registra che cosa si era deciso in quel momento. Anche quando il codice ha smentito
+quella decisione in modo dimostrabile (firma cambiata, valore di ritorno diverso, ecc.
+— cose che altrove rientrerebbero nella lista chiusa) **non si riscrive la frase per
+farla combaciare col codice**: la correzione va nel documento vivo (`CLAUDE.md`, le
+pagine `REGOLE-IMPORT-*`). Sul verbale si annota il superamento — una riga in coda al
+documento che dice cosa è cambiato dopo e dove guardare per lo stato attuale.
+Riscriverlo cancellerebbe la traccia di quello che si era deciso in quel momento, che
+è il suo unico valore.
 
 ## Il rapporto
 
@@ -173,3 +202,19 @@ fuori. Il modo `diff` è invece **esaustivo sul proprio intervallo**: verifica t
 citazioni che produce, senza campionamento. Sono limiti complementari, non
 intercambiabili: `diff` è completo ma cieco a ciò che non è cambiato di recente;
 `--completo` vede tutto ma non può leggerlo tutto in una sola esecuzione.
+
+**Cieco ai cambi di corpo, non solo all'errore di nascita.** `_REGOLE` aggancia solo
+righe di *definizione* aggiunte o rimosse (una `def`, una `class`, un `Column(...)`,
+una rotta). Un cambio nel *corpo* di una funzione — la deriva comportamentale più
+comune — non produce alcun simbolo, quindi non innesca nessuna verifica: `accept_rescue`
+è stato preso in un giro reale solo perché la sua firma è cambiata; la condizione sul
+passivo aggiunta dal commit `9ffdb14` sarebbe stata invisibile a firma invariata.
+«Trova la deriva, non l'errore di nascita» promette quindi più di quanto il meccanismo
+dia: trova la deriva **delle interfacce**, non dei comportamenti.
+
+**Il corpus si auto-inquina fra un giro e il successivo.** Il rapporto di uno sweep
+finisce esso stesso dentro `docs/`, quindi le sue citazioni entrano nel conteggio del
+giro successivo: misurato su questo repo, `create` passa da 38 a 45 citazioni — sopra
+`SOGLIA_GENERICO` — solo perché il rapporto che ne parla è stato aggiunto al corpus.
+Non c'è (ancora) un'esclusione per i rapporti di riallineamento stessi: se un simbolo
+generico compare per la prima volta a causa di un rapporto precedente, dichiaralo.

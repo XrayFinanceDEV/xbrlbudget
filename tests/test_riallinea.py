@@ -3,7 +3,9 @@
 Spec: docs/superpowers/specs/2026-08-14-agente-riallineamento-design.md §1 fase A
 Run:  python3 -m pytest tests/test_riallinea.py -v
 """
+import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -322,3 +324,48 @@ def test_un_diff_successivo_non_cancella_ultimo_completo(tmp_path):
     letto = carica_stato(p)
     assert letto["ultimo_completo"] == "2026-08-28"
     assert letto["ultimo_sha"] == "aaa1111"
+
+
+# --- --registra (CLI) -------------------------------------------------------
+# `main()` non chiamava mai `salva_stato`: 27 test coprivano una funzione che la CLI
+# non raggiungeva, e STATO.json era stato scritto a mano. Questo e' l'unico percorso
+# di esecuzione che scrive davvero lo stato: lo skill lo chiama DOPO aver verificato,
+# mai in fase di raccolta.
+
+_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "scripts", "riallinea.py")
+
+
+def _registra(stato_path, *extra_args):
+    return subprocess.run(
+        [sys.executable, _SCRIPT, "--registra", *extra_args, "--stato", str(stato_path)],
+        capture_output=True, text=True,
+    )
+
+
+def test_registra_scrive_davvero_lo_stato(tmp_path):
+    stato_path = tmp_path / "STATO.json"
+    r = _registra(stato_path, "abc1234", "--modo", "diff", "--data", "2026-08-21")
+    assert r.returncode == 0, r.stderr
+    letto = json.loads(stato_path.read_text(encoding="utf-8"))
+    assert letto["ultimo_sha"] == "abc1234"
+    assert letto["modo"] == "diff"
+    assert letto["data"] == "2026-08-21"
+    assert "ripresa_l3" not in letto
+
+
+def test_registra_con_ripresa_l3_sopravvive_a_una_registrazione_successiva(tmp_path):
+    stato_path = tmp_path / "STATO.json"
+    r1 = _registra(stato_path, "def5678", "--modo", "completo", "--data", "2026-08-28",
+                    "--ripresa-l3", "docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md")
+    assert r1.returncode == 0, r1.stderr
+    letto = json.loads(stato_path.read_text(encoding="utf-8"))
+    assert letto["ultimo_completo"] == "2026-08-28"
+    assert letto["ripresa_l3"] == "docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md"
+
+    # una registrazione successiva SENZA --ripresa-l3 non la cancella
+    r2 = _registra(stato_path, "aaa1111", "--modo", "diff", "--data", "2026-09-04")
+    assert r2.returncode == 0, r2.stderr
+    letto = json.loads(stato_path.read_text(encoding="utf-8"))
+    assert letto["ultimo_sha"] == "aaa1111"
+    assert letto["ripresa_l3"] == "docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md"

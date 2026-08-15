@@ -1773,3 +1773,19 @@ git commit -m "test(import): i due PDF veri del riscatto vision, piu' la documen
   non è una prova di regressione: se un risultato sembra spostarsi, ripetere prima di concludere.
 - **Non toccare `tests/fixtures/import_baseline.json`** in questo lavoro. Se si muove, è un bug del
   riscatto, non una baseline da rinfrescare.
+
+---
+
+## Nota di superamento (2026-08-15)
+
+Questo è un verbale storico: registra cosa si è deciso all'epoca, non lo stato attuale del
+codice — non va riscritto per farlo combaciare col codice di oggi (vedi «Piani e spec datati
+non si riscrivono» in `.claude/skills/riallinea/SKILL.md`). Il codice è andato oltre su tre
+punti, trovati da `/riallinea` (`docs/superpowers/allineamento/2026-08-14.md`, Famiglie 1-3):
+
+- `_apply_vision_rescue` (qui a `Tuple[Dict, Dict, List[str]]`, 3 valori) ritorna oggi 4 valori
+  — vedi la firma reale in `importers/pdf_importer.py:391-398`.
+- `mastro_level_rows` (qui senza il parametro `totals`, algoritmo "livello con meno cifre") ha
+  oggi un parametro `totals` e un algoritmo diverso — vedi `importers/vision_rescue.py:147-149`.
+- `accept_rescue` (qui a 6 parametri e "tre condizioni") ha oggi 8 parametri e 5 condizioni —
+  descritte correttamente in `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md`, non qui.

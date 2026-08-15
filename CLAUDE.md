@@ -583,8 +583,9 @@ l'unico punto di avanzamento in `components/pratica/PraticaActionBar.tsx`, il wi
 ### Layout SP/CE (Rettifiche · Confronto · /forecast/balance · /forecast/income)
 
 Nome, padre, sezione e ordine di ogni voce vengono dal catalogo `frontend/lib/ivcee-catalog.ts`; le
-righe rese sono quattro elenchi distinti su sette viste. **Aggiungere una sotto-voce tocca QUATTRO
-file** — saltarne uno produce una voce che non compare da nessuna parte, senza alcun errore:
+righe rese sono quattro elenchi distinti su sette viste. **Aggiungere una sotto-voce tocca quattro
+file sempre, sei quando entra in un aggregato riconciliato o in un elenco congelato dai test** —
+saltarne uno produce una voce che non compare da nessuna parte, senza alcun errore:
 
 | File | Che cosa |
 |---|---|

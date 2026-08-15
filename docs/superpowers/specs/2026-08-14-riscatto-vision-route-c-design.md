@@ -206,3 +206,32 @@ import vision è distinguibile a posteriori da uno testuale — come già fa `pa
    stata provata in vision. Se il totale non riconcilia, il cancello scarta e il file resta come
    oggi — obiettivo 2 mancato, obiettivi 3 e 4 comunque rispettati. Va verificato in
    implementazione prima di dichiarare chiuso quel caso.
+
+---
+
+## Esito del Rischio 2 (2026-08-15)
+
+Questo è un verbale storico: registra il progetto com'era, non lo stato del codice — non va
+riscritto per farlo combaciare (vedi «Piani e spec datati non si riscrivono» in
+`.claude/skills/riallinea/SKILL.md`). Il Rischio 2 si è avverato e poi è stato chiuso, con un
+meccanismo che il design non prevedeva.
+
+**Si è avverato.** In implementazione 623 chiudeva 2 volte su 3 con 9.079,77 di sbilancio
+residuo e 1 su 3 rifiutato; l'obiettivo 2 fu dichiarato «raggiunto in sostanza, non al
+centesimo».
+
+**La causa non era pagina 2.** Strumentando i confini si è misurato che la vision salta a
+intermittenza **una riga sola** — `37060000 Debiti v/istit.prev.e sicur.sociale` 9.079,77 — e
+che il cancello la lasciava passare perché la tolleranza `max(50 €; 0,5%)` su quel totale vale
+12.274,94, cioè più della riga mancante. La catena a valle non perdeva nulla: `2.445.907,88 −
+289.788,03 − 34.590,25 = 2.121.529,60` era il passivo finale al centesimo.
+
+**Il rimedio è il reintegro dal text layer**, un passaggio fra la lettura e il cancello che il
+§3 di questo design non contempla: il divario misurato contro il totale stampato si chiude con
+una riga che il documento stampa, ripescata solo se lo spiega **al centesimo** e se il suo
+codice non è già stato letto. Non contraddice il §3 — la sezione si continua a ricostruire da
+zero e non si somma nulla «a occhio» — ma lo estende, ed è descritto nel documento vivo:
+[REGOLE-IMPORT-02-ESTRAZIONE.md](../../import/REGOLE-IMPORT-02-ESTRAZIONE.md) §4-bis.
+
+**Esito:** 623 chiude 3 volte su 3 con sbilancio 0,00; 624 invariato. Obiettivo 2 raggiunto.
+Resta scoperto il caso in cui la stessa lettura salti due righe insieme.

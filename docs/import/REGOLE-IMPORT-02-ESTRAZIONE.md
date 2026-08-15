@@ -180,6 +180,48 @@ file vero: la vision trascrive i peer di uno stesso livello con un numero di cif
 (`7301500` accanto a `73015005`), e il minimo scartava due mastri buoni per 46.110,67. Senza totali
 leggibili, o se nessuna partizione riconcilia, resta il minimo e a decidere è il cancello.
 
+### Il reintegro dal text layer (`close_gaps`, `find_gap_closer`)
+
+> Aggiunto il 2026-08-15, fra la lettura e il cancello.
+
+La vision salta a intermittenza una riga, e **la tolleranza del cancello può essere più larga
+della riga saltata**: il riscatto passa allora *col buco dentro*, e quel buco diventa lo
+sbilancio finale. Misurato su budget_623: colonna destra ricostruita 2.445.907,88 contro i
+2.454.987,65 stampati, divario **9.079,77** = `37060000 Debiti v/istit.prev.e sicur.sociale`,
+che la vision non trascrive e che il text layer di pagina 1 invece porta. La tolleranza su quel
+totale vale 12.274,94, quindi il divario passava indisturbato.
+
+Prima del cancello, per **ogni colonna** di ogni sezione riscattata, si misura il divario dal
+totale letto e si cerca nel testo delle stesse pagine una riga che lo spieghi. **Non è un plug**:
+non inventa massa, la ritrova in una fonte che l'aveva letta. Tre condizioni, tutte necessarie:
+
+| # | Condizione |
+|---|---|
+| 1 | l'importo spiega il divario **al centesimo** — nessuna tolleranza: un centesimo di scarto e non è quella riga |
+| 2 | il codice non è già fra quelli letti in vision — ripescarlo lo conterebbe due volte, l'errore del 14/07 |
+| 3 | la descrizione si classifica in modo **specifico sul lato chiesto** — la colonna resta la verità sul lato, e un importo che coincide per caso con una riga dell'altro lato si scarta, mai si ribalta |
+
+**Il classificatore dipende dalla sezione, e non è un dettaglio.** Sul CE si usa
+`_resolve_ce_field(desc, direction)`, mai `classify_attivo`/`classify_passivo`: su un nodo CE il
+lato non filtra nulla, un costo può risolversi su un ricavo e il risultato si sposta di **2×** il
+suo importo. È lo stesso resolver, e la stessa ragione, della regola generale di pagina 03.
+
+Se restano più candidati con codici diversi si tiene il **livello mastro** (codice più corto),
+come `mastro_level_rows`; se l'ambiguità resta, si rinuncia. Rinunciare significa il
+comportamento precedente, che è sempre ammissibile.
+
+**Limite dichiarato: il reintegro chiude una riga per colonna, non una combinazione.** Se la
+stessa lettura salta *due* righe, il divario è la loro somma, nessuna riga singola lo spiega, il
+reintegro rinuncia e il cancello rifiuta — il file resta com'era. Su budget_623 il caso è
+`139.079,77 = 130.000,00 + 9.079,77` (`31030005 Riserva contributi c/capitale` più i debiti
+previdenziali). Cercare le combinazioni riaprirebbe il rischio di doppio conteggio per un
+guadagno non misurato, quindi non si fa.
+
+**Effetto misurato** (tre esecuzioni del percorso di produzione per file, dopo): budget_623
+passa da «2 su 3 con 9.079,77 di sbilancio, 1 su 3 mascherato» a **3 su 3 con sbilancio 0,00**;
+budget_624 resta identico. L'obiettivo 2 della spec del riscatto — dichiarato incerto quando fu
+scritta — si chiude qui.
+
 ### Il cancello (`accept_rescue`)
 
 Il riscatto si tiene solo se valgono **tutte**:

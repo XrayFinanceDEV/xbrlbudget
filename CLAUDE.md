@@ -186,6 +186,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   2× il proprio importo. Il ripiego si sceglie per direzione (a destra `ce04`).
 - **Un plug inventa massa ed è vietato; un fallback etichetta massa davvero letta ed è ammesso.**
   Non sono la stessa cosa, e la differenza è tutta qui.
+- **Il reintegro dal text layer resta lecito solo finché chiude al centesimo.** `close_gaps`
+  ripesca dal testo la riga che spiega un divario misurato contro il totale stampato: è massa
+  già letta, quindi un fallback. Concedergli una tolleranza — anche piccola, anche «come quella
+  del cancello» — lo trasforma in un plug che attribuisce a un conto vero un importo che nessuno
+  ha letto, e il foglio quadra lo stesso. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §4-bis
 - **`TIER0_FIELDS` non è mai una destinazione di ripiego** (immobilizzazioni nette, patrimonio
   netto, debiti verso banche, `ce09`): `ce09` è l'unico confine di KPI dentro i costi operativi
   (`EBITDA = EBIT + ce09`), gli altri spostano un totale e rompono PFN, ROI, indipendenza

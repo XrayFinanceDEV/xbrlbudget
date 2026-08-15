@@ -302,8 +302,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 
 > Raccolte dall'[inventario dello snellimento](docs/superpowers/2026-08-14-inventario-claude-md.md),
 > che per ciascuna porta la prova nel codice. Coprono i blocchi finora passati al setaccio —
-> **import** e **Rettifiche**: l'assenza di una regola sul resto del frontend o sul previsionale
-> non significa che non esista.
+> **import**, **Rettifiche** e **percorso Pratica**: l'assenza di una regola sul layout SP/CE o sul
+> previsionale non significa che non esista.
 
 ### Contabilità
 - **La colonna è la verità sul lato; la descrizione decide la voce.** Mai il contrario:
@@ -384,7 +384,22 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `ForecastYear` scritto e `forecast_years: []`. Ignorarlo dipinge una colonna Proiezione vuota
   sotto un toast verde. → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6
 
-### Rettifiche e stato del frontend
+### Frontend
+- **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
+  legale la `usePratica()` che `AppContext` chiama per cedere alla pratica il possesso della
+  selezione azienda; invertirlo fa lanciare il context al mount e l'app non parte.
+- **Lo stato persistito si legge in un `useEffect`, mai nell'inizializzatore di `useState`** (Next
+  sbaglia l'idratazione), **e si scrive in un `useEffect` su `[pratica]`**, mai dentro un updater
+  di `setState` (`reactStrictMode` invoca gli updater due volte in sviluppo). Quell'effetto è
+  autoritativo anche per la **rimozione**: separarla farebbe riscrivere la entry appena cancellata
+  da un `exitPratica()` di un componente figlio nello stesso commit.
+- **Il gate del percorso non è un confine di autorizzazione.** `blockedStep` e lo stepper leggono
+  la stessa cache in `localStorage`, non il server: se la cache dice «confermato» e il server dice
+  il contrario, si passa. È deliberato (essere più severi produrrebbe falsi blocchi) e va tenuto a
+  mente prima di appoggiarci sopra qualcosa che debba davvero reggere.
+- **`lib/pratica-*` non importa mai da `app/` o da `components/`.** È ciò che tiene quei moduli
+  testabili in `environment: node` e senza cicli di import; l'unica dipendenza verso l'alto
+  ammessa è un `import type`.
 - **Un salvataggio che il server ha rifiutato non si applica mai localmente.**
   `useRettificheYear.save()` e `.reset()` restituiscono `false` (toast già mostrato), e ogni
   chiamante che muta giornale o stato deve uscire su `false`. Prima di questa regola un 400 del
@@ -410,6 +425,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `useEffect`**: l'identità cambia a ogni render, l'effetto si ri-innesca da solo — anche per il
   `setLoading` che lui stesso ha provocato — e raddoppia le chiamate di rete. Dipendere dai singoli
   campi (`storico.data`, `storico.load`, …); gli `eslint-disable` su quegli effetti sono deliberati.
+  Vale anche per l'oggetto `pratica`: cambia identità a **ogni** `updatePratica`, quindi un effetto
+  che lo osserva intero riparte pure quando il campo che gli interessa non si è mosso — si dipende
+  dagli scalari (`pratica?.companyId`).
 
 ### Ambiente
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
@@ -526,185 +544,19 @@ la politica di partita doppia in `frontend/lib/pratica-rettifiche-rules.ts`.
 **Il giornale si comporta male, o non sai che cosa può fare da contropartita?**
 → [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md)
 
-### Il percorso unico "Pratica" (2026-08-08)
-Two workflows for a new pratica, down from three: **Da bilancio** (`/pratica`) and **Startup**
-(`/budget` in `startupMode`). The removed third card was "Budget da bilancio ufficiale, no
-rettifiche" — precisely the path that let a trial balance skip Rettifiche and propagate its errors
-into Confronto, Proiezione, Indicatori and the rating models. `/infrannuale` is now a `redirect()`
-to `/pratica`; the wizard itself (import → Rettifiche → Confronto → Proiezione → Indicatori →
-Stampa, described in the Rettifiche section above) moved file-for-file to `app/pratica/page.tsx`
-with no behaviour change in that move itself — the functional changes below came after.
-Spec: `docs/superpowers/specs/2026-08-08-percorso-unico-pratica-design.md`. Plan:
-`docs/superpowers/plans/2026-08-08-percorso-unico-pratica.md`. Execution ledger (every deviation
-from the plan, found in browser testing rather than in review):
-`.superpowers/sdd/2026-08-08-percorso-unico-pratica/progress.md`.
+### Il percorso unico "Pratica"
 
-- **`contexts/PraticaContext.tsx`** — the active pratica (`workflow`, `companyId`, `fiscalYear`,
-  `periodMonths`, `infrannualeScenarioId`, `budgetScenarioId`, `analysisStep`,
-  `rettificheConfirmed`), persisted in `localStorage` (`xbrl_pratica`) with the same pattern as
-  `startupMode`: read in a `useEffect`, never in the `useState` initializer, or Next mis-hydrates.
-  `PraticaProvider` is mounted ABOVE `AppProvider` in `app/layout.tsx` — that ordering is what lets
-  `AppContext` itself call `usePratica()` (see below).
+Due workflow: **Da bilancio** (`/pratica`) e **Startup** (`/budget` in `startupMode`);
+`/infrannuale` è un `redirect()` a `/pratica`. Tre fasi: **DATI** (Anagrafiche · Import ·
+Rettifiche) e **ANALISI** (Confronto · Proiezione · Indicatori · Stampa) come tab dentro
+`/pratica`, **PREVISIONALE** come sette rotte reali (Budget · Indici · CE Prev. · SP Prev. ·
+Riclassificato · Rendiconto · Report). Nulla oltre le Rettifiche è raggiungibile finché non sono
+confermate. Fasi, step e gate vivono in `frontend/lib/pratica-steps.ts` (modulo puro, con la sua
+suite); lo stato in `contexts/PraticaContext.tsx`, lo stepper in `components/PraticaStepper.tsx`,
+l'unico punto di avanzamento in `components/pratica/PraticaActionBar.tsx`, il wizard in
+`app/pratica/page.tsx`.
 
-**A three-phase model replaced the earlier flat step list (2026-08-09).** `lib/pratica-steps.ts`
-is the pure, React-free module that decides everything: `buildPraticaSteps(pratica, gates)` returns
-the ordered `PraticaStep[]` for the current workflow, each tagged with a `phase`
-(`"dati" | "analisi" | "previsionale"`, `PHASE_ORDER`) and a `group` (`"azione"` advances the
-pratica, `"vista"` is read-only and can be visited in any order). `kind: "tab"` steps are tabs
-inside `/pratica` (`setAnalysisStep` + `router.push("/pratica")` if not already there); `kind:
-"route"` steps are real Next pages (`router.push(step.route)`). It also owns `praticaGates`
-(the single gate derivation, shared by the stepper and the action bar so they can't diverge),
-`currentStepId`, `nextStep`/`prevStep`, `phaseStatus` (chip state: `done`/`active`/`todo`/`locked`)
-and `gateReason` (the tooltip text for a locked step). **This module has its own test suite,
-`lib/pratica-steps.test.ts` (19 cases) — the first frontend test in the project, run with `npm test`
-(Vitest) from `frontend/`.**
-
-The three phases, for the `bilancio` workflow:
-- **DATI** (tabs inside `/pratica`): Anagrafiche · Import · Rettifiche.
-- **ANALISI** (tabs inside `/pratica`): Confronto · Proiezione (only when `periodMonths !== 12` —
-  an already-annual bilancio is not projected to 12 months) · Indicatori · Stampa.
-- **PREVISIONALE** (real routes): Budget · Indici · CE Prev. · SP Prev. · Riclassificato ·
-  Rendiconto · Report — **seven** steps. `Indici` (`/analysis`) is new versus the previous flat-nav
-  model, where it was unreachable from inside a pratica (see the superseded note below).
-
-All PREVISIONALE steps but Budget are gated on `gates.forecastReady` (`budgetScenarioId !== null`);
-Budget itself gates on `gates.budgetScenario` for the `bilancio` workflow and is always enabled for
-`startup`.
-
-- **`components/PraticaStepper.tsx`**, rendered by `components/Navigation.tsx` instead of the flat
-  nav whenever `pratica !== null` and the path is not `/` (never both bars together). It renders
-  TWO rows: phase chips (`PHASE_ORDER`, status from `phaseStatus`, a `Tooltip` with `gateReason`
-  when locked) and, below, only the steps of the active phase (`azione` steps first, then a
-  separator, then `vista` steps) — so the sub-bar is always short regardless of how many read-only
-  views a phase has. Outside a pratica the flat nav is unchanged, minus the Importazione tab
-  (`/import` still works as a route, just unlinked).
-- **`components/pratica/PraticaActionBar.tsx` + `contexts/PraticaActionContext.tsx`** — the single
-  point of advancement, rendered below the page content (sticky, not fixed, so it never overlaps a
-  long table). A page registers its own primary action with `usePrimaryAction({ label, onClick,
-  disabled, reason })`; passing `label: null` means "this step has no action of its own" and the
-  bar falls back to `"Avanti: <next.label>"`, derived from `nextStep`/`gateReason` in
-  `pratica-steps.ts`. Of the seven PREVISIONALE steps only Budget registers an action; the other
-  six (Indici, CE Prev., SP Prev., Riclassificato, Rendiconto, Report) are read-only views that
-  register nothing and rely entirely on the fallback. The old per-tab inline CTAs (8 of them,
-  scattered across `app/pratica/page.tsx` and `app/budget/page.tsx`) were removed as those steps
-  were migrated; **`/budget`'s Save button is
-  the only survivor**, because `/budget` is also reachable outside a pratica (nav flat, voce
-  "Scenari") where the action bar does not render at all — there the page registers
-  `label: pratica ? "Salva e Calcola Previsionale" : null` (so inside a pratica the bar drives it)
-  **and** keeps its own `<Button>` rendered only when `!pratica` (so outside a pratica saving still
-  works). The "Ricalcola" button and its confirmation dialog are a distinct secondary action (with
-  the "azzera modifiche manuali CE" checkbox) and were left exactly where they were.
-
-**Moduli della pratica (2026-08-10).** `app/pratica/page.tsx` è sceso da 6.019 a 1.810 righe. Le
-funzioni pure stanno in `lib/pratica-format.ts` (formattazione), `lib/pratica-codes.ts` (tabelle di
-codici IV-CEE, `DETAIL_PARENTS`, `EXTRA_ALERT_DEFS`), `lib/pratica-reconcile.ts`
-(`reconcileSubfields`), `lib/pratica-indicators.ts` (indicatori, scoring, `computeCrisisRating`) e
-`lib/pratica-statement-rows.ts` (costruzione righe SP/CE); i componenti in `components/pratica/`.
-Regola: `lib/pratica-*` non importa mai da `app/` o `components/`. Tre suite di caratterizzazione
-(`lib/pratica-reconcile.test.ts`, `lib/pratica-indicators.test.ts`,
-`lib/pratica-statement-rows.test.ts`) fissano il comportamento dei calcoli — fissano quello
-**attuale**, non lo giudicano corretto.
-
-**Quanto queste suite proteggono davvero è misurato, non presunto (mutation harness, 2026-08-10
-final review).** Sul totale delle tre suite la mutation coverage misurata è **18% (11/61)**: la
-maggior parte delle mutazioni introdotte nell'implementazione sopravvive ai test invariata. Per
-`lib/pratica-indicators.ts` in particolare è **3/29** — quasi non funzionale come rete di
-regressione: `computeIndicators`'s test asserisce per VALORE solo `_ebitda_raw` e `ebitda_margin`;
-gli altri 17 campi di `IndicatorSet` sono verificati solo con `Number.isFinite(...)`, che nessuna
-mutazione aritmetica (segno scambiato, operando sbagliato, soglia spostata) può violare — il test
-passa comunque. Due asserzioni deboli in quella suite sono state corrette in questa review
-(mutation-proof ora): `scoreDotColor` fissa le stringhe colore esatte invece di limitarsi a "sono
-diverse a coppie", e `computeCrisisRating`'s test sui segnali extracontabili fissa i due codici
-concreti (A3 → C3) invece di limitarsi a "sono diversi". Il resto della suite resta com'era.
-**Non leggere questa nota come "gli indicatori sono coperti":** rafforzarla — valori distinti e
-non-zero per ogni codice nominato in ogni array sommato, asserzioni per valore esatto al posto di
-`Number.isFinite` — è un follow-up noto e deliberatamente non fatto in questa review (fuori
-perimetro insieme al bug `sp07_crediti_lungo` mancante da `totalAssets`, anch'esso lasciato al
-proprietario del progetto).
-
-**`sp07_crediti_lungo` mancante da `totalAssets` — corretto (2026-08-10).** Il bug appena
-descritto come "lasciato al proprietario del progetto" è stato risolto: `computeIndicators`
-(`lib/pratica-indicators.ts`) escludeva correttamente `sp07_crediti_lungo` (crediti esigibili
-oltre l'esercizio successivo) da `currentAssets` — non è attivo circolante — ma non lo
-riaggiungeva mai a `totalAssets`, disallineandosi da `ATTIVO_CODES` (`lib/pratica-codes.ts`) e da
-`attivoKeys` (`lib/pratica-reconcile.ts`), che lo includono entrambi. L'effetto: su un'azienda con
-crediti a lungo termine significativi, il totale attivo risultava sottostimato, e quindi
-`indipendenza` (equity/TA) e `roi` (EBIT/TA) risultavano SOVRASTIMATI — la direzione sbagliata per
-uno strumento di rischio creditizio. Fix: `sp07_crediti_lungo` è ora sommato a `totalAssets` (non
-a `currentAssets`, che resta invariato per costruzione), con un commento nel codice che spiega
-l'asimmetria. La suite di caratterizzazione esistente NON avrebbe intercettato questo bug (misura
-mutation coverage 3/29 su questo file, vedi sopra); non lo avrebbe nemmeno intercettato una sua
-reintroduzione — il suo fixture `BS_SANA` non contiene affatto `sp07_crediti_lungo` e asserisce
-solo `_ebitda_raw`/`ebitda_margin` per valore. Sono stati aggiunti due test mirati che pinnano
-esattamente questo comportamento: `indipendenza` e `roi` per valore esatto su un fixture con
-`sp07_crediti_lungo` non nullo, più un confronto che il `current_ratio` resta invariato in
-presenza/assenza di `sp07` (pinna la metà "non va in `currentAssets`" della regola). Questo
-corregge una singola omissione — non rende la suite degli indicatori adeguata nel complesso; la
-mutation coverage bassa descritta sopra resta un problema aperto per tutti gli altri campi.
-
-**Superseded note, kept for history:** an earlier version of this section said "PREVISIONALE has
-SIX steps, not four" — `/analysis` (Indici) was still unreachable from inside a pratica at that
-time; that gap is what the `previsionale` list above now closes.
-
-**The Rettifiche gate ANDs `gates.rettificheOk` into every ANALISI step past Rettifiche** — not,
-as an earlier version of this note claimed, into every step of the pratica: Confronto, Proiezione,
-Indicatori and Stampa in `pratica-steps.ts` all require `gates.rettificheOk && …`. An earlier
-version gated only `comparison`, which meant a scenario already created at import time
-(`infrannualeScenarioId` set) was on its own enough to unlock Proiezione/Indicatori/Stampa in the
-stepper even with rettifiche unconfirmed, or after a "Ripristina originale" — fixed in commit
-`71d3303`. **None of the seven PREVISIONALE steps AND `gates.rettificheOk` directly** — they gate on
-`gates.budgetScenario`/`gates.forecastReady` (`budgetScenarioId !== null`) instead. In the
-new-pratica ("bilancio") flow the rettifiche gate still holds transitively, because
-`budgetScenarioId` is only ever set by the promote step, which is reachable only past Rettifiche;
-but a pratica **resumed from a legacy budget scenario** (`budgetScenarioId` set,
-`infrannualeScenarioId` null — no ANALISI phase was ever gone through) has no rettifiche state to
-gate on at all. `pratica-steps.ts`'s `isLegacyBudgetResume` check hides the whole ANALISI phase for
-that case instead of rendering it enabled-but-dead (FINDING 4, 2026-08-08 final review — see
-`app/page.tsx`'s `resume()`). Two sub-tabs (Storico + Bilancio di verifica,
-see the Rettifiche section above) each need their own confirmation: `useRettificheYear` exposes
-`confirmed: boolean` and `confirm(): Promise<boolean>`, backed by a `{ entry_type: "confirm" }`
-marker appended to the same `rettifiche_log` (no migration) — idempotent, excluded from the
-journal/Riepilogo UI and from the server's 20-entry cap (`_countable_log_entries` in
-`backend/app/api/v1/financial_years.py`). `handleConfirmRettifiche` in `app/pratica/page.tsx` is
-the SINGLE path both the "Conferma e vai al Confronto" primary action bar button and the Riepilogo dialog's own button call —
-an earlier version let the dialog's button reach Confronto through a separate `onNext` that
-bypassed the gate entirely (Task 7 review, Critical finding).
-
-**`AppContext` now consumes `usePratica()`** (legal only because `PraticaProvider` sits above
-`AppProvider`), for two behaviours found as real bugs in browser testing, not designed up front:
-- `loadCompanies`'s auto-select-first-company fallback stands down while a pratica is active
-  (`praticaActiveRef`). Without it, `/pratica`'s mount-time `refreshCompanies()` re-selected an
-  unrelated existing company right after the home page's "Da bilancio" card had deliberately called
-  `setSelectedCompanyId(null)` — `AnagraficheStep` opened in EDIT mode and "Salva e prosegui"
-  silently renamed that company.
-- The app-wide `selectedCompanyId` follows `pratica.companyId` (an effect keyed on the scalar, never
-  on the `pratica` object). Without it, `/budget` reached via "Prosegui al Budget" listed the
-  scenarios of whatever company `AppContext` happened to have selected before, not the pratica's.
-
-**The wizard rehydrates after a refresh.** Wizard progress (`importResult`, `scenario`,
-`fiscalYear`, `periodMonths`, …) lives in local `useState` and does not survive F5; only the
-`PraticaContext` (localStorage-backed) does. A `useRef`-guarded effect in `app/pratica/page.tsx`
-runs the rehydration exactly once: if the persisted `analysisStep` is past Import, it re-fetches the
-company and the infrannuale scenario and repopulates the four local states, letting the existing
-auto-load effects (Rettifiche/Confronto/Analisi) take it from there. When the context lacks enough
-data (`companyId`/`infrannualeScenarioId` missing) or the fetch fails, the honest fallback is an
-Italian `Alert` ("Pratica da riaprire" — riparti dall'importazione o riapri la pratica dalla home)
-and a reset to the Import step — never a blank `<main>`.
-
-**Two follow-ups the ledger records as deferred, not fixed:**
-- **Il gate è applicato anche al render (2026-08-10).** `blockedStep()` in `lib/pratica-steps.ts`
-  decide se lo step corrente è raggiungibile, e una guardia unica in `app/pratica/page.tsx` avvolge
-  i sette rami `activeTab`. Due comportamenti deliberati: uno step **sconosciuto non blocca** (i
-  workflow ne omettono di proposito — bloccare creerebbe vicoli ciechi), e il controllo legge **la
-  stessa cache dello stepper**, senza interrogare il server. Quindi se la cache dice "confermato" e
-  il server dice il contrario, si passa: **non è un confine di autorizzazione** e non chiude un
-  exploit noto (nessuna delle review del 2026-08-08 era riuscita a costruirne uno). Il guadagno è
-  che l'invariante non dipende più dal fatto che ogni sito di navigazione se la ricordi.
-- **`app/pratica/page.tsx` non è più da 5.900 righe** (ora 1.810, vedi "Moduli della pratica" sopra),
-  ma la decomposizione del componente wizard stesso in tab-componenti resta esplicitamente non
-  fatta — quanto estratto finora sono funzioni pure e i componenti già a foglio (Rettifiche,
-  Confronto, Proiezione, Indicatori, Stampa); il corpo del wizard (stato, effetti di caricamento,
-  i sette rami `activeTab`) vive ancora tutto in `app/pratica/page.tsx`.
+**Lo stepper blocca un passaggio, o il wizard si perde dopo un refresh?** → [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md)
 
 ### Shared BS/IS Layout (Rettifiche, Confronto, /forecast/balance, /forecast/income)
 All four financial-statement views render the same IV-CEE-format layout to keep schemas comparable.
@@ -1061,7 +913,7 @@ POST /companies/{id}/scenarios
 **Frontend Pages:**
 - `/` - Home (company list)
 - `/import` - XBRL/CSV/PDF upload (not linked from the nav; the pratica wizard's Import step is the normal entry point)
-- `/pratica` - Percorso unico da bilancio: Anagrafiche → Import → Rettifiche → Confronto → [Proiezione] → Indicatori → Stampa → bridge to Budget. `/infrannuale` redirects here. See "Il percorso unico Pratica" below.
+- `/pratica` - Percorso unico da bilancio: Anagrafiche → Import → Rettifiche → Confronto → [Proiezione] → Indicatori → Stampa → bridge to Budget. `/infrannuale` redirects here. → [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md)
 - `/budget` - Scenario assumptions editor (also the Startup workflow's entry point)
 - `/forecast/income` - Forecast P&L (editable: click forecast cells → batch save → BS auto-adapts)
 - `/forecast/balance`, `/forecast/reclassified` - Forecast BS views (read-only, adapts to CE overrides)
@@ -1116,6 +968,7 @@ giusto è il codice, non `/docs`.
 | Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
 | Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
 | Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
+| Lo stepper della pratica blocca un passaggio, o il wizard si perde dopo un refresh? | [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) |
 | Un grafico degli Indicatori è sbagliato, o la Stampa impagina male? | [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md) |
 | Una classe Tailwind non produce alcuno stile e non c'è errore? | [docs/frontend/TAILWIND-E-CLASSI.md](docs/frontend/TAILWIND-E-CLASSI.md) |
 | Come si incastra l'app nell'iframe di Formula Finance, JWT compreso? | [docs/deployment/IFRAME_INTEGRATION.md](docs/deployment/IFRAME_INTEGRATION.md) |
@@ -1123,6 +976,7 @@ giusto è il codice, non `/docs`.
 | Perché una scelta è stata fatta così? | `docs/superpowers/specs/` (design) e `docs/superpowers/plans/` (esecuzione) |
 | La documentazione dice ancora il vero? | `/riallinea` (`.claude/skills/riallinea/`), rapporti in `docs/superpowers/allineamento/` |
 
-> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Percorso
-> Pratica e layout SP/CE vivono ancora dentro questo file invece che in una pagina propria
-> (Task 3-5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).
+> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Il layout
+> SP/CE, le tab minori, l'upload tracking e le API del budget vivono ancora dentro questo file
+> invece che in una pagina propria
+> (Task 4-5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).

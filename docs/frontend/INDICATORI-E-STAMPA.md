@@ -16,7 +16,8 @@ d'insieme, poi il dettaglio riga per riga.
 ## Un componente, non una copia
 
 `components/pratica/IndicatoriCharts.tsx` contiene i due `<Card>`, le due `ChartConfig` e la
-griglia. `IndicatoriTable` e `StampaContent` lo rendono entrambe.
+griglia. Lo rendono entrambe le viste, e sono i due soli consumatori:
+`components/pratica/IndicatoriTable.tsx:154` e `components/pratica/StampaContent.tsx:659`.
 
 Le configurazioni dei grafici sono lo stesso oggetto per le due viste: duplicarle avrebbe
 creato una seconda definizione della stessa cosa, cioè il difetto che il catalogo IV-CEE ha

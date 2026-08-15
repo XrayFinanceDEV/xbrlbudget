@@ -155,11 +155,9 @@ python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
    - `GET /companies` - List companies
    - `GET /companies/{id}/scenarios` - List scenarios
 
-7. **ADMIN / UPLOAD TRACKING (3 endpoints)**: Developer-only, header-auth
-   - `GET /admin/uploads` - Filter by user_id / file_type / status / date range
-   - `GET /admin/uploads/{id}` - Full record including error_traceback
-   - `GET /admin/uploads/{id}/download` - Stream the original file
-   - Gated by `X-Admin-Key` header matching `ADMIN_API_KEY` env var. Not used by the iframe frontend.
+7. **ADMIN / UPLOAD TRACKING (3 endpoints)**: `GET /admin/uploads`, `/{id}`, `/{id}/download` —
+   solo per chi mantiene il servizio, autenticati per header, mai chiamati dall'iframe.
+   Vedi «Upload Tracking» più sotto.
 
 **Key Simplification:** 1 comprehensive API call replaces 10+ granular endpoints
 
@@ -302,8 +300,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 
 > Raccolte dall'[inventario dello snellimento](docs/superpowers/2026-08-14-inventario-claude-md.md),
 > che per ciascuna porta la prova nel codice. Coprono i blocchi finora passati al setaccio —
-> **import**, **Rettifiche**, **percorso Pratica** e **layout SP/CE**: l'assenza di una regola sul
-> previsionale o sulle tab minori non significa che non esista.
+> **import**, **Rettifiche**, **percorso Pratica**, **layout SP/CE**, **tab Proiezione/Stampa**,
+> **upload tracking** e **API del previsionale**. Restano da setacciare le sezioni generali
+> (`Quick Reference`, `Architecture`, `Development Workflow`, `Common Tasks`): l'assenza qui di
+> una regola che le riguardi non significa che non esista.
 
 ### Contabilità
 - **La colonna è la verità sul lato; la descrizione decide la voce.** Mai il contrario:
@@ -380,9 +380,26 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   lavorano su un `FinancialYear` già persistito: un file non salvato sarebbe incorreggibile per
   sempre.
 - **Chi chiama l'endpoint bulk delle assumptions deve leggere `forecast_generated`, non l'HTTP
-  200.** Un previsionale rifiutato torna comunque 200, con la ragione in `message`, nessun
-  `ForecastYear` scritto e `forecast_years: []`. Ignorarlo dipinge una colonna Proiezione vuota
-  sotto un toast verde. → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6
+  200.** Un previsionale rifiutato torna comunque 200, con `success: true` e la ragione in
+  `message`. Non fidarsi nemmeno di `forecast_years`: nella risposta di fallimento contiene gli
+  anni delle **ipotesi salvate**, non degli anni prodotti — a restare vuoto è
+  `analysis.forecast_years` della `GET` successiva. Ignorarlo dipinge una colonna Proiezione
+  vuota sotto un toast verde. `PATCH /ce-override` e `POST /generate`, sullo stesso motore e
+  sullo stesso errore, rispondono invece 4xx/5xx.
+  → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6, `docs/budget/API-PREVISIONALE.md` §1
+- **Un override vince sulla percentuale di crescita, e sopravvive al salvataggio.** «Salva e
+  Calcola Previsionale» non ne azzera nessuno: si può cambiare `revenue_growth_pct` quanto si
+  vuole e vedere il previsionale non muoversi. Solo la casella *«Azzera le modifiche manuali del
+  CE previsionale»* del dialogo Ricalcola li cancella — e cancella le sole colonne il cui nome
+  finisce per `_override`: `sp_overrides` (il sacco JSON scritto da `/forecast/balance`) **non
+  viene toccato**.
+- **`sp_overrides` clampa a zero i valori negativi** (tranne `sp13_utile_perdita` e
+  `sp12h_riserva_neg_azioni_proprie`) e **ignora in silenzio** una chiave che non esiste nel
+  risultato: un override negativo, o scritto male, non dà errore — dà uno zero.
+- **Promuovere una proiezione CANCELLA il `FinancialYear` annuale già esistente** per quella
+  azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era
+  stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un
+  fallimento la annulla; un promote riuscito no.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
@@ -445,6 +462,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `/analysis`, già aggregato dal backend con le sotto-voci a zero, restituisce **0** su `sp04`,
   `sp06` e `sp07`: sostituire una somma scritta a mano con `aggregate()` azzera immobilizzazioni e
   crediti nel grafico stampato, in silenzio.
+- **I commenti AI dell'infrannuale hanno un'allowlist di sei chiavi.** `save_infrannuale_comments`
+  tiene `overall`, `ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`
+  e **scarta il resto senza dirlo**, restituendo comunque `{"success": true}`: un settimo
+  commento aggiunto lato client si salva «con successo» e sparisce al ricaricamento.
 - **Gli elenchi di codici congelati in `ivcee-catalog-parity.test.ts` non si aggiornano per far
   tornare verde la suite.** Se cambiano, una vista ha perso o riordinato una riga: è quello il
   difetto. L'unica eccezione è una riga aggiunta di proposito, che si aggiorna nello stesso commit.
@@ -503,26 +524,11 @@ Gli invarianti che governano tutte e tre le rotte stanno in «Invarianti e trapp
 - Cash as plug: Balances by adjusting sp09_disponibilita_liquide
 - Negative cash: Increases short-term debt (sp16_debiti_breve)
 - Triggered by: bulk assumptions endpoint with `auto_generate=true`
-- **CE overrides**: Every CE field (31 total) can be overridden with an absolute EUR value. Override takes precedence over growth-% calculation. `None` = use engine calculation.
-- **Auto-derived turnover days**: When DSO/DIO/DPO not explicitly set in assumptions, derived from base year ratios (e.g., `DSO = base_sp06 / base_revenue * 360`). Working capital always scales proportionally with revenue/cost changes — including when revenue is changed via CE override.
-- **Override clearing**: `POST /generate?clear_overrides=true` nulls all `*_override` columns on all assumption rows before regenerating. Uses dynamic `__table__.columns` introspection. It is triggered ONLY by the budget page "Ricalcola" dialog when the user ticks *"Azzera le modifiche manuali del CE previsionale"* (default off). "Salva e Calcola Previsionale" **never** clears overrides — it saves via the bulk PUT (`auto_generate=true`) sending full hydrated rows, so overrides made on `/forecast/income` survive the save.
-
-### Editable Forecast Income Statement (CE Overrides)
-User can manually edit any P&L line in forecast year columns on `/forecast/income`. Edits are collected locally, then batch-saved with "Aggiorna Previsionale". The BS adapts automatically: more revenue → more receivables (via DSO), more costs → more payables (via DPO), cash as plug.
-
-- **Override fields**: 31 `ce*_override` columns on `BudgetAssumptions` — one per editable CE field (ce01–ce20 plus sub-fields ce08a–d, ce09a–d, ce11b, ce17a/b). Nullable; `NULL` = use engine calculation.
-- **Batch endpoint**: `PATCH /scenarios/{id}/ce-override` accepts `{ overrides: [{ forecast_year, field, value }] }`. Applies all overrides to the assumptions rows, then regenerates forecast once.
-- **Frontend flow**: Click forecast cell → inline input → blur/Enter saves to `pendingEdits` state (yellow highlight) → "Aggiorna Previsionale" button appears → click sends all pending edits via batch endpoint → analysis cache invalidated → table refreshes.
-- **Clearing overrides**: Empty a cell's input to send `null` (reverts to engine value). From `/budget`, "Salva e Calcola" saves via bulk PUT and **preserves** overrides; only the "Ricalcola" dialog's *"Azzera le modifiche manuali del CE previsionale"* checkbox wipes all overrides via `POST /generate?clear_overrides=true`.
-- **Visual indicators**: Pending edits = yellow background + yellow underline. Server-persisted overrides = blue underline. Override status read from `assumptions` object in analysis response.
-- **Key files:**
-  - `database/models.py` — `BudgetAssumptions.ce*_override` columns
-  - `backend/app/schemas/budget.py` — Pydantic schemas for all override fields
-  - `backend/app/api/v1/budget_scenarios.py` — `PATCH /ce-override`, `POST /generate?clear_overrides=true`
-  - `calculations/forecast_engine.py` — Override checks in `_calculate_income_statement`, auto-derived DSO/DIO/DPO in `_calculate_balance_sheet`
-  - `frontend/app/forecast/income/page.tsx` — `FIELD_TO_OVERRIDE` map, `EditableCell`, `pendingEdits` state, batch save
-  - `frontend/app/budget/page.tsx` — `ScenarioForm` (2 tab: Informazioni / Ipotesi) renders a config-driven `AssumptionsGrid` (`components/budget/AssumptionsGrid.tsx` + `assumption-rows.ts`): ~11 essential rows + an "Avanzate" accordion; "Salva e Calcola" → `bulkUpsertAssumptions(auto_generate=true)`; Ricalcola dialog → `generateForecast(clearOverrides)` only when the azzera checkbox is ticked
-  - `frontend/lib/api.ts` — `patchCeOverrides()`, `generateForecast(clearOverrides)`
+- **Overrides**: ogni riga di CE (32 colonne `ce*_override`) e ogni voce di SP (il sacco JSON
+  `sp_overrides`) può essere forzata a un valore assoluto, che vince sulla percentuale di
+  crescita. Modificabili da `/forecast/income` e `/forecast/balance`.
+- **Giorni di rotazione**: DSO/DIO/DPO non impostati si derivano dall'anno base (360 giorni), e
+  il circolante scala con ricavi e costi previsionali, override compresi.
 
 ### Intra-Year Engine (Infrannuale)
 - Projects partial-year financials (e.g., 9 months) to a full 12-month year
@@ -545,12 +551,11 @@ User can manually edit any P&L line in forecast year columns on `/forecast/incom
   - Cash as plug (same as budget engine)
   - Taxes: recalculated on projected pre-tax profit
 - Output stored as ForecastYear (compatible with existing `/analysis` endpoint)
-- **Promote** (`POST /scenarios/{id}/promote`): Copies ForecastYear BS/IS into a new FinancialYear (period_months=NULL)
-  - Enables using the projected year as base year for a subsequent budget scenario
-  - Dynamic column copy via `__table__.columns` intersection (handles missing fields gracefully)
-  - REPLACES an existing full-year FinancialYear for that company+year (re-promote); deletes it with cascade before creating the new record — a manually imported full year for the same year is overwritten
-  - Quadratura gate: refuses to promote a projection that is not `semantic_valid` per `check_quadratura` — **not** a €5 threshold (`promote_service.py:46-57`; see `docs/import/REGOLE-IMPORT-04-QUADRATURE.md` §11)
-  - Service: `backend/app/services/promote_service.py`
+- **Promote** (`POST /scenarios/{id}/promote`, `backend/app/services/promote_service.py`): copia la
+  proiezione in un `FinancialYear` annuale, che può poi fare da anno base a uno scenario budget.
+  Due cancelli semantici (`check_quadratura(...).semantic_valid`, **non** una soglia in euro) e
+  una sostituzione distruttiva dell'anno annuale esistente — vedi «Invarianti e trappole ›
+  Previsionale» e [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5
 - Frontend wizard: Import → Rettifiche → Comparison → Projection (editable) → Results → Promote to Budget
 
 ### Rettifiche (BS/IS Adjustments Journal)
@@ -597,116 +602,43 @@ saltarne uno produce una voce che non compare da nessuna parte, senza alcun erro
 
 **Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre?** → [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md)
 
-### Projection Tab (Proiezione P&L editable overrides)
-Expanded `EDITABLE_CE_CODES` to cover **22 CE fields** (ce01–ce20 plus ce08/09/11/17 sub-fields), so the user can override almost every projected P&L line directly in the Proiezione table.
+### Tab Proiezione, tab Stampa, grafici Indicatori
 
-- **Backend override plumbing:** `calculateProjectedBS` sends the full set of override fields the backend schema supports (`ce02_override`, `ce03_override`, `ce10_override`, `ce11_override`, `ce13_override` through `ce19_override`). For ce17 the picker exposes `ce17a` and `ce17b` separately; the backend stores the net (`ce17a − ce17b`) in `ce17_override`. For `ce20_imposte`, the override is translated to an effective `tax_rate` (`ce20 / PBT × 100`) so the forecast engine reproduces it.
-- **Consistency:** `ProjectionTable`'s `PROJ_COST_CODES_ALL` includes `ce11b_altri_accantonamenti` (matches `calculateProjectedBS`'s `EBITDA_COST_CODES`), and `projRettifiche` is derived from `pv("ce17a") − pv("ce17b")` so edits flow into PBT → net profit. BS `sp13` now always agrees with the P&L utile displayed above it.
-- **Gotcha:** `buildBalanceItemsWithTotals` must NOT overwrite `annualized_value` when called from `calculateProjectedBS` — the Projection tab writes projected BS values into that field. Only `partial_value`, `reference_value`, `prior_value` are reconciled per year.
+La Proiezione rende 22 righe di CE modificabili a mano e ne ricalcola i sottototali; da lì
+`calculateProjectedBS` costruisce lo SP proiettato e salva le ipotesi. La Stampa porta sei
+commenti generati da Haiku e poi editabili. I due grafici degli indicatori sono un componente
+solo (`components/pratica/IndicatoriCharts.tsx`), reso sia dalla tab sia dalla Stampa.
 
-### Indicatori charts (Indicatori tab + Stampa)
-`components/pratica/IndicatoriCharts.tsx` holds both bar charts ("Incidenza economica sui ricavi",
-"Equilibrio finanziario e strutturale") and is rendered by **both** views — the configs are the
-same object, so they are not duplicated. Series **labels** stay with each caller (`Infrann. 9M` in
-the tab, `Infrann. 9M 2026` in Stampa). `buildIndicatorChartData` (`lib/pratica-indicators.ts`) is
-the pure part and the only testable one — the suite runs `environment: "node"`, no DOM; a `null`
-series is **dropped, not rendered as zero**. Known limit: the percentage indicators divide by
-`ce01_ricavi_vendite` alone, so a company invoicing on `ce04` yields a meaningless axis (AIC SRL:
-EBITDA % 80.395,7%). → `docs/frontend/INDICATORI-E-STAMPA.md`
+**Come si comportano gli override della Proiezione, o i commenti AI della Stampa?**
+→ [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) §11-§12
+**Un grafico degli Indicatori è sbagliato, o la Stampa impagina male?**
+→ [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md)
 
-### Infrannuale AI Comments (Stampa tab)
-Editable AI-generated commentary rendered above each table in the Stampa tab. Six comments total: **overall** (before the first table) + one per section (`ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`).
+### Upload Tracking
 
-- **Persistence:** `BudgetScenario.ai_comments_infrannuale` — single TEXT column storing a JSON dict. Six keys only (extra keys are stripped on save). Reset/regenerate replaces the whole dict.
-- **Generation:** `ai_comments_service.generate_infrannuale_comments(ctx)` calls Claude Haiku with a structured tool (Pydantic `InfrannualeComments`) so output is shape-validated. The frontend builds `ctx` locally (scenario, `income_map`, `balance_map`, `indicators` per column, `ratings`) and POSTs it to the backend — keeps the compute on the client and the LLM call server-side only. Missing `ANTHROPIC_API_KEY` returns an empty dict (toast: "chiave API mancante").
-- **Endpoints** (scenario-scoped):
-  - `GET /companies/{id}/scenarios/{scenario_id}/infrannuale/ai-comments` — return stored
-  - `POST .../infrannuale/ai-comments` — generate via Haiku + save + return
-  - `PUT .../infrannuale/ai-comments` — save user edits (no LLM call)
-- **UI:** in `StampaContent`, each `CommentBlock` is a shadcn `Textarea` bound to `aiComments[key]`; `onChange` updates local state, `onBlur` persists via `saveInfrannualeAIComments`. Empty blocks are hidden in print (`print:hidden`) so the PDF stays clean.
-- **Key files:**
-  - `database/models.py` — `BudgetScenario.ai_comments_infrannuale`
-  - `backend/app/services/ai_comments_service.py` — `InfrannualeComments`, `generate_infrannuale_comments`, `get/save_infrannuale_comments`
-  - `backend/app/api/v1/budget_scenarios.py` — 3 endpoints under `/infrannuale/ai-comments`
-  - `frontend/lib/api.ts` — `InfrannualeAIComments` + `get/generate/saveInfrannualeAIComments`
-  - `frontend/app/pratica/page.tsx` — `StampaContent` state, `buildAICtx()`, `CommentBlock`
+Ogni import (`/import/xbrl|csv|pdf|pdf-ocr`) salva i byte originali in
+`{UPLOAD_ROOT|data/uploads}/{user_id}/{YYYY-MM}/` e ne registra l'esito nella tabella
+`uploaded_files`; la ritenzione è di 90 giorni (`scripts/cleanup_uploads.py`, cron;
+`UPLOAD_RETENTION_DAYS` per cambiarla). Si rileggono da `GET /api/v1/admin/uploads*`, protetti
+dall'header `X-Admin-Key` che deve valere quanto la variabile d'ambiente `ADMIN_API_KEY` —
+senza quella variabile l'API risponde 503, non 403.
 
-### Upload Tracking (debugging user-reported import problems)
-- Every `/import/{xbrl,csv,pdf}` call persists the raw bytes to `data/uploads/{user_id}/{YYYY-MM}/...` and logs a row in the `uploaded_files` table **before** parsing runs (so parser crashes are still tracked).
-- DB row: `filename`, `file_type`, `file_size`, `storage_path`, `status` (pending/success/error), `error_message`, `error_traceback`, `uploaded_at`, `company_id`.
-- Tracker errors are swallowed — tracking must never break the import flow.
-- HTTP ownership/limit failures (`HTTPException`) are NOT marked as parser errors.
-- Retention: 90 days via `scripts/cleanup_uploads.py` (daily cron). Override with `UPLOAD_RETENTION_DAYS`.
-- Admin retrieval: `GET /api/v1/admin/uploads*` endpoints, gated by `X-Admin-Key` header (matches `ADMIN_API_KEY` env var).
-- Key files:
-  - `database/models.py` — `UploadedFile` model
-  - `backend/app/services/upload_tracker.py` — `save_upload`, `mark_success`, `mark_error`
-  - `backend/app/api/v1/admin.py` — admin router
-  - `migrate_db.py` — `CREATE TABLE IF NOT EXISTS uploaded_files` for existing prod DBs
-  - `scripts/cleanup_uploads.py` — retention cron job
+**Un utente segnala un import sbagliato e ti serve il suo file?**
+→ [docs/deployment/UPLOAD-TRACKING.md](docs/deployment/UPLOAD-TRACKING.md)
 
-### Bulk Assumptions Workflow
+### API del previsionale (assumptions · override · generate · promote)
 
-> ⚠️ **Leggi `forecast_generated`, non l'HTTP 200** — vedi «Invarianti e trappole › Previsionale».
-> I chiamanti che già lo fanno: `/budget` e i due punti di chiamata del wizard della pratica.
+`PUT /scenarios/{id}/assumptions` (bulk, `auto_generate=true`) è la porta normale;
+`PATCH /scenarios/{id}/ce-override` modifica le singole voci di CE già generate;
+`POST /scenarios/{id}/generate` rigenera, e con `?clear_overrides=true` azzera prima le
+modifiche manuali del CE; `POST /scenarios/{id}/promote` copia una proiezione infrannuale in
+un `FinancialYear` annuale, che può poi fare da anno base a uno scenario budget.
 
-```python
-# Budget: Multiple years
-PUT /scenarios/{id}/assumptions
-{
-  "assumptions": [
-    {"forecast_year": 2025, "revenue_growth_pct": 5.0, ...},
-    {"forecast_year": 2026, "revenue_growth_pct": 4.0, ...},
-    {"forecast_year": 2027, "revenue_growth_pct": 3.5, ...}
-  ],
-  "auto_generate": true  # Triggers ForecastEngine
-}
-# Returns: {success: true, forecast_generated: true, forecast_years: [2025,2026,2027]}
+⚠️ Le prime tre falliscono in modi diversi: solo il bulk risponde **200 a un previsionale
+rifiutato** (vedi «Invarianti e trappole › Previsionale»).
 
-# Infrannuale: Single year (growth % calculated by frontend from user overrides)
-PUT /scenarios/{id}/assumptions
-{
-  "assumptions": [
-    {"forecast_year": 2025, "revenue_growth_pct": 8.3, ...}  # 1 year only
-  ],
-  "auto_generate": true  # Triggers IntraYearEngine (detected via scenario_type)
-}
-# Returns: {success: true, forecast_generated: true, forecast_years: [2025]}
-
-# CE Override: Edit individual forecast P&L values after generation
-PATCH /scenarios/{id}/ce-override
-{
-  "overrides": [
-    {"forecast_year": 2026, "field": "ce01_override", "value": 1750000},
-    {"forecast_year": 2026, "field": "ce08_override", "value": 230000},
-    {"forecast_year": 2027, "field": "ce01_override", "value": 1820000}
-  ]
-}
-# Applies overrides to assumptions, regenerates forecast once
-# Returns: {success: true, applied: 3}
-
-# Regenerate with override reset (used by budget page Ricalcola / Salva buttons)
-POST /scenarios/{id}/generate?clear_overrides=true
-# Nulls all *_override columns, then regenerates from growth percentages
-```
-
-### Promote Infrannuale → Budget Workflow
-```python
-# Full user flow: partial-year import → infrannuale projection → promote → budget forecast
-
-# After infrannuale projection is generated:
-POST /companies/{id}/scenarios/{scenario_id}/promote
-# Returns: {success: true, financial_year_id: 123, year: 2025, company_id: 1, message: "..."}
-
-# Now create a budget scenario using the promoted year as base:
-POST /companies/{id}/scenarios
-{
-  "company_id": 1, "name": "Budget 2026-2028",
-  "base_year": 2025,  # ← the promoted year
-  "scenario_type": "budget"
-}
-# Proceeds with normal budget workflow (assumptions → analysis)
-```
+**Corpi di richiesta, precedenze, e che cosa azzera che cosa?**
+→ [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md)
 
 ## Common Tasks
 
@@ -847,7 +779,8 @@ POST /companies/{id}/scenarios
 - `/pratica` - Percorso unico da bilancio: Anagrafiche → Import → Rettifiche → Confronto → [Proiezione] → Indicatori → Stampa → bridge to Budget. `/infrannuale` redirects here. → [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md)
 - `/budget` - Scenario assumptions editor (also the Startup workflow's entry point)
 - `/forecast/income` - Forecast P&L (editable: click forecast cells → batch save → BS auto-adapts)
-- `/forecast/balance`, `/forecast/reclassified` - Forecast BS views (read-only, adapts to CE overrides)
+- `/forecast/balance` - Forecast BS (**editable**: le celle previsionali scrivono `sp_overrides`, non colonne `*_override`)
+- `/forecast/reclassified` - Forecast BS riclassificato (sola lettura)
 - `/analysis` - Financial ratios & charts
 - `/cashflow` - Cash flow statement
 - `/report` - Full report preview (mirrors PDF output)
@@ -896,6 +829,7 @@ giusto è il codice, non `/docs`.
 | **Import** — routing, estrazione, netting, quadrature, infrannuale, persistenza | la tabella nella sezione «Import PDF» qui sopra (9 pagine in `docs/import/` + `docs/FIXING-IMPORT.md`) |
 | Una voce XBRL in che campo `sp`/`ce` va a finire? | [docs/taxonomy/XBRL_PCI_IV_CEE_Mapping.md](docs/taxonomy/XBRL_PCI_IV_CEE_Mapping.md), [TASSONOMIA.md](docs/taxonomy/TASSONOMIA.md) |
 | Come si costruisce un budget e che cosa fa il motore di previsione? | [docs/budget/FORECASTING_GUIDE.md](docs/budget/FORECASTING_GUIDE.md) |
+| Salvi le ipotesi e il previsionale non si muove, o non sai che cosa azzera un override? | [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) |
 | Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
 | Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
 | Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
@@ -903,12 +837,13 @@ giusto è il codice, non `/docs`.
 | Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre? | [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md) |
 | Un grafico degli Indicatori è sbagliato, o la Stampa impagina male? | [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md) |
 | Una classe Tailwind non produce alcuno stile e non c'è errore? | [docs/frontend/TAILWIND-E-CLASSI.md](docs/frontend/TAILWIND-E-CLASSI.md) |
+| Un utente segnala un import sbagliato e ti serve il file esatto che ha caricato? | [docs/deployment/UPLOAD-TRACKING.md](docs/deployment/UPLOAD-TRACKING.md) |
 | Come si incastra l'app nell'iframe di Formula Finance, JWT compreso? | [docs/deployment/IFRAME_INTEGRATION.md](docs/deployment/IFRAME_INTEGRATION.md) |
 | Come si rilascia, e che cosa va configurato in produzione? | [docs/deployment/](docs/deployment/) (`README_DEPLOYMENT`, `PRODUCTION_CONFIG`, `NETLIFY_CHECKLIST`, `DEPLOYMENT_SUMMARY`) |
 | Perché una scelta è stata fatta così? | `docs/superpowers/specs/` (design) e `docs/superpowers/plans/` (esecuzione) |
 | La documentazione dice ancora il vero? | `/riallinea` (`.claude/skills/riallinea/`), rapporti in `docs/superpowers/allineamento/` |
 
-> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Le tab
-> minori, l'upload tracking e le API del budget vivono ancora dentro questo file invece che in una
-> pagina propria
-> (Task 5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).
+> Ogni blocco che doveva avere una pagina propria ce l'ha: la mappa non è più parziale. Quel che
+> resta dello snellimento
+> ([2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md),
+> Task 7) è comprimere le sezioni superstiti di **questo** file, non produrre altre pagine.

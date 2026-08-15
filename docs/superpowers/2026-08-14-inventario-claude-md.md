@@ -424,3 +424,131 @@ segnala come `ROTTO` ogni singolo link. La forma corretta è
 
 **Effetto sulla lunghezza:** `CLAUDE.md` passa da 1.072 a **1.182** righe. Il Task 6 *aggiunge*
 per costruzione — è la compressione dei Task 2-5 e 7 a far scendere il totale sotto le 500.
+
+## Blocchi minori, Upload Tracking e API budget (Task 5)
+
+Sette blocchi (`CLAUDE.md:506-508` e `510-525` per gli override CE, `600-605` Projection Tab,
+`607-615` Indicatori charts, `617-632` AI Comments, `634-646` Upload Tracking, `648-691` Bulk
+Assumptions, `693-709` Promote — numerazione del file a 914 righe, prima di questo task).
+Destinazioni: `docs/frontend/PRATICA-PERCORSO.md` §11-§12 (nuove sezioni, **accodate** per non
+rinumerare i §1-§10 a cui l'inventario del Task 3 rimanda), `docs/frontend/INDICATORI-E-STAMPA.md`,
+`docs/deployment/UPLOAD-TRACKING.md` (nuovo) e `docs/budget/API-PREVISIONALE.md` (**nuovo**).
+
+**Perché una pagina nuova in `docs/budget/` e non un'aggiunta ai due file esistenti.** Il piano
+diceva «`docs/budget/`, dove esistono già `TEST_BUDGET_API.md` e `FORECASTING_GUIDE.md`». Quei due
+sono guide in inglese del 2024-2025 (`FORECASTING_GUIDE` descrive il workflow **Streamlit**;
+`TEST_BUDGET_API` documenta come corrente la `POST /assumptions` per anno che `CLAUDE.md` elenca
+fra le deprecate): infilarci dentro le regole di precedenza degli override le avrebbe sepolte in
+testo superato. I due file restano dove sono, non sono stati toccati, e la pagina nuova è
+raggiungibile dalla mappa e da `docs/README.md`.
+
+**Sui conteggi.** Questo blocco ne portava otto. **Due sono falsi** (le colonne
+`ce*_override` sono 32 e non 31 — riga 254; l'elenco che le enumera ne salta una — riga 255);
+**sei tornano** e sono stati ri-misurati con un comando ciascuno: 22 codici editabili nella
+Proiezione, 6 commenti AI dell'infrannuale, 11 sezioni del `/report`, 90 giorni di ritenzione,
+20 rettifiche al massimo, 50 aziende per utente. Il conteggio «~11 righe essenziali» di
+`AssumptionsGrid` è esatto: sono 11.
+
+### Projection Tab (`CLAUDE.md:600-605`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 223 | «Expanded `EDITABLE_CE_CODES` to cover **22 CE fields** (ce01–ce20 plus ce08/09/11/17 sub-fields)» | **`OBSOLETA`** (la parentesi, non il numero) — 22 è confermato (`node`, conteggio dei letterali in `EDITABLE_CE_CODES`, `lib/pratica-codes.ts:2-24`), ma l'elenco è sbagliato: le sole sotto-voci editabili sono `ce11b`, `ce17a`, `ce17b`. **`ce08a`–`d` e `ce09a`–`d` NON ci sono**, benché il backend abbia le loro colonne e `/forecast/income` le renda modificabili. Riscritta in `PRATICA-PERCORSO.md` §11 |
+| 224 | «`calculateProjectedBS` sends the full set of override fields the backend schema supports (`ce02_override`, `ce03_override`, `ce10_override`, `ce11_override`, `ce13_override` through `ce19_override`)» | **`OBSOLETA`** — quell'elenco parziale non esiste più: oggi la chiamata allega `...buildCeOverridePayload(overrides)` (`app/pratica/page.tsx:850`), che manda **tutti e 32** i campi di `CE_OVERRIDE_FIELD_BY_CODE`, con `null` su quelli non editabili |
+| 225 | «For ce17 … the backend stores the net (`ce17a − ce17b`) in `ce17_override`» | **`OBSOLETA`** — `ce17a_override` e `ce17b_override` sono due colonne distinte, mandate distinte e lette distinte da entrambi i motori (`forecast_engine.py:737-738`, `intra_year_engine.py:774-781, 909-916`). Nessun netto viene calcolato lato client |
+| 226 | «For `ce20_imposte`, the override is translated to an effective `tax_rate` (`ce20 / PBT × 100`)» | **`OBSOLETA`** — il `tax_rate` inviato è la costante **27,9** (`app/pratica/page.tsx:851, 938`); le imposte passano come `ce20_override`, che il motore usa come totale e che **scavalca** l'aliquota (`forecast_engine.py:541-542`, `intra_year_engine.py:270-271`) |
+| 227 | Coerenza: `PROJ_COST_CODES_ALL` include `ce11b_altri_accantonamenti` come `EBITDA_COST_CODES`; `projRettifiche = pv("ce17a") − pv("ce17b")` così `sp13` concorda con l'utile stampato sopra | `SPOSTATA IN … PRATICA-PERCORSO.md` §11 — verificato `ProjectionTable.tsx:77-90` e `pratica-codes.ts:72-78` |
+| 228 | Gotcha: `buildBalanceItemsWithTotals` non deve sovrascrivere `annualized_value` quando è chiamata da `calculateProjectedBS` | `GIÀ IN docs/frontend/LAYOUT-SP-CE.md` §4 (riga 221 di questo inventario) — in `PRATICA-PERCORSO.md` §11 resta come rimando, non come seconda copia |
+| 229 | (**assente da `CLAUDE.md`**) I 22 override non partono vuoti: `loadComparison` li precompila con i valori annualizzati **oppure** li ripesca da `analysis.forecast_years[0].income_statement` quando un previsionale esiste già — è questo a farli sopravvivere a un cambio di tab | `SPOSTATA IN … PRATICA-PERCORSO.md` §11 — `app/pratica/page.tsx:621-664` |
+
+### Indicatori charts (`CLAUDE.md:607-615`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 230 | L'intero blocco: un solo componente per le due viste, configurazioni condivise ed etichette di serie no, `buildIndicatorChartData` come unica parte testabile (`environment: "node"`), una serie `null` **scartata e non resa a zero**, e il limite noto del denominatore `ce01` (AIC SRL, EBITDA % 80.395,7%) | `GIÀ IN docs/frontend/INDICATORI-E-STAMPA.md` — verificato affermazione per affermazione contro quella pagina: c'erano tutte, `CLAUDE.md` ne era una copia integrale. Il rimando finale del blocco puntava già lì. **Integrata** la pagina con l'unico dato che non aveva: i due soli consumatori del componente sono `IndicatoriTable.tsx:154` e `StampaContent.tsx:659` |
+
+### Infrannuale AI Comments (`CLAUDE.md:617-632`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 231 | Sei commenti: `overall` più uno per ciascuna delle cinque tabelle (`ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`) | `SPOSTATA IN … PRATICA-PERCORSO.md` §12 — **conteggio confermato**: `InfrannualeComments` ha esattamente sei campi (`ai_comments_service.py:344-363`) e l'allowlist di salvataggio le stesse sei chiavi (`:528`) |
+| 232 | Persistenza in `BudgetScenario.ai_comments_infrannuale`, colonna `TEXT` con un dizionario JSON; solo sei chiavi, le altre scartate al salvataggio | `RESTA` per la parte che morde — testo: *`save_infrannuale_comments` tiene sei chiavi e **scarta il resto senza dirlo**, restituendo comunque `{"success": true}`: un settimo commento aggiunto lato client si salva «con successo» e sparisce al ricaricamento.* Il resto `SPOSTATA IN … PRATICA-PERCORSO.md` §12. Verificato `models.py:562` (`Column(Text)`) e `ai_comments_service.py:527-530` |
+| 233 | Generazione via Claude Haiku con un tool costruito dallo schema Pydantic; il `ctx` lo costruisce il frontend e lo manda in POST; senza `ANTHROPIC_API_KEY` torna un dizionario vuoto | `SPOSTATA IN … PRATICA-PERCORSO.md` §12 — verificato `ai_comments_service.py:469-483` (il modello è `PDF_LLM_MODEL`, `config.py:213`, condiviso con l'import PDF) e il toast a `StampaContent.tsx:272` |
+| 234 | I tre endpoint (`GET` / `POST` / `PUT`) sotto `/infrannuale/ai-comments` | `SPOSTATA IN … PRATICA-PERCORSO.md` §12 — verificato `budget_scenarios.py:416, 431, 453` |
+| 235 | UI: ogni `CommentBlock` è una `Textarea` legata a `aiComments[key]`, `onBlur` persiste; i riquadri vuoti spariscono in stampa | `SPOSTATA IN … PRATICA-PERCORSO.md` §12 — verificato `StampaContent.tsx:284-303`. **Integrata**: la `Textarea` è `print:hidden` **sempre** e il testo esce come `<p>`; e i due commenti di proiezione non sono nemmeno resi quando `periodMonths === 12` (`:573, 629`) |
+| 236 | (elenco file) «`frontend/app/pratica/page.tsx` — `StampaContent` state, `buildAICtx()`, `CommentBlock`» | **`OBSOLETA`** — nessuno dei tre è più lì: `StampaContent`, `buildAICtx` (`:211`) e `CommentBlock` (`:284`) vivono in `frontend/components/pratica/StampaContent.tsx` dalla decomposizione del 2026-08-10 |
+| 237 | (**assente da `CLAUDE.md`**) Da non confondere con i commenti del `/report`: quelli sono **undici** (`ReportComments`, `ai_comments_service.py:32-66`) e stanno in un'altra colonna. La docstring del modulo ne dichiara dieci e la docstring della classe undici — sono undici; incoerenza **nel codice**, segnalata e non corretta | `SPOSTATA IN … PRATICA-PERCORSO.md` §12 |
+
+### Upload Tracking (`CLAUDE.md:634-646`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 238 | «Every `/import/{xbrl,csv,pdf}` call persists the raw bytes …» | **`OBSOLETA`** (per difetto) — gli endpoint tracciati sono **quattro**: c'è anche `/import/pdf-ocr` (`imports.py:576`), che scrive `file_type` **`pdf_ocr`**. Conseguenza operativa: il filtro `?file_type=pdf` di `/admin/uploads` è un'uguaglianza esatta e **non** raccoglie gli import OCR. Riscritta in `UPLOAD-TRACKING.md` §1 e §3 |
+| 239 | I byte vanno in `data/uploads/{user_id}/{YYYY-MM}/…` e la riga nasce **prima** del parsing, così anche un crash dell'estrattore resta tracciato | `RESTA` (una delle tre righe di orientamento che `CLAUDE.md` conserva) + `SPOSTATA IN docs/deployment/UPLOAD-TRACKING.md` §1-§2 — **integrata**: la radice è la variabile d'ambiente `UPLOAD_ROOT` (`upload_tracker.py:27`), l'`user_id` è sanificato e troncato a 64 caratteri, e il nome originale non viene riusato sul filesystem |
+| 240 | L'elenco delle colonne della riga | `SPOSTATA IN … UPLOAD-TRACKING.md` §3 — **incompleto**: manca `user_email`, catturata dal JWT al caricamento (`models.py:1104`), che è anche un filtro di `/admin/uploads` (sottostringa case-insensitive) |
+| 241 | Gli errori del tracker sono inghiottiti: tracciare non deve mai far fallire un import | `SPOSTATA IN … UPLOAD-TRACKING.md` §1 — verificato: `save_upload` restituisce `None` in caso di errore e le altre due funzioni escono su `record is None` |
+| 242 | «HTTP ownership/limit failures (`HTTPException`) are NOT marked as parser errors» | **`OBSOLETA`** (per generalizzazione) — vale su `xbrl`/`csv`/`pdf` (`imports.py:211, 326, 483`) ma **non** su `/import/pdf-ocr`, che le marca `error` (`:671-673`). E l'ordine rispetto ai controlli **non è uniforme**: `xbrl` e `pdf` chiamano `save_upload` **prima** di `validate_company_owned_by_user`/`check_company_limit`, quindi una richiesta respinta lascia file e riga `pending` per sempre; `csv` e `pdf-ocr` fanno il contrario, e su `pdf-ocr` la scelta è commentata sul posto (`:564-570`). Tabella delle quattro route in `UPLOAD-TRACKING.md` §1 |
+| 243 | Ritenzione 90 giorni via `scripts/cleanup_uploads.py` (cron giornaliero), sovrascrivibile con `UPLOAD_RETENTION_DAYS` | `RESTA` (seconda delle tre righe) + `SPOSTATA IN … UPLOAD-TRACKING.md` §5 — **conteggio ri-verificato**: `RETENTION_DAYS = int(os.environ.get("UPLOAD_RETENTION_DAYS", "90"))` (`cleanup_uploads.py:21`). Integrata: lo script conta a parte i file **già mancanti**, e cancella comunque la riga |
+| 244 | Recupero da `GET /api/v1/admin/uploads*`, protetto dall'header `X-Admin-Key` che deve valere quanto `ADMIN_API_KEY` | `RESTA` (terza delle tre righe) + `SPOSTATA IN … UPLOAD-TRACKING.md` §4 — **integrata**: senza la variabile d'ambiente la risposta è **503**, non 403 (`admin.py:29-33`); i filtri sono sette più `limit` (default 100, max 500), e `error_traceback`/`storage_path` compaiono **solo** sul dettaglio per id, non nell'elenco |
+| 245 | Elenco file, con «`migrate_db.py` — `CREATE TABLE IF NOT EXISTS uploaded_files`» | `SPOSTATA IN … UPLOAD-TRACKING.md` §3 e §6 — **precisato**: il DDL non ha alcun `IF NOT EXISTS`, è lo script a interrogare `sqlite_master` prima di eseguirlo (`migrate_db.py:205-213`). L'effetto è lo stesso, il posto dove cercare no |
+
+### Bulk Assumptions Workflow (`CLAUDE.md:648-691`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 246 | I quattro esempi di chiamata (bulk budget, bulk infrannuale, `PATCH /ce-override`, `POST /generate?clear_overrides=true`) con le rispettive risposte | `SPOSTATA IN docs/budget/API-PREVISIONALE.md` §1-§3 |
+| 247 | L'avviso «Leggi `forecast_generated`, non l'HTTP 200» | `GIÀ IN CLAUDE.md` § Invarianti › Previsionale (riga 124) — **ma il testo era diventato falso in un punto e questo task lo corregge**: diceva «nessun `ForecastYear` scritto e `forecast_years: []`». Nel ramo di fallimento `forecast_years` porta gli anni delle **ipotesi salvate** (`assumptions_service.py:228`), quindi non è vuoto; a restare vuoto è `analysis.forecast_years` della `GET` successiva. Aggiunto anche il contrasto: `PATCH /ce-override` e `POST /generate` sullo stesso errore rispondono 4xx/5xx |
+| 248 | «I chiamanti che già lo fanno: `/budget` e i due punti di chiamata del wizard della pratica» | **verificato e confermato** — `bulkUpsertAssumptions` ha esattamente tre punti di chiamata (`app/budget/page.tsx:1081`, `app/pratica/page.tsx:838` e `:920`) e tutti e tre controllano `forecast_generated === false` (`:1088`, `:873`, `:957`). Testo `SPOSTATA IN … API-PREVISIONALE.md` §1 |
+| 249 | «`POST /generate?clear_overrides=true` nulls all `*_override` columns» | `SPOSTATA IN … API-PREVISIONALE.md` §3 — **integrata, ed è la parte che morde**: il ciclo azzera le colonne il cui nome **finisce per `_override`** (`budget_scenarios.py:920-924`). `sp_overrides` finisce per `_overrides` e **sopravvive**. Vedi riga 259 |
+
+### Promote Infrannuale → Budget (`CLAUDE.md:693-709`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 250 | Il flusso completo (`POST …/promote` → creare uno scenario budget con `base_year` = anno promosso) e la forma della risposta | `SPOSTATA IN … API-PREVISIONALE.md` §5 — **integrata**: la risposta porta anche un blocco `verification` (`exact_match`, numero di campi confrontati per SP e CE, `semantic_valid`) che `CLAUDE.md` non mostrava |
+| 251 | (**assente da `CLAUDE.md`**) I cancelli sono **due**, non uno: dopo la copia, `_verify_copy` confronta campo per campo sorgente e bersaglio **e** `check_quadratura` gira una seconda volta sul bersaglio; un fallimento fa `rollback()` dell'intera transazione, quindi ripristina anche il `FinancialYear` cancellato al passo precedente | `SPOSTATA IN … API-PREVISIONALE.md` §5 — `promote_service.py:107-139` |
+| 252 | (**assente da `CLAUDE.md`**) `_forecast_bs_imbalance` (`promote_service.py:158`) è il resto del vecchio cancello a soglia in euro e **non ha più alcun chiamante in produzione**: lo esercita solo `tests/test_quadratura_gates.py`, che continua a chiamarlo «promote_service quadratura gate» | `SPOSTATA IN … API-PREVISIONALE.md` §5. Segnalazione, non correzione: rinominare il test è codice |
+| 253 | (dalla sezione «Intra-Year Engine», che resta) Il promote **sostituisce** un `FinancialYear` annuale esistente per company+anno, cancellandolo in cascata — anche se importato a mano | `RESTA` — testo: *Promuovere una proiezione **cancella** il `FinancialYear` annuale già esistente per quella azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un fallimento la annulla; un promote riuscito no.* Verificato `promote_service.py:59-67` |
+
+### Editable Forecast Income Statement / CE Overrides (`CLAUDE.md:506-508, 510-525`)
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 254 | «Every CE field (**31** total) can be overridden» / «**31** `ce*_override` columns on `BudgetAssumptions`» | **`OBSOLETA`** (il numero, in **due** punti) — sono **32**. Comando: `grep -oE "ce[0-9a-z]+_override" database/models.py \| sort -u \| wc -l` → 32; stesso conteggio su `backend/app/schemas/budget.py`, su `_CE_OVERRIDE_FIELDS` (`budget_scenarios.py:770-779`) e su `FIELD_TO_OVERRIDE` (`app/forecast/income/page.tsx:63`) |
+| 255 | «one per editable CE field (ce01–ce20 plus sub-fields ce08a–d, ce09a–d, ce11b, ce17a/b)» | **`OBSOLETA`** (per omissione) — quell'elenco fa 31 ed è il motivo del numero sbagliato: manca **`ce03a_override`** (incrementi di immobilizzazioni per lavori interni, A.4, `models.py:685`) |
+| 256 | Endpoint batch `PATCH /scenarios/{id}/ce-override` con `{overrides:[{forecast_year, field, value}]}`, applica e rigenera una volta sola | `SPOSTATA IN … API-PREVISIONALE.md` §2.1 — **integrata**: un `field` fuori dall'allowlist è 400, un anno senza riga di ipotesi è 404, e se la rigenerazione fallisce la risposta è **500 con gli override già committati** (`budget_scenarios.py:865-866`) |
+| 257 | Flusso frontend (clic → input → `pendingEdits` → «Aggiorna Previsionale» → batch → invalidazione della cache) e «svuotare una cella manda `null`» | `SPOSTATA IN … API-PREVISIONALE.md` §2.1 — verificato `app/forecast/income/page.tsx:139-183` |
+| 258 | «Server-persisted overrides = **blue** underline» | **`OBSOLETA`** (il colore) — la classe è `border-b-2 border-primary` (`app/forecast/income/page.tsx:511`), cioè il colore del tema, che nella palette slate di questo progetto non è blu. Il giallo delle modifiche in sospeso è invece letterale (`bg-yellow-100` + `border-yellow-500`) |
+| 259 | «Salva e Calcola Previsionale **never** clears overrides … solo la casella *Azzera le modifiche manuali del CE previsionale*» | `RESTA` — testo: *Un override vince sulla percentuale di crescita della stessa riga, e **sopravvive al salvataggio**: «Salva e Calcola Previsionale» non ne azzera nessuno, quindi si può cambiare `revenue_growth_pct` quanto si vuole e vedere il previsionale non muoversi. Solo la casella «Azzera le modifiche manuali del CE previsionale» li cancella — e cancella le sole colonne che finiscono per `_override`: `sp_overrides` non viene toccato.* |
+| 260 | «Auto-derived turnover days … (e.g. `DSO = base_sp06 / base_revenue * 360`)» | **`OBSOLETA`** (per imprecisione) — il DSO si deriva dai crediti **commerciali**, cioè `sp06 − sp06e_crediti_tributari − sp06f_imposte_anticipate` (`forecast_engine.py:897-911`, con il commento che spiega perché); il DIO usa `sp05 / ricavi` e **non** gli acquisti (`:915-922`); il DPO usa `sp16d_debiti_fornitori` e **non** l'aggregato `sp16` (`:1012-1019`). La seconda metà dell'affermazione — il circolante scala anche quando il ricavo viene da un override — è **vera** (`:875-876` legge `forecast_inc`, già con gli override applicati). Tabella corretta in `API-PREVISIONALE.md` §4 |
+| 261 | L'elenco dei file chiave, compreso «`ScenarioForm` (2 tab) … ~11 essential rows + an "Avanzate" accordion» | `SPOSTATA IN … API-PREVISIONALE.md` §6 — **conteggio verificato**: `ESSENTIAL_ROWS` ne ha esattamente **11** (`components/budget/assumption-rows.ts:32-61`), e `ADVANCED_GROUPS` sono 4 gruppi per 38 righe |
+
+### Fuori dai sette blocchi, incontrato durante la verifica
+
+| # | affermazione | destinazione |
+|---|---|---|
+| 262 | (`CLAUDE.md`, § Frontend Pages) «`/forecast/balance`, `/forecast/reclassified` — Forecast BS views (**read-only**, adapts to CE overrides)» | **`OBSOLETA` — corretta sul posto in questo task**, perché è la riga che nasconde tutto il meccanismo della riga 265: `/forecast/balance` è **editabile** e salva `sp_overrides` (`app/forecast/balance/page.tsx:153-183`). `/forecast/reclassified` resta in sola lettura |
+| 263 | (**assente da `CLAUDE.md`**) `BudgetAssumptions.sp_overrides` — un dizionario JSON di override sullo **stato patrimoniale**, applicato da entrambi i motori (`forecast_engine.py:1341`, `intra_year_engine.py:571`) | `SPOSTATA IN … API-PREVISIONALE.md` §2.2, e la parte che morde è `RESTA` — testo: *`sp_overrides` clampa a zero i valori negativi (tranne `sp13_utile_perdita` e `sp12h_riserva_neg_azioni_proprie`) e ignora in silenzio una chiave che non esiste nel risultato: un override negativo, o scritto male, non dà errore — dà uno zero.* Verificato `forecast_engine.py:236-324` |
+| 264 | (`CLAUDE.md`, § Key Conventions) «Tax Rate: **24% IRES** used in forecasting» | **segnalazione per il Task 7, non corretta qui** (è fuori dai sette blocchi) — 24 è il default dello schema Pydantic (`backend/app/schemas/budget.py:148`), che nessuna schermata usa: ogni chiamante manda **27,9** (IRES + IRAP), costante dichiarata in `STARTUP_TAX_RATE_PCT` (`app/budget/page.tsx:321`) e ripetuta letterale in altri tre punti. Il fatto è scritto in `API-PREVISIONALE.md` §4 |
+| 265 | (`CLAUDE.md`, § API Migration Notes) `PUT /assumptions/{year}` elencata fra le deprecate | **segnalazione per il Task 7** — non è morta: è la via con cui `/forecast/balance` salva gli `sp_overrides` (`app/forecast/balance/page.tsx:171`). O si smette di chiamarla deprecata, o si sposta quel salvataggio sul bulk; entrambe le cose sono codice |
+| 266 | «Report page (`/report`) renders full financial analysis with **11 sections**» | **conteggio ri-verificato e confermato** — `REPORT_SECTIONS` ha 11 voci (`frontend/components/report/report-types.ts:9-21`). Nessuna modifica |
+| 267 | «max 20 entries» delle rettifiche e «max 50 companies per user» | **conteggi ri-verificati e confermati** — `RETTIFICHE_LOG_MAX = 20` lato server e `RETTIFICHE_MAX` lato client (già fissati alla riga 149); `MAX_COMPANIES_PER_USER: int = 50` (`backend/app/core/config.py:49`). Nessuna modifica |
+
+### Effetto sul Task 6 (riaperto dal Task 5)
+
+Cinque righe `RESTA` nuove entrano in «Invarianti e trappole»: 259 (precedenza e sopravvivenza
+degli override) e 253 (il promote cancella l'anno annuale esistente) nel gruppo **Previsionale**,
+263 (il clamp di `sp_overrides`) sempre in **Previsionale**, e 232 (l'allowlist dei sei commenti
+AI) nel gruppo **Frontend**. Le righe 239, 243 e 244 sono le **tre righe** che restano in
+`CLAUDE.md` come sezione «Upload Tracking», non come invarianti: sono orientamento, non danno
+silenzioso.
+
+Una riga `RESTA` preesistente è stata **corretta**: la 124 (`forecast_generated`) affermava
+`forecast_years: []`, che il codice smentisce — vedi riga 247.
+
+Il capoverso introduttivo degli invarianti ora dichiara sette blocchi setacciati e nomina
+esplicitamente ciò che **non** è ancora passato al setaccio (le sezioni generali, Task 7).
+La nota di parzialità in coda alla mappa è stata **riscritta, non rimossa**: ogni blocco che
+doveva avere una pagina ce l'ha, quindi la mappa non è più parziale, ma dire soltanto «non è
+parziale» perderebbe l'informazione che il Task 7 esiste. La nuova formulazione dice che cosa
+resta da fare e che **non produrrà altre pagine**.

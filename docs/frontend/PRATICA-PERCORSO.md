@@ -369,3 +369,105 @@ degli indicatori nel complesso.
 | `frontend/app/page.tsx` | le due card «Nuova pratica», `startForCompany`, `resume` |
 | `frontend/app/budget/page.tsx` | il doppio ingresso: dentro e fuori da una pratica |
 | `frontend/app/layout.tsx` | l'ordine dei provider (`PraticaProvider` sopra `AppProvider`) |
+
+## 11. La tab Proiezione: il conto economico modificabile
+
+La Proiezione non è una tabella di sola lettura: l'utente sovrascrive a mano quasi ogni riga
+del conto economico proiettato, e lo stato patrimoniale si adegua.
+
+**Ventidue codici sono editabili** (`EDITABLE_CE_CODES`, `lib/pratica-codes.ts:2-24`) — e
+sono ventidue *diversi* dai trentadue override che il backend accetta:
+
+- ci sono tutte le voci di primo livello `ce01`–`ce20` **tranne `ce17`**, sostituito dalle sue
+  due sotto-voci `ce17a_rivalutazioni` e `ce17b_svalutazioni`;
+- l'unica altra sotto-voce è `ce11b_altri_accantonamenti`;
+- **`ce08a`–`d` e `ce09a`–`d` NON sono editabili qui**, benché il backend abbia le loro
+  colonne di override e `/forecast/income` le renda modificabili. Personale e ammortamenti si
+  toccano nella Proiezione solo al livello dell'aggregato.
+
+I valori partono **annualizzati** (`partial × 12 / periodMonths`), oppure vengono ripescati
+dal previsionale già salvato quando lo scenario ne ha uno: `loadComparison` rilegge
+`analysis.forecast_years[0].income_statement` e ripopola gli override da lì
+(`app/pratica/page.tsx:621-664`). È questo che fa sopravvivere una modifica a un cambio di tab.
+
+### I sottototali si ricalcolano dagli override, non dal backend
+
+`ProjectionTable` ricostruisce VP, costi, EBITDA, EBIT, gestione finanziaria, PBT e utile
+netto sommando i valori correnti degli override (`ProjectionTable.tsx:75-90`). Due dettagli
+tengono la colonna coerente con sé stessa:
+
+- `PROJ_COST_CODES_ALL` include `ce11b_altri_accantonamenti`, esattamente come
+  `EBITDA_COST_CODES` in `lib/pratica-codes.ts`. Se i due elenchi divergessero, EBITDA della
+  tabella ed EBITDA usato per lo SP proiettato racconterebbero due storie.
+- `ce17` è un **aggregato**: `projRettifiche = pv("ce17a") − pv("ce17b")`. Senza questa
+  derivazione una modifica alle rivalutazioni non arriverebbe al PBT, e lo `sp13` dello stato
+  patrimoniale proiettato non coinciderebbe con l'utile stampato sopra di esso.
+
+### Da CE proiettato a SP proiettato
+
+`calculateProjectedBS` (`app/pratica/page.tsx:716-884`) fa due cose in una:
+
+1. **Costruisce lo SP proiettato lato client**: rimanenze, crediti a breve e debiti a breve
+   dai rapporti di rotazione dell'anno di riferimento (via `scaledOrCarried` di
+   `lib/pratica-turnover.ts`, che deve restare d'accordo con `_turnover_ratio` del motore),
+   tutto il resto portato dal periodo parziale, `sp13` = utile proiettato, e la **cassa come
+   voce di pareggio** — se risulta negativa diventa debito a breve.
+2. **Salva le ipotesi e genera il previsionale sul server**, convertendo ogni override in una
+   percentuale di crescita rispetto all'anno di riferimento (`calcGrowth`) e allegando
+   `buildCeOverridePayload(overrides)`, che manda **tutti e trentadue** i campi di override —
+   quelli non editabili nella tabella partono a `null`.
+
+Il `tax_rate` inviato è la costante **27,9** (IRES + IRAP), non un'aliquota derivata dalle
+imposte modificate: le imposte proiettate arrivano al motore come `ce20_override`, che vince
+sull'aliquota. Il resto — precedenza degli override, che cosa li azzera, come si legge
+`forecast_generated` — è in [`docs/budget/API-PREVISIONALE.md`](../budget/API-PREVISIONALE.md).
+
+> **Trappola:** `buildBalanceItemsWithTotals` non deve **mai** sovrascrivere
+> `annualized_value` quando è chiamata da `calculateProjectedBS`. La Proiezione usa quel campo
+> per trasportare i valori di SP proiettati; la riconciliazione per anno tocca solo
+> `partial_value`, `reference_value` e `prior_value`
+> (`lib/pratica-statement-rows.ts:12-28`, e `docs/frontend/LAYOUT-SP-CE.md` §4).
+
+## 12. La tab Stampa: i sei commenti AI
+
+Sopra ogni tabella della Stampa c'è un riquadro di commento in italiano, generato da Claude
+Haiku e poi **modificabile a mano**. I commenti sono **sei**: `overall` (prima della prima
+tabella) più uno per ciascuna delle cinque tabelle — `ce_confronto`, `sp_confronto`,
+`ce_proiezione`, `sp_proiezione`, `indicatori`.
+
+Da non confondere con i commenti del `/report`, che sono **undici** e vivono in un'altra
+colonna (`ReportComments`, `ai_comments_service.py:32-66`).
+
+| Endpoint (scoped sullo scenario) | Che cosa fa |
+|---|---|
+| `GET .../infrannuale/ai-comments` | restituisce il dizionario salvato (`{}` se non c'è) |
+| `POST .../infrannuale/ai-comments` | genera con Haiku dal `ctx` ricevuto, salva, restituisce |
+| `PUT .../infrannuale/ai-comments` | salva le modifiche dell'utente, nessuna chiamata al modello |
+
+**Il contesto lo costruisce il client.** `buildAICtx()`
+(`components/pratica/StampaContent.tsx:211-264`) mette insieme scenario, `income_map`,
+`balance_map`, gli indicatori per colonna e i rating già calcolati, e lo manda in POST. Il
+calcolo resta sul client; al server resta solo la chiamata al modello, che è l'unica cosa che
+non può stare lì. Il modello è quello condiviso con l'import PDF (`PDF_LLM_MODEL`,
+`config.py:213`), invocato con un **tool** costruito dallo schema Pydantic
+`InfrannualeComments`, così l'output è già validato nella forma.
+
+Senza `ANTHROPIC_API_KEY` la generazione restituisce `{}` — nessun errore, nessun mezzo
+commento — e il client mostra *«Nessun commento generato (chiave API mancante?)»*.
+
+**Persistenza:** una sola colonna `TEXT`, `BudgetScenario.ai_comments_infrannuale`
+(`database/models.py:562`), con dentro il dizionario serializzato in JSON. Il salvataggio
+tiene **solo le sei chiavi note** e scarta silenziosamente tutto il resto
+(`ai_comments_service.py:527-530`), restituendo comunque `{"success": true}`: un settimo
+commento aggiunto lato client si scriverebbe «con successo» e sparirebbe al ricaricamento.
+
+**Resa e stampa:** ogni `CommentBlock` è una `Textarea` shadcn legata a `aiComments[k]`;
+`onChange` aggiorna lo stato locale, `onBlur` persiste con `PUT`. In stampa la `Textarea` è
+sempre nascosta e il testo esce come `<p>`; un riquadro **vuoto** sparisce del tutto
+(`print:hidden` condizionato a `!value`), così il PDF non porta cornici vuote. I due commenti
+di proiezione non sono nemmeno resi quando `periodMonths === 12`
+(`StampaContent.tsx:573, 629`): un bilancio già annuale non ha una proiezione da commentare.
+
+`StampaContent`, `buildAICtx` e `CommentBlock` vivono in
+`frontend/components/pratica/StampaContent.tsx` — non in `app/pratica/page.tsx`, dove stavano
+prima della decomposizione (§7).

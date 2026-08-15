@@ -124,6 +124,13 @@ git commit -m "docs(claude): l'import vive in docs/import, CLAUDE.md rimanda"
 
 ## Task 2: Rettifiche (77 righe) → `docs/frontend/RETTIFICHE.md`
 
+> **Fatto il 2026-08-15** (commit `f8b6d56`). Tre scoperte, registrate come righe 136-160
+> dell'inventario: il filtro del selettore contropartita **non** guarda il segno (riga 147,
+> `OBSOLETA`); i modi di proposta sono **tre** e uno è in partita singola (riga 136); la guardia
+> anti-regressione del server è **relativa** e non era documentata (riga 157). Sei righe `RESTA`
+> aggiunte a «Invarianti e trappole». Tre paragrafi sono stati spostati qui dai blocchi Pratica
+> (righe 158-159) e Layout (riga 160): **i Task 3 e 4 non li troveranno più**.
+
 **Files:**
 - Create: `docs/frontend/RETTIFICHE.md`
 - Modify: `CLAUDE.md` (`### Rettifiche (BS/IS Adjustments Journal)`), `docs/superpowers/2026-08-14-inventario-claude-md.md`

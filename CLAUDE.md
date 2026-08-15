@@ -294,6 +294,102 @@ from app.core.ownership import validate_company_owned_by_user  # Ownership check
 
 Sector determines Altman coefficients and FGPMI thresholds (from `data/rating_tables.json`)
 
+## Invarianti e trappole
+
+Le regole che, se ignorate, producono un danno **silenzioso**: il dato risulta sbagliato e
+nessun controllo se ne accorge. Il resto della documentazione spiega i meccanismi; qui c'è solo
+ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a violarla.
+
+> Raccolte dall'[inventario dello snellimento](docs/superpowers/2026-08-14-inventario-claude-md.md),
+> che per ciascuna porta la prova nel codice. Coprono **l'import**, l'unico blocco finora passato
+> al setaccio: l'assenza di una regola su frontend o previsionale non significa che non esista.
+
+### Contabilità
+- **La colonna è la verità sul lato; la descrizione decide la voce.** Mai il contrario:
+  `ERARIO C/`, `DEPOSITI BANCARI`, `FORNITORI C/ANTICIPI` cambiano lato attivo/passivo per
+  colonna. Ribaltare il lato per descrizione è stato tentato e revertito: regrediva file puliti.
+- **Diagnose, never fabricate.** Un divario si misura e si dichiara, non si tappa.
+  `enforce_ce_sp_identity`, `reconcile_ivcee_balance` e il parser best-effort **non modificano
+  nulla**: espongono `_ce_sp_difference`, `_declared_assets_difference`, `_plug_residual`, e la
+  correzione la fa l'utente in Rettifiche. Non cercare un bug dentro un plug che non esiste — per
+  molto tempo questo file ne ha descritti di inesistenti, ed è il guasto che ha motivato lo
+  snellimento.
+- **Debito senza scadenza dichiarata → a breve**, per prudenza: anticipare una scadenza peggiora
+  gli indici di liquidità, non li abbellisce, e l'utente lo sposta in Rettifiche. Vale per ogni
+  estrattore. Attenzione: `sp16` e `sp17` stanno **entrambi nel passivo**, quindi il pareggio non
+  vede l'appiattimento — lo vedono CCN, current ratio e il circolante di Altman.
+- **Un errore dentro un aggregato è accettato**: l'utente lo rifinisce in Rettifiche. Un errore
+  che **attraversa** un aggregato o un confine di KPI no — cambia un numero su cui si decide.
+
+### Estrazione e classificazione
+- **Mai dedurre la parentela fra conti dal prefisso o dalla lunghezza del codice.** I piani dei
+  conti sono specifici del gestionale: AGO stampa mastri a 8 cifre con figli a 9, nessuno prefisso
+  dell'altro, e `c.startswith(code)` no-oppa in silenzio. La profondità genera ipotesi; il **totale
+  stampato dal documento** decide. Nessun totale ⇒ scansione dichiarata non verificata, mai data
+  per buona. Corollario: si sommano i mastri **oppure** le foglie, mai entrambi.
+- **Per classificare una voce di CE usare `situazione_contabile_parser._resolve_ce_field(desc,
+  direction)`, mai `iv_cee_hierarchy.resolve(side=…)`**: su un nodo CE `side` non filtra nulla
+  (`Node.side` è popolato solo per lo SP), un costo può risolversi su un ricavo e il risultato si
+  sposta di **2×** il suo importo.
+- **Un secchio di ripiego è neutro solo dentro il proprio insieme.** `ce06` è neutro fra i costi
+  della produzione, ma su una riga letta nella colonna RICAVI è un costo, e sposta il risultato di
+  2× il proprio importo. Il ripiego si sceglie per direzione (a destra `ce04`).
+- **Un plug inventa massa ed è vietato; un fallback etichetta massa davvero letta ed è ammesso.**
+  Non sono la stessa cosa, e la differenza è tutta qui.
+- **`TIER0_FIELDS` non è mai una destinazione di ripiego** (immobilizzazioni nette, patrimonio
+  netto, debiti verso banche, `ce09`): `ce09` è l'unico confine di KPI dentro i costi operativi
+  (`EBITDA = EBIT + ce09`), gli altri spostano un totale e rompono PFN, ROI, indipendenza
+  finanziaria e i due modelli di rating in un colpo.
+- **La massa non riconosciuta va in un sotto-campo esplicito** (`ce06`, `sp16g`), mai su un
+  aggregato: `projection_common.base_bank_debt` assegna alle BANCHE qualunque scarto fra
+  `sp16`/`sp17` e la somma dei loro dettagli, e il residuo diventa debito bancario fantasma con
+  tanto di piano di rimborso.
+- **`data/iv_cee_tree.json` è solo di livello legale, per scelta.** Aggiungere alias di
+  sotto-conto sembra un miglioramento ovvio e raddoppia gli importi nell'aggregazione piatta delle
+  route A/B, dove padre e figlio verrebbero sommati entrambi. Nessun cancello vede quell'inflazione.
+- **L'LLM IV-CEE è l'estrattore sbagliato per una situazione contabile.** `extract_pdf_with_llm`
+  legge lo schema di legge, non un elenco di conti: su una contrapposte restituisce un'estrazione
+  sbilanciata che diventa il generico «Balance sheet does not balance». È l'ultima risorsa **solo**
+  quando il deterministico esce davvero vuoto. Ricablarlo come fallback di route C è una tentazione
+  ricorrente; l'estrattore giusto per le liste CoGe è il pass CoGe dedicato.
+
+### Quadratura, diagnostica e verdetti
+- **Attivo = Passivo = 0 non è una quadratura.** Un'estrazione vuota ha sbilancio zero: senza il
+  controllo `is_empty` risulterebbe il bilancio più pulito del corpus.
+- **Un difetto che quadra si corregge a monte, non aggiungendo un controllo a valle.** Un bilancio
+  letto dall'anno sbagliato è internamente coerente: quadra, e nessun gate lo vede.
+- **Un verdetto negativo vuole una contraddizione, non un controllo assente.** Vale in
+  `reliability.assess` (`UNRELIABLE` mai per assenza: un controllo mancante dà `DERIVED`), nel
+  cancello del riscatto vision (`residual_measured`) e nel gate infrannuale. Un controllo che manca
+  è «non lo so», e «non lo so» non blocca.
+- **Un estrattore dichiara sempre le proprie chiavi diagnostiche, anche a zero**
+  (`_unclassified_mass`, `_plug_residual`): a valle una chiave **assente vale zero**, quindi tacere
+  equivale a dichiararsi pulito. Vale per chiunque scriva un estrattore nuovo.
+- **Una correzione che tocca più campi si applica tutta o niente**, e in caso di errore ripristina
+  lo stato di partenza. Il netting dei contro-conti lo fa: un fallimento a metà lascerebbe un foglio
+  mezzo nettato **privo** dei marcatori `_contra_*`, e l'assenza di quei marcatori viene letta a
+  valle come «su questa route non gira nessuna scansione» — cioè un foglio corrotto declassato in
+  silenzio a foglio normale.
+- **L'estrazione LLM non è deterministica** (route A/B e pass CoGe): lo stesso file può dare due
+  esiti diversi a otto minuti di distanza. Un sospetto di regressione si conferma sul percorso di
+  produzione e su più esecuzioni, mai su una sola.
+
+### Previsionale
+- **Un verdetto di inaffidabilità blocca il previsionale, mai il salvataggio.** Le Rettifiche
+  lavorano su un `FinancialYear` già persistito: un file non salvato sarebbe incorreggibile per
+  sempre.
+- **Chi chiama l'endpoint bulk delle assumptions deve leggere `forecast_generated`, non l'HTTP
+  200.** Un previsionale rifiutato torna comunque 200, con la ragione in `message`, nessun
+  `ForecastYear` scritto e `forecast_years: []`. Ignorarlo dipinge una colonna Proiezione vuota
+  sotto un toast verde. → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6
+
+### Ambiente
+- **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
+  GPU) e sta dietro il compose profile `mineru`, che la esclude da **ogni** comando compose —
+  `build` compreso — perché il `Jenkinsfile` esegue `docker compose build --no-cache --parallel`
+  sullo staging. `MINERU_OCR_ENABLED` è `false` di default per la stessa ragione. Toglierlo dal
+  profile trascina vLLM sul server. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis
+
 ## Critical Implementation Notes
 
 ### XBRL Import
@@ -313,8 +409,7 @@ stampa; **XBRL nativo / non supportato**, che esce con un errore onesto. Dall'es
 il sistema **misura e dichiara, non corregge**: un divario diventa un avviso e una riga da
 sistemare in Rettifiche, mai un importo inventato.
 
-Gli invarianti che governano tutte e tre le rotte stanno in «Invarianti e trappole» (finché lo
-snellimento non è concluso, in `docs/superpowers/2026-08-14-inventario-claude-md.md`).
+Gli invarianti che governano tutte e tre le rotte stanno in «Invarianti e trappole», sopra.
 
 | Domanda | Pagina |
 |---|---|
@@ -824,12 +919,8 @@ Editable AI-generated commentary rendered above each table in the Stampa tab. Si
 
 ### Bulk Assumptions Workflow
 
-> ⚠️ **Leggi `forecast_generated`, non l'HTTP 200.** Quando il previsionale viene rifiutato (gate
-> semantico sulla fonte), `bulk_upsert_assumptions` **cattura** l'errore e risponde comunque
-> **200**, con `forecast_generated: false` e la ragione in `message`: nessun `ForecastYear`
-> scritto, `analysis.forecast_years` vuoto, e la colonna Proiezione resta **vuota sotto un toast
-> di successo**. Ogni chiamante deve controllare il campo (`/budget` e i due punti di chiamata del
-> wizard della pratica lo fanno). → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6
+> ⚠️ **Leggi `forecast_generated`, non l'HTTP 200** — vedi «Invarianti e trappole › Previsionale».
+> I chiamanti che già lo fanno: `/budget` e i due punti di chiamata del wizard della pratica.
 
 ```python
 # Budget: Multiple years
@@ -933,11 +1024,7 @@ POST /companies/{id}/scenarios
 ## Technical Constraints
 
 - **SQLite database**: Single-file, no concurrent writes (use transactions carefully)
-- **MinerU non va MAI sul VPS**: la sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
-  GPU). Sta dietro il compose profile `mineru`, che la esclude da **ogni** comando compose —
-  `build` compreso — perché il `Jenkinsfile` esegue `docker compose build --no-cache --parallel`
-  sullo staging. `MINERU_OCR_ENABLED` è `false` di default per la stessa ragione. Toglierlo dal
-  profile trascina vLLM sul server. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis
+- **MinerU non va MAI sul VPS**: vedi «Invarianti e trappole › Ambiente»
 - **Decimal precision**: Numeric(15, 2) - max 9,999,999,999,999.99
 - **JSON serialization**: Backend uses custom `DecimalJSONResponse` (Decimal → float)
 - **Italian locale**: UI text in Italian, European number formatting
@@ -1069,4 +1156,27 @@ POST /companies/{id}/scenarios
 
 ---
 
-**For detailed API documentation, examples, and usage, see README.md**
+## Mappa della documentazione
+
+Ogni riga è la **domanda** a cui quella pagina risponde. Se la tua domanda non è qui, il posto
+giusto è il codice, non `/docs`.
+
+| Domanda | Dove |
+|---|---|
+| Come funziona l'API, con esempi di chiamata? | [README.md](README.md) |
+| Che cosa c'è in `/docs`, e che cosa è superato? | [docs/README.md](docs/README.md) |
+| **Import** — routing, estrazione, netting, quadrature, infrannuale, persistenza | la tabella nella sezione «Import PDF» qui sopra (9 pagine in `docs/import/` + `docs/FIXING-IMPORT.md`) |
+| Una voce XBRL in che campo `sp`/`ce` va a finire? | [docs/taxonomy/XBRL_PCI_IV_CEE_Mapping.md](docs/taxonomy/XBRL_PCI_IV_CEE_Mapping.md), [TASSONOMIA.md](docs/taxonomy/TASSONOMIA.md) |
+| Come si costruisce un budget e che cosa fa il motore di previsione? | [docs/budget/FORECASTING_GUIDE.md](docs/budget/FORECASTING_GUIDE.md) |
+| Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
+| Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
+| Un grafico degli Indicatori è sbagliato, o la Stampa impagina male? | [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md) |
+| Una classe Tailwind non produce alcuno stile e non c'è errore? | [docs/frontend/TAILWIND-E-CLASSI.md](docs/frontend/TAILWIND-E-CLASSI.md) |
+| Come si incastra l'app nell'iframe di Formula Finance, JWT compreso? | [docs/deployment/IFRAME_INTEGRATION.md](docs/deployment/IFRAME_INTEGRATION.md) |
+| Come si rilascia, e che cosa va configurato in produzione? | [docs/deployment/](docs/deployment/) (`README_DEPLOYMENT`, `PRODUCTION_CONFIG`, `NETLIFY_CHECKLIST`, `DEPLOYMENT_SUMMARY`) |
+| Perché una scelta è stata fatta così? | `docs/superpowers/specs/` (design) e `docs/superpowers/plans/` (esecuzione) |
+| La documentazione dice ancora il vero? | `/riallinea` (`.claude/skills/riallinea/`), rapporti in `docs/superpowers/allineamento/` |
+
+> **Questa mappa è parziale, e resterà parziale finché lo snellimento non è concluso.** Rettifiche,
+> percorso Pratica e layout SP/CE vivono ancora dentro questo file invece che in una pagina propria
+> (Task 2-5 di [2026-08-14-claude-md-snellito](docs/superpowers/plans/2026-08-14-claude-md-snellito.md)).

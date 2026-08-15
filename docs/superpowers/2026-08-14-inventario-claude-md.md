@@ -233,3 +233,32 @@ I percorsi `<file>` senza cartella si intendono relativi a `docs/import/`.
 | # | affermazione | destinazione |
 |---|---|---|
 | 134 | (sezione «Intra-Year Engine», `CLAUDE.md:388`) «Quadratura gate: rifiuta di promuovere una proiezione il cui SP è sbilanciato (attivo−passivo > €5)» | `OBSOLETA` — **corretta sul posto** in questo task, perché una soglia in euro inesistente manda a cercare il posto sbagliato: il cancello è `check_quadratura(...).semantic_valid` (`backend/app/services/promote_service.py:46-57`), cioè pareggio **e** identità CE↔SP **e** non mascherato **e** coerenza aggregati/dettagli. Già registrato come D5 in `REGOLE-IMPORT-00-INDICE §5` |
+
+## Task 6 — eseguito in anticipo, e quindi PARZIALE (2026-08-15)
+
+Il Task 6 doveva raccogliere le righe `RESTA` dei **Task 1-5**. È stato eseguito con i soli
+**Task 1**, per una ragione di rilascio: fra il Task 1 e il Task 6 gli invarianti dell'import
+vivevano solo qui dentro, e questo file **non è auto-caricato** a ogni sessione. Spingere
+`CLAUDE.md` in quello stato avrebbe lasciato a chiunque facesse checkout un file amputato.
+
+Delle 24 righe `RESTA` del blocco import, **21** sono confluite nella nuova sezione
+«Invarianti e trappole» di `CLAUDE.md` (una per una, verificate presenti). Le altre tre — righe
+1, 15 e 17 — erano destinate alla sezione «Import PDF», scritta già nel Task 1, e ci sono.
+
+Le due copie inlineate durante il fix round 1 sono state **assorbite e rimosse**, come previsto:
+la riga 124 (`forecast_generated`, § Bulk Assumptions Workflow) e la riga 126 (MinerU sul VPS,
+§ Technical Constraints) ora vivono solo nella sezione invarianti, con un rimando di una riga
+al loro posto d'origine.
+
+**Cosa resta da fare quando i Task 2-5 verranno eseguiti:** ciascuno produrrà nuove righe
+`RESTA`, e la sezione «Invarianti e trappole» va **riaperta** per accoglierle — non è un
+capitolo chiuso. La stessa cosa vale per la «Mappa della documentazione» in coda a `CLAUDE.md`,
+che oggi dichiara apertamente di essere parziale.
+
+**Un avvertimento sul comando di verifica del piano:** `grep -o "](docs/[^)]*)" CLAUDE.md |
+tr -d '](' ` (Task 1 Step 5, Task 2-7) **non toglie la parentesi chiusa finale**, quindi
+segnala come `ROTTO` ogni singolo link. La forma corretta è
+`sed 's/^](//; s/)$//'`. Un `ROTTO` su tutte le righe è il sintomo del comando, non dei link.
+
+**Effetto sulla lunghezza:** `CLAUDE.md` passa da 1.072 a **1.182** righe. Il Task 6 *aggiunge*
+per costruzione — è la compressione dei Task 2-5 e 7 a far scendere il totale sotto le 500.

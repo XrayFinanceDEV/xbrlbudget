@@ -264,6 +264,13 @@ git add CLAUDE.md docs/ && git commit -m "docs(claude): tab, upload tracking e A
 
 ## Task 6: Le due sezioni nuove — «Invarianti e trappole» e «Mappa della documentazione»
 
+> **Eseguito il 2026-08-15 con le sole righe del Task 1, e quindi da RIAPRIRE.** Il vincolo di
+> rilascio ha avuto la precedenza sull'ordine: fino a questo task gli invarianti dell'import
+> vivevano solo nell'inventario, che non è auto-caricato, e `CLAUDE.md` non era spingibile.
+> 21 righe `RESTA` su 24 sono nella nuova sezione; le altre 3 erano già nella sezione «Import
+> PDF». **Ogni Task 2-5 produrrà nuove righe `RESTA` e dovrà tornare qui.** Vedi la sezione
+> «Task 6 — eseguito in anticipo» in coda all'inventario.
+
 **Files:**
 - Modify: `CLAUDE.md`
 - Read: `docs/superpowers/2026-08-14-inventario-claude-md.md`

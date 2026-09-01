@@ -869,6 +869,13 @@ function ScenarioForm({
     () => forecastYearsFor(baseYear, numYears),
     [numYears, baseYear]
   );
+  // Il piano e' a 3 o 5 anni, ma un vecchio scenario le cui ipotesi furono
+  // salvate a una finestra spostata (la disallineatura descritta qui sotto) puo'
+  // averne di piu': il tetto segue l'orizzonte davvero salvato, altrimenti il
+  // campo mostrerebbe un valore che il suo stesso `max` dichiara impossibile.
+  // Tagliare a 5 e basta rimetterebbe in piedi il bug che questo lotto ha
+  // chiuso, cioe' l'ultimo anno buttato via al primo salvataggio.
+  const maxAnni = Math.max(5, numYears);
 
   // Load historical data for display
   useEffect(() => {
@@ -1275,7 +1282,7 @@ function ScenarioForm({
                       id="num-years"
                       type="number"
                       min={1}
-                      max={5}
+                      max={maxAnni}
                       // Il campo tiene il testo battuto finche' ha il fuoco.
                       // Rimandare `numYears` a ogni tasto faceva rimbalzare il
                       // valore: cancellare il 3 non cambiava lo stato, React
@@ -1290,7 +1297,7 @@ function ScenarioForm({
                         // `max` su un input numerico non impedisce di battere
                         // 9: l'orizzonte segue solo un valore dentro l'1-5 che
                         // il resto del previsionale si aspetta.
-                        if (n >= 1 && n <= 5) setNumYears(n);
+                        if (n >= 1 && n <= maxAnni) setNumYears(n);
                       }}
                       // All'uscita il campo torna a mostrare l'orizzonte vero,
                       // cosi' un «34» o un campo vuoto non restano in vista.

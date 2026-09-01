@@ -120,6 +120,14 @@ export function withDefaultsForYears(
  * col 2026 importato affermava il contrario di ciò che si legge in database.
  * L'anno base decide da quali numeri parte l'intero piano, ed è proprio il tipo
  * di frase che convince chi legge a non controllare.
+ *
+ * `years` viene da `GET /companies/{id}/years`, che elenca gli anni di **ogni**
+ * `FinancialYear`, i periodi parziali compresi: in una pratica infrannuale il
+ * 2026 c'è come bilancio di verifica a 9 mesi, e non può fare da anno base
+ * finché non viene promosso. Per questo la seconda chiosa parla di **archivio**
+ * e non di disponibilità: dice che il piano non parte dai dati più recenti —
+ * che è vero e utile in entrambi i casi — senza promettere che quell'anno sia
+ * usabile come base.
  */
 export function baseYearNote(baseYear: number, years: number[]): string | null {
   if (years.length === 0) return null;
@@ -128,5 +136,5 @@ export function baseYearNote(baseYear: number, years: number[]): string | null {
   // Anno base oltre lo storico: startup, o un anno cancellato dopo la
   // creazione dello scenario. Nessuna delle due chiose sarebbe utile.
   if (ultimo < baseYear) return null;
-  return `ultimo disponibile: ${ultimo}`;
+  return `in archivio fino al ${ultimo}`;
 }

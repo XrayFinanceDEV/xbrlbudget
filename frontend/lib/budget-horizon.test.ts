@@ -78,11 +78,13 @@ describe("baseYearNote", () => {
     expect(baseYearNote(2026, [2024, 2025, 2026])).toBe("ultimo anno disponibile");
   });
 
-  it("con anni piu' recenti in database dichiara qual e' l'ultimo", () => {
+  it("con anni piu' recenti in database dichiara fin dove arriva l'archivio", () => {
     // Era una stringa fissa: uno scenario con base 2025 su un'azienda con il
     // 2026 importato affermava il contrario di cio' che si legge in database.
-    expect(baseYearNote(2025, [2024, 2025, 2026])).toBe("ultimo disponibile: 2026");
-    expect(baseYearNote(2024, [2024, 2025, 2026])).toBe("ultimo disponibile: 2026");
+    // Parla di archivio e non di disponibilita' perche' `years` elenca anche i
+    // periodi parziali, che come anno base non si possono usare.
+    expect(baseYearNote(2025, [2024, 2025, 2026])).toBe("in archivio fino al 2026");
+    expect(baseYearNote(2024, [2024, 2025, 2026])).toBe("in archivio fino al 2026");
   });
 
   it("tace quando non c'e' niente di vero da dire", () => {

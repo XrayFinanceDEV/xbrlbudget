@@ -203,20 +203,25 @@ def bulk_upsert_assumptions(
         assumptions_saved += 1
         forecast_years_list.append(assumption_data["forecast_year"])
 
-    # 7. Commit assumptions
-    db.commit()
-
-    # 7-bis. Gli anni fuori piano si potano QUI, non solo dentro il motore: le
-    # ipotesi sono gia' committate, mentre il motore puo' non girare affatto
-    # (`auto_generate=false`) o fallire — e in quel caso la sua transazione,
-    # potatura compresa, viene annullata mentre le ipotesi salvate restano. In
-    # entrambi i casi /analysis conterebbe ancora gli anni in piu' coi numeri
-    # del salvataggio precedente, sotto un avviso che parla solo di generazione.
+    # 7. Gli anni fuori piano si potano QUI, non solo dentro il motore: le
+    # ipotesi vengono committate qui sotto, mentre il motore puo' non girare
+    # affatto (`auto_generate=false`) o fallire — e in quel caso la sua
+    # transazione, potatura compresa, viene annullata mentre le ipotesi salvate
+    # restano. In entrambi i casi /analysis conterebbe ancora gli anni in piu'
+    # coi numeri del salvataggio precedente, sotto un avviso che parla solo di
+    # generazione.
+    #
+    # Sta PRIMA del commit, non dopo: cosi' e' atomica col salvataggio delle
+    # ipotesi (una DELETE che fallisce annulla tutto e l'errore e' onesto),
+    # mentre dopo il commit avrebbe potuto restituire 500 «errore nel
+    # salvataggio» su ipotesi gia' persistite e previsionale non rigenerato.
     # L'infrannuale e' escluso: la sua proiezione e' un anno solo e non segue
     # gli anni delle ipotesi.
     if scenario.scenario_type != "infrannuale":
-        if prune_out_of_plan_forecast_years(db, scenario_id, forecast_years_list):
-            db.commit()
+        prune_out_of_plan_forecast_years(db, scenario_id, forecast_years_list)
+
+    # 7-bis. Commit assumptions
+    db.commit()
 
     # 8. Generate forecasts if requested
     forecast_generated = False

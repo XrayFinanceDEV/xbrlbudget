@@ -311,10 +311,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   l'upsert dei soli anni che hanno un'ipotesi, quindi da 5 anni a 3 restano due anni fantasma coi
   numeri del salvataggio precedente, che /analysis, il rendiconto e il report continuano a mostrare.
   `prune_out_of_plan_forecast_years` li toglie, e va chiamata in **due** punti: dentro
-  `generate_forecast` (per `POST /generate`) e nel servizio delle assumptions subito dopo il commit
-  delle ipotesi — perché con `auto_generate=false` il motore non gira affatto, e se la generazione
-  fallisce la sua transazione viene annullata mentre le ipotesi restano salvate. Un elenco di anni
-  vuoto non cancella nulla: è assenza di informazione, non un piano a zero anni.
+  `generate_forecast` (per `POST /generate`) e nel servizio delle assumptions **dentro la stessa
+  transazione del salvataggio**, prima del commit — perché con `auto_generate=false` il motore non
+  gira affatto, e se la generazione fallisce la sua transazione viene annullata mentre le ipotesi
+  restano salvate; dopo il commit, invece, una `DELETE` fallita darebbe un 500 «errore nel
+  salvataggio» su ipotesi già persistite. Un elenco di anni vuoto non cancella nulla: è assenza di
+  informazione, non un piano a zero anni.
 - **Aggiungere una voce a SP o CE non è un'operazione a un file solo.** Serve il codice negli
   elenchi, il padre, l'etichetta e la riga del Confronto: saltarne uno produce una voce che non
   compare da nessuna parte, senza alcun errore. La tabella completa è nella sezione «Layout SP/CE»

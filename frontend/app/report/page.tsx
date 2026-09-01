@@ -223,6 +223,22 @@ export default function ReportPage() {
                 </>
               )}
             </div>
+            {/*
+              Prospetti completi e rendiconto SUBITO dopo la copertina, con un
+              salto pagina forzato ciascuno: sono le pagine che il lettore apre
+              per prime. L'ordine deve restare in passo con REPORT_SECTIONS,
+              che genera il sommario.
+            */}
+            <div className="report-section print:break-before-page">
+              <ReportAppendices data={analysisData} section="bs" />
+            </div>
+            <div className="report-section print:break-before-page">
+              <ReportAppendices data={analysisData} section="is" />
+            </div>
+            <div className="report-section space-y-2 print:space-y-1 print:break-before-page">
+              <ReportCashflow data={analysisData} />
+              <ReportAIComment comment={aiComments.cashflow_comment} loading={aiCommentsLoading} />
+            </div>
             <div className="report-section space-y-2 print:space-y-1">
               <ReportDashboard data={analysisData} />
               <ReportAIComment comment={aiComments.dashboard_comment} loading={aiCommentsLoading} />
@@ -244,16 +260,6 @@ export default function ReportPage() {
             <div className="report-section space-y-2 print:space-y-1">
               <ReportBreakEven data={analysisData} />
               <ReportAIComment comment={aiComments.break_even_comment} loading={aiCommentsLoading} />
-            </div>
-            <div className="report-section space-y-2 print:space-y-1">
-              <ReportCashflow data={analysisData} />
-              <ReportAIComment comment={aiComments.cashflow_comment} loading={aiCommentsLoading} />
-            </div>
-            <div className="report-section print:break-before-page">
-              <ReportAppendices data={analysisData} section="bs" />
-            </div>
-            <div className="report-section">
-              <ReportAppendices data={analysisData} section="is" />
             </div>
             <div className="report-section print:break-before-page">
               <ReportNotes />

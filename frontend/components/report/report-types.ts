@@ -6,8 +6,25 @@ export interface ReportSection {
   shortTitle: string;
 }
 
+/**
+ * L'ordine del report, e unica fonte del sommario: `report-toc.tsx` itera
+ * questo elenco, quindi spostare un blocco nella pagina senza spostarlo qui
+ * fa puntare il sommario a pagine sbagliate.
+ *
+ * I prospetti completi e il rendiconto stanno SUBITO DOPO la copertina, non
+ * in fondo: «è scomodo leggerli ora che sono in fondo».
+ *
+ * Le appendici sono DUE voci, non una. La pagina rende due blocchi
+ * (`section="bs"` e `section="is"`), i cui ancoraggi sono `appendices-bs` e
+ * `appendices-is`: finché qui c'era il solo id `appendices`, quella voce del
+ * sommario cercava un elemento che non esiste — non scorreva da nessuna parte
+ * e l'IntersectionObserver non la evidenziava mai.
+ */
 export const REPORT_SECTIONS: ReportSection[] = [
   { id: "cover", title: "Dati Aziendali", shortTitle: "Copertina" },
+  { id: "appendices-bs", title: "Stato Patrimoniale - Dati Completi", shortTitle: "SP completo" },
+  { id: "appendices-is", title: "Conto Economico - Dati Completi", shortTitle: "CE completo" },
+  { id: "cashflow", title: "Rendiconto Finanziario", shortTitle: "Cashflow" },
   { id: "dashboard", title: "Dashboard Sintetica", shortTitle: "Dashboard" },
   { id: "composition", title: "Composizione Patrimoniale", shortTitle: "Composizione" },
   { id: "income-margins", title: "Conto Economico e Margini", shortTitle: "Margini" },
@@ -15,8 +32,6 @@ export const REPORT_SECTIONS: ReportSection[] = [
   { id: "ratios", title: "Indici Finanziari", shortTitle: "Indici" },
   { id: "scoring", title: "Scoring e Rating", shortTitle: "Scoring" },
   { id: "break-even", title: "Break Even Point", shortTitle: "BEP" },
-  { id: "cashflow", title: "Rendiconto Finanziario", shortTitle: "Cashflow" },
-  { id: "appendices", title: "Appendici - Dati Completi", shortTitle: "Appendici" },
   { id: "notes", title: "Note Metodologiche", shortTitle: "Note" },
 ];
 

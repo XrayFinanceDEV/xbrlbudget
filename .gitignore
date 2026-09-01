@@ -91,6 +91,7 @@ dmypy.json
 
 # Backups
 *.bak
+*.bak-*
 *.backup
 *.db.backup_*
 
@@ -125,6 +126,9 @@ data/uploads/
 docs/debug/
 docs/debug2/
 docs/debug3/
+inbox/
+tests/debug/
+docs/examples/
 
 # Scratch di sessione degli harness OCR/import: log e dump rigenerabili, non specifica
 /_batch_log_*.txt

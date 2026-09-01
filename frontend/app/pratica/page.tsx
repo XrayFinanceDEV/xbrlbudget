@@ -95,7 +95,7 @@ import {
   PASSIVO_CODES,
 } from "@/lib/pratica-codes";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
-import { scaledOrCarried } from "@/lib/pratica-turnover";
+import { computeProjectedBS } from "@/lib/pratica-projected-bs";
 import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
@@ -740,7 +740,6 @@ export default function InfraannualePage() {
     const refBS = new Map(comparison.balance_items.map((i) => [i.code, i]));
     const refCE = new Map(comparison.income_items.map((i) => [i.code, i]));
 
-    const refVal = (code: string) => refBS.get(code)?.reference_value ?? 0;
     const partialVal = (code: string) => refBS.get(code)?.partial_value ?? 0;
     const refCEVal = (code: string) => refCE.get(code)?.reference_value ?? 0;
     const projCEVal = (code: string) => parseFloat(overrides[code] || "0");
@@ -749,7 +748,6 @@ export default function InfraannualePage() {
     const projRevenue = projCEVal("ce01_ricavi_vendite");
     const projMaterials = projCEVal("ce05_materie_prime");
     const projServices = projCEVal("ce06_servizi");
-    const projPurchases = projMaterials + projServices;
 
     // Compute projected net profit from overrides (same logic as ProjectionTable)
     const allCostCodes = [
@@ -769,76 +767,33 @@ export default function InfraannualePage() {
     );
     const projNetProfit = projIncome - projCosts;
 
-    // Turnover ratios from historical (reference year = full 12 months)
-    const refRevenue = refCEVal("ce01_ricavi_vendite");
-    const refPurchases = refCEVal("ce05_materie_prime") + refCEVal("ce06_servizi");
+    // Rapporti di rotazione, plug di cassa e arrotondamento vivono in
+    // `lib/pratica-projected-bs.ts`: modulo puro, con la sua suite, così
+    // l'anteprima non può divergere dall'ordine del motore (righe arrotondate
+    // PRIMA, cassa come residuo DOPO — vedi
+    // `ForecastEngine._normalize_balance_sheet_cents`).
+    const { values: projValues } = computeProjectedBS({
+      partial: Object.fromEntries(
+        comparison.balance_items.map((i) => [i.code, i.partial_value ?? 0])
+      ),
+      reference: Object.fromEntries(
+        comparison.balance_items.map((i) => [i.code, i.reference_value ?? 0])
+      ),
+      hasReference: comparison.has_reference,
+      refRevenue: refCEVal("ce01_ricavi_vendite"),
+      refMaterials: refCEVal("ce05_materie_prime"),
+      refServices: refCEVal("ce06_servizi"),
+      projRevenue,
+      projMaterials,
+      projServices,
+      projNetProfit,
+    });
 
-    // Projected working capital items. Without a reference year there are no
-    // turnover ratios, so we carry the partial-year stocks (matches the backend
-    // pure-annualization mode).
-    //
-    // Con un anno di riferimento, il rapporto passa comunque da
-    // `scaledOrCarried`: un denominatore trascurabile (AIC SRL fattura su
-    // ce04 e porta ce01 = 100,92 €) genera un moltiplicatore da 10.258x che
-    // gonfiava i crediti a 166,68 M. Stessa regola del backend
-    // (`_turnover_ratio` in intra_year_engine.py), altrimenti lo schermo e il
-    // record persistito raccontano due bilanci diversi.
-    const hasRef = comparison.has_reference;
-    const sp05 = hasRef && projMaterials !== 0
-      ? scaledOrCarried(refVal("sp05_rimanenze"), refCEVal("ce05_materie_prime"), projMaterials, partialVal("sp05_rimanenze"))
-      : partialVal("sp05_rimanenze");
-    const sp06 = hasRef && projRevenue !== 0
-      ? scaledOrCarried(refVal("sp06_crediti_breve"), refRevenue, projRevenue, partialVal("sp06_crediti_breve"))
-      : partialVal("sp06_crediti_breve");
-    let sp16 = hasRef && projPurchases !== 0
-      ? scaledOrCarried(refVal("sp16_debiti_breve"), refPurchases, projPurchases, partialVal("sp16_debiti_breve"))
-      : partialVal("sp16_debiti_breve");
-
-    // Other items from infrannuale (partial year)
-    const sp01 = partialVal("sp01_crediti_soci");
-    const sp02 = partialVal("sp02_immob_immateriali");
-    const sp03 = partialVal("sp03_immob_materiali");
-    const sp04 = partialVal("sp04_immob_finanziarie");
-    const sp07 = partialVal("sp07_crediti_lungo");
-    const sp08 = partialVal("sp08_attivita_finanziarie");
-    const sp10 = partialVal("sp10_ratei_risconti_attivi");
-    const sp11 = partialVal("sp11_capitale");
-    const sp12 = partialVal("sp12_riserve");
-    const sp14 = partialVal("sp14_fondi_rischi");
-    const sp15 = partialVal("sp15_tfr");
-    const sp17 = partialVal("sp17_debiti_lungo");
-    const sp18 = partialVal("sp18_ratei_risconti_passivi");
-
-    // sp13 = projected net profit
-    const sp13 = projNetProfit;
-
-    // Cash plug: Passivo - Attivo (without cash)
-    const totalAssetNoCash = sp01 + sp02 + sp03 + sp04 + sp05 + sp06 + sp07 + sp08 + sp10;
-    const totalLiabilities = sp11 + sp12 + sp13 + sp14 + sp15 + sp16 + sp17 + sp18;
-    let sp09 = totalLiabilities - totalAssetNoCash;
-
-    if (sp09 < 0) {
-      // Negative cash → increase short-term debt
-      sp16 = sp16 + Math.abs(sp09);
-      sp09 = 0;
-    }
-
-    // Build projected items with same structure as comparison
-    const projValues: Record<string, number> = {
-      sp01_crediti_soci: sp01, sp02_immob_immateriali: sp02,
-      sp03_immob_materiali: sp03, sp04_immob_finanziarie: sp04,
-      sp05_rimanenze: sp05, sp06_crediti_breve: sp06,
-      sp07_crediti_lungo: sp07, sp08_attivita_finanziarie: sp08,
-      sp09_disponibilita_liquide: sp09, sp10_ratei_risconti_attivi: sp10,
-      sp11_capitale: sp11, sp12_riserve: sp12, sp13_utile_perdita: sp13,
-      sp14_fondi_rischi: sp14, sp15_tfr: sp15, sp16_debiti_breve: sp16,
-      sp17_debiti_lungo: sp17, sp18_ratei_risconti_passivi: sp18,
-    };
-
-    const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
     const projItems: IntraYearComparisonItem[] = comparison.balance_items.map((item) => ({
       ...item,
-      annualized_value: Math.round(projValues[item.code] ?? partialVal(item.code)),
+      // I 18 aggregati arrivano già arrotondati e quadrati; le sotto-voci non
+      // sono proiettate e si portano avanti dal periodo parziale.
+      annualized_value: projValues[item.code] ?? Math.round(partialVal(item.code)),
     }));
 
     setProjectedBS(buildBalanceItemsWithTotals(projItems));

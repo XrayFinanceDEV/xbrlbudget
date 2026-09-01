@@ -59,6 +59,7 @@ temp/
 # Claude Code (local settings/config stay untracked; project skills are versioned)
 .claude/*
 !.claude/skills/
+!.claude/agents/
 .playwright-mcp/
 
 # Test outputs
@@ -135,3 +136,6 @@ docs/examples/
 /_ocr_all.jsonl
 /_ocr_res_*.jsonl
 /_uniq_pdfs.txt
+
+# Rapporti del collaudatore (rigenerabili)
+.collaudo/

@@ -80,13 +80,26 @@ class ForecastEngine:
         return result
 
     @classmethod
-    def _normalize_balance_sheet_cents(cls, values: Dict) -> Dict:
+    def _normalize_balance_sheet_cents(
+        cls, values: Dict, *, recompute_cash: bool = True
+    ) -> Dict:
         """Make persisted SP hierarchy and Attivo/Passivo exact to the cent.
 
         The engine calculates with higher precision while the ORM stores Numeric(15,2).
         Rounding every row independently could leave a one-cent mismatch in later
         forecast years.  Absorb only those rounding residuals in the generic detail
         bucket, then recompute cash from the rounded aggregate rows.
+
+        `recompute_cash=False` keeps the first two steps and drops the third.  It
+        exists for the intra-year engine, whose cash plug clamps at zero and
+        raises `unfunded_financing_requirement` rather than creating short-term
+        debt: recomputing sp09 as Sigma passivo - Sigma attivo would put the
+        negative residual straight back and undo that clamp.  Quantization and
+        residual absorption have nothing to do with the clamp, so they must keep
+        running — a record whose sub-fields do not sum to their own aggregate is
+        read downstream (`reconcileSubfields`, the anti-regression guard of
+        `PUT /adjustments`) and starts out disadvantaged against a guard that is
+        relative, not absolute.
         """
         result = cls._quantize_values(values)
         groups = {
@@ -198,7 +211,9 @@ class ForecastEngine:
             "sp14_fondi_rischi", "sp15_tfr", "sp16_debiti_breve",
             "sp17_debiti_lungo", "sp18_ratei_risconti_passivi",
         )
-        if all(field in result for field in asset_fields_without_cash + liability_fields):
+        if recompute_cash and all(
+            field in result for field in asset_fields_without_cash + liability_fields
+        ):
             result["sp09_disponibilita_liquide"] = sum(
                 (result[field] for field in liability_fields), Decimal("0")
             ) - sum(

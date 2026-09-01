@@ -9,6 +9,12 @@ import {
   updateCompany,
   deleteCompany,
 } from "@/lib/api";
+import {
+  ingressoNuovaPratica,
+  ingressoRiprendi,
+  type IngressoPratica,
+  type WorkflowPratica,
+} from "@/lib/pratica-ingresso";
 import type { CompanyWithScenarios, ScenarioSummary } from "@/types/api";
 import { getSectorName } from "@/lib/formatters";
 import { toast } from "sonner";
@@ -25,6 +31,9 @@ import {
   ArrowRight,
   RefreshCw,
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +48,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -47,7 +62,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/page-header";
 
@@ -59,6 +73,40 @@ const SECTOR_OPTIONS: Record<number, string> = {
   5: "Immobiliare",
   6: "Edilizia",
 };
+
+/**
+ * Le DUE voci del tipo di pratica, in linea.
+ *
+ * Un solo componente per i due punti in cui una pratica nasce — sotto la riga
+ * di un'azienda e subito dopo «Nuova azienda» — perché la regola è una sola: il
+ * tipo si chiede sempre DOPO aver chiesto la pratica, mai prima. Erano due card
+ * a tutta larghezza, ed erano il terzo modo di iniziare: quello che entrava con
+ * `companyId: null`.
+ */
+function SceltaTipoPratica({
+  onScegli,
+  onAnnulla,
+}: {
+  onScegli: (workflow: WorkflowPratica) => void;
+  onAnnulla?: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-border py-3">
+      <span className="text-sm text-muted-foreground">Che tipo di pratica?</span>
+      <Button size="sm" variant="outline" onClick={() => onScegli("bilancio")}>
+        <CalendarRange className="h-4 w-4 mr-1" /> Da bilancio
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => onScegli("startup")}>
+        <Rocket className="h-4 w-4 mr-1" /> Startup
+      </Button>
+      {onAnnulla && (
+        <Button size="sm" variant="ghost" onClick={onAnnulla}>
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
   const router = useRouter();
@@ -77,7 +125,10 @@ export default function Home() {
   } = useApp();
   const { startPratica } = usePratica();
 
-  const [showNewPratica, setShowNewPratica] = useState(false);
+  // Tendina: una sola azienda aperta per volta.
+  const [openCompanyId, setOpenCompanyId] = useState<number | null>(null);
+  // Quale «Nuova pratica» sta chiedendo il tipo.
+  const [chooserCompanyId, setChooserCompanyId] = useState<number | null>(null);
 
   // Create-company form
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -85,12 +136,16 @@ export default function Home() {
   const [newTaxId, setNewTaxId] = useState("");
   const [newSector, setNewSector] = useState(1);
   const [saving, setSaving] = useState(false);
+  // L'azienda appena creata, in attesa che si scelga il tipo della sua prima
+  // pratica: nessuno crea un'azienda per guardarla.
+  const [createdCompanyId, setCreatedCompanyId] = useState<number | null>(null);
 
   // Edit-company form
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editTaxId, setEditTaxId] = useState("");
   const [editSector, setEditSector] = useState(1);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // Landing on the home page always exits startup mode.
   useEffect(() => {
@@ -114,6 +169,22 @@ export default function Home() {
     refreshCompanies();
   }, [refreshCompanies]);
 
+  /**
+   * L'unico punto in cui si entra nel percorso.
+   *
+   * `setSelectedCompanyId` riceve sempre un id vero: non c'è più un ramo che
+   * azzera la selezione per difendersi dall'auto-selezione di `AppContext`
+   * (`companies[0]` quando non c'è né selezione né pratica attiva). Quella
+   * regola resta dov'è, ma qui non ha più nulla da disfare — l'azienda è
+   * decisa prima di partire, in tutti e tre gli ingressi.
+   */
+  const entra = (ingresso: IngressoPratica) => {
+    setStartupMode(ingresso.startupMode);
+    setSelectedCompanyId(ingresso.pratica.companyId);
+    startPratica(ingresso.pratica);
+    router.push(ingresso.route);
+  };
+
   const handleCreate = async () => {
     if (!newName.trim()) {
       toast.error("Il nome dell'azienda è obbligatorio");
@@ -126,11 +197,12 @@ export default function Home() {
         tax_id: newTaxId.trim() || undefined,
         sector: newSector,
       });
-      setSelectedCompanyId(company.id);
-      setShowCreateForm(false);
       setNewName("");
       setNewTaxId("");
       setNewSector(1);
+      // Creata: ora si chiede il tipo, con le STESSE due voci della tendina, e
+      // si entra. La schermata non torna indietro.
+      setCreatedCompanyId(company.id);
       toast.success("Azienda creata con successo");
       await refreshCompanies();
     } catch (err: unknown) {
@@ -177,146 +249,80 @@ export default function Home() {
     }
   };
 
-  // Avvia una pratica SU un'azienda che esiste già.
-  //
-  // Senza questo, un'azienda creata da "Nuova azienda" (o importata e poi
-  // rimasta senza scenari) era irraggiungibile: le due card di "Nuova pratica"
-  // partono per forza da `companyId: null`, AnagraficheStep con companyId null
-  // è un form di CREAZIONE (ne avrebbe creata una seconda) e lo step Import è
-  // bloccato finché `pratica.companyId` è null. L'unico bottone sulla scheda
-  // azienda era "Riprendi", che esiste solo per gli scenari già creati.
-  // AnagraficheStep dice "la scelta è già avvenuta sulla home": questo è il
-  // punto in cui avviene.
-  const startForCompany = (companyId: number) => {
-    setStartupMode(false);
-    setSelectedCompanyId(companyId);
-    startPratica({
-      workflow: "bilancio",
-      companyId,
-      analysisStep: "anagrafiche",
-    });
-    router.push("/pratica");
+  const nuovaPratica = (companyId: number, workflow: WorkflowPratica) => {
+    setChooserCompanyId(null);
+    setCreatedCompanyId(null);
+    setShowCreateForm(false);
+    entra(ingressoNuovaPratica(companyId, workflow));
   };
 
-  // Riprendi una pratica: popola il context, poi apri il posto giusto.
-  // Uno scenario budget legacy non ha una fase ANALISI ricostruibile (nessun
-  // infrannualeScenarioId, quindi nessun rettifiche_log da riaprire): si apre
-  // direttamente sul budget, e lo stepper nasconde del tutto la fase Analisi
-  // invece di mostrarla abilitata-ma-rotta (vedi pratica-steps.ts,
-  // isLegacyBudgetResume). Nota: il gate rettifiche NON si propaga a nessuno
-  // dei 6 step PREVISIONALE per questo percorso — vedi CLAUDE.md.
-  const resume = (companyId: number, s: ScenarioSummary) => {
-    setSelectedCompanyId(companyId);
-    const isInfra = s.scenario_type === "infrannuale";
-    startPratica({
-      workflow: "bilancio",
-      companyId,
-      fiscalYear: isInfra ? s.base_year + 1 : s.base_year,
-      periodMonths: isInfra ? s.period_months ?? 12 : 12,
-      infrannualeScenarioId: isInfra ? s.id : null,
-      budgetScenarioId: isInfra ? null : s.id,
-      analysisStep: isInfra ? "rettifiche" : "anagrafiche",
-    });
-    router.push(isInfra ? "/pratica" : "/budget");
+  const riprendi = (companyId: number, s: ScenarioSummary) => {
+    entra(ingressoRiprendi(companyId, s));
   };
+
+  const daEliminare = companies.find((c) => c.id === deletingId) ?? null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <PageHeader
         title="Aziende & Pratiche"
-        description="Le tue aziende e le relative pratiche di budget e infrannuale"
+        description="Le tue pratiche, raggruppate per azienda"
         icon={<Building2 className="h-6 w-6" />}
       >
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowCreateForm((v) => !v)}>
-            <Plus className="h-4 w-4 mr-1" /> Nuova azienda
-          </Button>
-          <Button onClick={() => setShowNewPratica((v) => !v)}>
-            <Plus className="h-4 w-4 mr-1" /> Nuova pratica
-          </Button>
-        </div>
+        {/*
+          Una sola azione in testata. «Nuova pratica» qui non esiste più: era
+          il terzo modo di iniziare, entrava con `companyId: null`, e da lì
+          Anagrafiche è un form di sola creazione — è così che nasceva
+          l'azienda doppia. Una pratica si chiede solo DENTRO un'azienda.
+        */}
+        <Button onClick={() => { setShowCreateForm((v) => !v); setCreatedCompanyId(null); }}>
+          <Plus className="h-4 w-4 mr-1" /> Nuova azienda
+        </Button>
       </PageHeader>
-
-      {showNewPratica && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <Card className="cursor-pointer transition-colors hover:border-primary/50"
-            onClick={() => {
-              setStartupMode(false);
-              // Riparte da una selezione pulita: senza questo l'auto-selezione di
-              // AppContext (companies[0]) fa aprire Anagrafiche come EDIT di
-              // un'azienda a caso invece che come nuova pratica.
-              setSelectedCompanyId(null);
-              // companyId resta null: l'azienda si sceglie o si crea nello step Anagrafiche.
-              startPratica({ workflow: "bilancio", companyId: null, analysisStep: "anagrafiche" });
-              router.push("/pratica");
-            }}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarRange className="h-5 w-5 text-primary" /> Da bilancio
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Bilancio ufficiale o bilancio di verifica infrannuale. Import, rettifiche,
-              confronto e budget in un unico percorso.
-              <Button variant="outline" size="sm" className="mt-3 w-full">
-                Avvia percorso <ArrowRight className="h-4 w-4" />
-              </Button>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer transition-colors hover:border-primary/50"
-            onClick={() => {
-              setStartupMode(true);
-              setSelectedCompanyId(null);
-              startPratica({ workflow: "startup", companyId: null, analysisStep: "anagrafiche" });
-              router.push("/budget");
-            }}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Rocket className="h-5 w-5 text-primary" /> Startup
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Business plan senza bilancio storico.
-              <Button variant="outline" size="sm" className="mt-3 w-full">
-                Crea business plan <ArrowRight className="h-4 w-4" />
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Create-company form */}
       {showCreateForm && (
         <Card className="mb-6">
           <CardHeader><CardTitle className="text-base">Nuova Azienda</CardTitle></CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-              <div className="space-y-1">
-                <Label>Nome *</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="es. ROSSI S.R.L." />
+            {createdCompanyId === null ? (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div className="space-y-1">
+                  <Label>Nome *</Label>
+                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="es. ROSSI S.R.L." />
+                </div>
+                <div className="space-y-1">
+                  <Label>Partita IVA</Label>
+                  <Input value={newTaxId} onChange={(e) => setNewTaxId(e.target.value)} placeholder="es. 12345678901" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Settore *</Label>
+                  <Select value={newSector.toString()} onValueChange={(v) => setNewSector(parseInt(v))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(SECTOR_OPTIONS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>{value}. {label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleCreate} disabled={saving}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Crea
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowCreateForm(false)}><X className="h-4 w-4" /></Button>
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Partita IVA</Label>
-                <Input value={newTaxId} onChange={(e) => setNewTaxId(e.target.value)} placeholder="es. 12345678901" />
-              </div>
-              <div className="space-y-1">
-                <Label>Settore *</Label>
-                <Select value={newSector.toString()} onValueChange={(v) => setNewSector(parseInt(v))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(SECTOR_OPTIONS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{value}. {label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleCreate} disabled={saving}>
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Crea
-                </Button>
-                <Button variant="outline" onClick={() => setShowCreateForm(false)}><X className="h-4 w-4" /></Button>
-              </div>
-            </div>
+            ) : (
+              // Creata: si entra subito nella sua prima pratica. Il tipo si
+              // chiede anche qui, e non si dà per scontato l'import: una
+              // startup è per definizione il caso in cui un bilancio storico
+              // NON esiste, ed è proprio quando si crea un'azienda nuova.
+              <SceltaTipoPratica
+                onScegli={(workflow) => nuovaPratica(createdCompanyId, workflow)}
+                onAnnulla={() => { setCreatedCompanyId(null); setShowCreateForm(false); }}
+              />
+            )}
           </CardContent>
         </Card>
       )}
@@ -360,12 +366,14 @@ export default function Home() {
         </div>
       ) : companies.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">
-          Nessuna azienda presente. Crea la prima azienda o avvia una nuova pratica.
+          Nessuna azienda presente. Crea la prima azienda per iniziare.
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {companies.map((company) => {
             const isEditing = editingId === company.id;
+            const isOpen = openCompanyId === company.id;
+            const pratiche = company.scenarios;
             return (
               <Card key={company.id}>
                 <CardHeader className="pb-3">
@@ -399,52 +407,69 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="flex items-center justify-between gap-3">
-                      <CardTitle className="flex items-center gap-3 text-base">
-                        {company.name}
-                        <Badge variant="secondary">{getSectorName(company.sector)}</Badge>
-                        {company.tax_id && <span className="text-xs font-normal text-muted-foreground">P.IVA {company.tax_id}</span>}
-                      </CardTitle>
-                      <div className="flex items-center gap-1">
-                        <Button size="sm" variant="outline" onClick={() => startForCompany(company.id)}>
-                          <Plus className="h-3 w-3 mr-1" /> Nuova pratica
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handleStartEdit(company)}>
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="ghost"><Trash2 className="h-3 w-3 text-destructive" /></Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Elimina azienda</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Eliminare &quot;{company.name}&quot; e tutti i dati associati
-                                (bilanci, scenari, previsioni)? Questa azione non può essere annullata.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Annulla</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(company.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                Elimina
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
+                      {/*
+                        La riga INTERA apre e chiude il gruppo: il bersaglio è
+                        tutta la riga, non la sola freccia.
+                      */}
+                      <button
+                        type="button"
+                        className="flex flex-1 items-center gap-3 text-left"
+                        onClick={() => setOpenCompanyId(isOpen ? null : company.id)}
+                        aria-expanded={isOpen}
+                      >
+                        {isOpen
+                          ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                        <CardTitle className="flex flex-wrap items-center gap-3 text-base">
+                          {company.name}
+                          <Badge variant="secondary">{getSectorName(company.sector)}</Badge>
+                          {company.tax_id && (
+                            <span className="text-xs font-normal text-muted-foreground">
+                              P.IVA {company.tax_id}
+                            </span>
+                          )}
+                        </CardTitle>
+                        <span className="text-xs text-muted-foreground">
+                          {pratiche.length === 0
+                            ? "nessuna pratica"
+                            : `${pratiche.length} ${pratiche.length === 1 ? "pratica" : "pratiche"}`}
+                        </span>
+                      </button>
+                      {/*
+                        Manutenzione, non un modo di iniziare un lavoro: dietro
+                        un ⋯ non compete con «Riprendi» e «Nuova pratica».
+                        Resta però RAGGIUNGIBILE su ogni azienda, gruppi vuoti
+                        compresi — `deleteCompany` è chiamata da questo solo
+                        punto in tutta l'app, e con un tetto di 50 aziende
+                        un'azienda invisibile e ineliminabile occuperebbe una
+                        casella per sempre.
+                      */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="ghost" aria-label={`Azioni su ${company.name}`}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleStartEdit(company)}>
+                            <Pencil className="h-4 w-4 mr-2" /> Rinomina
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeletingId(company.id)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" /> Elimina
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   )}
                 </CardHeader>
-                <CardContent className="pt-0">
-                  {company.scenarios.length === 0 ? (
-                    <p className="text-sm text-muted-foreground border-t border-dashed border-border pt-3">
-                      Nessuna pratica. Usa &quot;Nuova pratica&quot; qui sopra per importare un
-                      bilancio di questa azienda.
-                    </p>
-                  ) : (
-                    company.scenarios.map((s) => (
-                      <div key={s.id} className="flex items-center gap-3 border-t border-dashed border-border py-2 text-sm">
+
+                {isOpen && !isEditing && (
+                  <CardContent className="pt-0">
+                    {pratiche.map((s) => (
+                      <div key={s.id} className="flex flex-wrap items-center gap-3 border-t border-dashed border-border py-2 text-sm">
                         <Badge variant={s.has_forecast ? "default" : "secondary"}>
                           {s.has_forecast ? "in corso" : "bozza"}
                         </Badge>
@@ -455,18 +480,59 @@ export default function Home() {
                             : "Budget"} · base {s.base_year}
                         </span>
                         <span className="flex-1" />
-                        <Button size="sm" variant="outline" onClick={() => resume(company.id, s)}>
+                        <Button size="sm" variant="outline" onClick={() => riprendi(company.id, s)}>
                           Riprendi <ArrowRight className="h-4 w-4" />
                         </Button>
                       </div>
-                    ))
-                  )}
-                </CardContent>
+                    ))}
+                    {chooserCompanyId === company.id ? (
+                      <SceltaTipoPratica
+                        onScegli={(workflow) => nuovaPratica(company.id, workflow)}
+                        onAnnulla={() => setChooserCompanyId(null)}
+                      />
+                    ) : (
+                      <div className="border-t border-dashed border-border pt-3">
+                        <Button size="sm" variant="outline" onClick={() => setChooserCompanyId(company.id)}>
+                          <Plus className="h-4 w-4 mr-1" /> Nuova pratica
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                )}
               </Card>
             );
           })}
         </div>
       )}
+
+      {/*
+        Un solo dialogo per tutte le righe, guidato da `deletingId`: il menù ⋯
+        si chiude quando lo si sceglie, e un AlertDialog annidato dentro un
+        DropdownMenuItem sparirebbe con lui prima di comparire.
+
+        Il testo NON si abbrevia: la cancellazione è in cascata
+        (`cascade="all, delete-orphan"` su ogni relazione sotto Company), e
+        deve nominare per esteso ciò che porta via.
+      */}
+      <AlertDialog open={daEliminare !== null} onOpenChange={(open) => !open && setDeletingId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Elimina azienda</AlertDialogTitle>
+            <AlertDialogDescription>
+              Eliminare &quot;{daEliminare?.name}&quot; e tutti i dati associati
+              (bilanci, scenari, previsioni)? Questa azione non può essere annullata.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deletingId !== null) handleDelete(deletingId); setDeletingId(null); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Elimina
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

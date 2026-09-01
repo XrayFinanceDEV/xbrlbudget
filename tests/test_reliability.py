@@ -137,3 +137,77 @@ def test_unclassified_mass_is_carried_through_and_json_safe():
     payload = r.to_dict()
     json.dumps(payload)          # must not raise
     assert payload["unclassified_mass"] == "4321.55"
+
+
+# --- massa non classificata: due zeri che non sono lo stesso zero ------------
+#
+# #18 ha introdotto `_unclassified_mass_measured` per distinguere «il documento
+# stampa un totale di sezione, l'abbiamo confrontato, non manca massa» da «il
+# documento non stampa alcun totale, quindi non c'era nulla contro cui
+# misurare». La distinzione pero' non arrivava a nessuno: `assess` leggeva il
+# solo importo, e a valle i due casi restavano indistinguibili — che e'
+# esattamente il difetto che la chiave doveva togliere.
+
+
+def test_zero_misurato_e_un_verdetto_positivo():
+    r = assess(_bs(_unclassified_mass=D("0"),
+                   _unclassified_mass_measured=D("1")), {})
+    assert r.massa_non_classificata is AccountStatus.VERIFIED
+    assert r.unclassified_mass == D("0")
+
+
+def test_zero_non_misurato_non_e_un_verdetto_positivo_ma_resta_derived():
+    # Il file di #18 (AMB AMBIENTA) non stampa nessuna riga «Totale …»: i
+    # totali stanno nelle intestazioni di sezione. E' un layout legittimo e
+    # diffuso, quindi «non lo so» non puo' diventare UNRELIABLE — un verdetto
+    # negativo vuole una contraddizione, non un controllo assente.
+    r = assess(_bs(_unclassified_mass=D("0"),
+                   _unclassified_mass_measured=D("0")), {})
+    assert r.massa_non_classificata is AccountStatus.DERIVED
+    assert r.massa_non_classificata is not AccountStatus.VERIFIED
+
+
+def test_chiave_measured_assente_vale_non_misurato():
+    # Una chiave assente a valle vale zero, quindi tacere equivale a
+    # dichiararsi puliti: qui vale «non lo so», non «pulito».
+    r = assess(_bs(_unclassified_mass=D("0")), {})
+    assert r.massa_non_classificata is AccountStatus.DERIVED
+
+
+def test_massa_misurata_e_materiale_e_una_contraddizione():
+    # 178.663,25 di ratei passivi stampati che non arrivano in nessun campo,
+    # contro un totale di controllo che li stampa: questa e' una
+    # contraddizione, non un controllo mancante.
+    r = assess(_bs(_unclassified_mass=D("178663.25"),
+                   _unclassified_mass_measured=D("1")), {})
+    assert r.massa_non_classificata is AccountStatus.UNRELIABLE
+
+
+def test_massa_misurata_ma_sotto_soglia_resta_verificata():
+    # Soglia di materialita': max(1.000; 0,1% dell'attivo) = 2.000 su 2.000.000.
+    r = assess(_bs(_unclassified_mass=D("500"),
+                   _unclassified_mass_measured=D("1")), {})
+    assert r.massa_non_classificata is AccountStatus.VERIFIED
+
+
+def test_to_dict_resta_compatibile_e_porta_la_distinzione():
+    import json
+    payload = assess(_bs(_unclassified_mass=D("4321.55"),
+                         _unclassified_mass_measured=D("1")), {}).to_dict()
+    json.dumps(payload)
+    # I lettori di oggi non si rompono: la chiave storica e il suo formato
+    # (stringa) restano quelli.
+    assert payload["unclassified_mass"] == "4321.55"
+    assert payload["massa_non_classificata"]["status"] == "unreliable"
+    assert isinstance(payload["massa_non_classificata"]["reason"], str)
+
+
+def test_la_massa_non_classificata_non_entra_nel_cancello_dei_tre_conti():
+    # `all_critical_ok` e' il verdetto sui TRE conti che decidono ogni KPI, ed
+    # e' letto dal backend per conservare l'esito d'importazione: allargarlo a
+    # un quarto conto cambierebbe il gating su file reali senza che nessuno
+    # l'abbia deciso. La distinzione si legge dal proprio campo.
+    r = assess(_bs(_unclassified_mass=D("178663.25"),
+                   _unclassified_mass_measured=D("1")), {})
+    assert r.massa_non_classificata is AccountStatus.UNRELIABLE
+    assert r.all_critical_ok is True

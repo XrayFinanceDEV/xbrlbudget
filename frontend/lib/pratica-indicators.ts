@@ -33,6 +33,13 @@ export interface IndicatorSet {
   // «oneri nulli» da «ricavi nulli», e su un punteggio invertito i due
   // porterebbero allo stesso verdetto di eccellenza.
   _revenue_raw: number;
+  // I tre denominatori che servono solo alla RESA dei grafici, non al
+  // punteggio: `DENOMINATORE_DEL_RAPPORTO` li legge per rendere `null` — e non
+  // zero — `roi`, `roe` e `dscr` quando il rapporto non esiste. Stessa ragione
+  // di `_ebitda_raw` e `_revenue_raw`, che sono nati per questo.
+  _total_assets_raw: number;
+  _equity_raw: number;
+  _oneri_finanziari_raw: number;
 }
 
 // Linear interpolation score: 0 at `low`, 1 at `high`, clamped [0,1]
@@ -169,6 +176,9 @@ export function computeIndicators(
     _quick_ratio: safeDivide(currentAssets - inventory, currentLiabilities),
     _equity_over_fixed: safeDivide(equity, fixedAssets) * 100,
     _revenue_raw: revenue,
+    _total_assets_raw: totalAssets,
+    _equity_raw: equity,
+    _oneri_finanziari_raw: oneriFinanziari,
   };
 }
 
@@ -322,6 +332,18 @@ const DENOMINATORE_DEL_RAPPORTO: Partial<Record<keyof IndicatorSet, keyof Indica
   ebitda_margin: "_revenue_raw",
   materials_revenue: "_revenue_raw",
   services_revenue: "_revenue_raw",
+  // ROI e ROE: uno zero qui legge «nessun ritorno sul capitale», che e' un
+  // giudizio sull'azienda, mentre un attivo o un patrimonio netto nulli dicono
+  // solo che il rapporto non esiste. Su patrimonio netto NEGATIVO il ROE non ha
+  // nemmeno significato — un utile diviso un PN negativo cambia segno per il
+  // denominatore, non per la redditivita' — e il confronto `<= 0` lo esclude.
+  roi: "_total_assets_raw",
+  roe: "_equity_raw",
+  // Il DSCR e' il caso opposto agli altri, ed e' il piu' insidioso: zero oneri
+  // finanziari significa copertura INFINITA, cioe' il valore migliore
+  // possibile, e `safeDivide` lo rende come zero, cioe' il peggiore. L'azienda
+  // piu' sana su questo indicatore apparirebbe come la meno solvibile.
+  dscr: "_oneri_finanziari_raw",
 };
 
 /**

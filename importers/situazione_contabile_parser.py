@@ -4433,6 +4433,11 @@ def _hier_reconstruct(pages_data, full: str):
         if _severity == 'recorded':
             material += abs(_amt)
     bs['_unclassified_mass'] = material
+    # Misurata, non assente: questo percorso SA quale massa letta e' finita in un
+    # secchio generico, quindi lo zero qui significa «pulito» e non «non lo so».
+    # reliability.assess distingue i due casi da questa chiave, e una chiave
+    # assente vale «non misurato» — tacere non puo' valere come promessa.
+    bs['_unclassified_mass_measured'] = Decimal('1')
 
     pas_sum = sum((bs.get(k, Z) for k in ('sp11', 'sp12', 'sp14', 'sp15', 'sp16', 'sp17', 'sp18')), Z)
     sp13 = att_sum - pas_sum               # result as the SP gap → attivo == passivo
@@ -5160,6 +5165,11 @@ def build_sp_from_vision(rows, utile: Decimal) -> Dict[str, Decimal]:
         if _severity == 'recorded':
             material += abs(_amt)
     bs['_unclassified_mass'] = material
+    # Misurata, non assente: questo percorso SA quale massa letta e' finita in un
+    # secchio generico, quindi lo zero qui significa «pulito» e non «non lo so».
+    # reliability.assess distingue i due casi da questa chiave, e una chiave
+    # assente vale «non misurato» — tacere non puo' valere come promessa.
+    bs['_unclassified_mass_measured'] = Decimal('1')
     return bs
 
 

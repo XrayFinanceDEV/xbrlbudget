@@ -569,13 +569,25 @@ class IntraYearEngine:
         # balance-sheet values must not be reconstructed differently before the
         # scenario is promoted into the budget workflow.
         projected_bs = ForecastEngine._apply_sp_overrides(projected_bs, assumption)
-        if not any(
+        # Quantizzazione e assorbimento dei residui girano SEMPRE: sono due
+        # operazioni di arrotondamento, indifferenti allo stato diagnostico, e
+        # il record le vuole soprattutto qui — e' il ramo in cui il foglio non
+        # quadra per costruzione, quindi uno scarto da arrotondamento sui
+        # sotto-campi sparirebbe dentro uno sbilancio piu' grande e gia'
+        # dichiarato, senza che nessun controllo lo veda.
+        #
+        # Resta condizionato il solo terzo passo, il ricalcolo di sp09 come
+        # Sigma passivo - Sigma attivo: su una diagnostica di errore
+        # rimetterebbe in cassa il residuo negativo che `_project_balance_sheet`
+        # ha appena azzerato, disfacendo il clamp e trasformando in silenzio un
+        # fabbisogno finanziario scoperto in un saldo di cassa negativo.
+        ha_errori = any(
             diagnostic.get("severity") == "error"
             for diagnostic in self._diagnostics
-        ):
-            projected_bs = ForecastEngine._normalize_balance_sheet_cents(
-                projected_bs
-            )
+        )
+        projected_bs = ForecastEngine._normalize_balance_sheet_cents(
+            projected_bs, recompute_cash=not ha_errori
+        )
 
         # Store as ForecastYear
         self._save_forecast(scenario_id, projection_year, projected_bs, projected_inc)

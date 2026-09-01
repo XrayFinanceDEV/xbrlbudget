@@ -70,9 +70,21 @@ class ReliabilityReport:
     debiti_banche: AccountStatus
     debiti_banche_reason: str
     unclassified_mass: Decimal = Z
+    # Il verdetto sulla massa non classificata e' separato dall'importo perche'
+    # zero da solo non dice nulla: puo' essere «misurato contro il totale
+    # stampato, non manca massa» oppure «nessun totale da confrontare».
+    massa_non_classificata: AccountStatus = AccountStatus.DERIVED
+    massa_non_classificata_reason: str = (
+        'nessuna misura della massa non classificata dichiarata')
 
     @property
     def all_critical_ok(self) -> bool:
+        # Deliberatamente i TRE conti storici, non quattro. Questo flag e' letto
+        # dal backend per conservare l'esito d'importazione
+        # (backend/app/api/v1/financial_years.py): allargarlo alla massa non
+        # classificata cambierebbe il gating su file reali senza che la
+        # decisione sia stata presa da nessuno. La distinzione si legge dal
+        # proprio campo, che e' il punto di questo verdetto.
         return AccountStatus.UNRELIABLE not in (
             self.immobilizzazioni, self.patrimonio_netto, self.debiti_banche)
 
@@ -84,7 +96,11 @@ class ReliabilityReport:
                                  'reason': self.patrimonio_netto_reason},
             'debiti_banche': {'status': self.debiti_banche.value,
                               'reason': self.debiti_banche_reason},
+            # Chiave e formato storici: i lettori di oggi non si rompono.
             'unclassified_mass': str(self.unclassified_mass),
+            'massa_non_classificata': {
+                'status': self.massa_non_classificata.value,
+                'reason': self.massa_non_classificata_reason},
             'all_critical_ok': self.all_critical_ok,
         }
 
@@ -144,6 +160,38 @@ def _assess_debiti_banche(bs: dict):
             'nessuna esposizione bancaria e nessuno scarto da attribuire')
 
 
+def _assess_massa_non_classificata(bs: dict):
+    """Due zeri che non sono lo stesso zero.
+
+    `_unclassified_mass` a zero significa «pulito» solo se un totale di
+    controllo esisteva davvero: senza, non c'era nulla contro cui misurare, e
+    la risposta onesta e' «non lo so». La distinzione arriva da
+    `_unclassified_mass_measured`, scritta da `declare_unclassified_mass`.
+
+    Una chiave assente vale «non misurato», non «misurato e pulito»: a valle
+    una chiave assente vale zero, quindi tacere non puo' valere come promessa.
+    Il caso non e' teorico — il file di riferimento (AMB AMBIENTA) non stampa
+    nessuna riga «Totale …»: i totali stanno nelle intestazioni di sezione.
+
+    UNRELIABLE resta riservato alla contraddizione: massa stampata, misurata, e
+    materialmente non arrivata in nessun campo. Un controllo assente da'
+    DERIVED, mai un verdetto negativo — o un'intera famiglia di layout
+    legittimi risulterebbe inaffidabile.
+    """
+    if _d(bs, '_unclassified_mass_measured') <= Z:
+        return (AccountStatus.DERIVED,
+                'nessun totale di sezione stampato: la massa non classificata '
+                'non e misurabile su questo documento')
+    mass = _d(bs, '_unclassified_mass')
+    threshold = _threshold(_d(bs, 'totale_attivo'))
+    if mass > threshold:
+        return (AccountStatus.UNRELIABLE,
+                f'{mass:,.2f} di massa stampata non e finita in nessun campo '
+                f'IV-CEE (soglia {threshold:,.2f})')
+    return (AccountStatus.VERIFIED,
+            f'misurata contro il totale stampato: {mass:,.2f} non classificati')
+
+
 def assess(bs: dict, ce: dict,
            declared: Optional[dict] = None) -> ReliabilityReport:
     """Verdict on the three accounts that decide every KPI.
@@ -155,9 +203,12 @@ def assess(bs: dict, ce: dict,
     immo_status, immo_reason = _assess_immobilizzazioni(bs)
     pn_status, pn_reason = _assess_patrimonio_netto(bs, declared)
     bank_status, bank_reason = _assess_debiti_banche(bs)
+    mass_status, mass_reason = _assess_massa_non_classificata(bs)
     return ReliabilityReport(
         immobilizzazioni=immo_status, immobilizzazioni_reason=immo_reason,
         patrimonio_netto=pn_status, patrimonio_netto_reason=pn_reason,
         debiti_banche=bank_status, debiti_banche_reason=bank_reason,
         unclassified_mass=_d(bs, '_unclassified_mass'),
+        massa_non_classificata=mass_status,
+        massa_non_classificata_reason=mass_reason,
     )

@@ -48,6 +48,9 @@ function indicatori(patch: Partial<IndicatorSet> = {}): IndicatorSet {
     _quick_ratio: 0,
     _equity_over_fixed: 0,
     _revenue_raw: 0,
+    _total_assets_raw: 0,
+    _equity_raw: 0,
+    _oneri_finanziari_raw: 0,
     ...patch,
   };
 }
@@ -148,6 +151,7 @@ describe("INDICATOR_CHART_BOXES + buildIndicatorChartData", () => {
         periodo: "Storico 2025",
         indicatori: indicatori({
           ccn: 1000, roi: 7.5, dscr: 1.4, _ebitda_raw: 50000, _revenue_raw: 400000,
+          _total_assets_raw: 900000, _equity_raw: 300000, _oneri_finanziari_raw: 12000,
         }),
       },
     ]);
@@ -197,6 +201,53 @@ describe("INDICATOR_CHART_BOXES + buildIndicatorChartData", () => {
     expect(senzaRicavi.ebitda_margin).toBeNull();
     expect(senzaRicavi.materials_revenue).toBeNull();
     expect(senzaRicavi.services_revenue).toBeNull();
+  });
+
+  it("ROI e ROE valgono `null` quando attivo o patrimonio netto non esistono", () => {
+    // Il denominatore di questi due non e' in `IndicatorSet` per il punteggio,
+    // ma per la RESA: un ROI a zero legge «nessun ritorno sul capitale», che e'
+    // un giudizio, mentre l'attivo nullo dice solo che il rapporto non esiste.
+    const [senzaAttivo] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ roi: 0, _total_assets_raw: 0, _equity_raw: 300000 }),
+      },
+    ]);
+    expect(senzaAttivo.roi).toBeNull();
+    expect(senzaAttivo.roe).toBeTypeOf("number");
+
+    // Patrimonio netto NEGATIVO: il ROE non ha significato — un utile diviso un
+    // patrimonio negativo esce positivo per il segno, non per la redditivita'.
+    const [pnNegativo] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ roe: 0, _total_assets_raw: 900000, _equity_raw: -50000 }),
+      },
+    ]);
+    expect(pnNegativo.roe).toBeNull();
+    expect(pnNegativo.roi).toBeTypeOf("number");
+  });
+
+  it("il DSCR senza oneri finanziari vale `null`, non zero: mente al contrario", () => {
+    // E' il caso piu' insidioso dei tre. Zero oneri finanziari significa DSCR
+    // infinito, cioe' la situazione MIGLIORE possibile su questo indicatore;
+    // `safeDivide` lo rende come zero, cioe' la peggiore. L'azienda piu' sana
+    // del campione apparirebbe come quella che non copre il proprio debito.
+    const [senzaOneri] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ dscr: 0, _oneri_finanziari_raw: 0 }),
+      },
+    ]);
+    expect(senzaOneri.dscr).toBeNull();
+
+    const [conOneri] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ dscr: 1.4, _oneri_finanziari_raw: 12000 }),
+      },
+    ]);
+    expect(conOneri.dscr).toBe(1.4);
   });
 
   it("un periodo senza dati resta scartato anche con i sei riquadri", () => {

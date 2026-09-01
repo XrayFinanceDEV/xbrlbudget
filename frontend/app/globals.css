@@ -298,13 +298,89 @@
     overflow: visible !important;
     text-overflow: clip !important;
   }
-  /* Allow tables to break across pages naturally */
+  /* ---------------------------------------------------------------
+     Impaginazione della Stampa.
+
+     Regole PROPRIE di questa schermata. Il report ha le sue
+     (`.report-section`, `.report-ai-comment`, i `print:break-before-page`
+     scritti a mano in app/report/page.tsx) e non c'e' nulla da
+     riusare: quelle tengono unita una card che sta in una pagina, qui
+     ci sono quattro prospetti che in una pagina non ci stanno.
+
+     Il criterio e' uno: si tiene unito cio' che entra in una pagina, si
+     lascia spezzare — ripetendo l'intestazione — cio' che non ci entra.
+     --------------------------------------------------------------- */
+
+  /* Un prospetto e' piu' alto di una pagina (44 righe il CE, 76 lo SP):
+     vietargli di spezzarsi lo spingerebbe intero alla pagina dopo,
+     lasciando mezza pagina bianca e traboccando lo stesso. Si spezza,
+     quindi — ma solo FRA le righe. Il vincolo sulla singola riga esiste
+     gia' globale (`tr { break-inside: avoid }`, piu' su): qui e'
+     riscritto perche' la tenuta di questa schermata non dipenda da una
+     regola nata per il report. */
   #stampa-content table {
     break-inside: auto;
   }
-  /* Keep table header with first rows */
+  #stampa-content thead tr,
+  #stampa-content tbody tr {
+    break-inside: avoid;
+  }
+
+  /* Spezzandosi, ogni pagina ricomincia con la propria intestazione:
+     senza `table-header-group` la seconda pagina di un prospetto e' una
+     colonna di numeri senza nome. E' il contrappeso della regola qui
+     sopra, non un di piu'. */
   #stampa-content thead {
+    display: table-header-group;
+    break-inside: avoid;
     break-after: avoid;
+  }
+
+  /* Il contenitore scrollabile che shadcn mette attorno a ogni tabella
+     usa `overflow-auto`, non `overflow-x-auto`: la regola generale piu'
+     su non lo vede. Oggi Chromium impagina lo stesso quelle tabelle —
+     misurato — ma per le regole di frammentazione un contenitore con
+     overflow diverso da `visible` e' monolitico, e un giorno che lo
+     fosse davvero le righe oltre la prima pagina sparirebbero invece di
+     andare a capo pagina. Costa una riga; si toglie il dubbio. */
+  #stampa-content .overflow-auto {
+    overflow: visible !important;
+  }
+
+  /* Una riga-intestazione dentro un prospetto («A) VALORE DELLA
+     PRODUZIONE», «D) DEBITI») e' un titolo anche se e' un `<tr>`: non
+     resta ultima in fondo alla pagina. L'`h2` della sezione ha gia' il
+     suo `break-after: avoid` piu' su. */
+  #stampa-content tr.stampa-riga-titolo {
+    break-after: avoid;
+  }
+
+  /* Blocchi che in una pagina ci stanno, e spezzati non si leggono:
+     l'intestazione del documento, i cartellini di rating, la griglia dei
+     grafici, l'elenco dei segnali extracontabili. */
+  #stampa-content .stampa-blocco {
+    break-inside: avoid;
+  }
+
+  /* Un commento appartiene al prospetto che commenta: non si spezza e,
+     potendo, non apre la pagina per conto suo. */
+  #stampa-content .stampa-commento {
+    break-inside: avoid;
+    break-before: avoid;
+  }
+
+  /* Qui una card e' un grafico, e mezzo grafico non si legge. La regola
+     generale delle card, piu' su, li autorizza invece a spezzarsi
+     (`[data-slot="card"] { break-inside: auto }`): questa la ribalta per
+     la sola Stampa, con la specificita' che serve a batterla.
+
+     I riquadri di IndicatoriCharts portano gia' `print:break-inside-avoid`
+     e quella utility vince davvero — le utility Tailwind sono emesse DOPO
+     questo blocco, non prima. Ma e' una classe scritta su un componente
+     condiviso: questa regola rende la garanzia una proprieta' della
+     schermata, non di chi ricorda la classe. */
+  #stampa-content [data-slot="card"] {
+    break-inside: avoid;
   }
   /* Textarea hidden in print (CommentBlock uses <p> fallback) */
   #stampa-content textarea {

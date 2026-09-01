@@ -295,7 +295,7 @@ export function StampaContent({
     const value = aiComments[k] ?? "";
     // Hide empty blocks when printing to keep the PDF clean
     return (
-      <div className={cn("rounded-md border border-border/60 bg-muted/20 p-3 my-2 print:my-1 print:p-2", !value && "print:hidden")}>
+      <div className={cn("rounded-md border border-border/60 bg-muted/20 p-3 my-2 print:my-1 print:p-2 stampa-commento", !value && "print:hidden")}>
         {/* Screen: editable textarea */}
         <Textarea
           value={value}
@@ -403,7 +403,7 @@ export function StampaContent({
       </div>
 
       {/* Header */}
-      <div className="relative print:mb-4">
+      <div className="relative print:mb-4 stampa-blocco">
         {/* Upper-left: consulting firm branding */}
         {(logoUrl || userName) && (
           <div className="absolute left-0 top-0 flex items-center gap-2 max-w-[45%]">
@@ -460,7 +460,7 @@ export function StampaContent({
               const isSubtotal = ["_totale_vp", "_totale_cp", "_totale_fin", "_totale_straord",
                 "_ebitda", "_ebit", "_profit_before_tax", "_net_profit"].includes(item.code);
               if (isHeader) return (
-                <TableRow key={item.code} className="bg-muted hover:bg-muted">
+                <TableRow key={item.code} className="bg-muted hover:bg-muted stampa-riga-titolo">
                   <TableCell colSpan={4} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
@@ -505,7 +505,7 @@ export function StampaContent({
               const isSubtotal = ["_totale_attivo", "_totale_passivo",
                 "_totale_immob", "_totale_circ", "_totale_pn", "_totale_debiti", "_differenza"].includes(item.code);
               if (isHeader) return (
-                <TableRow key={item.code} className="bg-muted hover:bg-muted">
+                <TableRow key={item.code} className="bg-muted hover:bg-muted stampa-riga-titolo">
                   <TableCell colSpan={4} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
@@ -553,7 +553,7 @@ export function StampaContent({
                 "_ebitda", "_ebit", "_profit_before_tax", "_net_profit"].includes(item.code);
               const projValue = getProjectedCE(item);
               if (isHeader) return (
-                <TableRow key={item.code} className="bg-muted hover:bg-muted">
+                <TableRow key={item.code} className="bg-muted hover:bg-muted stampa-riga-titolo">
                   <TableCell colSpan={5} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
@@ -605,7 +605,7 @@ export function StampaContent({
                 "_totale_immob", "_totale_circ", "_totale_pn", "_totale_debiti", "_differenza"].includes(item.code);
               const projVal = projBSMap.get(item.code) ?? NaN;
               if (isHeader) return (
-                <TableRow key={item.code} className="bg-muted hover:bg-muted">
+                <TableRow key={item.code} className="bg-muted hover:bg-muted stampa-riga-titolo">
                   <TableCell colSpan={5} className="text-xs font-bold py-1.5 print:py-0.5 print:text-[9px]">{item.label}</TableCell>
                 </TableRow>
               );
@@ -639,18 +639,21 @@ export function StampaContent({
       {periodMonths !== 12 && <CommentBlock k="sp_proiezione" placeholder="Commento su Stato Patrimoniale — Proiezione..." />}
 
       {/* 5. INDICATORI DELLA CRISI D'IMPRESA */}
-      {/* `print:break-inside-avoid` tiene insieme cartellini di rating, sei
-          grafici e tabella: senza, l'unico modo in cui il blocco si spezza e'
-          proprio quello che l'issue vieta — i grafici a riempire una pagina e
-          la tabella degli indicatori a finire da sola sulla successiva. Il
-          blocco e' tarato per stare in una pagina (la griglia di stampa dei
-          grafici e' 3x2, vedi IndicatoriCharts); se non ci sta, il browser lo
-          spezza comunque, ma prima prova a spostarlo intero. */}
-      <div className="print:break-inside-avoid">
+      {/* Il blocco NON e' indivisibile, e non deve esserlo: cartellini +
+          grafici + tabella misurano piu' di mezza pagina, e vietare il taglio
+          sull'intero blocco lo spingeva intero alla pagina dopo — 170pt di
+          bianco in fondo alla precedente e una pagina finale con i soli
+          segnali extracontabili. A proteggere ci sono i pezzi: `stampa-blocco`
+          sui cartellini e sulla griglia dei sei grafici (che quindi non si
+          spezza mai a meta' di una riga di riquadri), `break-after: avoid`
+          sull'h2, intestazione ripetuta sulla tabella. E' cosi' che il timore
+          di #15 — i grafici su una pagina e la tabella da sola sulla dopo —
+          resta escluso senza pagarlo con una pagina quasi vuota. */}
+      <div>
         <h2 className="text-base font-semibold mb-2">Indicatori della Crisi d&apos;Impresa</h2>
 
         {/* Rating cards */}
-        <div className={cn("grid gap-4 mb-4", periodMonths === 12 ? "grid-cols-2" : "grid-cols-3")}>
+        <div className={cn("grid gap-4 mb-4 stampa-blocco", periodMonths === 12 ? "grid-cols-2" : "grid-cols-3")}>
           {[
             { label: `Storico ${refYear}`, rating: storicoRating, oltre: oltreCount(storicoCrisis), alerts: 0 },
             { label: `Infrann. ${periodMonths}M ${partialYear}`, rating: infraRating, oltre: oltreCount(infraCrisis), alerts: alertCount },
@@ -672,7 +675,7 @@ export function StampaContent({
         </div>
 
         {/* Grafici di sintesi: prima il quadro d'insieme, poi il dettaglio */}
-        <div className="mb-4">
+        <div className="mb-4 stampa-blocco">
           <IndicatoriCharts serie={serieGrafici} />
         </div>
 
@@ -728,7 +731,7 @@ export function StampaContent({
             </span>
           )}
         </h2>
-        <div className="rounded-lg border border-border p-4 print:p-2 space-y-2 print:space-y-0.5">
+        <div className="rounded-lg border border-border p-4 print:p-2 space-y-2 print:space-y-0.5 stampa-blocco">
           {EXTRA_ALERT_DEFS.map((def, idx) => {
             const isActive = !!extraAlerts[def.key];
             return (

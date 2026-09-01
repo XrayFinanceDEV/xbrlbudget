@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { Check, LogOut } from "lucide-react";
+import { ArrowRight, Check, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  shouldShowReason,
+  usePraticaPrimaryAction,
+} from "@/hooks/use-pratica-primary-action";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import {
@@ -30,6 +34,9 @@ export function PraticaStepper() {
   const router = useRouter();
   const { companies } = useApp();
   const { pratica, setAnalysisStep, exitPratica } = usePratica();
+  // STESSA definizione del primario che rende la barra in fondo: gate,
+  // azione registrata, rescue e motivi del blocco stanno in un punto solo.
+  const primaryState = usePraticaPrimaryAction();
 
   // La home è la pagina di uscita: là comanda la nav normale.
   if (!pratica || pathname === "/") return null;
@@ -134,6 +141,36 @@ export function PraticaStepper() {
             </nav>
 
             <span className="flex-1" />
+
+            {/*
+              Il primario, in taglia piena e allineato a destra. Il tester non
+              trovava quello in fondo — «c'è solo il bottone piccolo in basso a
+              destra, i clienti così non lo vedono» — e a primo impatto, in
+              cima a una pagina, non c'era nulla che dicesse come si va avanti.
+              La barra in fondo resta: dopo una tabella lunga è quella che serve.
+
+              Il motivo si mostra anche a bottone ABILITATO (`shouldShowReason`,
+              non `disabled && reason`): nel ramo rescue il bottone è abilitato
+              e il motivo è l'unica cosa che spiega il dirottamento.
+            */}
+            {primaryState && primaryState.primary.label !== null && (
+              <div className="flex shrink-0 items-center gap-2">
+                {shouldShowReason(primaryState.primary) && (
+                  <p className="hidden max-w-xs truncate text-xs text-muted-foreground lg:block">
+                    {primaryState.primary.reason}
+                  </p>
+                )}
+                <Button
+                  onClick={primaryState.primary.run}
+                  disabled={primaryState.primary.disabled}
+                  className="shrink-0"
+                >
+                  {primaryState.primary.label}
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              </div>
+            )}
+
             <Button
               variant="ghost"
               size="sm"

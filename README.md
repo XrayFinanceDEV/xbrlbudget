@@ -655,8 +655,12 @@ Il frontend sarà disponibile su `http://localhost:3000`
 
 **Configurazione:** Assicurati che il file `frontend/.env.local` contenga:
 ```
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
+
+> La variabile è la base **completa**, `/api/v1` incluso — `lib/api.ts` la passa a
+> `axios.create({ baseURL })` così com'è. Senza il suffisso ogni chiamata finisce su
+> `/companies` invece di `/api/v1/companies` e risponde 404.
 
 #### Esempi di Utilizzo API
 

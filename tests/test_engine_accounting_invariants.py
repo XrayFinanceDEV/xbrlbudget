@@ -170,3 +170,62 @@ def test_taxes_follow_the_explicit_rate(monkeypatch):
             assert ce1["ce20_imposte"] == (pbt * Decimal("0.24")).quantize(Decimal("0.01"))
     finally:
         engine.dispose()
+
+
+def test_shrinking_the_horizon_leaves_no_phantom_year(monkeypatch):
+    """Da 5 anni a 3: il previsionale ne tiene tre, senza orfani.
+
+    Il ciclo di generazione fa l'upsert dei soli anni che hanno un'ipotesi.
+    Senza la potatura, riportare il piano da 5 anni a 3 lasciava 2031 e 2032
+    nel previsionale con i numeri del salvataggio precedente: /analysis, il
+    rendiconto e il report li mostravano ancora, e nessun controllo se ne
+    accorgeva.
+    """
+    from database.models import (
+        ForecastBalanceSheet, ForecastIncomeStatement, ForecastYear,
+    )
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            scenario = _make_scenario(
+                db, company_id, "orizzonte",
+                [2027, 2028, 2029, 2030, 2031],
+                extra={"revenue_growth_pct": 5, "tax_rate": 27.9},
+            )
+            assert [y for y, _, _ in read_forecast_maps(db, scenario.id)] == [
+                2027, 2028, 2029, 2030, 2031
+            ]
+
+            budget_scenarios.bulk_upsert_assumptions(
+                company_id,
+                scenario.id,
+                request={
+                    "assumptions": [
+                        {"forecast_year": y, "revenue_growth_pct": 5, "tax_rate": 27.9}
+                        for y in (2027, 2028, 2029)
+                    ],
+                    "auto_generate": True,
+                },
+                user_id=USER,
+                db=db,
+            )
+
+            assert [y for y, _, _ in read_forecast_maps(db, scenario.id)] == [
+                2027, 2028, 2029
+            ]
+            vivi = {
+                fy.id for fy in db.query(ForecastYear).filter(
+                    ForecastYear.scenario_id == scenario.id
+                )
+            }
+            for tabella in (ForecastBalanceSheet, ForecastIncomeStatement):
+                orfani = [
+                    r for r in db.query(tabella).all()
+                    if r.forecast_year_id not in vivi
+                ]
+                assert orfani == []
+    finally:
+        engine.dispose()

@@ -392,6 +392,20 @@ class ForecastEngine:
         if not assumptions:
             raise ValueError(f"No assumptions found for scenario {scenario_id}")
 
+        # Un orizzonte accorciato non deve lasciare anni fantasma. Il ciclo qui
+        # sotto fa l'upsert dei soli anni che hanno un'ipotesi: senza questa
+        # potatura, riportare il piano da 5 anni a 3 lascerebbe 2028 e 2029 nel
+        # previsionale, e /analysis, il rendiconto e il report continuerebbero a
+        # mostrarli con i numeri del salvataggio precedente, senza un errore.
+        # Il cascade porta via anche SP e CE dell'anno rimosso.
+        planned_years = sorted({a.forecast_year for a in assumptions})
+        for stale in self.db.query(ForecastYear).filter(
+            ForecastYear.scenario_id == scenario_id,
+            ForecastYear.year.notin_(planned_years)
+        ).all():
+            self.db.delete(stale)
+        self.db.flush()
+
         forecast_years = []
 
         # NEW financing raised during the plan: each assumption's financing_amount

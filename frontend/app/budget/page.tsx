@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
 import { statoResidui } from "@/lib/base-bank-debt";
+import { forecastYearsFor, withDefaultsForYears } from "@/lib/budget-horizon";
 import { cn, getErrorMessage } from "@/lib/utils";
 import type {
   BudgetScenario,
@@ -856,8 +857,9 @@ function ScenarioForm({
   // Math.max(...years) unconditionally misaligned the horizon when a newer year was
   // imported/promoted after the scenario was created, dropping assumption rows on save.
   const baseYear = scenario?.base_year ?? Math.max(...years);
+  const scenarioId = scenario?.id ?? null;
   const forecastYears = useMemo(
-    () => Array.from({ length: numYears }, (_, i) => baseYear + i + 1),
+    () => forecastYearsFor(baseYear, numYears),
     [numYears, baseYear]
   );
 
@@ -887,160 +889,152 @@ function ScenarioForm({
   );
   const [existingAssumptionYears, setExistingAssumptionYears] = useState<Set<number>>(new Set());
 
+  // Idratazione: legge le ipotesi salvate e fissa l'orizzonte UNA volta sola.
+  // NON dipende da `forecastYears`: dipenderci significa che scrivere
+  // `numYears` fa ripartire l'effetto che riscrive `numYears`, ed e' la ragione
+  // per cui il campo «Numero di anni da prevedere» tornava indietro da solo
+  // dopo ~230 ms — il piano a 5 anni non era impostabile da nessuna schermata.
   useEffect(() => {
-    if (scenario) {
-      // Load existing assumptions
-      getBudgetAssumptions(companyId, scenario.id).then((data) => {
-        const assumptionsMap: Record<number, Partial<BudgetAssumptionsCreate>> = {};
-        const existingYears = new Set<number>();
-        data.forEach((a) => {
-          existingYears.add(a.forecast_year);
-          assumptionsMap[a.forecast_year] = {
-            scenario_id: scenario.id,
-            forecast_year: a.forecast_year,
-            revenue_growth_pct: a.revenue_growth_pct,
-            other_revenue_growth_pct: a.other_revenue_growth_pct,
-            variable_materials_growth_pct: a.variable_materials_growth_pct,
-            fixed_materials_growth_pct: a.fixed_materials_growth_pct,
-            variable_services_growth_pct: a.variable_services_growth_pct,
-            fixed_services_growth_pct: a.fixed_services_growth_pct,
-            rent_growth_pct: a.rent_growth_pct,
-            personnel_growth_pct: a.personnel_growth_pct,
-            other_costs_growth_pct: a.other_costs_growth_pct,
-            investments: a.investments,
-            intangible_investments: a.intangible_investments,
-            tangible_investments: a.tangible_investments,
-            asset_disposal_nbv: a.asset_disposal_nbv,
-            asset_disposal_proceeds: a.asset_disposal_proceeds,
-            dso_days: a.dso_days,
-            dio_days: a.dio_days,
-            dpo_days: a.dpo_days,
-            existing_debt_repayment_years: a.existing_debt_repayment_years,
-            altri_finanz_repayment_years: a.altri_finanz_repayment_years,
-            cash_sweep_enabled: a.cash_sweep_enabled ?? false,
-            cash_sweep_min_cash: a.cash_sweep_min_cash,
-            tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
-            previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
-            receivables_short_growth_pct: a.receivables_short_growth_pct,
-            receivables_long_growth_pct: a.receivables_long_growth_pct,
-            payables_short_growth_pct: a.payables_short_growth_pct,
-            tax_rate: a.tax_rate,
-            tax_advances_paid: a.tax_advances_paid ?? 0,
-            tax_temporary_differences: a.tax_temporary_differences ?? null,
-            fixed_materials_percentage: a.fixed_materials_percentage,
-            fixed_services_percentage: a.fixed_services_percentage,
-            depreciation_rate: a.depreciation_rate,
-            depreciation_rate_intangible: a.depreciation_rate_intangible,
-            financing_amount: a.financing_amount,
-            financing_duration_years: a.financing_duration_years,
-            financing_interest_rate: a.financing_interest_rate,
-            financing_loans: a.financing_loans ?? null,
-            sp01_growth_pct: a.sp01_growth_pct,
-            sp04_growth_pct: a.sp04_growth_pct,
-            sp06e_growth_pct: a.sp06e_growth_pct,
-            sp06f_growth_pct: a.sp06f_growth_pct,
-            sp08_growth_pct: a.sp08_growth_pct,
-            sp10_growth_pct: a.sp10_growth_pct,
-            sp14_growth_pct: a.sp14_growth_pct,
-            sp16e_growth_pct: a.sp16e_growth_pct,
-            sp16f_growth_pct: a.sp16f_growth_pct,
-            sp16g_growth_pct: a.sp16g_growth_pct,
-            sp17d_growth_pct: a.sp17d_growth_pct,
-            sp17e_growth_pct: a.sp17e_growth_pct,
-            sp17f_growth_pct: a.sp17f_growth_pct,
-            sp17g_growth_pct: a.sp17g_growth_pct,
-            sp18_growth_pct: a.sp18_growth_pct,
-            sp_overrides: a.sp_overrides ?? null,
-            ce01_override: a.ce01_override,
-            ce05_override: a.ce05_override,
-            ce06_override: a.ce06_override,
-            ce07_override: a.ce07_override,
-            ce08_override: a.ce08_override,
-            ce02_override: a.ce02_override,
-            ce03_override: a.ce03_override,
-            ce03a_override: a.ce03a_override,
-            ce10_override: a.ce10_override,
-            ce11_override: a.ce11_override,
-            ce13_override: a.ce13_override,
-            ce14_override: a.ce14_override,
-            ce15_override: a.ce15_override,
-            ce16_override: a.ce16_override,
-            ce17_override: a.ce17_override,
-            ce18_override: a.ce18_override,
-            ce19_override: a.ce19_override,
-            // Overrides editable ONLY on /forecast/income — must be hydrated here too,
-            // otherwise "Salva e Calcola" (server-side delete+reinsert) drops them and
-            // the user's manual P&L edits are wiped, contradicting the documented
-            // "overrides survive the save" guarantee.
-            ce04_override: a.ce04_override,
-            ce08a_override: a.ce08a_override,
-            ce08b_override: a.ce08b_override,
-            ce08c_override: a.ce08c_override,
-            ce08d_override: a.ce08d_override,
-            ce09_override: a.ce09_override,
-            ce09a_override: a.ce09a_override,
-            ce09b_override: a.ce09b_override,
-            ce09c_override: a.ce09c_override,
-            ce09d_override: a.ce09d_override,
-            ce11b_override: a.ce11b_override,
-            ce12_override: a.ce12_override,
-            ce17a_override: a.ce17a_override,
-            ce17b_override: a.ce17b_override,
-            ce20_override: a.ce20_override,
-          };
-        });
-        setAssumptions(assumptionsMap);
-        setExistingAssumptionYears(existingYears);
-        setNumYears(data.length || 3);
-      });
-    } else {
-      // Initialize with defaults. New scenarios start with all CE overrides NULL
-      // (absolute P&L edits live on /forecast/income); dead fields
-      // (investments, receivables_short/payables_short) are no longer written.
+    if (scenarioId === null) {
+      // Scenario nuovo: la mappa la riempie di default l'effetto qui sotto.
       setExistingAssumptionYears(new Set());
-      const defaultAssumptions: Record<number, Partial<BudgetAssumptionsCreate>> = {};
-      forecastYears.forEach((year) => {
-        defaultAssumptions[year] = {
-          forecast_year: year,
-          revenue_growth_pct: 0,
-          other_revenue_growth_pct: 0,
-          variable_materials_growth_pct: 0,
-          fixed_materials_growth_pct: 0,
-          variable_services_growth_pct: 0,
-          fixed_services_growth_pct: 0,
-          rent_growth_pct: 0,
-          personnel_growth_pct: 0,
-          other_costs_growth_pct: 0,
-          intangible_investments: 0,
-          tangible_investments: 0,
-          asset_disposal_nbv: null,
-          asset_disposal_proceeds: null,
-          receivables_long_growth_pct: 0,
-          dso_days: null,
-          dio_days: null,
-          dpo_days: null,
-          existing_debt_repayment_years: null,
-          altri_finanz_repayment_years: null,
-          cash_sweep_enabled: false,
-          cash_sweep_min_cash: null,
-          tfr_accrual_suspended: false,
-          previdenza_scales_with_personnel: false,
-          tax_rate: 27.9,
-          tax_advances_paid: 0,
-          tax_temporary_differences: null,
-          fixed_materials_percentage: 0,
-          fixed_services_percentage: 0,
-          depreciation_rate: 20,
-          depreciation_rate_intangible: 20,
-          financing_amount: 0,
-          financing_duration_years: 5,
-          financing_interest_rate: 3,
-          financing_loans: null,
+      setAssumptions({});
+      return;
+    }
+    let annullato = false;
+    getBudgetAssumptions(companyId, scenarioId).then((data) => {
+      if (annullato) return;
+      const assumptionsMap: Record<number, Partial<BudgetAssumptionsCreate>> = {};
+      const existingYears = new Set<number>();
+      data.forEach((a) => {
+        existingYears.add(a.forecast_year);
+        assumptionsMap[a.forecast_year] = {
+          scenario_id: scenarioId,
+          forecast_year: a.forecast_year,
+          revenue_growth_pct: a.revenue_growth_pct,
+          other_revenue_growth_pct: a.other_revenue_growth_pct,
+          variable_materials_growth_pct: a.variable_materials_growth_pct,
+          fixed_materials_growth_pct: a.fixed_materials_growth_pct,
+          variable_services_growth_pct: a.variable_services_growth_pct,
+          fixed_services_growth_pct: a.fixed_services_growth_pct,
+          rent_growth_pct: a.rent_growth_pct,
+          personnel_growth_pct: a.personnel_growth_pct,
+          other_costs_growth_pct: a.other_costs_growth_pct,
+          investments: a.investments,
+          intangible_investments: a.intangible_investments,
+          tangible_investments: a.tangible_investments,
+          asset_disposal_nbv: a.asset_disposal_nbv,
+          asset_disposal_proceeds: a.asset_disposal_proceeds,
+          dso_days: a.dso_days,
+          dio_days: a.dio_days,
+          dpo_days: a.dpo_days,
+          existing_debt_repayment_years: a.existing_debt_repayment_years,
+          altri_finanz_repayment_years: a.altri_finanz_repayment_years,
+          cash_sweep_enabled: a.cash_sweep_enabled ?? false,
+          cash_sweep_min_cash: a.cash_sweep_min_cash,
+          tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
+          previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
+          receivables_short_growth_pct: a.receivables_short_growth_pct,
+          receivables_long_growth_pct: a.receivables_long_growth_pct,
+          payables_short_growth_pct: a.payables_short_growth_pct,
+          tax_rate: a.tax_rate,
+          tax_advances_paid: a.tax_advances_paid ?? 0,
+          tax_temporary_differences: a.tax_temporary_differences ?? null,
+          fixed_materials_percentage: a.fixed_materials_percentage,
+          fixed_services_percentage: a.fixed_services_percentage,
+          depreciation_rate: a.depreciation_rate,
+          depreciation_rate_intangible: a.depreciation_rate_intangible,
+          financing_amount: a.financing_amount,
+          financing_duration_years: a.financing_duration_years,
+          financing_interest_rate: a.financing_interest_rate,
+          financing_loans: a.financing_loans ?? null,
+          sp01_growth_pct: a.sp01_growth_pct,
+          sp04_growth_pct: a.sp04_growth_pct,
+          sp06e_growth_pct: a.sp06e_growth_pct,
+          sp06f_growth_pct: a.sp06f_growth_pct,
+          sp08_growth_pct: a.sp08_growth_pct,
+          sp10_growth_pct: a.sp10_growth_pct,
+          sp14_growth_pct: a.sp14_growth_pct,
+          sp16e_growth_pct: a.sp16e_growth_pct,
+          sp16f_growth_pct: a.sp16f_growth_pct,
+          sp16g_growth_pct: a.sp16g_growth_pct,
+          sp17d_growth_pct: a.sp17d_growth_pct,
+          sp17e_growth_pct: a.sp17e_growth_pct,
+          sp17f_growth_pct: a.sp17f_growth_pct,
+          sp17g_growth_pct: a.sp17g_growth_pct,
+          sp18_growth_pct: a.sp18_growth_pct,
+          sp_overrides: a.sp_overrides ?? null,
+          ce01_override: a.ce01_override,
+          ce05_override: a.ce05_override,
+          ce06_override: a.ce06_override,
+          ce07_override: a.ce07_override,
+          ce08_override: a.ce08_override,
+          ce02_override: a.ce02_override,
+          ce03_override: a.ce03_override,
+          ce03a_override: a.ce03a_override,
+          ce10_override: a.ce10_override,
+          ce11_override: a.ce11_override,
+          ce13_override: a.ce13_override,
+          ce14_override: a.ce14_override,
+          ce15_override: a.ce15_override,
+          ce16_override: a.ce16_override,
+          ce17_override: a.ce17_override,
+          ce18_override: a.ce18_override,
+          ce19_override: a.ce19_override,
+          // Overrides editable ONLY on /forecast/income — must be hydrated here too,
+          // otherwise "Salva e Calcola" (server-side delete+reinsert) drops them and
+          // the user's manual P&L edits are wiped, contradicting the documented
+          // "overrides survive the save" guarantee.
+          ce04_override: a.ce04_override,
+          ce08a_override: a.ce08a_override,
+          ce08b_override: a.ce08b_override,
+          ce08c_override: a.ce08c_override,
+          ce08d_override: a.ce08d_override,
+          ce09_override: a.ce09_override,
+          ce09a_override: a.ce09a_override,
+          ce09b_override: a.ce09b_override,
+          ce09c_override: a.ce09c_override,
+          ce09d_override: a.ce09d_override,
+          ce11b_override: a.ce11b_override,
+          ce12_override: a.ce12_override,
+          ce17a_override: a.ce17a_override,
+          ce17b_override: a.ce17b_override,
+          ce20_override: a.ce20_override,
         };
       });
-      setAssumptions(defaultAssumptions);
-    }
-  }, [scenario, companyId, forecastYears]);
+      // L'orizzonte salvato e' il numero di righe. I default degli anni che una
+      // riga non ce l'hanno vanno messi QUI: questo `setAssumptions` sostituisce
+      // la mappa che l'effetto dei default aveva gia' riempito al mount, e senza
+      // riunirli il salvataggio manderebbe zero righe.
+      const nextNumYears = data.length || 3;
+      setAssumptions(
+        withDefaultsForYears(
+          assumptionsMap,
+          forecastYearsFor(baseYear, nextNumYears),
+          scenarioId
+        )
+      );
+      setExistingAssumptionYears(existingYears);
+      setNumYears(nextNumYears);
+    });
+    return () => {
+      annullato = true;
+    };
+  }, [scenarioId, companyId, baseYear]);
+
+  // I default degli anni previsti che non hanno ancora una riga: questo effetto
+  // reagisce all'orizzonte senza mai toccarlo. E' cio' che rende il campo
+  // «Numero di anni da prevedere» un input vero — portarlo a 5 aggiunge due
+  // righe neutre, e il salvataggio (`forecastYears.filter((y) => assumptions[y])`)
+  // le manda tutte e cinque.
+  //
+  // Non si ri-innesca da solo: `withDefaultsForYears` restituisce la mappa
+  // ricevuta quando non manca nulla, quindi React esce dall'aggiornamento.
+  useEffect(() => {
+    setAssumptions((prev) =>
+      withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined)
+    );
+  }, [forecastYears, scenarioId]);
 
   // Auto-generator state
   const [inflationRate, setInflationRate] = useState(2.5);
@@ -1235,7 +1229,14 @@ function ScenarioForm({
                       min={1}
                       max={5}
                       value={numYears}
-                      onChange={(e) => setNumYears(parseInt(e.target.value) || 3)}
+                      // `max` su un input numerico non impedisce di battere 9:
+                      // senza questo taglio l'orizzonte uscirebbe dal 1-5 che
+                      // il resto del previsionale si aspetta.
+                      onChange={(e) =>
+                        setNumYears(
+                          Math.min(5, Math.max(1, parseInt(e.target.value) || 3))
+                        )
+                      }
                       className="w-32 mt-2"
                     />
                   </div>

@@ -299,6 +299,19 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   Vale anche per l'oggetto `pratica`: cambia identità a **ogni** `updatePratica`, quindi un effetto
   che lo osserva intero riparte pure quando il campo che gli interessa non si è mosso — si dipende
   dagli scalari (`pratica?.companyId`).
+- **Un effetto non dipende mai da ciò che lui stesso scrive, nemmeno attraverso una `useMemo`.**
+  Il campo «Numero di anni da prevedere» aveva `forecastYears` (una `useMemo` su `numYears`) fra le
+  dipendenze dell'effetto che si chiudeva con `setNumYears(data.length || 3)`: il valore tornava
+  indietro dopo ~230 ms, senza un errore, e il piano a 5 anni non era impostabile da nessuna
+  schermata. Le due cose vanno separate — l'idratazione fissa l'orizzonte **una volta**, un secondo
+  effetto reagisce all'orizzonte senza toccarlo, e la sua funzione pura restituisce lo stato
+  **ricevuto** quando non c'è nulla da aggiungere (`lib/budget-horizon.ts`), così React esce
+  dall'aggiornamento e l'effetto non riparte.
+- **Accorciare l'orizzonte di un piano non basta a cancellare gli anni in più.** La generazione fa
+  l'upsert dei soli anni che hanno un'ipotesi: `ForecastEngine.generate_forecast` pota i
+  `ForecastYear` rimasti fuori **prima** del ciclo, altrimenti da 5 anni a 3 restano due anni
+  fantasma con i numeri del salvataggio precedente, che /analysis, il rendiconto e il report
+  continuano a mostrare.
 - **Aggiungere una voce a SP o CE non è un'operazione a un file solo.** Serve il codice negli
   elenchi, il padre, l'etichetta e la riga del Confronto: saltarne uno produce una voce che non
   compare da nessuna parte, senza alcun errore. La tabella completa è nella sezione «Layout SP/CE»

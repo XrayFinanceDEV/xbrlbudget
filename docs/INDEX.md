@@ -1,6 +1,14 @@
-# Documentazione XBRL Budget
+# Indice della documentazione XBRL Budget
 
-Documentazione di progetto **aggiornata**. Gli artefatti storici/superati (design pre-implementazione, snapshot di sessione, dump di test) stanno in [`../archive/`](../archive/README.md), non qui.
+Documentazione di progetto **aggiornata**. Gli artefatti storici/superati (design
+pre-implementazione, snapshot di sessione, dump di test) stanno in
+[`../archive/`](../archive/README.md), non qui.
+
+**Che cosa non sta in questo indice.** `superpowers/` è il banco da lavoro della
+**progettazione** — spec di design, piani di esecuzione, rapporti di riallineamento — non
+documentazione di progetto in senso stretto, e per questo non è elencata qui. Ci si arriva
+dalla mappa in `CLAUDE.md` («Perché una scelta è stata fatta così?»). Stesso discorso per
+`archive/`, che ha il [suo indice](../archive/README.md).
 
 > [`../CLAUDE.md`](../CLAUDE.md) è l'**istruzione operativa** per l'AI assistant e va tenuto
 > **sintetico**: descrive comandi, convenzioni e invarianti in forma breve, e rimanda qui. La
@@ -34,6 +42,7 @@ sono elencati nel §5 dell'indice).
 | [IMPORT-BALANCING-SCHEME.md](import/IMPORT-BALANCING-SCHEME.md) | Schema di quadratura L0→L5 + identità CE↔SP (`enforce_ce_sp_identity`) |
 | [IMPORT-QUADRATURA-ENGINE.md](import/IMPORT-QUADRATURA-ENGINE.md) | Motore IV-CEE condiviso (`iv_cee_hierarchy`) + anti-masking |
 | [TRIAL-BALANCE-IMPORT.md](import/TRIAL-BALANCE-IMPORT.md) | Parser universale situazioni contabili (rotta C) per sottototali |
+| [FIXING-IMPORT.md](FIXING-IMPORT.md) | Playbook per diagnosticare un import rotto su un file preciso: pipeline in una riga, principi, trappole di geometria e testo vettoriale |
 
 ## Tassonomia & mapping XBRL — [`taxonomy/`](taxonomy/)
 
@@ -64,6 +73,18 @@ sono elencati nel §5 dell'indice).
 | [LAYOUT-SP-CE.md](frontend/LAYOUT-SP-CE.md) | Il catalogo IV-CEE, i quattro elenchi di righe, i file da toccare per aggiungere una voce, il test di parità |
 | [TAILWIND-E-CLASSI.md](frontend/TAILWIND-E-CLASSI.md) | Dove possono vivere i nomi di classe: `content`, il fallimento silenzioso, come verificarlo davvero |
 | [INDICATORI-E-STAMPA.md](frontend/INDICATORI-E-STAMPA.md) | I due grafici degli indicatori condivisi fra tab e Stampa, regole di stampa/PDF, limite del denominatore `ce01` |
+
+## Configurazione delle agent skill — [`agents/`](agents/)
+
+Dove vivono le issue, con che nomi si etichettano, e come vanno letti i documenti di
+dominio. Sono le tre risposte che una sessione nuova deve trovare da sola; la sezione
+«Agent skills» di `CLAUDE.md` rimanda qui.
+
+| Doc | Cosa copre |
+|-----|------------|
+| [issue-tracker.md](agents/issue-tracker.md) | Le issue stanno su GitHub, via `gh`: creare, leggere, etichettare, chiudere, e le operazioni di wayfinding |
+| [triage-labels.md](agents/triage-labels.md) | Le cinque label canoniche e il loro nome in questo tracker |
+| [domain.md](agents/domain.md) | Che cosa leggere prima di esplorare, e il vocabolario del dominio (italiano) |
 
 ## Deployment — [`deployment/`](deployment/)
 

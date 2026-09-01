@@ -841,7 +841,7 @@ budget/
 │   ├── debug_*.py                  # Debug scripts
 │   └── migrate_*.py                # Database migration scripts
 │
-├── docs/                           # 📚 Documentation (see docs/README.md for the map)
+├── docs/                           # 📚 Documentation (see docs/INDEX.md for the map)
 │   ├── import/                     # 📥 Import pipeline: overview + routing/balancing/quadratura
 │   ├── taxonomy/                   # IV-CEE schema + XBRL mapping
 │   ├── budget/                     # Forecasting + report
@@ -854,7 +854,7 @@ budget/
 └── financial_analysis.db           # SQLite database
 ```
 
-> **Documentation map:** [`docs/README.md`](docs/README.md) lists every current
+> **Documentation map:** [`docs/INDEX.md`](docs/INDEX.md) lists every current
 > document and its scope. The authoritative sources are this `README.md`,
 > [`CLAUDE.md`](CLAUDE.md) (architecture/dev guide), and
 > [`docs/import/IMPORT-OVERVIEW.md`](docs/import/IMPORT-OVERVIEW.md) (import pipeline). Older notes that no

@@ -1,6 +1,6 @@
 # Archivio documentazione
 
-Materiale **storico o superato**, tenuto solo come traccia. **Non è documentazione corrente** — per quella vedi [`../docs/`](../docs/README.md). La storia completa è comunque in git.
+Materiale **storico o superato**, tenuto solo come traccia. **Non è documentazione corrente** — per quella vedi [`../docs/`](../docs/INDEX.md). La storia completa è comunque in git.
 
 | File | Perché è qui |
 |------|--------------|

@@ -550,7 +550,7 @@ giusto è il codice, non `/docs`.
 | Domanda | Dove |
 |---|---|
 | Come funziona l'API, con esempi di chiamata? | [README.md](README.md) |
-| Che cosa c'è in `/docs`, e che cosa è superato? | [docs/README.md](docs/README.md) |
+| Che cosa c'è in `/docs`, e che cosa è superato? | [docs/INDEX.md](docs/INDEX.md) |
 | **Import** — routing, estrazione, netting, quadrature, infrannuale, persistenza | la tabella nella sezione «Import PDF» qui sopra (9 pagine in `docs/import/` + `docs/FIXING-IMPORT.md`) |
 | Una voce XBRL in che campo `sp`/`ce` va a finire? | [docs/taxonomy/XBRL_PCI_IV_CEE_Mapping.md](docs/taxonomy/XBRL_PCI_IV_CEE_Mapping.md), [TASSONOMIA.md](docs/taxonomy/TASSONOMIA.md) |
 | Come si costruisce un budget e che cosa fa il motore di previsione? | [docs/budget/FORECASTING_GUIDE.md](docs/budget/FORECASTING_GUIDE.md) |

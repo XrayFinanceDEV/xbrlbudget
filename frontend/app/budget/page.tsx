@@ -21,7 +21,8 @@ import {
   getBalanceSheet,
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
-import { getErrorMessage } from "@/lib/utils";
+import { statoResidui } from "@/lib/base-bank-debt";
+import { cn, getErrorMessage } from "@/lib/utils";
 import type {
   BudgetScenario,
   BudgetScenarioCreate,
@@ -53,6 +54,7 @@ import {
   ChevronRight,
   Zap,
   Rocket,
+  ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1243,15 +1245,32 @@ function ScenarioForm({
               forecastYears={forecastYears}
               assumptions={assumptions}
               onUpdate={updateFinancingLoans}
+              baseYear={baseYear}
+              baseBalance={historicalData[baseYear]?.balance}
             />
 
-            <p className="text-xs text-muted-foreground">
-              Per modificare singole voci del CE previsionale (valori assoluti) vai a{" "}
-              <Link href="/forecast/income" className="underline text-primary">
-                CE Previsionale
-              </Link>
-              .
-            </p>
+            {/*
+              Era `text-xs text-muted-foreground`: la funzione più utile della
+              pagina annunciata col carattere più piccolo della pagina. Il
+              contenuto non cambia, cambia che si veda.
+            */}
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-4">
+              <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+              <div className="space-y-1">
+                <p className="text-sm">
+                  Le percentuali di crescita qui sopra valgono per l&apos;intero conto
+                  economico. Per forzare <strong>singole voci</strong> del CE previsionale
+                  a un valore assoluto, usa il CE Previsionale.
+                </p>
+                <Link
+                  href="/forecast/income"
+                  className="inline-flex items-center gap-1 text-sm font-semibold text-primary underline underline-offset-2"
+                >
+                  Vai al CE Previsionale
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </div>
 
             <Accordion type="single" collapsible>
               <AccordionItem value="avanzate">
@@ -1325,10 +1344,14 @@ function FinancingLoansGrid({
   forecastYears,
   assumptions,
   onUpdate,
+  baseYear,
+  baseBalance,
 }: {
   forecastYears: number[];
   assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
   onUpdate: (year: number, loans: FinancingLoanInput[]) => void;
+  baseYear: number;
+  baseBalance?: BalanceSheet;
 }) {
   const updateLoan = (
     year: number,
@@ -1341,16 +1364,117 @@ function FinancingLoansGrid({
     onUpdate(year, loans);
   };
 
+  // Il motore somma i residui di TUTTI gli anni di piano (`detailed_opening_total`)
+  // prima di confrontarli col debito bancario; l'UI ne ammette solo sul primo,
+  // ma il conteggio deve restare quello del motore.
+  const tuttiIResidui = forecastYears.flatMap(
+    (y) => assumptions[y]?.financing_loans ?? [],
+  );
+  const copertura = statoResidui(
+    baseBalance as unknown as Record<string, unknown>,
+    tuttiIResidui,
+  );
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Finanziamenti aggiuntivi</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Ogni contratto mantiene residuo iniziale, nuova erogazione, preammortamento,
-          quota balloon e tasso autonomi. Il residuo iniziale è ammesso solo nel primo anno.
+        {/*
+          Si chiamava «Finanziamenti aggiuntivi», che si legge come «nuovi»: il
+          tester ha chiesto come mancante il dettaglio del debito ESISTENTE, che
+          esiste da mesi. Il titolo diceva il contrario di quello che la card fa.
+        */}
+        <CardTitle className="text-base">Finanziamenti — esistenti e nuovi</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Qui si dettaglia contratto per contratto <strong>sia</strong> il debito bancario
+          già in essere <strong>sia</strong> i finanziamenti futuri.
+        </p>
+        <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+          <li>
+            <strong>Residuo iniziale</strong>: quota di debito bancario già in essere
+            all&apos;anno base {baseYear}. Ammesso solo nel primo anno di piano.
+          </li>
+          <li>
+            <strong>Nuova erogazione</strong>: finanziamento acceso in quell&apos;anno.
+          </li>
+        </ul>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Ogni contratto mantiene durata, tasso, preammortamento e quota balloon autonomi.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/*
+          Il debito da coprire, live. Il numero DEVE essere quello contro cui
+          valida il motore (`base_bank_debt`, che include gli scarti fra
+          aggregato e dettagli): la formula «ovvia» `sp16a + sp17a` darebbe un
+          numero diverso, e su un bilancio abbreviato mostrerebbe come coperto
+          un piano che il server rifiuta.
+        */}
+        {baseBalance && (
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Debito bancario {baseYear}
+                </p>
+                <p className="font-semibold">{formatCurrency(copertura.debitoBancario)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Residui inseriti</p>
+                <p className="font-semibold">{formatCurrency(copertura.sommaResidui)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Ancora da coprire</p>
+                <p
+                  className={cn(
+                    "font-semibold",
+                    copertura.bloccante
+                      ? "text-yellow-700 dark:text-yellow-400"
+                      : copertura.attivo
+                        ? "text-green-700 dark:text-green-400"
+                        : "text-foreground",
+                  )}
+                >
+                  {formatCurrency(copertura.differenza)}
+                </p>
+              </div>
+            </div>
+
+            {/*
+              Avviso NON bloccante, e l'input resta compilabile: si compila una
+              riga alla volta, e a metà compilazione lo scarto è normale. Ma il
+              vincolo è tutto-o-niente e al centesimo, e finora non era
+              dichiarato da nessuna parte — il previsionale veniva rifiutato dal
+              server con un messaggio che l'utente non poteva prevedere.
+            */}
+            {copertura.bloccante && (
+              <p className="mt-3 flex items-start gap-2 text-xs text-yellow-700 dark:text-yellow-400">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  I residui iniziali non coprono il debito bancario dell&apos;anno base:
+                  finché la differenza non è zero al centesimo, il previsionale verrà
+                  rifiutato.
+                </span>
+              </p>
+            )}
+
+            {/*
+              Due comandi visibili per la stessa cosa, e uno dei due smette di
+              fare qualcosa senza dirlo: `ESSENTIAL_ROWS` contiene ancora
+              «Rimborso debiti bancari (anni)», che il motore IGNORA non appena
+              esiste un residuo dettagliato.
+            */}
+            {copertura.attivo && (
+              <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Con almeno un residuo iniziale valorizzato, il motore usa questo
+                  scadenzario e <strong>ignora</strong> la riga «Rimborso debiti bancari
+                  (anni)» qui sopra.
+                </span>
+              </p>
+            )}
+          </div>
+        )}
         {forecastYears.map((year) => {
           const loans = assumptions[year]?.financing_loans ?? [];
           return (

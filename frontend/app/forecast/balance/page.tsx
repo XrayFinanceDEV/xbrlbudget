@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { generateForecast, getBudgetAssumptions, updateBudgetAssumptions } from "@/lib/api";
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { formatCurrency, formatPercentage, parseItalianAmount } from "@/lib/formatters";
 import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import type {
   BudgetScenario,
@@ -541,6 +541,112 @@ function BalanceCheckWarning({
   );
 }
 
+/**
+ * Cella modificabile dello SP Previsionale: a riposo mostra l'importo
+ * formattato (`1.247.893`), in modifica accetta la cifra grezza.
+ *
+ * Prima era un `<input type="number">` permanente, che mostrava `1247893`
+ * anche quando non lo stavi scrivendo — un `type="number"` non ammette
+ * separatori. È lo stesso modello che il CE Previsionale gemello usa già.
+ *
+ * Un `pendingValue` a `null` è «rimuovi l'override»: si rende il valore
+ * corrente col marcatore di modifica in sospeso, perché quale sarà il valore
+ * ricalcolato dal motore lato client non si sa.
+ */
+function EditableSpCell({
+  value,
+  pendingValue,
+  year,
+  field,
+  label,
+  onEdit,
+}: {
+  value: number;
+  pendingValue: number | null | undefined; // undefined = nessuna modifica in sospeso
+  year: number;
+  field: string;
+  label: string;
+  onEdit: (year: number, field: string, value: number | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const hasPending = pendingValue !== undefined;
+  const displayValue = hasPending ? (pendingValue ?? value) : value;
+
+  const startEdit = () => {
+    setEditValue(Math.round(displayValue).toString());
+    setEditing(true);
+  };
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const commitEdit = () => {
+    setEditing(false);
+    const parsed = parseItalianAmount(editValue);
+    if (parsed === undefined) return;      // non è un numero: non registrare nulla
+    // `null` = campo svuotato → RIMUOVI l'override e torna al valore
+    // calcolato. Non è uno zero: `handleSaveOverrides` fa `delete
+    // spOverrides[field]` sul null, e `sp_overrides` clampa comunque i
+    // negativi a zero ignorando in silenzio le chiavi sconosciute.
+    if (parsed === null) {
+      onEdit(year, field, null);
+      return;
+    }
+    // Entrare e uscire da una cella senza toccarla non è una modifica: senza
+    // questo, un semplice click abiliterebbe «Salva» su un valore identico.
+    if (Math.abs(parsed - displayValue) < 1) return;
+    onEdit(year, field, Math.round(parsed * 100) / 100);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") commitEdit();
+    else if (e.key === "Escape") setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <Input
+        ref={inputRef}
+        type="text"
+        value={editValue}
+        onChange={(event) => setEditValue(event.target.value)}
+        onBlur={commitEdit}
+        onKeyDown={handleKeyDown}
+        className="ml-auto h-8 w-32 text-right"
+        aria-label={`${label} ${year}`}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={startEdit}
+      aria-label={`${label} ${year}`}
+      className={cn(
+        "cursor-pointer hover:bg-primary/20 rounded px-1 -mx-1 transition-colors",
+        hasPending && "bg-yellow-100 dark:bg-yellow-900/30 border-b-2 border-yellow-500"
+      )}
+      title={
+        hasPending
+          ? pendingValue === null
+            ? "L'override verrà rimosso — clicca \"Salva\" per ricalcolare"
+            : "Modifica in sospeso — clicca \"Salva\" per applicare"
+          : "Clicca per modificare (svuota il campo per ripristinare il calcolato)"
+      }
+    >
+      {formatCurrency(displayValue)}
+    </button>
+  );
+}
+
 // Balance Sheet Table Component
 function BalanceSheetTable({
   historicalYears,
@@ -639,9 +745,6 @@ function BalanceSheetTable({
                 const year = forecastYears[i].year;
                 const editKey = row.field ? `${year}:${row.field}` : "";
                 const isEditable = Boolean(row.field && SP_EDITABLE_FIELDS.has(row.field));
-                const displayedValue = Object.prototype.hasOwnProperty.call(pendingEdits, editKey)
-                  ? pendingEdits[editKey]
-                  : value;
                 return (
                 <td
                   key={`forecast-${i}`}
@@ -652,16 +755,17 @@ function BalanceSheetTable({
                   )}
                 >
                   {isEditable ? (
-                    <Input
-                      type="number"
-                      step="100"
-                      className="ml-auto h-8 w-32 text-right"
-                      value={displayedValue ?? ""}
-                      onChange={(event) => {
-                        const raw = event.target.value;
-                        onEdit(year, row.field!, raw === "" ? null : Number(raw));
-                      }}
-                      aria-label={`${row.label.trim()} ${year}`}
+                    <EditableSpCell
+                      value={value ?? 0}
+                      pendingValue={
+                        Object.prototype.hasOwnProperty.call(pendingEdits, editKey)
+                          ? pendingEdits[editKey]
+                          : undefined
+                      }
+                      year={year}
+                      field={row.field!}
+                      label={row.label.trim()}
+                      onEdit={onEdit}
                     />
                   ) : value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}
                 </td>

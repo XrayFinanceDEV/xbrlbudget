@@ -11,6 +11,30 @@ export function formatCurrency(value: number): string {
   }).format(value);
 }
 
+/**
+ * Legge un importo scritto a mano nel formato italiano: punti (e spazi) come
+ * separatore delle migliaia, virgola decimale.
+ *
+ * Tre esiti, perché i chiamanti ne distinguono tre:
+ *   - `null`      campo vuoto → RIMUOVERE l'override. Non è «forza a zero»,
+ *                 ed è la differenza fra «torna al valore calcolato» e uno
+ *                 zero secco: `sp_overrides` clampa i negativi a zero e
+ *                 ignora in silenzio le chiavi sconosciute, quindi un errore
+ *                 qui non dà errore, dà uno zero.
+ *   - `undefined` non è un numero → non registrare nulla.
+ *   - un numero   il valore.
+ *
+ * Una sola implementazione per CE e SP Previsionale di proposito: due parser
+ * di numeri italiani che divergono sono un modo silenzioso di scrivere un
+ * importo diverso da quello digitato.
+ */
+export function parseItalianAmount(raw: string): number | null | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const parsed = parseFloat(trimmed.replace(/[.\s]/g, "").replace(",", "."));
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 export function formatCurrencyDetailed(value: number): string {
   return new Intl.NumberFormat('it-IT', {
     style: 'currency',

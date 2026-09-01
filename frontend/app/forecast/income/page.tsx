@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { formatCurrency, formatPercentage, parseItalianAmount } from "@/lib/formatters";
 import { patchCeOverrides } from "@/lib/api";
 import { INCOME_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import type {
@@ -467,14 +467,13 @@ function EditableCell({
 
   const commitEdit = () => {
     setEditing(false);
-    const trimmed = editValue.trim();
-    if (trimmed === "") {
-      // Clear override → revert to engine calculation
+    const parsed = parseItalianAmount(editValue);
+    if (parsed === undefined) return;      // non è un numero: non registrare nulla
+    if (parsed === null) {
+      // Campo svuotato → rimuovi l'override, torna al calcolo del motore
       onEdit(year, field, null);
       return;
     }
-    const parsed = parseFloat(trimmed.replace(/[.\s]/g, "").replace(",", "."));
-    if (isNaN(parsed)) return;
     // Only register edit if value actually changed (within €1 tolerance)
     if (Math.abs(parsed - value) < 1) return;
     onEdit(year, field, Math.round(parsed * 100) / 100);

@@ -100,6 +100,7 @@ import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
 } from "@/lib/pratica-statement-rows";
+import { buildConfrontoHighlights } from "@/lib/pratica-highlights";
 
 export default function InfraannualePage() {
   const { companies, refreshCompanies, setSelectedCompanyId } = useApp();
@@ -291,6 +292,17 @@ export default function InfraannualePage() {
   const [scenario, setScenario] = useState<BudgetScenario | null>(null);
   const [comparison, setComparison] = useState<IntraYearComparison | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
+
+  // Le voci di CE con la riga sintetica `_ebitda`: l'EBITDA non e' una voce di
+  // bilancio, e la costruiscono sia le due tabelle di confronto sia le card in
+  // evidenza. Una volta sola, qui, invece di tre volte a ogni render.
+  const incomeItemsWithEbitda = useMemo(
+    () =>
+      comparison
+        ? buildIncomeItemsWithEbitda(comparison.income_items, comparison.period_months)
+        : [],
+    [comparison],
+  );
 
   // Step 3: Projection overrides
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -1572,49 +1584,99 @@ export default function InfraannualePage() {
                   </p>
                 </div>
               )}
-              {/* Summary Cards */}
+              {/*
+                Otto card su due righe da quattro. Cinque di FLUSSO (le quattro
+                storiche piu' l'EBITDA in euro) e tre di RAPPORTO — e i due tipi
+                si confrontano con termini di paragone diversi: le prime con la
+                frazione d'anno trascorsa, le seconde col rapporto dell'anno di
+                riferimento. Un margine non matura pro-quota, e mostrarlo al 75%
+                dopo nove mesi direbbe il falso. La regola sta in
+                `lib/pratica-highlights.ts`, con la sua suite.
+              */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {["ce01_ricavi_vendite", "ce08_costi_personale", "ce05_materie_prime", "ce06_servizi"].map(
-                  (code) => {
-                    const item = comparison.income_items.find((i) => i.code === code);
-                    if (!item) return null;
-                    const expectedPct = (comparison.period_months / 12) * 100;
-                    const isAbove = item.pct_of_reference > expectedPct;
-                    return (
-                      <Card key={code}>
-                        <CardContent className="pt-4">
-                          <p className="text-xs text-muted-foreground truncate">
-                            {item.label}
+                {buildConfrontoHighlights(comparison, incomeItemsWithEbitda).map((h) =>
+                  h.kind === "flusso" ? (
+                    <Card key={h.code}>
+                      <CardContent className="pt-4">
+                        <p className="text-xs text-muted-foreground truncate">{h.label}</p>
+                        <p className="text-lg font-bold">{formatEuro(h.value)}</p>
+                        {h.ahead !== null ? (
+                          <div className="flex items-center gap-1 mt-1">
+                            {h.ahead ? (
+                              <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <TrendingDown className="h-3 w-3 text-red-600 dark:text-red-400" />
+                            )}
+                            <span
+                              className={`text-xs ${
+                                h.ahead
+                                  ? "text-green-600 dark:text-green-400"
+                                  : "text-red-600 dark:text-red-400"
+                              }`}
+                            >
+                              {formatPct(h.pctOfReference)} vs storico
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            annualizzato: {formatEuro(h.annualized)}
                           </p>
-                          <p className="text-lg font-bold">
-                            {formatEuro(item.partial_value)}
-                          </p>
-                          {comparison.has_reference ? (
-                            <div className="flex items-center gap-1 mt-1">
-                              {isAbove ? (
-                                <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
-                              ) : (
-                                <TrendingDown className="h-3 w-3 text-red-600 dark:text-red-400" />
-                              )}
-                              <span
-                                className={`text-xs ${
-                                  isAbove
+                        )}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <Card key={h.key}>
+                      <CardContent className="pt-4">
+                        <p className="text-xs text-muted-foreground truncate">{h.label}</p>
+                        <p className="text-lg font-bold">
+                          {h.value === null ? "n.d." : formatPct(h.value)}
+                        </p>
+                        {h.improved !== null && h.deltaPp !== null ? (
+                          <div className="flex items-center gap-1 mt-1">
+                            {/*
+                              La freccia segue il VALORE, il colore segue il
+                              GIUDIZIO: sui costi un'incidenza che scende e' una
+                              freccia giu' verde. Legarli fra loro renderebbe
+                              verde un costo che cresce.
+                            */}
+                            {h.deltaPp > 0 ? (
+                              <TrendingUp
+                                className={`h-3 w-3 ${
+                                  h.improved
                                     ? "text-green-600 dark:text-green-400"
                                     : "text-red-600 dark:text-red-400"
                                 }`}
-                              >
-                                {formatPct(item.pct_of_reference)} vs storico
-                              </span>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              annualizzato: {formatEuro(item.annualized_value)}
-                            </p>
-                          )}
-                        </CardContent>
-                      </Card>
-                    );
-                  }
+                              />
+                            ) : (
+                              <TrendingDown
+                                className={`h-3 w-3 ${
+                                  h.improved
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-red-600 dark:text-red-400"
+                                }`}
+                              />
+                            )}
+                            <span
+                              className={`text-xs ${
+                                h.improved
+                                  ? "text-green-600 dark:text-green-400"
+                                  : "text-red-600 dark:text-red-400"
+                              }`}
+                            >
+                              {h.deltaPp > 0 ? "+" : ""}
+                              {h.deltaPp.toFixed(1)} p.p. vs storico
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {h.reference === null
+                              ? "nessun anno di riferimento"
+                              : "rapporto non calcolabile"}
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ),
                 )}
               </div>
 
@@ -1629,7 +1691,7 @@ export default function InfraannualePage() {
                 </CardHeader>
                 <CardContent>
                   <ComparisonTable
-                    items={buildIncomeItemsWithEbitda(comparison.income_items, comparison.period_months)}
+                    items={incomeItemsWithEbitda}
                     periodMonths={comparison.period_months}
                     referenceYear={comparison.reference_year}
                     partialYear={comparison.partial_year}
@@ -1686,7 +1748,7 @@ export default function InfraannualePage() {
             </CardHeader>
             <CardContent>
               <ProjectionTable
-                items={buildIncomeItemsWithEbitda(comparison.income_items, comparison.period_months)}
+                items={incomeItemsWithEbitda}
                 periodMonths={comparison.period_months}
                 referenceYear={comparison.reference_year}
                 partialYear={comparison.partial_year}

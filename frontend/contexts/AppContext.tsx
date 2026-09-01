@@ -9,13 +9,17 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { getCompanies, getCompanyYears } from "@/lib/api";
+import { getCompaniesWithScenarios, getCompanyYears } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
-import type { Company } from "@/types/api";
+import type { Company, CompanyWithScenarios } from "@/types/api";
 
 interface AppContextType {
-  companies: Company[];
+  // Sempre CON gli scenari: è l'unica fonte dell'elenco aziende in tutta
+  // l'app (la home non ne ha più uno proprio). `CompanyWithScenarios`
+  // ESTENDE `Company`, quindi i consumatori che leggono solo i campi
+  // anagrafici non cambiano di una riga.
+  companies: CompanyWithScenarios[];
   selectedCompanyId: number | null;
   setSelectedCompanyId: (id: number | null) => void;
   years: number[];
@@ -24,6 +28,13 @@ interface AppContextType {
   selectedCompany: Company | null;
   loading: boolean;
   error: string | null;
+  // Un caricamento dell'elenco è andato a buon fine almeno una volta.
+  companiesLoaded: boolean;
+  // Messaggio dell'ULTIMO caricamento fallito, `null` quando l'ultimo è
+  // riuscito. Serve alla home per dire il vero invece di mostrare l'invito
+  // a creare la prima azienda: quel messaggio vale solo per il caso
+  // «caricamento riuscito, zero aziende».
+  companiesError: string | null;
   startupMode: boolean;
   setStartupMode: (v: boolean) => void;
   refreshCompanies: () => Promise<void>;
@@ -42,13 +53,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // is legal. A pratica owns the company selection while it is active — see
   // praticaActiveRef below and the sync effect after loadCompanies.
   const { pratica, exitPratica } = usePratica();
-  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companies, setCompanies] = useState<CompanyWithScenarios[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [companiesError, setCompaniesError] = useState<string | null>(null);
 
   // Startup mode: simplified budget flow (no import/companies tabs, reduced variables).
   // Persisted so it survives navigation between pages within a startup session.
@@ -92,9 +104,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const loadCompanies = useCallback(async () => {
     if (authLoadingRef.current) return;
     try {
-      const data = await getCompanies();
+      // `?include=scenarios`: una sola query lato server (joinedload), e il
+      // tetto è 50 aziende per utente — il costo dell'inclusione è nullo.
+      const data = await getCompaniesWithScenarios();
       setCompanies(data);
       setCompaniesLoaded(true);
+      setCompaniesError(null);
       lastLoadSucceededRef.current = true;
 
       // Fix selection if needed (outside of setCompanies callback)
@@ -113,6 +128,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("Error loading companies:", err);
       setError("Impossibile caricare le aziende");
+      // Distinto da `error` (condiviso con il caricamento anni) perché la
+      // home ci appende sopra un ramo di UI: senza, un fallimento si
+      // presenterebbe come «Nessuna azienda presente», cioè un invito a
+      // creare il duplicato che l'azienda già ha.
+      setCompaniesError("Impossibile caricare le aziende");
       lastLoadSucceededRef.current = false;
     }
   }, []);
@@ -222,6 +242,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedCompany,
       loading,
       error,
+      companiesLoaded,
+      companiesError,
       startupMode,
       setStartupMode,
       refreshCompanies: loadCompanies,
@@ -235,6 +257,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedCompany,
       loading,
       error,
+      companiesLoaded,
+      companiesError,
       startupMode,
       setStartupMode,
       loadCompanies,

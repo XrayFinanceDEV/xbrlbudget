@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import {
-  getCompaniesWithScenarios,
   createCompany,
   updateCompany,
   deleteCompany,
@@ -24,6 +23,7 @@ import {
   CalendarRange,
   Rocket,
   ArrowRight,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,11 +61,21 @@ const SECTOR_OPTIONS: Record<number, string> = {
 
 export default function Home() {
   const router = useRouter();
-  const { setStartupMode, setSelectedCompanyId, refreshCompanies } = useApp();
+  // L'elenco aziende arriva SOLO da AppContext: è già protetto dall'attesa
+  // dell'autenticazione (`authLoadingRef` in `loadCompanies`) e include gli
+  // scenari. Un fetch proprio qui è ciò che produceva la corsa col token
+  // dell'iframe — la home partiva senza `Authorization`, l'interceptor
+  // chiedeva un token nuovo al parent, e niente rilanciava questo caricamento.
+  const {
+    companies,
+    companiesLoaded,
+    companiesError,
+    setStartupMode,
+    setSelectedCompanyId,
+    refreshCompanies,
+  } = useApp();
   const { startPratica } = usePratica();
 
-  const [companies, setCompanies] = useState<CompanyWithScenarios[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showNewPratica, setShowNewPratica] = useState(false);
 
   // Create-company form
@@ -86,22 +96,6 @@ export default function Home() {
     setStartupMode(false);
   }, [setStartupMode]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getCompaniesWithScenarios();
-      setCompanies(data);
-    } catch (err) {
-      console.error("Error loading companies:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
   const handleCreate = async () => {
     if (!newName.trim()) {
       toast.error("Il nome dell'azienda è obbligatorio");
@@ -120,7 +114,7 @@ export default function Home() {
       setNewTaxId("");
       setNewSector(1);
       toast.success("Azienda creata con successo");
-      await Promise.all([load(), refreshCompanies()]);
+      await refreshCompanies();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Errore durante la creazione");
     } finally {
@@ -146,7 +140,7 @@ export default function Home() {
       });
       setEditingId(null);
       toast.success("Azienda aggiornata");
-      await Promise.all([load(), refreshCompanies()]);
+      await refreshCompanies();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Errore durante l'aggiornamento");
     } finally {
@@ -159,7 +153,7 @@ export default function Home() {
       await deleteCompany(id);
       setSelectedCompanyId(null);
       toast.success("Azienda eliminata");
-      await Promise.all([load(), refreshCompanies()]);
+      await refreshCompanies();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Errore durante l'eliminazione");
     }
@@ -310,7 +304,17 @@ export default function Home() {
       )}
 
       {/* Companies + pratiche */}
-      {loading ? (
+      {companiesError ? (
+        // Errore onesto. «Nessuna azienda presente» resta sotto, per il solo
+        // caso vero: caricamento riuscito e zero aziende.
+        <div className="py-12 text-center space-y-4">
+          <p className="text-muted-foreground">{companiesError}</p>
+          <Button variant="outline" onClick={() => refreshCompanies()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Riprova
+          </Button>
+        </div>
+      ) : !companiesLoaded ? (
         <div className="py-12 text-center text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin mx-auto" />
         </div>

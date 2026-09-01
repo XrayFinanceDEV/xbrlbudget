@@ -48,12 +48,12 @@ api.interceptors.response.use(
 );
 
 // Companies
-export const getCompanies = async (): Promise<Company[]> => {
-  const { data } = await api.get<Company[]>('/companies');
-  return data;
-};
-
-// One call for the Aziende & Pratiche home: each company carries its scenarios.
+//
+// Unica lettura dell'elenco aziende in tutta l'app, e sempre CON gli scenari
+// (una sola query lato server, joinedload; il tetto e' 50 aziende per utente).
+// La variante senza scenari e' stata tolta di proposito: due percorsi di
+// caricamento sono la condizione che ha prodotto la corsa col token
+// dell'iframe sulla home. Chiamare SEMPRE da AppContext, mai da una pagina.
 export const getCompaniesWithScenarios = async (): Promise<CompanyWithScenarios[]> => {
   const { data } = await api.get<CompanyWithScenarios[]>('/companies', {
     params: { include: 'scenarios' },

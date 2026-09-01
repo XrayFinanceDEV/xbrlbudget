@@ -14,7 +14,7 @@ import re
 import tempfile
 import time
 from decimal import Decimal
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 import fitz  # PyMuPDF
 import pydantic
@@ -382,6 +382,147 @@ def _comparative_column_words(words) -> List[Tuple]:
     return []
 
 
+# Intestazioni di colonna scritte a PAROLE, non a date. Il "bilancio riclassificato
+# UE" non data le colonne: l'unica data stampata e' il periodo ("dal 01/01/2026 al
+# 30/06/2026"), che il riconoscimento per data scambia per una coppia di colonne
+# affiancate a meta' pagina. Le vere colonne sono intestate
+# ``Importo corrente | Importo comparato | Scostamento | %`` e sono allineate a
+# DESTRA sul bordo della propria intestazione: l'ancora e' quindi il bordo destro
+# (``word[2]``), non il centro.
+_CURRENT_COLUMN_HEADERS = ('corrente',)
+_PRIOR_COLUMN_HEADERS = ('comparato', 'precedente', 'confronto')
+# Colonne di ANALISI, non contabili: vanno riconosciute per non essere scambiate
+# per la colonna del comparato (su una riga a corrente vuoto lo scostamento e la
+# percentuale sono gli unici altri numeri stampati, e senza queste ancore il
+# confronto "piu' vicino fra due" li attribuirebbe all'anno precedente).
+_ANALYSIS_COLUMN_HEADERS = ('scostamento', 'scost.', 'differenza', 'variazione', '%')
+
+
+class _ColumnAnchors(NamedTuple):
+    """Ancore orizzontali delle colonne numeriche di un prospetto comparato.
+
+    ``right_edge`` distingue le due grafie: le colonne intestate a parole sono
+    allineate al bordo destro dell'intestazione, quelle intestate a date si
+    riconoscono dal centro (comportamento storico, lasciato invariato).
+    """
+
+    current: float
+    prior: float
+    others: Tuple[float, ...]
+    right_edge: bool
+
+
+def _text_line_groups(words) -> List[List[Tuple]]:
+    """Raggruppa le parole per riga fisica (stessa baseline entro 1pt)."""
+    groups: List[List[Tuple]] = []
+    for word in sorted(words, key=lambda item: (float(item[1]), float(item[0]))):
+        if not groups or abs(float(word[1]) - float(groups[-1][0][1])) > 1.0:
+            groups.append([word])
+        else:
+            groups[-1].append(word)
+    return groups
+
+
+# Quanto puo' discostarsi il valore ESTRATTO dall'importo stampato nella cella del
+# comparato perche' i due si riconoscano come lo stesso numero. Non e' una
+# tolleranza contabile: e' un controllo di IDENTITA', il cinturino di sicurezza che
+# impedisce di azzerare un campo diverso da quello che ha preso il comparato. Chi
+# decide che il valore corrente e' zero e' la geometria (la cella e' vuota), non
+# questa soglia. Un euro perche' l'estrazione LLM non e' deterministica e a volte
+# restituisce l'importo troncato ai centesimi (90.603,75 -> 90603): a cento
+# centesimi di distanza si parla ancora dello stesso importo, a un euro di distanza
+# non esiste un'altra voce di bilancio con cui confonderlo.
+_PRIOR_CELL_MATCH_TOL = Decimal('1')
+
+
+def _row_code_words(labels) -> List[str]:
+    """Il codice di voce di una riga di prospetto: la PRIMA parola dell'etichetta.
+
+    Prendere tutte le parole del margine sinistro sembra piu' generoso ed e'
+    invece una trappola: nell'etichetta "D) Ratei e risconti" la congiunzione
+    ``e`` supera un confronto ``^E[.)]?$`` insensibile alle maiuscole, e la voce
+    dell'ATTIVO si spaccia per la ``E)`` del passivo. Il codice, quando c'e', sta
+    sempre in testa alla riga.
+    """
+    ordered = sorted(labels, key=lambda word: float(word[0]))
+    if not ordered or float(ordered[0][0]) >= 130:
+        return []
+    return [str(ordered[0][4]).strip()]
+
+
+def _labelled_column_anchors(words) -> Optional[_ColumnAnchors]:
+    """Ancore lette da un'intestazione ``corrente | comparato | ...`` stampata."""
+    for line in _text_line_groups(words):
+        current_word = prior_word = None
+        for word in sorted(line, key=lambda item: float(item[0])):
+            if float(word[0]) < 250:
+                continue  # colonne numeriche: mai a ridosso del margine sinistro
+            token = str(word[4]).strip().casefold().strip(':')
+            if current_word is None:
+                if token in _CURRENT_COLUMN_HEADERS:
+                    current_word = word
+            elif prior_word is None and token in _PRIOR_COLUMN_HEADERS:
+                prior_word = word
+        if current_word is None or prior_word is None:
+            continue
+        current_x = float(current_word[2])
+        prior_x = float(prior_word[2])
+        if prior_x - current_x < 25:
+            continue
+        others = tuple(
+            float(word[2]) for word in line
+            if float(word[0]) > prior_x
+            and str(word[4]).strip().casefold() in _ANALYSIS_COLUMN_HEADERS
+        )
+        return _ColumnAnchors(current_x, prior_x, others, True)
+    return None
+
+
+def _page_column_anchors(
+    words, document_centers: Optional[Tuple[float, float]] = None
+) -> Optional[_ColumnAnchors]:
+    """Ancore di colonna della pagina: prima le intestazioni a parole, poi le date."""
+    labelled = _labelled_column_anchors(words)
+    if labelled is not None:
+        return labelled
+    date_words = _comparative_column_words(words)
+    if len(date_words) >= 2:
+        current_x = (float(date_words[0][0]) + float(date_words[0][2])) / 2
+        prior_x = (float(date_words[1][0]) + float(date_words[1][2])) / 2
+    elif document_centers is not None:
+        current_x, prior_x = document_centers
+    else:
+        return None
+    if prior_x - current_x < 25:
+        return None
+    return _ColumnAnchors(current_x, prior_x, (), False)
+
+
+def _column_of(word, anchors: _ColumnAnchors) -> str:
+    """``'current'`` / ``'prior'`` / ``'other'``: colonna piu' vicina all'importo."""
+    x = float(word[2]) if anchors.right_edge else (float(word[0]) + float(word[2])) / 2
+    best_name = 'current'
+    best_distance = abs(x - anchors.current)
+    candidates = [('prior', anchors.prior)]
+    candidates.extend(('other', anchor) for anchor in anchors.others)
+    for name, anchor in candidates:
+        distance = abs(x - anchor)
+        if distance < best_distance:
+            best_name, best_distance = name, distance
+    return best_name
+
+
+def _split_current_prior(numbers, anchors: _ColumnAnchors) -> Tuple[List, List]:
+    current_numbers, prior_numbers = [], []
+    for word in numbers:
+        column = _column_of(word, anchors)
+        if column == 'current':
+            current_numbers.append(word)
+        elif column == 'prior':
+            prior_numbers.append(word)
+    return current_numbers, prior_numbers
+
+
 def _document_comparative_centers(doc: fitz.Document) -> Optional[Tuple[float, float]]:
     pairs = []
     for page in doc:
@@ -513,6 +654,85 @@ def reading_order_text(page: fitz.Page) -> str:
     return ordered
 
 
+# Voci di CE la cui cella dell'anno corrente puo' restare VUOTA su un prospetto
+# comparato: la riga stampa allora tre numeri invece di quattro (comparato,
+# scostamento, %) e la lettura lineare prende il primo, cioe' l'anno precedente.
+# Ogni voce porta i propri importi sulla stessa baseline dell'etichetta, quindi si
+# legge per riga fisica; il codice di voce stampato e le parole obbligatorie
+# rendono il riconoscimento inequivocabile.
+#   - ce03: A.4 "Incrementi di immobilizzazioni per lavori interni"
+#   - ce09d: B.10.d "Svalutazioni dei crediti compresi nell'attivo circolante"
+#   - ce20: 20) "Imposte sul reddito dell'esercizio" (anche quando la voce non ha
+#     il dettaglio 20.a/20.b su cui lavora il passo per segmenti piu' sotto)
+_BLANK_CURRENT_CE_ROWS = {
+    'ce03_lavori_interni': (
+        re.compile(r"^(?:A\.?)?4\)[,]?$", re.I),
+        ('incrementi', 'immobilizzazioni', 'lavori', 'interni'),
+    ),
+    'ce09d_svalutazione_crediti': (
+        re.compile(r"^(?:B\.?)?(?:10\.?)?d\)[,]?$", re.I),
+        ('svalutazioni', 'crediti'),
+    ),
+    'ce20_imposte': (
+        re.compile(r"^(?:20|22)\)[,]?$"),
+        ('imposte', 'reddito'),
+    ),
+}
+
+
+def _clear_blank_current_rows(
+    words,
+    anchors: _ColumnAnchors,
+    specs: Dict[str, Tuple[re.Pattern, Tuple[str, ...]]],
+    current: Dict[str, Decimal],
+    prior: Dict[str, Decimal],
+) -> List[Tuple[str, str]]:
+    """Azzera i campi la cui riga stampa un importo SOLO nella colonna comparato.
+
+    Nessun valore viene dedotto: si legge la geometria della riga, e si agisce solo
+    quando la cella dell'anno corrente e' dimostrabilmente vuota e quella del
+    comparato contiene l'importo che l'estrattore ha attribuito all'anno corrente.
+    """
+    cleared: List[Tuple[str, str]] = []
+    for line in _text_line_groups(words):
+        labels = [word for word in line if float(word[0]) < 350]
+        label_text = ' '.join(str(word[4]).casefold() for word in labels)
+        codes = _row_code_words(labels)
+        if not codes:
+            continue
+        numbers = [
+            word for word in line
+            if float(word[0]) > 350
+            and _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
+        ]
+        if not numbers:
+            continue
+        for field, (code_re, required_words) in specs.items():
+            if not all(token in label_text for token in required_words):
+                continue
+            if not any(code_re.fullmatch(code) for code in codes):
+                continue
+            current_numbers, prior_numbers = _split_current_prior(numbers, anchors)
+            if current_numbers or not prior_numbers:
+                continue
+            parsed = [_parse_it_number(str(word[4])) for word in prior_numbers]
+            parsed = [value for value in parsed if value is not None]
+            if not parsed or any(value != parsed[0] for value in parsed[1:]):
+                continue
+            extracted = current.get(field, Decimal('0'))
+            if (
+                parsed[0] == 0
+                or extracted == 0
+                or abs(abs(extracted) - abs(parsed[0])) > _PRIOR_CELL_MATCH_TOL
+            ):
+                continue
+            current[field] = Decimal('0')
+            if prior:
+                prior[field] = parsed[0]
+            cleared.append((field, str(parsed[0])))
+    return cleared
+
+
 def _reconcile_blank_current_ce_cells(
     file_path: str,
     current_ce: Dict[str, Decimal],
@@ -560,16 +780,14 @@ def _reconcile_blank_current_ce_cells(
     try:
         for page in doc:
             words = page.get_text('words', sort=True)
-            date_words = _comparative_column_words(words)
-            if len(date_words) >= 2:
-                current_x = (float(date_words[0][0]) + float(date_words[0][2])) / 2
-                prior_x = (float(date_words[1][0]) + float(date_words[1][2])) / 2
-            elif document_centers is not None:
-                current_x, prior_x = document_centers
-            else:
+            anchors = _page_column_anchors(words, document_centers)
+            if anchors is None:
                 continue
-            if prior_x - current_x < 25:
-                continue
+            cleared.extend(
+                _clear_blank_current_rows(
+                    words, anchors, _BLANK_CURRENT_CE_ROWS, current, prior
+                )
+            )
 
             item_words = sorted(
                 (
@@ -656,14 +874,9 @@ def _reconcile_blank_current_ce_cells(
                                 break
                         if subtotal_numbers:
                             numbers = subtotal_numbers
-                    current_numbers = []
-                    prior_numbers = []
-                    for word in numbers:
-                        center_x = (float(word[0]) + float(word[2])) / 2
-                        if abs(center_x - current_x) < abs(center_x - prior_x):
-                            current_numbers.append(word)
-                        else:
-                            prior_numbers.append(word)
+                    current_numbers, prior_numbers = _split_current_prior(
+                        numbers, anchors
+                    )
                     if current_numbers or not prior_numbers:
                         continue
                     # Repeated rendering of the same row is harmless; all observed
@@ -676,7 +889,7 @@ def _reconcile_blank_current_ce_cells(
                     if (
                         parsed[0] == 0
                         or extracted == 0
-                        or abs(abs(extracted) - abs(parsed[0])) > Decimal('0.01')
+                        or abs(abs(extracted) - abs(parsed[0])) > _PRIOR_CELL_MATCH_TOL
                     ):
                         continue
                     current[field] = Decimal('0')
@@ -727,30 +940,17 @@ def _reconcile_blank_current_sp_cells(
             if selected_sp_pages and page.number not in selected_sp_pages:
                 continue
             words = page.get_text('words', sort=True)
-            headers = _comparative_column_words(words)
-            if len(headers) >= 2:
-                current_x = (float(headers[0][0]) + float(headers[0][2])) / 2
-                prior_x = (float(headers[1][0]) + float(headers[1][2])) / 2
-            elif document_centers is not None:
-                # Some statement pages repeat the two numeric columns but not the
-                # date header.  Reuse only a document-level pair proven by another
-                # page of the same comparative statement (budget_282/336/397).
-                current_x, prior_x = document_centers
-            else:
-                continue
-            if prior_x - current_x < 25:
+            # Some statement pages repeat the two numeric columns but not the
+            # date header.  Reuse only a document-level pair proven by another
+            # page of the same comparative statement (budget_282/336/397).
+            anchors = _page_column_anchors(words, document_centers)
+            if anchors is None:
                 continue
 
-            line_groups: List[List[Tuple]] = []
-            for word in sorted(words, key=lambda item: (float(item[1]), float(item[0]))):
-                if not line_groups or abs(float(word[1]) - float(line_groups[-1][0][1])) > 1:
-                    line_groups.append([word])
-                else:
-                    line_groups[-1].append(word)
-            for line in line_groups:
+            for line in _text_line_groups(words):
                 labels = [word for word in line if float(word[0]) < 350]
                 label_text = ' '.join(str(word[4]).casefold() for word in labels)
-                codes = [str(word[4]).strip() for word in labels if float(word[0]) < 130]
+                codes = _row_code_words(labels)
                 for field, (required, code_re) in specs.items():
                     if not all(token in label_text for token in required):
                         continue
@@ -761,13 +961,9 @@ def _reconcile_blank_current_sp_cells(
                         if float(word[0]) > 350
                         and _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
                     ]
-                    current_numbers, prior_numbers = [], []
-                    for word in numbers:
-                        center_x = (float(word[0]) + float(word[2])) / 2
-                        if abs(center_x - current_x) < abs(center_x - prior_x):
-                            current_numbers.append(word)
-                        else:
-                            prior_numbers.append(word)
+                    current_numbers, prior_numbers = _split_current_prior(
+                        numbers, anchors
+                    )
                     if current_numbers or not prior_numbers:
                         continue
                     parsed = [_parse_it_number(str(word[4])) for word in prior_numbers]
@@ -778,7 +974,7 @@ def _reconcile_blank_current_sp_cells(
                     if (
                         parsed[0] == 0
                         or extracted == 0
-                        or abs(abs(extracted) - abs(parsed[0])) > Decimal('0.01')
+                        or abs(abs(extracted) - abs(parsed[0])) > _PRIOR_CELL_MATCH_TOL
                     ):
                         continue
                     current[field] = Decimal('0')
@@ -793,6 +989,95 @@ def _reconcile_blank_current_sp_cells(
             cleared,
         )
     return current, prior
+
+
+# Voci di SP che l'estrattore lineare puo' perdere per intero pur essendo
+# STAMPATE, e che si rileggono dalla riga di prospetto senza dedurre nulla.
+# ``E) Ratei e risconti`` del passivo e' l'unica registrata perche' e' l'unica
+# provata: sul bilancio riclassificato UE di AMB AMBIENTA sp18 usciva 0 contro
+# 178.663,25 stampati, mentre il ``D)`` dell'attivo arrivava regolarmente in sp10.
+# La lettera di voce distingue i due lati (art. 2424: D attivo, E passivo), le due
+# parole obbligatorie distinguono la voce di legge dai suoi conti di dettaglio
+# ("RATEI PASSIVI", "RISCONTI PASSIVI", che ne portano una sola).
+_MISSING_SP_ROWS = {
+    'sp18_ratei_risconti_passivi': (
+        re.compile(r"^E[.)]?$", re.I),
+        ('ratei', 'risconti'),
+    ),
+}
+
+
+def _recover_printed_sp_rows(
+    file_path: str, current_bs: Dict[str, Decimal]
+) -> Dict[str, Decimal]:
+    """Rilegge dalla fonte una voce di SP stampata che l'estrazione ha perso.
+
+    E' un RIPIEGO, non un tappo: l'importo esiste, e' stampato nella colonna
+    dell'anno corrente della propria riga di prospetto e viene letto li'. Nessun
+    valore viene mai ricavato da un divario di quadratura, e la voce viene toccata
+    solo quando l'estrazione la dichiara a zero: un importo gia' estratto, anche
+    diverso, resta com'e' (e il divario lo dichiara `_unclassified_mass`).
+    """
+    current = dict(current_bs)
+    try:
+        doc = fitz.open(file_path)
+    except Exception:
+        return current
+    try:
+        selected_sp_pages, _ = find_section_pages(file_path)
+    except Exception:
+        selected_sp_pages = set()
+    recovered: List[Tuple[str, str]] = []
+    document_centers = _document_comparative_centers(doc)
+    try:
+        for page in doc:
+            if selected_sp_pages and page.number not in selected_sp_pages:
+                continue
+            words = page.get_text('words', sort=True)
+            anchors = _page_column_anchors(words, document_centers)
+            for line in _text_line_groups(words):
+                labels = [word for word in line if float(word[0]) < 350]
+                label_text = ' '.join(str(word[4]).casefold() for word in labels)
+                codes = _row_code_words(labels)
+                if not codes:
+                    continue
+                numbers = [
+                    word for word in line
+                    if float(word[0]) > 350
+                    and _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
+                ]
+                if not numbers:
+                    continue
+                for field, (code_re, required_words) in _MISSING_SP_ROWS.items():
+                    if current.get(field, Decimal('0')) != 0:
+                        continue
+                    if not all(token in label_text for token in required_words):
+                        continue
+                    if not any(code_re.fullmatch(code) for code in codes):
+                        continue
+                    if anchors is not None:
+                        candidates, _ = _split_current_prior(numbers, anchors)
+                    else:
+                        # Colonna unica: la riga porta un solo importo, che e'
+                        # quello dell'anno stampato. Piu' di uno senza ancore di
+                        # colonna e' ambiguo e non si tocca nulla.
+                        candidates = list(numbers)
+                    parsed = [_parse_it_number(str(word[4])) for word in candidates]
+                    parsed = [value for value in parsed if value is not None]
+                    if not parsed or any(value != parsed[0] for value in parsed[1:]):
+                        continue
+                    if parsed[0] == 0:
+                        continue
+                    current[field] = parsed[0]
+                    recovered.append((field, str(parsed[0])))
+    finally:
+        doc.close()
+    if recovered:
+        logger.warning(
+            "SP source recovery: voci stampate assenti dall'estrazione, rilette "
+            "dalla riga di prospetto: %s", recovered,
+        )
+    return current
 
 
 def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
@@ -880,7 +1165,29 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     if sp_start is not None:
         sp_end = _find_end(SP_END_KEYWORDS, sp_start)
         if sp_end is None:
-            sp_end = min(sp_start + 2, total_pages - 1)
+            # Nessun "Totale passivo" stampato. Il default storico (sp_start + 2)
+            # e' una TAGLIA, non un'ancora: su un prospetto piu' lungo di tre
+            # pagine chiude la sezione patrimoniale a meta' del passivo e la coda
+            # non arriva mai al prompt. Sul bilancio riclassificato UE di AMB
+            # AMBIENTA (che i totali di sezione li stampa nell'intestazione, non
+            # in coda) "E) Ratei e risconti" 178.663,25 sta a pagina 4 e spariva:
+            # sp18 restava 0 mentre il "D) Ratei e risconti" dell'attivo, a
+            # pagina 2, arrivava regolarmente in sp10.
+            # L'ancora onesta e' il documento stesso: la sezione patrimoniale
+            # finisce dove comincia quella economica. La pagina che apre il CE e'
+            # INCLUSA perche' su questi layout porta ancora le ultime righe del
+            # passivo (ed e' la stessa condivisione che il ramo `ce_start`
+            # qui sotto gia' ammette nel verso opposto).
+            ce_header_page = _find_start(CE_START_KEYWORDS, after_page=sp_start + 1)
+            if ce_header_page is not None and ce_header_page > sp_start:
+                logger.warning(
+                    "Nessun totale di chiusura del passivo stampato: la sezione SP "
+                    "si chiude alla pagina che apre il CE (%s) invece che a %s",
+                    ce_header_page + 1, min(sp_start + 2, total_pages - 1) + 1,
+                )
+                sp_end = ce_header_page
+            else:
+                sp_end = min(sp_start + 2, total_pages - 1)
 
     # --- CE range ---
     # CE start: search after SP start to avoid re-matching the SP header page.
@@ -2660,6 +2967,7 @@ def extract_pdf_with_llm(
     balance_sheet_data, _ = _reconcile_blank_current_sp_cells(
         file_path, balance_sheet_data
     )
+    balance_sheet_data = _recover_printed_sp_rows(file_path, balance_sheet_data)
     raw_income_data = _model_to_decimal_dict(ce_result)
     income_data = _normalize_ce_signs(dict(raw_income_data))
     income_data, _ = _reconcile_blank_current_ce_cells(file_path, income_data)
@@ -2692,6 +3000,22 @@ def extract_pdf_with_llm(
     income_data = _reconcile_ce09_from_source_details(
         income_data, balance_sheet_data, "single"
     )
+
+    # Un estrattore dichiara SEMPRE le proprie chiavi diagnostiche, anche a zero:
+    # a valle una chiave assente vale zero, quindi tacere equivale a dichiararsi
+    # pulito. Le rotte A/B non scrivevano `_unclassified_mass` affatto.
+    try:
+        from importers.iv_cee_hierarchy import declare_unclassified_mass
+        balance_sheet_data.update(
+            declare_unclassified_mass(
+                balance_sheet_data, _declared_control_totals(file_path), "ivcee-single"
+            )
+        )
+    except Exception as _declare_err:  # pragma: no cover - diagnostica, mai bloccante
+        logger.warning(
+            f"Massa non classificata non dichiarata: {_declare_err}"
+        )
+
 
     return balance_sheet_data, income_data
 
@@ -4067,6 +4391,7 @@ def extract_pdf_both_years_with_llm(
     current_bs, prior_bs = _reconcile_blank_current_sp_cells(
         file_path, current_bs, prior_bs
     )
+    current_bs = _recover_printed_sp_rows(file_path, current_bs)
     raw_current_ce = _model_to_decimal_dict(ce_result.current_year)
     raw_prior_ce = _model_to_decimal_dict(ce_result.prior_year)
     current_ce = _normalize_ce_signs(dict(raw_current_ce))
@@ -4146,5 +4471,21 @@ def extract_pdf_both_years_with_llm(
     current_ce = _reconcile_ce09_from_source_details(current_ce, current_bs, "current")
     if prior_bs and prior_ce:
         prior_ce = _reconcile_ce09_from_source_details(prior_ce, prior_bs, "prior")
+
+    # Un estrattore dichiara SEMPRE le proprie chiavi diagnostiche, anche a zero:
+    # a valle una chiave assente vale zero, quindi tacere equivale a dichiararsi
+    # pulito. Le rotte A/B non scrivevano `_unclassified_mass` affatto.
+    try:
+        from importers.iv_cee_hierarchy import declare_unclassified_mass
+        current_bs.update(
+            declare_unclassified_mass(
+                current_bs, _declared_control_totals(file_path), "ivcee-current"
+            )
+        )
+    except Exception as _declare_err:  # pragma: no cover - diagnostica, mai bloccante
+        logger.warning(
+            f"Massa non classificata non dichiarata: {_declare_err}"
+        )
+
 
     return current_bs, current_ce, prior_bs, prior_ce

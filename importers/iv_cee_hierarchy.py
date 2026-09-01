@@ -618,9 +618,60 @@ def reconcile_ivcee_balance(bs: Dict[str, Decimal],
             f"[{label}] IV-CEE non quadrato: attivo {att:,.2f}, passivo {pas:,.2f}, "
             f"differenza {gap:,.2f}; nessun valore contabile è stato modificato"
         )
+    declared_passivo = (
+        _D(declared.get("passivo")) if declared and declared.get("passivo") is not None else None
+    )
     if declared_attivo is not None and abs(att - declared_attivo) > Decimal("0.01"):
         result["_declared_assets_difference"] = att - declared_attivo
+    if declared_passivo is not None and abs(pas - declared_passivo) > Decimal("0.01"):
+        result["_declared_liabilities_difference"] = pas - declared_passivo
+    result.update(declare_unclassified_mass(bs, declared, label))
     return result
+
+
+def declare_unclassified_mass(bs: Dict[str, Decimal],
+                              declared: Optional[Dict[str, Optional[Decimal]]] = None,
+                              label: str = "") -> Dict[str, Decimal]:
+    """Misura la massa STAMPATA che non e' finita in nessun campo IV-CEE.
+
+    Sulle rotte A/B nessuno scriveva `_unclassified_mass`, e a valle una chiave
+    assente vale zero: l'estrazione si dichiarava pulita mentre 178.663,25 di
+    ratei passivi stampati non erano arrivati da nessuna parte (AMB AMBIENTA).
+    La misura e' il difetto di ciascun lato rispetto al proprio totale di
+    controllo stampato — mai un valore contabile, mai una correzione.
+
+    Un'ECCEDENZA (somma classificata sopra il totale stampato) non e' massa
+    mancante e non entra qui: e' un doppio conteggio, e lo dichiara
+    `_declared_assets_difference` / `_declared_liabilities_difference`.
+
+    `_unclassified_mass_measured` dice se un totale di controllo esisteva
+    davvero: senza di esso lo zero significa "non lo so", non "pulito".
+    """
+    att = sum((_D(bs.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
+    pas = sum((_D(bs.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
+    shortfall = Decimal(0)
+    measured = False
+    for side, total in (("attivo", att), ("passivo", pas)):
+        printed = (declared or {}).get(side)
+        if printed is None:
+            continue
+        measured = True
+        shortfall += max(Decimal(0), _D(printed) - total)
+    out = {
+        "_unclassified_mass": shortfall,
+        "_unclassified_mass_measured": Decimal(1) if measured else Decimal(0),
+    }
+    if not measured:
+        logger.info(
+            f"[{label}] massa non classificata NON misurabile: il documento non "
+            f"stampa un totale di controllo di sezione"
+        )
+    elif shortfall > Decimal("0.01"):
+        logger.warning(
+            f"[{label}] massa stampata NON classificata: {shortfall:,.2f} "
+            f"(attivo classificato {att:,.2f}, passivo {pas:,.2f})"
+        )
+    return out
 
 
 def enforce_ce_sp_identity(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]],

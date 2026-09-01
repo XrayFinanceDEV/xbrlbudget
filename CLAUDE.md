@@ -308,10 +308,13 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   **ricevuto** quando non c'è nulla da aggiungere (`lib/budget-horizon.ts`), così React esce
   dall'aggiornamento e l'effetto non riparte.
 - **Accorciare l'orizzonte di un piano non basta a cancellare gli anni in più.** La generazione fa
-  l'upsert dei soli anni che hanno un'ipotesi: `ForecastEngine.generate_forecast` pota i
-  `ForecastYear` rimasti fuori **prima** del ciclo, altrimenti da 5 anni a 3 restano due anni
-  fantasma con i numeri del salvataggio precedente, che /analysis, il rendiconto e il report
-  continuano a mostrare.
+  l'upsert dei soli anni che hanno un'ipotesi, quindi da 5 anni a 3 restano due anni fantasma coi
+  numeri del salvataggio precedente, che /analysis, il rendiconto e il report continuano a mostrare.
+  `prune_out_of_plan_forecast_years` li toglie, e va chiamata in **due** punti: dentro
+  `generate_forecast` (per `POST /generate`) e nel servizio delle assumptions subito dopo il commit
+  delle ipotesi — perché con `auto_generate=false` il motore non gira affatto, e se la generazione
+  fallisce la sua transazione viene annullata mentre le ipotesi restano salvate. Un elenco di anni
+  vuoto non cancella nulla: è assenza di informazione, non un piano a zero anni.
 - **Aggiungere una voce a SP o CE non è un'operazione a un file solo.** Serve il codice negli
   elenchi, il padre, l'etichetta e la riga del Confronto: saltarne uno produce una voce che non
   compare da nessuna parte, senza alcun errore. La tabella completa è nella sezione «Layout SP/CE»

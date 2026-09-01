@@ -846,6 +846,9 @@ function ScenarioForm({
   const [description, setDescription] = useState(scenario?.description || "");
   const [isActive, setIsActive] = useState(scenario?.is_active === 1);
   const [numYears, setNumYears] = useState(3);
+  // Testo battuto nel campo degli anni mentre ha il fuoco (`null` = mostra
+  // `numYears`): vedi il commento sull'input.
+  const [testoAnni, setTestoAnni] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [historicalData, setHistoricalData] = useState<
     Record<number, { income: IncomeStatement; balance: BalanceSheet }>
@@ -892,6 +895,11 @@ function ScenarioForm({
     {}
   );
   const [existingAssumptionYears, setExistingAssumptionYears] = useState<Set<number>>(new Set());
+  // Finche' le ipotesi salvate non sono atterrate, la mappa in memoria non
+  // rappresenta lo scenario: salvare in quella finestra manderebbe righe a zero
+  // al posto di quelle vere, e il bulk cancella e reinserisce. Il salvataggio
+  // resta chiuso, e resta chiuso anche se la lettura fallisce.
+  const [idratato, setIdratato] = useState(false);
 
   // Idratazione: legge le ipotesi salvate e fissa l'orizzonte UNA volta sola.
   // NON dipende da `forecastYears`: dipenderci significa che scrivere
@@ -903,9 +911,11 @@ function ScenarioForm({
       // Scenario nuovo: la mappa la riempie di default l'effetto qui sotto.
       setExistingAssumptionYears(new Set());
       setAssumptions({});
+      setIdratato(true);
       return;
     }
     let annullato = false;
+    setIdratato(false);
     getBudgetAssumptions(companyId, scenarioId).then((data) => {
       if (annullato) return;
       const assumptionsMap: Record<number, Partial<BudgetAssumptionsCreate>> = {};
@@ -1006,11 +1016,21 @@ function ScenarioForm({
           ce20_override: a.ce20_override,
         };
       });
-      // L'orizzonte salvato e' il numero di righe. I default degli anni che una
-      // riga non ce l'hanno vanno messi QUI: questo `setAssumptions` sostituisce
-      // la mappa che l'effetto dei default aveva gia' riempito al mount, e senza
-      // riunirli il salvataggio manderebbe zero righe.
-      const nextNumYears = data.length || 3;
+      // L'orizzonte e' l'ULTIMO anno salvato, non il numero di righe: su uno
+      // scenario le cui ipotesi non partono da `base_year + 1` — la
+      // disallineatura descritta a :853-856 — contare le righe accorcia il
+      // piano, e il salvataggio successivo butterebbe via l'ultimo anno.
+      // I default degli anni scoperti vanno messi QUI: questo `setAssumptions`
+      // sostituisce la mappa che l'effetto dei default aveva gia' riempito al
+      // mount, e senza riunirli il salvataggio manderebbe zero righe.
+      // Senza ipotesi salvate resta il default di prodotto, tre anni.
+      const ultimoSalvato = data.reduce(
+        (max, a) => Math.max(max, a.forecast_year),
+        baseYear
+      );
+      const nextNumYears = data.length === 0
+        ? 3
+        : Math.max(1, ultimoSalvato - baseYear);
       setAssumptions(
         withDefaultsForYears(
           assumptionsMap,
@@ -1020,6 +1040,20 @@ function ScenarioForm({
       );
       setExistingAssumptionYears(existingYears);
       setNumYears(nextNumYears);
+      setIdratato(true);
+    }).catch((err) => {
+      if (annullato) return;
+      // Senza questo ramo un 401 in rinnovo di token o un 500 lasciavano il
+      // form fermo su un piano a zeri del tutto plausibile, e il salvataggio
+      // successivo cancellava le ipotesi vere.
+      // Messaggio fisso, non `getErrorMessage`: su un errore di rete quello
+      // restituisce «Network Error», che non dice a chi legge ne' che cosa e'
+      // andato storto ne' che il salvataggio ora e' chiuso. Il dettaglio
+      // tecnico resta in console.
+      console.error("Error loading assumptions:", err);
+      toast.error(
+        "Impossibile leggere le ipotesi salvate: il salvataggio resta chiuso finché non ricarichi la pagina"
+      );
     });
     return () => {
       annullato = true;
@@ -1035,10 +1069,11 @@ function ScenarioForm({
   // Non si ri-innesca da solo: `withDefaultsForYears` restituisce la mappa
   // ricevuta quando non manca nulla, quindi React esce dall'aggiornamento.
   useEffect(() => {
+    if (!idratato) return;
     setAssumptions((prev) =>
       withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined)
     );
-  }, [forecastYears, scenarioId]);
+  }, [idratato, forecastYears, scenarioId]);
 
   // Auto-generator state
   const [inflationRate, setInflationRate] = useState(2.5);
@@ -1075,6 +1110,10 @@ function ScenarioForm({
   }, []);
 
   const handleSave = async () => {
+    if (!idratato) {
+      toast.error("Ipotesi non ancora caricate: attendi, o ricarica la pagina");
+      return;
+    }
     if (!name.trim()) {
       toast.error("Il nome dello scenario e obbligatorio!");
       return;
@@ -1142,8 +1181,12 @@ function ScenarioForm({
   usePrimaryAction({
     label: pratica ? "Salva e Calcola Previsionale" : null,
     onClick: handleSave,
-    disabled: loading,
-    reason: loading ? "Calcolo in corso" : null,
+    disabled: loading || !idratato,
+    reason: loading
+      ? "Calcolo in corso"
+      : !idratato
+        ? "Lettura delle ipotesi salvate in corso"
+        : null,
   });
 
   const historicalYears = [...new Set(years)].filter(y => y <= baseYear).sort((a, b) => a - b);
@@ -1233,15 +1276,25 @@ function ScenarioForm({
                       type="number"
                       min={1}
                       max={5}
-                      value={numYears}
-                      // `max` su un input numerico non impedisce di battere 9:
-                      // senza questo taglio l'orizzonte uscirebbe dal 1-5 che
-                      // il resto del previsionale si aspetta.
-                      onChange={(e) =>
-                        setNumYears(
-                          Math.min(5, Math.max(1, parseInt(e.target.value) || 3))
-                        )
-                      }
+                      // Il campo tiene il testo battuto finche' ha il fuoco.
+                      // Rimandare `numYears` a ogni tasto faceva rimbalzare il
+                      // valore: cancellare il 3 non cambiava lo stato, React
+                      // rimetteva «3» nel DOM col cursore in fondo, e la cifra
+                      // successiva si accodava — battere 4 dopo un backspace
+                      // dava «34», cioe' un piano a 5 anni.
+                      value={testoAnni ?? String(numYears)}
+                      onChange={(e) => {
+                        const grezzo = e.target.value;
+                        setTestoAnni(grezzo);
+                        const n = parseInt(grezzo, 10);
+                        // `max` su un input numerico non impedisce di battere
+                        // 9: l'orizzonte segue solo un valore dentro l'1-5 che
+                        // il resto del previsionale si aspetta.
+                        if (n >= 1 && n <= 5) setNumYears(n);
+                      }}
+                      // All'uscita il campo torna a mostrare l'orizzonte vero,
+                      // cosi' un «34» o un campo vuoto non restano in vista.
+                      onBlur={() => setTestoAnni(null)}
                       className="w-32 mt-2"
                     />
                   </div>
@@ -1369,7 +1422,7 @@ function ScenarioForm({
           {scenario ? "Annulla" : "Indietro"}
         </Button>
         {!pratica && (
-          <Button onClick={handleSave} disabled={loading}>
+          <Button onClick={handleSave} disabled={loading || !idratato}>
             {loading ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...</>
             ) : (

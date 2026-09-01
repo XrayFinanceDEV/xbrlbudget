@@ -229,3 +229,40 @@ def test_shrinking_the_horizon_leaves_no_phantom_year(monkeypatch):
                 assert orfani == []
     finally:
         engine.dispose()
+
+
+def test_shrinking_prunes_even_without_generation(monkeypatch):
+    """Le ipotesi sono committate: la potatura non puo' vivere solo nel motore.
+
+    Con `auto_generate=false` il motore non gira affatto, e se la generazione
+    fallisce la sua transazione — potatura compresa — viene annullata mentre le
+    ipotesi restano salvate. In entrambi i casi /analysis conterebbe ancora gli
+    anni in piu', coi numeri del salvataggio precedente.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            scenario = _make_scenario(
+                db, company_id, "senza-generazione", [2027, 2028, 2029],
+                extra={"revenue_growth_pct": 5, "tax_rate": 27.9},
+            )
+            assert len(read_forecast_maps(db, scenario.id)) == 3
+
+            budget_scenarios.bulk_upsert_assumptions(
+                company_id,
+                scenario.id,
+                request={
+                    "assumptions": [
+                        {"forecast_year": 2027, "revenue_growth_pct": 5, "tax_rate": 27.9}
+                    ],
+                    "auto_generate": False,
+                },
+                user_id=USER,
+                db=db,
+            )
+
+            assert [y for y, _, _ in read_forecast_maps(db, scenario.id)] == [2027]
+    finally:
+        engine.dispose()

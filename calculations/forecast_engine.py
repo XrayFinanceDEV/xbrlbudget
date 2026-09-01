@@ -18,6 +18,31 @@ from calculations.projection_common import (
 from calculations.ce_result import calculate_ce_result
 
 
+def prune_out_of_plan_forecast_years(db: Session, scenario_id: int, planned_years) -> int:
+    """Cancella i `ForecastYear` dello scenario che non sono piu' nel piano.
+
+    La generazione fa l'upsert dei soli anni che hanno un'ipotesi, quindi senza
+    questa potatura riportare un piano da 5 anni a 3 lascerebbe due anni
+    fantasma coi numeri del salvataggio precedente: `/analysis`, il rendiconto e
+    il report continuerebbero a mostrarli, e nessun controllo se ne
+    accorgerebbe. Il cascade porta via anche SP e CE dell'anno rimosso.
+
+    Un elenco vuoto non cancella nulla: e' assenza di informazione, non un piano
+    a zero anni. Non fa commit — la decide il chiamante.
+    """
+    years = sorted({int(y) for y in planned_years})
+    if not years:
+        return 0
+    stale = db.query(ForecastYear).filter(
+        ForecastYear.scenario_id == scenario_id,
+        ForecastYear.year.notin_(years)
+    ).all()
+    for fy in stale:
+        db.delete(fy)
+    db.flush()
+    return len(stale)
+
+
 class ForecastEngine:
     """
     Calculates forecasted financial statements based on budget assumptions
@@ -392,19 +417,11 @@ class ForecastEngine:
         if not assumptions:
             raise ValueError(f"No assumptions found for scenario {scenario_id}")
 
-        # Un orizzonte accorciato non deve lasciare anni fantasma. Il ciclo qui
-        # sotto fa l'upsert dei soli anni che hanno un'ipotesi: senza questa
-        # potatura, riportare il piano da 5 anni a 3 lascerebbe 2028 e 2029 nel
-        # previsionale, e /analysis, il rendiconto e il report continuerebbero a
-        # mostrarli con i numeri del salvataggio precedente, senza un errore.
-        # Il cascade porta via anche SP e CE dell'anno rimosso.
-        planned_years = sorted({a.forecast_year for a in assumptions})
-        for stale in self.db.query(ForecastYear).filter(
-            ForecastYear.scenario_id == scenario_id,
-            ForecastYear.year.notin_(planned_years)
-        ).all():
-            self.db.delete(stale)
-        self.db.flush()
+        # Un orizzonte accorciato non deve lasciare anni fantasma: il ciclo qui
+        # sotto fa l'upsert dei soli anni che hanno un'ipotesi.
+        prune_out_of_plan_forecast_years(
+            self.db, scenario_id, [a.forecast_year for a in assumptions]
+        )
 
         forecast_years = []
 

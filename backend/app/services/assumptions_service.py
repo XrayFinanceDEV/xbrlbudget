@@ -16,7 +16,7 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from database import models
-from calculations.forecast_engine import ForecastEngine
+from calculations.forecast_engine import ForecastEngine, prune_out_of_plan_forecast_years
 
 
 def bulk_upsert_assumptions(
@@ -205,6 +205,18 @@ def bulk_upsert_assumptions(
 
     # 7. Commit assumptions
     db.commit()
+
+    # 7-bis. Gli anni fuori piano si potano QUI, non solo dentro il motore: le
+    # ipotesi sono gia' committate, mentre il motore puo' non girare affatto
+    # (`auto_generate=false`) o fallire — e in quel caso la sua transazione,
+    # potatura compresa, viene annullata mentre le ipotesi salvate restano. In
+    # entrambi i casi /analysis conterebbe ancora gli anni in piu' coi numeri
+    # del salvataggio precedente, sotto un avviso che parla solo di generazione.
+    # L'infrannuale e' escluso: la sua proiezione e' un anno solo e non segue
+    # gli anni delle ipotesi.
+    if scenario.scenario_type != "infrannuale":
+        if prune_out_of_plan_forecast_years(db, scenario_id, forecast_years_list):
+            db.commit()
 
     # 8. Generate forecasts if requested
     forecast_generated = False

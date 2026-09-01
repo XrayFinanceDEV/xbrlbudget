@@ -22,7 +22,7 @@ import {
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
 import { statoResidui } from "@/lib/base-bank-debt";
-import { forecastYearsFor, withDefaultsForYears } from "@/lib/budget-horizon";
+import { baseYearNote, forecastYearsFor, withDefaultsForYears } from "@/lib/budget-horizon";
 import { cn, getErrorMessage } from "@/lib/utils";
 import type {
   BudgetScenario,
@@ -857,6 +857,10 @@ function ScenarioForm({
   // Math.max(...years) unconditionally misaligned the horizon when a newer year was
   // imported/promoted after the scenario was created, dropping assumption rows on save.
   const baseYear = scenario?.base_year ?? Math.max(...years);
+  // La chiosa e' calcolata, non scritta: su uno scenario che non parte
+  // dall'ultimo anno importato dichiara qual e' l'ultimo, invece di affermare
+  // il contrario di cio' che si legge in database.
+  const notaAnnoBase = baseYearNote(baseYear, years);
   const scenarioId = scenario?.id ?? null;
   const forecastYears = useMemo(
     () => forecastYearsFor(baseYear, numYears),
@@ -1182,7 +1186,8 @@ function ScenarioForm({
                   />
                   <p className="text-sm text-muted-foreground flex items-center gap-1">
                     <Calendar className="h-3.5 w-3.5" />
-                    <strong>Anno Base:</strong> {baseYear} (ultimo anno disponibile)
+                    <strong>Anno Base:</strong> {baseYear}
+                    {notaAnnoBase ? ` (${notaAnnoBase})` : null}
                   </p>
                 </div>
                 <div className="space-y-2">

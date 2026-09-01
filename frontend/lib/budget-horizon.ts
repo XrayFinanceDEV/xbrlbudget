@@ -111,3 +111,22 @@ export function withDefaultsForYears(
   }
   return next;
 }
+
+/**
+ * La chiosa accanto all'anno base, o `null` se non c'è niente di vero da dire.
+ *
+ * Era una stringa fissa — «(ultimo anno disponibile)» — stampata anche quando
+ * l'azienda aveva anni più recenti: uno scenario con base 2025 su un'azienda
+ * col 2026 importato affermava il contrario di ciò che si legge in database.
+ * L'anno base decide da quali numeri parte l'intero piano, ed è proprio il tipo
+ * di frase che convince chi legge a non controllare.
+ */
+export function baseYearNote(baseYear: number, years: number[]): string | null {
+  if (years.length === 0) return null;
+  const ultimo = Math.max(...years);
+  if (ultimo === baseYear) return "ultimo anno disponibile";
+  // Anno base oltre lo storico: startup, o un anno cancellato dopo la
+  // creazione dello scenario. Nessuna delle due chiose sarebbe utile.
+  if (ultimo < baseYear) return null;
+  return `ultimo disponibile: ${ultimo}`;
+}

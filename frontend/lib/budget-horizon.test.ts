@@ -3,6 +3,7 @@ import {
   forecastYearsFor,
   defaultAssumption,
   withDefaultsForYears,
+  baseYearNote,
 } from "@/lib/budget-horizon";
 
 describe("forecastYearsFor", () => {
@@ -69,5 +70,24 @@ describe("withDefaultsForYears", () => {
     const cinque = withDefaultsForYears({}, [2025, 2026, 2027, 2028, 2029]);
     const tre = withDefaultsForYears(cinque, [2025, 2026, 2027]);
     expect(tre[2029]).toBeDefined();
+  });
+});
+
+describe("baseYearNote", () => {
+  it("dice «ultimo anno disponibile» solo quando lo e' davvero", () => {
+    expect(baseYearNote(2026, [2024, 2025, 2026])).toBe("ultimo anno disponibile");
+  });
+
+  it("con anni piu' recenti in database dichiara qual e' l'ultimo", () => {
+    // Era una stringa fissa: uno scenario con base 2025 su un'azienda con il
+    // 2026 importato affermava il contrario di cio' che si legge in database.
+    expect(baseYearNote(2025, [2024, 2025, 2026])).toBe("ultimo disponibile: 2026");
+    expect(baseYearNote(2024, [2024, 2025, 2026])).toBe("ultimo disponibile: 2026");
+  });
+
+  it("tace quando non c'e' niente di vero da dire", () => {
+    expect(baseYearNote(2026, [])).toBeNull();
+    // Anno base oltre lo storico (startup, o anno cancellato dopo la creazione).
+    expect(baseYearNote(2027, [2025, 2026])).toBeNull();
   });
 });

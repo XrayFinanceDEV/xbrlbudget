@@ -38,7 +38,7 @@ interface AppContextType {
   startupMode: boolean;
   setStartupMode: (v: boolean) => void;
   refreshCompanies: () => Promise<void>;
-  refreshYears: () => Promise<void>;
+  refreshYears: (companyId?: number) => Promise<void>;
 }
 
 const STARTUP_MODE_KEY = "xbrl_startup_mode";
@@ -181,12 +181,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companiesLoaded, companies, pratica?.companyId, exitPratica]);
 
-  // Reload years for the currently selected company
-  const refreshYears = useCallback(async () => {
-    const companyId = selectedCompanyIdRef.current;
-    if (!companyId) return;
+  // Reload years for the currently selected company. L'id esplicito serve a
+  // chi ha appena creato un anno sull'azienda già selezionata: `setSelectedCompanyId`
+  // non cambia valore, quindi l'effetto qui sotto non riparte, e il ref si
+  // aggiorna solo al render successivo.
+  const refreshYears = useCallback(async (companyId?: number) => {
+    const id = companyId ?? selectedCompanyIdRef.current;
+    if (!id) return;
     try {
-      const data = await getCompanyYears(companyId);
+      const data = await getCompanyYears(id);
       setYears((prev) => {
         const same =
           prev.length === data.length && prev.every((y, i) => y === data[i]);

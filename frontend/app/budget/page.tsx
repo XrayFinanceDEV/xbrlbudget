@@ -392,7 +392,7 @@ function StartupSetup({
   companyId: number | null;
   onCreated: (sc: BudgetScenario) => void;
 }) {
-  const { companies, setSelectedCompanyId, refreshCompanies } = useApp();
+  const { companies, setSelectedCompanyId, refreshCompanies, refreshYears } = useApp();
   // L'azienda della pratica, quando ce n'e' gia' una. Dalla home a tendina
   // arriva SEMPRE: e' la ragione per cui questo componente non deve piu'
   // crearne una: vedi `handleCreate`.
@@ -505,6 +505,12 @@ function StartupSetup({
       await generateForecast(company.id, scenario.id, false);
       await refreshCompanies();
       setSelectedCompanyId(company.id);
+      // L'anno di fondazione appena creato va portato dentro `years` a mano.
+      // Finché l'azienda nasceva qui, `setSelectedCompanyId` cambiava valore e
+      // l'effetto di AppContext ricaricava gli anni di conseguenza; ora che la
+      // home la sceglie prima, l'id non cambia, l'effetto non riparte e la pagina
+      // resta per sempre nello spinner «Apertura business plan...».
+      await refreshYears(company.id);
       toast.success("Business plan creato! Completa le variabili patrimoniali.");
       onCreated(scenario);
     } catch (err: any) {

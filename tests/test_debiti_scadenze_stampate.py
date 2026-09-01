@@ -226,3 +226,28 @@ def test_amb_ogni_importo_finisce_nel_proprio_sotto_campo_tipizzato():
             (v for k, v in bs.items() if k.startswith(prefisso) and k != aggregato), D("0")
         )
         assert dettagli == bs[aggregato], aggregato
+
+
+def test_una_scadenza_indicata_con_una_lettera_non_chiude_la_sezione(tmp_path):
+    """Alcuni layout letterano lo spacchettamento: `a) esigibili entro…`.
+
+    La lettera di voce e' il confine della sezione, ma solo quando e' MAIUSCOLA:
+    una `a)` minuscola dentro il D) e' una riga di scadenza, non la voce
+    successiva. Confonderle interrompeva la scansione alla prima, il cross-foot
+    falliva, e la ripartizione stampata — quella che questa funzione esiste per
+    leggere — veniva saltata su tutta quella famiglia di documenti.
+    """
+    pdf = tmp_path / "lettere.pdf"
+    _passivo_pdf(str(pdf), [
+        ("D) Debiti", "1.000,00"),
+        ("4) Debiti verso banche", "1.000,00"),
+        ("a) esigibili entro l'esercizio successivo", "600,00"),
+        ("b) esigibili oltre l'esercizio successivo", "400,00"),
+    ])
+
+    bs = _split_printed_debt_maturities(str(pdf), _bs_sbagliato())
+
+    assert bs["sp16a_debiti_banche_breve"] == D("600.00")
+    assert bs["sp17a_debiti_banche_lungo"] == D("400.00")
+    assert bs["sp16_debiti_breve"] == D("600.00")
+    assert bs["sp17_debiti_lungo"] == D("400.00")

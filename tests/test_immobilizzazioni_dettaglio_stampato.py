@@ -216,3 +216,45 @@ def test_amb_i_sotto_campi_sono_quelli_stampati_e_sommano_al_proprio_aggregato()
     ):
         somma = sum((bs.get(f, D("0")) for f in dettagli), D("0"))
         assert somma == bs[aggregato], aggregato
+
+
+def test_un_fratello_gia_estratto_e_non_stampato_blocca_la_sezione(tmp_path):
+    """La guardia deve vedere TUTTI i fratelli dell'aggregato, non i soli stampati.
+
+    Se l'estrazione ha gia' messo un importo in un sotto-campo che il documento
+    non stampa, scrivere le voci stampate e poi fissare l'aggregato al totale di
+    voce lascia i dettagli a sommare piu' dell'aggregato: `hierarchy_consistent`
+    fallisce — cioe' esattamente la condizione che questa funzione ripara — e
+    `reconcileSubfields` lato client conta due volte quella massa dentro il
+    secchio «altri».
+    """
+    pdf = tmp_path / "fratello.pdf"
+    _attivo_pdf(str(pdf), [
+        ("I. Immobilizzazioni Immateriali", "1.000,00"),
+        ("1) Costi di impianto e di ampliamento", "600,00"),
+        ("4) Concessioni, licenze, marchi e diritti simili", "400,00"),
+    ])
+
+    prima = _zero_bs()
+    # `sp02g` non compare fra le righe stampate, ma l'estrazione ce l'ha messo.
+    prima["sp02g_altre_immob_imm"] = D("5000.00")
+    assert _recover_printed_fixed_asset_details(str(pdf), prima) == prima
+
+
+def test_un_credito_immobilizzato_gia_estratto_blocca_la_sezione(tmp_path):
+    """`sp04b_crediti_immob_breve` esiste ed e' un fratello di sp04.
+
+    La voce di legge B.III.2 «Crediti» si spacchetta in entro/oltre, e questa
+    lettura porta l'importo all'oltre; ma il campo ENTRO resta un fratello
+    dell'aggregato, e la guardia deve guardarlo.
+    """
+    pdf = tmp_path / "sp04.pdf"
+    _attivo_pdf(str(pdf), [
+        ("III. Immobilizzazioni Finanziarie", "1.000,00"),
+        ("1) Partecipazioni", "400,00"),
+        ("3) Altri titoli", "600,00"),
+    ])
+
+    prima = {"sp04_immob_finanziarie": D("1000.00"),
+             "sp04b_crediti_immob_breve": D("5000.00")}
+    assert _recover_printed_fixed_asset_details(str(pdf), prima) == prima

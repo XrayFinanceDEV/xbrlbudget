@@ -98,7 +98,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
 export default function BudgetPage() {
   const router = useRouter();
   const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
-  const { updatePratica } = usePratica();
+  const { pratica, updatePratica } = usePratica();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -175,6 +175,7 @@ export default function BudgetPage() {
           icon={<Rocket className="h-6 w-6" />}
         />
         <StartupSetup
+          companyId={pratica?.companyId ?? null}
           onCreated={(sc) => {
             // Senza questo lo stepper del percorso non sblocca mai gli step
             // PREVISIONALE: il context non sa ancora che uno scenario esiste.
@@ -384,8 +385,20 @@ function buildStartupAssumption(
 // creates the company, the founding-year statements, the scenario and one
 // assumptions row per following year (driven by absolute CE overrides), then
 // generates the forecast and opens the scenario on the Patrimoniali tab.
-function StartupSetup({ onCreated }: { onCreated: (sc: BudgetScenario) => void }) {
-  const { setSelectedCompanyId, refreshCompanies } = useApp();
+function StartupSetup({
+  companyId,
+  onCreated,
+}: {
+  companyId: number | null;
+  onCreated: (sc: BudgetScenario) => void;
+}) {
+  const { companies, setSelectedCompanyId, refreshCompanies } = useApp();
+  // L'azienda della pratica, quando ce n'e' gia' una. Dalla home a tendina
+  // arriva SEMPRE: e' la ragione per cui questo componente non deve piu'
+  // crearne una: vedi `handleCreate`.
+  const azienda = companyId === null
+    ? null
+    : companies.find((c) => c.id === companyId) ?? null;
   const currentYear = new Date().getFullYear();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -395,6 +408,17 @@ function StartupSetup({ onCreated }: { onCreated: (sc: BudgetScenario) => void }
   const [period, setPeriod] = useState<3 | 5>(3);
   const [drivers, setDrivers] = useState<Record<number, StartupYearDriver>>({});
   const [loading, setLoading] = useState(false);
+
+  // Il nome arriva dall'azienda gia' scelta, e non nell'inizializzatore di
+  // `useState`: `companies` atterra dopo il mount, e leggerlo li' darebbe una
+  // casella vuota per sempre. Si semina una volta sola, per non riscrivere cio'
+  // che l'utente ha appena battuto.
+  const [nameSeeded, setNameSeeded] = useState(false);
+  useEffect(() => {
+    if (nameSeeded || !azienda?.name) return;
+    setName(azienda.name);
+    setNameSeeded(true);
+  }, [azienda?.name, nameSeeded]);
 
   const years = Array.from({ length: period }, (_, i) => currentYear + i);
 
@@ -441,7 +465,13 @@ function StartupSetup({ onCreated }: { onCreated: (sc: BudgetScenario) => void }
       // fund (sp15) therefore starts at 0 and accrues from the first plan year.
       const openingYear = foundingYear - 1;
       const cap = round2(capitale || 0);
-      const company = await createCompany({ name: name.trim(), sector: 3 });
+      // L'azienda gia' scelta NON si ricrea. Prima della home a tendina questo
+      // percorso entrava con `companyId: null` e l'azienda nasceva qui; ora la
+      // home la decide sempre — sia sotto una riga della tendina, sia subito
+      // dopo «Nuova azienda» — e ricrearla produrrebbe di nuovo il doppione che
+      // quel percorso esiste per togliere, per giunta con il settore forzato a
+      // 3 invece di quello scelto sulla home.
+      const company = azienda ?? await createCompany({ name: name.trim(), sector: 3 });
       await createFinancialYear(company.id, openingYear);
       // Opening balance sheet: paid-in capital only (Attivo cash == Passivo
       // capitale, no result). The income statement stays empty.

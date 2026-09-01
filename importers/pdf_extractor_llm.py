@@ -1105,7 +1105,10 @@ _DEBT_DETAIL_FIELDS = tuple(sorted({
     for field in pair
 }))
 _DEBT_SECTION_CODE_RE = re.compile(r"^D[.)]?[,]?$", re.I)
-_SECTION_CODE_RE = re.compile(r"^[A-Z][.)]?[,]?$", re.I)
+# La lettera di voce e' un confine di sezione solo se MAIUSCOLA: alcuni
+# layout letterano lo spacchettamento per scadenza (`a) esigibili entro…`),
+# e con `re.I` quella `a)` chiudeva la sezione alla prima riga utile.
+_SECTION_CODE_RE = re.compile(r"^[A-Z][.)]?[,]?$")
 _DEBT_ITEM_CODE_RE = re.compile(
     r"^(\d+(?:-(?:bis|ter|quater|quinquies))?)\)[,]?$", re.I
 )
@@ -1193,24 +1196,28 @@ def _split_printed_debt_maturities(
                     ):
                         in_debiti, printed_total = True, amount
                     continue
-                if _SECTION_CODE_RE.fullmatch(code) and code[0].upper() != 'D':
-                    # La lettera di voce successiva chiude la sezione. Le
-                    # scadenze dei CREDITI stanno fuori di qui, e restano fuori.
-                    closed = True
-                    break
-                item_match = _DEBT_ITEM_CODE_RE.fullmatch(code)
-                if item_match:
-                    item = item_match.group(1).casefold()
+                # La riga di scadenza si riconosce PRIMA del confine di
+                # sezione: e' il pattern piu' specifico, e un layout che la
+                # lettera (`a) esigibili entro…`) altrimenti chiuderebbe la
+                # scansione proprio sulla riga che si vuole leggere.
+                index = None
+                if 'esercizio successivo' in label_text:
+                    if 'entro' in label_text:
+                        index = 0
+                    elif 'oltre' in label_text:
+                        index = 1
+                if index is None:
+                    if _SECTION_CODE_RE.fullmatch(code) and code[0] != 'D':
+                        # La lettera di voce successiva chiude la sezione. Le
+                        # scadenze dei CREDITI stanno fuori di qui, e restano
+                        # fuori.
+                        closed = True
+                        break
+                    item_match = _DEBT_ITEM_CODE_RE.fullmatch(code)
+                    if item_match:
+                        item = item_match.group(1).casefold()
                     continue
                 if item is None or amount is None:
-                    continue
-                if 'esercizio successivo' not in label_text:
-                    continue
-                if 'entro' in label_text:
-                    index = 0
-                elif 'oltre' in label_text:
-                    index = 1
-                else:
                     continue
                 field = _DEBT_ITEM_FIELDS.get(item, _DEBT_GENERIC_FIELDS)[index]
                 per_field[field] = per_field.get(field, Decimal('0')) + amount
@@ -1263,6 +1270,11 @@ _FIXED_ASSET_SECTIONS = (
             '7': 'sp02g_altre_immob_imm',
         },
         'sp02g_altre_immob_imm',
+        (
+            'sp02a_costi_impianto', 'sp02b_costi_sviluppo', 'sp02c_brevetti',
+            'sp02d_concessioni', 'sp02e_avviamento', 'sp02f_immob_in_corso',
+            'sp02g_altre_immob_imm',
+        ),
     ),
     (
         'sp03_immob_materiali',
@@ -1274,6 +1286,10 @@ _FIXED_ASSET_SECTIONS = (
             '5': 'sp03e_immob_in_corso',
         },
         'sp03d_altri_beni',
+        (
+            'sp03a_terreni_fabbricati', 'sp03b_impianti_macchinari',
+            'sp03c_attrezzature', 'sp03d_altri_beni', 'sp03e_immob_in_corso',
+        ),
     ),
     (
         'sp04_immob_finanziarie',
@@ -1288,6 +1304,11 @@ _FIXED_ASSET_SECTIONS = (
             '3': 'sp04d_altri_titoli', '4': 'sp04e_strumenti_derivati_attivi',
         },
         'sp04d_altri_titoli',
+        (
+            'sp04a_partecipazioni', 'sp04b_crediti_immob_breve',
+            'sp04c_crediti_immob_lungo', 'sp04d_altri_titoli',
+            'sp04e_strumenti_derivati_attivi',
+        ),
     ),
     (
         'sp05_rimanenze',
@@ -1299,6 +1320,10 @@ _FIXED_ASSET_SECTIONS = (
             '5': 'sp05e_acconti',
         },
         'sp05e_acconti',
+        (
+            'sp05a_materie_prime', 'sp05b_prodotti_in_corso',
+            'sp05c_lavori_in_corso', 'sp05d_prodotti_finiti', 'sp05e_acconti',
+        ),
     ),
 )
 _ROMAN_CODE_RE = re.compile(r"^(?:I{1,3}|IV|VI{0,3}|IX|X)[.)]?[,]?$")
@@ -1340,14 +1365,14 @@ def _recover_printed_fixed_asset_details(
         selected_sp_pages = set()
     document_centers = _document_comparative_centers(doc)
     # Una voce per volta: aggregato -> (totale stampato, {campo: importo}).
-    letti: Dict[str, Tuple[Decimal, Dict[str, Decimal]]] = {}
-    sezione: Optional[Tuple[str, Dict[str, str], str]] = None
+    letti: Dict[str, Tuple[Decimal, Dict[str, Decimal], Tuple[str, ...]]] = {}
+    sezione: Optional[Tuple[str, Dict[str, str], str, Tuple[str, ...]]] = None
     printed_total = Decimal('0')
     voci: Dict[str, Decimal] = {}
 
     def _chiudi():
         if sezione is not None and voci:
-            letti[sezione[0]] = (printed_total, dict(voci))
+            letti[sezione[0]] = (printed_total, dict(voci), sezione[3])
 
     try:
         for page in doc:
@@ -1365,19 +1390,21 @@ def _recover_printed_fixed_asset_details(
                 amount = _row_current_amount(line, anchors)
 
                 aperta = None
-                for aggregate, roman_re, required, fields, generic in _FIXED_ASSET_SECTIONS:
+                for (
+                    aggregate, roman_re, required, fields, generic, siblings
+                ) in _FIXED_ASSET_SECTIONS:
                     if not roman_re.fullmatch(code):
                         continue
                     if not all(token in label_text for token in required):
                         continue
                     if aggregate == 'sp03_immob_materiali' and 'immateriali' in label_text:
                         continue
-                    aperta = (aggregate, fields, generic, amount)
+                    aperta = (aggregate, fields, generic, siblings, amount)
                     break
                 if aperta is not None:
                     _chiudi()
-                    sezione = aperta[:3]
-                    printed_total = aperta[3] if aperta[3] is not None else Decimal('0')
+                    sezione = aperta[:4]
+                    printed_total = aperta[4] if aperta[4] is not None else Decimal('0')
                     voci = {}
                     continue
 
@@ -1401,9 +1428,21 @@ def _recover_printed_fixed_asset_details(
         doc.close()
 
     recovered: List[Tuple[str, str]] = []
-    for aggregate, (total, fields) in letti.items():
+    for aggregate, (total, fields, siblings) in letti.items():
         somma = sum(fields.values(), Decimal('0'))
-        if total <= 0 or abs(somma - total) > Decimal('0.01'):
+        if total <= 0:
+            # Non e' un cross-foot fallito: su molti layout IV-CEE la riga in
+            # numero romano non porta alcun importo (il totale sta su una riga
+            # "Totale …" a parte, che non ha codice di voce). Manca il controllo,
+            # quindi non si scrive — ma il messaggio deve dirlo, o chi legge il
+            # log va a cercare un divario che non esiste.
+            logger.debug(
+                "Dettaglio di %s non applicato: la riga di voce non stampa un "
+                "totale contro cui misurare le %s voci lette.",
+                aggregate, len(fields),
+            )
+            continue
+        if abs(somma - total) > Decimal('0.01'):
             logger.warning(
                 "Dettaglio di %s ignorato: le voci stampate sommano %s contro %s "
                 "del totale di voce stampato. Senza cross-foot mancherebbe il "
@@ -1411,9 +1450,14 @@ def _recover_printed_fixed_asset_details(
                 aggregate, somma, total,
             )
             continue
-        if any(current.get(field, Decimal('0')) != 0 for field in fields):
-            # Un dettaglio gia' estratto non si sovrascrive: il divario lo
-            # dichiara `_unclassified_mass`, non lo corregge questa funzione.
+        if any(current.get(field, Decimal('0')) != 0 for field in siblings):
+            # Si riempie solo una sezione che l'estrazione ha lasciato del tutto
+            # vuota. Basta UN fratello gia' valorizzato — anche non stampato, ed
+            # e' il caso di `sp04b_crediti_immob_breve` — perche' scrivere le
+            # voci lette e poi fissare l'aggregato al totale di voce lasci i
+            # dettagli a sommare piu' dell'aggregato: `hierarchy_consistent`
+            # fallirebbe, cioe' proprio la condizione che qui si ripara, e
+            # `reconcileSubfields` conterebbe due volte quella massa.
             continue
         for field, value in fields.items():
             current[field] = value

@@ -1279,6 +1279,10 @@ _FIXED_ASSET_SECTIONS = (
         'sp04_immob_finanziarie',
         re.compile(r"^III[.)]?[,]?$"),
         ('immobilizzazioni', 'finanziarie'),
+        # B.III.2 «crediti» ha entro/oltre e il documento non li separa a
+        # questo livello: vanno all'OLTRE. E' il verso prudenziale per un
+        # credito — l'opposto di quello dei debiti — perche' anticiparne
+        # l'incasso abbellirebbe la liquidita' invece di peggiorarla.
         {
             '1': 'sp04a_partecipazioni', '2': 'sp04c_crediti_immob_lungo',
             '3': 'sp04d_altri_titoli', '4': 'sp04e_strumenti_derivati_attivi',

@@ -299,7 +299,25 @@ export function crisisScores(ind: IndicatorSet): number[] {
 export type SerieIndicatori = { periodo: string; indicatori: IndicatorSet | null };
 
 /** Riga appiattita come la vuole Recharts: etichetta + tutti gli indicatori. */
-export type RigaGraficoIndicatori = { periodo: string } & IndicatorSet;
+export type RigaGraficoIndicatori = { periodo: string } & {
+  [K in keyof IndicatorSet]: number | null;
+};
+
+/**
+ * Gli indicatori il cui zero NON significa zero, con il grezzo che lo dice.
+ *
+ * `safeDivide` restituisce 0 su denominatore nullo, e a quel punto lo zero di
+ * `pfn_ebitda` («nessun debito netto», ottimo) e quello di un EBITDA inesistente
+ * («il rapporto non esiste», pessimo) sono lo stesso numero. Sul punteggio la
+ * distinzione c'è già — `scoreIndicator` guarda `_ebitda_raw` e `_revenue_raw` —
+ * ma i grafici la perdevano: una barra a zero è indistinguibile da un'azienda
+ * con EBITDA nullo, che è esattamente ciò che l'issue #15 vieta.
+ */
+const DENOMINATORE_DEL_RAPPORTO: Partial<Record<keyof IndicatorSet, keyof IndicatorSet>> = {
+  pfn_ebitda: "_ebitda_raw",
+  of_mol: "_ebitda_raw",
+  of_revenue: "_revenue_raw",
+};
 
 /**
  * Costruisce le righe dei due grafici (incidenza economica ed equilibrio
@@ -311,12 +329,23 @@ export type RigaGraficoIndicatori = { periodo: string } & IndicatorSet;
  * si verifica nel browser e la logica si verifica qui.
  *
  * Una serie assente viene SCARTATA, non resa a zero: una barra a zero sarebbe
- * indistinguibile da un'azienda con EBITDA nullo.
+ * indistinguibile da un'azienda con EBITDA nullo. Vale per l'intero periodo
+ * (`indicatori === null`) e, dentro un periodo che esiste, per il singolo
+ * rapporto il cui denominatore è nullo: là lo zero di `safeDivide` non è un
+ * valore, è l'assenza di un valore. Recharts salta un punto `null`.
  */
 export function buildIndicatorChartData(serie: SerieIndicatori[]): RigaGraficoIndicatori[] {
   return serie
     .filter((s): s is { periodo: string; indicatori: IndicatorSet } => s.indicatori !== null)
-    .map((s) => ({ periodo: s.periodo, ...s.indicatori }));
+    .map((s) => {
+      const riga = { periodo: s.periodo, ...s.indicatori } as RigaGraficoIndicatori;
+      for (const [rapporto, grezzo] of Object.entries(DENOMINATORE_DEL_RAPPORTO)) {
+        if (s.indicatori[grezzo as keyof IndicatorSet] <= 0) {
+          riga[rapporto as keyof IndicatorSet] = null;
+        }
+      }
+      return riga;
+    });
 }
 
 export type IndicatorFormat = "euro" | "pct" | "ratio";

@@ -679,8 +679,11 @@ export function StampaContent({
           <IndicatoriCharts serie={serieGrafici} />
         </div>
 
-        {/* Indicator detail table */}
-        <Table>
+        {/* Indicator detail table. `stampa-tabella-indicatori` la tiene
+            attaccata alla griglia dei grafici qui sopra: e' il criterio di #15
+            («la tabella non finisce da sola su una pagina») reso vincolo
+            invece che conseguenza del riempimento. */}
+        <Table className="stampa-tabella-indicatori">
           <TableHeader>
             <TableRow>
               <TableHead>Indicatore</TableHead>

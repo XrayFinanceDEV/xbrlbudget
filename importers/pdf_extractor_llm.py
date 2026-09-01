@@ -3012,6 +3012,12 @@ def extract_pdf_with_llm(
             )
         )
     except Exception as _declare_err:  # pragma: no cover - diagnostica, mai bloccante
+        # Anche fallendo si dichiara. Una chiave ASSENTE a valle vale zero, cioe'
+        # «pulito»: tacere qui rimetterebbe in piedi proprio il difetto che questa
+        # dichiarazione esiste per togliere. Zero con `_measured` a zero significa
+        # invece «non lo so», che e' la verita' quando la misura non e' riuscita.
+        balance_sheet_data.setdefault('_unclassified_mass', Decimal('0'))
+        balance_sheet_data.setdefault('_unclassified_mass_measured', Decimal('0'))
         logger.warning(
             f"Massa non classificata non dichiarata: {_declare_err}"
         )
@@ -4483,6 +4489,12 @@ def extract_pdf_both_years_with_llm(
             )
         )
     except Exception as _declare_err:  # pragma: no cover - diagnostica, mai bloccante
+        # Anche fallendo si dichiara. Una chiave ASSENTE a valle vale zero, cioe'
+        # «pulito»: tacere qui rimetterebbe in piedi proprio il difetto che questa
+        # dichiarazione esiste per togliere. Zero con `_measured` a zero significa
+        # invece «non lo so», che e' la verita' quando la misura non e' riuscita.
+        current_bs.setdefault('_unclassified_mass', Decimal('0'))
+        current_bs.setdefault('_unclassified_mass_measured', Decimal('0'))
         logger.warning(
             f"Massa non classificata non dichiarata: {_declare_err}"
         )

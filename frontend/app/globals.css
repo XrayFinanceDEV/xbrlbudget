@@ -362,6 +362,15 @@
     break-inside: avoid;
   }
 
+  /* La tabella degli indicatori non apre una pagina per conto suo: #15 chiede
+     che non finisca da sola, e senza questa regola la garanzia dipenderebbe
+     dal riempimento misurato invece che da un vincolo. `break-before: avoid`
+     la tiene attaccata alla griglia dei grafici senza renderla indivisibile
+     — che e' cio' che produceva la pagina quasi vuota. */
+  #stampa-content .stampa-tabella-indicatori {
+    break-before: avoid;
+  }
+
   /* Un commento appartiene al prospetto che commenta: non si spezza e,
      potendo, non apre la pagina per conto suo. */
   #stampa-content .stampa-commento {

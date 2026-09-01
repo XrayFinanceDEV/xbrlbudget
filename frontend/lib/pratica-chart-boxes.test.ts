@@ -140,8 +140,16 @@ describe("INDICATOR_CHART_BOXES + buildIndicatorChartData", () => {
     // chiave nuova arriva da sola: questo test lo fissa, perché se domani
     // l'appiattimento diventasse selettivo un riquadro resterebbe vuoto senza
     // un solo errore.
+    // Denominatori non nulli: qui ogni rapporto ESISTE, quindi ogni serie deve
+    // arrivare come numero. Il caso opposto — denominatore a zero — ha il suo
+    // test qui sotto, ed è il solo in cui una serie può valere `null`.
     const [riga] = buildIndicatorChartData([
-      { periodo: "Storico 2025", indicatori: indicatori({ ccn: 1000, roi: 7.5, dscr: 1.4 }) },
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({
+          ccn: 1000, roi: 7.5, dscr: 1.4, _ebitda_raw: 50000, _revenue_raw: 400000,
+        }),
+      },
     ]);
     for (const box of INDICATOR_CHART_BOXES) {
       for (const serie of box.series) {
@@ -151,6 +159,38 @@ describe("INDICATOR_CHART_BOXES + buildIndicatorChartData", () => {
     expect(riga.ccn).toBe(1000);
     expect(riga.roi).toBe(7.5);
     expect(riga.dscr).toBe(1.4);
+  });
+
+  it("un rapporto senza denominatore vale `null`, non zero", () => {
+    // `safeDivide` restituisce 0 su denominatore nullo, e su un grafico quello
+    // zero è indistinguibile dal caso buono: `pfn_ebitda` a zero legge «nessun
+    // debito netto», `of_mol` a zero legge «oneri irrilevanti». Sono i verdetti
+    // opposti a quelli veri. Il punteggio la distinzione ce l'ha già
+    // (`scoreIndicator` guarda `_ebitda_raw`); questo la porta ai grafici.
+    const [senzaEbitda] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({
+          pfn: 250000, pfn_ebitda: 0, of_mol: 0, of_revenue: 3.2,
+          _ebitda_raw: 0, _revenue_raw: 400000,
+        }),
+      },
+    ]);
+    expect(senzaEbitda.pfn_ebitda).toBeNull();
+    expect(senzaEbitda.of_mol).toBeNull();
+    // `of_revenue` ha il proprio denominatore, che qui esiste: resta un numero.
+    expect(senzaEbitda.of_revenue).toBe(3.2);
+    // Gli indicatori che non sono rapporti su un grezzo dichiarato non vengono
+    // toccati: la PFN in euro è un valore, e 250.000 di debito netto va reso.
+    expect(senzaEbitda.pfn).toBe(250000);
+
+    const [senzaRicavi] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ of_revenue: 0, _ebitda_raw: 50000, _revenue_raw: 0 }),
+      },
+    ]);
+    expect(senzaRicavi.of_revenue).toBeNull();
   });
 
   it("un periodo senza dati resta scartato anche con i sei riquadri", () => {

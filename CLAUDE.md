@@ -574,3 +574,18 @@ giusto è il codice, non `/docs`.
 > concluso. Il file resta **sopra** le 500 righe volute dalla spec, e l'inventario spiega dove
 > vanno le 568: due terzi sono la sezione invarianti, la mappa e i sette rimandi — cioè il
 > prodotto del lavoro, non il residuo da tagliare.
+
+## Agent skills
+
+### Issue tracker
+
+Le issue vivono su GitHub (`XrayFinanceDEV/xbrlbudget`), via `gh` CLI.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Le cinque label canoniche, con i nomi di default. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.

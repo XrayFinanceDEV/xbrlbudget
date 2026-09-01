@@ -265,6 +265,13 @@ export default function InfraannualePage() {
     (verifica.exists && !verifica.confirmed ? 1 : 0) +
     (storico.exists && !storico.confirmed ? 1 : 0);
 
+  // Quante schede ESISTONO davvero. Serve alla riga di stato: il conteggio
+  // «da confermare» conta solo fra quelle esistenti, quindi da solo può dire
+  // «restano 0 schede» su un percorso che è comunque bloccato — succede quando
+  // il bilancio di verifica non è stato trovato. E su un import senza anno di
+  // raffronto la scheda è UNA, quindi «servono entrambe» sarebbe falso.
+  const rettificheSchedeEsistenti = (verifica.exists ? 1 : 0) + (storico.exists ? 1 : 0);
+
   // Le condizioni sono copiate INVARIATE dal bottone che questo sostituisce
   // (era app/pratica/page.tsx:4155-4167).
   const rettificheDisabled =
@@ -1448,14 +1455,30 @@ export default function InfraannualePage() {
           {allRettificheConfirmed ? (
             <span className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              Tutte le schede sono confermate.
+              {rettificheSchedeEsistenti === 1
+                ? "Scheda confermata."
+                : "Tutte le schede sono confermate."}
+            </span>
+          ) : rettificheSchedeEsistenti === 0 ? (
+            // Nessuna scheda caricata: il percorso è bloccato, ma non da una
+            // conferma mancante. Un «restano 0 schede da confermare» qui
+            // sarebbe un conteggio giusto sotto una spiegazione falsa.
+            <span className="flex items-center gap-2">
+              <CircleDashed className="h-4 w-4 shrink-0" />
+              Nessun bilancio da rettificare: controlla anno fiscale e mesi coperti
+              nella scheda Importazione.
             </span>
           ) : (
             <span className="flex items-center gap-2">
               <CircleDashed className="h-4 w-4 shrink-0" />
               {rettificheDaConfermare === 1
-                ? "Resta 1 scheda da confermare: servono entrambe per proseguire."
-                : `Restano ${rettificheDaConfermare} schede da confermare: servono entrambe per proseguire.`}
+                ? "Resta 1 scheda da confermare"
+                : `Restano ${rettificheDaConfermare} schede da confermare`}
+              {/* «entrambe» solo quando le schede sono davvero due: un import
+                  senza anno di raffronto ne ha una sola. */}
+              {rettificheSchedeEsistenti === 2
+                ? ": servono entrambe per proseguire."
+                : " per proseguire."}
             </span>
           )}
         </div>
@@ -1669,9 +1692,17 @@ export default function InfraannualePage() {
                           </div>
                         ) : (
                           <p className="text-xs text-muted-foreground mt-1">
-                            {h.reference === null
-                              ? "nessun anno di riferimento"
-                              : "rapporto non calcolabile"}
+                            {/*
+                              Tre casi distinti, e nessuno dei tre è una
+                              tendenza: rapporto invariato (scarto esattamente
+                              nullo), nessun anno di riferimento, denominatore
+                              a zero. Il primo si dice, non si tace.
+                            */}
+                            {h.deltaPp === 0
+                              ? "invariato vs storico"
+                              : h.reference === null
+                                ? "nessun anno di riferimento"
+                                : "rapporto non calcolabile"}
                           </p>
                         )}
                       </CardContent>

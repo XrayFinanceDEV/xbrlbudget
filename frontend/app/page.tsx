@@ -24,6 +24,7 @@ import {
   Rocket,
   ArrowRight,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,6 +96,23 @@ export default function Home() {
   useEffect(() => {
     setStartupMode(false);
   }, [setStartupMode]);
+
+  // Rinfresca l'elenco ATTERRANDO sulla home.
+  //
+  // Non è un secondo percorso di caricamento — è lo stesso `loadCompanies` del
+  // context, con la sua guardia su `authLoading`: la corsa nasceva da un fetch
+  // PROPRIO, non guardato e mai rilanciato all'arrivo del token.
+  //
+  // Senza questa riga la home mostra dati fermi al primo caricamento della
+  // sessione: `loadCompanies` è `useCallback(…, [])` e `authLoading` si
+  // stabilizza una volta sola, quindi l'effetto del context scatta UNA volta
+  // per sessione. Chi avvia una pratica, la fa creare uno scenario e poi esce
+  // dal percorso ritrovava la propria scheda azienda senza «Riprendi» — la
+  // pratica appena creata semplicemente non c'era, fino a un ricaricamento a
+  // mano. Vale anche per il badge «in corso»/«bozza», che legge `has_forecast`.
+  useEffect(() => {
+    refreshCompanies();
+  }, [refreshCompanies]);
 
   const handleCreate = async () => {
     if (!newName.trim()) {
@@ -304,9 +322,31 @@ export default function Home() {
       )}
 
       {/* Companies + pratiche */}
-      {companiesError ? (
-        // Errore onesto. «Nessuna azienda presente» resta sotto, per il solo
-        // caso vero: caricamento riuscito e zero aziende.
+      {/*
+        Errore onesto, ma NON al posto dei dati che ci sono già.
+        `companiesError` racconta l'ULTIMO caricamento: un refresh fallito dopo
+        una cancellazione (rete instabile) lascia `companies` valido e pieno, e
+        sostituirlo con la schermata d'errore farebbe sparire all'utente le
+        aziende che possiede. Qui l'errore è una fascia SOPRA l'elenco; prende
+        tutta la pagina solo quando non c'è nulla da mostrare.
+      */}
+      {companiesError && companies.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-yellow-500/40 bg-yellow-50 p-3 text-sm text-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-300">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            {companiesError} — l&apos;elenco qui sotto potrebbe non essere aggiornato.
+          </span>
+          <Button variant="outline" size="sm" onClick={() => refreshCompanies()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Riprova
+          </Button>
+        </div>
+      )}
+
+      {companiesError && companies.length === 0 ? (
+        // Nessun dato da salvare: l'errore prende la pagina. «Nessuna azienda
+        // presente» resta sotto, per il solo caso vero — caricamento riuscito
+        // e zero aziende.
         <div className="py-12 text-center space-y-4">
           <p className="text-muted-foreground">{companiesError}</p>
           <Button variant="outline" onClick={() => refreshCompanies()}>

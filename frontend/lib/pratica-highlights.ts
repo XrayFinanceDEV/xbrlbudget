@@ -32,7 +32,10 @@ export type HighlightFlusso = {
   /** La frazione d'anno trascorsa, in %: il termine di paragone. */
   expectedPct: number;
   annualized: number;
-  /** `null` senza anno di riferimento: nessun paragone, nessuna freccia. */
+  /**
+   * `null` quando il ritmo non si può giudicare: nessun anno di riferimento,
+   * oppure un riferimento non positivo. Vedi `ritmo()`.
+   */
   ahead: boolean | null;
 };
 
@@ -49,7 +52,11 @@ export type HighlightRapporto = {
   /**
    * `true` = migliore del riferimento. Sui costi il segno è INVERTITO:
    * un'incidenza sui ricavi che scende è un miglioramento.
-   * `null` quando non c'è riferimento, o un denominatore è zero.
+   *
+   * `null` quando non c'è un verdetto da dare: nessun riferimento, un
+   * denominatore a zero, **oppure uno scarto esattamente nullo** — un rapporto
+   * identico al riferimento non è né migliorato né peggiorato, e `false`
+   * dipingerebbe di rosso una freccia in giù su zero punti di scarto.
    */
   improved: boolean | null;
 };
@@ -98,6 +105,30 @@ export const HIGHLIGHT_RATIO_DEFS: RapportoDef[] = [
 ];
 
 /**
+ * Il verdetto sul ritmo, `null` quando non se ne può dare uno.
+ *
+ * Il confronto di flusso è «questa voce sta correndo più o meno di quanto ci
+ * si aspetti a questo punto dell'anno», e presuppone un riferimento
+ * **positivo**: `pct_of_reference` divide per il valore dell'anno storico,
+ * quindi su un riferimento negativo cambia segno e il verdetto si rovescia.
+ *
+ * Su un EBITDA storico di −100.000: una perdita che si riduce a −30.000 dà
+ * 30% < 75% e risulterebbe «in ritardo»; una che peggiora a −150.000 dà
+ * 150% > 75% e risulterebbe **verde**. Ed è proprio l'EBITDA la voce che
+ * finisce regolarmente sotto zero — non i ricavi, per cui le quattro card
+ * storiche non l'avevano mai incontrato.
+ */
+function ritmo(
+  item: IntraYearComparisonItem,
+  expectedPct: number,
+  hasReference: boolean,
+): boolean | null {
+  if (!hasReference) return null;
+  if (!(item.reference_value > 0)) return null;
+  return item.pct_of_reference > expectedPct;
+}
+
+/**
  * Rapporto in punti percentuali, `null` sul denominatore assente.
  *
  * `null` e non zero di proposito: uno zero si legge come «margine nullo», che
@@ -133,7 +164,7 @@ export function buildConfrontoHighlights(
       pctOfReference: item.pct_of_reference,
       expectedPct,
       annualized: item.annualized_value,
-      ahead: comparison.has_reference ? item.pct_of_reference > expectedPct : null,
+      ahead: ritmo(item, expectedPct, comparison.has_reference),
     });
   }
 
@@ -154,8 +185,9 @@ export function buildConfrontoHighlights(
       value,
       reference,
       deltaPp,
+      // `deltaPp === 0` cade nel ramo `null`: invariato non è un verdetto.
       improved:
-        deltaPp === null
+        deltaPp === null || deltaPp === 0
           ? null
           : def.lowerIsBetter
             ? deltaPp < 0

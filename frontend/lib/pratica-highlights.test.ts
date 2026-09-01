@@ -88,7 +88,10 @@ describe("buildConfrontoHighlights", () => {
       expect(m.value).toBeCloseTo(12.5, 10);
       expect(m.reference).toBeCloseTo(12.5, 10);
       expect(m.deltaPp).toBeCloseTo(0, 10);
-      expect(m.improved).toBe(false); // 0 non è un miglioramento
+      // Né migliorato né peggiorato: un rapporto identico al riferimento non è
+      // un verdetto. `false` dipingerebbe di rosso una freccia in giù su uno
+      // scarto di zero punti.
+      expect(m.improved).toBeNull();
     });
 
     it("il rapporto non dipende dai mesi: 3M e 9M danno lo stesso valore", () => {
@@ -204,5 +207,64 @@ describe("buildConfrontoHighlights", () => {
       "ce05_materie_prime",
       "ce06_servizi",
     ]);
+  });
+});
+
+describe("verdetti che non si possono dare", () => {
+  // Il confronto di flusso e' «questa voce sta correndo piu' o meno di quanto
+  // ci si aspetti a questo punto dell'anno», e presuppone un riferimento
+  // POSITIVO. Su un EBITDA storico negativo `pct_of_reference` cambia segno e
+  // il verdetto si rovescia — ed e' proprio l'EBITDA la voce che finisce
+  // regolarmente sotto zero, non i ricavi.
+  it("EBITDA storico negativo: nessuna freccia, non una freccia sbagliata", () => {
+    // perdita che si RIDUCE: -100k storico, -30k sui 9 mesi
+    const migliora = [
+      voce("ce01_ricavi_vendite", 900_000, 1_200_000),
+      voce("_ebitda", -30_000, -100_000),
+    ];
+    const f = flussi(buildConfrontoHighlights(NOVE, migliora)).find((x) => x.code === "_ebitda")!;
+    expect(f.ahead).toBeNull();
+
+    // perdita che PEGGIORA: -150k contro -100k. Col vecchio confronto
+    // `pct_of_reference` valeva 150% > 75% ⇒ freccia VERDE su un disastro.
+    const peggiora = [
+      voce("ce01_ricavi_vendite", 900_000, 1_200_000),
+      voce("_ebitda", -150_000, -100_000),
+    ];
+    const g = flussi(buildConfrontoHighlights(NOVE, peggiora)).find((x) => x.code === "_ebitda")!;
+    expect(g.ahead).toBeNull();
+    expect(g.ahead).not.toBe(true);
+  });
+
+  it("riferimento a zero: nessun ritmo da confrontare", () => {
+    const items = [voce("ce01_ricavi_vendite", 900_000, 0)];
+    const f = flussi(buildConfrontoHighlights(NOVE, items))[0];
+    expect(f.ahead).toBeNull();
+  });
+
+  it("con un riferimento positivo il verdetto si dà, come sempre", () => {
+    const f = flussi(buildConfrontoHighlights(NOVE, NOVE_MESI));
+    expect(f.every((x) => x.ahead !== null)).toBe(true);
+  });
+
+  it("un rapporto invariato non è né migliorato né peggiorato", () => {
+    const items = [
+      voce("ce01_ricavi_vendite", 900_000, 1_200_000),
+      voce("ce05_materie_prime", 270_000, 360_000), // 30% e 30%
+    ];
+    const r = rapporti(buildConfrontoHighlights(NOVE, items))
+      .find((x) => x.key === "materie_su_ricavi")!;
+    expect(r.deltaPp).toBeCloseTo(0, 10);
+    expect(r.improved).toBeNull();
+  });
+
+  it("ma uno scarto anche minimo un verdetto ce l'ha", () => {
+    const items = [
+      voce("ce01_ricavi_vendite", 900_000, 1_200_000),
+      voce("ce05_materie_prime", 269_100, 360_000), // 29,9% contro 30%
+    ];
+    const r = rapporti(buildConfrontoHighlights(NOVE, items))
+      .find((x) => x.key === "materie_su_ricavi")!;
+    expect(r.improved).toBe(true);
   });
 });

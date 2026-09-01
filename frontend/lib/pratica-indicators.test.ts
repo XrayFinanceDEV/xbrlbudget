@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CRISIS_SCORING_KEYS,
+  INDICATOR_DEFS,
   computeCrisisRating,
+  crisisScores,
   computeIndicators,
   invertedScore,
   linearScore,
@@ -77,8 +80,9 @@ describe("computeIndicators", () => {
     for (const k of [
       "dscr", "ebitda_margin", "mt", "ccn", "current_ratio", "ms",
       "copertura_immob", "indipendenza", "pfn", "pfn_ebitda",
-      "roi", "roe", "ros", "of_mol", "materials_revenue", "services_revenue",
-      "_ebitda_raw", "_quick_ratio", "_equity_over_fixed",
+      "roi", "roe", "ros", "of_mol", "of_revenue",
+      "materials_revenue", "services_revenue",
+      "_ebitda_raw", "_quick_ratio", "_equity_over_fixed", "_revenue_raw",
     ]) {
       expect(Number.isFinite(ind[k as keyof typeof ind])).toBe(true);
     }
@@ -178,5 +182,129 @@ describe("scoreDotColor", () => {
     expect(scoreDotColor(0.9)).toBe("bg-green-500");
     expect(scoreDotColor(0.5)).toBe("bg-yellow-500");
     expect(scoreDotColor(0.1)).toBe("bg-red-500");
+  });
+});
+
+// «Oneri finanziari su fatturato» e' un indicatore NUOVO, non un rinominato:
+// `of_mol` risponde a un'altra domanda (quanto pesano gli oneri sulla capacita'
+// di generare cassa, non sul giro d'affari) ed e' quello usato dal punteggio.
+describe("of_revenue — oneri finanziari su fatturato", () => {
+  it("e' oneri finanziari sui ricavi, in percentuale assoluta", () => {
+    const ind = computeIndicators(BS_SANA, IS_SANA);
+    // 12.000 / 1.200.000 = 1%
+    expect(ind.of_revenue).toBeCloseTo(1, 10);
+  });
+
+  it("non e' of_mol: stesso numeratore, denominatore diverso", () => {
+    const ind = computeIndicators(BS_SANA, IS_SANA);
+    // MOL = 250.000, ricavi = 1.200.000: i due rapporti non possono coincidere
+    expect(ind.of_mol).toBeCloseTo(12_000 / 250_000 * 100, 10);
+    expect(ind.of_revenue).not.toBeCloseTo(ind.of_mol, 3);
+  });
+
+  // Il difetto che la spec chiama per nome: `scoreIndicator` ha
+  // `default: return 0.5`, quindi un indicatore aggiunto a INDICATOR_DEFS
+  // senza il proprio `case` prende punteggio neutro su OGNI azienda — pallino
+  // giallo per tutti, per sempre, senza errore e senza test rosso.
+  it("ha una regola di punteggio propria, non il neutro di default", () => {
+    const buona = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 12_000 });
+    const pessima = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 72_000 });
+    expect(buona.of_revenue).toBeCloseTo(1, 10);
+    expect(pessima.of_revenue).toBeCloseTo(6, 10);
+
+    const sBuona = scoreIndicator("of_revenue", buona);
+    const sPessima = scoreIndicator("of_revenue", pessima);
+    expect(sBuona).toBe(1);      // <=1% dei ricavi: ottimo
+    expect(sPessima).toBe(0);    // >=5% dei ricavi: critico
+    expect(sBuona).not.toBe(0.5);
+    expect(sPessima).not.toBe(0.5);
+  });
+
+  it("interpola fra le due soglie", () => {
+    const media = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 36_000 });
+    expect(media.of_revenue).toBeCloseTo(3, 10);
+    expect(scoreIndicator("of_revenue", media)).toBeCloseTo(0.5, 10);
+  });
+
+  // Denominatore degenere. `safeDivide` restituisce 0, e su un punteggio
+  // INVERTITO uno zero significherebbe «ottimo»: senza il ramo dedicato
+  // un'azienda senza ricavi risulterebbe la piu' sana del corpus, e sarebbe
+  // indistinguibile da una che oneri finanziari non ne ha davvero. E'
+  // l'asimmetria che gli altri rapporti sui ricavi non hanno — `ros` ed
+  // `ebitda_margin` sono punteggi diretti, dove lo zero degenera da solo.
+  it("ricavi a zero non producono un verdetto di eccellenza", () => {
+    const senzaRicavi = computeIndicators(BS_SANA, { ...IS_SANA, ce01_ricavi_vendite: 0 });
+    expect(senzaRicavi.of_revenue).toBe(0);
+    expect(scoreIndicator("of_revenue", senzaRicavi)).not.toBe(1);
+  });
+
+  // Un denominatore assente e' «non lo so», non una contraddizione: un
+  // verdetto negativo vuole una contraddizione misurata.
+  it("ricavi a zero danno il neutro, non una condanna", () => {
+    const senzaRicavi = computeIndicators(BS_SANA, { ...IS_SANA, ce01_ricavi_vendite: 0 });
+    expect(scoreIndicator("of_revenue", senzaRicavi)).toBe(0.5);
+  });
+
+  // Il neutro degenere NON e' il neutro di `default`: senza il `case`, anche
+  // un'azienda con ricavi veri prenderebbe 0,5.
+  it("il neutro vale solo sul degenere, non su un'azienda con ricavi", () => {
+    const conRicavi = computeIndicators(BS_SANA, IS_SANA);
+    expect(conRicavi._revenue_raw).toBeGreaterThan(0);
+    expect(scoreIndicator("of_revenue", conRicavi)).not.toBe(0.5);
+  });
+
+  it("oneri finanziari a zero, con ricavi veri, restano un'eccellenza", () => {
+    const senzaOneri = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 0 });
+    expect(scoreIndicator("of_revenue", senzaOneri)).toBe(1);
+  });
+
+  it("of_mol resta invariato nel calcolo e nel punteggio", () => {
+    const ind = computeIndicators(BS_SANA, IS_SANA);
+    expect(ind.of_mol).toBeCloseTo(4.8, 10);
+    expect(scoreIndicator("of_mol", ind)).toBeCloseTo(invertedScore(4.8, 5, 30), 10);
+  });
+
+  it("compare in tabella accanto agli altri", () => {
+    const riga = INDICATOR_DEFS.find((d) => d.key === "of_revenue");
+    expect(riga).toBeDefined();
+    expect(riga!.format).toBe("pct");
+    // e of_mol non e' stato sostituito
+    expect(INDICATOR_DEFS.some((d) => d.key === "of_mol")).toBe(true);
+  });
+});
+
+// `computeCrisisRating` conta quanti punteggi stanno sotto 0,33, e le sue
+// bande (0 / 1-2 / 3 / 4-5 «oltre») sono tarate sul NUMERO di indicatori che
+// le alimentano. Un indicatore in piu' sposta quindi la classe di rischio di
+// aziende reali senza che nessuno l'abbia deciso.
+describe("of_revenue non entra nel punteggio di crisi", () => {
+  it("il set del punteggio esclude of_revenue e tiene of_mol", () => {
+    expect(CRISIS_SCORING_KEYS).not.toContain("of_revenue");
+    expect(CRISIS_SCORING_KEYS).toContain("of_mol");
+  });
+
+  it("il set del punteggio ha un elemento in meno della tabella", () => {
+    expect(CRISIS_SCORING_KEYS.length).toBe(INDICATOR_DEFS.length - 1);
+  });
+
+  // Oneri finanziari al 6% dei ricavi: `of_revenue` prende 0, cioe' sarebbe un
+  // «oltre» in piu'. Il conteggio del punteggio non deve muoversi.
+  it("un of_revenue pessimo non aggiunge un «oltre» al punteggio", () => {
+    const ind = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 72_000 });
+    expect(scoreIndicator("of_revenue", ind)).toBe(0);
+
+    const oltreConTutti = INDICATOR_DEFS
+      .map((d) => scoreIndicator(d.key, ind))
+      .filter((s) => s < 0.33).length;
+    const oltreDelPunteggio = crisisScores(ind).filter((s) => s < 0.33).length;
+
+    expect(oltreDelPunteggio).toBe(oltreConTutti - 1);
+  });
+
+  it("crisisScores e' allineato a CRISIS_SCORING_KEYS", () => {
+    const ind = computeIndicators(BS_SANA, IS_SANA);
+    expect(crisisScores(ind)).toEqual(
+      CRISIS_SCORING_KEYS.map((k) => scoreIndicator(k, ind)),
+    );
   });
 });

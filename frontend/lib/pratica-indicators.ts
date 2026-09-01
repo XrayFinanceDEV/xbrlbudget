@@ -16,13 +16,21 @@ export interface IndicatorSet {
   roi: number;
   roe: number;
   ros: number;
+  // Due domande diverse, tenute entrambe: `of_mol` dice quanto pesano gli
+  // oneri sulla capacita' di generare cassa ed e' quello usato dal punteggio
+  // di crisi; `of_revenue` dice quanto pesano sul giro d'affari.
   of_mol: number;
+  of_revenue: number;
   materials_revenue: number;
   services_revenue: number;
   // Internal fields for scoring
   _ebitda_raw: number;
   _quick_ratio: number;
   _equity_over_fixed: number;
+  // Serve a `scoreIndicator("of_revenue")`: il rapporto da solo non distingue
+  // «oneri nulli» da «ricavi nulli», e su un punteggio invertito i due
+  // porterebbero allo stesso verdetto di eccellenza.
+  _revenue_raw: number;
 }
 
 // Linear interpolation score: 0 at `low`, 1 at `high`, clamped [0,1]
@@ -152,11 +160,13 @@ export function computeIndicators(
     roe: safeDivide(netProfit, equity) * 100,
     ros: safeDivide(ebit, revenue) * 100,
     of_mol: safeDivide(oneriFinanziari, ebitda) * 100,
+    of_revenue: safeDivide(oneriFinanziari, revenue) * 100,
     materials_revenue: safeDivide(v(is_, "ce05_materie_prime"), revenue) * 100,
     services_revenue: safeDivide(v(is_, "ce06_servizi"), revenue) * 100,
     _ebitda_raw: ebitda,
     _quick_ratio: safeDivide(currentAssets - inventory, currentLiabilities),
     _equity_over_fixed: safeDivide(equity, fixedAssets) * 100,
+    _revenue_raw: revenue,
   };
 }
 
@@ -211,6 +221,22 @@ export function scoreIndicator(
     case "of_mol":
       if (ind._ebitda_raw <= 0) return ind.of_mol > 0 ? 0 : 0.5;
       return invertedScore(ind.of_mol, 5, 30);
+    // OF/fatturato: <1% ottimo, >5% critico (invertito). Soglie della pratica
+    // bancaria italiana, le stesse su cui e' tarato `of_mol`.
+    //
+    // Il ramo a ricavi zero non e' una rifinitura. `safeDivide` restituisce 0,
+    // e su un punteggio INVERTITO uno zero vale «ottimo»: senza questo ramo
+    // un'azienda senza ricavi risulterebbe la piu' sana del corpus, e sarebbe
+    // indistinguibile da una che oneri finanziari non ne ha davvero. Gli altri
+    // rapporti sui ricavi (`ros`, `ebitda_margin`) sono punteggi DIRETTI e
+    // degenerano verso il basso da soli: l'asimmetria e' solo qui.
+    //
+    // Il verdetto degenere e' 0,5 e non 0 perche' un denominatore assente e'
+    // «non lo so», non una contraddizione: un verdetto negativo vuole una
+    // contraddizione misurata, non un controllo che manca.
+    case "of_revenue":
+      if (ind._revenue_raw <= 0) return 0.5;
+      return invertedScore(ind.of_revenue, 1, 5);
     default:
       return 0.5;
   }
@@ -235,7 +261,32 @@ export const INDICATOR_DEFS: Array<{
   { key: "roe", label: "ROE", format: "pct" },
   { key: "ros", label: "ROS", format: "pct" },
   { key: "of_mol", label: "Oneri Finanziari / MOL", format: "pct" },
+  { key: "of_revenue", label: "Oneri Finanziari / Fatturato", format: "pct" },
 ];
+
+/**
+ * Gli indicatori che alimentano il PUNTEGGIO di crisi, che non sono tutti
+ * quelli che la tabella RENDE.
+ *
+ * `of_revenue` e' fuori di proposito. `computeCrisisRating` conta quanti
+ * punteggi stanno sotto 0,33 e le sue bande (0 / 1-2 / 3 / 4-5 «oltre») sono
+ * tarate sul NUMERO di indicatori che le alimentano: aggiungerne uno
+ * sposterebbe la classe di rischio di aziende reali senza che nessuno
+ * l'abbia deciso. E sugli oneri finanziari il punteggio usa gia' `of_mol` —
+ * contare anche `of_revenue` peserebbe due volte lo stesso fatto, solo su un
+ * altro denominatore.
+ *
+ * Il pallino di riga resta invece calcolato per OGNI indicatore: e' una
+ * valutazione della singola voce, non un voto sull'azienda.
+ */
+export const CRISIS_SCORING_KEYS: Array<keyof IndicatorSet> = INDICATOR_DEFS
+  .filter((d) => d.key !== "of_revenue")
+  .map((d) => d.key);
+
+/** I punteggi da passare a `computeCrisisRating`, nell'ordine canonico. */
+export function crisisScores(ind: IndicatorSet): number[] {
+  return CRISIS_SCORING_KEYS.map((k) => scoreIndicator(k, ind));
+}
 
 // Dot color and overall rating from score
 /**

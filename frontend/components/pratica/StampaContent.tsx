@@ -35,6 +35,7 @@ import {
   computeIndicators,
   scoreIndicator,
   INDICATOR_DEFS,
+  crisisScores,
   scoreDotColor,
   computeCrisisRating,
   type SerieIndicatori,
@@ -180,9 +181,18 @@ export function StampaContent({
   const proiezioneScores = INDICATOR_DEFS.map(d => scoreIndicator(d.key, proiezioneInd));
 
   const alertCount = Object.values(extraAlerts).filter(Boolean).length;
-  const storicoRating = computeCrisisRating(storicoScores, 0);
-  const infraRating = computeCrisisRating(infraScores, alertCount);
-  const proiezioneRating = computeCrisisRating(proiezioneScores, alertCount);
+
+  // Il punteggio di crisi NON usa tutte le righe rese: le bande di
+  // `computeCrisisRating` sono tarate sul numero di indicatori che le
+  // alimentano (vedi `CRISIS_SCORING_KEYS`). Gli array qui sopra restano
+  // allineati a INDICATOR_DEFS perche' li indicizza il pallino di riga.
+  const storicoCrisis = crisisScores(storicoInd);
+  const infraCrisis = crisisScores(infraInd);
+  const proiezioneCrisis = crisisScores(proiezioneInd);
+
+  const storicoRating = computeCrisisRating(storicoCrisis, 0);
+  const infraRating = computeCrisisRating(infraCrisis, alertCount);
+  const proiezioneRating = computeCrisisRating(proiezioneCrisis, alertCount);
 
   const oltreCount = (scores: number[]) => scores.filter(s => s < 0.33).length;
 
@@ -256,9 +266,9 @@ export function StampaContent({
         Proiezione: indicatorsRow(proiezioneInd),
       },
       ratings: {
-        Storico: ratingRow(storicoRating, storicoScores, 0),
-        Infrannuale: ratingRow(infraRating, infraScores, alertCount),
-        Proiezione: ratingRow(proiezioneRating, proiezioneScores, alertCount),
+        Storico: ratingRow(storicoRating, storicoCrisis, 0),
+        Infrannuale: ratingRow(infraRating, infraCrisis, alertCount),
+        Proiezione: ratingRow(proiezioneRating, proiezioneCrisis, alertCount),
       },
     };
   };
@@ -635,9 +645,9 @@ export function StampaContent({
         {/* Rating cards */}
         <div className={cn("grid gap-4 mb-4", periodMonths === 12 ? "grid-cols-2" : "grid-cols-3")}>
           {[
-            { label: `Storico ${refYear}`, rating: storicoRating, oltre: oltreCount(storicoScores), alerts: 0 },
-            { label: `Infrann. ${periodMonths}M ${partialYear}`, rating: infraRating, oltre: oltreCount(infraScores), alerts: alertCount },
-            ...(periodMonths !== 12 ? [{ label: `Proiezione ${partialYear}`, rating: proiezioneRating, oltre: oltreCount(proiezioneScores), alerts: alertCount }] : []),
+            { label: `Storico ${refYear}`, rating: storicoRating, oltre: oltreCount(storicoCrisis), alerts: 0 },
+            { label: `Infrann. ${periodMonths}M ${partialYear}`, rating: infraRating, oltre: oltreCount(infraCrisis), alerts: alertCount },
+            ...(periodMonths !== 12 ? [{ label: `Proiezione ${partialYear}`, rating: proiezioneRating, oltre: oltreCount(proiezioneCrisis), alerts: alertCount }] : []),
           ].map(col => (
             <div key={col.label} className="flex items-center justify-between rounded-lg border border-border p-3">
               <div>

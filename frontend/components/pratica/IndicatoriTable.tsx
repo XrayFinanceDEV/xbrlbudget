@@ -21,6 +21,7 @@ import {
   computeIndicators,
   scoreIndicator,
   INDICATOR_DEFS,
+  crisisScores,
   scoreDotColor,
   computeCrisisRating,
   type SerieIndicatori,
@@ -87,11 +88,20 @@ export function IndicatoriTable({
 
   const alertCount = Object.values(extraAlerts).filter(Boolean).length;
 
+  // Il punteggio di crisi NON usa tutte le righe rese sopra: le bande di
+  // `computeCrisisRating` sono tarate sul numero di indicatori che le
+  // alimentano, quindi il set e' fissato in `CRISIS_SCORING_KEYS`. Gli array
+  // qui sopra restano allineati a INDICATOR_DEFS perche' li indicizza il
+  // pallino di riga.
+  const storicoCrisis = crisisScores(storicoInd);
+  const infraCrisis = crisisScores(infraInd);
+  const proiezioneCrisis = proiezioneInd ? crisisScores(proiezioneInd) : null;
+
   // Crisis ratings: storico uses 0 alerts (historical), infra+proiezione include current alerts
-  const storicoRating = computeCrisisRating(storicoScores, 0);
-  const infraRating = computeCrisisRating(infraScores, alertCount);
-  const proiezioneRating = proiezioneScores
-    ? computeCrisisRating(proiezioneScores, alertCount)
+  const storicoRating = computeCrisisRating(storicoCrisis, 0);
+  const infraRating = computeCrisisRating(infraCrisis, alertCount);
+  const proiezioneRating = proiezioneCrisis
+    ? computeCrisisRating(proiezioneCrisis, alertCount)
     : null;
 
   const oltreCount = (scores: number[]) => scores.filter((s) => s < 0.33).length;
@@ -110,12 +120,12 @@ export function IndicatoriTable({
       {showRating && (
         <div className={cn("grid gap-4", hideProiezione ? "grid-cols-2" : "grid-cols-3")}>
           {[
-            { label: `Storico ${comparison.reference_year}`, rating: storicoRating, oltre: oltreCount(storicoScores), alerts: 0 },
-            { label: `Infrann. ${comparison.period_months}M ${comparison.partial_year}`, rating: infraRating, oltre: oltreCount(infraScores), alerts: alertCount },
+            { label: `Storico ${comparison.reference_year}`, rating: storicoRating, oltre: oltreCount(storicoCrisis), alerts: 0 },
+            { label: `Infrann. ${comparison.period_months}M ${comparison.partial_year}`, rating: infraRating, oltre: oltreCount(infraCrisis), alerts: alertCount },
             ...(!hideProiezione ? [{
               label: `Proiezione ${comparison.partial_year}`,
               rating: proiezioneRating,
-              oltre: proiezioneScores ? oltreCount(proiezioneScores) : null,
+              oltre: proiezioneCrisis ? oltreCount(proiezioneCrisis) : null,
               alerts: alertCount,
             }] : []),
           ].map((col) => (

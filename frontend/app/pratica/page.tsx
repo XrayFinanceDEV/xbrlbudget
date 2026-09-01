@@ -38,8 +38,10 @@ import {
   TrendingDown,
   RotateCcw,
   AlertTriangle,
+  CheckCircle2,
+  CircleDashed,
 } from "lucide-react";
-import { getErrorMessage } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -1416,13 +1418,71 @@ export default function InfraannualePage() {
 
         {/* STEP 1b: RETTIFICHE */}
         {activeTab === "rettifiche" && <>
+        {/*
+          Le due schede sono due lavori DISTINTI e servono ENTRAMBE per
+          proseguire (`rettificheOk` e' un AND sui due campi): chi ne conferma
+          una sola resta bloccato senza vedere perche'. La riga sta SOPRA le
+          tab di proposito — il motivo del blocco dev'essere leggibile senza
+          arrivare in fondo alla pagina.
+        */}
+        <div
+          className={cn(
+            "rounded-lg border p-3 text-sm",
+            allRettificheConfirmed
+              ? "border-green-500/40 bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300"
+              : "border-yellow-500/40 bg-yellow-50 text-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-300",
+          )}
+        >
+          {allRettificheConfirmed ? (
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              Tutte le schede sono confermate.
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              <CircleDashed className="h-4 w-4 shrink-0" />
+              {rettificheDaConfermare === 1
+                ? "Resta 1 scheda da confermare: servono entrambe per proseguire."
+                : `Restano ${rettificheDaConfermare} schede da confermare: servono entrambe per proseguire.`}
+            </span>
+          )}
+        </div>
+
         <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "storico" | "verifica")} className="space-y-4">
           <TabsList>
-            <TabsTrigger value="storico" disabled={!storico.exists}>
+            {/*
+              Lo stato viene dagli stessi `verifica.confirmed`/`storico.confirmed`
+              che alimentano `rettificheDaConfermare` e l'effetto che scrive
+              `pratica.rettificheConfirmed`: un indicatore calcolato per conto
+              proprio direbbe il falso sull'import senza anno di raffronto,
+              dove `rettificheConfirmed.storico` vale `true` benche' la scheda
+              non esista. Qui la scheda inesistente e' disabilitata e non
+              mostra alcuno stato — non e' «da confermare», non c'e'.
+            */}
+            <TabsTrigger value="storico" disabled={!storico.exists} className="gap-2">
+              {storico.exists &&
+                (storico.confirmed ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                ) : (
+                  <CircleDashed className="h-3.5 w-3.5 text-yellow-600 dark:text-yellow-400" />
+                ))}
               Rettifiche Storico {fiscalYear - 1}
+              {storico.exists && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  {storico.confirmed ? "confermata" : "da confermare"}
+                </span>
+              )}
             </TabsTrigger>
-            <TabsTrigger value="verifica">
+            <TabsTrigger value="verifica" className="gap-2">
+              {verifica.confirmed ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+              ) : (
+                <CircleDashed className="h-3.5 w-3.5 text-yellow-600 dark:text-yellow-400" />
+              )}
               Rettifiche Bil. di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}{fiscalYear}
+              <span className="text-xs font-normal text-muted-foreground">
+                {verifica.confirmed ? "confermata" : "da confermare"}
+              </span>
             </TabsTrigger>
           </TabsList>
 
@@ -1486,9 +1546,7 @@ export default function InfraannualePage() {
           <p className="text-sm text-muted-foreground">
             {allRettificheConfirmed
               ? "Rettifiche confermate. Puoi proseguire con il confronto."
-              : `Conferma le rettifiche per sbloccare gli step successivi (${rettificheDaConfermare} ${
-                  rettificheDaConfermare === 1 ? "scheda" : "schede"
-                } da confermare). Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta.`}
+              : "Conferma le rettifiche per sbloccare gli step successivi. Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta."}
           </p>
         </div>
         </>}

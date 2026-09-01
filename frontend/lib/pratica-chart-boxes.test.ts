@@ -191,6 +191,12 @@ describe("INDICATOR_CHART_BOXES + buildIndicatorChartData", () => {
       },
     ]);
     expect(senzaRicavi.of_revenue).toBeNull();
+    // Anche le tre serie del riquadro «Incidenza economica sui ricavi»: senza
+    // ricavi la percentuale non esiste, e uno zero su «materie / ricavi»
+    // leggerebbe «nessun costo di materia».
+    expect(senzaRicavi.ebitda_margin).toBeNull();
+    expect(senzaRicavi.materials_revenue).toBeNull();
+    expect(senzaRicavi.services_revenue).toBeNull();
   });
 
   it("un periodo senza dati resta scartato anche con i sei riquadri", () => {

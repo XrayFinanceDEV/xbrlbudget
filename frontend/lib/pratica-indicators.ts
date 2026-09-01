@@ -317,6 +317,11 @@ const DENOMINATORE_DEL_RAPPORTO: Partial<Record<keyof IndicatorSet, keyof Indica
   pfn_ebitda: "_ebitda_raw",
   of_mol: "_ebitda_raw",
   of_revenue: "_revenue_raw",
+  // Le tre serie dell'incidenza economica: senza ricavi la percentuale non
+  // esiste, e uno zero su «materie / ricavi» legge «nessun costo di materia».
+  ebitda_margin: "_revenue_raw",
+  materials_revenue: "_revenue_raw",
+  services_revenue: "_revenue_raw",
 };
 
 /**

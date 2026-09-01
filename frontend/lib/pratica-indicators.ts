@@ -1,3 +1,5 @@
+import { formatEuro } from "@/lib/pratica-format";
+
 export function safeDivide(a: number, b: number): number {
   return b !== 0 ? a / b : 0;
 }
@@ -315,6 +317,168 @@ export function buildIndicatorChartData(serie: SerieIndicatori[]): RigaGraficoIn
   return serie
     .filter((s): s is { periodo: string; indicatori: IndicatorSet } => s.indicatori !== null)
     .map((s) => ({ periodo: s.periodo, ...s.indicatori }));
+}
+
+export type IndicatorFormat = "euro" | "pct" | "ratio";
+
+/**
+ * Le unità degli indicatori che i GRAFICI rendono ma la tabella no.
+ *
+ * `materials_revenue` e `services_revenue` non stanno in `INDICATOR_DEFS`, e
+ * non vanno aggiunti lì per comodità: `CRISIS_SCORING_KEYS` deriva da quella
+ * lista, e le bande di `computeCrisisRating` sono tarate sul NUMERO di
+ * indicatori che le alimentano — due voci in più sposterebbero la classe di
+ * rischio di aziende reali senza che nessuno l'abbia deciso. Sono incidenze sui
+ * ricavi, quindi percentuali.
+ */
+const FORMATI_FUORI_TABELLA: Partial<Record<keyof IndicatorSet, IndicatorFormat>> = {
+  materials_revenue: "pct",
+  services_revenue: "pct",
+};
+
+/**
+ * L'unità di un indicatore. `INDICATOR_DEFS` resta la fonte per tutto ciò che
+ * la tabella rende; il resto viene da `FORMATI_FUORI_TABELLA`.
+ */
+export function indicatorFormat(key: keyof IndicatorSet): IndicatorFormat | undefined {
+  return INDICATOR_DEFS.find((d) => d.key === key)?.format ?? FORMATI_FUORI_TABELLA[key];
+}
+
+/**
+ * Un riquadro dei grafici della sezione Indicatori: titolo, unità dell'asse e
+ * le serie che vi finiscono dentro.
+ *
+ * È dato PURO, e vive qui e non nel componente per una ragione sola: la suite
+ * gira in `environment: "node"`, quindi il componente non è verificabile e
+ * questa configurazione sì. Il componente si limita a renderla, così non può
+ * divergere da ciò che i test fissano.
+ */
+export type IndicatorChartSeries = {
+  key: keyof IndicatorSet;
+  label: string;
+  /** Riferimento a una variabile CSS del tema, non una classe Tailwind. */
+  color: string;
+};
+
+export type IndicatorChartBox = {
+  id: string;
+  title: string;
+  description: string;
+  /**
+   * L'unità dell'INTERO riquadro. Deve coincidere con il `format` che
+   * `INDICATOR_DEFS` dichiara per OGNI serie: `pratica-chart-boxes.test.ts` lo
+   * verifica voce per voce.
+   */
+  format: IndicatorFormat;
+  series: IndicatorChartSeries[];
+};
+
+/**
+ * I sei riquadri, nell'ordine in cui vengono resi.
+ *
+ * **Nessun riquadro mescola unità.** Un CCN in euro accanto a un ROI in
+ * percentuale tara l'asse sulle centinaia di migliaia e schiaccia la
+ * percentuale sullo zero: escono due grafici, e nessuno dei due si legge. È
+ * anche il motivo per cui il CCN (euro) ha un riquadro tutto suo invece di
+ * stare con ROI e ROE.
+ *
+ * L'ordine non è casuale. A schermo la griglia è 2×3, quindi le coppie di riga
+ * sono (1,2), (3,4), (5,6): ogni riga accosta un riquadro percentuale e uno in
+ * euro o in volte, così due assi identici non finiscono mai affiancati. In
+ * stampa la griglia diventa 3×2 e le righe sono (1,2,3) e (4,5,6).
+ */
+export const INDICATOR_CHART_BOXES: IndicatorChartBox[] = [
+  {
+    id: "incidenza-economica",
+    title: "Incidenza economica sui ricavi",
+    description: "EBITDA, materie prime e servizi in percentuale dei ricavi.",
+    format: "pct",
+    series: [
+      { key: "ebitda_margin", label: "EBITDA / Ricavi", color: "hsl(var(--chart-2))" },
+      { key: "materials_revenue", label: "Materie / Ricavi", color: "hsl(var(--chart-3))" },
+      { key: "services_revenue", label: "Servizi / Ricavi", color: "hsl(var(--chart-4))" },
+    ],
+  },
+  {
+    id: "equilibrio-finanziario",
+    title: "Equilibrio finanziario e strutturale",
+    description: "Margine di tesoreria, margine di struttura e PFN.",
+    format: "euro",
+    series: [
+      { key: "mt", label: "Margine di Tesoreria", color: "hsl(var(--chart-1))" },
+      { key: "ms", label: "Margine di Struttura", color: "hsl(var(--chart-2))" },
+      { key: "pfn", label: "PFN", color: "hsl(var(--chart-5))" },
+    ],
+  },
+  {
+    id: "redditivita",
+    title: "Redditività",
+    description: "ROI e ROE: ritorno sul capitale investito e sul patrimonio netto.",
+    format: "pct",
+    series: [
+      { key: "roi", label: "ROI", color: "hsl(var(--chart-1))" },
+      { key: "roe", label: "ROE", color: "hsl(var(--chart-3))" },
+    ],
+  },
+  {
+    id: "capitale-circolante",
+    title: "Capitale circolante netto",
+    description: "Attivo corrente meno passivo corrente (CCN).",
+    format: "euro",
+    series: [{ key: "ccn", label: "CCN", color: "hsl(var(--chart-1))" }],
+  },
+  {
+    id: "sostenibilita-debito",
+    title: "Sostenibilità del debito",
+    description: "PFN / EBITDA e DSCR, espressi in volte.",
+    format: "ratio",
+    series: [
+      { key: "pfn_ebitda", label: "PFN / EBITDA", color: "hsl(var(--chart-5))" },
+      { key: "dscr", label: "DSCR", color: "hsl(var(--chart-2))" },
+    ],
+  },
+  {
+    id: "oneri-finanziari",
+    title: "Peso degli oneri finanziari",
+    description: "Oneri finanziari sul fatturato e sul MOL.",
+    format: "pct",
+    series: [
+      // Due domande diverse sullo stesso costo: quanto pesa sul giro d'affari
+      // e quanto sulla cassa generata. Stanno insieme perché la risposta si
+      // legge nel confronto, e condividono l'unità.
+      { key: "of_revenue", label: "OF / Fatturato", color: "hsl(var(--chart-4))" },
+      { key: "of_mol", label: "OF / MOL", color: "hsl(var(--chart-2))" },
+    ],
+  },
+];
+
+/**
+ * L'etichetta di un tick d'asse. Compatta di proposito: in stampa un riquadro
+ * è largo un terzo di A4 e un valore per esteso mangia metà del grafico.
+ */
+export function formatIndicatorAxis(value: number, format: IndicatorFormat): string {
+  if (format === "euro") {
+    return new Intl.NumberFormat("it-IT", { notation: "compact" }).format(value);
+  }
+  if (format === "pct") {
+    return `${new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 }).format(value)}%`;
+  }
+  return `${new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 }).format(value)}x`;
+}
+
+/** Il valore per esteso nel tooltip, nella stessa forma della tabella indicatori. */
+export function formatIndicatorTooltip(value: number, format: IndicatorFormat): string {
+  if (format === "euro") return formatEuro(value);
+  if (format === "pct") {
+    return `${new Intl.NumberFormat("it-IT", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(value)}%`;
+  }
+  return `${new Intl.NumberFormat("it-IT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)}x`;
 }
 
 export function scoreDotColor(score: number): string {

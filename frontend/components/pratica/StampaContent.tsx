@@ -639,7 +639,14 @@ export function StampaContent({
       {periodMonths !== 12 && <CommentBlock k="sp_proiezione" placeholder="Commento su Stato Patrimoniale — Proiezione..." />}
 
       {/* 5. INDICATORI DELLA CRISI D'IMPRESA */}
-      <div>
+      {/* `print:break-inside-avoid` tiene insieme cartellini di rating, sei
+          grafici e tabella: senza, l'unico modo in cui il blocco si spezza e'
+          proprio quello che l'issue vieta — i grafici a riempire una pagina e
+          la tabella degli indicatori a finire da sola sulla successiva. Il
+          blocco e' tarato per stare in una pagina (la griglia di stampa dei
+          grafici e' 3x2, vedi IndicatoriCharts); se non ci sta, il browser lo
+          spezza comunque, ma prima prova a spostarlo intero. */}
+      <div className="print:break-inside-avoid">
         <h2 className="text-base font-semibold mb-2">Indicatori della Crisi d&apos;Impresa</h2>
 
         {/* Rating cards */}

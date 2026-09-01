@@ -1608,13 +1608,18 @@ export default function InfraannualePage() {
                 </div>
               )}
               {/*
-                Otto card su due righe da quattro. Cinque di FLUSSO (le quattro
-                storiche piu' l'EBITDA in euro) e tre di RAPPORTO — e i due tipi
-                si confrontano con termini di paragone diversi: le prime con la
-                frazione d'anno trascorsa, le seconde col rapporto dell'anno di
-                riferimento. Un margine non matura pro-quota, e mostrarlo al 75%
-                dopo nove mesi direbbe il falso. La regola sta in
-                `lib/pratica-highlights.ts`, con la sua suite.
+                Otto card su due righe da quattro, e TRE termini di paragone
+                diversi — per questo la regola sta in `lib/pratica-highlights.ts`
+                con la sua suite, e non qui dentro:
+
+                  ricavi ed EBITDA (flusso)  → la frazione d'anno trascorsa
+                  i tre costi      (flusso)  → il ritmo dei RICAVI
+                  i tre rapporti             → lo stesso rapporto sullo storico
+
+                Un margine non matura pro-quota, e mostrarlo al 75% dopo nove
+                mesi direbbe il falso. E un costo giudicato sul calendario
+                sbaglia in due modi opposti: verde mentre corre su un'azienda
+                che cresce, verde mentre tutto crolla se si inverte il segno.
               */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {buildConfrontoHighlights(comparison, incomeItemsWithEbitda).map((h) =>
@@ -1623,22 +1628,53 @@ export default function InfraannualePage() {
                       <CardContent className="pt-4">
                         <p className="text-xs text-muted-foreground truncate">{h.label}</p>
                         <p className="text-lg font-bold">{formatEuro(h.value)}</p>
-                        {h.ahead !== null ? (
-                          <div className="flex items-center gap-1 mt-1">
-                            {h.ahead ? (
-                              <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
-                            ) : (
-                              <TrendingDown className="h-3 w-3 text-red-600 dark:text-red-400" />
-                            )}
-                            <span
-                              className={`text-xs ${
-                                h.ahead
-                                  ? "text-green-600 dark:text-green-400"
-                                  : "text-red-600 dark:text-red-400"
-                              }`}
-                            >
-                              {formatPct(h.pctOfReference)} vs storico
-                            </span>
+                        {h.better !== null ? (
+                          <div className="mt-1">
+                            <div className="flex items-center gap-1">
+                              {/*
+                                La freccia segue il VALORE (sopra o sotto il
+                                proprio termine di paragone), il colore segue il
+                                GIUDIZIO. Su un costo che cresce meno dei ricavi
+                                la freccia è giù ed è VERDE: legarli fra loro
+                                rimetterebbe il verde sul costo che corre.
+                              */}
+                              {h.pctOfReference > h.benchmarkPct ? (
+                                <TrendingUp
+                                  className={`h-3 w-3 ${
+                                    h.better
+                                      ? "text-green-600 dark:text-green-400"
+                                      : "text-red-600 dark:text-red-400"
+                                  }`}
+                                />
+                              ) : (
+                                <TrendingDown
+                                  className={`h-3 w-3 ${
+                                    h.better
+                                      ? "text-green-600 dark:text-green-400"
+                                      : "text-red-600 dark:text-red-400"
+                                  }`}
+                                />
+                              )}
+                              <span
+                                className={`text-xs ${
+                                  h.better
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-red-600 dark:text-red-400"
+                                }`}
+                              >
+                                {formatPct(h.pctOfReference)} vs storico
+                              </span>
+                            </div>
+                            {/*
+                              Contro CHE COSA è il verdetto, scritto: senza,
+                              una card di costo verde al 30% accanto a una card
+                              di ricavo rossa al 70% sembra un errore.
+                            */}
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {h.benchmarkLabel === "ricavi"
+                                ? `ricavi ${formatPct(h.benchmarkPct)}`
+                                : `atteso ${formatPct(h.benchmarkPct)}`}
+                            </p>
                           </div>
                         ) : (
                           <p className="text-xs text-muted-foreground mt-1">

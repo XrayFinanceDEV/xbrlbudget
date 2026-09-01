@@ -29,14 +29,25 @@ export type HighlightFlusso = {
   value: number;
   /** Quanto vale il parziale rispetto all'anno di riferimento, in %. */
   pctOfReference: number;
-  /** La frazione d'anno trascorsa, in %: il termine di paragone. */
+  /** La frazione d'anno trascorsa, in %. */
   expectedPct: number;
+  /**
+   * Il termine di paragone EFFETTIVO di questa card: la frazione d'anno per
+   * ricavi ed EBITDA, il ritmo dei RICAVI per le tre voci di costo.
+   */
+  benchmarkPct: number;
+  /** Come si chiama quel termine, per scriverlo in chiaro sulla card. */
+  benchmarkLabel: string;
   annualized: number;
   /**
-   * `null` quando il ritmo non si può giudicare: nessun anno di riferimento,
-   * oppure un riferimento non positivo. Vedi `ritmo()`.
+   * `true` = meglio del proprio termine di paragone. `null` quando un verdetto
+   * non si può dare: nessun anno di riferimento, un riferimento non positivo,
+   * il termine di paragone non calcolabile, o un pareggio esatto.
+   *
+   * Su un costo «meglio» vuol dire **cresciuto meno dei ricavi**, non
+   * «cresciuto meno del calendario» — vedi `verdettoFlusso()`.
    */
-  ahead: boolean | null;
+  better: boolean | null;
 };
 
 export type HighlightRapporto = {
@@ -63,13 +74,37 @@ export type HighlightRapporto = {
 
 export type Highlight = HighlightFlusso | HighlightRapporto;
 
-/** Le quattro card di flusso storiche, nell'ordine in cui erano scritte a mano. */
-export const HIGHLIGHT_FLOW_CODES = [
-  "ce01_ricavi_vendite",
-  "ce08_costi_personale",
-  "ce05_materie_prime",
-  "ce06_servizi",
-] as const;
+/**
+ * Le card di flusso, nell'ordine in cui vanno rese, e **contro che cosa** si
+ * giudica ciascuna.
+ *
+ * `calendario` — la voce si confronta con la frazione d'anno trascorsa: «sta
+ * correndo più o meno di quanto ci si aspetti a questo punto dell'anno». Vale
+ * per ricavi ed EBITDA, dove «più» è una buona notizia.
+ *
+ * `controRicavi` — la voce si confronta col **ritmo dei ricavi**. Vale per i
+ * costi, e non è una rifinitura: contro il calendario si sbaglia in due modi
+ * opposti e non se ne esce. Col verde su «sopra la quota» un'azienda che
+ * cresce ha i costi verdi mentre corrono; invertendo il segno, un'azienda che
+ * si contrae ha tre card verdi mentre il fatturato crolla — i costi scendono
+ * solo perché scende tutto. Il fatto che conta è uno: il costo sta crescendo
+ * più o meno del giro d'affari.
+ */
+type FlussoDef = {
+  code: string;
+  judge: "calendario" | "controRicavi";
+};
+
+export const HIGHLIGHT_FLOW_DEFS: FlussoDef[] = [
+  { code: "ce01_ricavi_vendite", judge: "calendario" },
+  { code: "ce08_costi_personale", judge: "controRicavi" },
+  { code: "ce05_materie_prime", judge: "controRicavi" },
+  { code: "ce06_servizi", judge: "controRicavi" },
+  { code: "_ebitda", judge: "calendario" },
+];
+
+/** Il denominatore del confronto per i costi. */
+const RICAVI_CODE = "ce01_ricavi_vendite";
 
 type RapportoDef = {
   key: string;
@@ -105,27 +140,64 @@ export const HIGHLIGHT_RATIO_DEFS: RapportoDef[] = [
 ];
 
 /**
- * Il verdetto sul ritmo, `null` quando non se ne può dare uno.
- *
- * Il confronto di flusso è «questa voce sta correndo più o meno di quanto ci
- * si aspetti a questo punto dell'anno», e presuppone un riferimento
- * **positivo**: `pct_of_reference` divide per il valore dell'anno storico,
- * quindi su un riferimento negativo cambia segno e il verdetto si rovescia.
+ * Un `pct_of_reference` è leggibile solo con un riferimento **positivo**:
+ * divide per il valore dell'anno storico, quindi sotto zero cambia segno e
+ * ogni verdetto si rovescia.
  *
  * Su un EBITDA storico di −100.000: una perdita che si riduce a −30.000 dà
- * 30% < 75% e risulterebbe «in ritardo»; una che peggiora a −150.000 dà
- * 150% > 75% e risulterebbe **verde**. Ed è proprio l'EBITDA la voce che
- * finisce regolarmente sotto zero — non i ricavi, per cui le quattro card
- * storiche non l'avevano mai incontrato.
+ * 30% e sembrerebbe «in ritardo»; una che peggiora a −150.000 dà 150% e
+ * sembrerebbe in anticipo. Ed è proprio l'EBITDA la voce che finisce
+ * regolarmente sotto zero — non i ricavi, per cui le quattro card storiche
+ * non l'avevano mai incontrato.
  */
-function ritmo(
+function ritmoLeggibile(
+  item: IntraYearComparisonItem | undefined,
+): item is IntraYearComparisonItem {
+  return item !== undefined && item.reference_value > 0;
+}
+
+/**
+ * Il termine di paragone e il verdetto di una card di flusso.
+ *
+ * `null` su ogni caso in cui un verdetto non si può dare — riferimento
+ * assente o non positivo, ricavi non leggibili per una card di costo, e
+ * **pareggio esatto**, che non è né un miglioramento né un peggioramento.
+ */
+function verdettoFlusso(
   item: IntraYearComparisonItem,
+  def: FlussoDef,
   expectedPct: number,
+  ricavi: IntraYearComparisonItem | undefined,
   hasReference: boolean,
-): boolean | null {
-  if (!hasReference) return null;
-  if (!(item.reference_value > 0)) return null;
-  return item.pct_of_reference > expectedPct;
+): { benchmarkPct: number; benchmarkLabel: string; better: boolean | null } {
+  const calendario = {
+    benchmarkPct: expectedPct,
+    benchmarkLabel: "frazione d'anno",
+  };
+
+  if (def.judge === "calendario") {
+    if (!hasReference || !ritmoLeggibile(item)) {
+      return { ...calendario, better: null };
+    }
+    if (item.pct_of_reference === expectedPct) return { ...calendario, better: null };
+    // Ricavi ed EBITDA: correre più della frazione d'anno è una buona notizia.
+    return { ...calendario, better: item.pct_of_reference > expectedPct };
+  }
+
+  // Costo: il paragone è il ritmo dei ricavi, e senza ricavi leggibili non
+  // c'è paragone — meglio nessuna freccia che una freccia sul calendario.
+  if (!hasReference || !ritmoLeggibile(item) || !ritmoLeggibile(ricavi)) {
+    return {
+      benchmarkPct: ricavi?.pct_of_reference ?? expectedPct,
+      benchmarkLabel: "ricavi",
+      better: null,
+    };
+  }
+  const ricaviPct = ricavi.pct_of_reference;
+  const base = { benchmarkPct: ricaviPct, benchmarkLabel: "ricavi" };
+  if (item.pct_of_reference === ricaviPct) return { ...base, better: null };
+  // Un costo che cresce MENO dei ricavi è un miglioramento.
+  return { ...base, better: item.pct_of_reference < ricaviPct };
 }
 
 /**
@@ -152,19 +224,30 @@ export function buildConfrontoHighlights(
   const byCode = new Map(items.map((i) => [i.code, i]));
   const expectedPct = (comparison.period_months / 12) * 100;
 
+  const ricavi = byCode.get(RICAVI_CODE);
+
   const flussi: Highlight[] = [];
-  for (const code of [...HIGHLIGHT_FLOW_CODES, "_ebitda"]) {
-    const item = byCode.get(code);
+  for (const def of HIGHLIGHT_FLOW_DEFS) {
+    const item = byCode.get(def.code);
     if (!item) continue;
+    const { benchmarkPct, benchmarkLabel, better } = verdettoFlusso(
+      item,
+      def,
+      expectedPct,
+      ricavi,
+      comparison.has_reference,
+    );
     flussi.push({
       kind: "flusso",
-      code,
+      code: def.code,
       label: item.label,
       value: item.partial_value,
       pctOfReference: item.pct_of_reference,
       expectedPct,
+      benchmarkPct,
+      benchmarkLabel,
       annualized: item.annualized_value,
-      ahead: ritmo(item, expectedPct, comparison.has_reference),
+      better,
     });
   }
 

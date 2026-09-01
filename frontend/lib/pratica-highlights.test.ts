@@ -59,7 +59,7 @@ describe("buildConfrontoHighlights", () => {
     // 90.000 / 150.000 = 60%, sotto il 75% atteso a nove mesi
     expect(ebitda!.pctOfReference).toBeCloseTo(60, 10);
     expect(ebitda!.expectedPct).toBeCloseTo(75, 10);
-    expect(ebitda!.ahead).toBe(false);
+    expect(ebitda!.better).toBe(false);
   });
 
   // Il cuore della cosa. Un margine non matura pro-quota: confrontarlo con la
@@ -161,7 +161,7 @@ describe("buildConfrontoHighlights", () => {
 
     it("anche le card di flusso perdono la freccia, come già facevano", () => {
       for (const f of flussi(buildConfrontoHighlights(SENZA, NOVE_MESI))) {
-        expect(f.ahead).toBeNull();
+        expect(f.better).toBeNull();
       }
     });
   });
@@ -223,7 +223,7 @@ describe("verdetti che non si possono dare", () => {
       voce("_ebitda", -30_000, -100_000),
     ];
     const f = flussi(buildConfrontoHighlights(NOVE, migliora)).find((x) => x.code === "_ebitda")!;
-    expect(f.ahead).toBeNull();
+    expect(f.better).toBeNull();
 
     // perdita che PEGGIORA: -150k contro -100k. Col vecchio confronto
     // `pct_of_reference` valeva 150% > 75% ⇒ freccia VERDE su un disastro.
@@ -232,19 +232,22 @@ describe("verdetti che non si possono dare", () => {
       voce("_ebitda", -150_000, -100_000),
     ];
     const g = flussi(buildConfrontoHighlights(NOVE, peggiora)).find((x) => x.code === "_ebitda")!;
-    expect(g.ahead).toBeNull();
-    expect(g.ahead).not.toBe(true);
+    expect(g.better).toBeNull();
+    expect(g.better).not.toBe(true);
   });
 
   it("riferimento a zero: nessun ritmo da confrontare", () => {
     const items = [voce("ce01_ricavi_vendite", 900_000, 0)];
     const f = flussi(buildConfrontoHighlights(NOVE, items))[0];
-    expect(f.ahead).toBeNull();
+    expect(f.better).toBeNull();
   });
 
-  it("con un riferimento positivo il verdetto si dà, come sempre", () => {
+  // Sui NOVE_MESI i ricavi sono esattamente in linea col calendario (75%),
+  // quindi la loro card pareggia e non dà verdetto: è il caso «invariato».
+  it("con un riferimento positivo il verdetto si dà, tranne sui pareggi", () => {
     const f = flussi(buildConfrontoHighlights(NOVE, NOVE_MESI));
-    expect(f.every((x) => x.ahead !== null)).toBe(true);
+    const senzaVerdetto = f.filter((x) => x.better === null).map((x) => x.code);
+    expect(senzaVerdetto).toEqual(["ce01_ricavi_vendite"]);
   });
 
   it("un rapporto invariato non è né migliorato né peggiorato", () => {
@@ -266,5 +269,96 @@ describe("verdetti che non si possono dare", () => {
     const r = rapporti(buildConfrontoHighlights(NOVE, items))
       .find((x) => x.key === "materie_su_ricavi")!;
     expect(r.improved).toBe(true);
+  });
+});
+
+/**
+ * Un costo non si giudica contro il CALENDARIO ma contro il ritmo dei RICAVI.
+ *
+ * Contro il calendario si sbaglia in due modi opposti e non se ne esce: col
+ * verde su «sopra la quota» un'azienda che cresce ha i costi verdi mentre
+ * corrono; invertendo il segno, un'azienda che si contrae ha tre card verdi
+ * mentre il fatturato crolla. Il fatto rilevante è uno solo — il costo sta
+ * crescendo più o meno del giro d'affari.
+ */
+describe("le card di costo si giudicano contro i ricavi", () => {
+  const conRicavi = (ricaviPct: number, costoPct: number) => [
+    voce("ce01_ricavi_vendite", 1_200_000 * (ricaviPct / 100), 1_200_000),
+    voce("ce08_costi_personale", 450_000 * (costoPct / 100), 450_000),
+  ];
+  const personale = (items: IntraYearComparisonItem[]) =>
+    flussi(buildConfrontoHighlights(NOVE, items)).find((f) => f.code === "ce08_costi_personale")!;
+
+  it("azienda in crescita: costo che corre PIÙ dei ricavi è un peggioramento", () => {
+    const f = personale(conRicavi(75, 80));
+    expect(f.better).toBe(false);
+  });
+
+  it("azienda in crescita: costo che corre MENO dei ricavi è un miglioramento", () => {
+    expect(personale(conRicavi(75, 70)).better).toBe(true);
+  });
+
+  // Il caso che l'inversione secca avrebbe sbagliato.
+  it("azienda che dimezza il fatturato: costo tagliato MENO del calo è rosso", () => {
+    const f = personale(conRicavi(40, 60));
+    // sotto la frazione d'anno (75%), quindi l'inversione secca l'avrebbe detto verde
+    expect(f.pctOfReference).toBeLessThan(f.expectedPct);
+    expect(f.better).toBe(false);
+  });
+
+  it("azienda che dimezza il fatturato: costo tagliato PIÙ del calo è verde", () => {
+    expect(personale(conRicavi(40, 30)).better).toBe(true);
+  });
+
+  it("il termine di paragone dichiarato è il ritmo dei ricavi, non la frazione d'anno", () => {
+    const f = personale(conRicavi(40, 60));
+    expect(f.benchmarkPct).toBeCloseTo(40, 6);
+    expect(f.expectedPct).toBeCloseTo(75, 6);
+  });
+
+  it("costo esattamente in linea coi ricavi: nessun verdetto", () => {
+    expect(personale(conRicavi(75, 75)).better).toBeNull();
+  });
+
+  it("senza la voce ricavi non si inventa un paragone", () => {
+    const soloCosto = [voce("ce08_costi_personale", 360_000, 450_000)];
+    const f = flussi(buildConfrontoHighlights(NOVE, soloCosto))
+      .find((x) => x.code === "ce08_costi_personale")!;
+    expect(f.better).toBeNull();
+  });
+
+  it("ricavi storici non positivi: nessun paragone", () => {
+    const items = [
+      voce("ce01_ricavi_vendite", 100_000, 0),
+      voce("ce08_costi_personale", 360_000, 450_000),
+    ];
+    const f = flussi(buildConfrontoHighlights(NOVE, items))
+      .find((x) => x.code === "ce08_costi_personale")!;
+    expect(f.better).toBeNull();
+  });
+
+  it("vale per tutte e tre le card di costo", () => {
+    const items = [
+      voce("ce01_ricavi_vendite", 900_000, 1_200_000),   // 75%
+      voce("ce08_costi_personale", 360_000, 450_000),    // 80% → peggio
+      voce("ce05_materie_prime", 280_000, 400_000),      // 70% → meglio
+      voce("ce06_servizi", 240_000, 300_000),            // 80% → peggio
+    ];
+    const f = flussi(buildConfrontoHighlights(NOVE, items));
+    const by = (c: string) => f.find((x) => x.code === c)!;
+    expect(by("ce08_costi_personale").better).toBe(false);
+    expect(by("ce05_materie_prime").better).toBe(true);
+    expect(by("ce06_servizi").better).toBe(false);
+  });
+
+  it("ricavi ed EBITDA restano sul confronto col calendario", () => {
+    const f = flussi(buildConfrontoHighlights(NOVE, NOVE_MESI));
+    const ricavi = f.find((x) => x.code === "ce01_ricavi_vendite")!;
+    const ebitda = f.find((x) => x.code === "_ebitda")!;
+    expect(ricavi.benchmarkPct).toBeCloseTo(75, 6);   // la frazione d'anno
+    expect(ebitda.benchmarkPct).toBeCloseTo(75, 6);
+    // ricavi in linea col calendario: nessun verdetto; EBITDA al 60%: peggio
+    expect(ricavi.better).toBeNull();
+    expect(ebitda.better).toBe(false);
   });
 });

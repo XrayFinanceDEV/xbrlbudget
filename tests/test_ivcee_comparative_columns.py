@@ -23,7 +23,12 @@ from decimal import Decimal
 import fitz
 import pytest
 
-from importers.iv_cee_hierarchy import declare_unclassified_mass, reconcile_ivcee_balance
+from importers.iv_cee_hierarchy import (
+    declare_unclassified_mass,
+    reconcile_ivcee_balance,
+    withdraw_unclassified_mass,
+)
+from importers.reliability import AccountStatus, assess
 from importers.pdf_extractor_llm import (
     _column_of,
     _labelled_column_anchors,
@@ -635,3 +640,84 @@ def test_anche_lo_sp_scrive_nel_precedente_il_segno_che_ha_nel_corrente(tmp_path
 
     assert current["sp14_fondi_rischi"] == D("0")
     assert prior["sp14_fondi_rischi"] == D("45000.00")
+
+
+# ---------------------------------------------------------------------------
+# E. l'ultima risorsa di route C non misura il netto contro un totale lordo
+# ---------------------------------------------------------------------------
+
+# I totali che una situazione contabile a PRESENTAZIONE LORDA stampa in coda:
+# comprendono i fondi ammortamento, che sono contro-conti presenti su ENTRAMBI i
+# lati. Ordini di grandezza del caso di riferimento (613_2024: 2,25M di fondi, un
+# attivo lordo di 4,98M contro 3,13M di netto).
+_LORDO_STAMPATO = {"attivo": D("4980000.00"), "passivo": D("4980000.00")}
+
+
+def _nettato():
+    """Un'estrazione IV-CEE CORRETTA di quella stessa situazione contabile.
+
+    I fondi ammortamento sono stati nettati contro i cespiti, come vuole l'art.
+    2424, e il foglio quadra al centesimo: 3.130.000,00 per lato. Non manca
+    nulla — la differenza contro il totale stampato e' esattamente la massa che
+    e' stata classificata, e classificata bene.
+    """
+    return {
+        "sp02_immob_immateriali": D("130000.00"),
+        "sp03_immob_materiali": D("1500000.00"),
+        "sp05_rimanenze": D("400000.00"),
+        "sp06_crediti_breve": D("900000.00"),
+        "sp09_disponibilita_liquide": D("200000.00"),
+        "sp11_capitale": D("100000.00"),
+        "sp12_riserve": D("530000.00"),
+        "sp13_utile_perdita": D("0"),
+        "sp15_tfr": D("300000.00"),
+        "sp16_debiti_breve": D("1400000.00"),
+        "sp16d_debiti_fornitori_breve": D("1400000.00"),
+        "sp17_debiti_lungo": D("800000.00"),
+        "sp17d_debiti_fornitori_lungo": D("800000.00"),
+        "totale_attivo": D("3130000.00"),
+    }
+
+
+def test_il_totale_lordo_stampato_sovrastima_l_estrazione_nettata():
+    """Il difetto, misurato: 1.850.000 per lato di massa GIA' classificata.
+
+    E' la stessa sovrastima che la scelta fra i due candidati di route C
+    corregge riducendo l'ancoraggio della massa contra scansionata
+    (`pdf_importer.py`, «On GROSS-presentation trial balances…»). Sull'ultima
+    risorsa l'ancora arriva invece grezza, e il netting corretto risulta massa
+    persa: un verdetto negativo che nessuna contraddizione sostiene.
+    """
+    misurato = declare_unclassified_mass(_nettato(), _LORDO_STAMPATO, "ultima-risorsa")
+
+    assert misurato["_unclassified_mass"] == D("3700000.00")
+    assert misurato["_unclassified_mass_measured"] == D("1")
+
+    bs = _nettato()
+    bs.update(misurato)
+    assert assess(bs, {}).massa_non_classificata is AccountStatus.UNRELIABLE
+
+
+def test_ritirata_la_misura_il_verdetto_e_non_lo_so_non_inaffidabile():
+    """«Non lo so» non blocca; un verdetto negativo vuole una contraddizione.
+
+    L'ancoraggio NETTO di una situazione contabile lorda non si sa calcolare da
+    qui, e non si finge di saperlo. Le due chiavi restano DICHIARATE — a valle
+    una chiave assente vale zero, cioe' «pulito» — ma con `_measured` a zero.
+    """
+    bs = _nettato()
+    bs.update(withdraw_unclassified_mass("ultima-risorsa"))
+
+    assert bs["_unclassified_mass"] == D("0")
+    assert bs["_unclassified_mass_measured"] == D("0")
+    assert assess(bs, {}).massa_non_classificata is AccountStatus.DERIVED
+
+
+def test_sulle_rotte_a_b_la_misura_resta_quella_di_prima():
+    """Il ritiro non tocca chi misura contro il proprio totale, non uno lordo."""
+    misurato = declare_unclassified_mass(
+        _classified(sp18_ratei_risconti_passivi=D("0")), DECLARED, "ivcee-single"
+    )
+
+    assert misurato["_unclassified_mass"] == D("178663.25")
+    assert misurato["_unclassified_mass_measured"] == D("1")

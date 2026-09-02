@@ -258,3 +258,69 @@ def test_un_credito_immobilizzato_gia_estratto_blocca_la_sezione(tmp_path):
     prima = {"sp04_immob_finanziarie": D("1000.00"),
              "sp04b_crediti_immob_breve": D("5000.00")}
     assert _recover_printed_fixed_asset_details(str(pdf), prima) == prima
+
+
+def _solo_sp03(aggregato):
+    """Lo SP con il solo sp03 valorizzato e i suoi cinque dettagli a zero."""
+    return {
+        "sp03_immob_materiali": aggregato,
+        "sp03a_terreni_fabbricati": D("0"), "sp03b_impianti_macchinari": D("0"),
+        "sp03c_attrezzature": D("0"), "sp03d_altri_beni": D("0"),
+        "sp03e_immob_in_corso": D("0"),
+    }
+
+
+def test_un_aggregato_gia_estratto_e_diverso_dal_totale_stampato_non_si_riscrive(tmp_path):
+    """La guardia sui fratelli non copre l'aggregato, che pero' viene scritto.
+
+    `siblings` porta i soli DETTAGLI: con i dettagli a zero la guardia passa, e
+    `current[aggregate] = total` riscrive comunque l'aggregato. Un `sp03` gia'
+    estratto a 5.000 diventava 1.000 in silenzio — il totale attivo si sposta di
+    4.000, un foglio che quadrava non quadra piu', e `sp03` e' un `TIER0_FIELD`:
+    ROI, indipendenza finanziaria, PFN e i due modelli di rating si spostano
+    insieme.
+    """
+    pdf = tmp_path / "aggregato_diverso.pdf"
+    _attivo_pdf(str(pdf), [
+        ("II. Immobilizzazioni Materiali", "1.000,00"),
+        ("2) Impianti e macchinario", "1.000,00"),
+    ])
+
+    prima = _solo_sp03(D("5000.00"))
+    assert _recover_printed_fixed_asset_details(str(pdf), prima) == prima
+
+
+def test_un_aggregato_a_zero_riceve_il_totale_di_voce_stampato(tmp_path):
+    """Il caso che la funzione esiste per riparare continua a funzionare.
+
+    Aggregato E dettagli vuoti: non c'e' nulla da sovrascrivere, e la sezione si
+    riempie con quello che il documento stampa.
+    """
+    pdf = tmp_path / "aggregato_vuoto.pdf"
+    _attivo_pdf(str(pdf), [
+        ("II. Immobilizzazioni Materiali", "1.000,00"),
+        ("2) Impianti e macchinario", "1.000,00"),
+    ])
+
+    bs = _recover_printed_fixed_asset_details(str(pdf), _solo_sp03(D("0")))
+
+    assert bs["sp03_immob_materiali"] == D("1000.00")
+    assert bs["sp03b_impianti_macchinari"] == D("1000.00")
+
+
+def test_un_aggregato_gia_estratto_e_pari_al_totale_stampato_si_dettaglia(tmp_path):
+    """E' il caso normale di un abbreviato: aggregato letto, dettagli mai stampati.
+
+    Qui la scrittura dell'aggregato e' un no-op — vale gia' il totale di voce —
+    e i dettagli vanno riempiti, o `hierarchy_consistent` fallisce.
+    """
+    pdf = tmp_path / "aggregato_uguale.pdf"
+    _attivo_pdf(str(pdf), [
+        ("II. Immobilizzazioni Materiali", "1.000,00"),
+        ("2) Impianti e macchinario", "1.000,00"),
+    ])
+
+    bs = _recover_printed_fixed_asset_details(str(pdf), _solo_sp03(D("1000.00")))
+
+    assert bs["sp03_immob_materiali"] == D("1000.00")
+    assert bs["sp03b_impianti_macchinari"] == D("1000.00")

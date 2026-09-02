@@ -1519,6 +1519,25 @@ def _recover_printed_fixed_asset_details(
             # fallirebbe, cioe' proprio la condizione che qui si ripara, e
             # `reconcileSubfields` conterebbe due volte quella massa.
             continue
+        estratto = current.get(aggregate, Decimal('0'))
+        if estratto != 0 and abs(estratto - total) > Decimal('0.01'):
+            # La guardia sui fratelli porta i soli DETTAGLI: l'aggregato non
+            # e' fra loro, e senza questo controllo `current[aggregate] =
+            # total` lo riscriveva comunque. sp02/sp03/sp04/sp05 sono
+            # `TIER0_FIELDS` e non sono mai una destinazione di ripiego: un
+            # aggregato gia' estratto e DIVERSO dal totale di voce stampato
+            # e' un divario da dichiarare, non da tappare — scriverlo
+            # sposterebbe il totale attivo di quella differenza e un foglio
+            # che quadrava non quadrerebbe piu'. Quando invece i due
+            # coincidono la scrittura e' un no-op e la sezione si dettaglia.
+            logger.warning(
+                "Dettaglio di %s ignorato: l'estrazione porta gia' %s, contro "
+                "%s del totale di voce stampato. Un TIER0 gia' valorizzato non "
+                "si riscrive: il divario si dichiara e si corregge in "
+                "Rettifiche.",
+                aggregate, estratto, total,
+            )
+            continue
         for field, value in fields.items():
             current[field] = value
             recovered.append((field, str(value)))

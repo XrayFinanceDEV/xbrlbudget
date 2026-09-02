@@ -772,3 +772,84 @@ def test_budget_328_imports_end_to_end_without_an_api_key(monkeypatch):
             assert prior.income_statement.net_profit == Decimal("283549")
     finally:
         engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Colonne comparate intestate a PAROLE (issue #27)
+# ---------------------------------------------------------------------------
+
+_LABELLED_FONT = "helv"
+_LABELLED_SIZE = 9
+# Bordi destri delle quattro colonne, come li stampa il gestionale del
+# «BILANCIO RICLASSIFICATO UE»: corrente | comparato | Scostamento | %.
+_LABELLED_COLUMNS = (424.0, 489.0, 543.0, 575.0)
+
+
+def _write_labelled_comparative_pdf(path: Path) -> None:
+    """Prospetto comparato intestato a parole, con le sole date del periodo.
+
+    Riproduce il layout di #18: le due colonne di importi sono intestate da
+    ``corrente`` e ``comparato``, e l'unica coppia di date stampata è
+    l'intervallo di periodo, che non intesta nulla.
+    """
+    def right(page, x_right, y, text):
+        width = fitz.get_text_length(text, fontname=_LABELLED_FONT, fontsize=_LABELLED_SIZE)
+        page.insert_text(
+            (x_right - width, y), text, fontname=_LABELLED_FONT, fontsize=_LABELLED_SIZE
+        )
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (30, 60), "BILANCIO RICLASSIFICATO UE dal 01/01/2026 al 30/06/2026", fontsize=11
+    )
+    page.insert_text((20, 80), "Descrizione", fontsize=_LABELLED_SIZE)
+    for x_right, header in zip(_LABELLED_COLUMNS, ("corrente", "comparato", "Scostamento", "%")):
+        right(page, x_right, 100, header)
+    rows = (
+        ("1) Ricavi delle vendite e delle prestazioni",
+         ("2.104.755,45", "3.761.087,73", "-1.656.332,28", "-44,03")),
+        ("4) Incrementi di immobilizzazioni per lavori interni",
+         (None, "90.603,75", "-90.603,75", "-100,00")),
+    )
+    y = 140
+    for label, amounts in rows:
+        page.insert_text((20, y), label, fontname=_LABELLED_FONT, fontsize=_LABELLED_SIZE)
+        for x_right, amount in zip(_LABELLED_COLUMNS, amounts):
+            if amount is not None:
+                right(page, x_right, y, amount)
+        y += 20
+    document.save(str(path))
+    document.close()
+
+
+def test_le_colonne_intestate_a_parole_sono_riconosciute_come_comparate(tmp_path):
+    """Due colonne intestate ``corrente | comparato`` sono due colonne.
+
+    Il rilevatore le riconosceva solo dalle date: su questo layout l'unica
+    coppia di date è l'intervallo di periodo (scartato, e giustamente), quindi
+    un file comparato veniva instradato al prompt LLM a un anno solo e l'anno
+    precedente stampato nel PDF andava perso.
+    """
+    from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+
+    pdf = tmp_path / "riclassificato-ue.pdf"
+    _write_labelled_comparative_pdf(pdf)
+
+    # le date del periodo, da sole, non provano nulla: è l'intestazione a parole
+    with fitz.open(pdf) as document:
+        from importers.standard_ivcee_parser import _column_centres
+
+        assert _column_centres(document) is None
+
+    assert has_comparative_ivcee_columns(str(pdf)) is True
+
+
+def test_un_prospetto_monocolonna_resta_non_comparato(tmp_path):
+    """Nessun falso positivo: un infrannuale a una colonna resta a un anno."""
+    from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+
+    pdf = tmp_path / "monocolonna.pdf"
+    _write_compact_infrannual_pdf(pdf)
+
+    assert has_comparative_ivcee_columns(str(pdf)) is False

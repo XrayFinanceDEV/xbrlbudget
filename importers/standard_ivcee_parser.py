@@ -96,18 +96,47 @@ def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
     return max(candidates, key=lambda pair: pair[0]) if candidates else None
 
 
+def _labelled_column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
+    """Ancore di due colonne intestate a PAROLE (``corrente | comparato | ...``).
+
+    Serve solo a **riconoscere** un prospetto comparato, mai a leggerlo: quelle
+    ancore sono bordi destri e su quel layout le colonne sono quattro (le due
+    di analisi comprese), mentre ``_physical_rows`` classifica per centro e ne
+    conosce due — dargliele in pasto attribuirebbe lo scostamento all'anno
+    precedente.  L'estrazione deterministica su questo layout resta declinata.
+
+    L'import è locale di proposito: ``pdf_extractor_llm`` importa ``anthropic``,
+    e questo parser deve restare importabile senza il client LLM.
+    """
+    from importers.pdf_extractor_llm import _labelled_column_anchors
+
+    for page in document:
+        anchors = _labelled_column_anchors(page.get_text("words", sort=True))
+        if anchors is not None:
+            return anchors.current, anchors.prior
+    return None
+
+
 def has_comparative_ivcee_columns(file_path: str) -> bool:
-    """Return ``True`` only when two side-by-side date columns are proven.
+    """Return ``True`` only when two side-by-side value columns are proven.
 
     Infrannual legal statements are often intentionally monocolumn.  Callers use this
     source-layout check to avoid forcing those files through the two-year LLM prompt.
+
+    Le colonne si provano in due grafie, e ne basta una: due date affiancate,
+    oppure un'intestazione a parole ``corrente | comparato``.  Riconoscere solo
+    le date scambiava per monocolonna il «bilancio riclassificato UE», dove
+    l'unica coppia di date è l'intervallo di periodo: il file finiva nel prompt
+    a un anno e l'anno precedente stampato nel PDF andava perso (#27, #18).
     """
     try:
         document = fitz.open(file_path)
     except Exception:
         return False
     try:
-        return _column_centres(document) is not None
+        if _column_centres(document) is not None:
+            return True
+        return _labelled_column_centres(document) is not None
     finally:
         document.close()
 

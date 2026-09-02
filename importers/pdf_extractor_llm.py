@@ -680,6 +680,29 @@ _BLANK_CURRENT_CE_ROWS = {
 }
 
 
+def _prior_cell_with_sibling_sign(printed, extracted):
+    """L'importo stampato nella cella comparata, con la convenzione dei fratelli.
+
+    Il ripesco gira DOPO ``_normalize_ce_signs``: scrivere in ``prior`` il token
+    grezzo del PDF vi deposita l'unico valore del dizionario che la
+    normalizzazione non ha mai visto. Su un prospetto che stampa i costi fra
+    parentesi il campo esce negativo accanto a fratelli tutti positivi, e il
+    risultato dell'anno precedente si sposta di 2x l'importo senza che nulla lo
+    segnali.
+
+    La cella stampata resta l'autorita' sulla GRANDEZZA (il ripesco esiste per
+    leggerla dalla fonte); il SEGNO viene dal valore che l'estrattore aveva
+    attribuito all'anno corrente, che la normalizzazione ha gia' trattato come i
+    suoi fratelli. Le due grandezze sono note uguali a meno di
+    ``_PRIOR_CELL_MATCH_TOL``: e' la condizione che il chiamante ha appena
+    verificato, ed e' cio' che rende lecito prendere il segno dall'una e il
+    valore dall'altra. Su un PDF a convenzione positiva i due segni coincidono
+    gia' e nulla cambia.
+    """
+    magnitude = abs(printed)
+    return -magnitude if extracted < 0 else magnitude
+
+
 def _clear_blank_current_rows(
     words,
     anchors: _ColumnAnchors,
@@ -727,9 +750,10 @@ def _clear_blank_current_rows(
             ):
                 continue
             current[field] = Decimal('0')
+            recovered = _prior_cell_with_sibling_sign(parsed[0], extracted)
             if prior:
-                prior[field] = parsed[0]
-            cleared.append((field, str(parsed[0])))
+                prior[field] = recovered
+            cleared.append((field, str(recovered)))
     return cleared
 
 
@@ -893,9 +917,10 @@ def _reconcile_blank_current_ce_cells(
                     ):
                         continue
                     current[field] = Decimal('0')
+                    recovered = _prior_cell_with_sibling_sign(parsed[0], extracted)
                     if prior:
-                        prior[field] = parsed[0]
-                    cleared.append((field, str(parsed[0])))
+                        prior[field] = recovered
+                    cleared.append((field, str(recovered)))
     finally:
         doc.close()
 
@@ -978,9 +1003,10 @@ def _reconcile_blank_current_sp_cells(
                     ):
                         continue
                     current[field] = Decimal('0')
+                    recovered = _prior_cell_with_sibling_sign(parsed[0], extracted)
                     if prior:
-                        prior[field] = parsed[0]
-                    cleared.append((field, str(parsed[0])))
+                        prior[field] = recovered
+                    cleared.append((field, str(recovered)))
     finally:
         doc.close()
     if cleared:

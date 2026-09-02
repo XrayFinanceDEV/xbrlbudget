@@ -29,6 +29,7 @@ from importers.pdf_extractor_llm import (
     _labelled_column_anchors,
     _page_column_anchors,
     _reconcile_blank_current_ce_cells,
+    _reconcile_blank_current_sp_cells,
     _recover_printed_sp_rows,
     find_section_pages,
 )
@@ -459,3 +460,104 @@ def test_un_importo_presente_solo_nell_attivo_non_blocca_il_ripesco(tmp_path):
     )
 
     assert recovered["sp18_ratei_risconti_passivi"] == D("178663.25")
+
+
+# ---------------------------------------------------------------------------
+# F. il valore spostato nell'anno precedente porta la convenzione dei fratelli
+# ---------------------------------------------------------------------------
+
+def _comparative_ce_pdf_costi_fra_parentesi(path):
+    """Lo stesso prospetto, ma con la convenzione «i costi sono negativi»."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((90, 60), "BILANCIO RICLASSIFICATO UE dal 01/01/2026 al 30/06/2026")
+    page.insert_text((20, 80), "Descrizione")
+    _header(page)
+    _row(page, 140, "CONTO ECONOMICO")
+    _row(page, 160, "1) Ricavi delle vendite e delle prestazioni",
+         "2.104.755,45", "3.761.087,73", "-1.656.332,28", "-44,03")
+    # corrente VUOTO, e il comparato stampa il costo fra parentesi
+    _row(page, 180, "17) Interessi e altri oneri finanziari",
+         None, "(12.500,00)", "12.500,00", "-100,00")
+    _row(page, 200, "20) Imposte sul reddito dell'esercizio",
+         None, "(28.773,00)", "28.773,00", "-100,00")
+    doc.save(path)
+    doc.close()
+
+
+def test_il_valore_spostato_nel_precedente_porta_il_segno_dei_fratelli(tmp_path):
+    """`_normalize_ce_signs` gira PRIMA, e questo valore non ci passa mai.
+
+    Il token grezzo di un costo stampato fra parentesi vale -12.500: scritto
+    tale e quale in `prior_ce`, si trova accanto a fratelli che la
+    normalizzazione ha portato tutti a positivo, e il risultato dell'anno
+    precedente si sposta di 2x l'importo senza che nulla lo segnali.
+
+    Il valore giusto e' quello che il campo ha GIA' nell'anno corrente — dove
+    l'estrattore l'aveva messo per sbaglio, e dove la normalizzazione l'ha
+    trattato come i suoi fratelli — con la precisione della cella stampata.
+    """
+    pdf_path = tmp_path / "parentesi.pdf"
+    _comparative_ce_pdf_costi_fra_parentesi(str(pdf_path))
+
+    # Come arrivano qui: gia' normalizzati, cioe' con i costi a positivo.
+    current, prior = _reconcile_blank_current_ce_cells(
+        str(pdf_path),
+        {"ce01_ricavi_vendite": D("2104755.45"),
+         "ce15_oneri_finanziari": D("12500.00"),
+         "ce20_imposte": D("28773.00")},
+        {"ce01_ricavi_vendite": D("3761087.73"),
+         "ce15_oneri_finanziari": D("0"),
+         "ce20_imposte": D("0")},
+    )
+
+    assert current["ce15_oneri_finanziari"] == D("0")
+    assert current["ce20_imposte"] == D("0")
+    assert prior["ce15_oneri_finanziari"] == D("12500.00")
+    assert prior["ce20_imposte"] == D("28773.00")
+
+
+def test_un_campo_a_convenzione_positiva_non_cambia(tmp_path):
+    """Su un PDF che non usa le parentesi nulla si muove."""
+    pdf_path = tmp_path / "positivo.pdf"
+    _comparative_ce_pdf(str(pdf_path))
+
+    _, prior = _reconcile_blank_current_ce_cells(
+        str(pdf_path),
+        {"ce03_lavori_interni": D("90603.75"), "ce20_imposte": D("28773.00")},
+        {"ce03_lavori_interni": D("0"), "ce20_imposte": D("0")},
+    )
+
+    assert prior["ce03_lavori_interni"] == D("90603.75")
+    assert prior["ce20_imposte"] == D("28773.00")
+
+
+def test_anche_lo_sp_scrive_nel_precedente_il_segno_che_ha_nel_corrente(tmp_path):
+    """Il terzo punto di scrittura e' quello dello SP, e segue la stessa regola.
+
+    La cella comparata stampata fra parentesi non e' un'autorita' sul segno piu'
+    di quanto lo sia nel CE: la grandezza e' la stessa che l'estrattore ha gia'
+    attribuito all'anno corrente (e' la condizione che il ripesco verifica prima
+    di agire), quindi il segno da usare e' quello. Scriverne uno diverso nella
+    stessa voce, fra le due colonne, e' incoerente comunque la si giri — e su
+    ``B) Fondi per rischi e oneri`` un valore negativo non esiste nell'art. 2424.
+    """
+    pdf_path = tmp_path / "sp-parentesi.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((20, 80), "Descrizione")
+    _header(page)
+    _row(page, 140, "STATO PATRIMONIALE PASSIVO", "2.352.461,64", "2.170.417,20")
+    _row(page, 160, "B) Fondi per rischi e oneri",
+         None, "(45.000,00)", "45.000,00", "-100,00")
+    doc.save(pdf_path)
+    doc.close()
+
+    current, prior = _reconcile_blank_current_sp_cells(
+        str(pdf_path),
+        {"sp14_fondi_rischi": D("45000.00")},
+        {"sp14_fondi_rischi": D("0")},
+    )
+
+    assert current["sp14_fondi_rischi"] == D("0")
+    assert prior["sp14_fondi_rischi"] == D("45000.00")

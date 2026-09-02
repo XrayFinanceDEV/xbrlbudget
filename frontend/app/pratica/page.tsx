@@ -17,7 +17,7 @@ import {
   getScenarioAnalysis,
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
-import { badgeScheda } from "@/lib/pratica-rettifiche-stato";
+import { badgeScheda, rigaRettifiche } from "@/lib/pratica-rettifiche-stato";
 import { blockedStep } from "@/lib/pratica-steps";
 import type {
   BudgetScenario,
@@ -262,23 +262,23 @@ export default function InfraannualePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifica.confirm, storico.confirm, storico.exists, updatePratica, setActiveTab]);
 
-  // Badge delle tab: la decisione sta nel modulo puro
-  // `lib/pratica-rettifiche-stato.ts`, con la sua suite.
+  // Riga di stato e badge delle tab: la decisione sta nel modulo puro
+  // `lib/pratica-rettifiche-stato.ts`, con la sua suite. Chiavare il ramo di
+  // ripiego sul CONTEGGIO delle schede (com'era) lasciava scoperto il caso in
+  // cui manca il solo bilancio di verifica: il conteggio vale 1, il ramo non
+  // scattava, e la riga diceva «Restano 0 schede da confermare» sotto un
+  // pulsante spento. Vedi #42.
   const statoVerifica = {
     resolved: verifica.resolved,
     exists: verifica.exists,
     confirmed: verifica.confirmed,
   };
-  const rettificheDaConfermare =
-    (verifica.exists && !verifica.confirmed ? 1 : 0) +
-    (storico.exists && !storico.confirmed ? 1 : 0);
-
-  // Quante schede ESISTONO davvero. Serve alla riga di stato: il conteggio
-  // «da confermare» conta solo fra quelle esistenti, quindi da solo può dire
-  // «restano 0 schede» su un percorso che è comunque bloccato — succede quando
-  // il bilancio di verifica non è stato trovato. E su un import senza anno di
-  // raffronto la scheda è UNA, quindi «servono entrambe» sarebbe falso.
-  const rettificheSchedeEsistenti = (verifica.exists ? 1 : 0) + (storico.exists ? 1 : 0);
+  const statoStorico = {
+    resolved: storico.resolved,
+    exists: storico.exists,
+    confirmed: storico.confirmed,
+  };
+  const rigaStato = rigaRettifiche(statoVerifica, statoStorico, allRettificheConfirmed);
 
   // Le condizioni sono copiate INVARIATE dal bottone che questo sostituisce
   // (era app/pratica/page.tsx:4155-4167).
@@ -1378,14 +1378,14 @@ export default function InfraannualePage() {
               : "border-yellow-500/40 bg-yellow-50 text-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-300",
           )}
         >
-          {allRettificheConfirmed ? (
+          {rigaStato.kind === "confermate" ? (
             <span className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              {rettificheSchedeEsistenti === 1
+              {rigaStato.schedeEsistenti === 1
                 ? "Scheda confermata."
                 : "Tutte le schede sono confermate."}
             </span>
-          ) : rettificheSchedeEsistenti === 0 ? (
+          ) : rigaStato.kind === "nessuna-scheda" ? (
             // Nessuna scheda caricata: il percorso è bloccato, ma non da una
             // conferma mancante. Un «restano 0 schede da confermare» qui
             // sarebbe un conteggio giusto sotto una spiegazione falsa.
@@ -1394,15 +1394,26 @@ export default function InfraannualePage() {
               Nessun bilancio da rettificare: controlla anno fiscale e mesi coperti
               nella scheda Importazione.
             </span>
+          ) : rigaStato.kind === "verifica-mancante" ? (
+            // Lo storico c'è (magari già confermato) ma il bilancio di verifica
+            // no: il percorso è bloccato da una scheda che manca, non da una
+            // conferma. Nominare la scheda è l'unico modo di far capire che si
+            // sistema nell'Importazione, non qui.
+            <span className="flex items-center gap-2">
+              <CircleDashed className="h-4 w-4 shrink-0" />
+              Bilancio di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}
+              {fiscalYear} non trovato: controlla anno fiscale e mesi coperti nella
+              scheda Importazione.
+            </span>
           ) : (
             <span className="flex items-center gap-2">
               <CircleDashed className="h-4 w-4 shrink-0" />
-              {rettificheDaConfermare === 1
+              {rigaStato.daConfermare === 1
                 ? "Resta 1 scheda da confermare"
-                : `Restano ${rettificheDaConfermare} schede da confermare`}
+                : `Restano ${rigaStato.daConfermare} schede da confermare`}
               {/* «entrambe» solo quando le schede sono davvero due: un import
                   senza anno di raffronto ne ha una sola. */}
-              {rettificheSchedeEsistenti === 2
+              {rigaStato.schedeEsistenti === 2
                 ? ": servono entrambe per proseguire."
                 : " per proseguire."}
             </span>

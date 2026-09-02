@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
+import { usePrimaryAction } from "@/contexts/PraticaActionContext";
+import {
+  buildPraticaSteps,
+  praticaGates,
+  currentStepId,
+  nextStep,
+} from "@/lib/pratica-steps";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage, parseItalianAmount } from "@/lib/formatters";
 import { patchCeOverrides } from "@/lib/api";
@@ -152,8 +159,8 @@ export default function ForecastIncomePage() {
     });
   }, []);
 
-  const handleSaveAll = useCallback(async () => {
-    if (!selectedCompanyId || !selectedScenario || !hasPendingEdits) return;
+  const handleSaveAll = useCallback(async (): Promise<boolean> => {
+    if (!selectedCompanyId || !selectedScenario || !hasPendingEdits) return false;
     setSaving(true);
     try {
       const overrides = Object.entries(pendingEdits).map(([key, value]) => {
@@ -176,12 +183,38 @@ export default function ForecastIncomePage() {
           ? undefined
           : { action: { label: "Vai al Rendiconto", onClick: () => router.push("/cashflow") } },
       );
+      return true;
     } catch (err: any) {
       toast.error("Errore: " + getErrorMessage(err, "aggiornamento previsionale fallito"));
+      return false;
     } finally {
       setSaving(false);
     }
   }, [selectedCompanyId, selectedScenario, pendingEdits, hasPendingEdits, invalidateAnalysis, pratica, router]);
+
+  // Le celle modificate qui restano in sospeso finche' non si salva, e SP Prev.
+  // legge il forecast che il motore ha rigenerato: senza questo, un "Avanti"
+  // con modifiche in sospeso le buttava in silenzio e apriva uno SP calcolato
+  // senza di esse. Con nulla da salvare `label: null` lascia alla barra il suo
+  // "Avanti: ..." di sempre.
+  const pathname = usePathname();
+  const stepDopo = useMemo(() => {
+    if (!pratica) return null;
+    const steps = buildPraticaSteps(pratica, praticaGates(pratica));
+    const n = nextStep(steps, currentStepId(pathname, pratica.analysisStep, pratica));
+    return n && n.enabled && n.route ? n : null;
+  }, [pratica, pathname]);
+
+  usePrimaryAction({
+    label: hasPendingEdits && stepDopo ? `Salva e prosegui: ${stepDopo.label}` : null,
+    disabled: saving,
+    reason: null,
+    onClick: async () => {
+      // Un salvataggio rifiutato non fa proseguire: il toast l'ha gia' detto.
+      if (!(await handleSaveAll())) return;
+      if (stepDopo?.route) router.push(stepDopo.route);
+    },
+  });
 
   if (!selectedCompanyId) {
     return (

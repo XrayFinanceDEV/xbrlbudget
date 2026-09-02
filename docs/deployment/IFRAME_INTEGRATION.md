@@ -240,6 +240,49 @@ The one case that stays **500** is a server with neither secret nor `DEV_USER_ID
 deployment error, and a 401 would send the parent into refreshing a token this server can
 never accept. Pinned by `tests/test_auth_jwt.py`.
 
+### Testing auth with a real token
+
+A backend started with `DEV_USER_ID` alone cannot verify anything, so **a perfectly valid
+Supabase token gets 401 there too**. To exercise the real path, start it with the secret —
+keeping `DEV_USER_ID` as well is the useful local combination, because then an
+un-authenticated call still falls back to the dev tenant:
+
+```bash
+# .env.staging already carries the secret of the Formula Finance Supabase project
+cd backend && source venv/bin/activate
+env DEV_USER_ID=dev-user-001 SUPABASE_JWT_SECRET="$(grep -m1 '^SUPABASE_JWT_SECRET=' ../.env.staging | cut -d= -f2-)" \
+  uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Get a token with `scripts/get_test_jwt.py`. It logs in through the FastAPI backend —
+`POST /api/v1/users/token` on `api_server_it`, an OAuth2 password form that forwards to
+`supabase.auth.sign_in_with_password` — so it needs no Supabase anon key, and the token comes
+back by the same route the iframe gets it. The script holds no credentials of its own; put
+them in a `.env*.local` file, a pattern `.gitignore` covers at any depth, because **test
+credentials must never be committed**:
+
+```bash
+# .env.test.local  (gitignored)
+export API_BASE_URL="https://api.kpsfinanciallab.it"   # facoltativa, e' il default
+export TEST_USER_EMAIL="..."
+export TEST_USER_PASSWORD="..."
+```
+
+```bash
+source .env.test.local
+TOKEN=$(python scripts/get_test_jwt.py)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/v1/companies
+```
+
+The two `@live_only` tests at the end of `tests/test_auth_jwt.py` do exactly this and **skip**
+when those variables are absent, so the suite stays runnable without secrets or network. They
+pin what a hand-signed token cannot: that the real token shape — HS256, `aud: "authenticated"`,
+uuid `sub` — passes. That `aud` is why `jwt.decode` runs with `verify_aud: False`; checking the
+audience would reject every production token.
+
+The response is scoped to the token's `sub`, so a real token and the `DEV_USER_ID` fallback see
+**different companies** on the same server — that is the multi-tenancy working, not a bug.
+
 ---
 
 ## Security Checklist

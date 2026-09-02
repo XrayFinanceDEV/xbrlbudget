@@ -11,6 +11,9 @@ manderebbe l'iframe a ri-chiedere all'infinito un token che nessuno potrà mai
 verificare.
 """
 import datetime
+import os
+import subprocess
+import sys
 
 import jwt
 import pytest
@@ -163,3 +166,71 @@ def test_segreto_mancante_in_produzione_resta_500(client):
 
     assert r.status_code == 500
     assert "SUPABASE_JWT_SECRET" in r.json()["detail"]
+
+
+# --- Token vero, opt-in ------------------------------------------------------
+#
+# Questi due girano solo se l'ambiente porta le credenziali di prova
+# (`source .env.test.local`, file gitignorato — vedi `scripts/get_test_jwt.py`).
+# Senza, si saltano: la suite non deve dipendere da un segreto né dalla rete.
+#
+# Il token arriva dal login del backend FastAPI (`POST /api/v1/users/token` di
+# api_server_it), cioè per la stessa via da cui lo riceve l'iframe.
+#
+# Servono a fissare quello che un token finto non può dimostrare: la **forma**
+# reale di un JWT Supabase — HS256, `aud: "authenticated"`, `sub` uuid — passa
+# davvero il vaglio di `get_current_user`. È `verify_aud: False` a renderlo
+# possibile: `aud` vale "authenticated", non il nome dell'applicazione, quindi
+# una verifica dell'audience rifiuterebbe ogni token di produzione.
+
+_LIVE_ENV = ("TEST_USER_EMAIL", "TEST_USER_PASSWORD")
+
+live_only = pytest.mark.skipif(
+    not all(os.environ.get(k) for k in _LIVE_ENV),
+    reason="credenziali di prova assenti: `source .env.test.local` per abilitare",
+)
+
+
+@pytest.fixture(scope="module")
+def token_vero():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out = subprocess.run(
+        [sys.executable, os.path.join(root, "scripts", "get_test_jwt.py")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if out.returncode != 0:
+        pytest.skip(f"il login non ha rilasciato un token: {out.stderr.strip()[:200]}")
+    return out.stdout.strip()
+
+
+@live_only
+def test_un_jwt_supabase_vero_viene_accettato(client, token_vero):
+    c, settings, mp = client
+    secret = os.environ.get("SUPABASE_JWT_SECRET")
+    if not secret:
+        pytest.skip("SUPABASE_JWT_SECRET assente: sta in .env.staging")
+    mp.setattr(settings, "SUPABASE_JWT_SECRET", secret)
+
+    r = c.get("/api/v1/companies", headers=_bearer(token_vero))
+
+    assert r.status_code == 200, r.text
+    # Il DB del test è vuoto: la risposta è intestata al `sub` del token, non a
+    # DEV_USER_ID, e quel tenant non possiede nulla qui.
+    assert r.json() == []
+
+
+@live_only
+def test_un_jwt_supabase_vero_ma_troncato_esce_401(client, token_vero):
+    """La forma che l'issue #36 descrive: un token vero che arriva mutilato."""
+    c, settings, mp = client
+    secret = os.environ.get("SUPABASE_JWT_SECRET")
+    if not secret:
+        pytest.skip("SUPABASE_JWT_SECRET assente: sta in .env.staging")
+    mp.setattr(settings, "SUPABASE_JWT_SECRET", secret)
+
+    r = c.get("/api/v1/companies", headers=_bearer(token_vero[:-10]))
+
+    assert r.status_code == 401
+    assert r.headers.get("WWW-Authenticate") == "Bearer"

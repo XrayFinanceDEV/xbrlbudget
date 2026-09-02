@@ -17,6 +17,7 @@ import {
   getScenarioAnalysis,
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
+import { badgeScheda } from "@/lib/pratica-rettifiche-stato";
 import { blockedStep } from "@/lib/pratica-steps";
 import type {
   BudgetScenario,
@@ -261,6 +262,13 @@ export default function InfraannualePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifica.confirm, storico.confirm, storico.exists, updatePratica, setActiveTab]);
 
+  // Badge delle tab: la decisione sta nel modulo puro
+  // `lib/pratica-rettifiche-stato.ts`, con la sua suite.
+  const statoVerifica = {
+    resolved: verifica.resolved,
+    exists: verifica.exists,
+    confirmed: verifica.confirmed,
+  };
   const rettificheDaConfermare =
     (verifica.exists && !verifica.confirmed ? 1 : 0) +
     (storico.exists && !storico.confirmed ? 1 : 0);
@@ -1426,16 +1434,24 @@ export default function InfraannualePage() {
                 </span>
               )}
             </TabsTrigger>
+            {/*
+              Il badge passa da `badgeScheda`, che tace finché il server non ha
+              risposto e su una scheda che risponde 404: `exists` parte da
+              `true` e il reset di identità lo rialza, quindi da solo diceva
+              «da confermare» su un lavoro che non si può fare. Vedi #43.
+            */}
             <TabsTrigger value="verifica" className="gap-2">
-              {verifica.confirmed ? (
+              {badgeScheda(statoVerifica) === "confermata" ? (
                 <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-              ) : (
+              ) : badgeScheda(statoVerifica) === "da confermare" ? (
                 <CircleDashed className="h-3.5 w-3.5 text-yellow-600 dark:text-yellow-400" />
-              )}
+              ) : null}
               Rettifiche Bil. di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}{fiscalYear}
-              <span className="text-xs font-normal text-muted-foreground">
-                {verifica.confirmed ? "confermata" : "da confermare"}
-              </span>
+              {badgeScheda(statoVerifica) && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  {badgeScheda(statoVerifica)}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 

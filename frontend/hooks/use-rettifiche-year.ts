@@ -16,6 +16,13 @@ export interface RettificheYear {
   applied: boolean;
   /** false only when the year has no FinancialYear at all (404). */
   exists: boolean;
+  /**
+   * Il server ha risposto (dati o 404) per QUESTA identità. `exists` da solo
+   * non lo dice: parte da `true` e il reset di identità lo rialza a `true`,
+   * quindi fra il cambio e la risposta vale «non lo so», non «c'è» — e una
+   * schermata che legge solo `exists` pubblicizza una scheda che non esiste.
+   */
+  resolved: boolean;
   /** L'utente ha premuto "Conferma e prosegui" su questo anno. */
   confirmed: boolean;
   /** Persiste il marker di conferma. Idempotente. Risolve false se il salvataggio fallisce. */
@@ -46,6 +53,7 @@ export function useRettificheYear(
   const [saving, setSaving] = useState(false);
   const [applied, setApplied] = useState(false);
   const [exists, setExists] = useState(true);
+  const [resolved, setResolved] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
 
   // Identity change (different company, year or period) invalidates the loaded
@@ -56,6 +64,7 @@ export function useRettificheYear(
     setCorrections({});
     setApplied(false);
     setExists(true);
+    setResolved(false);
     setConfirmed(false);
   }, [companyId, year, periodMonths]);
 
@@ -66,6 +75,7 @@ export function useRettificheYear(
       const result = await getAdjustableFinancialYear(companyId, year, periodMonths);
       setData(result);
       setExists(true);
+      setResolved(true);
       // Seed from SAVED values (they already include previously applied
       // rettifiche); original_* is used only for delta display and proposals.
       const initial: Record<string, number> = {};
@@ -89,6 +99,7 @@ export function useRettificheYear(
       if (status === 404) {
         // Legitimate state, not an error: the year was never imported.
         setExists(false);
+        setResolved(true);
         setData(null);
         setCorrections({});
         setApplied(false);
@@ -187,6 +198,7 @@ export function useRettificheYear(
     setCorrections({});
     setApplied(false);
     setExists(true);
+    setResolved(false);
     setConfirmed(false);
   }, []);
 
@@ -215,5 +227,5 @@ export function useRettificheYear(
     return true;
   }, [companyId, data, year, periodMonths, save]);
 
-  return { data, corrections, setCorrections, loading, saving, applied, confirmed, exists, load, save, reset, confirm, clear };
+  return { data, corrections, setCorrections, loading, saving, applied, confirmed, exists, resolved, load, save, reset, confirm, clear };
 }

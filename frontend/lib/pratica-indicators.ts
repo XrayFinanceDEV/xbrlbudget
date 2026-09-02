@@ -189,7 +189,23 @@ export function scoreIndicator(
 ): number {
   switch (key) {
     // DSCR: <1 crisis (CNDCEC), 1-1.2 grey zone, >1.2 good, >1.5 solid
+    //
+    // Senza oneri finanziari il rapporto non esiste: `safeDivide` restituisce 0
+    // e su una scala DIRETTA lo zero e' il verdetto peggiore. L'azienda senza
+    // debito oneroso — la piu' sana possibile su questo indicatore — finiva
+    // sotto 0,33, cioe' contata come un «oltre soglia» da `computeCrisisRating`,
+    // e veniva spinta in una classe di rischio peggiore proprio dall'assenza di
+    // debito. E' la contraddizione della #29, ed era visibile: il grafico
+    // «Sostenibilita' del debito» quel punto non lo disegna nemmeno.
+    //
+    // Il verdetto degenere e' 0,5 e non 0 ne' 1, per la stessa ragione gia'
+    // scritta sotto per `of_revenue`: un denominatore assente e' «non lo so»,
+    // non una contraddizione misurata, e nemmeno un'eccellenza da premiare.
+    // Le bande di `computeCrisisRating` NON si toccano — `dscr` resta dentro
+    // `CRISIS_SCORING_KEYS` e il numero di indicatori che le alimentano e'
+    // quello di prima.
     case "dscr":
+      if (ind._oneri_finanziari_raw <= 0) return 0.5;
       return linearScore(ind.dscr, 1.0, 1.5);
     // EBITDA margin: <5% concerning, >20% excellent
     case "ebitda_margin":
@@ -224,7 +240,21 @@ export function scoreIndicator(
     case "roi":
       return linearScore(ind.roi, 0, 12);
     // ROE: <0 loss, >12% good
+    //
+    // Patrimonio netto nullo o NEGATIVO: il rapporto non esiste. A zero
+    // `safeDivide` da' 0, e su un patrimonio negativo un utile diviso un
+    // denominatore negativo esce negativo per il DENOMINATORE, non per la
+    // redditivita' — quel numero non e' un ROE, e leggerlo come «nessun ritorno
+    // sul capitale» e' un giudizio che nessuno ha misurato. Anche qui il grafico
+    // il punto non lo disegna gia' (`DENOMINATORE_DEL_RAPPORTO`), e il punteggio
+    // ora dice la stessa cosa: 0,5, «non lo so».
+    //
+    // Il dissesto di un patrimonio netto negativo NON sparisce dal conteggio:
+    // `indipendenza`, `ms` e `copertura_immob` vanno tutti a zero da soli, e
+    // sono tre «oltre soglia» su un fatto misurato. Contarlo una quarta volta
+    // con un rapporto privo di significato non aggiungeva informazione.
     case "roe":
+      if (ind._equity_raw <= 0) return 0.5;
       return linearScore(ind.roe, 0, 12);
     // ROS: <0 loss, >10% good
     case "ros":

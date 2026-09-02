@@ -1,4 +1,14 @@
-# Deployment Guide - XBRL Budget Frontend
+# Deployment Guide - XBRL Budget Frontend — NON CORRENTE
+
+> **NON CORRENTE.** Questa guida spiega come mettere il frontend su **Netlify**. Il progetto
+> non sta su Netlify: un push fa partire Jenkins, che costruisce le immagini Docker e le
+> mette dietro nginx, e in produzione `NEXT_PUBLIC_API_URL` è **vuota di proposito** perché
+> frontend e backend condividono l'origine e l'app usa l'URL relativo `/api/v1`.
+> → **[DEPLOY-JENKINS-DOCKER.md](DEPLOY-JENKINS-DOCKER.md)**
+>
+> Il testo è rimasto intatto (non contiene indirizzi morti: usa segnaposti) come traccia del
+> percorso Netlify, se mai servisse riaprirlo. Una sola correzione di fatto: `netlify.toml`
+> sta nella **radice del repository**, non in `frontend/`.
 
 This guide explains how to deploy the Next.js frontend to Netlify.
 
@@ -72,7 +82,7 @@ The frontend requires the following environment variable:
 ## Configuration Files
 
 ### netlify.toml
-Located at `frontend/netlify.toml`. This file configures:
+Located at `netlify.toml`, in the repository root. This file configures:
 - Build command and Node version
 - Security headers
 - Static asset caching

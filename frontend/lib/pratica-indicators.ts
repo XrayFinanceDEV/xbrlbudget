@@ -347,6 +347,42 @@ const DENOMINATORE_DEL_RAPPORTO: Partial<Record<keyof IndicatorSet, keyof Indica
 };
 
 /**
+ * Oltre quanti punti percentuali un'incidenza SUI RICAVI smette di essere
+ * un'incidenza.
+ *
+ * La guardia qui sopra è su denominatore ZERO, e un denominatore minuscolo non
+ * è zero: su AIC SRL i ricavi 2025 valgono 100,92 € (il fatturato vero sta su
+ * `ce04_altri_ricavi`), «Materie / Ricavi» risulta 421.930,8%, l'asse arriva a
+ * 600.000% e le altre due colonne — 3.246,0% e 149,3% — diventano linee piatte
+ * indistinguibili dallo zero. Il grafico è corretto rispetto ai dati; sono i
+ * dati a non essere un'incidenza.
+ *
+ * La soglia è **adimensionale** di proposito: un minimo di ricavi in euro
+ * varrebbe solo per aziende di una certa taglia, mentre «il numeratore supera
+ * dieci volte il proprio denominatore» dice la stessa cosa a ogni scala. È
+ * l'analogo del rapporto di rotazione che implica più di un anno di magazzino
+ * (`_turnover_ratio` → `None` in `intra_year_engine`): una soglia di dominio,
+ * non un epsilon numerico. Il valore è tarabile dal proprietario; ciò che non
+ * si può fare è cambiarlo credendo di toccare solo l'estetica.
+ *
+ * **Vale per i soli rapporti che dividono per i RICAVI**, e non per «ogni
+ * percentuale grande». Fra i denominatori che i grafici usano, `_revenue_raw` è
+ * l'unico che può essere prossimo a zero mentre l'azienda non lo è: un
+ * fatturato finito su `ce04` in fase di import è un esito reale e frequente,
+ * ed è esattamente il caso di questa issue. Gli altri no — patrimonio netto e
+ * attivo non positivi sono già esclusi dal `<= 0` qui sopra, e un ROE del
+ * 1.500% su un patrimonio sottile o oneri finanziari pari a quindici volte il
+ * MOL sono numeri **genuini**, che vanno visti: nasconderli sarebbe perdere
+ * un'informazione vera per rendere più bello un asse.
+ *
+ * **Solo la RESA.** `computeIndicators` e `scoreIndicator` non cambiano, quindi
+ * il pallino di riga e il rating di crisi restano quelli di prima. Correggere
+ * il denominatore a monte — usare il valore della produzione invece di `ce01` —
+ * sposterebbe i punteggi di OGNI azienda, ed è una decisione di prodotto.
+ */
+export const INCIDENZA_MAX_PCT = 1000;
+
+/**
  * Costruisce le righe dei due grafici (incidenza economica ed equilibrio
  * finanziario) da un elenco di serie.
  *
@@ -360,6 +396,10 @@ const DENOMINATORE_DEL_RAPPORTO: Partial<Record<keyof IndicatorSet, keyof Indica
  * (`indicatori === null`) e, dentro un periodo che esiste, per il singolo
  * rapporto il cui denominatore è nullo: là lo zero di `safeDivide` non è un
  * valore, è l'assenza di un valore. Recharts salta un punto `null`.
+ *
+ * Un denominatore che esiste ma è troppo piccolo per reggere il rapporto è
+ * trattato allo stesso modo, ma per i soli rapporti sui RICAVI: vedi
+ * `INCIDENZA_MAX_PCT` qui sopra.
  */
 export function buildIndicatorChartData(serie: SerieIndicatori[]): RigaGraficoIndicatori[] {
   return serie
@@ -367,8 +407,22 @@ export function buildIndicatorChartData(serie: SerieIndicatori[]): RigaGraficoIn
     .map((s) => {
       const riga = { periodo: s.periodo, ...s.indicatori } as RigaGraficoIndicatori;
       for (const [rapporto, grezzo] of Object.entries(DENOMINATORE_DEL_RAPPORTO)) {
+        const chiave = rapporto as keyof IndicatorSet;
         if (s.indicatori[grezzo as keyof IndicatorSet] <= 0) {
-          riga[rapporto as keyof IndicatorSet] = null;
+          riga[chiave] = null;
+          continue;
+        }
+        // I ricavi ci sono ma sono troppo piccoli per fare da base: il rapporto
+        // esiste, non è un'incidenza. Vedi `INCIDENZA_MAX_PCT`. Il controllo
+        // sull'unità non è ridondanza: se un domani un rapporto in VOLTE
+        // dividesse per i ricavi, confrontarlo con una soglia in punti
+        // percentuali sarebbe un confronto fra unità diverse.
+        if (
+          grezzo === "_revenue_raw" &&
+          indicatorFormat(chiave) === "pct" &&
+          Math.abs(s.indicatori[chiave]) > INCIDENZA_MAX_PCT
+        ) {
+          riga[chiave] = null;
         }
       }
       return riga;

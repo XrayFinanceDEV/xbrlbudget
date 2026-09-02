@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   AXIS_WIDTH_MAX,
   AXIS_WIDTH_MIN,
+  INCIDENZA_MAX_PCT,
   INDICATOR_CHART_BOXES,
   INDICATOR_DEFS,
   buildIndicatorChartData,
+  computeIndicators,
   indicatorAxisWidth,
   indicatorFormat,
   formatIndicatorAxis,
   formatIndicatorTooltip,
+  scoreIndicator,
   type IndicatorSet,
   type SerieIndicatori,
 } from "@/lib/pratica-indicators";
@@ -361,5 +364,121 @@ describe("indicatorAxisWidth", () => {
       },
     ]);
     expect(indicatorAxisWidth(assurde, riquadroVolte)).toBe(AXIS_WIDTH_MAX);
+  });
+});
+
+describe("ricavi troppo piccoli per fare da base (#33)", () => {
+  // La guardia esistente è su denominatore ZERO, e 100,92 € di ricavi non sono
+  // zero: su AIC SRL «Materie / Ricavi» 2025 vale 421.930,8%, l'asse arriva a
+  // 600.000% e le altre due colonne — 3.246,0% e 149,3% — diventano linee
+  // piatte indistinguibili dallo zero. Il grafico è corretto rispetto ai dati;
+  // sono i dati a non essere un'incidenza.
+  //
+  // La correzione è di RESA e basta: `computeIndicators` e `scoreIndicator` non
+  // si toccano, perché cambiare il denominatore a monte sposterebbe i punteggi
+  // e quindi il rating di crisi di ogni azienda.
+
+  it("i ricavi di AIC SRL: l'incidenza a sei cifre non finisce sul grafico", () => {
+    const ind = computeIndicators(
+      {},
+      { ce01_ricavi_vendite: 100.92, ce05_materie_prime: 425850 },
+    );
+    // Il rapporto grezzo resta quello che è: nessuno lo ha ritoccato.
+    expect(ind.materials_revenue).toBeGreaterThan(400000);
+
+    const [riga] = buildIndicatorChartData([{ periodo: "Storico 2025", indicatori: ind }]);
+    expect(riga.materials_revenue).toBeNull();
+    expect(riga.ebitda_margin).toBeNull();
+  });
+
+  it("l'asse si restringe perché il valore degenere non produce più un'etichetta", () => {
+    // È l'effetto che l'issue chiede: senza la riga a sei cifre l'asse torna
+    // alla larghezza minima invece di riservare spazio a «600.000%».
+    const ind = computeIndicators(
+      {},
+      { ce01_ricavi_vendite: 100.92, ce05_materie_prime: 425850 },
+    );
+    const riquadro = INDICATOR_CHART_BOXES.find((b) => b.id === "incidenza-economica")!;
+    const righe = buildIndicatorChartData([{ periodo: "Storico 2025", indicatori: ind }]);
+    expect(indicatorAxisWidth(righe, riquadro)).toBe(AXIS_WIDTH_MIN);
+  });
+
+  it("un'incidenza alta ma plausibile resta sul grafico", () => {
+    // Materie pari a tre volte i ricavi è un'azienda in difficoltà, non un
+    // denominatore sbagliato: si deve vedere.
+    const [riga] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({
+          materials_revenue: 300,
+          ebitda_margin: -250,
+          _revenue_raw: 120000,
+        }),
+      },
+    ]);
+    expect(riga.materials_revenue).toBe(300);
+    expect(riga.ebitda_margin).toBe(-250);
+  });
+
+  it("la soglia è sul valore assoluto, e il limite esatto passa", () => {
+    const [riga] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({
+          materials_revenue: INCIDENZA_MAX_PCT,
+          services_revenue: -INCIDENZA_MAX_PCT - 1,
+          _revenue_raw: 120000,
+        }),
+      },
+    ]);
+    expect(riga.materials_revenue).toBe(INCIDENZA_MAX_PCT);
+    expect(riga.services_revenue).toBeNull();
+  });
+
+  it("vale anche su «OF / Fatturato», che divide per gli stessi ricavi", () => {
+    const [riga] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ of_revenue: 9500, _revenue_raw: 100.92 }),
+      },
+    ]);
+    expect(riga.of_revenue).toBeNull();
+  });
+
+  it("gli altri denominatori NON sono toccati: il loro estremo è un dato vero", () => {
+    // Un ROE del 1.500% su un patrimonio netto sottile, o oneri finanziari pari
+    // a quindici volte il MOL, sono numeri genuini e vanno visti: il difetto di
+    // questa issue è il denominatore «ricavi», non la grandezza del rapporto.
+    const [riga] = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({
+          roe: 1500,
+          _equity_raw: 5000,
+          of_mol: 1500,
+          _ebitda_raw: 800,
+          pfn_ebitda: 1200,
+        }),
+      },
+    ]);
+    expect(riga.roe).toBe(1500);
+    expect(riga.of_mol).toBe(1500);
+    // `pfn_ebitda` è in volte, non in punti percentuali: confrontarlo con una
+    // soglia percentuale sarebbe un confronto fra unità diverse.
+    expect(riga.pfn_ebitda).toBe(1200);
+  });
+
+  it("il PUNTEGGIO non si muove: la correzione è solo sulla resa", () => {
+    // Il pallino di riga e il rating di crisi continuano a leggere
+    // l'`IndicatorSet`, non la riga del grafico. È il confine che #25 aveva
+    // già fissato e che questa correzione non attraversa.
+    const ind = computeIndicators(
+      {},
+      { ce01_ricavi_vendite: 100.92, ce05_materie_prime: 425850 },
+    );
+    const [riga] = buildIndicatorChartData([{ periodo: "Storico 2025", indicatori: ind }]);
+    expect(riga.ebitda_margin).toBeNull();
+    // EBITDA largamente negativo: il punteggio resta 0, come prima.
+    expect(scoreIndicator("ebitda_margin", ind)).toBe(0);
   });
 });

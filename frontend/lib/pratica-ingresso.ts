@@ -37,6 +37,41 @@ export interface IngressoPratica {
 }
 
 /**
+ * Il motivo per cui il percorso Startup NON si puo' aprire su quest'azienda,
+ * oppure `null` se si puo'. Da leggere PRIMA di navigare.
+ *
+ * Il wizard del business plan sta dietro un cancello che chiede zero anni
+ * (`app/budget/page.tsx`): su un'azienda con `FinancialYear` si atterrava
+ * sull'elenco scenari ordinario, intestato «Previsionale Startup» e muto —
+ * nessuna schermata per capitale, periodo e driver, e nessun modo di capire
+ * che il percorso non stava facendo nulla.
+ *
+ * Rifiutare, e non aprire il wizard lo stesso, e' la scelta onesta: il
+ * percorso semina un bilancio di APERTURA sull'anno precedente al piano, e su
+ * un'azienda con storico quell'anno esiste gia'. Chi faceva in tempo a
+ * compilare il wizard apparso per un istante — `years` arriva dopo il mount —
+ * ne ricavava un 400 e un «Impossibile creare il business plan» che non
+ * nominava nemmeno l'anno.
+ *
+ * Chi chiama lo usa SOLO su un elenco di anni davvero letto: un elenco che non
+ * si e' potuto caricare non e' un elenco vuoto, e un controllo che manca e'
+ * «non lo so», non un verdetto negativo.
+ */
+export function rifiutoIngressoStartup(anniEsistenti: readonly number[]): string | null {
+  if (anniEsistenti.length === 0) return null;
+  const anni = [...anniEsistenti].sort((a, b) => a - b).join(", ");
+  const esercizi =
+    anniEsistenti.length === 1
+      ? `l'esercizio ${anni} esiste già`
+      : `gli esercizi ${anni} esistono già`;
+  return (
+    `Il percorso Startup parte da un bilancio di apertura e vuole un'azienda ` +
+    `senza storico: qui ${esercizi}. Usa «Da bilancio», oppure crea ` +
+    `un'azienda nuova.`
+  );
+}
+
+/**
  * Una pratica NUOVA su un'azienda che esiste gia'.
  *
  * Unico punto per i due modi di chiederla — «Nuova pratica» sotto una riga

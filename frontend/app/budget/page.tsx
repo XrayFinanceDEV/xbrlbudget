@@ -19,6 +19,7 @@ import {
   generateForecast,
   getIncomeStatement,
   getBalanceSheet,
+  getCompanyYears,
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
 import { statoResidui } from "@/lib/base-bank-debt";
@@ -98,7 +99,7 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
 
 export default function BudgetPage() {
   const router = useRouter();
-  const { selectedCompanyId, selectedCompany, years, startupMode, setSelectedCompanyId } = useApp();
+  const { selectedCompanyId, selectedCompany, years, yearsLoaded, startupMode, setSelectedCompanyId } = useApp();
   const { pratica, updatePratica } = usePratica();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
@@ -152,6 +153,21 @@ export default function BudgetPage() {
       action: { label: "Indici", onClick: () => router.push("/analysis") },
     });
   };
+
+  // Gli anni dell'azienda selezionata non sono ancora arrivati: `years` è
+  // vuoto perché non si sa, non perché l'azienda non ne abbia. Il cancello del
+  // wizard qui sotto legge proprio `years.length === 0`, quindi senza questa
+  // attesa il wizard COMPARIVA per un istante anche su un'azienda con storico
+  // — e chi faceva in tempo a compilarlo finiva su un 400 sull'anno di
+  // apertura, già esistente (#37).
+  if (startupMode && !yearsLoaded) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+        <p className="mt-4 text-muted-foreground">Caricamento in corso...</p>
+      </div>
+    );
+  }
 
   // Startup mode has no imported bilancio: when there's no base year yet, show
   // the from-zero business-plan wizard that seeds a manual base year, scenario
@@ -473,6 +489,21 @@ function StartupSetup({
       // quel percorso esiste per togliere, per giunta con il settore forzato a
       // 3 invece di quello scelto sulla home.
       const company = azienda ?? await createCompany({ name: name.trim(), sector: 3 });
+      // L'anno di apertura si CREA, non si sovrascrive. Su un'azienda che ne
+      // ha già uno per quell'anno il backend risponde 400 e il messaggio che
+      // ne usciva — «Impossibile creare il business plan» — non nominava
+      // nemmeno l'anno, cioè l'unica cosa che spiegava il rifiuto (#37).
+      if (azienda) {
+        const esistenti = await getCompanyYears(azienda.id);
+        if (esistenti.includes(openingYear)) {
+          toast.error(
+            `L'esercizio ${openingYear} esiste già per questa azienda: il ` +
+            `percorso Startup ci semina il bilancio di apertura e non lo ` +
+            `sovrascrive. Usa «Da bilancio», oppure crea un'azienda nuova.`
+          );
+          return;
+        }
+      }
       await createFinancialYear(company.id, openingYear);
       // Opening balance sheet: paid-in capital only (Attivo cash == Passivo
       // capitale, no result). The income statement stays empty.

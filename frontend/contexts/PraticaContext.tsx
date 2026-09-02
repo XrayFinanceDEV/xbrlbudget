@@ -31,6 +31,14 @@ export interface PraticaState {
 
 interface PraticaContextType {
   pratica: PraticaState | null;
+  /**
+   * `localStorage` è già stato letto. Finché è `false`, `pratica: null`
+   * significa «non lo so ancora», non «non c'è»: la lettura avviene in un
+   * `useEffect`, quindi il primo render vede sempre `null` anche quando una
+   * pratica c'è. Chi decide qualcosa sull'ASSENZA di una pratica deve
+   * aspettare questo flag.
+   */
+  praticaLoaded: boolean;
   startPratica: (init: Partial<PraticaState> & { workflow: PraticaWorkflow }) => void;
   updatePratica: (patch: Partial<PraticaState>) => void;
   setAnalysisStep: (step: string) => void;
@@ -53,6 +61,7 @@ const DEFAULTS: Omit<PraticaState, "workflow"> = {
 
 export function PraticaProvider({ children }: { children: React.ReactNode }) {
   const [pratica, setPratica] = useState<PraticaState | null>(null);
+  const [praticaLoaded, setPraticaLoaded] = useState(false);
 
   // Letto DOPO il mount: leggerlo nell'inizializzatore di useState romperebbe
   // l'idratazione di Next (server e client renderebbero markup diversi).
@@ -62,6 +71,11 @@ export function PraticaProvider({ children }: { children: React.ReactNode }) {
       if (raw) setPratica({ ...DEFAULTS, ...JSON.parse(raw) } as PraticaState);
     } catch {
       /* localStorage non disponibile o JSON corrotto */
+    } finally {
+      // Anche quando la lettura fallisce o non trova nulla: il flag dice «ho
+      // guardato», non «ho trovato». Senza il `finally`, un localStorage non
+      // disponibile lascerebbe per sempre in sospeso chi lo aspetta.
+      setPraticaLoaded(true);
     }
   }, []);
 
@@ -123,8 +137,8 @@ export function PraticaProvider({ children }: { children: React.ReactNode }) {
   const exitPratica = useCallback(() => persist(null), [persist]);
 
   const value = useMemo<PraticaContextType>(
-    () => ({ pratica, startPratica, updatePratica, setAnalysisStep, exitPratica }),
-    [pratica, startPratica, updatePratica, setAnalysisStep, exitPratica],
+    () => ({ pratica, praticaLoaded, startPratica, updatePratica, setAnalysisStep, exitPratica }),
+    [pratica, praticaLoaded, startPratica, updatePratica, setAnalysisStep, exitPratica],
   );
 
   return <PraticaContext.Provider value={value}>{children}</PraticaContext.Provider>;

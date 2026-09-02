@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
@@ -18,7 +19,7 @@ import {
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
 import { badgeScheda, rigaRettifiche } from "@/lib/pratica-rettifiche-stato";
-import { blockedStep } from "@/lib/pratica-steps";
+import { blockedStep, senzaPraticaAttiva } from "@/lib/pratica-steps";
 import type {
   BudgetScenario,
   IntraYearComparison,
@@ -104,10 +105,11 @@ import {
 import { buildConfrontoHighlights } from "@/lib/pratica-highlights";
 
 export default function InfraannualePage() {
+  const router = useRouter();
   const { companies, refreshCompanies, setSelectedCompanyId } = useApp();
 
   // Wizard state
-  const { pratica, setAnalysisStep, updatePratica } = usePratica();
+  const { pratica, praticaLoaded, setAnalysisStep, updatePratica } = usePratica();
   const activeTab = pratica?.analysisStep ?? "anagrafiche";
   const setActiveTab = setAnalysisStep;
 
@@ -1033,6 +1035,39 @@ export default function InfraannualePage() {
   const blocked = useMemo(() => blockedStep(pratica, activeTab), [pratica, activeTab]);
 
   usePrimaryAction(primary);
+
+  // Nessuna pratica attiva: qui non c'è nulla da fare, e finora non lo diceva
+  // nessuno. Il percorso rendeva comunque il primo step — la card «Anagrafica
+  // azienda» con tre campi vuoti — ma il bottone che la conclude vive in
+  // `usePraticaPrimaryAction`, che fuori da una pratica non ne propone alcuno:
+  // si compilava un form non inviabile, con l'unica via d'uscita nella barra di
+  // navigazione in alto (#32). Si rimanda alla home, che è il posto in cui una
+  // pratica si sceglie o si crea.
+  //
+  // Dopo ogni hook, mai prima: un ritorno anticipato più in alto salterebbe gli
+  // hook sottostanti e cambierebbe il loro ordine fra un render e l'altro.
+  if (senzaPraticaAttiva(pratica, praticaLoaded)) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-5 w-5" /> Nessuna pratica attiva
+            </CardTitle>
+            <CardDescription>
+              Il percorso lavora sempre dentro una pratica. Torna alla home e
+              scegline una da riprendere, oppure aprine una nuova su un&apos;azienda.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.push("/")}>
+              Vai alle aziende <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <>

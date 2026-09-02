@@ -680,6 +680,29 @@ _BLANK_CURRENT_CE_ROWS = {
 }
 
 
+def _prior_cell_with_sibling_sign(printed, extracted):
+    """L'importo stampato nella cella comparata, con la convenzione dei fratelli.
+
+    Il ripesco gira DOPO ``_normalize_ce_signs``: scrivere in ``prior`` il token
+    grezzo del PDF vi deposita l'unico valore del dizionario che la
+    normalizzazione non ha mai visto. Su un prospetto che stampa i costi fra
+    parentesi il campo esce negativo accanto a fratelli tutti positivi, e il
+    risultato dell'anno precedente si sposta di 2x l'importo senza che nulla lo
+    segnali.
+
+    La cella stampata resta l'autorita' sulla GRANDEZZA (il ripesco esiste per
+    leggerla dalla fonte); il SEGNO viene dal valore che l'estrattore aveva
+    attribuito all'anno corrente, che la normalizzazione ha gia' trattato come i
+    suoi fratelli. Le due grandezze sono note uguali a meno di
+    ``_PRIOR_CELL_MATCH_TOL``: e' la condizione che il chiamante ha appena
+    verificato, ed e' cio' che rende lecito prendere il segno dall'una e il
+    valore dall'altra. Su un PDF a convenzione positiva i due segni coincidono
+    gia' e nulla cambia.
+    """
+    magnitude = abs(printed)
+    return -magnitude if extracted < 0 else magnitude
+
+
 def _clear_blank_current_rows(
     words,
     anchors: _ColumnAnchors,
@@ -727,9 +750,10 @@ def _clear_blank_current_rows(
             ):
                 continue
             current[field] = Decimal('0')
+            recovered = _prior_cell_with_sibling_sign(parsed[0], extracted)
             if prior:
-                prior[field] = parsed[0]
-            cleared.append((field, str(parsed[0])))
+                prior[field] = recovered
+            cleared.append((field, str(recovered)))
     return cleared
 
 
@@ -893,9 +917,10 @@ def _reconcile_blank_current_ce_cells(
                     ):
                         continue
                     current[field] = Decimal('0')
+                    recovered = _prior_cell_with_sibling_sign(parsed[0], extracted)
                     if prior:
-                        prior[field] = parsed[0]
-                    cleared.append((field, str(parsed[0])))
+                        prior[field] = recovered
+                    cleared.append((field, str(recovered)))
     finally:
         doc.close()
 
@@ -978,9 +1003,10 @@ def _reconcile_blank_current_sp_cells(
                     ):
                         continue
                     current[field] = Decimal('0')
+                    recovered = _prior_cell_with_sibling_sign(parsed[0], extracted)
                     if prior:
-                        prior[field] = parsed[0]
-                    cleared.append((field, str(parsed[0])))
+                        prior[field] = recovered
+                    cleared.append((field, str(recovered)))
     finally:
         doc.close()
     if cleared:
@@ -999,12 +1025,50 @@ def _reconcile_blank_current_sp_cells(
 # La lettera di voce distingue i due lati (art. 2424: D attivo, E passivo), le due
 # parole obbligatorie distinguono la voce di legge dai suoi conti di dettaglio
 # ("RATEI PASSIVI", "RISCONTI PASSIVI", che ne portano una sola).
+# Il LATO del prospetto a cui appartiene ciascuna voce ripescabile: i prefissi
+# dei campi dell'art. 2424 che stanno dalla stessa parte. Il ripiego aggiunge
+# massa MANCANTE, non massa mal classificata: se l'importo stampato e' gia'
+# altrove sullo stesso lato, l'estrazione l'ha letto e archiviato male —
+# riscriverlo qui lo conterebbe due volte, e la correzione e' in Rettifiche.
+_SP_ATTIVO_PREFIXES = (
+    'sp01', 'sp02', 'sp03', 'sp04', 'sp05',
+    'sp06', 'sp07', 'sp08', 'sp09', 'sp10',
+)
+_SP_PASSIVO_PREFIXES = (
+    'sp11', 'sp12', 'sp13', 'sp14', 'sp15', 'sp16', 'sp17', 'sp18',
+)
 _MISSING_SP_ROWS = {
     'sp18_ratei_risconti_passivi': (
         re.compile(r"^E[.)]?$", re.I),
         ('ratei', 'risconti'),
+        _SP_PASSIVO_PREFIXES,
     ),
 }
+
+
+def _field_already_holding(
+    current: Dict[str, Decimal],
+    amount: Decimal,
+    target: str,
+    side_prefixes: Tuple[str, ...],
+) -> Optional[str]:
+    """Il campo dello STESSO LATO che porta gia' esattamente ``amount``.
+
+    ``None`` quando nessuno lo porta. Una coincidenza fra due voci di pari
+    importo fa rinunciare al ripesco: e' il verso prudente — si rinuncia a
+    scrivere e lo si dichiara, invece di rischiare di contare due volte il
+    lato senza che alcuna chiave lo nomini.
+    """
+    for field, value in current.items():
+        if field == target or not field.startswith(side_prefixes):
+            continue
+        try:
+            if Decimal(value) == amount:
+                return field
+        except Exception:
+            continue
+    return None
+
 
 
 def _recover_printed_sp_rows(
@@ -1028,6 +1092,7 @@ def _recover_printed_sp_rows(
     except Exception:
         selected_sp_pages = set()
     recovered: List[Tuple[str, str]] = []
+    skipped: List[Tuple[str, str, str]] = []
     document_centers = _document_comparative_centers(doc)
     try:
         for page in doc:
@@ -1048,7 +1113,9 @@ def _recover_printed_sp_rows(
                 ]
                 if not numbers:
                     continue
-                for field, (code_re, required_words) in _MISSING_SP_ROWS.items():
+                for field, (
+                    code_re, required_words, side_prefixes
+                ) in _MISSING_SP_ROWS.items():
                     if current.get(field, Decimal('0')) != 0:
                         continue
                     if not all(token in label_text for token in required_words):
@@ -1068,6 +1135,14 @@ def _recover_printed_sp_rows(
                         continue
                     if parsed[0] == 0:
                         continue
+                    gia_presente = _field_already_holding(
+                        current, parsed[0], field, side_prefixes
+                    )
+                    if gia_presente is not None:
+                        skipped.append(
+                            (field, gia_presente, str(parsed[0]))
+                        )
+                        continue
                     current[field] = parsed[0]
                     recovered.append((field, str(parsed[0])))
     finally:
@@ -1076,6 +1151,17 @@ def _recover_printed_sp_rows(
         logger.warning(
             "SP source recovery: voci stampate assenti dall'estrazione, rilette "
             "dalla riga di prospetto: %s", recovered,
+        )
+    if skipped:
+        logger.warning(
+            "SP source recovery rinunciata: l'importo stampato e' gia' presente "
+            "in un altro campo dello stesso lato del prospetto, quindi e' massa "
+            "gia' estratta e mal classificata, non massa mancante. La si "
+            "corregge in Rettifiche: %s",
+            [
+                f"{campo} non scritto: {importo} e' gia' in {altrove}"
+                for campo, altrove, importo in skipped
+            ],
         )
     return current
 
@@ -1459,6 +1545,25 @@ def _recover_printed_fixed_asset_details(
             # fallirebbe, cioe' proprio la condizione che qui si ripara, e
             # `reconcileSubfields` conterebbe due volte quella massa.
             continue
+        estratto = current.get(aggregate, Decimal('0'))
+        if estratto != 0 and abs(estratto - total) > Decimal('0.01'):
+            # La guardia sui fratelli porta i soli DETTAGLI: l'aggregato non
+            # e' fra loro, e senza questo controllo `current[aggregate] =
+            # total` lo riscriveva comunque. sp02/sp03/sp04/sp05 sono
+            # `TIER0_FIELDS` e non sono mai una destinazione di ripiego: un
+            # aggregato gia' estratto e DIVERSO dal totale di voce stampato
+            # e' un divario da dichiarare, non da tappare — scriverlo
+            # sposterebbe il totale attivo di quella differenza e un foglio
+            # che quadrava non quadrerebbe piu'. Quando invece i due
+            # coincidono la scrittura e' un no-op e la sezione si dettaglia.
+            logger.warning(
+                "Dettaglio di %s ignorato: l'estrazione porta gia' %s, contro "
+                "%s del totale di voce stampato. Un TIER0 gia' valorizzato non "
+                "si riscrive: il divario si dichiara e si corregge in "
+                "Rettifiche.",
+                aggregate, estratto, total,
+            )
+            continue
         for field, value in fields.items():
             current[field] = value
             recovered.append((field, str(value)))
@@ -1469,6 +1574,16 @@ def _recover_printed_fixed_asset_details(
             "dalle righe di voce stampate: %s", recovered,
         )
     return current
+
+
+# Quante pagine, al massimo, puo' occupare la sezione patrimoniale quando il
+# documento non stampa alcun totale di chiusura del passivo. Non e' un'ancora,
+# e' una TAGLIA: serve solo a impedire che «l'SP finisce dove comincia il CE»
+# si mangi tutto cio' che sta in mezzo quando in mezzo c'e' una Nota
+# Integrativa. Sei pagine sono il doppio del vecchio default (sp_start + 2) e
+# lasciano due pagine di margine sul caso piu' lungo osservato nel corpus — il
+# riclassificato UE di AMB AMBIENTA, che di pagine patrimoniali ne usa quattro.
+_SP_SECTION_MAX_PAGES = 6
 
 
 def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
@@ -1569,14 +1684,25 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
             # INCLUSA perche' su questi layout porta ancora le ultime righe del
             # passivo (ed e' la stessa condivisione che il ramo `ce_start`
             # qui sotto gia' ammette nel verso opposto).
+            # Il tetto resta comunque: fra l'SP e il CE puo' esserci una Nota
+            # Integrativa lunga, e li' il prospetto delle immobilizzazioni e la
+            # tabella dei debiti per scadenza ci sono quasi sempre — con numeri
+            # LORDI e in colonne diverse. Sono le stesse tabelle che gli scanner
+            # geometrici in giro su `sp_pages` leggerebbero volentieri al posto
+            # del prospetto, e un dettaglio preso dalle note attraversa un
+            # aggregato senza che il pareggio se ne accorga.
             ce_header_page = _find_start(CE_START_KEYWORDS, after_page=sp_start + 1)
+            cap = min(sp_start + _SP_SECTION_MAX_PAGES - 1, total_pages - 1)
             if ce_header_page is not None and ce_header_page > sp_start:
+                sp_end = min(ce_header_page, cap)
                 logger.warning(
                     "Nessun totale di chiusura del passivo stampato: la sezione SP "
-                    "si chiude alla pagina che apre il CE (%s) invece che a %s",
-                    ce_header_page + 1, min(sp_start + 2, total_pages - 1) + 1,
+                    "si chiude a pagina %s (%s). Apertura del CE a pagina %s, tetto "
+                    "di sezione a pagina %s.",
+                    sp_end + 1,
+                    "apertura del CE" if sp_end == ce_header_page else "tetto di sezione",
+                    ce_header_page + 1, cap + 1,
                 )
-                sp_end = ce_header_page
             else:
                 sp_end = min(sp_start + 2, total_pages - 1)
 

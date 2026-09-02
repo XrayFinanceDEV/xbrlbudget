@@ -1,4 +1,13 @@
-# Netlify Deployment Checklist
+# Netlify Deployment Checklist — NON CORRENTE
+
+> **NON CORRENTE.** Netlify non è il deploy di questo progetto: un push fa partire Jenkins,
+> che costruisce le immagini Docker e le mette dietro nginx
+> (→ **[DEPLOY-JENKINS-DOCKER.md](DEPLOY-JENKINS-DOCKER.md)**). Là dentro
+> `NEXT_PUBLIC_API_URL` è **vuota di proposito** e l'app usa l'URL relativo `/api/v1`.
+>
+> La procedura qui sotto resta come traccia del percorso Netlify, se mai servisse riaprirlo.
+> Gli URL del backend che conteneva — un host dedicato su porta non standard — sono stati
+> sostituiti da segnaposti: quell'indirizzo non risponde più.
 
 Use this checklist before deploying to Netlify.
 
@@ -13,22 +22,22 @@ Use this checklist before deploying to Netlify.
 
 ## Netlify Configuration
 
-- [ ] `netlify.toml` file is present in frontend directory
+- [ ] `netlify.toml` file is present (it is in the repository root, not in `frontend/`)
 - [ ] Node version specified (Node 20)
 - [ ] Build command configured: `npm run build`
 - [ ] Base directory set to `frontend` (if in monorepo)
 
 ## Environment Variables (Set in Netlify Dashboard)
 
-- [ ] `NEXT_PUBLIC_API_URL` = `https://kpsfinanciallab.w3pro.it:8001/api/v1`
+- [ ] `NEXT_PUBLIC_API_URL` = `https://<host-del-backend>/api/v1`
 
 **How to set:**
 1. Netlify Dashboard → Site settings → Environment variables
 2. Add variable: `NEXT_PUBLIC_API_URL`
-3. Value: `https://kpsfinanciallab.w3pro.it:8001/api/v1`
+3. Value: `https://<host-del-backend>/api/v1`
 4. Save and redeploy
 
-**Note:** Backend is hosted at `https://kpsfinanciallab.w3pro.it:8001` (port 8001)
+**Note:** on Netlify the backend necessarily lives outside the frontend origin, so CORS must be opened for it. Behind the current nginx deploy the two share one origin and none of this applies.
 
 ## First Deployment
 
@@ -56,7 +65,7 @@ Use this checklist before deploying to Netlify.
 
 After getting Netlify URL, update backend CORS on the server:
 
-1. SSH into your server: `kpsfinanciallab.w3pro.it`
+1. SSH into your server
 2. Edit backend config: `backend/app/core/config.py`
 3. Add your Netlify URL to `BACKEND_CORS_ORIGINS`:
 
@@ -73,10 +82,10 @@ BACKEND_CORS_ORIGINS: List[str] = [
 cd backend
 source venv/bin/activate
 # Kill existing process and restart
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Backend URL:** `https://kpsfinanciallab.w3pro.it:8001/api/v1`
+**Backend URL:** `https://<host-del-backend>/api/v1`
 
 ## Optional: Custom Domain
 

@@ -278,7 +278,7 @@ vuoto.
 | `lib/pratica-indicators.ts` | indicatori, scoring, `computeCrisisRating`, `buildIndicatorChartData` |
 | `lib/pratica-statement-rows.ts` | costruzione delle righe SP/CE |
 | `lib/pratica-rettifiche-rules.ts` | la politica di partita doppia (→ `RETTIFICHE.md`) |
-| `lib/pratica-turnover.ts` | `turnoverRatio` / `scaledOrCarried`, gemello lato client del motore infrannuale |
+| `lib/pratica-projected-bs.ts` | `projectedItemsFromForecast`: legge lo SP proiettato dal forecast del motore, non lo ricalcola |
 
 **Regola: `lib/pratica-*` non importa mai da `app/` o da `components/`.** È ciò che rende quei
 moduli testabili in `environment: node` e impedisce i cicli di import. L'unica dipendenza verso
@@ -405,17 +405,21 @@ tengono la colonna coerente con sé stessa:
 
 ### Da CE proiettato a SP proiettato
 
-`calculateProjectedBS` (`app/pratica/page.tsx:716-884`) fa due cose in una:
+`calculateProjectedBS` (`app/pratica/page.tsx`) fa due cose in una:
 
-1. **Costruisce lo SP proiettato lato client**: rimanenze, crediti a breve e debiti a breve
-   dai rapporti di rotazione dell'anno di riferimento (via `scaledOrCarried` di
-   `lib/pratica-turnover.ts`, che deve restare d'accordo con `_turnover_ratio` del motore),
-   tutto il resto portato dal periodo parziale, `sp13` = utile proiettato, e la **cassa come
-   voce di pareggio** — se risulta negativa diventa debito a breve.
+1. **Svuota la tabella dello SP e mostra l'attesa.** Non calcola nulla: fino al 2026-09-02 qui
+   c'era un secondo motore in TypeScript, tolto perché era divergito da quello Python su quattro
+   punti (#22, #39, #40, #41). Toccare una cella di CE azzera già lo SP (`setProjectedBS(null)`),
+   così non resta a schermo un numero che non vale più.
 2. **Salva le ipotesi e genera il previsionale sul server**, convertendo ogni override in una
    percentuale di crescita rispetto all'anno di riferimento (`calcGrowth`) e allegando
    `buildCeOverridePayload(overrides)`, che manda **tutti e trentadue** i campi di override —
    quelli non editabili nella tabella partono a `null`.
+3. **Rilegge ciò che il motore ha prodotto** (`GET /scenarios/{id}/analysis`) e rende
+   `forecast_years[0].balance_sheet` via `projectedItemsFromForecast`: la stessa fonte che le tab
+   Indicatori e Stampa leggono da sempre, quindi le tre viste non possono mostrare tre bilanci
+   diversi. Se `forecast_generated` è `false` la tabella resta vuota con l'avviso — dipingere una
+   proiezione che non è stata salvata era il difetto di partenza.
 
 Il `tax_rate` inviato è la costante **27,9** (IRES + IRAP), non un'aliquota derivata dalle
 imposte modificate: le imposte proiettate arrivano al motore come `ce20_override`, che vince

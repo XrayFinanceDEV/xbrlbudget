@@ -95,7 +95,7 @@ import {
   PASSIVO_CODES,
 } from "@/lib/pratica-codes";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
-import { computeProjectedBS } from "@/lib/pratica-projected-bs";
+import { projectedItemsFromForecast } from "@/lib/pratica-projected-bs";
 import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
@@ -314,6 +314,7 @@ export default function InfraannualePage() {
   // Step 3: Projection overrides
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [projectedBS, setProjectedBS] = useState<IntraYearComparisonItem[] | null>(null);
+  const [calculatingBS, setCalculatingBS] = useState(false);
   const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
   useEffect(() => {
     projectedBSRef.current = projectedBS;
@@ -659,13 +660,8 @@ export default function InfraannualePage() {
           }
 
           // Restore BS projection from saved forecast balance sheet
-          if (forecastBS && Object.keys(forecastBS).length > 0) {
-            const projItems: IntraYearComparisonItem[] = data.balance_items.map((item) => ({
-              ...item,
-              annualized_value: Math.round(forecastBS[item.code] ?? item.partial_value),
-            }));
-            setProjectedBS(buildBalanceItemsWithTotals(projItems));
-          }
+          const projItems = projectedItemsFromForecast(data.balance_items, forecastBS);
+          if (projItems) setProjectedBS(buildBalanceItemsWithTotals(projItems));
 
           setAnalysis(existingAnalysis);
         }
@@ -732,71 +728,18 @@ export default function InfraannualePage() {
 
   // STEP 3: Generate Projection
 
-  // Calculate projected BS from CE overrides + historical turnover ratios,
-  // then save assumptions to backend to generate forecast
+  // Salva le ipotesi, fa girare il motore e rende CIO' CHE IL MOTORE HA
+  // PRODOTTO. Nessuna proiezione si calcola qui: rotazioni, quote residue,
+  // imposte e plug di cassa vivono solo in `calculations/intra_year_engine.py`.
   const calculateProjectedBS = async () => {
     if (!comparison || !importResult || !scenario) return;
 
-    const refBS = new Map(comparison.balance_items.map((i) => [i.code, i]));
-    const refCE = new Map(comparison.income_items.map((i) => [i.code, i]));
-
-    const partialVal = (code: string) => refBS.get(code)?.partial_value ?? 0;
-    const refCEVal = (code: string) => refCE.get(code)?.reference_value ?? 0;
-    const projCEVal = (code: string) => parseFloat(overrides[code] || "0");
-
-    // Projected P&L values for turnover computation
-    const projRevenue = projCEVal("ce01_ricavi_vendite");
-    const projMaterials = projCEVal("ce05_materie_prime");
-    const projServices = projCEVal("ce06_servizi");
-
-    // Compute projected net profit from overrides (same logic as ProjectionTable)
-    const allCostCodes = [
-      ...EBITDA_COST_CODES, "ce09_ammortamenti",
-      "ce15_oneri_finanziari", "ce17b_svalutazioni", "ce19_oneri_straordinari", "ce20_imposte",
-    ];
-    const allIncomeCodes = [
-      ...VP_CODES,
-      "ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari",
-      "ce16_utili_perdite_cambi", "ce17a_rivalutazioni", "ce18_proventi_straordinari",
-    ];
-    const projIncome = allIncomeCodes.reduce(
-      (acc, c) => acc + (EDITABLE_CE_CODES.includes(c) ? projCEVal(c) : (refCE.get(c)?.annualized_value ?? 0)), 0
-    );
-    const projCosts = allCostCodes.reduce(
-      (acc, c) => acc + (EDITABLE_CE_CODES.includes(c) ? projCEVal(c) : (refCE.get(c)?.annualized_value ?? 0)), 0
-    );
-    const projNetProfit = projIncome - projCosts;
-
-    // Rapporti di rotazione, plug di cassa e arrotondamento vivono in
-    // `lib/pratica-projected-bs.ts`: modulo puro, con la sua suite, così
-    // l'anteprima non può divergere dall'ordine del motore (righe arrotondate
-    // PRIMA, cassa come residuo DOPO — vedi
-    // `ForecastEngine._normalize_balance_sheet_cents`).
-    const { values: projValues } = computeProjectedBS({
-      partial: Object.fromEntries(
-        comparison.balance_items.map((i) => [i.code, i.partial_value ?? 0])
-      ),
-      reference: Object.fromEntries(
-        comparison.balance_items.map((i) => [i.code, i.reference_value ?? 0])
-      ),
-      hasReference: comparison.has_reference,
-      refRevenue: refCEVal("ce01_ricavi_vendite"),
-      refMaterials: refCEVal("ce05_materie_prime"),
-      refServices: refCEVal("ce06_servizi"),
-      projRevenue,
-      projMaterials,
-      projServices,
-      projNetProfit,
-    });
-
-    const projItems: IntraYearComparisonItem[] = comparison.balance_items.map((item) => ({
-      ...item,
-      // I 18 aggregati arrivano già arrotondati e quadrati; le sotto-voci non
-      // sono proiettate e si portano avanti dal periodo parziale.
-      annualized_value: projValues[item.code] ?? Math.round(partialVal(item.code)),
-    }));
-
-    setProjectedBS(buildBalanceItemsWithTotals(projItems));
+    // Lo SP proiettato NON si calcola qui: lo produce `IntraYearEngine` e lo si
+    // rilegge dal forecast salvato, appena sotto. La tabella si svuota intanto,
+    // perche' i numeri di prima non valgono piu' e inventarne altri e' il
+    // difetto che questa funzione aveva (#22, #39, #40, #41).
+    setProjectedBS(null);
+    setCalculatingBS(true);
 
     // Save assumptions to backend and generate forecast
     try {
@@ -841,21 +784,33 @@ export default function InfraannualePage() {
         }],
         auto_generate: true,
       });
-      setAnalysis(null); // Clear stale analysis so Indicatori tab reloads
       // The backend returns success:true even when generation fails
       // (assumptions_service.py:210-217) — check the explicit flag, otherwise
       // the Indicatori tab silently renders an empty "Proiezione" column after
       // a success toast, with the real reason only in the response message.
       if (result?.forecast_generated === false) {
+        setAnalysis(null);
         toast.warning(
           result?.message ?? "Ipotesi salvate, ma la proiezione non è stata generata"
         );
-      } else {
-        toast.success("Proiezione calcolata e salvata");
+        return;
       }
+      // Si rilegge cio' che il motore ha prodotto: e' la stessa fonte che le tab
+      // Indicatori e Stampa rendono, quindi le tre viste non possono piu'
+      // mostrare tre bilanci diversi.
+      const data = await getScenarioAnalysis(importResult.companyId, scenario.id);
+      setAnalysis(data);
+      const projItems = projectedItemsFromForecast(
+        comparison.balance_items,
+        data.forecast_years?.[0]?.balance_sheet,
+      );
+      setProjectedBS(projItems ? buildBalanceItemsWithTotals(projItems) : null);
+      toast.success("Proiezione calcolata e salvata");
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nel salvataggio proiezione";
       toast.error(msg);
+    } finally {
+      setCalculatingBS(false);
     }
   };
 
@@ -873,12 +828,10 @@ export default function InfraannualePage() {
     setOverrides(defaults);
     const effectiveOverrides = Object.keys(overrides).length > 0 ? overrides : defaults;
 
-    // Set projectedBS from comparison balance items (already full-year values)
-    const projItems: IntraYearComparisonItem[] = comparison.balance_items.map((item) => ({
-      ...item,
-      annualized_value: item.partial_value,
-    }));
-    setProjectedBS(buildBalanceItemsWithTotals(projItems));
+    // Su 12 mesi il parziale E' l'anno intero, ma la proiezione resta quella
+    // che il motore persiste: la si rilegge dopo il salvataggio, come sopra.
+    setProjectedBS(null);
+    setCalculatingBS(true);
 
     // Calculate growth rates from imported 12M values vs reference year
     try {
@@ -928,16 +881,26 @@ export default function InfraannualePage() {
         }],
         auto_generate: true,
       });
-      setAnalysis(null); // Clear stale analysis so Indicatori tab reloads
       // Same silent-failure guard as calculateProjectedBS above.
       if (result?.forecast_generated === false) {
+        setAnalysis(null);
         toast.warning(
           result?.message ?? "Ipotesi salvate, ma la proiezione non è stata generata"
         );
+        return;
       }
+      const data = await getScenarioAnalysis(importResult.companyId, scenario.id);
+      setAnalysis(data);
+      const projItems = projectedItemsFromForecast(
+        comparison.balance_items,
+        data.forecast_years?.[0]?.balance_sheet,
+      );
+      setProjectedBS(projItems ? buildBalanceItemsWithTotals(projItems) : null);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nel salvataggio proiezione";
       toast.error(msg);
+    } finally {
+      setCalculatingBS(false);
     }
   };
 
@@ -1796,12 +1759,27 @@ export default function InfraannualePage() {
                   Liquidità come differenza.
                 </CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={calculateProjectedBS}>
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Calcola Proiezione SP
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={calculateProjectedBS}
+                disabled={calculatingBS}
+              >
+                {calculatingBS ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                )}
+                {calculatingBS ? "Calcolo in corso…" : "Calcola Proiezione SP"}
               </Button>
             </CardHeader>
             <CardContent>
+              {calculatingBS ? (
+                <div className="py-12 text-center text-muted-foreground flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Il motore sta calcolando la proiezione…
+                </div>
+              ) : (
               <ComparisonTable
                 items={projectedBS ?? buildBalanceItemsWithTotals(
                   comparison.balance_items.map((i) => ({ ...i, annualized_value: NaN }))
@@ -1812,6 +1790,7 @@ export default function InfraannualePage() {
                 priorYear={comparison.prior_year}
                 showAnnualized
               />
+              )}
             </CardContent>
           </Card>
           </>

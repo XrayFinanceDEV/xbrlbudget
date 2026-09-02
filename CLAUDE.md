@@ -427,9 +427,19 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
 - **Working capital** comes from the reference year's turnover ratios. A ratio implying **more than a
   year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
   carried instead, with a `degenerate_turnover_ratio` diagnostic — `_safe_divide` guards a zero
-  denominator, not a negligible one. **The same guard exists on both sides**
-  (`frontend/lib/pratica-turnover.ts` mirrors the engine) and they must agree, or the screen and the
-  saved record show two different balance sheets. → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
+  denominator, not a negligible one. The guard lives **only** in the engine: since 2026-09-02 the
+  Proiezione tab renders the forecast the engine produced instead of recomputing it in TypeScript,
+  so there is no second copy to keep in agreement.
+  → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
+- **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a
+  schermo (i sottototali delle 22 righe di CE che l'utente digita) sta nel client; tutto ciò che
+  **deriva** uno stato patrimoniale da un conto economico — rotazioni, quote residue, imposte,
+  rimborso del debito, plug di cassa — sta in `calculations/intra_year_engine.py`. Il gemello
+  TypeScript che c'era (`lib/pratica-projected-bs.ts`, `lib/pratica-turnover.ts`) era divergito su
+  quattro punti e faceva mostrare a Proiezione, Indicatori e Stampa **tre bilanci diversi della
+  stessa azienda**. Ogni superficie di modifica — ipotesi, CE Prev., SP Prev. — salva e fa
+  rigenerare il motore; il rendiconto legge lo stesso `ForecastYear`. Un secondo motore ri-diverge
+  alla prima modifica del primo.
 - **Promote** (`POST /scenarios/{id}/promote`, `backend/app/services/promote_service.py`): copies the
   projection into a full-year `FinancialYear` that can then be a budget base year. Two semantic gates
   (`check_quadratura(...).semantic_valid`, **not** a euro threshold) and a destructive replacement of

@@ -172,8 +172,9 @@ Le aziende sane non si muovono: sotto la soglia il calcolo resta quello di prima
 > `_project_balance_sheet` (backend). Devono restare d'accordo. Quando divergevano si otteneva
 > il caso peggiore — il plug di cassa del frontend scaricava i 165 M eccedenti sui debiti a
 > breve e mostrava a schermo un bilancio che "quadra", mentre il record persistito restava
-> sbilanciato e il promote lo rifiutava, senza che nulla spiegasse la differenza. La guardia
-> è implementata su entrambi i lati (`lib/pratica-turnover.ts` per il frontend).
+> sbilanciato e il promote lo rifiutava, senza che nulla spiegasse la differenza. Dal
+> 2026-09-02 il lato client non calcola più la proiezione — la legge dal forecast che il motore
+> ha persistito — quindi la guardia esiste in un posto solo e non c'è nulla da tenere d'accordo.
 
 ### Nessuna destinazione implicita dell'utile
 Capitale e riserve si prendono dal parziale invariati. Il commento nel codice è netto: *il

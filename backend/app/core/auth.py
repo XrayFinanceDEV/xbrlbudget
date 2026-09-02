@@ -34,6 +34,22 @@ def get_current_user(
         token = credentials.credentials
 
         if not settings.SUPABASE_JWT_SECRET:
+            # Il token non è verificabile. Con DEV_USER_ID impostato non è una
+            # configurazione sbagliata: è il normale avvio in sviluppo, e un
+            # token che non si può controllare non vale più di nessun token —
+            # 401, che è lo stato su cui il frontend ri-chiede il token al
+            # parent dell'iframe (`frontend/lib/api.ts`). Il fallback
+            # DEV_USER_ID non lo riscatta: varrebbe qualunque stringa, e un
+            # token davvero rotto non si vedrebbe mai. Senza DEV_USER_ID,
+            # invece, è il server a essere configurato male e resta un 500: un
+            # 401 manderebbe l'iframe a ri-chiedere all'infinito un token che
+            # questo server non potrà mai accettare.
+            if settings.DEV_USER_ID:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token cannot be verified: SUPABASE_JWT_SECRET not configured",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="SUPABASE_JWT_SECRET not configured",

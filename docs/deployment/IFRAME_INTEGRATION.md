@@ -232,6 +232,14 @@ When a budget API call returns 401 (token expired):
 3. Parent sends new `AUTH_TOKEN`
 4. User retries their action (no manual refresh needed)
 
+**Every rejected token comes out as 401**, never 500, because step 1 is what triggers the
+refresh — a truncated, unsigned, wrongly-signed, expired or `sub`-less token, and also a
+well-formed token sent to a dev backend that has `DEV_USER_ID` but no `SUPABASE_JWT_SECRET`
+(there the token simply cannot be verified, and the dev fallback does **not** rescue it).
+The one case that stays **500** is a server with neither secret nor `DEV_USER_ID`: that is a
+deployment error, and a 401 would send the parent into refreshing a token this server can
+never accept. Pinned by `tests/test_auth_jwt.py`.
+
 ---
 
 ## Security Checklist

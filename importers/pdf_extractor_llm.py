@@ -999,12 +999,50 @@ def _reconcile_blank_current_sp_cells(
 # La lettera di voce distingue i due lati (art. 2424: D attivo, E passivo), le due
 # parole obbligatorie distinguono la voce di legge dai suoi conti di dettaglio
 # ("RATEI PASSIVI", "RISCONTI PASSIVI", che ne portano una sola).
+# Il LATO del prospetto a cui appartiene ciascuna voce ripescabile: i prefissi
+# dei campi dell'art. 2424 che stanno dalla stessa parte. Il ripiego aggiunge
+# massa MANCANTE, non massa mal classificata: se l'importo stampato e' gia'
+# altrove sullo stesso lato, l'estrazione l'ha letto e archiviato male —
+# riscriverlo qui lo conterebbe due volte, e la correzione e' in Rettifiche.
+_SP_ATTIVO_PREFIXES = (
+    'sp01', 'sp02', 'sp03', 'sp04', 'sp05',
+    'sp06', 'sp07', 'sp08', 'sp09', 'sp10',
+)
+_SP_PASSIVO_PREFIXES = (
+    'sp11', 'sp12', 'sp13', 'sp14', 'sp15', 'sp16', 'sp17', 'sp18',
+)
 _MISSING_SP_ROWS = {
     'sp18_ratei_risconti_passivi': (
         re.compile(r"^E[.)]?$", re.I),
         ('ratei', 'risconti'),
+        _SP_PASSIVO_PREFIXES,
     ),
 }
+
+
+def _field_already_holding(
+    current: Dict[str, Decimal],
+    amount: Decimal,
+    target: str,
+    side_prefixes: Tuple[str, ...],
+) -> Optional[str]:
+    """Il campo dello STESSO LATO che porta gia' esattamente ``amount``.
+
+    ``None`` quando nessuno lo porta. Una coincidenza fra due voci di pari
+    importo fa rinunciare al ripesco: e' il verso prudente — si rinuncia a
+    scrivere e lo si dichiara, invece di rischiare di contare due volte il
+    lato senza che alcuna chiave lo nomini.
+    """
+    for field, value in current.items():
+        if field == target or not field.startswith(side_prefixes):
+            continue
+        try:
+            if Decimal(value) == amount:
+                return field
+        except Exception:
+            continue
+    return None
+
 
 
 def _recover_printed_sp_rows(
@@ -1028,6 +1066,7 @@ def _recover_printed_sp_rows(
     except Exception:
         selected_sp_pages = set()
     recovered: List[Tuple[str, str]] = []
+    skipped: List[Tuple[str, str, str]] = []
     document_centers = _document_comparative_centers(doc)
     try:
         for page in doc:
@@ -1048,7 +1087,9 @@ def _recover_printed_sp_rows(
                 ]
                 if not numbers:
                     continue
-                for field, (code_re, required_words) in _MISSING_SP_ROWS.items():
+                for field, (
+                    code_re, required_words, side_prefixes
+                ) in _MISSING_SP_ROWS.items():
                     if current.get(field, Decimal('0')) != 0:
                         continue
                     if not all(token in label_text for token in required_words):
@@ -1068,6 +1109,14 @@ def _recover_printed_sp_rows(
                         continue
                     if parsed[0] == 0:
                         continue
+                    gia_presente = _field_already_holding(
+                        current, parsed[0], field, side_prefixes
+                    )
+                    if gia_presente is not None:
+                        skipped.append(
+                            (field, gia_presente, str(parsed[0]))
+                        )
+                        continue
                     current[field] = parsed[0]
                     recovered.append((field, str(parsed[0])))
     finally:
@@ -1076,6 +1125,17 @@ def _recover_printed_sp_rows(
         logger.warning(
             "SP source recovery: voci stampate assenti dall'estrazione, rilette "
             "dalla riga di prospetto: %s", recovered,
+        )
+    if skipped:
+        logger.warning(
+            "SP source recovery rinunciata: l'importo stampato e' gia' presente "
+            "in un altro campo dello stesso lato del prospetto, quindi e' massa "
+            "gia' estratta e mal classificata, non massa mancante. La si "
+            "corregge in Rettifiche: %s",
+            [
+                f"{campo} non scritto: {importo} e' gia' in {altrove}"
+                for campo, altrove, importo in skipped
+            ],
         )
     return current
 

@@ -413,3 +413,49 @@ def test_un_importo_diverso_non_viene_azzerato(tmp_path):
     )
 
     assert current["ce03_lavori_interni"] == D("12345.67")
+
+
+# ---------------------------------------------------------------------------
+# E. il ripiego aggiunge massa MANCANTE, non massa mal classificata
+# ---------------------------------------------------------------------------
+
+def test_un_importo_gia_presente_altrove_nel_passivo_non_si_ripesca(tmp_path):
+    """Se l'LLM l'ha letto e archiviato altrove, riscriverlo lo conta due volte.
+
+    I 178.663,25 stampati alla ``E) Ratei e risconti`` del passivo possono essere
+    finiti sotto `sp16g_altri_debiti_breve`: la massa e' gia' dentro
+    l'estrazione. La guardia sul solo campo di destinazione non lo vede — sp18
+    e' zero in entrambi i casi — e il passivo eccede l'attivo di quell'importo,
+    senza che nessuna chiave nomini il doppio conteggio.
+    """
+    pdf_path = tmp_path / "prospetto-lungo.pdf"
+    _long_statement_pdf(str(pdf_path))
+
+    prima = {
+        "sp16_debiti_breve": D("1843574.40"),
+        "sp16g_altri_debiti_breve": D("178663.25"),
+        "sp18_ratei_risconti_passivi": D("0"),
+    }
+    recovered = _recover_printed_sp_rows(str(pdf_path), prima)
+
+    assert recovered["sp18_ratei_risconti_passivi"] == D("0")
+    assert recovered == prima
+
+
+def test_un_importo_presente_solo_nell_attivo_non_blocca_il_ripesco(tmp_path):
+    """La guardia guarda il proprio LATO, non l'intero prospetto.
+
+    Ratei attivi e ratei passivi di pari importo sono una coincidenza possibile,
+    e non dicono nulla sulla classificazione del passivo: il ripiego — che e' il
+    caso per cui la funzione esiste — deve scrivere lo stesso.
+    """
+    pdf_path = tmp_path / "prospetto-lungo.pdf"
+    _long_statement_pdf(str(pdf_path))
+
+    recovered = _recover_printed_sp_rows(
+        str(pdf_path),
+        {"sp10_ratei_risconti_attivi": D("178663.25"),
+         "sp18_ratei_risconti_passivi": D("0")},
+    )
+
+    assert recovered["sp18_ratei_risconti_passivi"] == D("178663.25")

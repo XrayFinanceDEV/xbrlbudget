@@ -24,6 +24,11 @@ interface AppContextType {
   selectedCompanyId: number | null;
   setSelectedCompanyId: (id: number | null) => void;
   years: number[];
+  // Gli anni dell'azienda selezionata sono stati letti: `years` vuoto vuol dire
+  // «nessun anno», non «non ancora arrivati». Senza questa distinzione il
+  // cancello del wizard startup (`years.length === 0`) è vero anche per
+  // un'azienda che gli anni ce li ha, e il wizard compare per un istante.
+  yearsLoaded: boolean;
   selectedYear: number | null;
   setSelectedYear: (year: number | null) => void;
   selectedCompany: Company | null;
@@ -62,6 +67,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([]);
+  // A QUALE azienda appartiene `years`. Non un booleano «sta caricando»: un
+  // booleano si accende dentro un effetto, cioè un render DOPO il cambio di
+  // azienda, e in quel render `years` è ancora quello di prima (o vuoto) ma
+  // risulta già buono. Confrontando gli id la risposta è calcolata in fase di
+  // render e la finestra non esiste.
+  const [yearsCompanyId, setYearsCompanyId] = useState<number | null>(null);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +239,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!selectedCompanyId) {
       setYears([]);
+      setYearsCompanyId(null);
       setSelectedYear(null);
       return;
     }
@@ -247,6 +259,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.error("Error loading years:", err);
         setError("Impossibile caricare gli anni");
+      } finally {
+        // Anche dopo un errore: `years` resta quello che è, ma chi aspetta una
+        // risposta ne riceve una. Marcarlo solo in caso di successo lascerebbe
+        // in eterno lo spinner di chi distingue «zero anni» da «non lo so».
+        setYearsCompanyId(selectedCompanyId);
       }
     };
     loadYears();
@@ -264,6 +281,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedCompanyId,
       setSelectedCompanyId,
       years,
+      yearsLoaded: yearsCompanyId === selectedCompanyId,
       selectedYear,
       setSelectedYear,
       selectedCompany,
@@ -280,6 +298,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       companies,
       selectedCompanyId,
       years,
+      yearsCompanyId,
       selectedYear,
       selectedCompany,
       loading,

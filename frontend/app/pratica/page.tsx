@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
@@ -17,7 +18,8 @@ import {
   getScenarioAnalysis,
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
-import { blockedStep } from "@/lib/pratica-steps";
+import { badgeScheda, rigaRettifiche } from "@/lib/pratica-rettifiche-stato";
+import { blockedStep, senzaPraticaAttiva } from "@/lib/pratica-steps";
 import type {
   BudgetScenario,
   IntraYearComparison,
@@ -103,10 +105,11 @@ import {
 import { buildConfrontoHighlights } from "@/lib/pratica-highlights";
 
 export default function InfraannualePage() {
+  const router = useRouter();
   const { companies, refreshCompanies, setSelectedCompanyId } = useApp();
 
   // Wizard state
-  const { pratica, setAnalysisStep, updatePratica } = usePratica();
+  const { pratica, praticaLoaded, setAnalysisStep, updatePratica } = usePratica();
   const activeTab = pratica?.analysisStep ?? "anagrafiche";
   const setActiveTab = setAnalysisStep;
 
@@ -261,16 +264,23 @@ export default function InfraannualePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifica.confirm, storico.confirm, storico.exists, updatePratica, setActiveTab]);
 
-  const rettificheDaConfermare =
-    (verifica.exists && !verifica.confirmed ? 1 : 0) +
-    (storico.exists && !storico.confirmed ? 1 : 0);
-
-  // Quante schede ESISTONO davvero. Serve alla riga di stato: il conteggio
-  // «da confermare» conta solo fra quelle esistenti, quindi da solo può dire
-  // «restano 0 schede» su un percorso che è comunque bloccato — succede quando
-  // il bilancio di verifica non è stato trovato. E su un import senza anno di
-  // raffronto la scheda è UNA, quindi «servono entrambe» sarebbe falso.
-  const rettificheSchedeEsistenti = (verifica.exists ? 1 : 0) + (storico.exists ? 1 : 0);
+  // Riga di stato e badge delle tab: la decisione sta nel modulo puro
+  // `lib/pratica-rettifiche-stato.ts`, con la sua suite. Chiavare il ramo di
+  // ripiego sul CONTEGGIO delle schede (com'era) lasciava scoperto il caso in
+  // cui manca il solo bilancio di verifica: il conteggio vale 1, il ramo non
+  // scattava, e la riga diceva «Restano 0 schede da confermare» sotto un
+  // pulsante spento. Vedi #42.
+  const statoVerifica = {
+    resolved: verifica.resolved,
+    exists: verifica.exists,
+    confirmed: verifica.confirmed,
+  };
+  const statoStorico = {
+    resolved: storico.resolved,
+    exists: storico.exists,
+    confirmed: storico.confirmed,
+  };
+  const rigaStato = rigaRettifiche(statoVerifica, statoStorico, allRettificheConfirmed);
 
   // Le condizioni sono copiate INVARIATE dal bottone che questo sostituisce
   // (era app/pratica/page.tsx:4155-4167).
@@ -1026,6 +1036,39 @@ export default function InfraannualePage() {
 
   usePrimaryAction(primary);
 
+  // Nessuna pratica attiva: qui non c'è nulla da fare, e finora non lo diceva
+  // nessuno. Il percorso rendeva comunque il primo step — la card «Anagrafica
+  // azienda» con tre campi vuoti — ma il bottone che la conclude vive in
+  // `usePraticaPrimaryAction`, che fuori da una pratica non ne propone alcuno:
+  // si compilava un form non inviabile, con l'unica via d'uscita nella barra di
+  // navigazione in alto (#32). Si rimanda alla home, che è il posto in cui una
+  // pratica si sceglie o si crea.
+  //
+  // Dopo ogni hook, mai prima: un ritorno anticipato più in alto salterebbe gli
+  // hook sottostanti e cambierebbe il loro ordine fra un render e l'altro.
+  if (senzaPraticaAttiva(pratica, praticaLoaded)) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-5 w-5" /> Nessuna pratica attiva
+            </CardTitle>
+            <CardDescription>
+              Il percorso lavora sempre dentro una pratica. Torna alla home e
+              scegline una da riprendere, oppure aprine una nuova su un&apos;azienda.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.push("/")}>
+              Vai alle aziende <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1370,14 +1413,14 @@ export default function InfraannualePage() {
               : "border-yellow-500/40 bg-yellow-50 text-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-300",
           )}
         >
-          {allRettificheConfirmed ? (
+          {rigaStato.kind === "confermate" ? (
             <span className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              {rettificheSchedeEsistenti === 1
+              {rigaStato.schedeEsistenti === 1
                 ? "Scheda confermata."
                 : "Tutte le schede sono confermate."}
             </span>
-          ) : rettificheSchedeEsistenti === 0 ? (
+          ) : rigaStato.kind === "nessuna-scheda" ? (
             // Nessuna scheda caricata: il percorso è bloccato, ma non da una
             // conferma mancante. Un «restano 0 schede da confermare» qui
             // sarebbe un conteggio giusto sotto una spiegazione falsa.
@@ -1386,15 +1429,26 @@ export default function InfraannualePage() {
               Nessun bilancio da rettificare: controlla anno fiscale e mesi coperti
               nella scheda Importazione.
             </span>
+          ) : rigaStato.kind === "verifica-mancante" ? (
+            // Lo storico c'è (magari già confermato) ma il bilancio di verifica
+            // no: il percorso è bloccato da una scheda che manca, non da una
+            // conferma. Nominare la scheda è l'unico modo di far capire che si
+            // sistema nell'Importazione, non qui.
+            <span className="flex items-center gap-2">
+              <CircleDashed className="h-4 w-4 shrink-0" />
+              Bilancio di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}
+              {fiscalYear} non trovato: controlla anno fiscale e mesi coperti nella
+              scheda Importazione.
+            </span>
           ) : (
             <span className="flex items-center gap-2">
               <CircleDashed className="h-4 w-4 shrink-0" />
-              {rettificheDaConfermare === 1
+              {rigaStato.daConfermare === 1
                 ? "Resta 1 scheda da confermare"
-                : `Restano ${rettificheDaConfermare} schede da confermare`}
+                : `Restano ${rigaStato.daConfermare} schede da confermare`}
               {/* «entrambe» solo quando le schede sono davvero due: un import
                   senza anno di raffronto ne ha una sola. */}
-              {rettificheSchedeEsistenti === 2
+              {rigaStato.schedeEsistenti === 2
                 ? ": servono entrambe per proseguire."
                 : " per proseguire."}
             </span>
@@ -1426,16 +1480,24 @@ export default function InfraannualePage() {
                 </span>
               )}
             </TabsTrigger>
+            {/*
+              Il badge passa da `badgeScheda`, che tace finché il server non ha
+              risposto e su una scheda che risponde 404: `exists` parte da
+              `true` e il reset di identità lo rialza, quindi da solo diceva
+              «da confermare» su un lavoro che non si può fare. Vedi #43.
+            */}
             <TabsTrigger value="verifica" className="gap-2">
-              {verifica.confirmed ? (
+              {badgeScheda(statoVerifica) === "confermata" ? (
                 <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-              ) : (
+              ) : badgeScheda(statoVerifica) === "da confermare" ? (
                 <CircleDashed className="h-3.5 w-3.5 text-yellow-600 dark:text-yellow-400" />
-              )}
+              ) : null}
               Rettifiche Bil. di verifica {periodMonths < 12 ? `${periodMonths}M ` : ""}{fiscalYear}
-              <span className="text-xs font-normal text-muted-foreground">
-                {verifica.confirmed ? "confermata" : "da confermare"}
-              </span>
+              {badgeScheda(statoVerifica) && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  {badgeScheda(statoVerifica)}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 

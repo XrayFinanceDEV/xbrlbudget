@@ -1576,6 +1576,16 @@ def _recover_printed_fixed_asset_details(
     return current
 
 
+# Quante pagine, al massimo, puo' occupare la sezione patrimoniale quando il
+# documento non stampa alcun totale di chiusura del passivo. Non e' un'ancora,
+# e' una TAGLIA: serve solo a impedire che «l'SP finisce dove comincia il CE»
+# si mangi tutto cio' che sta in mezzo quando in mezzo c'e' una Nota
+# Integrativa. Sei pagine sono il doppio del vecchio default (sp_start + 2) e
+# lasciano due pagine di margine sul caso piu' lungo osservato nel corpus — il
+# riclassificato UE di AMB AMBIENTA, che di pagine patrimoniali ne usa quattro.
+_SP_SECTION_MAX_PAGES = 6
+
+
 def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
     """
     Scan PDF pages with PyMuPDF to find SP and CE sections using
@@ -1674,14 +1684,25 @@ def find_section_pages(file_path: str) -> Tuple[Set[int], Set[int]]:
             # INCLUSA perche' su questi layout porta ancora le ultime righe del
             # passivo (ed e' la stessa condivisione che il ramo `ce_start`
             # qui sotto gia' ammette nel verso opposto).
+            # Il tetto resta comunque: fra l'SP e il CE puo' esserci una Nota
+            # Integrativa lunga, e li' il prospetto delle immobilizzazioni e la
+            # tabella dei debiti per scadenza ci sono quasi sempre — con numeri
+            # LORDI e in colonne diverse. Sono le stesse tabelle che gli scanner
+            # geometrici in giro su `sp_pages` leggerebbero volentieri al posto
+            # del prospetto, e un dettaglio preso dalle note attraversa un
+            # aggregato senza che il pareggio se ne accorga.
             ce_header_page = _find_start(CE_START_KEYWORDS, after_page=sp_start + 1)
+            cap = min(sp_start + _SP_SECTION_MAX_PAGES - 1, total_pages - 1)
             if ce_header_page is not None and ce_header_page > sp_start:
+                sp_end = min(ce_header_page, cap)
                 logger.warning(
                     "Nessun totale di chiusura del passivo stampato: la sezione SP "
-                    "si chiude alla pagina che apre il CE (%s) invece che a %s",
-                    ce_header_page + 1, min(sp_start + 2, total_pages - 1) + 1,
+                    "si chiude a pagina %s (%s). Apertura del CE a pagina %s, tetto "
+                    "di sezione a pagina %s.",
+                    sp_end + 1,
+                    "apertura del CE" if sp_end == ce_header_page else "tetto di sezione",
+                    ce_header_page + 1, cap + 1,
                 )
-                sp_end = ce_header_page
             else:
                 sp_end = min(sp_start + 2, total_pages - 1)
 

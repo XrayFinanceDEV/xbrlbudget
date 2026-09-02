@@ -208,6 +208,80 @@ def test_lo_stato_patrimoniale_arriva_fino_alla_pagina_che_apre_il_ce(tmp_path):
     assert sp_pages == {0, 1, 2, 3}
 
 
+def _long_note_pdf(path, note_pages=12):
+    """SP senza «Totale passivo», poi una Nota Integrativa lunga, poi il CE.
+
+    E' il deposito ordinario: l'SP chiude senza totale di sezione, seguono le
+    note, e l'intestazione del conto economico arriva solo dopo. Le note portano
+    il prospetto delle immobilizzazioni e la tabella dei debiti per scadenza —
+    con numeri LORDI e in colonne diverse — cioe' proprio le tabelle che gli
+    scanner geometrici che girano su ``sp_pages`` sono liberi di leggere.
+    """
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((20, 80), "Descrizione")
+    _header(page)
+    _row(page, 140, "STATO PATRIMONIALE ATTIVO",
+         "2.352.461,64", "2.170.417,20", "182.044,44", "8,38")
+    _row(page, 160, "D) Ratei e risconti",
+         "216.226,30", "208.869,12", "7.357,18", "3,52")
+
+    page = doc.new_page()
+    _header(page)
+    _row(page, 140, "STATO PATRIMONIALE PASSIVO",
+         "2.352.461,64", "2.170.417,20", "182.044,44", "8,38")
+    _row(page, 160, "D) Debiti",
+         "1.843.574,40", "1.791.522,27", "52.052,13", "2,90")
+
+    page = doc.new_page()
+    _header(page)
+    _row(page, 140, "E) Ratei e risconti",
+         "178.663,25", "20.812,17", "157.851,08", "758,45")
+
+    for index in range(note_pages):
+        page = doc.new_page()
+        _header(page)
+        _row(page, 140, "NOTA INTEGRATIVA - Movimenti delle immobilizzazioni")
+        _row(page, 160, "Costo storico immobilizzazioni materiali",
+             "1.204.883,10", "1.150.112,44", "54.770,66", "4,76")
+        _row(page, 180, "Fondo ammortamento",
+             "1.114.066,51", "1.061.208,03", "52.858,48", "4,98")
+
+    page = doc.new_page()
+    _header(page)
+    _row(page, 140, "CONTO ECONOMICO")
+    _row(page, 160, "A) Valore della produzione",
+         "2.112.107,99", "4.006.984,18", "-1.894.876,19", "-47,28")
+    page = doc.new_page()
+    _header(page)
+    _row(page, 140, "21) Utile (perdita) dell'esercizio",
+         "27.887,32", "7.422,36", "20.464,96", "275,72")
+    doc.save(path)
+    doc.close()
+
+
+def test_la_nota_integrativa_non_finisce_nella_sezione_patrimoniale(tmp_path):
+    """«L'SP finisce dove comincia il CE» regge solo se il CE comincia SUBITO dopo.
+
+    Senza un tetto, `_find_start` scandisce fino in fondo al documento e
+    `sp_pages` si mangia tutta la Nota Integrativa: il prompt SP si gonfia, e
+    ogni scanner geometrico che gira su `sp_pages` puo' leggere il prospetto
+    delle immobilizzazioni o la tabella dei debiti per scadenza stampati nelle
+    note — numeri LORDI, in colonne diverse. Un dettaglio letto dalle note al
+    posto del prospetto attraversa un aggregato, e il foglio quadra lo stesso.
+    """
+    pdf_path = tmp_path / "nota-lunga.pdf"
+    _long_note_pdf(str(pdf_path))
+
+    sp_pages, ce_pages = find_section_pages(str(pdf_path))
+
+    assert 15 in ce_pages, "il CE comincia dove il documento lo intesta"
+    assert max(sp_pages) <= 5, (
+        "la sezione SP deve fermarsi al tetto, non alla pagina che apre il CE"
+    )
+    assert {0, 1, 2} <= sp_pages, "il passivo stampato deve restare dentro"
+
+
 def test_i_ratei_passivi_stampati_si_rileggono_dalla_riga(tmp_path):
     pdf_path = tmp_path / "prospetto-lungo.pdf"
     _long_statement_pdf(str(pdf_path))

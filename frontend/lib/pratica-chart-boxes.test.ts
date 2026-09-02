@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  AXIS_WIDTH_MAX,
+  AXIS_WIDTH_MIN,
   INDICATOR_CHART_BOXES,
   INDICATOR_DEFS,
   buildIndicatorChartData,
+  indicatorAxisWidth,
   indicatorFormat,
   formatIndicatorAxis,
   formatIndicatorTooltip,
@@ -284,5 +287,79 @@ describe("formatIndicatorAxis / formatIndicatorTooltip", () => {
   it("regge i valori negativi, che su PFN e margini sono la norma", () => {
     expect(formatIndicatorTooltip(-2.5, "ratio")).toBe("-2,50x");
     expect(formatIndicatorAxis(-30, "pct")).toBe("-30%");
+  });
+});
+
+describe("indicatorAxisWidth", () => {
+  // Recharts riserva all'asse Y una larghezza FISSA (60px di default) e ritaglia
+  // ciò che non ci sta: `600.000%` esce come `00.000%`, con la prima cifra
+  // mangiata dal bordo. Il difetto è indipendente dalla scala — un margine in
+  // euro su un'azienda grande si taglia allo stesso modo — quindi la larghezza
+  // va calcolata dalle etichette che quel riquadro renderà davvero.
+  const riquadroPct = INDICATOR_CHART_BOXES.find((b) => b.id === "incidenza-economica")!;
+  const riquadroEuro = INDICATOR_CHART_BOXES.find((b) => b.id === "equilibrio-finanziario")!;
+  const riquadroVolte = INDICATOR_CHART_BOXES.find((b) => b.id === "sostenibilita-debito")!;
+
+  it("un'etichetta lunga allarga l'asse oltre il default di Recharts", () => {
+    const strette = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ mt: 1200, ms: 800, pfn: -300 }),
+      },
+    ]);
+    const larghe = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ mt: 1200, ms: -450000000, pfn: 0 }),
+      },
+    ]);
+    expect(indicatorAxisWidth(strette, riquadroEuro)).toBe(AXIS_WIDTH_MIN);
+    expect(indicatorAxisWidth(larghe, riquadroEuro)).toBeGreaterThan(AXIS_WIDTH_MIN);
+  });
+
+  it("misura solo le serie del proprio riquadro", () => {
+    // Un valore enorme che sta in un ALTRO riquadro non deve allargare questo:
+    // l'asse rende le sue serie, non tutto l'`IndicatorSet`.
+    const righe = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({
+          ebitda_margin: 12,
+          materials_revenue: 40,
+          services_revenue: 8,
+          mt: -123456789,
+          _revenue_raw: 400000,
+        }),
+      },
+    ]);
+    expect(indicatorAxisWidth(righe, riquadroPct)).toBe(AXIS_WIDTH_MIN);
+    expect(indicatorAxisWidth(righe, riquadroEuro)).toBeGreaterThan(AXIS_WIDTH_MIN);
+  });
+
+  it("un punto `null` non conta e non fa saltare il calcolo", () => {
+    // Un rapporto senza denominatore vale `null`: non ha etichetta, quindi non
+    // ha larghezza. Trattarlo come 0 andrebbe bene, trattarlo come `NaN` no.
+    const righe = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ ebitda_margin: 0, _revenue_raw: 0 }),
+      },
+    ]);
+    expect(righe[0].ebitda_margin).toBeNull();
+    expect(indicatorAxisWidth(righe, riquadroPct)).toBe(AXIS_WIDTH_MIN);
+  });
+
+  it("nessuna riga: resta il default, non zero", () => {
+    expect(indicatorAxisWidth([], riquadroPct)).toBe(AXIS_WIDTH_MIN);
+  });
+
+  it("non oltre il massimo: l'asse non si mangia il grafico", () => {
+    const assurde = buildIndicatorChartData([
+      {
+        periodo: "Storico 2025",
+        indicatori: indicatori({ pfn_ebitda: 999999999999, _ebitda_raw: 1 }),
+      },
+    ]);
+    expect(indicatorAxisWidth(assurde, riquadroVolte)).toBe(AXIS_WIDTH_MAX);
   });
 });

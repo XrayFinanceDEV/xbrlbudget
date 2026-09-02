@@ -522,6 +522,48 @@ export function formatIndicatorAxis(value: number, format: IndicatorFormat): str
   return `${new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 }).format(value)}x`;
 }
 
+/**
+ * La larghezza in pixel che il grafico riserva all'asse Y.
+ *
+ * Recharts usa una larghezza FISSA (60px di default) e RITAGLIA ciò che non ci
+ * sta: un'incidenza a sei cifre come `600.000%` esce come `00.000%`, con la
+ * prima cifra mangiata dal bordo e senza alcun errore. Il difetto NON dipende
+ * dalla scala dei valori — un margine in euro di un'azienda grande si taglia
+ * allo stesso modo — quindi non si chiude ritarando i dati: la larghezza va
+ * presa dalle etichette che quel riquadro renderà davvero.
+ *
+ * La misura è per forza approssimata: la suite gira senza DOM, quindi qui
+ * nessuno può misurare il testo. `AXIS_CHAR_PX` è la larghezza di una cifra a
+ * 12px nel font di sistema, arrotondata per eccesso, e la cifra di margine
+ * copre il tick «tondo» che Recharts sceglie SOPRA il massimo dei dati (950 →
+ * 1.000, che è più lungo del dato che l'ha prodotto). Sovrastimare costa un po'
+ * di area del grafico, sottostimare taglia una cifra: l'errore è ammesso in un
+ * verso solo.
+ */
+export const AXIS_WIDTH_MIN = 60;
+export const AXIS_WIDTH_MAX = 110;
+const AXIS_CHAR_PX = 7;
+const AXIS_PADDING_PX = 12;
+
+export function indicatorAxisWidth(
+  righe: RigaGraficoIndicatori[],
+  box: IndicatorChartBox,
+): number {
+  let lunghezzaMax = 0;
+  for (const riga of righe) {
+    for (const serie of box.series) {
+      const valore = riga[serie.key];
+      // `null` è l'assenza di un valore, non uno zero: non produce un'etichetta
+      // e non occupa larghezza. Vedi `buildIndicatorChartData`.
+      if (valore === null || valore === undefined || !Number.isFinite(valore)) continue;
+      lunghezzaMax = Math.max(lunghezzaMax, formatIndicatorAxis(valore, box.format).length);
+    }
+  }
+  if (lunghezzaMax === 0) return AXIS_WIDTH_MIN;
+  const larghezza = (lunghezzaMax + 1) * AXIS_CHAR_PX + AXIS_PADDING_PX;
+  return Math.min(AXIS_WIDTH_MAX, Math.max(AXIS_WIDTH_MIN, larghezza));
+}
+
 /** Il valore per esteso nel tooltip, nella stessa forma della tabella indicatori. */
 export function formatIndicatorTooltip(value: number, format: IndicatorFormat): string {
   if (format === "euro") return formatEuro(value);

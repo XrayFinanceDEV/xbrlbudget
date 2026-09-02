@@ -58,6 +58,25 @@ export interface BalanceSheet {
   sp05e_acconti: string;
   sp06_crediti_breve: string;
   sp07_crediti_lungo: string;
+
+  // Detailed breakdown - Crediti. sp06e/sp06f non sono crediti commerciali:
+  // il motore li porta avanti invece di scalarli coi ricavi via DSO, e il
+  // segnaposto «auto:» delle ipotesi li scorpora per dire il vero.
+  sp06a_crediti_clienti_breve: string;
+  sp06b_crediti_controllate_breve: string;
+  sp06c_crediti_collegate_breve: string;
+  sp06d_crediti_controllanti_breve: string;
+  sp06e_crediti_tributari_breve: string;
+  sp06f_imposte_anticipate_breve: string;
+  sp06g_crediti_altri_breve: string;
+  sp07a_crediti_clienti_lungo: string;
+  sp07b_crediti_controllate_lungo: string;
+  sp07c_crediti_collegate_lungo: string;
+  sp07d_crediti_controllanti_lungo: string;
+  sp07e_crediti_tributari_lungo: string;
+  sp07f_imposte_anticipate_lungo: string;
+  sp07g_crediti_altri_lungo: string;
+
   sp08_attivita_finanziarie: string;
   sp09_disponibilita_liquide: string;
   sp10_ratei_risconti_attivi: string;

@@ -7,7 +7,8 @@ import { Info } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import type { BalanceSheet, BudgetAssumptionsCreate, IncomeStatement } from "@/types/api";
-import { AssumptionRowDef, computeAutoDays } from "./assumption-rows";
+import { AssumptionRowDef } from "./assumption-rows";
+import { computeAutoDays } from "@/lib/budget-turnover";
 
 type Historical = Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
 

@@ -3,7 +3,7 @@
 // A row with fields.length > 1 DUAL-WRITES the same value into every listed
 // column (Materie/Servizi %: variable == fixed growth makes the fixed/variable
 // split mathematically irrelevant — see forecast_engine.py:220-242).
-import type { BalanceSheet, IncomeStatement } from "@/types/api";
+import type { IncomeStatement } from "@/types/api";
 
 export type AssumptionRowDef = {
   key: string;
@@ -171,23 +171,4 @@ export function computeEffectiveTaxRate(income: IncomeStatement): number | null 
   if (pbt <= 0 || tax <= 0) return null;
   const rate = (tax / pbt) * 100;
   return rate > 0 && rate <= 60 ? Math.round(rate * 10) / 10 : null;
-}
-
-/** Auto-derived turnover days from the base year — same formulas the engine
- *  applies when the field is NULL (forecast_engine.py:487-505). */
-export function computeAutoDays(
-  kind: "dso" | "dio" | "dpo",
-  income: IncomeStatement | undefined,
-  balance: BalanceSheet | undefined,
-): number | null {
-  if (!income || !balance) return null;
-  const revenue = num(income.ce01_ricavi_vendite);
-  const purchases = num(income.ce05_materie_prime) + num(income.ce06_servizi);
-  let numerator = 0;
-  let denominator = 0;
-  if (kind === "dso") { numerator = num(balance.sp06_crediti_breve); denominator = revenue; }
-  if (kind === "dio") { numerator = num(balance.sp05_rimanenze); denominator = revenue; }
-  if (kind === "dpo") { numerator = num(balance.sp16d_debiti_fornitori_breve); denominator = purchases; }
-  if (denominator <= 0) return null;
-  return Math.round((numerator / denominator) * 360);
 }

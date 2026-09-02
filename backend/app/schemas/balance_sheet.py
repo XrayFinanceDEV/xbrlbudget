@@ -30,6 +30,25 @@ class BalanceSheetBase(BaseModel):
     sp05e_acconti: Decimal = Field(default=Decimal("0"))
     sp06_crediti_breve: Decimal = Field(default=Decimal("0"))
     sp07_crediti_lungo: Decimal = Field(default=Decimal("0"))
+
+    # Detailed breakdown - Crediti. sp06e/sp06f are NOT commercial receivables:
+    # the forecast engine carries them forward instead of scaling them with revenue
+    # via DSO, so the assumptions form needs them to show the DSO it will really use.
+    sp06a_crediti_clienti_breve: Decimal = Field(default=Decimal("0"))
+    sp06b_crediti_controllate_breve: Decimal = Field(default=Decimal("0"))
+    sp06c_crediti_collegate_breve: Decimal = Field(default=Decimal("0"))
+    sp06d_crediti_controllanti_breve: Decimal = Field(default=Decimal("0"))
+    sp06e_crediti_tributari_breve: Decimal = Field(default=Decimal("0"))
+    sp06f_imposte_anticipate_breve: Decimal = Field(default=Decimal("0"))
+    sp06g_crediti_altri_breve: Decimal = Field(default=Decimal("0"))
+    sp07a_crediti_clienti_lungo: Decimal = Field(default=Decimal("0"))
+    sp07b_crediti_controllate_lungo: Decimal = Field(default=Decimal("0"))
+    sp07c_crediti_collegate_lungo: Decimal = Field(default=Decimal("0"))
+    sp07d_crediti_controllanti_lungo: Decimal = Field(default=Decimal("0"))
+    sp07e_crediti_tributari_lungo: Decimal = Field(default=Decimal("0"))
+    sp07f_imposte_anticipate_lungo: Decimal = Field(default=Decimal("0"))
+    sp07g_crediti_altri_lungo: Decimal = Field(default=Decimal("0"))
+
     sp08_attivita_finanziarie: Decimal = Field(default=Decimal("0"))
     sp09_disponibilita_liquide: Decimal = Field(default=Decimal("0"))
     sp10_ratei_risconti_attivi: Decimal = Field(default=Decimal("0"))
@@ -106,6 +125,25 @@ class BalanceSheetUpdate(BaseModel):
     sp05e_acconti: Optional[Decimal] = None
     sp06_crediti_breve: Optional[Decimal] = None
     sp07_crediti_lungo: Optional[Decimal] = None
+
+    # Detailed breakdown - Crediti. sp06e/sp06f are NOT commercial receivables:
+    # the forecast engine carries them forward instead of scaling them with revenue
+    # via DSO, so the assumptions form needs them to show the DSO it will really use.
+    sp06a_crediti_clienti_breve: Optional[Decimal] = None
+    sp06b_crediti_controllate_breve: Optional[Decimal] = None
+    sp06c_crediti_collegate_breve: Optional[Decimal] = None
+    sp06d_crediti_controllanti_breve: Optional[Decimal] = None
+    sp06e_crediti_tributari_breve: Optional[Decimal] = None
+    sp06f_imposte_anticipate_breve: Optional[Decimal] = None
+    sp06g_crediti_altri_breve: Optional[Decimal] = None
+    sp07a_crediti_clienti_lungo: Optional[Decimal] = None
+    sp07b_crediti_controllate_lungo: Optional[Decimal] = None
+    sp07c_crediti_collegate_lungo: Optional[Decimal] = None
+    sp07d_crediti_controllanti_lungo: Optional[Decimal] = None
+    sp07e_crediti_tributari_lungo: Optional[Decimal] = None
+    sp07f_imposte_anticipate_lungo: Optional[Decimal] = None
+    sp07g_crediti_altri_lungo: Optional[Decimal] = None
+
     sp08_attivita_finanziarie: Optional[Decimal] = None
     sp09_disponibilita_liquide: Optional[Decimal] = None
     sp10_ratei_risconti_attivi: Optional[Decimal] = None

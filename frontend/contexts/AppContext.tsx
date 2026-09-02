@@ -12,6 +12,7 @@ import React, {
 import { getCompaniesWithScenarios, getCompanyYears } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
+import { companiesLoadKey } from "@/lib/auth-reload";
 import type { Company, CompanyWithScenarios } from "@/types/api";
 
 interface AppContextType {
@@ -49,6 +50,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const { isLoading: authLoading, isAuthenticated } = useAuth();
   const authLoadingRef = useRef(authLoading);
   authLoadingRef.current = authLoading;
+  // Chiave PRIMITIVA dello stato di autenticazione: `null` finché non è
+  // risolta, poi "anon"/"auth". È la dipendenza dell'effetto di caricamento
+  // qui sotto — vedi `lib/auth-reload.ts` e la sua suite.
+  const authKey = companiesLoadKey(authLoading, isAuthenticated);
   // PraticaProvider is mounted ABOVE AppProvider (see app/layout.tsx), so this
   // is legal. A pratica owns the company selection while it is active — see
   // praticaActiveRef below and the sync effect after loadCompanies.
@@ -99,14 +104,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // `companies` array and wrongly concludes the company was deleted.
   const lastLoadSucceededRef = useRef(false);
 
+  // Numero d'ordine dell'ultimo caricamento partito (vedi loadCompanies).
+  const loadSeqRef = useRef(0);
+
   // Stable loadCompanies — no dependencies, reads current selection via ref
   // Skips API call if auth is still loading (prevents 401 in iframe mode)
   const loadCompanies = useCallback(async () => {
     if (authLoadingRef.current) return;
+    // Sequenza di richiesta: con il token in ritardo due caricamenti sono in
+    // volo insieme (quello anonimo che sta prendendo 401 e quello autenticato)
+    // e nulla garantisce che rispondano nell'ordine di partenza. Senza questa
+    // guardia il 401 arrivato per secondo riscriverebbe `companiesError` sopra
+    // un elenco già caricato: vince sempre l'ULTIMA richiesta partita.
+    const seq = ++loadSeqRef.current;
     try {
       // `?include=scenarios`: una sola query lato server (joinedload), e il
       // tetto è 50 aziende per utente — il costo dell'inclusione è nullo.
       const data = await getCompaniesWithScenarios();
+      if (seq !== loadSeqRef.current) return;
       setCompanies(data);
       setCompaniesLoaded(true);
       setCompaniesError(null);
@@ -126,6 +141,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSelectedCompanyId(data[0].id);
       }
     } catch (err) {
+      if (seq !== loadSeqRef.current) return;
       console.error("Error loading companies:", err);
       setError("Impossibile caricare le aziende");
       // Distinto da `error` (condiviso con il caricamento anni) perché la
@@ -137,12 +153,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Load companies after auth resolves
+  // Load companies after auth resolves — E DI NUOVO se il token cambia.
+  // `AuthContext` fa scendere `isLoading` a tempo, non alla ricezione del
+  // token: se il parent risponde oltre il timeout, il primo caricamento è già
+  // partito senza `Authorization` ed è finito in 401. Dipendere dal solo
+  // `authLoading` — che a quel punto non si muove più, e `loadCompanies` è
+  // stabile — lascerebbe l'iframe su «Impossibile caricare le aziende» per
+  // sempre. `authKey` cambia anche all'arrivo del token (e su un AUTH_LOGOUT
+  // seguito da un nuovo AUTH_TOKEN), ed è un primitivo: non può ri-innescare
+  // l'effetto da solo, e nel caso normale — token prima del timeout, un solo
+  // render per i due `set` dello stesso handler — la chiamata resta UNA.
   useEffect(() => {
-    if (!authLoading) {
-      loadCompanies();
-    }
-  }, [authLoading, loadCompanies]);
+    if (authKey === null) return;
+    loadCompanies();
+  }, [authKey, loadCompanies]);
 
   // FIX 2: while a pratica is active and points at a company, the app-wide
   // selection follows it — so ordinary pages reached via the pratica bridge

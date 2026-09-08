@@ -13,7 +13,6 @@ import logging
 import re
 import tempfile
 import time
-import unicodedata
 from decimal import Decimal
 from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -665,7 +664,7 @@ def reading_order_text(page: fitz.Page) -> str:
 #   - ce09d: B.10.d "Svalutazioni dei crediti compresi nell'attivo circolante"
 #   - ce20: 20) "Imposte sul reddito dell'esercizio" (anche quando la voce non ha
 #     il dettaglio 20.a/20.b su cui lavora il passo per segmenti piu' sotto)
-_CE_ROW_SPEC_OVERRIDES = {
+_BLANK_CURRENT_CE_ROWS = {
     'ce03_lavori_interni': (
         re.compile(r"^(?:A\.?)?4\)[,]?$", re.I),
         ('incrementi', 'immobilizzazioni', 'lavori', 'interni'),
@@ -679,101 +678,6 @@ _CE_ROW_SPEC_OVERRIDES = {
         ('imposte', 'reddito'),
     ),
 }
-
-# Parole di servizio: presenti in mezzo prospetto, quindi inutili a distinguere una
-# riga dall'altra. Chiedere "di" non restringe nulla e allunga solo l'insieme.
-_LABEL_STOPWORDS = frozenset({
-    'di', 'del', 'della', 'dello', 'dei', 'delle', 'degli', 'da', 'dal', 'dalla',
-    'e', 'ed', 'o', 'a', 'al', 'alla', 'ai', 'alle', 'agli', 'in', 'nel', 'nella',
-    'per', 'con', 'su', 'sul', 'sulla', 'il', 'lo', 'la', 'i', 'gli', 'le', 'un',
-    'una', 'uno', "l'", "dell'", "nell'", "all'", 'che', 'non',
-})
-
-# Quante parole obbligatorie al massimo. Il taglio e' in TESTA al label, non in coda:
-# un prospetto tronca la fine di una descrizione lunga, mai l'inizio.
-_LABEL_WORDS_CAP = 4
-
-
-def _strip_accents(text: str) -> str:
-    """Confronto insensibile agli accenti.
-
-    ``data/iv_cee_tree.json`` scrive «attivita e passivita finanziarie» senza accenti,
-    il prospetto stampa «attività e passività»: senza questa normalizzazione ``ce17``
-    non si riconoscerebbe MAI, e il difetto sarebbe muto — una voce che non matcha si
-    comporta esattamente come una voce non in tabella.
-    """
-    return ''.join(
-        ch for ch in unicodedata.normalize('NFKD', text) if not unicodedata.combining(ch)
-    )
-
-
-def _distinctive_label_words(label: str) -> Tuple[str, ...]:
-    """Le parole del label che identificano la riga, in ordine di stampa.
-
-    Perche' NON si usano gli ``aliases`` del tree: sono tarati per il match per
-    descrizione della rotta C, dove serve larghezza — ``ce06`` ha alias ``servizi``,
-    ``ce09`` ha ``ammortamenti``. Larghezza qui significa azzerare il campo sbagliato.
-    """
-    words = []
-    for token in re.split(r"[^0-9a-z']+", _strip_accents(label.casefold())):
-        if not token or token in _LABEL_STOPWORDS or len(token) < 3:
-            continue
-        words.append(token)
-        if len(words) == _LABEL_WORDS_CAP:
-            break
-    return tuple(words)
-
-
-def _code_pattern_from_path(path: str) -> Optional[re.Pattern]:
-    """L'espressione del codice stampato, dedotta dal ``path`` dell'albero legale.
-
-    ``A.4`` -> ``A.4)`` oppure ``4)``: il prospetto puo' ripetere o omettere la
-    lettera della sezione. ``D`` (senza numero arabo) resta la sola lettera.
-    ``None`` per i path che non descrivono un codice stampabile (``IMP``), che sono
-    coperti dagli override.
-    """
-    match = re.fullmatch(r"([A-E])(?:\.(\d+)(bis|ter|quater)?)?", path)
-    if not match:
-        return None
-    letter, number, suffix = match.groups()
-    if number is None:
-        return re.compile(rf"^{letter}[.)]?[,]?$", re.I)
-    tail = rf"[-\s]?{suffix}" if suffix else ""
-    return re.compile(rf"^(?:{letter}\.?)?{number}{tail}\)[,]?$", re.I)
-
-
-def _ce_row_specs_from_tree() -> Dict[str, Tuple[re.Pattern, Tuple[str, ...]]]:
-    """La tabella riga-di-prospetto -> campo per OGNI foglia legale del CE.
-
-    #24: il meccanismo di ``_clear_blank_current_rows`` era gia' generale, corta era
-    la tabella — tre voci su ventuno. Derivarla da ``data/iv_cee_tree.json`` evita di
-    creare un quarto posto da tenere allineato a mano: e' la stessa fonte che alimenta
-    il motore di quadratura.
-
-    L'asimmetria che rende sicura la generalizzazione: un insieme di parole troppo
-    STRETTO fa non riconoscere la riga — cioe' quello che succede oggi per diciotto
-    voci su ventuno, nessun peggioramento. Troppo LARGO azzera il campo sbagliato. I
-    due errori non si equivalgono, quindi si stringe.
-    """
-    from importers.iv_cee_hierarchy import load_tree
-
-    specs: Dict[str, Tuple[re.Pattern, Tuple[str, ...]]] = {}
-    for node in load_tree()['raw'].get('income_statement', []):
-        field = node.get('db_field')
-        if not field or not node.get('is_legal_leaf'):
-            continue
-        pattern = _code_pattern_from_path(str(node.get('path', '')))
-        words = _distinctive_label_words(str(node.get('label', '')))
-        if pattern is None or not words:
-            continue
-        specs[field] = (pattern, words)
-    return specs
-
-
-# Gli override VINCONO sulla derivazione: quelle tre voci furono verificate contro un
-# file reale, e il label ne produrrebbe una versione piu' stretta (``ce20`` guadagna
-# «esercizio»), cioe' una regressione silenziosa su cio' che oggi funziona.
-_BLANK_CURRENT_CE_ROWS = {**_ce_row_specs_from_tree(), **_CE_ROW_SPEC_OVERRIDES}
 
 
 def _prior_cell_with_sibling_sign(printed, extracted):
@@ -853,9 +757,7 @@ def _clear_blank_current_rows(
         return cleared
     for line in _text_line_groups(words):
         labels = [word for word in line if float(word[0]) < 350]
-        # Accenti normalizzati sui DUE lati: il tree scrive «attivita», il
-        # prospetto stampa «attività» (vedi _strip_accents).
-        label_text = _strip_accents(' '.join(str(word[4]).casefold() for word in labels))
+        label_text = ' '.join(str(word[4]).casefold() for word in labels)
         codes = _row_code_words(labels)
         if not codes:
             continue

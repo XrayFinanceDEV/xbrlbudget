@@ -456,7 +456,7 @@ sopravvivenza al salvataggio.
 
 ## 11. Fuori ambito, rimandato al lotto 2
 
-Con spec propria, da scrivere subito dopo l'approvazione di questa: incasso dei crediti
+Con spec propria (`2026-09-08-scadenziamento-pregresso-design.md`): incasso dei crediti
 esistenti con un proprio piano (oggi il DSO sostituisce lo stock), debiti tributari divisi
 in correnti e rateizzati con piano di rate (oggi: precedente + imposte − acconti), e la
 regola generale «le voci patrimoniali generate dal previsionale sono separate dallo

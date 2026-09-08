@@ -129,19 +129,53 @@ describe("costiTableRows", () => {
   const rows = (m: number, s: number, forced = { materials: false, services: false }) =>
     costiTableRows(base, even(m), even(s), forced);
 
-  it("due gruppi con i loro pallini, variabili prima dei fissi", () => {
+  it("tre gruppi: la quota, poi le variabili, poi le fisse — coi loro pallini", () => {
     const r = rows(40, 40);
-    expect(r[0]).toEqual({ group: "Costi variabili", swatch: "variable" });
-    expect(r[3]).toEqual({ group: "Costi fissi", swatch: "fixed" });
+    expect(r[0]).toEqual({ group: "Quota fissa, anno per anno" });
+    expect(r[3]).toEqual({ group: "Costi variabili", swatch: "variable" });
+    expect(r[6]).toEqual({ group: "Costi fissi", swatch: "fixed" });
   });
 
-  it("tutti e sei i campi del passo che la tabella edita, nell'ordine", () => {
+  it("tutti gli otto campi del passo che la tabella edita, nell'ordine", () => {
     const fields = rows(40, 40).flatMap((r) => ("field" in r ? [r.field] : []));
     expect(fields).toEqual([
+      "fixed_materials_percentage", "fixed_services_percentage",
       "variable_materials_growth_pct", "variable_services_growth_pct",
       "fixed_materials_growth_pct", "fixed_services_growth_pct",
       "personnel_growth_pct", "rent_growth_pct",
     ]);
+  });
+
+  it("la quota fissa e' editabile anno per anno, e non si spegne mai", () => {
+    for (const share of [0, 40, 100]) {
+      const r = rows(share, share);
+      for (const field of ["fixed_materials_percentage", "fixed_services_percentage"]) {
+        const row = r.find((x) => "field" in x && x.field === field) as
+          { off?: boolean; baseLabel: string } | undefined;
+        expect(row, `${field} a quota ${share}`).toBeDefined();
+        expect(row!.off).toBeUndefined();
+        // L'anno base non ha una quota: e' un'ipotesi sul futuro.
+        expect(row!.baseLabel).toBe("—");
+      }
+    }
+  });
+
+  it("un valore differenziato per anno non viene appiattito dalla tabella", () => {
+    // La tabella scrive con `update(anno, campo, valore)`: espone il campo una
+    // volta e YearInputTable ne rende una casella per anno. Cio' che l'utente ha
+    // differenziato resta differenziato finche' non muove lo slider — che e'
+    // l'unico gesto che chiama `updateAll` — e nel frattempo `uneven` lo dichiara.
+    const differenziato = asMap({
+      2027: { fixed_materials_percentage: 30 },
+      2028: { fixed_materials_percentage: 55 },
+    });
+    const share = fixedShareOf(differenziato, [2027, 2028], "fixed_materials_percentage");
+    expect(share).toEqual({ value: 30, uneven: true });
+    const r = costiTableRows(base, share, even(40), { materials: false, services: false });
+    expect(r.some((x) => "field" in x && x.field === "fixed_materials_percentage")).toBe(true);
+    // Nessuna riga porta con se' un valore: i valori restano nella mappa per anno.
+    expect(r.every((x) => !("value" in x))).toBe(true);
+    expect(differenziato[2028].fixed_materials_percentage).toBe(55);
   });
 
   it("a quota 100 si spengono le variabili, a quota 0 le fisse — e mai le altre", () => {
@@ -175,8 +209,10 @@ describe("costiTableRows", () => {
     const r = rows(40, 40, { materials: true, services: false });
     const sub = (field: string) =>
       (r.find((x) => "field" in x && x.field === field) as { sub?: string }).sub;
+    expect(sub("fixed_materials_percentage")).toBe("forzato in CE Prev.");
     expect(sub("variable_materials_growth_pct")).toBe("forzato in CE Prev.");
     expect(sub("fixed_materials_growth_pct")).toBe("forzato in CE Prev.");
+    expect(sub("fixed_services_percentage")).toBeUndefined();
     expect(sub("variable_services_growth_pct")).toBeUndefined();
     expect(sub("personnel_growth_pct")).toBeUndefined();
   });

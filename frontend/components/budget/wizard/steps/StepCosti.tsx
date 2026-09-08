@@ -184,8 +184,9 @@ export function StepCosti(p: StepProps): JSX.Element {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Quanto di questi costi e&apos; fisso</CardTitle>
             <p className="text-xs text-muted-foreground">
-              La quota fissa segue l&apos;inflazione, la quota variabile segue i ricavi. Lo slider vale per
-              tutti gli anni previsti.
+              La quota fissa segue l&apos;inflazione, la quota variabile segue i ricavi. Lo slider vale
+              per tutti gli anni previsti; per differenziarli, la riga «quota fissa» della tabella qui
+              sotto si compila anno per anno.
             </p>
           </CardHeader>
           <CardContent className="pt-0">

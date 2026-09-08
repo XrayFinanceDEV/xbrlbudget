@@ -119,15 +119,25 @@ export function splitBaseAmount(
  * — dichiarata qui perche' `lib/` non importa da `components/`.
  */
 export type CostiTableRow =
-  | { group: string; swatch: "fixed" | "variable" }
+  | { group: string; swatch?: "fixed" | "variable" }
   | { field: string; label: string; sub?: string; baseLabel: string; off?: boolean };
 
 const FORCED_NOTE = "forzato in CE Prev.";
 
 /**
- * Due gruppi, variabili prima dei fissi. Una riga si spegne quando la quota la
- * annulla — a quota 100 la parte variabile non esiste, a quota 0 la parte fissa
- * — perche' la sua percentuale di crescita non avrebbe niente su cui mordere.
+ * Tre gruppi: la quota fissa, poi le variabili, poi le fisse.
+ *
+ * Le due righe della quota fissa esistono perche' la quota e' un'ipotesi PER
+ * ANNO e il motore la applica riga per riga: lo slider la scrive su tutti gli
+ * anni insieme (`updateAll`), queste due righe la correggono anno per anno
+ * (`update`). Senza di esse un valore differenziato a mano sarebbe modificabile
+ * solo dallo slider, cioe' appiattito da un gesto che l'utente non legge come
+ * distruttivo. La colonna dell'anno base resta «—»: una quota e' un'ipotesi sul
+ * futuro, l'anno base non ne ha una.
+ *
+ * Una riga si spegne quando la quota la annulla — a quota 100 la parte variabile
+ * non esiste, a quota 0 la parte fissa — perche' la sua percentuale di crescita
+ * non avrebbe niente su cui mordere.
  */
 export function costiTableRows(
   base: CostiBase,
@@ -140,6 +150,19 @@ export function costiTableRows(
   const matNote = forced.materials ? FORCED_NOTE : undefined;
   const servNote = forced.services ? FORCED_NOTE : undefined;
   return [
+    { group: "Quota fissa, anno per anno" },
+    {
+      field: "fixed_materials_percentage",
+      label: "Materie prime · quota fissa (%)",
+      sub: matNote,
+      baseLabel: "—",
+    },
+    {
+      field: "fixed_services_percentage",
+      label: "Servizi · quota fissa (%)",
+      sub: servNote,
+      baseLabel: "—",
+    },
     { group: "Costi variabili", swatch: "variable" },
     {
       field: "variable_materials_growth_pct",

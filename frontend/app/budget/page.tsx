@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
@@ -13,19 +13,17 @@ import {
   createBudgetScenario,
   updateBudgetScenario,
   deleteBudgetScenario,
-  getBudgetAssumptions,
   createBudgetAssumptions,
   bulkUpsertAssumptions,
   generateForecast,
-  getIncomeStatement,
-  getBalanceSheet,
   getCompanyYears,
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
-import { statoResidui } from "@/lib/base-bank-debt";
-import { baseYearNote, forecastYearsFor, withDefaultsForYears } from "@/lib/budget-horizon";
 import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
-import { cn, getErrorMessage } from "@/lib/utils";
+import { getErrorMessage } from "@/lib/utils";
+import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
+import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
+import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
 import type {
   BudgetScenario,
   BudgetScenarioCreate,
@@ -33,8 +31,6 @@ import type {
   BudgetAssumptionsCreate,
   IncomeStatement,
   BalanceSheet,
-  FinancingLoanInput,
-  TemporaryDifferenceInput,
 } from "@/types/api";
 import { toast } from "sonner";
 import {
@@ -289,7 +285,7 @@ export default function BudgetPage() {
           />
         </>
       ) : (
-        <ScenarioForm
+        <ScenarioFormStartup
           companyId={selectedCompanyId}
           years={years}
           scenario={editingScenario}
@@ -854,7 +850,7 @@ function ScenariosList({
 }
 
 // Scenario Form Component
-function ScenarioForm({
+function ScenarioFormStartup({
   companyId,
   years,
   scenario,
@@ -877,30 +873,26 @@ function ScenarioForm({
   const [name, setName] = useState(scenario?.name || "");
   const [description, setDescription] = useState(scenario?.description || "");
   const [isActive, setIsActive] = useState(scenario?.is_active === 1);
-  const [numYears, setNumYears] = useState(3);
   // Testo battuto nel campo degli anni mentre ha il fuoco (`null` = mostra
   // `numYears`): vedi il commento sull'input.
   const [testoAnni, setTestoAnni] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [historicalData, setHistoricalData] = useState<
-    Record<number, { income: IncomeStatement; balance: BalanceSheet }>
-  >({});
 
-  // Base year: for an EXISTING scenario it is the stored base_year (the forecast
-  // horizon must stay aligned with the saved assumption years); only for a NEW
-  // scenario do we default to the latest available historical year. Using
-  // Math.max(...years) unconditionally misaligned the horizon when a newer year was
-  // imported/promoted after the scenario was created, dropping assumption rows on save.
-  const baseYear = scenario?.base_year ?? Math.max(...years);
-  // La chiosa e' calcolata, non scritta: su uno scenario che non parte
-  // dall'ultimo anno importato dichiara qual e' l'ultimo, invece di affermare
-  // il contrario di cio' che si legge in database.
-  const notaAnnoBase = baseYearNote(baseYear, years);
-  const scenarioId = scenario?.id ?? null;
-  const forecastYears = useMemo(
-    () => forecastYearsFor(baseYear, numYears),
-    [numYears, baseYear]
-  );
+  const {
+    baseYear,
+    notaAnnoBase,
+    numYears,
+    setNumYears,
+    forecastYears,
+    historicalYears,
+    historicalData,
+    assumptions,
+    idratato,
+    updateAssumption,
+    updateFinancingLoans,
+    updateTemporaryDifferences,
+  } = useScenarioAssumptions({ companyId, years, scenario });
+
   // Il piano e' a 3 o 5 anni, ma un vecchio scenario le cui ipotesi furono
   // salvate a una finestra spostata (la disallineatura descritta qui sotto) puo'
   // averne di piu': il tetto segue l'orizzonte davvero salvato, altrimenti il
@@ -909,244 +901,9 @@ function ScenarioForm({
   // chiuso, cioe' l'ultimo anno buttato via al primo salvataggio.
   const maxAnni = Math.max(5, numYears);
 
-  // Load historical data for display
-  useEffect(() => {
-    const loadHistoricalData = async () => {
-      const data: Record<number, { income: IncomeStatement; balance: BalanceSheet }> = {};
-      for (const year of years) {
-        try {
-          const [income, balance] = await Promise.all([
-            getIncomeStatement(companyId, year),
-            getBalanceSheet(companyId, year),
-          ]);
-          data[year] = { income, balance };
-        } catch (err) {
-          console.error(`Error loading data for year ${year}:`, err);
-        }
-      }
-      setHistoricalData(data);
-    };
-    loadHistoricalData();
-  }, [companyId, years]);
-
-  // Initialize assumptions with defaults or existing values
-  const [assumptions, setAssumptions] = useState<Record<number, Partial<BudgetAssumptionsCreate>>>(
-    {}
-  );
-  const [existingAssumptionYears, setExistingAssumptionYears] = useState<Set<number>>(new Set());
-  // Finche' le ipotesi salvate non sono atterrate, la mappa in memoria non
-  // rappresenta lo scenario: salvare in quella finestra manderebbe righe a zero
-  // al posto di quelle vere, e il bulk cancella e reinserisce. Il salvataggio
-  // resta chiuso, e resta chiuso anche se la lettura fallisce.
-  const [idratato, setIdratato] = useState(false);
-
-  // Idratazione: legge le ipotesi salvate e fissa l'orizzonte UNA volta sola.
-  // NON dipende da `forecastYears`: dipenderci significa che scrivere
-  // `numYears` fa ripartire l'effetto che riscrive `numYears`, ed e' la ragione
-  // per cui il campo «Numero di anni da prevedere» tornava indietro da solo
-  // dopo ~230 ms — il piano a 5 anni non era impostabile da nessuna schermata.
-  useEffect(() => {
-    if (scenarioId === null) {
-      // Scenario nuovo: la mappa la riempie di default l'effetto qui sotto.
-      setExistingAssumptionYears(new Set());
-      setAssumptions({});
-      setIdratato(true);
-      return;
-    }
-    let annullato = false;
-    setIdratato(false);
-    getBudgetAssumptions(companyId, scenarioId).then((data) => {
-      if (annullato) return;
-      const assumptionsMap: Record<number, Partial<BudgetAssumptionsCreate>> = {};
-      const existingYears = new Set<number>();
-      data.forEach((a) => {
-        existingYears.add(a.forecast_year);
-        assumptionsMap[a.forecast_year] = {
-          scenario_id: scenarioId,
-          forecast_year: a.forecast_year,
-          revenue_growth_pct: a.revenue_growth_pct,
-          other_revenue_growth_pct: a.other_revenue_growth_pct,
-          variable_materials_growth_pct: a.variable_materials_growth_pct,
-          fixed_materials_growth_pct: a.fixed_materials_growth_pct,
-          variable_services_growth_pct: a.variable_services_growth_pct,
-          fixed_services_growth_pct: a.fixed_services_growth_pct,
-          rent_growth_pct: a.rent_growth_pct,
-          personnel_growth_pct: a.personnel_growth_pct,
-          other_costs_growth_pct: a.other_costs_growth_pct,
-          investments: a.investments,
-          intangible_investments: a.intangible_investments,
-          tangible_investments: a.tangible_investments,
-          asset_disposal_nbv: a.asset_disposal_nbv,
-          asset_disposal_proceeds: a.asset_disposal_proceeds,
-          dso_days: a.dso_days,
-          dio_days: a.dio_days,
-          dpo_days: a.dpo_days,
-          existing_debt_repayment_years: a.existing_debt_repayment_years,
-          altri_finanz_repayment_years: a.altri_finanz_repayment_years,
-          cash_sweep_enabled: a.cash_sweep_enabled ?? false,
-          cash_sweep_min_cash: a.cash_sweep_min_cash,
-          tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
-          previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
-          receivables_short_growth_pct: a.receivables_short_growth_pct,
-          receivables_long_growth_pct: a.receivables_long_growth_pct,
-          payables_short_growth_pct: a.payables_short_growth_pct,
-          tax_rate: a.tax_rate,
-          tax_advances_paid: a.tax_advances_paid ?? 0,
-          tax_temporary_differences: a.tax_temporary_differences ?? null,
-          fixed_materials_percentage: a.fixed_materials_percentage,
-          fixed_services_percentage: a.fixed_services_percentage,
-          depreciation_rate: a.depreciation_rate,
-          depreciation_rate_intangible: a.depreciation_rate_intangible,
-          financing_amount: a.financing_amount,
-          financing_duration_years: a.financing_duration_years,
-          financing_interest_rate: a.financing_interest_rate,
-          financing_loans: a.financing_loans ?? null,
-          sp01_growth_pct: a.sp01_growth_pct,
-          sp04_growth_pct: a.sp04_growth_pct,
-          sp06e_growth_pct: a.sp06e_growth_pct,
-          sp06f_growth_pct: a.sp06f_growth_pct,
-          sp08_growth_pct: a.sp08_growth_pct,
-          sp10_growth_pct: a.sp10_growth_pct,
-          sp14_growth_pct: a.sp14_growth_pct,
-          sp16e_growth_pct: a.sp16e_growth_pct,
-          sp16f_growth_pct: a.sp16f_growth_pct,
-          sp16g_growth_pct: a.sp16g_growth_pct,
-          sp17d_growth_pct: a.sp17d_growth_pct,
-          sp17e_growth_pct: a.sp17e_growth_pct,
-          sp17f_growth_pct: a.sp17f_growth_pct,
-          sp17g_growth_pct: a.sp17g_growth_pct,
-          sp18_growth_pct: a.sp18_growth_pct,
-          sp_overrides: a.sp_overrides ?? null,
-          ce01_override: a.ce01_override,
-          ce05_override: a.ce05_override,
-          ce06_override: a.ce06_override,
-          ce07_override: a.ce07_override,
-          ce08_override: a.ce08_override,
-          ce02_override: a.ce02_override,
-          ce03_override: a.ce03_override,
-          ce03a_override: a.ce03a_override,
-          ce10_override: a.ce10_override,
-          ce11_override: a.ce11_override,
-          ce13_override: a.ce13_override,
-          ce14_override: a.ce14_override,
-          ce15_override: a.ce15_override,
-          ce16_override: a.ce16_override,
-          ce17_override: a.ce17_override,
-          ce18_override: a.ce18_override,
-          ce19_override: a.ce19_override,
-          // Overrides editable ONLY on /forecast/income — must be hydrated here too,
-          // otherwise "Salva e Calcola" (server-side delete+reinsert) drops them and
-          // the user's manual P&L edits are wiped, contradicting the documented
-          // "overrides survive the save" guarantee.
-          ce04_override: a.ce04_override,
-          ce08a_override: a.ce08a_override,
-          ce08b_override: a.ce08b_override,
-          ce08c_override: a.ce08c_override,
-          ce08d_override: a.ce08d_override,
-          ce09_override: a.ce09_override,
-          ce09a_override: a.ce09a_override,
-          ce09b_override: a.ce09b_override,
-          ce09c_override: a.ce09c_override,
-          ce09d_override: a.ce09d_override,
-          ce11b_override: a.ce11b_override,
-          ce12_override: a.ce12_override,
-          ce17a_override: a.ce17a_override,
-          ce17b_override: a.ce17b_override,
-          ce20_override: a.ce20_override,
-        };
-      });
-      // L'orizzonte e' l'ULTIMO anno salvato, non il numero di righe: su uno
-      // scenario le cui ipotesi non partono da `base_year + 1` — la
-      // disallineatura descritta a :853-856 — contare le righe accorcia il
-      // piano, e il salvataggio successivo butterebbe via l'ultimo anno.
-      // I default degli anni scoperti vanno messi QUI: questo `setAssumptions`
-      // sostituisce la mappa che l'effetto dei default aveva gia' riempito al
-      // mount, e senza riunirli il salvataggio manderebbe zero righe.
-      // Senza ipotesi salvate resta il default di prodotto, tre anni.
-      const ultimoSalvato = data.reduce(
-        (max, a) => Math.max(max, a.forecast_year),
-        baseYear
-      );
-      const nextNumYears = data.length === 0
-        ? 3
-        : Math.max(1, ultimoSalvato - baseYear);
-      setAssumptions(
-        withDefaultsForYears(
-          assumptionsMap,
-          forecastYearsFor(baseYear, nextNumYears),
-          scenarioId
-        )
-      );
-      setExistingAssumptionYears(existingYears);
-      setNumYears(nextNumYears);
-      setIdratato(true);
-    }).catch((err) => {
-      if (annullato) return;
-      // Senza questo ramo un 401 in rinnovo di token o un 500 lasciavano il
-      // form fermo su un piano a zeri del tutto plausibile, e il salvataggio
-      // successivo cancellava le ipotesi vere.
-      // Messaggio fisso, non `getErrorMessage`: su un errore di rete quello
-      // restituisce «Network Error», che non dice a chi legge ne' che cosa e'
-      // andato storto ne' che il salvataggio ora e' chiuso. Il dettaglio
-      // tecnico resta in console.
-      console.error("Error loading assumptions:", err);
-      toast.error(
-        "Impossibile leggere le ipotesi salvate: il salvataggio resta chiuso finché non ricarichi la pagina"
-      );
-    });
-    return () => {
-      annullato = true;
-    };
-  }, [scenarioId, companyId, baseYear]);
-
-  // I default degli anni previsti che non hanno ancora una riga: questo effetto
-  // reagisce all'orizzonte senza mai toccarlo. E' cio' che rende il campo
-  // «Numero di anni da prevedere» un input vero — portarlo a 5 aggiunge due
-  // righe neutre, e il salvataggio (`forecastYears.filter((y) => assumptions[y])`)
-  // le manda tutte e cinque.
-  //
-  // Non si ri-innesca da solo: `withDefaultsForYears` restituisce la mappa
-  // ricevuta quando non manca nulla, quindi React esce dall'aggiornamento.
-  useEffect(() => {
-    if (!idratato) return;
-    setAssumptions((prev) =>
-      withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined)
-    );
-  }, [idratato, forecastYears, scenarioId]);
-
   // Auto-generator state
   const [inflationRate, setInflationRate] = useState(2.5);
   const [showAutoGen, setShowAutoGen] = useState(false);
-
-  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
-    setAssumptions((prev) => ({
-      ...prev,
-      [year]: {
-        ...prev[year],
-        [field]: value,
-      },
-    }));
-  }, []);
-
-  const updateFinancingLoans = useCallback((year: number, loans: FinancingLoanInput[]) => {
-    setAssumptions((prev) => ({
-      ...prev,
-      [year]: {
-        ...prev[year],
-        financing_loans: loans.length > 0 ? loans : null,
-      },
-    }));
-  }, []);
-
-  const updateTemporaryDifferences = useCallback((year: number, lines: TemporaryDifferenceInput[]) => {
-    setAssumptions((prev) => ({
-      ...prev,
-      [year]: {
-        ...prev[year],
-        tax_temporary_differences: lines.length > 0 ? lines : null,
-      },
-    }));
-  }, []);
 
   const handleSave = async () => {
     if (!idratato) {
@@ -1227,8 +984,6 @@ function ScenarioForm({
         ? "Lettura delle ipotesi salvate in corso"
         : null,
   });
-
-  const historicalYears = [...new Set(years)].filter(y => y <= baseYear).sort((a, b) => a - b);
 
   return (
     <div>
@@ -1471,362 +1226,6 @@ function ScenarioForm({
         )}
       </div>
     </div>
-  );
-}
-
-function FinancingLoansGrid({
-  forecastYears,
-  assumptions,
-  onUpdate,
-  baseYear,
-  baseBalance,
-}: {
-  forecastYears: number[];
-  assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
-  onUpdate: (year: number, loans: FinancingLoanInput[]) => void;
-  baseYear: number;
-  baseBalance?: BalanceSheet;
-}) {
-  const updateLoan = (
-    year: number,
-    index: number,
-    field: keyof FinancingLoanInput,
-    value: string | number
-  ) => {
-    const loans = [...(assumptions[year]?.financing_loans ?? [])];
-    loans[index] = { ...loans[index], [field]: value };
-    onUpdate(year, loans);
-  };
-
-  // Il motore somma i residui di TUTTI gli anni di piano (`detailed_opening_total`)
-  // prima di confrontarli col debito bancario; l'UI ne ammette solo sul primo,
-  // ma il conteggio deve restare quello del motore.
-  const tuttiIResidui = forecastYears.flatMap(
-    (y) => assumptions[y]?.financing_loans ?? [],
-  );
-  const copertura = statoResidui(
-    baseBalance as unknown as Record<string, unknown>,
-    tuttiIResidui,
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        {/*
-          Si chiamava «Finanziamenti aggiuntivi», che si legge come «nuovi»: il
-          tester ha chiesto come mancante il dettaglio del debito ESISTENTE, che
-          esiste da mesi. Il titolo diceva il contrario di quello che la card fa.
-        */}
-        <CardTitle className="text-base">Finanziamenti — esistenti e nuovi</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Qui si dettaglia contratto per contratto <strong>sia</strong> il debito bancario
-          già in essere <strong>sia</strong> i finanziamenti futuri.
-        </p>
-        <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-          <li>
-            <strong>Residuo iniziale</strong>: quota di debito bancario già in essere
-            all&apos;anno base {baseYear}. Ammesso solo nel primo anno di piano.
-          </li>
-          <li>
-            <strong>Nuova erogazione</strong>: finanziamento acceso in quell&apos;anno.
-          </li>
-        </ul>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Ogni contratto mantiene durata, tasso, preammortamento e quota balloon autonomi.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/*
-          Il debito da coprire, live. Il numero DEVE essere quello contro cui
-          valida il motore (`base_bank_debt`, che include gli scarti fra
-          aggregato e dettagli): la formula «ovvia» `sp16a + sp17a` darebbe un
-          numero diverso, e su un bilancio abbreviato mostrerebbe come coperto
-          un piano che il server rifiuta.
-        */}
-        {baseBalance && (
-          <div className="rounded-md border border-border bg-muted/30 p-3">
-            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Debito bancario {baseYear}
-                </p>
-                <p className="font-semibold">{formatCurrency(copertura.debitoBancario)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Residui inseriti</p>
-                <p className="font-semibold">{formatCurrency(copertura.sommaResidui)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Ancora da coprire</p>
-                <p
-                  className={cn(
-                    "font-semibold",
-                    copertura.bloccante
-                      ? "text-yellow-700 dark:text-yellow-400"
-                      : copertura.attivo
-                        ? "text-green-700 dark:text-green-400"
-                        : "text-foreground",
-                  )}
-                >
-                  {formatCurrency(copertura.differenza)}
-                </p>
-              </div>
-            </div>
-
-            {/*
-              Avviso NON bloccante, e l'input resta compilabile: si compila una
-              riga alla volta, e a metà compilazione lo scarto è normale. Ma il
-              vincolo è tutto-o-niente e al centesimo, e finora non era
-              dichiarato da nessuna parte — il previsionale veniva rifiutato dal
-              server con un messaggio che l'utente non poteva prevedere.
-            */}
-            {copertura.bloccante && (
-              <p className="mt-3 flex items-start gap-2 text-xs text-yellow-700 dark:text-yellow-400">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  I residui iniziali non coprono il debito bancario dell&apos;anno base:
-                  finché la differenza non è zero al centesimo, il previsionale verrà
-                  rifiutato.
-                </span>
-              </p>
-            )}
-
-            {/*
-              Due comandi visibili per la stessa cosa, e uno dei due smette di
-              fare qualcosa senza dirlo: `ESSENTIAL_ROWS` contiene ancora
-              «Rimborso debiti bancari (anni)», che il motore IGNORA non appena
-              esiste un residuo dettagliato.
-            */}
-            {copertura.attivo && (
-              <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Con almeno un residuo iniziale valorizzato, il motore usa questo
-                  scadenzario e <strong>ignora</strong> la riga «Rimborso debiti bancari
-                  (anni)» qui sopra.
-                </span>
-              </p>
-            )}
-          </div>
-        )}
-        {forecastYears.map((year) => {
-          const loans = assumptions[year]?.financing_loans ?? [];
-          return (
-            <div key={year} className="rounded-md border border-border p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h4 className="text-sm font-semibold">{year}</h4>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onUpdate(year, [
-                    ...loans,
-                    {
-                      name: `Finanziamento ${loans.length + 2}`,
-                      amount: 1000,
-                      opening_residual: 0,
-                      duration_years: 5,
-                      interest_rate: 3,
-                      grace_years: 0,
-                      balloon_pct: 0,
-                    },
-                  ])}
-                >
-                  <Plus className="mr-1 h-4 w-4" /> Aggiungi linea
-                </Button>
-              </div>
-              {loans.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Nessuna linea aggiuntiva.</p>
-              ) : (
-                <div className="space-y-3">
-                  {loans.map((loan, index) => (
-                    <div key={index} className="rounded-md bg-muted/30 p-2">
-                    <div className="grid grid-cols-1 gap-2 md:grid-cols-4 xl:grid-cols-[1.3fr_repeat(6,minmax(7rem,1fr))_auto]">
-                      <Input
-                        value={loan.name ?? ""}
-                        placeholder="Descrizione"
-                        onChange={(event) => updateLoan(year, index, "name", event.target.value)}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1000}
-                        value={loan.opening_residual}
-                        disabled={year !== forecastYears[0]}
-                        aria-label={`Residuo iniziale finanziamento ${year}`}
-                        placeholder="Residuo iniziale"
-                        onChange={(event) => updateLoan(year, index, "opening_residual", Number(event.target.value))}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1000}
-                        value={loan.amount}
-                        aria-label={`Importo finanziamento ${year}`}
-                        placeholder="Nuova erogazione"
-                        onChange={(event) => updateLoan(year, index, "amount", Number(event.target.value))}
-                      />
-                      <Input
-                        type="number"
-                        min={1}
-                        max={50}
-                        step={1}
-                        value={loan.duration_years}
-                        aria-label={`Durata finanziamento ${year}`}
-                        placeholder="Durata"
-                        onChange={(event) => updateLoan(year, index, "duration_years", Number(event.target.value))}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.1}
-                        value={loan.interest_rate}
-                        aria-label={`Tasso finanziamento ${year}`}
-                        placeholder="Tasso %"
-                        onChange={(event) => updateLoan(year, index, "interest_rate", Number(event.target.value))}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        max={Math.max(0, Number(loan.duration_years) - 1)}
-                        step={1}
-                        value={loan.grace_years}
-                        aria-label={`Preammortamento finanziamento ${year}`}
-                        placeholder="Preamm. anni"
-                        onChange={(event) => updateLoan(year, index, "grace_years", Number(event.target.value))}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={loan.balloon_pct}
-                        aria-label={`Balloon finanziamento ${year}`}
-                        placeholder="Balloon %"
-                        onChange={(event) => updateLoan(year, index, "balloon_pct", Number(event.target.value))}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Rimuovi finanziamento ${index + 1} del ${year}`}
-                        onClick={() => onUpdate(year, loans.filter((_, loanIndex) => loanIndex !== index))}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Rata capitale ordinaria stimata: {formatCurrency((() => {
-                        const principal = Number(loan.amount || 0) + Number(loan.opening_residual || 0);
-                        const years = Math.max(1, Number(loan.duration_years || 1) - Number(loan.grace_years || 0));
-                        return principal * (1 - Number(loan.balloon_pct || 0) / 100) / years;
-                      })())}
-                    </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
-}
-
-function TaxTemporaryDifferencesGrid({
-  forecastYears,
-  assumptions,
-  onUpdate,
-}: {
-  forecastYears: number[];
-  assumptions: Record<number, Partial<BudgetAssumptionsCreate>>;
-  onUpdate: (year: number, lines: TemporaryDifferenceInput[]) => void;
-}) {
-  const updateLine = (
-    year: number,
-    index: number,
-    field: keyof TemporaryDifferenceInput,
-    value: string | number | null,
-  ) => {
-    const lines = [...(assumptions[year]?.tax_temporary_differences ?? [])];
-    lines[index] = { ...lines[index], [field]: value };
-    onUpdate(year, lines);
-  };
-
-  return (
-    <Card className="mt-4">
-      <CardHeader>
-        <CardTitle className="text-sm">Mastrino imposte anticipate e differite</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Saldo imponibile = apertura + incrementi − riversamenti. Le differenze deducibili
-          alimentano i crediti per imposte anticipate; le imponibili il fondo imposte differite.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {forecastYears.map((year) => {
-          const lines = assumptions[year]?.tax_temporary_differences ?? [];
-          const defaultRate = Number(assumptions[year]?.tax_rate ?? 0);
-          const totals = lines.reduce((acc, line) => {
-            const base = Math.max(0, Number(line.opening_amount) + Number(line.additions) - Number(line.reversals));
-            const tax = base * Number(line.tax_rate ?? defaultRate) / 100;
-            if (line.kind === "taxable") acc.liability += tax;
-            else if (line.maturity === "long") acc.longAsset += tax;
-            else acc.shortAsset += tax;
-            return acc;
-          }, { shortAsset: 0, longAsset: 0, liability: 0 });
-          return (
-            <div key={year} className="rounded-md border border-border p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h5 className="text-sm font-semibold">{year}</h5>
-                  <p className="text-[11px] text-muted-foreground">
-                    DTA breve {formatCurrency(totals.shortAsset)} · DTA lungo {formatCurrency(totals.longAsset)} · DTL {formatCurrency(totals.liability)}
-                  </p>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={() => onUpdate(year, [
-                  ...lines,
-                  {
-                    name: `Differenza temporanea ${lines.length + 1}`,
-                    kind: "deductible",
-                    maturity: "short",
-                    opening_amount: 0,
-                    additions: 0,
-                    reversals: 0,
-                    tax_rate: null,
-                  },
-                ])}>
-                  <Plus className="mr-1 h-4 w-4" /> Aggiungi differenza
-                </Button>
-              </div>
-              {lines.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Nessuna differenza temporanea.</p>
-              ) : lines.map((line, index) => (
-                <div key={index} className="mb-2 grid grid-cols-1 gap-2 rounded-md bg-muted/30 p-2 md:grid-cols-4 xl:grid-cols-[1.4fr_repeat(6,minmax(7rem,1fr))_auto]">
-                  <Input value={line.name} placeholder="Descrizione" onChange={(e) => updateLine(year, index, "name", e.target.value)} />
-                  <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={line.kind} onChange={(e) => updateLine(year, index, "kind", e.target.value)}>
-                    <option value="deductible">Deducibile (DTA)</option>
-                    <option value="taxable">Imponibile (DTL)</option>
-                  </select>
-                  <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={line.maturity} onChange={(e) => updateLine(year, index, "maturity", e.target.value)} disabled={line.kind === "taxable"}>
-                    <option value="short">Entro 12 mesi</option>
-                    <option value="long">Oltre 12 mesi</option>
-                  </select>
-                  <Input type="number" min={0} step={1000} value={line.opening_amount} placeholder="Apertura" onChange={(e) => updateLine(year, index, "opening_amount", Number(e.target.value))} />
-                  <Input type="number" min={0} step={1000} value={line.additions} placeholder="Incrementi" onChange={(e) => updateLine(year, index, "additions", Number(e.target.value))} />
-                  <Input type="number" min={0} step={1000} value={line.reversals} placeholder="Riversamenti" onChange={(e) => updateLine(year, index, "reversals", Number(e.target.value))} />
-                  <Input type="number" min={0} max={100} step={0.1} value={line.tax_rate ?? ""} placeholder={`Aliquota ${defaultRate}%`} onChange={(e) => updateLine(year, index, "tax_rate", e.target.value === "" ? null : Number(e.target.value))} />
-                  <Button type="button" variant="ghost" size="icon" aria-label={`Rimuovi differenza ${index + 1} del ${year}`} onClick={() => onUpdate(year, lines.filter((_, lineIndex) => lineIndex !== index))}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
   );
 }
 

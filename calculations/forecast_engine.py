@@ -2,8 +2,9 @@
 Forecast Calculation Engine
 Generates forecasted Income Statements and Balance Sheets based on budget assumptions
 """
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from database.models import (
     Company, FinancialYear, BalanceSheet, IncomeStatement,
@@ -16,6 +17,110 @@ from calculations.projection_common import (
     new_financing_schedule,
 )
 from calculations.ce_result import calculate_ce_result
+
+
+@dataclass
+class ForecastSource:
+    """Le letture che il calcolo richiede: scenario, anno base e i due prospetti."""
+    scenario: BudgetScenario
+    base_fy: FinancialYear
+    base_bs: BalanceSheet
+    base_inc: IncomeStatement
+
+
+@dataclass
+class ForecastYearResult:
+    """Un anno calcolato: i due prospetti come dict, piu' i `details` dichiarati."""
+    year: int
+    income_statement: Dict[str, Decimal]
+    balance_sheet: Dict[str, Decimal]
+    details: Dict[str, Any]
+
+
+@dataclass
+class ForecastError:
+    """L'errore del motore, con l'anno su cui si e' fermato (`None` = a monte del ciclo)."""
+    year: Optional[int]
+    message: str
+
+
+@dataclass
+class ForecastComputation:
+    """Esito del calcolo puro: gli anni prodotti, e l'eventuale errore che li ha fermati."""
+    years: List[ForecastYearResult]
+    error: Optional[ForecastError] = None
+
+
+class _DictView:
+    """getattr(view, 'sp09_...') su un dict del motore: previous_* senza ORM.
+
+    Nel percorso persistente `previous_inc`/`previous_bs` sono gli oggetti ORM
+    appena scritti e i calcolatori li leggono con `getattr`. Nel calcolo puro
+    l'ORM non c'e': questo adattatore lascia i calcolatori invariati. Una chiave
+    assente alza `AttributeError`, cosi' `getattr(obj, field, default)` ricade sul
+    default esattamente come su una colonna a `None`.
+    """
+    __slots__ = ("_d",)
+
+    def __init__(self, d):
+        self._d = d
+
+    def __getattr__(self, name):
+        try:
+            return self._d[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+def _split_to_cents(fixed_part: Decimal, line_value: Decimal) -> Tuple[Decimal, Decimal]:
+    """(quota fissa, quota variabile) al centesimo, con la somma pari **esatta**
+    alla riga di CE che spiegano.
+
+    La riga e' l'arrotondamento della somma, non la somma degli arrotondamenti:
+    quantizzare i due addendi separatamente li fa divergere dalla voce di un
+    centesimo, cioe' produce un dettaglio che non ricompone il proprio totale.
+    La quota fissa si arrotonda, la variabile assorbe il residuo.
+    """
+    fixed_q = Decimal(str(fixed_part)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return fixed_q, line_value - fixed_q
+
+
+def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
+    """Scenario, anno base e i due prospetti, con gli stessi controlli di
+    generate_forecast: scenario assente, base assente o incompleto, gate
+    semantico dell'infrannuale, ricavi base negativi. Alza ValueError."""
+    scenario = db.query(BudgetScenario).filter(BudgetScenario.id == scenario_id).first()
+    if not scenario:
+        raise ValueError(f"Budget scenario {scenario_id} not found")
+
+    # Get base year data (prefer full-year record)
+    from database.queries import get_fy_prefer_full
+    base_fy = get_fy_prefer_full(db, scenario.company_id, scenario.base_year)
+    if not base_fy or not base_fy.balance_sheet or not base_fy.income_statement:
+        raise ValueError(f"Base year {scenario.base_year} data not found or incomplete")
+
+    # Reuse the same semantic gate as the infrannuale engine.  A balanced
+    # aggregate with missing debt/credit detail is not safe for DSO/DPO,
+    # repayment schedules or cash-flow projection.
+    from calculations.intra_year_engine import IntraYearEngine
+    IntraYearEngine(db)._validate_forecast_source(base_fy, "Base source")
+
+    base_inc = base_fy.income_statement
+
+    # Guard: a base year with NEGATIVE sales revenue is a broken extraction
+    # (ricavi delle vendite, OIC A.1, can never be < 0). Projecting it produces
+    # garbage — applying a growth % to a negative base inverts the direction
+    # (e.g. +15% makes it MORE negative). Refuse with an honest error pointing to
+    # Rettifiche instead of generating a misleading forecast.
+    if (base_inc.ce01_ricavi_vendite or Decimal('0')) < 0:
+        raise ValueError(
+            f"Anno base {scenario.base_year}: ricavi delle vendite negativi "
+            f"({base_inc.ce01_ricavi_vendite:.0f} €) — estrazione del bilancio non valida. "
+            f"Correggi i ricavi in Rettifiche (o re-importa il bilancio) prima di generare il previsionale."
+        )
+
+    return ForecastSource(scenario=scenario, base_fy=base_fy,
+                          base_bs=base_fy.balance_sheet, base_inc=base_inc)
 
 
 def prune_out_of_plan_forecast_years(db: Session, scenario_id: int, planned_years) -> int:
@@ -363,75 +468,18 @@ class ForecastEngine:
             )
         return result
 
-    def generate_forecast(self, scenario_id: int) -> Dict:
+    def assemble_financing(self, assumptions, base_bs) -> Tuple[List[dict], bool]:
+        """(financing_loans, use_detailed_existing_schedule) — alza ValueError
+        su opening_residual fuori dal primo anno o residui != debito base.
+
+        NEW financing raised during the plan: each assumption's financing_amount
+        is a loan taken THAT year, amortised over its durata with interest on the
+        residual (shared kernel `new_financing_schedule`). Assembled ONCE from all
+        years because a single per-year assumption can't see a loan raised earlier
+        that is still being repaid. Keeps the SP debt (sp17a) and the P&L oneri
+        finanziari (ce15) in sync — the previous code added the debt but only
+        charged interest in the year of erogazione.
         """
-        Generate complete forecast for a budget scenario
-
-        Args:
-            scenario_id: Budget scenario ID
-
-        Returns:
-            Dictionary with forecast results and statistics
-        """
-        # Get scenario
-        scenario = self.db.query(BudgetScenario).filter(
-            BudgetScenario.id == scenario_id
-        ).first()
-
-        if not scenario:
-            raise ValueError(f"Budget scenario {scenario_id} not found")
-
-        # Get base year data (prefer full-year record)
-        from database.queries import get_fy_prefer_full
-        base_fy = get_fy_prefer_full(self.db, scenario.company_id, scenario.base_year)
-
-        if not base_fy or not base_fy.balance_sheet or not base_fy.income_statement:
-            raise ValueError(f"Base year {scenario.base_year} data not found or incomplete")
-
-        # Reuse the same semantic gate as the infrannuale engine.  A balanced
-        # aggregate with missing debt/credit detail is not safe for DSO/DPO,
-        # repayment schedules or cash-flow projection.
-        from calculations.intra_year_engine import IntraYearEngine
-        IntraYearEngine(self.db)._validate_forecast_source(base_fy, "Base source")
-
-        base_bs = base_fy.balance_sheet
-        base_inc = base_fy.income_statement
-
-        # Guard: a base year with NEGATIVE sales revenue is a broken extraction
-        # (ricavi delle vendite, OIC A.1, can never be < 0). Projecting it produces
-        # garbage — applying a growth % to a negative base inverts the direction
-        # (e.g. +15% makes it MORE negative). Refuse with an honest error pointing to
-        # Rettifiche instead of generating a misleading forecast.
-        if (base_inc.ce01_ricavi_vendite or Decimal('0')) < 0:
-            raise ValueError(
-                f"Anno base {scenario.base_year}: ricavi delle vendite negativi "
-                f"({base_inc.ce01_ricavi_vendite:.0f} €) — estrazione del bilancio non valida. "
-                f"Correggi i ricavi in Rettifiche (o re-importa il bilancio) prima di generare il previsionale."
-            )
-
-        # Get all assumptions for this scenario
-        assumptions = self.db.query(BudgetAssumptions).filter(
-            BudgetAssumptions.scenario_id == scenario_id
-        ).order_by(BudgetAssumptions.forecast_year).all()
-
-        if not assumptions:
-            raise ValueError(f"No assumptions found for scenario {scenario_id}")
-
-        # Un orizzonte accorciato non deve lasciare anni fantasma: il ciclo qui
-        # sotto fa l'upsert dei soli anni che hanno un'ipotesi.
-        prune_out_of_plan_forecast_years(
-            self.db, scenario_id, [a.forecast_year for a in assumptions]
-        )
-
-        forecast_years = []
-
-        # NEW financing raised during the plan: each assumption's financing_amount
-        # is a loan taken THAT year, amortised over its durata with interest on the
-        # residual (shared kernel `new_financing_schedule`). Assembled ONCE from all
-        # years because a single per-year assumption can't see a loan raised earlier
-        # that is still being repaid. Keeps the SP debt (sp17a) and the P&L oneri
-        # finanziari (ce15) in sync — the previous code added the debt but only
-        # charged interest in the year of erogazione.
         financing_loans = []
         detailed_opening_total = Decimal('0')
         first_forecast_year = assumptions[0].forecast_year
@@ -466,51 +514,139 @@ class ForecastEngine:
 
         use_detailed_existing_schedule = detailed_opening_total > 0
         if use_detailed_existing_schedule:
-            getter = lambda field: getattr(base_bs, field, None) or Decimal('0')
+            getter = lambda field_name: getattr(base_bs, field_name, None) or Decimal('0')
             base_bank_total = base_bank_debt(getter)
             if abs(base_bank_total - detailed_opening_total) > Decimal('0.01'):
                 raise ValueError(
                     "The sum of financing opening residuals must equal base-year "
                     f"bank debt ({detailed_opening_total} != {base_bank_total})"
                 )
+        return financing_loans, use_detailed_existing_schedule
 
-        # Generate forecast for each year
-        for idx, assumption in enumerate(assumptions):
-            year_offset = assumption.forecast_year - scenario.base_year
+    def compute_forecast(
+        self,
+        source: ForecastSource,
+        assumptions: List[BudgetAssumptions],
+        *,
+        stop_on_error: bool = True,
+    ) -> ForecastComputation:
+        """Il ciclo di generate_forecast senza persistenza.
 
-            # Calculate forecasted income statement
-            forecast_inc = self._calculate_income_statement(
-                base_inc=base_inc,
-                assumption=assumption,
-                previous_inc=forecast_years[-1]['income_statement'] if forecast_years else base_inc,
-                previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs,
-                financing_loans=financing_loans
-            )
-            forecast_inc = self._normalize_income_statement_cents(forecast_inc)
+        Con `stop_on_error=False` l'errore del motore ferma il ciclo e resta in
+        `error`, gli anni gia' calcolati in `years`; con `True` (default) alza
+        come oggi, cosi' il percorso persistente non cambia comportamento.
+        """
+        if not assumptions:
+            raise ValueError(f"No assumptions found for scenario {source.scenario.id}")
 
-            # Calculate forecasted balance sheet
-            forecast_bs = self._calculate_balance_sheet(
-                base_bs=base_bs,
-                base_inc=base_inc,
-                forecast_inc=forecast_inc,
-                assumption=assumption,
-                previous_bs=forecast_years[-1]['balance_sheet'] if forecast_years else base_bs,
-                year_offset=year_offset,
-                financing_loans=financing_loans,
-                use_detailed_existing_schedule=use_detailed_existing_schedule,
-            )
-            forecast_bs = self._normalize_balance_sheet_cents(forecast_bs)
+        try:
+            financing_loans, use_detailed = self.assemble_financing(assumptions, source.base_bs)
+        except ValueError as e:
+            if stop_on_error:
+                raise
+            return ForecastComputation(years=[], error=ForecastError(year=None, message=str(e)))
 
+        results: List[ForecastYearResult] = []
+        # Growth rates apply YEAR OVER YEAR: the first forecast year reads the
+        # base year, every later one reads the year just computed.
+        prev_inc = source.base_inc
+        prev_bs = source.base_bs
+        for assumption in assumptions:
+            details: Dict[str, Any] = {}
+            try:
+                forecast_inc = self._calculate_income_statement(
+                    base_inc=source.base_inc,
+                    assumption=assumption,
+                    previous_inc=prev_inc,
+                    previous_bs=prev_bs,
+                    financing_loans=financing_loans,
+                    details=details,
+                )
+                forecast_inc = self._normalize_income_statement_cents(forecast_inc)
+                forecast_bs = self._calculate_balance_sheet(
+                    base_bs=source.base_bs,
+                    base_inc=source.base_inc,
+                    forecast_inc=forecast_inc,
+                    assumption=assumption,
+                    previous_bs=prev_bs,
+                    year_offset=assumption.forecast_year - source.scenario.base_year,
+                    financing_loans=financing_loans,
+                    use_detailed_existing_schedule=use_detailed,
+                    details=details,
+                )
+                forecast_bs = self._normalize_balance_sheet_cents(forecast_bs)
+            except ValueError as e:
+                if stop_on_error:
+                    raise
+                return ForecastComputation(
+                    years=results,
+                    error=ForecastError(year=assumption.forecast_year, message=str(e)),
+                )
+
+            # I due addendi stanno alla scala del centesimo della riga che
+            # riepilogano, e ci ricompongono esatti. Con un override restano
+            # `None`: la scomposizione non esiste, e dichiararla direbbe il falso.
+            for line, fixed_key, variable_key in (
+                ('ce05_materie_prime', 'ce05_fixed', 'ce05_variable'),
+                ('ce06_servizi', 'ce06_fixed', 'ce06_variable'),
+            ):
+                if details.get(fixed_key) is None:
+                    continue
+                details[fixed_key], details[variable_key] = _split_to_cents(
+                    details[fixed_key], forecast_inc[line]
+                )
+
+            results.append(ForecastYearResult(
+                year=assumption.forecast_year,
+                income_statement=forecast_inc,
+                balance_sheet=forecast_bs,
+                details=details,
+            ))
+            prev_inc = _DictView(forecast_inc)
+            prev_bs = _DictView(forecast_bs)
+
+        return ForecastComputation(years=results)
+
+    def generate_forecast(self, scenario_id: int) -> Dict:
+        """
+        Generate complete forecast for a budget scenario
+
+        Args:
+            scenario_id: Budget scenario ID
+
+        Returns:
+            Dictionary with forecast results and statistics
+        """
+        source = load_forecast_source(self.db, scenario_id)
+
+        # Get all assumptions for this scenario
+        assumptions = self.db.query(BudgetAssumptions).filter(
+            BudgetAssumptions.scenario_id == scenario_id
+        ).order_by(BudgetAssumptions.forecast_year).all()
+
+        if not assumptions:
+            raise ValueError(f"No assumptions found for scenario {scenario_id}")
+
+        # Un orizzonte accorciato non deve lasciare anni fantasma: il ciclo qui
+        # sotto fa l'upsert dei soli anni che hanno un'ipotesi.
+        prune_out_of_plan_forecast_years(
+            self.db, scenario_id, [a.forecast_year for a in assumptions]
+        )
+
+        computation = self.compute_forecast(source, assumptions, stop_on_error=True)
+
+        forecast_years = []
+        for result in computation.years:
             # Get or create forecast year
             fy = self.db.query(ForecastYear).filter(
                 ForecastYear.scenario_id == scenario_id,
-                ForecastYear.year == assumption.forecast_year
+                ForecastYear.year == result.year
             ).first()
 
             if not fy:
                 fy = ForecastYear(
                     scenario_id=scenario_id,
-                    year=assumption.forecast_year
+                    year=result.year
                 )
                 self.db.add(fy)
                 self.db.flush()
@@ -522,11 +658,11 @@ class ForecastEngine:
 
             if existing_bs:
                 # Update existing
-                for field, value in forecast_bs.items():
-                    setattr(existing_bs, field, value)
+                for field_name, value in result.balance_sheet.items():
+                    setattr(existing_bs, field_name, value)
             else:
                 # Create new
-                new_bs = ForecastBalanceSheet(forecast_year_id=fy.id, **forecast_bs)
+                new_bs = ForecastBalanceSheet(forecast_year_id=fy.id, **result.balance_sheet)
                 self.db.add(new_bs)
                 self.db.flush()
                 existing_bs = new_bs
@@ -538,17 +674,17 @@ class ForecastEngine:
 
             if existing_inc:
                 # Update existing
-                for field, value in forecast_inc.items():
-                    setattr(existing_inc, field, value)
+                for field_name, value in result.income_statement.items():
+                    setattr(existing_inc, field_name, value)
             else:
                 # Create new
-                new_inc = ForecastIncomeStatement(forecast_year_id=fy.id, **forecast_inc)
+                new_inc = ForecastIncomeStatement(forecast_year_id=fy.id, **result.income_statement)
                 self.db.add(new_inc)
                 self.db.flush()
                 existing_inc = new_inc
 
             forecast_years.append({
-                'year': assumption.forecast_year,
+                'year': result.year,
                 'forecast_year_obj': fy,
                 'balance_sheet': existing_bs,
                 'income_statement': existing_inc
@@ -560,8 +696,8 @@ class ForecastEngine:
         return {
             'success': True,
             'scenario_id': scenario_id,
-            'scenario_name': scenario.name,
-            'base_year': scenario.base_year,
+            'scenario_name': source.scenario.name,
+            'base_year': source.scenario.base_year,
             'forecast_years': [fy['year'] for fy in forecast_years],
             'years_generated': len(forecast_years)
         }
@@ -612,10 +748,14 @@ class ForecastEngine:
         assumption: BudgetAssumptions,
         previous_inc,
         previous_bs=None,
-        financing_loans=None
+        financing_loans=None,
+        details=None,
     ) -> Dict:
         """
         Calculate forecasted income statement based on assumptions
+
+        `details`, se passato, riceve la scomposizione fisso/variabile di ce05 e
+        ce06 (`None` su entrambe le quote quando la riga e' sotto override).
         """
         # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
         # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
@@ -642,30 +782,38 @@ class ForecastEngine:
         # Materials
         if assumption.ce05_override is not None:
             ce05 = assumption.ce05_override
+            # Un override sostituisce la riga intera: la scomposizione fisso/variabile
+            # non esiste piu', e dichiararla a zero direbbe il falso.
+            ce05_fixed_part = ce05_variable_part = None
         else:
             base_materials = _pinc('ce05_materie_prime')
             fixed_pct_materials = assumption.fixed_materials_percentage / Decimal('100')
             variable_pct_materials = Decimal('1') - fixed_pct_materials
             variable_materials = base_materials * variable_pct_materials
             fixed_materials = base_materials * fixed_pct_materials
-            ce05 = (
-                variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100')) +
-                fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
-            )
+            ce05_variable_part = variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100'))
+            ce05_fixed_part = fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
+            ce05 = ce05_variable_part + ce05_fixed_part
 
         # Services
         if assumption.ce06_override is not None:
             ce06 = assumption.ce06_override
+            ce06_fixed_part = ce06_variable_part = None
         else:
             base_services = _pinc('ce06_servizi')
             fixed_pct_services = assumption.fixed_services_percentage / Decimal('100')
             variable_pct_services = Decimal('1') - fixed_pct_services
             variable_services = base_services * variable_pct_services
             fixed_services = base_services * fixed_pct_services
-            ce06 = (
-                variable_services * (Decimal('1') + assumption.variable_services_growth_pct / Decimal('100')) +
-                fixed_services * (Decimal('1') + assumption.fixed_services_growth_pct / Decimal('100'))
-            )
+            ce06_variable_part = variable_services * (Decimal('1') + assumption.variable_services_growth_pct / Decimal('100'))
+            ce06_fixed_part = fixed_services * (Decimal('1') + assumption.fixed_services_growth_pct / Decimal('100'))
+            ce06 = ce06_variable_part + ce06_fixed_part
+
+        if details is not None:
+            details['ce05_fixed'] = ce05_fixed_part
+            details['ce05_variable'] = ce05_variable_part
+            details['ce06_fixed'] = ce06_fixed_part
+            details['ce06_variable'] = ce06_variable_part
 
         # Rent/Godimento beni
         if assumption.ce07_override is not None:
@@ -871,11 +1019,16 @@ class ForecastEngine:
         year_offset: int = 1,
         financing_loans=None,
         use_detailed_existing_schedule: bool = False,
+        details=None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
         Builds debt detail bottom-up: financial debts from repayment schedule,
         trade payables from DPO, other operating debts carried forward.
+
+        `details`, se passato, riceve i giorni di rotazione effettivamente
+        applicati (`dso_applied`, `dio_applied`, `dpo_applied`) — quelli espliciti
+        dell'ipotesi o quelli dedotti dall'anno base.
         """
         D = Decimal
         ZERO = D('0')
@@ -954,6 +1107,8 @@ class ForecastEngine:
                 - _base('sp06f_imposte_anticipate_breve'),
             )
             dso = (base_sp06_trade / base_revenue * DAYS) if base_revenue > 0 else ZERO
+        if details is not None:
+            details['dso_applied'] = dso
         sp06_trade = forecast_revenue * dso / DAYS
         sp06 = sp06_trade + sp06e + sp06f
 
@@ -965,6 +1120,8 @@ class ForecastEngine:
             # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
             base_sp05 = _base('sp05_rimanenze')
             dio = (base_sp05 / base_revenue * DAYS) if base_revenue > 0 else ZERO
+        if details is not None:
+            details['dio_applied'] = dio
         sp05 = forecast_revenue * dio / DAYS
 
         # Long-term receivables, other current assets
@@ -1062,6 +1219,8 @@ class ForecastEngine:
             # Auto-derive DPO from base year: base_sp16d / base_purchases * 360
             base_sp16d = _base('sp16d_debiti_fornitori_breve')
             dpo = (base_sp16d / base_purchases * DAYS) if base_purchases > 0 else ZERO
+        if details is not None:
+            details['dpo_applied'] = dpo
         sp16d = forecast_purchases * dpo / DAYS
 
         # Long-term trade payables

@@ -229,3 +229,28 @@ class ForecastGenerationResult(BaseModel):
         ),
     )
     generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ===== Forecast Preview (in-memory, no persistence) =====
+
+class ForecastPreviewError(BaseModel):
+    """L'errore del motore durante l'anteprima, con l'anno su cui si e' fermato."""
+    year: Optional[int] = None
+    message: str
+
+
+class ForecastPreviewYear(BaseModel):
+    """Un anno calcolato in memoria, con i due prospetti e i dettagli dichiarati."""
+    year: int
+    income_statement: Dict[str, Any]
+    balance_sheet: Dict[str, Any]
+    details: Dict[str, Any]
+
+
+class ForecastPreviewResponse(BaseModel):
+    """Risposta di `POST /scenarios/{id}/preview`: 200 anche a calcolo interrotto,
+    con gli anni gia' prodotti e `error` valorizzato."""
+    scenario_id: int
+    base_year: int
+    forecast_years: List[ForecastPreviewYear]
+    error: Optional[ForecastPreviewError] = None

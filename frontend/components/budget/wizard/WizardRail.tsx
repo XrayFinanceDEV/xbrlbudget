@@ -8,19 +8,9 @@ import type { JSX } from "react";
 import { Check } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { WIZARD_STEPS, type WizardStep, type WizardStepKey } from "@/lib/budget-wizard-steps";
+import { WIZARD_STEPS, groupWizardSteps, type WizardStepKey } from "@/lib/budget-wizard-steps";
 
-interface StepGroup {
-  group: WizardStep["group"];
-  steps: WizardStep[];
-}
-
-const GROUPS: StepGroup[] = WIZARD_STEPS.reduce<StepGroup[]>((acc, step) => {
-  const last = acc[acc.length - 1];
-  if (last && last.group === step.group) last.steps.push(step);
-  else acc.push({ group: step.group, steps: [step] });
-  return acc;
-}, []);
+const GROUPS = groupWizardSteps(WIZARD_STEPS);
 
 export function WizardRail(props: {
   active: WizardStepKey;

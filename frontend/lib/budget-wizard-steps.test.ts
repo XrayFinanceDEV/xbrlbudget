@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEAD_FIELDS, STEP_FIELDS, WIZARD_STEPS, nextStep, prevStep,
-  primaryLabel, stepForErrorMessage, stepStorageKey,
+  DEAD_FIELDS, STEP_FIELDS, WIZARD_STEPS, groupWizardSteps, nextStep, prevStep,
+  primaryLabel, stepForErrorMessage, stepStorageKey, type WizardStep,
 } from "./budget-wizard-steps";
 
 describe("budget-wizard-steps", () => {
@@ -35,5 +35,24 @@ describe("budget-wizard-steps", () => {
     expect(stepForErrorMessage("Unfunded financing requirement 84,120.00: add ...")).toBe("pregresso-nuovo");
     expect(stepForErrorMessage("altro")).toBe("imposte");
     expect(stepStorageKey(12)).toBe("budget-wizard-step:12");
+  });
+  it("raggruppa per identita' di gruppo, non per vicinanza (I3)", () => {
+    // Fixture deliberatamente non contigua: A, B, A. Un raggruppamento che si
+    // fonde solo col vicino precedente produrrebbe due gruppi "A".
+    const steps: WizardStep[] = [
+      { n: 1, key: "scenario", title: "Uno", subtitle: "", group: "Impostazione" },
+      { n: 2, key: "fatturato", title: "Due", subtitle: "", group: "Conto economico" },
+      { n: 3, key: "costi", title: "Tre", subtitle: "", group: "Impostazione" },
+    ];
+    const grouped = groupWizardSteps(steps);
+    expect(grouped).toHaveLength(2);
+    expect(grouped.map((g) => g.group)).toEqual(["Impostazione", "Conto economico"]);
+    expect(grouped[0].steps.map((s) => s.key)).toEqual(["scenario", "costi"]);
+    expect(grouped[1].steps.map((s) => s.key)).toEqual(["fatturato"]);
+  });
+  it("sui sette passi veri produce i tre gruppi noti, in ordine", () => {
+    const grouped = groupWizardSteps(WIZARD_STEPS);
+    expect(grouped.map((g) => g.group)).toEqual(["Impostazione", "Conto economico", "Stato patrimoniale"]);
+    expect(grouped.reduce((n, g) => n + g.steps.length, 0)).toBe(7);
   });
 });

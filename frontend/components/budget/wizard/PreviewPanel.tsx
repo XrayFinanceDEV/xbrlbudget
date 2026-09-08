@@ -3,42 +3,23 @@
 // Renders the engine-computed preview rows (lib/budget-preview-rows.ts) for
 // one wizard step. Presentational only: every number here already came out
 // of POST /scenarios/{id}/preview — nothing is derived in this component.
+// What to show for a cell (value vs "—", pct vs days, the note) and the
+// per-kind row class are decided in lib/budget-preview-cell.ts, testable
+// without a DOM.
 import type { JSX, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import type { PreviewCell, PreviewRow, PreviewRowKind } from "@/lib/budget-preview-rows";
-
-function rowClass(kind: PreviewRowKind): string {
-  switch (kind) {
-    case "sub":
-      return "text-muted-foreground text-xs";
-    case "total":
-      return "font-semibold border-t border-border bg-muted/40";
-    case "kpi":
-      return "font-semibold";
-    default:
-      return "";
-  }
-}
+import { describeCell, rowClass } from "@/lib/budget-preview-cell";
+import type { PreviewCell, PreviewRow } from "@/lib/budget-preview-rows";
 
 function Cell({ cell }: { cell: PreviewCell }): JSX.Element {
-  if (cell.value === null) {
-    return (
-      <td className="whitespace-nowrap px-2 py-1 text-right align-top" title={cell.note}>
-        <div className="text-muted-foreground">—</div>
-        {cell.note && <div className="text-[11px] italic text-muted-foreground">{cell.note}</div>}
-      </td>
-    );
-  }
-  const hasPct = cell.pct !== undefined && cell.pct !== null;
-  const hasDays = cell.days !== undefined && cell.days !== null;
+  const { main, sub, note } = describeCell(cell);
   return (
-    <td className="whitespace-nowrap px-2 py-1 text-right align-top">
-      <div>{formatCurrency(cell.value)}</div>
-      {hasPct && <div className="text-[11px] text-muted-foreground">{formatPercentage(cell.pct! / 100)}</div>}
-      {!hasPct && hasDays && <div className="text-[11px] text-muted-foreground">{cell.days} gg</div>}
+    <td className="whitespace-nowrap px-2 py-1 text-right align-top" title={note ?? undefined}>
+      <div className={cell.value === null ? "text-muted-foreground" : undefined}>{main}</div>
+      {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
+      {note && <div className="text-[11px] italic text-muted-foreground">{note}</div>}
     </td>
   );
 }

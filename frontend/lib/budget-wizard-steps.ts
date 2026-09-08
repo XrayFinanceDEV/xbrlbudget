@@ -51,6 +51,22 @@ export const DEAD_FIELDS = [
   "interest_rate_receivables", "interest_rate_payables",
 ] as const;
 
+export interface WizardStepGroup { group: WizardStep["group"]; steps: WizardStep[] }
+
+/** Raggruppa per identita' di `group`, non per vicinanza nell'elenco: due
+ *  passi con lo stesso `group` finiscono nello stesso gruppo anche se un
+ *  passo di un altro gruppo li separa. L'ordine dei gruppi e' quello della
+ *  prima comparsa. */
+export function groupWizardSteps(steps: readonly WizardStep[]): WizardStepGroup[] {
+  const byGroup = new Map<WizardStep["group"], WizardStep[]>();
+  for (const step of steps) {
+    const existing = byGroup.get(step.group);
+    if (existing) existing.push(step);
+    else byGroup.set(step.group, [step]);
+  }
+  return Array.from(byGroup, ([group, groupSteps]) => ({ group, steps: groupSteps }));
+}
+
 export function primaryLabel(step: WizardStepKey): string {
   return step === "imposte" ? "Salva e calcola previsionale" : "Avanti";
 }

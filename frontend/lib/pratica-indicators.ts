@@ -250,9 +250,19 @@ export function scoreIndicator(
     // ora dice la stessa cosa: 0,5, «non lo so».
     //
     // Il dissesto di un patrimonio netto negativo NON sparisce dal conteggio:
-    // `indipendenza`, `ms` e `copertura_immob` vanno tutti a zero da soli, e
-    // sono tre «oltre soglia» su un fatto misurato. Contarlo una quarta volta
-    // con un rapporto privo di significato non aggiungeva informazione.
+    // `indipendenza` e `ms` vanno a zero da soli, e sono due «oltre soglia» su
+    // un fatto misurato. Contarlo una terza volta con un rapporto privo di
+    // significato non aggiungeva informazione.
+    //
+    // `copertura_immob` NON e' fra questi, e la versione precedente di questo
+    // commento diceva il falso includendolo: vale `(PN + debiti a lungo) /
+    // immobilizzazioni`, quindi con debiti a lungo ampi il suo punteggio e' 1
+    // anche a patrimonio netto negativo — misurato, PN -100.000 e sp17 500.000
+    // su 200.000 di immobilizzazioni danno 200% e punteggio pieno. Il conteggio
+    // degli «oltre» scende quindi di due, non di uno, e le bande di
+    // `computeCrisisRating` (0 / <=2 / 3 / <=5 / <=6 / <=7) possono spostare la
+    // classe di rischio. E' voluto: un'azienda senza debito oneroso non deve
+    // essere contata come «oltre soglia» proprio per l'assenza di debito.
     case "roe":
       if (ind._equity_raw <= 0) return 0.5;
       return linearScore(ind.roe, 0, 12);

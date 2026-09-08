@@ -1,8 +1,8 @@
 # Review tester — Lotto 2: navigazione e scopribilità
 
 **Data:** 2026-08-31
-**Stato:** Design approvato, **con una decisione aperta** (§D6, da confermare prima di
-implementare I4)
+**Stato:** Design approvato. La decisione aperta §D6 e' stata **chiusa il 2026-09-08**: I4 non
+si fa (vedi §D6).
 **Area:** frontend. `components/pratica/PraticaActionBar.tsx`,
 `contexts/PraticaActionContext.tsx`, `app/pratica/page.tsx`, `app/budget/page.tsx`,
 `components/pratica/StampaContent.tsx`. **Nessuna modifica a DB, motori o endpoint.**
@@ -76,9 +76,9 @@ utile della pagina è annunciata col carattere più piccolo della pagina.
 | D3 | Le due tab Rettifiche portano uno **stato visibile** «da confermare / confermata» | L'informazione esiste già nel context: manca solo di essere mostrata |
 | D4 | La card diventa **«Finanziamenti — esistenti e nuovi»**, con il debito bancario dell'anno base e il residuo ancora da coprire mostrati **live** | La funzione c'è: quello che manca è dire che c'è, e dire quando la somma non torna **prima** che il backend risponda con un errore |
 | D5 | La frase sul CE Previsionale si ingrandisce e si stacca dal fondo pagina | Un rimando è utile quanto è visibile |
-| **D6** | **APERTA** — dove vive «Prosegui al Budget» | vedi sotto |
+| **D6** | **CHIUSA 2026-09-08** — «Prosegui al Budget» resta solo sulla Stampa | vedi sotto |
 
-### D6 — decisione aperta
+### D6 — decisione chiusa il 2026-09-08
 
 Il tester scrive: «non ha senso che per passare al budget bisogna per forza stampare
 l'infrannuale e fare i commenti AI». **Ha ragione a metà, e la metà giusta conta.**
@@ -90,9 +90,13 @@ registrata **solo** dentro `StampaContent` (`components/pratica/StampaContent.ts
 step `budget` solo con `gates.budgetScenario`, cioè solo quando quello scenario esiste già
 (`lib/pratica-steps.ts:69`, `:116`).
 
-**Raccomandazione:** rendere l'azione disponibile anche dallo step **Indicatori**, lasciandola
-dov'è sulla Stampa. Non spostarla: la Stampa resta il posto naturale per chi segue il percorso
-per intero.
+**Raccomandazione (non accolta):** rendere l'azione disponibile anche dallo step **Indicatori**,
+lasciandola dov'è sulla Stampa.
+
+> **DECISIONE DEL PROPRIETARIO, 2026-09-08: no.** Al Budget si va **solo dopo l'anteprima di
+> stampa dell'infrannuale.** `promote` cancella il `FinancialYear` annuale dell'anno, e vedere
+> l'output prima di distruggere qualcosa è parte del percorso, non un attrito da togliere. I4
+> non si implementa e la issue #17 è chiusa come non voluta.
 
 **Perché serve un tuo assenso esplicito prima di toccarla.** `promote` è **distruttivo**:
 cancella il `FinancialYear` annuale già esistente per quell'azienda e quell'anno, con SP e CE
@@ -159,15 +163,18 @@ motivo del blocco è leggibile senza arrivare in fondo alla pagina.
    motore **ignora** non appena esiste un residuo dettagliato. Va detto in UI, altrimenti
    restano due comandi visibili per la stessa cosa e uno dei due non fa nulla, in silenzio.
 
-### I4 — «Prosegui al Budget» anche da Indicatori — *subordinato a D6*
+### I4 — «Prosegui al Budget» anche da Indicatori — **NON SI FA**
 
-Da implementare **solo dopo conferma esplicita**. L'azione è già incapsulata in `handlePromote`
-(`components/pratica/StampaContent.tsx:305-357`), quindi tecnicamente si tratta di registrarla
-come primario anche sullo step `results`. Il riuso dello scenario esistente c'è già
-(`:323-333`: doppio click o ritorno sui propri passi non generano due scenari).
+Chiusa il 2026-09-08 dalla decisione §D6: al Budget si va solo dopo l'anteprima di stampa
+dell'infrannuale, perché `promote` è distruttivo e l'output va visto prima. La issue #17 è
+chiusa come non voluta.
 
-Se confermata, aggiungere una conferma esplicita che nomini la conseguenza distruttiva quando
-esiste già un `FinancialYear` annuale per quell'anno.
+> Emerso lavorandoci, e vale se un giorno la decisione cambia: la conferma «esiste già un
+> bilancio annuale per quell'anno» **non è implementabile con l'API di oggi**.
+> `GET /companies/{id}/years` (`backend/app/api/v1/companies.py:142-156`) ha
+> `response_model=List[int]` e restituisce i soli anni deduplicati, senza `period_months`:
+> nell'infrannuale l'anno parziale è sempre in quell'elenco, quindi la conferma scatterebbe
+> **sempre** — e un dialogo che compare sempre si impara a chiudere senza leggere.
 
 ### I5 — Frase sul CE Previsionale
 
@@ -194,4 +201,4 @@ testo a taglia piena, un riquadro leggero, e il link reso come tale. Il contenut
   entrare nel percorso. Il pezzo si sposta, e sparisce, nella spec 04.
 - Non tocca la struttura delle ipotesi budget (economiche/patrimoniali, fisso/variabile,
   dual-write): **outstanding** per decisione del 31/08.
-- Non implementa I4 senza il tuo assenso su D6.
+- Non implementa I4: §D6 l'ha esclusa il 2026-09-08.

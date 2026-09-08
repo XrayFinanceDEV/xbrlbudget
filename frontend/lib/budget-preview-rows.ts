@@ -4,6 +4,8 @@
  * restituito: qui non si deriva nulla (spec 2026-09-08 §7).
  */
 import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeStatement } from "@/types/api";
+import type { HistoricalData } from "@/lib/budget-trend";
+import { computeAutoDays } from "@/lib/budget-turnover";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -36,6 +38,61 @@ export function ceAggregates(income: Record<string, unknown>): {
   const ro = mol - amm;
   const ebt = ro + fin;
   return { vp, main, alt, amm, fin, mol, ro, ebt };
+}
+
+/**
+ * L'anteprima del passo Scenario (Task 11 §1): niente chiamata a `/preview`,
+ * solo un recap del bilancio storico gia' caricato — ricavi, incidenza % di
+ * ce05/ce06/ce08 sui ricavi, il MOL semplificato dato dal brief e i giorni
+ * `computeAutoDays` per DSO/DIO/DPO. `historicalYears[0]` fa da colonna
+ * "base" (il primo anno disponibile in archivio) e il resto degli anni
+ * storici, base compreso l'anno base vero e proprio, sono le colonne
+ * `years`: nessun anno e' mostrato due volte.
+ */
+export function rowsAnnoBase(historicalYears: number[], historical: HistoricalData): PreviewRow[] {
+  if (historicalYears.length === 0) return [];
+  const [primoAnno, ...restoAnni] = historicalYears;
+  const baseEntry = historical[primoAnno];
+  const restEntries = restoAnni.map((y) => historical[y]);
+
+  const revenueOf = (e: HistoricalData[number] | undefined): number | null => (e ? num(e.income.ce01_ricavi_vendite) : null);
+
+  const incidenceRow = (key: string, label: string, field: keyof IncomeStatement): PreviewRow => {
+    const cellFor = (e: HistoricalData[number] | undefined): PreviewCell => {
+      if (!e) return { value: null };
+      const v = num(e.income[field]);
+      return { value: v, pct: pctOf(v, num(e.income.ce01_ricavi_vendite)) };
+    };
+    return row(key, label, "value", cellFor(baseEntry), restEntries.map(cellFor));
+  };
+
+  // MOL = ce01+ce04-ce05-ce06-ce07-ce08-ce12 (Task 11 §1): la formula del
+  // brief, piu' semplice della cascata di ceAggregates perche' qui non c'e'
+  // bisogno di scorporare rimanenze/accantonamenti dal solo storico.
+  const molOf = (e: HistoricalData[number] | undefined): number | null => {
+    if (!e) return null;
+    const i = e.income;
+    return num(i.ce01_ricavi_vendite) + num(i.ce04_altri_ricavi) - num(i.ce05_materie_prime)
+      - num(i.ce06_servizi) - num(i.ce07_godimento_beni) - num(i.ce08_costi_personale) - num(i.ce12_oneri_diversi);
+  };
+
+  const daysRow = (key: string, label: string, kind: "dso" | "dio" | "dpo"): PreviewRow => {
+    const cellFor = (e: HistoricalData[number] | undefined): PreviewCell =>
+      ({ value: null, days: e ? computeAutoDays(kind, e.income, e.balance) : null });
+    return row(key, label, "value", cellFor(baseEntry), restEntries.map(cellFor));
+  };
+
+  return [
+    row("ricavi", "Ricavi delle vendite", "kpi",
+      { value: revenueOf(baseEntry) }, restEntries.map((e) => ({ value: revenueOf(e) }))),
+    incidenceRow("ce05", "Materie prime", "ce05_materie_prime"),
+    incidenceRow("ce06", "Servizi", "ce06_servizi"),
+    incidenceRow("ce08", "Personale", "ce08_costi_personale"),
+    row("mol", "MOL", "kpi", { value: molOf(baseEntry) }, restEntries.map((e) => ({ value: molOf(e) }))),
+    daysRow("dso", "Giorni incasso clienti (DSO)", "dso"),
+    daysRow("dio", "Giorni rotazione magazzino (DIO)", "dio"),
+    daysRow("dpo", "Giorni pagamento fornitori (DPO)", "dpo"),
+  ];
 }
 
 export function rowsFatturato(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {

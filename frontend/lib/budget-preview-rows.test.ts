@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types/api";
+import type { HistoricalData } from "@/lib/budget-trend";
+import { computeAutoDays } from "@/lib/budget-turnover";
 import {
-  rowsAltreVociCe, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte, rowsPregressoNuovo,
+  rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte, rowsPregressoNuovo,
   unfundedFromError,
 } from "./budget-preview-rows";
 
@@ -149,5 +151,76 @@ describe("rowsPregressoNuovo / unfundedFromError", () => {
   });
   it("year non nullo ma messaggio senza importo riconoscibile -> null, non lancia", () => {
     expect(unfundedFromError({ year: 2028, message: "Errore generico senza importo" })).toBeNull();
+  });
+});
+
+describe("rowsAnnoBase", () => {
+  const inc2023 = {
+    ce01_ricavi_vendite: "1000", ce04_altri_ricavi: "50", ce05_materie_prime: "400",
+    ce06_servizi: "200", ce07_godimento_beni: "30", ce08_costi_personale: "150", ce12_oneri_diversi: "20",
+  } as unknown as IncomeStatement;
+  const bal2023 = {
+    sp05_rimanenze: "120", sp06_crediti_breve: "300", sp06e_crediti_tributari_breve: "50",
+    sp06f_imposte_anticipate_breve: "10", sp16d_debiti_fornitori_breve: "180",
+  } as unknown as BalanceSheet;
+  const inc2024 = {
+    ...inc2023, ce01_ricavi_vendite: "1100", ce05_materie_prime: "430",
+  } as unknown as IncomeStatement;
+  const bal2024 = { ...bal2023, sp06_crediti_breve: "330" } as unknown as BalanceSheet;
+  const historical: HistoricalData = {
+    2023: { income: inc2023, balance: bal2023 },
+    2024: { income: inc2024, balance: bal2024 },
+  };
+
+  it("[] senza anni storici, e non lancia", () => {
+    expect(rowsAnnoBase([], historical)).toEqual([]);
+  });
+
+  it("il primo anno storico fa da colonna base, il resto (anno base incluso) da colonne years", () => {
+    const rows = rowsAnnoBase([2023, 2024], historical);
+    const ricavi = rows.find((r) => r.key === "ricavi")!;
+    expect(ricavi.base.value).toBe(1000);
+    expect(ricavi.years).toEqual([{ value: 1100 }]);
+  });
+
+  it("incidenza % di ce05/ce06/ce08 sui ricavi dello stesso anno", () => {
+    const rows = rowsAnnoBase([2023, 2024], historical);
+    const ce05 = rows.find((r) => r.key === "ce05")!;
+    expect(ce05.base).toMatchObject({ value: 400, pct: 40 });
+    expect(ce05.years[0].value).toBe(430);
+    expect(ce05.years[0].pct).toBeCloseTo((430 / 1100) * 100, 6);
+  });
+
+  it("MOL = ce01+ce04-ce05-ce06-ce07-ce08-ce12", () => {
+    const rows = rowsAnnoBase([2023, 2024], historical);
+    const mol = rows.find((r) => r.key === "mol")!;
+    expect(mol.base.value).toBe(1000 + 50 - 400 - 200 - 30 - 150 - 20);
+    expect(mol.years[0].value).toBe(1100 + 50 - 430 - 200 - 30 - 150 - 20);
+  });
+
+  it("giorni DSO/DIO/DPO sono quelli di computeAutoDays, valore assente", () => {
+    const rows = rowsAnnoBase([2023, 2024], historical);
+    const dso = rows.find((r) => r.key === "dso")!;
+    expect(dso.base.value).toBeNull();
+    expect(dso.base.days).toBe(computeAutoDays("dso", inc2023, bal2023));
+    expect(dso.years[0].days).toBe(computeAutoDays("dso", inc2024, bal2024));
+    const dio = rows.find((r) => r.key === "dio")!;
+    expect(dio.base.days).toBe(computeAutoDays("dio", inc2023, bal2023));
+    const dpo = rows.find((r) => r.key === "dpo")!;
+    expect(dpo.base.days).toBe(computeAutoDays("dpo", inc2023, bal2023));
+  });
+
+  it("un solo anno storico: base valorizzata, years vuote su ogni riga", () => {
+    const rows = rowsAnnoBase([2023], historical);
+    expect(rows.every((r) => r.years.length === 0)).toBe(true);
+    expect(rows.find((r) => r.key === "ricavi")!.base.value).toBe(1000);
+  });
+
+  it("anno storico senza dati in `historical` -> celle nulle, non lancia", () => {
+    const rows = rowsAnnoBase([2023, 2099], historical);
+    const ricavi = rows.find((r) => r.key === "ricavi")!;
+    expect(ricavi.years[0].value).toBeNull();
+    const dso = rows.find((r) => r.key === "dso")!;
+    expect(dso.years[0]).toEqual({ value: null, days: null });
   });
 });

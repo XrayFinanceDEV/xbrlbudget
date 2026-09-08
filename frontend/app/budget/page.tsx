@@ -24,6 +24,7 @@ import {
 import { formatCurrency } from "@/lib/formatters";
 import { statoResidui } from "@/lib/base-bank-debt";
 import { baseYearNote, forecastYearsFor, withDefaultsForYears } from "@/lib/budget-horizon";
+import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
 import { cn, getErrorMessage } from "@/lib/utils";
 import type {
   BudgetScenario,
@@ -1903,36 +1904,6 @@ function StartupEconomicsRecap({
   );
 }
 
-// Auto-Generator Helper
-function calculateTrend(
-  historicalData: Record<number, { income: IncomeStatement; balance: BalanceSheet }>,
-  year1: number,
-  year2: number,
-  getValue: (income: IncomeStatement) => number
-): number | null {
-  const d1 = historicalData[year1];
-  const d2 = historicalData[year2];
-  if (!d1?.income || !d2?.income) return null;
-  const v1 = getValue(d1.income);
-  const v2 = getValue(d2.income);
-  if (v1 === 0) return null;
-  return ((v2 - v1) / Math.abs(v1)) * 100;
-}
-
-const TREND_ITEMS: {
-  label: string;
-  fields: string[];
-  getValue: (i: IncomeStatement) => number;
-}[] = [
-  { label: "Ricavi", fields: ["revenue_growth_pct"], getValue: (i) => parseFloat(i.ce01_ricavi_vendite) },
-  { label: "Altri ricavi", fields: ["other_revenue_growth_pct"], getValue: (i) => parseFloat(i.ce04_altri_ricavi) },
-  { label: "Materie prime", fields: ["variable_materials_growth_pct", "fixed_materials_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce05_materie_prime)) },
-  { label: "Servizi", fields: ["variable_services_growth_pct", "fixed_services_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce06_servizi)) },
-  { label: "Godimento beni", fields: ["rent_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce07_godimento_beni)) },
-  { label: "Personale", fields: ["personnel_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce08_costi_personale)) },
-  { label: "Oneri diversi", fields: ["other_costs_growth_pct"], getValue: (i) => Math.abs(parseFloat(i.ce12_oneri_diversi)) },
-];
-
 function AutoGeneratorCard({
   historicalYears,
   forecastYears,
@@ -1962,12 +1933,7 @@ function AutoGeneratorCard({
     const trend = hasTwoYears
       ? calculateTrend(historicalData, year1, year2, item.getValue)
       : null;
-    const blended = trend !== null ? (trend + inflationRate) / 2 : inflationRate;
-    const rates = forecastYears.map((_, i) => {
-      if (n === 1) return Math.round(blended * 100) / 100;
-      const weight = i / (n - 1);
-      return Math.round((blended * (1 - weight) + inflationRate * weight) * 100) / 100;
-    });
+    const rates = forecastYears.map((_, i) => blendedRate(trend, inflationRate, i, n));
     return { ...item, trend, rates };
   });
 

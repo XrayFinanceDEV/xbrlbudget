@@ -199,6 +199,63 @@ def _should_import_prior(
     return not has_existing
 
 
+def _single_year_read_prior_column(
+    single_bs: Optional[Dict[str, Decimal]],
+    dual_current_bs: Optional[Dict[str, Decimal]],
+    dual_prior_bs: Optional[Dict[str, Decimal]],
+) -> bool:
+    """True quando l'estrattore a UN anno ha letto la colonna di RAFFRONTO.
+
+    Su un bilancio annuale comparato le due colonne sono omogenee (2025 / 2024) e
+    l'estrattore a un anno prende quella corrente. Su un INFRANNUALE comparato non lo
+    sono — 9 mesi contro 12 — e la colonna di raffronto e' la piu' "completa" delle
+    due: se il prompt la preferisse, l'anno corrente uscirebbe con i numeri dell'anno
+    sbagliato. Un bilancio letto dall'anno sbagliato e' internamente coerente: quadra,
+    e nessun cancello di quadratura lo vede. Lo vede solo il confronto con la colonna
+    che il passaggio a due anni etichetta esplicitamente come comparato.
+
+    Il criterio e' l'IDENTITA', non la somiglianza: leggere due volte la stessa colonna
+    da' gli stessi importi al centesimo, mentre un attivo a 9 mesi e uno a 12 si
+    somigliano senza mai coincidere. Da qui la tolleranza dell'euro (la stessa di
+    ``validate_balance``) e le tre ancore minime non nulle.
+
+    Serve una CONTRADDIZIONE per un verdetto positivo, mai un'assenza: senza comparato,
+    con troppe poche ancore, o quando il passaggio a due anni restituisce due colonne
+    uguali (e quindi il confronto non distingue nulla), la risposta e' False — «non lo
+    so» non fa scartare la lettura.
+    """
+    if not single_bs or not dual_current_bs or not dual_prior_bs:
+        return False
+
+    tolerance = Decimal("1.00")
+
+    def _anchorable(container, key):
+        value = container.get(key)
+        return isinstance(value, Decimal)
+
+    anchors = [
+        key
+        for key, value in dual_prior_bs.items()
+        # Le chiavi diagnostiche (``_plug_residual``, ``_ce_sp_difference``) non sono
+        # poste di bilancio: contarle come ancore impedirebbe di riconoscere due
+        # letture della stessa colonna con residui diversi.
+        if not key.startswith("_")
+        and isinstance(value, Decimal)
+        and value != 0
+        and _anchorable(single_bs, key)
+        and _anchorable(dual_current_bs, key)
+    ]
+    if len(anchors) < 3:
+        return False
+
+    if any(abs(single_bs[key] - dual_prior_bs[key]) > tolerance for key in anchors):
+        return False
+
+    return any(
+        abs(dual_current_bs[key] - dual_prior_bs[key]) > tolerance for key in anchors
+    )
+
+
 def _is_aggregated_summary(text: str) -> bool:
     """True when the document carries NO legal IV-CEE substructure — only top-level
     macro-voci (e.g. "Immobilizzazioni: 2.406.946", "B) Patrimonio netto: ..."), with
@@ -908,15 +965,12 @@ def import_pdf_balance_sheet(
             from importers.pdf_extractor_llm import (
                 extract_pdf_with_llm, extract_pdf_both_years_with_llm,
             )
-            if period_months:
-                # A prior year is optional. Use the dual prompt only when the source
-                # physically proves two date columns; a monocolumn partial statement
-                # must use the single-year extractor and return no fabricated prior.
-                from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+            # A prior year is optional. Use the dual prompt only when the source
+            # physically proves two date columns; a monocolumn partial statement
+            # must use the single-year extractor and return no fabricated prior.
+            from importers.standard_ivcee_parser import has_comparative_ivcee_columns
 
-                if has_comparative_ivcee_columns(file_path):
-                    logger.info(f"Dual-year extraction (period_months={period_months})")
-                    return extract_pdf_both_years_with_llm(file_path)
+            if period_months and not has_comparative_ivcee_columns(file_path):
                 logger.info(
                     f"Single-year infrannual extraction (period_months={period_months}; "
                     "no prior column detected)"
@@ -924,7 +978,14 @@ def import_pdf_balance_sheet(
                 bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
                 return bs, ce, None, None
 
-            # Budget (full year): take the CURRENT year from the proven single-year extractor
+            # Da qui in giu' passano SIA il budget annuale SIA l'infrannuale comparato
+            # (#50). L'infrannuale comparato tornava direttamente dal prompt a due anni,
+            # cioe' senza la mitigazione descritta qui sotto: dopo #27 quei file hanno
+            # cominciato ad arrivarci, e una riga di CE persa sull'anno corrente usciva
+            # dove prima usciva intera. Un percorso solo, perche' un secondo percorso
+            # ri-diverge alla prima modifica del primo.
+            #
+            # Take the CURRENT year from the proven single-year extractor
             # (the both-years prompt occasionally drops a current-year line — budget_227), then
             # run a dual pass purely to capture the PRIOR (comparative) column. This way a
             # comparative bilancio imports BOTH years and the user is never asked to re-upload a
@@ -944,12 +1005,24 @@ def import_pdf_balance_sheet(
             def _attempt():
                 """One extraction pass: single-year current + dual pass for the prior,
                 falling back to the dual-pass current when the single-year one does not
-                balance (dense 4-column layouts trip the single-year prompt)."""
+                balance (dense 4-column layouts trip the single-year prompt) or when it
+                turns out to have read the COMPARATIVE column instead of the current one
+                (infrannuale: the two columns are not homogeneous, 9 months against 12)."""
                 bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
                 prior_bs = prior_ce = None
+                read_comparative = False
                 try:
                     dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
-                    if not _balances(bs) and _balances(dual_bs):
+                    if _single_year_read_prior_column(bs, dual_bs, prior_bs):
+                        # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
+                        read_comparative = True
+                        logger.warning(
+                            "Single-year current extraction coincides with the "
+                            "comparative column: it read the wrong column; using the "
+                            "dual-pass current year"
+                        )
+                        bs, ce = dual_bs, dual_ce
+                    elif not _balances(bs) and _balances(dual_bs):
                         logger.info(
                             "Single-year current extraction is unbalanced; using the "
                             "dual-pass current year (it balances)"
@@ -959,6 +1032,12 @@ def import_pdf_balance_sheet(
                     logger.warning(
                         f"Prior-year dual extraction failed ({type(prior_err).__name__}: "
                         f"{prior_err}); importing current year only"
+                    )
+                # Dichiarata SEMPRE, anche a zero: a valle una chiave assente vale zero,
+                # quindi tacere equivarrebbe a dichiararsi puliti.
+                if bs is not None:
+                    bs["_single_year_read_comparative"] = (
+                        Decimal("1") if read_comparative else Decimal("0")
                     )
                 return bs, ce, prior_bs, prior_ce
 

@@ -5,6 +5,7 @@
 // split mathematically irrelevant — see forecast_engine.py:220-242).
 import type { IncomeStatement } from "@/types/api";
 import { FIELD_RULES } from "@/lib/budget-field-rules";
+import { ceAggregates } from "@/lib/budget-preview-rows";
 
 export type AssumptionRowDef = {
   key: string;
@@ -130,20 +131,10 @@ const num = (v: string | number | null | undefined): number =>
   typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0;
 
 /** Effective base-year tax rate (ce20 / PBT), or null when not derivable.
- *  Mirrors the engine's preference (forecast_engine.py:374-390). */
+ *  Mirrors the engine's preference (forecast_engine.py:374-390). PBT comes from
+ *  ceAggregates (lib/budget-preview-rows.ts) so the formula exists in one place. */
 export function computeEffectiveTaxRate(income: IncomeStatement): number | null {
-  const vp = num(income.ce01_ricavi_vendite) + num(income.ce02_variazioni_rimanenze)
-    + num(income.ce03_lavori_interni) + num(income.ce03a_incrementi_immobilizzazioni)
-    + num(income.ce04_altri_ricavi);
-  const costs = num(income.ce05_materie_prime) + num(income.ce06_servizi)
-    + num(income.ce07_godimento_beni) + num(income.ce08_costi_personale)
-    + num(income.ce09_ammortamenti) + num(income.ce10_var_rimanenze_mat_prime)
-    + num(income.ce11_accantonamenti) + num(income.ce12_oneri_diversi);
-  const fin = num(income.ce13_proventi_partecipazioni) + num(income.ce14_altri_proventi_finanziari)
-    - num(income.ce15_oneri_finanziari) + num(income.ce16_utili_perdite_cambi)
-    + num(income.ce17_rettifiche_attivita_fin)
-    + num(income.ce18_proventi_straordinari) - num(income.ce19_oneri_straordinari);
-  const pbt = vp - costs + fin;
+  const pbt = ceAggregates(income as unknown as Record<string, unknown>).ebt;
   const tax = num(income.ce20_imposte);
   if (pbt <= 0 || tax <= 0) return null;
   const rate = (tax / pbt) * 100;

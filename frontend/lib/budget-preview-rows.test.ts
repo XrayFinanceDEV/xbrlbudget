@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import {
-  rowsCosti, rowsFatturato, rowsImposte, rowsPregressoNuovo, unfundedFromError,
+  rowsAltreVociCe, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte, rowsPregressoNuovo,
+  unfundedFromError,
 } from "./budget-preview-rows";
 
 const baseInc = {
@@ -56,11 +57,86 @@ describe("rowsCosti", () => {
   });
 });
 
-describe("rowsImposte / rowsPregressoNuovo / unfundedFromError", () => {
+// Fixture con tre delle undici voci minori non nulle e di segno diverso, cosi' la
+// formula canonica (usata da ceAggregates/rowsImposte/rowsAltreVociCe) e quella
+// semplificata che c'era prima del fix danno numeri diversi:
+//   canonica:     vp=1180 (1100+30+50), costs=900 (430+210+30+155+40+0+15+20), fin=-20 (-10-10)
+//                 ebt = 1180 - 900 - 20 = 260
+//   semplificata: vp0=1150 (1100+50), main=825, alt0=20 (solo ce12), mol=305, amm=40, ro=265,
+//                 of=10 -> ebt = 265 - 10 = 255
+// La differenza (5) e' esattamente ce02+ce03+ce03a-ce10-ce11+ce13+ce14+ce16+ce17+ce18-ce19
+// = 30 - 15 - 10 = 5.
+const minoriOver = { ce02_variazioni_rimanenze: 30, ce11_accantonamenti: 15, ce18_proventi_straordinari: -10 };
+const EBT_CANONICO = 260;
+const EBT_SEMPLIFICATO = 255;
+
+describe("rowsImposte — formula canonica, non quella semplificata", () => {
   it("imposte e utile netto", () => {
     const rows = rowsImposte(baseInc, [year(2027)]);
     expect(rows.find((r) => r.key === "ce20")!.years[0].value).toBe(-33);
   });
+  it("ebt/net con le voci minori non nulle usano la formula canonica", () => {
+    const rows = rowsImposte(baseInc, [year(2027, minoriOver)]);
+    const ebt = rows.find((r) => r.key === "ebt")!.years[0].value;
+    const net = rows.find((r) => r.key === "net")!.years[0].value;
+    expect(ebt).toBe(EBT_CANONICO);
+    expect(ebt).not.toBe(EBT_SEMPLIFICATO);
+    expect(net).toBe(EBT_CANONICO - 33);
+  });
+  it("years: [] non lancia e non produce righe d'anno", () => {
+    const rows = rowsImposte(baseInc, []);
+    expect(rows.every((r) => r.years.length === 0)).toBe(true);
+  });
+});
+
+describe("rowsAltreVociCe", () => {
+  it("ebt e' quello canonico, diverso dal semplificato, con le voci minori non nulle", () => {
+    const rows = rowsAltreVociCe(baseInc, [year(2027, minoriOver)]);
+    expect(rows.find((r) => r.key === "ebt")!.years[0].value).toBe(EBT_CANONICO);
+    expect(rows.find((r) => r.key === "ebt")!.years[0].value).not.toBe(EBT_SEMPLIFICATO);
+  });
+  it("la cascata vp + main + alt + amm + fin somma esattamente a ebt (segni delle righe)", () => {
+    const rows = rowsAltreVociCe(baseInc, [year(2027, minoriOver)]);
+    const val = (key: string) => rows.find((r) => r.key === key)!.years[0].value!;
+    expect(val("vp") + val("main") + val("alt") + val("amm") + val("fin")).toBeCloseTo(val("ebt"), 6);
+    // e vale anche sulla colonna base
+    const valBase = (key: string) => rows.find((r) => r.key === key)!.base.value!;
+    expect(valBase("vp") + valBase("main") + valBase("alt") + valBase("amm") + valBase("fin"))
+      .toBeCloseTo(valBase("ebt"), 6);
+  });
+  it("years: [] non lancia e non produce righe d'anno", () => {
+    const rows = rowsAltreVociCe(baseInc, []);
+    expect(rows.every((r) => r.years.length === 0)).toBe(true);
+  });
+});
+
+describe("rowsCircolante", () => {
+  it("CCN, quota sui ricavi, assorbimento di cassa — letterali verificabili a mano", () => {
+    const baseBs = {
+      sp06_crediti_breve: "300", sp06e_crediti_tributari_breve: "50",
+      sp06f_imposte_anticipate_breve: "10", sp05_rimanenze: "120", sp16d_debiti_fornitori_breve: "180",
+    } as unknown as BalanceSheet;
+    // bCred = 300-50-10=240, bMag=120, bForn=180 -> bCcn = 240+120-180 = 180
+    const y = year(2027, { ce01_ricavi_vendite: 1200 });
+    Object.assign(y.balance_sheet, {
+      sp06_crediti_breve: 330, sp06e_crediti_tributari_breve: 40,
+      sp06f_imposte_anticipate_breve: 20, sp05_rimanenze: 150, sp16d_debiti_fornitori_breve: 200,
+    });
+    // cred = 330-40-20=270, mag=150, forn=200 -> ccn = 270+150-200 = 220
+    const rows = rowsCircolante(baseBs, baseInc, [y]);
+    expect(rows.find((r) => r.key === "crediti")!.base.value).toBe(240);
+    expect(rows.find((r) => r.key === "crediti")!.years[0].value).toBe(270);
+    expect(rows.find((r) => r.key === "rimanenze")!.years[0].value).toBe(150);
+    expect(rows.find((r) => r.key === "fornitori")!.years[0].value).toBe(-200);
+    expect(rows.find((r) => r.key === "ccn")!.base.value).toBe(180);
+    expect(rows.find((r) => r.key === "ccn")!.years[0].value).toBe(220);
+    expect(rows.find((r) => r.key === "ccn-pct")!.years[0].pct).toBeCloseTo((220 / 1200) * 100, 6);
+    // assorbimento di cassa = -(ccn - ccn_precedente) = -(220 - 180) = -40
+    expect(rows.find((r) => r.key === "cassa")!.years[0].value).toBe(-40);
+  });
+});
+
+describe("rowsPregressoNuovo / unfundedFromError", () => {
   it("PFN = debiti finanziari - cassa", () => {
     const rows = rowsPregressoNuovo({ sp09_disponibilita_liquide: "50", sp16a_debiti_banche_breve: "30",
       sp17a_debiti_banche_lungo: "120" } as unknown as BalanceSheet, [year(2027)]);
@@ -70,5 +146,8 @@ describe("rowsImposte / rowsPregressoNuovo / unfundedFromError", () => {
     expect(unfundedFromError({ year: 2028, message: "Unfunded financing requirement 84,120.50: add ..." }))
       .toEqual({ year: 2028, amount: 84120.5 });
     expect(unfundedFromError({ year: null, message: "altro" })).toBeNull();
+  });
+  it("year non nullo ma messaggio senza importo riconoscibile -> null, non lancia", () => {
+    expect(unfundedFromError({ year: 2028, message: "Errore generico senza importo" })).toBeNull();
   });
 });

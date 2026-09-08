@@ -799,6 +799,40 @@ def _prior_cell_with_sibling_sign(printed, extracted):
     return -magnitude if extracted < 0 else magnitude
 
 
+def _page_has_current_column_values(words, anchors: _ColumnAnchors) -> bool:
+    """Almeno una riga della pagina porta un importo nella colonna dell'anno CORRENTE.
+
+    Serve a distinguere una cella vuota da un'ANCORA SBAGLIATA, che si somigliano
+    ma non sono la stessa cosa. Su `budget_609` la pagina del conto economico non
+    stampa intestazioni di data: le ancore arrivano dal livello di documento, da
+    un'altra pagina, e cadono a sinistra di ENTRAMBE le colonne reali (che sono
+    allineate a destra a x1=488 e x1=546). Tutti e 70 gli importi finiscono in
+    «comparato» e il meccanismo vede 36 celle correnti vuote su 36 righe.
+
+    La guardia di identita' non basta li': il campo CONTIENE davvero il numero che
+    la geometria chiama comparato, perche' quel numero e' il valore corrente. Su
+    `17-bis) utili e perdite su cambi` — un importo solo, perche' il 2024 stampa un
+    trattino — l'identita' tornava e il valore reale -5.103 veniva azzerato.
+
+    Una pagina INTERA senza un solo valore corrente non e' un esercizio vuoto: e'
+    un'ancora sbagliata. Il confronto e' netto e misurato — 0 valori correnti su 70
+    (`budget_609`) contro 18 su 23 (`budget_391`, dove la cella vuota e' vera e
+    l'azzeramento va fatto).
+    """
+    for line in _text_line_groups(words):
+        numbers = [
+            word for word in line
+            if float(word[0]) > 350
+            and _GEOMETRIC_NUMBER_RE.fullmatch(str(word[4]).strip())
+        ]
+        if not numbers:
+            continue
+        current_numbers, _prior = _split_current_prior(numbers, anchors)
+        if current_numbers:
+            return True
+    return False
+
+
 def _clear_blank_current_rows(
     words,
     anchors: _ColumnAnchors,
@@ -813,6 +847,10 @@ def _clear_blank_current_rows(
     comparato contiene l'importo che l'estrattore ha attribuito all'anno corrente.
     """
     cleared: List[Tuple[str, str]] = []
+    # Ancore sbagliate: senza questo, ogni riga della pagina risulta a cella corrente
+    # vuota e la guardia di identita' non se ne accorge. Vedi _page_has_current_column_values.
+    if not _page_has_current_column_values(words, anchors):
+        return cleared
     for line in _text_line_groups(words):
         labels = [word for word in line if float(word[0]) < 350]
         # Accenti normalizzati sui DUE lati: il tree scrive «attivita», il

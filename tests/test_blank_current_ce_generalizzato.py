@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from importers.pdf_extractor_llm import (  # noqa: E402
     _BLANK_CURRENT_CE_ROWS,
+    _page_has_current_column_values,
     _CE_ROW_SPEC_OVERRIDES,
     _ColumnAnchors,
     _ce_row_specs_from_tree,
@@ -109,12 +110,53 @@ def test_due_voci_non_possono_rivendicare_la_stessa_riga():
                     f"{fa} e {fb} rivendicano la stessa riga su {shared[:3]}")
 
 
+def _healthy_row(y=60):
+    """Una riga qualunque con ENTRAMBE le celle piene: e' cio' che dimostra che le
+    ancore della pagina sono giuste. Una pagina reale ne ha sempre almeno una."""
+    return _row(y, "1)", "Ricavi delle vendite e delle prestazioni",
+                current="900.000,00", prior="800.000,00")
+
+
+# ------------------------------------------- la guardia sulle ancore sbagliate
+
+def test_una_pagina_senza_alcun_valore_corrente_e_unancora_sbagliata():
+    """budget_609: la pagina del CE non stampa intestazioni di data, le ancore
+    arrivano da un'altra pagina e cadono a sinistra di ENTRAMBE le colonne reali.
+    Tutti i 70 importi finiscono in «comparato» e il codice vede 36 celle correnti
+    vuote. Una pagina intera senza un solo valore corrente non e' un anno vuoto:
+    e' un'ancora sbagliata, e su `ce16` costava il valore reale -5.103."""
+    words = _row(100, "6)", "Materie prime sussidiarie di consumo e merci", prior="12.500,00")
+    words += _row(120, "7)", "Servizi", prior="9.000,00")
+    current = {'ce05_materie_prime': D("12500")}
+    prior = {'ce05_materie_prime': D("0")}
+
+    assert _page_has_current_column_values(words, ANCHORS) is False
+    assert _clear_blank_current_rows(words, ANCHORS, _BLANK_CURRENT_CE_ROWS, current, prior) == []
+    assert current['ce05_materie_prime'] == D("12500")
+
+
+def test_la_guardia_non_blocca_una_pagina_sana():
+    """budget_391: 18 valori correnti su 23 righe. Li' la cella vuota di `ce02` e'
+    davvero vuota e va azzerata. La guardia deve distinguere i due casi, non
+    spegnere il meccanismo."""
+    words = _healthy_row() + _row(100, "6)", "Materie prime sussidiarie di consumo e merci",
+                                  prior="12.500,00")
+    current = {'ce05_materie_prime': D("12500")}
+    prior = {'ce05_materie_prime': D("0")}
+
+    assert _page_has_current_column_values(words, ANCHORS) is True
+    cleared = _clear_blank_current_rows(words, ANCHORS, _BLANK_CURRENT_CE_ROWS, current, prior)
+    assert [f for f, _ in cleared] == ['ce05_materie_prime']
+    assert current['ce05_materie_prime'] == D("0")
+
+
 # ----------------------------------------------------- comportamento sulla riga
 
 def test_una_voce_prima_scoperta_ora_si_azzera():
     """Il criterio di #18 era incondizionato. `ce05` non era in lista: la sua cella
     corrente vuota lasciava passare il valore del comparato."""
-    words = _row(100, "6)", "Materie prime sussidiarie di consumo e merci", prior="12.500,00")
+    words = _healthy_row() + _row(100, "6)", "Materie prime sussidiarie di consumo e merci",
+                                  prior="12.500,00")
     current = {'ce05_materie_prime': D("12500")}
     prior = {'ce05_materie_prime': D("0")}
 
@@ -130,8 +172,8 @@ def test_una_voce_con_accenti_si_riconosce():
     «attività e passività». Senza normalizzare i due lati `ce17` non matcherebbe mai —
     e un difetto cosi' e' muto: una voce che non matcha e' indistinguibile da una voce
     che non e' in tabella."""
-    words = _row(100, "D)", "Rettifiche di valore di attività e passività finanziarie",
-                 prior="4.400,00")
+    words = _healthy_row() + _row(100, "D)", "Rettifiche di valore di attivita e passivita",
+                                  prior="4.400,00")
     current = {'ce17_rettifiche_attivita_fin': D("4400")}
     prior = {'ce17_rettifiche_attivita_fin': D("0")}
 
@@ -168,7 +210,8 @@ def test_una_cella_corrente_piena_non_si_tocca():
 def test_non_si_azzera_un_campo_diverso_da_quello_che_ha_preso_il_comparato():
     """La guardia di identita': l'importo estratto deve essere QUELLO stampato nella
     cella del comparato. Se non coincide, la riga non e' la sua e non si tocca."""
-    words = _row(100, "6)", "Materie prime sussidiarie di consumo e merci", prior="12.500,00")
+    words = _healthy_row() + _row(100, "6)", "Materie prime sussidiarie di consumo e merci",
+                                  prior="12.500,00")
     current = {'ce05_materie_prime': D("777")}
 
     assert _clear_blank_current_rows(words, ANCHORS, _BLANK_CURRENT_CE_ROWS, current, {}) == []

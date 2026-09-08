@@ -5,26 +5,22 @@ import axios from "axios";
 import { previewForecast } from "@/lib/api";
 import { PreviewSequencer, createDebouncedRunner } from "@/lib/budget-preview-queue";
 import { getErrorMessage } from "@/lib/utils";
-import type { ForecastPreviewResponse } from "@/types/api";
+import type { PreviewState } from "@/components/budget/wizard/types";
 
 const DELAY_MS = 400;
 
 /**
- * Stato dell'anteprima. Non vive ancora in `components/budget/wizard/types.ts`
- * (Task 8, non ancora integrato su questo commit): questo hook lo definisce
- * ed esporta qui, cosi' resta l'unica dichiarazione fino a quando il Task 8
- * non la sposta/riusa.
+ * Lo stato dell'anteprima ha una sola dichiarazione, in
+ * `components/budget/wizard/types.ts`: qui si importa e si ri-esporta, cosi'
+ * chi consuma l'hook non deve conoscere due percorsi. `hooks/` puo' importare
+ * da `components/`; il contrario no.
  *
  * `error` NON e' esclusivo di `data`: un 200 con `error` valorizzato significa
  * che il motore si e' fermato a un certo anno ma gli anni precedenti sono
  * validi (es. fabbisogno finanziario scoperto) — l'hook deve mostrare
  * entrambi, mai svuotare `data` quando arriva un `error`.
  */
-export interface PreviewState {
-  data: ForecastPreviewResponse | null;
-  error: string | null;
-  loading: boolean;
-}
+export type { PreviewState };
 
 /**
  * Client dell'anteprima del previsionale: debounce sulle modifiche di `rows`,

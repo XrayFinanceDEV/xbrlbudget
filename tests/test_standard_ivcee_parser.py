@@ -853,3 +853,53 @@ def test_un_prospetto_monocolonna_resta_non_comparato(tmp_path):
     _write_compact_infrannual_pdf(pdf)
 
     assert has_comparative_ivcee_columns(str(pdf)) is False
+
+
+def _write_prose_monocolumn_pdf(path: Path) -> None:
+    """Infrannuale monocolonna la cui unica «prova» è una riga di relazione.
+
+    Le parole ``corrente`` e ``precedente`` cadono oltre x=250 sulla stessa
+    riga di prosa, che è tutto quel che il rilevatore chiedeva: nessuna
+    intestazione di colonna, nessun importo incolonnato sotto di esse.
+    """
+    document = fitz.open()
+    prosa = document.new_page()
+    prosa.insert_text((60, 80), "RELAZIONE SULLA GESTIONE", fontsize=10)
+    prosa.insert_text(
+        (60, 100),
+        "La gestione dell'impresa evidenzia un risultato corrente rispetto al precedente",
+        fontsize=10,
+    )
+    prosa.insert_text(
+        (60, 118), "esercizio, chiuso in perdita per oneri non ricorrenti.", fontsize=10
+    )
+    prospetto = document.new_page()
+    prospetto.insert_text((30, 60), "STATO PATRIMONIALE al 30/06/2026", fontsize=11)
+    y = 100
+    for label, amount in (
+        ("B) Immobilizzazioni", "350.000,00"),
+        ("C) Attivo circolante", "420.000,00"),
+        ("A) Patrimonio netto", "180.000,00"),
+    ):
+        prospetto.insert_text((20, y), label, fontsize=9)
+        prospetto.insert_text((200, y), amount, fontsize=9)
+        y += 20
+    document.save(str(path))
+    document.close()
+
+
+def test_una_riga_di_prosa_non_e_un_intestazione_di_colonna(tmp_path):
+    """Nessun falso positivo da prosa: sotto un'intestazione ci sono importi.
+
+    ``corrente`` e ``precedente`` sulla stessa riga oltre x=250 bastavano a far
+    passare per comparato un documento monocolonna, e a instradarlo al prompt
+    LLM a due anni — cioè esattamente ciò che questo rilevatore esiste per
+    impedire. Un'intestazione vera ha importi incolonnati sotto di sé; una
+    frase di relazione no.
+    """
+    from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+
+    pdf = tmp_path / "prosa-monocolonna.pdf"
+    _write_prose_monocolumn_pdf(pdf)
+
+    assert has_comparative_ivcee_columns(str(pdf)) is False

@@ -111,10 +111,57 @@ def _labelled_column_centres(document: fitz.Document) -> Optional[Tuple[float, f
     from importers.pdf_extractor_llm import _labelled_column_anchors
 
     for page in document:
-        anchors = _labelled_column_anchors(page.get_text("words", sort=True))
-        if anchors is not None:
-            return anchors.current, anchors.prior
+        words = page.get_text("words", sort=True)
+        anchors = _labelled_column_anchors(words)
+        if anchors is None:
+            continue
+        if not _anchors_carry_amounts(words, anchors.current, anchors.prior):
+            continue
+        return anchors.current, anchors.prior
     return None
+
+
+# Quanto puo' discostarsi il bordo destro di un importo da quello della sua
+# intestazione perche' i due si dicano incolonnati. Le colonne di questi
+# prospetti sono allineate a destra, quindi lo scarto vero e' di frazioni di
+# punto; dodici punti sono la larghezza di un carattere e coprono l'apertura di
+# una parentesi o un font leggermente diverso fra intestazione e valore, senza
+# arrivare alla colonna accanto (le ancore distano almeno 25 punti per
+# costruzione, vedi `_labelled_column_anchors`).
+_ANCHOR_AMOUNT_TOL = 12.0
+
+
+def _anchors_carry_amounts(words, current_x: float, prior_x: float) -> bool:
+    """Sotto ENTRAMBE le ancore c'e' almeno un importo incolonnato?
+
+    `_labelled_column_anchors` accetta una riga che porti ``corrente`` e poi
+    ``comparato``/``precedente``/``confronto`` oltre x=250: una frase di
+    relazione mandata a capo puo' soddisfarlo per caso — «un risultato
+    **corrente** in miglioramento rispetto al **precedente**» — e l'ha fatto.
+    Dentro `pdf_extractor_llm` quel falso positivo e' innocuo, perche' su una
+    pagina di prosa non ci sono importi da attribuire; qui invece l'esito
+    diventa un booleano di DOCUMENTO che sposta l'intero file sul prompt LLM a
+    due anni, cioe' esattamente cio' che questa funzione esiste per impedire.
+
+    La conferma segue la regola generale dell'import: la geometria genera
+    l'ipotesi, sono i NUMERI STAMPATI a decidere. Un'intestazione vera ha
+    importi incolonnati sotto di se'; una frase non ne ha. Basta un importo per
+    ancora, non due: sul layout di #18 la colonna ``corrente`` ne porta uno
+    solo, perche' la seconda riga ha la cella corrente vuota — ed e' proprio il
+    caso per cui il riconoscimento serve.
+    """
+    trovati_current = trovati_prior = False
+    for word in words:
+        if _amount(str(word[4]).strip()) is None:
+            continue
+        destro = float(word[2])
+        if abs(destro - current_x) <= _ANCHOR_AMOUNT_TOL:
+            trovati_current = True
+        elif abs(destro - prior_x) <= _ANCHOR_AMOUNT_TOL:
+            trovati_prior = True
+        if trovati_current and trovati_prior:
+            return True
+    return False
 
 
 def has_comparative_ivcee_columns(file_path: str) -> bool:

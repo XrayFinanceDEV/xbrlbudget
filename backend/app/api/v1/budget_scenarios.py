@@ -998,6 +998,16 @@ def preview_forecast_route(
             db, scenario_id, request_data.get("assumptions", []))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        # Stessa rete del bulk (generate_forecasts sopra): un guasto inatteso
+        # nel motore non deve mai uscire come 500 anonimo. Non e' una scusa per
+        # non chiudere le cause vere (coalescenza dei null, forecast_year non
+        # numerico) dentro il servizio -- quelle restano ValueError -> 400.
+        logger.exception("Forecast preview failed for scenario=%s", scenario_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error during forecast preview: {str(e)}"
+        )
 
 
 # ===== Forecast Data Access Endpoints =====

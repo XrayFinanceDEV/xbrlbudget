@@ -235,7 +235,7 @@ class ForecastGenerationResult(BaseModel):
 
 class ForecastPreviewError(BaseModel):
     """L'errore del motore durante l'anteprima, con l'anno su cui si e' fermato."""
-    year: Optional[int] = None
+    year: Optional[int]
     message: str
 
 
@@ -253,4 +253,4 @@ class ForecastPreviewResponse(BaseModel):
     scenario_id: int
     base_year: int
     forecast_years: List[ForecastPreviewYear]
-    error: Optional[ForecastPreviewError] = None
+    error: Optional[ForecastPreviewError]

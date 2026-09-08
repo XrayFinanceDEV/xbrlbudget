@@ -5,6 +5,8 @@ Handles bulk insert/update of forecast assumptions with automatic forecast gener
 """
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
+from decimal import Decimal
+from sqlalchemy import Numeric
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 import sys
@@ -19,6 +21,69 @@ from database import models
 from calculations.forecast_engine import ForecastEngine, prune_out_of_plan_forecast_years
 
 
+_NUMERIC_COLUMNS = {
+    c.name: c for c in models.BudgetAssumptions.__table__.columns if isinstance(c.type, Numeric)
+}
+_NUMERIC_FIELDS = tuple(_NUMERIC_COLUMNS)
+_COLUMN_SCALE = {name: col.type.scale for name, col in _NUMERIC_COLUMNS.items()}
+_COLUMN_DEFAULT = {
+    name: col.default.arg for name, col in _NUMERIC_COLUMNS.items() if col.default is not None
+}
+
+
+def _normalize_numeric_fields(row: models.BudgetAssumptions) -> models.BudgetAssumptions:
+    """Le tre cose che il giro DB fa sul percorso persistito (INSERT poi SELECT
+    fresca), replicate qui perche' una riga transitoria (l'anteprima) non tocca
+    mai il DB:
+
+    1. coalescenza dei null sul DEFAULT DI COLONNA -- non un default inventato:
+       verificato empiricamente che SQLAlchemy applica il default Python-side
+       anche quando l'attributo e' stato assegnato esplicitamente a None (non
+       solo quando resta NO_VALUE). E' cosi' che un `tax_rate: null` dal client
+       fa girare il 24 dello schema, non il 27,9 che ogni chiamante reale manda
+       (CLAUDE.md, "Tax rate"): la coalescenza deve RIPRODURRE questo
+       comportamento, non correggerlo.
+    2. quantizzazione alla scala della colonna, con la stessa formattazione del
+       bind SQLite -- non `.quantize()`, che arrotonda diversamente: su
+       1234.565 la formattazione da' 1234.57, `.quantize()` da' 1234.56.
+    3. tipo Decimal (il motore lavora in Decimal, mai float).
+    """
+    for field in _NUMERIC_FIELDS:
+        value = getattr(row, field, None)
+        if value is None:
+            default = _COLUMN_DEFAULT.get(field)
+            if default is None:
+                continue  # colonna nullable: None resta un valore legittimo
+            value = default
+        scale = _COLUMN_SCALE[field]
+        setattr(row, field, Decimal(f"%.{scale}f" % float(value)))
+    return row
+
+
+def validate_assumptions_list(assumptions_list: List[Dict[str, Any]], base_year: int) -> None:
+    """Stesso controllo per bulk e anteprima, chiamato PRIMA di qualunque lettura
+    che dipenda dall'anno base: un corpo malformato e' un errore del chiamante e
+    non dipende da cosa dice il database sull'anno base, quindi deve dare lo
+    stesso messaggio ovunque arrivi.
+    """
+    if not assumptions_list:
+        raise ValueError("At least one assumption record is required")
+    years = []
+    for assumption in assumptions_list:
+        if "forecast_year" not in assumption:
+            raise ValueError("Each assumption must have a forecast_year")
+        # int(...) difensivo: un forecast_year non numerico deve dare un 400
+        # onesto (ValueError), non un TypeError dal confronto qui sotto.
+        forecast_year = int(assumption["forecast_year"])
+        if forecast_year <= base_year:
+            raise ValueError(
+                f"Forecast year {forecast_year} must be greater than base year {base_year}"
+            )
+        years.append(forecast_year)
+    if len(years) != len(set(years)):
+        raise ValueError("Duplicate forecast years found in assumptions list")
+
+
 def build_assumption_row(scenario_id: int, data: Dict[str, Any]) -> models.BudgetAssumptions:
     """Una riga di ipotesi dal dict del client, con i default del bulk.
 
@@ -26,7 +91,7 @@ def build_assumption_row(scenario_id: int, data: Dict[str, Any]) -> models.Budge
     (bulk); l'anteprima la passa al motore e basta. Bulk e anteprima passano
     di qui, così un campo aggiunto a uno non può mancare all'altro.
     """
-    return models.BudgetAssumptions(
+    row = models.BudgetAssumptions(
         scenario_id=scenario_id,
         forecast_year=data.get("forecast_year"),
         revenue_growth_pct=data.get("revenue_growth_pct", 0.0),
@@ -122,6 +187,7 @@ def build_assumption_row(scenario_id: int, data: Dict[str, Any]) -> models.Budge
         ce17b_override=data.get("ce17b_override", None),
         ce20_override=data.get("ce20_override", None),
     )
+    return _normalize_numeric_fields(row)
 
 
 def bulk_upsert_assumptions(
@@ -177,25 +243,10 @@ def bulk_upsert_assumptions(
     if not scenario:
         raise ValueError(f"Scenario {scenario_id} not found")
 
-    # 2. Validate assumptions list
-    if not assumptions_list or len(assumptions_list) == 0:
-        raise ValueError("At least one assumption record is required")
-
-    # 3. Validate all years are after base year
-    for assumption in assumptions_list:
-        if "forecast_year" not in assumption:
-            raise ValueError("Each assumption must have a forecast_year")
-
-        forecast_year = assumption["forecast_year"]
-        if forecast_year <= scenario.base_year:
-            raise ValueError(
-                f"Forecast year {forecast_year} must be greater than base year {scenario.base_year}"
-            )
-
-    # 4. Check for duplicate years in input
-    years = [a["forecast_year"] for a in assumptions_list]
-    if len(years) != len(set(years)):
-        raise ValueError("Duplicate forecast years found in assumptions list")
+    # 2-4. Validazione condivisa col percorso di anteprima (Task 9): stesso
+    # corpo malformato -> stesso messaggio, ovunque arrivi. Valida PRIMA di
+    # qualunque lettura che dipenda dall'anno base.
+    validate_assumptions_list(assumptions_list, scenario.base_year)
 
     # 5. Delete existing assumptions for this scenario
     db.query(models.BudgetAssumptions).filter(

@@ -43,6 +43,10 @@ def test_preview_of_saved_rows_equals_persisted_and_writes_nothing(monkeypatch):
             assert [y["year"] for y in out["forecast_years"]] == [2027, 2028]
             assert _counts(db) == before
             assert [a.revenue_growth_pct for a in db.query(models.BudgetAssumptions).order_by(models.BudgetAssumptions.forecast_year)] == saved_pct
+            # I3: non solo "nessuna riga in piu'/in meno" (che un mutare-sul-posto
+            # di una riga PERSISTITA supererebbe comunque) — nessuna riga sporca,
+            # nessuna riga nuova pendente, nessuna riga cancellata.
+            assert not db.new and not db.dirty and not db.deleted
             # con le righe salvate, l'anteprima coincide col persistito
             same = budget_scenarios.preview_forecast_route(
                 company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
@@ -51,6 +55,91 @@ def test_preview_of_saved_rows_equals_persisted_and_writes_nothing(monkeypatch):
                 assert Decimal(str(y["income_statement"]["ce01_ricavi_vendite"])) == ce["ce01_ricavi_vendite"]
             for key in ("ce05_fixed", "ce05_variable", "ce06_fixed", "ce06_variable", "dso_applied", "dio_applied", "dpo_applied"):
                 assert key in same["forecast_years"][0]["details"]
+            assert not db.new and not db.dirty and not db.deleted
+    finally:
+        engine.dispose()
+
+
+def test_null_and_fractional_inputs_match_persisted_numbers(monkeypatch):
+    """C1 + I2: un `null` esplicito e un valore a tre decimali devono dare, in
+    anteprima, esattamente gli stessi numeri del bulk sullo stesso corpo — non
+    solo non alzare piu'. `revenue_growth_pct`/`tax_rate` a null riproducono i
+    default di colonna (0 e 24, NON 27,9: CLAUDE.md "Tax rate"); `dso_days` e
+    `financing_duration_years` a tre decimali quantizzano alla scala della
+    colonna esattamente come farebbe il giro DB."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            sc = budget_scenarios.create_budget_scenario(
+                company_id, BudgetScenarioCreate(company_id=company_id, name="p", base_year=2026, scenario_type="budget"),
+                user_id=USER, db=db)
+            rows = [
+                {
+                    "forecast_year": 2027,
+                    "revenue_growth_pct": None,
+                    "tax_rate": None,
+                    "dso_days": 90.999,
+                    "financing_amount": 100000,
+                    "financing_duration_years": 3.999,
+                    "financing_interest_rate": 5,
+                },
+                {"forecast_year": 2028, "revenue_growth_pct": 5},
+            ]
+            res = budget_scenarios.bulk_upsert_assumptions(
+                company_id, sc.id, request={"assumptions": rows, "auto_generate": True}, user_id=USER, db=db)
+            assert res["forecast_generated"] is True
+            saved = {a.forecast_year: a for a in db.query(models.BudgetAssumptions)}
+            assert saved[2027].revenue_growth_pct == Decimal("0.000000")
+            assert saved[2027].tax_rate == Decimal("24.000000")  # non 27,9: si riproduce, non si corregge
+            assert saved[2027].dso_days == Decimal("91.00")
+            assert saved[2027].financing_duration_years == Decimal("4.00")
+
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            assert out["error"] is None
+
+            persisted = read_forecast_maps(db, sc.id)
+            for y, (_, bs, ce) in zip(out["forecast_years"], persisted):
+                # Confronta solo i campi che il motore dichiara (non i sotto-campi
+                # di dettaglio che il calcolo puro non popola, e che sul foglio
+                # persistito restano al default 0 di colonna): la parita' che
+                # conta e' su cio' che entrambi i percorsi calcolano davvero.
+                for field, value in bs.items():
+                    if field.startswith("_") or field not in y["balance_sheet"]:
+                        continue
+                    assert Decimal(str(y["balance_sheet"][field])) == value, f"balance_sheet.{field} anno {y['year']}"
+                for field, value in ce.items():
+                    if field not in y["income_statement"]:
+                        continue
+                    assert Decimal(str(y["income_statement"][field])) == value, f"income_statement.{field} anno {y['year']}"
+    finally:
+        engine.dispose()
+
+
+def test_infrannuale_scenario_is_rejected_with_400(monkeypatch):
+    """I1: il wizard e' budget-only. Un tentativo di anteprima su uno scenario
+    infrannuale va rifiutato con un 400 parlante, senza ramificare su
+    IntraYearEngine (che darebbe due bilanci diversi della stessa azienda dallo
+    stesso corpo — l'invariante "un solo motore di proiezione")."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            sc = models.BudgetScenario(
+                company_id=company_id, name="infra", base_year=2025,
+                scenario_type="infrannuale", period_months=6,
+            )
+            db.add(sc)
+            db.commit()
+            with pytest.raises(HTTPException) as e:
+                budget_scenarios.preview_forecast_route(
+                    company_id, sc.id, request={"assumptions": [{"forecast_year": 2026}]},
+                    user_id=USER, db=db)
+            assert e.value.status_code == 400
+            assert "infrannuale" in e.value.detail.lower()
     finally:
         engine.dispose()
 

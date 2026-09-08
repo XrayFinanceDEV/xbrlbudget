@@ -9,8 +9,11 @@ def test_row_is_transient_and_carries_every_column_default():
     assert isinstance(row, models.BudgetAssumptions)
     assert row.scenario_id == 7 and row.forecast_year == 2027
     assert row.revenue_growth_pct == 5
-    # default del bulk, non dello schema: 27.9, 40, 20
-    assert row.tax_rate == 27.9
+    # default del bulk, non dello schema: 27.9, 40, 20 — confrontati come
+    # Decimal, non come float: la riga esce normalizzata alla scala della
+    # colonna (Numeric(10,6)), e Decimal('27.900000') != float 27.9 (27.9 non
+    # ha una rappresentazione binaria esatta).
+    assert row.tax_rate == Decimal("27.9")
     assert row.fixed_materials_percentage == 40.0
     assert row.depreciation_rate == 20.0
     assert row.financing_amount == 0.0            # null -> 0

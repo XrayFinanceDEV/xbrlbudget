@@ -4,21 +4,28 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { previewForecast } from "@/lib/api";
 import { PreviewSequencer, createDebouncedRunner } from "@/lib/budget-preview-queue";
+import { previewStateFromError, previewStateFromResponse, type PreviewState } from "@/lib/budget-preview-state";
 import { getErrorMessage } from "@/lib/utils";
-import type { PreviewState } from "@/components/budget/wizard/types";
 
 const DELAY_MS = 400;
 
 /**
  * Lo stato dell'anteprima ha una sola dichiarazione, in
- * `components/budget/wizard/types.ts`: qui si importa e si ri-esporta, cosi'
- * chi consuma l'hook non deve conoscere due percorsi. `hooks/` puo' importare
- * da `components/`; il contrario no.
+ * `lib/budget-preview-state.ts`: qui si importa e si ri-esporta, cosi' chi
+ * consuma l'hook non deve conoscere due percorsi. `components/budget/wizard/
+ * types.ts` la ri-esporta a sua volta, per chi ci era gia' abituato.
+ *
+ * Le due transizioni (`previewStateFromResponse`/`previewStateFromError`)
+ * sono funzioni pure in `lib/`, testate direttamente li': questo hook non fa
+ * altro che decidere QUANDO chiamarle (annullamento via `axios.isCancel`,
+ * risposta ancora corrente via `PreviewSequencer`) e passarle a `setState`.
  *
  * `error` NON e' esclusivo di `data`: un 200 con `error` valorizzato significa
  * che il motore si e' fermato a un certo anno ma gli anni precedenti sono
  * validi (es. fabbisogno finanziario scoperto) — l'hook deve mostrare
- * entrambi, mai svuotare `data` quando arriva un `error`.
+ * entrambi, mai svuotare `data` quando arriva un `error`. Questo e'
+ * l'invariante di `previewStateFromResponse`, provato in
+ * `lib/budget-preview-state.test.ts`.
  */
 export type { PreviewState };
 
@@ -51,11 +58,12 @@ export function useForecastPreview({
         setState((s) => ({ ...s, loading: true }));
         previewForecast(companyId, scenarioId, payload, signal)
           .then((data) => {
-            if (seq.current.isCurrent(mine)) setState({ data, error: null, loading: false });
+            if (seq.current.isCurrent(mine)) setState(previewStateFromResponse(data));
           })
           .catch((err) => {
             if (axios.isCancel(err) || !seq.current.isCurrent(mine)) return;
-            setState((s) => ({ ...s, error: getErrorMessage(err, "Anteprima non disponibile"), loading: false }));
+            const message = getErrorMessage(err, "Anteprima non disponibile");
+            setState((s) => previewStateFromError(s, message));
           });
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, DELAY_MS),

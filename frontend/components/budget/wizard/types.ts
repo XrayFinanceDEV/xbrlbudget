@@ -5,12 +5,11 @@
 import type { FinancingLoanInput, ForecastPreviewResponse, TemporaryDifferenceInput } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { HistoricalData } from "@/lib/budget-trend";
-
-export interface PreviewState {
-  data: ForecastPreviewResponse | null;
-  error: string | null;
-  loading: boolean;
-}
+// Dichiarazione unica in lib/ (lib/ non puo' importare da components/): qui
+// si importa e si ri-esporta, cosi' chi importava PreviewState da questo
+// file non deve cambiare percorso.
+import type { PreviewState } from "@/lib/budget-preview-state";
+export type { PreviewState };
 
 export interface StepProps {
   companyId: number;

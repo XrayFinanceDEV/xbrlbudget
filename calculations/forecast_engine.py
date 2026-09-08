@@ -535,6 +535,13 @@ class ForecastEngine:
         Con `stop_on_error=False` l'errore del motore ferma il ciclo e resta in
         `error`, gli anni gia' calcolati in `years`; con `True` (default) alza
         come oggi, cosi' il percorso persistente non cambia comportamento.
+
+        I sette `details` di ogni anno non stanno tutti alla stessa scala: le
+        quattro quote di ce05/ce06 sono importi, e sono quantizzate al centesimo
+        della riga che spiegano; `dso_applied`, `dio_applied` e `dpo_applied` sono
+        giorni, e restano i `Decimal` grezzi che il motore ha applicato — arrotondarli
+        direbbe che la rotazione usata e' un'altra. Chi li rende fianco a fianco
+        formatti i giorni per conto proprio.
         """
         if not assumptions:
             raise ValueError(f"No assumptions found for scenario {source.scenario.id}")

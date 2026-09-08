@@ -1,10 +1,16 @@
-"""compute_forecast: parita' col previsionale persistito, e `details` dichiarati.
+"""compute_forecast: round-trip col previsionale persistito, e `details` dichiarati.
 
 Il motore budget e' separato in lettura (`load_forecast_source`), calcolo puro
-(`ForecastEngine.compute_forecast`) e persistenza (`generate_forecast`). Queste
-prove fissano le due cose che la separazione non deve rompere: il previsionale
-salvato resta identico al centesimo, e ogni anno calcolato porta i sette
-`details` dichiarati.
+(`ForecastEngine.compute_forecast`) e persistenza (`generate_forecast`).
+
+Attenzione a che cosa prova la prima delle tre. `generate_forecast` chiama
+`compute_forecast`, quindi il lato «persistito» e' prodotto dallo stesso codice
+del lato «calcolato»: il confronto e' un round-trip, non una parita' contro il
+comportamento pre-refactor. Fissa il determinismo del motore e il fatto che i
+`Decimal` sopravvivano intatti al giro su `Numeric(15, 2)` — non puo' invece
+accorgersi di una regressione da proprieta' ORM o di un buco di `_DictView`, che
+sono garantiti per costruzione (ogni lettura di `previous_*` passa da
+`getattr(obj, campo, default)` con un letterale che e' chiave del dict prodotto).
 """
 from decimal import Decimal
 
@@ -31,7 +37,13 @@ def _scenario(db, company_id, extra):
     return sc
 
 
-def test_compute_matches_persisted_forecast_to_the_cent(monkeypatch):
+def test_compute_round_trips_through_the_persisted_forecast(monkeypatch):
+    """Il previsionale salvato e quello ricalcolato coincidono al centesimo.
+
+    Round-trip, non parita': `generate_forecast` delega a `compute_forecast`, quindi
+    i due lati escono dallo stesso codice. Quel che pinna e' il determinismo del
+    motore e la sopravvivenza dei `Decimal` al giro su `Numeric(15, 2)`.
+    """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -79,6 +91,15 @@ def test_details_are_declared_and_sum_to_the_line(monkeypatch):
             # anno 1: 200.000 base -> 30% fisso +2%, 70% variabile +10%
             assert comp.years[0].details["ce05_fixed"] == Decimal("61200.00")
             assert comp.years[0].details["ce05_variable"] == Decimal("154000.00")
+            assert comp.years[0].income_statement["ce05_materie_prime"] == Decimal("215200.00")
+            # Anno 3, il caso per cui la ripartizione esiste: le due quote analitiche
+            # sono 70855,8912 e 178297,504, e la loro somma arrotonda a 249.153,40
+            # mentre i due arrotondamenti separati darebbero 249.153,39. La quota
+            # variabile porta quindi il centesimo di residuo (…,51, non …,50) e i due
+            # addendi ricompongono la riga esatti.
+            assert comp.years[2].details["ce05_fixed"] == Decimal("70855.89")
+            assert comp.years[2].details["ce05_variable"] == Decimal("178297.51")
+            assert comp.years[2].income_statement["ce05_materie_prime"] == Decimal("249153.40")
     finally:
         engine.dispose()
 

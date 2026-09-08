@@ -172,7 +172,7 @@ export default function BudgetPage() {
   if (startupMode && years.length === 0) {
     // After creation we set editingScenario but the founding-year FinancialYear
     // may not have propagated into `years` yet — show a loader until it does so
-    // ScenarioForm doesn't render with an empty `years` array.
+    // ScenarioFormStartup doesn't render with an empty `years` array.
     if (editingScenario) {
       return (
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">

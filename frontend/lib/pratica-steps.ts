@@ -361,6 +361,27 @@ export function rescueStep(steps: PraticaStep[]): PraticaStep | null {
   return [...steps].reverse().find((s) => s.enabled && s.kind === "tab") ?? null;
 }
 
+/**
+ * Il wizard è stato aperto FUORI da una pratica: qui non c'è nulla da fare.
+ *
+ * Il primario del percorso vive in `usePraticaPrimaryAction`, che restituisce
+ * `null` senza pratica: la pagina rendeva la card «Anagrafica azienda» con tre
+ * campi vuoti e nessun bottone nel corpo: si compilava un form che non si
+ * poteva inviare, e l'unica via d'uscita era la barra di navigazione.
+ *
+ * `idratata` non è un dettaglio: `pratica` è `null` anche PRIMA che il context
+ * abbia letto `localStorage` (lo legge in un `useEffect` — leggerlo
+ * nell'inizializzatore di `useState` romperebbe l'idratazione di Next).
+ * Decidere sul solo `pratica === null` rimanderebbe alla home chiunque
+ * ricarichi /pratica su una pratica valida.
+ */
+export function senzaPraticaAttiva(
+  pratica: PraticaState | null,
+  idratata: boolean,
+): boolean {
+  return idratata && pratica === null;
+}
+
 export interface StepBlock {
   /** Perché lo step non è raggiungibile. */
   reason: string | null;

@@ -8,10 +8,12 @@ import {
   createCompany,
   updateCompany,
   deleteCompany,
+  getCompanyYears,
 } from "@/lib/api";
 import {
   ingressoNuovaPratica,
   ingressoRiprendi,
+  rifiutoIngressoStartup,
   type IngressoPratica,
   type WorkflowPratica,
 } from "@/lib/pratica-ingresso";
@@ -86,18 +88,21 @@ const SECTOR_OPTIONS: Record<number, string> = {
 function SceltaTipoPratica({
   onScegli,
   onAnnulla,
+  attesa = false,
 }: {
   onScegli: (workflow: WorkflowPratica) => void;
   onAnnulla?: () => void;
+  /** Un controllo è in corso: le voci restano ferme finché non si sa. */
+  attesa?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-border py-3">
       <span className="text-sm text-muted-foreground">Che tipo di pratica?</span>
-      <Button size="sm" variant="outline" onClick={() => onScegli("bilancio")}>
+      <Button size="sm" variant="outline" disabled={attesa} onClick={() => onScegli("bilancio")}>
         <CalendarRange className="h-4 w-4 mr-1" /> Da bilancio
       </Button>
-      <Button size="sm" variant="outline" onClick={() => onScegli("startup")}>
-        <Rocket className="h-4 w-4 mr-1" /> Startup
+      <Button size="sm" variant="outline" disabled={attesa} onClick={() => onScegli("startup")}>
+        {attesa ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Rocket className="h-4 w-4 mr-1" />} Startup
       </Button>
       {onAnnulla && (
         <Button size="sm" variant="ghost" onClick={onAnnulla}>
@@ -129,6 +134,9 @@ export default function Home() {
   const [openCompanyId, setOpenCompanyId] = useState<number | null>(null);
   // Quale «Nuova pratica» sta chiedendo il tipo.
   const [chooserCompanyId, setChooserCompanyId] = useState<number | null>(null);
+  // Il controllo degli anni prima di entrare in Startup: tiene ferme le due
+  // voci finché non si sa, così un secondo clic non parte in parallelo.
+  const [verificaStartup, setVerificaStartup] = useState(false);
 
   // Create-company form
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -249,7 +257,32 @@ export default function Home() {
     }
   };
 
-  const nuovaPratica = (companyId: number, workflow: WorkflowPratica) => {
+  /**
+   * Il percorso Startup semina un bilancio di APERTURA sull'anno precedente al
+   * piano: su un'azienda che ha già uno storico il wizard non si apre affatto
+   * (il cancello di `/budget` chiede zero anni) e la pagina resta muta, con il
+   * titolo «Previsionale Startup» e nient'altro. Si rifiuta QUI, prima di
+   * navigare, e la scelta del tipo resta aperta: da lì si ripiega su «Da
+   * bilancio» senza rifare il giro.
+   *
+   * Se gli anni non si riescono a leggere non si blocca nulla: un controllo
+   * che manca è «non lo so», e «non lo so» non è un verdetto negativo.
+   */
+  const nuovaPratica = async (companyId: number, workflow: WorkflowPratica) => {
+    if (workflow === "startup") {
+      setVerificaStartup(true);
+      try {
+        const motivo = rifiutoIngressoStartup(await getCompanyYears(companyId));
+        if (motivo) {
+          toast.error(motivo);
+          return;
+        }
+      } catch (err: unknown) {
+        console.error("Anni dell'azienda non leggibili, ingresso Startup non bloccato:", err);
+      } finally {
+        setVerificaStartup(false);
+      }
+    }
     setChooserCompanyId(null);
     setCreatedCompanyId(null);
     setShowCreateForm(false);
@@ -319,6 +352,7 @@ export default function Home() {
               // startup è per definizione il caso in cui un bilancio storico
               // NON esiste, ed è proprio quando si crea un'azienda nuova.
               <SceltaTipoPratica
+                attesa={verificaStartup}
                 onScegli={(workflow) => nuovaPratica(createdCompanyId, workflow)}
                 onAnnulla={() => { setCreatedCompanyId(null); setShowCreateForm(false); }}
               />
@@ -487,6 +521,7 @@ export default function Home() {
                     ))}
                     {chooserCompanyId === company.id ? (
                       <SceltaTipoPratica
+                        attesa={verificaStartup}
                         onScegli={(workflow) => nuovaPratica(company.id, workflow)}
                         onAnnulla={() => setChooserCompanyId(null)}
                       />

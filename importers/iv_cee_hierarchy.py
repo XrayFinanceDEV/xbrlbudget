@@ -674,6 +674,35 @@ def declare_unclassified_mass(bs: Dict[str, Decimal],
     return out
 
 
+def withdraw_unclassified_mass(label: str = "") -> Dict[str, Decimal]:
+    """Ritira la misura della massa non classificata: l'ancoraggio non e' comparabile.
+
+    `declare_unclassified_mass` confronta la somma classificata con i totali che
+    il documento STAMPA. Su una situazione contabile a presentazione LORDA quei
+    totali comprendono i fondi ammortamento — contro-conti che compaiono su
+    entrambi i lati — e la perdita parcheggiata sull'attivo: misurarci contro
+    un'estrazione IV-CEE correttamente NETTATA fa risultare «non classificata»
+    proprio la massa che e' stata classificata, e nettata bene. E' la stessa
+    sovrastima che la scelta fra i due candidati di route C corregge riducendo
+    l'ancoraggio della massa contra scansionata; qui l'ancoraggio netto non si sa
+    calcolare, e non si finge di saperlo.
+
+    Le due chiavi restano comunque DICHIARATE: a valle una chiave assente vale
+    zero, cioe' «pulito», e tacere sarebbe una promessa. `_measured` a zero
+    significa invece «non lo so» — e un controllo che manca da' `DERIVED`, mai
+    un verdetto negativo: quello vuole una contraddizione.
+    """
+    logger.info(
+        f"[{label}] massa non classificata NON misurata: i totali stampati sono "
+        f"quelli di una presentazione lorda e non sono confrontabili con "
+        f"un'estrazione IV-CEE nettata"
+    )
+    return {
+        "_unclassified_mass": Decimal(0),
+        "_unclassified_mass_measured": Decimal(0),
+    }
+
+
 def enforce_ce_sp_identity(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]],
                            label: str = "", tol: Optional[Decimal] = None,
                            prefer: str = "sp13",

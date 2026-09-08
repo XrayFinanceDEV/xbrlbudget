@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ingressoNuovaPratica,
   ingressoRiprendi,
+  rifiutoIngressoStartup,
   type IngressoPratica,
 } from "@/lib/pratica-ingresso";
 import type { ScenarioSummary } from "@/types/api";
@@ -98,5 +99,46 @@ describe("ingressoRiprendi", () => {
   it("un infrannuale senza `period_months` vale un anno intero", () => {
     const i = ingressoRiprendi(42, scenario({ period_months: null }));
     expect(i.pratica.periodMonths).toBe(12);
+  });
+});
+
+/**
+ * #37 — l'ingresso Startup su un'azienda che ha gia' uno storico.
+ *
+ * Il wizard del business plan sta dietro un cancello che chiede ZERO anni
+ * (`app/budget/page.tsx`), quindi su un'azienda con `FinancialYear` la pagina
+ * cadeva sull'elenco scenari ordinario, intestato «Previsionale Startup» e
+ * muto: nessuna schermata per capitale, periodo e driver, e nessuna spiegazione.
+ *
+ * Il rifiuto arriva PRIMA di navigare, non dopo: il percorso Startup semina un
+ * bilancio di apertura sull'anno precedente al piano, e su un'azienda con
+ * storico quell'anno esiste gia' — quel che se ne ricavava era un 400 che non
+ * diceva nemmeno quale fosse il problema.
+ */
+describe("rifiutoIngressoStartup", () => {
+  it("un'azienda senza anni non viene rifiutata: il percorso resta identico", () => {
+    expect(rifiutoIngressoStartup([])).toBeNull();
+  });
+
+  it("un'azienda con storico viene rifiutata, e il motivo nomina gli anni", () => {
+    const motivo = rifiutoIngressoStartup([2024, 2023, 2026]);
+    expect(motivo).not.toBeNull();
+    expect(motivo).toContain("2023");
+    expect(motivo).toContain("2024");
+    expect(motivo).toContain("2026");
+    // Ordinati: l'elenco si legge, non si indovina.
+    expect(motivo!.indexOf("2023")).toBeLessThan(motivo!.indexOf("2026"));
+  });
+
+  it("un solo anno basta a rifiutare, e il messaggio dice dove andare", () => {
+    const motivo = rifiutoIngressoStartup([2025]);
+    expect(motivo).toContain("2025");
+    expect(motivo).toContain("Da bilancio");
+  });
+
+  it("non muta l'elenco che riceve", () => {
+    const anni = [2026, 2024];
+    rifiutoIngressoStartup(anni);
+    expect(anni).toEqual([2026, 2024]);
   });
 });

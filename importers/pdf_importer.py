@@ -1330,6 +1330,20 @@ def import_pdf_balance_sheet(
                 logger.warning("Route C: entrambi gli estrattori vuoti; "
                                "ultimo tentativo con l'estrattore IV-CEE LLM")
                 balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
+                # L'estrattore IV-CEE ha appena misurato la propria massa non
+                # classificata contro i totali che il DOCUMENTO stampa. Qui il
+                # documento e' una situazione contabile: se e' a presentazione
+                # lorda quei totali comprendono i fondi ammortamento (su entrambi
+                # i lati) e la perdita parcheggiata sull'attivo, e lo scarto
+                # contro un'estrazione correttamente NETTATA e' massa che E'
+                # stata classificata — non massa persa. Sulle rotte A/B il
+                # confronto e' fra grandezze omogenee e resta com'e'.
+                from importers.iv_cee_hierarchy import withdraw_unclassified_mass
+                balance_sheet_data.update(withdraw_unclassified_mass("route-c-ultima-risorsa"))
+                if prior_bs_data:
+                    prior_bs_data.update(
+                        withdraw_unclassified_mass("route-c-ultima-risorsa-prior")
+                    )
         if not is_trial_balance:
             # IV CEE format (routes A/B) — use LLM extraction
             balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()

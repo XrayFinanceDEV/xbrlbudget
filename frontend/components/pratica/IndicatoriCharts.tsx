@@ -27,6 +27,7 @@ import {
   buildIndicatorChartData,
   formatIndicatorAxis,
   formatIndicatorTooltip,
+  indicatorAxisWidth,
   type IndicatorChartBox,
   type SerieIndicatori,
 } from "@/lib/pratica-indicators";
@@ -92,7 +93,11 @@ export function IndicatoriCharts({ serie }: { serie: SerieIndicatori[] }) {
               <RechartsBarChart data={data}>
                 <CartesianGrid vertical={false} />
                 <XAxis dataKey="periodo" tickLine={false} axisLine={false} />
+                {/* La larghezza è calcolata, non lasciata al default: Recharts
+                    riserva all'asse 60px fissi e RITAGLIA ciò che non ci sta,
+                    così `600.000%` esce come `00.000%` senza alcun errore. */}
                 <YAxis
+                  width={indicatorAxisWidth(data, box)}
                   tickFormatter={(value) => formatIndicatorAxis(Number(value), box.format)}
                 />
                 <ChartTooltip

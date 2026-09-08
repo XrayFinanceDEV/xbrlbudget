@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CRISIS_SCORING_KEYS,
   INDICATOR_DEFS,
+  buildIndicatorChartData,
   computeCrisisRating,
   crisisScores,
   computeIndicators,
@@ -305,6 +306,92 @@ describe("of_revenue non entra nel punteggio di crisi", () => {
     const ind = computeIndicators(BS_SANA, IS_SANA);
     expect(crisisScores(ind)).toEqual(
       CRISIS_SCORING_KEYS.map((k) => scoreIndicator(k, ind)),
+    );
+  });
+});
+
+// #29. La #25 aveva chiuso la RESA — sul grafico `dscr` e `roe` valgono `null`
+// quando il loro denominatore non esiste — ma il PUNTEGGIO era rimasto a 0, e
+// 0 e' sotto 0,33, cioe' un «oltre soglia». Un'azienda SENZA oneri finanziari,
+// che su quell'indicatore e' la piu' sana possibile, veniva spinta in una
+// classe di rischio peggiore proprio dall'assenza di debito oneroso.
+describe("i denominatori che non esistono non producono un «oltre» (#29)", () => {
+  it("senza oneri finanziari il DSCR vale 0,5, non 0", () => {
+    const ind = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 0 });
+    expect(ind._oneri_finanziari_raw).toBe(0);
+    expect(scoreIndicator("dscr", ind)).toBe(0.5);
+  });
+
+  it("con oneri finanziari il DSCR resta quello di prima", () => {
+    // La correzione tocca il solo ramo degenere: dove il rapporto esiste, la
+    // scala CNDCEC (1,0 / 1,5) e' intatta.
+    const ind = computeIndicators(BS_SANA, IS_SANA);
+    expect(ind._oneri_finanziari_raw).toBeGreaterThan(0);
+    expect(scoreIndicator("dscr", ind)).toBe(linearScore(ind.dscr, 1.0, 1.5));
+  });
+
+  it("un DSCR davvero basso resta 0: il ramo degenere non e' una scappatoia", () => {
+    const ind = computeIndicators(BS_SANA, {
+      ...IS_SANA,
+      ce15_oneri_finanziari: 400_000,
+    });
+    expect(scoreIndicator("dscr", ind)).toBe(0);
+  });
+
+  it("a patrimonio netto nullo il ROE vale 0,5, non 0", () => {
+    const bs = { ...BS_SANA, sp11_capitale: 0, sp12_riserve: 0, sp13_utile_perdita: 0 };
+    const ind = computeIndicators(bs, IS_SANA);
+    expect(ind._equity_raw).toBe(0);
+    expect(scoreIndicator("roe", ind)).toBe(0.5);
+  });
+
+  it("a patrimonio netto NEGATIVO il ROE vale 0,5: il rapporto cambia segno per il denominatore", () => {
+    // Un utile diviso un PN negativo esce negativo per il denominatore, non per
+    // la redditivita': il numero non e' un ROE. Il dissesto lo contano gia'
+    // `indipendenza`, `ms` e `copertura_immob`, che su un PN negativo vanno tutti
+    // a zero — non serve contarlo una quarta volta con un rapporto senza senso.
+    const bs = { ...BS_SANA, sp11_capitale: 10_000, sp12_riserve: 0, sp13_utile_perdita: -300_000 };
+    const ind = computeIndicators(bs, IS_SANA);
+    expect(ind._equity_raw).toBeLessThan(0);
+    expect(scoreIndicator("roe", ind)).toBe(0.5);
+    // Il dissesto resta contato altrove.
+    expect(scoreIndicator("indipendenza", ind)).toBe(0);
+    expect(scoreIndicator("ms", ind)).toBe(0);
+  });
+
+  it("con patrimonio netto positivo il ROE resta quello di prima", () => {
+    const ind = computeIndicators(BS_SANA, IS_SANA);
+    expect(ind._equity_raw).toBeGreaterThan(0);
+    expect(scoreIndicator("roe", ind)).toBe(linearScore(ind.roe, 0, 12));
+  });
+
+  it("una perdita vera con patrimonio netto positivo resta 0", () => {
+    const ind = computeIndicators(BS_SANA, { ...IS_SANA, ce05_materie_prime: 1_500_000 });
+    expect(ind._equity_raw).toBeGreaterThan(0);
+    expect(ind.roe).toBeLessThan(0);
+    expect(scoreIndicator("roe", ind)).toBe(0);
+  });
+
+  it("il punteggio e' ora coerente col grafico: dove non c'e' punto, non c'e' «oltre»", () => {
+    // E' la contraddizione che l'issue descrive: azienda sana e senza oneri
+    // finanziari, nessun punto sul grafico «Sostenibilita' del debito» e nessun
+    // «oltre» nel conteggio di crisi.
+    const ind = computeIndicators(BS_SANA, { ...IS_SANA, ce15_oneri_finanziari: 0 });
+    const [riga] = buildIndicatorChartData([{ periodo: "Storico", indicatori: ind }]);
+    expect(riga.dscr).toBeNull();
+    expect(scoreIndicator("dscr", ind)).toBeGreaterThanOrEqual(0.33);
+  });
+
+  it("le bande di computeCrisisRating restano tarate sullo stesso numero di indicatori", () => {
+    // L'alternativa scartata era togliere `dscr` da `CRISIS_SCORING_KEYS`: le
+    // bande sono calibrate sul NUMERO di indicatori che le alimentano, quindi
+    // toglierne uno le sposta. Il conteggio non cambia, cambia solo il verdetto
+    // del caso degenere.
+    expect(CRISIS_SCORING_KEYS).toContain("dscr");
+    expect(CRISIS_SCORING_KEYS).toContain("roe");
+    expect(CRISIS_SCORING_KEYS.length).toBe(INDICATOR_DEFS.length - 1);
+    expect(crisisScores(computeIndicators(BS_SANA, IS_SANA)).length).toBe(
+      CRISIS_SCORING_KEYS.length,
     );
   });
 });

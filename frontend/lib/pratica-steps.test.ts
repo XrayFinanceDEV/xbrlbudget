@@ -11,6 +11,7 @@ import {
   praticaGates,
   prevStep,
   rescueStep,
+  senzaPraticaAttiva,
   type PraticaGates,
 } from "./pratica-steps";
 
@@ -301,5 +302,40 @@ describe("rescueStep", () => {
     const fallback = rescueStep(steps) ?? steps.find((s) => s.enabled) ?? null;
     expect(fallback?.id).toBe("budget");
     expect(fallback?.kind).toBe("route");
+  });
+});
+
+/**
+ * #32 — `/pratica` senza pratica attiva era un vicolo cieco: la card
+ * «Anagrafica azienda» con tre campi vuoti e NESSUN bottone nel corpo della
+ * pagina. Il primario del percorso vive in `usePraticaPrimaryAction`, che
+ * restituisce `null` fuori da una pratica, quindi il form non era inviabile:
+ * si compilavano tre campi che non si potevano mandare da nessuna parte.
+ *
+ * La parte insidiosa è l'idratazione: `pratica` è `null` anche nel primo
+ * render, prima che il context legga `localStorage` (lo legge in un
+ * `useEffect`, mai nell'inizializzatore di `useState`). Decidere sul solo
+ * `pratica === null` rimanderebbe alla home chiunque ricarichi /pratica su una
+ * pratica valida.
+ */
+describe("senzaPraticaAttiva", () => {
+  it("non decide nulla finché il context non è stato letto", () => {
+    expect(senzaPraticaAttiva(null, false)).toBe(false);
+  });
+
+  it("letto il context e trovato nulla: qui non c'è niente da fare", () => {
+    expect(senzaPraticaAttiva(null, true)).toBe(true);
+  });
+
+  it("una pratica attiva non viene mai rimandata alla home", () => {
+    expect(senzaPraticaAttiva(PRATICA, true)).toBe(false);
+    expect(senzaPraticaAttiva(PRATICA, false)).toBe(false);
+  });
+
+  it("una pratica ancora senza azienda resta una pratica", () => {
+    // Il form di Anagrafiche in modalità CREAZIONE (`companyId: null`) è uno
+    // stato legittimo del percorso: il vicolo cieco era l'assenza della
+    // pratica, non l'assenza dell'azienda.
+    expect(senzaPraticaAttiva({ ...PRATICA, companyId: null }, true)).toBe(false);
   });
 });

@@ -1,0 +1,129 @@
+import { describe, expect, it } from "vitest";
+import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear } from "@/types/api";
+import type { AssumptionsMap } from "@/lib/budget-horizon";
+import {
+  boolAssumption,
+  pregressoBase,
+  pregressoPreview,
+  singleYearValue,
+} from "./budget-pregresso-step";
+
+const baseBs = {
+  sp16a_debiti_banche_breve: "300", sp17a_debiti_banche_lungo: "700",
+  sp16_debiti_breve: "300", sp17_debiti_lungo: "700",
+  sp16b_debiti_altri_finanz_breve: "50", sp17b_debiti_altri_finanz_lungo: "150",
+  sp16c_debiti_obbligazioni_breve: "0", sp17c_debiti_obbligazioni_lungo: "0",
+  sp16d_debiti_fornitori_breve: "0", sp17d_debiti_fornitori_lungo: "0",
+  sp16e_debiti_tributari_breve: "40", sp17e_debiti_tributari_lungo: "10",
+  sp16f_debiti_previdenza_breve: "0", sp17f_debiti_previdenza_lungo: "0",
+  sp16g_altri_debiti_breve: "0", sp17g_altri_debiti_lungo: "0",
+  sp06_crediti_breve: "500", sp06e_crediti_tributari_breve: "20", sp06f_imposte_anticipate_breve: "5",
+  sp02_immob_immateriali: "10", sp03_immob_materiali: "90", sp09_disponibilita_liquide: "60",
+} as unknown as BalanceSheet;
+
+const year = (y: number, over: Partial<ForecastPreviewYear> = {}): ForecastPreviewYear => ({
+  year: y,
+  income_statement: {},
+  balance_sheet: {
+    sp16a_debiti_banche_breve: 280, sp17a_debiti_banche_lungo: 650,
+    sp16b_debiti_altri_finanz_breve: 40, sp17b_debiti_altri_finanz_lungo: 130,
+    sp02_immob_immateriali: 8, sp03_immob_materiali: 85, sp09_disponibilita_liquide: 90,
+  },
+  details: { ce05_fixed: null, ce05_variable: null, ce06_fixed: null, ce06_variable: null, dso_applied: 60, dio_applied: 45, dpo_applied: 78 },
+  ...over,
+});
+
+const response = (years: ForecastPreviewYear[], error: ForecastPreviewResponse["error"] = null): ForecastPreviewResponse =>
+  ({ scenario_id: 1, base_year: 2026, forecast_years: years, error });
+
+const asMap = (m: Record<number, Record<string, unknown>>): AssumptionsMap => m as unknown as AssumptionsMap;
+
+describe("pregressoBase", () => {
+  it("anno base assente => tutto null, mai zero", () => {
+    expect(pregressoBase(undefined)).toEqual({
+      bankDebt: null, bankDebtShort: null, altriFinanziatori: null, creditiClienti: null, debitiTributari: null,
+    });
+  });
+
+  it("somma i saldi al 31/12 secondo la formula di ciascuna riga", () => {
+    const b = pregressoBase(baseBs);
+    expect(b.bankDebt).toBe(1000); // sp16a + sp17a, nessuno scarto aggregato/dettagli qui
+    expect(b.bankDebtShort).toBe(300);
+    expect(b.altriFinanziatori).toBe(200); // sp16b + sp17b
+    expect(b.creditiClienti).toBe(475); // sp06 - sp06e - sp06f
+    expect(b.debitiTributari).toBe(50); // sp16e + sp17e
+  });
+
+  it("uno scarto positivo fra aggregato e dettagli va alle banche (stessa convenzione di base-bank-debt)", () => {
+    // Bilancio abbreviato: tutto il debito sull'aggregato, nessun dettaglio.
+    const abbreviato = {
+      sp16a_debiti_banche_breve: "0", sp17a_debiti_banche_lungo: "0",
+      sp16_debiti_breve: "1000", sp17_debiti_lungo: "700",
+      sp16b_debiti_altri_finanz_breve: "0", sp17b_debiti_altri_finanz_lungo: "0",
+      sp16c_debiti_obbligazioni_breve: "0", sp17c_debiti_obbligazioni_lungo: "0",
+      sp16d_debiti_fornitori_breve: "0", sp17d_debiti_fornitori_lungo: "0",
+      sp16e_debiti_tributari_breve: "0", sp17e_debiti_tributari_lungo: "0",
+      sp16f_debiti_previdenza_breve: "0", sp17f_debiti_previdenza_lungo: "0",
+      sp16g_altri_debiti_breve: "0", sp17g_altri_debiti_lungo: "0",
+      sp06_crediti_breve: "0", sp06e_crediti_tributari_breve: "0", sp06f_imposte_anticipate_breve: "0",
+    } as unknown as BalanceSheet;
+    expect(pregressoBase(abbreviato).bankDebt).toBe(1700);
+  });
+});
+
+describe("singleYearValue", () => {
+  it("nessun anno => value null, non uneven", () => {
+    expect(singleYearValue(asMap({}), [], "existing_debt_repayment_years")).toEqual({ value: null, uneven: false });
+  });
+
+  it("campo non impostato => null", () => {
+    const v = singleYearValue(asMap({ 2027: {}, 2028: {} }), [2027, 2028], "existing_debt_repayment_years");
+    expect(v).toEqual({ value: null, uneven: false });
+  });
+
+  it("mostra il valore del primo anno previsto", () => {
+    const v = singleYearValue(
+      asMap({ 2027: { existing_debt_repayment_years: 5 }, 2028: { existing_debt_repayment_years: 5 } }),
+      [2027, 2028], "existing_debt_repayment_years"
+    );
+    expect(v).toEqual({ value: 5, uneven: false });
+  });
+
+  it("anni non concordi => uneven true, mostra comunque il primo", () => {
+    const v = singleYearValue(
+      asMap({ 2027: { existing_debt_repayment_years: 5 }, 2028: { existing_debt_repayment_years: 7 } }),
+      [2027, 2028], "existing_debt_repayment_years"
+    );
+    expect(v).toEqual({ value: 5, uneven: true });
+  });
+});
+
+describe("boolAssumption", () => {
+  it("assente => false, il default del motore", () => {
+    expect(boolAssumption(asMap({}), [2027], "cash_sweep_enabled")).toBe(false);
+  });
+
+  it("legge il primo anno previsto", () => {
+    expect(boolAssumption(asMap({ 2027: { cash_sweep_enabled: true } }), [2027], "cash_sweep_enabled")).toBe(true);
+    expect(boolAssumption(asMap({ 2027: { cash_sweep_enabled: false } }), [2027], "cash_sweep_enabled")).toBe(false);
+  });
+});
+
+describe("pregressoPreview", () => {
+  it("senza anno base o senza risposta: nessuna riga", () => {
+    expect(pregressoPreview(undefined, response([year(2027)]))).toEqual({ years: [], rows: [], unfunded: null });
+    expect(pregressoPreview(baseBs, null)).toEqual({ years: [], rows: [], unfunded: null });
+  });
+
+  it("gli anni sono quelli che il motore ha davvero prodotto", () => {
+    const p = pregressoPreview(baseBs, response([year(2027)]));
+    expect(p.years).toEqual([2027]);
+    expect(p.rows.length).toBeGreaterThan(0);
+    expect(p.unfunded).toBeNull();
+  });
+
+  it("un fabbisogno scoperto si legge dall'errore strutturato, non si inventa", () => {
+    const p = pregressoPreview(baseBs, response([year(2027)], { year: 2028, message: "Unfunded financing requirement 1,234.56" }));
+    expect(p.unfunded).toEqual({ year: 2028, amount: 1234.56 });
+  });
+});

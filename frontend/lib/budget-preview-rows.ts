@@ -252,9 +252,24 @@ export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear
     r("net", "Utile netto", "kpi"), r("trib", "Debiti tributari a fine anno", "value")];
 }
 
+/**
+ * L'importo del fabbisogno scoperto dentro un messaggio del motore, o `null`
+ * se il messaggio e' un altro.
+ *
+ * Riconoscimento UNICO — una sola regex per l'anteprima (che riceve
+ * `ForecastPreviewError`, con l'anno) e per il salvataggio in blocco (che
+ * riceve una sola stringa, senza anno: `assumptions_service.py` incapsula
+ * `str(e)` in «Assumptions saved successfully, but forecast generation
+ * failed: …»). Due regex divergerebbero alla prima modifica del messaggio del
+ * motore, e uno dei due canali tornerebbe in silenzio all'inglese grezzo.
+ */
+export function unfundedAmountFromMessage(message: string): number | null {
+  const m = /Unfunded financing requirement ([\d,]+\.\d{2})/i.exec(message);
+  return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+}
+
 export function unfundedFromError(error: ForecastPreviewError | null): { year: number; amount: number } | null {
   if (!error || error.year === null) return null;
-  const m = /Unfunded financing requirement ([\d,]+\.\d{2})/i.exec(error.message);
-  if (!m) return null;
-  return { year: error.year, amount: parseFloat(m[1].replace(/,/g, "")) };
+  const amount = unfundedAmountFromMessage(error.message);
+  return amount === null ? null : { year: error.year, amount };
 }

@@ -1,4 +1,6 @@
 /** I sette passi del percorso ipotesi (spec 2026-09-08 §4). Modulo puro. */
+import { saveNotice } from "@/lib/budget-preview-notice";
+
 export type WizardStepKey =
   | "scenario" | "fatturato" | "costi" | "altre-voci-ce"
   | "circolante" | "pregresso-nuovo" | "imposte";
@@ -218,8 +220,11 @@ export function saveOutcome(result: BulkSaveResult | null | undefined): SaveOutc
   if (!result || result.forecast_generated !== false) {
     return { ok: true, message: "Previsionale calcolato", step: null, route: ROUTE_DOPO_CALCOLO };
   }
-  const message = result.message?.trim() ? result.message.trim() : "Previsionale non generato";
-  return { ok: false, message, step: stepForErrorMessage(message), route: null };
+  // Il messaggio GREZZO decide il passo (la regex del motore e' in inglese);
+  // quello tradotto va al toast. `saveNotice` riusa il riconoscimento e la
+  // frase dell'anteprima — una sola traduzione, in `budget-preview-notice`.
+  const raw = result.message?.trim() ? result.message.trim() : "Previsionale non generato";
+  return { ok: false, message: saveNotice(raw), step: stepForErrorMessage(raw), route: null };
 }
 
 const ORDER = WIZARD_STEPS.map((s) => s.key);

@@ -149,7 +149,10 @@ describe("saveOutcome", () => {
       message: "Unfunded financing requirement 84,120.00",
     });
     expect(out.ok).toBe(false);
-    expect(out.message).toContain("Unfunded");
+    // Il toast e' in italiano — `saveNotice`, la stessa frase dell'anteprima —
+    // ma il PASSO si decide sul messaggio grezzo, che e' in inglese.
+    expect(out.message).toContain("Fabbisogno finanziario scoperto");
+    expect(out.message).not.toContain("Unfunded");
     expect(out.step).toBe("pregresso-nuovo");
   });
   it("un rifiuto non naviga MAI: niente toast verde su una Proiezione vuota", () => {

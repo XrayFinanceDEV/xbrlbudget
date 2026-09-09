@@ -182,7 +182,7 @@ export function planTaxRate(
   const nota =
     sotto.source === "forzata"
       ? "L'anno base non esprime un'aliquota effettiva: il piano usa il valore forzato qui sotto."
-      : `L'anno base non esprime un'aliquota effettiva e nessun valore e' stato forzato: il piano usa il predefinito ${pct1(DEFAULT_TAX_RATE)} (IRES + IRAP).`;
+      : `L'anno base non esprime un'aliquota effettiva e nessun valore è stato forzato: il piano usa il predefinito ${pct1(DEFAULT_TAX_RATE)} (IRES + IRAP).`;
   return {
     ratePct: sotto.ratePct,
     source: sotto.source,

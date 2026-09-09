@@ -102,7 +102,7 @@ export function forcedNote(forcedYears: number[], allYears: number[]): string | 
 
 /** Il `title` della casella inerte: sta sull'anno, quindi non lo ripete. */
 const FORCED_CELL_NOTE =
-  "Forzato in CE Prev.: in quest'anno la voce e' un importo assoluto, quindi questa " +
+  "Forzato in CE Prev.: in quest'anno la voce è un importo assoluto, quindi questa " +
   "percentuale non ha effetto. Si azzera dal dialogo Ricalcola.";
 
 /** Il `title` della riga che la quota all'estremo ha annullato: una casella

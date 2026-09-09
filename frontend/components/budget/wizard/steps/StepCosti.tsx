@@ -21,7 +21,7 @@ import { parseFieldValue } from "@/lib/budget-field-rules";
 import { describeCell } from "@/lib/budget-preview-cell";
 import type { PreviewCell, PreviewRow } from "@/lib/budget-preview-rows";
 import { previewNotice } from "@/lib/budget-preview-notice";
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { euro, pct1 } from "@/lib/budget-format";
 import {
   alignVariablesToRevenue,
   costiBase,
@@ -38,9 +38,6 @@ import {
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputGroup, type YearInputRow } from "../YearInputTable";
 import type { StepProps } from "../types";
-
-const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
-const weightPct = (v: number | null): string => (v === null ? "—" : formatPercentage(v / 100, 1));
 
 function SplitSlider(props: {
   label: string;
@@ -192,11 +189,11 @@ export function StepCosti(p: StepProps): JSX.Element {
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)]">
+    <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
       <div className="space-y-4">
         <Card className="border-border/80">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Quanto di questi costi e&apos; fisso</CardTitle>
+            <CardTitle className="text-sm">Quanto di questi costi è fisso</CardTitle>
             <p className="text-xs text-muted-foreground">
               La quota fissa segue l&apos;inflazione, la quota variabile segue i ricavi. Lo slider vale
               per tutti gli anni previsti; per differenziarli, la riga «quota fissa» della tabella qui
@@ -248,52 +245,57 @@ export function StepCosti(p: StepProps): JSX.Element {
         </Card>
       </div>
 
-      <PreviewPanel
-        title="Costi principali e margine"
-        baseYear={p.baseYear}
-        years={preview.years}
-        rows={preview.tableRows}
-        loading={p.preview.loading}
-        error={previewNotice(p.preview)}
-      >
-        {preview.bars.length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            {preview.bars.map((b) => (
-              <div key={b.year}>
-                <div className="flex items-baseline justify-between text-[11px] text-muted-foreground">
-                  <span>{b.year}</span>
-                  <span className="tabular-nums">
-                    {euro(b.fixed)} fissi · {euro(b.variable)} variabili
-                  </span>
+      <div className="lg:sticky lg:top-4">
+        <PreviewPanel
+          title="Costi principali e margine"
+          baseYear={p.baseYear}
+          years={preview.years}
+          rows={preview.tableRows}
+          loading={p.preview.loading}
+          error={previewNotice(p.preview)}
+        >
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Le percentuali in tabella sono sui ricavi dell&apos;anno.
+          </p>
+          {preview.bars.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {preview.bars.map((b) => (
+                <div key={b.year}>
+                  <div className="flex items-baseline justify-between text-[11px] text-muted-foreground">
+                    <span>{b.year}</span>
+                    <span className="tabular-nums">
+                      {euro(b.fixed)} fissi · {euro(b.variable)} variabili
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex h-2 overflow-hidden rounded-full bg-muted">
+                    <div className="bg-blue-500 dark:bg-blue-400" style={{ flex: b.fixedFlex }} />
+                    <div className="bg-amber-500 dark:bg-amber-400" style={{ flex: b.variableFlex }} />
+                  </div>
                 </div>
-                <div className="mt-0.5 flex h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="bg-blue-500 dark:bg-blue-400" style={{ flex: b.fixedFlex }} />
-                  <div className="bg-amber-500 dark:bg-amber-400" style={{ flex: b.variableFlex }} />
-                </div>
-              </div>
-            ))}
-            <p className="pt-0.5 text-[11px] text-muted-foreground">
-              peso dei fissi: {weightPct(preview.weight.base)} → {weightPct(preview.weight.last)}
-            </p>
-          </div>
-        )}
+              ))}
+              <p className="pt-0.5 text-[11px] text-muted-foreground">
+                peso dei fissi sui costi principali: {pct1(preview.weight.base)} → {pct1(preview.weight.last)}
+              </p>
+            </div>
+          )}
 
-        {preview.fornitori && (
-          <>
-            <Separator className="my-3" />
-            <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              {preview.dpo === null
-                ? `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear}`
-                : `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear} (${preview.dpo} GG)`}
-            </p>
-            <FornitoriRow row={preview.fornitori} years={preview.years} />
-            <p className="mt-1 px-2 text-[11px] text-muted-foreground">
-              I giorni medi si regolano al passo 5, Capitale circolante. Qui restano quelli dell&apos;ultimo
-              bilancio per non mescolare le ipotesi.
-            </p>
-          </>
-        )}
-      </PreviewPanel>
+          {preview.fornitori && (
+            <>
+              <Separator className="my-3" />
+              <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                {preview.dpo === null
+                  ? `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear}`
+                  : `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear} (${preview.dpo} GG)`}
+              </p>
+              <FornitoriRow row={preview.fornitori} years={preview.years} />
+              <p className="mt-1 px-2 text-[11px] text-muted-foreground">
+                I giorni medi si regolano al passo 5, Capitale circolante. Qui restano quelli dell&apos;ultimo
+                bilancio per non mescolare le ipotesi.
+              </p>
+            </>
+          )}
+        </PreviewPanel>
+      </div>
     </div>
   );
 }

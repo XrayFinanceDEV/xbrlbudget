@@ -33,7 +33,7 @@ function unfundedText(amount: number, year: number | null): string {
   const dove = year === null ? "" : ` nel ${year}`;
   return `Fabbisogno finanziario scoperto${dove}: ${formatCurrency(amount)}. ` +
     "Il previsionale si ferma qui: copri lo scoperto con un finanziamento, meno investimenti, o un " +
-    "rimborso piu' lungo del debito pregresso.";
+    "rimborso più lungo del debito pregresso.";
 }
 
 export function previewNotice(preview: PreviewState): string | null {

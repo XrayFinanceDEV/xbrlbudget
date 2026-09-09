@@ -475,3 +475,41 @@ di proiezione non sono nemmeno resi quando `periodMonths === 12`
 `StampaContent`, `buildAICtx` e `CommentBlock` vivono in
 `frontend/components/pratica/StampaContent.tsx` — non in `app/pratica/page.tsx`, dove stavano
 prima della decomposizione (§7).
+
+## 13. La vista Budget: il percorso a sette passi delle ipotesi
+
+Lo step PREVISIONALE «Budget» (§3) non è più una lista di ipotesi con un accordion «Avanzate»:
+è un percorso a **sette passi**, uno alla volta, ciascuno con la propria anteprima calcolata dal
+motore (`POST /scenarios/{id}/preview`, non scrive — vedi
+[`docs/budget/API-PREVISIONALE.md`](../budget/API-PREVISIONALE.md) §7). L'elenco dei passi e la
+mappa campo → passo sono dati puri in `frontend/lib/budget-wizard-steps.ts`
+(`WIZARD_STEPS`, `STEP_FIELDS`), senza React:
+
+| # | Passo | Gruppo | Campi (`STEP_FIELDS`) |
+|---|---|---|---|
+| 1 | Scenario | Impostazione | nessuno — nome, anno base, orizzonte |
+| 2 | Fatturato | Conto economico | `revenue_growth_pct`, `other_revenue_growth_pct` |
+| 3 | Costi principali | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `personnel_growth_pct`, `rent_growth_pct` |
+| 4 | Altre voci CE | Conto economico | `other_costs_growth_pct` |
+| 5 | Capitale circolante | Stato patrimoniale | `dso_days`, `dio_days`, `dpo_days`, `receivables_long_growth_pct`, tredici `sp*_growth_pct` (sp01, sp04, sp06e, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended` |
+| 6 | Pregresso e nuovo | Stato patrimoniale | `existing_debt_repayment_years`, `altri_finanz_repayment_years`, `financing_loans`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash` |
+| 7 | Imposte | Stato patrimoniale | `tax_rate`, `tax_advances_paid`, `tax_temporary_differences`, `sp16e_growth_pct`, `sp17e_growth_pct` |
+
+`primaryLabel` rende «Salva e calcola previsionale» solo sul passo 7 («Avanti» altrove); gli
+altri sei passi avanzano senza toccare il server. `stepForErrorMessage` rimanda al passo
+«Pregresso e nuovo» un errore di fabbisogno scoperto (`/unfunded financing requirement/i`),
+altrimenti al passo «Imposte» — gli unici due punti dove un errore del motore ha un passo
+plausibile a cui appartenere. Il progresso persiste per scenario in `localStorage`
+(`stepStorageKey`).
+
+**`DEAD_FIELDS`** (`investments`, `receivables_short_growth_pct`, `payables_short_growth_pct`,
+`interest_rate_receivables`, `interest_rate_payables`) sono colonne che il motore non legge più:
+idratate da uno scenario salvato e rispedite al salvataggio, ma **nessun passo le mostra**.
+
+Il componente del passo 3 (`components/budget/wizard/steps/StepCosti.tsx`) applica l'invariante
+di CLAUDE.md sulla quota fissa: lo slider chiama `p.updateAll(field, v)` e scrive lo stesso
+valore su **tutti** gli anni di piano, mentre la riga «quota fissa» della tabella per anno
+(`p.update(year, field, v)`) corregge un singolo anno. Uno scenario con quote diverse fra anni
+mostra l'avviso *«Valori diversi per anno: muovendo lo slider … li allinei tutti a quello che
+imposti»* — non un blocco, perché il componente non sa quale dei valori discordi sia quello
+«giusto».

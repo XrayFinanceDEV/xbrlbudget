@@ -106,6 +106,7 @@ guardare. Scegli, insisti dove senti puzza di bruciato, abbandona ciò che regge
 | **Indicatori** | dati degenerati: ricavi a zero, patrimonio netto negativo, nessun onere finanziario. Il grafico deve **omettere** la voce, non disegnare uno zero. |
 | **Stampa** | i sei commenti AI si salvano e si rileggono; i grafici compaiono; l'impaginazione. |
 | **Coerenza fra viste** | prendi **un** numero — ricavi, MOL, PFN — e inseguilo in Confronto, Proiezione, Indicatori e Stampa. Devono dire tutti la stessa cosa. |
+| **Wizard ipotesi budget** (`/budget`) | il percorso a sette passi si naviga avanti/indietro senza perdere i valori digitati; l'anteprima di ogni passo (`POST /preview`) corrisponde ai numeri di CE Prev. e SP Prev. **dopo** aver salvato con «Salva e calcola previsionale» — non solo in direzione, al centesimo. |
 
 ## Missione B — il previsionale a 3 e a 5 anni
 

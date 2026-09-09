@@ -34,7 +34,8 @@ cd frontend && npm run dev                      # http://localhost:3000
 ```
 
 **Budget workflow:** import → `POST /companies/{id}/scenarios` → `PUT /scenarios/{id}/assumptions`
-(bulk, every year at once, `auto_generate=true`) → `GET /scenarios/{id}/analysis`. Optional:
+(bulk, every year at once, `auto_generate=true`) → `POST /scenarios/{id}/preview` (anteprima dal
+motore, non scrive) → `GET /scenarios/{id}/analysis`. Optional:
 `PATCH /scenarios/{id}/ce-override` and `POST /scenarios/{id}/generate?clear_overrides=true`.
 
 **Infrannuale workflow:** import with `period_months` → rettifiche **once per year**
@@ -250,6 +251,15 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **`sp_overrides` clampa a zero i valori negativi** (tranne `sp13_utile_perdita` e
   `sp12h_riserva_neg_azioni_proprie`) e **ignora in silenzio** una chiave che non esiste nel
   risultato: un override negativo, o scritto male, non dà errore — dà uno zero.
+- **`POST /preview` non scrive nulla e risponde 200 anche a un piano che si ferma**: leggere
+  `error`, non lo status. Gli anni in `forecast_years` sono quelli calcolati prima dell'errore.
+- **Lo slider della quota fissa scrive tutti gli anni di piano** (`fixed_*_percentage`): il
+  modello è per anno, l'interfaccia no. Uno scenario con valori diversi fra anni mostra un
+  avviso e viene allineato al primo tocco.
+- **`tax_rate` è un ripiego, non l'aliquota che vince.** Il motore usa l'aliquota effettiva
+  dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
+  derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
+  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:718-748`).
 - **Promuovere una proiezione CANCELLA il `FinancialYear` annuale già esistente** per quella
   azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era
   stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un

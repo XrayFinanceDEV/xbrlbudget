@@ -213,4 +213,54 @@ Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno
 | `frontend/app/forecast/income/page.tsx` | `FIELD_TO_OVERRIDE`, `EditableCell`, `pendingEdits`, salvataggio batch |
 | `frontend/app/forecast/balance/page.tsx` | l'editor dello SP previsionale che scrive `sp_overrides` |
 | `frontend/lib/pratica-codes.ts` | `CE_OVERRIDE_FIELD_BY_CODE`, `buildCeOverridePayload` |
-| `frontend/lib/api.ts` | `bulkUpsertAssumptions`, `patchCeOverrides`, `generateForecast(clearOverrides)`, `promoteProjection` |
+| `frontend/lib/api.ts` | `bulkUpsertAssumptions`, `patchCeOverrides`, `generateForecast(clearOverrides)`, `promoteProjection`, `previewForecast` |
+| `backend/app/services/forecast_preview_service.py` | il servizio dell'anteprima: `load_forecast_source` + `compute_forecast(stop_on_error=False)`, nessuna sessione toccata |
+
+## 7. Anteprima — stesso motore, nessuna scrittura
+
+```
+POST /companies/{id}/scenarios/{sid}/preview
+{ "assumptions": [ { "forecast_year": 2026, "revenue_growth_pct": 5.0, "...": "..." } ] }
+```
+
+Stesso corpo del bulk (`{"assumptions": [...]}`); bulk e anteprima condividono
+`build_assumption_row` (`backend/app/services/assumptions_service.py:99`) e
+`validate_assumptions_list`, così un campo aggiunto a un percorso non può mancare all'altro. Le
+righe costruite sono transitorie — **mai `db.add`, mai `commit`** — e il motore le legge con
+`getattr` come farebbe con righe persistite. Rifiuta con **400** uno scenario
+`scenario_type == "infrannuale"` prima di leggere qualunque cosa: quel percorso ha il proprio
+motore (`IntraYearEngine`) e le proprie tab (Confronto, Proiezione).
+
+Risposta, sempre **200**, anche a calcolo interrotto:
+
+```json
+{
+  "scenario_id": 12,
+  "base_year": 2025,
+  "forecast_years": [
+    {
+      "year": 2026,
+      "income_statement": { "ce01_ricavi_vendite": 2597000.0, "...": "..." },
+      "balance_sheet": { "sp09_disponibilita_liquide": 131240.0, "...": "..." },
+      "details": {
+        "ce05_fixed": 349860.0, "ce05_variable": 675220.0,
+        "ce06_fixed": 257040.0, "ce06_variable": 178080.0,
+        "dso_applied": 62.0, "dio_applied": 45.0, "dpo_applied": 78.0
+      }
+    }
+  ],
+  "error": null
+}
+```
+
+`error` è `null` oppure `{"year": 2027, "message": "..."}`: in quel caso `forecast_years`
+contiene solo gli anni calcolati **prima** dell'errore. Gli errori di ingresso (anno ≤ base,
+anni duplicati, corpo vuoto, scenario infrannuale) restano **400** come nel bulk, perché sono
+errori del chiamante, non del piano.
+
+`details` porta sempre le **sette chiavi** dichiarate da `ForecastEngine.compute_forecast`
+(`calculations/forecast_engine.py:602-604` e `:820-823`, `:1118`, `:1131`, `:1230`):
+`ce05_fixed`, `ce05_variable`, `ce06_fixed`, `ce06_variable` (i due addendi di materie prime e
+servizi — `null` quando `ce05_override`/`ce06_override` è valorizzato, perché la scomposizione
+non è definita su un importo forzato) e `dso_applied`, `dio_applied`, `dpo_applied` (i giorni di
+rotazione effettivamente usati, forzati o derivati che siano).

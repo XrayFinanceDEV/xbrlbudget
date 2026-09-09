@@ -75,6 +75,24 @@ export function groupWizardSteps(steps: readonly WizardStep[]): WizardStepGroup[
   return Array.from(byGroup, ([group, groupSteps]) => ({ group, steps: groupSteps }));
 }
 
+/**
+ * L'etichetta dell'orizzonte in coda alla barra dei passi.
+ *
+ * Con un anno solo si leggeva «Orizzonte 1 anni · 2027 – 2027»: due errori in
+ * sette parole, il plurale e un intervallo che ripete due volte lo stesso anno.
+ * La decisione sta qui e non nel JSX per la stessa ragione per cui ci sta
+ * quella di `budget-tax-rate.ts` («1 anno su 2»): un'interfaccia italiana e'
+ * collaudabile solo se le sue frasi le compone un modulo puro.
+ */
+export function horizonLabel(horizon: number, baseYear: number): string {
+  const n = Math.max(0, Math.floor(horizon) || 0);
+  if (n === 0) return "Nessun anno di piano";
+  const anni = n === 1 ? "1 anno" : `${n} anni`;
+  const primo = baseYear + 1;
+  const ultimo = baseYear + n;
+  return `Orizzonte ${anni} · ${primo === ultimo ? primo : `${primo} – ${ultimo}`}`;
+}
+
 export function primaryLabel(step: WizardStepKey): string {
   return step === "imposte" ? "Salva e calcola previsionale" : "Avanti";
 }

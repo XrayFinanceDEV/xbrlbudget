@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEAD_FIELDS, ROUTE_DOPO_CALCOLO, STEP_FIELDS, WIZARD_STEPS, groupWizardSteps, nextStep,
+  DEAD_FIELDS, ROUTE_DOPO_CALCOLO, STEP_FIELDS, WIZARD_STEPS, groupWizardSteps, horizonLabel, nextStep,
   parseStoredStep, prevStep,
   primaryLabel, saveOutcome, stepFooterHint, stepForErrorMessage, stepLead, stepStorageKey,
   stepsUpTo, wizardChrome, type WizardStep,
@@ -179,5 +179,20 @@ describe("saveOutcome", () => {
   });
   it("un successo non sposta il passo: si resta dove si e', poi si naviga", () => {
     expect(saveOutcome({ forecast_generated: true }).step).toBeNull();
+  });
+});
+
+describe("horizonLabel", () => {
+  it("piu' anni: plurale e intervallo", () => {
+    expect(horizonLabel(3, 2026)).toBe("Orizzonte 3 anni · 2027 – 2029");
+    expect(horizonLabel(5, 2025)).toBe("Orizzonte 5 anni · 2026 – 2030");
+  });
+  it("un anno solo: singolare, e nessun intervallo che ripete lo stesso anno", () => {
+    // Prima si leggeva «Orizzonte 1 anni · 2027 – 2027»: due errori in sette parole.
+    expect(horizonLabel(1, 2026), "un piano di un anno non e' «1 anni»").toBe("Orizzonte 1 anno · 2027");
+  });
+  it("nessun anno di piano non e' un intervallo a rovescio", () => {
+    expect(horizonLabel(0, 2026)).toBe("Nessun anno di piano");
+    expect(horizonLabel(-2, 2026)).toBe("Nessun anno di piano");
   });
 });

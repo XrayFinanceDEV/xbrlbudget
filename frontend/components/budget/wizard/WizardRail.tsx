@@ -8,7 +8,7 @@ import type { JSX } from "react";
 import { Check } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { WIZARD_STEPS, groupWizardSteps, type WizardStepKey } from "@/lib/budget-wizard-steps";
+import { WIZARD_STEPS, groupWizardSteps, horizonLabel, type WizardStepKey } from "@/lib/budget-wizard-steps";
 
 const GROUPS = groupWizardSteps(WIZARD_STEPS);
 
@@ -60,7 +60,7 @@ export function WizardRail(props: {
           </div>
         ))}
         <div className="ml-auto flex items-center whitespace-nowrap border-l border-border pl-4 text-xs text-muted-foreground">
-          Orizzonte {horizon} anni · {baseYear + 1} – {baseYear + horizon}
+          {horizonLabel(horizon, baseYear)}
         </div>
       </Card>
     </nav>

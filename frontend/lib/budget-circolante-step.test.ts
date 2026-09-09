@@ -5,6 +5,8 @@ import {
   giorniMediAuto,
   giorniMediRows,
   minorFieldsRows,
+  spIndexingOf,
+  DRIVERS,
 } from "./budget-circolante-step";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement } from "@/types/api";
@@ -60,6 +62,70 @@ describe("minorFieldsRows", () => {
   it("anno base assente ⇒ '—' su tutte le righe, mai '€ 0'", () => {
     const rows = minorFieldsRows(undefined);
     expect(rows.every((r) => r.baseLabel === "—")).toBe(true);
+  });
+
+  it("senza aggancio ogni voce dichiara di restare costante, e la % resta viva", () => {
+    // E' la frase che oggi non dice nessuno: una voce lasciata vuota resta
+    // FERMA per tutto il piano, e nulla lo segnala.
+    const riga = minorFieldsRows(balance()).find((r) => r.field === "sp16g_growth_pct");
+    expect(riga?.andamento).toBe("Costante per tutto il piano, salvo variazione %");
+    expect(riga?.agganciata).toBe(false);
+    expect(riga?.driver).toBeNull();
+    expect(riga?.off).toBeUndefined();
+  });
+
+  it("agganciata a un driver: lo dichiara, e spegne la casella della %", () => {
+    const riga = minorFieldsRows(balance(), { sp16g: "ricavi" })
+      .find((r) => r.field === "sp16g_growth_pct");
+    expect(riga?.andamento).toBe("Cresce con i ricavi");
+    expect(riga?.agganciata).toBe(true);
+    expect(riga?.driver).toBe("ricavi");
+    // Un driver vince sulla percentuale: lasciarla viva darebbe una casella
+    // che accetta un numero senza alcun effetto.
+    expect(riga?.off).toBe(true);
+    expect(riga?.offNote).toContain("non viene applicata");
+  });
+
+  it("le voci governate altrove non offrono alcun driver, e dicono da chi", () => {
+    const rows = minorFieldsRows(balance(), { sp06e: "ricavi", sp06f: "ricavi" });
+    const governate = rows.filter((r) => r.code === null);
+    expect(governate.map((r) => r.field)).toEqual([
+      "receivables_long_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
+    ]);
+    expect(rows.find((r) => r.field === "sp06e_growth_pct")?.andamento)
+      .toBe("Governata dalla posizione tributaria");
+    // La chiave c'e' ma il motore la ignorerebbe: l'interfaccia non la applica
+    // e non la offre, invece di lasciarla scegliere e poi buttarla via.
+    expect(rows.find((r) => r.field === "sp06e_growth_pct")?.driver).toBeNull();
+    expect(rows.filter((r) => r.code !== null)).toHaveLength(11);
+  });
+
+  it("l'interruttore previdenza/personale toglie sp16f e sp17f dagli agganciabili", () => {
+    const rows = minorFieldsRows(balance(), { sp16f: "ricavi" }, true);
+    const sp16f = rows.find((r) => r.field === "sp16f_growth_pct");
+    expect(sp16f?.code).toBeNull();
+    expect(sp16f?.andamento).toBe("Cresce con il costo del personale");
+    expect(sp16f?.agganciata).toBe(true);
+    expect(sp16f?.off).toBe(true);
+  });
+
+  it("i tre driver, e solo tre", () => {
+    expect([...DRIVERS]).toEqual(["ricavi", "acquisti", "personale"]);
+  });
+});
+
+describe("spIndexingOf", () => {
+  it("legge l'aggancio del primo anno previsto", () => {
+    const a: AssumptionsMap = {
+      2025: { sp_indexing: { sp16g: "ricavi" } },
+      2026: { sp_indexing: { sp16g: "acquisti" } },
+    };
+    expect(spIndexingOf(a, [2025, 2026])).toEqual({ sp16g: "ricavi" });
+  });
+
+  it("assente o null ⇒ mappa vuota, cioe' tutto costante", () => {
+    expect(spIndexingOf({ 2025: { sp_indexing: null } }, [2025])).toEqual({});
+    expect(spIndexingOf({}, [2025])).toEqual({});
   });
 });
 

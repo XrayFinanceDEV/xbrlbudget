@@ -26,6 +26,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import type {
   BudgetScenario,
   FinancingLoanInput,
+  SpIndexingDriver,
   TemporaryDifferenceInput,
 } from "@/types/api";
 import { toast } from "sonner";
@@ -46,6 +47,9 @@ export interface ScenarioAssumptionsState {
   updateAll: (field: string, value: number | boolean | null) => void; // tutti i forecastYears
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
+  /** Aggancia una voce minore dello SP a un driver di volume su tutti gli anni
+   *  di piano; `null` la slega. */
+  updateSpIndexing: (code: string, driver: SpIndexingDriver | null) => void;
 }
 
 export function useScenarioAssumptions({
@@ -207,6 +211,30 @@ export function useScenarioAssumptions({
     }));
   }, []);
 
+  /**
+   * L'aggancio di una voce minore dello SP a un driver di volume (Task 15).
+   * Scrive TUTTI gli anni di piano: il modello e' per anno — il motore legge
+   * `sp_indexing` riga per riga — ma la scelta e' una sola, come per gli
+   * interruttori e come per la quota fissa dei costi. Passare `null` toglie
+   * la chiave invece di lasciarla a un valore vuoto: al motore una chiave
+   * assente significa «costante», che e' esattamente cio' che l'utente ha
+   * appena chiesto.
+   */
+  const updateSpIndexing = useCallback((code: string, driver: SpIndexingDriver | null) => {
+    setAssumptions((prev) => {
+      const next = { ...prev };
+      for (const y of forecastYears) {
+        const { [code]: _tolto, ...resto } = next[y]?.sp_indexing ?? {};
+        const mappa = driver ? { ...resto, [code]: driver } : resto;
+        next[y] = {
+          ...(next[y] ?? {}),
+          sp_indexing: Object.keys(mappa).length > 0 ? mappa : null,
+        };
+      }
+      return next;
+    });
+  }, [forecastYears]);
+
   const isNew = idratato && existingAssumptionYears.size === 0;
   const updateAll = useCallback((field: string, value: number | boolean | null) => {
     setAssumptions((prev) => {
@@ -234,5 +262,6 @@ export function useScenarioAssumptions({
     updateAll,
     updateFinancingLoans,
     updateTemporaryDifferences,
+    updateSpIndexing,
   };
 }

@@ -136,6 +136,7 @@ export function hydrateAssumptions(
       sp17f_growth_pct: a.sp17f_growth_pct,
       sp17g_growth_pct: a.sp17g_growth_pct,
       sp18_growth_pct: a.sp18_growth_pct,
+      sp_indexing: a.sp_indexing ?? null,
       sp_overrides: a.sp_overrides ?? null,
       ce01_override: a.ce01_override,
       ce05_override: a.ce05_override,

@@ -528,6 +528,7 @@ export interface BudgetAssumptions {
   sp17f_growth_pct: number | null;
   sp17g_growth_pct: number | null;
   sp18_growth_pct: number | null;
+  sp_indexing: Record<string, SpIndexingDriver> | null;
   sp_overrides: Record<string, number> | null;
   ce02_override: number | null;
   ce03_override: number | null;
@@ -623,6 +624,7 @@ export interface BudgetAssumptionsCreate {
   sp17f_growth_pct?: number | null;
   sp17g_growth_pct?: number | null;
   sp18_growth_pct?: number | null;
+  sp_indexing?: Record<string, SpIndexingDriver> | null;
   sp_overrides?: Record<string, number> | null;
   ce02_override?: number | null;
   ce03_override?: number | null;
@@ -1020,6 +1022,27 @@ export interface ScenarioAnalysis {
 
 // ===== Forecast Preview (anteprima motore, task 3) =====
 
+/** I tre driver di volume a cui una voce minore dello SP puo' essere agganciata
+ *  (Task 15). Il motore applica `stock dell'anno base × fattore del driver`. */
+export type SpIndexingDriver = "ricavi" | "acquisti" | "personale";
+
+/** Che cosa il motore ha davvero indicizzato in un anno, voce per voce. */
+export interface IndicizzazioneVoce {
+  driver: SpIndexingDriver;
+  fattore: number;
+  /** La `sp*_growth_pct` della stessa voce esiste ma non e' stata applicata:
+   *  vince il driver. */
+  percentuale_ignorata: boolean;
+}
+
+/** Una chiave che NON ha avuto effetto, col perche'. Dichiarata sempre, anche a
+ *  lista vuota: a valle una chiave assente vale zero. */
+export interface IndicizzazioneIgnorata {
+  voce: string;
+  driver: string;
+  motivo: string;
+}
+
 export interface ForecastYearDetails {
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
@@ -1027,6 +1050,8 @@ export interface ForecastYearDetails {
   pregresso: Record<PregressoKey, PregressoDetail>;
   imposte: ImposteDetail;
   pregresso_ignored: PregressoKey[];
+  indicizzazione: Record<string, IndicizzazioneVoce>;
+  indicizzazione_ignorata: IndicizzazioneIgnorata[];
 }
 
 export interface ForecastPreviewYear {

@@ -1047,6 +1047,10 @@ export interface ForecastYearDetails {
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
   dso_applied: number; dio_applied: number; dpo_applied: number;
+  /** I giorni medi DEDOTTI caduti nella guardia (`'dso' | 'dio' | 'dpo'`):
+   *  il motore ha riportato il saldo dell'anno base invece di scalarlo.
+   *  Sempre presente, vuoto quando non scatta nulla. */
+  degenerate_turnover_ratio: string[];
   pregresso: Record<PregressoKey, PregressoDetail>;
   imposte: ImposteDetail;
   pregresso_ignored: PregressoKey[];

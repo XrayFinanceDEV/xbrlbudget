@@ -34,6 +34,18 @@ from calculations.ce_result import calculate_ce_result
 # BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre
 # un `prev × (1+%)` composto per cinque anni si'.
 
+# ── GIORNI MEDI DERIVATI: la soglia oltre cui non descrivono piu' l'azienda ──
+#
+# Un giorno medio DEDOTTO dall'anno base e' un rapporto: giacenza / flusso. Oltre
+# un anno di giacenza smette di descrivere l'azienda e descrive il proprio
+# denominatore — e moltiplicare il flusso PROIETTATO per quel rapporto non e' una
+# stima imprecisa, e' un moltiplicatore arbitrario. Stessa soglia del rilievo G1
+# del banco di sensibilita' (`scripts/sensibilita_ipotesi.py`) e stessa nozione
+# del motore infrannuale (`intra_year_engine._turnover_ratio`, «piu' di un anno
+# di magazzino»). Un giorno ESPLICITO dell'utente non passa di qui: e' una
+# scelta, non una derivazione.
+MAX_DERIVED_TURNOVER_DAYS: Decimal = Decimal("365")
+
 SP_INDEXING_DRIVERS: Tuple[str, ...] = ("ricavi", "acquisti", "personale")
 
 # Le voci minori agganciabili, e il campo dell'anno base che il fattore
@@ -1532,8 +1544,10 @@ class ForecastEngine:
 
         `details`, se passato, riceve i giorni di rotazione effettivamente
         applicati (`dso_applied`, `dio_applied`, `dpo_applied`) — quelli espliciti
-        dell'ipotesi o quelli dedotti dall'anno base — e lo stato del pregresso
-        saldo per saldo (`pregresso`, `pregresso_ignored`, `imposte`).
+        dell'ipotesi o quelli dedotti dall'anno base — l'elenco dei giorni DEDOTTI
+        caduti nella guardia (`degenerate_turnover_ratio`, sempre presente, vuoto
+        quando non scatta nulla) e lo stato del pregresso saldo per saldo
+        (`pregresso`, `pregresso_ignored`, `imposte`).
 
         `pregresso` e' lo scadenziamento gia' normalizzato (validate_pregresso),
         `year_index` l'anno di piano (0 = il primo) e `horizon` quanti anni ha il
@@ -1617,8 +1631,67 @@ class ForecastEngine:
         # so that working capital scales proportionally with revenue/purchases.
         forecast_revenue = forecast_inc['ce01_ricavi_vendite']
         forecast_purchases = forecast_inc['ce05_materie_prime'] + forecast_inc['ce06_servizi']
-        base_revenue = base_inc.ce01_ricavi_vendite or D('1')
-        base_purchases = (base_inc.ce05_materie_prime + base_inc.ce06_servizi) or D('1')
+        base_revenue = _base_inc('ce01_ricavi_vendite')
+        base_purchases = _base_inc('ce05_materie_prime') + _base_inc('ce06_servizi')
+
+        # ── GUARDIA SUI GIORNI MEDI DEDOTTI (Task 14) ──
+        # Il denominatore di ripiego che stava qui (`or D('1')`) non era una
+        # guardia: era un denominatore inventato, e su un'azienda che fattura su
+        # `ce04` produceva giorni a scala astronomica senza che nulla protestasse.
+        degenerate_days: List[str] = []
+        if details is not None:
+            # Dichiarata SEMPRE, anche vuota: a valle una chiave assente vale zero,
+            # quindi tacere equivarrebbe a dichiararsi puliti. E' la lista viva, che
+            # i tre blocchi qui sotto riempiono man mano.
+            details['degenerate_turnover_ratio'] = degenerate_days
+
+        def _derived_days(stock, flow_base, name):
+            """I giorni dedotti dall'anno base, o `None` se DEGENERI.
+
+            Giacenza nulla ⇒ zero giorni, e non c'e' nulla di degenere: qualunque
+            denominatore, il saldo riportato e quello scalato valgono entrambi
+            zero, e un avviso su una voce che non esiste sarebbe solo rumore.
+            """
+            if not stock:
+                return ZERO
+            if flow_base is None or flow_base <= 0:
+                degenerate_days.append(name)
+                return None
+            days = stock / flow_base * DAYS
+            if days < 0 or days > MAX_DERIVED_TURNOVER_DAYS:
+                degenerate_days.append(name)
+                return None
+            return days
+
+        def _effective_days(amount, flow):
+            """Il giorno DAVVERO applicato quando il motore ha riportato uno stock.
+
+            Nessun giorno e' stato usato come moltiplicatore: quello dichiarato e'
+            quello che il saldo scritto vale sul flusso proiettato, cosi' che
+            `saldo = flusso × giorni / 360` resti vera (e' l'identita' che i
+            rilievi C1-C3 del banco di sensibilita' verificano). Flusso nullo ⇒
+            nessun giorno lo descrive: zero, e la lista dice perche'.
+            """
+            return (amount / flow * DAYS) if flow > 0 else ZERO
+
+        def _carry_unless_planned(stock, key):
+            """Lo stock dell'anno base riportato — a meno che un piano lo governi.
+
+            Un giorno degenere fa RIPORTARE uno stock invece di convertire un
+            flusso, ed e' proprio la ragione per cui crediti e fornitori restano
+            fuori da `_net_of_pregresso` (vedi la sua docstring piu' sotto: ne
+            restano fuori *perche'* il loro generato converte un flusso) a venir
+            meno. Lo stock riportato E' il pregresso: `validate_pregresso` impone
+            che la massa dichiarata sia quella del bilancio base. Sommargli il
+            residuo del piano conterebbe due volte la stessa massa, e il saldo
+            non calerebbe mai per quanto il piano lo scadenzi.
+
+            La regola e' quella gia' scritta per l'indicizzazione (Ruling 17): il
+            piano vince e la voce si estingue con lui. Il generato e' zero, il
+            saldo e' il solo residuo — e se il piano non copre tutta la massa il
+            residuo resta aperto, quindi nulla sparisce.
+            """
+            return ZERO if (pregresso or {}).get(key) else stock
 
         # Crediti tributari (sp06e) and imposte anticipate (sp06f) are NOT commercial
         # receivables and must NOT scale with revenue via DSO (the client's "crediti
@@ -1643,6 +1716,7 @@ class ForecastEngine:
         dso = getattr(assumption, 'dso_days', None)
         if dso is not None:
             dso = D(str(dso))
+            sp06_trade = forecast_revenue * dso / DAYS
         else:
             base_sp06_trade = max(
                 ZERO,
@@ -1650,23 +1724,33 @@ class ForecastEngine:
                 - _base('sp06e_crediti_tributari_breve')
                 - _base('sp06f_imposte_anticipate_breve'),
             )
-            dso = (base_sp06_trade / base_revenue * DAYS) if base_revenue > 0 else ZERO
+            dso = _derived_days(base_sp06_trade, base_revenue, 'dso')
+            if dso is None:
+                sp06_trade = _carry_unless_planned(base_sp06_trade, 'crediti_commerciali')
+                dso = _effective_days(sp06_trade, forecast_revenue)
+            else:
+                sp06_trade = forecast_revenue * dso / DAYS
         if details is not None:
             details['dso_applied'] = dso
-        sp06_trade = forecast_revenue * dso / DAYS
         sp06 = sp06_trade + sp06e + sp06f
 
         # DIO → sp05 (inventory)
         dio = getattr(assumption, 'dio_days', None)
         if dio is not None:
             dio = D(str(dio))
+            sp05 = forecast_revenue * dio / DAYS
         else:
             # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
             base_sp05 = _base('sp05_rimanenze')
-            dio = (base_sp05 / base_revenue * DAYS) if base_revenue > 0 else ZERO
+            dio = _derived_days(base_sp05, base_revenue, 'dio')
+            if dio is None:
+                # Le rimanenze non hanno piano di scadenziamento: nulla da scorporare.
+                sp05 = base_sp05
+                dio = _effective_days(sp05, forecast_revenue)
+            else:
+                sp05 = forecast_revenue * dio / DAYS
         if details is not None:
             details['dio_applied'] = dio
-        sp05 = forecast_revenue * dio / DAYS
 
         # Long-term receivables, other current assets
         long_growth = D('1') + assumption.receivables_long_growth_pct / D('100')
@@ -1799,13 +1883,18 @@ class ForecastEngine:
         dpo = getattr(assumption, 'dpo_days', None)
         if dpo is not None:
             dpo = D(str(dpo))
+            sp16d = forecast_purchases * dpo / DAYS
         else:
             # Auto-derive DPO from base year: base_sp16d / base_purchases * 360
             base_sp16d = _base('sp16d_debiti_fornitori_breve')
-            dpo = (base_sp16d / base_purchases * DAYS) if base_purchases > 0 else ZERO
+            dpo = _derived_days(base_sp16d, base_purchases, 'dpo')
+            if dpo is None:
+                sp16d = _carry_unless_planned(base_sp16d, 'debiti_fornitori')
+                dpo = _effective_days(sp16d, forecast_purchases)
+            else:
+                sp16d = forecast_purchases * dpo / DAYS
         if details is not None:
             details['dpo_applied'] = dpo
-        sp16d = forecast_purchases * dpo / DAYS
 
         # Long-term trade payables
         sp17d_anchor, sp17d_factor = _sp_scale('sp17d', 'sp17d_growth_pct')

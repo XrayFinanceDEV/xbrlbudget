@@ -258,9 +258,19 @@ contiene solo gli anni calcolati **prima** dell'errore. Gli errori di ingresso (
 anni duplicati, corpo vuoto, scenario infrannuale) restano **400** come nel bulk, perché sono
 errori del chiamante, non del piano.
 
-`details` porta sempre le **sette chiavi** dichiarate da `ForecastEngine.compute_forecast`
-(`calculations/forecast_engine.py:602-604` e `:820-823`, `:1118`, `:1131`, `:1230`):
+`details` porta sempre le chiavi dichiarate da `ForecastEngine.compute_forecast`:
 `ce05_fixed`, `ce05_variable`, `ce06_fixed`, `ce06_variable` (i due addendi di materie prime e
 servizi — `null` quando `ce05_override`/`ce06_override` è valorizzato, perché la scomposizione
 non è definita su un importo forzato) e `dso_applied`, `dio_applied`, `dpo_applied` (i giorni di
 rotazione effettivamente usati, forzati o derivati che siano).
+
+`degenerate_turnover_ratio` è una **lista** — presente ogni anno, vuota quando non scatta nulla —
+dei giorni **dedotti** che il motore ha scartato: `'dso'`, `'dio'`, `'dpo'`. Un giorno dedotto è
+degenere quando il denominatore dell'anno base non è positivo, o quando il rapporto supera i 365
+giorni: oltre un anno di giacenza smette di descrivere l'azienda e descrive il proprio
+denominatore. Su un giorno degenere il motore **riporta il saldo dell'anno base** invece di
+scalarlo, e `dso_applied`/`dio_applied`/`dpo_applied` dichiarano il giorno che quel saldo vale
+davvero sul flusso proiettato (zero se il flusso è nullo), mai quello degenere. Un giorno
+**esplicito** dell'ipotesi non passa dalla guardia: è una scelta, non una derivazione. Se il
+saldo ha un piano di pregresso è il piano a governarlo e il riporto vale zero, o la stessa massa
+sarebbe contata due volte.

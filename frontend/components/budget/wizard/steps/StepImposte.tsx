@@ -113,16 +113,23 @@ export function StepImposte(p: StepProps): JSX.Element {
               </div>
             </div>
 
-            <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
-              <div>
-                <div className="text-sm font-medium text-foreground">Aliquota usata dal piano</div>
-                {plan.nota && <div className="text-xs text-muted-foreground">{plan.nota}</div>}
+            {/* Nel caso comune questa riga ripeterebbe numero e badge di
+                quella dell'aliquota effettiva: `addsInformation` (deciso in
+                lib/budget-tax-rate.ts, col suo test) dice quando serve. */}
+            {plan.addsInformation && (
+              <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Aliquota usata dal piano</div>
+                  {plan.nota && <div className="text-xs text-muted-foreground">{plan.nota}</div>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm tabular-nums text-foreground">{plan.value}</span>
+                  <Badge variant={plan.source === "effettiva" ? "secondary" : "outline"}>
+                    {plan.sourceLabel}
+                  </Badge>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm tabular-nums text-foreground">{plan.value}</span>
-                <Badge variant={plan.source === "effettiva" ? "secondary" : "outline"}>{plan.sourceLabel}</Badge>
-              </div>
-            </div>
+            )}
 
             <div>
               <YearInputTable

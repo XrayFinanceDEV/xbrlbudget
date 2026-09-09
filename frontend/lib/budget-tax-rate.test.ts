@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { planTaxRate } from "./budget-tax-rate";
+import { altreVociCalculated } from "./budget-altre-voci-step";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
+import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
 
 /** `tax_rate` e' NOT NULL: un'ipotesi non forzata porta comunque il 27,9. */
 const nonForzata: AssumptionsMap = { 2025: { tax_rate: 27.9 }, 2026: { tax_rate: 27.9 } };
 const forzata: AssumptionsMap = { 2025: { tax_rate: 32 }, 2026: { tax_rate: 32 } };
 const YEARS = [2025, 2026];
+
+/** Imposte forzate a importo dal CE previsionale, su tutti gli anni. */
+const overrideTutti: AssumptionsMap = {
+  2025: { tax_rate: 27.9, ce20_override: 10000 },
+  2026: { tax_rate: 27.9, ce20_override: 12000 },
+};
+/** ...e su un anno solo. */
+const overrideParziale: AssumptionsMap = {
+  2025: { tax_rate: 27.9, ce20_override: 10000 },
+  2026: { tax_rate: 27.9 },
+};
 
 describe("planTaxRate", () => {
   it("l'effettiva dell'anno base vince: e' la sola che si mostra senza provenienza", () => {
@@ -55,11 +68,84 @@ describe("planTaxRate", () => {
     expect(p.source).toBe("predefinita");
     expect(p.ratePct).toBe(27.9);
   });
+});
 
-  it("la stessa domanda ha una sola risposta: passo 4 e passo 7 leggono gli stessi campi", () => {
-    // Non c'e' un secondo percorso: chiunque passi gli stessi input ottiene
-    // lo stesso oggetto. E' il contratto che ha sostituito le due letture.
-    expect(planTaxRate(null, nonForzata, YEARS)).toEqual(planTaxRate(null, nonForzata, YEARS));
-    expect(planTaxRate(25, forzata, YEARS).label).toBe(planTaxRate(25, forzata, YEARS).label);
+describe("planTaxRate · ce20_override", () => {
+  // forecast_engine.py:723-726 — con `ce20_override` quell'importo E' l'imposta
+  // totale dell'anno: il motore NON applica nessuna aliquota. Dichiararne una
+  // sarebbe affermare qualcosa che il motore non fa.
+  it("override su tutti gli anni: nessuna aliquota, e l'etichetta lo dice", () => {
+    const p = planTaxRate(25, overrideTutti, YEARS);
+    expect(p.source).toBe("sostituita");
+    expect(p.ratePct).toBeNull();
+    expect(p.value).toBe("—");
+    // Il difetto: prima qui usciva «27,9% · predefinita, non calcolata».
+    expect(p.label).not.toContain("%");
+    expect(p.nota).toContain("non applica nessuna aliquota");
+    expect(p.overriddenYears).toEqual(YEARS);
+  });
+
+  it("l'override batte anche l'aliquota effettiva derivabile", () => {
+    expect(planTaxRate(25, overrideTutti, YEARS).source).toBe("sostituita");
+    expect(planTaxRate(null, { ...overrideTutti, 2025: { tax_rate: 32, ce20_override: 1 } }, YEARS).source)
+      .toBe("sostituita");
+  });
+
+  it("override su alcuni anni: l'aliquota resta per gli altri, e si dice quanti", () => {
+    const p = planTaxRate(25, overrideParziale, YEARS);
+    expect(p.source).toBe("sostituita");
+    expect(p.ratePct).toBe(25);
+    expect(p.value).toBe("25,0%");
+    expect(p.overriddenYears).toEqual([2025]);
+    expect(p.totalYears).toBe(2);
+    expect(p.label).toContain("1 anni su 2");
+    expect(p.nota).toContain("2025");
+    expect(p.nota).toContain("effettiva dell'anno base");
+  });
+
+  it("un override a zero e' un override vero (imposte azzerate), non un'assenza", () => {
+    const p = planTaxRate(25, { 2025: { ce20_override: 0 }, 2026: { ce20_override: 0 } }, YEARS);
+    expect(p.source).toBe("sostituita");
+    expect(p.ratePct).toBeNull();
+  });
+
+  it("senza override il campo non entra in gioco", () => {
+    expect(planTaxRate(25, nonForzata, YEARS).overriddenYears).toEqual([]);
+    expect(planTaxRate(25, { 2025: { ce20_override: null }, 2026: {} }, YEARS).source).toBe("effettiva");
+  });
+});
+
+describe("planTaxRate · addsInformation", () => {
+  it("nel caso comune la riga «usata dal piano» non aggiunge nulla e si nasconde", () => {
+    // Effettiva derivabile, nulla di forzato, nessun override: la riga
+    // ripeterebbe numero e badge dell'aliquota effettiva.
+    expect(planTaxRate(25, nonForzata, YEARS).addsInformation).toBe(false);
+  });
+  it("in ogni altro caso la riga dice qualcosa che le altre non dicono", () => {
+    expect(planTaxRate(25, forzata, YEARS).addsInformation).toBe(true); // forzata ignorata
+    expect(planTaxRate(null, forzata, YEARS).addsInformation).toBe(true);
+    expect(planTaxRate(null, nonForzata, YEARS).addsInformation).toBe(true);
+    expect(planTaxRate(25, overrideTutti, YEARS).addsInformation).toBe(true);
+  });
+});
+
+describe("passo 4 e passo 7 non possono discordare", () => {
+  const income = (): IncomeStatement =>
+    ({ ce12_oneri_diversi: "50", ce09_ammortamenti: "80", ce15_oneri_finanziari: "20" } as unknown as IncomeStatement);
+  const response = (): ForecastPreviewResponse =>
+    ({ scenario_id: 1, base_year: 2024, forecast_years: [], error: null });
+
+  // Falsificabile: cade se il passo 4 torna a formattare per conto proprio,
+  // o se rende `value` invece di `label` — cioe' se ricompare un'aliquota
+  // senza provenienza li' dove il passo 7 ne mostra una.
+  it.each([
+    ["effettiva", 25 as number | null, nonForzata],
+    ["forzata", null, forzata],
+    ["predefinita", null, nonForzata],
+    ["sostituita", 25, overrideTutti],
+  ])("il passo 4 rende la label di planTaxRate — caso %s", (_caso, effettiva, assumptions) => {
+    const plan = planTaxRate(effettiva, assumptions, YEARS);
+    const c = altreVociCalculated(2024, income(), plan, assumptions, YEARS, response());
+    expect(c.imposte.value).toBe(plan.label);
   });
 });

@@ -28,6 +28,59 @@ const year = (y: number, over: Partial<Record<string, number>> = {}): ForecastPr
     dso_applied: 60, dio_applied: 45, dpo_applied: 78 },
 });
 
+// I valori attesi sono quelli che `calculate_ce_result` (calculations/ce_result.py)
+// restituisce sullo STESSO input, verificati eseguendola:
+//   ce11b = 30.000  ->  ebitda 170.000, ebit 120.000, pbt 120.000
+//   ce17a 20.000 / ce17b 5.000 contro ce17 90.000  ->  rettifiche 15.000 ("detail")
+//   solo ce17 90.000                               ->  rettifiche 90.000 ("aggregate")
+const canone = {
+  ce01_ricavi_vendite: 1000000, ce05_materie_prime: 400000, ce06_servizi: 250000,
+  ce07_godimento_beni: 50000, ce08_costi_personale: 100000, ce09_ammortamenti: 50000,
+} as unknown as Record<string, unknown>;
+
+describe("ceAggregates — il canone e' calculate_ce_result, non una formula simile", () => {
+  it("senza voci di scarto, MOL/RO/EBT sono quelli del canone", () => {
+    const a = ceAggregates(canone);
+    expect(a.mol).toBe(200000);
+    expect(a.ro).toBe(150000);
+    expect(a.ebt).toBe(150000);
+  });
+
+  it("ce11b_altri_accantonamenti entra nei costi della produzione", () => {
+    const a = ceAggregates({ ...canone, ce11b_altri_accantonamenti: 30000 });
+    const perche = "ce11b_altri_accantonamenti deve entrare nei costi della produzione, "
+      + "come in calculations/ce_result.py: ometterlo fa discordare i passi 1-4 e 7 "
+      + "da /analysis, dal riclassificato e dal report sulla stessa azienda";
+    expect(a.alt, perche).toBe(30000);
+    expect(a.mol, perche).toBe(170000);
+    expect(a.ro, perche).toBe(120000);
+    expect(a.ebt, perche).toBe(120000);
+  });
+
+  it("sezione D: con un dettaglio valorizzato l'aggregato ce17 viene ignorato", () => {
+    const a = ceAggregates({
+      ...canone, ce17_rettifiche_attivita_fin: 90000,
+      ce17a_rivalutazioni: 20000, ce17b_svalutazioni: 5000,
+    });
+    const perche = "con ce17a o ce17b valorizzati la sezione D vale ce17a − ce17b e "
+      + "l'aggregato ce17_rettifiche_attivita_fin va IGNORATO (calculations/ce_result.py): "
+      + "sommarli entrambi conta due volte la stessa rettifica";
+    expect(a.fin, perche).toBe(15000);
+    expect(a.ebt, perche).toBe(165000);
+  });
+
+  it("sezione D: senza dettagli resta il ripiego sull'aggregato ce17", () => {
+    const a = ceAggregates({ ...canone, ce17_rettifiche_attivita_fin: 90000 });
+    expect(a.fin).toBe(90000);
+    expect(a.ebt).toBe(240000);
+  });
+
+  it("un solo dettaglio basta a escludere l'aggregato", () => {
+    expect(ceAggregates({ ...canone, ce17_rettifiche_attivita_fin: 90000, ce17b_svalutazioni: 5000 }).fin)
+      .toBe(-5000);
+  });
+});
+
 describe("rowsFatturato", () => {
   it("ricavi con variazione % sull'anno precedente e cumulata sul base", () => {
     const rows = rowsFatturato(baseInc, [year(2027), year(2028, { ce01_ricavi_vendite: 1210 })]);

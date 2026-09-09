@@ -20,6 +20,20 @@ const row = (key: string, label: string, kind: PreviewRowKind, base: PreviewCell
  * produzione (per macro-voce) e area finanziaria/straordinaria, con la stessa
  * formula canonica di computeEffectiveTaxRate (assumption-rows.ts) — quella
  * funzione la importa da qui, cosi' la formula esiste in un solo posto.
+ *
+ * «Canonica» vuol dire una cosa precisa: la stessa di `calculate_ce_result`
+ * (`calculations/ce_result.py`), che e' cio' che scrivono `/analysis`, il
+ * riclassificato e il report. Due punti su cui questa funzione se n'era
+ * discostata, e che il test congela:
+ *
+ * - `ce11b_altri_accantonamenti` entra nei costi della produzione. Il motore
+ *   lo SCRIVE nel CE previsionale (`forecast_engine.py`, con `ce11b_override`
+ *   fra le colonne idratate): ometterlo faceva discordare MOL, RO, EBT e
+ *   «Valore della produzione» dei passi 1-4 e 7 da ogni altra vista sulla
+ *   stessa azienda.
+ * - la sezione D e' `ce17a − ce17b` quando UNO dei due dettagli e' valorizzato,
+ *   e l'aggregato `ce17` viene ignorato; sommarli sempre entrambi conta due
+ *   volte la stessa rettifica.
  */
 export function ceAggregates(income: Record<string, unknown>): {
   vp: number; main: number; alt: number; amm: number; fin: number; mol: number; ro: number; ebt: number;
@@ -28,10 +42,13 @@ export function ceAggregates(income: Record<string, unknown>): {
   const vp = g("ce01_ricavi_vendite") + g("ce02_variazioni_rimanenze") + g("ce03_lavori_interni")
     + g("ce03a_incrementi_immobilizzazioni") + g("ce04_altri_ricavi");
   const main = g("ce05_materie_prime") + g("ce06_servizi") + g("ce07_godimento_beni") + g("ce08_costi_personale");
-  const alt = g("ce10_var_rimanenze_mat_prime") + g("ce11_accantonamenti") + g("ce12_oneri_diversi");
+  const alt = g("ce10_var_rimanenze_mat_prime") + g("ce11_accantonamenti") + g("ce11b_altri_accantonamenti")
+    + g("ce12_oneri_diversi");
   const amm = g("ce09_ammortamenti");
+  const riva = g("ce17a_rivalutazioni"), sval = g("ce17b_svalutazioni");
+  const rettificheD = riva !== 0 || sval !== 0 ? riva - sval : g("ce17_rettifiche_attivita_fin");
   const fin = g("ce13_proventi_partecipazioni") + g("ce14_altri_proventi_finanziari") - g("ce15_oneri_finanziari")
-    + g("ce16_utili_perdite_cambi") + g("ce17_rettifiche_attivita_fin")
+    + g("ce16_utili_perdite_cambi") + rettificheD
     + g("ce18_proventi_straordinari") - g("ce19_oneri_straordinari");
   const mol = vp - main - alt;
   const ro = mol - amm;

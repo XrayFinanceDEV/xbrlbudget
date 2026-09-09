@@ -6,7 +6,7 @@
 // declarative row list instead of AssumptionRowDef, so a step only supplies
 // which fields it edits.
 import type { JSX } from "react";
-import { FIELD_RULES, parseFieldValue } from "@/lib/budget-field-rules";
+import { fieldRule, parseFieldValue } from "@/lib/budget-field-rules";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { yearCellState, type YearCellOff } from "@/lib/budget-year-cell";
 import { cn } from "@/lib/utils";
@@ -92,7 +92,7 @@ export function YearInputTable(props: {
                   {row.baseLabel}
                 </td>
                 {forecastYears.map((year) => {
-                  const rule = FIELD_RULES[row.field];
+                  const rule = fieldRule(row.field);
                   // Il `title` sta anche sul `td`: un input `disabled` non
                   // riceve eventi del mouse in tutti i browser, e il tooltip
                   // e' l'unica cosa che spiega perche' la casella e' inerte.

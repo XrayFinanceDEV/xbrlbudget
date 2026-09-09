@@ -2,6 +2,13 @@
 // scalar field written by ESSENTIAL_ROWS / ADVANCED_GROUPS in
 // components/budget/assumption-rows.ts, so kind/min/max/step/nullable exist
 // exactly once and both the form rows and the wizard steps read from here.
+//
+// Quella frase e' una GARANZIA DI TIPO, non piu' solo un commento: `FieldName`
+// e' l'insieme delle chiavi scritte qui sotto, e `rule()` in assumption-rows.ts
+// accetta soltanto quelle. Prima, `rule(["campo_inventato"])` faceva lo spread
+// di `undefined` e produceva una riga senza `kind` e senza `min/max/step` —
+// un campo battuto a mano restava senza validazione e ne' `tsc` ne' la suite se
+// ne accorgevano. Chi ha in mano una stringa qualunque usa `fieldRule()`.
 export interface FieldRule {
   kind: "pct" | "eur" | "years" | "days" | "bool";
   min?: number;
@@ -24,7 +31,7 @@ const days = (over: Partial<FieldRule> = {}): FieldRule =>
 
 const bool: FieldRule = { kind: "bool" };
 
-export const FIELD_RULES: Record<string, FieldRule> = {
+const RULES = {
   // Ricavi e costi
   revenue_growth_pct: pct(),
   other_revenue_growth_pct: pct(),
@@ -81,11 +88,23 @@ export const FIELD_RULES: Record<string, FieldRule> = {
   // Imposte
   tax_rate: pct({ min: 0, max: 100 }),
   tax_advances_paid: eur(),
-};
+} satisfies Record<string, FieldRule>;
+
+/** I soli nomi di campo che hanno una regola. Una riga del form non puo'
+ *  nominarne altri: e' un errore di `tsc`, non un difetto silenzioso. */
+export type FieldName = keyof typeof RULES;
+
+export const FIELD_RULES: Record<FieldName, FieldRule> = RULES;
+
+/** La regola di un campo di cui si ha solo la stringa (una riga costruita a
+ *  runtime, un `field` che arriva da un componente): `undefined` se non c'e'. */
+export function fieldRule(field: string): FieldRule | undefined {
+  return (RULES as Record<string, FieldRule | undefined>)[field];
+}
 
 /** "" -> null se il campo e' nullable, altrimenti 0; virgola accettata; clamp min/max. */
 export function parseFieldValue(field: string, raw: string): number | null {
-  const rule = FIELD_RULES[field] ?? { kind: "pct" };
+  const rule = fieldRule(field) ?? { kind: "pct" };
   const t = raw.trim();
   if (t === "") return rule.nullable ? null : 0;
   const n = parseFloat(t.replace(",", "."));

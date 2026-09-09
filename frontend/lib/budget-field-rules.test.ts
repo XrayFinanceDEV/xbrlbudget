@@ -1,12 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { FIELD_RULES, parseFieldValue } from "./budget-field-rules";
+import { FIELD_RULES, fieldRule, parseFieldValue, type FieldName, type FieldRule } from "./budget-field-rules";
 import { STEP_FIELDS } from "./budget-wizard-steps";
 
 describe("budget-field-rules", () => {
   it("ogni campo scalare dei passi ha una regola", () => {
     const json = new Set(["financing_loans", "tax_temporary_differences"]);
     for (const fields of Object.values(STEP_FIELDS))
-      for (const f of fields) if (!json.has(f)) expect(FIELD_RULES[f], f).toBeDefined();
+      for (const f of fields) if (!json.has(f)) expect(fieldRule(f), f).toBeDefined();
+  });
+
+  /**
+   * La guardia vera delle righe di `components/budget/assumption-rows.ts` e' il
+   * TIPO, non un test: `rule()` accetta solo `FieldName`, cioe' le chiavi di
+   * `FIELD_RULES`. `lib/` non puo' importare da `components/`, quindi la regola
+   * non si puo' esercitare da qui su quelle righe — ma un errore di tipo non
+   * spiega perche' la regola esiste, e questo test lo scrive.
+   *
+   * Prima, `rule(["campo_inventato"], {...})` faceva lo spread di `undefined` e
+   * produceva una riga senza `kind` e senza `min/max/step`: la casella nasceva
+   * senza validazione, `tsc` restava pulito e la suite verde. L'iniezione del
+   * revisore era esattamente quella.
+   *
+   * `@ts-expect-error` qui sotto e' un'asserzione a tutti gli effetti: se
+   * qualcuno riportasse `FIELD_RULES` a `Record<string, FieldRule>`, l'errore
+   * atteso sparirebbe e `tsc` fallirebbe su questa riga.
+   */
+  it("un campo senza regola non e' un `FieldName`: lo ferma tsc", () => {
+    const noto: FieldName = "revenue_growth_pct";
+    expect(FIELD_RULES[noto]).toBeDefined();
+
+    // @ts-expect-error — "campo_inventato" non e' una chiave di FIELD_RULES.
+    const inventato: FieldRule = FIELD_RULES["campo_inventato"];
+    expect(inventato).toBeUndefined();
+
+    // Chi ha in mano una stringa qualunque passa da `fieldRule`, che dichiara
+    // l'assenza invece di nasconderla in uno spread.
+    expect(fieldRule("campo_inventato")).toBeUndefined();
   });
 
   it("parse: virgola, vuoto, clamp", () => {

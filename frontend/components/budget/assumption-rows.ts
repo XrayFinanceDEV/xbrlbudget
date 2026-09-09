@@ -5,7 +5,7 @@
 // split mathematically irrelevant — see forecast_engine.py:220-242).
 import type { IncomeStatement } from "@/types/api";
 import { num } from "@/lib/budget-format";
-import { FIELD_RULES } from "@/lib/budget-field-rules";
+import { FIELD_RULES, type FieldName } from "@/lib/budget-field-rules";
 import { ceAggregates } from "@/lib/budget-preview-rows";
 
 export type AssumptionRowDef = {
@@ -29,11 +29,21 @@ export type AssumptionRowDef = {
   max?: number;
 };
 
+/** Cio' che una riga aggiunge alla regola del campo. `key` e `label` sono
+ *  obbligatori: senza il cast di prima, una riga senza etichetta non compila. */
+type RowExtras = Pick<AssumptionRowDef, "key" | "label">
+  & Partial<Omit<AssumptionRowDef, "key" | "label" | "fields">>;
+
 /** kind/min/max/step/nullable come from FIELD_RULES (lib/budget-field-rules.ts) —
  *  the row only adds label/tooltip/fields/historicalField/etc. Rule keyed on
- *  fields[0]; dual-write rows share one rule across their fields. */
-const rule = (fields: string[], over: Partial<AssumptionRowDef> = {}): AssumptionRowDef =>
-  ({ fields, ...FIELD_RULES[fields[0]], ...over } as AssumptionRowDef);
+ *  fields[0]; dual-write rows share one rule across their fields.
+ *
+ *  I campi sono tipati `FieldName`, cioe' le sole chiavi di `FIELD_RULES`: una
+ *  riga costruita su un campo che non ha una regola non compila piu'. Prima
+ *  faceva lo spread di `undefined` e nasceva senza `kind` e senza `min/max/step`,
+ *  con `tsc` pulito e la suite verde. */
+const rule = (fields: [FieldName, ...FieldName[]], over: RowExtras): AssumptionRowDef =>
+  ({ fields, ...FIELD_RULES[fields[0]], ...over });
 
 export const ESSENTIAL_ROWS: AssumptionRowDef[] = [
   rule(["revenue_growth_pct"], { key: "ricavi", label: "Ricavi %", historicalField: "ce01_ricavi_vendite",

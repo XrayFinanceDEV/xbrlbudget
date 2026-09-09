@@ -93,6 +93,29 @@ class TemporaryDifferenceInput(BaseModel):
     tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
 
 
+class PregressoPlanInput(BaseModel):
+    """Runoff plan for a working capital item (receivables or payables)."""
+    opening: Decimal = Field(..., ge=0)
+    amounts: List[Decimal] = Field(default_factory=list)
+    writeoff: Optional[List[Decimal]] = None  # solo crediti_commerciali
+
+
+class PregressoTributariInput(PregressoPlanInput):
+    """Runoff plan for tax payables with settlement details."""
+    saldo: Decimal = Field(default=Decimal("0"), ge=0)
+    rateizzato: Decimal = Field(default=Decimal("0"), ge=0)
+    acconto_pct: Decimal = Field(default=Decimal("100"), ge=0, le=200)
+
+
+class PregressoInput(BaseModel):
+    """Opening balances and runoff schedules for working capital items and tax payables."""
+    crediti_commerciali: Optional[PregressoPlanInput] = None
+    debiti_fornitori: Optional[PregressoPlanInput] = None
+    debiti_tributari: Optional[PregressoTributariInput] = None
+    debiti_previdenziali: Optional[PregressoPlanInput] = None
+    altri_debiti: Optional[PregressoPlanInput] = None
+
+
 class BudgetAssumptionsBase(BaseModel):
     """Base BudgetAssumptions schema"""
     scenario_id: int
@@ -158,6 +181,9 @@ class BudgetAssumptionsBase(BaseModel):
     financing_duration_years: Decimal = Field(default=Decimal("0"))
     financing_interest_rate: Decimal = Field(default=Decimal("0"))
     financing_loans: Optional[List[FinancingLoanInput]] = None
+
+    # Scadenziamento del pregresso (runoff schedules for working capital and tax payables)
+    pregresso: Optional[PregressoInput] = None
 
     # SP line item growth % overrides (None = 0% / carry forward unchanged)
     sp01_growth_pct: Optional[Decimal] = None
@@ -261,6 +287,9 @@ class BudgetAssumptionsUpdate(BaseModel):
     financing_duration_years: Optional[Decimal] = None
     financing_interest_rate: Optional[Decimal] = None
     financing_loans: Optional[List[FinancingLoanInput]] = None
+
+    # Scadenziamento del pregresso
+    pregresso: Optional[PregressoInput] = None
 
     # SP line item growth % overrides
     sp01_growth_pct: Optional[Decimal] = None

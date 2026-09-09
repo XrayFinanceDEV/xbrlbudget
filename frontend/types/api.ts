@@ -427,6 +427,49 @@ export interface TemporaryDifferenceInput {
   tax_rate?: number | null;
 }
 
+export type PregressoKey = "crediti_commerciali" | "debiti_fornitori" | "debiti_tributari" | "debiti_previdenziali" | "altri_debiti";
+
+export interface PregressoPlan {
+  opening: number;
+  amounts: number[];
+  writeoff?: number[] | null;
+}
+
+export interface PregressoTributari extends PregressoPlan {
+  saldo: number;
+  rateizzato: number;
+  acconto_pct: number;
+}
+
+export interface Pregresso {
+  crediti_commerciali?: PregressoPlan | null;
+  debiti_fornitori?: PregressoPlan | null;
+  debiti_tributari?: PregressoTributari | null;
+  debiti_previdenziali?: PregressoPlan | null;
+  altri_debiti?: PregressoPlan | null;
+}
+
+export interface PregressoDetail {
+  opening: number;
+  closed: number;
+  writeoff: number;
+  residual_short: number;
+  residual_long: number;
+  generated: number;
+  mode: "legacy" | "runoff";
+}
+
+export interface ImposteDetail {
+  current_tax: number;
+  saldo_paid: number;
+  acconti_paid: number;
+  rate_paid: number;
+  generated_debt: number;
+  generated_credit: number;
+  opening_credit_left: number;
+  mode: "saldo_acconto" | "manual";
+}
+
 export interface BudgetAssumptions {
   id: number;
   scenario_id: number;
@@ -518,6 +561,7 @@ export interface BudgetAssumptions {
   ce17a_override: number | null;
   ce17b_override: number | null;
   ce20_override: number | null;
+  pregresso: Pregresso | null;
   created_at: string;
   updated_at: string;
 }
@@ -612,6 +656,7 @@ export interface BudgetAssumptionsCreate {
   ce17a_override?: number | null;
   ce17b_override?: number | null;
   ce20_override?: number | null;
+  pregresso?: Pregresso | null;
 }
 
 export interface ForecastBalanceSheet {

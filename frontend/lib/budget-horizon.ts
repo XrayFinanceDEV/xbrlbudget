@@ -120,6 +120,7 @@ export function hydrateAssumptions(
       financing_duration_years: a.financing_duration_years,
       financing_interest_rate: a.financing_interest_rate,
       financing_loans: a.financing_loans ?? null,
+      pregresso: a.pregresso ?? null,
       sp01_growth_pct: a.sp01_growth_pct,
       sp04_growth_pct: a.sp04_growth_pct,
       sp06e_growth_pct: a.sp06e_growth_pct,
@@ -249,6 +250,7 @@ export function defaultAssumption(
     financing_duration_years: 5,
     financing_interest_rate: 3,
     financing_loans: null,
+    pregresso: null,
   };
 }
 

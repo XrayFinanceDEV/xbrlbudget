@@ -655,6 +655,8 @@ class BudgetAssumptions(Base):
     financing_interest_rate = Column(Numeric(10, 6), default=0, nullable=False)  # Loan interest rate %
     financing_loans = Column(JSON, nullable=True)  # Additional loans for the same forecast year
 
+    pregresso = Column(JSON, nullable=True)  # Scadenziamento del pregresso, solo riga del primo anno (spec lotto 2)
+
     # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
     sp01_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti verso soci
     sp04_growth_pct = Column(Numeric(10, 6), nullable=True)  # Immobilizzazioni finanziarie

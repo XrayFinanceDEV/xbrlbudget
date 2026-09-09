@@ -108,6 +108,7 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     ce18_override: null,
     ce19_override: null,
     ce20_override: null,
+    pregresso: null,
     created_at: "",
     updated_at: "",
     ...overrides,

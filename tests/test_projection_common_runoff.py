@@ -72,3 +72,19 @@ def test_opening_credit_offsets_the_saldo_and_explicit_advances_win():
     big = tax_settlement_saldo_acconto(opening_credit=D("100"), saldo_due=D("40"), rate_due=D("0"),
                                        current_tax=D("0"), previous_tax=D("0"), acconto_pct=D("0"), explicit_advances=None)
     assert big.saldo_paid == D("0") and big.opening_credit_left == D("60") and big.acconti_paid == D("0")
+
+def test_explicit_zero_advances_means_not_declared_and_falls_back_to_pct():
+    """Lo zero esplicito non è un override: significa 'non dichiarato' e ricade sulla percentuale."""
+    t = tax_settlement_saldo_acconto(opening_credit=D("0"), saldo_due=D("0"), rate_due=D("0"),
+                                     current_tax=D("100"), previous_tax=D("100"), acconto_pct=D("50"), explicit_advances=D("0"))
+    assert t.acconti_paid == D("50"), "Explicit zero deve ricadere sulla percentuale"
+    assert t.generated_debt == D("50"), "Debito calcolato su acconti dalla percentuale, non su zero"
+
+
+def test_zero_acconto_pct_without_explicit_means_no_advances():
+    """acconto_pct = 0 senza importo esplicito ⇒ zero acconti assoluti."""
+    t = tax_settlement_saldo_acconto(opening_credit=D("0"), saldo_due=D("0"), rate_due=D("0"),
+                                     current_tax=D("100"), previous_tax=D("100"), acconto_pct=D("0"), explicit_advances=None)
+    assert t.acconti_paid == D("0"), "Zero percentuale ⇒ zero acconti"
+    assert t.cash_out == D("0"), "Cash-out non comprende acconti quando acconto_pct=0"
+    assert t.generated_debt == D("100"), "Debito è l'intera imposta corrente"

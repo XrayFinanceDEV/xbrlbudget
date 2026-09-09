@@ -864,7 +864,7 @@ def test_manual_tax_position_ignores_the_plan_and_says_so(monkeypatch):
             r = runoff_schedule(rateizzato, rate_plan, [], year_index, horizon)
             runoff["debiti_tributari"] = r
             acconto_pct = plan_tax["acconto_pct"] if plan_tax else D('100')
-            explicit = getattr(assumption, 'tax_advances_paid', None)
+            explicit = getattr(assumption, 'tax_advances_paid', None)   # 0 = non dichiarato: vedi la nota qui sotto
             tax_year = tax_settlement_saldo_acconto(
                 opening_credit=opening_credit, saldo_due=saldo_due, rate_due=r.closed,
                 current_tax=current_tax, previous_tax=previous_tax, acconto_pct=acconto_pct, explicit_advances=explicit)
@@ -888,6 +888,19 @@ Rimuovere il calcolo di `sp17e` a `:1091` (ora dentro i due rami). `_base_inc` �
                                   {'current_tax': current_tax, 'saldo_paid': ZERO, 'acconti_paid': ZERO, 'rate_paid': ZERO,
                                    'generated_debt': ZERO, 'generated_credit': ZERO, 'opening_credit_left': ZERO, 'mode': 'manual'})
 ```
+
+**Nota del pre-volo (2026-09-09, Ruling 11) — `tax_advances_paid = 0` significa «non
+dichiarato», non «zero acconti».** La colonna e' `Numeric(15,2), default=0, nullable=False`
+(`database/models.py:645`) e lo schema Pydantic ha anch'esso `default=Decimal("0")`
+(`backend/app/schemas/budget.py:149`): `None` non arriva mai al kernel, quindi lo zero e'
+l'unico valore che puo' voler dire «l'utente non ha detto nulla». Per questo
+`tax_settlement_saldo_acconto` ricade sulla percentuale quando l'importo esplicito e' zero, e
+NON va cambiato in `is not None`: renderebbe `acconto_pct` lettera morta per ogni scenario che
+non ha mai toccato quel campo. **Chi vuole dichiarare zero acconti mette `acconto_pct = 0`**, che
+da' esattamente zero. Conseguenza vincolante per il Task 8: il passo delle imposte espone la
+**percentuale di acconto**, non una casella d'importo «acconti versati» — una casella in cui
+l'utente scrive 0 e ottiene altro sarebbe il difetto silenzioso peggiore che questo repo
+conosca.
 
 Il tributario senza piano usa `saldo_due = massa intera` (tutto saldo, niente rateizzato: spec §4) e `runoff_schedule(ZERO, [], ...)`.
 

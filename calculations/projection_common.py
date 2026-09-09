@@ -299,11 +299,18 @@ class TaxYear:
 def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current_tax,
                                  previous_tax, acconto_pct, explicit_advances) -> TaxYear:
     """Imposte a saldo + acconto (spec lotto 2 §3.2). Solo il motore budget:
-    l'infrannuale continua a usare tax_closing_position."""
+    l'infrannuale continua a usare tax_closing_position.
+
+    L'importo esplicito di acconti (`explicit_advances`) vale come override SOLO se > ZERO.
+    Lo zero (il valore di default in DB: Column(Numeric(15,2), default=0, nullable=False))
+    significa «non dichiarato», e in quel caso ricade sulla percentuale dell'anno precedente
+    (`acconto_pct` sulla `previous_tax`). Chi vuole ZERO acconti assoluti (nessun acconto)
+    deve impostare `acconto_pct = 0`.
+    """
     d = lambda v: Decimal(str(v or 0))
     opening_credit, saldo_due, rate_due = d(opening_credit), d(saldo_due), d(rate_due)
     current_tax, previous_tax = d(current_tax), d(previous_tax)
-    if explicit_advances is not None and d(explicit_advances) > ZERO:
+    if d(explicit_advances) > ZERO:
         acconti = d(explicit_advances)
     else:
         acconti = max(ZERO, previous_tax * d(acconto_pct) / Decimal('100'))

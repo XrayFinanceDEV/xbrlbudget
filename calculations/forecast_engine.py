@@ -167,31 +167,113 @@ class ForecastEngine:
             for field, value in values.items()
         }
 
+    # I due gruppi CE la cui identita' aggregato/dettagli va tenuta esatta al
+    # centesimo. L'ordine e' quello di stampa, ed e' anche l'ordine in cui si
+    # cerca il dettaglio su cui posare il residuo (dall'ultimo al primo).
+    _CE_RESIDUAL_GROUPS: Dict[str, Tuple[str, ...]] = {
+        "ce08_costi_personale": (
+            "ce08a_tfr_accrual",
+            "ce08b_salari_stipendi",
+            "ce08c_oneri_sociali",
+            "ce08d_altri_costi_personale",
+        ),
+        "ce09_ammortamenti": (
+            "ce09a_ammort_immateriali",
+            "ce09b_ammort_materiali",
+            "ce09c_svalutazioni",
+            "ce09d_svalutazione_crediti",
+        ),
+    }
+
+    # L'attributo `*_override` di BudgetAssumptions che forza ciascuna riga dei
+    # due gruppi sopra, aggregati compresi — solo quelli che partecipano a un
+    # gruppo residuo: gli altri override (ce01, ce05, ...) non servono qui.
+    _CE_RESIDUAL_OVERRIDE_ATTRS: Dict[str, str] = {
+        "ce08_override": "ce08_costi_personale",
+        "ce08a_override": "ce08a_tfr_accrual",
+        "ce08b_override": "ce08b_salari_stipendi",
+        "ce08c_override": "ce08c_oneri_sociali",
+        "ce08d_override": "ce08d_altri_costi_personale",
+        "ce09_override": "ce09_ammortamenti",
+        "ce09a_override": "ce09a_ammort_immateriali",
+        "ce09b_override": "ce09b_ammort_materiali",
+        "ce09c_override": "ce09c_svalutazioni",
+        "ce09d_override": "ce09d_svalutazione_crediti",
+    }
+
     @classmethod
-    def _normalize_income_statement_cents(cls, values: Dict) -> Dict:
-        """Keep CE aggregate/detail identities exact after cent rounding."""
+    def _forced_ce_residual_fields(cls, assumption: BudgetAssumptions) -> "frozenset[str]":
+        """I nomi di riga dei due gruppi CE che questa ipotesi forza esplicitamente."""
+        return frozenset(
+            field
+            for attr, field in cls._CE_RESIDUAL_OVERRIDE_ATTRS.items()
+            if getattr(assumption, attr, None) is not None
+        )
+
+    @classmethod
+    def _normalize_income_statement_cents(
+        cls,
+        values: Dict,
+        *,
+        forced_fields: "frozenset[str]" = frozenset(),
+        details: Optional[Dict] = None,
+    ) -> Dict:
+        """Keep CE aggregate/detail identities exact after cent rounding.
+
+        Il residuo (aggregato quantizzato meno somma dei dettagli quantizzati)
+        si posa sull'ultimo dettaglio del gruppo che **non** porta un override
+        esplicito — mai su uno che l'utente (o il motore, per `ce09d`) ha
+        scritto: posarcelo comunque lo cancellerebbe subito dopo che e' stato
+        onorato (Task 11, scadenziamento pregresso — misurato: senza questa
+        guardia un `ce08d_override=7000` con l'aggregato piu' alto diventa
+        113.777,78 sulla riga persistita, e un `ce09d_override` pulito prende
+        un centesimo di residuo di arrotondamento che non gli appartiene).
+
+        `forced_fields` sono i nomi di riga (non gli attributi `*_override`)
+        che l'ipotesi ha forzato esplicitamente, aggregato compreso. Il
+        chiamante infrannuale non lo passa: default vuoto, comportamento
+        identico a prima di questo task.
+
+        Se **tutti** i dettagli di un gruppo sono forzati e l'aggregato non lo
+        e', l'aggregato viene ricalcolato come loro somma — sono la fonte piu'
+        specifica. Se anche l'aggregato e' forzato e diverge dalla somma dei
+        dettagli, vince l'aggregato (com'era prima), il residuo va comunque
+        sull'ultimo dettaglio libero (o su quello di chiusura se sono forzati
+        tutti), e il conflitto e' **dichiarato**, mai taciuto, in
+        `details['override_conflicts']` — una lista di `{"aggregate",
+        "declared", "details_sum"}`, sempre presente quando `details` e'
+        passato, anche vuota: una chiave assente varrebbe zero a valle.
+        """
         result = cls._quantize_values(values)
-        groups = {
-            "ce08_costi_personale": (
-                "ce08a_tfr_accrual",
-                "ce08b_salari_stipendi",
-                "ce08c_oneri_sociali",
-                "ce08d_altri_costi_personale",
-            ),
-            "ce09_ammortamenti": (
-                "ce09a_ammort_immateriali",
-                "ce09b_ammort_materiali",
-                "ce09c_svalutazioni",
-                "ce09d_svalutazione_crediti",
-            ),
-        }
-        for aggregate, details in groups.items():
-            if aggregate not in result or not all(field in result for field in details):
+        conflicts: List[Dict[str, Any]] = []
+        for aggregate, group_fields in cls._CE_RESIDUAL_GROUPS.items():
+            if aggregate not in result or not all(field in result for field in group_fields):
                 continue
-            residual = result[aggregate] - sum(
-                (result[field] for field in details), Decimal("0")
+            details_sum = sum((result[field] for field in group_fields), Decimal("0"))
+            aggregate_forced = aggregate in forced_fields
+            all_details_forced = all(field in forced_fields for field in group_fields)
+
+            if all_details_forced and not aggregate_forced:
+                # I dettagli sono tutti espliciti: l'aggregato li segue, non il contrario.
+                result[aggregate] = details_sum
+                continue
+
+            residual = result[aggregate] - details_sum
+            if aggregate_forced and residual != 0:
+                conflicts.append({
+                    "aggregate": aggregate,
+                    "declared": result[aggregate],
+                    "details_sum": details_sum,
+                })
+
+            target = next(
+                (field for field in reversed(group_fields) if field not in forced_fields),
+                group_fields[-1],
             )
-            result[details[-1]] += residual
+            result[target] += residual
+
+        if details is not None:
+            details['override_conflicts'] = conflicts
 
         # D) Rettifiche is a signed net family: aggregate = rivalutazioni -
         # svalutazioni.  Keep the stored rows exact when all three are present.
@@ -569,7 +651,11 @@ class ForecastEngine:
                     financing_loans=financing_loans,
                     details=details,
                 )
-                forecast_inc = self._normalize_income_statement_cents(forecast_inc)
+                forecast_inc = self._normalize_income_statement_cents(
+                    forecast_inc,
+                    forced_fields=self._forced_ce_residual_fields(assumption),
+                    details=details,
+                )
                 forecast_bs = self._calculate_balance_sheet(
                     base_bs=source.base_bs,
                     base_inc=source.base_inc,

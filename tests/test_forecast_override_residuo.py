@@ -133,6 +133,65 @@ def test_residuo_va_sul_dettaglio_non_forzato():
         engine.dispose()
 
 
+def test_aggregato_libero_segue_i_dettagli_forzati_ce08():
+    """Tutti e quattro i dettagli di ce08 forzati, l'aggregato libero (nessun
+    `ce08_override`): l'aggregato persistito e' la loro somma (10.000,00),
+    non il valore che la crescita avrebbe prodotto dall'anno base (120.000,00
+    — nessuna crescita del personale nella linea di base, quindi l'aggregato
+    "naturale" resterebbe fermo li'). Discrimina davvero: tolto il ramo che
+    implementa questa regola (`calculations/forecast_engine.py` — «se tutti i
+    dettagli sono forzati e l'aggregato no, l'aggregato diventa la loro
+    somma»), l'aggregato persistito torna a 120.000,00 (misurato)."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            source = _source(db)
+            riga = _riga(
+                source.scenario.id, 2027,
+                ce08a_override=D("1000.00"),
+                ce08b_override=D("2000.00"),
+                ce08c_override=D("3000.00"),
+                ce08d_override=D("4000.00"),
+            )
+            comp = ForecastEngine(db).compute_forecast(source, [riga])
+            assert comp.error is None
+            ce = comp.years[0].income_statement
+            assert ce["ce08_costi_personale"] == D("10000.00")
+    finally:
+        engine.dispose()
+
+
+def test_aggregato_libero_segue_i_dettagli_forzati_ce09():
+    """Stesso ramo, gruppo ammortamenti, con un residuo di arrotondamento
+    genuino: quattro dettagli forzati a 1,004 quantizzano tutti a 1,00
+    (somma 4,00), ma la somma grezza pre-quantizzazione (4,016) arrotonda
+    a 4,02. L'aggregato libero deve seguire i dettagli persistiti (4,00), non
+    il residuo di un centesimo. Discrimina: tolto lo stesso ramo, l'aggregato
+    resta 4,02 e il centesimo di residuo finisce scaricato sull'ultimo
+    dettaglio (misurato)."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            source = _source(db)
+            riga = _riga(
+                source.scenario.id, 2027,
+                ce09a_override=D("1.004"),
+                ce09b_override=D("1.004"),
+                ce09c_override=D("1.004"),
+                ce09d_override=D("1.004"),
+            )
+            comp = ForecastEngine(db).compute_forecast(source, [riga])
+            assert comp.error is None
+            ce = comp.years[0].income_statement
+            assert ce["ce09a_ammort_immateriali"] == D("1.00")
+            assert ce["ce09b_ammort_materiali"] == D("1.00")
+            assert ce["ce09c_svalutazioni"] == D("1.00")
+            assert ce["ce09d_svalutazione_crediti"] == D("1.00")
+            assert ce["ce09_ammortamenti"] == D("4.00")
+    finally:
+        engine.dispose()
+
+
 def test_conflitto_dichiarato():
     """ce08 e tutti e quattro i dettagli forzati e fra loro incoerenti:
     l'aggregato vince (com'era prima), e il conflitto e' dichiarato in

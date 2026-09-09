@@ -28,7 +28,7 @@ Con `auto_generate: true` il servizio sceglie il motore dal `scenario_type`
 (`IntraYearEngine` per `infrannuale`, `ForecastEngine` altrimenti) e lo esegue. Se il motore
 solleva — per il gate semantico sulla fonte, per ricavi di base negativi, per qualunque
 ragione — l'eccezione viene **catturata** e la risposta è ugualmente **200**
-(`backend/app/services/assumptions_service.py:221-229`):
+(`backend/app/services/assumptions_service.py:318-327`):
 
 ```jsonc
 { "success": true, "assumptions_saved": 2,
@@ -47,8 +47,8 @@ Due dettagli che si sbagliano facilmente:
   non si accorge di nulla.
 
 I tre chiamanti in `frontend/` controllano `forecast_generated === false` e mostrano un
-`toast.warning` col `message`: `app/budget/page.tsx:1088`, `app/pratica/page.tsx:873`
-(`calculateProjectedBS`) e `:957` (`saveProjection12M`). Un quarto chiamante che se ne
+`toast.warning` col `message`: `app/budget/page.tsx:982-985`, `app/pratica/page.tsx:801`
+(`calculateProjectedBS`) e `:895` (`saveProjection12M`). Un quarto chiamante che se ne
 dimenticasse dipingerebbe una colonna Proiezione vuota sotto un toast verde.
 
 `POST /generate`, per contrasto, **non** cattura: fa 400 su `ValueError` e 500 su tutto il
@@ -67,9 +67,9 @@ nell'allowlist `_CE_OVERRIDE_FIELDS` di `budget_scenarios.py:770-779` e nella ma
 `FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:63`.
 
 Ogni colonna è un **valore assoluto in euro**. `NULL` = usa il calcolo del motore.
-`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:541-542`,
+`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:730-731`,
 `intra_year_engine.py:270-271`); `ce17a_override`/`ce17b_override` sono letti separatamente,
-**non** come netto in `ce17_override` (`forecast_engine.py:737-738`).
+**non** come netto in `ce17_override` (`forecast_engine.py:938-939`).
 
 Il batch:
 
@@ -102,11 +102,11 @@ fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/ana
 `BudgetAssumptions.sp_overrides` è una colonna **JSON** (`models.py:680`), un dizionario
 `{campo_sp: valore}`. Non è un residuo: `/forecast/balance` è **editabile** e la scrive
 (`frontend/app/forecast/balance/page.tsx:153-183`), passando per la `PUT` per anno; entrambi i
-motori la applicano in coda al calcolo dello SP (`forecast_engine.py:1341`,
+motori la applicano in coda al calcolo dello SP (`forecast_engine.py:1553`,
 `intra_year_engine.py:571`), e il ramo a 12 mesi del wizard della pratica ne manda
-una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:933-937`).
+una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:872`).
 
-`_apply_sp_overrides` (`forecast_engine.py:236-324`) ha tre comportamenti da conoscere:
+`_apply_sp_overrides` (`forecast_engine.py:381-470`) ha tre comportamenti da conoscere:
 
 1. una chiave che non esiste nel risultato è **ignorata in silenzio**;
 2. ogni valore è **clampato a ≥ 0**, tranne `sp13_utile_perdita` e
@@ -139,7 +139,7 @@ tutti gli override di stato patrimoniale.
 ## 4. I giorni di rotazione derivati dall'anno base
 
 Quando `dso_days` / `dio_days` / `dpo_days` non sono impostati nelle ipotesi, il motore li
-deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:836`):
+deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:1042`):
 
 | | formula | nota |
 |---|---|---|
@@ -150,8 +150,8 @@ deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:836`):
 > **L'aliquota di default non è quella che l'app usa.** Lo schema Pydantic ha
 > `tax_rate: Decimal = 24` (`backend/app/schemas/budget.py:148`, l'IRES da sola), ma ogni
 > chiamante del frontend manda **27,9** — la miscela IRES 24 + IRAP 3,9 dichiarata in
-> `STARTUP_TAX_RATE_PCT` (`app/budget/page.tsx:321`) e ripetuta letterale in
-> `app/budget/page.tsx:990` e in `app/pratica/page.tsx:851, 938`. Il 24% si vede solo su una
+> `STARTUP_TAX_RATE_PCT` (`app/budget/page.tsx:361`) e ripetuta letterale in
+> `app/pratica/page.tsx:780, 877` e in `lib/budget-horizon.ts:237`. Il 24% si vede solo su una
 > chiamata che ometta il campo.
 
 Il circolante scala quindi con i ricavi e i costi previsionali, **anche quando questi vengono
@@ -213,4 +213,54 @@ Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno
 | `frontend/app/forecast/income/page.tsx` | `FIELD_TO_OVERRIDE`, `EditableCell`, `pendingEdits`, salvataggio batch |
 | `frontend/app/forecast/balance/page.tsx` | l'editor dello SP previsionale che scrive `sp_overrides` |
 | `frontend/lib/pratica-codes.ts` | `CE_OVERRIDE_FIELD_BY_CODE`, `buildCeOverridePayload` |
-| `frontend/lib/api.ts` | `bulkUpsertAssumptions`, `patchCeOverrides`, `generateForecast(clearOverrides)`, `promoteProjection` |
+| `frontend/lib/api.ts` | `bulkUpsertAssumptions`, `patchCeOverrides`, `generateForecast(clearOverrides)`, `promoteProjection`, `previewForecast` |
+| `backend/app/services/forecast_preview_service.py` | il servizio dell'anteprima: `load_forecast_source` + `compute_forecast(stop_on_error=False)`, nessuna sessione toccata |
+
+## 7. Anteprima — stesso motore, nessuna scrittura
+
+```
+POST /companies/{id}/scenarios/{sid}/preview
+{ "assumptions": [ { "forecast_year": 2026, "revenue_growth_pct": 5.0, "...": "..." } ] }
+```
+
+Stesso corpo del bulk (`{"assumptions": [...]}`); bulk e anteprima condividono
+`build_assumption_row` (`backend/app/services/assumptions_service.py:99`) e
+`validate_assumptions_list`, così un campo aggiunto a un percorso non può mancare all'altro. Le
+righe costruite sono transitorie — **mai `db.add`, mai `commit`** — e il motore le legge con
+`getattr` come farebbe con righe persistite. Rifiuta con **400** uno scenario
+`scenario_type == "infrannuale"` prima di leggere qualunque cosa: quel percorso ha il proprio
+motore (`IntraYearEngine`) e le proprie tab (Confronto, Proiezione).
+
+Risposta, sempre **200**, anche a calcolo interrotto:
+
+```json
+{
+  "scenario_id": 12,
+  "base_year": 2025,
+  "forecast_years": [
+    {
+      "year": 2026,
+      "income_statement": { "ce01_ricavi_vendite": 2597000.0, "...": "..." },
+      "balance_sheet": { "sp09_disponibilita_liquide": 131240.0, "...": "..." },
+      "details": {
+        "ce05_fixed": 349860.0, "ce05_variable": 675220.0,
+        "ce06_fixed": 257040.0, "ce06_variable": 178080.0,
+        "dso_applied": 62.0, "dio_applied": 45.0, "dpo_applied": 78.0
+      }
+    }
+  ],
+  "error": null
+}
+```
+
+`error` è `null` oppure `{"year": 2027, "message": "..."}`: in quel caso `forecast_years`
+contiene solo gli anni calcolati **prima** dell'errore. Gli errori di ingresso (anno ≤ base,
+anni duplicati, corpo vuoto, scenario infrannuale) restano **400** come nel bulk, perché sono
+errori del chiamante, non del piano.
+
+`details` porta sempre le **sette chiavi** dichiarate da `ForecastEngine.compute_forecast`
+(`calculations/forecast_engine.py:602-604` e `:820-823`, `:1118`, `:1131`, `:1230`):
+`ce05_fixed`, `ce05_variable`, `ce06_fixed`, `ce06_variable` (i due addendi di materie prime e
+servizi — `null` quando `ce05_override`/`ce06_override` è valorizzato, perché la scomposizione
+non è definita su un importo forzato) e `dso_applied`, `dio_applied`, `dpo_applied` (i giorni di
+rotazione effettivamente usati, forzati o derivati che siano).

@@ -1,6 +1,8 @@
 # Riprogettazione delle ipotesi budget — i tre mockup
 
-**Data:** 2026-08-31 · **Stato:** **outstanding**, nessun design approvato
+**Data:** 2026-08-31 · **Stato:** superato dalla spec
+[2026-09-08-percorso-ipotesi-budget-design.md](2026-09-08-percorso-ipotesi-budget-design.md),
+che disegna il percorso a sette passi
 **Origine:** review del tester del 31/08. Stavano in `inbox/`, che è gitignorata;
 spostati qui il 2026-09-01 su richiesta del proprietario perché sopravvivessero a una
 pulizia della cartella.

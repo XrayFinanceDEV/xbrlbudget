@@ -311,3 +311,71 @@ dell'invio.
 - `docs/budget/FORECASTING_GUIDE.md`: già superato in più punti; o si riscrive la sezione
   circolante e imposte, o si marca come storico. Da decidere nel piano.
 - `docs/frontend/PRATICA-PERCORSO.md`: i passi 6 e 7 completi.
+
+## 11. Due difetti preesistenti aggiunti a questo lotto (decisione del proprietario, 2026-09-09)
+
+Trovati durante il lotto 1 — il primo estraendo i contratti del motore, il secondo al
+collaudo col browser. Entrambi **preesistenti su `main`**, quindi non hanno bloccato il
+merge del lotto 1; entrano qui perché toccano esattamente ciò che questo lotto rimette in
+discussione: il confine fra ciò che il previsionale genera e ciò che è già a bilancio.
+
+### 11.1 Un `sp_overrides` può persistere una CASSA NEGATIVA sotto un esito di successo
+
+`_apply_sp_overrides` (`calculations/forecast_engine.py:466-468`) clampa la cassa con
+`max(0, …)`, ma `_normalize_balance_sheet_cents(recompute_cash=True)` (`:344-351`) gira
+**dopo** — chiamata a `:584` sul risultato di `:1553` — e ricalcola
+`sp09 = passivo − attivo_senza_cassa` **senza clamp e senza sollevare**. Il clamp viene
+scavalcato dal passaggio successivo.
+
+Contraddice due invarianti dichiarati in `CLAUDE.md`: «la cassa plugga solo verso l'alto,
+un plug negativo fa **sollevare** il motore» e «`sp_overrides` clampa a zero i negativi —
+non dà errore, dà uno zero». Sul percorso **con** override non vale nessuna delle due.
+A valle avvelena current ratio, PFN, circolante di Altman e liquidità FGPMI, che vengono
+calcolati su un numero aritmeticamente impossibile senza un avviso.
+
+Riproduzione misurata (`source backend/venv/bin/activate && PYTHONPATH=. python3`):
+
+```python
+from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
+from backend.app.services import assumptions_service
+from database.models import BudgetScenario
+
+engine, Session = memory_sessions()
+db = Session()
+cid, _ = seed_base_year(db, user_id="plug")
+sc = BudgetScenario(company_id=cid, name="plug", base_year=2026, scenario_type="budget")
+db.add(sc); db.commit()
+
+# Un override che SQUILIBRA il foglio: rimanenze gonfiate senza contropartita.
+rows = [{"forecast_year": 2027, "revenue_growth_pct": 5.0,
+         "sp_overrides": {"sp05_rimanenze": 5000000}}]
+res = assumptions_service.bulk_upsert_assumptions(db, sc.id, rows, auto_generate=True)
+print(res.get("forecast_generated"), res.get("message"))   # True, «...generated successfully»
+for year, sp, _ce in read_forecast_maps(db, sc.id):
+    print(year, sp["sp09_disponibilita_liquide"])           # 2027  -4779777.78
+```
+
+**Che cosa deve fare la correzione**: la cassa non può uscire negativa da nessun percorso.
+O il ricalcolo finale rispetta lo stesso cancello del plug — e allora un override che
+squilibra il foglio **solleva** come un fabbisogno scoperto — oppure lo squilibrio viene
+**dichiarato** in `details` e l'interfaccia lo mostra. Quello che non è ammissibile è il
+comportamento di oggi: un numero impossibile, persistito, sotto un messaggio di successo.
+Vale la regola di casa: *diagnose, never fabricate*.
+
+### 11.2 Dopo un salvataggio respinto, CE Prev. e SP Prev. mostrano il previsionale vecchio senza dirlo
+
+Il bulk risponde **200 anche a un previsionale rifiutato**: le ipotesi restano salvate, il
+`ForecastYear` no. Il wizard del lotto 1 gestisce bene il proprio caso — toast rosso, nessun
+atterraggio su CE Prev., ritorno al passo dell'errore — ma se l'utente esce dalla barra di
+navigazione in alto, **CE Prev., SP Prev., Riclassificato, Rendiconto e Report mostrano i
+numeri del previsionale precedente** senza alcun segnale che non riflettano le ipotesi
+salvate.
+
+Misurato al collaudo: con `investments = 200.000.000` persistito per il 2025 e la
+generazione respinta, `/analysis` restituisce ancora i tre anni con i numeri della baseline,
+identici; nessuna stringa di avviso in pagina.
+
+**Che cosa deve fare la correzione**: serve un modo per sapere che il `ForecastYear`
+mostrato è **più vecchio** delle `BudgetAssumptions` salvate, e un indicatore su quelle
+viste. Sta in questo lotto perché il lotto 2 introduce comunque nuove ragioni di rifiuto
+(un piano di scadenziamento incapiente), quindi la frequenza del caso aumenta.

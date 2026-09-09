@@ -976,6 +976,40 @@ def generate_forecasts(
     )
 
 
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/preview",
+    response_model=forecast_schemas.ForecastPreviewResponse,
+    summary="Anteprima del previsionale dalle ipotesi nel corpo, senza salvare",
+)
+def preview_forecast_route(
+    company_id: int,
+    scenario_id: int,
+    request: Any = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Stesso corpo del bulk (`{"assumptions": [...]}`), nessuna scrittura.
+    Risponde 200 anche se il motore si ferma: leggere `error`, non lo status."""
+    from app.services import forecast_preview_service
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    request_data = request if isinstance(request, dict) else request.model_dump()
+    try:
+        return forecast_preview_service.preview_forecast(
+            db, scenario_id, request_data.get("assumptions", []))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        # Stessa rete del bulk (generate_forecasts sopra): un guasto inatteso
+        # nel motore non deve mai uscire come 500 anonimo. Non e' una scusa per
+        # non chiudere le cause vere (coalescenza dei null, forecast_year non
+        # numerico) dentro il servizio -- quelle restano ValueError -> 400.
+        logger.exception("Forecast preview failed for scenario=%s", scenario_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error during forecast preview: {str(e)}"
+        )
+
+
 # ===== Forecast Data Access Endpoints =====
 
 @router.get(

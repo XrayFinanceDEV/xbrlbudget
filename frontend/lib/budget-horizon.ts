@@ -20,14 +20,179 @@
  * `environment: node`.
  */
 
-import type { BudgetAssumptionsCreate } from "@/types/api";
+import type { BudgetAssumptions, BudgetAssumptionsCreate } from "@/types/api";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
+
+/**
+ * Gli interruttori che il wizard scrive su TUTTI gli anni con `updateAll`.
+ * Un'unione sola: la funzione che li legge e' una sola (`boolAssumption`), e
+ * prima di questo fix ne esistevano due copie verbatim — in
+ * `budget-circolante-step.ts` e in `budget-pregresso-step.ts` — che
+ * differivano solo per quali campi accettavano.
+ */
+export type BoolAssumptionField =
+  | "previdenza_scales_with_personnel"
+  | "tfr_accrual_suspended"
+  | "cash_sweep_enabled";
+
+/**
+ * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
+ * riga — ma il checkbox e' uno solo: si mostra quello del primo anno
+ * previsto (stesso criterio di `fixedShareOf` in budget-costi-step.ts).
+ * Assente ⇒ `false`, il default del motore (database/models.py).
+ */
+export function boolAssumption(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+  field: BoolAssumptionField,
+): boolean {
+  return Boolean(assumptions[forecastYears[0]]?.[field]);
+}
 
 /** Gli anni previsti: `numYears` anni **dopo** l'anno base. */
 export function forecastYearsFor(baseYear: number, numYears: number): number[] {
   const n = Math.max(0, Math.floor(numYears) || 0);
   return Array.from({ length: n }, (_, i) => baseYear + i + 1);
+}
+
+/**
+ * La mappa idratata delle ipotesi salvate, campo per campo: da
+ * `BudgetAssumptions` (quello che il server restituisce) a
+ * `Partial<BudgetAssumptionsCreate>` (quello che il bulk endpoint rimanda
+ * indietro), con `scenario_id` riscritto sullo scenario corrente.
+ *
+ * Funzione pura e senza rete — per questo è il posto più pericoloso del
+ * lotto: un campo dimenticato qui sparisce **in silenzio** al primo «Salva e
+ * Calcola Previsionale», perché il bulk è delete-all + reinsert e la riga
+ * rimandata indietro sostituisce quella salvata. `budget-horizon.test.ts`
+ * congela l'elenco delle chiavi prodotte apposta per questo: se un campo
+ * sparisce (o se ne aggiunge uno senza aggiornare il test nello stesso
+ * commit), la suite fallisce invece di lasciarlo sparire senza errore.
+ *
+ * Estratta verbatim da `use-scenario-assumptions.ts` (Task 7); i commenti
+ * storici sui singoli campi restano qui, dove ora vive la logica che
+ * spiegano.
+ */
+export function hydrateAssumptions(
+  rows: BudgetAssumptions[],
+  scenarioId: number
+): AssumptionsMap {
+  const out: AssumptionsMap = {};
+  rows.forEach((a) => {
+    out[a.forecast_year] = {
+      scenario_id: scenarioId,
+      forecast_year: a.forecast_year,
+      revenue_growth_pct: a.revenue_growth_pct,
+      other_revenue_growth_pct: a.other_revenue_growth_pct,
+      variable_materials_growth_pct: a.variable_materials_growth_pct,
+      fixed_materials_growth_pct: a.fixed_materials_growth_pct,
+      variable_services_growth_pct: a.variable_services_growth_pct,
+      fixed_services_growth_pct: a.fixed_services_growth_pct,
+      rent_growth_pct: a.rent_growth_pct,
+      personnel_growth_pct: a.personnel_growth_pct,
+      other_costs_growth_pct: a.other_costs_growth_pct,
+      investments: a.investments,
+      intangible_investments: a.intangible_investments,
+      tangible_investments: a.tangible_investments,
+      asset_disposal_nbv: a.asset_disposal_nbv,
+      asset_disposal_proceeds: a.asset_disposal_proceeds,
+      dso_days: a.dso_days,
+      dio_days: a.dio_days,
+      dpo_days: a.dpo_days,
+      existing_debt_repayment_years: a.existing_debt_repayment_years,
+      altri_finanz_repayment_years: a.altri_finanz_repayment_years,
+      cash_sweep_enabled: a.cash_sweep_enabled ?? false,
+      cash_sweep_min_cash: a.cash_sweep_min_cash,
+      tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
+      previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
+      receivables_short_growth_pct: a.receivables_short_growth_pct,
+      receivables_long_growth_pct: a.receivables_long_growth_pct,
+      payables_short_growth_pct: a.payables_short_growth_pct,
+      tax_rate: a.tax_rate,
+      tax_advances_paid: a.tax_advances_paid ?? 0,
+      tax_temporary_differences: a.tax_temporary_differences ?? null,
+      fixed_materials_percentage: a.fixed_materials_percentage,
+      fixed_services_percentage: a.fixed_services_percentage,
+      depreciation_rate: a.depreciation_rate,
+      depreciation_rate_intangible: a.depreciation_rate_intangible,
+      financing_amount: a.financing_amount,
+      financing_duration_years: a.financing_duration_years,
+      financing_interest_rate: a.financing_interest_rate,
+      financing_loans: a.financing_loans ?? null,
+      sp01_growth_pct: a.sp01_growth_pct,
+      sp04_growth_pct: a.sp04_growth_pct,
+      sp06e_growth_pct: a.sp06e_growth_pct,
+      sp06f_growth_pct: a.sp06f_growth_pct,
+      sp08_growth_pct: a.sp08_growth_pct,
+      sp10_growth_pct: a.sp10_growth_pct,
+      sp14_growth_pct: a.sp14_growth_pct,
+      sp16e_growth_pct: a.sp16e_growth_pct,
+      sp16f_growth_pct: a.sp16f_growth_pct,
+      sp16g_growth_pct: a.sp16g_growth_pct,
+      sp17d_growth_pct: a.sp17d_growth_pct,
+      sp17e_growth_pct: a.sp17e_growth_pct,
+      sp17f_growth_pct: a.sp17f_growth_pct,
+      sp17g_growth_pct: a.sp17g_growth_pct,
+      sp18_growth_pct: a.sp18_growth_pct,
+      sp_overrides: a.sp_overrides ?? null,
+      ce01_override: a.ce01_override,
+      ce05_override: a.ce05_override,
+      ce06_override: a.ce06_override,
+      ce07_override: a.ce07_override,
+      ce08_override: a.ce08_override,
+      ce02_override: a.ce02_override,
+      ce03_override: a.ce03_override,
+      ce03a_override: a.ce03a_override,
+      ce10_override: a.ce10_override,
+      ce11_override: a.ce11_override,
+      ce13_override: a.ce13_override,
+      ce14_override: a.ce14_override,
+      ce15_override: a.ce15_override,
+      ce16_override: a.ce16_override,
+      ce17_override: a.ce17_override,
+      ce18_override: a.ce18_override,
+      ce19_override: a.ce19_override,
+      // Overrides editable ONLY on /forecast/income — must be hydrated here too,
+      // otherwise "Salva e Calcola" (server-side delete+reinsert) drops them and
+      // the user's manual P&L edits are wiped, contradicting the documented
+      // "overrides survive the save" guarantee.
+      ce04_override: a.ce04_override,
+      ce08a_override: a.ce08a_override,
+      ce08b_override: a.ce08b_override,
+      ce08c_override: a.ce08c_override,
+      ce08d_override: a.ce08d_override,
+      ce09_override: a.ce09_override,
+      ce09a_override: a.ce09a_override,
+      ce09b_override: a.ce09b_override,
+      ce09c_override: a.ce09c_override,
+      ce09d_override: a.ce09d_override,
+      ce11b_override: a.ce11b_override,
+      ce12_override: a.ce12_override,
+      ce17a_override: a.ce17a_override,
+      ce17b_override: a.ce17b_override,
+      ce20_override: a.ce20_override,
+    };
+  });
+  return out;
+}
+
+/**
+ * L'orizzonte di piano dalle ipotesi salvate: l'ULTIMO anno salvato meno
+ * l'anno base, non il numero di righe. Su uno scenario le cui ipotesi non
+ * partono da `base_year + 1` — la disallineatura descritta nel commento su
+ * `baseYear` in `use-scenario-assumptions.ts` — contare le righe accorcia il
+ * piano, e il salvataggio successivo butterebbe via l'ultimo anno.
+ *
+ * Senza righe salvate resta il default di prodotto, tre anni. Il minimo
+ * restituito è 1: anche una riga degenere il cui `forecast_year` coincide con
+ * l'anno base (che non dovrebbe succedere, ma non deve produrre un piano a
+ * zero anni) risale a 1.
+ */
+export function horizonFromSavedRows(rows: BudgetAssumptions[], baseYear: number): number {
+  if (rows.length === 0) return 3;
+  const ultimoSalvato = rows.reduce((max, a) => Math.max(max, a.forecast_year), baseYear);
+  return Math.max(1, ultimoSalvato - baseYear);
 }
 
 /**
@@ -72,8 +237,12 @@ export function defaultAssumption(
     tax_rate: 27.9,
     tax_advances_paid: 0,
     tax_temporary_differences: null,
-    fixed_materials_percentage: 0,
-    fixed_services_percentage: 0,
+    // 40 e' il default del motore e della colonna (backend/app/schemas/budget.py,
+    // database/models.py). Uno 0 scritto qui BATTE quel default — non lo integra —
+    // e apriva i Costi di ogni scenario nuovo con lo slider a 0 % e le due righe
+    // «parte fissa» gia' spente.
+    fixed_materials_percentage: 40,
+    fixed_services_percentage: 40,
     depreciation_rate: 20,
     depreciation_rate_intangible: 20,
     financing_amount: 0,
@@ -110,6 +279,34 @@ export function withDefaultsForYears(
     next[year] = defaultAssumption(year, scenarioId);
   }
   return next;
+}
+
+/**
+ * Le righe da mandare a `PUT /scenarios/{id}/assumptions` — l'esatto inverso
+ * di `hydrateAssumptions`, e altrettanto pericoloso: il bulk è **delete-all +
+ * reinsert**, quindi una chiave che non parte da qui non viene «lasciata com'è
+ * sul server», viene **cancellata**. Un campo perso qui azzera un'ipotesi
+ * salvata senza un solo errore, con un toast verde sopra.
+ *
+ * Sta in `lib/` e non nel `useMemo` di `BudgetWizard` proprio per questo: un
+ * componente non è collaudabile in questo repo (nessun jsdom, e non va
+ * aggiunto), e `budget-horizon.test.ts` congela qui l'elenco delle chiavi
+ * prodotte, lo stesso di `hydrateAssumptions`. Ridurre lo spread a due campi
+ * — la mutazione che era passata a suite verde — ora fa fallire la suite.
+ *
+ * Si mandano solo gli anni che hanno un'ipotesi: un anno senza riga non è un
+ * anno a zero, è un anno di cui non si sa nulla. `scenario_id` e
+ * `forecast_year` sono riscritti sullo scenario e sull'anno correnti, perché
+ * la mappa può portarsi dietro quelli di un'idratazione precedente.
+ */
+export function assumptionRowsForSave(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+  scenarioId: number
+): Record<string, unknown>[] {
+  return forecastYears
+    .filter((year) => assumptions[year])
+    .map((year) => ({ ...assumptions[year], scenario_id: scenarioId, forecast_year: year }));
 }
 
 /**

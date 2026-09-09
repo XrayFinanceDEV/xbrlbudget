@@ -1,7 +1,5 @@
 import type { BalanceSheet, IncomeStatement } from "@/types/api";
-
-const num = (v: string | number | null | undefined): number =>
-  typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0;
+import { num } from "@/lib/budget-format";
 
 /**
  * I giorni di rotazione «auto» derivati dall'anno base: il valore che il motore

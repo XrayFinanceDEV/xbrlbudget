@@ -972,3 +972,26 @@ export interface ScenarioAnalysis {
     };
   };
 }
+
+// ===== Forecast Preview (anteprima motore, task 3) =====
+
+export interface ForecastYearDetails {
+  ce05_fixed: number | null; ce05_variable: number | null;
+  ce06_fixed: number | null; ce06_variable: number | null;
+  dso_applied: number; dio_applied: number; dpo_applied: number;
+}
+
+export interface ForecastPreviewYear {
+  year: number;
+  income_statement: Record<string, number>;
+  balance_sheet: Record<string, number>;
+  details: ForecastYearDetails;
+}
+
+export interface ForecastPreviewError { year: number | null; message: string }
+
+export interface ForecastPreviewResponse {
+  scenario_id: number; base_year: number;
+  forecast_years: ForecastPreviewYear[];
+  error: ForecastPreviewError | null;
+}

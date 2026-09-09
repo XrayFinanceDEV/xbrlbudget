@@ -685,6 +685,22 @@ export const bulkUpsertAssumptions = async (
   return data;
 };
 
+// Anteprima: stesso corpo del bulk, nessuna scrittura lato server. `signal`
+// annulla la chiamata precedente quando l'utente continua a digitare.
+export const previewForecast = async (
+  companyId: number,
+  scenarioId: number,
+  rows: Record<string, unknown>[],
+  signal?: AbortSignal
+): Promise<import('@/types/api').ForecastPreviewResponse> => {
+  const { data } = await api.post<import('@/types/api').ForecastPreviewResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/preview`,
+    { assumptions: rows },
+    { signal }
+  );
+  return data;
+};
+
 // Batch-patch CE overrides and regenerate forecast
 export const patchCeOverrides = async (
   companyId: number,

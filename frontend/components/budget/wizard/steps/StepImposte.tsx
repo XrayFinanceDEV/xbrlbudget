@@ -27,6 +27,7 @@ import {
   taxRateInputDisplay,
   taxRateValue,
 } from "@/lib/budget-imposte-step";
+import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
@@ -154,7 +155,7 @@ export function StepImposte(p: StepProps): JSX.Element {
           years={preview.years}
           rows={preview.rows}
           loading={p.preview.loading}
-          error={p.preview.error}
+          error={previewNotice(p.preview)}
         />
         <p className="text-xs text-muted-foreground">
           È l&apos;ultimo passo: il previsionale completo si legge e si ritocca nelle tab CE Prev. e SP Prev.

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { computeEffectiveTaxRate } from "@/components/budget/assumption-rows";
 import { altreVociCalculated, altreVociPreview, altreVociTableRows } from "@/lib/budget-altre-voci-step";
+import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable } from "../YearInputTable";
@@ -95,7 +96,7 @@ export function StepAltreVociCE(p: StepProps): JSX.Element {
           years={preview.years}
           rows={preview.rows}
           loading={p.preview.loading}
-          error={p.preview.error}
+          error={previewNotice(p.preview)}
         />
       </div>
     </div>

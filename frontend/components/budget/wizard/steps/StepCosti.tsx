@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { describeCell } from "@/lib/budget-preview-cell";
 import type { PreviewCell, PreviewRow } from "@/lib/budget-preview-rows";
+import { previewNotice } from "@/lib/budget-preview-notice";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import {
   alignVariablesToRevenue,
@@ -242,7 +243,7 @@ export function StepCosti(p: StepProps): JSX.Element {
         years={preview.years}
         rows={preview.tableRows}
         loading={p.preview.loading}
-        error={p.preview.error}
+        error={previewNotice(p.preview)}
       >
         {preview.bars.length > 0 && (
           <div className="mt-3 space-y-1.5">

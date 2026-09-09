@@ -3,8 +3,8 @@ import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
-  rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte, rowsPregressoNuovo,
-  unfundedFromError,
+  ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
+  rowsPregressoNuovo, unfundedFromError,
 } from "./budget-preview-rows";
 
 const baseInc = {
@@ -155,6 +155,11 @@ describe("rowsPregressoNuovo / unfundedFromError", () => {
 });
 
 describe("rowsAnnoBase", () => {
+  // 2023 = anno precedente, 2024 = l'anno base VERO (`baseYear`, primo
+  // argomento della funzione): il fixture ha apposta un anno che precede
+  // l'anno base nell'archivio, cosi' i test "base = primo anno in archivio"
+  // (il difetto del rilievo 2) e "base = anno base vero" (il fix) danno
+  // risposte diverse e discriminano.
   const inc2023 = {
     ce01_ricavi_vendite: "1000", ce04_altri_ricavi: "50", ce05_materie_prime: "400",
     ce06_servizi: "200", ce07_godimento_beni: "30", ce08_costi_personale: "150", ce12_oneri_diversi: "20",
@@ -173,54 +178,79 @@ describe("rowsAnnoBase", () => {
   };
 
   it("[] senza anni storici, e non lancia", () => {
-    expect(rowsAnnoBase([], historical)).toEqual([]);
+    expect(rowsAnnoBase(2024, [], historical)).toEqual([]);
   });
 
-  it("il primo anno storico fa da colonna base, il resto (anno base incluso) da colonne years", () => {
-    const rows = rowsAnnoBase([2023, 2024], historical);
+  it("l'anno base VERO fa da colonna base (fix round 1, rilievo 2 — non il primo anno in archivio), gli anni precedenti da colonne years", () => {
+    const rows = rowsAnnoBase(2024, [2023, 2024], historical);
     const ricavi = rows.find((r) => r.key === "ricavi")!;
-    expect(ricavi.base.value).toBe(1000);
-    expect(ricavi.years).toEqual([{ value: 1100 }]);
+    expect(ricavi.base.value).toBe(1100); // 2024, l'anno base vero — non 1000 (2023, il primo in archivio)
+    expect(ricavi.years).toEqual([{ value: 1000 }]); // 2023, l'anno precedente
   });
 
   it("incidenza % di ce05/ce06/ce08 sui ricavi dello stesso anno", () => {
-    const rows = rowsAnnoBase([2023, 2024], historical);
+    const rows = rowsAnnoBase(2024, [2023, 2024], historical);
     const ce05 = rows.find((r) => r.key === "ce05")!;
-    expect(ce05.base).toMatchObject({ value: 400, pct: 40 });
-    expect(ce05.years[0].value).toBe(430);
-    expect(ce05.years[0].pct).toBeCloseTo((430 / 1100) * 100, 6);
+    expect(ce05.base).toMatchObject({ value: 430, pct: (430 / 1100) * 100 });
+    expect(ce05.years[0].value).toBe(400);
+    expect(ce05.years[0].pct).toBeCloseTo(40, 6);
   });
 
-  it("MOL = ce01+ce04-ce05-ce06-ce07-ce08-ce12", () => {
-    const rows = rowsAnnoBase([2023, 2024], historical);
-    const mol = rows.find((r) => r.key === "mol")!;
-    expect(mol.base.value).toBe(1000 + 50 - 400 - 200 - 30 - 150 - 20);
-    expect(mol.years[0].value).toBe(1100 + 50 - 430 - 200 - 30 - 150 - 20);
-  });
-
-  it("giorni DSO/DIO/DPO sono quelli di computeAutoDays, valore assente", () => {
-    const rows = rowsAnnoBase([2023, 2024], historical);
+  it("giorni DSO/DIO/DPO sono quelli di computeAutoDays sull'anno giusto, valore assente", () => {
+    const rows = rowsAnnoBase(2024, [2023, 2024], historical);
     const dso = rows.find((r) => r.key === "dso")!;
     expect(dso.base.value).toBeNull();
-    expect(dso.base.days).toBe(computeAutoDays("dso", inc2023, bal2023));
-    expect(dso.years[0].days).toBe(computeAutoDays("dso", inc2024, bal2024));
+    expect(dso.base.days).toBe(computeAutoDays("dso", inc2024, bal2024));
+    expect(dso.years[0].days).toBe(computeAutoDays("dso", inc2023, bal2023));
     const dio = rows.find((r) => r.key === "dio")!;
-    expect(dio.base.days).toBe(computeAutoDays("dio", inc2023, bal2023));
+    expect(dio.base.days).toBe(computeAutoDays("dio", inc2024, bal2024));
     const dpo = rows.find((r) => r.key === "dpo")!;
-    expect(dpo.base.days).toBe(computeAutoDays("dpo", inc2023, bal2023));
+    expect(dpo.base.days).toBe(computeAutoDays("dpo", inc2024, bal2024));
   });
 
-  it("un solo anno storico: base valorizzata, years vuote su ogni riga", () => {
-    const rows = rowsAnnoBase([2023], historical);
+  it("un solo anno storico (coincide con l'anno base): base valorizzata, years vuote su ogni riga", () => {
+    const rows = rowsAnnoBase(2024, [2024], historical);
     expect(rows.every((r) => r.years.length === 0)).toBe(true);
-    expect(rows.find((r) => r.key === "ricavi")!.base.value).toBe(1000);
+    expect(rows.find((r) => r.key === "ricavi")!.base.value).toBe(1100);
   });
 
-  it("anno storico senza dati in `historical` -> celle nulle, non lancia", () => {
-    const rows = rowsAnnoBase([2023, 2099], historical);
+  it("anno precedente senza dati in `historical` -> celle nulle, non lancia", () => {
+    const rows = rowsAnnoBase(2024, [2099, 2024], historical);
     const ricavi = rows.find((r) => r.key === "ricavi")!;
     expect(ricavi.years[0].value).toBeNull();
     const dso = rows.find((r) => r.key === "dso")!;
     expect(dso.years[0]).toEqual({ value: null, days: null });
+  });
+
+  it("MOL = ceAggregates(...).mol, coincide con quello di rowsCosti/rowsAltreVociCe sullo stesso anno base — fix round 1, rilievo 1", () => {
+    // ce02 e ce11 entrambi diversi da zero: la vecchia formula locale
+    // (ce01+ce04-ce05-ce06-ce07-ce08-ce12) e quella canonica di ceAggregates
+    // divergono per (ce02+ce03+ce03a)-(ce10+ce11) = 30-15 = 15, quindi il
+    // test discrimina davvero fra le due (senza, darebbe lo stesso numero
+    // per coincidenza e non proverebbe nulla).
+    const incConVociMinori = {
+      ...inc2024, ce02_variazioni_rimanenze: "30", ce11_accantonamenti: "15",
+    } as unknown as IncomeStatement;
+    const historicalConVociMinori: HistoricalData = {
+      ...historical, 2024: { income: incConVociMinori, balance: bal2024 },
+    };
+
+    const rows = rowsAnnoBase(2024, [2023, 2024], historicalConVociMinori);
+    const molAnnoBase = rows.find((r) => r.key === "mol")!.base.value;
+
+    const molCanonico = ceAggregates(incConVociMinori as unknown as Record<string, unknown>).mol;
+    const molVecchiaFormulaDelBrief = 1100 + 50 - 430 - 200 - 30 - 150 - 20; // = 320
+
+    expect(molCanonico).toBe(335); // 1180 (vp) - 810 (main) - 35 (alt)
+    expect(molCanonico).not.toBe(molVecchiaFormulaDelBrief); // le due formule divergono davvero
+    expect(molAnnoBase).toBe(molCanonico);
+
+    // La stessa "MOL" che rowsCosti e rowsAltreVociCe calcolano sullo stesso
+    // anno base, sullo stesso CE: un'azienda con queste voci non deve vedere
+    // due numeri diversi passando dal passo 1 al passo 3/4.
+    const molRowsCosti = rowsCosti(incConVociMinori, { materials: 40, services: 40 }, []).find((r) => r.key === "mol")!.base.value;
+    const molRowsAltreVoci = rowsAltreVociCe(incConVociMinori, []).find((r) => r.key === "mol")!.base.value;
+    expect(molAnnoBase).toBe(molRowsCosti);
+    expect(molAnnoBase).toBe(molRowsAltreVoci);
   });
 });

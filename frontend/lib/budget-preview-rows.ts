@@ -43,17 +43,20 @@ export function ceAggregates(income: Record<string, unknown>): {
 /**
  * L'anteprima del passo Scenario (Task 11 §1): niente chiamata a `/preview`,
  * solo un recap del bilancio storico gia' caricato — ricavi, incidenza % di
- * ce05/ce06/ce08 sui ricavi, il MOL semplificato dato dal brief e i giorni
- * `computeAutoDays` per DSO/DIO/DPO. `historicalYears[0]` fa da colonna
- * "base" (il primo anno disponibile in archivio) e il resto degli anni
- * storici, base compreso l'anno base vero e proprio, sono le colonne
- * `years`: nessun anno e' mostrato due volte.
+ * ce05/ce06/ce08 sui ricavi, il MOL canonico di `ceAggregates` e i giorni
+ * `computeAutoDays` per DSO/DIO/DPO. La colonna "base" del `PreviewPanel` e'
+ * l'anno base vero (`baseYear`, lo stesso del titolo «Bilancio {baseYear} ·
+ * anno base»), le colonne `years` sono gli anni storici PRECEDENTI (fix
+ * round 1, rilievo 2 — la colonna base mostrava `historicalYears[0]`, il
+ * primo anno in archivio, disallineata dal titolo): nessun anno e' mostrato
+ * due volte, e il vero anno base non finisce fra colonne che altrove nel
+ * wizard significano "anni di previsione".
  */
-export function rowsAnnoBase(historicalYears: number[], historical: HistoricalData): PreviewRow[] {
+export function rowsAnnoBase(baseYear: number, historicalYears: number[], historical: HistoricalData): PreviewRow[] {
   if (historicalYears.length === 0) return [];
-  const [primoAnno, ...restoAnni] = historicalYears;
-  const baseEntry = historical[primoAnno];
-  const restEntries = restoAnni.map((y) => historical[y]);
+  const anniPrecedenti = historicalYears.filter((y) => y !== baseYear);
+  const baseEntry = historical[baseYear];
+  const restEntries = anniPrecedenti.map((y) => historical[y]);
 
   const revenueOf = (e: HistoricalData[number] | undefined): number | null => (e ? num(e.income.ce01_ricavi_vendite) : null);
 
@@ -66,15 +69,15 @@ export function rowsAnnoBase(historicalYears: number[], historical: HistoricalDa
     return row(key, label, "value", cellFor(baseEntry), restEntries.map(cellFor));
   };
 
-  // MOL = ce01+ce04-ce05-ce06-ce07-ce08-ce12 (Task 11 §1): la formula del
-  // brief, piu' semplice della cascata di ceAggregates perche' qui non c'e'
-  // bisogno di scorporare rimanenze/accantonamenti dal solo storico.
-  const molOf = (e: HistoricalData[number] | undefined): number | null => {
-    if (!e) return null;
-    const i = e.income;
-    return num(i.ce01_ricavi_vendite) + num(i.ce04_altri_ricavi) - num(i.ce05_materie_prime)
-      - num(i.ce06_servizi) - num(i.ce07_godimento_beni) - num(i.ce08_costi_personale) - num(i.ce12_oneri_diversi);
-  };
+  // MOL da ceAggregates, l'unico aggregatore canonico del modulo: e' la
+  // stessa "MOL" che rowsCosti e rowsAltreVociCe calcolano sullo stesso anno
+  // base. Una formula locale piu' semplice (quella letterale del brief,
+  // ce01+ce04-ce05-ce06-ce07-ce08-ce12) diverge da quella canonica per
+  // (ce02+ce03+ce03a)-(ce10+ce11) — variazione rimanenze, lavori interni o
+  // accantonamenti non nulli danno due "MOL" diversi passando dal passo 1 al
+  // passo 3 (fix round 1, rilievo 1).
+  const molOf = (e: HistoricalData[number] | undefined): number | null =>
+    e ? ceAggregates(e.income as unknown as Record<string, unknown>).mol : null;
 
   const daysRow = (key: string, label: string, kind: "dso" | "dio" | "dpo"): PreviewRow => {
     const cellFor = (e: HistoricalData[number] | undefined): PreviewCell =>

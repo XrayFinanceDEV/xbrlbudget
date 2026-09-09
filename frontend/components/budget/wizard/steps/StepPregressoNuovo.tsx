@@ -25,6 +25,7 @@ import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { formatCurrency } from "@/lib/formatters";
 import { boolAssumption, pregressoBase, pregressoPreview, singleYearValue } from "@/lib/budget-pregresso-step";
+import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
@@ -236,7 +237,7 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
           years={preview.years}
           rows={preview.rows}
           loading={p.preview.loading}
-          error={p.preview.error}
+          error={previewNotice(p.preview)}
         >
           {preview.unfunded ? (
             <div className="mt-3 flex gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">

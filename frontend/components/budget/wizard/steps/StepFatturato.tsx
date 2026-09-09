@@ -9,6 +9,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/formatters";
 import { rowsFatturato } from "@/lib/budget-preview-rows";
+import { previewNotice } from "@/lib/budget-preview-notice";
 import { revenueBarGeometry } from "@/lib/budget-revenue-bars";
 import type { ForecastPreviewYear } from "@/types/api";
 import { PreviewPanel } from "../PreviewPanel";
@@ -45,8 +46,14 @@ function RevenueBars({ base, years }: { base: number; years: ForecastPreviewYear
 
 export function StepFatturato(p: StepProps) {
   const baseInc = p.historical[p.baseYear]?.income;
-  const rows = useMemo(() => (baseInc && p.preview.data ? rowsFatturato(baseInc, p.preview.data.forecast_years) : []),
-    [baseInc, p.preview.data]);
+  // Gli anni delle colonne sono quelli che il motore ha davvero prodotto
+  // (`data.forecast_years`), non quelli richiesti (`p.forecastYears`): se il
+  // motore si e' fermato a meta' (fabbisogno scoperto) le intestazioni non
+  // restano senza celle sotto. Stessa convenzione di lib/budget-costi-step.ts
+  // (fix round 1, rilievo 3-a).
+  const previewYears = p.preview.data?.forecast_years ?? [];
+  const rows = useMemo(() => (baseInc ? rowsFatturato(baseInc, previewYears) : []),
+    [baseInc, previewYears]);
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
       <Card>
@@ -61,9 +68,9 @@ export function StepFatturato(p: StepProps) {
         </CardContent>
       </Card>
       <div className="lg:sticky lg:top-4">
-        <PreviewPanel title="Ricavi proiettati" baseYear={p.baseYear} years={p.forecastYears} rows={rows}
-          loading={p.preview.loading} error={p.preview.error}>
-          <RevenueBars base={num(baseInc?.ce01_ricavi_vendite)} years={p.preview.data?.forecast_years ?? []} />
+        <PreviewPanel title="Ricavi proiettati" baseYear={p.baseYear} years={previewYears.map((y) => y.year)} rows={rows}
+          loading={p.preview.loading} error={previewNotice(p.preview)}>
+          <RevenueBars base={num(baseInc?.ce01_ricavi_vendite)} years={previewYears} />
         </PreviewPanel>
       </div>
     </div>

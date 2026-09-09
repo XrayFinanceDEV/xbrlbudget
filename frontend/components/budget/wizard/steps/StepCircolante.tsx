@@ -26,6 +26,7 @@ import {
   giorniMediRows,
   minorFieldsRows,
 } from "@/lib/budget-circolante-step";
+import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable } from "../YearInputTable";
@@ -117,7 +118,7 @@ export function StepCircolante(p: StepProps): JSX.Element {
           years={preview.years}
           rows={preview.rows}
           loading={p.preview.loading}
-          error={p.preview.error}
+          error={previewNotice(p.preview)}
         />
       </div>
     </div>

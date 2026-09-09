@@ -88,7 +88,8 @@ export function StepScenario(props: StepScenarioProps) {
     [hasTwoYears, historical, year1, year2, forecastYears, inflation, n],
   );
 
-  const annoBaseRows = useMemo(() => rowsAnnoBase(historicalYears, historical), [historicalYears, historical]);
+  const annoBaseRows = useMemo(() => rowsAnnoBase(baseYear, historicalYears, historical), [baseYear, historicalYears, historical]);
+  const anniPrecedenti = useMemo(() => historicalYears.filter((y) => y !== baseYear), [historicalYears, baseYear]);
 
   const riapplicaTendenza = () => {
     applyTrendToAssumptions(historicalYears, forecastYears, historical, inflation, update);
@@ -255,12 +256,18 @@ export function StepScenario(props: StepScenarioProps) {
       <div className="lg:sticky lg:top-4">
         <PreviewPanel
           title={`Bilancio ${baseYear} · anno base`}
-          baseYear={historicalYears[0] ?? baseYear}
-          years={historicalYears.slice(1)}
+          baseYear={baseYear}
+          years={anniPrecedenti}
           rows={annoBaseRows}
           loading={false}
           error={null}
-        />
+        >
+          {anniPrecedenti.length > 0 && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Le colonne a destra sono gli anni storici precedenti, non anni di previsione.
+            </p>
+          )}
+        </PreviewPanel>
       </div>
     </div>
   );

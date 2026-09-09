@@ -3,6 +3,7 @@ import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, Income
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import {
   DEFAULT_TAX_RATE,
+  TAX_RATE_PLACEHOLDER,
   impostePreview,
   spTributariRows,
   taxRateInputDisplay,
@@ -85,6 +86,22 @@ describe("spTributariRows", () => {
       sp16e_debiti_tributari_breve: "0", sp17e_debiti_tributari_lungo: "10",
     } as unknown as BalanceSheet;
     expect(spTributariRows(baseBs)[0].baseLabel).toBe("0 €");
+  });
+});
+
+describe("TAX_RATE_PLACEHOLDER", () => {
+  // Era `auto ${DEFAULT_TAX_RATE}` e a schermo si leggeva «auto :»: il
+  // segnaposto non ci stava nella casella. Rimetterci dentro il numero
+  // tornerebbe a troncare — e un troncamento non da' alcun errore.
+  it("non ripete l'aliquota: e' la lunghezza a essere il difetto", () => {
+    expect(TAX_RATE_PLACEHOLDER).not.toContain(String(DEFAULT_TAX_RATE));
+    expect(TAX_RATE_PLACEHOLDER).not.toMatch(/\d/);
+  });
+
+  it("resta breve: la casella deve ospitare anche quattro cifre e una virgola", () => {
+    expect(TAX_RATE_PLACEHOLDER.length).toBeLessThanOrEqual(6);
+    expect(TAX_RATE_PLACEHOLDER.trim()).toBe(TAX_RATE_PLACEHOLDER);
+    expect(TAX_RATE_PLACEHOLDER).not.toBe("");
   });
 });
 

@@ -22,6 +22,7 @@ import { parseFieldValue } from "@/lib/budget-field-rules";
 import { formatPercentage } from "@/lib/formatters";
 import {
   DEFAULT_TAX_RATE,
+  TAX_RATE_PLACEHOLDER,
   impostePreview,
   spTributariRows,
   taxRateInputDisplay,
@@ -91,7 +92,9 @@ export function StepImposte(p: StepProps): JSX.Element {
             <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
               <div>
                 <div className="text-sm font-medium text-foreground">Aliquota forzata</div>
-                <div className="text-xs text-muted-foreground">vuota = usa l&apos;effettiva</div>
+                <div className="text-xs text-muted-foreground">
+                  vuota = usa l&apos;effettiva, o {pct1(DEFAULT_TAX_RATE)} se non derivabile
+                </div>
               </div>
               <div className="flex items-center gap-1">
                 <Input
@@ -99,9 +102,12 @@ export function StepImposte(p: StepProps): JSX.Element {
                   min={0}
                   max={100}
                   step={0.1}
-                  className="w-20 text-right"
+                  // 80 px non bastavano nemmeno al segnaposto: a schermo si
+                  // leggeva «auto :». Qui ci sta il segnaposto e ci sta un
+                  // valore digitato di quattro cifre e una virgola.
+                  className="w-28 text-right"
                   aria-label="Aliquota forzata"
-                  placeholder={`auto ${DEFAULT_TAX_RATE}`}
+                  placeholder={TAX_RATE_PLACEHOLDER}
                   value={taxRateDisplay}
                   onChange={(e) => {
                     const raw = e.target.value.trim();

@@ -48,6 +48,21 @@ export function taxRateInputDisplay(v: SingleYearValue): number | "" {
   return v.value === null || v.value === DEFAULT_TAX_RATE ? "" : v.value;
 }
 
+/**
+ * Il segnaposto della casella dell'aliquota forzata.
+ *
+ * Era `auto ${DEFAULT_TAX_RATE}` in una casella larga 80 px, e a schermo si
+ * leggeva «auto :» — un troncamento che sembra un errore di rendering. Il
+ * segnaposto quindi non ripete piu' il numero (che sta nella riga sotto la
+ * casella e, quando il piano lo usa davvero, nella riga «Aliquota usata dal
+ * piano»), e la casella e' stata allargata perche' ci stia anche un valore
+ * digitato di quattro cifre e una virgola.
+ *
+ * Sta qui, e con la sua prova, perche' e' la lunghezza a essere il difetto:
+ * un ripensamento che ci rimettesse dentro il 27,9 tornerebbe a troncare.
+ */
+export const TAX_RATE_PLACEHOLDER = "auto";
+
 export interface SpTributariRow {
   field: string;
   label: string;

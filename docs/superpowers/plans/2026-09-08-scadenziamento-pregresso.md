@@ -936,6 +936,17 @@ Il tributario senza piano usa `saldo_due = massa intera` (tutto saldo, niente ra
 
 **Modello:** sonnet · **Ondata:** C (dopo 4, 5)
 
+**Da raccogliere dal Task 5 (round 2, commit `8535097`).** Il motore dichiara ora
+`details['pregresso_writeoff_ignored']` — lista di `{saldo, field, requested, reason}`, sempre
+presente e vuota quando non c'e' nulla da dire — per gli anni in cui un inesigibile scadenziato
+**non** e' stato scaricato perche' un `ce09d_override`/`ce09_override` dell'utente impediva di
+rilevarne il costo. L'implementatore **non** ha aggiunto la chiave a `ForecastYearDetails` in
+`frontend/types/api.ts`, di proposito: e' il file di un altro task, e la direzione e' quella
+sicura — l'API dichiara **piu'** di quanto il tipo prometta, mai meno. **Aggiungerla e' compito
+di questo task**, e la tabella del pregresso deve mostrare quella riga: un credito che l'utente
+credeva di aver svalutato e che invece e' rimasto a bilancio va detto, non lasciato dedurre.
+
+
 **Aggiunta del proprietario, verificata nel motore (2026-09-09).** «Probabilmente oggi il piano
 non genera tutte le sottospecie di debiti o crediti previsionali ma solo quelli del circolante.»
 Misurato su `calculations/forecast_engine.py` (versione `6b7d7f3`), ed e' cosi' — anche piu' netto:

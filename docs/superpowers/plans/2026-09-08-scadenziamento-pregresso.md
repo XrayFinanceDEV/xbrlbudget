@@ -935,6 +935,36 @@ Il tributario senza piano usa `saldo_due = massa intera` (tutto saldo, niente ra
 
 **Modello:** sonnet · **Ondata:** C (dopo 4, 5)
 
+**Aggiunta del proprietario, verificata nel motore (2026-09-09).** «Probabilmente oggi il piano
+non genera tutte le sottospecie di debiti o crediti previsionali ma solo quelli del circolante.»
+Misurato su `calculations/forecast_engine.py` (versione `6b7d7f3`), ed e' cosi' — anche piu' netto:
+
+| Voce | Come nasce nel previsionale | Scadenziando tutto il pregresso |
+|---|---|---|
+| crediti commerciali (`sp06_trade`) | **driver**: `ricavi previsti × DSO / 360` (`:1343`), poi spartito pro quota fra `sp06a..d`, `sp06g` (`:1742`) | la voce **si rigenera**: cambia la composizione, non sparisce |
+| rimanenze (`sp05`) | **driver**: `ricavi previsti × DIO / 360` (`:1356`) | si rigenera |
+| debiti fornitori (`sp16d`) | **driver**: `acquisti previsti × DPO / 360` (`:1487`) | si rigenera |
+| debiti banche (`sp16a`/`sp17a`) | piano di rimborso + nuovi finanziamenti | segue il proprio piano |
+| tributari (`sp06e`/`sp16e`) | imposte (Task 6) | segue le imposte |
+| previdenziali (`sp16f`/`sp17f`) | `base × fattore personale` se agganciati, altrimenti `prev × (1+%)` (`:1525-1529`) | **si estingue**, se non agganciati |
+| altri debiti (`sp16g`/`sp17g`), fornitori lungo (`sp17d`), tributari lungo (`sp17e`) | `prev × (1+%)` (`:1512-1514`, `:1490`) | **si estingue** |
+
+Cioe': il piano **genera** da un driver soltanto le tre voci del circolante; le banche e le imposte
+seguono un piano proprio; **tutto il resto e' riportato con una percentuale**, non generato. Con il
+Ruling 16 (il generato nasce al netto della massa dichiarata), scadenziare l'intera massa di una
+voce riportata la porta a **zero e ce la lascia** — ed e' il comportamento voluto: parole del
+proprietario, «se scadenzio un debito pregresso che poi non si rigenera dal piano previsionale, il
+debito si deve estinguere».
+
+**Conseguenza vincolante per questo task:** la tabella del pregresso deve **dire all'utente quale
+delle due cose accadra' alla voce che sta scadenziando**, riga per riga. Una voce che si rigenera
+dal driver e una che si estingue per sempre si dichiarano allo stesso modo e si comportano in
+modo opposto: senza quell'indicazione l'utente azzera «altri debiti» e scopre mesi dopo che non
+sono piu' tornati. Serve anche la via d'uscita, detta esplicitamente nella copy: chi vuole
+rimettere un debito lo inserisce a mano in **SP Prev.** (`sp_overrides`), e da li' alleggerisce
+il cashflow. Testo in italiano, icone `lucide-react`, nessuna emoji.
+
+
 **Files:**
 - Create: `frontend/components/budget/wizard/PregressoTable.tsx`
 - Modify: `frontend/components/budget/wizard/steps/StepPregressoNuovo.tsx`, `frontend/lib/budget-preview-rows.ts` (+ test)

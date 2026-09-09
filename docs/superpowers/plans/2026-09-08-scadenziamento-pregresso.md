@@ -936,6 +936,16 @@ Il tributario senza piano usa `saldo_due = massa intera` (tutto saldo, niente ra
 
 **Modello:** sonnet · **Ondata:** C (dopo 4, 5)
 
+**Da raccogliere dal Task 14 (commit `bd15e8b`).** Il motore dichiara ora
+`details['degenerate_turnover_ratio']` — lista dei giorni medi derivati risultati fuori scala, per
+cui il motore **riporta il saldo base invece di scalarlo** — ma **nessuna schermata la rende**: il
+tipo c'e', il dato arriva, e il passo «Capitale circolante» mostra solo i giorni. Un utente vede
+un giorno medio e non sa che quel giorno non e' stato applicato. Va mostrato nel passo dei giorni
+medi (non in questa tabella: e' un passo diverso, dichiararlo nel commit). Misurato al Task 14: il
+fixture `holding` dell'`e2e_kit` ha `dpo = 3.600` e la guardia vi scatta davvero — non e' un caso
+di laboratorio.
+
+
 **Da raccogliere dal Task 5 (round 2, commit `8535097`).** Il motore dichiara ora
 `details['pregresso_writeoff_ignored']` — lista di `{saldo, field, requested, reason}`, sempre
 presente e vuota quando non c'e' nulla da dire — per gli anni in cui un inesigibile scadenziato

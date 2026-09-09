@@ -28,10 +28,12 @@ import {
   costiPreview,
   costiTableRows,
   fixedShareOf,
-  isSplitForced,
+  forcedNote,
+  forcedSplitYears,
   splitBaseAmount,
   type FixedShare,
   type FixedShareField,
+  type ForcedSplit,
 } from "@/lib/budget-costi-step";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputGroup, type YearInputRow } from "../YearInputTable";
@@ -46,7 +48,9 @@ function SplitSlider(props: {
   field: FixedShareField;
   share: number;
   uneven: boolean;
-  forced: boolean;
+  /** Il testo del badge, che dice ANCHE in quali anni e' forzato; `null` =
+   *  nessun anno forzato, nessun badge (deciso in `lib/budget-costi-step`). */
+  forced: string | null;
   onChange: (v: number) => void;
 }): JSX.Element {
   const { label, baseAmount, field, share, uneven, forced, onChange } = props;
@@ -59,7 +63,7 @@ function SplitSlider(props: {
           {label}
           {forced && (
             <Badge variant="outline" className="font-normal text-amber-700 dark:text-amber-300">
-              forzato in CE Prev.
+              {forced}
             </Badge>
           )}
         </span>
@@ -160,9 +164,16 @@ function FornitoriRow({ row, years }: { row: PreviewRow; years: number[] }): JSX
 export function StepCosti(p: StepProps): JSX.Element {
   const mat: FixedShare = fixedShareOf(p.assumptions, p.forecastYears, "fixed_materials_percentage");
   const serv: FixedShare = fixedShareOf(p.assumptions, p.forecastYears, "fixed_services_percentage");
-  const forced = {
-    materials: isSplitForced(p.assumptions, p.forecastYears, "ce05_override"),
-    services: isSplitForced(p.assumptions, p.forecastYears, "ce06_override"),
+  // Quali ANNI CE Prev. forza, non «se» li forza: il badge dice dove e' vero,
+  // e le sole caselle di quegli anni si spengono.
+  const forced: ForcedSplit = {
+    years: p.forecastYears,
+    materials: forcedSplitYears(p.assumptions, p.forecastYears, "ce05_override"),
+    services: forcedSplitYears(p.assumptions, p.forecastYears, "ce06_override"),
+  };
+  const forcedBadge = {
+    materials: forcedNote(forced.materials, forced.years),
+    services: forcedNote(forced.services, forced.years),
   };
 
   const base = costiBase(p.historical[p.baseYear]?.income);
@@ -199,7 +210,7 @@ export function StepCosti(p: StepProps): JSX.Element {
               field="fixed_materials_percentage"
               share={mat.value}
               uneven={mat.uneven}
-              forced={forced.materials}
+              forced={forcedBadge.materials}
               onChange={(v) => p.updateAll("fixed_materials_percentage", v)}
             />
             <SplitSlider
@@ -208,7 +219,7 @@ export function StepCosti(p: StepProps): JSX.Element {
               field="fixed_services_percentage"
               share={serv.value}
               uneven={serv.uneven}
-              forced={forced.services}
+              forced={forcedBadge.services}
               onChange={(v) => p.updateAll("fixed_services_percentage", v)}
             />
           </CardContent>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import type { CostiTableRow } from "./budget-costi-step";
+import type { CostiTableRow, ForcedSplit } from "./budget-costi-step";
 import {
   FIXED_SHARE_DEFAULT,
   alignVariablesToRevenue,
@@ -9,9 +9,11 @@ import {
   costiPreview,
   costiTableRows,
   fixedShareOf,
-  isSplitForced,
+  forcedNote,
+  forcedSplitYears,
   splitBaseAmount,
 } from "./budget-costi-step";
+import { yearCellState, type YearCellOff } from "./budget-year-cell";
 
 const baseInc = {
   ce01_ricavi_vendite: "1000", ce04_altri_ricavi: "50", ce05_materie_prime: "400",
@@ -85,17 +87,48 @@ describe("fixedShareOf", () => {
   });
 });
 
-describe("isSplitForced", () => {
-  it("basta un anno con l'override perche' la ripartizione sia forzata", () => {
-    expect(isSplitForced(asMap({ 2027: {}, 2028: { ce05_override: 500 } }), [2027, 2028], "ce05_override")).toBe(true);
+describe("forcedSplitYears", () => {
+  it("risponde QUALI anni sono forzati, non se lo e' almeno uno", () => {
+    expect(forcedSplitYears(
+      asMap({ 2027: {}, 2028: { ce05_override: 500 }, 2029: {} }), [2027, 2028, 2029], "ce05_override"
+    )).toEqual([2028]);
   });
 
   it("un override a zero e' comunque un override", () => {
-    expect(isSplitForced(asMap({ 2027: { ce06_override: 0 } }), [2027], "ce06_override")).toBe(true);
+    expect(forcedSplitYears(asMap({ 2027: { ce06_override: 0 } }), [2027], "ce06_override")).toEqual([2027]);
   });
 
-  it("null e assente non forzano nulla", () => {
-    expect(isSplitForced(asMap({ 2027: { ce05_override: null }, 2028: {} }), [2027, 2028], "ce05_override")).toBe(false);
+  it("null, assente e stringa vuota non forzano nulla", () => {
+    expect(forcedSplitYears(
+      asMap({ 2027: { ce05_override: null }, 2028: {}, 2029: { ce05_override: "" } }),
+      [2027, 2028, 2029], "ce05_override"
+    )).toEqual([]);
+  });
+
+  it("gli anni tornano nell'ordine del piano, non in quello della mappa", () => {
+    expect(forcedSplitYears(
+      asMap({ 2029: { ce05_override: 1 }, 2027: { ce05_override: 1 } }), [2027, 2028, 2029], "ce05_override"
+    )).toEqual([2027, 2029]);
+  });
+});
+
+describe("forcedNote", () => {
+  it("nessun anno forzato, nessun avviso: un badge acceso ovunque non distingue nulla", () => {
+    expect(forcedNote([], [2027, 2028, 2029])).toBeNull();
+  });
+
+  it("un anno solo: l'avviso dice QUALE", () => {
+    expect(forcedNote([2027], [2027, 2028, 2029])).toBe("forzato in CE Prev. nel 2027");
+  });
+
+  it("due anni su tre si legge «e», tre su quattro con la virgola", () => {
+    expect(forcedNote([2027, 2029], [2027, 2028, 2029])).toBe("forzato in CE Prev. nel 2027 e 2029");
+    expect(forcedNote([2027, 2028, 2029], [2027, 2028, 2029, 2030]))
+      .toBe("forzato in CE Prev. nel 2027, 2028 e 2029");
+  });
+
+  it("tutti gli anni previsti: elencarli non aggiunge nulla, l'avviso resta secco", () => {
+    expect(forcedNote([2027, 2028], [2027, 2028])).toBe("forzato in CE Prev.");
   });
 });
 
@@ -127,7 +160,9 @@ describe("splitBaseAmount", () => {
 describe("costiTableRows", () => {
   const base = { mat: 400, serv: 200, pers: 150, god: 30 };
   const even = (v: number) => ({ value: v, uneven: false });
-  const rows = (m: number, s: number, forced = { materials: false, services: false }) =>
+  const PIANO = [2027, 2028, 2029];
+  const nulla: ForcedSplit = { years: PIANO, materials: [], services: [] };
+  const rows = (m: number, s: number, forced: ForcedSplit = nulla) =>
     costiTableRows(base, even(m), even(s), forced);
 
   it("tre gruppi: la quota, poi le variabili, poi le fisse — coi loro pallini", () => {
@@ -172,7 +207,7 @@ describe("costiTableRows", () => {
     });
     const share = fixedShareOf(differenziato, [2027, 2028], "fixed_materials_percentage");
     expect(share).toEqual({ value: 30, uneven: true });
-    const r = costiTableRows(base, share, even(40), { materials: false, services: false });
+    const r = costiTableRows(base, share, even(40), nulla);
     expect(r.some((x) => "field" in x && x.field === "fixed_materials_percentage")).toBe(true);
     // Nessuna riga porta con se' un valore: i valori restano nella mappa per anno.
     expect(r.every((x) => !("value" in x))).toBe(true);
@@ -200,12 +235,12 @@ describe("costiTableRows", () => {
     const centoPoiQuaranta = { value: 100, uneven: true };
     const zeroPoiQuaranta = { value: 0, uneven: true };
     const r = costiTableRows(base, centoPoiQuaranta, zeroPoiQuaranta,
-      { materials: false, services: false });
+      nulla);
     expect(off(r, "variable_materials_growth_pct").off).toBe(false);
     expect(off(r, "fixed_services_growth_pct").off).toBe(false);
     // Quando invece gli anni concordano, l'estremo spegne come prima.
     const concordi = costiTableRows(base, { value: 100, uneven: false }, { value: 0, uneven: false },
-      { materials: false, services: false });
+      nulla);
     expect(off(concordi, "variable_materials_growth_pct").off).toBe(true);
     expect(off(concordi, "fixed_services_growth_pct").off).toBe(true);
   });
@@ -220,21 +255,60 @@ describe("costiTableRows", () => {
 
   it("senza anno base la colonna base e' un trattino, non uno zero", () => {
     const r = costiTableRows({ mat: null, serv: null, pers: null, god: null }, even(40), even(40),
-      { materials: false, services: false });
+      nulla);
     const labels = r.flatMap((x) => ("baseLabel" in x ? [x.baseLabel] : []));
     expect(labels.every((l) => l === "—")).toBe(true);
   });
 
-  it("l'override marca le sole righe del suo gruppo", () => {
-    const r = rows(40, 40, { materials: true, services: false });
+  it("l'override marca le sole righe del suo gruppo, e dice in quale anno", () => {
+    const r = rows(40, 40, { years: PIANO, materials: [2027], services: [] });
     const sub = (field: string) =>
       (r.find((x) => "field" in x && x.field === field) as { sub?: string }).sub;
-    expect(sub("fixed_materials_percentage")).toBe("forzato in CE Prev.");
-    expect(sub("variable_materials_growth_pct")).toBe("forzato in CE Prev.");
-    expect(sub("fixed_materials_growth_pct")).toBe("forzato in CE Prev.");
+    expect(sub("fixed_materials_percentage")).toBe("forzato in CE Prev. nel 2027");
+    expect(sub("variable_materials_growth_pct")).toBe("forzato in CE Prev. nel 2027");
+    expect(sub("fixed_materials_growth_pct")).toBe("forzato in CE Prev. nel 2027");
     expect(sub("fixed_services_percentage")).toBeUndefined();
     expect(sub("variable_services_growth_pct")).toBeUndefined();
     expect(sub("personnel_growth_pct")).toBeUndefined();
+  });
+
+  // La prova che la granularita' e' l'ANNO: `costiTableRows` produce le righe,
+  // `yearCellState` — la stessa funzione che `YearInputTable` chiama per ogni
+  // casella — dice se quella casella e' inerte. Le due insieme sono cio' che
+  // l'utente vede.
+  const cella = (r: CostiTableRow[], field: string, y: number) =>
+    yearCellState(r.find((x) => "field" in x && x.field === field) as YearCellOff, y);
+
+  it("un anno forzato su tre spegne SOLO quell'anno, e dice perche'", () => {
+    const r = rows(40, 40, { years: PIANO, materials: [2027], services: [] });
+    for (const field of [
+      "fixed_materials_percentage", "variable_materials_growth_pct", "fixed_materials_growth_pct",
+    ]) {
+      expect(cella(r, field, 2027).disabled, `${field} 2027`).toBe(true);
+      expect(cella(r, field, 2027).title, `${field} 2027`).toContain("Forzato in CE Prev.");
+      expect(cella(r, field, 2028).disabled, `${field} 2028`).toBe(false);
+      expect(cella(r, field, 2029).disabled, `${field} 2029`).toBe(false);
+    }
+    // Le righe dei servizi e le due voci non collegate restano intatte.
+    for (const field of ["variable_services_growth_pct", "personnel_growth_pct"]) {
+      for (const y of PIANO) expect(cella(r, field, y).disabled, `${field} ${y}`).toBe(false);
+    }
+  });
+
+  it("nessun anno forzato: nessuna cella si spegne, su nessuna riga", () => {
+    const r = rows(40, 40);
+    const fields = r.flatMap((x) => ("field" in x ? [x.field] : []));
+    for (const field of fields) {
+      for (const y of PIANO) expect(cella(r, field, y), `${field} ${y}`).toEqual({ disabled: false });
+    }
+  });
+
+  it("una casella spenta dalla quota all'estremo porta il suo perche', non quello dell'override", () => {
+    const r = rows(100, 40);
+    const c = cella(r, "variable_materials_growth_pct", 2027);
+    expect(c.disabled).toBe(true);
+    expect(c.title).toContain("quota fissa al 100%");
+    expect(c.title).not.toContain("CE Prev.");
   });
 });
 

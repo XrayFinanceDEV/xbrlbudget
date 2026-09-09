@@ -16,6 +16,7 @@
  */
 import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
+import type { YearCellOff } from "@/lib/budget-year-cell";
 import { rowsCosti, type PreviewRow } from "@/lib/budget-preview-rows";
 import { formatCurrency } from "@/lib/formatters";
 
@@ -69,20 +70,64 @@ export function fixedShareOf(
 }
 
 /**
- * Un override assoluto in CE Prev. sostituisce la voce intera: la ripartizione
- * fisso/variabile che il motore dichiarava non c'e' piu' e lo slider non morde
- * su quell'anno. Basta un anno qualunque perche' l'avviso vada mostrato.
+ * GLI ANNI in cui un override assoluto di CE Prev. sostituisce la voce
+ * intera: la ripartizione fisso/variabile che il motore dichiarava non c'e'
+ * piu' e ne' lo slider ne' le percentuali di crescita mordono su quegli anni.
+ *
+ * La granularita' e' l'ANNO e non la riga. Prima questa funzione rispondeva
+ * `true`/`false` con un `some(...)`: un `ce05_override` sul solo 2025
+ * accendeva il badge «forzato in CE Prev.» su tutte le righe collegate e su
+ * tutti gli anni, mentre l'anteprima — che marca cella per cella — mostrava
+ * il valore forzato sul solo 2025. L'utente leggeva un avviso acceso anche
+ * dove la casella funziona, e digitava senza alcun segnale in quella dove
+ * non serve a niente.
+ *
+ * Un override a zero e' un override vero (voce azzerata); `null` e assente
+ * non forzano nulla.
  */
-export function isSplitForced(
+export function forcedSplitYears(
   assumptions: AssumptionsMap,
   years: number[],
   field: SplitOverrideField
-): boolean {
-  return years.some((y) => {
+): number[] {
+  return years.filter((y) => {
     const v = assumptions[y]?.[field];
-    return v !== null && v !== undefined;
+    return v !== null && v !== undefined && v !== ("" as unknown);
   });
 }
+
+const FORCED_NOTE = "forzato in CE Prev.";
+
+/** «2027» · «2027 e 2029» · «2027, 2028 e 2029». */
+function listaAnni(years: number[]): string {
+  if (years.length <= 1) return years.map(String).join("");
+  return `${years.slice(0, -1).join(", ")} e ${years[years.length - 1]}`;
+}
+
+/**
+ * L'avviso «forzato in CE Prev.», che dice ANCHE dove e' vero.
+ *
+ * Senza anni forzati non c'e' avviso (`null`): un badge che si accende
+ * ovunque non distingue piu' niente. Quando invece tutti gli anni previsti
+ * sono forzati elencarli non aggiunge nulla, e l'avviso resta secco.
+ */
+export function forcedNote(forcedYears: number[], allYears: number[]): string | null {
+  if (forcedYears.length === 0) return null;
+  if (allYears.length > 0 && forcedYears.length === allYears.length) return FORCED_NOTE;
+  return `${FORCED_NOTE} nel ${listaAnni(forcedYears)}`;
+}
+
+/** Il `title` della casella inerte: sta sull'anno, quindi non lo ripete. */
+const FORCED_CELL_NOTE =
+  "Forzato in CE Prev.: in quest'anno la voce e' un importo assoluto, quindi questa " +
+  "percentuale non ha effetto. Si azzera dal dialogo Ricalcola.";
+
+/** Il `title` della riga che la quota all'estremo ha annullato: una casella
+ *  spenta senza il suo perche' e' lo stesso difetto un gradino piu' in la'. */
+const OFF_NOTE = {
+  variabile: "Con la quota fissa al 100% non resta parte variabile: questa percentuale non ha effetto.",
+  fissa: "Con la quota fissa a 0% non resta parte fissa: questa percentuale non ha effetto.",
+};
 
 export interface CostiBase {
   mat: number | null;
@@ -120,9 +165,14 @@ export function splitBaseAmount(
  */
 export type CostiTableRow =
   | { group: string; swatch?: "fixed" | "variable" }
-  | { field: string; label: string; sub?: string; baseLabel: string; off?: boolean };
+  | ({ field: string; label: string; sub?: string; baseLabel: string } & YearCellOff);
 
-const FORCED_NOTE = "forzato in CE Prev.";
+/** Gli anni previsti, e quelli in cui CE Prev. forza le due voci. */
+export interface ForcedSplit {
+  years: number[];
+  materials: number[];
+  services: number[];
+}
 
 /**
  * Tre gruppi: la quota fissa, poi le variabili, poi le fisse.
@@ -143,17 +193,25 @@ const FORCED_NOTE = "forzato in CE Prev.";
  * indigitabile un campo che sul secondo anno il motore usa eccome. Qui la quota
  * che si conosce e' solo quella del primo anno: un controllo che non sa non
  * blocca.
+ *
+ * L'override di CE Prev. invece si sa per anno, e si spegne per anno
+ * (`offYears`): la casella dell'anno forzato diventa inerte con il suo
+ * perche', quelle degli altri anni restano vive. Prima non si spegneva nulla
+ * e l'unico segnale — il badge — era acceso su tutti gli anni: si digitava un
+ * numero senza effetto mentre l'anteprima non si muoveva.
  */
 export function costiTableRows(
   base: CostiBase,
   mat: FixedShare,
   serv: FixedShare,
-  forced: { materials: boolean; services: boolean }
+  forced: ForcedSplit
 ): CostiTableRow[] {
   const matSplit = splitBaseAmount(base.mat, mat.value);
   const servSplit = splitBaseAmount(base.serv, serv.value);
-  const matNote = forced.materials ? FORCED_NOTE : undefined;
-  const servNote = forced.services ? FORCED_NOTE : undefined;
+  const matNote = forcedNote(forced.materials, forced.years) ?? undefined;
+  const servNote = forcedNote(forced.services, forced.years) ?? undefined;
+  const matForced = { offYears: forced.materials, offYearsNote: FORCED_CELL_NOTE };
+  const servForced = { offYears: forced.services, offYearsNote: FORCED_CELL_NOTE };
   return [
     { group: "Quota fissa, anno per anno" },
     {
@@ -161,12 +219,14 @@ export function costiTableRows(
       label: "Materie prime · quota fissa (%)",
       sub: matNote,
       baseLabel: "—",
+      ...matForced,
     },
     {
       field: "fixed_services_percentage",
       label: "Servizi · quota fissa (%)",
       sub: servNote,
       baseLabel: "—",
+      ...servForced,
     },
     { group: "Costi variabili", swatch: "variable" },
     {
@@ -175,6 +235,8 @@ export function costiTableRows(
       sub: matNote,
       baseLabel: euro(matSplit.variable),
       off: mat.value >= 100 && !mat.uneven,
+      offNote: OFF_NOTE.variabile,
+      ...matForced,
     },
     {
       field: "variable_services_growth_pct",
@@ -182,6 +244,8 @@ export function costiTableRows(
       sub: servNote,
       baseLabel: euro(servSplit.variable),
       off: serv.value >= 100 && !serv.uneven,
+      offNote: OFF_NOTE.variabile,
+      ...servForced,
     },
     { group: "Costi fissi", swatch: "fixed" },
     {
@@ -190,6 +254,8 @@ export function costiTableRows(
       sub: matNote,
       baseLabel: euro(matSplit.fixed),
       off: mat.value <= 0 && !mat.uneven,
+      offNote: OFF_NOTE.fissa,
+      ...matForced,
     },
     {
       field: "fixed_services_growth_pct",
@@ -197,6 +263,8 @@ export function costiTableRows(
       sub: servNote,
       baseLabel: euro(servSplit.fixed),
       off: serv.value <= 0 && !serv.uneven,
+      offNote: OFF_NOTE.fissa,
+      ...servForced,
     },
     { field: "personnel_growth_pct", label: "Personale", baseLabel: euro(base.pers) },
     { field: "rent_growth_pct", label: "Godimento beni di terzi", baseLabel: euro(base.god) },

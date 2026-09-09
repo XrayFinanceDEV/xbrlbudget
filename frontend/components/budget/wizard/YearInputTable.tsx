@@ -8,15 +8,22 @@
 import type { JSX } from "react";
 import { FIELD_RULES, parseFieldValue } from "@/lib/budget-field-rules";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
+import { yearCellState, type YearCellOff } from "@/lib/budget-year-cell";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "./types";
 
-export interface YearInputRow {
+/**
+ * `off` spegne la riga intera; `offYears` spegne SOLO gli anni elencati e
+ * lascia vivi gli altri — un `ce*_override` forza la voce su un anno, non su
+ * tutto il piano. Quale delle due valga su una data casella, e con quale
+ * spiegazione, lo decide `yearCellState` (`lib/budget-year-cell.ts`) con la
+ * sua suite: qui non si decide nulla.
+ */
+export interface YearInputRow extends YearCellOff {
   field: string;
   label: string;
   sub?: string;
   baseLabel: string;
-  off?: boolean;
   placeholder?: (year: number) => string;
   group?: never;
 }
@@ -86,19 +93,24 @@ export function YearInputTable(props: {
                 </td>
                 {forecastYears.map((year) => {
                   const rule = FIELD_RULES[row.field];
+                  // Il `title` sta anche sul `td`: un input `disabled` non
+                  // riceve eventi del mouse in tutti i browser, e il tooltip
+                  // e' l'unica cosa che spiega perche' la casella e' inerte.
+                  const cell = yearCellState(row, year);
                   return (
-                    <td key={year} className="px-2 py-1.5 align-top">
+                    <td key={year} className="px-2 py-1.5 align-top" title={cell.title}>
                       <input
                         type="number"
                         inputMode="decimal"
                         step={rule?.step ?? "1"}
                         min={rule?.min}
                         max={rule?.max}
-                        disabled={row.off}
+                        disabled={cell.disabled}
+                        title={cell.title}
                         placeholder={row.placeholder?.(year)}
                         value={valueOf(assumptions, year, row.field)}
                         onChange={(e) => update(year, row.field, parseFieldValue(row.field, e.target.value))}
-                        className="w-full rounded border border-input bg-transparent px-2 py-1 text-right text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed"
+                        className="w-full rounded border border-input bg-transparent px-2 py-1 text-right text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:border-dashed disabled:bg-muted/50 disabled:text-muted-foreground"
                       />
                     </td>
                   );

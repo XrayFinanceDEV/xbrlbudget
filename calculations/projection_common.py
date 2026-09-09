@@ -282,3 +282,37 @@ def runoff_schedule(opening, amounts, writeoff, year_index, horizon) -> RunoffYe
     residual_short = min(residual, due_next)
     return RunoffYear(opening=opening, closed=closed, writeoff=wo, residual=residual,
                       residual_short=residual_short, residual_long=residual - residual_short)
+
+
+# ── Tax settlement: saldo + acconto kernel ──
+@dataclass(frozen=True)
+class TaxYear:
+    saldo_paid: Decimal
+    acconti_paid: Decimal
+    rate_paid: Decimal
+    generated_debt: Decimal
+    generated_credit: Decimal
+    opening_credit_left: Decimal
+    cash_out: Decimal
+
+
+def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current_tax,
+                                 previous_tax, acconto_pct, explicit_advances) -> TaxYear:
+    """Imposte a saldo + acconto (spec lotto 2 §3.2). Solo il motore budget:
+    l'infrannuale continua a usare tax_closing_position."""
+    d = lambda v: Decimal(str(v or 0))
+    opening_credit, saldo_due, rate_due = d(opening_credit), d(saldo_due), d(rate_due)
+    current_tax, previous_tax = d(current_tax), d(previous_tax)
+    if explicit_advances is not None and d(explicit_advances) > ZERO:
+        acconti = d(explicit_advances)
+    else:
+        acconti = max(ZERO, previous_tax * d(acconto_pct) / Decimal('100'))
+    used = min(opening_credit, saldo_due)
+    saldo_paid = saldo_due - used
+    net = current_tax - acconti
+    return TaxYear(
+        saldo_paid=saldo_paid, acconti_paid=acconti, rate_paid=rate_due,
+        generated_debt=max(ZERO, net), generated_credit=max(ZERO, -net),
+        opening_credit_left=opening_credit - used,
+        cash_out=saldo_paid + acconti + rate_due,
+    )

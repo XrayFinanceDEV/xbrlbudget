@@ -2,7 +2,7 @@ from decimal import Decimal as D
 
 import pytest
 
-from calculations.projection_common import runoff_schedule, validate_runoff
+from calculations.projection_common import runoff_schedule, validate_runoff, tax_settlement_saldo_acconto
 
 
 def test_full_plan_in_first_year_leaves_nothing():
@@ -45,3 +45,30 @@ def test_three_equal_instalments_reclassify_by_maturity():
 def test_validation_errors(amounts, writeoff, msg):
     with pytest.raises(ValueError, match=msg):
         validate_runoff(D("1000"), amounts, writeoff, 3, "crediti commerciali")
+
+# ── Tax settlement: saldo + acconti kernel ──
+def test_constant_tax_with_full_advance_generates_no_debt_and_pays_the_tax():
+    t = tax_settlement_saldo_acconto(opening_credit=D("0"), saldo_due=D("0"), rate_due=D("0"),
+                                     current_tax=D("100"), previous_tax=D("100"), acconto_pct=D("100"), explicit_advances=None)
+    assert t.acconti_paid == D("100") and t.generated_debt == D("0") and t.generated_credit == D("0")
+    assert t.cash_out == D("100")
+
+
+def test_falling_tax_generates_a_credit_and_rising_tax_a_debt():
+    down = tax_settlement_saldo_acconto(opening_credit=D("0"), saldo_due=D("0"), rate_due=D("0"),
+                                        current_tax=D("60"), previous_tax=D("100"), acconto_pct=D("100"), explicit_advances=None)
+    assert down.generated_credit == D("40") and down.generated_debt == D("0")
+    up = tax_settlement_saldo_acconto(opening_credit=D("0"), saldo_due=D("0"), rate_due=D("0"),
+                                      current_tax=D("130"), previous_tax=D("100"), acconto_pct=D("100"), explicit_advances=None)
+    assert up.generated_debt == D("30")
+
+
+def test_opening_credit_offsets_the_saldo_and_explicit_advances_win():
+    t = tax_settlement_saldo_acconto(opening_credit=D("25"), saldo_due=D("40"), rate_due=D("10"),
+                                     current_tax=D("100"), previous_tax=D("100"), acconto_pct=D("100"), explicit_advances=D("70"))
+    assert t.saldo_paid == D("15") and t.opening_credit_left == D("0")
+    assert t.acconti_paid == D("70") and t.generated_debt == D("30")
+    assert t.rate_paid == D("10") and t.cash_out == D("15") + D("70") + D("10")
+    big = tax_settlement_saldo_acconto(opening_credit=D("100"), saldo_due=D("40"), rate_due=D("0"),
+                                       current_tax=D("0"), previous_tax=D("0"), acconto_pct=D("0"), explicit_advances=None)
+    assert big.saldo_paid == D("0") and big.opening_credit_left == D("60") and big.acconti_paid == D("0")

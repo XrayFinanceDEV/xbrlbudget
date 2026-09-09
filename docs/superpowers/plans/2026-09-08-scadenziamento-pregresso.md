@@ -46,7 +46,7 @@ Ondata D:              9 (haiku) · 10 (collaudatore)
 - Modify `calculations/forecast_engine.py` — `validate_pregresso()`, lettura del piano in `compute_forecast`, `_calculate_balance_sheet` (quattro saldi + imposte), `_calculate_income_statement` (`ce09d`), `details.pregresso` / `details.imposte` / `details.pregresso_ignored`.
 - Modify `database/models.py` (`pregresso = Column(JSON, nullable=True)`), `migrate_db.py`, `backend/app/schemas/budget.py` (`PregressoInput` e sotto-modelli, campo su Base/Update), `backend/app/services/assumptions_service.py` (`build_assumption_row`: `pregresso=jsonable_encoder(...)`).
 - Create `tests/test_projection_common_runoff.py`, `tests/test_budget_pregresso.py`.
-- Frontend: `types/api.ts` (tipi `Pregresso*`, `details` estesi), `lib/budget-pregresso.ts` (+ test), `lib/budget-preview-rows.ts` (+ righe nuove nei test), `hooks/use-scenario-assumptions.ts` (idrata `pregresso`), `components/budget/wizard/steps/StepPregressoNuovo.tsx`, `steps/StepImposte.tsx`, `components/budget/wizard/PregressoTable.tsx`.
+- Frontend: `types/api.ts` (tipi `Pregresso*`, `details` estesi), `lib/budget-pregresso-circolante.ts` (+ test), `lib/budget-preview-rows.ts` (+ righe nuove nei test), `hooks/use-scenario-assumptions.ts` (idrata `pregresso`), `components/budget/wizard/steps/StepPregressoNuovo.tsx`, `steps/StepImposte.tsx`, `components/budget/wizard/PregressoTable.tsx`.
 
 ---
 
@@ -366,12 +366,21 @@ def test_build_assumption_row_carries_pregresso_as_json():
 
 ---
 
-### Task 4: `lib/budget-pregresso.ts`
+### Task 4: `lib/budget-pregresso-circolante.ts`
+
+**Rinomina decisa in corso d'opera (2026-09-09, Ruling 15).** Il modulo si chiama
+`budget-pregresso-circolante.ts`, non `budget-pregresso.ts`. Motivo: `lib/budget-pregresso-step.ts`
+esiste gia' dal lotto 1 e governa lo scadenziamento del **debito bancario** pregresso sullo stesso
+passo 6 del wizard; questo modulo governa il pregresso del **circolante** (crediti commerciali,
+fornitori, tributari, previdenziali, altri debiti). Due moduli il cui nome differisce per un
+suffisso che non nomina la differenza sono un invito a importare quello sbagliato — e i task 7 e 8
+ne importeranno uno dei due.
+
 
 **Modello:** sonnet · **Ondata:** A
 
 **Files:**
-- Create: `frontend/lib/budget-pregresso.ts`, `frontend/lib/budget-pregresso.test.ts`
+- Create: `frontend/lib/budget-pregresso-circolante.ts`, `frontend/lib/budget-pregresso-circolante.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -427,7 +436,7 @@ describe("budget-pregresso", () => {
 - [ ] **Step 3: Implementare**
 
 ```ts
-// frontend/lib/budget-pregresso.ts
+// frontend/lib/budget-pregresso-circolante.ts
 import type { BalanceSheet, Pregresso, PregressoKey, PregressoPlan, PregressoTributari } from "@/types/api";
 
 const num = (v: unknown): number => (typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0);
@@ -489,8 +498,8 @@ export function validatePregresso(p: Pregresso, masses: Record<PregressoKey, num
 }
 ```
 
-- [ ] **Step 4: Verificare** — `npx vitest run lib/budget-pregresso && npx tsc --noEmit` → PASS.
-- [ ] **Step 5: Commit** — `git add frontend/lib/budget-pregresso.ts frontend/lib/budget-pregresso.test.ts && git commit -m "feat(budget): modulo puro dello scadenziamento del pregresso"`
+- [ ] **Step 4: Verificare** — `npx vitest run lib/budget-pregresso-circolante && npx tsc --noEmit` → PASS.
+- [ ] **Step 5: Commit** — `git add frontend/lib/budget-pregresso-circolante.ts frontend/lib/budget-pregresso-circolante.test.ts && git commit -m "feat(budget): modulo puro dello scadenziamento del pregresso"`
 
 ---
 

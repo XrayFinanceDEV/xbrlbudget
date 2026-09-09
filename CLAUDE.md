@@ -431,8 +431,8 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into
-  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1101-1104`; the
-  docstring at `:1014` still says otherwise and is wrong). And both engines plug cash **upward
+  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1112-1116`; the
+  docstring at `:1025` still says otherwise and is wrong). And both engines plug cash **upward
   only**, but they part company on what a negative residual costs you: qui è **clampato a zero** con
   una diagnostica `unfunded_financing_requirement` (`:1211-1223`) e la proiezione esce lo stesso,
   mentre il motore budget **solleva** e non produce nulla. Un fabbisogno scoperto quindi si vede in

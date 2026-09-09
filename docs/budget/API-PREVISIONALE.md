@@ -104,7 +104,7 @@ fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/ana
 (`frontend/app/forecast/balance/page.tsx:153-183`), passando per la `PUT` per anno; entrambi i
 motori la applicano in coda al calcolo dello SP (`forecast_engine.py:1553`,
 `intra_year_engine.py:571`), e il ramo a 12 mesi del wizard della pratica ne manda
-una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:933-937`).
+una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:872`).
 
 `_apply_sp_overrides` (`forecast_engine.py:381-470`) ha tre comportamenti da conoscere:
 

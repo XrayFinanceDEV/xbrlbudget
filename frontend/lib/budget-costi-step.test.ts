@@ -32,6 +32,9 @@ const year = (y: number, over: Partial<ForecastPreviewYear> = {}): ForecastPrevi
   details: {
     ce05_fixed: 130, ce05_variable: 300, ce06_fixed: 120, ce06_variable: 90,
     dso_applied: 60, dio_applied: 45, dpo_applied: 78,
+    pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } },
+    imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" },
+    pregresso_ignored: [],
   },
   ...over,
 });

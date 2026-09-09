@@ -978,7 +978,7 @@ function ScenarioFormStartup({
       });
 
       // The backend returns success:true even when generation fails
-      // (assumptions_service.py:210-217) — check the explicit flag.
+      // (assumptions_service.py:318-327) — check the explicit flag.
       if (result?.forecast_generated === false) {
         toast.warning(
           result?.message ?? "Ipotesi salvate, ma il previsionale non è stato generato"

@@ -503,8 +503,21 @@ plausibile a cui appartenere. Il progresso persiste per scenario in `localStorag
 (`stepStorageKey`).
 
 **`DEAD_FIELDS`** (`investments`, `receivables_short_growth_pct`, `payables_short_growth_pct`,
-`interest_rate_receivables`, `interest_rate_payables`) sono colonne che il motore non legge più:
-idratate da uno scenario salvato e rispedite al salvataggio, ma **nessun passo le mostra**.
+`interest_rate_receivables`, `interest_rate_payables`) sono le colonne che **nessun passo mostra**.
+«Morte» però vuol dire due cose diverse, e la distinzione conta:
+
+- il giro del salvataggio le divide in due: `investments`,
+  `receivables_short_growth_pct` e `payables_short_growth_pct` sono fra le chiavi che
+  `hydrateAssumptions` (`lib/budget-horizon.ts`) legge dallo scenario salvato e rispedisce al
+  bulk; `interest_rate_receivables` e `interest_rate_payables` **non ci sono** — esistono nel
+  tipo, ma non passano da `hydrateAssumptions` e non fanno neppure il giro. Il commento del
+  codice (`lib/budget-wizard-steps.ts`) lo dice così;
+- il motore le legge o no: `investments` **lo legge ancora**. `ForecastEngine._get_total_investments`
+  lo usa come totale legacy quando né `tangible_investments` né `intangible_investments` sono
+  valorizzati, e `_get_split_investments` **alza `ValueError`** se è valorizzato senza split
+  («Investments must be split into intangible_investments and tangible_investments») — cioè un
+  valore non nullo in quella colonna non è inerte, ferma la generazione. Le altre quattro il
+  motore non le legge davvero: non compaiono in `calculations/`.
 
 Il componente del passo 3 (`components/budget/wizard/steps/StepCosti.tsx`) applica l'invariante
 di CLAUDE.md sulla quota fissa: lo slider chiama `p.updateAll(field, v)` e scrive lo stesso

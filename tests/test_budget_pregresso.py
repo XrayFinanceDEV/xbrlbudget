@@ -540,3 +540,120 @@ def test_the_leftover_tax_credit_is_spent_on_a_later_saldo(monkeypatch):
             assert bs2["sp06e_crediti_tributari_breve"] == D("0.00")
     finally:
         engine.dispose()
+
+
+def test_the_writeoff_that_no_override_lets_the_ce_record_does_not_leave_the_sp(monkeypatch):
+    """L'inesigibile esce dai crediti solo se il costo entra nel CE.
+
+    Con un `ce09d_override` la svalutazione dell'anno e' quella dell'utente, non
+    quella del piano: scaricare lo stesso il credito farebbe sparire un attivo
+    senza contropartita, e il plug di cassa lo rimpiazzerebbe euro per euro
+    (misurato prima della correzione: 5.000 di credito diventavano 5.000 di
+    cassa). L'override vince e il credito resta: il piano con inesigibile
+    soppresso deve dare, riga per riga, lo stesso bilancio di un piano che
+    l'inesigibile non lo aveva scritto affatto."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            def _scenario(writeoff, override_field):
+                rows = [dict(forecast_year=y, **MANUAL_TAX) for y in (2027, 2028)]
+                rows[0][override_field] = 800
+                plan = {"opening": 120000, "amounts": [60000]}
+                if writeoff:
+                    plan["writeoff"] = writeoff
+                rows[0]["pregresso"] = {"crediti_commerciali": plan}
+                return _run(db, company_id, rows)[0], rows
+            senza, _ = _scenario(None, "ce09d_override")
+            con, rows_con = _scenario([5000], "ce09d_override")
+            for (_, bs_a, ce_a), (_, bs_b, ce_b) in zip(read_forecast_maps(db, senza.id),
+                                                        read_forecast_maps(db, con.id)):
+                assert bs_a == bs_b and ce_a == ce_b
+            (_, bs0, ce0), _ = read_forecast_maps(db, con.id)
+            assert ce0["ce09d_svalutazione_crediti"] == D("800.00")   # l'override, non 5.000
+            assert bs0["sp07_crediti_lungo"] == D("60000.00")         # 120.000 - 60.000, niente svalutazione
+            assert bs0["_total_assets"] == bs0["_total_liabilities"]
+            # e la cosa e' DICHIARATA, non taciuta
+            out = budget_scenarios.preview_forecast_route(
+                company_id, con.id, request={"assumptions": rows_con}, user_id=USER, db=db)
+            y0, y1 = out["forecast_years"]
+            assert y0["details"]["pregresso_writeoff_ignored"] == [{
+                "saldo": "crediti_commerciali", "field": "ce09d_svalutazione_crediti",
+                "requested": D("5000"), "reason": "ce09d_override",
+            }]
+            assert y1["details"]["pregresso_writeoff_ignored"] == []
+            assert y0["details"]["pregresso"]["crediti_commerciali"]["writeoff"] == D("0")
+    finally:
+        engine.dispose()
+
+
+def test_an_aggregate_ce09_override_blocks_the_writeoff_too(monkeypatch):
+    """Il gemello dell'aggregato: `ce09_override` e' la riga che entra nel
+    risultato d'esercizio, quindi con quella forzata la svalutazione del piano
+    non arriva al risultato nemmeno passando dal dettaglio."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            rows = [dict(forecast_year=y, **MANUAL_TAX) for y in (2027, 2028)]
+            rows[0]["ce09_override"] = 45000
+            rows[0]["pregresso"] = {"crediti_commerciali": {"opening": 120000, "amounts": [60000], "writeoff": [5000]}}
+            sc, _ = _run(db, company_id, rows)
+            (_, bs0, ce0), _ = read_forecast_maps(db, sc.id)
+            assert ce0["ce09_ammortamenti"] == D("45000.00")
+            assert bs0["sp07_crediti_lungo"] == D("60000.00")   # il credito NON si scarica
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            ignored = out["forecast_years"][0]["details"]["pregresso_writeoff_ignored"]
+            assert [i["reason"] for i in ignored] == ["ce09_override"]
+            assert ignored[0]["requested"] == D("5000")
+    finally:
+        engine.dispose()
+
+
+def test_the_quadratura_residual_never_rewrites_a_field_the_plan_wrote(monkeypatch):
+    """`sp16g`/`sp17g` sono i secchi in cui `_normalize_balance_sheet_cents` posa
+    il residuo di quadratura di `sp16`/`sp17`, e sono ESATTAMENTE i due campi che
+    il piano `altri_debiti` scrive. Un centesimo di residuo li faceva divergere
+    dal numero dichiarato nei `details` — cioe' la tabella che l'utente legge dal
+    bilancio che l'utente stampa (misurato: `sp16g` persistito 0,01 contro 0
+    dichiarato, dal secondo anno in poi). Ora il residuo va sull'ultimo campo
+    libero del gruppo, e i due prospetti tornano a dire la stessa cosa."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            _split_base_payables(db, company_id)
+            rows = [dict(forecast_year=y, revenue_growth_pct=1.11,
+                         variable_materials_growth_pct=1.11, variable_services_growth_pct=1.11,
+                         personnel_growth_pct=1.11,
+                         financing_amount=(120000 if y == 2027 else 0),
+                         financing_duration_years=7, financing_interest_rate=4.44)
+                    for y in (2027, 2028, 2029)]
+            rows[0]["pregresso"] = {"altri_debiti": {"opening": 20000, "amounts": [12000, 4000]}}
+            sc, _ = _run(db, company_id, rows)
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            persisted = read_forecast_maps(db, sc.id)
+            for (year, bs, _), preview in zip(persisted, out["forecast_years"]):
+                declared = preview["details"]["pregresso"]["altri_debiti"]
+                assert bs["sp16g_altri_debiti_breve"] == declared["residual_short"], year
+                assert bs["sp17g_altri_debiti_lungo"] == declared["residual_long"], year
+                # il residuo non e' sparito: e' andato su un campo libero, e i due
+                # gruppi continuano a quadrare col proprio aggregato
+                for aggregate, letters in (("sp16_debiti_breve", "abcdefg"), ("sp17_debiti_lungo", "abcdefg")):
+                    detail_sum = sum(
+                        (v for k, v in bs.items()
+                         if k[:4] == aggregate[:4] and len(k.split("_")[0]) == 5
+                         and k.split("_")[0][4] in letters),
+                        D("0"),
+                    )
+                    assert bs[aggregate] == detail_sum, (year, aggregate)
+            # il caso misurato: nel secondo anno il residuo a breve e' zero, e
+            # prima della correzione `sp16g` valeva 0,01
+            assert persisted[1][1]["sp16g_altri_debiti_breve"] == D("0.00")
+    finally:
+        engine.dispose()

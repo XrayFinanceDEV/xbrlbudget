@@ -270,6 +270,51 @@ class ForecastEngine:
             if getattr(assumption, attr, None) is not None
         )
 
+    # Gli attributi `*_override` che impediscono al motore di rilevare in CE il
+    # costo dell'inesigibile: `ce09d` perche' e' la riga stessa, `ce09` perche' e'
+    # l'aggregato che entra nel risultato d'esercizio.
+    _WRITEOFF_BLOCKING_OVERRIDES = ("ce09d_override", "ce09_override")
+
+    @classmethod
+    def _suppress_unrecordable_writeoffs(cls, pregresso, assumptions) -> None:
+        """L'inesigibile esce dallo SP solo se il costo entra nel CE.
+
+        Un `ce09d_override` (la riga) o un `ce09_override` (l'aggregato che fa il
+        risultato) vincono sul motore, come ogni override di questo motore — ma
+        allora la svalutazione **non e' rilevata**, e scaricare lo stesso il credito
+        dallo stato patrimoniale farebbe sparire un attivo senza contropartita:
+        il plug di cassa lo rimpiazzerebbe euro per euro, il foglio quadrerebbe al
+        centesimo e la ricchezza sarebbe inventata (misurato: 5.000 di credito
+        diventavano 5.000 di cassa). Non e' un divario da tappare, e' massa da non
+        creare.
+
+        Quindi l'override vince due volte: tiene la sua riga di CE **e** lascia il
+        credito a bilancio. La lista `writeoff` del piano viene azzerata in
+        quell'anno — e' l'unica che il motore usa da qui in poi, quindi il residuo
+        resta piu' alto per tutti gli anni successivi, non solo per questo — e
+        l'importo chiesto e' conservato per essere **dichiarato** nei `details`:
+        mai taciuto, come `override_conflicts` per il conto economico.
+        """
+        plan = (pregresso or {}).get("crediti_commerciali")
+        if not plan or not plan.get("writeoff"):
+            return
+        effective: List[Decimal] = []
+        ignored: Dict[int, Dict[str, Any]] = {}
+        for index, requested in enumerate(plan["writeoff"]):
+            assumption = assumptions[index] if index < len(assumptions) else None
+            blocking = next(
+                (attr for attr in cls._WRITEOFF_BLOCKING_OVERRIDES
+                 if assumption is not None and getattr(assumption, attr, None) is not None),
+                None,
+            )
+            if blocking is not None and requested > 0:
+                effective.append(Decimal('0'))
+                ignored[index] = {"requested": requested, "reason": blocking}
+            else:
+                effective.append(requested)
+        plan["writeoff"] = effective
+        plan["writeoff_ignored"] = ignored
+
     @staticmethod
     def _pregresso_writeoff(pregresso, year_index: int) -> Decimal:
         """L'inesigibile del piano dei crediti per l'anno `year_index` (0 se non c'e')."""
@@ -375,9 +420,35 @@ class ForecastEngine:
             )
         return result
 
+    # I due campi di SP che ciascun piano di pregresso scrive di proposito (lato
+    # breve, lato oltre). Servono a `_normalize_balance_sheet_cents`: sono valori
+    # dichiarati nei `details`, e il residuo di quadratura non puo' riscriverli.
+    _PREGRESSO_SP_FIELDS: Dict[str, Tuple[str, str]] = {
+        "debiti_fornitori": ("sp16d_debiti_fornitori_breve", "sp17d_debiti_fornitori_lungo"),
+        "debiti_tributari": ("sp16e_debiti_tributari_breve", "sp17e_debiti_tributari_lungo"),
+        "debiti_previdenziali": ("sp16f_debiti_previdenza_breve", "sp17f_debiti_previdenza_lungo"),
+        "altri_debiti": ("sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo"),
+    }
+
+    @classmethod
+    def _pregresso_sp_forced_fields(cls, pregresso) -> "frozenset[str]":
+        """I campi di SP che un piano di pregresso ha scritto in questo scenario.
+
+        `crediti_commerciali` non c'e': il piano scrive gli AGGREGATI `sp06`/`sp07`
+        e i sotto-campi li ripartisce `_alloc` sulle proporzioni dell'anno base,
+        quindi il residuo di quadratura non contraddice nulla di dichiarato.
+        """
+        return frozenset(
+            field
+            for key, fields in cls._PREGRESSO_SP_FIELDS.items()
+            if (pregresso or {}).get(key)
+            for field in fields
+        )
+
     @classmethod
     def _normalize_balance_sheet_cents(
-        cls, values: Dict, *, recompute_cash: bool = True
+        cls, values: Dict, *, recompute_cash: bool = True,
+        forced_fields: "frozenset[str]" = frozenset(),
     ) -> Dict:
         """Make persisted SP hierarchy and Attivo/Passivo exact to the cent.
 
@@ -396,6 +467,18 @@ class ForecastEngine:
         read downstream (`reconcileSubfields`, the anti-regression guard of
         `PUT /adjustments`) and starts out disadvantaged against a guard that is
         relative, not absolute.
+
+        `forced_fields` sono i campi che il motore ha scritto di proposito e ha
+        gia' DICHIARATO altrove (oggi: i lati breve/oltre di un saldo con piano di
+        pregresso). Il residuo non si posa su di loro — e' la stessa cura che il
+        Task 11 ha applicato al conto economico, qui sul patrimoniale: i secchi di
+        default di `sp16`/`sp17` sono `sp16g`/`sp17g`, cioe' **esattamente** i campi
+        che il piano `altri_debiti` scrive, e un centesimo di residuo li faceva
+        divergere dal numero dichiarato nei `details` (misurato: `sp17g` persistito
+        12.048,41 contro 12.048,40 dichiarato). Se sono forzati, il residuo va
+        sull'ultimo campo libero del gruppo; se lo sono tutti, resta sul secchio di
+        default — un centesimo va pur posato da qualche parte. Il chiamante
+        infrannuale non lo passa: default vuoto, stesso comportamento di sempre.
         """
         result = cls._quantize_values(values)
         groups = {
@@ -494,7 +577,13 @@ class ForecastEngine:
             residual = result[aggregate] - sum(
                 (result[field] for field in details), Decimal("0")
             )
-            result[residual_field] += residual
+            target = residual_field
+            if target in forced_fields:
+                target = next(
+                    (field for field in reversed(details) if field not in forced_fields),
+                    residual_field,
+                )
+            result[target] += residual
 
         asset_fields_without_cash = (
             "sp01_crediti_soci", "sp02_immob_immateriali",
@@ -728,6 +817,10 @@ class ForecastEngine:
             pregresso = validate_pregresso(
                 getattr(assumptions[0], 'pregresso', None), source.base_bs, len(assumptions)
             )
+            # Va fatto QUI e non nel calcolatore: sopprimere l'inesigibile di un
+            # anno alza il residuo di tutti gli anni dopo, e il singolo anno non
+            # vede gli override degli altri.
+            self._suppress_unrecordable_writeoffs(pregresso, assumptions)
         except ValueError as e:
             if stop_on_error:
                 raise
@@ -779,7 +872,9 @@ class ForecastEngine:
                     prev_details=prev_details,
                     details=details,
                 )
-                forecast_bs = self._normalize_balance_sheet_cents(forecast_bs)
+                forecast_bs = self._normalize_balance_sheet_cents(
+                    forecast_bs, forced_fields=self._pregresso_sp_forced_fields(pregresso),
+                )
             except ValueError as e:
                 if stop_on_error:
                     raise
@@ -1894,6 +1989,23 @@ class ForecastEngine:
                     'mode': 'runoff' if r else 'legacy',
                 }
             details.setdefault('pregresso_ignored', [])
+            # L'inesigibile che un override di CE ha impedito di rilevare, e che
+            # quindi NON e' stato scaricato dai crediti: dichiarato sempre, anche
+            # vuoto, come `override_conflicts`. Senza questa riga il piano direbbe
+            # 5.000 di inesigibile e il bilancio non ne mostrerebbe traccia — ne'
+            # in meno sui crediti ne' in piu' sui costi — senza un solo avviso.
+            writeoff_ignored = (
+                ((pregresso or {}).get('crediti_commerciali') or {}).get('writeoff_ignored') or {}
+            ).get(year_index)
+            details['pregresso_writeoff_ignored'] = (
+                [{
+                    'saldo': 'crediti_commerciali',
+                    'field': 'ce09d_svalutazione_crediti',
+                    'requested': writeoff_ignored['requested'],
+                    'reason': writeoff_ignored['reason'],
+                }]
+                if writeoff_ignored else []
+            )
             # La posizione tributaria dell'anno, dichiarata SEMPRE: `saldo_acconto`
             # quando e' il kernel a governarla, `manual` quando l'utente ha imposto
             # una percentuale di crescita su sp06e/sp16e — e allora gli importi

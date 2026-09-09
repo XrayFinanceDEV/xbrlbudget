@@ -1870,26 +1870,6 @@ class ForecastEngine:
             if plan_tax and details is not None:
                 details.setdefault('pregresso_ignored', []).append('debiti_tributari')
         else:
-            # L'anno 0 legge il consuntivo: il debito tributario di apertura e' il
-            # saldo da versare (senza piano e' tutto saldo, niente rateizzato:
-            # spec §4) e `ce20` dell'anno base e' l'unica imposta nota su cui
-            # commisurare l'acconto. Dall'anno 1 in poi la sorgente sono i
-            # `details` dell'anno precedente.
-            prev_tax_details = (prev_details or {}).get('imposte') or {}
-            if year_index == 0 or not prev_tax_details:
-                saldo_due = (
-                    plan_tax['saldo'] if plan_tax
-                    else pregresso_opening_masses(_base)['debiti_tributari']
-                )
-                previous_tax = _base_inc('ce20_imposte')
-                opening_credit = _base('sp06e_crediti_tributari_breve')
-            else:
-                saldo_due = prev_tax_details['generated_debt']
-                previous_tax = prev_tax_details['current_tax']
-                opening_credit = (
-                    prev_tax_details['generated_credit']
-                    + prev_tax_details['opening_credit_left']
-                )
             # Il piano delle rate scadenzia il solo rateizzato: il saldo non entra
             # nel runoff perche' si paga per intero nel primo anno di piano.
             r = runoff_schedule(
@@ -1897,6 +1877,48 @@ class ForecastEngine:
                 plan_tax['amounts'] if plan_tax else [],
                 [], year_index, horizon,
             )
+            prev_tax_details = (prev_details or {}).get('imposte') or {}
+            # L'imposta su cui si commisura l'acconto e' quella dell'anno prima:
+            # la dichiara ogni anno, la via manuale compresa. Al primo anno di
+            # piano e' `ce20` del consuntivo, l'unica imposta che il consuntivo porta.
+            previous_tax = prev_tax_details.get('current_tax')
+            if previous_tax is None:
+                previous_tax = _base_inc('ce20_imposte')
+            if prev_tax_details.get('mode') == 'saldo_acconto':
+                # L'anno prima e' passato di qui: sa dire quanto di se' e' saldo
+                # e quanto e' rata, e lo consegna gia' scomposto.
+                saldo_due = prev_tax_details['generated_debt']
+                opening_credit = (
+                    prev_tax_details['generated_credit']
+                    + prev_tax_details['opening_credit_left']
+                )
+            else:
+                # Primo anno di piano, OPPURE un anno preceduto dalla VIA MANUALE.
+                # In entrambi i casi la scomposizione non esiste da nessuna parte e
+                # l'unica fonte vera e' il patrimoniale che quell'anno ha prodotto:
+                # tutto il debito tributario e' saldo da versare, tranne il
+                # rateizzato ancora aperto (spec §4), e il credito tributario e' il
+                # credito di apertura.
+                #
+                # Portarselo dietro NON e' un dettaglio: ricominciare da zero dopo
+                # un anno manuale faceva evaporare debito e credito tributari, e la
+                # cassa — che e' il plug — assorbiva la differenza. Il foglio
+                # quadrava lo stesso e nessuna diagnostica se ne accorgeva.
+                opening_tax_debt = (
+                    _prev('sp16e_debiti_tributari_breve')
+                    + _prev('sp17e_debiti_tributari_lungo')
+                )
+                if year_index == 0 and plan_tax:
+                    # Il saldo dichiarato dall'utente, esatto al centesimo: la
+                    # sottrazione qui sotto lo ricostruirebbe entro la tolleranza
+                    # di `validate_pregresso`, non uguale.
+                    saldo_due = plan_tax['saldo']
+                else:
+                    # `r.residual + r.closed` e' il rateizzato ancora aperto
+                    # all'INIZIO di quest'anno: non e' saldo, e dichiararlo tale
+                    # lo farebbe risultare pagato due volte.
+                    saldo_due = max(ZERO, opening_tax_debt - (r.residual + r.closed))
+                opening_credit = _prev('sp06e_crediti_tributari_breve')
             # Solo un piano vero mette il saldo in `mode: runoff` (spec §5.3):
             # senza piano non c'e' nulla di scadenziato da dichiarare, e l'unica
             # sede onesta di cio' che e' stato versato resta `details['imposte']`.
@@ -2199,15 +2221,25 @@ class ForecastEngine:
         # Anche senza alcun piano, e anche a zero: a valle una chiave assente vale
         # zero, quindi tacere equivarrebbe a dichiararsi puliti. `mode` distingue
         # il saldo che segue le formule di oggi (`legacy`) da quello scadenziato
-        # (`runoff`); `opening` e' sempre la massa letta dal bilancio base, cosi'
-        # l'interfaccia sa che cosa c'e' da scadenziare anche prima del primo piano.
+        # (`runoff`).
+        #
+        # `opening` e' la massa che gli ALTRI CAMPI DELLA RIGA descrivono, cosi' che
+        # le cinque righe si leggano tutte allo stesso modo e `opening − Σclosed`
+        # torni sul residuo. Senza piano e' la massa del bilancio base, cosi'
+        # l'interfaccia sa che cosa c'e' da scadenziare prima ancora del primo piano.
+        # Con un piano e' la massa scadenziata, che per i quattro saldi non fiscali
+        # e' la stessa cosa (`validate_pregresso` impone che coincidano), ma per i
+        # tributari NO: li' il piano scadenzia il solo RATEIZZATO, mentre il saldo
+        # si versa nel primo anno e vive in `details['imposte']`. Dichiarare li' la
+        # massa intera faceva della riga tributaria l'unica delle cinque che non
+        # torna: 90.000 di apertura con 60.000 di rate a spiegarla.
         if details is not None:
             masses = pregresso_opening_masses(_base)
             details['pregresso'] = {}
             for key in PREGRESSO_KEYS:
                 r = pregresso_runoff.get(key)
                 details['pregresso'][key] = {
-                    'opening': masses[key],
+                    'opening': r.opening if r else masses[key],
                     'closed': r.closed if r else ZERO,
                     'writeoff': r.writeoff if r else ZERO,
                     'residual_short': r.residual_short if r else ZERO,

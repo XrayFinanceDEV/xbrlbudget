@@ -422,6 +422,21 @@ def test_instalments_go_short_then_long(monkeypatch):
             assert bs0["sp16e_debiti_tributari_breve"] >= D("20000.00")
             assert bs1["sp17e_debiti_tributari_lungo"] == D("0.00")
             assert bs2["sp17e_debiti_tributari_lungo"] == D("0.00")
+            # La riga del pregresso si legge come le altre quattro: `generated` e' il
+            # solo debito NUOVO, il residuo lo dichiarano gli altri due campi, e
+            # `opening − Σclosed` torna sul residuo. Dichiarare `sp16e` come generato
+            # direbbe 20.000 di generato accanto a 20.000 di rata a breve — la stessa
+            # rata contata due volte — e dichiarare l'apertura a 90.000 lascerebbe
+            # 30.000 che nessun altro campo della riga spiega.
+            righe = [d["pregresso"]["debiti_tributari"] for d in _details_of(db, sc.id)]
+            assert [r["mode"] for r in righe] == ["runoff"] * 3
+            assert [r["opening"] for r in righe] == [D("60000")] * 3     # il rateizzato
+            assert [r["closed"] for r in righe] == [D("20000")] * 3
+            for indice, riga in enumerate(righe):
+                atteso = D("60000") - D("20000") * (indice + 1)
+                assert riga["residual_short"] + riga["residual_long"] == atteso
+                assert riga["generated"] + riga["residual_short"] == (bs0, bs1, bs2)[indice]["sp16e_debiti_tributari_breve"]
+            assert righe[0]["generated"] < D("20000")   # il generato NON e' sp16e
     finally:
         engine.dispose()
 
@@ -655,5 +670,91 @@ def test_the_quadratura_residual_never_rewrites_a_field_the_plan_wrote(monkeypat
             # il caso misurato: nel secondo anno il residuo a breve e' zero, e
             # prima della correzione `sp16g` valeva 0,01
             assert persisted[1][1]["sp16g_altri_debiti_breve"] == D("0.00")
+    finally:
+        engine.dispose()
+
+
+# ── Round 1: i tre rami che la revisione ha trovato scoperti o sbagliati ──
+
+
+def _details_of(db, scenario_id):
+    """I `details` di ogni anno, ricalcolati sulle ipotesi appena salvate."""
+    source = load_forecast_source(db, scenario_id)
+    rows = (db.query(models.BudgetAssumptions).filter_by(scenario_id=scenario_id)
+            .order_by(models.BudgetAssumptions.forecast_year).all())
+    return [y.details for y in ForecastEngine(db).compute_forecast(source, rows).years]
+
+
+def _seed_with_a_tax_position(db):
+    """Anno base con 20.000 di crediti tributari e 5.000 di debiti tributari.
+
+    Gli aggregati `sp06` e `sp16` non cambiano, quindi il gate aggregato/dettagli
+    dell'anno base resta soddisfatto e il bilancio pareggia come prima."""
+    company_id, _ = seed_base_year(db, user_id=USER)
+    bs = db.query(models.FinancialYear).filter_by(company_id=company_id).one().balance_sheet
+    bs.sp06e_crediti_tributari_breve = D("20000"); bs.sp06a_crediti_clienti_breve -= D("20000")
+    bs.sp16e_debiti_tributari_breve = D("5000"); bs.sp16d_debiti_fornitori_breve -= D("5000")
+    db.commit()
+    return company_id
+
+
+def test_switching_from_manual_to_automatic_carries_the_tax_position_over(monkeypatch):
+    """Un anno a via MANUALE seguito da uno automatico non fa sparire il debito
+    e il credito tributari che l'anno manuale aveva davvero.
+
+    L'anno automatico non trova nei `details` precedenti la scomposizione
+    saldo/rata — la via manuale non ne produce nessuna — e deve percio' leggere
+    il PATRIMONIALE dell'anno prima, come fa al primo anno di piano. Ripartire da
+    zero faceva evaporare 20.000 di credito e 5.000 di debito: la cassa, che e' il
+    plug, si alzava di 15.000 e il foglio quadrava lo stesso."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id = _seed_with_a_tax_position(db)
+            rows = [dict(forecast_year=2027, revenue_growth_pct=0, tax_rate=24, **MANUAL_TAX),
+                    dict(forecast_year=2028, revenue_growth_pct=0, tax_rate=24)]
+            sc, _ = _run(db, company_id, rows)
+            imposte = [d["imposte"] for d in _details_of(db, sc.id)]
+            assert imposte[0]["mode"] == "manual"
+            # 2028 legge il patrimoniale del 2027: 5.000 di saldo, compensati dai
+            # 20.000 di credito, e 15.000 di credito che restano
+            assert imposte[1]["mode"] == "saldo_acconto"
+            assert imposte[1]["saldo_paid"] == D("0")
+            assert imposte[1]["opening_credit_left"] == D("15000")
+            assert imposte[1]["acconti_paid"] == D("16800")   # 100% dell'imposta 2027
+            (_, bs0, _), (_, bs1, _) = read_forecast_maps(db, sc.id)
+            assert (bs0["sp06e_crediti_tributari_breve"], bs0["sp16e_debiti_tributari_breve"]) == (D("20000.00"), D("5000.00"))
+            assert bs1["sp06e_crediti_tributari_breve"] == D("15000.00")
+            assert bs1["sp16e_debiti_tributari_breve"] == D("0.00")
+            assert bs1["_total_assets"] == bs1["_total_liabilities"]
+    finally:
+        engine.dispose()
+
+
+def test_explicit_advances_beat_the_percentage(monkeypatch):
+    """`tax_advances_paid` > 0 e' l'importo versato e vince sulla percentuale.
+
+    Scollegarlo non rompeva nulla: la casella e' a schermo (StepImposte) e non
+    aveva un solo test. Qui 8.000 dichiarati contro i 50.000 che la percentuale
+    del 100% calcolerebbe sul `ce20` base — due esiti opposti, debito contro
+    credito, non una sfumatura."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id = _seed_with_a_tax_position(db)
+            rows = [dict(forecast_year=y, revenue_growth_pct=0, tax_rate=24, tax_advances_paid=8000)
+                    for y in (2027, 2028)]
+            sc, _ = _run(db, company_id, rows)
+            imposte = [d["imposte"] for d in _details_of(db, sc.id)]
+            assert imposte[0]["acconti_paid"] == D("8000")          # non 50.000
+            assert imposte[0]["generated_debt"] == D("8800")        # 16.800 − 8.000
+            assert imposte[0]["generated_credit"] == D("0")
+            assert imposte[1]["acconti_paid"] == D("8000")
+            (_, bs0, _), (_, bs1, _) = read_forecast_maps(db, sc.id)
+            assert bs0["sp16e_debiti_tributari_breve"] == D("8800.00")
+            # il saldo 2027 (8.800) si versa nel 2028 attingendo al credito residuo
+            assert bs1["sp06e_crediti_tributari_breve"] == D("6200.00")   # 15.000 − 8.800
     finally:
         engine.dispose()

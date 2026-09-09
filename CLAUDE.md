@@ -34,9 +34,11 @@ cd frontend && npm run dev                      # http://localhost:3000
 ```
 
 **Budget workflow:** import → `POST /companies/{id}/scenarios` → `PUT /scenarios/{id}/assumptions`
-(bulk, every year at once, `auto_generate=true`) → `POST /scenarios/{id}/preview` (anteprima dal
-motore, non scrive) → `GET /scenarios/{id}/analysis`. Optional:
+(bulk, every year at once, `auto_generate=true`) → `GET /scenarios/{id}/analysis`. Optional:
 `PATCH /scenarios/{id}/ce-override` and `POST /scenarios/{id}/generate?clear_overrides=true`.
+`POST /scenarios/{id}/preview` sits **beside** that chain, never inside it: it runs the same engine
+on assumptions that were never saved — the wizard calls it on every edit, debounced — and writes
+nothing.
 
 **Infrannuale workflow:** import with `period_months` → rettifiche **once per year**
 (`GET`/`PUT /companies/{id}/years/{year}/adjustable|adjustments` — the partial year and its
@@ -252,7 +254,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `sp12h_riserva_neg_azioni_proprie`) e **ignora in silenzio** una chiave che non esiste nel
   risultato: un override negativo, o scritto male, non dà errore — dà uno zero.
 - **`POST /preview` non scrive nulla e risponde 200 anche a un piano che si ferma**: leggere
-  `error`, non lo status. Gli anni in `forecast_years` sono quelli calcolati prima dell'errore.
+  `error`, non lo status. Gli anni in `forecast_years` sono quelli calcolati prima dell'errore, non
+  quelli chiesti: chi guarda solo lo status disegna un'anteprima monca come se fosse completa.
 - **Lo slider della quota fissa scrive tutti gli anni di piano** (`fixed_*_percentage`): il
   modello è per anno, l'interfaccia no. Uno scenario con valori diversi fra anni mostra un
   avviso e viene allineato al primo tocco.

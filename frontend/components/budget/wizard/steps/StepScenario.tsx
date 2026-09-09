@@ -171,7 +171,8 @@ export function StepScenario(props: StepScenarioProps) {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Le ipotesi degli anni oltre l&apos;orizzonte restano salvate ma non producono proiezione.
+                Se accorci l&apos;orizzonte, al primo «Salva e calcola previsionale» le ipotesi degli anni
+                tolti vengono cancellate, insieme ai loro anni di proiezione.
               </p>
             </div>
           </CardContent>

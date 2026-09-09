@@ -1,10 +1,15 @@
 /**
- * Modulo puro dello scadenziamento del pregresso (spec 2026-09-08 §3): come
- * l'utente dichiara la chiusura dei saldi di circolante gia' a bilancio
- * (crediti commerciali, debiti fornitori, tributari, previdenziali, altri
- * debiti) sull'orizzonte di piano. Costruisce le masse di apertura dal
- * bilancio base, valida un piano dichiarato e offre le conversioni
- * importo/percentuale e rata-uguale che i due passi del wizard useranno.
+ * Modulo puro dello scadenziamento del pregresso di CIRCOLANTE (spec
+ * 2026-09-08 §3): come l'utente dichiara la chiusura dei saldi di
+ * circolante gia' a bilancio (crediti commerciali, debiti fornitori,
+ * tributari, previdenziali, altri debiti) sull'orizzonte di piano.
+ * Costruisce le masse di apertura dal bilancio base, valida un piano
+ * dichiarato e offre le conversioni importo/percentuale e rata-uguale che i
+ * due passi del wizard useranno.
+ *
+ * Meta' dello stesso passo 6 del wizard di `lib/budget-pregresso-step.ts`,
+ * che governa l'altra meta' — il pregresso del debito BANCARIO. I due nomi
+ * ora si distinguono: questo e' il circolante, quello e' il debito.
  *
  * Modulo puro: nessun import da `app/` o da `components/`.
  */

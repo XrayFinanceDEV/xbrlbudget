@@ -45,6 +45,34 @@ export function blendedRate(trend: number | null, inflation: number, index: numb
   return Math.round((blended * (1 - weight) + inflation * weight) * 100) / 100;
 }
 
+/**
+ * Si puo' precompilare uno scenario nuovo dalla tendenza storica?
+ *
+ * Il cancello guarda la PRESENZA DEI DATI, non l'ampiezza dell'elenco degli
+ * anni. `historicalYears` deriva dal prop `years` (`GET /companies/{id}/years`)
+ * ed e' gia' pieno al primo render, mentre `historical` arriva da 2xN richieste
+ * in serie che chiamano `setHistoricalData` una volta sola alla fine: chi
+ * guardava `historicalYears.length >= 2` faceva partire il seed con
+ * `historical` ancora vuoto — `trendAssumptions` senza dati scrive l'inflazione
+ * su ogni campo — e il flag one-shot impediva per sempre la ripetizione. Lo
+ * scenario nasceva cosi' con tutte le voci al 2%, e il percorso reale (la
+ * Stampa crea lo scenario senza ipotesi e apre il wizard su `isNew`) passa
+ * esattamente di li'.
+ *
+ * Servono i DUE anni che `trendAssumptions` legge davvero: gli ultimi due
+ * dell'elenco. Uno solo — o nessuno — non e' una tendenza.
+ */
+export function shouldSeedTrend(
+  isNew: boolean,
+  historicalYears: number[],
+  historical: HistoricalData,
+): boolean {
+  if (!isNew || historicalYears.length < 2) return false;
+  const year1 = historicalYears[historicalYears.length - 2];
+  const year2 = historicalYears[historicalYears.length - 1];
+  return Boolean(historical[year1]?.income && historical[year2]?.income);
+}
+
 /** trendAssumptions: TREND_ITEMS x forecastYears, ogni campo scritto con blendedRate. */
 export function trendAssumptions(
   historicalYears: number[],

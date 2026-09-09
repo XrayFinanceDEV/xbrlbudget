@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { blendedRate, calculateTrend, TREND_ITEMS, trendAssumptions } from "@/lib/budget-trend";
+import { blendedRate, calculateTrend, shouldSeedTrend, TREND_ITEMS, trendAssumptions } from "@/lib/budget-trend";
 import { rowsAnnoBase } from "@/lib/budget-preview-rows";
 import { PreviewPanel } from "../PreviewPanel";
 import type { StepProps } from "../types";
@@ -67,10 +67,13 @@ export function StepScenario(props: StepScenarioProps) {
   // faceva rimbalzare il valore, vedi lib/budget-horizon.ts).
   const [testoAnni, setTestoAnni] = useState<string | null>(null);
 
-  // Scenario nuovo: precompila UNA volta, appena idratato.
+  // Scenario nuovo: precompila UNA volta, appena idratato — e «idratato» vuol
+  // dire che i dati storici sono ARRIVATI, non che l'elenco degli anni e' lungo
+  // due. La decisione sta in `shouldSeedTrend` (lib/budget-trend.ts), col suo
+  // test; qui resta il solo one-shot, che scatta quando il seed avviene davvero.
   const seeded = useRef(false);
   useEffect(() => {
-    if (!isNew || seeded.current || historicalYears.length < 2) return;
+    if (seeded.current || !shouldSeedTrend(isNew, historicalYears, historical)) return;
     seeded.current = true;
     applyTrendToAssumptions(historicalYears, forecastYears, historical, inflation, update);
   }, [isNew, historicalYears, forecastYears, historical, inflation, update]);

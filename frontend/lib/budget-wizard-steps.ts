@@ -79,6 +79,80 @@ export function stepStorageKey(scenarioId: number): string {
   return `budget-wizard-step:${scenarioId}`;
 }
 
+/**
+ * Il sottotitolo del passo: i testi del prototipo
+ * (`docs/superpowers/specs/2026-09-08-percorso-ipotesi-budget-prototipo.html`,
+ * i `<p class="lead">`), con l'anno base vero al posto del 2025 scritto a
+ * mano nel prototipo — su uno scenario che parte da un altro anno la frase
+ * affermerebbe il contrario di cio' che si legge a schermo.
+ */
+export function stepLead(step: WizardStepKey, baseYear: number): string {
+  switch (step) {
+    case "scenario":
+      return `Da dove parte il piano e quanto lontano guarda. Tutto il resto si misura rispetto al bilancio ${baseYear}.`;
+    case "fatturato":
+      return "Quanto crescono i ricavi, anno per anno. Tutti i costi variabili del passo successivo seguono questa curva.";
+    case "costi":
+      return "Materie prime, servizi, personale e godimento beni di terzi: l'87% dei costi operativi. Prima quanto è fisso, poi come si muove.";
+    case "altre-voci-ce":
+      return "Le voci minori e quelle che il piano calcola da solo. Modifica solo ciò che ti serve.";
+    case "circolante":
+      return `Giorni medi di incasso, giacenza e pagamento. Vuoto significa «come nel ${baseYear}».`;
+    case "pregresso-nuovo":
+      return "A sinistra il bilancio che c'è già e come si scadenzia. A destra quello che il piano genera. Non si mescolano.";
+    case "imposte":
+      return "Calcolate dal piano sull'utile ante imposte. Correggi l'aliquota o il modo in cui i debiti tributari vengono pagati.";
+  }
+}
+
+/** La riga di posizione della barra in basso. L'ultimo passo dice dove si
+ *  atterra dopo il calcolo, invece di ripetere il proprio titolo. */
+export function stepFooterHint(step: WizardStepKey): string {
+  const s = WIZARD_STEPS.find((w) => w.key === step);
+  if (!s) return "";
+  return step === "imposte"
+    ? `Passo ${s.n} di ${WIZARD_STEPS.length} · dopo il calcolo vai in CE Prev. e SP Prev. per i correttivi finali`
+    : `Passo ${s.n} di ${WIZARD_STEPS.length} · ${s.title}`;
+}
+
+/**
+ * Il passo ricordato in `localStorage`, o `null`. Una chiave assente, un
+ * valore scritto da una versione precedente o una stringa qualsiasi non
+ * devono aprire il wizard su un passo che non esiste: si torna al primo.
+ */
+export function parseStoredStep(raw: string | null | undefined): WizardStepKey | null {
+  return raw != null && (ORDER as string[]).includes(raw) ? (raw as WizardStepKey) : null;
+}
+
+/** La forma che interessa della risposta del bulk delle assumptions. */
+export interface BulkSaveResult {
+  forecast_generated?: boolean;
+  message?: string | null;
+}
+
+export type SaveOutcome =
+  | { ok: true }
+  | { ok: false; message: string; step: WizardStepKey };
+
+/**
+ * Che cosa e' successo davvero al salvataggio.
+ *
+ * `PUT /scenarios/{id}/assumptions` risponde **200 anche quando il
+ * previsionale e' stato rifiutato** (CLAUDE.md § Previsionale): la verita' e'
+ * in `forecast_generated`, la ragione in `message`. Leggere l'HTTP 200
+ * dipinge una colonna Proiezione vuota sotto un toast verde — ed e' per
+ * questo che la decisione sta qui, con la sua prova, e non dentro il
+ * componente.
+ *
+ * Solo un `false` esplicito e' un rifiuto: un campo assente non e' una
+ * negazione, e trattarlo come tale bloccherebbe un salvataggio riuscito.
+ */
+export function saveOutcome(result: BulkSaveResult | null | undefined): SaveOutcome {
+  if (!result || result.forecast_generated !== false) return { ok: true };
+  const message = result.message?.trim() ? result.message.trim() : "Previsionale non generato";
+  return { ok: false, message, step: stepForErrorMessage(message) };
+}
+
 const ORDER = WIZARD_STEPS.map((s) => s.key);
 
 export function nextStep(step: WizardStepKey): WizardStepKey | null {

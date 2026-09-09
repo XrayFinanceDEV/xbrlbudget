@@ -22,6 +22,7 @@ import { formatCurrency } from "@/lib/formatters";
 import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
 import { getErrorMessage } from "@/lib/utils";
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
+import { BudgetWizard } from "@/components/budget/wizard/BudgetWizard";
 import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
 import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
 import type {
@@ -284,7 +285,7 @@ export default function BudgetPage() {
             onRegenerate={setRegenScenarioId}
           />
         </>
-      ) : (
+      ) : startupMode ? (
         <ScenarioFormStartup
           companyId={selectedCompanyId}
           years={years}
@@ -298,7 +299,22 @@ export default function BudgetPage() {
             setActiveTab("list");
           }}
         />
-      )}
+      ) : editingScenario ? (
+        // Fuori dallo startup la vecchia tab «Ipotesi» e' sostituita dal
+        // percorso a sette passi (spec 2026-09-08). `editingScenario` e'
+        // sempre valorizzato qui: la creazione manuale di uno scenario e'
+        // disattivata (vedi il commento su ScenariosList sopra), quindi si
+        // arriva a questo ramo solo da «Modifica» su uno scenario esistente.
+        <BudgetWizard
+          companyId={selectedCompanyId}
+          years={years}
+          scenario={editingScenario}
+          onCancel={() => {
+            setEditingScenario(null);
+            setActiveTab("list");
+          }}
+        />
+      ) : null}
 
       <AlertDialog open={regenScenarioId !== null} onOpenChange={(open) => !open && setRegenScenarioId(null)}>
         <AlertDialogContent>

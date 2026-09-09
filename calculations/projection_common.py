@@ -17,10 +17,12 @@ Each function takes a ``getter(field_name) -> Decimal`` accessor so each engine
 can pass its own base-year reader (``_base`` / ``_get_field``) without this
 module depending on the ORM object shape.
 """
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable
 
 ZERO = Decimal('0')
+CENT = Decimal('0.01')
 
 # Existing-debt repayment is a BANK plan and therefore uses the total bank
 # exposure (entro + oltre 12 mesi). Bonds and other lenders have distinct legal
@@ -233,3 +235,50 @@ def new_financing_schedule(loans, target_year):
             repayment += min(opening, current_repayment)
             interest += opening * rate
     return raised, repayment, interest
+
+
+# ── Runoff schedule: opening balance parcelled into year-by-year collections ──
+@dataclass(frozen=True)
+class RunoffYear:
+    opening: Decimal
+    closed: Decimal
+    writeoff: Decimal
+    residual: Decimal
+    residual_short: Decimal
+    residual_long: Decimal
+
+
+def _dec_list(values):
+    return [Decimal(str(v or 0)) for v in (values or [])]
+
+
+def validate_runoff(opening, amounts, writeoff, horizon, label):
+    """Errori in italiano, per l'utente: negativo, oltre l'orizzonte, oltre la massa."""
+    amounts, writeoff = _dec_list(amounts), _dec_list(writeoff)
+    if any(a < ZERO for a in amounts) or any(w < ZERO for w in writeoff):
+        raise ValueError(f"Scadenziamento di {label}: un importo è negativo")
+    if len(amounts) > horizon or len(writeoff) > horizon:
+        raise ValueError(f"Scadenziamento di {label}: il piano va oltre l'orizzonte di {horizon} anni")
+    total = sum(amounts, ZERO) + sum(writeoff, ZERO)
+    if total - Decimal(str(opening)) > CENT:
+        raise ValueError(
+            f"Scadenziamento di {label}: la somma supera il saldo di apertura ({total:.2f} > {Decimal(str(opening)):.2f})")
+
+
+def runoff_schedule(opening, amounts, writeoff, year_index, horizon) -> RunoffYear:
+    """Residuo del pregresso dopo l'anno `year_index` e la sua scadenza.
+
+    `residual_short` e' l'importo dovuto nell'anno dopo (spec §3.3); tutto il
+    resto e' oltre 12 mesi. Non valida: chiamare validate_runoff prima del ciclo.
+    """
+    opening = Decimal(str(opening))
+    amounts, writeoff = _dec_list(amounts), _dec_list(writeoff)
+    at = lambda lst, i: lst[i] if 0 <= i < len(lst) else ZERO
+    closed = at(amounts, year_index)
+    wo = at(writeoff, year_index)
+    residual = opening - sum(amounts[:year_index + 1], ZERO) - sum(writeoff[:year_index + 1], ZERO)
+    residual = max(ZERO, residual)
+    due_next = at(amounts, year_index + 1) if year_index + 1 < horizon else ZERO
+    residual_short = min(residual, due_next)
+    return RunoffYear(opening=opening, closed=closed, writeoff=wo, residual=residual,
+                      residual_short=residual_short, residual_long=residual - residual_short)

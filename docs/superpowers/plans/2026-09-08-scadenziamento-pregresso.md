@@ -971,18 +971,13 @@ Tabella: `Voce | Saldo {baseYear} | anno… | Residuo`. Per riga: `PREGRESSO_LAB
 - [ ] `docs/frontend/PRATICA-PERCORSO.md`: passi 6 e 7 completi. `docs/superpowers/2026-09-08-nota-costruttori-sp-infrannuale.md`: invariata, già cita il lotto.
 - [ ] Commit `docs(budget): scadenziamento del pregresso e imposte a saldo + acconto`.
 
-**Aggiunta in pre-volo (2026-09-09) — l'invariante di `CLAUDE.md` sulla cassa va RISCRITTO.**
-Oggi la sezione «Forecasting Engine (Budget)» dice: «It does **not** become short-term debt —
-creating `sp16a` there used to hide a missing scenario choice — so the way out is an explicit
-financing assumption, never a retry.» Dopo il Task 12 questo e' falso. Il testo nuovo deve dire
-che un fabbisogno scoperto **solleva** quando lo scoperto di c/c non e' concesso
-(`overdraft_allowed = False`, che e' il default e il comportamento di ogni scenario esistente),
-e diventa `sp16a` generato dal piano quando l'utente lo concede — dichiarato nei `details`
-(`scoperto_generato`, `scoperto_residuo`, `oneri_scoperto`) e mostrato in anteprima, con un
-tetto opzionale (`overdraft_limit`) oltre il quale il motore solleva di nuovo. La ragione
-storica dell'invariante era il **silenzio**, non il debito: dirlo, cosi' che nessuno lo
-ripristini per errore. Stesso trattamento per `details['cassa_assorbita']`, che si dichiara
-sempre — anche con la cassa positiva — perche' l'utente va avvertito che il piano assorbe cassa.
+**Aggiunta in pre-volo (2026-09-09) — l'invariante di `CLAUDE.md` sulla cassa lo riscrive il
+Task 12, non questo task.** Il testo esatto da scrivere e' nello **Step 7 del Task 12**, e ci va
+nello **stesso commit** del codice che lo rende vero: `CLAUDE.md` descrive il codice com'e', non
+com'e' previsto che diventi, e in questo repo una riga di documentazione su otto e' gia'
+sbagliata. Qui, nel Task 9, resta solo la **verifica**: rileggere quel paragrafo dopo il Task 12
+e controllare che dica quello che il codice fa davvero, misurandolo.
+
 
 ### Task 10: Collaudo
 
@@ -1142,6 +1137,14 @@ riscritto in questo stesso lotto** (Task 9), non lasciato a contraddire il codic
    icona `lucide-react`, nessuna emoji — e un avviso piu' forte quando `scoperto_generato > 0`,
    che dice l'importo. Con `overdraft_allowed = False` e un fabbisogno scoperto l'anteprima
    gia' oggi mostra l'errore del motore: quel percorso non cambia.
+8. **Lo scoperto e' anche uno strumento di misura, non solo una valvola** (indicazione del
+   proprietario, 2026-09-09): «l'utente vuole testare un piano stressato per vedere quanta
+   finanza serve con quelle ipotesi». Accendere `overdraft_allowed` senza tetto e' quindi una
+   **modalita' di misura** legittima, non un ripiego, e la risposta che l'utente cerca e'
+   `scoperto_generato` anno per anno. L'anteprima non si limita all'avviso: mostra il
+   **fabbisogno di picco** e **l'anno in cui cade**, che sono il numero e la data che si portano
+   in banca. Il motore li dichiara in `details['fabbisogno_picco']` e
+   `details['fabbisogno_picco_anno']` — sempre, anche a zero.
 
 - [ ] **Step 1: Il test che misura il difetto di oggi** — il frammento della spec §11.1
   trasformato in test: con `overdraft_allowed` non concesso, `bulk_upsert_assumptions(...)` con
@@ -1162,7 +1165,37 @@ riscritto in questo stesso lotto** (Task 9), non lasciato a contraddire il codic
 - [ ] **Step 6: Verde** — `tests/test_budget_*.py`, `tests/test_forecast*.py`,
   `tests/test_intra*.py` (il ramo `recompute_cash=False` dell'infrannuale **non cambia in
   nulla**: Global Constraints), `npx vitest run budget-preview-rows`, `npx tsc --noEmit`
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: `CLAUDE.md` — la correzione va nello STESSO commit del codice che la rende vera**
+
+Nella sezione «Forecasting Engine (Budget)», sostituire il periodo che oggi dice
+«It does **not** become short-term debt — creating `sp16a` there used to hide a missing
+scenario choice — so the way out is an explicit financing assumption, never a retry.»
+con un testo che dica queste cose, in questo ordine:
+
+- La cassa plugga sempre e solo **verso l'alto**: un plug negativo e' un fabbisogno scoperto.
+- Che cosa succede allora dipende da **una scelta esplicita dell'utente**, `overdraft_allowed`,
+  che di default e' **spenta** — quindi ogni scenario esistente si comporta come prima.
+- Spenta: il motore **solleva**, `Unfunded financing requirement <importo>`, e non produce nulla.
+- Accesa: il fabbisogno diventa `sp16a_debiti_banche_breve` **generato dal piano**, tenuto
+  distinto nei `details` dal debito bancario pregresso, con oneri finanziari calcolati sul
+  saldo di **apertura** (mai su quello che l'anno stesso genera: sarebbe circolare) e un tetto
+  opzionale `overdraft_limit` oltre il quale il motore torna a sollevare.
+- **Perche' esiste**: un piano stressato e' una cosa che si vuole poter far girare — serve a
+  misurare **quanta finanza richiedono quelle ipotesi**, e la risposta e' `scoperto_generato`
+  anno per anno, con il picco in `fabbisogno_picco`.
+- **Perche' il divieto c'era**: la vecchia regola vietava `sp16a` perche' compariva **muto**,
+  nascondendo una scelta di scenario mai fatta. Oggi la scelta e' esplicita e l'importo e'
+  dichiarato in `details` e mostrato in anteprima. Scriverlo, cosi' che nessuno ripristini il
+  divieto in buona fede fra sei mesi.
+- Aggiungere infine, sempre in quella sezione o nella riga di «Invarianti e trappole ›
+  Previsionale» che parla di `sp_overrides`: il ricalcolo finale della cassa
+  (`_normalize_balance_sheet_cents(recompute_cash=True)`) **non scavalca piu'** il clamp degli
+  override — era il difetto §11.1 della spec.
+
+Non riscrivere la sezione intera e non toccare l'invariante dell'infrannuale, che **non cambia**:
+li' il plug negativo resta clampato a zero con la diagnostica `unfunded_financing_requirement`.
+
+- [ ] **Step 8: Commit**
 
 ---
 

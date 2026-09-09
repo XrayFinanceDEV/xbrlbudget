@@ -134,13 +134,15 @@ export function planTaxRate(
   //    un'aliquota sarebbe affermare una cosa che il motore non fa.
   if (overridden.length > 0) {
     const tutti = overridden.length === totalYears;
+    // «1 anni su 2» in un'interfaccia italiana e' un errore che l'utente legge.
+    const anni = overridden.length === 1 ? "1 anno" : `${overridden.length} anni`;
     const quanti = tutti
       ? "su tutti gli anni previsti"
-      : `su ${overridden.length} anni su ${totalYears} (${overridden.join(", ")})`;
+      : `su ${anni} su ${totalYears} (${overridden.join(", ")})`;
     const value = tutti ? "—" : pct1(sotto.ratePct);
     const sourceLabel = tutti
       ? "sostituita da un importo forzato"
-      : `sostituita in ${overridden.length} anni su ${totalYears}`;
+      : `sostituita in ${anni} su ${totalYears}`;
     return {
       ratePct: tutti ? null : sotto.ratePct,
       source: "sostituita",

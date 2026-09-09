@@ -98,9 +98,18 @@ describe("planTaxRate · ce20_override", () => {
     expect(p.value).toBe("25,0%");
     expect(p.overriddenYears).toEqual([2025]);
     expect(p.totalYears).toBe(2);
-    expect(p.label).toContain("1 anni su 2");
+    // Singolare: «1 anni su 2» e' un errore che l'utente legge a schermo.
+    expect(p.label).toContain("1 anno su 2");
+    expect(p.label).not.toContain("1 anni");
+    expect(p.nota).toContain("1 anno su 2");
     expect(p.nota).toContain("2025");
     expect(p.nota).toContain("effettiva dell'anno base");
+  });
+
+  it("due anni su tre restano al plurale", () => {
+    const p = planTaxRate(25, { 2025: { ce20_override: 100 }, 2026: { ce20_override: 100 } }, [2025, 2026, 2027]);
+    expect(p.label).toContain("2 anni su 3");
+    expect(p.nota).toContain("2 anni su 3");
   });
 
   it("un override a zero e' un override vero (imposte azzerate), non un'assenza", () => {

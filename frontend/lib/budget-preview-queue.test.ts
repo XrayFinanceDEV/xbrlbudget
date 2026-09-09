@@ -32,24 +32,30 @@ describe("createDebouncedRunner", () => {
   });
 
   /**
-   * Riproduce in node la regola del browser che nessun test vedeva: i timer di
-   * `window` invocati con un ricevitore diverso da `window` lanciano
-   * `TypeError: Illegal invocation`. Il difetto reale era
-   * `timers.setTimeout(...)` su un oggetto che teneva i globali — l'anteprima
-   * crollava all'ingresso di OGNI passo che la usa, e la suite restava verde.
-   * Trovato col browser (`lib/budget-preview-queue.ts:37` nella traccia).
+   * Riproduce in node la regola del browser che nessun test vedeva: un'operazione
+   * di `Window` invocata con un ricevitore che non sia la global lancia
+   * `TypeError: Illegal invocation`. Il difetto reale era `timers.setTimeout(...)`
+   * su un oggetto che teneva i globali — l'anteprima crollava all'ingresso di OGNI
+   * passo che la usa, e la suite restava verde. Trovato col browser.
    *
-   * I timer di node non controllano il ricevitore, quindi il controllo va
-   * simulato: si sostituisce il globale con una versione severa. I parametri
-   * di default sono valutati a ogni chiamata, quindi la versione severa e'
-   * quella che il codice sotto prova legge davvero.
+   * Il meccanismo su cui questo test poggia: nel codice sotto prova i timer sono
+   * **identificatori liberi** dentro una arrow, risolti su `globalThis` al momento
+   * della chiamata. Percio' sostituire il globale QUI cambia davvero cio' che
+   * quel codice invoca. Se qualcuno riportasse la cattura in un oggetto — anche
+   * issato a livello di modulo, che leggerebbe il globale una volta sola
+   * all'import — la sostituzione non lo raggiungerebbe: per questo il test non
+   * si accontenta dell'assenza di eccezioni, ma **esige che il globale
+   * sostituito sia stato chiamato**. Senza quella seconda asserzione la
+   * variante issata passerebbe verde riportando il difetto.
    */
-  it("i timer di default si chiamano nudi, non come metodi di un oggetto", () => {
+  it("i timer di default si chiamano nudi, e passano per il globale corrente", () => {
     const realSet = globalThis.setTimeout;
     const realClear = globalThis.clearTimeout;
+    let chiamate = 0;
     const severo = <F extends (...a: never[]) => unknown>(reale: F) =>
       function (this: unknown, ...args: Parameters<F>) {
         if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+        chiamate += 1;
         return (reale as (...a: Parameters<F>) => unknown)(...args);
       };
     globalThis.setTimeout = severo(realSet) as unknown as typeof setTimeout;
@@ -59,6 +65,10 @@ describe("createDebouncedRunner", () => {
       expect(() => runner.push(1)).not.toThrow();
       // `cancel` passa per clearTimeout: anche quello va chiamato nudo.
       expect(() => runner.cancel()).not.toThrow();
+      // Due chiamate: lo schedule del push e l'unschedule del cancel. A zero
+      // significa che il codice tiene un riferimento catturato altrove, cioe'
+      // esattamente la forma che nel browser lancia.
+      expect(chiamate).toBe(2);
     } finally {
       globalThis.setTimeout = realSet;
       globalThis.clearTimeout = realClear;

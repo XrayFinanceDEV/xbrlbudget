@@ -114,8 +114,10 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
   const altriFinanz = singleYearValue(p.assumptions, p.forecastYears, "altri_finanz_repayment_years");
   const cashSweepEnabled = boolAssumption(p.assumptions, p.forecastYears, "cash_sweep_enabled");
 
+  // `items-start` come negli altri passi: senza, la colonna si stira a tutta
+  // l'altezza della riga e il `lg:sticky` della colonna destra non ha effetto.
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid gap-5 lg:grid-cols-2 items-start">
       <div className="space-y-4">
         <Card>
           <CardHeader>
@@ -170,7 +172,11 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
         />
       </div>
 
-      <div className="space-y-4">
+      {/* `lg:sticky lg:top-4` come negli altri quattro passi con anteprima:
+          la colonna dell'anteprima resta a vista mentre si scorre la colonna
+          degli input. Qui la colonna porta anche la card "Generato dal
+          previsionale", quindi lo `space-y-4` resta. */}
+      <div className="space-y-4 lg:sticky lg:top-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Generato dal previsionale</CardTitle>

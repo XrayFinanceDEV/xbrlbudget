@@ -7,7 +7,7 @@
 // volta ricapitola solo numeri che il motore ha gia' restituito nel preview.
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/formatters";
+import { euro, num, numOrNull } from "@/lib/budget-format";
 import { rowsFatturato } from "@/lib/budget-preview-rows";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import { revenueBarGeometry } from "@/lib/budget-revenue-bars";
@@ -15,9 +15,6 @@ import type { ForecastPreviewYear } from "@/types/api";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable } from "../YearInputTable";
 import type { StepProps } from "../types";
-
-const num = (v: string | number | null | undefined): number =>
-  typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0;
 
 /**
  * Mini-grafico a barre dei ricavi: base + anni proiettati, sulla stessa
@@ -51,7 +48,9 @@ export function StepFatturato(p: StepProps) {
   // motore si e' fermato a meta' (fabbisogno scoperto) le intestazioni non
   // restano senza celle sotto. Stessa convenzione di lib/budget-costi-step.ts
   // (fix round 1, rilievo 3-a).
-  const previewYears = p.preview.data?.forecast_years ?? [];
+  // La `useMemo` sotto dipende da questo array: ricavarlo fuori da una memo
+  // ne cambiava l'identita' a ogni render e la memo non memoizzava piu' nulla.
+  const previewYears = useMemo(() => p.preview.data?.forecast_years ?? [], [p.preview.data]);
   const rows = useMemo(() => (baseInc ? rowsFatturato(baseInc, previewYears) : []),
     [baseInc, previewYears]);
   return (
@@ -61,8 +60,11 @@ export function StepFatturato(p: StepProps) {
         <CardContent>
           <YearInputTable forecastYears={p.forecastYears} baseYear={p.baseYear} assumptions={p.assumptions} update={p.update}
             rows={[
-              { field: "revenue_growth_pct", label: "Ricavi delle vendite", baseLabel: formatCurrency(num(baseInc?.ce01_ricavi_vendite)) },
-              { field: "other_revenue_growth_pct", label: "Altri ricavi e proventi", baseLabel: formatCurrency(num(baseInc?.ce04_altri_ricavi)) },
+              // Senza anno base si scrive «—», non «€ 0»: uno zero vero e uno
+              // zero di ripiego non sono la stessa cosa, ed e' la regola degli
+              // altri sei passi (lib/budget-costi-step.ts).
+              { field: "revenue_growth_pct", label: "Ricavi delle vendite", baseLabel: euro(numOrNull(baseInc?.ce01_ricavi_vendite)) },
+              { field: "other_revenue_growth_pct", label: "Altri ricavi e proventi", baseLabel: euro(numOrNull(baseInc?.ce04_altri_ricavi)) },
             ]} />
           <p className="mt-2 text-xs text-muted-foreground">Le percentuali si applicano all&apos;anno precedente, non al {p.baseYear}.</p>
         </CardContent>

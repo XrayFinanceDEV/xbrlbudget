@@ -29,6 +29,7 @@ Ondata A (parallela):  1 · 2 · 3 · 4
 Ondata B (sequenziale, stesso file): 5 (dopo 1,3) → 6 (dopo 2,3,5)
 Ondata C (parallela):  7 (dopo 4,5) · 8 (dopo 4,6)
 Ondata D:              9 (haiku) · 10 (collaudatore)
+Ondata E:              11 (fatto, in A) · 6 → 15 → 14 → 12 · 13 (frontend, parallelo)
 ```
 
 | Task | Modello | Perché |
@@ -1345,4 +1346,82 @@ riportato invece che scalato — e un avviso che glielo dice, invece di un numer
   giorni applicati sono quelli di oggi.
 - [ ] **Step 3: Implementa**
 - [ ] **Step 4: Verde su `tests/test_budget_*.py` e `tests/test_forecast*.py` interi**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 15: Le voci minori dello SP possono essere indicizzate a un driver
+
+**Modello:** opus · **Ondata:** E, **dopo il Task 6 e prima del 14** (stesso file, `forecast_engine.py`)
+
+**Files:**
+- Modify: `database/models.py` (`BudgetAssumptions`: un campo JSON), `migrate_db.py`,
+  `backend/app/schemas/budget.py`
+- Modify: `calculations/forecast_engine.py` — `_calculate_balance_sheet`, il blocco delle voci
+  minori (`_sp_growth` e' definito a `:1294`; le righe indicizzabili stanno a `:1300`, `:1490`,
+  `:1512-1514`, `:1525-1529`)
+- Modify: `frontend/types/api.ts`, `hooks/use-scenario-assumptions.ts`, il passo «voci minori SP»
+  del wizard
+- Test: `tests/test_forecast_indicizzazione.py` (nuovo), test del passo nel frontend
+
+**Perche' esiste** (indicazione del proprietario, 2026-09-09): «le voci minori dei debiti si
+tengono o costanti o in crescita con il fatturato. Aumenta il volume aumenta tutto, questa e' un
+po' la prassi, ma non e' facile tradurla in numeri».
+
+Due fatti misurati sul motore (versione `6b7d7f3`) che inquadrano il task:
+
+1. **Oggi il default e' «costante», non «cresce col fatturato».** `_sp_growth` restituisce `ZERO`
+   quando la percentuale non e' impostata (`:1294-1298`), quindi una voce minore lasciata in pace
+   resta ferma per tutto il piano. La prassi descritta non e' il default: e' qualcosa che l'utente
+   deve digitare riga per riga.
+2. **Il meccanismo esiste gia', cablato su una voce sola.** I debiti previdenziali «agganciati» si
+   calcolano `base × (costo del personale previsto / costo del personale base)` (`:1525-1526`):
+   indicizzati a un driver e applicati all'**anno base**, non composti sul saldo dell'anno prima.
+   E' esattamente «aumenta il volume aumenta tutto», e risolve la difficolta' che il proprietario
+   solleva — indicizzare sulla base **non accumula deriva**, mentre `prev × (1+%)` composto per
+   cinque anni sì. Questo task generalizza quella forma, non ne inventa una nuova.
+
+**Contratto:**
+
+1. Un campo JSON nullable su `BudgetAssumptions`, `sp_indexing`, che mappa il codice di una voce
+   al suo driver: `{"sp16g": "ricavi", "sp17d": "acquisti", "sp16f": "personale"}`. Migrazione
+   **additiva**. **Chiave assente = costante**, cioe' il comportamento di oggi (`prev × (1+%)`,
+   con la percentuale che l'utente ha messo o zero): ogni scenario esistente e ogni test esistente
+   restano identici al centesimo. E' il vincolo su cui verrai giudicato.
+2. Tre driver, e solo tre: `ricavi` (`ce01` previsto / `ce01` base), `acquisti`
+   (`ce05 + ce06`), `personale` (`ce08`). Il denominatore a zero non produce un fattore: produce
+   **costante**, e lo si dichiara (vedi punto 5) — mai una divisione per un valore inventato.
+3. Formula, identica nella forma a quella dei previdenziali: `valore = base_della_voce × fattore`,
+   dove il `base_della_voce` e' quello dell'**anno base**, non dell'anno precedente. Non si
+   compone.
+4. **Composizione con il pregresso (Ruling 16).** Se la voce ha anche un piano di scadenziamento,
+   la parte generata nasce **al netto** della massa dichiarata: `(base − massa) × fattore`, piu' il
+   residuo del piano. Le due regole devono valere insieme, e serve un test che le eserciti
+   entrambe sulla stessa voce.
+5. **`details` sempre dichiarati**, anche vuoti: `details['indicizzazione']` mappa ogni voce
+   indicizzata al driver usato e al fattore applicato, e dichiara le voci per cui il driver era
+   **degenere** (denominatore a zero) e si e' ricaduti su costante. Una chiave assente, a valle,
+   vale zero: tacere equivale a dichiararsi puliti.
+6. **Voci escluse, e non e' una dimenticanza:** i tributari (`sp06e`, `sp16e`, `sp17e`) sono
+   governati dalle imposte dal Task 6 in poi, e le banche (`sp16a`, `sp17a`) dal piano di
+   rimborso. Indicizzarli significherebbe avere due padroni per lo stesso numero. Se il campo
+   contiene una di quelle chiavi, viene **ignorato e dichiarato** in
+   `details['indicizzazione_ignorata']`, non applicato in silenzio.
+7. **L'interfaccia dice la cosa che oggi non dice nessuno**: nel passo «voci minori SP», per ogni
+   voce, se resta **costante per tutto il piano** oppure a quale driver e' agganciata. La
+   sorpresa vera di oggi non e' l'assenza dell'indicizzazione: e' che una voce lasciata vuota
+   resti ferma senza che nulla lo dica. Testo in italiano, icone `lucide-react`, nessuna emoji.
+
+- [ ] **Step 1: I test che falliscono** — (a) voce indicizzata a `ricavi` con ricavi +20%: il
+  saldo vale `base × 1,2`, non `prev × (1+%)`; (b) driver degenere (`ce01` base a zero): la voce
+  resta costante e `details` lo dichiara; (c) voce indicizzata **e** con piano di pregresso:
+  `(base − massa) × fattore + residuo`, numeri calcolati a mano; (d) chiave su `sp16e`: ignorata
+  e dichiarata; (e) **parita'**: nessun `sp_indexing` ⇒ ogni numero identico al centesimo.
+- [ ] **Step 2: Verificare che falliscano** — e, come i task 4, 5 e 11 di questo lotto, provare
+  che le asserzioni **discriminino**: rompere a mano il ramo su una copia di lavoro del file
+  (backup fuori dal repo, ripristino con `cp`, **mai** un `git checkout`) e misurare che fallisca
+  il solo test dedicato.
+- [ ] **Step 3: Implementa** — campo, migrazione, schema, motore, `details`, tipi, passo del wizard.
+- [ ] **Step 4: Verde** — `tests/test_budget_*.py`, `tests/test_forecast*.py`,
+  `tests/test_intra*.py` (l'infrannuale **non cambia**), `npx tsc --noEmit`, suite frontend.
 - [ ] **Step 5: Commit**

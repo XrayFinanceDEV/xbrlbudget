@@ -657,6 +657,14 @@ class BudgetAssumptions(Base):
 
     pregresso = Column(JSON, nullable=True)  # Scadenziamento del pregresso, solo riga del primo anno (spec lotto 2)
 
+    # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15):
+    # {"sp16g": "ricavi", "sp17d": "acquisti", "sp16f": "personale"}. Chiave
+    # ASSENTE = costante, cioe' il comportamento di sempre (`prev × (1+%)`).
+    # Il motore applica `stock dell'anno base × fattore del driver` — la forma
+    # gia' cablata su `previdenza_scales_with_personnel`, che indicizza e non
+    # compone, cosi' un piano a cinque anni non accumula deriva.
+    sp_indexing = Column(JSON, nullable=True)
+
     # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
     sp01_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti verso soci
     sp04_growth_pct = Column(Numeric(10, 6), nullable=True)  # Immobilizzazioni finanziarie

@@ -21,6 +21,74 @@ from calculations.projection_common import (
 from calculations.ce_result import calculate_ce_result
 
 
+# ── INDICIZZAZIONE DELLE VOCI MINORI DELLO SP (Task 15) ──
+#
+# «Le voci minori dei debiti si tengono o costanti o in crescita con il
+# fatturato. Aumenta il volume aumenta tutto» (indicazione del proprietario,
+# 2026-09-09). Fino a qui il default era «costante» e basta: `_sp_growth`
+# restituisce zero quando la percentuale non e' impostata, quindi una voce
+# lasciata in pace resta ferma per tutto il piano.
+#
+# La forma dell'aggancio NON e' nuova: e' quella gia' cablata sui debiti
+# previdenziali (`previdenza_scales_with_personnel`), cioe' `stock dell'ANNO
+# BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre
+# un `prev × (1+%)` composto per cinque anni si'.
+
+SP_INDEXING_DRIVERS: Tuple[str, ...] = ("ricavi", "acquisti", "personale")
+
+# Le voci minori agganciabili, e il campo dell'anno base che il fattore
+# moltiplica. Sono le voci che oggi seguono una `sp*_growth_pct` annullabile:
+# fuori da questo elenco una chiave viene ignorata e dichiarata, mai applicata
+# a una voce che il motore governa in un altro modo.
+SP_INDEXABLE_FIELDS: Dict[str, str] = {
+    "sp01": "sp01_crediti_soci",
+    "sp04": "sp04_immob_finanziarie",
+    "sp08": "sp08_attivita_finanziarie",
+    "sp10": "sp10_ratei_risconti_attivi",
+    "sp14": "sp14_fondi_rischi",
+    "sp16f": "sp16f_debiti_previdenza_breve",
+    "sp16g": "sp16g_altri_debiti_breve",
+    "sp17d": "sp17d_debiti_fornitori_lungo",
+    "sp17f": "sp17f_debiti_previdenza_lungo",
+    "sp17g": "sp17g_altri_debiti_lungo",
+    "sp18": "sp18_ratei_risconti_passivi",
+}
+
+# La voce e il saldo di pregresso che la scadenzia. Ruling 17: dichiarare un
+# piano significa «questo saldo lo sto estinguendo», dichiarare un driver
+# significa «questo saldo si rigenera col volume» — due affermazioni
+# contraddittorie sulla stessa voce, e il motore non ne inventa una terza. Il
+# motivo tecnico e' misurato: `validate_pregresso` impone che la massa dichiarata
+# coincida col bilancio base, quindi per una voce con piano il generato e'
+# `base − massa` = 0, e un fattore per zero resta zero — cioe' codice morto che
+# l'utente crede attivo.
+SP_INDEXING_PLAN_KEY: Dict[str, str] = {
+    "sp16f": "debiti_previdenziali",
+    "sp17f": "debiti_previdenziali",
+    "sp16g": "altri_debiti",
+    "sp17g": "altri_debiti",
+    "sp17d": "debiti_fornitori",
+}
+
+# Le voci che un altro meccanismo governa gia': indicizzarle darebbe due padroni
+# allo stesso numero. Non e' una dimenticanza, ed e' per questo che la chiave
+# viene DICHIARATA ignorata invece di sparire.
+SP_INDEXING_GOVERNED: Dict[str, str] = {
+    "sp06e": "governata dalla posizione tributaria",
+    "sp16e": "governata dalla posizione tributaria",
+    "sp17e": "governata dalla posizione tributaria",
+    "sp16a": "governata dal piano di rimborso",
+    "sp17a": "governata dal piano di rimborso",
+    # Le imposte anticipate/differite non ruotano col volume: quando ci sono
+    # differenze temporanee le scrive il kernel del deferred, e anche senza il
+    # proprietario ha gia' escluso che salgano coi ricavi («crediti tributari /
+    # imposte anticipate che salgono coi ricavi — non e' corretto», la ragione
+    # per cui sp06e/sp06f sono stati tolti dal DSO).
+    "sp06f": "governata dalla posizione fiscale",
+    "sp07f": "governata dalla posizione fiscale",
+}
+
+
 @dataclass
 class ForecastSource:
     """Le letture che il calcolo richiede: scenario, anno base e i due prospetti."""
@@ -443,6 +511,120 @@ class ForecastEngine:
             for key, fields in cls._PREGRESSO_SP_FIELDS.items()
             if (pregresso or {}).get(key)
             for field in fields
+        )
+
+    # ── INDICIZZAZIONE: i tre fattori, e chi resta fuori ──
+
+    @classmethod
+    def _sp_indexing_factors(cls, base_inc, forecast_inc) -> Dict[str, Optional[Decimal]]:
+        """I tre driver di volume: previsto / anno base. `None` = degenere.
+
+        Un denominatore a zero NON produce un fattore inventato: produce
+        degenerazione, e chi la incontra ricade su «costante» dichiarandolo.
+        Per questo i denominatori si rileggono qui invece di riusare
+        `base_revenue` / `base_purchases` del calcolatore, che portano un
+        `or D('1')` di comodo per la rotazione: quel fallback trasformerebbe
+        uno zero in un fattore di 600.000, e nessun controllo lo vedrebbe.
+        """
+        zero = Decimal("0")
+
+        def _b(field: str) -> Decimal:
+            return getattr(base_inc, field, zero) or zero
+
+        def _f(field: str) -> Decimal:
+            return forecast_inc.get(field, zero) or zero
+
+        pairs = {
+            "ricavi": (_f("ce01_ricavi_vendite"), _b("ce01_ricavi_vendite")),
+            "acquisti": (
+                _f("ce05_materie_prime") + _f("ce06_servizi"),
+                _b("ce05_materie_prime") + _b("ce06_servizi"),
+            ),
+            "personale": (_f("ce08_costi_personale"), _b("ce08_costi_personale")),
+        }
+        return {
+            name: (num / den if den > zero else None)
+            for name, (num, den) in pairs.items()
+        }
+
+    @classmethod
+    def _resolve_sp_indexing(
+        cls, assumption, base_inc, forecast_inc, pregresso,
+    ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, str]]]:
+        """Che cosa e' indicizzato in questo anno, e che cosa e' stato ignorato.
+
+        Restituisce `(applicate, ignorate)`. Le prime mappano il codice della
+        voce al driver e al fattore applicato; le seconde dicono, voce per voce,
+        PERCHE' la chiave non ha avuto effetto. Entrambe finiscono nei `details`
+        di ogni anno, anche vuote: a valle una chiave assente vale zero, quindi
+        tacere equivarrebbe a dichiararsi puliti.
+
+        Nessuna chiave alza mai un errore: una voce che non si puo' indicizzare
+        e' un'ipotesi che non si applica, non un piano che si ferma. Il rifiuto
+        secco dei driver inesistenti sta nello schema Pydantic, dove il client
+        riceve un 422 che dice quale nome ha sbagliato.
+        """
+        raw = getattr(assumption, "sp_indexing", None)
+        applied: Dict[str, Dict[str, Any]] = {}
+        ignored: List[Dict[str, str]] = []
+        if not isinstance(raw, dict) or not raw:
+            return applied, ignored
+        factors = cls._sp_indexing_factors(base_inc, forecast_inc)
+        previdenza_switch = bool(getattr(assumption, "previdenza_scales_with_personnel", False))
+        # Ordine per codice: i `details` sono una dichiarazione, e una
+        # dichiarazione che cambia ordine a ogni esecuzione non e' confrontabile.
+        for code in sorted(raw):
+            driver = raw[code]
+
+            def _skip(motivo: str) -> None:
+                ignored.append({"voce": code, "driver": driver, "motivo": motivo})
+
+            if driver not in SP_INDEXING_DRIVERS:
+                _skip("driver sconosciuto")
+            elif code in SP_INDEXING_GOVERNED:
+                _skip(SP_INDEXING_GOVERNED[code])
+            elif code not in SP_INDEXABLE_FIELDS:
+                _skip("voce non indicizzabile")
+            elif previdenza_switch and code in ("sp16f", "sp17f"):
+                # L'interruttore E' gia' l'indicizzazione di queste due voci al
+                # costo del personale: vince lui, cosi' gli scenari che lo usano
+                # non cambiano di un centesimo.
+                _skip("governata dall'interruttore previdenza/personale")
+            elif (pregresso or {}).get(SP_INDEXING_PLAN_KEY.get(code, "")):
+                _skip("piano di scadenziamento")
+            elif factors.get(driver) is None:
+                _skip("driver degenere")
+            else:
+                applied[code] = {
+                    "driver": driver,
+                    "fattore": factors[driver],
+                    # Un driver e una percentuale sulla stessa voce sono due
+                    # affermazioni diverse: vince il driver. Dichiararlo evita
+                    # una casella che accetta un numero senza alcun effetto.
+                    "percentuale_ignorata": (
+                        getattr(assumption, f"{code}_growth_pct", None) is not None
+                    ),
+                }
+        return applied, ignored
+
+    @classmethod
+    def _indexed_sp_forced_fields(cls, details) -> "frozenset[str]":
+        """I campi che l'indicizzazione ha scritto di proposito in questo anno.
+
+        `sp16g`/`sp17g` sono anche i secchi di default in cui
+        `_normalize_balance_sheet_cents` posa il residuo di quadratura di
+        `sp16`/`sp17`: senza questa dichiarazione il numero persistito
+        divergerebbe di un centesimo dal `base × fattore` che i `details`
+        dichiarano — lo stesso difetto che il Task 11 ha chiuso sul conto
+        economico e il Task 5 sul patrimoniale, qui sulla terza famiglia di
+        campi dichiarati. Gli altri codici sono aggregati o dettagli che non
+        fanno mai da secchio: elencarli e' inerte, ed e' preferibile a un elenco
+        che va tenuto d'accordo a mano con i gruppi della normalizzazione.
+        """
+        return frozenset(
+            SP_INDEXABLE_FIELDS[code]
+            for code in ((details or {}).get("indicizzazione") or {})
+            if code in SP_INDEXABLE_FIELDS
         )
 
     @classmethod
@@ -873,7 +1055,11 @@ class ForecastEngine:
                     details=details,
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
-                    forecast_bs, forced_fields=self._pregresso_sp_forced_fields(pregresso),
+                    forecast_bs,
+                    forced_fields=(
+                        self._pregresso_sp_forced_fields(pregresso)
+                        | self._indexed_sp_forced_fields(details)
+                    ),
                 )
             except ValueError as e:
                 if stop_on_error:
@@ -1399,7 +1585,32 @@ class ForecastEngine:
                 return ZERO
             return D(str(val)) / D('100')
 
-        sp04 = max(ZERO, _prev('sp04_immob_finanziarie') * (D('1') + _sp_growth('sp04_growth_pct')) - ce09c)
+        # ── INDICIZZAZIONE DELLE VOCI MINORI A UN DRIVER DI VOLUME ──
+        # Dichiarata SEMPRE, anche vuota: a valle una chiave assente vale zero.
+        indicizzazione, indicizzazione_ignorata = self._resolve_sp_indexing(
+            assumption, base_inc, forecast_inc, pregresso,
+        )
+        if details is not None:
+            details['indicizzazione'] = indicizzazione
+            details['indicizzazione_ignorata'] = indicizzazione_ignorata
+
+        def _sp_scale(code, growth_field):
+            """(ancora, fattore) di una voce minore.
+
+            Indicizzata: `(_base, fattore del driver)` — lo stock dell'ANNO BASE
+            per il fattore dell'anno, la stessa forma di `pers_factor`, che
+            indicizza e non compone. Altrimenti `(_prev, 1 + %)`, cioe' la
+            formula di sempre lettera per lettera: senza `sp_indexing` ogni
+            numero resta identico al centesimo, ed e' la proprieta' su cui
+            questo lotto si gioca.
+            """
+            entry = indicizzazione.get(code)
+            if entry is None:
+                return _prev, D('1') + _sp_growth(growth_field)
+            return _base, entry['fattore']
+
+        sp04_anchor, sp04_factor = _sp_scale('sp04', 'sp04_growth_pct')
+        sp04 = max(ZERO, sp04_anchor('sp04_immob_finanziarie') * sp04_factor - ce09c)
 
         # Working capital via turnover days
         # When turnover days are not explicitly set, derive them from the base year
@@ -1500,9 +1711,12 @@ class ForecastEngine:
                     + _prev('sp07f_imposte_anticipate_lungo') * long_growth
                 )
 
-        sp08 = _prev('sp08_attivita_finanziarie') * (D('1') + _sp_growth('sp08_growth_pct'))
-        sp10 = _prev('sp10_ratei_risconti_attivi') * (D('1') + _sp_growth('sp10_growth_pct'))
-        sp01 = _prev('sp01_crediti_soci') * (D('1') + _sp_growth('sp01_growth_pct'))
+        sp08_anchor, sp08_factor = _sp_scale('sp08', 'sp08_growth_pct')
+        sp08 = sp08_anchor('sp08_attivita_finanziarie') * sp08_factor
+        sp10_anchor, sp10_factor = _sp_scale('sp10', 'sp10_growth_pct')
+        sp10 = sp10_anchor('sp10_ratei_risconti_attivi') * sp10_factor
+        sp01_anchor, sp01_factor = _sp_scale('sp01', 'sp01_growth_pct')
+        sp01 = sp01_anchor('sp01_crediti_soci') * sp01_factor
 
         # ── EQUITY ──
 
@@ -1526,15 +1740,19 @@ class ForecastEngine:
         # ── LIABILITIES (bottom-up from components) ──
 
         # Other liabilities (non-debt)
-        provision_factor = D('1') + _sp_growth('sp14_growth_pct')
+        sp14_anchor, provision_factor = _sp_scale('sp14', 'sp14_growth_pct')
         if tax_difference_lines:
-            sp14a = _prev('sp14a_fondi_trattamento_quiescenza') * provision_factor
+            sp14a = sp14_anchor('sp14a_fondi_trattamento_quiescenza') * provision_factor
             sp14b = deferred['liability']
-            sp14c = _prev('sp14c_strumenti_derivati_passivi') * provision_factor
-            sp14d = _prev('sp14d_altri_fondi') * provision_factor
+            sp14c = sp14_anchor('sp14c_strumenti_derivati_passivi') * provision_factor
+            sp14d = sp14_anchor('sp14d_altri_fondi') * provision_factor
             sp14 = sp14a + sp14b + sp14c + sp14d
         else:
-            sp14 = _prev('sp14_fondi_rischi') * provision_factor
+            sp14 = sp14_anchor('sp14_fondi_rischi') * provision_factor
+            # I sotto-campi dell'anno precedente restano la sorgente delle sole
+            # PROPORZIONI del riparto: l'importo lo decide `sp14` qui sopra, e
+            # cambiarne l'ancora sposterebbe la ripartizione senza che nessuno
+            # l'abbia chiesto.
             provision_fields = (
                 'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
                 'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
@@ -1558,7 +1776,8 @@ class ForecastEngine:
             sp15 = _prev('sp15_tfr')
         else:
             sp15 = _prev('sp15_tfr') + forecast_inc.get('ce08a_tfr_accrual', ZERO)
-        sp18 = _prev('sp18_ratei_risconti_passivi') * (D('1') + _sp_growth('sp18_growth_pct'))
+        sp18_anchor, sp18_factor = _sp_scale('sp18', 'sp18_growth_pct')
+        sp18 = sp18_anchor('sp18_ratei_risconti_passivi') * sp18_factor
 
         # --- FINANCIAL DEBTS: repayment schedule ---
         existing_repay_years = getattr(assumption, 'existing_debt_repayment_years', None)
@@ -1589,7 +1808,8 @@ class ForecastEngine:
         sp16d = forecast_purchases * dpo / DAYS
 
         # Long-term trade payables
-        sp17d = _prev('sp17d_debiti_fornitori_lungo') * (D('1') + _sp_growth('sp17d_growth_pct'))
+        sp17d_anchor, sp17d_factor = _sp_scale('sp17d', 'sp17d_growth_pct')
+        sp17d = sp17d_anchor('sp17d_debiti_fornitori_lungo') * sp17d_factor
 
         # ── SCORPORO: il generato nasce dalla base AL NETTO della massa a pregresso ──
         def _net_of_pregresso(value, key, short_field, *, from_base=False):
@@ -1699,10 +1919,15 @@ class ForecastEngine:
             sp17e = r.residual_long
             sp06e = tax_year.generated_credit + tax_year.opening_credit_left
             sp06 = sp06_trade + sp06e + sp06f
+        # Con un piano l'indicizzazione e' gia' stata scartata (Ruling 17),
+        # quindi l'ancora torna a essere `_prev` e lo scorporo resta quello di
+        # sempre; senza piano `_net_of_pregresso` e' un passa-avanti.
+        sp16g_anchor, sp16g_factor = _sp_scale('sp16g', 'sp16g_growth_pct')
         sp16g = _net_of_pregresso(
-            _prev('sp16g_altri_debiti_breve'), 'altri_debiti', 'sp16g_altri_debiti_breve',
-        ) * (D('1') + _sp_growth('sp16g_growth_pct'))
-        sp17g = _prev('sp17g_altri_debiti_lungo') * (D('1') + _sp_growth('sp17g_growth_pct'))
+            sp16g_anchor('sp16g_altri_debiti_breve'), 'altri_debiti', 'sp16g_altri_debiti_breve',
+        ) * sp16g_factor
+        sp17g_anchor, sp17g_factor = _sp_scale('sp17g', 'sp17g_growth_pct')
+        sp17g = sp17g_anchor('sp17g_altri_debiti_lungo') * sp17g_factor
 
         # Previdenza (sp16f/sp17f): opt-in scaling with the personnel cost (P5).
         # When enabled, social-security payables move in proportion to ce08 vs the BASE
@@ -1719,11 +1944,13 @@ class ForecastEngine:
             ) * pers_factor
             sp17f = _base('sp17f_debiti_previdenza_lungo') * pers_factor
         else:
+            sp16f_anchor, sp16f_factor = _sp_scale('sp16f', 'sp16f_growth_pct')
             sp16f = _net_of_pregresso(
-                _prev('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
+                sp16f_anchor('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
                 'sp16f_debiti_previdenza_breve',
-            ) * (D('1') + _sp_growth('sp16f_growth_pct'))
-            sp17f = _prev('sp17f_debiti_previdenza_lungo') * (D('1') + _sp_growth('sp17f_growth_pct'))
+            ) * sp16f_factor
+            sp17f_anchor, sp17f_factor = _sp_scale('sp17f', 'sp17f_growth_pct')
+            sp17f = sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor
 
         # ── PREGRESSO: gli altri tre saldi, stessa regola dei crediti ──
         # Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' tutto

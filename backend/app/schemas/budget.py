@@ -3,7 +3,7 @@ Pydantic schemas for Budget and Forecast models
 """
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 from decimal import Decimal
 
 
@@ -91,6 +91,17 @@ class TemporaryDifferenceInput(BaseModel):
     additions: Decimal = Field(default=Decimal("0"), ge=0)
     reversals: Decimal = Field(default=Decimal("0"), ge=0)
     tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+
+
+SpIndexingDriver = Literal["ricavi", "acquisti", "personale"]
+"""I tre driver di volume, e solo tre (Task 15 §2).
+
+`ricavi` = `ce01` previsto / `ce01` base · `acquisti` = `ce05 + ce06` ·
+`personale` = `ce08`. Un quarto nome e' un errore del chiamante e va rifiutato
+qui: il motore non inventa un fattore per un driver che non conosce, e un 422
+dice al client che cosa ha sbagliato meglio di una chiave silenziosamente
+ignorata.
+"""
 
 
 class PregressoPlanInput(BaseModel):
@@ -184,6 +195,10 @@ class BudgetAssumptionsBase(BaseModel):
 
     # Scadenziamento del pregresso (runoff schedules for working capital and tax payables)
     pregresso: Optional[PregressoInput] = None
+
+    # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15).
+    # Chiave assente = costante, cioe' il comportamento di sempre.
+    sp_indexing: Optional[Dict[str, SpIndexingDriver]] = None
 
     # SP line item growth % overrides (None = 0% / carry forward unchanged)
     sp01_growth_pct: Optional[Decimal] = None
@@ -290,6 +305,10 @@ class BudgetAssumptionsUpdate(BaseModel):
 
     # Scadenziamento del pregresso
     pregresso: Optional[PregressoInput] = None
+
+    # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15).
+    # Chiave assente = costante, cioe' il comportamento di sempre.
+    sp_indexing: Optional[Dict[str, SpIndexingDriver]] = None
 
     # SP line item growth % overrides
     sp01_growth_pct: Optional[Decimal] = None

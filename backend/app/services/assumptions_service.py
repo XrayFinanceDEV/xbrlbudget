@@ -205,6 +205,7 @@ def build_assumption_row(
         ce17b_override=data.get("ce17b_override", None),
         ce20_override=data.get("ce20_override", None),
         pregresso=jsonable_encoder(data.get("pregresso", None)),
+        sp_indexing=jsonable_encoder(data.get("sp_indexing", None)),
     )
     return _normalize_numeric_fields(row)
 

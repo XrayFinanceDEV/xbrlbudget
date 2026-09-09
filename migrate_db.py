@@ -133,6 +133,7 @@ MIGRATIONS = {
         ("financing_interest_rate",            "NUMERIC(10,6) DEFAULT 0 NOT NULL"),
         ("financing_loans",                    "TEXT"),
         ("pregresso",                          "TEXT"),
+        ("sp_indexing",                        "TEXT"),
         ("ce02_override",                      "NUMERIC(15,2)"),
         ("ce03_override",                      "NUMERIC(15,2)"),
         ("ce10_override",                      "NUMERIC(15,2)"),

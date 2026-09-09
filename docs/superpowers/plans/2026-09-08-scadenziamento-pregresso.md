@@ -958,6 +958,19 @@ Tabella: `Voce | Saldo {baseYear} | anno… | Residuo`. Per riga: `PREGRESSO_LAB
 - [ ] `docs/frontend/PRATICA-PERCORSO.md`: passi 6 e 7 completi. `docs/superpowers/2026-09-08-nota-costruttori-sp-infrannuale.md`: invariata, già cita il lotto.
 - [ ] Commit `docs(budget): scadenziamento del pregresso e imposte a saldo + acconto`.
 
+**Aggiunta in pre-volo (2026-09-09) — l'invariante di `CLAUDE.md` sulla cassa va RISCRITTO.**
+Oggi la sezione «Forecasting Engine (Budget)» dice: «It does **not** become short-term debt —
+creating `sp16a` there used to hide a missing scenario choice — so the way out is an explicit
+financing assumption, never a retry.» Dopo il Task 12 questo e' falso. Il testo nuovo deve dire
+che un fabbisogno scoperto **solleva** quando lo scoperto di c/c non e' concesso
+(`overdraft_allowed = False`, che e' il default e il comportamento di ogni scenario esistente),
+e diventa `sp16a` generato dal piano quando l'utente lo concede — dichiarato nei `details`
+(`scoperto_generato`, `scoperto_residuo`, `oneri_scoperto`) e mostrato in anteprima, con un
+tetto opzionale (`overdraft_limit`) oltre il quale il motore solleva di nuovo. La ragione
+storica dell'invariante era il **silenzio**, non il debito: dirlo, cosi' che nessuno lo
+ripristini per errore. Stesso trattamento per `details['cassa_assorbita']`, che si dichiara
+sempre — anche con la cassa positiva — perche' l'utente va avvertito che il piano assorbe cassa.
+
 ### Task 10: Collaudo
 
 **Modello:** collaudatore
@@ -1049,53 +1062,94 @@ def test_conflitto_dichiarato():
 
 ---
 
-### Task 12: La cassa non esce negativa da nessun percorso
+### Task 12: La cassa non esce negativa — diventa scoperto di c/c, se concesso, e sempre dichiarata
 
-**Modello:** opus · **Ondata:** E (indipendente da 1-10)
+**Modello:** opus · **Ondata:** E (dopo l'ondata C — tocca anche l'anteprima del wizard)
 
 **Files:**
-- Modify: `calculations/forecast_engine.py` — `_normalize_balance_sheet_cents` (`:213-…`, il ramo
-  `recompute_cash=True`), il chiamante a `:584`, e il cancello del plug (`:1372-1375`)
-- Test: `tests/test_forecast_cassa_negativa.py` (nuovo)
+- Modify: `database/models.py` (`BudgetAssumptions`: due colonne nuove), `migrate_db.py`
+  (voce `"budget_assumptions"`, `:92`), `backend/app/schemas/budget.py`
+  (`BudgetAssumptionsBase` e `BudgetAssumptionsUpdate`)
+- Modify: `calculations/forecast_engine.py` — il cancello del plug (`:1372-1375`), il blocco che
+  con la cassa in eccesso rimborsa il debito bancario (`:1378-1387`), `sp16a` (`:1209`, `:1334`,
+  `:1355`), `ce15` (`:948-963`), e i `details`
+- Modify: `frontend/types/api.ts`, `frontend/lib/budget-preview-rows.ts`,
+  il passo «nuovi finanziamenti» del wizard, `frontend/components/budget/wizard/` (avviso)
+- Test: `tests/test_forecast_scoperto.py` (nuovo), `frontend/lib/budget-preview-rows.test.ts`
 
-**Il difetto** è descritto e **riprodotto** nella spec, §11.1: leggerlo lì, con il frammento che
-lo misura (`sp_overrides={"sp05_rimanenze": 5000000}` → `sp09 = −4.779.777,78` sotto
+**Il difetto di partenza** e' la spec §11.1: leggerlo li', con il frammento che lo misura
+(`sp_overrides={"sp05_rimanenze": 5000000}` → `sp09 = −4.779.777,78` sotto
 `forecast_generated: True`). `_apply_sp_overrides` clampa a zero (`:466-468`), poi
 `_normalize_balance_sheet_cents(recompute_cash=True)` ricalcola `sp09 = passivo − attivo senza
-cassa` **senza clamp e senza sollevare**, e scavalca il clamp.
+cassa` **senza clamp e senza sollevare** (`:584`), e scavalca il clamp.
 
-**Ruling del controllore (2026-09-09), fra le due strade che la spec lascia aperte:
-il motore SOLLEVA.** Cioè: se il ricalcolo finale della cassa esce negativo, si alza la stessa
-eccezione del plug scoperto — `Unfunded financing requirement <importo>` — e la generazione
-fallisce per intero. Motivo: è l'unica delle due che rispetta *entrambi* gli invarianti che
-`CLAUDE.md` dichiara («la cassa plugga solo verso l'alto: un plug negativo fa **sollevare**» e
-«`sp_overrides` clampa a zero i negativi»), e la spec stessa chiama «non ammissibile» un numero
-impossibile persistito. Dichiararlo soltanto lo lascerebbe persistito.
-Costo se sbaglio: un utente che oggi salva un override squilibrato e vede numeri assurdi, domani
-vede un errore secco e deve correggere l'override. È il comportamento che il motore ha già su
-ogni altro percorso.
+**Ruling del proprietario (2026-09-09), che sostituisce quello del controllore.** «La cassa
+negativa non esiste in senso stretto: diventa debito bancario a breve nuovo da piano» — **ma
+solo se l'utente lo concede**, e **l'utente va sempre avvertito che il piano assorbe cassa**.
+
+Questo contraddice la lettera di `CLAUDE.md` («non diventa debito a breve — creare `sp16a` li'
+nascondeva una scelta di scenario mancante»). La ragione storica di quell'invariante era il
+**silenzio**, non il debito: il debito compariva senza che nessuno lo avesse chiesto. Qui la
+scelta di scenario e' esplicita (una concessione dell'utente) e il debito e' dichiarato nei
+`details` e mostrato in anteprima, quindi la ragione decade. **L'invariante in `CLAUDE.md` va
+riscritto in questo stesso lotto** (Task 9), non lasciato a contraddire il codice.
 
 **Contratto:**
 
-1. `recompute_cash=True`: se `sp09` ricalcolato `< 0`, sollevare con il **testo esistente** del
-   fabbisogno scoperto (stessa classe di eccezione, stesso formato di importo: allinearsi a
-   `:1372-1375`, non inventare un secondo messaggio).
-2. `recompute_cash=False` (infrannuale) **non cambia in nulla**: quel ramo clampa e diagnostica,
-   ed è escluso dal lotto (Global Constraints: `intra_year_engine.py` non si tocca).
-3. Il percorso bulk (`assumptions_service.bulk_upsert_assumptions`) deve restituire
-   `forecast_generated: False` con la ragione in `message`, come per ogni altro fallimento del
-   motore — non un 500. Verificarlo, non presumerlo.
+1. Due ipotesi nuove su `BudgetAssumptions`, per anno come tutte le altre:
+   `overdraft_allowed` (`Boolean`, default `False`) e `overdraft_limit`
+   (`Numeric(15,2)`, `nullable=True` = concesso senza tetto). Migrazione **additiva**: uno
+   scenario esistente si ritrova `overdraft_allowed = False`, cioe' il comportamento di oggi.
+2. Cassa negativa con `overdraft_allowed = False` ⇒ il motore **solleva** come oggi, stesso
+   messaggio, stesso testo. Nessun test esistente cambia.
+3. Cassa negativa con `overdraft_allowed = True` ⇒ `sp09 = 0` e l'importo scoperto diventa
+   **`sp16a_debiti_banche_breve` generato dal piano**, distinto nei `details` dal debito
+   bancario pregresso (e' esattamente il confine che questo lotto esiste per tracciare).
+   Se `overdraft_limit` e' valorizzato e il fabbisogno lo supera, il motore **solleva** per la
+   parte eccedente, con un messaggio che dice il tetto e l'importo richiesto.
+4. Vale su **entrambi** i percorsi: il plug normale (`:1372-1375`) e il ricalcolo finale dopo
+   un `sp_overrides` (`:584`). Da nessuno dei due puo' uscire una cassa negativa persistita.
+5. **Interessi, senza circolarita'.** Lo scoperto matura oneri finanziari al
+   `financing_interest_rate` gia' presente fra le ipotesi, **calcolati su un saldo noto prima
+   che il CE si chiuda** — cioe' sullo scoperto in apertura d'anno, mai su quello che l'anno
+   stesso sta generando: altrimenti l'interesse cambia la cassa che determina l'interesse.
+   Confluiscono in `ce15` e sono dichiarati a parte in `details['oneri_scoperto']`.
+   `financing_interest_rate` assente ⇒ zero, e lo si dichiara lo stesso.
+6. **Rimborso.** Lo scoperto non e' eterno: il blocco che gia' esiste a `:1378-1387` — la cassa
+   in eccesso abbatte il debito bancario, prima a breve poi a lungo — lo assorbe negli anni
+   successivi. Verificare che lo faccia; se non lo fa, e' parte del task.
+7. **L'avviso, che e' il punto.** `details` dichiara **sempre**, anche a zero (CLAUDE.md ›
+   Invarianti — una chiave assente vale zero, quindi tacere equivale a dichiararsi puliti):
+   - `cassa_assorbita`: di quanto il piano riduce la cassa nell'anno (apertura − chiusura,
+     zero se la cassa cresce). Si dichiara **anche quando la cassa resta positiva**: e' la cosa
+     di cui l'utente va avvertito.
+   - `scoperto_generato`: lo scoperto nato nell'anno. `scoperto_residuo`: quello in essere a
+     fine anno. `oneri_scoperto`: gli interessi del punto 5.
+   L'anteprima del wizard mostra un avviso quando `cassa_assorbita > 0` — testo in italiano,
+   icona `lucide-react`, nessuna emoji — e un avviso piu' forte quando `scoperto_generato > 0`,
+   che dice l'importo. Con `overdraft_allowed = False` e un fabbisogno scoperto l'anteprima
+   gia' oggi mostra l'errore del motore: quel percorso non cambia.
 
-- [ ] **Step 1: Test che fallisce** — il frammento della spec §11.1, trasformato in test:
-  `bulk_upsert_assumptions(...)` con quell'override deve dare `forecast_generated is False` e un
-  `message` che contiene `fabbisogno`/`Unfunded`; **nessun** `ForecastBalanceSheet` con `sp09 < 0`
-  deve esistere a valle.
-- [ ] **Step 2: Un secondo test di non-regressione**: un `sp_overrides` che **non** squilibra il
-  foglio (per esempio `sp05_rimanenze` con contropartita) continua a generare, e i numeri sono
-  quelli di oggi al centesimo.
-- [ ] **Step 3: Implementa**
-- [ ] **Step 4: Verde su `tests/test_budget_*.py`, `tests/test_forecast*.py`, `tests/test_intra*.py`**
-- [ ] **Step 5: Commit**
+- [ ] **Step 1: Il test che misura il difetto di oggi** — il frammento della spec §11.1
+  trasformato in test: con `overdraft_allowed` non concesso, `bulk_upsert_assumptions(...)` con
+  quell'override deve dare `forecast_generated is False` e la ragione in `message` (CLAUDE.md:
+  il bulk risponde 200 anche a un previsionale rifiutato — si legge `forecast_generated`, non lo
+  status), e **nessun** `ForecastBalanceSheet` con `sp09 < 0` deve esistere a valle.
+- [ ] **Step 2: Il test dello scoperto concesso** — stesso scenario con
+  `overdraft_allowed = True`: la generazione riesce, `sp09 == 0`, `sp16a` cresce esattamente
+  dell'importo che prima era negativo, `details['scoperto_generato']` lo dichiara.
+  Poi il tetto: `overdraft_limit` sotto il fabbisogno ⇒ solleva, e il messaggio nomina i due
+  importi.
+- [ ] **Step 3: Il test del giro d'anno** — anno 1 genera scoperto, anno 2 genera cassa in
+  eccesso: lo scoperto si riduce, e gli oneri dell'anno 2 sono calcolati sul saldo di apertura.
+- [ ] **Step 4: Il test di parita'** — uno scenario senza scoperto e senza override produce
+  **gli stessi numeri di oggi al centesimo**, e `details['cassa_assorbita']` e' dichiarato.
+- [ ] **Step 5: Implementa** — colonne, migrazione, schema, motore, `details`, tipi, anteprima,
+  avviso, controllo nel passo «nuovi finanziamenti» del wizard.
+- [ ] **Step 6: Verde** — `tests/test_budget_*.py`, `tests/test_forecast*.py`,
+  `tests/test_intra*.py` (il ramo `recompute_cash=False` dell'infrannuale **non cambia in
+  nulla**: Global Constraints), `npx vitest run budget-preview-rows`, `npx tsc --noEmit`
+- [ ] **Step 7: Commit**
 
 ---
 

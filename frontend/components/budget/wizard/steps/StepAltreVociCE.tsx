@@ -6,14 +6,17 @@
 // prodotto il motore — sta in lib/budget-altre-voci-step.ts, provata in
 // environment: node. L'unica eccezione e' l'aliquota effettiva dell'anno
 // base: la calcola computeEffectiveTaxRate (components/budget/
-// assumption-rows.ts), che lib/ non puo' importare — il numero passa da
-// qui al modulo lib solo per la formattazione col fallback.
+// assumption-rows.ts), che lib/ non puo' importare — il numero passa da qui
+// a planTaxRate (lib/budget-tax-rate.ts), che e' l'UNICO posto in cui si
+// decide quale aliquota il piano usera' e da dove viene. Il passo 7 rende lo
+// stesso oggetto: la stessa domanda non puo' avere due risposte.
 import type { JSX } from "react";
 import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { computeEffectiveTaxRate } from "@/components/budget/assumption-rows";
 import { altreVociCalculated, altreVociPreview, altreVociTableRows } from "@/lib/budget-altre-voci-step";
+import { planTaxRate } from "@/lib/budget-tax-rate";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
@@ -22,11 +25,15 @@ import { YearInputTable } from "../YearInputTable";
 export function StepAltreVociCE(p: StepProps): JSX.Element {
   const baseInc = p.historical[p.baseYear]?.income;
   const effectiveTaxRatePct = baseInc ? computeEffectiveTaxRate(baseInc) : null;
+  const taxRate = useMemo(
+    () => planTaxRate(effectiveTaxRatePct, p.assumptions, p.forecastYears),
+    [effectiveTaxRatePct, p.assumptions, p.forecastYears],
+  );
 
   const rows = altreVociTableRows(baseInc);
   const calculated = useMemo(
-    () => altreVociCalculated(p.baseYear, baseInc, effectiveTaxRatePct, p.assumptions, p.forecastYears, p.preview.data),
-    [p.baseYear, baseInc, effectiveTaxRatePct, p.assumptions, p.forecastYears, p.preview.data],
+    () => altreVociCalculated(p.baseYear, baseInc, taxRate, p.assumptions, p.forecastYears, p.preview.data),
+    [p.baseYear, baseInc, taxRate, p.assumptions, p.forecastYears, p.preview.data],
   );
   const preview = useMemo(() => altreVociPreview(baseInc, p.preview.data), [baseInc, p.preview.data]);
 

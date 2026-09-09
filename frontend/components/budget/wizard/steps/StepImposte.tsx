@@ -27,6 +27,7 @@ import {
   taxRateInputDisplay,
   taxRateValue,
 } from "@/lib/budget-imposte-step";
+import { planTaxRate } from "@/lib/budget-tax-rate";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
@@ -57,6 +58,13 @@ export function StepImposte(p: StepProps): JSX.Element {
 
   const taxRate = taxRateValue(p.assumptions, p.forecastYears);
   const taxRateDisplay = taxRateInputDisplay(taxRate);
+  // Quale aliquota il piano usera' davvero, e perche': una sola funzione, la
+  // stessa che rende il passo 4 (lib/budget-tax-rate.ts). Prima i due passi
+  // rispondevano in modo diverso sullo stesso caso.
+  const plan = useMemo(
+    () => planTaxRate(effectiveRate, p.assumptions, p.forecastYears),
+    [effectiveRate, p.assumptions, p.forecastYears],
+  );
 
   const tributariRows = useMemo(() => spTributariRows(baseBs), [baseBs]);
   const preview = useMemo(() => impostePreview(baseInc, p.preview.data), [baseInc, p.preview.data]);
@@ -76,7 +84,7 @@ export function StepImposte(p: StepProps): JSX.Element {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm tabular-nums text-foreground">{pct1(effectiveRate)}</span>
-                <Badge variant="secondary">usata dal piano</Badge>
+                {plan.source === "effettiva" && <Badge variant="secondary">usata dal piano</Badge>}
               </div>
             </div>
 
@@ -102,6 +110,17 @@ export function StepImposte(p: StepProps): JSX.Element {
                   }}
                 />
                 <span className="text-xs text-muted-foreground">%</span>
+              </div>
+            </div>
+
+            <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
+              <div>
+                <div className="text-sm font-medium text-foreground">Aliquota usata dal piano</div>
+                {plan.nota && <div className="text-xs text-muted-foreground">{plan.nota}</div>}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm tabular-nums text-foreground">{plan.value}</span>
+                <Badge variant={plan.source === "effettiva" ? "secondary" : "outline"}>{plan.sourceLabel}</Badge>
               </div>
             </div>
 

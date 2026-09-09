@@ -3,8 +3,8 @@ import {
   altreVociCalculated,
   altreVociPreview,
   altreVociTableRows,
-  effectiveTaxRateLabel,
 } from "./budget-altre-voci-step";
+import { planTaxRate } from "@/lib/budget-tax-rate";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 
@@ -31,22 +31,15 @@ describe("altreVociTableRows", () => {
   });
 });
 
-describe("effectiveTaxRateLabel", () => {
-  it("formatta l'aliquota derivata", () => {
-    expect(effectiveTaxRateLabel(25)).toBe("25,0%");
-  });
-
-  it("cade sul fallback del motore (27,9%, non il 24 di schema) quando non derivabile", () => {
-    expect(effectiveTaxRateLabel(null)).toBe("27,9%");
-  });
-});
-
 describe("altreVociCalculated", () => {
   const assumptions: AssumptionsMap = { 2025: { depreciation_rate: 15 }, 2026: { depreciation_rate: 15 } };
+  // L'aliquota non si decide piu' qui: arriva da `planTaxRate`, lo stesso
+  // oggetto che rende il passo 7. La sua suite e' in budget-tax-rate.test.ts.
+  const tax = (effective: number | null, a: AssumptionsMap = assumptions) => planTaxRate(effective, a, [2025, 2026]);
 
   it("ammortamenti e oneri finanziari vanno da base a ultimo anno dell'anteprima", () => {
     const data = response([previewYear(2025, 90, 22), previewYear(2026, 95, 24)]);
-    const c = altreVociCalculated(2024, income(), 25, assumptions, [2025, 2026], data);
+    const c = altreVociCalculated(2024, income(), tax(25), assumptions, [2025, 2026], data);
     expect(c.ammortamenti.value).toContain("→");
     expect(c.oneriFinanziari.value).toContain("→");
     expect(c.ammortamenti.small).toContain("2024");
@@ -54,25 +47,30 @@ describe("altreVociCalculated", () => {
   });
 
   it("senza anteprima ancora arrivata il valore non ha la freccia (solo la base)", () => {
-    const c = altreVociCalculated(2024, income(), null, assumptions, [2025, 2026], null);
+    const c = altreVociCalculated(2024, income(), tax(null), assumptions, [2025, 2026], null);
     expect(c.ammortamenti.value).not.toContain("→");
   });
 
-  it("l'aliquota mostrata e' quella passata dal chiamante, col fallback se null", () => {
+  it("l'aliquota mostrata e' la label di planTaxRate: il predefinito porta la sua provenienza", () => {
     const data = response([]);
-    expect(altreVociCalculated(2024, income(), 28, assumptions, [2025], data).imposte.value).toBe("28,0%");
-    expect(altreVociCalculated(2024, income(), null, assumptions, [2025], data).imposte.value).toBe("27,9%");
+    expect(altreVociCalculated(2024, income(), tax(28), assumptions, [2025], data).imposte.value).toBe("28,0%");
+    // Il difetto chiuso: qui prima usciva "27,9%" nudo, come se fosse un
+    // calcolo, mentre il passo 7 sullo stesso caso mostrava "—".
+    const fallback = altreVociCalculated(2024, income(), tax(null), assumptions, [2025], data).imposte.value;
+    expect(fallback).toContain("27,9%");
+    expect(fallback).toContain("predefinita");
   });
 
   it("un anno non ancora idratato dal passo 6 usa il default di schema (20%), non zero", () => {
     const data = response([]);
-    const c = altreVociCalculated(2024, income(), null, {}, [2025], data);
+    const c = altreVociCalculated(2024, income(), tax(null, {}), {}, [2025], data);
     expect(c.ammortamenti.small).toContain("20%");
   });
 
   it("un depreciation_rate esplicito a 0 resta 0, non il default", () => {
     const data = response([]);
-    const c = altreVociCalculated(2024, income(), null, { 2025: { depreciation_rate: 0 } }, [2025], data);
+    const depr: AssumptionsMap = { 2025: { depreciation_rate: 0 } };
+    const c = altreVociCalculated(2024, income(), tax(null, depr), depr, [2025], data);
     expect(c.ammortamenti.small).toContain("0%");
   });
 });

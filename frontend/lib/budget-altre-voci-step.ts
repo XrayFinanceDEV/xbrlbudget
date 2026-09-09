@@ -13,16 +13,17 @@
  * (`ce09_ammortamenti`, `ce15_oneri_finanziari` dell'ultimo anno
  * dell'anteprima), mai un ricalcolo.
  *
- * L'unica formula che NON viene dal motore e' l'aliquota effettiva
- * dell'anno base: la calcola `computeEffectiveTaxRate`
- * (components/budget/assumption-rows.ts, che a sua volta usa `ceAggregates`
- * di lib/budget-preview-rows.ts). Questo modulo non puo' importarla — `lib/`
- * non importa da `components/` — quindi il componente la calcola e passa
- * qui solo il numero (o `null`) da formattare.
+ * L'aliquota mostrata sotto "Imposte" NON si decide piu' qui: la decide
+ * `planTaxRate` (lib/budget-tax-rate.ts), l'unico posto in cui si stabilisce
+ * quale aliquota il piano usera' e da dove viene. Prima questo modulo aveva
+ * un `effectiveTaxRateLabel` che sostituiva il `null` col 27,9 e lo mostrava
+ * come se fosse calcolato, mentre il passo 7 sullo stesso caso mostrava
+ * "—": due risposte alla stessa domanda.
  */
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import { rowsAltreVociCe, type PreviewRow } from "@/lib/budget-preview-rows";
+import type { PlanTaxRate } from "@/lib/budget-tax-rate";
 import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
 
 const num = (v: unknown): number => {
@@ -38,10 +39,6 @@ const numOrNull = (v: unknown): number | null => {
 };
 
 const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
-
-/** L'aliquota reale del motore (CLAUDE.md: 27,9 = IRES + IRAP, non il 24 di
- *  schema) quando quella effettiva dell'anno base non e' derivabile. */
-const DEFAULT_TAX_RATE_PCT = 27.9;
 
 /** Default di schema di `depreciation_rate` (database/models.py:649) per un
  *  anno che il passo 6 non ha ancora idratato. */
@@ -86,14 +83,6 @@ function arrowLabel(r: BaseToLast): string {
   return r.last === null ? euro(r.base) : `${euro(r.base)} → ${euro(r.last)}`;
 }
 
-/** Etichetta dell'aliquota effettiva, o il fallback del motore (27,9%,
- *  CLAUDE.md) quando l'anno base non la rende derivabile. Le percentuali
- *  sono assolute: si divide per 100 per `formatPercentage`, come gia' fa
- *  `describeCell`. */
-export function effectiveTaxRateLabel(effectiveRatePct: number | null): string {
-  return formatPercentage((effectiveRatePct ?? DEFAULT_TAX_RATE_PCT) / 100, 1);
-}
-
 /**
  * La quota di ammortamento sui nuovi investimenti da mostrare in nota:
  * quella del primo anno di previsione (stesso "il primo anno rappresenta
@@ -118,14 +107,16 @@ export interface AltreVociCalculated {
 }
 
 /**
- * Le tre righe della card "Calcolate dal piano". `effectiveTaxRatePct' e'
- * gia' calcolato dal chiamante (vedi il commento in testa al file sul
- * perche' questo modulo non puo' calcolarlo da solo).
+ * Le tre righe della card "Calcolate dal piano". `taxRate` arriva gia' deciso
+ * da `planTaxRate` (lib/budget-tax-rate.ts): qui si rende la sua `label`, che
+ * porta con se' la provenienza quando l'aliquota non e' quella effettiva
+ * dell'anno base — cosi' un predefinito non passa mai per un calcolo. E' lo
+ * stesso oggetto che rende il passo 7.
  */
 export function altreVociCalculated(
   baseYear: number,
   baseInc: IncomeStatement | undefined | null,
-  effectiveTaxRatePct: number | null,
+  taxRate: PlanTaxRate,
   assumptions: AssumptionsMap,
   forecastYears: number[],
   data: ForecastPreviewResponse | null,
@@ -140,7 +131,7 @@ export function altreVociCalculated(
       value: arrowLabel(amm),
     },
     oneriFinanziari: { small: "sul debito del passo 6", value: arrowLabel(oneri) },
-    imposte: { small: "aliquota del passo 7", value: effectiveTaxRateLabel(effectiveTaxRatePct) },
+    imposte: { small: "aliquota del passo 7", value: taxRate.label },
   };
 }
 

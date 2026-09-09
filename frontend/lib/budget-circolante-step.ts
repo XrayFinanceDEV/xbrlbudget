@@ -19,18 +19,9 @@
  */
 import { computeAutoDays } from "@/lib/budget-turnover";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import { formatCurrency } from "@/lib/formatters";
+import { euro, numOrNull } from "@/lib/budget-format";
 import { rowsCircolante, type PreviewRow } from "@/lib/budget-preview-rows";
 import type { BalanceSheet, ForecastPreviewResponse, IncomeStatement } from "@/types/api";
-
-/** `null`/assente restano `null`: zero vero e assenza non sono la stessa cosa. */
-const numOrNull = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === "") return null;
-  const n = typeof v === "number" ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? n : null;
-};
-
-const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
 
 /**
  * Riga della tabella, forma strutturalmente compatibile con `YearInputRow`
@@ -99,17 +90,9 @@ export function minorFieldsRows(baseBs: BalanceSheet | undefined | null): Circol
   ];
 }
 
-export type BoolAssumptionField = "previdenza_scales_with_personnel" | "tfr_accrual_suspended";
-
-/**
- * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
- * riga — ma il checkbox e' uno solo: si mostra quello del primo anno
- * previsto (stesso criterio di `fixedShareOf` in budget-costi-step.ts).
- * Assente ⇒ `false`, il default del motore (database/models.py).
- */
-export function boolAssumption(assumptions: AssumptionsMap, forecastYears: number[], field: BoolAssumptionField): boolean {
-  return Boolean(assumptions[forecastYears[0]]?.[field]);
-}
+/** L'interruttore per anno vive in `lib/budget-horizon.ts`, con `AssumptionsMap`:
+ *  qui si ri-esporta perche' il passo 5 legga tutto dal proprio modulo. */
+export { boolAssumption, type BoolAssumptionField } from "@/lib/budget-horizon";
 
 export interface CircolantePreview {
   /** Gli anni che il motore ha davvero prodotto, non quelli richiesti. */

@@ -35,7 +35,7 @@
  * imposta, si dichiara solo QUALE aliquota il motore applichera' e perche'.
  */
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import { formatPercentage } from "@/lib/formatters";
+import { pct1 } from "@/lib/budget-format";
 import { DEFAULT_TAX_RATE, taxRateValue } from "@/lib/budget-imposte-step";
 
 export type TaxRateSource = "effettiva" | "forzata" | "predefinita" | "sostituita";
@@ -76,8 +76,6 @@ export interface PlanTaxRate {
    */
   addsInformation: boolean;
 }
-
-const pct1 = (v: number): string => formatPercentage(v / 100, 1);
 
 /**
  * L'aliquota davvero FORZATA dall'utente, o `null`.

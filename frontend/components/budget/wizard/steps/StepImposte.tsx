@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
 import { computeEffectiveTaxRate } from "@/components/budget/assumption-rows";
 import { parseFieldValue } from "@/lib/budget-field-rules";
-import { formatPercentage } from "@/lib/formatters";
+import { pct1 } from "@/lib/budget-format";
 import {
   DEFAULT_TAX_RATE,
   TAX_RATE_PLACEHOLDER,
@@ -33,8 +33,6 @@ import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
-
-const pct1 = (v: number | null): string => (v === null ? "—" : formatPercentage(v / 100, 1));
 
 const ADVANCES_ROWS: YearInputRow[] = [{ field: "tax_advances_paid", label: "Acconti versati nell'anno", baseLabel: "—" }];
 

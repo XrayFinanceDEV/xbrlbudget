@@ -18,30 +18,13 @@ import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { YearCellOff } from "@/lib/budget-year-cell";
 import { rowsCosti, type PreviewRow } from "@/lib/budget-preview-rows";
-import { formatCurrency } from "@/lib/formatters";
+import { euro, num, numOrNull, pctOf } from "@/lib/budget-format";
 
 /** Il default del motore per `fixed_*_percentage` (backend/app/schemas/budget.py). */
 export const FIXED_SHARE_DEFAULT = 40;
 
 export type FixedShareField = "fixed_materials_percentage" | "fixed_services_percentage";
 export type SplitOverrideField = "ce05_override" | "ce06_override";
-
-const num = (v: unknown): number => {
-  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
-  return Number.isFinite(n) ? n : 0;
-};
-
-/** `null`/assente restano `null`: uno zero vero e uno zero di ripiego non sono la stessa cosa. */
-const numOrNull = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === "") return null;
-  const n = typeof v === "number" ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? n : null;
-};
-
-const pctOf = (v: number | null, den: number | null): number | null =>
-  v === null || den === null || den === 0 ? null : (v / den) * 100;
-
-const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
 
 export interface FixedShare {
   /** La quota da mostrare: quella del primo anno previsto. */

@@ -24,6 +24,32 @@ import type { BudgetAssumptions, BudgetAssumptionsCreate } from "@/types/api";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
 
+/**
+ * Gli interruttori che il wizard scrive su TUTTI gli anni con `updateAll`.
+ * Un'unione sola: la funzione che li legge e' una sola (`boolAssumption`), e
+ * prima di questo fix ne esistevano due copie verbatim — in
+ * `budget-circolante-step.ts` e in `budget-pregresso-step.ts` — che
+ * differivano solo per quali campi accettavano.
+ */
+export type BoolAssumptionField =
+  | "previdenza_scales_with_personnel"
+  | "tfr_accrual_suspended"
+  | "cash_sweep_enabled";
+
+/**
+ * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
+ * riga — ma il checkbox e' uno solo: si mostra quello del primo anno
+ * previsto (stesso criterio di `fixedShareOf` in budget-costi-step.ts).
+ * Assente ⇒ `false`, il default del motore (database/models.py).
+ */
+export function boolAssumption(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+  field: BoolAssumptionField,
+): boolean {
+  return Boolean(assumptions[forecastYears[0]]?.[field]);
+}
+
 /** Gli anni previsti: `numYears` anni **dopo** l'anno base. */
 export function forecastYearsFor(baseYear: number, numYears: number): number[] {
   const n = Math.max(0, Math.floor(numYears) || 0);

@@ -21,24 +21,11 @@
  * "—": due risposte alla stessa domanda.
  */
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { formatPercentage } from "@/lib/formatters";
+import { euro, num, numOrNull } from "@/lib/budget-format";
 import { rowsAltreVociCe, type PreviewRow } from "@/lib/budget-preview-rows";
 import type { PlanTaxRate } from "@/lib/budget-tax-rate";
 import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
-
-const num = (v: unknown): number => {
-  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
-  return Number.isFinite(n) ? n : 0;
-};
-
-/** `null`/assente restano `null`: zero vero e assenza non sono la stessa cosa. */
-const numOrNull = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === "") return null;
-  const n = typeof v === "number" ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? n : null;
-};
-
-const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
 
 /** Default di schema di `depreciation_rate` (database/models.py:649) per un
  *  anno che il passo 6 non ha ancora idratato. */

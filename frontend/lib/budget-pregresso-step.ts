@@ -18,11 +18,7 @@ import type { BalanceSheet, ForecastPreviewResponse } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { rowsPregressoNuovo, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
-
-const num = (v: unknown): number => {
-  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
-  return Number.isFinite(n) ? n : 0;
-};
+import { num } from "@/lib/budget-format";
 
 export interface PregressoBase {
   /** Debito bancario totale, formula del motore (`lib/base-bank-debt`). */
@@ -82,17 +78,9 @@ export function singleYearValue(assumptions: AssumptionsMap, years: number[], fi
   return { value, uneven: vals.some((v) => v !== value) };
 }
 
-export type BoolAssumptionField = "cash_sweep_enabled";
-
-/**
- * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
- * riga — ma il checkbox e' uno solo: si mostra quello del primo anno
- * previsto (stesso criterio di `fixedShareOf` in budget-costi-step.ts).
- * Assente ⇒ `false`, il default del motore (database/models.py).
- */
-export function boolAssumption(assumptions: AssumptionsMap, forecastYears: number[], field: BoolAssumptionField): boolean {
-  return Boolean(assumptions[forecastYears[0]]?.[field]);
-}
+/** L'interruttore per anno vive in `lib/budget-horizon.ts`, con `AssumptionsMap`:
+ *  qui si ri-esporta perche' il passo 6 legga tutto dal proprio modulo. */
+export { boolAssumption, type BoolAssumptionField } from "@/lib/budget-horizon";
 
 export interface PregressoPreview {
   /** Gli anni che il motore ha davvero prodotto, non quelli richiesti. */

@@ -4,6 +4,7 @@
 // column (Materie/Servizi %: variable == fixed growth makes the fixed/variable
 // split mathematically irrelevant — see forecast_engine.py:220-242).
 import type { IncomeStatement } from "@/types/api";
+import { num } from "@/lib/budget-format";
 import { FIELD_RULES } from "@/lib/budget-field-rules";
 import { ceAggregates } from "@/lib/budget-preview-rows";
 
@@ -126,9 +127,6 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
     ],
   },
 ];
-
-const num = (v: string | number | null | undefined): number =>
-  typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0;
 
 /** Effective base-year tax rate (ce20 / PBT), or null when not derivable.
  *  Mirrors the engine's preference (forecast_engine.py:374-390). PBT comes from

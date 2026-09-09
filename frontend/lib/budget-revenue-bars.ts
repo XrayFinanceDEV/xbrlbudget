@@ -6,8 +6,7 @@
  * per questo sta qui in `lib/`, mai dentro il componente SVG.
  */
 import type { ForecastPreviewYear } from "@/types/api";
-
-const num = (v: unknown): number => (typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0);
+import { num } from "@/lib/budget-format";
 
 export interface RevenueBarGeometry { value: number; height: number; y: number; isBase: boolean }
 

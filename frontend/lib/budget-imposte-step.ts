@@ -11,18 +11,9 @@
  */
 import type { BalanceSheet, ForecastPreviewResponse, IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import { formatCurrency } from "@/lib/formatters";
+import { euro, numOrNull } from "@/lib/budget-format";
 import { singleYearValue, type SingleYearValue } from "@/lib/budget-pregresso-step";
 import { rowsImposte, type PreviewRow } from "@/lib/budget-preview-rows";
-
-/** `null`/assente restano `null`: zero vero e assenza non sono la stessa cosa. */
-const numOrNull = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === "") return null;
-  const n = typeof v === "number" ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? n : null;
-};
-
-const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
 
 /**
  * L'aliquota reale del progetto: IRES + IRAP, non il `24` (sola IRES) di

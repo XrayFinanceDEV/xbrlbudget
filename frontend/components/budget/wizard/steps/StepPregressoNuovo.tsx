@@ -12,7 +12,7 @@
 // (Task 7) si riusano cosi' come sono: non sono duplicate qui dentro.
 import type { JSX, ReactNode } from "react";
 import { useMemo } from "react";
-import { AlertTriangle, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,14 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
 import { parseFieldValue } from "@/lib/budget-field-rules";
-import { formatCurrency } from "@/lib/formatters";
+import { euro } from "@/lib/budget-format";
 import { boolAssumption, pregressoBase, pregressoPreview, singleYearValue } from "@/lib/budget-pregresso-step";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
-
-const euro = (v: number | null): string => (v === null ? "—" : formatCurrency(v));
 
 /** Riga «etichetta / nota piccola» a sinistra, controllo a destra — lo
  *  schema di Card «Calcolate dal piano» di StepAltreVociCE, qui con un
@@ -245,24 +243,14 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
           loading={p.preview.loading}
           error={previewNotice(p.preview)}
         >
-          {preview.unfunded ? (
-            <div className="mt-3 flex gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              <div>
-                <b>
-                  Fabbisogno scoperto nel {preview.unfunded.year}: {formatCurrency(preview.unfunded.amount)}.
-                </b>{" "}
-                Il previsionale non verrà generato finché non lo copri: un nuovo finanziamento, meno investimenti,
-                o un rimborso più lungo del pregresso.
-              </div>
+          {/* Il fabbisogno scoperto lo dice gia' `previewNotice`, sopra, in UN
+              solo posto (lib/budget-preview-notice.ts): qui resta la sola
+              conferma opposta, che quel riquadro non da'. */}
+          {!preview.unfunded && p.preview.data && (
+            <div className="mt-3 flex gap-2 rounded-md bg-muted p-3 text-sm">
+              <Check className="h-4 w-4 shrink-0 mt-0.5" /> La cassa resta positiva in tutti gli anni: nessun
+              fabbisogno da coprire.
             </div>
-          ) : (
-            p.preview.data && (
-              <div className="mt-3 flex gap-2 rounded-md bg-muted p-3 text-sm">
-                <Check className="h-4 w-4 shrink-0 mt-0.5" /> La cassa resta positiva in tutti gli anni: nessun
-                fabbisogno da coprire.
-              </div>
-            )
           )}
         </PreviewPanel>
       </div>

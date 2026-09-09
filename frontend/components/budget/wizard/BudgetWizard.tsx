@@ -28,6 +28,7 @@ import { useInvalidateAnalysis, useInvalidateScenarios } from "@/hooks/use-queri
 import { useForecastPreview } from "@/hooks/use-forecast-preview";
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
 import { bulkUpsertAssumptions, updateBudgetScenario } from "@/lib/api";
+import { assumptionRowsForSave } from "@/lib/budget-horizon";
 import {
   WIZARD_STEPS,
   nextStep,
@@ -38,6 +39,8 @@ import {
   stepFooterHint,
   stepLead,
   stepStorageKey,
+  stepsUpTo,
+  wizardChrome,
   type WizardStepKey,
 } from "@/lib/budget-wizard-steps";
 import { getErrorMessage } from "@/lib/utils";
@@ -106,9 +109,12 @@ export function BudgetWizard({
   // `setStep` di questo sia atterrato.
   const [ripristinatoPer, setRipristinatoPer] = useState<number | null>(null);
   useEffect(() => {
-    const ricordato = parseStoredStep(readStorage(stepStorageKey(scenario.id)));
-    setStep(ricordato ?? "scenario");
-    setVisited(new Set([ricordato ?? "scenario"]));
+    const ricordato = parseStoredStep(readStorage(stepStorageKey(scenario.id))) ?? "scenario";
+    setStep(ricordato);
+    // Chi riapre al passo 7 ci era arrivato passando per gli altri sei:
+    // segnare visitato il solo passo ripristinato mostrerebbe sei pallini
+    // grigi accanto a un settimo attivo.
+    setVisited(new Set(stepsUpTo(ricordato)));
     setRipristinatoPer(scenario.id);
   }, [scenario.id]);
 
@@ -129,11 +135,7 @@ export function BudgetWizard({
   // reinserisce. `null` = «non ancora», non «nessuna riga».
   const rows = useMemo(
     () =>
-      s.idratato
-        ? s.forecastYears
-            .filter((y) => s.assumptions[y])
-            .map((y) => ({ ...s.assumptions[y], scenario_id: scenario.id, forecast_year: y }))
-        : null,
+      s.idratato ? assumptionRowsForSave(s.assumptions, s.forecastYears, scenario.id) : null,
     [s.idratato, s.forecastYears, s.assumptions, scenario.id],
   );
 
@@ -171,16 +173,20 @@ export function BudgetWizard({
       // 200 con previsionale rifiutato: la verita' e' in `forecast_generated`,
       // la ragione in `message` (CLAUDE.md § Previsionale). Chi legge l'HTTP
       // 200 dipinge una colonna Proiezione vuota sotto un toast verde.
+      //
+      // Niente rami e niente `return` anticipato: l'esito e' un oggetto e si
+      // consuma per intero, sempre nello stesso ordine. Togliere una riga qui
+      // non puo' piu' produrre una navigazione dopo un rifiuto — la
+      // condizione sta in `saveOutcome`, con la sua prova.
       const esito = saveOutcome(result);
-      if (!esito.ok) {
-        toast.error(esito.message);
-        setStep(esito.step);
-        return;
+      if (esito.ok) toast.success(esito.message);
+      else toast.error(esito.message);
+      if (esito.step) setStep(esito.step);
+      if (esito.route) {
+        invalidateScenarios(companyId);
+        invalidateAnalysis(companyId, scenario.id);
+        router.push(esito.route);
       }
-      invalidateScenarios(companyId);
-      invalidateAnalysis(companyId, scenario.id);
-      toast.success("Previsionale calcolato");
-      router.push("/forecast/income");
     } catch (err) {
       toast.error(getErrorMessage(err, "Impossibile salvare le ipotesi"));
     } finally {
@@ -236,9 +242,32 @@ export function BudgetWizard({
 
   const active = WIZARD_STEPS.find((w) => w.key === step) ?? WIZARD_STEPS[0];
   const indietro = prevStep(step);
+  // Quali comandi rende il wizard e dove: dentro la pratica la sua barra in
+  // fondo sarebbe COPERTA da quella del percorso, e il click su «Indietro»
+  // finirebbe sull'«Avanti» del percorso. La decisione, misurata nel
+  // browser, sta in lib/budget-wizard-steps.ts con la sua prova.
+  const chrome = wizardChrome(pratica !== null);
+
+  const annulla = (
+    <Button variant="outline" size={chrome.headerControls ? "sm" : "default"} onClick={onCancel}>
+      Annulla
+    </Button>
+  );
+  const indietroButton = (
+    <Button
+      variant="outline"
+      size={chrome.headerControls ? "sm" : "default"}
+      disabled={!indietro}
+      onClick={() => {
+        if (indietro) setStep(indietro);
+      }}
+    >
+      Indietro
+    </Button>
+  );
 
   return (
-    <div className="pb-24">
+    <div className={chrome.containerClass}>
       <WizardRail
         active={step}
         visited={visited}
@@ -247,9 +276,20 @@ export function BudgetWizard({
         onGo={setStep}
       />
 
-      <div className="mb-4 mt-4">
-        <h1 className="text-xl font-semibold">{active.title}</h1>
-        <p className="text-sm text-muted-foreground">{stepLead(step, s.baseYear)}</p>
+      <div className="mb-4 mt-4 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">{active.title}</h1>
+          <p className="text-sm text-muted-foreground">{stepLead(step, s.baseYear)}</p>
+        </div>
+        {/* Dentro la pratica «Avanti» sta nella barra del percorso, ma
+            «Annulla» e «Indietro» non hanno un equivalente li': risalgono
+            qui, dove nulla li copre. */}
+        {chrome.headerControls && (
+          <div className="flex shrink-0 items-center gap-2">
+            {annulla}
+            {indietroButton}
+          </div>
+        )}
       </div>
 
       {step === "scenario" && (
@@ -276,24 +316,23 @@ export function BudgetWizard({
       {step === "pregresso-nuovo" && <StepPregressoNuovo {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}
 
-      <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t bg-background px-6 py-2.5">
-        <span className="mr-auto text-xs text-muted-foreground">{stepFooterHint(step)}</span>
-        <Button variant="outline" onClick={onCancel}>
-          Annulla
-        </Button>
-        <Button
-          variant="outline"
-          disabled={!indietro}
-          onClick={() => {
-            if (indietro) setStep(indietro);
-          }}
-        >
-          Indietro
-        </Button>
-        <Button onClick={goNext} disabled={saving || !s.idratato}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : primaryLabel(step)}
-        </Button>
-      </div>
+      {chrome.bottomBar && (
+        <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t bg-background px-6 py-2.5">
+          <span className="mr-auto text-xs text-muted-foreground">{stepFooterHint(step)}</span>
+          {annulla}
+          {indietroButton}
+          {chrome.primaryButton && (
+            <Button onClick={goNext} disabled={saving || !s.idratato}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : primaryLabel(step)}
+            </Button>
+          )}
+        </div>
+      )}
+      {/* La posizione nel percorso resta visibile anche senza barra propria:
+          dentro la pratica quella del percorso mostra solo il primario. */}
+      {!chrome.bottomBar && (
+        <p className="mt-6 text-xs text-muted-foreground">{stepFooterHint(step)}</p>
+      )}
     </div>
   );
 }

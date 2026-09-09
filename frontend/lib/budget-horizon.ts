@@ -256,6 +256,34 @@ export function withDefaultsForYears(
 }
 
 /**
+ * Le righe da mandare a `PUT /scenarios/{id}/assumptions` — l'esatto inverso
+ * di `hydrateAssumptions`, e altrettanto pericoloso: il bulk è **delete-all +
+ * reinsert**, quindi una chiave che non parte da qui non viene «lasciata com'è
+ * sul server», viene **cancellata**. Un campo perso qui azzera un'ipotesi
+ * salvata senza un solo errore, con un toast verde sopra.
+ *
+ * Sta in `lib/` e non nel `useMemo` di `BudgetWizard` proprio per questo: un
+ * componente non è collaudabile in questo repo (nessun jsdom, e non va
+ * aggiunto), e `budget-horizon.test.ts` congela qui l'elenco delle chiavi
+ * prodotte, lo stesso di `hydrateAssumptions`. Ridurre lo spread a due campi
+ * — la mutazione che era passata a suite verde — ora fa fallire la suite.
+ *
+ * Si mandano solo gli anni che hanno un'ipotesi: un anno senza riga non è un
+ * anno a zero, è un anno di cui non si sa nulla. `scenario_id` e
+ * `forecast_year` sono riscritti sullo scenario e sull'anno correnti, perché
+ * la mappa può portarsi dietro quelli di un'idratazione precedente.
+ */
+export function assumptionRowsForSave(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+  scenarioId: number
+): Record<string, unknown>[] {
+  return forecastYears
+    .filter((year) => assumptions[year])
+    .map((year) => ({ ...assumptions[year], scenario_id: scenarioId, forecast_year: year }));
+}
+
+/**
  * La chiosa accanto all'anno base, o `null` se non c'è niente di vero da dire.
  *
  * Era una stringa fissa — «(ultimo anno disponibile)» — stampata anche quando

@@ -6,6 +6,7 @@ import {
   baseYearNote,
   hydrateAssumptions,
   horizonFromSavedRows,
+  assumptionRowsForSave,
 } from "@/lib/budget-horizon";
 import type { BudgetAssumptions } from "@/types/api";
 
@@ -302,5 +303,48 @@ describe("horizonFromSavedRows", () => {
 
   it("una riga degenere sull'anno base da' comunque 1, non 0", () => {
     expect(horizonFromSavedRows([fixtureRow({ forecast_year: 2025 })], 2025)).toBe(1);
+  });
+});
+
+describe("assumptionRowsForSave", () => {
+  // Il bulk e' delete-all + reinsert: una chiave che non parte NON resta sul
+  // server, viene cancellata. Questo test e' la rete che mancava — una
+  // mutazione che riduce lo spread della riga a due campi buttava 85 colonne
+  // su 87 a ogni salvataggio, e la suite restava verde.
+  const idratata = () =>
+    hydrateAssumptions([fixtureRow({ forecast_year: 2026 }), fixtureRow({ forecast_year: 2027 })], 7);
+
+  it("manda ESATTAMENTE le chiavi che l'idratazione ha letto", () => {
+    const map = idratata();
+    const attese = Object.keys(map[2026]).sort();
+    // Ancorato all'elenco congelato di `hydrateAssumptions`: se il numero si
+    // muove, il difetto e' li' e questo test non si aggiorna per zittirlo.
+    expect(attese.length).toBe(87);
+    const rows = assumptionRowsForSave(map, [2026, 2027], 7);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(Object.keys(row).sort()).toEqual(attese);
+  });
+
+  it("riscrive scenario_id e forecast_year sullo scenario e sull'anno correnti", () => {
+    // La mappa puo' portarsi dietro quelli di un'idratazione precedente.
+    const rows = assumptionRowsForSave(idratata(), [2026, 2027], 99);
+    expect(rows.map((r) => r.scenario_id)).toEqual([99, 99]);
+    expect(rows.map((r) => r.forecast_year)).toEqual([2026, 2027]);
+  });
+
+  it("un anno senza ipotesi non si manda: e' un anno di cui non si sa nulla, non un anno a zero", () => {
+    const rows = assumptionRowsForSave(idratata(), [2026, 2027, 2028], 7);
+    expect(rows.map((r) => r.forecast_year)).toEqual([2026, 2027]);
+    expect(assumptionRowsForSave({}, [2026], 7)).toEqual([]);
+  });
+
+  it("i valori sopravvivono al giro: un override non si perde per strada", () => {
+    const map = hydrateAssumptions(
+      [fixtureRow({ forecast_year: 2026, ce09_override: 12345, revenue_growth_pct: 8 })],
+      7,
+    );
+    const [row] = assumptionRowsForSave(map, [2026], 7);
+    expect(row.ce09_override).toBe(12345);
+    expect(row.revenue_growth_pct).toBe(8);
   });
 });

@@ -45,7 +45,13 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
   imposte: ["tax_rate", "tax_advances_paid", "tax_temporary_differences", "sp16e_growth_pct", "sp17e_growth_pct"],
 };
 
-/** Colonne che il motore non legge: idratate e rispedite, mai mostrate. */
+/**
+ * Colonne che il motore non legge e che nessun passo mostra. Le prime tre
+ * (`investments`, `receivables_short_growth_pct`, `payables_short_growth_pct`)
+ * sono fra le 87 chiavi idratate e rispedite dal salvataggio; le due
+ * `interest_rate_*` NON lo sono — esistono nel tipo ma non passano da
+ * `hydrateAssumptions`, quindi non fanno neppure il giro.
+ */
 export const DEAD_FIELDS = [
   "investments", "receivables_short_growth_pct", "payables_short_growth_pct",
   "interest_rate_receivables", "interest_rate_payables",
@@ -124,18 +130,79 @@ export function parseStoredStep(raw: string | null | undefined): WizardStepKey |
   return raw != null && (ORDER as string[]).includes(raw) ? (raw as WizardStepKey) : null;
 }
 
+export interface WizardChrome {
+  /** La barra fissa in fondo al wizard. */
+  bottomBar: boolean;
+  /** «Annulla» e «Indietro» resi in testa al passo, accanto al titolo. */
+  headerControls: boolean;
+  /** Il primario («Avanti» / «Salva e calcola») reso dal wizard. */
+  primaryButton: boolean;
+  /** La classe del contenitore: spazio in fondo solo se la barra fissa c'e'. */
+  containerClass: string;
+}
+
+/**
+ * Quali comandi rende il wizard, e dove.
+ *
+ * Misurato nel browser: dentro una pratica ci sono DUE barre ancorate a
+ * `bottom: 0`. Quella della pratica (`PraticaActionBar`, `sticky`, z-index
+ * 30) parte 4 px piu' in alto, e' 4 px piu' alta e sta sopra quella del
+ * wizard (`fixed`, z-index 10), coprendola per intero:
+ * `document.elementFromPoint` al centro del pulsante «Indietro» del wizard
+ * restituisce l'«Avanti» della pratica. Non e' un difetto estetico —
+ * l'utente vede scritto «Indietro» e premendo **esce dal passo Budget e
+ * avanza il percorso**, sulla via d'ingresso normale.
+ *
+ * Dentro la pratica il wizard quindi non rende la propria barra: il primario
+ * lo registra gia' in `usePrimaryAction`, e la barra della pratica lo mostra.
+ * «Annulla» e «Indietro» non hanno un equivalente li', quindi risalgono in
+ * testa al passo, accanto al titolo, dove nulla li copre. Fuori dalla pratica
+ * (navigazione diretta su `/budget`) la barra del wizard e' l'unica e resta.
+ *
+ * `containerClass` segue la stessa decisione: il `pb-24` serve solo a non
+ * farsi coprire l'ultima riga dalla barra `fixed` del wizard. La barra della
+ * pratica e' `sticky`, resta in flusso e non copre nulla.
+ */
+export function wizardChrome(inPratica: boolean): WizardChrome {
+  return inPratica
+    ? { bottomBar: false, headerControls: true, primaryButton: false, containerClass: "" }
+    : { bottomBar: true, headerControls: false, primaryButton: true, containerClass: "pb-24" };
+}
+
 /** La forma che interessa della risposta del bulk delle assumptions. */
 export interface BulkSaveResult {
   forecast_generated?: boolean;
   message?: string | null;
 }
 
-export type SaveOutcome =
-  | { ok: true }
-  | { ok: false; message: string; step: WizardStepKey };
+export interface SaveOutcome {
+  /** Il previsionale e' stato davvero generato. */
+  ok: boolean;
+  /** Il testo del toast, che sia di successo o di errore. */
+  message: string;
+  /** Il passo su cui portare l'utente, o `null` per restare dov'e'. */
+  step: WizardStepKey | null;
+  /**
+   * La rotta su cui atterrare (e il segnale per invalidare le query), oppure
+   * `null` se non si naviga.
+   *
+   * E' un CAMPO — e una stringa nullable, non un booleano — di proposito. La
+   * navigazione dopo un previsionale rifiutato (toast verde su una colonna
+   * Proiezione vuota) e' il difetto piu' costoso documentato in CLAUDE.md, ed
+   * era rimediabile togliendo un `return` dal componente senza far cadere un
+   * test. Ora la condizione sta qui, con la sua prova; e nel componente
+   * `router.push(esito.route)` **non compila** senza il suo guardiano,
+   * perche' `string | null` non e' una rotta.
+   */
+  route: string | null;
+}
+
+/** Dove si atterra dopo un previsionale generato: il CE previsionale, dove si
+ *  leggono e si ritoccano i numeri appena calcolati. */
+export const ROUTE_DOPO_CALCOLO = "/forecast/income";
 
 /**
- * Che cosa e' successo davvero al salvataggio.
+ * Che cosa e' successo davvero al salvataggio, e che cosa fare di conseguenza.
  *
  * `PUT /scenarios/{id}/assumptions` risponde **200 anche quando il
  * previsionale e' stato rifiutato** (CLAUDE.md § Previsionale): la verita' e'
@@ -148,9 +215,11 @@ export type SaveOutcome =
  * negazione, e trattarlo come tale bloccherebbe un salvataggio riuscito.
  */
 export function saveOutcome(result: BulkSaveResult | null | undefined): SaveOutcome {
-  if (!result || result.forecast_generated !== false) return { ok: true };
+  if (!result || result.forecast_generated !== false) {
+    return { ok: true, message: "Previsionale calcolato", step: null, route: ROUTE_DOPO_CALCOLO };
+  }
   const message = result.message?.trim() ? result.message.trim() : "Previsionale non generato";
-  return { ok: false, message, step: stepForErrorMessage(message) };
+  return { ok: false, message, step: stepForErrorMessage(message), route: null };
 }
 
 const ORDER = WIZARD_STEPS.map((s) => s.key);
@@ -163,4 +232,17 @@ export function nextStep(step: WizardStepKey): WizardStepKey | null {
 export function prevStep(step: WizardStepKey): WizardStepKey | null {
   const i = ORDER.indexOf(step);
   return i > 0 ? ORDER[i - 1] : null;
+}
+
+/**
+ * I passi dal primo fino a quello dato, compreso.
+ *
+ * Serve al ripristino: chi torna su uno scenario e riapre al passo 7 ci e'
+ * arrivato passando per gli altri sei. Segnare come visitato il solo passo
+ * ripristinato mostrerebbe sei pallini grigi accanto a un settimo attivo —
+ * la guida direbbe il contrario di dove si trova l'utente.
+ */
+export function stepsUpTo(step: WizardStepKey): WizardStepKey[] {
+  const i = ORDER.indexOf(step);
+  return i < 0 ? [ORDER[0]] : ORDER.slice(0, i + 1);
 }

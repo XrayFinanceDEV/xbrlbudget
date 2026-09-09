@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEAD_FIELDS, STEP_FIELDS, WIZARD_STEPS, groupWizardSteps, nextStep, parseStoredStep, prevStep,
+  DEAD_FIELDS, ROUTE_DOPO_CALCOLO, STEP_FIELDS, WIZARD_STEPS, groupWizardSteps, nextStep,
+  parseStoredStep, prevStep,
   primaryLabel, saveOutcome, stepFooterHint, stepForErrorMessage, stepLead, stepStorageKey,
-  type WizardStep,
+  stepsUpTo, wizardChrome, type WizardStep,
 } from "./budget-wizard-steps";
 
 describe("budget-wizard-steps", () => {
@@ -96,6 +97,51 @@ describe("parseStoredStep", () => {
   });
 });
 
+describe("stepsUpTo", () => {
+  it("porta tutti i passi fino a quello dato, compreso", () => {
+    expect(stepsUpTo("scenario")).toEqual(["scenario"]);
+    expect(stepsUpTo("costi")).toEqual(["scenario", "fatturato", "costi"]);
+    expect(stepsUpTo("imposte")).toHaveLength(7);
+  });
+  it("chi riapre al passo 7 non trova sei pallini grigi", () => {
+    // Segnare come visitato il solo passo ripristinato farebbe dire alla
+    // guida il contrario di dove si trova l'utente.
+    expect(stepsUpTo("imposte")).toContain("scenario");
+    expect(stepsUpTo("imposte")).toContain("circolante");
+  });
+});
+
+describe("wizardChrome", () => {
+  it("dentro la pratica il wizard NON rende la propria barra in fondo", () => {
+    // Due barre a bottom:0: quella della pratica (z-30, sticky) copre quella
+    // del wizard (z-10, fixed), e il click su «Indietro» finisce sull'«Avanti»
+    // del percorso. Misurato nel browser, non dedotto.
+    const c = wizardChrome(true);
+    expect(c.bottomBar).toBe(false);
+    expect(c.primaryButton).toBe(false);
+    // Ma Annulla e Indietro devono restare raggiungibili: risalgono in testa.
+    expect(c.headerControls).toBe(true);
+    // Nessuna barra `fixed` da compensare.
+    expect(c.containerClass).toBe("");
+  });
+  it("fuori dalla pratica la barra del wizard e' l'unica e resta", () => {
+    const c = wizardChrome(false);
+    expect(c.bottomBar).toBe(true);
+    expect(c.primaryButton).toBe(true);
+    expect(c.headerControls).toBe(false);
+    expect(c.containerClass).toBe("pb-24");
+  });
+  it("i comandi esistono sempre in esattamente un posto", () => {
+    for (const inPratica of [true, false]) {
+      const c = wizardChrome(inPratica);
+      // Mai due barre insieme, e mai zero posti in cui premere Indietro.
+      expect(c.bottomBar).toBe(!c.headerControls);
+      // Il `pb-24` esiste se e solo se c'e' una barra `fixed` da compensare.
+      expect(c.containerClass === "pb-24").toBe(c.bottomBar);
+    }
+  });
+});
+
 describe("saveOutcome", () => {
   it("un previsionale rifiutato torna 200: la verita' e' in forecast_generated", () => {
     const out = saveOutcome({
@@ -103,19 +149,32 @@ describe("saveOutcome", () => {
       message: "Unfunded financing requirement 84,120.00",
     });
     expect(out.ok).toBe(false);
-    if (out.ok) return;
     expect(out.message).toContain("Unfunded");
     expect(out.step).toBe("pregresso-nuovo");
   });
+  it("un rifiuto non naviga MAI: niente toast verde su una Proiezione vuota", () => {
+    // E' il difetto piu' costoso documentato in CLAUDE.md, e prima era
+    // rimediabile togliendo un `return` dal componente senza rompere nulla.
+    expect(saveOutcome({ forecast_generated: false, message: "x" }).route).toBeNull();
+    expect(saveOutcome({ forecast_generated: false }).route).toBeNull();
+  });
   it("un rifiuto senza ragione ha comunque un messaggio, e cade sull'ultimo passo", () => {
-    const out = saveOutcome({ forecast_generated: false, message: "   " });
-    expect(out).toEqual({ ok: false, message: "Previsionale non generato", step: "imposte" });
-    expect(saveOutcome({ forecast_generated: false }).ok).toBe(false);
+    expect(saveOutcome({ forecast_generated: false, message: "   " })).toEqual({
+      ok: false, message: "Previsionale non generato", step: "imposte", route: null,
+    });
+  });
+  it("si atterra sul CE previsionale, dove i numeri appena calcolati si leggono", () => {
+    expect(saveOutcome({ forecast_generated: true }).route).toBe(ROUTE_DOPO_CALCOLO);
+    expect(ROUTE_DOPO_CALCOLO).toBe("/forecast/income");
   });
   it("solo un false esplicito e' un rifiuto: un campo assente non e' una negazione", () => {
-    expect(saveOutcome({ forecast_generated: true }).ok).toBe(true);
-    expect(saveOutcome({}).ok).toBe(true);
-    expect(saveOutcome(null).ok).toBe(true);
-    expect(saveOutcome(undefined).ok).toBe(true);
+    const atteso = { ok: true, message: "Previsionale calcolato", step: null, route: ROUTE_DOPO_CALCOLO };
+    expect(saveOutcome({ forecast_generated: true })).toEqual(atteso);
+    expect(saveOutcome({})).toEqual(atteso);
+    expect(saveOutcome(null)).toEqual(atteso);
+    expect(saveOutcome(undefined)).toEqual(atteso);
+  });
+  it("un successo non sposta il passo: si resta dove si e', poi si naviga", () => {
+    expect(saveOutcome({ forecast_generated: true }).step).toBeNull();
   });
 });

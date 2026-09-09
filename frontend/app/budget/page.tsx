@@ -140,6 +140,13 @@ export default function BudgetPage() {
 
   const handleEditScenario = (scenario: BudgetScenario) => {
     setEditingScenario(scenario);
+    // `activeTab` ha due letture diverse a seconda del ramo di render qui
+    // sotto. Nello startup e' la tab vera di `ScenarioFormStartup` («info» o
+    // «ipotesi»); fuori dallo startup non esistono piu' tab — c'e' il
+    // percorso a sette passi, che tiene il proprio passo per conto suo — e
+    // conta solo che il valore sia DIVERSO da «list», cioe' «non sono
+    // sull'elenco». Qualunque valore non-"list" andrebbe: resta "info"
+    // perche' e' quello giusto per lo startup, che usa lo stesso handler.
     setActiveTab("info");
   };
 

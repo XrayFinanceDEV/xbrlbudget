@@ -237,6 +237,48 @@ def new_financing_schedule(loans, target_year):
     return raised, repayment, interest
 
 
+# ── Pregresso del circolante: le cinque masse di apertura ──
+# I cinque saldi che l'utente puo' scadenziare (spec lotto 2 §3.1). La massa di
+# apertura e' letta dal bilancio dell'anno base: e' l'importo che ESISTE GIA', da
+# tenere distinto da quello che il piano genera. Il lato breve e il lato lungo si
+# sommano, perche' e' il piano — non la classificazione dell'anno base — a dire
+# quando quel saldo si chiude.
+PREGRESSO_KEYS = (
+    "crediti_commerciali",
+    "debiti_fornitori",
+    "debiti_tributari",
+    "debiti_previdenziali",
+    "altri_debiti",
+)
+PREGRESSO_LABELS = {
+    "crediti_commerciali": "crediti commerciali",
+    "debiti_fornitori": "debiti verso fornitori",
+    "debiti_tributari": "debiti tributari",
+    "debiti_previdenziali": "debiti previdenziali",
+    "altri_debiti": "altri debiti",
+}
+
+
+def pregresso_opening_masses(getter: Callable[[str], Decimal]):
+    """Le cinque masse di apertura del pregresso, dall'anno base.
+
+    I crediti commerciali sono i soli crediti COMMERCIALI: crediti tributari e
+    imposte anticipate (`sp06e/f`, `sp07e/f`) dipendono dalla posizione fiscale,
+    non dalla rotazione, e restano fuori — esattamente come restano fuori dal DSO.
+    """
+    g = lambda field: getter(field) or ZERO
+    return {
+        "crediti_commerciali": (
+            g('sp06_crediti_breve') - g('sp06e_crediti_tributari_breve') - g('sp06f_imposte_anticipate_breve')
+            + g('sp07_crediti_lungo') - g('sp07e_crediti_tributari_lungo') - g('sp07f_imposte_anticipate_lungo')
+        ),
+        "debiti_fornitori": g('sp16d_debiti_fornitori_breve') + g('sp17d_debiti_fornitori_lungo'),
+        "debiti_tributari": g('sp16e_debiti_tributari_breve') + g('sp17e_debiti_tributari_lungo'),
+        "debiti_previdenziali": g('sp16f_debiti_previdenza_breve') + g('sp17f_debiti_previdenza_lungo'),
+        "altri_debiti": g('sp16g_altri_debiti_breve') + g('sp17g_altri_debiti_lungo'),
+    }
+
+
 # ── Runoff schedule: opening balance parcelled into year-by-year collections ──
 @dataclass(frozen=True)
 class RunoffYear:

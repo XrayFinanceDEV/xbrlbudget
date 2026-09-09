@@ -14,7 +14,8 @@ from database.models import (
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
     tfr_accrual_quota, tax_closing_position, deferred_tax_position,
-    new_financing_schedule,
+    new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
+    pregresso_opening_masses, runoff_schedule, validate_runoff,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -148,6 +149,64 @@ def prune_out_of_plan_forecast_years(db: Session, scenario_id: int, planned_year
     return len(stale)
 
 
+def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Dict[str, Any]]:
+    """Normalizza lo scadenziamento del pregresso in Decimal, o alza ValueError.
+
+    Tre controlli, tutti con messaggi in italiano perche' li legge l'utente:
+    la massa dichiarata deve coincidere con quella del bilancio base (±0,01 —
+    scadenziare un saldo che nel frattempo e' cambiato scadenzia un numero che
+    non esiste piu'), il piano non puo' andare oltre l'orizzonte, e la somma
+    degli importi non puo' superare la massa: incassare piu' di quanto c'e'
+    inventa cassa, quindi e' un errore, mai un troncamento silenzioso.
+
+    `pregresso` assente o vuoto restituisce `{}`: nessun piano, il motore usa
+    le formule di oggi intere, lato breve e lato lungo (spec §3.1).
+    """
+    if not pregresso:
+        return {}
+    cent = Decimal('0.01')
+    masses = pregresso_opening_masses(lambda field: getattr(base_bs, field, None))
+    out: Dict[str, Dict[str, Any]] = {}
+    for key in PREGRESSO_KEYS:
+        plan = pregresso.get(key)
+        if not plan:
+            continue
+        label = PREGRESSO_LABELS[key]
+        opening = Decimal(str(plan.get('opening') or 0))
+        if abs(opening - masses[key]) > cent:
+            raise ValueError(
+                f"Il saldo di apertura di {label} è cambiato "
+                f"({opening:.2f} → {masses[key]:.2f}): rivedi lo scadenziamento"
+            )
+        amounts = [Decimal(str(a or 0)) for a in plan.get('amounts') or []]
+        # L'inesigibile esiste solo sui crediti: su un debito non significa nulla.
+        writeoff = (
+            [Decimal(str(w or 0)) for w in plan.get('writeoff') or []]
+            if key == "crediti_commerciali" else []
+        )
+        if key == "debiti_tributari":
+            saldo = Decimal(str(plan.get('saldo') or 0))
+            rate = Decimal(str(plan.get('rateizzato') or 0))
+            if abs(saldo + rate - opening) > cent:
+                raise ValueError(
+                    f"Debiti tributari: saldo + rateizzato ({saldo + rate:.2f}) deve essere "
+                    f"uguale al saldo di apertura ({opening:.2f})"
+                )
+            # Il piano delle rate scadenzia il solo rateizzato: il saldo dell'anno
+            # precedente si paga nel primo anno per definizione (spec §3.2).
+            validate_runoff(rate, amounts, [], horizon, label)
+            acconto_pct = plan.get('acconto_pct')
+            out[key] = {
+                "opening": opening, "saldo": saldo, "rateizzato": rate, "amounts": amounts,
+                "writeoff": [],
+                "acconto_pct": Decimal(str(acconto_pct)) if acconto_pct is not None else Decimal('100'),
+            }
+        else:
+            validate_runoff(opening, amounts, writeoff, horizon, label)
+            out[key] = {"opening": opening, "amounts": amounts, "writeoff": writeoff}
+    return out
+
+
 class ForecastEngine:
     """
     Calculates forecasted financial statements based on budget assumptions
@@ -209,6 +268,30 @@ class ForecastEngine:
             for attr, field in cls._CE_RESIDUAL_OVERRIDE_ATTRS.items()
             if getattr(assumption, attr, None) is not None
         )
+
+    @staticmethod
+    def _pregresso_writeoff(pregresso, year_index: int) -> Decimal:
+        """L'inesigibile del piano dei crediti per l'anno `year_index` (0 se non c'e')."""
+        plan = (pregresso or {}).get("crediti_commerciali")
+        if not plan:
+            return Decimal('0')
+        writeoff = plan.get("writeoff") or []
+        return writeoff[year_index] if year_index < len(writeoff) else Decimal('0')
+
+    @classmethod
+    def _engine_forced_ce_fields(cls, pregresso, year_index: int) -> "frozenset[str]":
+        """Le righe CE che il MOTORE ha scritto di proposito in questo anno.
+
+        Valgono quanto un override dell'utente per `_normalize_income_statement_cents`:
+        `ce09d_svalutazione_crediti` e' l'ultimo dettaglio del gruppo `ce09`, quindi
+        senza questa dichiarazione il residuo di arrotondamento dell'aggregato ci
+        finirebbe sopra e l'inesigibile scadenziato risulterebbe di un centesimo
+        diverso da quello chiesto. Un anno senza inesigibile non forza nulla:
+        `ce09d` torna a essere il dettaglio di chiusura, come prima del lotto.
+        """
+        if cls._pregresso_writeoff(pregresso, year_index) > 0:
+            return frozenset({"ce09d_svalutazione_crediti"})
+        return frozenset()
 
     @classmethod
     def _normalize_income_statement_cents(
@@ -630,6 +713,20 @@ class ForecastEngine:
 
         try:
             financing_loans, use_detailed = self.assemble_financing(assumptions, source.base_bs)
+            # Lo scadenziamento del pregresso vive SOLO sulla riga del primo anno
+            # di piano, come `financing_loans[].opening_residual`: e' una
+            # fotografia dell'anno base, non un'ipotesi dell'anno N. Trovarlo
+            # altrove significa che il client lo ha duplicato o spostato, e
+            # applicarlo lo farebbe valere due volte.
+            for extra in assumptions[1:]:
+                if getattr(extra, 'pregresso', None):
+                    raise ValueError(
+                        "pregresso is allowed only in the first forecast year "
+                        "(lo scadenziamento vale solo sulla riga del primo anno)"
+                    )
+            pregresso = validate_pregresso(
+                getattr(assumptions[0], 'pregresso', None), source.base_bs, len(assumptions)
+            )
         except ValueError as e:
             if stop_on_error:
                 raise
@@ -640,7 +737,12 @@ class ForecastEngine:
         # base year, every later one reads the year just computed.
         prev_inc = source.base_inc
         prev_bs = source.base_bs
-        for assumption in assumptions:
+        # I `details` dell'anno precedente viaggiano con l'anno: la posizione
+        # tributaria a saldo + acconto paga in N il debito generato a fine N-1,
+        # e quel numero sta li'. `None` sul primo anno di piano.
+        prev_details: Optional[Dict[str, Any]] = None
+        horizon = len(assumptions)
+        for year_index, assumption in enumerate(assumptions):
             details: Dict[str, Any] = {}
             try:
                 forecast_inc = self._calculate_income_statement(
@@ -649,11 +751,16 @@ class ForecastEngine:
                     previous_inc=prev_inc,
                     previous_bs=prev_bs,
                     financing_loans=financing_loans,
+                    pregresso=pregresso,
+                    year_index=year_index,
                     details=details,
                 )
                 forecast_inc = self._normalize_income_statement_cents(
                     forecast_inc,
-                    forced_fields=self._forced_ce_residual_fields(assumption),
+                    forced_fields=(
+                        self._forced_ce_residual_fields(assumption)
+                        | self._engine_forced_ce_fields(pregresso, year_index)
+                    ),
                     details=details,
                 )
                 forecast_bs = self._calculate_balance_sheet(
@@ -665,6 +772,10 @@ class ForecastEngine:
                     year_offset=assumption.forecast_year - source.scenario.base_year,
                     financing_loans=financing_loans,
                     use_detailed_existing_schedule=use_detailed,
+                    pregresso=pregresso,
+                    year_index=year_index,
+                    horizon=horizon,
+                    prev_details=prev_details,
                     details=details,
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(forecast_bs)
@@ -697,6 +808,7 @@ class ForecastEngine:
             ))
             prev_inc = _DictView(forecast_inc)
             prev_bs = _DictView(forecast_bs)
+            prev_details = details
 
         return ForecastComputation(years=results)
 
@@ -842,6 +954,8 @@ class ForecastEngine:
         previous_inc,
         previous_bs=None,
         financing_loans=None,
+        pregresso=None,
+        year_index: int = 0,
         details=None,
     ) -> Dict:
         """
@@ -849,6 +963,10 @@ class ForecastEngine:
 
         `details`, se passato, riceve la scomposizione fisso/variabile di ce05 e
         ce06 (`None` su entrambe le quote quando la riga e' sotto override).
+
+        `pregresso` e' lo scadenziamento gia' normalizzato (validate_pregresso):
+        di questo prospetto riguarda solo l'inesigibile dei crediti dell'anno
+        `year_index`, che e' una svalutazione crediti (ce09d).
         """
         # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
         # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
@@ -981,7 +1099,14 @@ class ForecastEngine:
         else:
             ce09b = min(prev_ce09b + new_depr_tangible, avail_tangible)
         ce09c = assumption.ce09c_override if assumption.ce09c_override is not None else base_ce09c
-        ce09d = assumption.ce09d_override if assumption.ce09d_override is not None else base_ce09d
+        # L'inesigibile scadenziato e' una svalutazione crediti dell'anno: si somma
+        # alla svalutazione dell'anno base, che resta il portato di sempre. Non
+        # c'e' fondo svalutazione nel modello (sp14): si resta al netto, e la
+        # riduzione del residuo la fa runoff_schedule sullo stato patrimoniale.
+        ce09d = (
+            assumption.ce09d_override if assumption.ce09d_override is not None
+            else base_ce09d + self._pregresso_writeoff(pregresso, year_index)
+        )
 
         # Total depreciation: override or sum of sub-items
         if assumption.ce09_override is not None:
@@ -1112,6 +1237,10 @@ class ForecastEngine:
         year_offset: int = 1,
         financing_loans=None,
         use_detailed_existing_schedule: bool = False,
+        pregresso=None,
+        year_index: int = 0,
+        horizon: int = 1,
+        prev_details=None,
         details=None,
     ) -> Dict:
         """
@@ -1121,7 +1250,16 @@ class ForecastEngine:
 
         `details`, se passato, riceve i giorni di rotazione effettivamente
         applicati (`dso_applied`, `dio_applied`, `dpo_applied`) — quelli espliciti
-        dell'ipotesi o quelli dedotti dall'anno base.
+        dell'ipotesi o quelli dedotti dall'anno base — e lo stato del pregresso
+        saldo per saldo (`pregresso`, `pregresso_ignored`, `imposte`).
+
+        `pregresso` e' lo scadenziamento gia' normalizzato (validate_pregresso),
+        `year_index` l'anno di piano (0 = il primo) e `horizon` quanti anni ha il
+        piano: servono a runoff_schedule per dire quanto del pregresso resta
+        aperto e quanto di quel residuo e' dovuto l'anno DOPO (quindi a breve).
+        `prev_details` sono i `details` dell'anno precedente (`None` sul primo):
+        oggi nessun ramo li legge — li usera' la posizione tributaria a saldo +
+        acconto, che nell'anno N paga il debito generato a fine N-1.
         """
         D = Decimal
         ZERO = D('0')
@@ -1228,6 +1366,38 @@ class ForecastEngine:
             sp07 = sp07_non_deferred + sp07f
         else:
             sp07 = _prev('sp07_crediti_lungo') * long_growth
+
+        # ── PREGRESSO: il circolante e' generato + residuo (spec lotto 2 §3.1) ──
+        # `generated` conserva il lato breve PRIMA del residuo: e' il numero che il
+        # motore produceva senza piano, ed e' quello che i `details` dichiarano.
+        # Senza piano non si entra in nessuno di questi rami e i saldi restano
+        # identici al centesimo a quelli di prima del lotto.
+        pregresso_runoff: Dict[str, Any] = {}
+        generated: Dict[str, Decimal] = {'crediti_commerciali': sp06_trade}
+        crediti_plan = (pregresso or {}).get('crediti_commerciali')
+        if crediti_plan:
+            runoff_crediti = runoff_schedule(
+                crediti_plan['opening'], crediti_plan['amounts'], crediti_plan['writeoff'],
+                year_index, horizon,
+            )
+            pregresso_runoff['crediti_commerciali'] = runoff_crediti
+            # A breve: il generato dal DSO piu' il pregresso dovuto l'anno DOPO.
+            # Oltre: TUTTO pregresso — la % di crescita del lungo commerciale non
+            # si applica piu' (`mode: runoff` nei details lo dichiara). Le quote
+            # fiscali di sp07 (crediti tributari e imposte anticipate) restano
+            # fuori dal piano, esattamente come restano fuori dal DSO.
+            sp06_trade = sp06_trade + runoff_crediti.residual_short
+            sp06 = sp06_trade + sp06e + sp06f
+            sp07e_long = _prev('sp07e_crediti_tributari_lungo') * long_growth
+            if tax_difference_lines:
+                sp07_non_deferred = runoff_crediti.residual_long + sp07e_long
+                sp07 = sp07_non_deferred + sp07f
+            else:
+                sp07 = (
+                    runoff_crediti.residual_long + sp07e_long
+                    + _prev('sp07f_imposte_anticipate_lungo') * long_growth
+                )
+
         sp08 = _prev('sp08_attivita_finanziarie') * (D('1') + _sp_growth('sp08_growth_pct'))
         sp10 = _prev('sp10_ratei_risconti_attivi') * (D('1') + _sp_growth('sp10_growth_pct'))
         sp01 = _prev('sp01_crediti_soci') * (D('1') + _sp_growth('sp01_growth_pct'))
@@ -1357,6 +1527,42 @@ class ForecastEngine:
         else:
             sp16f = _prev('sp16f_debiti_previdenza_breve') * (D('1') + _sp_growth('sp16f_growth_pct'))
             sp17f = _prev('sp17f_debiti_previdenza_lungo') * (D('1') + _sp_growth('sp17f_growth_pct'))
+
+        # ── PREGRESSO: gli altri tre saldi, stessa regola dei crediti ──
+        # Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' tutto
+        # pregresso: `sp17d_growth_pct`, `sp17f_growth_pct` e `sp17g_growth_pct`
+        # non si applicano piu' al saldo che ha un piano, e i details lo dicono.
+        generated['debiti_fornitori'] = sp16d
+        generated['debiti_tributari'] = sp16e
+        generated['debiti_previdenziali'] = sp16f
+        generated['altri_debiti'] = sp16g
+        fornitori_plan = (pregresso or {}).get('debiti_fornitori')
+        if fornitori_plan:
+            runoff_fornitori = runoff_schedule(
+                fornitori_plan['opening'], fornitori_plan['amounts'], fornitori_plan['writeoff'],
+                year_index, horizon,
+            )
+            pregresso_runoff['debiti_fornitori'] = runoff_fornitori
+            sp16d = sp16d + runoff_fornitori.residual_short
+            sp17d = runoff_fornitori.residual_long
+        previdenziali_plan = (pregresso or {}).get('debiti_previdenziali')
+        if previdenziali_plan:
+            runoff_previdenziali = runoff_schedule(
+                previdenziali_plan['opening'], previdenziali_plan['amounts'],
+                previdenziali_plan['writeoff'], year_index, horizon,
+            )
+            pregresso_runoff['debiti_previdenziali'] = runoff_previdenziali
+            sp16f = sp16f + runoff_previdenziali.residual_short
+            sp17f = runoff_previdenziali.residual_long
+        altri_debiti_plan = (pregresso or {}).get('altri_debiti')
+        if altri_debiti_plan:
+            runoff_altri = runoff_schedule(
+                altri_debiti_plan['opening'], altri_debiti_plan['amounts'],
+                altri_debiti_plan['writeoff'], year_index, horizon,
+            )
+            pregresso_runoff['altri_debiti'] = runoff_altri
+            sp16g = sp16g + runoff_altri.residual_short
+            sp17g = runoff_altri.residual_long
 
         # A missing breakdown is unknown creditor type, not bank debt.  The source
         # gate catches this on the base year; retain a local guard for direct calls
@@ -1553,6 +1759,36 @@ class ForecastEngine:
         sp05_fields = ['sp05a_materie_prime', 'sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
                        'sp05d_prodotti_finiti', 'sp05e_acconti']
         sp05a, sp05b, sp05c, sp05d, sp05e = _alloc(sp05, sp05_fields)
+
+        # ── DETAILS DEL PREGRESSO: dichiarati SEMPRE, tutti e cinque i saldi ──
+        # Anche senza alcun piano, e anche a zero: a valle una chiave assente vale
+        # zero, quindi tacere equivarrebbe a dichiararsi puliti. `mode` distingue
+        # il saldo che segue le formule di oggi (`legacy`) da quello scadenziato
+        # (`runoff`); `opening` e' sempre la massa letta dal bilancio base, cosi'
+        # l'interfaccia sa che cosa c'e' da scadenziare anche prima del primo piano.
+        if details is not None:
+            masses = pregresso_opening_masses(_base)
+            details['pregresso'] = {}
+            for key in PREGRESSO_KEYS:
+                r = pregresso_runoff.get(key)
+                details['pregresso'][key] = {
+                    'opening': masses[key],
+                    'closed': r.closed if r else ZERO,
+                    'writeoff': r.writeoff if r else ZERO,
+                    'residual_short': r.residual_short if r else ZERO,
+                    'residual_long': r.residual_long if r else ZERO,
+                    'generated': generated.get(key, ZERO),
+                    'mode': 'runoff' if r else 'legacy',
+                }
+            details.setdefault('pregresso_ignored', [])
+            # La posizione tributaria a saldo + acconto e' del task successivo:
+            # finche' non c'e', il contratto vale gia' ma dice il vero — `manual`
+            # e zeri, non numeri inventati.
+            details.setdefault('imposte', {
+                'current_tax': ZERO, 'saldo_paid': ZERO, 'acconti_paid': ZERO,
+                'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
+                'opening_credit_left': ZERO, 'mode': 'manual',
+            })
 
         result = {
             'sp01_crediti_soci': sp01,

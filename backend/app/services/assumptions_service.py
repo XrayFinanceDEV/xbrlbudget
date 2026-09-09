@@ -60,21 +60,32 @@ def _normalize_numeric_fields(row: models.BudgetAssumptions) -> models.BudgetAss
     return row
 
 
-def validate_assumptions_list(assumptions_list: List[Dict[str, Any]], base_year: int) -> None:
+def validate_assumptions_list(assumptions_list: List[Dict[str, Any]], base_year: int) -> List[int]:
     """Stesso controllo per bulk e anteprima, chiamato PRIMA di qualunque lettura
     che dipenda dall'anno base: un corpo malformato e' un errore del chiamante e
     non dipende da cosa dice il database sull'anno base, quindi deve dare lo
     stesso messaggio ovunque arrivi.
+
+    Restituisce gli anni GIA' COERCIATI a int, nello stesso ordine di
+    assumptions_list. E' l'UNICO punto che fa la conversione: chi costruisce le
+    righe (build_assumption_row) o la lista degli anni del piano deve usare
+    questo valore, mai `assumption["forecast_year"]` grezzo. Coercire solo la
+    variabile locale del confronto qui sotto non basta -- un `forecast_year`
+    stringa che supera questa validazione arriverebbe comunque grezzo al motore
+    o a un `sorted()` a valle, con lo stesso TypeError che la validazione doveva
+    prevenire (N1: sul percorso bulk, con le righe gia' committate).
     """
     if not assumptions_list:
         raise ValueError("At least one assumption record is required")
-    years = []
+    years: List[int] = []
     for assumption in assumptions_list:
         if "forecast_year" not in assumption:
             raise ValueError("Each assumption must have a forecast_year")
-        # int(...) difensivo: un forecast_year non numerico deve dare un 400
-        # onesto (ValueError), non un TypeError dal confronto qui sotto.
-        forecast_year = int(assumption["forecast_year"])
+        raw_year = assumption["forecast_year"]
+        try:
+            forecast_year = int(raw_year)
+        except (TypeError, ValueError):
+            raise ValueError(f"forecast_year non valido: {raw_year!r}")
         if forecast_year <= base_year:
             raise ValueError(
                 f"Forecast year {forecast_year} must be greater than base year {base_year}"
@@ -82,9 +93,12 @@ def validate_assumptions_list(assumptions_list: List[Dict[str, Any]], base_year:
         years.append(forecast_year)
     if len(years) != len(set(years)):
         raise ValueError("Duplicate forecast years found in assumptions list")
+    return years
 
 
-def build_assumption_row(scenario_id: int, data: Dict[str, Any]) -> models.BudgetAssumptions:
+def build_assumption_row(
+    scenario_id: int, data: Dict[str, Any], forecast_year: int = None
+) -> models.BudgetAssumptions:
     """Una riga di ipotesi dal dict del client, con i default del bulk.
 
     L'istanza è TRANSITORIA: chi la vuole persistere la aggiunge alla sessione
@@ -93,7 +107,11 @@ def build_assumption_row(scenario_id: int, data: Dict[str, Any]) -> models.Budge
     """
     row = models.BudgetAssumptions(
         scenario_id=scenario_id,
-        forecast_year=data.get("forecast_year"),
+        # `forecast_year`, se dato, e' il valore GIA' COERCIATO da
+        # validate_assumptions_list (bulk e anteprima lo passano sempre): una
+        # stringa numerica dal client non deve mai finire grezza sulla colonna.
+        # Il fallback sul dict resta solo per un uso diretto/di test.
+        forecast_year=forecast_year if forecast_year is not None else data.get("forecast_year"),
         revenue_growth_pct=data.get("revenue_growth_pct", 0.0),
         other_revenue_growth_pct=data.get("other_revenue_growth_pct", 0.0),
         variable_materials_growth_pct=data.get("variable_materials_growth_pct", 0.0),
@@ -245,8 +263,10 @@ def bulk_upsert_assumptions(
 
     # 2-4. Validazione condivisa col percorso di anteprima (Task 9): stesso
     # corpo malformato -> stesso messaggio, ovunque arrivi. Valida PRIMA di
-    # qualunque lettura che dipenda dall'anno base.
-    validate_assumptions_list(assumptions_list, scenario.base_year)
+    # qualunque lettura che dipenda dall'anno base, e restituisce gli anni GIA'
+    # COERCIATI: il loop sotto e forecast_years_list usano quelli, mai il valore
+    # grezzo del dict (N1).
+    coerced_years = validate_assumptions_list(assumptions_list, scenario.base_year)
 
     # 5. Delete existing assumptions for this scenario
     db.query(models.BudgetAssumptions).filter(
@@ -257,11 +277,11 @@ def bulk_upsert_assumptions(
     assumptions_saved = 0
     forecast_years_list = []
 
-    for assumption_data in assumptions_list:
-        db_assumption = build_assumption_row(scenario_id, assumption_data)
+    for assumption_data, forecast_year in zip(assumptions_list, coerced_years):
+        db_assumption = build_assumption_row(scenario_id, assumption_data, forecast_year=forecast_year)
         db.add(db_assumption)
         assumptions_saved += 1
-        forecast_years_list.append(assumption_data["forecast_year"])
+        forecast_years_list.append(forecast_year)
 
     # 7. Gli anni fuori piano si potano QUI, non solo dentro il motore: le
     # ipotesi vengono committate qui sotto, mentre il motore puo' non girare

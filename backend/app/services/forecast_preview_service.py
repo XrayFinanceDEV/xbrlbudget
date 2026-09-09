@@ -31,11 +31,15 @@ def preview_forecast(db: Session, scenario_id: int, assumptions_list: List[Dict[
             "L'anteprima del previsionale copre solo scenari budget: "
             "l'infrannuale ha il proprio percorso (Confronto, Proiezione)."
         )
-    validate_assumptions_list(assumptions_list, scenario.base_year)
+    # validate_assumptions_list restituisce gli anni GIA' COERCIATI a int (N1):
+    # build_assumption_row li riceve espliciti, cosi' un forecast_year stringa
+    # nel corpo non arriva grezzo al sorted() qui sotto ne' al motore.
+    coerced_years = validate_assumptions_list(assumptions_list, scenario.base_year)
 
     source = load_forecast_source(db, scenario_id)          # ValueError -> 400 nella route
     rows = sorted(
-        (build_assumption_row(scenario_id, a) for a in assumptions_list),
+        (build_assumption_row(scenario_id, a, forecast_year=y)
+         for a, y in zip(assumptions_list, coerced_years)),
         key=lambda r: r.forecast_year,
     )
     # Le righe sono transitorie: MAI db.add. Il motore le legge con getattr.

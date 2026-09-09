@@ -39,23 +39,26 @@ def test_preview_of_saved_rows_equals_persisted_and_writes_nothing(monkeypatch):
             out = budget_scenarios.preview_forecast_route(
                 company_id, sc.id, request={"assumptions": [dict(r, revenue_growth_pct=40) for r in rows]},
                 user_id=USER, db=db)
+            # I3: l'asserzione di forma corre SUBITO dopo la chiamata, PRIMA di
+            # qualunque query — una query fa autoflush e ripulisce db.dirty, e
+            # a quel punto una mutazione in memoria e' gia' scritta nel DB
+            # (misurato: dirty=1 subito dopo preview, dirty=0 dopo una sola
+            # query, col valore gia' nel DB). Mettere l'asserzione dopo una
+            # query non discrimina piu' nulla.
+            assert not db.new and not db.dirty and not db.deleted
             assert out["error"] is None
             assert [y["year"] for y in out["forecast_years"]] == [2027, 2028]
             assert _counts(db) == before
             assert [a.revenue_growth_pct for a in db.query(models.BudgetAssumptions).order_by(models.BudgetAssumptions.forecast_year)] == saved_pct
-            # I3: non solo "nessuna riga in piu'/in meno" (che un mutare-sul-posto
-            # di una riga PERSISTITA supererebbe comunque) — nessuna riga sporca,
-            # nessuna riga nuova pendente, nessuna riga cancellata.
-            assert not db.new and not db.dirty and not db.deleted
             # con le righe salvate, l'anteprima coincide col persistito
             same = budget_scenarios.preview_forecast_route(
                 company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            assert not db.new and not db.dirty and not db.deleted
             for y, (_, bs, ce) in zip(same["forecast_years"], read_forecast_maps(db, sc.id)):
                 assert Decimal(str(y["balance_sheet"]["sp09_disponibilita_liquide"])) == bs["sp09_disponibilita_liquide"]
                 assert Decimal(str(y["income_statement"]["ce01_ricavi_vendite"])) == ce["ce01_ricavi_vendite"]
             for key in ("ce05_fixed", "ce05_variable", "ce06_fixed", "ce06_variable", "dso_applied", "dio_applied", "dpo_applied"):
                 assert key in same["forecast_years"][0]["details"]
-            assert not db.new and not db.dirty and not db.deleted
     finally:
         engine.dispose()
 
@@ -176,5 +179,78 @@ def test_bad_input_is_400_and_foreign_scenario_is_404(monkeypatch):
                 budget_scenarios.preview_forecast_route(
                     company_id, sc.id, request={"assumptions": rows}, user_id="someone-else", db=db)
             assert e.value.status_code == 404
+    finally:
+        engine.dispose()
+
+
+def test_forecast_year_convertible_string_succeeds_on_both_endpoints(monkeypatch):
+    """N1: una stringa numerica convertibile ("2027") deve funzionare come
+    l'intero, su entrambi gli endpoint. La coercizione gira una volta sola
+    dentro validate_assumptions_list, e il valore coerciato e' quello che
+    build_assumption_row scrive sulla colonna — mai la stringa grezza, che
+    altrimenti sopravvive fino al sorted() dell'anteprima o alla lista degli
+    anni del bulk e li fa fallire piu' a valle (con, sul bulk, le righe gia'
+    committate: la regressione che questo round corregge)."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            sc = budget_scenarios.create_budget_scenario(
+                company_id, BudgetScenarioCreate(company_id=company_id, name="p", base_year=2026, scenario_type="budget"),
+                user_id=USER, db=db)
+            rows = [{"forecast_year": "2027", "revenue_growth_pct": 5}]
+
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            assert out["error"] is None
+            assert [y["year"] for y in out["forecast_years"]] == [2027]
+
+            res = budget_scenarios.bulk_upsert_assumptions(
+                company_id, sc.id, request={"assumptions": rows, "auto_generate": True}, user_id=USER, db=db)
+            assert res["forecast_generated"] is True
+            saved = db.query(models.BudgetAssumptions).filter(
+                models.BudgetAssumptions.scenario_id == sc.id).all()
+            assert len(saved) == 1
+            assert saved[0].forecast_year == 2027
+            assert isinstance(saved[0].forecast_year, int)  # non la stringa grezza
+    finally:
+        engine.dispose()
+
+
+def test_forecast_year_not_convertible_is_400_and_writes_nothing_on_both_endpoints(monkeypatch):
+    """N1: un forecast_year che non si converte a intero e' un 400 con
+    messaggio, mai un 500 — e non scrive nulla, nemmeno le righe valide dello
+    stesso corpo: la validazione gira TUTTA prima di qualunque scrittura, cosi'
+    un corpo misto (una riga buona + una con "abc") non lascia il bulk a meta'
+    con la tabella scritta e la risposta che dice il contrario."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            sc = budget_scenarios.create_budget_scenario(
+                company_id, BudgetScenarioCreate(company_id=company_id, name="p", base_year=2026, scenario_type="budget"),
+                user_id=USER, db=db)
+            rows = [
+                {"forecast_year": 2027, "revenue_growth_pct": 5},
+                {"forecast_year": "abc", "revenue_growth_pct": 5},
+            ]
+
+            with pytest.raises(HTTPException) as e:
+                budget_scenarios.preview_forecast_route(
+                    company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            assert e.value.status_code == 400
+            assert db.query(models.BudgetAssumptions).filter(
+                models.BudgetAssumptions.scenario_id == sc.id).count() == 0
+
+            with pytest.raises(HTTPException) as e:
+                budget_scenarios.bulk_upsert_assumptions(
+                    company_id, sc.id, request={"assumptions": rows, "auto_generate": True}, user_id=USER, db=db)
+            assert e.value.status_code == 400
+            assert db.query(models.BudgetAssumptions).filter(
+                models.BudgetAssumptions.scenario_id == sc.id).count() == 0
+            assert db.query(models.ForecastYear).filter(
+                models.ForecastYear.scenario_id == sc.id).count() == 0
     finally:
         engine.dispose()

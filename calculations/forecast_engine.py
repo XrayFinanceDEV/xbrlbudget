@@ -1489,6 +1489,41 @@ class ForecastEngine:
         # Long-term trade payables
         sp17d = _prev('sp17d_debiti_fornitori_lungo') * (D('1') + _sp_growth('sp17d_growth_pct'))
 
+        # ── SCORPORO: il generato nasce dalla base AL NETTO della massa a pregresso ──
+        def _net_of_pregresso(value, key, short_field, *, from_base=False):
+            """La sorgente del generato, tolto il pregresso che gia' contiene.
+
+            Un saldo senza driver (previdenziali, altri debiti) si genera come
+            `prev × (1+%)`: quel `prev` e' il saldo dell'anno prima, che dopo il
+            primo anno di piano CONTIENE il residuo del pregresso. Farlo crescere
+            cosi' com'e' rimetterebbe dentro dalla finestra il pregresso appena
+            pagato — il saldo resterebbe fermo dopo aver pagato quasi tutto — ed e'
+            l'esatto contrario di cio' che il piano dichiara. Il generato quindi
+            parte dalla base scorporata della massa dichiarata, e il residuo lo
+            tiene il kernel: `saldo = generato + residuo`, senza sovrapposizioni.
+
+            Il pregresso dentro la sorgente e' l'intero campo dell'anno base
+            (`validate_pregresso` impone che la massa dichiarata sia quella del
+            bilancio base, quindi al primo anno il campo e' pregresso al 100%), o
+            il `residual_short` dell'anno precedente per gli anni successivi.
+            `from_base=True` per le formule ancorate all'anno base invece che al
+            precedente (previdenza agganciata al personale).
+
+            Senza piano restituisce il valore tale e quale: nessun ramo nuovo,
+            nessun `max()` in mezzo, quindi gli stessi numeri di sempre.
+            """
+            plan = (pregresso or {}).get(key)
+            if not plan:
+                return value
+            if from_base or year_index == 0:
+                carried = _base(short_field)
+            else:
+                carried = runoff_schedule(
+                    plan['opening'], plan['amounts'], plan['writeoff'],
+                    year_index - 1, horizon,
+                ).residual_short
+            return max(ZERO, value - carried)
+
         # --- OTHER OPERATING DEBTS: carry forward with optional growth % ---
         sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
 
@@ -1509,7 +1544,9 @@ class ForecastEngine:
                 tax_advances,
             )
             sp06 = sp06_trade + sp06e + sp06f
-        sp16g = _prev('sp16g_altri_debiti_breve') * (D('1') + _sp_growth('sp16g_growth_pct'))
+        sp16g = _net_of_pregresso(
+            _prev('sp16g_altri_debiti_breve'), 'altri_debiti', 'sp16g_altri_debiti_breve',
+        ) * (D('1') + _sp_growth('sp16g_growth_pct'))
         sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
         sp17g = _prev('sp17g_altri_debiti_lungo') * (D('1') + _sp_growth('sp17g_growth_pct'))
 
@@ -1522,16 +1559,28 @@ class ForecastEngine:
             base_ce08 = (getattr(base_inc, 'ce08_costi_personale', ZERO) or ZERO)
             fc_ce08 = (forecast_inc.get('ce08_costi_personale', ZERO) or ZERO)
             pers_factor = (fc_ce08 / base_ce08) if base_ce08 > 0 else D('1')
-            sp16f = _base('sp16f_debiti_previdenza_breve') * pers_factor
+            sp16f = _net_of_pregresso(
+                _base('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
+                'sp16f_debiti_previdenza_breve', from_base=True,
+            ) * pers_factor
             sp17f = _base('sp17f_debiti_previdenza_lungo') * pers_factor
         else:
-            sp16f = _prev('sp16f_debiti_previdenza_breve') * (D('1') + _sp_growth('sp16f_growth_pct'))
+            sp16f = _net_of_pregresso(
+                _prev('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
+                'sp16f_debiti_previdenza_breve',
+            ) * (D('1') + _sp_growth('sp16f_growth_pct'))
             sp17f = _prev('sp17f_debiti_previdenza_lungo') * (D('1') + _sp_growth('sp17f_growth_pct'))
 
         # ── PREGRESSO: gli altri tre saldi, stessa regola dei crediti ──
         # Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' tutto
         # pregresso: `sp17d_growth_pct`, `sp17f_growth_pct` e `sp17g_growth_pct`
         # non si applicano piu' al saldo che ha un piano, e i details lo dicono.
+        # I due saldi senza driver (previdenziali, altri debiti) hanno gia' la
+        # sorgente scorporata da `_net_of_pregresso`: il loro `generated` qui sotto
+        # e' quindi cio' che il piano genera DAVVERO di nuovo, non il vecchio saldo
+        # ripresentato. Fornitori e crediti no: il loro generato non e' uno stock
+        # riportato ma la conversione di un flusso (acquisti × DPO, ricavi × DSO),
+        # e scorporarlo direbbe che l'azienda smette di comprare e di vendere.
         generated['debiti_fornitori'] = sp16d
         generated['debiti_tributari'] = sp16e
         generated['debiti_previdenziali'] = sp16f

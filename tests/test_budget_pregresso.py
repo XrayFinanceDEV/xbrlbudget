@@ -160,9 +160,12 @@ def _split_base_payables(db, company_id):
 
 
 def test_payables_previdenza_and_altri_debiti_follow_the_same_rule(monkeypatch):
-    """Gli altri tre saldi: il lato breve e' generato + dovuto l'anno dopo, il
-    lato oltre e' TUTTO pregresso — e la sua percentuale di crescita (+50% qui)
-    non si applica piu'. La massa di apertura somma i due lati dell'anno base."""
+    """Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' TUTTO
+    pregresso (la % di crescita oltre viene ignorata). E il GENERATO dei due saldi
+    senza driver nasce dalla base SCORPORATA della massa dichiarata: se il piano
+    copre l'intero saldo — e `validate_pregresso` impone che lo copra — il generato
+    e' zero e la voce scende man mano che il piano la paga. Fornitori invece
+    genera da un flusso (acquisti × DPO) e non si scorpora."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -181,27 +184,90 @@ def test_payables_previdenza_and_altri_debiti_follow_the_same_rule(monkeypatch):
             sc1, _ = _run(db, company_id, planned)
             (_, bs0a, _), (_, bs1a, _) = read_forecast_maps(db, sc0.id)
             (_, bs0b, _), (_, bs1b, _) = read_forecast_maps(db, sc1.id)
-            # L'ultimo campo dice se il GENERATO di quel saldo si riporta dall'anno
-            # prima (`prev × (1+%)`, spec §3.1) invece di rinascere da una
-            # rotazione: in quel caso l'anno 2 riparte da un anno 1 che gia'
-            # conteneva il residuo a breve, e il suo lato breve resta piu' alto
-            # della linea di base di quell'importo. E' la "formula di oggi"
-            # applicata all'anno di piano, non un doppio conteggio del piano:
-            # il residuo dell'anno 2 vale zero e non viene aggiunto una seconda volta.
-            for short, long_, due_next, residual_long, carried in (
-                ("sp16d_debiti_fornitori_breve", "sp17d_debiti_fornitori_lungo", "20000.00", "15000.00", False),
-                ("sp16f_debiti_previdenza_breve", "sp17f_debiti_previdenza_lungo", "5000.00", "5000.00", True),
-                ("sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo", "4000.00", "4000.00", True),
+            # senza piano: i due saldi senza driver si riportano interi e il lato
+            # oltre cresce del 50% — e' il percorso di sempre, la linea di base
+            assert (bs0a["sp16f_debiti_previdenza_breve"], bs0a["sp17f_debiti_previdenza_lungo"]) == (D("25000.00"), D("15000.00"))
+            assert (bs0a["sp16g_altri_debiti_breve"], bs0a["sp17g_altri_debiti_lungo"]) == (D("15000.00"), D("7500.00"))
+            # con piano, numeri calcolati a mano:
+            #   fornitori   115.000, piano 80.000 + 20.000 → residuo 35.000 (20.000
+            #               dovuti l'anno dopo, 15.000 oltre); il generato resta il
+            #               DPO sull'anno base (acquisti 350.000 invariati → 100.000)
+            #   previdenz.   35.000, piano 25.000 + 5.000 → residuo 10.000 (5.000 e 5.000),
+            #               generato 0 perche' la massa dichiarata e' l'intero saldo
+            #   altri        20.000, piano 12.000 + 4.000 → residuo 8.000 (4.000 e 4.000),
+            #               generato 0 per la stessa ragione
+            for short, long_, y1_short, y1_long, y2_short, y2_long in (
+                ("sp16d_debiti_fornitori_breve", "sp17d_debiti_fornitori_lungo",
+                 "120000.00", "15000.00", "100000.00", "15000.00"),
+                ("sp16f_debiti_previdenza_breve", "sp17f_debiti_previdenza_lungo",
+                 "5000.00", "5000.00", "0.00", "5000.00"),
+                ("sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo",
+                 "4000.00", "4000.00", "0.00", "4000.00"),
             ):
-                # anno 1: generato + quanto e' dovuto l'anno dopo a breve, il resto oltre
-                assert bs0b[short] == bs0a[short] + D(due_next)
-                assert bs0b[long_] == D(residual_long)
-                assert bs0a[long_] != D(residual_long)      # senza piano cresceva del 50%
-                # anno 2: il residuo non scadenziato e' tutto oltre (non c'e' un anno dopo)
-                assert bs1b[short] == bs1a[short] + (D(due_next) if carried else D("0"))
-                assert bs1b[long_] == D(residual_long)
+                assert (bs0b[short], bs0b[long_]) == (D(y1_short), D(y1_long))
+                assert (bs1b[short], bs1b[long_]) == (D(y2_short), D(y2_long))
+            # e il saldo dei due senza driver SCENDE, invece di restare fermo:
+            # 35.000 → 10.000 → 5.000 dopo aver pagato 25.000 e poi 5.000
+            assert bs0b["sp16f_debiti_previdenza_breve"] + bs0b["sp17f_debiti_previdenza_lungo"] == D("10000.00")
+            assert bs1b["sp16f_debiti_previdenza_breve"] + bs1b["sp17f_debiti_previdenza_lungo"] == D("5000.00")
             assert bs0b["_total_assets"] == bs0b["_total_liabilities"]
             assert bs1b["_total_assets"] == bs1b["_total_liabilities"]
+    finally:
+        engine.dispose()
+
+
+def test_a_plan_that_schedules_nothing_neither_creates_nor_destroys_mass(monkeypatch):
+    """Il momento in cui il piano parte: niente scadenziato, quindi il generato
+    scorporato e' zero e il residuo e' l'intera massa. Il saldo della voce vale
+    ancora esattamente il saldo dell'anno base — solo, tutto oltre 12 mesi, perche'
+    nessun importo risulta dovuto l'anno dopo (spec §3.3)."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            _split_base_payables(db, company_id)
+            rows = [dict(forecast_year=y, sp16f_growth_pct=30, sp17f_growth_pct=30, **MANUAL_TAX)
+                    for y in (2027, 2028)]
+            rows[0]["pregresso"] = {"debiti_previdenziali": {"opening": 35000, "amounts": []}}
+            sc, _ = _run(db, company_id, rows)
+            for _, bs, _ in read_forecast_maps(db, sc.id):
+                assert bs["sp16f_debiti_previdenza_breve"] == D("0.00")     # generato 35.000 - 35.000
+                assert bs["sp17f_debiti_previdenza_lungo"] == D("35000.00")  # residuo intero
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            for year in out["forecast_years"]:
+                saldo = year["details"]["pregresso"]["debiti_previdenziali"]
+                assert saldo["mode"] == "runoff"
+                assert saldo["opening"] == D("35000.00")
+                assert saldo["generated"] == D("0")
+                assert saldo["closed"] == D("0") and saldo["residual_long"] == D("35000.00")
+    finally:
+        engine.dispose()
+
+
+def test_the_scorporo_also_applies_to_previdenza_scaled_on_personnel(monkeypatch):
+    """L'aggancio al costo del personale e' pur sempre uno STOCK riportato, solo
+    ancorato all'anno base invece che all'anno prima: se quello stock e' dichiarato
+    a pregresso, moltiplicarlo per il fattore del personale lo rimetterebbe dentro
+    ogni anno. Anche li' il generato parte dalla base scorporata."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            _split_base_payables(db, company_id)
+            rows = [dict(forecast_year=y, personnel_growth_pct=20,
+                         previdenza_scales_with_personnel=True, **MANUAL_TAX)
+                    for y in (2027, 2028)]
+            without = _run(db, company_id, [dict(r) for r in rows])[0]
+            (_, bs_no_plan, _), _ = read_forecast_maps(db, without.id)
+            assert bs_no_plan["sp16f_debiti_previdenza_breve"] == D("30000.00")   # 25.000 × 1,2
+            rows[0]["pregresso"] = {"debiti_previdenziali": {"opening": 35000, "amounts": [25000, 5000]}}
+            sc, _ = _run(db, company_id, rows)
+            (_, bs0, _), (_, bs1, _) = read_forecast_maps(db, sc.id)
+            assert (bs0["sp16f_debiti_previdenza_breve"], bs0["sp17f_debiti_previdenza_lungo"]) == (D("5000.00"), D("5000.00"))
+            assert (bs1["sp16f_debiti_previdenza_breve"], bs1["sp17f_debiti_previdenza_lungo"]) == (D("0.00"), D("5000.00"))
     finally:
         engine.dispose()
 

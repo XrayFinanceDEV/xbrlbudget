@@ -995,6 +995,24 @@ Tabella: `Voce | Saldo {baseYear} | anno… | Residuo`. Per riga: `PREGRESSO_LAB
 
 **Modello:** sonnet · **Ondata:** C (dopo 4, 6)
 
+**Due decisioni prese dopo il Task 6 (2026-09-09), da rispettare alla lettera.**
+
+1. **`sp17e_growth_pct` non si mostra sulla via automatica** (Ruling 19). Dal Task 6 quel saldo
+   lo governano le imposte, quindi la percentuale e' **inerte**: oggi il campo e' esposto come
+   «Debiti tributari oltre %» in `frontend/lib/budget-imposte-step.ts:74`, l'utente lo imposta e
+   non succede nulla, **senza errore**. E' la classe di difetto peggiore che questo repo conosca.
+   Sulla via automatica il controllo sparisce, con una riga che dice perche'; resta attivo solo
+   sulla via manuale (`manual_tax_position`), dove governa davvero qualcosa. Lo stesso vale per
+   `sp16e_growth_pct` se e' nelle stesse condizioni: verificarlo, non presumerlo.
+
+2. **Il credito tributario compensa il saldo e basta** (decisione del proprietario, fra tre
+   opzioni). `used = min(opening_credit, saldo_due)` nel kernel resta com'e', e **non** va
+   aggiunta una spiegazione a schermo: il proprietario ha scartato esplicitamente anche
+   quell'opzione. Conseguenza misurata dall'implementatore del Task 6, da conoscere senza
+   correggerla: su un fixture piatto `sp06e` resta a 33.200 per tutti gli anni di piano. Se
+   qualcuno in futuro la segnala come difetto, non lo e': e' una scelta, ed e' registrata qui.
+
+
 **Files:**
 - Modify: `frontend/components/budget/wizard/steps/StepImposte.tsx`, `frontend/lib/budget-preview-rows.ts` (+ test)
 

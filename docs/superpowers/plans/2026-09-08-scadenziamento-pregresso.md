@@ -733,6 +733,16 @@ Alla fine del calcolatore, prima del `return`:
 
 (`generated` è un dict riempito dove ogni saldo viene calcolato.) Le imposte popolano la loro parte nel Task 6; **in questo task** `details['imposte']` va comunque dichiarato con `mode: 'manual'` e zeri, così il contratto vale già.
 
+**Vincolo aggiunto in corso d'opera (2026-09-09), e non è una raccomandazione.** Il Task 3 ha reso
+`pregresso`, `imposte` e `pregresso_ignored` campi **obbligatori** di `ForecastYearDetails` in
+`frontend/types/api.ts` (commit `eb73cb2`). Da adesso il tipo promette più di quanto l'API
+mantenga, e a raddrizzarlo è questo task: il motore deve dichiarare **tutte e tre le chiavi per
+ogni anno, sempre** — anche quando non c'è alcun piano, anche vuote, anche a zero. Serve un test
+che lo tenga fermo su uno scenario **senza** `pregresso`: le tre chiavi ci sono, `pregresso` è un
+dict vuoto o con i saldi a zero, `pregresso_ignored` è una lista vuota, `imposte` ha
+`mode: 'manual'`. Senza quel test, al merge il tipo TypeScript è una bugia e nessuno se ne
+accorge: una chiave assente, a valle, vale zero — quindi tacere equivale a dichiararsi puliti.
+
 - [ ] **Step 6: `ce09d` in `_calculate_income_statement`**
 
 Firma `(..., pregresso=None, year_index=0, details=None)`; a `:743`:

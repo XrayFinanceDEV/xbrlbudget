@@ -1394,10 +1394,17 @@ Due fatti misurati sul motore (versione `6b7d7f3`) che inquadrano il task:
 3. Formula, identica nella forma a quella dei previdenziali: `valore = base_della_voce × fattore`,
    dove il `base_della_voce` e' quello dell'**anno base**, non dell'anno precedente. Non si
    compone.
-4. **Composizione con il pregresso (Ruling 16).** Se la voce ha anche un piano di scadenziamento,
-   la parte generata nasce **al netto** della massa dichiarata: `(base − massa) × fattore`, piu' il
-   residuo del piano. Le due regole devono valere insieme, e serve un test che le eserciti
-   entrambe sulla stessa voce.
+4. **Una voce con un piano di scadenziamento NON e' indicizzabile** (Ruling 17, deciso dopo il
+   round 1 del Task 5). Dichiarare un piano significa «questo saldo lo sto estinguendo»;
+   dichiarare un driver significa «questo saldo si rigenera col volume». Sono due affermazioni
+   contraddittorie sulla stessa voce, e il motore non ne inventa una terza. La chiave di
+   indicizzazione su una voce con piano viene **ignorata e dichiarata** in
+   `details['indicizzazione_ignorata']`, esattamente come per i tributari e le banche del punto 6.
+   Motivo tecnico, misurato: `validate_pregresso` impone che l'apertura dichiarata coincida col
+   bilancio base, quindi per una voce con piano `base − massa` e' **sempre** zero — un fattore
+   moltiplicato per zero resta zero, e l'indicizzazione sarebbe codice morto che l'utente crede
+   attivo. L'interfaccia deve impedire di scegliere le due cose insieme, non lasciarle convivere
+   e poi ignorarne una.
 5. **`details` sempre dichiarati**, anche vuoti: `details['indicizzazione']` mappa ogni voce
    indicizzata al driver usato e al fattore applicato, e dichiara le voci per cui il driver era
    **degenere** (denominatore a zero) e si e' ricaduti su costante. Una chiave assente, a valle,
@@ -1414,9 +1421,10 @@ Due fatti misurati sul motore (versione `6b7d7f3`) che inquadrano il task:
 
 - [ ] **Step 1: I test che falliscono** — (a) voce indicizzata a `ricavi` con ricavi +20%: il
   saldo vale `base × 1,2`, non `prev × (1+%)`; (b) driver degenere (`ce01` base a zero): la voce
-  resta costante e `details` lo dichiara; (c) voce indicizzata **e** con piano di pregresso:
-  `(base − massa) × fattore + residuo`, numeri calcolati a mano; (d) chiave su `sp16e`: ignorata
-  e dichiarata; (e) **parita'**: nessun `sp_indexing` ⇒ ogni numero identico al centesimo.
+  resta costante e `details` lo dichiara; (c) voce indicizzata **e** con piano di pregresso: il
+  driver e' ignorato, la voce si estingue col piano, e `details['indicizzazione_ignorata']` la
+  nomina; (d) chiave su `sp16e`: ignorata e dichiarata; (e) **parita'**: nessun `sp_indexing` ⇒
+  ogni numero identico al centesimo.
 - [ ] **Step 2: Verificare che falliscano** — e, come i task 4, 5 e 11 di questo lotto, provare
   che le asserzioni **discriminino**: rompere a mano il ramo su una copia di lavoro del file
   (backup fuori dal repo, ripristino con `cp`, **mai** un `git checkout`) e misurare che fallisca

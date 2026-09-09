@@ -756,7 +756,12 @@ Firma `(..., pregresso=None, year_index=0, details=None)`; a `:743`:
 **Modello:** opus · **Ondata:** B (dopo 2, 3, 5; stesso file del Task 5)
 
 **Files:**
-- Modify: `calculations/forecast_engine.py` (`_calculate_balance_sheet:1069-1091`)
+- Modify: `calculations/forecast_engine.py` — il blocco delle imposte dentro
+  `_calculate_balance_sheet` e' a **`:1244-1258`** (`tax_advances`, la chiamata a
+  `tax_closing_position`, `sp06e`/`sp16e`). L'aliquota e la scomposizione stanno in
+  `_tax_components` (`:718-750`). *(Il piano diceva `:1069-1091`: numero di riga di `main`
+  prima del lotto 1, che ha spostato 398 righe in questo file. Quel tratto e' `_sp_growth`
+  e il preambolo del circolante — il posto sbagliato. Corretto in pre-volo, 2026-09-09.)*
 - Test: `tests/test_budget_pregresso.py` (sezione imposte)
 
 - [ ] **Step 1: Test**
@@ -959,3 +964,236 @@ Tabella: `Voce | Saldo {baseYear} | anno… | Residuo`. Per riga: `PREGRESSO_LAB
 
 - [ ] Server accesi (backend riavviato). Perimetro: scenario esistente senza piano → SP Prev. identico a prima **tranne** `sp16e`/`sp06e`/cassa (imposte), da spiegare nel report; crediti 80/20; fornitori con residuo oltre l'orizzonte; tributari 3 rate → `sp17e`; inesigibile → `ce09d` in CE Prev.; errore di massa → messaggio onesto sia in anteprima sia al salvataggio; rendiconto: il flusso del pregresso compare nel circolante.
 - [ ] Rilievi → fix con test → commit; merge del branch.
+
+---
+
+## Ondata E — quattro difetti assegnati in pre-volo (2026-09-09)
+
+Questi quattro task **non c'erano** nel piano originale. Due li aveva assegnati il proprietario a
+questo lotto (spec §11); due li ha trovati il banco di sensibilità (`scripts/sensibilita_ipotesi.py`)
+alla fine del lotto 1. Il perché di ciascuno sta nella scansione di pre-volo, in
+`.superpowers/sdd/2026-09-08-scadenziamento-pregresso/progress.md`.
+
+A differenza dei task 1-10, questi sono **correzioni di difetto**: il piano dà il contratto e i
+test, non la trascrizione. L'implementatore legge il codice e decide la forma, dentro il contratto.
+
+**Ordine:** il **Task 11 va prima del Task 5** — il lotto scrive `ce09d` e la normalizzazione oggi
+lo sovrascrive. Gli altri tre sono indipendenti da 1-10.
+
+---
+
+### Task 11: Un override di dettaglio sopravvive alla normalizzazione
+
+**Modello:** sonnet · **Ondata:** A (prima del Task 5)
+
+**Files:**
+- Modify: `calculations/forecast_engine.py` — `_normalize_income_statement_cents` (`:171-210`),
+  il suo unico chiamante (`:572`), e il punto di `_calculate_income_statement` che conosce gli
+  override (`ce08` a `:845-853`, `ce09` subito sotto)
+- Test: `tests/test_forecast_override_residuo.py` (nuovo)
+
+**Il difetto, misurato.** `ce08d` è onorato a `:853`
+(`assumption.ce08d_override if … is not None else max(0, ce08 − a − b − c)`) e **cancellato** a
+`:190-193`:
+
+```python
+residual = result[aggregate] - sum((result[field] for field in details), Decimal("0"))
+result[details[-1]] += residual      # details[-1] E' ce08d
+```
+
+Senza override il residuo è zero al centesimo e la riga è innocua: è per quello che il difetto
+non si vede. Con `ce08d_override` il residuo vale `ce08 − (a+b+c+d_override)` e ci finisce
+sopra: l'utente scrive un numero, ne vede un altro, nessun errore. Vale identico per
+`ce09d_svalutazione_crediti`, che è `details[-1]` del gruppo `ce09` — **cioè esattamente il campo
+in cui questo lotto scrive l'inesigibile** (spec §3.4). Senza questa correzione il Task 5 scrive
+in un campo che il passaggio successivo riscrive.
+
+**Contratto:**
+
+1. Il residuo di gruppo si posa sull'**ultimo dettaglio senza override esplicito**.
+2. Se **tutti** i dettagli del gruppo hanno un override e l'aggregato **non** ce l'ha,
+   l'aggregato viene ricalcolato come loro somma.
+3. Se anche l'aggregato ha un override e i due sono in conflitto, **vince l'aggregato** (è ciò
+   che accade oggi), il residuo va sull'ultimo dettaglio, e il conflitto viene **dichiarato** —
+   mai taciuto — in `details['override_conflicts']` come lista di
+   `{"aggregate": <campo>, "declared": <Decimal>, "details_sum": <Decimal>}`.
+   Regola di casa: *diagnose, never fabricate*.
+4. **Parità:** senza alcun override di dettaglio, ogni numero prodotto oggi resta identico al
+   centesimo. È l'unica cosa che i test esistenti devono continuare a dimostrare.
+
+Il normalizzatore oggi riceve solo `values` e non sa nulla degli override: passargli l'insieme
+dei nomi di campo forzati è parte del task (un parametro keyword con default vuoto, così il
+chiamante infrannuale — se ce n'è uno — non cambia comportamento).
+
+- [ ] **Step 1: Test che falliscono**
+
+Quattro casi, tutti su `compute_forecast` con un `BudgetAssumptions` staccato (il banco di
+sensibilità mostra come si costruisce: `scripts/sensibilita_ipotesi.py`, `_default_di_schema`):
+
+```python
+def test_ce08d_override_sopravvive():
+    # ce08d_override = 7.000 con ce08 aggregato piu' alto: la riga persistita vale 7.000
+def test_ce09d_override_sopravvive():
+    # stesso su ce09d_svalutazione_crediti
+def test_residuo_va_sul_dettaglio_non_forzato():
+    # ce08d forzato, ce08c libero: il residuo si posa su ce08c, e a+b+c+d == ce08
+def test_conflitto_dichiarato():
+    # ce08 e tutti e quattro i dettagli forzati e incoerenti:
+    # ce08 vince, e details['override_conflicts'] contiene la riga
+```
+
+- [ ] **Step 2: Verifica che falliscano** — `backend/venv/bin/python -m pytest tests/test_forecast_override_residuo.py -v`
+- [ ] **Step 3: Implementa il contratto**
+- [ ] **Step 4: Verde, più `tests/test_budget_*.py` e `tests/test_forecast*.py` interi (parità)**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 12: La cassa non esce negativa da nessun percorso
+
+**Modello:** opus · **Ondata:** E (indipendente da 1-10)
+
+**Files:**
+- Modify: `calculations/forecast_engine.py` — `_normalize_balance_sheet_cents` (`:213-…`, il ramo
+  `recompute_cash=True`), il chiamante a `:584`, e il cancello del plug (`:1372-1375`)
+- Test: `tests/test_forecast_cassa_negativa.py` (nuovo)
+
+**Il difetto** è descritto e **riprodotto** nella spec, §11.1: leggerlo lì, con il frammento che
+lo misura (`sp_overrides={"sp05_rimanenze": 5000000}` → `sp09 = −4.779.777,78` sotto
+`forecast_generated: True`). `_apply_sp_overrides` clampa a zero (`:466-468`), poi
+`_normalize_balance_sheet_cents(recompute_cash=True)` ricalcola `sp09 = passivo − attivo senza
+cassa` **senza clamp e senza sollevare**, e scavalca il clamp.
+
+**Ruling del controllore (2026-09-09), fra le due strade che la spec lascia aperte:
+il motore SOLLEVA.** Cioè: se il ricalcolo finale della cassa esce negativo, si alza la stessa
+eccezione del plug scoperto — `Unfunded financing requirement <importo>` — e la generazione
+fallisce per intero. Motivo: è l'unica delle due che rispetta *entrambi* gli invarianti che
+`CLAUDE.md` dichiara («la cassa plugga solo verso l'alto: un plug negativo fa **sollevare**» e
+«`sp_overrides` clampa a zero i negativi»), e la spec stessa chiama «non ammissibile» un numero
+impossibile persistito. Dichiararlo soltanto lo lascerebbe persistito.
+Costo se sbaglio: un utente che oggi salva un override squilibrato e vede numeri assurdi, domani
+vede un errore secco e deve correggere l'override. È il comportamento che il motore ha già su
+ogni altro percorso.
+
+**Contratto:**
+
+1. `recompute_cash=True`: se `sp09` ricalcolato `< 0`, sollevare con il **testo esistente** del
+   fabbisogno scoperto (stessa classe di eccezione, stesso formato di importo: allinearsi a
+   `:1372-1375`, non inventare un secondo messaggio).
+2. `recompute_cash=False` (infrannuale) **non cambia in nulla**: quel ramo clampa e diagnostica,
+   ed è escluso dal lotto (Global Constraints: `intra_year_engine.py` non si tocca).
+3. Il percorso bulk (`assumptions_service.bulk_upsert_assumptions`) deve restituire
+   `forecast_generated: False` con la ragione in `message`, come per ogni altro fallimento del
+   motore — non un 500. Verificarlo, non presumerlo.
+
+- [ ] **Step 1: Test che fallisce** — il frammento della spec §11.1, trasformato in test:
+  `bulk_upsert_assumptions(...)` con quell'override deve dare `forecast_generated is False` e un
+  `message` che contiene `fabbisogno`/`Unfunded`; **nessun** `ForecastBalanceSheet` con `sp09 < 0`
+  deve esistere a valle.
+- [ ] **Step 2: Un secondo test di non-regressione**: un `sp_overrides` che **non** squilibra il
+  foglio (per esempio `sp05_rimanenze` con contropartita) continua a generare, e i numeri sono
+  quelli di oggi al centesimo.
+- [ ] **Step 3: Implementa**
+- [ ] **Step 4: Verde su `tests/test_budget_*.py`, `tests/test_forecast*.py`, `tests/test_intra*.py`**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 13: Un previsionale più vecchio delle ipotesi si dichiara
+
+**Modello:** sonnet · **Ondata:** E (indipendente da 1-10)
+
+**Files:**
+- Modify: `backend/app/services/` — il servizio che compone `GET /scenarios/{id}/analysis`
+- Modify: `backend/app/schemas/` — il campo nuovo sullo schema di `/analysis`
+- Modify: `frontend/types/api.ts`
+- Create: `frontend/components/budget/ForecastStaleBanner.tsx`
+- Modify: le cinque viste che leggono `/analysis` e mostrano il previsionale — `app/forecast/income`,
+  `app/forecast/balance`, `app/forecast/reclassified`, `app/cashflow`, `app/report`
+- Test: `tests/test_forecast_stale.py` (nuovo), `frontend/lib/budget-stale.test.ts` (nuovo)
+
+**Il difetto** è la spec §11.2. Il bulk risponde 200 a un previsionale rifiutato: le ipotesi
+restano salvate, il `ForecastYear` no, e le cinque viste mostrano i numeri **precedenti** senza
+un segnale.
+
+**Ruling del controllore (2026-09-09) sul meccanismo: confronto di timestamp, nessuna colonna
+nuova.** `BudgetAssumptions` e `ForecastYear` hanno entrambi `created_at`/`updated_at`
+(`database/models.py:718-719` e `:738-739`). Il previsionale è **stantio** quando
+`max(updated_at delle assumptions dello scenario) > max(updated_at dei ForecastYear dello
+scenario)`. Motivo: una bandiera persistita può divergere dalla realtà, un confronto no — ed è
+vero per costruzione anche sul percorso `auto_generate=false`, dove il previsionale *è*
+davvero più vecchio delle ipotesi. Costo se sbaglio: un falso positivo se due scritture cadono
+nello stesso microsecondo — `datetime.utcnow()` ha i microsecondi, e la generazione scrive
+**dopo** le ipotesi nella stessa transazione, quindi il confronto stretto `>` regge.
+
+**Contratto:**
+
+1. `/analysis` dichiara **sempre** `forecast_stale: bool`, anche `false` (CLAUDE.md ›
+   Invarianti: una chiave assente vale zero, quindi tacere equivale a dichiararsi puliti), più
+   `assumptions_updated_at` e `forecast_updated_at` in ISO, per poter spiegare l'avviso.
+2. Nessun `ForecastYear` ⇒ `forecast_stale` è `false` (non c'è niente di stantio da mostrare:
+   la vista è vuota, e il vuoto si vede).
+3. La decisione sta in un modulo puro `frontend/lib/budget-stale.ts` con la sua suite in
+   `environment: node` — **`jsdom` non è installato e non va installato**; il componente rende
+   soltanto (CLAUDE.md › Frontend: `lib/budget-*` non importa mai da `app/` o `components/`).
+4. Il banner dice, in italiano: che i numeri a schermo sono di una generazione **precedente**
+   alle ipotesi salvate, e che per allinearli si rigenera. Nessuna emoji, icona `lucide-react`.
+
+- [ ] **Step 1: Test backend che fallisce** — salvare ipotesi con generazione respinta, poi
+  `GET /analysis`: `forecast_stale is True`. E il caso pulito: dopo una generazione riuscita,
+  `False`.
+- [ ] **Step 2: Test del modulo puro** — la funzione decide su due stringhe ISO più il conteggio
+  degli anni; casi: stantio, allineato, nessun previsionale, timestamp mancante.
+- [ ] **Step 3: Implementa backend, tipo, modulo, componente, e le cinque viste**
+- [ ] **Step 4: Verde: pytest del file nuovo, `npx vitest run budget-stale`, `npx tsc --noEmit`**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 14: Giorni medi automatici degeneri — la guardia che il motore budget non ha
+
+**Modello:** opus · **Ondata:** E (indipendente da 1-10)
+
+**Files:**
+- Modify: `calculations/forecast_engine.py` — `_calculate_balance_sheet`, `base_revenue` (`:1083`)
+  e i tre punti che dichiarano i giorni applicati (`:1118`, `:1131`, `:1230`)
+- Test: `tests/test_forecast_giorni_degeneri.py` (nuovo)
+
+**Il difetto.** `base_revenue = base_inc.ce01_ricavi_vendite or D('1')`. Quel `or D('1')` non è
+una guardia: è un denominatore inventato. Su un'azienda il cui valore della produzione sta in
+`ce04` — o su un anno base con `ce01` a zero — i giorni medi automatici escono a scala
+astronomica, il circolante ci si adegua, e **nessun controllo se ne accorge**: il foglio quadra
+lo stesso. Il motore infrannuale la guardia ce l'ha (`_turnover_ratio → None` con diagnostica
+`degenerate_turnover_ratio`, `CLAUDE.md` › Intra-Year Engine); il motore budget no.
+
+**Ruling del controllore (2026-09-09): si aggiunge la guardia, NON si cambia che cosa conta come
+ricavo.** Allargare `base_revenue` a `ce01+ce04` cambierebbe i numeri di ogni azienda con `ce04`
+diverso da zero, e i Global Constraints di questo lotto impongono la parità al centesimo su ciò
+che il piano non tocca. La guardia invece non scatta mai su un'azienda sana, quindi la parità
+regge. Costo se sbaglio: un'azienda con giorni medi reali sopra i 365 vede il proprio saldo base
+riportato invece che scalato — e un avviso che glielo dice, invece di un numero assurdo muto.
+
+**Contratto:**
+
+1. Un giorno medio **derivato** (non esplicito) è **degenere** quando `> 365` o `< 0`, o quando
+   `ce01` dell'anno base è `<= 0`. La soglia è la stessa che usa il banco di sensibilità nel
+   rilievo G1 (`scripts/sensibilita_ipotesi.py:315-324`) e la stessa nozione dell'infrannuale
+   («più di un anno di magazzino»).
+2. Su un giorno degenere il motore **non scala**: riporta il saldo dell'anno base per quella
+   voce (crediti, rimanenze o debiti commerciali), come fa l'infrannuale.
+3. Lo dichiara: `details['degenerate_turnover_ratio']` è una **lista** dei nomi dei giorni
+   caduti (`'dso'`, `'dio'`, `'dpo'`), **sempre presente**, vuota quando non scatta nulla.
+   `dso_applied`/`dio_applied`/`dpo_applied` restano dichiarati e riportano il giorno **davvero
+   applicato**, non quello degenere.
+4. Un giorno **esplicito** dell'utente non passa dalla guardia: è una scelta, non una derivazione.
+5. **Parità:** su ogni scenario dei test esistenti nessun giorno è degenere, quindi ogni numero
+   resta identico al centesimo.
+
+- [ ] **Step 1: Test che fallisce** — anno base con `ce01 = 0` e ricavi in `ce04`, crediti
+  commerciali a 120.000: oggi `dso_applied` esce fuori scala; dopo, `dso` è degenere, `sp06a`
+  proiettato vale il saldo base, e `details['degenerate_turnover_ratio'] == ['dso']`.
+- [ ] **Step 2: Test di non-degenerazione** — l'`e2e_kit` normale: la lista è **vuota** e i tre
+  giorni applicati sono quelli di oggi.
+- [ ] **Step 3: Implementa**
+- [ ] **Step 4: Verde su `tests/test_budget_*.py` e `tests/test_forecast*.py` interi**
+- [ ] **Step 5: Commit**

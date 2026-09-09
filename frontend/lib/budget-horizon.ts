@@ -211,8 +211,12 @@ export function defaultAssumption(
     tax_rate: 27.9,
     tax_advances_paid: 0,
     tax_temporary_differences: null,
-    fixed_materials_percentage: 0,
-    fixed_services_percentage: 0,
+    // 40 e' il default del motore e della colonna (backend/app/schemas/budget.py,
+    // database/models.py). Uno 0 scritto qui BATTE quel default — non lo integra —
+    // e apriva i Costi di ogni scenario nuovo con lo slider a 0 % e le due righe
+    // «parte fissa» gia' spente.
+    fixed_materials_percentage: 40,
+    fixed_services_percentage: 40,
     depreciation_rate: 20,
     depreciation_rate_intangible: 20,
     financing_amount: 0,

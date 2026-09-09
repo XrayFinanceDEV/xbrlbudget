@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
+import type { CostiTableRow } from "./budget-costi-step";
 import {
   FIXED_SHARE_DEFAULT,
   alignVariablesToRevenue,
@@ -188,6 +189,25 @@ describe("costiTableRows", () => {
     expect(off(zero, "fixed_services_growth_pct").off).toBe(true);
     expect(off(zero, "variable_services_growth_pct").off).toBe(false);
     expect(off(zero, "personnel_growth_pct").off).toBeUndefined();
+  });
+
+  it("con gli anni discordi l'estremo non spegne niente: un controllo che non sa non blocca", () => {
+    // `off` e' un flag di RIGA e YearInputTable lo traduce in `disabled` su OGNI
+    // anno. Con quota 100 sul 2027 e 40 sul 2028, spegnere la parte variabile
+    // renderebbe indigitabile un campo che sul 2028 il motore usa eccome.
+    const off = (r: CostiTableRow[], field: string) =>
+      r.find((x) => "field" in x && x.field === field) as { off?: boolean };
+    const centoPoiQuaranta = { value: 100, uneven: true };
+    const zeroPoiQuaranta = { value: 0, uneven: true };
+    const r = costiTableRows(base, centoPoiQuaranta, zeroPoiQuaranta,
+      { materials: false, services: false });
+    expect(off(r, "variable_materials_growth_pct").off).toBe(false);
+    expect(off(r, "fixed_services_growth_pct").off).toBe(false);
+    // Quando invece gli anni concordano, l'estremo spegne come prima.
+    const concordi = costiTableRows(base, { value: 100, uneven: false }, { value: 0, uneven: false },
+      { materials: false, services: false });
+    expect(off(concordi, "variable_materials_growth_pct").off).toBe(true);
+    expect(off(concordi, "fixed_services_growth_pct").off).toBe(true);
   });
 
   it("la colonna base mostra il taglio della quota, non l'importo intero", () => {

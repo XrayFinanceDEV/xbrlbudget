@@ -103,7 +103,9 @@ function SplitSlider(props: {
       </div>
       {uneven && (
         <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-          Valori diversi per anno: muovendo lo slider li allinei.
+          Valori diversi per anno: muovendo lo slider — o digitando nella casella qui accanto — li
+          allinei tutti a quello che imposti. Per differenziarli, usa la riga «quota fissa» della
+          tabella.
         </p>
       )}
     </div>

@@ -137,7 +137,12 @@ const FORCED_NOTE = "forzato in CE Prev.";
  *
  * Una riga si spegne quando la quota la annulla — a quota 100 la parte variabile
  * non esiste, a quota 0 la parte fissa — perche' la sua percentuale di crescita
- * non avrebbe niente su cui mordere.
+ * non avrebbe niente su cui mordere. Ma **mai quando gli anni discordano**:
+ * `off` e' un flag di RIGA e `YearInputTable` lo traduce in `disabled` su OGNI
+ * colonna, quindi con quota 100 sul primo anno e 40 sul secondo si renderebbe
+ * indigitabile un campo che sul secondo anno il motore usa eccome. Qui la quota
+ * che si conosce e' solo quella del primo anno: un controllo che non sa non
+ * blocca.
  */
 export function costiTableRows(
   base: CostiBase,
@@ -169,14 +174,14 @@ export function costiTableRows(
       label: "Materie prime · parte variabile",
       sub: matNote,
       baseLabel: euro(matSplit.variable),
-      off: mat.value >= 100,
+      off: mat.value >= 100 && !mat.uneven,
     },
     {
       field: "variable_services_growth_pct",
       label: "Servizi · parte variabile",
       sub: servNote,
       baseLabel: euro(servSplit.variable),
-      off: serv.value >= 100,
+      off: serv.value >= 100 && !serv.uneven,
     },
     { group: "Costi fissi", swatch: "fixed" },
     {
@@ -184,14 +189,14 @@ export function costiTableRows(
       label: "Materie prime · parte fissa",
       sub: matNote,
       baseLabel: euro(matSplit.fixed),
-      off: mat.value <= 0,
+      off: mat.value <= 0 && !mat.uneven,
     },
     {
       field: "fixed_services_growth_pct",
       label: "Servizi · parte fissa",
       sub: servNote,
       baseLabel: euro(servSplit.fixed),
-      off: serv.value <= 0,
+      off: serv.value <= 0 && !serv.uneven,
     },
     { field: "personnel_growth_pct", label: "Personale", baseLabel: euro(base.pers) },
     { field: "rent_growth_pct", label: "Godimento beni di terzi", baseLabel: euro(base.god) },

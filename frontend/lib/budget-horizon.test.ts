@@ -137,6 +137,15 @@ describe("defaultAssumption", () => {
   it("senza scenario non inventa un id", () => {
     expect(defaultAssumption(2026).scenario_id).toBeUndefined();
   });
+
+  it("la quota fissa parte dal 40 del motore, non da uno zero che lo scavalca", () => {
+    // Uno 0 esplicito BATTE il default della colonna e dello schema (40), e
+    // apriva i Costi di uno scenario nuovo con lo slider a 0 % e le righe
+    // «parte fissa» gia' spente. Se questi due tornano a zero, si vede qui.
+    const a = defaultAssumption(2026, 17);
+    expect(a.fixed_materials_percentage).toBe(40);
+    expect(a.fixed_services_percentage).toBe(40);
+  });
 });
 
 describe("withDefaultsForYears", () => {

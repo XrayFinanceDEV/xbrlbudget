@@ -249,10 +249,20 @@ def test_promote_then_budget_chain_stays_quadrato(tmp_path, monkeypatch):
                                      base_year=2026, scenario_type="budget"),
                 user_id=USER, db=db,
             )
+            # Il fixture porta 1.150.949,04 di debiti tributari: da quando le
+            # imposte si pagano a saldo + acconto quel saldo si VERSA nel primo
+            # anno di piano invece di riportarsi, e senza uno scadenziamento
+            # scopre un fabbisogno. La catena lo copre con la finanza esplicita
+            # che il motore stesso indica; qui si guarda la quadratura, non la
+            # posizione fiscale.
             result = budget_scenarios.bulk_upsert_assumptions(
                 company_id, budget.id,
                 request={"assumptions": [
-                    {"forecast_year": y, "revenue_growth_pct": 4, "tax_rate": 24}
+                    {"forecast_year": y, "revenue_growth_pct": 4, "tax_rate": 24,
+                     "financing_loans": ([{"name": "Copertura saldo imposte",
+                                           "amount": 1200000, "duration_years": 6,
+                                           "interest_rate": 3, "grace_years": 1}]
+                                         if y == 2027 else None)}
                     for y in (2027, 2028, 2029)
                 ], "auto_generate": True},
                 user_id=USER, db=db,

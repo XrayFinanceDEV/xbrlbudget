@@ -456,7 +456,14 @@ def test_pdf_to_adjustments_to_assumptions_full_workflow_matrix(
                                     # expose a sizeable explicit funding need.
                                     # Fund the valid-path matrix deliberately;
                                     # uncovered needs have separate diagnostic tests.
-                                    "amount": 500000 if is_partial else 20000,
+                                    # Sul percorso annuale il fabbisogno e' salito da
+                                    # quando le imposte si pagano a saldo + acconto: il
+                                    # debito tributario di apertura di questo fixture
+                                    # (794.335,07 o 1.150.949,04) non e' piu' un saldo
+                                    # che si riporta, e' un saldo che si VERSA nel primo
+                                    # anno di piano. Senza uno scadenziamento va coperto,
+                                    # esattamente come dice il messaggio del motore.
+                                    "amount": 500000 if is_partial else 1400000,
                                     "duration_years": 5,
                                     "interest_rate": 4,
                                     "grace_years": 1,

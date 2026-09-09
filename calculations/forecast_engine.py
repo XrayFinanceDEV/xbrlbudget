@@ -13,9 +13,10 @@ from database.models import (
 )
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota, tax_closing_position, deferred_tax_position,
+    tfr_accrual_quota, deferred_tax_position,
     new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
+    tax_settlement_saldo_acconto,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -1274,6 +1275,12 @@ class ForecastEngine:
         def _base(field, default=ZERO):
             return getattr(base_bs, field, default) or default
 
+        def _base_inc(field, default=ZERO):
+            # Il gemello di `_base` sul conto economico dell'anno base: la
+            # posizione tributaria del primo anno di piano commisura l'acconto
+            # sull'imposta del consuntivo, che sta li' e non nel patrimoniale.
+            return getattr(base_inc, field, default) or default
+
         # ── ASSETS ──
 
         # Fixed assets - previous year + investments - depreciation
@@ -1524,30 +1531,82 @@ class ForecastEngine:
                 ).residual_short
             return max(ZERO, value - carried)
 
-        # --- OTHER OPERATING DEBTS: carry forward with optional growth % ---
-        sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
-
-        # Tax settlement: opening net tax position + current tax expense - advances.
-        # A negative closing liability is reclassified automatically to tax credits;
-        # neither side can become negative. Explicit legacy growth percentages remain
-        # an escape hatch and take precedence over the automatic settlement.
+        # ── POSIZIONE TRIBUTARIA: saldo dell'anno prima + acconto sull'anno in corso ──
+        # Le imposte non si pagano come un saldo qualsiasi (spec lotto 2 §3.2): in
+        # ogni anno esce il SALDO maturato a fine anno precedente, l'ACCONTO
+        # sull'anno in corso e la RATA del tributario rateizzato. Quel che resta
+        # scoperto a fine anno (`generated_debt`) e' il saldo che si paghera'
+        # l'anno DOPO — ed e' per questo che il calcolo legge i `details`
+        # dell'anno precedente invece del solo saldo di bilancio: un saldo di
+        # bilancio non sa dire quanto di se' e' saldo e quanto e' rata.
+        # Le percentuali di crescita esplicite restano la via manuale e vincono
+        # sull'automatismo; se c'e' anche un piano, i details lo dichiarano
+        # ignorato invece di applicarlo a meta'.
+        plan_tax = (pregresso or {}).get('debiti_tributari')
         manual_tax_position = (
             getattr(assumption, 'sp06e_growth_pct', None) is not None
             or getattr(assumption, 'sp16e_growth_pct', None) is not None
         )
-        if not manual_tax_position:
-            tax_advances = D(str(getattr(assumption, 'tax_advances_paid', ZERO) or ZERO))
-            sp06e, sp16e = tax_closing_position(
-                _prev('sp06e_crediti_tributari_breve'),
-                _prev('sp16e_debiti_tributari_breve'),
-                current_tax,
-                tax_advances,
+        tax_year = None
+        tax_generated_short = None
+        if manual_tax_position:
+            sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
+            sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
+            if plan_tax and details is not None:
+                details.setdefault('pregresso_ignored', []).append('debiti_tributari')
+        else:
+            # L'anno 0 legge il consuntivo: il debito tributario di apertura e' il
+            # saldo da versare (senza piano e' tutto saldo, niente rateizzato:
+            # spec §4) e `ce20` dell'anno base e' l'unica imposta nota su cui
+            # commisurare l'acconto. Dall'anno 1 in poi la sorgente sono i
+            # `details` dell'anno precedente.
+            prev_tax_details = (prev_details or {}).get('imposte') or {}
+            if year_index == 0 or not prev_tax_details:
+                saldo_due = (
+                    plan_tax['saldo'] if plan_tax
+                    else pregresso_opening_masses(_base)['debiti_tributari']
+                )
+                previous_tax = _base_inc('ce20_imposte')
+                opening_credit = _base('sp06e_crediti_tributari_breve')
+            else:
+                saldo_due = prev_tax_details['generated_debt']
+                previous_tax = prev_tax_details['current_tax']
+                opening_credit = (
+                    prev_tax_details['generated_credit']
+                    + prev_tax_details['opening_credit_left']
+                )
+            # Il piano delle rate scadenzia il solo rateizzato: il saldo non entra
+            # nel runoff perche' si paga per intero nel primo anno di piano.
+            r = runoff_schedule(
+                plan_tax['rateizzato'] if plan_tax else ZERO,
+                plan_tax['amounts'] if plan_tax else [],
+                [], year_index, horizon,
             )
+            # Solo un piano vero mette il saldo in `mode: runoff` (spec §5.3):
+            # senza piano non c'e' nulla di scadenziato da dichiarare, e l'unica
+            # sede onesta di cio' che e' stato versato resta `details['imposte']`.
+            if plan_tax:
+                pregresso_runoff['debiti_tributari'] = r
+            tax_year = tax_settlement_saldo_acconto(
+                opening_credit=opening_credit,
+                saldo_due=saldo_due,
+                rate_due=r.closed,
+                current_tax=current_tax,
+                previous_tax=previous_tax,
+                acconto_pct=plan_tax['acconto_pct'] if plan_tax else D('100'),
+                # Zero = «non dichiarato» (la colonna e' NOT NULL default 0): il
+                # kernel ricade allora sulla percentuale. Chi vuole zero acconti
+                # mette `acconto_pct = 0`.
+                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+            )
+            tax_generated_short = tax_year.generated_debt
+            sp16e = tax_year.generated_debt + r.residual_short
+            sp17e = r.residual_long
+            sp06e = tax_year.generated_credit + tax_year.opening_credit_left
             sp06 = sp06_trade + sp06e + sp06f
         sp16g = _net_of_pregresso(
             _prev('sp16g_altri_debiti_breve'), 'altri_debiti', 'sp16g_altri_debiti_breve',
         ) * (D('1') + _sp_growth('sp16g_growth_pct'))
-        sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
         sp17g = _prev('sp17g_altri_debiti_lungo') * (D('1') + _sp_growth('sp17g_growth_pct'))
 
         # Previdenza (sp16f/sp17f): opt-in scaling with the personnel cost (P5).
@@ -1582,7 +1641,12 @@ class ForecastEngine:
         # riportato ma la conversione di un flusso (acquisti × DPO, ricavi × DSO),
         # e scorporarlo direbbe che l'azienda smette di comprare e di vendere.
         generated['debiti_fornitori'] = sp16d
-        generated['debiti_tributari'] = sp16e
+        # Il generato del tributario e' il solo debito NUOVO dell'anno (il saldo
+        # che si paghera' l'anno dopo): il residuo delle rate lo dichiara
+        # `residual_short`/`residual_long`, esattamente come per gli altri saldi.
+        generated['debiti_tributari'] = (
+            tax_generated_short if tax_generated_short is not None else sp16e
+        )
         generated['debiti_previdenziali'] = sp16f
         generated['altri_debiti'] = sp16g
         fornitori_plan = (pregresso or {}).get('debiti_fornitori')
@@ -1830,14 +1894,28 @@ class ForecastEngine:
                     'mode': 'runoff' if r else 'legacy',
                 }
             details.setdefault('pregresso_ignored', [])
-            # La posizione tributaria a saldo + acconto e' del task successivo:
-            # finche' non c'e', il contratto vale gia' ma dice il vero — `manual`
-            # e zeri, non numeri inventati.
-            details.setdefault('imposte', {
-                'current_tax': ZERO, 'saldo_paid': ZERO, 'acconti_paid': ZERO,
-                'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
-                'opening_credit_left': ZERO, 'mode': 'manual',
-            })
+            # La posizione tributaria dell'anno, dichiarata SEMPRE: `saldo_acconto`
+            # quando e' il kernel a governarla, `manual` quando l'utente ha imposto
+            # una percentuale di crescita su sp06e/sp16e — e allora gli importi
+            # pagati non esistono, quindi si dichiarano zero invece di inventarli.
+            details['imposte'] = (
+                {
+                    'current_tax': current_tax,
+                    'saldo_paid': tax_year.saldo_paid,
+                    'acconti_paid': tax_year.acconti_paid,
+                    'rate_paid': tax_year.rate_paid,
+                    'generated_debt': tax_year.generated_debt,
+                    'generated_credit': tax_year.generated_credit,
+                    'opening_credit_left': tax_year.opening_credit_left,
+                    'mode': 'saldo_acconto',
+                }
+                if tax_year is not None else
+                {
+                    'current_tax': current_tax, 'saldo_paid': ZERO, 'acconti_paid': ZERO,
+                    'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
+                    'opening_credit_left': ZERO, 'mode': 'manual',
+                }
+            )
 
         result = {
             'sp01_crediti_soci': sp01,

@@ -21,7 +21,7 @@ import { parseFieldValue } from "@/lib/budget-field-rules";
 import { describeCell } from "@/lib/budget-preview-cell";
 import type { PreviewCell, PreviewRow } from "@/lib/budget-preview-rows";
 import { previewNotice } from "@/lib/budget-preview-notice";
-import { euro, pct1 } from "@/lib/budget-format";
+import { days1, euro, pct1 } from "@/lib/budget-format";
 import {
   alignVariablesToRevenue,
   costiBase,
@@ -285,7 +285,7 @@ export function StepCosti(p: StepProps): JSX.Element {
               <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {preview.dpo === null
                   ? `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear}`
-                  : `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear} (${preview.dpo} GG)`}
+                  : `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear} (${days1(preview.dpo)} GG)`}
               </p>
               <FornitoriRow row={preview.fornitori} years={preview.years} />
               <p className="mt-1 px-2 text-[11px] text-muted-foreground">

@@ -21,6 +21,7 @@ import {
 import { formatCurrency } from "@/lib/formatters";
 import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
 import { getErrorMessage } from "@/lib/utils";
+import { patchPraticaPerScenarioAperto } from "@/lib/pratica-ingresso";
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
 import { BudgetWizard } from "@/components/budget/wizard/BudgetWizard";
 import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
@@ -140,6 +141,14 @@ export default function BudgetPage() {
 
   const handleEditScenario = (scenario: BudgetScenario) => {
     setEditingScenario(scenario);
+    // Senza questo, `pratica.budgetScenarioId` resta sul vecchio scenario:
+    // CE Prev./SP Prev. e le altre pagine PREVISIONALE lo rileggono ciascuna
+    // per conto proprio (`usePreferredBudgetScenarioId`) e ridecidono la
+    // preferenza vecchia — vedi `patchPraticaPerScenarioAperto` per i casi in
+    // cui NON si scrive (nessuna pratica, pratica di un'altra azienda,
+    // pratica gia' su questo scenario).
+    const patch = patchPraticaPerScenarioAperto(pratica, scenario);
+    if (patch) updatePratica(patch);
     // `activeTab` ha due letture diverse a seconda del ramo di render qui
     // sotto. Nello startup e' la tab vera di `ScenarioFormStartup` («info» o
     // «ipotesi»); fuori dallo startup non esistono piu' tab — c'e' il

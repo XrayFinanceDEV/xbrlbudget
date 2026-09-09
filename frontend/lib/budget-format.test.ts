@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { euro, num, numOrNull, pct1, pctOf } from "./budget-format";
+import { days1, euro, num, numOrNull, pct1, pctOf } from "./budget-format";
 
 describe("budget-format", () => {
   it("num: numero, stringa, virgola decimale assente, assenza", () => {
@@ -38,6 +38,14 @@ describe("budget-format", () => {
     expect(pct1(60.5)).toBe("60,5%");
     expect(pct1(40)).toBe("40,0%");
     expect(pct1(null)).toBe("—");
+  });
+
+  it("days1: un decimale, non il float grezzo del motore", () => {
+    expect(days1(47)).toBe("47,0");
+    expect(days1(116.4)).toBe("116,4");
+    expect(days1(46.86003603992246)).toBe("46,9");
+    expect(days1(0)).toBe("0,0");
+    expect(days1(null)).toBe("—");
   });
 
   it("pctOf: denominatore zero, nullo o assente non danno zero ma nulla", () => {

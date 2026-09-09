@@ -28,9 +28,14 @@ describe("describeCell", () => {
     expect(d.main).toMatch(/0/);
   });
 
-  it("giorni quando non c'e' percentuale", () => {
+  it("giorni quando non c'e' percentuale, a un decimale", () => {
     const d = describeCell({ value: 30, days: 45 });
-    expect(d.sub).toBe("45 gg");
+    expect(d.sub).toBe("45,0 gg");
+  });
+
+  it("giorni: il float grezzo del motore si arrotonda a un decimale, non si stampa intero (R1)", () => {
+    const d = describeCell({ value: 30, days: 46.86003603992246 });
+    expect(d.sub).toBe("46,9 gg");
   });
 
   it("la percentuale ha precedenza sui giorni se entrambi presenti", () => {

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ingressoNuovaPratica,
   ingressoRiprendi,
+  patchPraticaPerScenarioAperto,
   rifiutoIngressoStartup,
   type IngressoPratica,
 } from "@/lib/pratica-ingresso";
-import type { ScenarioSummary } from "@/types/api";
+import type { PraticaState } from "@/contexts/PraticaContext";
+import type { BudgetScenario, ScenarioSummary } from "@/types/api";
 
 /**
  * I TRE soli ingressi al percorso, e l'unica cosa che li accomuna: l'azienda
@@ -140,5 +142,61 @@ describe("rifiutoIngressoStartup", () => {
     const anni = [2026, 2024];
     rifiutoIngressoStartup(anni);
     expect(anni).toEqual([2026, 2024]);
+  });
+});
+
+// R2 del collaudo run-03: dopo aver aperto uno scenario con «Modifica»,
+// `pratica.budgetScenarioId` restava sul vecchio scenario, e CE Prev./
+// SP Prev. mostravano di default i numeri di un ALTRO scenario della stessa
+// azienda dopo il salvataggio.
+function praticaState(over: Partial<PraticaState> = {}): PraticaState {
+  return {
+    workflow: "bilancio",
+    companyId: 21,
+    fiscalYear: 2024,
+    periodMonths: 12,
+    infrannualeScenarioId: null,
+    budgetScenarioId: 16,
+    analysisStep: "anagrafiche",
+    rettificheConfirmed: { storico: true, verifica: true },
+    ...over,
+  };
+}
+
+function budgetScenario(over: Partial<BudgetScenario> = {}): BudgetScenario {
+  return {
+    id: 20,
+    company_id: 21,
+    name: "COLLAUDO SEED 20260909",
+    base_year: 2024,
+    scenario_type: "budget",
+    period_months: null,
+    description: null,
+    is_active: 1,
+    created_at: "2026-09-09T00:00:00Z",
+    updated_at: "2026-09-09T00:00:00Z",
+    ...over,
+  };
+}
+
+describe("patchPraticaPerScenarioAperto", () => {
+  it("nessuna pratica attiva: nessuna scrittura", () => {
+    expect(patchPraticaPerScenarioAperto(null, budgetScenario())).toBeNull();
+  });
+
+  it("pratica di un'altra azienda: non la dirotta", () => {
+    const pratica = praticaState({ companyId: 99 });
+    expect(patchPraticaPerScenarioAperto(pratica, budgetScenario({ company_id: 21 }))).toBeNull();
+  });
+
+  it("pratica gia' sullo scenario giusto: nessuna scrittura (niente re-render inutile)", () => {
+    const pratica = praticaState({ companyId: 21, budgetScenarioId: 20 });
+    expect(patchPraticaPerScenarioAperto(pratica, budgetScenario({ id: 20, company_id: 21 }))).toBeNull();
+  });
+
+  it("pratica sulla stessa azienda ma su un altro scenario: scrive il nuovo id", () => {
+    const pratica = praticaState({ companyId: 21, budgetScenarioId: 16 });
+    const patch = patchPraticaPerScenarioAperto(pratica, budgetScenario({ id: 20, company_id: 21 }));
+    expect(patch).toEqual({ companyId: 21, budgetScenarioId: 20 });
   });
 });

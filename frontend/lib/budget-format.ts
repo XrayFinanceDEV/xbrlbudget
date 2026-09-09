@@ -10,7 +10,7 @@
  *
  * Modulo puro: nessun import da `app/` o da `components/`.
  */
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { formatCurrency, formatNumber, formatPercentage } from "@/lib/formatters";
 
 /**
  * Il numero dietro un valore che arriva dall'API (`Decimal` serializzato come
@@ -49,6 +49,18 @@ export const euro = (v: number | null): string => (v === null ? "—" : formatCu
  * assolute (25,5 = 25,5%), quindi si divide per 100 qui, una volta sola.
  */
 export const pct1 = (v: number | null): string => (v === null ? "—" : formatPercentage(v / 100, 1));
+
+/**
+ * Giorni (DSO/DIO/DPO applicati) a UN decimale, formato italiano. Il valore
+ * che il motore ha applicato arriva grezzo nei `details` (`compute_forecast`
+ * li lascia cosi' apposta, `calculations/forecast_engine.py:536-546`): senza
+ * questo formattatore lo si mostra a 14 cifre decimali. Diverso dal
+ * segnaposto «auto: N» di `computeAutoDays` (`lib/budget-turnover.ts`), che
+ * chiude con `Math.round()` — quello e' un suggerimento da digitare, questo
+ * e' il valore applicato, e arrotondarlo all'intero direbbe che la
+ * rotazione usata e' un'altra.
+ */
+export const days1 = (v: number | null): string => (v === null ? "—" : formatNumber(v, 1));
 
 /** L'incidenza di `v` su `den`, in percentuale assoluta. Denominatore nullo,
  *  assente o zero ⇒ `null`: non c'e' incidenza da dichiarare, e non e' zero. */

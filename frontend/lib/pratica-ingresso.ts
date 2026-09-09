@@ -1,4 +1,5 @@
-import type { ScenarioSummary } from "@/types/api";
+import type { PraticaState } from "@/contexts/PraticaContext";
+import type { BudgetScenario, ScenarioSummary } from "@/types/api";
 
 /**
  * I tre ingressi al percorso, come dato puro.
@@ -130,4 +131,42 @@ export function ingressoRiprendi(
     },
     route: isInfra ? "/pratica" : "/budget",
   };
+}
+
+/**
+ * Aprire uno scenario di budget per la modifica (bottone «Modifica» sulla
+ * lista `/budget`) può lasciare la pratica corrente puntata su un ALTRO
+ * scenario: `usePreferredBudgetScenarioId` (`hooks/use-queries.ts`) legge
+ * `pratica.budgetScenarioId`, e quello stato non si aggiorna da solo aprendo
+ * uno scenario diverso — CE Prev., SP Prev. e le altre pagine PREVISIONALE lo
+ * ridecidono ciascuna per conto proprio, e ridecidono la preferenza vecchia.
+ * Questa funzione decide SE e COSA scrivere; il chiamante (`app/budget/page.tsx`)
+ * si limita a passarle pratica e scenario e a chiamare `updatePratica` col
+ * risultato, se non è `null`.
+ *
+ * `null` in tre casi, per non scrivere quando non serve:
+ *   - nessuna pratica attiva — non se ne crea una per un giro sulla lista
+ *     scenari fuori dal percorso guidato (`updatePratica` la ignorerebbe
+ *     comunque, ma qui la decisione è esplicita e testabile);
+ *   - la pratica attiva appartiene a un'ALTRA azienda — aprire uno scenario
+ *     mentre si sta lavorando alla pratica di un'altra azienda non deve
+ *     dirottare quella pratica su una company diversa;
+ *   - la pratica è già su questo identico scenario — nessuna scrittura, per
+ *     non causare un re-render inutile (l'oggetto `pratica` cambia identità
+ *     a ogni `updatePratica`, e un effetto che lo osserva intero riparte).
+ *
+ * Altrimenti l'aggiornamento è `{ companyId, budgetScenarioId }` — esplicito
+ * anche sul `companyId`, benché qui coincida già con quello della pratica,
+ * per lo stesso motivo di `StartupSetup.onCreated` (`app/budget/page.tsx`):
+ * un patch parziale che si fida di un campo non passato è un modo silenzioso
+ * di lasciare la pratica un giro indietro.
+ */
+export function patchPraticaPerScenarioAperto(
+  pratica: PraticaState | null,
+  scenario: BudgetScenario,
+): Pick<PraticaState, "companyId" | "budgetScenarioId"> | null {
+  if (!pratica) return null;
+  if (pratica.companyId !== scenario.company_id) return null;
+  if (pratica.budgetScenarioId === scenario.id) return null;
+  return { companyId: scenario.company_id, budgetScenarioId: scenario.id };
 }

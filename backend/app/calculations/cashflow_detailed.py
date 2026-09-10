@@ -183,13 +183,26 @@ class DetailedCashFlowCalculator:
 
         # Payables: increase is positive (defer payment)
         # Only OPERATING debts belong in working capital (fornitori, tributari, previdenziali,
-        # altri debiti — sp16d-g / sp17d-g, BalanceSheet.operating_debt_total). FINANCIAL debt
-        # (banche, altri finanziatori, obbligazioni — sp16a-c / sp17a-c) is a financing flow: it
-        # is left out here and picked up by the residual formula in the financing section below.
-        # This matters because a maturity reclassification between sp16a and sp17a (e.g. task
-        # 17's short-term instalment of a new loan) must never move through operating cashflow —
-        # it is entirely inside "financial debt" on both sides of the split.
-        delta_payables = D(bs_current.operating_debt_total) - D(bs_previous.operating_debt_total)
+        # altri debiti, breve e lungo). FINANCIAL debt (banche, altri finanziatori, obbligazioni —
+        # sp16a-c / sp17a-c) is a financing flow: it is left out here and picked up by the residual
+        # formula in the financing section below. This matters because a maturity reclassification
+        # between sp16a and sp17a (e.g. task 17's short-term instalment of a new loan) must never
+        # move through operating cashflow — it is entirely inside "financial debt" on both sides.
+        #
+        # Computed as sp16/sp17 (the reconciled aggregates current_ratio/CCN/Altman already read)
+        # MINUS the financial detail sub-fields, not as a sum of the operating detail sub-fields
+        # (BalanceSheet.operating_debt_total exists and is documented for this, but its d/e/f/g
+        # sub-fields are not in forecast_engine's `_BANK_DEBT_SPLIT_FIELDS` forced set and can
+        # drift a cent from the aggregate on a rounding-prone scenario — sp16a-c/sp16/sp17a-c/sp17
+        # are forced and exact instead, so anchoring on them never manufactures a stray cent that
+        # the rest of the balance sheet's KPIs, computed off the same aggregates, do not see).
+        delta_payables = (
+            (D(bs_current.sp16_debiti_breve) - D(bs_current.financial_debt_short))
+            - (D(bs_previous.sp16_debiti_breve) - D(bs_previous.financial_debt_short))
+        ) + (
+            (D(bs_current.sp17_debiti_lungo) - D(bs_current.financial_debt_long))
+            - (D(bs_previous.sp17_debiti_lungo) - D(bs_previous.financial_debt_long))
+        )
 
         # Accruals/deferrals - active
         delta_accruals_active = D(bs_previous.sp10_ratei_risconti_attivi) - D(bs_current.sp10_ratei_risconti_attivi)

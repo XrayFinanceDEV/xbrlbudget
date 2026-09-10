@@ -127,14 +127,41 @@ except Exception:  # pragma: no cover - fallback se il kit non e' raggiungibile
     }
     _FIXTURE_SOURCE = "copia locale (tests/e2e_kit.py non raggiungibile)"
 
+def _con_banca_pregressa(bs: Dict[str, Decimal], breve: Decimal, lungo: Decimal) -> Dict[str, Decimal]:
+    """Il fixture con debito bancario PREGRESSO non tondo, a breve e oltre.
+
+    Perche' esiste (Task 16). Tutti i fixture di sopra hanno `sp16a` a zero: il
+    breve e' spiegato per intero dai fornitori. Un banco cosi' e' cieco sulla rata
+    del nuovo finanziamento che consumava il debito bancario pregresso a breve
+    (Ruling 40), perche' `min(0, rata)` vale zero su qualunque versione. Il lungo
+    pregresso sostituisce quello del kit, e la cassa riassorbe la differenza,
+    cosi' che il fixture resti in pareggio e con i dettagli dei debiti esatti.
+    """
+    out = dict(bs)
+    lungo_kit = D(str(bs.get("sp17a_debiti_banche_lungo", 0)))
+    out["sp16a_debiti_banche_breve"] = breve
+    out["sp16_debiti_breve"] = D(str(bs.get("sp16_debiti_breve", 0))) + breve
+    out["sp17a_debiti_banche_lungo"] = lungo
+    out["sp17_debiti_lungo"] = D(str(bs.get("sp17_debiti_lungo", 0))) + lungo - lungo_kit
+    out["sp09_disponibilita_liquide"] = (
+        D(str(bs.get("sp09_disponibilita_liquide", 0))) + breve + lungo - lungo_kit
+    )
+    return out
+
+
+BANCA_BS = _con_banca_pregressa(BASE_BS, D("12345.67"), D("23456.79"))
+
 # Scale non tonde: preservano il rapporto di ogni fixture (quindi anche il
 # dpo = 3.600 giorni della holding) ma rendono ogni importo frazionario.
+# I fixture nuovi vanno IN CODA: ogni fixture ha il proprio generatore, quindi
+# quelli di prima restano identici estrazione per estrazione.
 FIXTURES: List[Tuple[str, Dict[str, Decimal], Dict[str, Decimal], Decimal]] = [
     ("base", BASE_BS, BASE_CE, D("1")),
     ("base_scala_a", BASE_BS, BASE_CE, D("1.2347")),
     ("base_scala_b", BASE_BS, BASE_CE, D("0.68193")),
     ("holding", HOLDING_BS, HOLDING_CE, D("1")),
     ("holding_scala", HOLDING_BS, HOLDING_CE, D("1.07316")),
+    ("banca", BANCA_BS, BASE_CE, D("1")),
 ]
 
 
@@ -261,6 +288,28 @@ def profilo_misto(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
     return valori
 
 
+def profilo_finanziamento_e_rimborso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Prestito nuovo e piano del pregresso nello stesso scenario, senza cash sweep.
+
+    Il piano dura meno dell'orizzonte: estinto il pregresso, la sua rata fissa
+    sull'esposizione dell'anno base scendeva sul prestito nuovo che stava nella
+    stessa voce `sp17a` (Task 16). Nessun profilo di sopra combina le due ipotesi.
+    Sui fixture senza banca il piano non ha nulla da rimborsare: e' il contrasto
+    che deve restare a zero celle.
+    """
+    valori: Dict[str, Any] = {"existing_debt_repayment_years": _anni_frazionari(rng, 1.2, 1.9)}
+    if anno_idx == 0:
+        valori.update({
+            "financing_amount": _eur(rng, 50000, 150000),
+            "financing_duration_years": "4",
+            "financing_interest_rate": _pct(rng, 2, 6),
+        })
+    return valori
+
+
+# I profili nuovi vanno IN CODA: il generatore di un fixture e' consumato profilo
+# dopo profilo, quindi un profilo inserito in mezzo cambierebbe le estrazioni di
+# tutti quelli che lo seguono.
 PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "neutro": profilo_neutro,
     "crescita": profilo_crescita,
@@ -270,6 +319,7 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "fiscale": profilo_fiscale,
     "rimborso_indicizzazione": profilo_rimborso_indicizzazione,
     "misto": profilo_misto,
+    "finanziamento_e_rimborso": profilo_finanziamento_e_rimborso,
 }
 
 

@@ -468,3 +468,43 @@ def test_un_override_di_sp16a_sotto_la_quota_la_riduce_e_non_crea_debito():
         assert not fuori, "\n".join(fuori)
     finally:
         engine.dispose()
+
+
+def test_un_override_di_sp17a_fissa_solo_l_oltre_e_aggiunge_la_quota_al_debito():
+    """`sp_overrides` fissa `sp17a` a 60.000,00 nel 2027 (rilievo Important I2 della
+    revisione: un override di `sp17a`, non solo di `sp16a`, cambia significato).
+
+    La riclassifica (`_quota_breve_prestiti_nuovi`) avviene PRIMA che gli override
+    vengano applicati: l'override di `sp17a` fissa quindi solo la parte OLTRE la
+    quota, e `sp16a` resta quello che era senza override (breve pregresso 12.345,67
+    piu' la quota a breve 25.000,09 = 37.345,76). Rispetto a un override salvato
+    quando il prestito stava tutto in `sp17a` (prima del Task 17), il debito del
+    2027 e' quindi 25.000,09 PIU' alto (il contrario del caso `sp16a`, dove era piu'
+    basso): il segno dipende da quale lato dello split l'utente ha fissato.
+    """
+    engine, sessions = memory_sessions()
+    try:
+        rows = _righe(A3, None, {0: {**PRESTITO, "sp_overrides": {SP17A: 60000.00}}})
+        with sessions() as db:
+            run = _genera(db, "override-sp17a", rows)
+        fuori = []
+        sp27, _ce27, det27 = run[2027]
+        assert sp27[SP17A] == D("60000.00"), sp27[SP17A]
+        if sp27[SP16A] != D("37345.76"):
+            fuori.append(f"[2027] sp16a {sp27[SP16A]}, atteso 37345.76 (breve pregresso + quota, override non lo tocca)")
+        if _quota(det27) != D("25000.09"):
+            fuori.append(f"[2027] quota dichiarata {det27.get(QUOTA)}, attesa 25000.09 (sp16a non e' vincolato dall'override)")
+        precedente = sp27[SP16A] + sp27[SP17A]
+        for anno in (2028, 2029):
+            sp, _ce, det = run[anno]
+            totale = sp[SP16A] + sp[SP17A]
+            if totale != precedente - D("25000.09"):
+                fuori.append(f"[{anno}] debito bancario {totale}, atteso {precedente} − rata del prestito 25000.09")
+            if _quota(det) != D("25000.09"):
+                fuori.append(f"[{anno}] quota dichiarata {det.get(QUOTA)}, calendario 25000.09")
+            precedente = totale
+        for anno in A3:
+            _al_centesimo(fuori, f"[override-sp17a | {anno}]", run[anno][0], run[anno][2])
+        assert not fuori, "\n".join(fuori)
+    finally:
+        engine.dispose()

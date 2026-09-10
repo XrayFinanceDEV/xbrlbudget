@@ -171,7 +171,8 @@ class BudgetAssumptionsBase(BaseModel):
     # Scoperto di c/c (opt-in): un fabbisogno scoperto diventa sp16a generato dal
     # piano invece di far alzare il motore. Spento = comportamento di sempre.
     overdraft_allowed: bool = False
-    overdraft_limit: Optional[Decimal] = None   # None = concesso senza tetto
+    # None = concesso senza tetto; negativo non ha senso (un fido non e' un credito).
+    overdraft_limit: Optional[Decimal] = Field(default=None, ge=0)
 
     # TFR accrual suspended (TFR paid to INPS, fund stops growing this year)
     tfr_accrual_suspended: bool = False
@@ -293,7 +294,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     cash_sweep_enabled: Optional[bool] = None
     cash_sweep_min_cash: Optional[Decimal] = None
     overdraft_allowed: Optional[bool] = None
-    overdraft_limit: Optional[Decimal] = None
+    overdraft_limit: Optional[Decimal] = Field(None, ge=0)
     tfr_accrual_suspended: Optional[bool] = None
     previdenza_scales_with_personnel: Optional[bool] = None
     interest_rate_receivables: Optional[Decimal] = None

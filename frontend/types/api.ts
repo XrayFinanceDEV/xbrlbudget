@@ -1117,6 +1117,10 @@ export interface ForecastYearDetails {
    *  (`null` senza scoperto). */
   fabbisogno_picco?: number;
   fabbisogno_picco_anno?: number | null;
+  /** Di quanto la cassa chiude sotto `cash_sweep_min_cash` in un anno con
+   *  scoperto: lo scoperto si rimborsa per primo anche sotto il minimo, per
+   *  decisione del proprietario, e lo si dichiara. Zero senza sweep o senza scoperto. */
+  cassa_sotto_minimo?: number;
 }
 
 export interface ForecastPreviewYear {

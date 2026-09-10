@@ -8,6 +8,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import { euro, num, pctOf } from "@/lib/budget-format";
 import type { PregressoKey } from "@/types/api";
+import type { ForecastPreviewResponse } from "@/types/api";
 import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
@@ -393,7 +394,9 @@ export function unfundedFromError(error: ForecastPreviewError | null): { year: n
 
 // ── Cassa assorbita e scoperto di c/c (Task 12) ────────────────────────────
 
-export interface ScopertoAnno { year: number; cassaAssorbita: number; scopertoGenerato: number; scopertoResiduo: number }
+export interface ScopertoAnno {
+  year: number; cassaAssorbita: number; scopertoGenerato: number; scopertoResiduo: number; cassaSottoMinimo: number;
+}
 
 export interface ScopertoAvvisi {
   anni: ScopertoAnno[];
@@ -404,6 +407,9 @@ export interface ScopertoAvvisi {
   cassa: string | null;
   /** Avviso forte: il piano ha acceso uno scoperto, con gli importi. */
   scoperto: string | null;
+  /** La cassa chiusa sotto la cassa minima del cash sweep per rimborsare lo
+   *  scoperto: una decisione del proprietario, e la si dichiara. */
+  sottoMinimo: string | null;
 }
 
 /**
@@ -427,6 +433,7 @@ export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
     cassaAssorbita: num(y.details.cassa_assorbita),
     scopertoGenerato: num(y.details.scoperto_generato),
     scopertoResiduo: num(y.details.scoperto_residuo),
+    cassaSottoMinimo: num(y.details.cassa_sotto_minimo),
   }));
   const primo = years[0]?.details;
   const pAmount = num(primo?.fabbisogno_picco);
@@ -444,5 +451,27 @@ export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
       generato.map((a) => `${euro(a.scopertoGenerato)} nel ${a.year}`).join(", ") || "nessuno nuovo"}. `
       + (picco ? `Fabbisogno di picco ${euro(picco.amount)} nel ${picco.year}: è la finanza che queste ipotesi richiedono.` : "");
 
-  return { anni, picco, cassa, scoperto };
+  const sotto = anni.filter((a) => a.cassaSottoMinimo > 0);
+  const sottoMinimo = sotto.length === 0 ? null
+    : `Lo scoperto si rimborsa per primo, anche sotto la cassa minima del cash sweep: la cassa chiude ${
+      sotto.map((a) => `${euro(a.cassaSottoMinimo)} sotto il minimo nel ${a.year}`).join(", ")}. `
+      + "Tenere liquidità pagando interessi sullo scoperto non avrebbe senso.";
+
+  return { anni, picco, cassa, scoperto, sottoMinimo };
+}
+
+/**
+ * Se il passo 6 puo' confermare «la cassa resta positiva in tutti gli anni».
+ *
+ * Solo con una risposta del motore SENZA errore, con anni prodotti e senza
+ * alcuno scoperto. Un errore qualunque — anche uno che nessuna regex riconosce,
+ * come il tetto dello scoperto superato — basta a tacere: prima la conferma
+ * compariva sotto il riquadro che diceva il contrario, perche' l'errore del
+ * tetto non e' un «unfunded» e un piano fermo al primo anno non ha anni da cui
+ * leggere uno scoperto.
+ */
+export function confermaCassaPositiva(data: ForecastPreviewResponse | null, avvisi: ScopertoAvvisi): boolean {
+  if (!data || data.error) return false;
+  if ((data.forecast_years ?? []).length === 0) return false;
+  return avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
 }

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
+from decimal import Decimal
 import logging
 import sys
 import os
@@ -837,6 +838,28 @@ def patch_ce_override(
     return {"success": True, "applied": applied}
 
 
+# Una sola copia: alla rotta CE equivalente non serve, perche' lei scrive nelle
+# colonne `ce*_override` (Numeric), dove un Decimal non cambia forma;
+# qui invece il valore finisce dentro un sacco JSON, e la forma e' contenuto.
+def _sp_override_json_value(value: Optional[Decimal]) -> Any:
+    """Rida' al valore validato da Pydantic la forma numerica del corpo.
+
+    `apply_sp_overrides` scrive il valore com'e' nel sacco JSON `sp_overrides`,
+    e quel sacco finora conteneva i numeri usciti da `json.loads` della
+    richiesta. Passare un Decimal cambierebbe la forma salvata:
+    `model_dump(mode="json")` (Pydantic 2) lo gira in STRINGA, `jsonable_encoder`
+    in float anche dove il corpo ne portava uno intero (`1000` -> `1000.0`). Un
+    integrale resta `int`, il resto e' `float` -- identico a oggi, e il motore
+    rilegge comunque con `Decimal(str(...))`, quindi il previsionale non si
+    muove di un centesimo (M2).
+    """
+    if value is None:
+        return None
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+
 @router.patch(
     "/companies/{company_id}/scenarios/{scenario_id}/sp-override",
     response_model=Any,
@@ -845,7 +868,7 @@ def patch_ce_override(
 def patch_sp_override(
     company_id: int,
     scenario_id: int,
-    request: Any = Body(...),
+    request: budget_schemas.SpOverrideRequest,
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -881,17 +904,31 @@ def patch_sp_override(
     `sp_overrides` write (CLAUDE.md § Previsionale). Set `value` to `null` to
     clear that key and revert to engine calculation. Multiple entries for the
     same year merge into that year's SAME bag.
+
+    **Validation:** the body is checked by `budget_schemas.SpOverrideRequest`
+    before anything is written or regenerated, so a non-numeric `value`, a
+    NaN/Infinity, a missing `forecast_year` or an `overrides` that is not a
+    list answers **422**. Before that they reached `Decimal(str(raw_value))`
+    inside the engine, whose `decimal.InvalidOperation` is an `ArithmeticError`
+    and not a `ValueError`, and the only answer this route could give was a
+    500 (M2). Nothing was ever left written in either case -- the rollback was
+    already correct, only the status code was not.
     """
     from app.services import assumptions_service
 
     scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
-    if isinstance(request, dict):
-        request_data = request
-    else:
-        request_data = request.model_dump() if hasattr(request, 'model_dump') else request
-
-    overrides = request_data.get("overrides", [])
+    # Il corpo e' gia' valido qui: Pydantic ha rifiutato un 422 prima che si
+    # scrivesse e si rigenerasse qualunque cosa (M2). `value` torna numero
+    # nella forma che aveva nel corpo, perche' il sacco salvato non cambi.
+    overrides = [
+        {
+            "forecast_year": entry.forecast_year,
+            "field": entry.field,
+            "value": _sp_override_json_value(entry.value),
+        }
+        for entry in request.overrides
+    ]
 
     try:
         years_touched = assumptions_service.apply_sp_overrides(db, scenario, overrides)

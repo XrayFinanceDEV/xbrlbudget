@@ -84,8 +84,8 @@ due esiti HTTP opposti a seconda della porta da cui si è entrati.
 `ce01`–`ce20` meno `ce17` (sostituito dalle sue due sotto-voci), più `ce03a` (incrementi di
 immobilizzazioni per lavori interni, A.4), `ce08a`–`d`, `ce09a`–`d`, `ce11b`, `ce17`, `ce17a`,
 `ce17b`. Lo stesso insieme di 32 compare in `backend/app/schemas/budget.py` (due volte),
-nell'allowlist `_CE_OVERRIDE_FIELDS` di `budget_scenarios.py:770-779` e nella mappa
-`FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:63`.
+nell'allowlist `CE_OVERRIDE_FIELDS` di `backend/app/services/assumptions_service.py` e nella
+mappa `FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:63`.
 
 Ogni colonna è un **valore assoluto in euro**. `NULL` = usa il calcolo del motore.
 `ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:730-731`,
@@ -105,10 +105,14 @@ PATCH /companies/{id}/scenarios/{sid}/ce-override
 
 `value: null` azzera l'override e restituisce la riga al motore. Un `field` fuori
 dall'allowlist è **400**, un anno senza riga di ipotesi è **404**, e la rigenerazione avviene
-una volta sola alla fine. Attenzione all'ultimo ramo: se la rigenerazione fallisce la risposta
-è **500 «Overrides saved but forecast regeneration failed»** — gli override sono già stati
-committati e si applicheranno alla prima rigenerazione successiva, anche se questa chiamata
-è andata in errore.
+una volta sola alla fine — **nella stessa transazione del salvataggio**
+(`assumptions_service.apply_ce_overrides`). Se la rigenerazione fallisce la risposta è **500**,
+e **nessuno** degli override del lotto resta scritto: `db.rollback()` disfa tutto cio' che la
+chiamata aveva applicato, quindi una `GET` successiva legge le ipotesi esattamente come prima
+del tentativo. Prima di questa correzione gli override venivano committati **prima** di provare
+a rigenerare: un fallimento li lasciava comunque scritti, e si applicavano (facendo fallire di
+nuovo, con lo stesso errore) alla prima rigenerazione successiva — invisibile all'utente, perché
+il client scarta la modifica rifiutata e mostra il previsionale vecchio.
 
 Su `/forecast/income` il ciclo è: clic sulla cella previsionale → input in linea → `blur`/Enter
 mette la modifica in `pendingEdits` (**sfondo giallo + sottolineatura gialla**) → compare
@@ -126,6 +130,16 @@ fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/ana
 motori la applicano in coda al calcolo dello SP (`forecast_engine.py:1553`,
 `intra_year_engine.py:571`), e il ramo a 12 mesi del wizard della pratica ne manda
 una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:872`).
+
+`PUT /assumptions/{year}` salva e rigenera nella **stessa transazione**
+(`assumptions_service.update_single_year_assumptions`): se la rigenerazione fallisce (400 se
+il motore solleva un errore semantico, 500 altrimenti), la scrittura si annulla —
+`db.rollback()` — e `sp_overrides` resta esattamente come prima della chiamata. Prima di
+questa correzione la riga veniva committata subito, prima di provare a rigenerare: un
+fallimento la lasciava comunque scritta, e riappariva a ogni salvataggio successivo (che la
+rilegge e la fonde con le nuove modifiche, `frontend/app/forecast/balance/page.tsx:166-172`),
+facendo fallire ogni rigenerazione successiva con lo stesso errore finché l'utente non toccava
+di nuovo proprio quella cella — che però a schermo non era distinguibile dalle altre.
 
 `_apply_sp_overrides` (`forecast_engine.py:381-470`) ha tre comportamenti da conoscere:
 

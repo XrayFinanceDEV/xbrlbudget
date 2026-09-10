@@ -244,6 +244,17 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   vuota sotto un toast verde. `PATCH /ce-override` e `POST /generate`, sullo stesso motore e
   sullo stesso errore, rispondono invece 4xx/5xx.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6, `docs/budget/API-PREVISIONALE.md` §1
+- **Un override di cella rifiutato dal motore non resta persistito** — vale per SP Prev.
+  (`PUT /assumptions/{year}`) e CE Prev. (`PATCH /ce-override`), **non** per il bulk (bullet
+  sopra, che resta diverso di proposito). Le due chiamate salvano e rigenerano nella STESSA
+  transazione (`assumptions_service.update_single_year_assumptions`/`apply_ce_overrides`): una
+  generazione respinta fa `db.rollback()` di tutto cio' che quella chiamata ha applicato, quindi
+  una `GET` successiva legge le ipotesi esattamente come prima del tentativo. Prima di questo,
+  entrambe le rotte facevano `commit()` dell'override **prima** di provare a rigenerare: un
+  fallimento lasciava comunque il valore rifiutato scritto in `sp_overrides`/`ce*_override` —
+  invisibile, perche' il client scarta la modifica e mostra il previsionale vecchio (lo scenario
+  sembra intatto), ma ogni generazione successiva falliva con lo stesso errore finche' l'utente
+  non toccava di nuovo proprio quella cella, che pero' a schermo non vedeva diversa dalle altre.
 - **Un override vince sulla percentuale di crescita, e sopravvive al salvataggio.** «Salva e
   Calcola Previsionale» non ne azzera nessuno: si può cambiare `revenue_growth_pct` quanto si
   vuole e vedere il previsionale non muoversi. Solo la casella *«Azzera le modifiche manuali del

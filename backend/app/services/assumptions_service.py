@@ -407,3 +407,138 @@ def delete_assumptions_for_scenario(
     db.commit()
 
     return count
+
+
+def _regenerate_forecast(db: Session, scenario: models.BudgetScenario) -> None:
+    """La stessa selezione di motore di `POST /generate` (infrannuale vs
+    budget), fattorizzata perche' `update_single_year_assumptions` e
+    `apply_ce_overrides` non la duplichino."""
+    if scenario.scenario_type == "infrannuale":
+        from calculations.intra_year_engine import IntraYearEngine
+        IntraYearEngine(db).generate_projection(scenario.id)
+    else:
+        ForecastEngine(db).generate_forecast(scenario.id)
+
+
+def update_single_year_assumptions(
+    db: Session,
+    scenario: models.BudgetScenario,
+    forecast_year: int,
+    update_data: Dict[str, Any],
+) -> models.BudgetAssumptions:
+    """
+    Aggiorna le ipotesi di UN anno (`PUT /assumptions/{year}`, l'editor di
+    cella di SP Prev.) e rigenera il previsionale nella STESSA transazione:
+    se la generazione fallisce, l'aggiornamento si annulla — un override di
+    cella rifiutato dal motore non resta persistito (CLAUDE.md §
+    Previsionale/Frontend, "una correzione che tocca piu' campi si applica
+    tutta o niente").
+
+    Diverso dal bulk (`bulk_upsert_assumptions` sopra), che salva SEMPRE
+    anche a generazione fallita: e' un comportamento documentato del wizard,
+    e questa funzione non lo tocca. Qui non c'e' nulla da "salvare
+    comunque" — l'unico esito utile e' l'override applicato E riflesso nel
+    previsionale, o nessuno dei due.
+
+    Solleva `LookupError` se le ipotesi dell'anno non esistono (nessuna
+    mutazione avvenuta, nulla da annullare); rilancia l'eccezione del
+    motore (di norma `ValueError`) dopo un `rollback()` che disfa la
+    `setattr` appena fatta.
+    """
+    db_assumptions = db.query(models.BudgetAssumptions).filter(
+        models.BudgetAssumptions.scenario_id == scenario.id,
+        models.BudgetAssumptions.forecast_year == forecast_year,
+    ).first()
+    if not db_assumptions:
+        raise LookupError(
+            f"Assumptions for year {forecast_year} not found in scenario {scenario.id}"
+        )
+
+    for field, value in update_data.items():
+        setattr(db_assumptions, field, value)
+
+    try:
+        _regenerate_forecast(db, scenario)
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(db_assumptions)
+    return db_assumptions
+
+
+# I campi ce*_override che PATCH /ce-override puo' toccare. Vive qui, non nel
+# router, per lo stesso motivo di `bulk_upsert_assumptions`: la mutazione (e
+# ora l'atomicita' col motore) e' logica di servizio, non di routing.
+CE_OVERRIDE_FIELDS = {
+    "ce01_override", "ce02_override", "ce03_override", "ce03a_override", "ce04_override",
+    "ce05_override", "ce06_override", "ce07_override", "ce08_override",
+    "ce08a_override", "ce08b_override", "ce08c_override", "ce08d_override",
+    "ce09_override", "ce09a_override", "ce09b_override", "ce09c_override", "ce09d_override",
+    "ce10_override", "ce11_override", "ce11b_override", "ce12_override",
+    "ce13_override", "ce14_override", "ce15_override", "ce16_override",
+    "ce17_override", "ce17a_override", "ce17b_override",
+    "ce18_override", "ce19_override", "ce20_override",
+}
+
+
+def apply_ce_overrides(
+    db: Session,
+    scenario: models.BudgetScenario,
+    overrides: List[Dict[str, Any]],
+) -> int:
+    """
+    Applica un lotto di override `ce*_override` (`PATCH /ce-override`,
+    l'editor di cella di CE Prev.), poi rigenera il previsionale UNA sola
+    volta — stessa atomicita' di `update_single_year_assumptions`: una
+    rigenerazione rifiutata annulla TUTTO il lotto appena applicato, non solo
+    l'ultima voce (CLAUDE.md § Previsionale/Frontend, "una correzione che
+    tocca piu' campi si applica tutta o niente").
+
+    Solleva `ValueError` per un lotto vuoto o malformato (voce senza
+    `forecast_year`/`field`, o un `field` fuori da `CE_OVERRIDE_FIELDS`) e
+    `LookupError` per un anno senza ipotesi — in ENTRAMBI i casi con un
+    `rollback()` di quanto gia' applicato nel lotto prima dell'errore;
+    rilancia l'eccezione del motore dopo lo stesso `rollback()`.
+
+    Restituisce il numero di override applicati.
+    """
+    if not overrides:
+        raise ValueError("overrides list is required")
+
+    from decimal import Decimal as D
+
+    try:
+        assumption_cache: Dict[int, models.BudgetAssumptions] = {}
+        applied = 0
+        for entry in overrides:
+            forecast_year = entry.get("forecast_year")
+            field = entry.get("field")
+            value = entry.get("value")
+
+            if not forecast_year or not field:
+                raise ValueError("Each override needs forecast_year and field")
+            if field not in CE_OVERRIDE_FIELDS:
+                raise ValueError(f"Invalid override field: {field}")
+
+            if forecast_year not in assumption_cache:
+                assumption = db.query(models.BudgetAssumptions).filter(
+                    models.BudgetAssumptions.scenario_id == scenario.id,
+                    models.BudgetAssumptions.forecast_year == forecast_year,
+                ).first()
+                if not assumption:
+                    raise LookupError(f"No assumptions found for year {forecast_year}")
+                assumption_cache[forecast_year] = assumption
+
+            setattr(
+                assumption_cache[forecast_year], field,
+                D(str(value)) if value is not None else None,
+            )
+            applied += 1
+
+        _regenerate_forecast(db, scenario)
+    except Exception:
+        db.rollback()
+        raise
+
+    return applied

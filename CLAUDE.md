@@ -453,8 +453,10 @@ unaffected. Leaving it all in `sp17a` overstates CCN and current ratio (2,4206 i
 the test kit) and Altman's working capital (0,4093 instead of 0,3620) — the balance check never sees
 it, `sp16` and `sp17` are both liabilities. It also used to move the reclassified amount from the
 rendiconto's financing flow into its operating one: `cashflow_detailed.py` and `cashflow.py` now
-split on `BalanceSheet.financial_debt_short/long` vs `operating_debt_short/long`, never the raw
-`sp16`/`sp17` aggregate, so the quota never crosses that boundary either.
+take working capital as `sp16`/`sp17` **minus** `BalanceSheet.financial_debt_short/long` (banks, other
+lenders, bonds), and financial debt is a financing flow — anchored on those aggregates, not on the sum
+of the operating sub-fields, which can drift a cent from them — so the quota never crosses that
+boundary either.
 **An `sp_overrides` on `sp16a` or `sp17a` moves cash and total bank debt by the quota, in opposite
 directions**, because the split happens *before* overrides are applied: `sp16a` now fixes
 breve-pregresso-plus-quota (overriding it subtracts the quota too, −25.000,09 of debt and cash on the

@@ -187,8 +187,9 @@ calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il re
   Avviene dopo il cash sweep, che rimborsa prima il debito bancario pregresso e poi il prestito
   nuovo; il debito bancario pregresso conserva la propria ripartizione. Il rendiconto
   (`backend/app/calculations/cashflow_detailed.py`, `cashflow.py`) non la vede nemmeno lui: il
-  circolante segue `BalanceSheet.operating_debt_total` (fornitori, tributari, previdenziali, altri
-  debiti), il finanziario `financial_debt_short`/`financial_debt_long` — mai l'aggregato grezzo
+  circolante e' `sp16`/`sp17` **meno** `financial_debt_short`/`financial_debt_long` (non la somma dei
+  sotto-campi operativi, che puo' scostarsi di un centesimo dall'aggregato), il finanziario e'
+  `financial_debt_short`/`financial_debt_long` — mai l'aggregato grezzo
   `sp16`/`sp17` — quindi la riclassifica fra `sp16a` e `sp17a` non attraversa il confine
   operativo/finanziario del rendiconto.
 - `details['prestiti_nuovi_quota_breve']` dichiara la quota ogni anno, anche a zero, per quanto

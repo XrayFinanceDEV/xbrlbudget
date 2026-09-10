@@ -1121,6 +1121,16 @@ export interface ForecastYearDetails {
    *  scoperto: lo scoperto si rimborsa per primo anche sotto il minimo, per
    *  decisione del proprietario, e lo si dichiara. Zero senza sweep o senza scoperto. */
   cassa_sotto_minimo?: number;
+  /** La quota del prestito nuovo che scade entro l'anno dopo, spostata da `sp17a`
+   *  a `sp16a` (`forecast_engine.py`, `details['prestiti_nuovi_quota_breve']`):
+   *  il motore la scrive su OGNI anno, anche a zero, perche' a valle una chiave
+   *  assente vale zero. */
+  prestiti_nuovi_quota_breve: number;
+  /** I conflitti fra un aggregato di CE forzato e la somma dei suoi dettagli,
+   *  dove ha vinto l'aggregato (`forecast_engine.py`,
+   *  `details['override_conflicts']`): lista sempre presente su ogni anno di uno
+   *  scenario budget, vuota quando nessun override crea conflitto. */
+  override_conflicts: { aggregate: string; declared: number; details_sum: number }[];
 }
 
 export interface ForecastPreviewYear {

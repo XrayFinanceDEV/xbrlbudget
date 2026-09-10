@@ -434,3 +434,25 @@ class IntraYearComparison(BaseModel):
     period_months: int
     income_items: List[IntraYearComparisonItem]
     balance_items: List[IntraYearComparisonItem]
+
+
+# Override Request Schemas
+class SpOverrideEntry(BaseModel):
+    """One cell edit of SP Prev.: `{forecast_year, field, value}`.
+
+    `value` is a Decimal so that a non-numeric body is refused HERE, by
+    Pydantic (422), and never reaches the engine, where
+    `Decimal(str(raw_value))` raises `decimal.InvalidOperation` -- an
+    `ArithmeticError`, not a `ValueError`, which the route could only report
+    as a 500 (final review of the lotto 2, M2). NaN and infinities are
+    refused too: either would silently poison every projected line.
+    `value: null` means "clear this key", same as before.
+    """
+    forecast_year: int
+    field: str
+    value: Optional[Decimal] = Field(default=None, allow_inf_nan=False)
+
+
+class SpOverrideRequest(BaseModel):
+    """Body of `PATCH /companies/{id}/scenarios/{id}/sp-override`."""
+    overrides: List[SpOverrideEntry]

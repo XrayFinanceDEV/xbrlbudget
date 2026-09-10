@@ -6,7 +6,7 @@
 import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
-import { num, pctOf } from "@/lib/budget-format";
+import { euro, num, pctOf } from "@/lib/budget-format";
 import type { PregressoKey } from "@/types/api";
 import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
 
@@ -328,4 +328,60 @@ export function unfundedFromError(error: ForecastPreviewError | null): { year: n
   if (!error || error.year === null) return null;
   const amount = unfundedAmountFromMessage(error.message);
   return amount === null ? null : { year: error.year, amount };
+}
+
+// ── Cassa assorbita e scoperto di c/c (Task 12) ────────────────────────────
+
+export interface ScopertoAnno { year: number; cassaAssorbita: number; scopertoGenerato: number; scopertoResiduo: number }
+
+export interface ScopertoAvvisi {
+  anni: ScopertoAnno[];
+  /** Il fabbisogno di picco del piano e l'anno in cui cade: il numero e la data
+   *  che si portano in banca. `null` quando il motore non dichiara scoperto. */
+  picco: { amount: number; year: number } | null;
+  /** Avviso tenue: il piano consuma cassa, anche se la cassa resta positiva. */
+  cassa: string | null;
+  /** Avviso forte: il piano ha acceso uno scoperto, con gli importi. */
+  scoperto: string | null;
+}
+
+/**
+ * Gli avvisi di cassa e di scoperto dell'anteprima, letti da cio' che il motore
+ * DICHIARA (`details.cassa_assorbita`, `scoperto_*`, `fabbisogno_picco*`): qui
+ * non si deriva nulla, e il picco non si ricalcola come massimo dei residui —
+ * lo dichiara il motore, uguale su ogni anno.
+ *
+ * Una chiave assente vale zero (il tipo le tiene facoltative): e' la lettura
+ * prudente, perche' il motore le dichiara sempre, e un'anteprima di una
+ * versione vecchia non deve inventare un avviso.
+ *
+ * L'avviso di cassa esiste anche senza scoperto, ed e' il punto: l'utente
+ * deve sapere che il piano gli consuma liquidita' PRIMA che diventi uno
+ * scoperto. Con lo scoperto spento e un fabbisogno scoperto il motore si
+ * ferma, e quel caso lo dice gia' `previewNotice`: qui non si ripete.
+ */
+export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
+  const anni = years.map((y) => ({
+    year: y.year,
+    cassaAssorbita: num(y.details.cassa_assorbita),
+    scopertoGenerato: num(y.details.scoperto_generato),
+    scopertoResiduo: num(y.details.scoperto_residuo),
+  }));
+  const primo = years[0]?.details;
+  const pAmount = num(primo?.fabbisogno_picco);
+  const pYear = primo?.fabbisogno_picco_anno ?? null;
+  const picco = pAmount > 0 && pYear !== null ? { amount: pAmount, year: pYear } : null;
+
+  const assorbita = anni.filter((a) => a.cassaAssorbita > 0);
+  const cassa = assorbita.length === 0 ? null
+    : `Il piano assorbe cassa: ${assorbita.map((a) => `${euro(a.cassaAssorbita)} nel ${a.year}`).join(", ")}. `
+      + "La liquidità si riduce anche dove resta positiva.";
+
+  const generato = anni.filter((a) => a.scopertoGenerato > 0);
+  const scoperto = generato.length === 0 && picco === null ? null
+    : `Scoperto di conto corrente generato dal piano: ${
+      generato.map((a) => `${euro(a.scopertoGenerato)} nel ${a.year}`).join(", ") || "nessuno nuovo"}. `
+      + (picco ? `Fabbisogno di picco ${euro(picco.amount)} nel ${picco.year}: è la finanza che queste ipotesi richiedono.` : "");
+
+  return { anni, picco, cassa, scoperto };
 }

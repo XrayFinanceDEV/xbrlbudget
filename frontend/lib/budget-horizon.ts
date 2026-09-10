@@ -34,7 +34,8 @@ export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
 export type BoolAssumptionField =
   | "previdenza_scales_with_personnel"
   | "tfr_accrual_suspended"
-  | "cash_sweep_enabled";
+  | "cash_sweep_enabled"
+  | "overdraft_allowed";
 
 /**
  * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
@@ -104,6 +105,8 @@ export function hydrateAssumptions(
       altri_finanz_repayment_years: a.altri_finanz_repayment_years,
       cash_sweep_enabled: a.cash_sweep_enabled ?? false,
       cash_sweep_min_cash: a.cash_sweep_min_cash,
+      overdraft_allowed: a.overdraft_allowed ?? false,
+      overdraft_limit: a.overdraft_limit ?? null,
       tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
       previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
       receivables_short_growth_pct: a.receivables_short_growth_pct,
@@ -234,6 +237,8 @@ export function defaultAssumption(
     altri_finanz_repayment_years: null,
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
+    overdraft_allowed: false,
+    overdraft_limit: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,
     tax_rate: 27.9,

@@ -498,6 +498,11 @@ export interface BudgetAssumptions {
   altri_finanz_repayment_years: number | null;
   cash_sweep_enabled: boolean;
   cash_sweep_min_cash: number | null;
+  /** Scoperto di c/c concesso: un fabbisogno scoperto diventa `sp16a` generato dal
+   *  piano invece di fermare il motore. Spento (default) = comportamento di sempre. */
+  overdraft_allowed: boolean;
+  /** Tetto dello scoperto; `null` = concesso senza tetto. */
+  overdraft_limit: number | null;
   tfr_accrual_suspended: boolean;
   previdenza_scales_with_personnel: boolean;
   interest_rate_receivables: number;
@@ -594,6 +599,8 @@ export interface BudgetAssumptionsCreate {
   altri_finanz_repayment_years?: number | null;
   cash_sweep_enabled?: boolean;
   cash_sweep_min_cash?: number | null;
+  overdraft_allowed?: boolean;
+  overdraft_limit?: number | null;
   tfr_accrual_suspended?: boolean;
   previdenza_scales_with_personnel?: boolean;
   interest_rate_receivables?: number;
@@ -1095,6 +1102,21 @@ export interface ForecastYearDetails {
    *  direzione sicura. Si legge sempre con `?? []` — una chiave assente vale
    *  zero. */
   pregresso_writeoff_ignored?: PregressoWriteoffIgnored[];
+  /** Di quanto il piano riduce la cassa nell'anno (apertura - chiusura, zero se
+   *  cresce). Dichiarata anche quando la cassa resta positiva: e' l'avviso che
+   *  arriva PRIMA dello scoperto. Facoltative per la stessa ragione di
+   *  `pregresso_writeoff_ignored`: il tipo promette meno dell'API, mai di piu'. */
+  cassa_assorbita?: number;
+  /** Lo scoperto di c/c nato nell'anno (`sp16a` generato dal piano). */
+  scoperto_generato?: number;
+  /** Lo scoperto in essere a fine anno, distinto dal debito bancario pregresso. */
+  scoperto_residuo?: number;
+  /** Gli oneri dello scoperto, maturati sul saldo di APERTURA (in `ce15`). */
+  oneri_scoperto?: number;
+  /** Il fabbisogno di picco del PIANO, uguale su ogni anno, e l'anno in cui cade
+   *  (`null` senza scoperto). */
+  fabbisogno_picco?: number;
+  fabbisogno_picco_anno?: number | null;
 }
 
 export interface ForecastPreviewYear {

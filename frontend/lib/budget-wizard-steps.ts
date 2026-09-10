@@ -43,6 +43,7 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "tangible_investments", "intangible_investments",
     "depreciation_rate", "depreciation_rate_intangible",
     "asset_disposal_nbv", "asset_disposal_proceeds", "cash_sweep_enabled", "cash_sweep_min_cash",
+    "overdraft_allowed", "overdraft_limit",
   ],
   imposte: ["tax_rate", "tax_advances_paid", "tax_temporary_differences", "sp16e_growth_pct", "sp17e_growth_pct"],
 };
@@ -103,7 +104,11 @@ export function primaryLabel(step: WizardStepKey): string {
 }
 
 export function stepForErrorMessage(message: string): WizardStepKey {
-  return /unfunded financing requirement/i.test(message) ? "pregresso-nuovo" : "imposte";
+  // Anche il tetto dello scoperto superato si corregge al passo 6, dove lo
+  // scoperto si concede: rimandare a Imposte manderebbe l'utente nel posto
+  // sbagliato con un messaggio che parla d'altro.
+  return /unfunded financing requirement|scoperto di conto corrente oltre il tetto/i.test(message)
+    ? "pregresso-nuovo" : "imposte";
 }
 
 export function stepStorageKey(scenarioId: number): string {

@@ -625,6 +625,16 @@ class BudgetAssumptions(Base):
     cash_sweep_enabled = Column(Boolean, default=False, nullable=False)
     cash_sweep_min_cash = Column(Numeric(15, 2), nullable=True)  # Cash floor to keep (NULL = 0)
 
+    # Scoperto di conto corrente (opt-in, per forecast year): la cassa plugga solo
+    # verso l'alto, e un plug negativo e' un fabbisogno scoperto. Spento (il
+    # default) il motore alza e non produce nulla, come ha sempre fatto — quindi
+    # ogni scenario esistente si comporta come prima. Acceso, il fabbisogno diventa
+    # `sp16a_debiti_banche_breve` generato dal piano, dichiarato nei `details` e
+    # distinto dal debito bancario pregresso. Serve anche a MISURARE: un piano
+    # stressato lo si vuole poter far girare per leggere quanta finanza richiede.
+    overdraft_allowed = Column(Boolean, default=False, nullable=False)
+    overdraft_limit = Column(Numeric(15, 2), nullable=True)  # NULL = concesso senza tetto
+
     # TFR accrual suspension: companies with >60 employees pay the maturing TFR to the
     # INPS treasury fund instead of accruing it internally. When True, the TFR fund
     # (sp15) stops growing for this forecast year (the ce08a cost stays in the P&L).

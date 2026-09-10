@@ -16,7 +16,7 @@
 // piano da leggere/scrivere (primo anno di piano) e l'interruttore € / %.
 import type { JSX, ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle, Check, TrendingDown } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,7 @@ import { PREGRESSO_LABELS, validatePregresso } from "@/lib/budget-pregresso-circ
 import { boolAssumption, pregressoBase, pregressoPreview, singleYearValue } from "@/lib/budget-pregresso-step";
 import { TABELLA_KEYS, massesOf, type PregressoMode } from "@/lib/budget-pregresso-tabella";
 import { previewNotice } from "@/lib/budget-preview-notice";
+import { scopertoAvvisi } from "@/lib/budget-preview-rows";
 import type { Pregresso } from "@/types/api";
 import type { StepProps } from "../types";
 import { PregressoTable } from "../PregressoTable";
@@ -88,6 +89,13 @@ const INVESTMENT_ROWS: YearInputRow[] = [
   { field: "intangible_investments", label: "Investimenti immateriali €", baseLabel: "—" },
 ];
 
+// Il tetto e' per anno come ogni ipotesi; vuoto = concesso senza tetto, cioe'
+// la modalita' di MISURA: il piano stressato gira, e l'anteprima dice quanta
+// finanza richiede.
+const OVERDRAFT_ROWS: YearInputRow[] = [
+  { field: "overdraft_limit", label: "Tetto dello scoperto €", sub: "vuoto = senza tetto", baseLabel: "—" },
+];
+
 const ADVANCED_ROWS: YearInputRow[] = [
   { field: "depreciation_rate", label: "Ammortamento nuovi investimenti materiali %", baseLabel: "—" },
   { field: "depreciation_rate_intangible", label: "Ammortamento nuovi investimenti immateriali %", baseLabel: "—" },
@@ -127,6 +135,9 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
   const existingDebt = singleYearValue(p.assumptions, p.forecastYears, "existing_debt_repayment_years");
   const altriFinanz = singleYearValue(p.assumptions, p.forecastYears, "altri_finanz_repayment_years");
   const cashSweepEnabled = boolAssumption(p.assumptions, p.forecastYears, "cash_sweep_enabled");
+  const overdraftAllowed = boolAssumption(p.assumptions, p.forecastYears, "overdraft_allowed");
+  // Letti da cio' che il motore dichiara, mai ricalcolati qui.
+  const avvisi = useMemo(() => scopertoAvvisi(p.preview.data?.forecast_years ?? []), [p.preview.data]);
 
   // `items-start` come negli altri passi: senza, la colonna si stira a tutta
   // l'altezza della riga e il `lg:sticky` della colonna destra non ha effetto.
@@ -265,6 +276,39 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
               />
             </div>
 
+            <Separator />
+
+            <div>
+              <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Scoperto di conto corrente
+              </p>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="overdraft-allowed"
+                  checked={overdraftAllowed}
+                  onCheckedChange={(checked) => p.updateAll("overdraft_allowed", checked === true)}
+                />
+                <Label htmlFor="overdraft-allowed" className="text-sm font-normal">
+                  Concedi lo scoperto: il fabbisogno scoperto diventa debito bancario a breve
+                </Label>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Spento, il previsionale si ferma sul primo anno che non si finanzia. Acceso, misura quanta finanza
+                richiedono le ipotesi: oneri al tasso del nuovo finanziamento, sullo scoperto di inizio anno.
+              </p>
+              {overdraftAllowed && (
+                <div className="mt-2">
+                  <YearInputTable
+                    forecastYears={p.forecastYears}
+                    baseYear={p.baseYear}
+                    assumptions={p.assumptions}
+                    update={p.update}
+                    rows={OVERDRAFT_ROWS}
+                  />
+                </div>
+              )}
+            </div>
+
             <Accordion type="single" collapsible>
               <AccordionItem value="avanzate" className="border-b-0">
                 <AccordionTrigger className="text-sm font-medium">Mostra tutte</AccordionTrigger>
@@ -317,7 +361,24 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
           {/* Il fabbisogno scoperto lo dice gia' `previewNotice`, sopra, in UN
               solo posto (lib/budget-preview-notice.ts): qui resta la sola
               conferma opposta, che quel riquadro non da'. */}
-          {!preview.unfunded && p.preview.data && (
+          {/* Lo scoperto acceso: l'avviso forte, con gli importi e il picco. */}
+          {avvisi.scoperto && (
+            <div className="mt-3 flex gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{avvisi.scoperto}</span>
+            </div>
+          )}
+
+          {/* La cassa che il piano consuma, anche dove resta positiva: l'avviso
+              che arriva PRIMA dello scoperto, non dopo. */}
+          {avvisi.cassa && (
+            <div className="mt-3 flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              <TrendingDown className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{avvisi.cassa}</span>
+            </div>
+          )}
+
+          {!preview.unfunded && !avvisi.scoperto && p.preview.data && (
             <div className="mt-3 flex gap-2 rounded-md bg-muted p-3 text-sm">
               <Check className="h-4 w-4 shrink-0 mt-0.5" /> La cassa resta positiva in tutti gli anni: nessun
               fabbisogno da coprire.

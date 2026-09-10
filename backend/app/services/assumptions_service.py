@@ -136,6 +136,8 @@ def build_assumption_row(
         altri_finanz_repayment_years=data.get("altri_finanz_repayment_years", None),
         cash_sweep_enabled=data.get("cash_sweep_enabled", False) or False,
         cash_sweep_min_cash=data.get("cash_sweep_min_cash", None),
+        overdraft_allowed=data.get("overdraft_allowed", False) or False,
+        overdraft_limit=data.get("overdraft_limit", None),
         tfr_accrual_suspended=data.get("tfr_accrual_suspended", False) or False,
         previdenza_scales_with_personnel=data.get("previdenza_scales_with_personnel", False) or False,
         interest_rate_receivables=data.get("interest_rate_receivables", 0.0),

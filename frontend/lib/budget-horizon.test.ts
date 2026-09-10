@@ -45,6 +45,8 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     altri_finanz_repayment_years: null,
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
+    overdraft_allowed: false,
+    overdraft_limit: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,
     interest_rate_receivables: 0,
@@ -236,7 +238,7 @@ describe("hydrateAssumptions", () => {
     "financing_interest_rate", "financing_loans", "fixed_materials_growth_pct",
     "fixed_materials_percentage", "fixed_services_growth_pct", "fixed_services_percentage",
     "forecast_year", "intangible_investments", "investments", "other_costs_growth_pct",
-    "other_revenue_growth_pct", "payables_short_growth_pct", "personnel_growth_pct",
+    "other_revenue_growth_pct", "overdraft_allowed", "overdraft_limit", "payables_short_growth_pct", "personnel_growth_pct",
     "pregresso", "previdenza_scales_with_personnel", "receivables_long_growth_pct",
     "receivables_short_growth_pct", "rent_growth_pct", "revenue_growth_pct", "scenario_id",
     "sp01_growth_pct", "sp04_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
@@ -247,8 +249,8 @@ describe("hydrateAssumptions", () => {
     "tfr_accrual_suspended", "variable_materials_growth_pct", "variable_services_growth_pct",
   ];
 
-  it("scrive esattamente le 89 chiavi congelate, ordinate", () => {
-    expect(CHIAVI_ATTESE.length).toBe(89);
+  it("scrive esattamente le 91 chiavi congelate, ordinate", () => {
+    expect(CHIAVI_ATTESE.length).toBe(91);
     const out = hydrateAssumptions([fixtureRow({ forecast_year: 2026 })], 1);
     expect(Object.keys(out[2026]).sort()).toEqual([...CHIAVI_ATTESE].sort());
   });
@@ -321,7 +323,7 @@ describe("assumptionRowsForSave", () => {
     const attese = Object.keys(map[2026]).sort();
     // Ancorato all'elenco congelato di `hydrateAssumptions`: se il numero si
     // muove, il difetto e' li' e questo test non si aggiorna per zittirlo.
-    expect(attese.length).toBe(89);
+    expect(attese.length).toBe(91);
     const rows = assumptionRowsForSave(map, [2026, 2027], 7);
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(Object.keys(row).sort()).toEqual(attese);

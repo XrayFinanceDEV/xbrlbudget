@@ -196,3 +196,11 @@ describe("horizonLabel", () => {
     expect(horizonLabel(-2, 2026)).toBe("Nessun anno di piano");
   });
 });
+
+describe("stepForErrorMessage · scoperto di c/c (Task 12)", () => {
+  it("il tetto dello scoperto superato riporta al passo in cui lo scoperto si concede", () => {
+    expect(stepForErrorMessage(
+      "Scoperto di conto corrente oltre il tetto concesso: servono 5.014.777,78, il tetto concesso e' 100.000,00",
+    )).toBe("pregresso-nuovo");
+  });
+});

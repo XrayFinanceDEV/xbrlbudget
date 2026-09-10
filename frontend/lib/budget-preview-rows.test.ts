@@ -6,6 +6,8 @@ import {
   ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
   rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
 } from "./budget-preview-rows";
+import { scopertoAvvisi } from "./budget-preview-rows";
+import { euro } from "@/lib/budget-format";
 
 const baseInc = {
   ce01_ricavi_vendite: "1000", ce04_altri_ricavi: "50", ce05_materie_prime: "400",
@@ -363,5 +365,58 @@ describe("rowsPregressoRunoff", () => {
       .toEqual(["Debiti verso fornitori · residuo a breve", "Crediti commerciali · residuo a breve"]);
     expect(rows[0].years).toHaveLength(2);
     expect(rowsPregressoRunoff([], ["crediti_commerciali"])).toEqual([]);
+  });
+});
+
+describe("scopertoAvvisi — cassa assorbita e scoperto di c/c (Task 12)", () => {
+  // Importi non tondi: un avviso che si accende solo su numeri tondi non prova nulla.
+  const conDettagli = (y: number, d: Record<string, number | null>): ForecastPreviewYear => {
+    const base = year(y);
+    return { ...base, details: { ...base.details, ...d } };
+  };
+
+  it("nessuna chiave dichiarata (anteprima vecchia): nessun avviso, nessun picco", () => {
+    const a = scopertoAvvisi([year(2027)]);
+    expect(a.cassa).toBeNull();
+    expect(a.scoperto).toBeNull();
+    expect(a.picco).toBeNull();
+    expect(a.anni).toEqual([{ year: 2027, cassaAssorbita: 0, scopertoGenerato: 0, scopertoResiduo: 0 }]);
+  });
+
+  it("la cassa che scende RESTANDO positiva accende l'avviso tenue, non quello forte", () => {
+    const a = scopertoAvvisi([
+      conDettagli(2027, { cassa_assorbita: 16966.67, scoperto_generato: 0, fabbisogno_picco: 0, fabbisogno_picco_anno: null }),
+      conDettagli(2028, { cassa_assorbita: 0, scoperto_generato: 0, fabbisogno_picco: 0, fabbisogno_picco_anno: null }),
+    ]);
+    expect(a.cassa).toContain(`${euro(16966.67)} nel 2027`);
+    expect(a.cassa).not.toContain("2028");
+    expect(a.scoperto).toBeNull();
+    expect(a.picco).toBeNull();
+  });
+
+  it("lo scoperto acceso dice l'importo anno per anno, e il picco con l'anno in cui cade", () => {
+    const picco = { fabbisogno_picco: 89458.78, fabbisogno_picco_anno: 2027 };
+    const a = scopertoAvvisi([
+      conDettagli(2027, { cassa_assorbita: 30000, scoperto_generato: 89458.78, scoperto_residuo: 89458.78, ...picco }),
+      conDettagli(2028, { cassa_assorbita: 0, scoperto_generato: 1234.56, scoperto_residuo: 12345.67, ...picco }),
+    ]);
+    // L'importo del 2028 non compare nella frase del picco: e' l'unico modo di
+    // provare che l'elenco anno per anno c'e' davvero (misurato con una
+    // mutazione — col solo 2027, la frase del picco bastava a far passare il test).
+    expect(a.scoperto).toContain(`${euro(1234.56)} nel 2028`);
+    expect(a.scoperto).toContain(`${euro(89458.78)} nel 2027`);
+    expect(a.scoperto).toContain(`Fabbisogno di picco ${euro(89458.78)} nel 2027`);
+    expect(a.picco).toEqual({ amount: 89458.78, year: 2027 });
+    expect(a.anni[1].scopertoResiduo).toBe(12345.67);
+  });
+
+  it("il picco e' quello DICHIARATO dal motore, non il massimo ricalcolato dei residui", () => {
+    // Residui volutamente incoerenti col picco: se la funzione ricalcolasse,
+    // leggerebbe 500 nel 2028 invece di 400 nel 2027.
+    const a = scopertoAvvisi([
+      conDettagli(2027, { scoperto_generato: 400, scoperto_residuo: 400, fabbisogno_picco: 400, fabbisogno_picco_anno: 2027 }),
+      conDettagli(2028, { scoperto_generato: 100, scoperto_residuo: 500, fabbisogno_picco: 400, fabbisogno_picco_anno: 2027 }),
+    ]);
+    expect(a.picco).toEqual({ amount: 400, year: 2027 });
   });
 });

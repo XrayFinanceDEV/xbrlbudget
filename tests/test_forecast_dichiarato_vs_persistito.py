@@ -178,16 +178,27 @@ def _divergenze(bs, ce, det, row):
     if bs["_total_assets"] != bs["_total_liabilities"]:
         fuori.append(("quadratura", f"attivo {bs['_total_assets']} != passivo {bs['_total_liabilities']}"))
 
-    # Il residuo di quadratura non si posa MAI su un campo dichiarato. E' la
-    # stessa affermazione dei confronti qui sopra, presa dall'altro capo: quelli
-    # guardano l'esito, questo guarda l'atto — e un residuo posato su un campo
-    # dichiarato e' un difetto anche nell'anno fortunato in cui vale zero.
+    # Il residuo di quadratura non si posa MAI su un campo la cui dichiarazione
+    # comanda il MOTORE. E' la stessa affermazione dei confronti qui sopra,
+    # presa dall'altro capo: quelli guardano l'esito, questo guarda l'atto.
+    # Ma "dichiarato" non vuol dire "elencato nei `details`": una riga in modo
+    # legacy HA un `generated` che realign_ scrive eguale al persistito, quindi
+    # un centesimo posato li' sopravvive dichiarato anche l'anno dopo (ed e' il
+    # comportamento pre-lotto: il secchio libero lo riceveva). Inviolabili sono
+    # le righe la cui memoria sta ALTROVE dal bilancio: il calendario del piano
+    # (modo runoff), l'indicizzazione (che riporta alla BASE, non al prev), la
+    # ripartizione bancaria, e cio' che un override dell'utente ha fissato.
     dichiarati = (
-        {campo for coppia in SHORT_LONG.values() for campo in coppia}
+        {campo for saldo, coppia in SHORT_LONG.items()
+         if det["pregresso"][saldo]["mode"] == "runoff" for campo in coppia}
         | {SP_INDEXABLE_FIELDS[code] for code in det["indicizzazione"]}
         # Task 16, giro di correzione 1 (rilievo 4): entrambi i lati della
         # ripartizione pregresso/prestito nuovo, non solo il breve.
         | {"sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"}
+        # Il secchio forzato da un piano/indice e' inviolabile anche se la sua
+        # riga e' legacy: dove la batteria arriva, un centesimo su una riga che
+        # l'utente ha forzato dalla schermata SP Prev. cancellere' l'override.
+        | {c for c, v in sp_ov.items() if v is not None}
     )
     for posa in det["residuo_quadratura"]:
         if posa["campo"] in dichiarati:

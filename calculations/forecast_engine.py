@@ -743,6 +743,18 @@ class ForecastEngine:
         {"sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"}
     )
 
+    # (I3b) Il lato FINANZIARIO integrale di `sp16`/`sp17`: banche, altri
+    # finanziari, obbligazioni. Mai ripiego del cammino a ritroso in
+    # `_normalize_balance_sheet_cents` — confine PFN e confine del rendiconto.
+    _BANK_DEBT_FIELDS_SP16: "frozenset[str]" = frozenset((
+        "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+        "sp16c_debiti_obbligazioni_breve",
+    ))
+    _BANK_DEBT_FIELDS_SP17: "frozenset[str]" = frozenset((
+        "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+        "sp17c_debiti_obbligazioni_lungo",
+    ))
+
     # (I1-bis, Ruling 57) Il lato OLTRE che un piano di scadenziamento scrive
     # dal calendario e non dal persistito: un `sp_overrides` su quella riga
     # verrebbe salvato e poi CANCELLATO IN SILENZIO l'anno dopo dal runoff
@@ -1147,21 +1159,59 @@ class ForecastEngine:
         posati: List[Dict[str, Any]] = []
         if details is not None:
             details['residuo_quadratura'] = posati
+        # I3(b): i sotto-campi FINANZIARI di `sp16`/`sp17` (banche, altri
+        # finanziari, obbligazioni) non possono mai essere il ripiego del
+        # cammino a ritroso. Sono un confine PFN e, dopo questo lotto, anche il
+        # confine operativo/finanziario del rendiconto (`sp16 −
+        # financial_debt_short`): un residuo posato su `sp16c` scrive debito
+        # obbligazionario su un'azienda che non ne ha — con segno negativo, nei
+        # casi peggiori (sonda 40f0332 vs 0207c93: `sp16c −0,01 … −0,02` per
+        # quattro anni su uno scenario senza piano ne' indicizzazione). Se
+        # nessun operativo e' libero il residuo resta sul secchio di default —
+        # un centesimo va pur posato da qualche parte — ma e' DICHIARATO in
+        # `residuo_quadratura`, come sempre.
+        _cammino_esclusi = {
+            "sp16_debiti_breve": cls._BANK_DEBT_FIELDS_SP16,
+            "sp17_debiti_lungo": cls._BANK_DEBT_FIELDS_SP17,
+        }
         for aggregate, (group_fields, residual_field) in groups.items():
             if aggregate not in result or not all(field in result for field in group_fields):
                 continue
             residual = result[aggregate] - sum(
                 (result[field] for field in group_fields), Decimal("0")
             )
+            if not residual:
+                continue
             target = residual_field
             if target in forced_fields:
+                esclusi = _cammino_esclusi.get(aggregate, frozenset())
                 target = next(
-                    (field for field in reversed(group_fields) if field not in forced_fields),
-                    residual_field,
+                    (field for field in reversed(group_fields)
+                     if field not in forced_fields and field not in esclusi),
+                    None,
                 )
+            if target is None:
+                # Nessun operativo libero: le righe sono la dichiarazione, e
+                # l'aggregato del gruppo DEBITI e' letteramente la loro somma
+                # (riga 2961 `sp16 = sp16a + … + sp16g`) — quindi e' lui che
+                # segue la somma, come gia' fa il normalizzatore del CE quando
+                # tutti i dettagli di un gruppo sono forzati. Se invece anche
+                # l'aggregato e' forzato (uno `sp_overrides` su `sp16`/`sp17`
+                # fissa il totale), il centesimo va pur sempre posato su
+                # qualcosa: resta sul secchio di default, ed e' DICHIARATO qui
+                # sotto in `residuo_quadratura` — mai taciuto.
+                if aggregate in forced_fields:
+                    result[residual_field] += residual
+                    posati.append({'campo': residual_field, 'importo': residual})
+                else:
+                    scarto = sum(
+                        (result[field] for field in group_fields), Decimal("0")
+                    ) - result[aggregate]
+                    result[aggregate] += scarto
+                    posati.append({'campo': aggregate, 'importo': scarto})
+                continue
             result[target] += residual
-            if residual:
-                posati.append({'campo': target, 'importo': residual})
+            posati.append({'campo': target, 'importo': residual})
 
         asset_fields_without_cash = (
             "sp01_crediti_soci", "sp02_immob_immateriali",
@@ -1548,7 +1598,21 @@ class ForecastEngine:
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
                     forced_fields=(
-                        self._declared_sp_fields()
+                        # I3(a): l'elenco dei dichiarati entra QUI' solo quando
+                        # il secchio di default `sp16g`/`sp17g` e' gia' forzato
+                        # da un piano o da un'indicizzazione — come PROMETTEVA
+                        # la docstring di `_declared_sp_fields` ma il codice non
+                        # faceva (includerlo sempre forza anche d..f, libera
+                        # solo a/b/c, e il cammino a ritroso posa il residuo su
+                        # `sp16c`: la sonda 40f0332 vs 0207c93 lo misura su 6
+                        # percentuali di crescita su 8, anche NEGATIVO). Con il
+                        # secchio libero il ripiego non parte mai: il residuo
+                        # resta su `sp16g`/`sp17g` esatto come prima del lotto.
+                        (self._declared_sp_fields()
+                         if ({"sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo"}
+                             & (self._pregresso_sp_forced_fields(pregresso)
+                                | self._indexed_sp_forced_fields(details)))
+                         else frozenset())
                         | self._pregresso_sp_forced_fields(pregresso)
                         | self._indexed_sp_forced_fields(details)
                         # `sp16a`/`sp17a` portano SEMPRE la ripartizione

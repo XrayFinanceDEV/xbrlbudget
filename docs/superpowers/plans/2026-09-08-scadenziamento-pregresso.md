@@ -1500,3 +1500,26 @@ poteva vederlo: i suoi fixture hanno `sp16a` a zero.
   le celle si muovono **solo** negli scenari con debito pregresso e nuovo finanziamento insieme.
 - `CLAUDE.md` › Forecasting Engine dice gia' «le rate pagano il proprio debito»: dopo questo task diventa vera;
   si ritocca solo se non dice esattamente cio' che il motore fa.
+
+---
+
+### Task 17: Il prestito nuovo ha una quota a breve
+
+**Aggiunto il 2026-09-10 per decisione del proprietario** («Adesso, in questo lotto»), dopo che la revisione
+del Task 16 lo ha confermato con una sonda. **Modello:** opus (motore). Parte dall'HEAD del giro 1 del Task 16:
+toccano la stessa ripartizione `sp16a`/`sp17a` e vanno in serie.
+
+**Il difetto.** Tutto il residuo del prestito nuovo sta in `sp17a`, anche la quota che scade l'anno dopo. Sulla
+base del kit i 25.000,10 in scadenza stanno a lungo: riclassificati, il current ratio 2027 passa da 2,4206 a
+2,0794 e la CCN scende di 25.000,10. `sp16` e `sp17` sono entrambi nel passivo: il pareggio non lo vede, lo vedono
+CCN, current ratio e circolante di Altman.
+
+**Contratto:**
+- La quota di ogni prestito nuovo che il calendario del kernel rimborsa nell'anno successivo sta in `sp16a`
+  (preammortamento: zero; maxirata: a breve l'anno prima); il resto in `sp17a`.
+- Il debito bancario pregresso invariato (I1 esteso del Task 16); per i contratti misti la sola parte nuova.
+- Totale del debito, cassa, CE invariati anno per anno; scoperto (I1-I4 del Task 12) e cash sweep (prima il
+  pregresso, decisione del proprietario) invariati; la ripartizione protetta dal residuo di quadratura.
+- Rete rossa sull'HEAD di partenza; parita': si muovono solo `sp16a`/`sp16` e `sp17a`/`sp17`, in coppie di segno
+  opposto, negli scenari con un prestito nuovo — zero CE, zero `sp09`, zero altrove.
+- `CLAUDE.md` › Forecasting Engine e `API-PREVISIONALE.md` nello stesso commit, con cosa si rompe a ignorarlo.

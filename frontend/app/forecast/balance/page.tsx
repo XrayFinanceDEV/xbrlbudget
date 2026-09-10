@@ -24,6 +24,7 @@ import {
 } from "recharts";
 import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info, Save } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/page-header";
@@ -120,8 +121,6 @@ const SP_EDITABLE_FIELDS = new Set([
   "sp18_ratei_risconti_passivi",
 ]);
 
-type PendingSpEdits = Record<string, number | null>;
-
 export default function ForecastBalancePage() {
   const { selectedCompanyId } = useApp();
   const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
@@ -174,11 +173,18 @@ export default function ForecastBalancePage() {
         });
       }));
       await generateForecast(selectedCompanyId, selectedScenario.id);
-      setPendingEdits({});
+      setPendingEdits((prev) => pendingEditsAfterSave(prev, "success"));
       invalidateAnalysis(selectedCompanyId, selectedScenario.id);
       toast.success("Stato patrimoniale aggiornato");
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "aggiornamento dello stato patrimoniale fallito"));
+      // Rilievo 6, giro di correzione 1: un salvataggio che il server ha
+      // rifiutato non deve lasciare la cella a mostrare il valore digitato
+      // come se fosse stato applicato — vedi `pendingEditsAfterSave`.
+      // `updateBudgetAssumptions` puo' avere gia' scritto `sp_overrides` sul
+      // server anche se la generazione e' poi fallita: la cella torna al
+      // valore VERO, quello dell'ultimo previsionale generato con successo.
+      setPendingEdits((prev) => pendingEditsAfterSave(prev, "error"));
     } finally {
       setSaving(false);
     }

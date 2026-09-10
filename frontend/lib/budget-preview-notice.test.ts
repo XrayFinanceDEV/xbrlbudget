@@ -83,9 +83,45 @@ describe("saveNotice", () => {
       .toBe(daAnteprima!.slice(daAnteprima!.indexOf(coda)));
   });
 
-  it("un messaggio che la regex non riconosce resta GREZZO: meglio l'inglese di un testo inventato", () => {
-    expect(saveNotice("Assumptions saved successfully, but forecast generation failed: boom"))
-      .toBe("Assumptions saved successfully, but forecast generation failed: boom");
+  it("un messaggio SENZA il prefisso noto del backend resta GREZZO: meglio l'inglese di un testo inventato", () => {
     expect(saveNotice("Previsionale non generato")).toBe("Previsionale non generato");
+    expect(saveNotice("qualcosa che nessuna regex riconosce")).toBe("qualcosa che nessuna regex riconosce");
+  });
+
+  // Rilievo 6 (giro di correzione 1): il toast del wizard restava in inglese
+  // — «Assumptions saved successfully, but forecast generation failed: …» —
+  // anche quando il messaggio del motore, dopo i due punti, era in italiano.
+  // Il prefisso e' una stringa FISSA scritta da `assumptions_service.py:330`,
+  // non un messaggio arbitrario del motore: tradurlo non e' "inventare" —
+  // e' la stessa distinzione che il resto di questo file gia' rispetta fra
+  // testo di contorno (traducibile) e messaggio del motore (mai toccato).
+  it("il prefisso FISSO del backend va in italiano, il messaggio del motore dopo i due punti resta quello che e'", () => {
+    const dalBackend =
+      "Assumptions saved successfully, but forecast generation failed: The sum of financing opening " +
+      "residuals must equal base-year bank debt (300000 != 4465659.00)";
+    expect(saveNotice(dalBackend)).toBe(
+      "Ipotesi salvate, ma il previsionale non è stato calcolato: The sum of financing opening " +
+      "residuals must equal base-year bank debt (300000 != 4465659.00)"
+    );
+  });
+
+  it("il prefisso si toglie anche quando il messaggio del motore e' gia' in italiano: non lo tocca", () => {
+    const dalBackend =
+      "Assumptions saved successfully, but forecast generation failed: Scadenziamento di crediti " +
+      "commerciali: gli importi superano il saldo di apertura";
+    expect(saveNotice(dalBackend)).toBe(
+      "Ipotesi salvate, ma il previsionale non è stato calcolato: Scadenziamento di crediti " +
+      "commerciali: gli importi superano il saldo di apertura"
+    );
+  });
+
+  it("il fabbisogno scoperto riconosciuto vince comunque sul prefisso: una frase sola, non due incollate", () => {
+    // Gia' provato sopra con `DAL_BACKEND`, ripetuto qui per dichiarare
+    // l'ordine di precedenza esplicitamente: il ramo del fabbisogno scoperto
+    // gira PRIMA dello spoglio del prefisso, quindi un messaggio riconosciuto
+    // non passa mai per il ramo "prefisso + messaggio grezzo".
+    const notice = saveNotice(DAL_BACKEND);
+    expect(notice.startsWith("Ipotesi salvate.")).toBe(true);
+    expect(notice).not.toContain("ma il previsionale non è stato calcolato");
   });
 });

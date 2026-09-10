@@ -52,7 +52,7 @@ aggiunta ammessa. Il componente di stato d'errore condiviso da §3.2/§3.3 della
 e la prima riga dei vincoli qui sopra vieta a `lib/` di importare da `components/` — il rendering sta per forza
 altrove. Il Task 2 crea quindi anche `frontend/components/budget/ForecastLoadError.tsx`, esattamente sullo stesso
 schema di `lib/budget-stale.ts` + `components/budget/ForecastStaleBanner.tsx` (il precedente diretto in questo
-stesso repo). Non tocca alcun file del lotto 3A (che lavora su `frontend/components/budget/BudgetWizard.tsx`,
+stesso repo). Non tocca alcun file del lotto 3A (che lavora su `frontend/components/budget/wizard/BudgetWizard.tsx`,
 `frontend/app/budget/page.tsx`, `frontend/lib/budget-preview-notice.ts`, i servizi e i motori del previsionale):
 non è quindi un conflitto — è un'estensione minima e necessaria dell'elenco, segnalata qui invece che in silenzio.
 
@@ -259,7 +259,12 @@ Aggiungi subito dopo, come nuovo elenco puntato (stessa sezione, prima della rig
 ### Ownership
 
 - File toccati: `backend/app/main.py`, `tests/test_cors_on_500.py`, `CLAUDE.md`.
-- Nessun conflitto con il lotto 3A (che non tocca `backend/app/main.py` né `CLAUDE.md`).
+- Nessun conflitto di file col lotto 3A su `backend/app/main.py` (non lo tocca). Il 3A tocca invece `CLAUDE.md`, in
+  otto dei suoi tredici task — ma su sezioni testualmente disgiunte da questa («Forecasting Engine», «Intra-Year
+  Engine», «Invarianti e trappole › Previsionale», contro «Invarianti e trappole › Frontend» qui): **il 3B, più
+  piccolo, si integra per primo** nel branch verso cui i due lotti confluiscono, e il 3A — nel suo Task 13, prima
+  della propria verifica di fine lotto — unisce quel branch nel proprio e rilegge le sezioni di `CLAUDE.md` toccate
+  da entrambi (Global Constraints del piano 3A, «Ordine di integrazione col lotto gemello»).
 
 ### Observable acceptance
 
@@ -829,7 +834,7 @@ aggiungi subito dopo, come nuovo elenco puntato:
   `frontend/components/budget/ForecastLoadError.tsx` (nuovo — vedi la deviazione dichiarata nei Global Constraints),
   `frontend/hooks/use-queries.ts`, `frontend/app/forecast/income/page.tsx`, `frontend/app/forecast/balance/page.tsx`,
   `frontend/app/report/page.tsx`, `CLAUDE.md`.
-- Nessun conflitto con il lotto 3A (`frontend/components/budget/BudgetWizard.tsx`, `frontend/app/budget/page.tsx`,
+- Nessun conflitto con il lotto 3A (`frontend/components/budget/wizard/BudgetWizard.tsx`, `frontend/app/budget/page.tsx`,
   `frontend/lib/budget-preview-notice.ts`, servizi e motori del previsionale — nessuno di questi file compare qui).
 - `CLAUDE.md` è condiviso col Task 1: questo worktree va aperto **dopo** che il Task 1 è stato integrato nel branch
   del lotto, altrimenti l'anchor di inserimento («il bullet aggiunto dal Task 1») non esiste ancora.

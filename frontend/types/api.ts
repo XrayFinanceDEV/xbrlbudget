@@ -1097,11 +1097,11 @@ export interface ForecastYearDetails {
   /** L'inesigibile scadenziato che un override di CE ha impedito di
    *  rilevare, e che quindi NON e' stato scaricato dai crediti: il credito
    *  e' rimasto a bilancio. Il motore la dichiara sempre, anche vuota
-   *  (`forecast_engine.py`, `details['pregresso_writeoff_ignored']`), ma qui
-   *  resta facoltativa: il tipo promette MENO dell'API, mai di piu', ed e' la
-   *  direzione sicura. Si legge sempre con `?? []` — una chiave assente vale
-   *  zero. */
-  pregresso_writeoff_ignored?: PregressoWriteoffIgnored[];
+   *  (`forecast_engine.py`, `details['pregresso_writeoff_ignored']`), su
+   *  OGNI anno che produce (`compute_forecast` la scrive prima di ogni
+   *  `results.append`, e non c'e' un `return` prima): il tipo la promette
+   *  obbligatoria per lo stesso motivo. */
+  pregresso_writeoff_ignored: PregressoWriteoffIgnored[];
   /** Di quanto il piano riduce la cassa nell'anno (apertura - chiusura, zero se
    *  cresce). Dichiarata anche quando la cassa resta positiva: e' l'avviso che
    *  arriva PRIMA dello scoperto. Facoltative per la stessa ragione di

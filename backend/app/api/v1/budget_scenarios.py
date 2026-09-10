@@ -837,6 +837,78 @@ def patch_ce_override(
     return {"success": True, "applied": applied}
 
 
+@router.patch(
+    "/companies/{company_id}/scenarios/{scenario_id}/sp-override",
+    response_model=Any,
+    summary="Batch-patch SP overrides across one or more years and regenerate forecast once"
+)
+def patch_sp_override(
+    company_id: int,
+    scenario_id: int,
+    request: Any = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Update one or more SP overrides, possibly across MULTIPLE forecast
+    years, then regenerate the forecast once, in the SAME transaction: a
+    rejected regeneration rolls back the WHOLE batch -- every year touched
+    by this call, not just one (CLAUDE.md § Previsionale/Frontend -- an
+    override the engine rejects is never persisted; "una correzione che
+    tocca piu' campi si applica tutta o niente").
+
+    Replaces looping N `PUT /assumptions/{year}` calls in parallel for a
+    multi-year edit (SP Prev., giro di correzione 3): after giro 2 each PUT
+    regenerates the WHOLE scenario in its own transaction, and N of those in
+    parallel on SQLite risked "database is locked" plus spurious rejections
+    (a year validated without yet seeing the sibling year's uncommitted
+    edit). This route applies every edit first, then regenerates once.
+
+    **Request body:**
+    ```json
+    {
+        "overrides": [
+            { "forecast_year": 2025, "field": "sp16a_debiti_banche_breve", "value": 400000.55 },
+            { "forecast_year": 2026, "field": "sp16a_debiti_banche_breve", "value": 350000.00 },
+            { "forecast_year": 2025, "field": "sp06a_crediti_clienti_breve", "value": null }
+        ]
+    }
+    ```
+
+    `field` is the key inside that year's `sp_overrides` JSON bag -- there is
+    no fixed allowlist (unlike CE's `CE_OVERRIDE_FIELDS`): a key the engine's
+    result does not recognize is ignored in silence, same as every other
+    `sp_overrides` write (CLAUDE.md § Previsionale). Set `value` to `null` to
+    clear that key and revert to engine calculation. Multiple entries for the
+    same year merge into that year's SAME bag.
+    """
+    from app.services import assumptions_service
+
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+
+    if isinstance(request, dict):
+        request_data = request
+    else:
+        request_data = request.model_dump() if hasattr(request, 'model_dump') else request
+
+    overrides = request_data.get("overrides", [])
+
+    try:
+        years_touched = assumptions_service.apply_sp_overrides(db, scenario, overrides)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Forecast regeneration failed after SP override patch")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Forecast regeneration failed, no override was applied: {str(e)}"
+        )
+
+    return {"success": True, "years": years_touched}
+
+
 # ===== Forecast Generation Endpoint =====
 
 @router.post(

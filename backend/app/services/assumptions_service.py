@@ -542,3 +542,91 @@ def apply_ce_overrides(
         raise
 
     return applied
+
+
+def apply_sp_overrides(
+    db: Session,
+    scenario: models.BudgetScenario,
+    overrides: List[Dict[str, Any]],
+) -> int:
+    """
+    Applica un lotto di override `sp_overrides` (`PATCH /sp-override`, l'editor
+    di cella di SP Prev., PIU' anni in una sola chiamata), poi rigenera il
+    previsionale UNA sola volta -- stessa atomicita' di `apply_ce_overrides`:
+    una rigenerazione rifiutata annulla TUTTO il lotto appena applicato, su
+    TUTTI gli anni coinvolti, non solo l'ultimo (CLAUDE.md § Previsionale/
+    Frontend, "una correzione che tocca piu' campi si applica tutta o
+    niente").
+
+    Perche' esiste (giro di correzione 3, task 10): prima di questa funzione
+    SP Prev. salvava una modifica multi-anno con un `PUT /assumptions/{year}`
+    **per ogni anno, in parallelo** (`Promise.all` lato client) -- e dal giro
+    2 ciascun PUT rigenera l'INTERO scenario nella propria transazione. Su
+    SQLite questo rischia scritture concorrenti (`database is locked`) e un
+    anno puo' essere validato senza vedere ancora la modifica dell'altro,
+    non ancora committata: un rifiuto spurio anche quando la combinazione
+    delle due modifiche sarebbe valida. Qui tutte le modifiche di tutti gli
+    anni si applicano PRIMA di una rigenerazione sola, come gia' fa
+    `apply_ce_overrides` per CE Prev.
+
+    Ogni entry e' `{forecast_year, field, value}`: `field` e' il NOME del
+    campo dentro il sacco JSON `sp_overrides` di quell'anno -- non c'e' un
+    `CE_OVERRIDE_FIELDS` da rispettare qui, perche' il motore stesso ignora
+    in silenzio una chiave che non esiste nel risultato (CLAUDE.md §
+    Previsionale, gia' documentato per `sp_overrides`). `value: None`
+    cancella quella chiave dal sacco (torna al calcolo del motore);
+    altrimenti la scrive o sovrascrive. Piu' entry sullo stesso anno si
+    fondono nello STESSO sacco, replicando il merge che il client faceva
+    prima leggendo `current?.sp_overrides` (ora lato server, sulla riga
+    fresca di questa transazione, non su una copia letta a parte).
+
+    Solleva `ValueError` per un lotto vuoto o una entry senza
+    `forecast_year`/`field`, `LookupError` per un anno senza ipotesi -- in
+    ENTRAMBI i casi con `rollback()` di quanto gia' applicato nel lotto
+    prima dell'errore; rilancia l'eccezione del motore dopo lo stesso
+    `rollback()`.
+
+    Restituisce il numero di ANNI toccati (non il numero di entry: piu'
+    entry sullo stesso anno contano una volta sola).
+    """
+    if not overrides:
+        raise ValueError("overrides list is required")
+
+    try:
+        assumption_cache: Dict[int, models.BudgetAssumptions] = {}
+        bag_cache: Dict[int, Dict[str, Any]] = {}
+
+        for entry in overrides:
+            forecast_year = entry.get("forecast_year")
+            field = entry.get("field")
+            value = entry.get("value")
+
+            if not forecast_year or not field:
+                raise ValueError("Each override needs forecast_year and field")
+
+            if forecast_year not in assumption_cache:
+                assumption = db.query(models.BudgetAssumptions).filter(
+                    models.BudgetAssumptions.scenario_id == scenario.id,
+                    models.BudgetAssumptions.forecast_year == forecast_year,
+                ).first()
+                if not assumption:
+                    raise LookupError(f"No assumptions found for year {forecast_year}")
+                assumption_cache[forecast_year] = assumption
+                bag_cache[forecast_year] = dict(assumption.sp_overrides or {})
+
+            bag = bag_cache[forecast_year]
+            if value is None:
+                bag.pop(field, None)
+            else:
+                bag[field] = value
+
+        for forecast_year, assumption in assumption_cache.items():
+            bag = bag_cache[forecast_year]
+            assumption.sp_overrides = jsonable_encoder(bag) if bag else None
+
+        _regenerate_forecast(db, scenario)
+    except Exception:
+        db.rollback()
+        raise
+
+    return len(assumption_cache)

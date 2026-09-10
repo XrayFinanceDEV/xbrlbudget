@@ -245,9 +245,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   sullo stesso errore, rispondono invece 4xx/5xx.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6, `docs/budget/API-PREVISIONALE.md` §1
 - **Un override di cella rifiutato dal motore non resta persistito** — vale per SP Prev.
-  (`PUT /assumptions/{year}`) e CE Prev. (`PATCH /ce-override`), **non** per il bulk (bullet
-  sopra, che resta diverso di proposito). Le due chiamate salvano e rigenerano nella STESSA
-  transazione (`assumptions_service.update_single_year_assumptions`/`apply_ce_overrides`): una
+  (`PATCH /sp-override`, un solo lotto per tutti gli anni toccati) e CE Prev. (`PATCH /ce-override`),
+  **non** per il bulk (bullet sopra, che resta diverso di proposito). Le due chiamate salvano e
+  rigenerano nella STESSA transazione (`assumptions_service.apply_sp_overrides`/`apply_ce_overrides`;
+  `PUT /assumptions/{year}` fa lo stesso con `update_single_year_assumptions`, ma nessuna schermata
+  la chiama piu'): una
   generazione respinta fa `db.rollback()` di tutto cio' che quella chiamata ha applicato, quindi
   una `GET` successiva legge le ipotesi esattamente come prima del tentativo. Prima di questo,
   entrambe le rotte facevano `commit()` dell'override **prima** di provare a rigenerare: un

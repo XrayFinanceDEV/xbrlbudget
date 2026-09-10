@@ -555,7 +555,23 @@ def _e_vuoto(v: Any) -> bool:
     return False
 
 
+# Una chiave ASSENTE non e' una chiave presente con valore `None`. Prima di
+# questo sentinella le due cose si confondevano (`dict.get` restituiva `None` in
+# entrambi i casi), e il banco non vedeva una chiave nuova dichiarata a `None`:
+# e' successo con `fabbisogno_picco_anno`, la sesta chiave del Task 12, mentre
+# il rapporto ne contava cinque.
+_ASSENTE = object()
+
+
 def _uguali(campo: str, a: Any, b: Any) -> bool:
+    if a is _ASSENTE or b is _ASSENTE:
+        if a is b:
+            return True
+        presente = b if a is _ASSENTE else a
+        # Una chiave nuova VUOTA (lista o dizionario vuoti, falso, stringa vuota)
+        # resta non una divergenza, come dice `_e_vuoto`; una chiave nuova a
+        # `None` si': `None` e' un valore dichiarato, non un'assenza.
+        return presente is not None and _e_vuoto(presente)
     if a is None and b is None:
         return True
     if a is None:
@@ -574,6 +590,8 @@ def _uguali(campo: str, a: Any, b: Any) -> bool:
 
 
 def _fmt(v: Any) -> str:
+    if v is _ASSENTE:
+        return "(assente)"
     if v is None:
         return "—"
     if _e_numero(v):
@@ -617,14 +635,14 @@ def confronta_scenario(sid: str, esito_a: Dict[str, Any], esito_b: Dict[str, Any
             chiavi = sorted(set(ra[prospetto]) | set(rb[prospetto]))
             for chiave in chiavi:
                 celle += 1
-                va, vb = ra[prospetto].get(chiave), rb[prospetto].get(chiave)
+                va, vb = ra[prospetto].get(chiave, _ASSENTE), rb[prospetto].get(chiave, _ASSENTE)
                 if not _uguali(f"{prospetto}.{chiave}", va, vb):
                     divergenze.append(Divergenza(sid, anno, f"{prospetto}.{chiave}",
                                                  _fmt(va), _fmt(vb)))
         chiavi_dettagli = sorted(set(ra["details"]) | set(rb["details"]))
         for chiave in chiavi_dettagli:
             celle += 1
-            va, vb = ra["details"].get(chiave), rb["details"].get(chiave)
+            va, vb = ra["details"].get(chiave, _ASSENTE), rb["details"].get(chiave, _ASSENTE)
             if not _uguali(f"details.{chiave}", va, vb):
                 divergenze.append(Divergenza(sid, anno, f"details.{chiave}",
                                              _fmt(va), _fmt(vb)))

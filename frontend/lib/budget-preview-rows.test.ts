@@ -6,7 +6,7 @@ import {
   ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
   rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
 } from "./budget-preview-rows";
-import { scopertoAvvisi } from "./budget-preview-rows";
+import { confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
 import { euro } from "@/lib/budget-format";
 
 const baseInc = {
@@ -405,7 +405,8 @@ describe("scopertoAvvisi — cassa assorbita e scoperto di c/c (Task 12)", () =>
     expect(a.cassa).toBeNull();
     expect(a.scoperto).toBeNull();
     expect(a.picco).toBeNull();
-    expect(a.anni).toEqual([{ year: 2027, cassaAssorbita: 0, scopertoGenerato: 0, scopertoResiduo: 0 }]);
+    expect(a.anni).toEqual([{ year: 2027, cassaAssorbita: 0, scopertoGenerato: 0, scopertoResiduo: 0, cassaSottoMinimo: 0 }]);
+    expect(a.sottoMinimo).toBeNull();
   });
 
   it("la cassa che scende RESTANDO positiva accende l'avviso tenue, non quello forte", () => {
@@ -554,5 +555,41 @@ describe("rowsImposteSaldoAcconto", () => {
     const ce20Label = rowsImposte(baseInc, [year(2027)]).find((r) => r.key === "ce20")!.label;
     expect(ce20Label).toBe("Imposte");
     expect(label).not.toBe(ce20Label);
+  });
+});
+
+describe("scopertoAvvisi · cassa sotto il minimo, e confermaCassaPositiva (Task 12, correzione 1)", () => {
+  const conDettagli = (y: number, d: Record<string, number | null>): ForecastPreviewYear => {
+    const base = year(y);
+    return { ...base, details: { ...base.details, ...d } };
+  };
+  const risposta = (years: ForecastPreviewYear[], error: { year: number | null; message: string } | null = null) =>
+    ({ scenario_id: 1, base_year: 2026, forecast_years: years, error });
+
+  it("lo scoperto rimborsato sotto la cassa minima si dichiara, con l'importo e l'anno", () => {
+    const a = scopertoAvvisi([
+      conDettagli(2028, { cassa_sotto_minimo: 20000.55, scoperto_residuo: 108714.36 }),
+      conDettagli(2029, { cassa_sotto_minimo: 0 }),
+    ]);
+    expect(a.sottoMinimo).toContain(`${euro(20000.55)} sotto il minimo nel 2028`);
+    expect(a.sottoMinimo).not.toContain("2029");
+  });
+
+  it("con un errore del motore la conferma non compare mai, anche se nessuna regex lo riconosce", () => {
+    const tetto = { year: 2027, message: "Scoperto di conto corrente oltre il tetto concesso: servono 239.459,15, il tetto concesso e' 100.000,00" };
+    const vuota = risposta([], tetto);
+    expect(confermaCassaPositiva(vuota, scopertoAvvisi(vuota.forecast_years))).toBe(false);
+    const parziale = risposta([conDettagli(2027, { cassa_assorbita: 0 })], { year: 2028, message: "altro" });
+    expect(confermaCassaPositiva(parziale, scopertoAvvisi(parziale.forecast_years))).toBe(false);
+  });
+
+  it("senza risposta, senza anni o con uno scoperto in essere la conferma tace; pulito la da'", () => {
+    expect(confermaCassaPositiva(null, scopertoAvvisi([]))).toBe(false);
+    const senzaAnni = risposta([]);
+    expect(confermaCassaPositiva(senzaAnni, scopertoAvvisi([]))).toBe(false);
+    const conScoperto = risposta([conDettagli(2027, { scoperto_residuo: 3324.1, scoperto_generato: 0, fabbisogno_picco: 0 })]);
+    expect(confermaCassaPositiva(conScoperto, scopertoAvvisi(conScoperto.forecast_years))).toBe(false);
+    const pulita = risposta([conDettagli(2027, { cassa_assorbita: 1234.56 })]);
+    expect(confermaCassaPositiva(pulita, scopertoAvvisi(pulita.forecast_years))).toBe(true);
   });
 });

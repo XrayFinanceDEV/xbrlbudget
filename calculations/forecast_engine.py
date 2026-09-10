@@ -142,61 +142,97 @@ def _eur_it(amount: Decimal) -> str:
 
 @dataclass
 class _Overdraft:
-    """Lo scoperto di conto corrente concesso su UN anno di piano.
+    """Lo scoperto di conto corrente su UN anno di piano: un componente a se'.
 
     La cassa plugga solo verso l'alto: un plug negativo e' un fabbisogno
     scoperto. Che cosa succede allora dipende da una scelta ESPLICITA
-    dell'utente (`overdraft_allowed`, spenta di default), non dal motore —
-    ed e' la ragione per cui questo oggetto esiste invece di un `if` sparso
-    nei tre punti che possono produrre una cassa negativa.
+    dell'utente (`overdraft_allowed`, spenta di default), non dal motore.
 
-    `opening` e' lo scoperto in essere all'APERTURA dell'anno, che l'anno
-    precedente ha dichiarato in `details['scoperto_residuo']`: e' su quello, e
-    mai su quello che l'anno stesso sta generando, che maturano gli oneri —
-    altrimenti l'interesse cambierebbe la cassa che determina l'interesse.
+    **Lo scoperto e' una voce GENERATA dal piano, e resta separata nel calcolo,
+    non solo nella dichiarazione** («bisogna dividere le voci patrimoniali
+    generate dal previsionale dallo scadenziamento del pregresso», il
+    proprietario). Per questo `_calculate_balance_sheet` toglie lo scoperto di
+    apertura da `sp16a` PRIMA dei piani di rimborso — la rata del debito
+    esistente e quella del nuovo finanziamento pagano il proprio debito, mai lo
+    scoperto — e il plug calcola una cassa NETTA, cioe' la cassa che resterebbe
+    se lo scoperto si chiudesse tutto a fine anno. `sp16a` si ricompone solo
+    alla fine: quota bancaria + scoperto in essere.
 
-    `raised` e `repaid` si accumulano perche' i punti che possono accendere lo
-    scoperto sono piu' d'uno (il plug, il ricalcolo dopo un `sp_overrides`, la
-    quadratura finale al centesimo): il tetto va misurato sul totale, non su
-    ciascuno separatamente.
+    **Un solo cancello, sulla cifra finale** (`copri`): il fabbisogno si misura
+    una volta, dopo ogni rettifica compresi gli `sp_overrides`, sulla cassa
+    netta ricalcolata da aggregati gia' al centesimo. Da li' discendono le due
+    regole che prima erano sparse in tre punti:
+    - cassa libera e scoperto non convivono: cassa netta positiva ⇒ scoperto
+      chiuso; negativa ⇒ cassa a zero e scoperto pari al fabbisogno;
+    - lo scoperto si rimborsa per primo ANCHE sotto `cash_sweep_min_cash`, per
+      decisione del proprietario («annulliamo la cassa per compensare lo
+      scoperto»): tenere liquidita' pagando interessi sullo scoperto non ha
+      senso. Lo si DICHIARA (`details['cassa_sotto_minimo']`), non lo si evita.
+
+    `opening` e' lo scoperto in essere all'APERTURA, quello che l'anno prima ha
+    dichiarato in `details['scoperto_residuo']`: gli oneri maturano su quello, mai
+    su cio' che l'anno sta generando (sarebbe circolare).
+
+    Senza concessione lo scoperto di apertura si puo' solo rimborsare, non
+    accrescere: la concessione riguarda lo scoperto NUOVO.
+
+    `forced_total` e' il campo di `sp_overrides` che fissa il totale di `sp16a` (o
+    del suo aggregato `sp16`). Il totale forzato vince: lo scoperto ne discende,
+    e con cassa netta non negativa vale zero. Con un fabbisogno invece nessuna
+    ripartizione e' coerente — il passivo e' fissato dall'override qualunque sia
+    la divisione fra banca e scoperto, quindi la cassa resterebbe negativa — e il
+    motore lo rifiuta con un errore esplicito invece di superare il totale.
     """
     allowed: bool = False
     limit: Optional[Decimal] = None      # None = concesso senza tetto
     opening: Decimal = Decimal("0")
-    raised: Decimal = Decimal("0")
-    repaid: Decimal = Decimal("0")
+    forced_total: Optional[str] = None
+    outstanding: Decimal = Decimal("0")  # lo scoperto in essere a fine anno, scritto da `copri`
 
     @property
-    def outstanding(self) -> Decimal:
-        """Lo scoperto in essere adesso: apertura, meno rimborsi, piu' acceso."""
-        return self.opening - self.repaid + self.raised
+    def raised(self) -> Decimal:
+        """Lo scoperto NATO nell'anno: l'aumento sul saldo di apertura."""
+        return max(Decimal("0"), self.outstanding - self.opening)
 
-    def copri(self, fabbisogno: Decimal) -> None:
-        """Accende `fabbisogno` di scoperto, o alza.
+    @property
+    def repaid(self) -> Decimal:
+        """Lo scoperto RIMBORSATO nell'anno: la diminuzione sul saldo di apertura."""
+        return max(Decimal("0"), self.opening - self.outstanding)
 
-        Non concesso: stesso messaggio di sempre (`Unfunded financing
-        requirement`), che il frontend riconosce con una sola regex.
-        Oltre il tetto: alza dicendo i due importi, quello richiesto e quello
-        concesso — un tetto che si limitasse a tagliare produrrebbe di nuovo
-        una cassa negativa, cioe' il difetto che questo codice chiude.
+    def copri(self, cassa_netta: Decimal) -> Tuple[Decimal, Decimal]:
+        """(cassa, scoperto) a fine anno dalla cassa NETTA, o alza.
+
+        La cassa netta si quantizza PRIMA del confronto (Ruling 37): un
+        fabbisogno che vale 0,00 non alza e non accende scoperto, e un centesimo
+        vero non si assorbe con una tolleranza. Senza concessione il messaggio
+        e' quello di sempre (`Unfunded financing requirement`), con l'importo
+        dello scoperto NUOVO; il tetto si confronta con lo scoperto IN ESSERE a
+        fine anno, cioe' il fido come utilizzo massimo.
         """
-        if not self.allowed:
+        zero = Decimal("0")
+        cassa_netta = Decimal(str(cassa_netta)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        fabbisogno = max(zero, -cassa_netta)
+        nuovo = fabbisogno - self.opening
+        if nuovo > zero and not self.allowed:
             raise ValueError(
-                f"Unfunded financing requirement {fabbisogno:,.2f}: add an explicit "
+                f"Unfunded financing requirement {nuovo:,.2f}: add an explicit "
                 "financing assumption; no bank debt was created automatically"
             )
-        richiesto = self.outstanding + fabbisogno
-        if self.limit is not None and richiesto > self.limit:
+        if fabbisogno > zero and self.forced_total is not None:
+            raise ValueError(
+                f"Scoperto di conto corrente incompatibile con {self.forced_total} forzato: "
+                f"servono {_eur_it(fabbisogno)} di scoperto, ma il totale della voce e' fissato "
+                "dall'override. Togli l'override o copri il fabbisogno con un finanziamento."
+            )
+        if self.allowed and self.limit is not None and fabbisogno > self.limit:
             # In italiano e con le migliaia all'europea: il frontend non ha una
-            # traduzione per questo messaggio e lo mostra GREZZO
-            # (`previewNotice`, `saveNotice`), accanto a importi formattati
-            # cosi'. Il riconoscimento del passo sta in `stepForErrorMessage`.
+            # traduzione per questo messaggio e lo mostra GREZZO.
             raise ValueError(
                 "Scoperto di conto corrente oltre il tetto concesso: "
-                f"servono {_eur_it(richiesto)}, il tetto concesso e' {_eur_it(self.limit)}"
+                f"servono {_eur_it(fabbisogno)}, il tetto concesso e' {_eur_it(self.limit)}"
             )
-        self.raised += fabbisogno
-
+        self.outstanding = fabbisogno
+        return max(zero, cassa_netta), fabbisogno
 
 class _DictView:
     """getattr(view, 'sp09_...') su un dict del motore: previous_* senza ORM.
@@ -904,26 +940,26 @@ class ForecastEngine:
             ) - sum(
                 (result[field] for field in asset_fields_without_cash), Decimal("0")
             )
-            # E' l'ULTIMA scrittura sulla cassa di tutto il motore, quindi e'
-            # l'ultimo punto in cui un numero impossibile puo' passare: prima di
-            # questa riga il ricalcolo scavalcava il clamp di `_apply_sp_overrides`
-            # e persisteva una cassa negativa sotto un messaggio di successo
-            # (spec §11.1). Qui il residuo e' ormai al centesimo — i due cancelli
-            # a monte hanno gia' coperto il fabbisogno vero — ma «piccolo» non e'
-            # una ragione per lasciarlo passare: o lo copre lo scoperto concesso,
-            # o il motore alza. Il chiamante infrannuale non passa di qui
-            # (`recompute_cash=False`).
-            if cassa < 0 and overdraft is not None:
-                fabbisogno = -cassa
-                overdraft.copri(fabbisogno)
-                result["sp16a_debiti_banche_breve"] = (
-                    result.get("sp16a_debiti_banche_breve", Decimal("0")) + fabbisogno
-                )
-                result["sp16_debiti_breve"] = (
-                    result.get("sp16_debiti_breve", Decimal("0")) + fabbisogno
-                )
-                cassa = Decimal("0")
+            # E' l'ULTIMA scrittura sulla cassa di tutto il motore, ed e' qui il
+            # SOLO cancello del fabbisogno (`_Overdraft.copri`): dopo ogni
+            # rettifica, `sp_overrides` compresi, su una cassa NETTA che nasce
+            # da aggregati gia' al centesimo. Prima di questo punto la cassa
+            # netta puo' essere negativa di proposito; da qui non esce mai
+            # negativa (spec §11.1). Lo scoperto si somma a `sp16a`/`sp16` DOPO
+            # il residuo di quadratura, quindi non ne crea uno nuovo. Il
+            # chiamante infrannuale non passa di qui (`recompute_cash=False`).
+            if overdraft is not None:
+                cassa, scoperto = overdraft.copri(cassa)
+                result["sp16a_debiti_banche_breve"] += scoperto
+                result["sp16_debiti_breve"] += scoperto
             result["sp09_disponibilita_liquide"] = cassa
+        elif overdraft is not None:
+            # Un chiamante con `overdraft` passa SEMPRE da qui: un prospetto a
+            # cui manca una riga non puo' saltare il cancello e persistere la
+            # cassa netta, magari negativa, cosi' com'e'.
+            raise ValueError(
+                "balance sheet incomplete: the overdraft gate needs every SP aggregate"
+            )
         return result
 
     @staticmethod
@@ -960,12 +996,12 @@ class ForecastEngine:
         their parent aggregate; cash remains the balancing item unless it was
         explicitly overridden by an API client.
 
-        `overdraft` e' la concessione dello scoperto di c/c (`_Overdraft`), e
-        governa il ri-plug della cassa: un override che squilibra il foglio non
-        puo' chiudersi con un `max(0, ...)` che lascia il foglio sbilanciato —
-        e' il difetto della spec §11.1, dove il clamp veniva poi scavalcato dal
-        ricalcolo finale e la cassa finiva persistita a -4,8 milioni sotto un
-        messaggio di successo. Assente (`None`) il clamp resta quello di sempre:
+        `overdraft` (`_Overdraft`) segnala il percorso del previsionale: il
+        ri-plug scrive la cassa NETTA, anche negativa, e il fabbisogno lo misura
+        una volta sola `_normalize_balance_sheet_cents`, dopo la quantizzazione.
+        Un `max(0, ...)` qui lasciava il foglio sbilanciato ed era scavalcato dal
+        ricalcolo finale (spec §11.1, cassa persistita a -4,8 milioni sotto un
+        messaggio di successo). Assente (`None`) il clamp resta quello di sempre:
         e' il chiamante INFRANNUALE (`intra_year_engine`), il cui plug negativo
         va clampato a zero con la propria diagnostica e non alza mai.
         """
@@ -1048,17 +1084,13 @@ class ForecastEngine:
                 )
             ), Decimal('0'))
             saldo = total_liabilities - total_assets_no_cash
-            if saldo < 0 and overdraft is not None:
-                fabbisogno = -saldo
-                overdraft.copri(fabbisogno)   # alza se non concesso, o oltre il tetto
-                result['sp16a_debiti_banche_breve'] = (
-                    result.get('sp16a_debiti_banche_breve', Decimal('0')) + fabbisogno
-                )
-                result['sp16_debiti_breve'] = (
-                    result.get('sp16_debiti_breve', Decimal('0')) + fabbisogno
-                )
-                saldo = Decimal('0')
-            result['sp09_disponibilita_liquide'] = max(Decimal('0'), saldo)
+            # Sul previsionale la cassa resta NETTA, anche negativa: il cancello
+            # e' uno solo e sta nella quadratura finale, sulla cifra al centesimo.
+            # Un `max(0, ...)` qui lascerebbe il foglio sbilanciato e un
+            # ri-plug che accende scoperto qui ne misurerebbe una seconda volta.
+            result['sp09_disponibilita_liquide'] = (
+                saldo if overdraft is not None else max(Decimal('0'), saldo)
+            )
         return result
 
     def assemble_financing(self, assumptions, base_bs) -> Tuple[List[dict], bool]:
@@ -1182,10 +1214,17 @@ class ForecastEngine:
             # dentro `sp16a` c'e' anche il debito bancario PREGRESSO, ed e'
             # esattamente il confine che questo lotto esiste per tracciare.
             limite = getattr(assumption, 'overdraft_limit', None)
+            sp_ov = getattr(assumption, 'sp_overrides', None)
+            sp_ov = sp_ov if isinstance(sp_ov, dict) else {}
             overdraft = _Overdraft(
                 allowed=bool(getattr(assumption, 'overdraft_allowed', False)),
                 limit=Decimal(str(limite)) if limite is not None else None,
                 opening=Decimal(str((prev_details or {}).get('scoperto_residuo') or 0)),
+                forced_total=next(
+                    (campo for campo in ('sp16a_debiti_banche_breve', 'sp16_debiti_breve')
+                     if sp_ov.get(campo) is not None),
+                    None,
+                ),
             )
             cassa_apertura = self._read_bs(prev_bs, 'sp09_disponibilita_liquide')
             try:
@@ -1230,14 +1269,14 @@ class ForecastEngine:
                         self._declared_sp_fields()
                         | self._pregresso_sp_forced_fields(pregresso)
                         | self._indexed_sp_forced_fields(details)
-                        # `sp16a` e' dichiarato solo quando lo scoperto ci ha
-                        # scritto: il residuo di quadratura non deve poterlo
-                        # spostare di un centesimo sotto il numero che
-                        # `details['scoperto_residuo']` afferma. Fuori da quel
-                        # caso l'insieme resta identico a prima, quindi nessuno
-                        # scenario di sempre cambia bersaglio.
+                        # `sp16a` protetto quando lo scoperto puo' esserci:
+                        # la sua quota bancaria e' quella del piano di rimborso,
+                        # e il residuo di quadratura non deve poterla spostare.
+                        # Fuori da quel caso l'insieme resta identico a prima,
+                        # quindi nessuno scenario di sempre cambia bersaglio.
                         | (frozenset({'sp16a_debiti_banche_breve'})
-                           if overdraft.outstanding > Decimal('0') else frozenset())
+                           if overdraft.allowed or overdraft.opening > Decimal('0')
+                           else frozenset())
                     ),
                     details=details,
                     overdraft=overdraft,
@@ -1275,18 +1314,21 @@ class ForecastEngine:
             details['cassa_assorbita'] = max(
                 Decimal('0'), (cassa_apertura - cassa_chiusura)
             ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            details['scoperto_generato'] = overdraft.raised.quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
-            # Il residuo non puo' dichiarare piu' scoperto di quanto `sp16a`
-            # ne porti scritto: un piano di rimborso del debito esistente puo'
-            # aver eroso la voce, e dichiarare un saldo che il prospetto non
-            # mostra e' il difetto «dichiarato != persistito» preso dall'altro
-            # capo.
-            details['scoperto_residuo'] = min(
-                overdraft.outstanding.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
-                forecast_bs['sp16a_debiti_banche_breve'],
-            )
+            # Esatti per costruzione: `copri` lavora su una cassa netta gia' al
+            # centesimo, e lo scoperto persistito in `sp16a` e' esattamente
+            # `outstanding` (la quota bancaria viene dal piano di rimborso).
+            details['scoperto_generato'] = overdraft.raised
+            details['scoperto_residuo'] = overdraft.outstanding
+            # Lo scoperto si rimborsa per primo anche sotto la cassa minima del
+            # cash sweep, per decisione del proprietario: si dichiara di quanto
+            # la cassa chiude sotto quel minimo in un anno con scoperto (aperto o
+            # chiuso nell'anno). Sempre presente, anche a zero.
+            minimo = getattr(assumption, 'cash_sweep_min_cash', None)
+            sotto = Decimal('0')
+            if (bool(getattr(assumption, 'cash_sweep_enabled', False)) and minimo is not None
+                    and (overdraft.opening > 0 or overdraft.outstanding > 0)):
+                sotto = max(Decimal('0'), Decimal(str(minimo)) - cassa_chiusura)
+            details['cassa_sotto_minimo'] = sotto.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             results.append(ForecastYearResult(
                 year=assumption.forecast_year,
@@ -1820,6 +1862,10 @@ class ForecastEngine:
         D = Decimal
         ZERO = D('0')
         DAYS = D('360')
+        # Senza `overdraft` nessun cancello gira a valle: il plug negativo alza qui,
+        # come ha sempre fatto. Con `overdraft` la cassa resta netta fino alla
+        # quadratura finale, che e' l'unico cancello.
+        gate_downstream = overdraft is not None
         if overdraft is None:
             overdraft = _Overdraft()
 
@@ -2170,7 +2216,13 @@ class ForecastEngine:
         existing_repay_years = getattr(assumption, 'existing_debt_repayment_years', None)
 
         # Carry forward financial sub-fields from previous year
-        sp16a = _prev('sp16a_debiti_banche_breve')
+        # `sp16a` dell'anno prima e' quota bancaria + scoperto in essere. Lo
+        # scoperto si toglie QUI, prima di ogni piano di rimborso: altrimenti la
+        # rata del debito esistente e quella del nuovo finanziamento (che
+        # prendono prima dal breve) pagherebbero lo scoperto e il loro debito
+        # resterebbe fermo — misurato: `sp17a` bloccato a 33.333,33 con un piano
+        # a tre anni. Lo scoperto rientra solo nella quadratura finale.
+        sp16a = max(ZERO, _prev('sp16a_debiti_banche_breve') - overdraft.opening)
         sp16b = _prev('sp16b_debiti_altri_finanz_breve')
         sp16c = _prev('sp16c_debiti_obbligazioni_breve')
         sp17a = _prev('sp17a_debiti_banche_lungo')
@@ -2507,38 +2559,24 @@ class ForecastEngine:
         total_assets_no_cash = sp01 + sp02 + sp03 + sp04 + sp05 + sp06 + sp07 + sp08 + sp10
         total_liabilities = sp11 + sp12 + sp13 + sp14 + sp15 + sp16 + sp17 + sp18
 
+        # Cassa NETTA: lo scoperto non e' fra i debiti, quindi questo e' cio' che
+        # resterebbe in cassa chiudendolo tutto. Puo' essere negativa: il
+        # fabbisogno lo misura una volta sola la quadratura finale
+        # (`_Overdraft.copri`), dopo gli `sp_overrides` e al centesimo.
         sp09 = total_liabilities - total_assets_no_cash
 
         # A negative implied cash balance is an uncovered funding requirement.
-        # Con lo scoperto SPENTO (il default) il motore alza e non produce nulla,
-        # come ha sempre fatto; con lo scoperto concesso il fabbisogno diventa
-        # `sp16a` generato dal piano — una scelta esplicita dell'utente, non un
-        # debito che compare muto (vedi `_Overdraft`).
-        if sp09 < 0:
-            fabbisogno = -sp09
-            overdraft.copri(fabbisogno)
-            sp16a += fabbisogno
-            sp16 += fabbisogno
-            sp09 = ZERO
-        elif overdraft.outstanding > ZERO:
-            # Lo scoperto non e' eterno: e' cassa negativa, quindi la cassa
-            # disponibile lo rimborsa per prima, prima di qualunque altra
-            # destinazione. Non passa dal cash sweep, che e' opt-in e serve al
-            # debito bancario ORDINARIO. Il minimo con `sp16a` non e' pleonastico:
-            # un piano di rimborso del debito esistente puo' aver gia' eroso la
-            # voce, e non si rimborsa piu' di quanto sia rimasto scritto.
-            rimborso = min(sp09, overdraft.outstanding, sp16a)
-            if rimborso > ZERO:
-                overdraft.repaid += rimborso
-                sp16a -= rimborso
-                sp16 -= rimborso
-                sp09 -= rimborso
+        if sp09 < 0 and not gate_downstream:
+            overdraft.copri(sp09)
         if bool(getattr(assumption, 'cash_sweep_enabled', False)):
             # ── CASH SWEEP (opt-in) ── Use cash generated above the minimum floor to pay
             # down BANK debt — short-term first (sp16a), then long-term (sp17a) — instead
             # of letting idle cash accumulate while the debt stays flat (the client's
             # "la cassa cresce ma il debito v/banche resta invariato"). Cash and debt are
             # reduced by the same amount, so the balance sheet stays balanced.
+            # Sulla cassa NETTA: finche' c'e' scoperto da chiudere non c'e'
+            # eccesso, e il debito bancario ordinario non passa davanti allo
+            # scoperto.
             floor = getattr(assumption, 'cash_sweep_min_cash', None)
             floor = D(str(floor)) if floor is not None else ZERO
             excess = sp09 - floor

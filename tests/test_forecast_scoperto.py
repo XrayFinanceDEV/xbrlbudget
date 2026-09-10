@@ -375,3 +375,249 @@ def test_gli_oneri_maturano_sul_residuo_di_apertura_non_su_quanto_acceso_prima()
             assert _eur(dettagli[2029]["oneri_scoperto"]) == _eur(residuo_28 * D("6") / D("100"))
     finally:
         engine.dispose()
+
+
+# ══ Giro di correzione 1 ══════════════════════════════════════════════════════
+#
+# Lo scoperto e' una voce GENERATA dal piano: «bisogna dividere le voci
+# patrimoniali generate dal previsionale dallo scadenziamento del pregresso» (il
+# proprietario). Il commit 2641305 lo separava nei `details` ma lo mescolava
+# nell'aritmetica di `sp16a`: le rate dei debiti lo pagavano al posto del proprio
+# debito (I1), e un override applicato dopo il plug lasciava convivere cassa e
+# scoperto gonfiando la misura (I2). Ogni test qui sotto e' rosso su 2641305.
+
+from database.models import BalanceSheet, FinancialYear  # noqa: E402
+
+
+def _con_banca(db, company_id, breve=D("12345.67")):
+    """Debito bancario PREGRESSO a breve, non tondo: il confine che gli oneri e i
+    rimborsi dello scoperto non devono attraversare."""
+    fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
+    b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
+    b.sp16a_debiti_banche_breve = breve
+    b.sp16_debiti_breve = b.sp16_debiti_breve + breve
+    b.sp09_disponibilita_liquide = b.sp09_disponibilita_liquide + breve
+    db.commit()
+
+
+def _genera(db, user, rows, banca=None):
+    company_id, sid = _scenario(db, user)
+    if banca is not None:
+        _con_banca(db, company_id, banca)
+    res = assumptions_service.bulk_upsert_assumptions(db, sid, rows, auto_generate=True)
+    return sid, res
+
+
+def _stress(anno, **extra):
+    """Il piano stressato delle sonde di revisione: 350.000,37 investiti nel primo anno."""
+    riga = _riga(anno, financing_interest_rate=6.13, overdraft_allowed=True)
+    if anno == 2027:
+        riga["tangible_investments"] = 350000.37
+    riga.update(extra)
+    return riga
+
+
+def _gemello(rows):
+    """Lo stesso piano SENZA lo stress e senza override: cio' che dicono i piani di
+    rimborso da soli. I debiti non dipendono ne' dagli investimenti ne' dalla cassa."""
+    out = []
+    for r in rows:
+        g = {k: v for k, v in r.items() if k not in ("tangible_investments", "sp_overrides")}
+        out.append(g)
+    return out
+
+
+@pytest.mark.parametrize("nome, extra_primo, extra_tutti, sp17a_atteso", [
+    ("debito esistente in 3 anni", {}, {"existing_debt_repayment_years": 3},
+     [D("33333.33"), D("16666.66"), D("0")]),
+    ("nuovo finanziamento in 4 anni", {"financing_amount": 100000.37, "financing_duration_years": 4}, {},
+     [D("125000.28"), D("100000.19"), D("75000.10")]),
+])
+def test_i1_le_rate_pagano_il_proprio_debito_non_lo_scoperto(nome, extra_primo, extra_tutti, sp17a_atteso):
+    """Su 2641305 `sp17a` restava fermo (33.333,33 tre anni di fila; 125.000,28 per
+    sempre): la rata, che prende prima dal breve, pagava lo scoperto."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            rows = [_stress(2027, **extra_primo, **extra_tutti)] + [
+                _stress(y, **extra_tutti) for y in (2028, 2029)]
+            sid, res = _genera(db, f"i1-{nome}", rows)
+            assert res["forecast_generated"] is True, res["message"]
+            sid_g, res_g = _genera(db, f"i1-gemello-{nome}", _gemello(rows))
+            assert res_g["forecast_generated"] is True, res_g["message"]
+            det, _ = _dettagli(db, sid, rows)
+            det_g, _ = _dettagli(db, sid_g, _gemello(rows))
+            mappe = read_forecast_maps(db, sid)
+            gemello = {y: sp for y, sp, _ce in read_forecast_maps(db, sid_g)}
+
+            assert [sp["sp17a_debiti_banche_lungo"] for _y, sp, _ce in mappe] == sp17a_atteso
+            assert any(D(str(det[y]["scoperto_residuo"])) > 0 for y in (2027, 2028)), det
+            for y, sp, _ce in mappe:
+                assert sp["sp17a_debiti_banche_lungo"] == gemello[y]["sp17a_debiti_banche_lungo"], y
+                # La quota bancaria di `sp16a` e' quella del piano, con o senza scoperto.
+                assert (sp["sp16a_debiti_banche_breve"] - D(str(det[y]["scoperto_residuo"]))
+                        == gemello[y]["sp16a_debiti_banche_breve"] - D(str(det_g[y]["scoperto_residuo"]))), y
+    finally:
+        engine.dispose()
+
+
+def test_i2_un_override_dopo_il_plug_non_lascia_cassa_e_scoperto_insieme():
+    """Crediti forzati a 1.000,55 nel primo anno stressato.
+
+    Su 2641305: cassa 122.995,45 E scoperto 239.459,15 insieme, e
+    `cassa_assorbita` zero. Il fabbisogno vero e' lo scoperto senza override meno
+    i crediti liberati: 116.463,70, con la cassa a zero.
+    """
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            base_rows = [_stress(2027)]
+            sid_b, res_b = _genera(db, "i2-senza", base_rows)
+            assert res_b["forecast_generated"] is True, res_b["message"]
+            _, sp_b, _ = read_forecast_maps(db, sid_b)[0]
+            det_b, _ = _dettagli(db, sid_b, base_rows)
+
+            rows = [_stress(2027, sp_overrides={"sp06a_crediti_clienti_breve": 1000.55})]
+            sid, res = _genera(db, "i2-override", rows)
+            assert res["forecast_generated"] is True, res["message"]
+            _, sp, _ = read_forecast_maps(db, sid)[0]
+            det, _ = _dettagli(db, sid, rows)
+
+            liberati = sp_b["sp06a_crediti_clienti_breve"] - D("1000.55")
+            atteso = D(str(det_b[2027]["scoperto_residuo"])) - liberati
+            assert atteso == D("116463.70")
+            assert sp["sp09_disponibilita_liquide"] == D("0.00")
+            assert sp["sp16a_debiti_banche_breve"] == atteso
+            assert D(str(det[2027]["scoperto_residuo"])) == atteso
+            assert D(str(det[2027]["scoperto_generato"])) == atteso
+            assert D(str(det[2027]["fabbisogno_picco"])) == atteso
+            assert _eur(det[2027]["cassa_assorbita"]) == 30000.0
+    finally:
+        engine.dispose()
+
+
+def test_i3_il_tetto_si_misura_sullo_scoperto_in_essere_a_fine_anno():
+    """Il piano di I2 sta sotto un tetto di 120.000: genera. Su 2641305 no, perche'
+    il plug aveva gia' contato 239.459,15 prima dell'override."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            ov = {"sp06a_crediti_clienti_breve": 1000.55}
+            _sid, res = _genera(db, "i3-sotto", [_stress(2027, sp_overrides=ov, overdraft_limit=120000)])
+            assert res["forecast_generated"] is True, res["message"]
+            _sid2, res2 = _genera(db, "i3-sopra", [_stress(2027, sp_overrides=ov, overdraft_limit=116463.69)])
+        assert res2["forecast_generated"] is False
+        assert "servono 116.463,70, il tetto concesso e' 116.463,69" in res2["message"], res2["message"]
+    finally:
+        engine.dispose()
+
+
+def test_i4_override_di_sp16a_il_totale_forzato_vince_o_la_combinazione_si_rifiuta():
+    """Il totale di `sp16a` fissato da un override vince, e lo scoperto ne discende.
+
+    Perche' a volte si rifiuta, invece di superare il totale: con `sp16a` forzato a X
+    il passivo e' fissato qualunque sia la divisione di X fra banca e scoperto,
+    quindi la cassa vale `passivo − attivo` comunque la si divida. Se e' negativa,
+    nessuna ripartizione di X la rende non negativa: l'unica via sarebbe superare X,
+    cioe' smentire l'override. Su 2641305 lo stesso caso generava con
+    `scoperto_generato` 466.572,63 contro uno scoperto in essere di 239.459,15.
+    """
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            _sid, rifiuto = _genera(
+                db, "i4-poco", [_stress(2027, sp_overrides={"sp16a_debiti_banche_breve": 12345.67})])
+            assert rifiuto["forecast_generated"] is False
+            assert "incompatibile con sp16a_debiti_banche_breve forzato" in rifiuto["message"], rifiuto["message"]
+            assert "servono 227.113,48 di scoperto" in rifiuto["message"], rifiuto["message"]
+
+            rows = [_stress(2027, sp_overrides={"sp16a_debiti_banche_breve": 400000.55}, overdraft_limit=300000)]
+            sid, res = _genera(db, "i4-abbastanza", rows)
+            assert res["forecast_generated"] is True, res["message"]
+            _, sp, _ = read_forecast_maps(db, sid)[0]
+            det, _ = _dettagli(db, sid, rows)
+            assert sp["sp16a_debiti_banche_breve"] == D("400000.55")
+            # Senza override il fabbisogno era 239.459,15: il totale forzato lo copre e avanza.
+            assert sp["sp09_disponibilita_liquide"] == D("400000.55") - D("239459.15")
+            assert _eur(det[2027]["scoperto_residuo"]) == 0.0
+            assert _eur(det[2027]["scoperto_generato"]) == 0.0
+    finally:
+        engine.dispose()
+
+
+def test_ruling_37_un_fabbisogno_che_vale_zero_centesimi_non_alza():
+    """Il fabbisogno si quantizza PRIMA del confronto, senza tolleranza.
+
+    L'attivita' finanziaria forzata alla cassa del piano piu' 4 millesimi porta la
+    cassa esatta a -0,004: al centesimo vale 0,00 e il piano genera (su 2641305:
+    «Unfunded financing requirement 0.00»). Piu' 6 millesimi il centesimo e' vero,
+    e il motore alza per 0,01.
+    """
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            sid0, res0 = _genera(db, "r37-base", [_riga(2027)])
+            assert res0["forecast_generated"] is True, res0["message"]
+            _, sp0, _ = read_forecast_maps(db, sid0)[0]
+            cassa = sp0["sp09_disponibilita_liquide"]
+            assert cassa > 0
+
+            sid, res = _genera(db, "r37-zero", [_riga(2027, sp_overrides={
+                "sp08_attivita_finanziarie": float(cassa + D("0.004"))})])
+            assert res["forecast_generated"] is True, res["message"]
+            _, sp, _ = read_forecast_maps(db, sid)[0]
+            assert sp["sp09_disponibilita_liquide"] == D("0.00")
+
+            _sid, res2 = _genera(db, "r37-centesimo", [_riga(2027, sp_overrides={
+                "sp08_attivita_finanziarie": float(cassa + D("0.006"))})])
+        assert res2["forecast_generated"] is False
+        assert _importo_scoperto(res2["message"]) == D("0.01"), res2["message"]
+    finally:
+        engine.dispose()
+
+
+def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima():
+    """Decisione del proprietario: «annulliamo la cassa per compensare lo scoperto».
+
+    Cash sweep con cassa minima 20.000,55 nel 2028 e nel 2029: nel 2028 la cassa
+    chiude a zero con lo scoperto ancora aperto, e `cassa_sotto_minimo` lo dice;
+    nel 2029 lo scoperto e' chiuso e la cassa torna esattamente al minimo.
+    """
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            sweep = {"cash_sweep_enabled": True, "cash_sweep_min_cash": 20000.55}
+            rows = [_stress(2027), _stress(2028, **sweep), _stress(2029, **sweep)]
+            sid, res = _genera(db, "r38", rows)
+            assert res["forecast_generated"] is True, res["message"]
+            mappe = {y: sp for y, sp, _ce in read_forecast_maps(db, sid)}
+            det, _ = _dettagli(db, sid, rows)
+        assert _eur(det[2027]["cassa_sotto_minimo"]) == 0.0       # sweep spento: nessun minimo
+        assert mappe[2028]["sp09_disponibilita_liquide"] == D("0.00")
+        assert D(str(det[2028]["scoperto_residuo"])) == D("108714.36")
+        assert D(str(det[2028]["cassa_sotto_minimo"])) == D("20000.55")
+        assert mappe[2029]["sp09_disponibilita_liquide"] == D("20000.55")
+        assert _eur(det[2029]["scoperto_residuo"]) == 0.0
+        assert _eur(det[2029]["cassa_sotto_minimo"]) == 0.0
+    finally:
+        engine.dispose()
+
+
+def test_gli_oneri_stanno_sullo_scoperto_non_sul_debito_bancario_pregresso():
+    """Debito bancario pregresso a breve di 12.345,67: gli oneri dello scoperto non lo
+    toccano, e la quota bancaria di `sp16a` resta quella. Uccide la mutazione «oneri
+    su tutto `sp16a` di apertura», che il fixture senza banca lasciava vivere."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            rows = [_stress(2027), _stress(2028)]
+            sid, res = _genera(db, "oneri-banca", rows, banca=D("12345.67"))
+            assert res["forecast_generated"] is True, res["message"]
+            mappe = {y: sp for y, sp, _ce in read_forecast_maps(db, sid)}
+            det, _ = _dettagli(db, sid, rows)
+        residuo_27 = D(str(det[2027]["scoperto_residuo"]))
+        assert residuo_27 > 0
+        assert mappe[2027]["sp16a_debiti_banche_breve"] - residuo_27 == D("12345.67")
+        assert D(str(det[2028]["oneri_scoperto"])) == (residuo_27 * D("6.13") / D("100")).quantize(D("0.01"))
+    finally:
+        engine.dispose()

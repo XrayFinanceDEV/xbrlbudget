@@ -123,6 +123,22 @@ def _divergenze(bs, ce, det, row):
         confronta("ce09d_svalutazione_crediti", writeoff,
                   "details['pregresso']['crediti_commerciali'].writeoff")
 
+    # ── lo scoperto di c/c (Task 12), a scoperto spento come acceso ──
+    # Le sette chiavi si dichiarano sempre: a valle una chiave assente vale zero.
+    for chiave in ("cassa_assorbita", "scoperto_generato", "scoperto_residuo", "oneri_scoperto",
+                   "fabbisogno_picco", "fabbisogno_picco_anno", "cassa_sotto_minimo"):
+        if chiave not in det:
+            fuori.append((chiave, f"{chiave}: chiave non dichiarata"))
+    cassa = bs["sp09_disponibilita_liquide"]
+    residuo = D(str(det.get("scoperto_residuo") or 0))
+    if cassa < 0:
+        fuori.append(("sp09 negativa", f"cassa persistita {cassa}"))
+    # I2: cassa libera e scoperto non convivono, neppure dopo un `sp_overrides`.
+    if cassa > 0 and residuo > 0:
+        fuori.append(("I2 cassa e scoperto", f"cassa {cassa} e scoperto {residuo} nello stesso anno"))
+    if bs["_total_assets"] != bs["_total_liabilities"]:
+        fuori.append(("quadratura", f"attivo {bs['_total_assets']} != passivo {bs['_total_liabilities']}"))
+
     # Il residuo di quadratura non si posa MAI su un campo dichiarato. E' la
     # stessa affermazione dei confronti qui sopra, presa dall'altro capo: quelli
     # guardano l'esito, questo guarda l'atto — e un residuo posato su un campo
@@ -130,6 +146,7 @@ def _divergenze(bs, ce, det, row):
     dichiarati = (
         {campo for coppia in SHORT_LONG.values() for campo in coppia}
         | {SP_INDEXABLE_FIELDS[code] for code in det["indicizzazione"]}
+        | {"sp16a_debiti_banche_breve"}
     )
     for posa in det["residuo_quadratura"]:
         if posa["campo"] in dichiarati:
@@ -319,3 +336,167 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
         + [f"  {v:4d}  {k}" for k, v in per_campo.most_common()]
         + ["esempi:"] + [testo for _, testo in fuori[:15]]
     )
+
+
+# ══ Lo scoperto ACCESO, dove i difetti vivevano (Task 12, giro di correzione 1) ══
+#
+# La prima stesura del Task 12 fu verificata da una sonda usa-e-getta, e i due
+# difetti che la revisione trovo' stavano proprio fuori da quella sonda: i piani
+# di rimborso (la rata del debito esistente e quella del nuovo finanziamento
+# pagavano lo scoperto invece del proprio debito) e un `sp_overrides` dopo il
+# plug (cassa e scoperto insieme, misura gonfiata fino al doppio). Qui entrano
+# nella griglia.
+#
+# L'oracolo di I1 non ricalcola i piani di rimborso — sarebbe un secondo motore
+# in un test: e' lo STESSO scenario senza lo stress ne' gli override, il
+# «gemello». I debiti bancari non dipendono ne' dagli investimenti ne' dalla
+# cassa, quindi quota bancaria di `sp16a` e `sp17a` devono coincidere con quelle
+# del gemello, con o senza scoperto.
+
+DEBITI = {
+    "nessun piano": ({}, {}),
+    # Rate al mezzo centesimo: (12.345,67 + 23.456,79) / 3 = 11.934,153…
+    "rimborso esistente in 3 anni": ({}, {"existing_debt_repayment_years": 3}),
+    # 100.000,37 / 4 = 25.000,0925 all'anno.
+    "nuovo finanziamento": ({"financing_amount": 100000.37, "financing_duration_years": 4}, {}),
+}
+
+SQUILIBRI = {
+    "nessuno": None,
+    # Il rilievo 1: un'attivita' forzata DOPO il plug, nel primo anno stressato.
+    "crediti giu' nel 2027": (0, {"sp06a_crediti_clienti_breve": 1000.55}),
+    "rimanenze su nel 2028": (1, {"sp05a_materie_prime": 91234.565}),
+}
+
+TASSO = 6.135
+STRESS_2027 = 180123.455
+
+
+def _base_year_con_banca(db, user):
+    """La base della rete piu' debito bancario pregresso non tondo, a breve e oltre."""
+    company_id = _base_year(db, user)
+    fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
+    b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
+    breve, lungo = D("12345.67"), D("23456.79")
+    b.sp16a_debiti_banche_breve = breve
+    b.sp16_debiti_breve += breve
+    b.sp17a_debiti_banche_lungo = lungo
+    b.sp17_debiti_lungo += lungo
+    b.sp09_disponibilita_liquide += breve + lungo
+    db.commit()
+    return company_id
+
+
+def _genera_e_leggi(db, user, rows):
+    company_id = _base_year_con_banca(db, user)
+    sc = budget_scenarios.create_budget_scenario(
+        company_id,
+        BudgetScenarioCreate(company_id=company_id, name="scoperto", base_year=2026, scenario_type="budget"),
+        user_id=user, db=db)
+    res = budget_scenarios.bulk_upsert_assumptions(
+        company_id, sc.id, request={"assumptions": rows, "auto_generate": True}, user_id=user, db=db)
+    if not res["forecast_generated"]:
+        return res, None, None
+    prev = budget_scenarios.preview_forecast_route(company_id, sc.id, request={"assumptions": rows},
+                                                   user_id=user, db=db)
+    return res, read_forecast_maps(db, sc.id), prev["forecast_years"]
+
+
+@pytest.mark.parametrize("crescita", CRESCITE)
+def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persistito(crescita, monkeypatch):
+    """54 scenari per percentuale, 162 anni, piu' 18 gemelli: zero divergenze.
+
+    Afferma, anno per anno: le famiglie di `_divergenze` (con I2 e cassa mai
+    negativa); I1 (quota bancaria di `sp16a` e `sp17a` = gemello); I4
+    (`scoperto_generato` = aumento del residuo, `oneri_scoperto` = residuo di
+    apertura × tasso e addebitato in `ce15`, picco = massimo dei residui).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    fuori, scenari, anni = [], 0, 0
+    esercitati = Counter()
+    try:
+        with sessions() as db:
+            gemelli = {}
+            for (nome_p, piano), (nome_d, (primo, tutti)), (nome_s, squilibrio) in itertools.product(
+                PIANI.items(), DEBITI.items(), SQUILIBRI.items()
+            ):
+                scenari += 1
+                tag = f"{nome_p} | {nome_d} | {nome_s}"
+
+                def righe(stress):
+                    rows = [dict(forecast_year=y, revenue_growth_pct=crescita, **INVESTIMENTI_SOTTO_CENTESIMO,
+                                 overdraft_allowed=True, financing_interest_rate=TASSO, **tutti) for y in ANNI]
+                    rows[0].update(primo)
+                    if piano:
+                        rows[0]["pregresso"] = piano
+                    if stress:
+                        rows[0]["tangible_investments"] = STRESS_2027
+                        if squilibrio:
+                            rows[squilibrio[0]]["sp_overrides"] = squilibrio[1]
+                    return rows
+
+                chiave_g = (nome_p, nome_d)
+                if chiave_g not in gemelli:
+                    res_g, mappe_g, anni_g = _genera_e_leggi(db, f"gemello-{crescita}-{scenari}", righe(False))
+                    if mappe_g is None:
+                        fuori.append(("non generato", f"[gemello {tag}] {res_g['message']}"))
+                        continue
+                    gemelli[chiave_g] = {y: (bs, ce, a["details"]) for (y, bs, ce), a in zip(mappe_g, anni_g)}
+                gem = gemelli[chiave_g]
+
+                rows = righe(True)
+                res, mappe, anni_prev = _genera_e_leggi(db, f"scoperto-{crescita}-{scenari}", rows)
+                if mappe is None:
+                    fuori.append(("non generato", f"[{tag}] {res['message']}"))
+                    continue
+                esercitati[nome_d] += 1
+                residui = [D(str(a["details"]["scoperto_residuo"])) for a in anni_prev]
+                picco = max(residui)
+                residuo_prec = D("0")
+                for (anno, bs, ce), prev_anno, row in zip(mappe, anni_prev, rows):
+                    anni += 1
+                    det = prev_anno["details"]
+                    dove = f"[{tag} | {anno}]"
+                    for campo, guasto in _divergenze(bs, ce, det, row):
+                        fuori.append((campo, f"{dove} {guasto}"))
+                    residuo = D(str(det["scoperto_residuo"]))
+                    esercitati["anni con scoperto"] += residuo > 0
+                    esercitati["anni che rimborsano"] += residuo < residuo_prec
+                    bs_g, ce_g, det_g = gem[anno]
+                    residuo_g = D(str(det_g["scoperto_residuo"]))
+                    # I1: i piani di rimborso pagano il proprio debito, mai lo scoperto.
+                    if bs["sp17a_debiti_banche_lungo"] != bs_g["sp17a_debiti_banche_lungo"]:
+                        fuori.append(("I1 sp17a", f"{dove} sp17a {bs['sp17a_debiti_banche_lungo']}, "
+                                                  f"il piano dice {bs_g['sp17a_debiti_banche_lungo']}"))
+                    banca = bs["sp16a_debiti_banche_breve"] - residuo
+                    banca_g = bs_g["sp16a_debiti_banche_breve"] - residuo_g
+                    if banca != banca_g:
+                        fuori.append(("I1 sp16a banca", f"{dove} quota bancaria {banca}, il piano dice {banca_g}"))
+                    # I4: dichiarato = persistito.
+                    generato = D(str(det["scoperto_generato"]))
+                    if generato != max(D("0"), residuo - residuo_prec):
+                        fuori.append(("I4 generato", f"{dove} generato {generato}, residuo {residuo_prec} -> {residuo}"))
+                    oneri = D(str(det["oneri_scoperto"]))
+                    if oneri != _q(residuo_prec * D(str(TASSO)) / D("100")):
+                        fuori.append(("I4 oneri", f"{dove} oneri {oneri} sul residuo d'apertura {residuo_prec}"))
+                    if ce["ce15_oneri_finanziari"] - oneri != ce_g["ce15_oneri_finanziari"] - D(str(det_g["oneri_scoperto"])):
+                        fuori.append(("I4 ce15", f"{dove} ce15 {ce['ce15_oneri_finanziari']} con oneri {oneri}"))
+                    if D(str(det["fabbisogno_picco"])) != picco:
+                        fuori.append(("I4 picco", f"{dove} picco {det['fabbisogno_picco']}, massimo dei residui {picco}"))
+                    anno_picco = ANNI[residui.index(picco)] if picco > 0 else None
+                    if det["fabbisogno_picco_anno"] != anno_picco:
+                        fuori.append(("I4 picco anno", f"{dove} anno {det['fabbisogno_picco_anno']} invece di {anno_picco}"))
+                    residuo_prec = residuo
+    finally:
+        engine.dispose()
+    per_campo = Counter(campo for campo, _ in fuori)
+    assert not fuori, "\n".join(
+        [f"{len(fuori)} divergenze su {anni} anni ({scenari} scenari)", "per campo:"]
+        + [f"  {v:4d}  {k}" for k, v in per_campo.most_common()]
+        + ["esempi:"] + [testo for _, testo in fuori[:15]]
+    )
+    assert scenari == 54 and anni == 162, f"batteria incompleta: {scenari} scenari, {anni} anni"
+    # Una griglia che non accende scoperto, o non lo rimborsa, non prova I1 ne' I2.
+    assert esercitati["anni con scoperto"] > 0 and esercitati["anni che rimborsano"] > 0, dict(esercitati)
+    assert all(esercitati[nome] == 18 for nome in DEBITI), dict(esercitati)

@@ -31,7 +31,7 @@ import { PREGRESSO_LABELS, validatePregresso } from "@/lib/budget-pregresso-circ
 import { boolAssumption, pregressoBase, pregressoPreview, singleYearValue } from "@/lib/budget-pregresso-step";
 import { TABELLA_KEYS, massesLongOf, massesOf, type PregressoMode } from "@/lib/budget-pregresso-tabella";
 import { previewNotice } from "@/lib/budget-preview-notice";
-import { scopertoAvvisi } from "@/lib/budget-preview-rows";
+import { confermaCassaPositiva, scopertoAvvisi } from "@/lib/budget-preview-rows";
 import type { Pregresso } from "@/types/api";
 import type { StepProps } from "../types";
 import { PregressoTable } from "../PregressoTable";
@@ -386,7 +386,15 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
             </div>
           )}
 
-          {!preview.unfunded && !avvisi.scoperto && p.preview.data && (
+          {/* Lo scoperto rimborsato sotto la cassa minima: deciso, e detto. */}
+          {avvisi.sottoMinimo && (
+            <div className="mt-3 flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              <TrendingDown className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{avvisi.sottoMinimo}</span>
+            </div>
+          )}
+
+          {confermaCassaPositiva(p.preview.data, avvisi) && (
             <div className="mt-3 flex gap-2 rounded-md bg-muted p-3 text-sm">
               <Check className="h-4 w-4 shrink-0 mt-0.5" /> La cassa resta positiva in tutti gli anni: nessun
               fabbisogno da coprire.

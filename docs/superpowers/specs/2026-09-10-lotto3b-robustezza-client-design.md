@@ -24,7 +24,8 @@ budget (tutti nel 3A). Nessun cambiamento ai motori o ai servizi del previsional
 - Un hook che restituisce un oggetto non entra intero in un array di dipendenze `useEffect`; un effetto non dipende da
   ciò che scrive (regole di `CLAUDE.md` › Frontend).
 - UI in italiano, icone lucide-react, niente emoji.
-- Test prima rossi (sulle asserzioni) e poi verdi; implementazione e revisione su sonnet.
+- Test prima rossi (sulle asserzioni) e poi verdi. **Esecutore pi, revisore Claude sonnet** (decisione del
+  proprietario, 2026-09-10).
 - File del lotto: `backend/app/main.py`; `frontend/app/forecast/income/page.tsx`, `frontend/app/forecast/balance/page.tsx`,
   `frontend/app/report/page.tsx`; la parte Indicatori di `frontend/app/pratica/page.tsx`;
   `frontend/hooks/use-queries.ts` se serve; moduli nuovi in `frontend/lib/`. Toccare un file del 3A è un conflitto da

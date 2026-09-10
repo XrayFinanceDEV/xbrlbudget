@@ -54,7 +54,8 @@ debito pregresso scadenziato che il piano non rigenera si estingue; lo scoperto 
 - Terminatori CRLF da preservare: `frontend/types/api.ts`, `backend/app/services/analysis_service.py`,
   `backend/app/calculations/cashflow.py`, `backend/app/calculations/cashflow_detailed.py`,
   `docs/budget/FORECASTING_GUIDE.md`.
-- Implementazione del motore e prima revisione del codice del motore su opus; il resto su sonnet.
+- **Esecutore pi, revisore Claude** (decisione del proprietario, 2026-09-10): pi (LLM locale via orchestrazione Orca)
+  implementa ogni task, motore compreso; la revisione e' di Claude, opus sui task del motore e sonnet sugli altri.
 
 ## 4. Il design, voce per voce
 

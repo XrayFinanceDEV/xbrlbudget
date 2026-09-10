@@ -714,6 +714,21 @@ export const patchCeOverrides = async (
   return data;
 };
 
+// Batch-patch SP overrides across one or more years and regenerate forecast once
+// (giro di correzione 3, task 10): sostituisce N `updateBudgetAssumptions` in
+// parallelo per una modifica multi-anno -- una sola transazione lato server.
+export const patchSpOverrides = async (
+  companyId: number,
+  scenarioId: number,
+  overrides: Array<{ forecast_year: number; field: string; value: number | null }>
+): Promise<{ success: boolean; years: number }> => {
+  const { data } = await api.patch(
+    `/companies/${companyId}/scenarios/${scenarioId}/sp-override`,
+    { overrides }
+  );
+  return data;
+};
+
 // Promote Infrannuale Projection
 export interface PromoteResult {
   success: boolean;

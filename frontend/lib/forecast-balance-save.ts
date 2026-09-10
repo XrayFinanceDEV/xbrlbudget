@@ -26,11 +26,46 @@
  * `pendingEdits` e' stato LOCALE, e senza svuotarlo la cella continuerebbe
  * a mostrare il valore digitato anche se il server non l'ha mai applicato.
  *
+ * Giro di correzione 3: `handleSaveOverrides` mandava N `PUT
+ * /assumptions/{year}` **in parallelo** (`Promise.all`, un anno per
+ * chiamata) per una modifica multi-anno — e dal giro 2 ciascuna rigenera
+ * l'INTERO scenario nella propria transazione. Su SQLite questo rischia
+ * scritture concorrenti (`database is locked`) e un anno puo' essere
+ * validato senza vedere ancora la modifica dell'altro, non ancora
+ * committata — un rifiuto spurio anche quando la combinazione sarebbe
+ * valida (task-10-fix1-rereview.md, "New Breakage"). `overridesFromPendingEdits`
+ * costruisce il lotto per `PATCH /sp-override` (`patchSpOverrides`,
+ * `lib/api.ts`) — TUTTI gli anni in UNA chiamata sola, stessa forma di
+ * `patchCeOverrides`/CE Prev., cosi' il server applica tutto e rigenera
+ * una volta (`assumptions_service.apply_sp_overrides`).
+ *
  * Modulo puro: nessun import da `app/` o da `components/`.
  */
 export type PendingSpEdits = Record<string, number | null>;
 
 export type SaveAttemptOutcome = "success" | "error";
+
+/** Una voce del lotto per `PATCH /sp-override`/`PATCH /ce-override`: stessa
+ *  forma per entrambi gli editor di cella. */
+export interface OverrideBatchEntry {
+  forecast_year: number;
+  field: string;
+  value: number | null;
+}
+
+/**
+ * Il lotto di override da mandare in UNA sola chiamata, da `pendingEdits`
+ * (chiave `"anno:campo"`). Non raggruppa per anno: la rotta stessa (`PATCH
+ * /sp-override`) accetta piu' entry sullo stesso anno e le fonde lato
+ * server nello stesso sacco `sp_overrides` — qui basta spacchettare la
+ * chiave.
+ */
+export function overridesFromPendingEdits(pending: PendingSpEdits): OverrideBatchEntry[] {
+  return Object.entries(pending).map(([key, value]) => {
+    const [yearRaw, field] = key.split(":");
+    return { forecast_year: Number.parseInt(yearRaw, 10), field, value };
+  });
+}
 
 /**
  * Le modifiche in sospeso dopo un tentativo di salvataggio.

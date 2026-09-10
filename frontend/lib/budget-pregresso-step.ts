@@ -14,10 +14,11 @@
  * PFN previsti NON si ricalcolano qui, si leggono da `rowsPregressoNuovo`,
  * che a sua volta legge solo cio' che il motore ha gia' restituito.
  */
-import type { BalanceSheet, ForecastPreviewResponse } from "@/types/api";
+import type { BalanceSheet, ForecastPreviewResponse, PregressoKey } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { baseBankDebt } from "@/lib/base-bank-debt";
-import { rowsPregressoNuovo, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
+import { rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
+import { writeoffIgnoredAvvisi } from "@/lib/budget-pregresso-tabella";
 import { num } from "@/lib/budget-format";
 
 export interface PregressoBase {
@@ -87,9 +88,13 @@ export interface PregressoPreview {
   years: number[];
   rows: PreviewRow[];
   unfunded: { year: number; amount: number } | null;
+  /** Gli anni in cui un inesigibile scadenziato NON e' stato scaricato perche'
+   *  un override del CE impediva di rilevarne il costo: il credito e' rimasto
+   *  a bilancio, e va detto. Vuoto quando non c'e' nulla da dire. */
+  writeoffIgnored: string[];
 }
 
-const EMPTY_PREVIEW: PregressoPreview = { years: [], rows: [], unfunded: null };
+const EMPTY_PREVIEW: PregressoPreview = { years: [], rows: [], unfunded: null, writeoffIgnored: [] };
 
 /**
  * Dalla risposta del motore a tutto cio' che l'anteprima del passo rende.
@@ -100,13 +105,17 @@ const EMPTY_PREVIEW: PregressoPreview = { years: [], rows: [], unfunded: null };
  */
 export function pregressoPreview(
   baseBs: BalanceSheet | undefined | null,
-  data: ForecastPreviewResponse | null
+  data: ForecastPreviewResponse | null,
+  keys: readonly PregressoKey[] = [],
 ): PregressoPreview {
   if (!baseBs || !data) return EMPTY_PREVIEW;
   const previewYears = data.forecast_years ?? [];
   return {
     years: previewYears.map((y) => y.year),
-    rows: rowsPregressoNuovo(baseBs, previewYears),
+    // Debito/cassa/PFN, poi il pregresso scadenziato: due letture dello stesso
+    // `forecast_years`, nessun ricalcolo.
+    rows: [...rowsPregressoNuovo(baseBs, previewYears), ...rowsPregressoRunoff(previewYears, keys)],
     unfunded: unfundedFromError(data.error),
+    writeoffIgnored: writeoffIgnoredAvvisi(previewYears),
   };
 }

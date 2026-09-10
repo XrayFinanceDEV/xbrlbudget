@@ -1043,6 +1043,16 @@ export interface IndicizzazioneIgnorata {
   motivo: string;
 }
 
+/** Un inesigibile chiesto dal piano dei crediti e NON scaricato, col perche':
+ *  `reason` e' il nome dell'override che ha vinto (`ce09d_override` o
+ *  `ce09_override`), `requested` l'importo chiesto. */
+export interface PregressoWriteoffIgnored {
+  saldo: PregressoKey;
+  field: string;
+  requested: number;
+  reason: string;
+}
+
 export interface ForecastYearDetails {
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
@@ -1056,6 +1066,14 @@ export interface ForecastYearDetails {
   pregresso_ignored: PregressoKey[];
   indicizzazione: Record<string, IndicizzazioneVoce>;
   indicizzazione_ignorata: IndicizzazioneIgnorata[];
+  /** L'inesigibile scadenziato che un override di CE ha impedito di
+   *  rilevare, e che quindi NON e' stato scaricato dai crediti: il credito
+   *  e' rimasto a bilancio. Il motore la dichiara sempre, anche vuota
+   *  (`forecast_engine.py`, `details['pregresso_writeoff_ignored']`), ma qui
+   *  resta facoltativa: il tipo promette MENO dell'API, mai di piu', ed e' la
+   *  direzione sicura. Si legge sempre con `?? []` — una chiave assente vale
+   *  zero. */
+  pregresso_writeoff_ignored?: PregressoWriteoffIgnored[];
 }
 
 export interface ForecastPreviewYear {

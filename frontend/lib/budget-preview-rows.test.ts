@@ -4,7 +4,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
   ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
-  rowsPregressoNuovo, unfundedFromError,
+  rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
 } from "./budget-preview-rows";
 
 const baseInc = {
@@ -305,5 +305,63 @@ describe("rowsAnnoBase", () => {
     const molRowsAltreVoci = rowsAltreVociCe(incConVociMinori, []).find((r) => r.key === "mol")!.base.value;
     expect(molAnnoBase).toBe(molRowsCosti);
     expect(molAnnoBase).toBe(molRowsAltreVoci);
+  });
+});
+
+// ── rowsPregressoRunoff (Task 7) ────────────────────────────────────────────
+// Il pregresso che il motore ha davvero scadenziato: si legge da
+// `details.pregresso`, non si ricalcola.
+describe("rowsPregressoRunoff", () => {
+  const withPregresso = (y: number, over: Record<string, Record<string, unknown>>): ForecastPreviewYear => {
+    const base = year(y);
+    const pregresso = { ...base.details.pregresso } as unknown as Record<string, Record<string, unknown>>;
+    for (const [k, v] of Object.entries(over)) pregresso[k] = { ...pregresso[k], ...v };
+    return { ...base, details: { ...base.details, pregresso } } as unknown as ForecastPreviewYear;
+  };
+
+  it("la riga del residuo a breve porta il numero del motore, e l'apertura in colonna base", () => {
+    const rows = rowsPregressoRunoff(
+      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 200, residual_long: 0, closed: 800, writeoff: 0, mode: "runoff" } })],
+      ["crediti_commerciali"],
+    );
+    const residuo = rows.find((r) => r.label === "Crediti commerciali · residuo a breve")!;
+    expect(residuo.years[0].value).toBe(200);
+    expect(residuo.base.value).toBe(1000);
+    expect(residuo.years[0].note).toBeUndefined();
+    expect(rows.find((r) => r.label === "chiuso nell'anno")!.years[0].value).toBe(800);
+  });
+
+  it("`mode: legacy` e' un saldo SENZA piano, e lo dice: non e' un residuo di zero", () => {
+    const rows = rowsPregressoRunoff(
+      [withPregresso(2025, { altri_debiti: { opening: 58, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
+      ["altri_debiti"],
+    );
+    const residuo = rows.find((r) => r.label === "Altri debiti · residuo a breve")!;
+    expect(residuo.years[0].note).toBe("nessun piano: tutto nel primo anno");
+  });
+
+  it("l'inesigibile compare solo quando il motore ne dichiara uno diverso da zero", () => {
+    const senza = rowsPregressoRunoff(
+      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 200, residual_long: 0, closed: 800, writeoff: 0, mode: "runoff" } })],
+      ["crediti_commerciali"],
+    );
+    expect(senza.some((r) => r.label === "di cui inesigibile")).toBe(false);
+    const con = rowsPregressoRunoff(
+      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 150, residual_long: 0, closed: 800, writeoff: 50, mode: "runoff" } })],
+      ["crediti_commerciali"],
+    );
+    expect(con.find((r) => r.label === "di cui inesigibile")!.years[0].value).toBe(50);
+  });
+
+  it("un'intestazione sola, poi i saldi nell'ordine chiesto; senza anni nessuna riga", () => {
+    const rows = rowsPregressoRunoff(
+      [withPregresso(2025, {}), withPregresso(2026, {})],
+      ["debiti_fornitori", "crediti_commerciali"],
+    );
+    expect(rows[0].label).toBe("Pregresso: residuo a breve · oltre");
+    expect(rows.filter((r) => r.label.endsWith("· residuo a breve")).map((r) => r.label))
+      .toEqual(["Debiti verso fornitori · residuo a breve", "Crediti commerciali · residuo a breve"]);
+    expect(rows[0].years).toHaveLength(2);
+    expect(rowsPregressoRunoff([], ["crediti_commerciali"])).toEqual([]);
   });
 });

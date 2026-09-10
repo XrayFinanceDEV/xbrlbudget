@@ -7,6 +7,8 @@ import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeSta
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import { num, pctOf } from "@/lib/budget-format";
+import type { PregressoKey } from "@/types/api";
+import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -249,6 +251,44 @@ export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewY
     r("immob", "Immobilizzazioni nette", "value"), r("cash", "Cassa", "kpi"),
     r("pfn", "Posizione finanziaria netta", "total"),
   ];
+}
+
+/**
+ * Il pregresso di circolante che il motore ha davvero scadenziato, saldo per
+ * saldo (Task 7): apertura in colonna base, poi per ogni anno il residuo a
+ * breve, quello oltre l'esercizio, il chiuso e — dove c'e' — l'inesigibile.
+ * Lettura pura di `details.pregresso`: qui non si scadenzia nulla, il piano lo
+ * svolge `runoff_schedule` in Python.
+ *
+ * `mode: "legacy"` non e' un residuo di zero: e' un saldo per cui NESSUN piano
+ * e' stato dichiarato, e che quindi segue le formule di sempre — il motore lo
+ * chiude tutto nel primo anno. Confondere le due cose farebbe leggere «0» come
+ * «pagato», e la nota esiste per questo.
+ */
+export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly PregressoKey[]): PreviewRow[] {
+  if (years.length === 0) return [];
+  const empty = (): PreviewCell[] => years.map(() => ({ value: null }));
+  const out: PreviewRow[] = [
+    row("pregresso-head", "Pregresso: residuo a breve · oltre", "total", { value: null }, empty()),
+  ];
+  for (const key of keys) {
+    const det = years.map((y) => y.details.pregresso?.[key] ?? null);
+    const pick = (f: "residual_short" | "residual_long" | "closed" | "writeoff"): PreviewCell[] =>
+      det.map((d) => ({ value: d ? num(d[f]) : null }));
+    const residuo = pick("residual_short").map((c, i) =>
+      det[i]?.mode === "legacy" ? { ...c, note: "nessun piano: tutto nel primo anno" } : c);
+    out.push(row(`pregresso-${key}`, `${PREGRESSO_LABELS[key]} · residuo a breve`, "value",
+      { value: det[0] ? num(det[0].opening) : null }, residuo));
+    out.push(row(`pregresso-${key}-long`, "oltre l'esercizio", "sub", { value: null }, pick("residual_long")));
+    out.push(row(`pregresso-${key}-closed`, "chiuso nell'anno", "sub", { value: null }, pick("closed")));
+    // L'inesigibile esiste sul solo piano dei crediti: si mostra quando il
+    // motore ne dichiara uno, invece di aggiungere quattro righe a zero.
+    const writeoff = pick("writeoff");
+    if (writeoff.some((c) => c.value !== null && c.value !== 0)) {
+      out.push(row(`pregresso-${key}-writeoff`, "di cui inesigibile", "sub", { value: null }, writeoff));
+    }
+  }
+  return out;
 }
 
 export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {

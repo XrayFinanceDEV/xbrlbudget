@@ -111,8 +111,9 @@ describe("boolAssumption", () => {
 
 describe("pregressoPreview", () => {
   it("senza anno base o senza risposta: nessuna riga", () => {
-    expect(pregressoPreview(undefined, response([year(2027)]))).toEqual({ years: [], rows: [], unfunded: null });
-    expect(pregressoPreview(baseBs, null)).toEqual({ years: [], rows: [], unfunded: null });
+    const vuota = { years: [], rows: [], unfunded: null, writeoffIgnored: [] };
+    expect(pregressoPreview(undefined, response([year(2027)]))).toEqual(vuota);
+    expect(pregressoPreview(baseBs, null)).toEqual(vuota);
   });
 
   it("gli anni sono quelli che il motore ha davvero prodotto", () => {
@@ -125,5 +126,37 @@ describe("pregressoPreview", () => {
   it("un fabbisogno scoperto si legge dall'errore strutturato, non si inventa", () => {
     const p = pregressoPreview(baseBs, response([year(2027)], { year: 2028, message: "Unfunded financing requirement 1,234.56" }));
     expect(p.unfunded).toEqual({ year: 2028, amount: 1234.56 });
+  });
+});
+
+// ── Il pregresso scadenziato nell'anteprima (Task 7) ────────────────────────
+describe("pregressoPreview · pregresso di circolante", () => {
+  it("senza chiavi l'anteprima e' quella di prima: nessuna riga di pregresso", () => {
+    const p = pregressoPreview(baseBs, response([year(2027)]));
+    expect(p.rows.some((r) => r.label.endsWith("· residuo a breve"))).toBe(false);
+  });
+
+  it("con le chiavi le righe del residuo si aggiungono SOTTO quelle di debito e cassa", () => {
+    const p = pregressoPreview(baseBs, response([year(2027)]), ["altri_debiti"]);
+    const pfn = p.rows.findIndex((r) => r.key === "pfn");
+    const head = p.rows.findIndex((r) => r.label === "Pregresso: residuo a breve · oltre");
+    expect(pfn).toBeGreaterThanOrEqual(0);
+    expect(head).toBeGreaterThan(pfn);
+    expect(p.rows.some((r) => r.label === "Altri debiti · residuo a breve")).toBe(true);
+  });
+
+  it("l'inesigibile non scaricato arriva all'interfaccia, invece di restare nei details", () => {
+    const conAvviso = year(2027, {
+      details: {
+        ...year(2027).details,
+        pregresso_writeoff_ignored: [
+          { saldo: "crediti_commerciali", field: "ce09d_svalutazione_crediti", requested: 5000, reason: "ce09d_override" },
+        ],
+      },
+    });
+    const p = pregressoPreview(baseBs, response([conAvviso]), ["crediti_commerciali"]);
+    expect(p.writeoffIgnored).toHaveLength(1);
+    expect(p.writeoffIgnored[0]).toContain("2027");
+    expect(pregressoPreview(baseBs, response([year(2027)]), ["crediti_commerciali"]).writeoffIgnored).toEqual([]);
   });
 });

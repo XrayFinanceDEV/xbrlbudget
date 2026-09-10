@@ -308,6 +308,67 @@ export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear
     r("net", "Utile netto", "kpi"), r("trib", "Debiti tributari a fine anno", "value")];
 }
 
+/** Un anno sulla VIA MANUALE non ha una liquidazione da mostrare: il motore
+ *  dichiara zero invece di inventare gli importi, e uno zero letto come
+ *  «versato niente» sarebbe peggio del vuoto. */
+const IMPOSTE_MANUALE = "posizione tributaria manuale";
+
+/**
+ * Come si sono PAGATE le imposte di ogni anno (Task 8): il saldo maturato a
+ * fine anno precedente, l'acconto sull'anno in corso, la rata del tributario
+ * rateizzato, e cio' che resta aperto a fine anno.
+ *
+ * Lettura pura di `details.imposte`: il kernel e'
+ * `tax_settlement_saldo_acconto` (`calculations/projection_common.py`), qui
+ * non si liquida nulla. L'uscita di cassa e' l'unica somma, ed e' la stessa
+ * del kernel (`saldo_paid + acconti_paid + rate_paid`).
+ *
+ * `mode: "manual"` non e' un anno pagato a zero: e' un anno in cui una
+ * percentuale di crescita su `sp06e`/`sp16e` ha preso il posto del piano. Le
+ * celle di quegli anni restano VUOTE con la loro nota — tranne l'imposta
+ * dell'anno, che il motore dichiara in entrambe le vie. Quando ogni anno e'
+ * manuale non resta nulla da incolonnare: una riga sola, con la nota.
+ */
+export function rowsImposteSaldoAcconto(years: ForecastPreviewYear[]): PreviewRow[] {
+  if (years.length === 0) return [];
+  // Una chiave assente vale zero, ma il MODO assente non e' «automatico»:
+  // senza `imposte` non c'e' liquidazione da mostrare, e la riga si comporta
+  // come sulla via manuale invece di stampare colonne di zeri.
+  const det = years.map((y) => y.details?.imposte ?? null);
+  const manuale = det.map((d) => d === null || d.mode !== "saldo_acconto");
+  const head = row("imposte-pagamenti", "Pagamenti dell'anno", "total", { value: null },
+    years.map((_, i) => (manuale[i] ? { value: null, note: IMPOSTE_MANUALE } : { value: null })));
+  if (manuale.every(Boolean)) return [head];
+
+  const cells = (f: (d: NonNullable<(typeof det)[number]>) => number, sempre = false): PreviewCell[] =>
+    det.map((d, i) =>
+      d !== null && (sempre || !manuale[i]) ? { value: num(f(d)) } : { value: null, note: IMPOSTE_MANUALE });
+  const someNonZero = (cs: PreviewCell[]) => cs.some((c) => c.value !== null && c.value !== 0);
+
+  const out: PreviewRow[] = [head];
+  // L'imposta dell'anno il motore la dichiara anche sulla via manuale: e' la
+  // sola cifra vera di quegli anni, e nasconderla direbbe meno del dovuto.
+  out.push(row("imposte-current", "Imposte dell'anno", "value", { value: null },
+    cells((d) => d.current_tax, true)));
+  out.push(row("imposte-saldo", "Saldo dell'anno precedente versato", "sub", { value: null },
+    cells((d) => d.saldo_paid)));
+  out.push(row("imposte-acconti", "Acconti versati", "sub", { value: null },
+    cells((d) => d.acconti_paid)));
+  // Le rate esistono solo con un rateizzato scadenziato, il credito solo
+  // quando l'acconto ha superato l'imposta: righe a zero fisso non si mostrano.
+  const rate = cells((d) => d.rate_paid);
+  if (someNonZero(rate)) out.push(row("imposte-rate", "Rate del rateizzato", "sub", { value: null }, rate));
+  out.push(row("imposte-cassa", "Uscita di cassa per imposte", "kpi", { value: null },
+    cells((d) => d.saldo_paid + d.acconti_paid + d.rate_paid)));
+  out.push(row("imposte-debito", "Debito tributario a fine anno", "value", { value: null },
+    cells((d) => d.generated_debt)));
+  const credito = cells((d) => d.generated_credit);
+  if (someNonZero(credito)) {
+    out.push(row("imposte-credito", "Credito tributario a fine anno", "value", { value: null }, credito));
+  }
+  return out;
+}
+
 /**
  * L'importo del fabbisogno scoperto dentro un messaggio del motore, o `null`
  * se il messaggio e' un altro.

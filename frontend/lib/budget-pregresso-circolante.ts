@@ -109,6 +109,14 @@ export function validatePregresso(p: Pregresso, masses: Record<PregressoKey, num
 
     if (key === "debiti_tributari") {
       const t = plan as PregressoTributari;
+      // Il saldo si digita e il rateizzato si deduce (`withSaldo`): un saldo
+      // oltre l'apertura non viene troncato, quindi il rateizzato esce
+      // negativo — e la somma torna lo stesso, cioe' il controllo qui sotto
+      // non lo vedrebbe. Lo schema del server ha `ge=0` su entrambi: senza
+      // questa riga il rifiuto arriverebbe come un 422 illeggibile.
+      if (t.saldo < 0 || t.rateizzato < 0) {
+        errs.push(`${label}: saldo e rateizzato non possono essere negativi — il saldo supera il debito di apertura`);
+      }
       if (Math.abs(t.saldo + t.rateizzato - t.opening) > 0.01) {
         errs.push(`${label}: saldo + rateizzato deve essere uguale al saldo di apertura`);
       }

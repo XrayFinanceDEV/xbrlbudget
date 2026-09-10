@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   boolAssumption,
   circolantePreview,
+  degenerateDaysAvvisi,
   giorniMediAuto,
   giorniMediRows,
   minorFieldsRows,
@@ -142,9 +143,10 @@ describe("boolAssumption", () => {
 
 describe("circolantePreview", () => {
   it("senza SP o CE base, o senza risposta, non c'e' anteprima", () => {
-    expect(circolantePreview(undefined, income(), null)).toEqual({ years: [], rows: [] });
-    expect(circolantePreview(balance(), undefined, null)).toEqual({ years: [], rows: [] });
-    expect(circolantePreview(balance(), income(), null)).toEqual({ years: [], rows: [] });
+    const vuota = { years: [], rows: [], degenerateDays: [] };
+    expect(circolantePreview(undefined, income(), null)).toEqual(vuota);
+    expect(circolantePreview(balance(), undefined, null)).toEqual(vuota);
+    expect(circolantePreview(balance(), income(), null)).toEqual(vuota);
   });
 
   it("gli anni sono quelli che il motore ha davvero prodotto", () => {
@@ -152,5 +154,39 @@ describe("circolantePreview", () => {
     const p = circolantePreview(balance(), income(), data);
     expect(p.years).toEqual([2025]);
     expect(p.rows.length).toBeGreaterThan(0);
+  });
+});
+
+// ── I giorni medi che il motore ha SCARTATO (Task 7, raccolto dal Task 14) ───
+describe("degenerateDaysAvvisi", () => {
+  const conDegenere = (year: number, kinds: string[]): ForecastPreviewYear =>
+    ({ ...previewYear(year), details: { ...previewYear(year).details, degenerate_turnover_ratio: kinds } } as unknown as ForecastPreviewYear);
+
+  it("nessun avviso quando la guardia non scatta, e nessuno con la chiave assente", () => {
+    expect(degenerateDaysAvvisi(response([conDegenere(2025, [])]))).toEqual([]);
+    expect(degenerateDaysAvvisi(response([previewYear(2025)]))).toEqual([]);
+    expect(degenerateDaysAvvisi(null)).toEqual([]);
+  });
+
+  it("l'avviso nomina il giorno medio e dice che il saldo base e' stato RIPORTATO, non scalato", () => {
+    const avvisi = degenerateDaysAvvisi(response([conDegenere(2025, ["dpo"])]));
+    expect(avvisi).toHaveLength(1);
+    expect(avvisi[0]).toContain("Giorni pagamento fornitori (DPO)");
+    expect(avvisi[0]).toContain("2025");
+    expect(avvisi[0]).toMatch(/riportato il saldo/);
+  });
+
+  it("piu' anni sullo stesso giorno medio danno UN avviso con gli anni dentro; giorni diversi ne danno due", () => {
+    const avvisi = degenerateDaysAvvisi(response([conDegenere(2025, ["dpo"]), conDegenere(2026, ["dpo", "dio"])]));
+    expect(avvisi).toHaveLength(2);
+    const dpo = avvisi.find((a) => a.includes("(DPO)"))!;
+    expect(dpo).toContain("2025, 2026");
+    expect(avvisi.find((a) => a.includes("(DIO)"))).toContain("2026");
+  });
+
+  it("circolantePreview porta gli avvisi al passo, invece di lasciarli nei details", () => {
+    const p = circolantePreview(balance(), income(), response([conDegenere(2025, ["dso"])]));
+    expect(p.degenerateDays).toHaveLength(1);
+    expect(p.degenerateDays[0]).toContain("(DSO)");
   });
 });

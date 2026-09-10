@@ -30,7 +30,7 @@ import {
   DRIVERS,
   DRIVER_LABELS,
 } from "@/lib/budget-circolante-step";
-import { Link2, Minus } from "lucide-react";
+import { AlertTriangle, Link2, Minus } from "lucide-react";
 import type { SpIndexingDriver } from "@/types/api";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
@@ -75,6 +75,19 @@ export function StepCircolante(p: StepProps): JSX.Element {
               I giorni del {p.baseYear} sono calcolati sui soli crediti e debiti commerciali, su 360 giorni. Le
               voci non commerciali (tributari, imposte anticipate) non seguono i ricavi.
             </p>
+            {/* Un giorno medio dedotto e poi SCARTATO dal motore va detto qui,
+                dove i giorni si leggono: altrimenti si guarda un numero che il
+                previsionale non ha applicato. */}
+            {preview.degenerateDays.length > 0 && (
+              <div className="mt-2 space-y-1 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                {preview.degenerateDays.map((m) => (
+                  <div key={m} className="flex gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{m}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

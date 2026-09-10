@@ -73,10 +73,14 @@ const DESTINI: Record<PregressoKey, PregressoDestino> = {
   altri_debiti: "estingue",
 };
 
-/** Le quattro voci che questa tabella scadenzia. I tributari NON ci sono: si
- *  regolano al passo 7, dove il piano dei rateizzati vive accanto a saldo e
- *  acconti. */
-export const TABELLA_KEYS: readonly PregressoKey[] = [
+/** Le quattro voci che questa tabella scadenzia — mai `debiti_tributari`, che
+ *  si regola al passo 7 (`impostePreview`, dove il piano dei rateizzati vive
+ *  accanto a saldo e acconti). Il tipo lo rende un errore di compilazione, non
+ *  solo una nota: `legacyNoteFor` e `rowsPregressoRunoff` accettano solo
+ *  queste quattro chiavi. */
+export type TabellaPregressoKey = Exclude<PregressoKey, "debiti_tributari">;
+
+export const TABELLA_KEYS: readonly TabellaPregressoKey[] = [
   "crediti_commerciali", "debiti_fornitori", "debiti_previdenziali", "altri_debiti",
 ];
 
@@ -149,18 +153,20 @@ export function destinoOf(key: PregressoKey): PregressoDestino {
  * vieta altrove ("diagnose, never fabricate"): il testo si completa per
  * chiave con cio' che la voce fa davvero, non si lascia uguale per tutte.
  *
- * `destinoOf` decide anche qui: `rigenera`/`imposte` mantengono la chiusura
- * nel primo anno (un driver — di volume o fiscale — sostituisce comunque il
- * vecchio saldo), `estingue` no.
+ * `destinoOf` decide anche qui: `rigenera` mantiene la chiusura nel primo
+ * anno (un driver di volume sostituisce comunque il vecchio saldo),
+ * `estingue` no. Non c'e' voce per `imposte`: `TabellaPregressoKey` esclude
+ * `debiti_tributari`, il solo destino che vale "imposte" (`DESTINI`, sopra),
+ * quindi `destinoOf` qui non lo restituisce mai — l'asserzione lo dice al
+ * type-checker, il tipo del parametro lo garantisce ai chiamanti.
  */
-const LEGACY_NOTE_BY_DESTINO: Record<PregressoDestino, string> = {
+const LEGACY_NOTE_BY_DESTINO: Record<Exclude<PregressoDestino, "imposte">, string> = {
   rigenera: "nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari",
   estingue: "nessun piano: non si chiude — cresce ogni anno della percentuale impostata",
-  imposte: "nessun piano: tutto nel primo anno, poi si rigenera dalle imposte dell'anno",
 };
 
-export function legacyNoteFor(key: PregressoKey): string {
-  return LEGACY_NOTE_BY_DESTINO[destinoOf(key)];
+export function legacyNoteFor(key: TabellaPregressoKey): string {
+  return LEGACY_NOTE_BY_DESTINO[destinoOf(key) as Exclude<PregressoDestino, "imposte">];
 }
 
 /** Le masse di apertura del bilancio base, o tutte a zero quando l'anno base

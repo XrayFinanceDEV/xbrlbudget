@@ -14,11 +14,11 @@
  * PFN previsti NON si ricalcolano qui, si leggono da `rowsPregressoNuovo`,
  * che a sua volta legge solo cio' che il motore ha gia' restituito.
  */
-import type { BalanceSheet, ForecastPreviewResponse, PregressoKey } from "@/types/api";
+import type { BalanceSheet, ForecastPreviewResponse } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
-import { writeoffIgnoredAvvisi, writeoffIgnoredByYear } from "@/lib/budget-pregresso-tabella";
+import { writeoffIgnoredAvvisi, writeoffIgnoredByYear, type TabellaPregressoKey } from "@/lib/budget-pregresso-tabella";
 import { num } from "@/lib/budget-format";
 
 export interface PregressoBase {
@@ -113,7 +113,7 @@ const EMPTY_PREVIEW: PregressoPreview = {
 export function pregressoPreview(
   baseBs: BalanceSheet | undefined | null,
   data: ForecastPreviewResponse | null,
-  keys: readonly PregressoKey[] = [],
+  keys: readonly TabellaPregressoKey[] = [],
 ): PregressoPreview {
   if (!baseBs || !data) return EMPTY_PREVIEW;
   const previewYears = data.forecast_years ?? [];

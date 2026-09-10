@@ -229,9 +229,11 @@ describe("budget-pregresso-tabella", () => {
       expect(legacyNoteFor("altri_debiti")).not.toBe(legacyNoteFor("debiti_fornitori"));
     });
 
-    it("i tributari si rigenerano dalle imposte, non dal volume: nota propria", () => {
-      expect(legacyNoteFor("debiti_tributari")).toBe("nessun piano: tutto nel primo anno, poi si rigenera dalle imposte dell'anno");
-    });
+    // "debiti_tributari" non e' un caso di questa funzione: si scadenzia al
+    // passo 7 (`impostePreview`), mai qui — `TABELLA_KEYS` non lo include, e
+    // `TabellaPregressoKey` lo rende un errore di compilazione passarlo a
+    // `legacyNoteFor`. Prima di questo commit c'era un'asserzione su un ramo
+    // che nessun chiamante di produzione poteva raggiungere.
   });
 
   describe("writeoffIgnoredByYear (rilievo 6)", () => {

@@ -7,10 +7,9 @@ import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeSta
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import { euro, num, pctOf } from "@/lib/budget-format";
-import type { PregressoKey } from "@/types/api";
 import type { ForecastPreviewResponse } from "@/types/api";
 import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
-import { legacyNoteFor } from "@/lib/budget-pregresso-tabella";
+import { legacyNoteFor, type TabellaPregressoKey } from "@/lib/budget-pregresso-tabella";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -272,7 +271,7 @@ export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewY
  * visibile. Confondere «nessun piano» con «residuo pagato» sarebbe un difetto
  * a se'; dire "chiude" di un saldo che invece cresce sarebbe l'altro.
  */
-export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly PregressoKey[]): PreviewRow[] {
+export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly TabellaPregressoKey[]): PreviewRow[] {
   if (years.length === 0) return [];
   const empty = (): PreviewCell[] => years.map(() => ({ value: null }));
   const out: PreviewRow[] = [

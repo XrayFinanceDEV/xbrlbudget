@@ -278,12 +278,6 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   (`calculations/projection_common.py:341-367`, `tax_settlement_saldo_acconto`). Prima di questo
   lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
   un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
-- **`pregresso` vive solo nella riga del primo anno di piano, e dichiara la massa di apertura.**
-  Uno scadenziamento scritto su un'altra riga alza `pregresso is allowed only in the first
-  forecast year`; un `opening` diverso dal bilancio base (tolleranza 0,01 €) alza «il saldo di
-  apertura di {voce} è cambiato»: scadenziare un saldo nel frattempo cambiato scadenzierebbe un
-  numero che non esiste più (`calculations/forecast_engine.py:1176-1188`, `validate_pregresso`
-  a `:334-362`).
 - **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
@@ -513,7 +507,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1112-1116`; the
   docstring at `:1025` still says otherwise and is wrong). And both engines plug cash **upward
   only**, but they part company on what a negative residual costs you: qui è **clampato a zero** con
-  una diagnostica `unfunded_financing_requirement` (`:1211-1223`) e la proiezione esce lo stesso,
+  una diagnostica `unfunded_financing_requirement` (`:1211-1224`) e la proiezione esce lo stesso,
   mentre il motore budget **solleva** e non produce nulla — salvo che lo scoperto di c/c sia concesso
   (`overdraft_allowed`), e allora il fabbisogno diventa scoperto generato dal piano, dichiarato. Un
   fabbisogno scoperto quindi si vede in un avviso sull'infrannuale, e sul previsionale in un errore
@@ -521,9 +515,13 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
 - **Working capital** comes from the reference year's turnover ratios. A ratio implying **more than a
   year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
   carried instead, with a `degenerate_turnover_ratio` diagnostic — `_safe_divide` guards a zero
-  denominator, not a negligible one. The guard lives **only** in the engine: since 2026-09-02 the
-  Proiezione tab renders the forecast the engine produced instead of recomputing it in TypeScript,
-  so there is no second copy to keep in agreement.
+  denominator, not a negligible one. The guard lives **only in the Python engines, and each one
+  carries its own copy**: since 2026-09-02 the Proiezione tab renders the forecast this engine
+  produced instead of recomputing it in TypeScript, so there is no second copy to keep in
+  agreement with *this* one — but the budget engine is not silent on the same risk either, it has
+  its own copy of the same guard (`degenerate_turnover_ratio`,
+  `calculations/forecast_engine.py:1990-2011`, Task 14 of this lotto), not shared with the one
+  here.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
 - **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a
   schermo (i sottototali delle 22 righe di CE che l'utente digita) sta nel client; tutto ciò che

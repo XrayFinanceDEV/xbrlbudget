@@ -301,8 +301,9 @@ sarebbe contata due volte.
 `details` porta anche, sempre (ogni anno, anche a zero/vuoto): `pregresso`, `imposte`,
 `pregresso_ignored`, `pregresso_writeoff_ignored` (§8), `oneri_scoperto`, `scoperto_generato`,
 `scoperto_residuo`, `cassa_assorbita`, `fabbisogno_picco`, `fabbisogno_picco_anno`,
-`cassa_sotto_minimo` (§10) — il bulk e l'anteprima condividono lo stesso motore e lo stesso dict,
-quindi nessuna di queste manca da una delle due porte.
+`cassa_sotto_minimo` (§10), `indicizzazione`, `indicizzazione_ignorata` (§11) — il bulk e
+l'anteprima condividono lo stesso motore e lo stesso dict, quindi nessuna di queste manca da una
+delle due porte.
 
 ## 8. Lo scadenziamento del pregresso
 
@@ -468,3 +469,67 @@ Un `sp_overrides` su `sp16a` (o sul suo aggregato `sp16`) fissa il totale: vince
 discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripartizione è coerente
 (il passivo è fissato dall'override qualunque sia la divisione fra banca e scoperto), e il motore
 rifiuta la combinazione con un errore esplicito invece di superare il totale.
+
+## 11. Indicizzazione delle voci minori dello SP (`sp_indexing`)
+
+Undici voci minori dello stato patrimoniale seguono, per default, la formula di sempre —
+`prev × (1 + %)`, cioè restano **ferme** se la percentuale non è impostata. `sp_indexing`
+(`BudgetAssumptions.sp_indexing`, colonna `JSON`) le aggancia invece a un driver di volume:
+`stock dell'anno BASE × fattore del driver`, la stessa forma già usata da
+`previdenza_scales_with_personnel`. Indicizzare sulla base non accumula deriva, mentre un
+`prev × (1+%)` composto per cinque anni sì.
+
+```jsonc
+{ "forecast_year": 2026, "revenue_growth_pct": 5.0,
+  "sp_indexing": { "sp01": "ricavi", "sp16g": "acquisti", "sp08": "personale" } }
+```
+
+- **Chiave** = uno degli **undici** codici indicizzabili (`SP_INDEXABLE_FIELDS`,
+  `calculations/forecast_engine.py:56-68`): `sp01`, `sp04`, `sp08`, `sp10`, `sp14`, `sp16f`,
+  `sp16g`, `sp17d`, `sp17f`, `sp17g`, `sp18`. Un codice fuori da questo elenco è ignorato e
+  dichiarato con il motivo `"voce non indicizzabile"` — non applicato a una voce che il motore
+  governa in un altro modo.
+- **Valore** = uno dei **tre driver**, tipizzato `Literal["ricavi", "acquisti", "personale"]`
+  (`backend/app/schemas/budget.py:96,207,319`): `ricavi` = `ce01` previsto / `ce01` base,
+  `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base — un nome
+  fuori da questi tre è **rifiutato dallo schema Pydantic con 422**, non ignorato in silenzio
+  (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`).
+- **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
+  come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
+  passo 5 del wizard («Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
+  stesso criterio delle altre caselle "uguali per tutto il piano" — si legge la scelta del primo
+  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:205-216`).
+- **Driver degenere** (denominatore dell'anno base ≤ 0): il motore non indicizza, ricade sul
+  comportamento costante/percentuale e dichiara il motivo `"driver degenere"` — mai un fattore
+  inventato da un `or 1` di comodo.
+
+### Mutuamente esclusivo con un piano del pregresso sulla stessa voce
+
+Dichiarare un piano di scadenziamento su un saldo (§8) significa «questo saldo lo sto
+estinguendo»; dichiarare un driver su una voce significa «questo saldo si rigenera col volume» —
+due affermazioni contraddittorie sulla stessa voce. `SP_INDEXING_PLAN_KEY`
+(`calculations/forecast_engine.py:78-84`) mappa i tre codici in comune ai saldi del pregresso —
+`sp16f`/`sp17f` → `debiti_previdenziali`, `sp16g`/`sp17g` → `altri_debiti`, `sp17d` →
+`debiti_fornitori` — e quando quel saldo ha un piano, l'indicizzazione sul codice mappato è
+ignorata e dichiarata col motivo `"piano di scadenziamento"`. Vince sempre il piano, mai il
+driver: con un piano il generato di quella voce è `base − massa scadenzata`, che
+`validate_pregresso` impone uguale a zero — un fattore per zero resterebbe comunque zero, cioè
+codice morto che l'utente crederebbe attivo se non fosse dichiarato ignorato.
+
+Altre tre esclusioni, stesso pattern (`SP_INDEXING_GOVERNED`,
+`calculations/forecast_engine.py:89-102`, controllato **prima** dell'elenco degli 11 indicizzabili
+— per queste sette chiavi il motivo è quello specifico, non il generico "voce non indicizzabile"):
+`sp06e`/`sp16e`/`sp17e` sono governate dalla posizione tributaria (§9), `sp16a`/`sp17a` dal piano
+di rimborso del debito, `sp06f`/`sp07f` (imposte anticipate) dalla posizione fiscale — nessuna di
+queste sette è comunque fra gli 11 codici indicizzabili, quindi l'esclusione dà solo un motivo più
+preciso, non un divieto altrimenti assente. Indicizzarle darebbe comunque due padroni allo stesso
+numero. E l'interruttore `previdenza_scales_with_personnel`, quando acceso, vince su un
+`sp_indexing` scritto per `sp16f`/`sp17f`: è già lui l'indicizzazione di quelle due voci al costo
+del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
+
+### `details` — due chiavi, sempre presenti (anche vuote)
+
+| Chiave | Valore |
+|---|---|
+| `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` come ripiego difensivo del motore (l'API non lo raggiunge mai: il nome del driver è già un `Literal` a tre valori nello schema Pydantic, rifiutato con 422 prima di arrivare qui) |

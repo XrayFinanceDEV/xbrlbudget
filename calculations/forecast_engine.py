@@ -268,6 +268,40 @@ def _split_to_cents(fixed_part: Decimal, line_value: Decimal) -> Tuple[Decimal, 
     return fixed_q, line_value - fixed_q
 
 
+def _e_contratto_pregresso(loan) -> bool:
+    """Un contratto con `opening_residual` descrive debito bancario GIA' in bilancio.
+
+    E' pregresso scadenziato per contratto, non un prestito nuovo: la sua rata
+    riduce il debito bancario dell'anno base (dal breve, poi dal lungo), mentre
+    un prestito nuovo si rimborsa solo da se' stesso. Un contratto misto (anche
+    `amount` > 0) resta intero da questa parte: e' un contratto esistente
+    rifinanziato, e il kernel lo ammortizza come un capitale solo.
+    """
+    return Decimal(str(loan.get('opening_residual') or 0)) > 0
+
+
+def _residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
+    """Il residuo dei soli prestiti NUOVI a fine `fino_al_anno`, come il motore lo persiste.
+
+    La catena e' quella che il previsionale ha sempre scritto per un prestito da
+    solo: residuo dell'anno prima al centesimo, piu' l'erogato, meno la rata del
+    kernel, al centesimo. Quantizzare anno per anno non e' un vezzo: un residuo
+    calcolato sul calendario grezzo differisce di un centesimo da quello
+    persistito (100.000,38 in 4 anni: 25.000,095 grezzo contro 25.000,11
+    persistito il terzo anno), e quel centesimo, tolto a `sp17a`, finirebbe
+    attribuito al debito bancario pregresso.
+    """
+    zero, cent = Decimal('0'), Decimal('0.01')
+    anni = [int(loan['year']) for loan in (loans or ())]
+    if not anni:
+        return zero
+    residuo = zero
+    for anno in range(min(anni), fino_al_anno + 1):
+        raised, repayment, _ = new_financing_schedule(loans, anno)
+        residuo = max(zero, residuo + raised - repayment).quantize(cent, rounding=ROUND_HALF_UP)
+    return residuo
+
+
 def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
     """Scenario, anno base e i due prospetti, con gli stessi controlli di
     generate_forecast: scenario assente, base assente o incompleto, gate
@@ -2229,6 +2263,32 @@ class ForecastEngine:
         sp17b = _prev('sp17b_debiti_altri_finanz_lungo')
         sp17c = _prev('sp17c_debiti_obbligazioni_lungo')
 
+        # ── IL PRESTITO NUOVO E' UNA VOCE GENERATA DAL PIANO: separata nel calcolo ──
+        # «Bisogna dividere le voci patrimoniali generate dal previsionale dallo
+        # scadenziamento del pregresso» (il proprietario). `sp17a` dell'anno prima e'
+        # debito bancario pregresso + residuo dei prestiti NUOVI, e — come lo
+        # scoperto qui sopra — il residuo nuovo si separa PRIMA di ogni piano di
+        # rimborso, perche' ogni debito si riduce solo con il proprio rimborso (I1
+        # esteso, Task 16). Mescolati, sbagliavano in due direzioni, entrambe
+        # misurate: la rata del prestito nuovo si prendeva «prima dal breve», cioe'
+        # dal debito bancario PREGRESSO (Ruling 40: 12.345,67 di breve senza piano
+        # azzerati nel primo anno), e la rata del piano del pregresso, che e' fissa
+        # sull'esposizione dell'anno base e sopravvive al pregresso estinto, si
+        # mangiava il prestito nuovo (piano in 2 anni, orizzonte di 3: `sp17a` a
+        # 7.098,88 invece dei 25.000,11 del prestito da solo).
+        #
+        # Il residuo nuovo di apertura e' la catena del kernel, non una lettura: non
+        # supera mai `sp17a`. Un cash sweep o un `sp_overrides` che l'anno prima ha
+        # abbassato `sp17a` sotto quella catena lo ha quindi abbassato prima sul
+        # pregresso e poi sul nuovo, che ha un calendario contrattuale (e interessi
+        # calcolati su quello).
+        prestiti_nuovi = [loan for loan in (financing_loans or []) if not _e_contratto_pregresso(loan)]
+        contratti_pregresso = [loan for loan in (financing_loans or []) if _e_contratto_pregresso(loan)]
+        nuovo_apertura = min(
+            sp17a, _residuo_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year - 1)
+        )
+        sp17a_pregresso = sp17a - nuovo_apertura
+
         # Handle abbreviato gap: if previous year has aggregate but no sub-field
         # detail, allocate the unaccounted portion to banche (bank debt).
         prev_sp16_agg = _prev('sp16_debiti_breve')
@@ -2525,11 +2585,13 @@ class ForecastEngine:
         ):
             # Short-term bank debt is repaid first; any residual instalment reduces
             # long-term bank debt. Bonds and other lenders are left untouched.
+            # Solo il PREGRESSO: estinto quello, il `max` ferma la rata a zero invece
+            # di lasciarla scendere sul prestito nuovo che sta nella stessa voce.
             annual_repayment = financial_repayment_instalment(_base, existing_repay_years)
             short_repayment = min(sp16a, annual_repayment)
             sp16a = max(ZERO, sp16a - short_repayment)
             long_repayment = annual_repayment - short_repayment
-            sp17a = max(ZERO, sp17a - long_repayment)
+            sp17a_pregresso = max(ZERO, sp17a_pregresso - long_repayment)
 
         # Altri finanziatori (sp17b) — e.g. an intra-group loan — repaid on its OWN fixed
         # schedule, independent of the bank debt (shared kernel: fixed instalment on the
@@ -2539,17 +2601,27 @@ class ForecastEngine:
             annual_altri = altri_finanz_repayment_instalment(_base, altri_repay_years)
             sp17b = max(ZERO, sp17b - annual_altri)
 
+        # Il pregresso descritto per CONTRATTO (`opening_residual`): la sua rata
+        # riduce il debito bancario dell'anno base, prima dal breve e poi dal lungo —
+        # la stessa aritmetica di sempre, ristretta ai soli contratti esistenti.
+        es_raised, es_repayment, _ = new_financing_schedule(
+            contratti_pregresso, assumption.forecast_year)
+        sp17a_pregresso = sp17a_pregresso + es_raised
+        short_es_repayment = min(sp16a, es_repayment)
+        sp16a = max(ZERO, sp16a - short_es_repayment)
+        sp17a_pregresso = max(ZERO, sp17a_pregresso - (es_repayment - short_es_repayment))
+
         # New financing raised during the plan: add what is raised THIS year to
         # long-term bank debt, then subtract this year's straight-line instalment
-        # so the loan amortises over its durata (shared kernel, mirrors the
-        # existing-debt plan above). Because sp17a is carried forward via `_prev`,
-        # a loan raised once (e.g. 150k in year 1, then 0) stays on the sheet and
-        # shrinks by its rata each year instead of persisting flat forever.
-        fin_raised, fin_repayment, _ = new_financing_schedule(financing_loans, assumption.forecast_year)
-        sp17a = sp17a + fin_raised
-        short_fin_repayment = min(sp16a, fin_repayment)
-        sp16a = max(ZERO, sp16a - short_fin_repayment)
-        sp17a = max(ZERO, sp17a - (fin_repayment - short_fin_repayment))
+        # so the loan amortises over its durata (shared kernel). Because sp17a is
+        # carried forward via `_prev`, a loan raised once (e.g. 150k in year 1,
+        # then 0) stays on the sheet and shrinks by its rata each year instead of
+        # persisting flat forever. La rata paga SOLO il prestito nuovo: mai il breve
+        # pregresso (Ruling 40), mai il lungo pregresso.
+        fin_raised, fin_repayment, _ = new_financing_schedule(
+            prestiti_nuovi, assumption.forecast_year)
+        nuovo_residuo = max(ZERO, nuovo_apertura + fin_raised - fin_repayment)
+        sp17a = sp17a_pregresso + nuovo_residuo
 
         # --- AGGREGATE sp16/sp17 from components ---
         sp16 = sp16a + sp16b + sp16c + sp16d + sp16e + sp16f + sp16g

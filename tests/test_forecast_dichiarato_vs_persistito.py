@@ -353,13 +353,39 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
 # cassa, quindi quota bancaria di `sp16a` e `sp17a` devono coincidere con quelle
 # del gemello, con o senza scoperto.
 
+PRESTITO = {"financing_amount": 100000.37, "financing_duration_years": 4}
+
 DEBITI = {
     "nessun piano": ({}, {}),
     # Rate al mezzo centesimo: (12.345,67 + 23.456,79) / 3 = 11.934,153…
     "rimborso esistente in 3 anni": ({}, {"existing_debt_repayment_years": 3}),
     # 100.000,37 / 4 = 25.000,0925 all'anno.
-    "nuovo finanziamento": ({"financing_amount": 100000.37, "financing_duration_years": 4}, {}),
+    "nuovo finanziamento": (PRESTITO, {}),
+    # Task 16: pregresso a breve e oltre CON il suo piano, e un prestito nuovo nello
+    # stesso scenario. Il piano in 2 anni si estingue nel 2028 e l'orizzonte arriva
+    # al 2029: e' l'anno in cui la rata del pregresso, sopravvissuta al pregresso,
+    # si mangiava il prestito nuovo. 35.802,46 / 2 = 17.901,23, al centesimo: il
+    # mezzo centesimo sta nel prestito, e la somma di I1 esteso resta esatta.
+    "rimborso in 2 anni + nuovo finanziamento": (PRESTITO, {"existing_debt_repayment_years": 2}),
 }
+
+# ══ I1 esteso (Task 16): il prestito nuovo non tocca il debito bancario pregresso ══
+#
+# Questa griglia conteneva gia' debito bancario pregresso e un prestito nuovo,
+# ma il gemello di I1 AVEVA LO STESSO PRESTITO: lo scenario stressato e il suo
+# gemello sbagliavano allo stesso modo, e la rata nuova che azzerava 12.345,67 di
+# breve pregresso passava inosservata (Ruling 40). Il confronto giusto e' con lo
+# stesso scenario SENZA prestito.
+#
+# Che cosa resta del prestito nuovo, da solo, persistito anno per anno (misurato:
+# lo stesso prestito su un'azienda senza banca). Non dipende ne' dal pregresso ne'
+# dalla crescita: e' la catena del kernel al centesimo.
+SENZA_NUOVO = {
+    "nuovo finanziamento": ("nessun piano", ({}, {})),
+    "rimborso in 2 anni + nuovo finanziamento": (
+        "rimborso esistente in 2 anni", ({}, {"existing_debt_repayment_years": 2})),
+}
+RESIDUO_PRESTITO = {2027: D("75000.28"), 2028: D("50000.19"), 2029: D("25000.10")}
 
 SQUILIBRI = {
     "nessuno": None,
@@ -404,48 +430,82 @@ def _genera_e_leggi(db, user, rows):
 
 @pytest.mark.parametrize("crescita", CRESCITE)
 def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persistito(crescita, monkeypatch):
-    """54 scenari per percentuale, 162 anni, piu' 18 gemelli: zero divergenze.
+    """72 scenari per percentuale, 216 anni, piu' 30 gemelli: zero divergenze.
 
     Afferma, anno per anno: le famiglie di `_divergenze` (con I2 e cassa mai
-    negativa); I1 (quota bancaria di `sp16a` e `sp17a` = gemello); I4
-    (`scoperto_generato` = aumento del residuo, `oneri_scoperto` = residuo di
+    negativa); I1 (quota bancaria di `sp16a` e `sp17a` = gemello); I1 esteso
+    (Task 16: sul gemello con prestito nuovo, quota bancaria di `sp16a` = gemello
+    SENZA prestito, e `sp17a` = quel gemello + il residuo del prestito da solo);
+    I4 (`scoperto_generato` = aumento del residuo, `oneri_scoperto` = residuo di
     apertura × tasso e addebitato in `ce15`, picco = massimo dei residui).
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     fuori, scenari, anni = [], 0, 0
     esercitati = Counter()
+
+    def righe(piano, primo, tutti, squilibrio, stress):
+        rows = [dict(forecast_year=y, revenue_growth_pct=crescita, **INVESTIMENTI_SOTTO_CENTESIMO,
+                     overdraft_allowed=True, financing_interest_rate=TASSO, **tutti) for y in ANNI]
+        rows[0].update(primo)
+        if piano:
+            rows[0]["pregresso"] = piano
+        if stress:
+            rows[0]["tangible_investments"] = STRESS_2027
+            if squilibrio:
+                rows[squilibrio[0]]["sp_overrides"] = squilibrio[1]
+        return rows
+
     try:
         with sessions() as db:
             gemelli = {}
+
+            def gemello(nome_p, piano, nome_d, primo, tutti):
+                """Lo scenario senza stress ne' override, generato una volta per chiave."""
+                chiave = (nome_p, nome_d)
+                if chiave not in gemelli:
+                    res_g, mappe_g, anni_g = _genera_e_leggi(
+                        db, f"gemello-{crescita}-{nome_p}-{nome_d}", righe(piano, primo, tutti, None, False))
+                    if mappe_g is None:
+                        fuori.append(("non generato", f"[gemello {nome_p} | {nome_d}] {res_g['message']}"))
+                        return None
+                    gemelli[chiave] = {y: (bs, ce, a["details"]) for (y, bs, ce), a in zip(mappe_g, anni_g)}
+                return gemelli[chiave]
+
             for (nome_p, piano), (nome_d, (primo, tutti)), (nome_s, squilibrio) in itertools.product(
                 PIANI.items(), DEBITI.items(), SQUILIBRI.items()
             ):
                 scenari += 1
                 tag = f"{nome_p} | {nome_d} | {nome_s}"
 
-                def righe(stress):
-                    rows = [dict(forecast_year=y, revenue_growth_pct=crescita, **INVESTIMENTI_SOTTO_CENTESIMO,
-                                 overdraft_allowed=True, financing_interest_rate=TASSO, **tutti) for y in ANNI]
-                    rows[0].update(primo)
-                    if piano:
-                        rows[0]["pregresso"] = piano
-                    if stress:
-                        rows[0]["tangible_investments"] = STRESS_2027
-                        if squilibrio:
-                            rows[squilibrio[0]]["sp_overrides"] = squilibrio[1]
-                    return rows
+                gem = gemello(nome_p, piano, nome_d, primo, tutti)
+                if gem is None:
+                    continue
 
-                chiave_g = (nome_p, nome_d)
-                if chiave_g not in gemelli:
-                    res_g, mappe_g, anni_g = _genera_e_leggi(db, f"gemello-{crescita}-{scenari}", righe(False))
-                    if mappe_g is None:
-                        fuori.append(("non generato", f"[gemello {tag}] {res_g['message']}"))
-                        continue
-                    gemelli[chiave_g] = {y: (bs, ce, a["details"]) for (y, bs, ce), a in zip(mappe_g, anni_g)}
-                gem = gemelli[chiave_g]
+                # I1 esteso, una volta per gemello: il prestito nuovo non muove la
+                # quota bancaria pregressa di `sp16a`, e in `sp17a` si somma e basta.
+                # Sul gemello e non sullo scenario stressato: lo stressato e' gia'
+                # legato al suo gemello da I1 qui sotto, quindi lo e' anche a questo.
+                if nome_d in SENZA_NUOVO and nome_s == next(iter(SQUILIBRI)):
+                    nome_senza, (primo_s, tutti_s) = SENZA_NUOVO[nome_d]
+                    senza = gemello(nome_p, piano, nome_senza, primo_s, tutti_s)
+                    for anno in (ANNI if senza is not None else ()):
+                        bs_c, _ce_c, det_c = gem[anno]
+                        bs_s, _ce_s, det_s = senza[anno]
+                        dove_g = f"[{nome_p} | {nome_d} | gemello | {anno}]"
+                        esercitati["anni I1 esteso"] += 1
+                        banca_c = bs_c["sp16a_debiti_banche_breve"] - D(str(det_c["scoperto_residuo"]))
+                        banca_s = bs_s["sp16a_debiti_banche_breve"] - D(str(det_s["scoperto_residuo"]))
+                        if banca_c != banca_s:
+                            fuori.append(("I1 esteso sp16a", f"{dove_g} quota bancaria {banca_c} col prestito, "
+                                                             f"{banca_s} senza: la rata nuova ha pagato il pregresso"))
+                        atteso = bs_s["sp17a_debiti_banche_lungo"] + RESIDUO_PRESTITO[anno]
+                        if bs_c["sp17a_debiti_banche_lungo"] != atteso:
+                            fuori.append(("I1 esteso sp17a", f"{dove_g} sp17a {bs_c['sp17a_debiti_banche_lungo']}, "
+                                                             f"pregresso {bs_s['sp17a_debiti_banche_lungo']} + "
+                                                             f"prestito {RESIDUO_PRESTITO[anno]} = {atteso}"))
 
-                rows = righe(True)
+                rows = righe(piano, primo, tutti, squilibrio, True)
                 res, mappe, anni_prev = _genera_e_leggi(db, f"scoperto-{crescita}-{scenari}", rows)
                 if mappe is None:
                     fuori.append(("non generato", f"[{tag}] {res['message']}"))
@@ -496,7 +556,9 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
         + [f"  {v:4d}  {k}" for k, v in per_campo.most_common()]
         + ["esempi:"] + [testo for _, testo in fuori[:15]]
     )
-    assert scenari == 54 and anni == 162, f"batteria incompleta: {scenari} scenari, {anni} anni"
+    assert scenari == 72 and anni == 216, f"batteria incompleta: {scenari} scenari, {anni} anni"
     # Una griglia che non accende scoperto, o non lo rimborsa, non prova I1 ne' I2.
     assert esercitati["anni con scoperto"] > 0 and esercitati["anni che rimborsano"] > 0, dict(esercitati)
     assert all(esercitati[nome] == 18 for nome in DEBITI), dict(esercitati)
+    # 6 piani × 2 voci con prestito nuovo × 3 anni: I1 esteso non e' stato saltato.
+    assert esercitati["anni I1 esteso"] == 36, dict(esercitati)

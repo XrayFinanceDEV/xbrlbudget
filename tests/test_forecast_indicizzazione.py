@@ -164,10 +164,15 @@ def test_acquisti_and_personale_drivers(monkeypatch):
             assert bs["sp16f_debiti_previdenza_breve"] == D("18750.00")  # 15.000 × 1,25
 
             det = _preview(db, company_id, sc.id, rows)["forecast_years"][0]["details"]
-            assert det["indicizzazione"]["sp17d"] == {"driver": "acquisti", "fattore": D("1.1"),
-                                                      "percentuale_ignorata": False}
-            assert det["indicizzazione"]["sp16f"] == {"driver": "personale", "fattore": D("1.25"),
-                                                      "percentuale_ignorata": False}
+            # `valore` e' il numero DAVVERO scritto sulla voce: e' quello che
+            # rende esatto il confronto «persistito == dichiarato» anche dove la
+            # formula ha un addendo in piu' di `base × fattore` (sp04, sp14).
+            assert det["indicizzazione"]["sp17d"] == {
+                "driver": "acquisti", "fattore": D("1.1"),
+                "valore": D("11000"), "percentuale_ignorata": False}
+            assert det["indicizzazione"]["sp16f"] == {
+                "driver": "personale", "fattore": D("1.25"),
+                "valore": D("18750"), "percentuale_ignorata": False}
     finally:
         engine.dispose()
 
@@ -189,6 +194,54 @@ def test_an_indexed_voce_ignores_its_growth_percentage_and_says_so(monkeypatch):
             assert bs["sp16g_altri_debiti_breve"] == D("42000.00")  # 35.000 × 1,2, non × 1,9
             det = _preview(db, company_id, sc.id, rows)["forecast_years"][0]["details"]
             assert det["indicizzazione"]["sp16g"]["percentuale_ignorata"] is True
+    finally:
+        engine.dispose()
+
+
+def test_indexing_sp04_does_not_cancel_the_writedowns_already_recorded(monkeypatch):
+    """`ce09c` non torna indietro perche' la voce e' indicizzata.
+
+    L'ancora sull'anno base riparte ogni anno dallo stesso stock: sottrarre la
+    sola svalutazione dell'anno cancellerebbe quelle degli anni prima, e con un
+    driver piatto (fattore 1,00) la serie 30.000 / 20.000 / 10.000 diventerebbe
+    30.000 / 30.000 / 30.000 — senza una diagnostica, e con un attivo che non
+    scende mentre il conto economico dichiara di averlo svalutato.
+
+    L'asserzione forte e' l'ultima: **a fattore 1,00 l'indicizzazione non deve
+    cambiare un solo centesimo** rispetto alla voce lasciata a riporto. Un driver
+    che non si muove non e' un'ipotesi diversa.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
+            bs_row = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
+            bs_row.sp03_immob_materiali = D("120000.00")
+            bs_row.sp04_immob_finanziarie = D("40000.00")
+            bs_row.sp04a_partecipazioni = D("40000.00")
+            db.commit()
+            # Ricavi fermi ⇒ fattore 1,00; `ce09c` di 10.000 l'anno.
+            rows = [dict(forecast_year=y, revenue_growth_pct=0, ce09c_override=10000,
+                         **MANUAL_TAX) for y in (2027, 2028, 2029)]
+            sc_riporto, _ = _run(db, company_id, rows)
+            a_riporto = [bs["sp04_immob_finanziarie"] for _, bs, _ in read_forecast_maps(db, sc_riporto.id)]
+            assert a_riporto == [D("30000.00"), D("20000.00"), D("10000.00")]
+
+            rows_i = [dict(r, sp_indexing={"sp04": "ricavi"}) for r in rows]
+            sc, _ = _run(db, company_id, rows_i)
+            indicizzato = [bs["sp04_immob_finanziarie"] for _, bs, _ in read_forecast_maps(db, sc.id)]
+            assert indicizzato == [D("30000.00"), D("20000.00"), D("10000.00")]
+
+            det = _preview(db, company_id, sc.id, rows_i)["forecast_years"]
+            assert [d["details"]["svalutazioni_cumulate"] for d in det] == [
+                D("10000"), D("20000"), D("30000")]
+            # Fattore piatto ⇒ nessun numero si muove, riga per riga.
+            for (_, bs_a, ce_a), (_, bs_b, ce_b) in zip(
+                read_forecast_maps(db, sc_riporto.id), read_forecast_maps(db, sc.id)
+            ):
+                assert bs_a == bs_b and ce_a == ce_b
     finally:
         engine.dispose()
 

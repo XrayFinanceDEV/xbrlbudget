@@ -26,6 +26,7 @@ import {
   giorniMediAuto,
   giorniMediRows,
   minorFieldsRows,
+  pianiPregressoOf,
   spIndexingOf,
   DRIVERS,
   DRIVER_LABELS,
@@ -48,9 +49,14 @@ export function StepCircolante(p: StepProps): JSX.Element {
     () => spIndexingOf(p.assumptions, p.forecastYears),
     [p.assumptions, p.forecastYears],
   );
+  // Ruling 17: una voce che un piano sta estinguendo non offre alcun driver.
+  const piani = useMemo(
+    () => pianiPregressoOf(p.assumptions, p.forecastYears),
+    [p.assumptions, p.forecastYears],
+  );
   const minorRows = useMemo(
-    () => minorFieldsRows(baseBs, indexing, previdenzaChecked0),
-    [baseBs, indexing, previdenzaChecked0],
+    () => minorFieldsRows(baseBs, indexing, previdenzaChecked0, piani),
+    [baseBs, indexing, previdenzaChecked0, piani],
   );
   const preview = useMemo(() => circolantePreview(baseBs, baseInc, p.preview.data), [baseBs, baseInc, p.preview.data]);
 

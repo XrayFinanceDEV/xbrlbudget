@@ -511,6 +511,29 @@ class ForecastEngine:
     }
 
     @classmethod
+    def _declared_sp_fields(cls) -> "frozenset[str]":
+        """I campi di SP il cui valore i `details` dichiarano SEMPRE.
+
+        `details['pregresso'][k]` dichiara `generated + residual_short` sul lato
+        breve e `residual_long` sul lato oltre di tutti e quattro i debiti, con o
+        senza piano; `details['imposte']` dichiara per conto suo il tributario. Un
+        centesimo di residuo di quadratura posato li' fa divergere il numero
+        persistito da quello dichiarato — ed e' il difetto trovato CINQUE volte in
+        questo file: sul conto economico (Task 11), sul patrimoniale (Task 5),
+        sulle voci indicizzate e infine sui tributari, sempre da chi lo cercava.
+
+        Il primo bersaglio del residuo resta il secchio di default `sp16g`/`sp17g`,
+        e questo elenco entra in gioco **solo** quando quel secchio e' gia'
+        forzato — cioe' sui percorsi con piano o con indicizzazione. Sui percorsi
+        di sempre e' quindi inerte per costruzione, non per fortuna: e' cosi' che
+        la parita' regge senza doverla sperare (misurato: con il secchio libero il
+        residuo e' zero in tutte le osservazioni della sonda).
+        """
+        return frozenset(
+            field for fields in cls._PREGRESSO_SP_FIELDS.values() for field in fields
+        )
+
+    @classmethod
     def _pregresso_sp_forced_fields(cls, pregresso) -> "frozenset[str]":
         """I campi di SP che un piano di pregresso ha scritto in questo scenario.
 
@@ -643,6 +666,7 @@ class ForecastEngine:
     def _normalize_balance_sheet_cents(
         cls, values: Dict, *, recompute_cash: bool = True,
         forced_fields: "frozenset[str]" = frozenset(),
+        details: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """Make persisted SP hierarchy and Attivo/Passivo exact to the cent.
 
@@ -765,19 +789,27 @@ class ForecastEngine:
                 "sp17g_altri_debiti_lungo",
             ),
         }
-        for aggregate, (details, residual_field) in groups.items():
-            if aggregate not in result or not all(field in result for field in details):
+        # Dichiarato SEMPRE, anche vuoto: a valle una chiave assente vale zero.
+        # Un centesimo che si sposta senza che nessuno lo dica e' esattamente il
+        # modo in cui questo difetto e' rimasto invisibile cinque volte.
+        posati: List[Dict[str, Any]] = []
+        if details is not None:
+            details['residuo_quadratura'] = posati
+        for aggregate, (group_fields, residual_field) in groups.items():
+            if aggregate not in result or not all(field in result for field in group_fields):
                 continue
             residual = result[aggregate] - sum(
-                (result[field] for field in details), Decimal("0")
+                (result[field] for field in group_fields), Decimal("0")
             )
             target = residual_field
             if target in forced_fields:
                 target = next(
-                    (field for field in reversed(details) if field not in forced_fields),
+                    (field for field in reversed(group_fields) if field not in forced_fields),
                     residual_field,
                 )
             result[target] += residual
+            if residual:
+                posati.append({'campo': target, 'importo': residual})
 
         asset_fields_without_cash = (
             "sp01_crediti_soci", "sp02_immob_immateriali",
@@ -1069,9 +1101,11 @@ class ForecastEngine:
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
                     forced_fields=(
-                        self._pregresso_sp_forced_fields(pregresso)
+                        self._declared_sp_fields()
+                        | self._pregresso_sp_forced_fields(pregresso)
                         | self._indexed_sp_forced_fields(details)
                     ),
+                    details=details,
                 )
             except ValueError as e:
                 if stop_on_error:
@@ -1623,8 +1657,49 @@ class ForecastEngine:
                 return _prev, D('1') + _sp_growth(growth_field)
             return _base, entry['fattore']
 
+        def _declare_indexed(code, valore):
+            """Il valore che l'indicizzazione ha DAVVERO scritto sulla voce.
+
+            Non e' ridondante con `fattore`: `sp04` sottrae le svalutazioni
+            cumulate e `sp14` con differenze temporanee somma la quota del
+            kernel del deferred, quindi `base × fattore` non basta a
+            ricostruirlo. Dichiarare il valore rende il confronto «persistito ==
+            dichiarato» esatto su tutte e undici le voci — ed e' quel confronto,
+            non l'occhio di chi legge, che ha trovato il residuo di quadratura
+            cinque volte in questo file.
+            """
+            if code in indicizzazione:
+                indicizzazione[code]['valore'] = valore
+            return valore
+
+        # ── SVALUTAZIONI CUMULATE: quel che il CE ha gia' rilevato non torna ──
+        # `ce09c` non e' una crescita mancata: e' massa che il conto economico ha
+        # gia' rilevato e che non rientra. La formula a riporto la sottraeva una
+        # volta per anno e il saldo scendeva davvero; un'ancora sull'anno base la
+        # cancella ogni anno, perche' riparte sempre dallo stesso stock — misurato:
+        # con `ce09c` da 10.000 e fattore 1,00 la serie 30.000 / 20.000 / 10.000
+        # diventava 30.000 / 30.000 / 30.000, senza una diagnostica. Indicizzare
+        # deve indicizzare la CRESCITA, non annullare una rettifica.
+        #
+        # Il cumulato viaggia nei `details` come ogni altro stato che attraversa
+        # gli anni (la posizione tributaria fa lo stesso con `prev_details`), ed e'
+        # dichiarato SEMPRE, anche a zero: cosi' un anno indicizzato in mezzo a
+        # anni costanti trova comunque la somma giusta di tutte le svalutazioni
+        # rilevate dall'anno base in poi.
+        svalutazioni_cumulate = (
+            ((prev_details or {}).get('svalutazioni_cumulate') or ZERO) + ce09c
+        )
+        if details is not None:
+            details['svalutazioni_cumulate'] = svalutazioni_cumulate
+
         sp04_anchor, sp04_factor = _sp_scale('sp04', 'sp04_growth_pct')
-        sp04 = max(ZERO, sp04_anchor('sp04_immob_finanziarie') * sp04_factor - ce09c)
+        sp04 = _declare_indexed('sp04', max(
+            ZERO,
+            sp04_anchor('sp04_immob_finanziarie') * sp04_factor
+            # A riporto la sottrazione e' gia' dentro `_prev`: togliere il
+            # cumulato la conterebbe due volte. Sull'ancora dell'anno base no.
+            - (svalutazioni_cumulate if 'sp04' in indicizzazione else ce09c),
+        ))
 
         # Working capital via turnover days
         # When turnover days are not explicitly set, derive them from the base year
@@ -1796,11 +1871,11 @@ class ForecastEngine:
                 )
 
         sp08_anchor, sp08_factor = _sp_scale('sp08', 'sp08_growth_pct')
-        sp08 = sp08_anchor('sp08_attivita_finanziarie') * sp08_factor
+        sp08 = _declare_indexed('sp08', sp08_anchor('sp08_attivita_finanziarie') * sp08_factor)
         sp10_anchor, sp10_factor = _sp_scale('sp10', 'sp10_growth_pct')
-        sp10 = sp10_anchor('sp10_ratei_risconti_attivi') * sp10_factor
+        sp10 = _declare_indexed('sp10', sp10_anchor('sp10_ratei_risconti_attivi') * sp10_factor)
         sp01_anchor, sp01_factor = _sp_scale('sp01', 'sp01_growth_pct')
-        sp01 = sp01_anchor('sp01_crediti_soci') * sp01_factor
+        sp01 = _declare_indexed('sp01', sp01_anchor('sp01_crediti_soci') * sp01_factor)
 
         # ── EQUITY ──
 
@@ -1830,9 +1905,9 @@ class ForecastEngine:
             sp14b = deferred['liability']
             sp14c = sp14_anchor('sp14c_strumenti_derivati_passivi') * provision_factor
             sp14d = sp14_anchor('sp14d_altri_fondi') * provision_factor
-            sp14 = sp14a + sp14b + sp14c + sp14d
+            sp14 = _declare_indexed('sp14', sp14a + sp14b + sp14c + sp14d)
         else:
-            sp14 = sp14_anchor('sp14_fondi_rischi') * provision_factor
+            sp14 = _declare_indexed('sp14', sp14_anchor('sp14_fondi_rischi') * provision_factor)
             # I sotto-campi dell'anno precedente restano la sorgente delle sole
             # PROPORZIONI del riparto: l'importo lo decide `sp14` qui sopra, e
             # cambiarne l'ancora sposterebbe la ripartizione senza che nessuno
@@ -1861,7 +1936,7 @@ class ForecastEngine:
         else:
             sp15 = _prev('sp15_tfr') + forecast_inc.get('ce08a_tfr_accrual', ZERO)
         sp18_anchor, sp18_factor = _sp_scale('sp18', 'sp18_growth_pct')
-        sp18 = sp18_anchor('sp18_ratei_risconti_passivi') * sp18_factor
+        sp18 = _declare_indexed('sp18', sp18_anchor('sp18_ratei_risconti_passivi') * sp18_factor)
 
         # --- FINANCIAL DEBTS: repayment schedule ---
         existing_repay_years = getattr(assumption, 'existing_debt_repayment_years', None)
@@ -1898,7 +1973,8 @@ class ForecastEngine:
 
         # Long-term trade payables
         sp17d_anchor, sp17d_factor = _sp_scale('sp17d', 'sp17d_growth_pct')
-        sp17d = sp17d_anchor('sp17d_debiti_fornitori_lungo') * sp17d_factor
+        sp17d = _declare_indexed(
+            'sp17d', sp17d_anchor('sp17d_debiti_fornitori_lungo') * sp17d_factor)
 
         # ── SCORPORO: il generato nasce dalla base AL NETTO della massa a pregresso ──
         def _net_of_pregresso(value, key, short_field, *, from_base=False):
@@ -2034,11 +2110,11 @@ class ForecastEngine:
         # quindi l'ancora torna a essere `_prev` e lo scorporo resta quello di
         # sempre; senza piano `_net_of_pregresso` e' un passa-avanti.
         sp16g_anchor, sp16g_factor = _sp_scale('sp16g', 'sp16g_growth_pct')
-        sp16g = _net_of_pregresso(
+        sp16g = _declare_indexed('sp16g', _net_of_pregresso(
             sp16g_anchor('sp16g_altri_debiti_breve'), 'altri_debiti', 'sp16g_altri_debiti_breve',
-        ) * sp16g_factor
+        ) * sp16g_factor)
         sp17g_anchor, sp17g_factor = _sp_scale('sp17g', 'sp17g_growth_pct')
-        sp17g = sp17g_anchor('sp17g_altri_debiti_lungo') * sp17g_factor
+        sp17g = _declare_indexed('sp17g', sp17g_anchor('sp17g_altri_debiti_lungo') * sp17g_factor)
 
         # Previdenza (sp16f/sp17f): opt-in scaling with the personnel cost (P5).
         # When enabled, social-security payables move in proportion to ce08 vs the BASE
@@ -2056,12 +2132,13 @@ class ForecastEngine:
             sp17f = _base('sp17f_debiti_previdenza_lungo') * pers_factor
         else:
             sp16f_anchor, sp16f_factor = _sp_scale('sp16f', 'sp16f_growth_pct')
-            sp16f = _net_of_pregresso(
+            sp16f = _declare_indexed('sp16f', _net_of_pregresso(
                 sp16f_anchor('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
                 'sp16f_debiti_previdenza_breve',
-            ) * sp16f_factor
+            ) * sp16f_factor)
             sp17f_anchor, sp17f_factor = _sp_scale('sp17f', 'sp17f_growth_pct')
-            sp17f = sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor
+            sp17f = _declare_indexed(
+                'sp17f', sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor)
 
         # ── PREGRESSO: gli altri tre saldi, stessa regola dei crediti ──
         # Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' tutto

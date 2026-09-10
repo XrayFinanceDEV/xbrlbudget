@@ -1030,6 +1030,10 @@ export type SpIndexingDriver = "ricavi" | "acquisti" | "personale";
 export interface IndicizzazioneVoce {
   driver: SpIndexingDriver;
   fattore: number;
+  /** L'importo che il motore ha DAVVERO scritto sulla voce. Non e' ridondante
+   *  con `fattore`: `sp04` sottrae le svalutazioni cumulate e `sp14` con
+   *  differenze temporanee somma la quota del deferred. */
+  valore: number;
   /** La `sp*_growth_pct` della stessa voce esiste ma non e' stata applicata:
    *  vince il driver. */
   percentuale_ignorata: boolean;
@@ -1056,6 +1060,13 @@ export interface ForecastYearDetails {
   pregresso_ignored: PregressoKey[];
   indicizzazione: Record<string, IndicizzazioneVoce>;
   indicizzazione_ignorata: IndicizzazioneIgnorata[];
+  /** Le svalutazioni (`ce09c`) rilevate dall'anno base a questo anno compreso:
+   *  cio' che il conto economico ha gia' tolto a `sp04` e che non rientra. */
+  svalutazioni_cumulate: number;
+  /** Dove il residuo di arrotondamento e' stato posato, e quanto. Vuoto quando
+   *  non c'era nulla da posare: un centesimo che si sposta senza che nessuno lo
+   *  dica e' il modo in cui la stessa trappola e' rimasta invisibile sei volte. */
+  residuo_quadratura: { campo: string; importo: number }[];
 }
 
 export interface ForecastPreviewYear {

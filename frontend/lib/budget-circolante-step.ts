@@ -85,7 +85,7 @@ export function giorniMediRows(auto: GiorniMedi): CircolanteTableRow[] {
  */
 const MINOR_FIELDS: readonly {
   field: string; label: string; baseField: string;
-  code: string | null; governata?: string;
+  code: string | null; governata?: string; inerte?: boolean;
 }[] = [
   { field: "receivables_long_growth_pct", label: "Crediti oltre 12 mesi", baseField: "sp07_crediti_lungo",
     code: null, governata: "dalla propria variazione % e dal piano dei crediti" },
@@ -93,8 +93,14 @@ const MINOR_FIELDS: readonly {
   { field: "sp04_growth_pct", label: "Immobilizzazioni finanziarie", baseField: "sp04_immob_finanziarie", code: "sp04" },
   { field: "sp06e_growth_pct", label: "Crediti tributari", baseField: "sp06e_crediti_tributari_breve",
     code: null, governata: "dalla posizione tributaria" },
-  { field: "sp06f_growth_pct", label: "Imposte anticipate", baseField: "sp06f_imposte_anticipate_breve",
+  { field: "sp06f_growth_pct", label: "Imposte anticipate entro", baseField: "sp06f_imposte_anticipate_breve",
     code: null, governata: "dalla posizione fiscale" },
+  // La meta' OLTRE della stessa coppia. Non ha una `sp*_growth_pct` propria — la
+  // scrive il kernel del deferred, oppure segue `receivables_long_growth_pct` —
+  // quindi la riga e' di sola lettura (`inerte`). Mostrarne una e non l'altra
+  // faceva sembrare che l'esclusione valesse per meta' della coppia.
+  { field: "sp07f", label: "Imposte anticipate oltre", baseField: "sp07f_imposte_anticipate_lungo",
+    code: null, governata: "dalla posizione fiscale", inerte: true },
   { field: "sp08_growth_pct", label: "Attività finanziarie", baseField: "sp08_attivita_finanziarie", code: "sp08" },
   { field: "sp10_growth_pct", label: "Ratei e risconti attivi", baseField: "sp10_ratei_risconti_attivi", code: "sp10" },
   { field: "sp14_growth_pct", label: "Fondi per rischi e oneri", baseField: "sp14_fondi_rischi", code: "sp14" },
@@ -114,6 +120,34 @@ export const DRIVER_LABELS: Record<SpIndexingDriver, string> = {
 };
 
 export const DRIVERS: readonly SpIndexingDriver[] = ["ricavi", "acquisti", "personale"];
+
+/**
+ * Il saldo di pregresso che scadenzia ciascuna voce (Ruling 17). Dichiarare un
+ * piano significa «questo saldo lo sto estinguendo», dichiarare un driver
+ * significa «questo saldo si rigenera col volume»: due affermazioni
+ * contraddittorie sulla stessa voce. Il motore ignora la chiave e lo dichiara in
+ * `indicizzazione_ignorata`, ma il contratto chiede che l'interfaccia lo
+ * IMPEDISCA — perche' un selettore vivo che afferma «Cresce con i ricavi» mentre
+ * il motore sta estinguendo la voce e' peggio del divieto: e' una bugia a schermo.
+ */
+const PIANO_DI: Record<string, string> = {
+  sp16f: "debiti_previdenziali", sp17f: "debiti_previdenziali",
+  sp16g: "altri_debiti", sp17g: "altri_debiti",
+  sp17d: "debiti_fornitori",
+};
+
+/** I saldi che hanno davvero un piano di scadenziamento in questo scenario.
+ *  Il piano vive SOLO sulla riga del primo anno, come il motore pretende. */
+export function pianiPregressoOf(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+): string[] {
+  const piano = assumptions[forecastYears[0]]?.pregresso;
+  if (!piano) return [];
+  return Object.entries(piano)
+    .filter(([, v]) => v != null)
+    .map(([k]) => k);
+}
 
 export interface MinorFieldRow extends CircolanteTableRow {
   /** Il codice SP, `null` quando nessun driver puo' agganciare la voce. */
@@ -150,6 +184,7 @@ export function minorFieldsRows(
   baseBs: BalanceSheet | undefined | null,
   indexing: Record<string, SpIndexingDriver> = {},
   previdenzaSuPersonale = false,
+  pianiPregresso: readonly string[] = [],
 ): MinorFieldRow[] {
   const b = (k: string) => euro(baseBs ? numOrNull((baseBs as unknown as Record<string, unknown>)[k]) : null);
   return MINOR_FIELDS.map((v) => {
@@ -157,23 +192,30 @@ export function minorFieldsRows(
     // personale: con quello acceso il motore ignora una chiave su quelle due
     // voci, quindi l'interfaccia mostra l'aggancio che vale davvero.
     const switchOwned = previdenzaSuPersonale && (v.code === "sp16f" || v.code === "sp17f");
-    const driver = v.code && !switchOwned ? indexing[v.code] ?? null : null;
-    const andamento = v.governata
-      ? `Governata ${v.governata}`
-      : switchOwned
-        ? `Cresce con ${DRIVER_LABELS.personale}`
-        : driver
-          ? `Cresce con ${DRIVER_LABELS[driver]}`
-          : "Costante per tutto il piano, salvo variazione %";
+    // Ruling 17: con un piano la voce si estingue, e nessun driver la governa.
+    const conPiano = Boolean(v.code && pianiPregresso.includes(PIANO_DI[v.code] ?? ""));
+    const driver = v.code && !switchOwned && !conPiano ? indexing[v.code] ?? null : null;
+    const andamento = conPiano
+      ? "Governata dal piano di scadenziamento"
+      : v.governata
+        ? `Governata ${v.governata}`
+        : switchOwned
+          ? `Cresce con ${DRIVER_LABELS.personale}`
+          : driver
+            ? `Cresce con ${DRIVER_LABELS[driver]}`
+            : "Costante per tutto il piano, salvo variazione %";
+    // Con un piano il motore scrive `base − massa` (che vale zero) o il residuo
+    // del runoff: la percentuale e' inerte tanto quanto il driver.
+    const inerte = Boolean(driver) || switchOwned || conPiano || v.inerte === true;
     return {
       field: v.field, label: v.label, baseLabel: b(v.baseField),
-      code: switchOwned ? null : v.code, driver, andamento,
+      code: switchOwned || conPiano ? null : v.code, driver, andamento,
       agganciata: Boolean(driver) || switchOwned,
       sub: andamento,
-      // Un driver vince sulla percentuale: la casella resterebbe viva senza
-      // alcun effetto, ed e' esattamente il difetto da cui nasce
+      // Un driver (o un piano) vince sulla percentuale: la casella resterebbe
+      // viva senza alcun effetto, ed e' esattamente il difetto da cui nasce
       // `lib/budget-year-cell.ts`.
-      ...(driver || switchOwned
+      ...(inerte
         ? { off: true, offNote: `${andamento}: la variazione % non viene applicata` }
         : {}),
     };

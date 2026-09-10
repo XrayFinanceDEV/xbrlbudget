@@ -491,9 +491,13 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   governa in un altro modo.
 - **Valore** = uno dei **tre driver**, tipizzato `Literal["ricavi", "acquisti", "personale"]`
   (`backend/app/schemas/budget.py:96,207,319`): `ricavi` = `ce01` previsto / `ce01` base,
-  `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base — un nome
-  fuori da questi tre è **rifiutato dallo schema Pydantic con 422**, non ignorato in silenzio
-  (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`).
+  `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
+  (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`). Un nome fuori da questi tre
+  **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
+  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:685`),
+  e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
+  (`calculations/forecast_engine.py:726-727`). Solo le rotte tipizzate per singola riga passano dal
+  `Literal` Pydantic e rispondono 422.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
   passo 5 del wizard («Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo

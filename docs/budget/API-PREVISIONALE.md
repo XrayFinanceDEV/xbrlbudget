@@ -160,6 +160,40 @@ già calcolato con gli override applicati (`:875-876`). Più ricavi → più cre
 → più debiti verso fornitori; la cassa fa da pareggio, e una cassa negativa diventa debito a
 breve.
 
+## 4-bis. Il nuovo finanziamento: che cosa sta a breve
+
+Un prestito nuovo è la legacy `financing_amount` / `financing_duration_years` /
+`financing_interest_rate` della riga d'ipotesi, oppure una riga di `financing_loans[]` con
+`amount` (ed eventualmente `grace_years` e `balloon_pct`). Si rimborsa col calendario del kernel
+`new_financing_schedule` (`calculations/projection_common.py`): quote capitali costanti dopo
+l'eventuale preammortamento, maxirata insieme all'ultima rata, interessi in `ce15` sul residuo di
+apertura. Un contratto misto (`amount` e `opening_residual` sulla stessa riga) si divide in due
+contratti con le stesse condizioni: la parte nuova segue questa sezione, quella pregressa no.
+
+Il residuo del prestito **non** sta tutto in `sp17a_debiti_banche_lungo`: la parte che il
+calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il resto in `sp17a`
+(`_quota_breve_prestiti_nuovi` in `calculations/forecast_engine.py`).
+
+- Finché anche l'anno dopo è di preammortamento la quota a breve è zero; nell'anno prima della
+  maxirata la maxirata sta a breve.
+- L'ultimo anno di piano non si azzera: la rata dell'anno oltre l'orizzonte viene dal contratto.
+- La quota è la differenza fra due residui al centesimo della catena persistita, non la rata
+  arrotondata: 100.000,38 in 4 anni ha rata 25.000,095 e quota a breve 25.000,09.
+- È una riclassifica, non un flusso: cassa, interessi, risultato e totale del debito bancario non
+  cambiano. Avviene dopo il cash sweep, che rimborsa prima il debito bancario pregresso e poi il
+  prestito nuovo; il debito bancario pregresso conserva la propria ripartizione.
+- `details['prestiti_nuovi_quota_breve']` dichiara la quota ogni anno, anche a zero, per quanto
+  `sp16a` ne persiste davvero.
+
+**Perché conta:** `sp16` e `sp17` stanno entrambi nel passivo, quindi il pareggio non vede dove sta
+la quota; la vedono CCN, current ratio e circolante di Altman. Sulla base del kit di test (12.345,67
+di breve e 23.456,79 di lungo pregresso, 100.000,38 in 4 anni al 4,35%) il current ratio 2027 è
+2,0794; con tutto il prestito oltre l'esercizio risultava 2,4206.
+
+Un `sp_overrides` su `sp16a` fissa un totale che **contiene** la quota. Se la porta sotto, il taglio
+cade prima sul breve pregresso e la quota dichiarata è ciò che ne resta: un override salvato quando
+il prestito stava tutto in `sp17a` oggi toglie anche la quota a breve dal debito.
+
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 
 ```

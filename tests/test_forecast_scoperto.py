@@ -430,8 +430,13 @@ def _gemello(rows):
 @pytest.mark.parametrize("nome, extra_primo, extra_tutti, sp17a_atteso", [
     ("debito esistente in 3 anni", {}, {"existing_debt_repayment_years": 3},
      [D("33333.33"), D("16666.66"), D("0")]),
+    # Il lungo e' il kit (50.000,00) piu' il residuo del prestito MENO la rata
+    # dell'anno dopo, che dal Task 17 sta a breve: catena 75.000,28 / 50.000,19 /
+    # 25.000,10 / 0,01, quindi 25.000,09 a breve ogni anno (anche nel 2029: la rata
+    # del 2030 cade oltre l'orizzonte, ma il calendario del contratto la conosce).
+    # 50.000 + 75.000,28 − 25.000,09 = 100.000,19, poi 75.000,10 e 50.000,01.
     ("nuovo finanziamento in 4 anni", {"financing_amount": 100000.37, "financing_duration_years": 4}, {},
-     [D("125000.28"), D("100000.19"), D("75000.10")]),
+     [D("100000.19"), D("75000.10"), D("50000.01")]),
 ])
 def test_i1_le_rate_pagano_il_proprio_debito_non_lo_scoperto(nome, extra_primo, extra_tutti, sp17a_atteso):
     """Su 2641305 `sp17a` restava fermo (33.333,33 tre anni di fila; 125.000,28 per

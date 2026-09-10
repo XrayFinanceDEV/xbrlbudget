@@ -445,6 +445,13 @@ the answer is `scoperto_generato` year by year, with the peak in `fabbisogno_pic
 hiding a scenario choice nobody had made. Now the choice is explicit, the amount is declared in
 `details` and shown in the wizard preview — do not restore the ban in good faith: the reason for it
 is gone, not forgotten.
+**The share of a new loan that falls due next year sits in `sp16a`, the rest in `sp17a`**: the capital
+the kernel calendar repays the following year (zero while that year is still grace, the balloon the
+year before it falls due, and not zeroed in the last plan year), declared in
+`details['prestiti_nuovi_quota_breve']`; pre-existing bank debt keeps its own split, and cash, P&L and
+total bank debt do not move. Leaving it all in `sp17a` overstates CCN, current ratio and Altman's
+working capital (2,4206 instead of 2,0794 on the test kit), and the balance check never sees it —
+`sp16` and `sp17` are both liabilities. An `sp_overrides` on `sp16a` now fixes a total that includes it.
 DSO/DIO/DPO that are not set explicitly are derived from the base year on 360
 days (from *commercial* receivables and payables, not the aggregates), and working capital scales
 with projected revenue and costs, CE overrides included.

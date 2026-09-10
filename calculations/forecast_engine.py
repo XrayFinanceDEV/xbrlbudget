@@ -743,6 +743,27 @@ class ForecastEngine:
         {"sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"}
     )
 
+    # (I1-bis, Ruling 57) Il lato OLTRE che un piano di scadenziamento scrive
+    # dal calendario e non dal persistito: un `sp_overrides` su quella riga
+    # verrebbe salvato e poi CANCELLATO IN SILENZIO l'anno dopo dal runoff
+    # (misurato: piano fornitori, override `sp17d = 250,25`, `residual_long`
+    # resta 0 e la riga torna quella del calendario — un dato che cambia
+    # attraverso il confine di un KPI senza che nessuno lo dica, il tipo di
+    # danno che `CLAUDE.md` vieta). Il motore quindi lo RIFIUTA, con un
+    # ValueError che nomina il campo e dice dove agire. Senza piano su quel
+    # saldo l'override lungo e' lecito come sempre: la riga segue
+    # `_prev × (1 + crescita)` e l'override si porta avanti da se'.
+    _LATO_OLTRE_GOVERNATO_DA_PIANO: Dict[str, str] = {
+        "debiti_fornitori": "sp17d_debiti_fornitori_lungo",
+        "debiti_tributari": "sp17e_debiti_tributari_lungo",
+        "debiti_previdenziali": "sp17f_debiti_previdenza_lungo",
+        "altri_debiti": "sp17g_altri_debiti_lungo",
+        # Il piano dei crediti commerciali scrive l'AGGREGATO `sp07` come
+        # residuo lungo del runoff piu' la quota tributaria cresciuta: lo
+        # stesso meccanismo degli altri quattro saldi, sullo stesso lato.
+        "crediti_commerciali": "sp07_crediti_lungo",
+    }
+
     @classmethod
     def _declared_sp_fields(cls) -> "frozenset[str]":
         """I campi di SP il cui valore i `details` dichiarano SEMPRE.
@@ -765,6 +786,103 @@ class ForecastEngine:
         return frozenset(
             field for fields in cls._PREGRESSO_SP_FIELDS.values() for field in fields
         )
+
+    @staticmethod
+    def _q(x) -> Decimal:
+        """Al centesimo con la regola del motore (`_quantize_values`)."""
+        return Decimal(str(x or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+    @classmethod
+    def _realign_sp_declarations(cls, details: Dict[str, Any], forecast_bs: Dict[str, Any]) -> None:
+        """Allinea al persistito le SCOMPOSIZIONI che il motore ha dichiarato.
+
+        In modo `saldo_acconto` l'anno N+1 legge `saldo_due` da
+        `details['imposte']['generated_debt']` e il credito d'apertura da
+        `generated_credit + opening_credit_left` dell'anno N: sono l'unica
+        memoria della posizione, perche' un saldo di bilancio non sa dire
+        quanto di se' e' saldo e quanto e' rata. Gli `sp_overrides` si
+        applicano dopo ogni dichiarazione, e se nessuno le riallinea
+        l'override su `sp06e`/`sp16e` si annulla da solo l'anno dopo: la
+        cassa N+1 assorbe l'intera differenza senza alcun flusso, il foglio
+        quadra e nessun controllo se ne accorge (rilievo I1 della revisione
+        finale del branch — regressione del Task 6, perche' la via manuale,
+        che legge il patrimoniale, l'override lo portava avanti). Lo schema
+        e' quello di `prestiti_nuovi_quota_breve`: la dichiarazione si
+        clampa su cio' che la riga persistita puo' reggere, e l'override si
+        porta avanti come stato di apertura.
+
+        La stessa cura vale, in forma puramente dichiarativa (nessun anno
+        successivo legge queste chiavi), per gli altri campi che i `details`
+        scompongono: la riga `generated + residual_short` di
+        `details['pregresso']` e il `valore` di `details['indicizzazione'].
+        Ovunque, senza override, la riscrittura e' un identico al centesimo
+        (il banco di parita' lo conferma): si tocca solo cio' che un
+        override o una posatura ha davvero mosso.
+
+        Regola dichiarata per il credito tributario: prima si esaurisce
+        `opening_credit_left` (il credito portato dall'anno prima), il resto
+        va a `generated_credit`. La somma e' cio' che l'anno dopo consuma;
+        la ripartizione tiene attribuibile al consuntivo cio' che del
+        credito non e' stato generato dal piano.
+
+        Anche `sp17e` entra nella posizione, ma solo tramite il piano: in
+        modo `saldo_acconto` il rateizzato lo scandisce il runoff, non il
+        bilancio, e un override su `sp17e` non ha ripercussione sull'anno
+        dopo — qui si allinea il dichiarato (`residual_long`), non si
+        riscrive il piano.
+        """
+        # 1) `pregresso`: la riga breve (e, con piano, il lato oltre) segue il persistito.
+        residual_short_tax = Decimal('0')
+        for key, (breve, oltre) in cls._PREGRESSO_SP_FIELDS.items():
+            d = (details.get('pregresso') or {}).get(key)
+            if not d or breve not in forecast_bs:
+                continue
+            persisted = Decimal(str(forecast_bs[breve]))
+            if d.get('mode') == 'runoff':
+                res = min(Decimal(str(d.get('residual_short') or 0)), persisted)
+                new_gen = persisted - res
+                if (new_gen != cls._q(d.get('generated') or 0)
+                        or res != cls._q(d.get('residual_short') or 0)):
+                    d['residual_short'] = res
+                    d['generated'] = new_gen
+                if oltre in forecast_bs:
+                    oltre_p = Decimal(str(forecast_bs[oltre]))
+                    if oltre_p != cls._q(d.get('residual_long') or 0):
+                        d['residual_long'] = oltre_p
+            else:
+                if persisted != cls._q(d.get('generated') or 0):
+                    d['generated'] = persisted
+            if key == 'debiti_tributari':
+                residual_short_tax = Decimal(str(d.get('residual_short') or 0))
+        # 2) `imposte`: debito e credito dichiarati seguono `sp16e`/`sp06e`.
+        imposte = details.get('imposte')
+        if imposte and imposte.get('mode') == 'saldo_acconto':
+            sp16e = forecast_bs.get('sp16e_debiti_tributari_breve')
+            if sp16e is not None:
+                debt = max(Decimal('0'), Decimal(str(sp16e)) - residual_short_tax)
+                if debt != cls._q(imposte.get('generated_debt') or 0):
+                    imposte['generated_debt'] = debt
+                # Le due sedi dichiarano lo stesso numero: la riga del pregresso
+                # e la riga `imposte` restano coerenti fra loro.
+                d_tax = (details.get('pregresso') or {}).get('debiti_tributari')
+                if d_tax is not None and cls._q(d_tax.get('generated') or 0) != cls._q(debt):
+                    d_tax['generated'] = debt
+            sp06e = forecast_bs.get('sp06e_crediti_tributari_breve')
+            if sp06e is not None:
+                sp06e = Decimal(str(sp06e))
+                declared = (Decimal(str(imposte.get('generated_credit') or 0))
+                            + Decimal(str(imposte.get('opening_credit_left') or 0)))
+                if sp06e != cls._q(declared):
+                    left = min(Decimal(str(imposte.get('opening_credit_left') or 0)), sp06e)
+                    imposte['opening_credit_left'] = left
+                    imposte['generated_credit'] = sp06e - left
+        # 3) `indicizzazione`: il `valore` dichiarato segue la riga persistita.
+        for code, voce in (details.get('indicizzazione') or {}).items():
+            field = SP_INDEXABLE_FIELDS.get(code)
+            if field is not None and field in forecast_bs:
+                persisted = Decimal(str(forecast_bs[field]))
+                if persisted != cls._q(voce.get('valore') or 0):
+                    voce['valore'] = persisted
 
     @classmethod
     def _pregresso_sp_forced_fields(cls, pregresso) -> "frozenset[str]":
@@ -1340,6 +1458,21 @@ class ForecastEngine:
             # anno alza il residuo di tutti gli anni dopo, e il singolo anno non
             # vede gli override degli altri.
             self._suppress_unrecordable_writeoffs(pregresso, assumptions)
+            # I1-bis: nessun anno va generato per poi scoprire la collisione
+            # fra un piano di scadenziamento e un override sul suo lato oltre.
+            if pregresso:
+                for a in assumptions:
+                    ov = getattr(a, 'sp_overrides', None)
+                    if not isinstance(ov, dict):
+                        continue
+                    for saldo, campo in self._LATO_OLTRE_GOVERNATO_DA_PIANO.items():
+                        if ov.get(campo) is not None and pregresso.get(saldo):
+                            raise ValueError(
+                                f"L'override di {campo} non e' ammesso: il saldo"
+                                " ha un piano di scadenziamento del pregresso"
+                                f" ('{saldo}'). Modifica il piano nel passo 6"
+                                " invece di forzare la voce."
+                            )
         except ValueError as e:
             if stop_on_error:
                 raise
@@ -1486,6 +1619,20 @@ class ForecastEngine:
                 Decimal(str(details.get('prestiti_nuovi_quota_breve') or 0)),
                 max(Decimal('0'), forecast_bs['sp16a_debiti_banche_breve'] - overdraft.outstanding),
             )
+            # ── POSIZIONE TRIBUTARIA: LE DICHIARAZIONI SEGUONO IL PERSISTITO ──
+            # In modo `saldo_acconto` l'anno dopo legge `saldo_due` e il credito
+            # d'apertura DA QUESTI `details`, non dal patrimoniale; gli
+            # `sp_overrides` si applicano dopo, e prima di qui nessuno li
+            # riallineava. Un override su `sp06e`/`sp16e` quindi si annullava da
+            # solo l'anno dopo: la cassa assorbiva l'intera differenza senza
+            # alcun flusso, il foglio quadrava e nessun controllo se ne
+            # accorgeva (rilievo I1 della revisione finale del branch —
+            # regressione del Task 6, perche' la via manuale, che legge il
+            # patrimoniale, l'override lo portava avanti). Lo schema e' lo
+            # stesso di `prestiti_nuovi_quota_breve` sopra: il motore riallinea
+            # la dichiarazione al valore persistito, e l'override si porta
+            # avanti come stato di apertura.
+            self._realign_sp_declarations(details, forecast_bs)
             # Lo scoperto si rimborsa per primo anche sotto la cassa minima del
             # cash sweep, per decisione del proprietario: si dichiara di quanto
             # la cassa chiude sotto quel minimo in un anno con scoperto (aperto o

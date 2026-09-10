@@ -92,6 +92,8 @@ CENT = D("0.01")
 # perche' certi sotto-campi ci sono — vedi tests/e2e_kit.py per l'originale).
 # --------------------------------------------------------------------------- #
 
+from calculations.projection_common import base_bank_debt as _debito_bancario_base
+
 try:
     from tests.e2e_kit import BASE_BS, BASE_CE, HOLDING_BS, HOLDING_CE  # type: ignore
     _FIXTURE_SOURCE = "tests/e2e_kit.py"
@@ -307,6 +309,45 @@ def profilo_finanziamento_e_rimborso(rng: random.Random, anno_idx: int) -> Dict[
     return valori
 
 
+def profilo_finanziamento_misto(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Un contratto MISTO: `amount` (nuovo) e `opening_residual` (pregresso)
+    valorizzati insieme sulla STESSA riga di `financing_loans` — come lo
+    produce `FinancingLoansGrid.tsx` quando l'utente riempie entrambe le
+    caselle sulla stessa riga (Task 16, giro di correzione 1, Ruling 45).
+
+    Prima di questa correzione il motore trattava il contratto intero come
+    pregresso e la sua quota nuova consumava il breve pregresso — esattamente
+    il Ruling 40, ma per un contratto che l'utente ha scritto come uno solo.
+    Nessun profilo di sopra mette `amount` e `opening_residual` sulla stessa
+    riga: `profilo_finanziamento_e_rimborso` usa la legacy `financing_amount`
+    (un prestito sempre e solo nuovo) accanto a un `existing_debt_repayment_years`
+    che scadenzia l'ESPOSIZIONE AGGREGATA, non un contratto per riga.
+
+    Il primo contratto (pregresso puro, durata lunga) e i due `opening_residual`
+    sono SEGNAPOSTO a "0": `costruisci_griglia` li riempie dopo, col debito
+    bancario REALE del fixture che consuma questo profilo — un residuo diverso
+    dal debito base fa fallire la validazione di `assemble_financing` — e con
+    una ripartizione pensata per cadere nella stessa zona di confine della
+    sonda P8 della revisione (vedi il commento sul posto).
+    """
+    if anno_idx == 0:
+        return {
+            "financing_loans": [
+                {
+                    "name": "Debito bancario pregresso",
+                    "amount": 0, "opening_residual": "0",
+                    "duration_years": "6", "interest_rate": _pct(rng, 2, 6),
+                },
+                {
+                    "name": "Mutuo misto",
+                    "amount": _eur(rng, 15000, 25000), "opening_residual": "0",
+                    "duration_years": "2", "interest_rate": _pct(rng, 2, 6),
+                },
+            ],
+        }
+    return {}
+
+
 # I profili nuovi vanno IN CODA: il generatore di un fixture e' consumato profilo
 # dopo profilo, quindi un profilo inserito in mezzo cambierebbe le estrazioni di
 # tutti quelli che lo seguono.
@@ -320,6 +361,7 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "rimborso_indicizzazione": profilo_rimborso_indicizzazione,
     "misto": profilo_misto,
     "finanziamento_e_rimborso": profilo_finanziamento_e_rimborso,
+    "finanziamento_misto": profilo_finanziamento_misto,
 }
 
 
@@ -335,7 +377,39 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
         for profilo_nome, profilo in PROFILI.items():
             anni_def = []
             for i in range(num_anni):
-                anni_def.append({"anno": 2026 + 1 + i, "valori": profilo(rng, i)})
+                valori = profilo(rng, i)
+                if profilo_nome == "finanziamento_misto" and i == 0:
+                    # `assemble_financing` alza un ValueError se la somma dei
+                    # `opening_residual` dichiarati non coincide col debito
+                    # bancario dell'anno base (Decimal, entro 0,01): il profilo
+                    # non conosce il fixture che lo consuma, quindi i due
+                    # residui si allineano QUI, dopo la generazione, sul debito
+                    # bancario REALE — calcolato con la stessa funzione del
+                    # motore (`base_bank_debt`), non a occhio.
+                    #
+                    # La ripartizione non e' meta'/meta': e' la stessa zona di
+                    # confine della sonda P8 della revisione (rilievo 1). Con
+                    # `amount` fra 15.000 e 25.000 e il contratto pregresso
+                    # puro che tiene il 60% del breve (durata lunga, rata
+                    # annua bassa), la rata pregressa del misto DA SOLA resta
+                    # sempre sotto il breve, e quella COMBINATA (+ l'importo
+                    # nuovo) lo supera sempre — la prova e' nel commento sopra
+                    # `profilo_finanziamento_misto`. Cosi' la cella si muove
+                    # per QUALUNQUE estrazione casuale dell'importo, non solo
+                    # per un seme fortunato.
+                    debito_base = _debito_bancario_base(lambda f: D(bs.get(f, "0")))
+                    breve = D(bs.get("sp16a_debiti_banche_breve", "0"))
+                    if debito_base <= 0:
+                        residuo_puro, residuo_misto = D("0"), D("0")
+                    elif breve <= 0:
+                        residuo_puro, residuo_misto = D("0"), debito_base
+                    else:
+                        residuo_misto = min(breve * D("0.6"), debito_base).quantize(CENT)
+                        residuo_puro = (debito_base - residuo_misto).quantize(CENT)
+                    loans = valori["financing_loans"]
+                    loans[0]["opening_residual"] = str(residuo_puro)
+                    loans[1]["opening_residual"] = str(residuo_misto)
+                anni_def.append({"anno": 2026 + 1 + i, "valori": valori})
             scenari.append({
                 "id": f"{fixture_nome}__{profilo_nome}",
                 "base_year": 2026,

@@ -33,6 +33,8 @@ solo se il proprietario la chiede); la robustezza del client e lo stato d'errore
 5. **Lingua:** i messaggi d'errore del motore e dei servizi del previsionale si scrivono **in italiano alla fonte**, in
    questo lotto.
 6. **Dividendi** nel rendiconto: in agenda di questo lotto.
+7. Dalla revisione finale del lotto 2: **lo sweep decide dopo gli override** (dentro §4.1); **guardia del magazzino per
+   settore** (§4.8); **§11.1 sull'infrannuale** (§4.9). Il credito tributario continua a compensare solo il saldo.
 
 Decisioni precedenti che restano vincolanti: lo scoperto si rimborsa per primo, anche sotto `cash_sweep_min_cash`; un
 debito pregresso scadenziato che il piano non rigenera si estingue; lo scoperto esiste solo se concesso
@@ -69,6 +71,10 @@ dallo sweep continua a maturare interessi (sonda: 7.200,00 in tre anni su debito
 - I contratti della griglia e il pregresso con «anni di rimborso» non sono mai toccati dallo sweep: capitale e interessi
   sono quelli del loro piano, e quindi coerenti per costruzione.
 - La cassa eccedente oltre `cash_sweep_min_cash` resta in `sp09`.
+- **Lo sweep decide sulla cassa di dopo gli `sp_overrides`** (rilievo I2 della revisione finale del lotto 2, assegnato
+  qui dal proprietario). Oggi decide prima: un piano finanziabile diventa «Unfunded financing requirement 11.053,98»,
+  oppure, con scoperto concesso, rimborsa 50.000 di `sp17a` e apre 11.053,98 di scoperto nello stesso anno. Il
+  fabbisogno e l'eccesso si misurano una volta sola, dopo gli override, come gia' il gate dello scoperto.
 - Nuova chiave `details['debito_bancario']`, dichiarata **ogni anno anche vuota**, con le componenti del debito bancario
   a fine anno:
   ```
@@ -88,7 +94,9 @@ dallo sweep continua a maturare interessi (sonda: 7.200,00 in tre anni su debito
 già il piano. In ogni scenario: la chiave `details` nuova appare e `prestiti_nuovi_quota_breve` sparisce. Tutto il
 resto a zero.
 
-**Test.** Il caso della sonda (prestito 80.000 / 5 anni / 5%, sweep a soglia zero, azienda molto profittevole):
+**Test.** Il caso della sonda della revisione finale (sweep + override di SP che rende il piano finanziabile): nessun
+fabbisogno, nessuno scoperto aperto insieme a un rimborso. Il caso della sonda della ricognizione (prestito 80.000 / 5
+anni / 5%, sweep a soglia zero, azienda molto profittevole):
 `sp17a` segue il piano, `ce15` invariato, cassa più alta del rimborso non fatto. Sweep con pregresso senza piano:
 rimborsato prima a breve poi a lungo, dopo lo scoperto. Sweep con «anni di rimborso»: il pregresso segue la sua rata.
 Invariante di `details['debito_bancario']` su tutta la griglia del banco.
@@ -231,6 +239,39 @@ Aggregati, totali e CE a zero.
 dopo la normalizzazione. Il caso della sonda (piano su tributari + previdenziali + altri, rate al mezzo centesimo): mai
 `sp16c`.
 
+### 4.8 Guardia dei giorni di magazzino per settore
+
+**Oggi.** Il motore budget (task 14 del lotto 2, `degenerate_turnover_ratio`) tratta un DIO dedotto oltre 365 giorni
+come degenere e tiene le rimanenze al valore base invece di scalarle coi ricavi. Per Immobiliare (settore 5) ed
+Edilizia (settore 6) un magazzino oltre l'anno e' spesso normale (immobili in rimanenza, lavori in corso).
+
+**Comportamento richiesto** (decisione del proprietario). Per i settori 5 e 6 la guardia non si applica alle rimanenze:
+il DIO dedotto, anche oltre 365, scala coi ricavi. Negli altri settori la guardia resta com'e'. La soglia per settore
+sta in un solo punto (tabella nel codice) e la diagnostica dichiara quale soglia e' stata applicata. DSO e DPO
+invariati. L'infrannuale ha la propria copia della guardia (`intra_year_engine._turnover_ratio`): stessa regola, stesso
+test.
+
+**Celle attese.** Solo scenari con settore 5 o 6 e DIO dedotto oltre 365: `sp05` e la cassa. Il banco non ha fixture di
+quei settori con magazzino lungo: il task ne aggiunge uno, in un commit separato a 0 divergenze.
+
+**Test.** Settore 6 con DIO dedotto 500: rimanenze che scalano coi ricavi, nessun `degenerate_turnover_ratio` sulle
+rimanenze. Settore 1 con lo stesso DIO: comportamento di oggi.
+
+### 4.9 Infrannuale: un override che squilibra non persiste una cassa negativa (difetto §11.1)
+
+**Oggi (da confermare con una sonda).** `intra_year_engine.generate_projection` applica gli `sp_overrides` con il clamp e
+poi `_normalize_balance_sheet_cents(recompute_cash=not ha_errori)`, che ricalcola la cassa senza clamp: un override che
+squilibra lo SP, senza diagnostiche d'errore, puo' salvare `sp09` negativa. E' il difetto §11.1 della spec del lotto 2,
+chiuso solo sul motore budget.
+
+**Comportamento richiesto.** Primo step: una sonda che lo conferma o lo smentisce, con i numeri. Se confermato: la
+stessa regola del previsionale — il fabbisogno si misura una volta sola, dopo l'override, sulla cassa ricalcolata — e
+sull'infrannuale diventa l'avviso `unfunded_financing_requirement` con cassa a zero, come per ogni altro fabbisogno di
+quel motore. Mai `sp09` negativa persistita. Se la sonda lo smentisce, il task si chiude dichiarandolo con la sonda come
+test permanente.
+
+**Celle attese.** Nessuna sul banco (motore budget); test dedicati sull'infrannuale.
+
 ## 5. Ordine e dipendenze
 
 1. **4.1** sweep e `details['debito_bancario']` — il danno per anno più alto.
@@ -240,7 +281,8 @@ dopo la normalizzazione. Il caso della sonda (piano su tributari + previdenziali
 4. **4.4** rendiconto — indipendente dai motori; può andare in parallelo a 4.2-4.3 su un worktree suo.
 5. **4.5** bulk tipizzato.
 6. **4.6** messaggi italiani — tocca testi in tutti i file dei task precedenti: dopo di loro.
-7. **4.7** centesimi — per ultima e da sola.
+7. **4.8** guardia per settore e **4.9** §11.1 sull'infrannuale — indipendenti fra loro; 4.9 dopo 4.2-4.3 (stesso motore).
+8. **4.7** centesimi — per ultima e da sola.
 
 ## 6. Verifica di fine lotto
 

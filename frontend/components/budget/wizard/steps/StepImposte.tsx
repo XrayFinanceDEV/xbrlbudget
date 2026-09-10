@@ -123,7 +123,7 @@ export function StepImposte(p: StepProps): JSX.Element {
   const pregresso = useMemo(() => (pregressoSalvato ?? {}) as Pregresso, [pregressoSalvato]);
   const tribPlan = tributariPlan(pregresso);
   const setPregresso = (next: Pregresso) => {
-    if (firstYear !== undefined) p.update(firstYear, "pregresso", next);
+    p.updatePregresso(next);
   };
   const masses = useMemo(() => massesOf(baseBs), [baseBs]);
   // Diagnostica, non correzione: si valida il SOLO piano tributario, cosi' gli

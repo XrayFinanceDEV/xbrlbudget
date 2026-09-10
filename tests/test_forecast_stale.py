@@ -22,7 +22,7 @@ esplicitamente `fy.updated_at`.
 """
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 # `backend/app/api/v1/analysis.py` importa `app.core.database` senza il
@@ -283,6 +283,22 @@ def test_i_timestamp_escono_in_utc_esplicito_con_e_senza_frazione():
     # La premessa che rende pericoloso il confronto di stringhe:
     assert forecast_iso > assumptions_iso
     assert _istante(forecast_iso) < _istante(assumptions_iso)
+
+
+def test_un_timestamp_con_fuso_esce_in_utc_con_una_sola_z():
+    """Oggi le colonne sono ingenue. Se diventassero con fuso, accodare `Z` a
+    `isoformat()` darebbe `…+00:00Z`, che `Date.parse` non legge: il client
+    tratterebbe il timestamp come assente e l'avviso resterebbe spento senza
+    un errore. Un valore con fuso si porta in UTC prima di uscire."""
+    roma = timezone(timedelta(hours=2))
+    alle_dieci_a_roma = datetime(2026, 9, 10, 10, 0, 0, 500000, tzinfo=roma)
+    alle_otto_utc = datetime(2026, 9, 10, 8, 0, 0, tzinfo=timezone.utc)
+    assumptions_iso, forecast_iso, stale = _stale(
+        [_Riga(alle_dieci_a_roma)], [_Riga(alle_otto_utc)]
+    )
+    assert assumptions_iso == "2026-09-10T08:00:00.500000Z"
+    assert forecast_iso == "2026-09-10T08:00:00Z"
+    assert stale is True
 
 
 # ── Infrannuale: il gemello della rigenerazione ────────────────────────────

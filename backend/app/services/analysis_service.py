@@ -6,6 +6,7 @@ in a single response. This simplifies the API by consolidating multiple endpoint
 """
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
+from datetime import timezone
 from decimal import Decimal
 import sys
 import os
@@ -258,8 +259,15 @@ def _forecast_staleness(scenario) -> tuple:
 
     def _iso_utc(stamp):
         # Colonne ingenue per costruzione (`default=datetime.utcnow`): il
-        # suffisso dichiara la base che il valore ha gia'.
-        return stamp.isoformat() + "Z" if stamp else None
+        # suffisso dichiara la base che il valore ha gia'. Un valore con fuso
+        # si porta prima in UTC e si spoglia: accodare `Z` a un `+00:00`
+        # darebbe una stringa che `Date.parse` non legge, e l'avviso si
+        # spegnerebbe senza che nessuno se ne accorga.
+        if stamp is None:
+            return None
+        if stamp.tzinfo is not None:
+            stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+        return stamp.isoformat() + "Z"
 
     return (
         _iso_utc(assumptions_at),

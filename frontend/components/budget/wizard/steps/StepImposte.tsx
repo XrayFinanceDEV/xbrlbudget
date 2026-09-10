@@ -12,41 +12,64 @@
 // il motore ha già scritto.
 import type { JSX } from "react";
 import { useMemo } from "react";
+import { AlertTriangle } from "lucide-react";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
 import { computeEffectiveTaxRate } from "@/components/budget/assumption-rows";
 import { parseFieldValue } from "@/lib/budget-field-rules";
-import { pct1 } from "@/lib/budget-format";
+import { euro, numOrNull, pct1 } from "@/lib/budget-format";
+import { validatePregresso } from "@/lib/budget-pregresso-circolante";
+import { massesOf } from "@/lib/budget-pregresso-tabella";
 import {
+  ACCONTO_CHIOSA,
   DEFAULT_TAX_RATE,
+  MANUAL_TAX_AVVISO,
+  PREGRESSO_IGNORED_AVVISO,
+  SP17E_NOTA_AUTOMATICA,
   TAX_RATE_PLACEHOLDER,
+  TRIBUTARI_KEYS,
+  TRIBUTARI_TABELLA_NOTA,
+  accontoPctValue,
   impostePreview,
+  manualTaxPosition,
+  rateOptions,
   spTributariRows,
   taxRateInputDisplay,
   taxRateValue,
+  tributariMasses,
+  tributariOpening,
+  tributariPlan,
+  tributariTabella,
+  withAccontoPct,
+  withRate,
+  withRateUguali,
+  withSaldo,
 } from "@/lib/budget-imposte-step";
 import { planTaxRate } from "@/lib/budget-tax-rate";
 import { previewNotice } from "@/lib/budget-preview-notice";
+import type { Pregresso } from "@/types/api";
 import type { StepProps } from "../types";
+import { PregressoTable } from "../PregressoTable";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
 
 const ADVANCES_ROWS: YearInputRow[] = [{ field: "tax_advances_paid", label: "Acconti versati nell'anno", baseLabel: "—" }];
 
-/** Un Select disabilitato con un solo valore: segnaposto del lotto 2. */
-function Lotto2Select({ text, className }: { text: string; className?: string }): JSX.Element {
+/** Riga «etichetta / nota piccola» a sinistra, controllo a destra — lo stesso
+ *  schema del passo 6 (`ScheduleRow` in StepPregressoNuovo). */
+function TribRow({ label, small, children }: { label: string; small: string; children: React.ReactNode }): JSX.Element {
   return (
-    <Select disabled value="lotto2">
-      <SelectTrigger className={className ?? "h-8 w-40 text-xs"}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="lotto2">{text}</SelectItem>
-      </SelectContent>
-    </Select>
+    <div className="flex items-start justify-between gap-3 border-b border-border/50 pb-2.5">
+      <div>
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="text-xs text-muted-foreground">{small}</div>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
   );
 }
 
@@ -65,8 +88,36 @@ export function StepImposte(p: StepProps): JSX.Element {
     [effectiveRate, p.assumptions, p.forecastYears],
   );
 
-  const tributariRows = useMemo(() => spTributariRows(baseBs), [baseBs]);
   const preview = useMemo(() => impostePreview(baseInc, p.preview.data), [baseInc, p.preview.data]);
+
+  // La via manuale (percentuale di crescita su sp06e/sp16e) e' un'alternativa
+  // al piano, non un suo complemento: e' lei a decidere se «Debiti tributari
+  // oltre %» sia a schermo, perche' fuori di li' non governa nulla.
+  const manual = useMemo(
+    () => manualTaxPosition(p.assumptions, p.forecastYears),
+    [p.assumptions, p.forecastYears],
+  );
+  const tributariRows = useMemo(() => spTributariRows(baseBs, manual), [baseBs, manual]);
+
+  // Il piano e' UNO per scenario e vive nelle ipotesi del PRIMO anno di piano,
+  // come quello del passo 6: il motore lo legge da li', e scriverlo su ogni
+  // anno lo farebbe applicare piu' volte.
+  const firstYear = p.forecastYears[0];
+  const opening = useMemo(() => tributariOpening(baseBs), [baseBs]);
+  const pregressoSalvato = p.assumptions[firstYear]?.pregresso;
+  const pregresso = useMemo(() => (pregressoSalvato ?? {}) as Pregresso, [pregressoSalvato]);
+  const tribPlan = tributariPlan(pregresso);
+  const setPregresso = (next: Pregresso) => {
+    if (firstYear !== undefined) p.update(firstYear, "pregresso", next);
+  };
+  const masses = useMemo(() => massesOf(baseBs), [baseBs]);
+  // Diagnostica, non correzione: si valida il SOLO piano tributario, cosi' gli
+  // errori delle altre quattro voci restano al passo che le scadenzia.
+  const errors = useMemo(
+    () => validatePregresso(tribPlan ? { debiti_tributari: tribPlan } : {}, masses, p.forecastYears.length),
+    [tribPlan, masses, p.forecastYears.length],
+  );
+  const opzioniRate = rateOptions(p.forecastYears.length);
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
@@ -154,26 +205,132 @@ export function StepImposte(p: StepProps): JSX.Element {
         />
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader>
             <CardTitle className="text-base">Pagamento dei debiti tributari</CardTitle>
-            <Badge variant="outline">lotto 2</Badge>
+            <CardDescription>
+              debito tributario al 31/12/{p.baseYear}: {euro(opening)}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <YearInputTable
-              forecastYears={p.forecastYears}
-              baseYear={p.baseYear}
-              assumptions={p.assumptions}
-              update={p.update}
-              rows={tributariRows}
-            />
-            <div className="space-y-2 border-t border-border/50 pt-2.5">
-              <Lotto2Select text="Correnti · anno successivo" className="h-8 w-full text-xs" />
-              <Lotto2Select text="Rateizzati · 3 rate annuali" className="h-8 w-full text-xs" />
-            </div>
-            <p className="pt-1 text-xs text-muted-foreground">
-              Oggi il motore muove la posizione tributaria come precedente + imposte dell&apos;anno − acconti. La
-              divisione fra correnti e rateizzati entra con l&apos;estensione del motore.
-            </p>
+            {baseBs && firstYear !== undefined ? (
+              <>
+                <TribRow
+                  label="Saldo dell'anno precedente"
+                  small="si versa per intero nel primo anno di piano"
+                >
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={100}
+                      className="w-36 text-right"
+                      aria-label="Saldo dell'anno precedente"
+                      value={tribPlan ? tribPlan.saldo : opening}
+                      onChange={(e) => setPregresso(withSaldo(pregresso, opening, numOrNull(e.target.value)))}
+                    />
+                    <span className="text-xs text-muted-foreground">€</span>
+                  </div>
+                </TribRow>
+
+                <TribRow
+                  label="Rateizzato"
+                  small="ciò che il saldo non copre: si scadenzia nel piano qui sotto"
+                >
+                  {/* In sola lettura per costruzione: saldo e rateizzato devono
+                      sommare l'apertura, e due caselle indipendenti farebbero
+                      salvare piani che il server rifiuta. */}
+                  <span className="text-sm tabular-nums text-foreground">
+                    {euro(tribPlan ? tribPlan.rateizzato : 0)}
+                  </span>
+                </TribRow>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Piano delle rate
+                  </p>
+                  {opzioniRate.length > 0 && (
+                    <Select
+                      onValueChange={(v) => setPregresso(withRateUguali(pregresso, opening, Number(v)))}
+                    >
+                      <SelectTrigger className="h-8 w-36 text-xs" aria-label="Rate uguali">
+                        <SelectValue placeholder="Rate uguali" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {opzioniRate.map((n) => (
+                          <SelectItem key={n} value={String(n)}>{n} rate uguali</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {/* La stessa tabella del passo 6, su una riga sola: la massa
+                    che scadenzia e' il RATEIZZATO, non l'apertura — il saldo
+                    non entra nel runoff nemmeno nel motore. */}
+                <PregressoTable
+                  keys={TRIBUTARI_KEYS}
+                  masses={tributariMasses(pregresso, opening)}
+                  pregresso={tributariTabella(pregresso, opening)}
+                  forecastYears={p.forecastYears}
+                  baseYear={p.baseYear}
+                  mode="eur"
+                  massLabel="Rateizzato"
+                  nota={TRIBUTARI_TABELLA_NOTA}
+                  errors={errors}
+                  onChange={(next) =>
+                    setPregresso(withRate(pregresso, opening, next.debiti_tributari?.amounts ?? []))}
+                />
+
+                <TribRow label="Acconto sull'imposta dell'anno prima" small={ACCONTO_CHIOSA}>
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={200}
+                      step={5}
+                      className="w-24 text-right"
+                      aria-label="Acconto sull'imposta dell'anno prima"
+                      value={accontoPctValue(pregresso)}
+                      onChange={(e) => setPregresso(withAccontoPct(pregresso, opening, numOrNull(e.target.value)))}
+                    />
+                    <span className="text-xs text-muted-foreground">%</span>
+                  </div>
+                </TribRow>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Il bilancio dell&apos;anno base non è ancora disponibile: senza quel saldo non c&apos;è nulla da
+                scadenziare.
+              </p>
+            )}
+
+            {preview.pregressoIgnored && (
+              <div className="flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{PREGRESSO_IGNORED_AVVISO}</span>
+              </div>
+            )}
+
+            <Accordion type="single" collapsible>
+              <AccordionItem value="manuale" className="border-b-0">
+                <AccordionTrigger className="text-sm font-medium">Posizione tributaria manuale</AccordionTrigger>
+                <AccordionContent className="space-y-2">
+                  <p className="text-xs text-muted-foreground">{MANUAL_TAX_AVVISO}</p>
+                  <YearInputTable
+                    forecastYears={p.forecastYears}
+                    baseYear={p.baseYear}
+                    assumptions={p.assumptions}
+                    update={p.update}
+                    rows={tributariRows}
+                  />
+                  {/* Il controllo che sulla via automatica non governa nulla non
+                      si mostra inerte: sparisce, e questa riga dice perche'. */}
+                  {!manual && (
+                    <p className="text-[11px] text-muted-foreground">{SP17E_NOTA_AUTOMATICA}</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </CardContent>
         </Card>
       </div>

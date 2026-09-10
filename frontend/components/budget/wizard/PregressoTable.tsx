@@ -67,8 +67,16 @@ export function PregressoTable(props: {
   mode: PregressoMode;
   onChange: (next: Pregresso) => void;
   errors: string[];
+  /** La riga in coda alla tabella. Il default e' la via d'uscita del passo 6
+   *  (rimettere a bilancio una voce che il piano non rigenera); il passo 7 ne
+   *  passa una propria, perche' li' non c'e' nessuna voce che si estingue. */
+  nota?: string;
+  /** Il titolo della colonna delle masse. Al passo 7 la massa non e' il saldo
+   *  dell'anno base ma il RATEIZZATO che se ne e' dichiarato. */
+  massLabel?: string;
 }): JSX.Element {
   const { keys, masses, pregresso, forecastYears, baseYear, mode, onChange, errors } = props;
+  const nota = props.nota ?? PREGRESSO_VIA_USCITA;
   const [aperti, setAperti] = useState<Record<string, boolean>>({});
 
   const righe = pregressoRighe(keys, masses, pregresso);
@@ -84,7 +92,9 @@ export function PregressoTable(props: {
           <thead>
             <tr className="border-b border-border">
               <th className="px-2 py-1 text-left font-medium text-muted-foreground">Voce</th>
-              <th className="px-2 py-1 text-right font-medium text-muted-foreground">Saldo {baseYear}</th>
+              <th className="px-2 py-1 text-right font-medium text-muted-foreground">
+                {props.massLabel ?? `Saldo ${baseYear}`}
+              </th>
               {forecastYears.map((y) => (
                 <th key={y} className="px-1 py-1 text-right font-medium text-muted-foreground">{y}</th>
               ))}
@@ -101,9 +111,13 @@ export function PregressoTable(props: {
                   <td className="px-2 py-1">
                     <div className="font-medium text-foreground">{riga.label}</div>
                     <div className="mt-0.5 flex items-start gap-1 text-[11px] text-muted-foreground">
-                      {riga.destino === "rigenera"
-                        ? <RefreshCw className="mt-0.5 h-3 w-3 shrink-0" />
-                        : <CircleOff className="mt-0.5 h-3 w-3 shrink-0" />}
+                      {/* Il cerchio sbarrato e' la SOLA sorpresa da segnalare:
+                          la voce che si dichiara come le altre e resta a zero.
+                          Chi si rigenera — dal volume o dalle imposte — porta
+                          la freccia. */}
+                      {riga.destino === "estingue"
+                        ? <CircleOff className="mt-0.5 h-3 w-3 shrink-0" />
+                        : <RefreshCw className="mt-0.5 h-3 w-3 shrink-0" />}
                       <span>{riga.destinoNota}</span>
                     </div>
                     {/* Un accordion vero (components/ui/accordion) non puo'
@@ -176,7 +190,7 @@ export function PregressoTable(props: {
         </ul>
       )}
 
-      <p className="text-[11px] text-muted-foreground">{PREGRESSO_VIA_USCITA}</p>
+      <p className="text-[11px] text-muted-foreground">{nota}</p>
     </div>
   );
 }

@@ -41,8 +41,16 @@ describe("budget-pregresso-tabella", () => {
     expect(righe.map((r) => r.writeoff)).toEqual([true, false, false, false]);
   });
 
-  it("il destino dei tributari e' altrove: non si rigenera dal circolante, segue le imposte", () => {
-    expect(destinoOf("debiti_tributari")).toBe("altrove");
+  // I tributari non stanno in TABELLA_KEYS: la loro riga la rende il passo 7,
+  // dove la tabella scadenzia il rateizzato. Non si rigenerano dal circolante
+  // — si rigenerano dalle IMPOSTE dell'anno, e non si estinguono: una nota che
+  // dicesse «va a zero e ci resta» sarebbe falsa sul saldo che il piano genera
+  // ogni anno.
+  it("il destino dei tributari e' le imposte: si rigenera, ma non da un driver di volume", () => {
+    expect(destinoOf("debiti_tributari")).toBe("imposte");
+    const riga = pregressoRighe(["debiti_tributari"], masses, {})[0];
+    expect(riga.destinoNota).toMatch(/rateizzato/);
+    expect(riga.destinoNota).not.toMatch(/passo Imposte/);
   });
 
   it("cellValue: euro mostra l'importo, pct l'incidenza sulla massa, e un anno mai toccato resta vuoto", () => {

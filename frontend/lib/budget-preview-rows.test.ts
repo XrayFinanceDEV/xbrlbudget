@@ -4,7 +4,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
   ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
-  rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
+  rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
 } from "./budget-preview-rows";
 import { scopertoAvvisi } from "./budget-preview-rows";
 import { euro } from "@/lib/budget-format";
@@ -418,5 +418,85 @@ describe("scopertoAvvisi — cassa assorbita e scoperto di c/c (Task 12)", () =>
       conDettagli(2028, { scoperto_generato: 100, scoperto_residuo: 500, fabbisogno_picco: 400, fabbisogno_picco_anno: 2027 }),
     ]);
     expect(a.picco).toEqual({ amount: 400, year: 2027 });
+  });
+});
+
+// ── rowsImposteSaldoAcconto (Task 8) ────────────────────────────────────────
+// Come si sono PAGATE le imposte dell'anno: saldo dell'anno prima, acconto
+// sull'anno in corso, rata del rateizzato. Lettura pura di `details.imposte`:
+// il kernel e' `tax_settlement_saldo_acconto` in Python, qui non si liquida
+// nulla.
+describe("rowsImposteSaldoAcconto", () => {
+  const conImposte = (y: number, over: Record<string, unknown>): ForecastPreviewYear => {
+    const base = year(y);
+    return {
+      ...base,
+      details: { ...base.details, imposte: { ...base.details.imposte, ...over } },
+    } as unknown as ForecastPreviewYear;
+  };
+
+  const saldoAcconto = (y: number, over: Record<string, unknown> = {}) =>
+    conImposte(y, {
+      mode: "saldo_acconto", current_tax: 41230.55, saldo_paid: 18740.13, acconti_paid: 33200.44,
+      rate_paid: 14303.31, generated_debt: 8030.11, generated_credit: 0, opening_credit_left: 0, ...over,
+    });
+
+  it("gli importi sono quelli del motore, riga per riga, sotto un'intestazione sola", () => {
+    const rows = rowsImposteSaldoAcconto([saldoAcconto(2027)]);
+    expect(rows[0].label).toBe("Pagamenti dell'anno");
+    const v = (label: string) => rows.find((r) => r.label === label)!.years[0].value;
+    expect(v("Imposte dell'anno")).toBe(41230.55);
+    expect(v("Saldo dell'anno precedente versato")).toBe(18740.13);
+    expect(v("Acconti versati")).toBe(33200.44);
+    expect(v("Rate del rateizzato")).toBe(14303.31);
+    expect(v("Debito tributario a fine anno")).toBe(8030.11);
+  });
+
+  it("l'uscita di cassa e' saldo + acconti + rate, la stessa somma del kernel", () => {
+    const rows = rowsImposteSaldoAcconto([saldoAcconto(2027)]);
+    const cassa = rows.find((r) => r.label === "Uscita di cassa per imposte")!.years[0].value!;
+    expect(Math.round(cassa * 100) / 100).toBe(66243.88);
+  });
+
+  it("la colonna base resta vuota: l'anno base non ha una liquidazione da mostrare", () => {
+    for (const r of rowsImposteSaldoAcconto([saldoAcconto(2027)])) expect(r.base.value).toBeNull();
+  });
+
+  it("il credito d'imposta compare solo quando ce n'e' uno: niente righe a zero", () => {
+    const senza = rowsImposteSaldoAcconto([saldoAcconto(2027)]);
+    expect(senza.some((r) => r.label === "Credito tributario a fine anno")).toBe(false);
+    const con = rowsImposteSaldoAcconto([saldoAcconto(2027, { generated_debt: 0, generated_credit: 2711.09 })]);
+    expect(con.find((r) => r.label === "Credito tributario a fine anno")!.years[0].value).toBe(2711.09);
+  });
+
+  it("le rate compaiono solo con un rateizzato scadenziato", () => {
+    const senza = rowsImposteSaldoAcconto([saldoAcconto(2027, { rate_paid: 0 })]);
+    expect(senza.some((r) => r.label === "Rate del rateizzato")).toBe(false);
+  });
+
+  it("via manuale su tutti gli anni: una riga sola, con la nota, e nessun importo inventato", () => {
+    const rows = rowsImposteSaldoAcconto([conImposte(2027, { mode: "manual" }), conImposte(2028, { mode: "manual" })]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].years.map((c) => c.note)).toEqual(["posizione tributaria manuale", "posizione tributaria manuale"]);
+    expect(rows[0].years.map((c) => c.value)).toEqual([null, null]);
+  });
+
+  it("un anno manuale in mezzo non si legge «pagato zero»: cella vuota e nota", () => {
+    const rows = rowsImposteSaldoAcconto([
+      saldoAcconto(2027),
+      conImposte(2028, { mode: "manual", current_tax: 52117.6 }),
+    ]);
+    const saldo = rows.find((r) => r.label === "Saldo dell'anno precedente versato")!;
+    expect(saldo.years[0].value).toBe(18740.13);
+    expect(saldo.years[1].value).toBeNull();
+    expect(saldo.years[1].note).toBe("posizione tributaria manuale");
+    // l'imposta dell'anno il motore la dichiara anche sulla via manuale
+    const corrente = rows.find((r) => r.label === "Imposte dell'anno")!;
+    expect(corrente.years[1].value).toBe(52117.6);
+    expect(corrente.years[1].note).toBeUndefined();
+  });
+
+  it("senza anni nessuna riga", () => {
+    expect(rowsImposteSaldoAcconto([])).toEqual([]);
   });
 });

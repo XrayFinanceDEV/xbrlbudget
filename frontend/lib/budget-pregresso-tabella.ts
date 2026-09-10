@@ -43,10 +43,11 @@ export type PregressoTarget = "amounts" | "writeoff";
  *   lascia, per tutti gli anni. E' il comportamento voluto, ed e' anche la
  *   sorpresa: due voci che si dichiarano allo stesso modo si comportano in
  *   modo opposto.
- * - `altrove`: la voce non si governa qui (i tributari seguono la posizione
- *   fiscale, al passo 7).
+ * - `imposte`: la voce si rigenera, ma dalle IMPOSTE dell'anno, non da un
+ *   driver di volume — e' il caso dei tributari, che si scadenziano al passo 7
+ *   e dove il piano governa il solo rateizzato.
  */
-export type PregressoDestino = "rigenera" | "estingue" | "altrove";
+export type PregressoDestino = "rigenera" | "estingue" | "imposte";
 
 /**
  * Misurato su `calculations/forecast_engine.py` (task-7-brief.md, verificato di
@@ -65,7 +66,7 @@ export type PregressoDestino = "rigenera" | "estingue" | "altrove";
 const DESTINI: Record<PregressoKey, PregressoDestino> = {
   crediti_commerciali: "rigenera",
   debiti_fornitori: "rigenera",
-  debiti_tributari: "altrove",
+  debiti_tributari: "imposte",
   debiti_previdenziali: "estingue",
   altri_debiti: "estingue",
 };
@@ -86,7 +87,8 @@ const DESTINO_NOTE: Record<PregressoDestino, string> = {
     "Si rigenera: il previsionale ne crea di nuovi dal volume d'affari, quindi qui decidi solo quando rientra il pregresso.",
   estingue:
     "Non si rigenera: il previsionale non ne crea di nuovi, quindi ciò che scadenzi qui va a zero e ci resta per tutto il piano.",
-  altrove: "Segue la posizione fiscale: si regola al passo Imposte.",
+  imposte:
+    "Si rigenera dalle imposte: ogni anno di piano genera il proprio debito tributario, quindi qui si scadenzia il solo rateizzato già a bilancio.",
 };
 
 /** La via d'uscita, detta per esteso: chi vuole rimettere a bilancio un debito

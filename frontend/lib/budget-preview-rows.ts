@@ -354,7 +354,17 @@ export function rowsImposteSaldoAcconto(years: ForecastPreviewYear[]): PreviewRo
   const out: PreviewRow[] = [head];
   // L'imposta dell'anno il motore la dichiara anche sulla via manuale: e' la
   // sola cifra vera di quegli anni, e nasconderla direbbe meno del dovuto.
-  out.push(row("imposte-current", "Imposte dell'anno", "value", { value: null },
+  //
+  // «correnti», non «dell'anno»: nel motore `total_tax = current_tax +
+  // deferred_expense` (`forecast_engine.py:1287`) e questa riga legge SOLO
+  // `current_tax`, la componente che partecipa alla liquidazione di
+  // saldo/acconto — la riga «Imposte» del CE ricapitolato (`rowsImposte`,
+  // sopra) e' invece `ce20`, il totale. Con differenze temporanee non nulle le
+  // due divergono davvero (misurato: sonda del motore, +40.000 di differenza
+  // tassabile al 25% -> ce20 − current_tax = 10.000, l'imposta differita), e la stessa
+  // etichetta sulle due righe farebbe leggere due numeri diversi come se
+  // fossero la stessa cosa (fix1 R7).
+  out.push(row("imposte-current", "Imposte correnti dell'anno", "value", { value: null },
     cells((d) => d.current_tax, true)));
   out.push(row("imposte-saldo", "Saldo dell'anno precedente versato", "sub", { value: null },
     cells((d) => d.saldo_paid)));
@@ -366,7 +376,16 @@ export function rowsImposteSaldoAcconto(years: ForecastPreviewYear[]): PreviewRo
   if (someNonZero(rate)) out.push(row("imposte-rate", "Rate del rateizzato", "sub", { value: null }, rate));
   out.push(row("imposte-cassa", "Uscita di cassa per imposte", "kpi", { value: null },
     cells((d) => d.saldo_paid + d.acconti_paid + d.rate_paid)));
-  out.push(row("imposte-debito", "Debito tributario a fine anno", "value", { value: null },
+  // «Saldo d'imposta da versare l'anno dopo», non «Debito tributario a fine
+  // anno»: quella riga sta gia' sopra (`rowsImposte`, chiave "trib") ed e'
+  // `sp16e` — nel motore `sp16e = generated_debt + residual_short` del piano a
+  // rate (`forecast_engine.py:2117`), quindi con un piano a rate le due righe
+  // divergono SEMPRE della rata a breve (misurato: sonda del motore, 20.000
+  // contro 0 su due anni). `generated_debt` e' solo la parte generata
+  // dall'imposta dell'anno, senza il rateizzato pregresso: due etichette
+  // quasi identiche sopra due numeri diversi, nello stesso riquadro, erano il
+  // difetto (fix1 R1).
+  out.push(row("imposte-debito", "Saldo d'imposta da versare l'anno dopo", "value", { value: null },
     cells((d) => d.generated_debt)));
   const credito = cells((d) => d.generated_credit);
   if (someNonZero(credito)) {

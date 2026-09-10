@@ -18,6 +18,7 @@ import { euro, numOrNull } from "@/lib/budget-format";
 import { equalInstalments, openingMasses } from "@/lib/budget-pregresso-circolante";
 import { singleYearValue, type SingleYearValue } from "@/lib/budget-pregresso-step";
 import { rowsImposte, rowsImposteSaldoAcconto, type PreviewRow } from "@/lib/budget-preview-rows";
+import type { YearCellOff } from "@/lib/budget-year-cell";
 
 /**
  * L'aliquota reale del progetto: IRES + IRAP, non il `24` (sola IRES) di
@@ -58,7 +59,7 @@ export function taxRateInputDisplay(v: SingleYearValue): number | "" {
  */
 export const TAX_RATE_PLACEHOLDER = "auto";
 
-export interface SpTributariRow {
+export interface SpTributariRow extends YearCellOff {
   field: string;
   label: string;
   sub: string;
@@ -66,20 +67,31 @@ export interface SpTributariRow {
 }
 
 /**
- * La via MANUALE: `sp06e_growth_pct` **oppure** `sp16e_growth_pct` valorizzata
- * su un anno qualsiasi del piano.
+ * Gli anni sui quali la via manuale e' DAVVERO accesa: quelli in cui
+ * `sp06e_growth_pct` o `sp16e_growth_pct` sono valorizzati su QUELL'anno.
  *
- * Misurato sul motore, non dedotto: `forecast_engine.py` costruisce
+ * Misurato sul motore, non dedotto: `forecast_engine.py` decide
  * `manual_tax_position` da quei due soli campi (`getattr(...) is not None`),
- * quindi **uno zero e' un valore**, non un'assenza — chi scrive `0` passa alla
- * via manuale. La via e' per anno: se un anno solo ce l'ha, quel controllo
- * governa qualcosa e resta a schermo.
+ * **per anno** (`forecast_engine.py:2038-2041`) — quindi **uno zero e' un
+ * valore**, non un'assenza, e un piano misto (2027 automatico, 2028 manuale)
+ * non accende la via sul 2027 anche se `manualTaxPosition` (sotto) e' `true`
+ * perche' governa il 2028. Serve la lista, non solo il booleano: e' cosi' che
+ * `spTributariRows` decide QUALI celle di `sp17e_growth_pct` restano vive
+ * (fix1 R2 — prima la via era un booleano unico su tutto il piano, e la
+ * cella dell'anno automatico restava compilabile senza muovere nulla).
  */
-export function manualTaxPosition(assumptions: AssumptionsMap, years: number[]): boolean {
-  return years.some((y) => {
+export function manualTaxYears(assumptions: AssumptionsMap, years: number[]): number[] {
+  return years.filter((y) => {
     const a = assumptions[y] as Record<string, unknown> | undefined;
     return (a?.sp06e_growth_pct ?? null) !== null || (a?.sp16e_growth_pct ?? null) !== null;
   });
+}
+
+/** La via MANUALE governa ALMENO un anno del piano: decide se la riga
+ *  `sp17e_growth_pct` compare affatto (vedi `manualTaxYears` per la
+ *  granularita' per anno, che decide quali SUE celle restano vive). */
+export function manualTaxPosition(assumptions: AssumptionsMap, years: number[]): boolean {
+  return manualTaxYears(assumptions, years).length > 0;
 }
 
 const SP16E_SUB =
@@ -95,11 +107,22 @@ const SP17E_SUB = "governa il debito oltre l'esercizio soltanto sulla via manual
  * l'utente lo imposta e non succede nulla, **senza errore** — la classe di
  * difetto peggiore che questo repo conosca. Il controllo sparisce, e questa
  * riga dice come farlo tornare.
+ *
+ * «qui sopra», non «qui sotto»: in `StepImposte.tsx` la `YearInputTable` con
+ * la riga «Debiti tributari entro %» viene resa PRIMA di questa nota, quindi
+ * quella riga sta sopra la nota, non sotto (fix1 R4). E l'etichetta del passo
+ * Circolante e' «Crediti tributari», senza «%» (`budget-circolante-step.ts`).
  */
 export const SP17E_NOTA_AUTOMATICA =
   "«Debiti tributari oltre %» non compare finché il piano governa i tributari: il debito oltre l'esercizio " +
   "è il residuo delle rate, e una percentuale di crescita non lo muoverebbe. Torna valorizzando «Debiti " +
-  "tributari entro %» qui sotto, o «Crediti tributari %» al passo Circolante.";
+  "tributari entro %» qui sopra, o «Crediti tributari» al passo Circolante.";
+
+/** Il motivo per cui la cella `sp17e_growth_pct` di UN anno automatico resta
+ *  inerte su un piano MISTO (qualche anno manuale, altri no): stesso
+ *  contenuto di `SP17E_NOTA_AUTOMATICA`, mostrato come `title` sulla singola
+ *  cella invece che come riga sotto la tabella (fix1 R2). */
+export const SP17E_NOTA_ANNO_AUTOMATICO = SP17E_NOTA_AUTOMATICA;
 
 /** L'avviso della via manuale, dentro l'accordion: valorizzare una di quelle
  *  percentuali fa ignorare saldo, rate e acconti dichiarati sopra. */
@@ -122,7 +145,16 @@ export const PREGRESSO_IGNORED_AVVISO =
  * governa qualcosa anche quando la via e' spenta. `sp17e_growth_pct` no: si
  * mostra solo a via accesa (vedi `SP17E_NOTA_AUTOMATICA`).
  */
-export function spTributariRows(baseBs: BalanceSheet | undefined | null, manual: boolean): SpTributariRow[] {
+/**
+ * `automaticYears` sono gli anni del piano NON coperti da `manualTaxYears`:
+ * su un piano misto, `sp17e_growth_pct` resta a schermo (perche' governa
+ * qualcosa da qualche parte) ma le sue celle sugli anni automatici sono
+ * inerti — la stessa granularita' per anno del motore, non un booleano unico
+ * su tutto il piano (fix1 R2).
+ */
+export function spTributariRows(
+  baseBs: BalanceSheet | undefined | null, manual: boolean, automaticYears: number[] = [],
+): SpTributariRow[] {
   const bs = baseBs as unknown as Record<string, unknown> | null | undefined;
   const b = (field: string): number | null => (bs ? numOrNull(bs[field]) : null);
   const rows: SpTributariRow[] = [
@@ -135,6 +167,9 @@ export function spTributariRows(baseBs: BalanceSheet | undefined | null, manual:
     rows.push({
       field: "sp17e_growth_pct", label: "Debiti tributari oltre %", sub: SP17E_SUB,
       baseLabel: euro(b("sp17e_debiti_tributari_lungo")),
+      ...(automaticYears.length > 0
+        ? { offYears: automaticYears, offYearsNote: SP17E_NOTA_ANNO_AUTOMATICO }
+        : {}),
     });
   }
   return rows;
@@ -225,10 +260,54 @@ export function accontoPctValue(pregresso: Pregresso): number {
   return tributariPlan(pregresso)?.acconto_pct ?? DEFAULT_ACCONTO_PCT;
 }
 
+/**
+ * Che cosa mostra una casella controllata (saldo, acconto) MENTRE l'utente
+ * digita, dato il testo grezzo dell'ultimo `onChange` (`draft`; `null` =
+ * nessuna digitazione in corso, per esempio subito dopo un blur) e il valore
+ * che il piano ha davvero salvato.
+ *
+ * Una casella appena svuotata dal backspace resta VUOTA, mai il valore di
+ * ripiego (0 per il saldo, 100 per l'acconto): quel ripiego lo scrivono
+ * `withSaldo`/`withAccontoPct` nel piano SALVATO, ma se anche la casella lo
+ * mostrasse subito la digitazione si romperebbe a meta' — misurato: "10" ->
+ * backspace -> "1" non arriva mai alla casella vuota, perche' il valore
+ * tornava a 100 (o 0) a ogni tocco e la cifra successiva si sommava a quel
+ * ripiego invece che ripartire da vuoto (fix1 R6).
+ */
+export function draftDisplay(draft: string | null, saved: number): number | "" {
+  if (draft === null) return saved;
+  if (draft.trim() === "") return "";
+  const n = Number(draft);
+  return Number.isFinite(n) ? n : "";
+}
+
 /** Il numero di rate uguali che si possono offrire: mai piu' degli anni di
  *  piano, o si creerebbe un piano che `validatePregresso` rifiuta subito. */
 export function rateOptions(horizon: number): number[] {
   return [2, 3, 4, 5].filter((n) => n <= horizon);
+}
+
+/**
+ * L'opzione del `Select` «N rate uguali» che rispecchia DAVVERO il piano
+ * attuale: l'opzione `n` solo se `amounts` coincide, al centesimo, con
+ * `equalInstalments(rateizzato, n)` per un `n` fra quelli offerti; altrimenti
+ * stringa vuota — lo stato neutro che il `Select` senza `value` mostrerebbe
+ * comunque come segnaposto.
+ *
+ * Serve perche' un ritocco a mano su una singola rata (dentro `PregressoTable`,
+ * via `withRate`) non deve lasciare il `Select` fermo sull'ultima scelta: senza
+ * questa funzione un piano toccato a mano continuerebbe a mostrare «3 rate
+ * uguali» come se il piano fosse ancora quello — un'etichetta che mente sullo
+ * stato vero (fix1 R6).
+ */
+export function rateSelectValue(amounts: number[], rateizzato: number, options: number[]): string {
+  for (const n of options) {
+    const eq = equalInstalments(rateizzato, n);
+    if (amounts.length === eq.length && amounts.every((v, i) => Math.abs(v - eq[i]) < 0.005)) {
+      return String(n);
+    }
+  }
+  return "";
 }
 
 /**
@@ -265,10 +344,19 @@ export const TRIBUTARI_TABELLA_NOTA =
   "Le rate scadenziano il solo rateizzato: il saldo esce per intero nel primo anno di piano, insieme " +
   "all'acconto. Ciò che resta dopo l'ultimo anno resta a bilancio come debito oltre l'esercizio.";
 
-/** La chiosa della casella dell'acconto: la percentuale e' il ripiego, un
- *  importo esplicito per anno vince (`explicit_advances > 0` nel kernel). */
+/**
+ * La chiosa della casella dell'acconto: la percentuale e' il ripiego, un
+ * importo esplicito per anno vince — ma solo se MAGGIORE DI ZERO
+ * (`explicit_advances > ZERO` nel kernel, `projection_common.py:355`). Chi
+ * scrive zero nella casella «Acconti versati nell'anno» non ottiene «zero
+ * acconti»: ottiene la percentuale, perche' zero e' il valore che quella
+ * casella storica usa per dire «non compilata». Il Ruling 11 lo chiamava «il
+ * difetto silenzioso peggiore»: la nota deve dirlo in chiaro, non lasciarlo
+ * dedurre da «se valorizzati» (fix1 C1).
+ */
 export const ACCONTO_CHIOSA =
-  "percentuale dell'imposta dell'anno prima; gli acconti per anno qui sopra, se valorizzati, lo scavalcano.";
+  "percentuale dell'imposta dell'anno prima; un acconto per anno qui sopra, se MAGGIORE DI ZERO, la " +
+  "scavalca — zero vuol dire «usa la percentuale di acconto», non «zero acconti».";
 
 /** Il motore ha davvero ignorato il piano dei tributari, su almeno un anno:
  *  `details['pregresso_ignored']`, dichiarato sempre — anche vuoto. */

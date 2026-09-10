@@ -164,6 +164,14 @@ export function validatePregresso(p: Pregresso, masses: Record<PregressoKey, num
       if (t.saldo < 0 || t.rateizzato < 0) {
         errs.push(`${label}: saldo e rateizzato non possono essere negativi — il saldo supera il debito di apertura`);
       }
+      // Stessi limiti del server (`PregressoTributariInput.acconto_pct`,
+      // `backend/app/schemas/budget.py`: `ge=0, le=200`), letti li' e non
+      // dedotti: senza questo controllo il client non segnala nulla e il
+      // server risponde con un 422 illeggibile — lo stesso difetto che il
+      // controllo dei negativi qui sopra chiude sul saldo/rateizzato (fix1 R3).
+      if (t.acconto_pct < 0 || t.acconto_pct > 200) {
+        errs.push(`${label}: l'acconto deve stare fra 0% e 200%`);
+      }
       if (Math.abs(t.saldo + t.rateizzato - t.opening) > 0.01) {
         errs.push(`${label}: saldo + rateizzato deve essere uguale al saldo di apertura`);
       }

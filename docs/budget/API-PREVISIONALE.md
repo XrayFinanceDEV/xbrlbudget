@@ -604,9 +604,9 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
   (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`). Un nome fuori da questi tre
   **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
-  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:685`),
+  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`),
   e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
-  (`calculations/forecast_engine.py:726-727`). Solo le rotte tipizzate per singola riga passano dal
+  (`calculations/forecast_engine.py:850-851`). Solo le rotte tipizzate per singola riga passano dal
   `Literal` Pydantic e rispondono 422.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
@@ -646,4 +646,4 @@ del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
 | Chiave | Valore |
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
-| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` come ripiego difensivo del motore (l'API non lo raggiunge mai: il nome del driver è già un `Literal` a tre valori nello schema Pydantic, rifiutato con 422 prima di arrivare qui) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è raggiungibile**: sulla porta normale — il bulk `PUT /scenarios/{id}/assumptions` (§1), che riceve un dict e non passa dallo schema — è il motore a ignorare il driver e dichiararlo qui; il `Literal` a tre valori lo rifiuta con 422 solo sulle rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |

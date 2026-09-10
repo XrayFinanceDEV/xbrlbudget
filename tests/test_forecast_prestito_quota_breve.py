@@ -327,6 +327,73 @@ def test_lo_sweep_rimborsa_prima_il_pregresso_poi_il_prestito_nuovo():
         engine.dispose()
 
 
+# ══ Uno sweep che erode il prestito nuovo ══
+#
+# La sonda 6b della revisione del Task 16, sulla stessa base: lo sweep del 2027
+# chiude tutto il pregresso, breve e lungo, e intacca il prestito. La quota a breve
+# si calcola su cio' che del prestito RESTA. Quando il resto scade tutto l'anno dopo
+# e il residuo grezzo cade sul mezzo centesimo, quel mezzo centesimo resta oltre come
+# 0,01: e' il prezzo dei totali esatti (`Q(lungo - quota) + quota = Q(lungo)`), e il
+# limite al lungo arrotondato per difetto e' cio' che lo garantisce. Senza, la quota
+# sarebbe 15.000,29, `sp17a` persisterebbe -0,01 e il debito un centesimo in meno.
+# Totale e cassa sono i numeri di `5197929`; su `5197929` la quota era zero. Gli
+# oneri finanziari non si fissano qui: sono gli stessi dello scenario senza sweep,
+# cioe' il difetto (b) della revisione del 16, che il lotto 3 correggera'.
+EROSIONE = [
+    dict(
+        nome="il resto scade tutto l'anno dopo",
+        # sweep = breve + lungo + 60.000,00: del prestito (75.000,285 grezzo) restano
+        # 15.000,285, tutti in scadenza nel 2028 (rata 25.000,095).
+        minimo="71191.48",
+        totale=("15000.29", "0", "0", "0", "0"),
+        cassa=("71191.48", "180035.96", "320042.79", "476723.80", "650608.11"),
+        quota=("15000.28", "0", "0", "0", "0"),
+        oltre=("0.01", "0", "0", "0", "0"),
+    ),
+    dict(
+        nome="una rata a breve, poi il resto",
+        # sweep = breve + lungo + 40.000,55: restano 34.999,735 → 34.999,74. Rata 2028:
+        # 34.999,74 − 9.999,65 (9.999,645) = 25.000,09 a breve. Nel 2028 restano
+        # 9.999,645, tutti in scadenza nel 2029: 9.999,64 a breve e 0,01 oltre.
+        minimo="91190.93",
+        totale=("34999.74", "9999.65", "0", "0", "0"),
+        cassa=("91190.93", "190035.61", "320042.79", "476723.80", "650608.11"),
+        quota=("25000.09", "9999.64", "0", "0", "0"),
+        oltre=("9999.65", "0.01", "0", "0", "0"),
+    ),
+]
+
+
+@pytest.mark.parametrize("caso", EROSIONE, ids=[c["nome"] for c in EROSIONE])
+def test_uno_sweep_che_erode_il_prestito_lascia_a_breve_solo_cio_che_ne_resta(caso):
+    engine, sessions = memory_sessions()
+    try:
+        rows = _righe(A5, None, {0: {**PRESTITO, "cash_sweep_enabled": True,
+                                     "cash_sweep_min_cash": float(D(caso["minimo"]))}})
+        with sessions() as db:
+            run = _genera(db, "erosione", rows)
+        # Precondizione: lo sweep del 2027 ha girato fino al minimo, non oltre.
+        assert run[2027][0][SP09] == D(caso["minimo"]), run[2027][0][SP09]
+        fuori = []
+        for i, anno in enumerate(A5):
+            c, _ce, det = run[anno]
+            dove = f"[{caso['nome']} | {anno}]"
+            confronti = {
+                "debito bancario sp16a+sp17a, su 5197929": (c[SP16A] + c[SP17A], caso["totale"][i]),
+                "cassa sp09, su 5197929": (c[SP09], caso["cassa"][i]),
+                "quota a breve in sp16a": (c[SP16A] - _scoperto(det), caso["quota"][i]),
+                "quota dichiarata": (_quota(det), caso["quota"][i]),
+                "oltre in sp17a": (c[SP17A], caso["oltre"][i]),
+            }
+            for etichetta, (valore, atteso) in confronti.items():
+                if valore != D(atteso):
+                    fuori.append(f"{dove} {etichetta}: {valore}, atteso {atteso}")
+            _al_centesimo(fuori, dove, c, det)
+        assert not fuori, "\n".join(fuori)
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("lungo, attesa", [
     # Tutto in scadenza l'anno dopo, lungo grezzo sul mezzo centesimo: senza il
     # limite la quota sarebbe 5.000,01 e `sp17a` persisterebbe -0,01.

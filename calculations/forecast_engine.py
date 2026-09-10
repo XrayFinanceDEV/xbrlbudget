@@ -224,6 +224,18 @@ class _Overdraft:
                 f"servono {_eur_it(fabbisogno)} di scoperto, ma il totale della voce e' fissato "
                 "dall'override. Togli l'override o copri il fabbisogno con un finanziamento."
             )
+        if self.allowed and self.limit is not None and self.limit < zero:
+            # Lo schema Pydantic ha `ge=0` (`backend/app/schemas/budget.py`),
+            # ma il bulk `PUT /assumptions` scrive `BudgetAssumptions` da un
+            # dict grezzo (`assumptions_service.build_assumption_row`) che non
+            # passa da quello schema: un tetto negativo arriva fin qui. Un
+            # tetto negativo non e' "fabbisogno oltre il tetto" — e' un valore
+            # che non ha senso a prescindere dal fabbisogno — quindi ha un
+            # messaggio proprio, non quello sotto.
+            raise ValueError(
+                "Il limite di scoperto non puo' essere negativo: "
+                f"ricevuto {_eur_it(self.limit)}"
+            )
         if self.allowed and self.limit is not None and fabbisogno > self.limit:
             # In italiano e con le migliaia all'europea: il frontend non ha una
             # traduzione per questo messaggio e lo mostra GREZZO.

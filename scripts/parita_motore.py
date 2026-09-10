@@ -93,6 +93,7 @@ CENT = D("0.01")
 # --------------------------------------------------------------------------- #
 
 from calculations.projection_common import base_bank_debt as _debito_bancario_base
+from calculations.projection_common import pregresso_opening_masses as _masse_pregresso
 
 try:
     from tests.e2e_kit import BASE_BS, BASE_CE, HOLDING_BS, HOLDING_CE  # type: ignore
@@ -153,6 +154,33 @@ def _con_banca_pregressa(bs: Dict[str, Decimal], breve: Decimal, lungo: Decimal)
 
 BANCA_BS = _con_banca_pregressa(BASE_BS, D("12345.67"), D("23456.79"))
 
+
+def _con_tributari_pregressi(bs: Dict[str, Decimal], breve: Decimal, lungo: Decimal) -> Dict[str, Decimal]:
+    """Il fixture con debiti TRIBUTARI pregressi non tondi, a breve e oltre.
+
+    Perche' esiste (Task 4 del followup). Nessun fixture di sopra ha mai un
+    euro di `sp16e`/`sp17e` in apertura: la massa di `debiti_tributari`
+    (`pregresso_opening_masses`) e' sempre zero, quindi un banco senza questo
+    fixture non potrebbe MAI vedere una divergenza sul solo pezzo che un piano
+    del pregresso aggiunge alla posizione tributaria — il RATEIZZATO
+    (`validate_pregresso`, ramo `debiti_tributari`: `saldo + rateizzato =
+    opening`, e il piano delle rate scadenzia il solo rateizzato). Stessa
+    tecnica di `_con_banca_pregressa`: la cassa riassorbe la differenza, cosi'
+    il fixture resta in pareggio e con i dettagli dei debiti esatti.
+    """
+    out = dict(bs)
+    out["sp16e_debiti_tributari_breve"] = breve
+    out["sp16_debiti_breve"] = D(str(bs.get("sp16_debiti_breve", 0))) + breve
+    out["sp17e_debiti_tributari_lungo"] = lungo
+    out["sp17_debiti_lungo"] = D(str(bs.get("sp17_debiti_lungo", 0))) + lungo
+    out["sp09_disponibilita_liquide"] = (
+        D(str(bs.get("sp09_disponibilita_liquide", 0))) + breve + lungo
+    )
+    return out
+
+
+TRIBUTARI_BS = _con_tributari_pregressi(BASE_BS, D("9876.54"), D("3210.98"))
+
 # Scale non tonde: preservano il rapporto di ogni fixture (quindi anche il
 # dpo = 3.600 giorni della holding) ma rendono ogni importo frazionario.
 # I fixture nuovi vanno IN CODA: ogni fixture ha il proprio generatore, quindi
@@ -164,6 +192,7 @@ FIXTURES: List[Tuple[str, Dict[str, Decimal], Dict[str, Decimal], Decimal]] = [
     ("holding", HOLDING_BS, HOLDING_CE, D("1")),
     ("holding_scala", HOLDING_BS, HOLDING_CE, D("1.07316")),
     ("banca", BANCA_BS, BASE_CE, D("1")),
+    ("tributari", TRIBUTARI_BS, BASE_CE, D("1")),
 ]
 
 
@@ -348,6 +377,39 @@ def profilo_finanziamento_misto(rng: random.Random, anno_idx: int) -> Dict[str, 
     return {}
 
 
+def profilo_pregresso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Un piano di scadenziamento del pregresso (`BudgetAssumptions.pregresso`,
+    kernel `runoff_schedule`), su crediti commerciali, debiti fornitori e la
+    quota RATEIZZATA dei debiti tributari (Task 4 del followup: nessun
+    profilo di sopra passa mai `pregresso`, quindi il banco non aveva mai
+    visto una divergenza sul kernel del runoff, ne' sull'interazione fra un
+    piano e la posizione tributaria a saldo+acconto).
+
+    Vale solo sul primo anno di piano — `pregresso` vive sulla riga del primo
+    anno (spec §3.1) — gli anni dopo non aggiungono ipotesi. Le FRAZIONI sono
+    generate qui, deterministiche dal seed; `costruisci_griglia` le converte
+    nell'importo reale sulla massa di apertura del fixture che consuma questo
+    profilo (`pregresso_opening_masses`, la stessa funzione del motore): il
+    profilo non conosce il fixture, e l'`opening` del piano deve coincidere al
+    centesimo con quella del bilancio base o `validate_pregresso` lo rifiuta.
+    Un saldo la cui massa e' zero sul fixture (i tributari, ovunque tranne
+    `tributari`/`banca` — vedi `_con_tributari_pregressi`) resta fuori dal
+    piano: scadenziare un euro che non c'e' alzerebbe un errore, non un
+    piano a zero.
+    """
+    if anno_idx != 0:
+        return {}
+    return {
+        "_pregresso_frazioni": {
+            "crediti_commerciali": [round(rng.uniform(0.15, 0.35), 4), round(rng.uniform(0.15, 0.35), 4)],
+            "debiti_fornitori": [round(rng.uniform(0.15, 0.35), 4), round(rng.uniform(0.15, 0.35), 4)],
+            "debiti_tributari_rateizzato_pct": round(rng.uniform(0.3, 0.6), 4),
+            "debiti_tributari_amounts": [round(rng.uniform(0.2, 0.4), 4), round(rng.uniform(0.2, 0.4), 4)],
+        },
+        "existing_debt_repayment_years": _anni_frazionari(rng, 3, 6),
+    }
+
+
 # I profili nuovi vanno IN CODA: il generatore di un fixture e' consumato profilo
 # dopo profilo, quindi un profilo inserito in mezzo cambierebbe le estrazioni di
 # tutti quelli che lo seguono.
@@ -362,6 +424,7 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "misto": profilo_misto,
     "finanziamento_e_rimborso": profilo_finanziamento_e_rimborso,
     "finanziamento_misto": profilo_finanziamento_misto,
+    "pregresso": profilo_pregresso,
 }
 
 
@@ -409,6 +472,50 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
                     loans = valori["financing_loans"]
                     loans[0]["opening_residual"] = str(residuo_puro)
                     loans[1]["opening_residual"] = str(residuo_misto)
+                if profilo_nome == "pregresso" and i == 0:
+                    # L'`opening` di un saldo scadenziato deve coincidere al
+                    # centesimo con la sua massa di apertura sul bilancio base
+                    # (`validate_pregresso`), e il profilo non conosce il
+                    # fixture che lo consuma: il piano vero si costruisce QUI,
+                    # con la stessa funzione del motore
+                    # (`pregresso_opening_masses`), non a occhio. Un saldo la
+                    # cui massa e' zero su questo fixture (i tributari, fuori
+                    # da `tributari`/`banca`) resta fuori dal piano —
+                    # scadenziare un euro che non c'e' alzerebbe un errore,
+                    # non un piano a zero.
+                    frazioni = valori.pop("_pregresso_frazioni")
+                    masse = _masse_pregresso(lambda f: D(bs.get(f, "0")))
+
+                    def _rate(opening: Decimal, quote) -> List[str]:
+                        importi: List[str] = []
+                        residuo = opening
+                        for q in quote[:num_anni]:
+                            imp = min(residuo, (opening * D(str(q))).quantize(CENT))
+                            importi.append(str(imp))
+                            residuo -= imp
+                        return importi
+
+                    piano: Dict[str, Any] = {}
+                    for chiave in ("crediti_commerciali", "debiti_fornitori"):
+                        opening = masse[chiave]
+                        if opening <= 0:
+                            continue
+                        piano[chiave] = {
+                            "opening": str(opening),
+                            "amounts": _rate(opening, frazioni[chiave]),
+                        }
+                    opening_trib = masse["debiti_tributari"]
+                    if opening_trib > 0:
+                        rateizzato = (
+                            opening_trib * D(str(frazioni["debiti_tributari_rateizzato_pct"]))
+                        ).quantize(CENT)
+                        saldo = opening_trib - rateizzato
+                        piano["debiti_tributari"] = {
+                            "opening": str(opening_trib), "saldo": str(saldo),
+                            "rateizzato": str(rateizzato),
+                            "amounts": _rate(rateizzato, frazioni["debiti_tributari_amounts"]),
+                        }
+                    valori["pregresso"] = piano
                 anni_def.append({"anno": 2026 + 1 + i, "valori": valori})
             scenari.append({
                 "id": f"{fixture_nome}__{profilo_nome}",

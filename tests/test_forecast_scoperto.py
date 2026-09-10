@@ -174,6 +174,33 @@ def test_tetto_dello_scoperto_solleva_e_nomina_i_due_importi():
         engine.dispose()
 
 
+def test_tetto_negativo_ha_un_messaggio_onesto_non_quello_del_tetto_superato():
+    """`overdraft_limit` negativo: lo schema Pydantic lo vieta (`ge=0`), ma il
+    bulk `PUT /assumptions` scrive `BudgetAssumptions` da un dict grezzo
+    (`assumptions_service.build_assumption_row`) che non passa da quello
+    schema — un tetto negativo arriva fino al motore. Resta un errore (il
+    comportamento non cambia), ma il messaggio nomina il difetto vero — un
+    tetto che non ha senso — invece di travestirsi da "fabbisogno oltre il
+    tetto concesso", che varrebbe anche a fabbisogno zero.
+    """
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            _, sid = _scenario(db, "scoperto-tetto-negativo")
+            rows = [_riga(2027, overdraft_allowed=True, overdraft_limit=-1000)]
+            res = assumptions_service.bulk_upsert_assumptions(db, sid, rows, auto_generate=True)
+
+        assert res["forecast_generated"] is False, res["message"]
+        assert "Il limite di scoperto non puo' essere negativo" in res["message"], res["message"]
+        assert "ricevuto -1.000,00" in res["message"], res["message"]
+        assert "tetto concesso" not in res["message"], res["message"]
+
+        with sessions() as db2:
+            assert db2.query(ForecastBalanceSheet).count() == 0
+    finally:
+        engine.dispose()
+
+
 # ── Step 3: il giro d'anno ────────────────────────────────────────────────────
 
 def _piano_due_anni(**extra):

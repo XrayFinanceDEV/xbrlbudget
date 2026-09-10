@@ -604,34 +604,47 @@ def update_budget_assumptions(
     db: Session = Depends(get_db),
 ):
     """
-    Update budget assumptions for a specific forecast year
+    Update budget assumptions for a specific forecast year, then regenerate
+    the forecast in the SAME transaction.
 
-    Only provided fields will be updated
+    Only provided fields will be updated. A rejected regeneration rolls back
+    the update: a GET afterward reads the assumptions exactly as they were
+    before this call (CLAUDE.md § Previsionale/Frontend -- an override the
+    engine rejects is never persisted, only applied-and-reflected or neither).
     """
+    from app.services import assumptions_service
+
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
-
-    # Find assumptions for this year
-    db_assumptions = db.query(models.BudgetAssumptions).filter(
-        models.BudgetAssumptions.scenario_id == scenario_id,
-        models.BudgetAssumptions.forecast_year == year
-    ).first()
-
-    if not db_assumptions:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Assumptions for year {year} not found in scenario {scenario_id}"
-        )
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Update only provided fields
     update_data = _json_safe_assumption_fields(
         assumptions_update.model_dump(exclude_unset=True)
     )
-    for field, value in update_data.items():
-        setattr(db_assumptions, field, value)
 
-    db.commit()
-    db.refresh(db_assumptions)
+    try:
+        db_assumptions = assumptions_service.update_single_year_assumptions(
+            db, scenario, year, update_data
+        )
+    except LookupError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Forecast generation failed: {str(e)}"
+        )
+    except Exception as e:
+        logger.exception(
+            "Forecast regeneration failed after assumptions update, scenario=%s year=%s",
+            scenario_id, year,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error during forecast generation: {str(e)}"
+        )
 
     return db_assumptions
 
@@ -766,18 +779,6 @@ def bulk_upsert_assumptions(
 
 # ===== CE Override (direct forecast editing) =====
 
-# All CE override fields that can be patched from the forecast income table
-_CE_OVERRIDE_FIELDS = {
-    "ce01_override", "ce02_override", "ce03_override", "ce03a_override", "ce04_override",
-    "ce05_override", "ce06_override", "ce07_override", "ce08_override",
-    "ce08a_override", "ce08b_override", "ce08c_override", "ce08d_override",
-    "ce09_override", "ce09a_override", "ce09b_override", "ce09c_override", "ce09d_override",
-    "ce10_override", "ce11_override", "ce11b_override", "ce12_override",
-    "ce13_override", "ce14_override", "ce15_override", "ce16_override",
-    "ce17_override", "ce17a_override", "ce17b_override",
-    "ce18_override", "ce19_override", "ce20_override",
-}
-
 @router.patch(
     "/companies/{company_id}/scenarios/{scenario_id}/ce-override",
     response_model=Any,
@@ -791,7 +792,10 @@ def patch_ce_override(
     db: Session = Depends(get_db),
 ):
     """
-    Update one or more CE overrides, then regenerate the forecast once.
+    Update one or more CE overrides, then regenerate the forecast once, in
+    the SAME transaction: a rejected regeneration rolls back the WHOLE
+    batch, not just the last entry (CLAUDE.md § Previsionale/Frontend -- an
+    override the engine rejects is never persisted).
 
     **Request body:**
     ```json
@@ -806,7 +810,9 @@ def patch_ce_override(
 
     Set `value` to `null` to clear an override and revert to engine calculation.
     """
-    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    from app.services import assumptions_service
+
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     if isinstance(request, dict):
         request_data = request
@@ -814,58 +820,93 @@ def patch_ce_override(
         request_data = request.model_dump() if hasattr(request, 'model_dump') else request
 
     overrides = request_data.get("overrides", [])
-    if not overrides:
-        raise HTTPException(status_code=400, detail="overrides list is required")
-
-    from decimal import Decimal as D
-
-    # Cache assumption rows per year to avoid repeated queries
-    assumption_cache: dict = {}
-    applied = 0
-
-    for entry in overrides:
-        forecast_year = entry.get("forecast_year")
-        field = entry.get("field")
-        value = entry.get("value")
-
-        if not forecast_year or not field:
-            raise HTTPException(status_code=400, detail="Each override needs forecast_year and field")
-        if field not in _CE_OVERRIDE_FIELDS:
-            raise HTTPException(status_code=400, detail=f"Invalid override field: {field}")
-
-        if forecast_year not in assumption_cache:
-            assumption = db.query(models.BudgetAssumptions).filter(
-                models.BudgetAssumptions.scenario_id == scenario_id,
-                models.BudgetAssumptions.forecast_year == forecast_year
-            ).first()
-            if not assumption:
-                raise HTTPException(status_code=404, detail=f"No assumptions found for year {forecast_year}")
-            assumption_cache[forecast_year] = assumption
-
-        setattr(assumption_cache[forecast_year], field, D(str(value)) if value is not None else None)
-        applied += 1
-
-    db.commit()
-
-    # Regenerate forecast once
-    scenario = db.query(models.BudgetScenario).filter(
-        models.BudgetScenario.id == scenario_id
-    ).first()
 
     try:
-        if scenario.scenario_type == "infrannuale":
-            from calculations.intra_year_engine import IntraYearEngine
-            engine = IntraYearEngine(db)
-            engine.generate_projection(scenario_id)
-        else:
-            from calculations.forecast_engine import ForecastEngine
-            engine = ForecastEngine(db)
-            engine.generate_forecast(scenario_id)
+        applied = assumptions_service.apply_ce_overrides(db, scenario, overrides)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Forecast regeneration failed after CE override patch")
-        raise HTTPException(status_code=500, detail=f"Overrides saved but forecast regeneration failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Forecast regeneration failed, no override was applied: {str(e)}"
+        )
 
     return {"success": True, "applied": applied}
+
+
+@router.patch(
+    "/companies/{company_id}/scenarios/{scenario_id}/sp-override",
+    response_model=Any,
+    summary="Batch-patch SP overrides across one or more years and regenerate forecast once"
+)
+def patch_sp_override(
+    company_id: int,
+    scenario_id: int,
+    request: Any = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Update one or more SP overrides, possibly across MULTIPLE forecast
+    years, then regenerate the forecast once, in the SAME transaction: a
+    rejected regeneration rolls back the WHOLE batch -- every year touched
+    by this call, not just one (CLAUDE.md § Previsionale/Frontend -- an
+    override the engine rejects is never persisted; "una correzione che
+    tocca piu' campi si applica tutta o niente").
+
+    Replaces looping N `PUT /assumptions/{year}` calls in parallel for a
+    multi-year edit (SP Prev., giro di correzione 3): after giro 2 each PUT
+    regenerates the WHOLE scenario in its own transaction, and N of those in
+    parallel on SQLite risked "database is locked" plus spurious rejections
+    (a year validated without yet seeing the sibling year's uncommitted
+    edit). This route applies every edit first, then regenerates once.
+
+    **Request body:**
+    ```json
+    {
+        "overrides": [
+            { "forecast_year": 2025, "field": "sp16a_debiti_banche_breve", "value": 400000.55 },
+            { "forecast_year": 2026, "field": "sp16a_debiti_banche_breve", "value": 350000.00 },
+            { "forecast_year": 2025, "field": "sp06a_crediti_clienti_breve", "value": null }
+        ]
+    }
+    ```
+
+    `field` is the key inside that year's `sp_overrides` JSON bag -- there is
+    no fixed allowlist (unlike CE's `CE_OVERRIDE_FIELDS`): a key the engine's
+    result does not recognize is ignored in silence, same as every other
+    `sp_overrides` write (CLAUDE.md § Previsionale). Set `value` to `null` to
+    clear that key and revert to engine calculation. Multiple entries for the
+    same year merge into that year's SAME bag.
+    """
+    from app.services import assumptions_service
+
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+
+    if isinstance(request, dict):
+        request_data = request
+    else:
+        request_data = request.model_dump() if hasattr(request, 'model_dump') else request
+
+    overrides = request_data.get("overrides", [])
+
+    try:
+        years_touched = assumptions_service.apply_sp_overrides(db, scenario, overrides)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Forecast regeneration failed after SP override patch")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Forecast regeneration failed, no override was applied: {str(e)}"
+        )
+
+    return {"success": True, "years": years_touched}
 
 
 # ===== Forecast Generation Endpoint =====

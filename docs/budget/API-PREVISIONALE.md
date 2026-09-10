@@ -84,8 +84,8 @@ due esiti HTTP opposti a seconda della porta da cui si è entrati.
 `ce01`–`ce20` meno `ce17` (sostituito dalle sue due sotto-voci), più `ce03a` (incrementi di
 immobilizzazioni per lavori interni, A.4), `ce08a`–`d`, `ce09a`–`d`, `ce11b`, `ce17`, `ce17a`,
 `ce17b`. Lo stesso insieme di 32 compare in `backend/app/schemas/budget.py` (due volte),
-nell'allowlist `_CE_OVERRIDE_FIELDS` di `budget_scenarios.py:770-779` e nella mappa
-`FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:71`.
+nell'allowlist `CE_OVERRIDE_FIELDS` di `backend/app/services/assumptions_service.py` e nella
+mappa `FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:72`.
 
 Ogni colonna è un **valore assoluto in euro**. `NULL` = usa il calcolo del motore.
 `ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:1647-1648`,
@@ -105,10 +105,18 @@ PATCH /companies/{id}/scenarios/{sid}/ce-override
 
 `value: null` azzera l'override e restituisce la riga al motore. Un `field` fuori
 dall'allowlist è **400**, un anno senza riga di ipotesi è **404**, e la rigenerazione avviene
-una volta sola alla fine. Attenzione all'ultimo ramo: se la rigenerazione fallisce la risposta
-è **500 «Overrides saved but forecast regeneration failed»** — gli override sono già stati
-committati e si applicheranno alla prima rigenerazione successiva, anche se questa chiamata
-è andata in errore.
+una volta sola alla fine — **nella stessa transazione del salvataggio**
+(`assumptions_service.apply_ce_overrides`). Se la rigenerazione fallisce, lo status **dipende dal
+motivo** (`budget_scenarios.py:826-835`, `patch_ce_override`): un rigetto di dominio del motore —
+`ValueError`, il caso reale nella stragrande maggioranza (`Unfunded financing requirement`, un
+override incompatibile con lo scoperto, ecc.) — risponde **400**; solo un'eccezione davvero
+inattesa (un bug, non un rifiuto legittimo dell'ipotesi) risponde **500**. In ENTRAMBI i casi
+**nessuno** degli override del lotto resta scritto: `db.rollback()` disfa tutto cio' che la
+chiamata aveva applicato, quindi una `GET` successiva legge le ipotesi esattamente come prima
+del tentativo. Prima di questa correzione gli override venivano committati **prima** di provare
+a rigenerare: un fallimento li lasciava comunque scritti, e si applicavano (facendo fallire di
+nuovo, con lo stesso errore) alla prima rigenerazione successiva — invisibile all'utente, perché
+il client scarta la modifica rifiutata e mostra il previsionale vecchio.
 
 Su `/forecast/income` il ciclo è: clic sulla cella previsionale → input in linea → `blur`/Enter
 mette la modifica in `pendingEdits` (**sfondo giallo + sottolineatura gialla**) → compare
@@ -122,10 +130,42 @@ fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/ana
 
 `BudgetAssumptions.sp_overrides` è una colonna **JSON** (`models.py:700`), un dizionario
 `{campo_sp: valore}`. Non è un residuo: `/forecast/balance` è **editabile** e la scrive
-(`frontend/app/forecast/balance/page.tsx:154-184`), passando per la `PUT` per anno; entrambi i
-motori la applicano in coda al calcolo dello SP (`forecast_engine.py:3057`,
-`intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda
-una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:872`).
+(`frontend/app/forecast/balance/page.tsx:153-158`), in un lotto UNICO che può toccare **più
+anni in una sola chiamata**:
+
+```jsonc
+PATCH /companies/{id}/scenarios/{sid}/sp-override
+{ "overrides": [
+    { "forecast_year": 2026, "field": "sp16a_debiti_banche_breve", "value": 400000.55 },
+    { "forecast_year": 2027, "field": "sp16a_debiti_banche_breve", "value": 350000.00 },
+    { "forecast_year": 2026, "field": "sp06a_crediti_clienti_breve", "value": null }
+] }
+→ { "success": true, "years": 2 }
+```
+
+entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engine.py:3069`,
+`intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda una versione
+propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:876`).
+
+`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:845-907`)
+applica TUTTE le voci del lotto — anche su anni diversi — PRIMA di rigenerare, una volta sola,
+nella STESSA transazione: un rifiuto (400 se il motore solleva un `ValueError`, 500 altrimenti —
+stessa distinzione di §2.1) fa `db.rollback()` dell'INTERO lotto, non solo dell'ultima voce, e
+`sp_overrides` resta esattamente come prima della chiamata su OGNI anno toccato. Non c'è
+un'allowlist di campi come `CE_OVERRIDE_FIELDS`: una chiave che il risultato del motore non
+riconosce è ignorata in silenzio (vedi sotto).
+
+Sostituisce un pattern precedente (fino al giro di correzione 3 del task 10):
+`PUT /assumptions/{year}` **per ogni anno modificato, in parallelo** (`Promise.all` lato
+client). Dal giro di correzione 2 ciascuna di quelle chiamate rigenerava l'INTERO scenario
+nella propria transazione: N rigenerazioni pesanti in corsa sullo stesso file SQLite rischiavano
+`database is locked`, e un anno poteva essere validato senza ancora vedere la modifica
+dell'altro (non ancora committata) — un rifiuto spurio anche quando la combinazione delle due
+modifiche sarebbe stata valida. `PATCH /sp-override` applica tutto prima di rigenerare una volta
+sola, eliminando sia la concorrenza sia il rifiuto spurio. `PUT /assumptions/{year}`
+(`assumptions_service.update_single_year_assumptions`) resta disponibile con la stessa garanzia
+transazionale del giro 2 per un aggiornamento di un singolo anno — nessun chiamante nel
+frontend la usa più.
 
 `_apply_sp_overrides` (`forecast_engine.py:1104-1206`) ha tre comportamenti da conoscere:
 

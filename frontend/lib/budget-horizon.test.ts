@@ -12,7 +12,8 @@ import {
   assumptionRowsForSave,
   type AssumptionsMap,
 } from "@/lib/budget-horizon";
-import type { BudgetAssumptions, Pregresso } from "@/types/api";
+import { residualAfter, validatePregresso } from "@/lib/budget-pregresso-circolante";
+import type { BudgetAssumptions, Pregresso, PregressoKey } from "@/types/api";
 
 /**
  * Riga `BudgetAssumptions` completa, con tutti i campi valorizzati a un
@@ -287,6 +288,72 @@ describe("hydrateAssumptions", () => {
     expect(out[2026].tax_advances_paid).toBe(0);
     expect(out[2026].tax_temporary_differences).toBeNull();
   });
+
+  it(
+    "coerce un pregresso tornato dal server con importi-STRINGA a numeri veri (rilievo 5, giro di correzione 1)",
+    () => {
+      // JSON reale osservato dal collaudo su GET /scenarios/{id}/assumptions
+      // (task-10-report-parte1.md, righe 668-679): la colonna `pregresso` e'
+      // un bag di `Decimal`, e Pydantic v2 li serializza come STRINGA in
+      // "json mode" — anche se il tipo `Pregresso` promette `number`.
+      const pregressoDalServer = {
+        crediti_commerciali: {
+          opening: "7657687.3",
+          amounts: ["6451277.6", "806409.7"],
+          writeoff: ["400000"],
+        },
+        debiti_tributari: {
+          opening: "146441",
+          saldo: "60000",
+          rateizzato: "86441",
+          amounts: ["20000", "20000", "20000"],
+          acconto_pct: "100",
+        },
+      } as unknown as Pregresso;
+
+      const row = {
+        ...fixtureRow({ forecast_year: 2026 }),
+        pregresso: pregressoDalServer,
+      } as unknown as BudgetAssumptions;
+      const out = hydrateAssumptions([row], 1);
+      const p = out[2026].pregresso!;
+
+      // Ogni campo numerico e' un vero `number`, non la stringa arrivata dal
+      // server: e' la causa, non solo il sintomo.
+      expect(typeof p.crediti_commerciali!.opening).toBe("number");
+      expect(typeof p.crediti_commerciali!.amounts[0]).toBe("number");
+      expect(typeof p.crediti_commerciali!.writeoff![0]).toBe("number");
+      expect(typeof p.debiti_tributari!.rateizzato).toBe("number");
+
+      // Residuo crediti commerciali: l'intera massa e' gia' stata
+      // scadenziata (importi + inesigibile = apertura), quindi deve fare
+      // ZERO — non NaN. Senza coercizione la somma concatena le stringhe
+      // ("0" + "6451277.6" + "806409.7" ha due punti decimali) e
+      // `plan.opening - quella_stringa` e' NaN.
+      expect(residualAfter(p.crediti_commerciali!, 1)).toBe(0);
+
+      // Nessuna validazione falsa sui debiti tributari: le tre rate
+      // (60.000) stanno ben dentro il rateizzato (86.441). Senza
+      // coercizione la somma concatenata delle rate resta un intero valido
+      // ma enormemente piu' grande, e la validazione la legge come "le rate
+      // superano il rateizzato".
+      const masses: Record<PregressoKey, number> = {
+        crediti_commerciali: p.crediti_commerciali!.opening,
+        debiti_fornitori: 0,
+        debiti_tributari: p.debiti_tributari!.opening,
+        debiti_previdenziali: 0,
+        altri_debiti: 0,
+      };
+      expect(validatePregresso(p, masses, 5)).toEqual([]);
+
+      // Residuo rate (passo 7, tabella): il rateizzato meno le rate
+      // versate, 86.441 − 60.000 = 26.441 — non azzerato da un confronto
+      // fra stringhe concatenate che il clamp `Math.max(0, …)` schiaccia a
+      // zero silenziosamente.
+      const tabellaPlan = { ...p.debiti_tributari!, opening: p.debiti_tributari!.rateizzato };
+      expect(residualAfter(tabellaPlan, 2)).toBe(26441);
+    },
+  );
 });
 
 describe("horizonFromSavedRows", () => {

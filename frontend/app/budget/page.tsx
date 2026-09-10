@@ -21,6 +21,7 @@ import {
 import { formatCurrency } from "@/lib/formatters";
 import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
 import { getErrorMessage } from "@/lib/utils";
+import { saveNotice } from "@/lib/budget-preview-notice";
 import { patchPraticaPerScenarioAperto } from "@/lib/pratica-ingresso";
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
 import { BudgetWizard } from "@/components/budget/wizard/BudgetWizard";
@@ -989,8 +990,11 @@ function ScenarioFormStartup({
       // The backend returns success:true even when generation fails
       // (assumptions_service.py:318-327) — check the explicit flag.
       if (result?.forecast_generated === false) {
+        // `saveNotice` (giro di correzione 2, rilievo 6): stesso prefisso
+        // fisso del backend tradotto in italiano del wizard, non un secondo
+        // testo scritto a mano che potrebbe divergerne.
         toast.warning(
-          result?.message ?? "Ipotesi salvate, ma il previsionale non è stato generato"
+          result?.message ? saveNotice(result.message) : "Ipotesi salvate, ma il previsionale non è stato generato"
         );
       } else {
         toast.success("Scenario salvato e previsionale calcolato con successo!");

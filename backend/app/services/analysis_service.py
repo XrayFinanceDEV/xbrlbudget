@@ -6,6 +6,7 @@ in a single response. This simplifies the API by consolidating multiple endpoint
 """
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
+from datetime import timezone
 from decimal import Decimal
 import sys
 import os
@@ -232,8 +233,20 @@ def _forecast_staleness(scenario) -> tuple:
     Il confronto e' **stretto**: `datetime.utcnow()` ha i microsecondi e la
     generazione scrive dopo le ipotesi, quindi la parita' e' «allineato».
 
+    I due timestamp escono in **UTC esplicito, col suffisso `Z`**. Le colonne
+    sono `default=datetime.utcnow`, cioe' UTC *ingenuo*: emesso cosi' com'e',
+    `Date.parse` lo legge come ora LOCALE (misurato in Europe/Rome: `08:00`
+    diventa `06:00Z`) e il primo che lo mostra a schermo lo sposta di due ore.
+    Il verdetto non ne dipende, perche' confronta due valori della stessa base.
+    Nota per chi li confronta come stringhe: `isoformat()` OMETTE la frazione
+    quando i microsecondi sono zero, e poiche' `'Z'` > `'.'` l'ordine
+    lessicografico di `"…00Z"` e `"…00.500000Z"` e' l'inverso di quello degli
+    istanti. Si confrontano gli istanti, mai le stringhe.
+
     Returns:
-        (assumptions_updated_at ISO | None, forecast_updated_at ISO | None, stale)
+        (assumptions_updated_at ISO UTC `Z` | None,
+         forecast_updated_at ISO UTC `Z` | None,
+         stale)
     """
     def _latest(rows):
         stamps = [r.updated_at or r.created_at for r in rows or []]
@@ -243,9 +256,22 @@ def _forecast_staleness(scenario) -> tuple:
     assumptions_at = _latest(scenario.assumptions)
     forecast_at = _latest(scenario.forecast_years)
     stale = bool(assumptions_at and forecast_at and assumptions_at > forecast_at)
+
+    def _iso_utc(stamp):
+        # Colonne ingenue per costruzione (`default=datetime.utcnow`): il
+        # suffisso dichiara la base che il valore ha gia'. Un valore con fuso
+        # si porta prima in UTC e si spoglia: accodare `Z` a un `+00:00`
+        # darebbe una stringa che `Date.parse` non legge, e l'avviso si
+        # spegnerebbe senza che nessuno se ne accorga.
+        if stamp is None:
+            return None
+        if stamp.tzinfo is not None:
+            stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+        return stamp.isoformat() + "Z"
+
     return (
-        assumptions_at.isoformat() if assumptions_at else None,
-        forecast_at.isoformat() if forecast_at else None,
+        _iso_utc(assumptions_at),
+        _iso_utc(forecast_at),
         stale,
     )
 

@@ -198,11 +198,17 @@ class CompleteAnalysisResponse(BaseModel):
     )
     assumptions_updated_at: Optional[str] = Field(
         default=None,
-        description="Ultima scrittura delle ipotesi dello scenario, ISO (None se non ce ne sono)",
+        description=(
+            "Ultima scrittura delle ipotesi dello scenario, ISO 8601 in UTC col suffisso Z "
+            "(la frazione manca quando i microsecondi sono zero); None se non ce ne sono"
+        ),
     )
     forecast_updated_at: Optional[str] = Field(
         default=None,
-        description="Ultima generazione del previsionale, ISO (None se non e' mai stato generato)",
+        description=(
+            "Ultima generazione del previsionale, ISO 8601 in UTC col suffisso Z "
+            "(la frazione manca quando i microsecondi sono zero); None se non e' mai stato generato"
+        ),
     )
 
 

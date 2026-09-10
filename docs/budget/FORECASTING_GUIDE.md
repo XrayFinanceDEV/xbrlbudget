@@ -214,7 +214,7 @@ e il **risultato ante imposte**, in cascata, così che la somma torni esattament
   percentuale insieme al piano dei crediti commerciali. Nel motore le voci agganciabili sono undici
   codici, e fra essi non ci sono i debiti bancari, che seguono il piano di rimborso. Se una voce ha
   un piano di scadenziamento al passo 6, è il piano a governarla: lì l'interfaccia toglie il driver
-  invece di proportelo e poi buttarlo via.
+  invece di proporglielo e poi buttarlo via.
 - L'interruttore **Debiti previdenziali scalano col costo del personale** quando è acceso è già
   lui l'indicizzazione di quelle due voci: prevale su qualunque driver scelto per esse.
 - Dove il driver è acceso, la **percentuale di crescita della stessa voce non ha alcun effetto**:
@@ -360,7 +360,7 @@ le mostra insieme:
   ragione è un fabbisogno scoperto ti riporta al passo 6, dove lo scoperto si concede, negli altri
   casi al passo 7.
 - **Un previsionale mostrato può essere più vecchio delle ipotesi salvate**, e la schermata
-  dell'analisi lo dichiara. Succede justamente quando il salvataggio ha registrato le ipotesi ma
+  dell'analisi lo dichiara. Succede appunto quando il salvataggio ha registrato le ipotesi ma
   il motore si è fermato: le pagine successive continuano a mostrare i numeri della generazione
   precedente.
 

@@ -1,5 +1,10 @@
 # 📊 Budget & Forecasting Module - User Guide
 
+> **Superato dal 2026-09: vedi [`docs/budget/API-PREVISIONALE.md`](API-PREVISIONALE.md).** Questa
+> guida precede lo scadenziamento del pregresso, le imposte a saldo + acconto, lo scoperto di
+> conto corrente e il percorso a sette passi delle ipotesi: descrive un motore e un'interfaccia
+> che non sono più questi. Riscriverla è fuori ambito di questo lotto.
+
 ## Overview
 The forecasting module allows you to create 3-year financial projections based on percentage growth assumptions. You can create multiple scenarios (optimistic, pessimistic, base case) and compare them with historical data.
 

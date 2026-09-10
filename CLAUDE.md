@@ -270,6 +270,37 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
   derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
   inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:1499-1509`, `_tax_components`).
+- **Le imposte si pagano a saldo + acconto, non ad accumulo.** Il debito tributario generato a
+  fine anno N esce come saldo nell'anno N+1 — al netto del credito tributario di apertura, fino a
+  capienza — e l'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
+  `tax_advances_paid` se **maggiore di zero**: zero in quella casella non vuol dire «zero
+  acconti», vuol dire «non dichiarato», e ricade sulla percentuale
+  (`calculations/projection_common.py:341-367`, `tax_settlement_saldo_acconto`). Prima di questo
+  lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
+  un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
+- **`pregresso` vive solo nella riga del primo anno di piano, e dichiara la massa di apertura.**
+  Uno scadenziamento scritto su un'altra riga alza `pregresso is allowed only in the first
+  forecast year`; un `opening` diverso dal bilancio base (tolleranza 0,01 €) alza «il saldo di
+  apertura di {voce} è cambiato»: scadenziare un saldo nel frattempo cambiato scadenzierebbe un
+  numero che non esiste più (`calculations/forecast_engine.py:1176-1188`, `validate_pregresso`
+  a `:334-362`).
+- **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
+  formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
+  residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
+  voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
+  peso dal residuo lungo (`calculations/forecast_engine.py:2116-2145` per i crediti, `:2442-2468`
+  per fornitori/previdenziali/altri debiti). `details['pregresso'][saldo]['mode']` vale `"runoff"`
+  quando è così, `"legacy"` (formule di oggi, intere) quando il saldo non ha un piano.
+- **Un previsionale mostrato può essere più vecchio delle ipotesi salvate, e si dichiara.**
+  `forecast_stale` in `/analysis` è `true` quando l'ultima scrittura delle ipotesi è successiva
+  all'ultima generazione riuscita — capita perché il bulk risponde 200 anche a una generazione
+  respinta, e per costruzione sul percorso `auto_generate=false`
+  (`backend/app/services/analysis_service.py:211-260`, `_forecast_staleness`). Nessun
+  `ForecastYear` o nessuna ipotesi ⇒ `false`: un controllo che manca è «non lo so», mai un
+  verdetto negativo. `assumptions_updated_at`/`forecast_updated_at` escono **UTC esplicito con
+  la `Z`**: le colonne sono `datetime.utcnow()` ingenuo, ed emetterle senza dichiarare il fuso le
+  farebbe leggere come ora locale da `Date.parse` (misurato: `08:00` diventerebbe `06:00Z` in
+  Europe/Rome).
 - **Promuovere una proiezione CANCELLA il `FinancialYear` annuale già esistente** per quella
   azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era
   stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un
@@ -448,6 +479,21 @@ is gone, not forgotten.
 DSO/DIO/DPO that are not set explicitly are derived from the base year on 360
 days (from *commercial* receivables and payables, not the aggregates), and working capital scales
 with projected revenue and costs, CE overrides included.
+**Closing working capital is generated + pregresso residual**, for five opening balances (trade
+receivables, trade payables, tax payables, welfare payables, other payables): an optional
+`pregresso` runoff plan (`BudgetAssumptions.pregresso`, JSON, valid only on the first forecast
+year's row) schedules how much of the base-year opening mass is collected or paid in each plan
+year; whatever the day-count/growth formula would produce is added to the still-open short-term
+residual, and the entire long-term side becomes pregresso (`calculations/forecast_engine.py:2116-
+2145`, `:2442-2468`, kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
+balance behaves exactly as before the lotto, to the cent (`mode: "legacy"` in
+`details['pregresso']`). Tax payables are the one balance whose behaviour changes **even without a
+plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
+year-end N is paid as saldo in N+1, net of the opening tax credit up to its amount, and the advance
+defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` **greater than
+zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py:341-367`).
+Before this lotto tax debt never left the balance sheet and projected cash was inflated by one
+year's unpaid tax — a defect that balanced, so no check ever saw it.
 Every CE line (32 `ce*_override` columns, from `/forecast/income`) and every BS line (the
 `sp_overrides` JSON bag, from `/forecast/balance`) can be forced to an absolute value that beats the
 growth percentage. → [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md)

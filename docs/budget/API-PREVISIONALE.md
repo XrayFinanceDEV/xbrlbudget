@@ -51,6 +51,27 @@ I tre chiamanti in `frontend/` controllano `forecast_generated === false` e most
 (`calculateProjectedBS`) e `:895` (`saveProjection12M`). Un quarto chiamante che se ne
 dimenticasse dipingerebbe una colonna Proiezione vuota sotto un toast verde.
 
+### 1.1 `forecast_stale` — il previsionale mostrato è più vecchio delle ipotesi
+
+Se l'utente esce dal wizard invece di leggere il toast, o è passato dal percorso
+`auto_generate=false`, le pagine successive (CE Prev., SP Prev., Riclassificato, Rendiconto,
+Report) continuavano a mostrare i numeri della generazione **precedente**, senza alcun segnale.
+`GET /companies/{id}/scenarios/{sid}/analysis` porta ora tre campi per questo
+(`backend/app/services/analysis_service.py:211-260`, `_forecast_staleness`):
+
+| Campo | Valore |
+|---|---|
+| `forecast_stale` | `true` quando l'ultima scrittura delle `BudgetAssumptions` è **successiva** all'ultima generazione riuscita del `ForecastYear`. Dichiarato **sempre**, anche `false`: una chiave assente varrebbe zero, cioè "allineato" — tacere sarebbe dichiararsi puliti senza averlo controllato. Nessun `ForecastYear` **o** nessuna ipotesi ⇒ `false`: un controllo che manca è "non lo so", mai un verdetto negativo. |
+| `assumptions_updated_at` | ISO 8601 in **UTC esplicito con la `Z`**, o `null` se non ci sono ipotesi. |
+| `forecast_updated_at` | ISO 8601 in **UTC esplicito con la `Z`**, o `null` se non è mai stato generato nulla. |
+
+Le colonne sorgente sono `datetime.utcnow()` **ingenuo** (nessun fuso in colonna): il servizio
+aggiunge la `Z` a mano dopo aver normalizzato un eventuale timestamp con fuso in UTC. Ometterla
+farebbe leggere il valore come ora **locale** da `Date.parse` — misurato: `08:00` diventerebbe
+`06:00Z` in Europe/Rome. Il confronto che decide `forecast_stale` è sugli **istanti** `datetime`,
+non sulle stringhe: `isoformat()` omette la frazione quando i microsecondi sono zero, e l'ordine
+lessicografico di `"…00Z"` rispetto a `"…00.500000Z"` è l'inverso di quello dei due istanti.
+
 `POST /generate`, per contrasto, **non** cattura: fa 400 su `ValueError` e 500 su tutto il
 resto (`backend/app/api/v1/budget_scenarios.py:936-945`). Lo stesso motore, lo stesso errore,
 due esiti HTTP opposti a seconda della porta da cui si è entrati.
@@ -203,13 +224,15 @@ Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno
 
 | File | Che cosa contiene |
 |---|---|
-| `database/models.py` | `BudgetAssumptions` — le 32 colonne `ce*_override` e `sp_overrides` |
-| `backend/app/schemas/budget.py` | gli stessi campi lato Pydantic (due classi) |
+| `database/models.py` | `BudgetAssumptions` — le 32 colonne `ce*_override`, `sp_overrides`, `pregresso`, `overdraft_allowed`/`overdraft_limit` |
+| `backend/app/schemas/budget.py` | gli stessi campi lato Pydantic (`PregressoInput` e le sue due sotto-classi comprese) |
 | `backend/app/services/assumptions_service.py` | il bulk, e il `try/except` che produce il 200 con `forecast_generated: false` |
+| `backend/app/services/analysis_service.py` | `_forecast_staleness` — `forecast_stale`, `assumptions_updated_at`, `forecast_updated_at` (§1.1) |
 | `backend/app/api/v1/budget_scenarios.py` | `PATCH /ce-override` + `_CE_OVERRIDE_FIELDS`, `POST /generate?clear_overrides`, i 3 endpoint dei commenti AI, `POST /promote` |
 | `backend/app/services/promote_service.py` | i due cancelli, la sostituzione, la copia verificata |
-| `calculations/forecast_engine.py` | override nel CE, `_apply_sp_overrides`, DSO/DIO/DPO derivati |
-| `calculations/intra_year_engine.py` | gli stessi override sul percorso infrannuale |
+| `calculations/forecast_engine.py` | override nel CE, `_apply_sp_overrides`, DSO/DIO/DPO derivati, `validate_pregresso`, la classe `_Overdraft` |
+| `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses` |
+| `calculations/intra_year_engine.py` | gli stessi override sul percorso infrannuale — **non** tocca lo scadenziamento del pregresso né l'overdraft |
 | `frontend/app/forecast/income/page.tsx` | `FIELD_TO_OVERRIDE`, `EditableCell`, `pendingEdits`, salvataggio batch |
 | `frontend/app/forecast/balance/page.tsx` | l'editor dello SP previsionale che scrive `sp_overrides` |
 | `frontend/lib/pratica-codes.ts` | `CE_OVERRIDE_FIELD_BY_CODE`, `buildCeOverridePayload` |
@@ -274,3 +297,174 @@ davvero sul flusso proiettato (zero se il flusso è nullo), mai quello degenere.
 **esplicito** dell'ipotesi non passa dalla guardia: è una scelta, non una derivazione. Se il
 saldo ha un piano di pregresso è il piano a governarlo e il riporto vale zero, o la stessa massa
 sarebbe contata due volte.
+
+`details` porta anche, sempre (ogni anno, anche a zero/vuoto): `pregresso`, `imposte`,
+`pregresso_ignored`, `pregresso_writeoff_ignored` (§8), `oneri_scoperto`, `scoperto_generato`,
+`scoperto_residuo`, `cassa_assorbita`, `fabbisogno_picco`, `fabbisogno_picco_anno`,
+`cassa_sotto_minimo` (§10) — il bulk e l'anteprima condividono lo stesso motore e lo stesso dict,
+quindi nessuna di queste manca da una delle due porte.
+
+## 8. Lo scadenziamento del pregresso
+
+Il motore proietta il circolante con formule di **stock**: ogni formula sostituisce l'intero
+saldo dell'anno prima, quindi il pregresso si presume incassato o pagato entro l'anno, sempre.
+`BudgetAssumptions.pregresso` (colonna `JSON`, `database/models.py`) è il modo per dire
+l'opposto: quanto del saldo al 31/12 dell'anno base si chiude in ciascun anno di piano, saldo per
+saldo.
+
+```jsonc
+PUT /companies/{id}/scenarios/{sid}/assumptions
+{
+  "assumptions": [
+    { "forecast_year": 2026, "revenue_growth_pct": 5.0,
+      "pregresso": {
+        "crediti_commerciali":  { "opening": 422000.00, "amounts": [380000.00, 30000.00], "writeoff": [12000.00, 0] },
+        "debiti_fornitori":     { "opening": 322000.00, "amounts": [322000.00] },
+        "debiti_tributari":     { "opening": 96000.00, "saldo": 61000.00, "rateizzato": 35000.00,
+                                   "amounts": [11667.00, 11667.00, 11666.00], "acconto_pct": 100 },
+        "debiti_previdenziali": { "opening": 41000.00, "amounts": [41000.00] },
+        "altri_debiti":         { "opening": 58000.00, "amounts": [58000.00] }
+      }
+    },
+    { "forecast_year": 2027, "revenue_growth_pct": 4.0 }
+  ],
+  "auto_generate": true
+}
+```
+
+Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoInput`,
+`PregressoPlanInput`, `PregressoTributariInput`): `crediti_commerciali`, `debiti_fornitori`,
+`debiti_tributari`, `debiti_previdenziali`, `altri_debiti`. Una chiave **assente o `null`** vale
+«nessun piano»: il motore usa la formula di oggi **intera**, lato breve e lato lungo, ed è il
+comportamento di prima del lotto al centesimo (`mode: "legacy"`, sotto).
+
+- **Solo sulla riga del primo anno di piano.** `pregresso` su una riga successiva alza
+  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1181-
+  1186`). È una fotografia dell'anno base, non un'ipotesi per-anno.
+- **`opening` deve coincidere col bilancio base**, tolleranza 0,01 €, o il motore si ferma con
+  «il saldo di apertura di {voce} è cambiato ({dichiarato} → {base}): rivedi lo scadenziamento»
+  (`validate_pregresso`, `calculations/forecast_engine.py:334-362`).
+- **`amounts[i]`** è l'importo chiuso nell'anno di piano `i` (0 = il primo). Per
+  `debiti_tributari` riguarda il **solo rateizzato**: il saldo dell'anno precedente si versa per
+  intero nel primo anno di piano, per definizione (§9). Lunghezza ≤ orizzonte; importi ≥ 0; la
+  somma non può superare la massa che scadenzia — `amounts + writeoff ≤ opening` per i crediti,
+  `saldo + rateizzato = opening` **al centesimo** e `Σ amounts ≤ rateizzato` per i tributari
+  (`validate_runoff`, `calculations/projection_common.py:297-307`). Superare la massa è un
+  **errore**, non un troncamento
+  silenzioso: incassare più di quanto c'è inventa cassa.
+- **`writeoff[i]`** esiste solo su `crediti_commerciali`: è l'inesigibile di quell'anno, riduce
+  il residuo e va in `ce09d_svalutazione_crediti` (`ce09d(N) = ce09d_base + inesigibile(N)`, salvo
+  `ce09d_override` — se un override di CE forza `ce09` o `ce09d`, l'inesigibile scadenziato non
+  può essere scaricato e resta a bilancio: `pregresso_writeoff_ignored`, sotto, lo dichiara).
+
+**Scadenza per costruzione.** Alla chiusura dell'anno N, la parte del residuo dovuta in N+1 sta a
+breve (`sp06`/`sp16x`); il resto sta oltre 12 mesi (`sp07`/`sp17x`). **Con un piano il lato lungo
+è interamente pregresso**: il motore rigenera dalla formula di oggi solo il lato a breve
+(generato + il residuo dovuto l'anno dopo), il resto del residuo ci resta per tutto il piano e la
+percentuale di crescita di quella voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`)
+smette di applicarsi (`calculations/forecast_engine.py:2116-2145` per i crediti, `:2442-2468` per
+fornitori/previdenziali/altri debiti). Nell'ultimo anno di piano tutto il residuo non scadenziato
+è oltre: non c'è un «anno dopo» nel piano, e il motore non inventa scadenze.
+
+### `details['pregresso'][chiave]` — una per ciascuna delle cinque voci, ogni anno
+
+| Chiave | Valore |
+|---|---|
+| `opening` | la massa che le altre chiavi della riga descrivono: la massa di apertura del bilancio base senza piano, la massa scadenziata con un piano — per i tributari è il **rateizzato**, non l'intera apertura, perché il saldo si versa a parte (§9) |
+| `closed` | l'importo chiuso quest'anno (`amounts[year_index]`, o zero senza piano) |
+| `writeoff` | l'inesigibile di quest'anno (solo crediti) |
+| `residual_short` | il residuo dovuto l'anno **dopo** — quello che finisce a breve |
+| `residual_long` | il resto del residuo, oltre l'esercizio |
+| `generated` | il lato a breve **generato dalla formula di oggi**, prima di sommare `residual_short` |
+| `mode` | `"runoff"` con un piano dichiarato, `"legacy"` senza (formula di oggi, intera) |
+
+`pregresso_ignored` è una **lista**, sempre presente anche vuota: i saldi il cui piano è stato
+scavalcato dalla via manuale (oggi il solo caso possibile è `debiti_tributari`, quando
+`sp06e_growth_pct` o `sp16e_growth_pct` sono valorizzati — §9). `pregresso_writeoff_ignored` è
+una lista di oggetti (`saldo`, `field`, `requested`, `reason`) per l'inesigibile che un override
+di CE ha impedito di scaricare: senza questa chiave il piano direbbe un importo inesigibile e il
+bilancio non ne mostrerebbe traccia, senza un solo avviso.
+
+## 9. Le imposte a saldo + acconto
+
+È l'unico dei cinque saldi il cui comportamento cambia **anche senza un piano**: il vecchio
+meccanismo (`precedente + imposte dell'anno − acconti`, con acconti a **zero** di default)
+accumulava debito tributario che non usciva mai — un difetto che quadrava, mai visto da un
+controllo. Ora ogni anno di piano paga **saldo + acconto + rate**
+(`calculations.projection_common.tax_settlement_saldo_acconto`, chiamata solo dal motore budget —
+l'infrannuale continua a usare `tax_closing_position`, invariata):
+
+- **saldo pagato in N** = il debito tributario **generato a fine N−1**, al netto del credito
+  tributario di apertura fino a capienza (l'eccedenza resta credito). Per N = 1 è la quota
+  «saldo dell'anno precedente» che l'utente dichiara nel campo `pregresso.debiti_tributari.saldo`.
+- **acconti(N)** = `tax_advances_paid` della riga N se **maggiore di zero**, altrimenti
+  `imposte(N−1) × acconto_pct / 100` — `acconto_pct` di default **100**, `imposte(0)` è `ce20`
+  dell'anno base (l'unico dato di imposta che il consuntivo porta). **Zero in `tax_advances_paid`
+  non vuol dire «zero acconti»**: la colonna è `NOT NULL default 0`, quindi zero è il valore che
+  dice «non compilata», e il motore ricade sulla percentuale. Chi vuole davvero zero acconti
+  imposta `acconto_pct = 0`.
+- **rate pagate in N** = l'importo del piano `pregresso.debiti_tributari.amounts` per l'anno N —
+  scadenzia il **solo rateizzato**, mai il saldo.
+- **debito generato a fine N** = `max(0, imposte(N) − acconti(N))`; **credito generato a fine N**
+  = `max(0, acconti(N) − imposte(N))`.
+- `sp16e(N)` = debito generato + rate dovute in N+1; `sp17e(N)` = rate dovute oltre N+1;
+  `sp06e(N)` = credito generato + eccedenza del credito di apertura non ancora usata.
+
+Uscita di cassa dell'anno = saldo + acconti + rate, attraverso il plug come tutto il resto.
+
+**Via manuale.** `sp06e_growth_pct` o `sp16e_growth_pct` valorizzati saltano tutto questo, come
+prima del lotto: i debiti tributari si muovono per crescita percentuale, e un piano tributario
+scritto insieme a quelle percentuali produce `pregresso_ignored: ["debiti_tributari"]` invece di
+applicarsi a metà.
+
+### `details['imposte']` — sempre presente, ogni anno
+
+| Chiave | Valore |
+|---|---|
+| `current_tax` | l'imposta corrente dell'anno (da `_tax_components`, le differite restano fuori) |
+| `saldo_paid` | il saldo versato quest'anno |
+| `acconti_paid` | l'acconto versato quest'anno |
+| `rate_paid` | le rate del rateizzato versate quest'anno |
+| `generated_debt` | il debito tributario generato a fine anno (→ `sp16e` dell'anno prossimo) |
+| `generated_credit` | il credito tributario generato a fine anno |
+| `opening_credit_left` | il credito di apertura non ancora usato |
+| `mode` | `"saldo_acconto"` (il kernel governa) o `"manual"` (via manuale attiva: gli importi pagati sono dichiarati zero, perché non esistono — mai inventati) |
+
+## 10. Scoperto di conto corrente (overdraft)
+
+La cassa proiettata pluggia **solo verso l'alto**: un plug negativo è un fabbisogno scoperto.
+`overdraft_allowed` (per anno di ipotesi, **`false` di default**) decide che cosa succede: spento,
+il motore **solleva** `Unfunded financing requirement <importo>` e non produce nulla, come sempre;
+acceso, il fabbisogno diventa uno scoperto **generato dal piano**, componente separato dal debito
+bancario pregresso e dal nuovo finanziamento — anche nell'aritmetica, non solo nei `details`
+(`calculations/forecast_engine.py`, classe `_Overdraft`). `overdraft_limit` (opzionale, ≥ 0) è il
+tetto: oltre, il motore solleva di nuovo. Il cancello unico è `_Overdraft.copri`, chiamato una
+volta sola dopo ogni rettifica compresi gli `sp_overrides`, su una cassa netta già arrotondata al
+centesimo.
+
+```jsonc
+{ "forecast_year": 2027, "revenue_growth_pct": 5.0,
+  "overdraft_allowed": true, "overdraft_limit": 100000.00 }
+```
+
+### `details` — sei chiavi dello scoperto, sempre presenti (anche a zero)
+
+| Chiave | Valore |
+|---|---|
+| `scoperto_generato` | lo scoperto **nato** nell'anno (aumento sul saldo di apertura) |
+| `scoperto_residuo` | lo scoperto **in essere a fine anno** — l'apertura dell'anno dopo |
+| `cassa_assorbita` | quanto la cassa si riduce nell'anno, **anche dove resta positiva**: l'avviso arriva prima che diventi scoperto, non dopo |
+| `oneri_scoperto` | l'interesse maturato al `financing_interest_rate`, sullo scoperto di **apertura** — mai su quello che l'anno stesso genera, sarebbe circolare |
+| `fabbisogno_picco` | il fabbisogno di picco su **tutto il piano**, scritto su ogni anno: la domanda che si porta in banca non dipende dall'anno che si sta guardando |
+| `fabbisogno_picco_anno` | l'anno in cui cade il picco — `null` quando il picco è zero |
+
+Una settima chiave, distinta dalle sei di sopra e legata al `cash_sweep_min_cash` (Ruling 38):
+`cassa_sotto_minimo`, quanto la cassa di chiusura sta sotto il minimo del cash sweep in un anno
+con scoperto aperto o chiuso nell'anno — perché lo scoperto si rimborsa **per primo**, anche sotto
+quel minimo (tenere liquidità pagando interessi sullo scoperto non avrebbe senso), e questo si
+dichiara invece di evitarlo.
+
+Un `sp_overrides` su `sp16a` (o sul suo aggregato `sp16`) fissa il totale: vince, e lo scoperto ne
+discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripartizione è coerente
+(il passivo è fissato dall'override qualunque sia la divisione fra banca e scoperto), e il motore
+rifiuta la combinazione con un errore esplicito invece di superare il totale.

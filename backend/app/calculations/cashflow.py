@@ -124,9 +124,14 @@ class CashFlowCalculator:
             operating_cf -= delta_inventory
 
             # Increase in payables increases cash (we keep cash longer)
+            # Only OPERATING debt (fornitori, tributari, previdenziali, altri debiti — short
+            # and long term) belongs here. FINANCIAL debt (banks, other financial institutions,
+            # bonds) is a financing flow, captured below via financial_debt_total — never both,
+            # or a maturity reclassification between sp16a and sp17a would move through
+            # operating cashflow (see cashflow_detailed.py, same rule).
             delta_payables = (
-                Decimal(str(bs_current.sp16_debiti_breve)) -
-                Decimal(str(bs_previous.sp16_debiti_breve))
+                Decimal(str(bs_current.operating_debt_total)) -
+                Decimal(str(bs_previous.operating_debt_total))
             )
             operating_cf += delta_payables
         else:
@@ -153,10 +158,12 @@ class CashFlowCalculator:
 
         # 3. FINANCING ACTIVITIES
         if bs_previous:
-            # Change in total debt
+            # Change in FINANCIAL debt only (banks, other financial institutions, bonds — short
+            # and long term). total_debt would also include operating debt, already counted
+            # above in delta_payables, and double-count it here.
             delta_debt = (
-                Decimal(str(bs_current.total_debt)) -
-                Decimal(str(bs_previous.total_debt))
+                Decimal(str(bs_current.financial_debt_total)) -
+                Decimal(str(bs_previous.financial_debt_total))
             )
 
             # Change in equity (excluding current year profit)

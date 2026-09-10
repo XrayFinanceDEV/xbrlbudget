@@ -182,8 +182,14 @@ class DetailedCashFlowCalculator:
         delta_receivables = D(bs_previous.sp06_crediti_breve) - D(bs_current.sp06_crediti_breve)
 
         # Payables: increase is positive (defer payment)
-        # Include ALL short-term debts (operating + financial) in working capital
-        delta_payables = D(bs_current.sp16_debiti_breve) - D(bs_previous.sp16_debiti_breve)
+        # Only OPERATING debts belong in working capital (fornitori, tributari, previdenziali,
+        # altri debiti — sp16d-g / sp17d-g, BalanceSheet.operating_debt_total). FINANCIAL debt
+        # (banche, altri finanziatori, obbligazioni — sp16a-c / sp17a-c) is a financing flow: it
+        # is left out here and picked up by the residual formula in the financing section below.
+        # This matters because a maturity reclassification between sp16a and sp17a (e.g. task
+        # 17's short-term instalment of a new loan) must never move through operating cashflow —
+        # it is entirely inside "financial debt" on both sides of the split.
+        delta_payables = D(bs_current.operating_debt_total) - D(bs_previous.operating_debt_total)
 
         # Accruals/deferrals - active
         delta_accruals_active = D(bs_previous.sp10_ratei_risconti_attivi) - D(bs_current.sp10_ratei_risconti_attivi)
@@ -332,52 +338,35 @@ class DetailedCashFlowCalculator:
 
         # ===== C. FINANCING ACTIVITIES =====
 
-        # Third-party funds (LONG-TERM financial debt only)
-        # NOTE: Short-term financial debt changes are already in working capital section (delta_payables)
-        # Financing section shows only long-term debt: banks, other financial institutions, bonds
-
-        # Calculate long-term debt change
-        current_lt_debt = (
-            D(bs_current.sp17a_debiti_banche_lungo) + D(bs_current.sp17b_debiti_altri_finanz_lungo) +
-            D(bs_current.sp17c_debiti_obbligazioni_lungo)
-        )
-        previous_lt_debt = (
-            D(bs_previous.sp17a_debiti_banche_lungo) + D(bs_previous.sp17b_debiti_altri_finanz_lungo) +
-            D(bs_previous.sp17c_debiti_obbligazioni_lungo)
-        )
+        # Third-party funds (FINANCIAL debt, short and long term)
+        # Financial debt (banks, other financial institutions, bonds — sp16a-c / sp17a-c,
+        # BalanceSheet.financial_debt_short / financial_debt_long) is entirely a financing flow.
+        # It is NOT part of delta_payables above (which only carries operating debt), so a
+        # maturity reclassification from sp17a to sp16a (e.g. task 17's short-term instalment of
+        # a new loan) never touches operating cashflow, and produces no cashflow of its own here
+        # either — it is symmetric on both sides of the split, and the residual formula below
+        # picks up whatever financial debt actually moved without double-counting it.
+        current_lt_debt = D(bs_current.financial_debt_long)
+        previous_lt_debt = D(bs_previous.financial_debt_long)
         delta_lt_debt = current_lt_debt - previous_lt_debt
 
-        # Calculate short-term financial debt change (for reclassification detection)
-        current_st_financial = (
-            D(bs_current.sp16a_debiti_banche_breve) + D(bs_current.sp16b_debiti_altri_finanz_breve) +
-            D(bs_current.sp16c_debiti_obbligazioni_breve)
-        )
-        previous_st_financial = (
-            D(bs_previous.sp16a_debiti_banche_breve) + D(bs_previous.sp16b_debiti_altri_finanz_breve) +
-            D(bs_previous.sp16c_debiti_obbligazioni_breve)
-        )
+        current_st_financial = D(bs_current.financial_debt_short)
+        previous_st_financial = D(bs_previous.financial_debt_short)
         delta_st_financial = current_st_financial - previous_st_financial
 
-        # Calculate total financial debt change
+        # Total financial debt change (informational — not summed directly into financing;
+        # see the residual formula below).
         delta_total_debt = delta_lt_debt + delta_st_financial
 
-        # Detect and adjust for LT-to-ST reclassifications
-        # Reclassification occurs when LT debt approaching maturity (<12 months) moves to ST
-        # This shows as: LT decrease + ST increase, but NO cashflow
-        # Since ST changes are in WC (delta_payables), we must exclude reclassified amount from financing
-        #
         # Calculate financing cashflow to make cash balance:
         # Cash change = Operating + Investing + Financing
-        # Therefore: Financing = Cash change - Operating - Investing
+        # Therefore: Financing = Cash change - Operating - Investing - Own funds
         #
-        # However, we calculate it component by component and let it reconcile naturally
-        # The correct formula accounts for the fact that ST debt is in WC:
-        # Financing from debt = LT debt change + (ST debt change - amount already in WC)
-        # Since ALL ST debt change is in WC, we only count LT changes
-        # But we need to add back reclassifications that are netted in both places
-        #
-        # NOTE: We'll calculate third-party funds after own funds using cash reconciliation
-        # to ensure the cashflow statement balances properly
+        # We calculate it as the residual that makes the statement balance, rather than summing
+        # delta_total_debt directly, so that any balance-sheet movement this calculator does not
+        # otherwise classify (e.g. TFR/fondi timing, accruals) still reconciles to actual cash
+        # instead of leaving a silent gap. Since delta_payables now excludes financial debt, that
+        # residual correctly carries delta_total_debt without double-counting it.
 
         # Own funds (equity changes including profit distributions)
         # If previous year profit wasn't retained in reserves, it was distributed

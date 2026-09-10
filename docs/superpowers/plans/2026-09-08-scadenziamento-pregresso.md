@@ -1472,3 +1472,31 @@ Due fatti misurati sul motore (versione `6b7d7f3`) che inquadrano il task:
 - [ ] **Step 4: Verde** — `tests/test_budget_*.py`, `tests/test_forecast*.py`,
   `tests/test_intra*.py` (l'infrannuale **non cambia**), `npx tsc --noEmit`, suite frontend.
 - [ ] **Step 5: Commit**
+
+---
+
+### Task 16: La rata del nuovo finanziamento paga il proprio debito, non il debito bancario pregresso
+
+**Aggiunto il 2026-09-10 per decisione del proprietario** («Adesso, in questo lotto»), dopo che la
+ri-revisione del Task 12 ha confermato il difetto con una sonda. **Modello:** opus (motore).
+
+**Il difetto.** In `calculations/forecast_engine.py` (circa riga 2550)
+`short_fin_repayment = min(sp16a, fin_repayment)` fa consumare alla rata del **nuovo** finanziamento la
+quota bancaria **pregressa** a breve. Un'azienda con `sp16a` pregresso 12.345,67 e nessun piano di rimborso
+lo vede restare costante senza nuovo prestito, e andare a 0 nel primo anno con un nuovo finanziamento. E' la
+famiglia del rilievo 2 del Task 12, rimasta fuori perche' non riguarda lo scoperto. Il banco di parita' non
+poteva vederlo: i suoi fixture hanno `sp16a` a zero.
+
+**Contratto:**
+- **I1 esteso** — ogni debito si riduce solo con il proprio rimborso: la componente pregressa di
+  `sp16a`/`sp17a` e' identica, anno per anno, con e senza il nuovo finanziamento (finche' la cassa non richiede
+  scoperto; oltre, vale gia' I1 del Task 12). Un debito pregresso scadenziato che il piano non rigenera si
+  estingue (Ruling 16); uno **non** scadenziato non sparisce perche' e' arrivato un prestito nuovo.
+- SP quadrato al centesimo; dichiarato = persistito; cancello unico `_Overdraft.copri` invariato.
+- **Rete rossa sul codice di prima**: test dedicato (`sp16a` pregresso non tondo senza piano e con piano,
+  `sp17a` pregresso > 0, nuovo finanziamento con rate al mezzo centesimo) ed estensione del campionamento di
+  `tests/test_forecast_dichiarato_vs_persistito.py`; entrambi falliscono su `5ad6112`, passano dopo.
+- **Banco di parita'** (commit separato): un fixture con debito bancario pregresso > 0 a breve e a lungo;
+  le celle si muovono **solo** negli scenari con debito pregresso e nuovo finanziamento insieme.
+- `CLAUDE.md` › Forecasting Engine dice gia' «le rate pagano il proprio debito»: dopo questo task diventa vera;
+  si ritocca solo se non dice esattamente cio' che il motore fa.

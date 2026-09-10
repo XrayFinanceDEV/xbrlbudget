@@ -28,6 +28,7 @@ import { ReportCashflow } from "@/components/report/report-cashflow";
 import { ReportAppendices } from "@/components/report/report-appendices";
 import { ReportNotes } from "@/components/report/report-notes";
 import { ReportAIComment } from "@/components/report/report-ai-comment";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 
 export default function ReportPage() {
   const { selectedCompanyId, selectedCompany } = useApp();
@@ -186,6 +187,10 @@ export default function ReportPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      {/* print:hidden come ogni altro avviso di questa pagina: e' rivolto a chi
+          guarda lo schermo prima di stampare, non al destinatario del report. */}
+      <ForecastStaleBanner analysis={analysisData} className="mb-6 print:hidden" />
 
       {analysisData && (
         <div className="flex gap-6 print:block">

@@ -3,6 +3,7 @@ Forecast Calculation Engine
 Generates forecasted Income Statements and Balance Sheets based on budget assumptions
 """
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -1149,6 +1150,17 @@ class ForecastEngine:
                 )
                 self.db.add(fy)
                 self.db.flush()
+            else:
+                # `updated_at` e' la data della generazione, e /analysis la
+                # confronta con quella delle ipotesi per dichiarare stantio un
+                # previsionale piu' vecchio di cio' che dovrebbe riflettere.
+                # Su un anno gia' esistente questo ciclo scrive solo sui FIGLI
+                # (BS e IS): la riga `ForecastYear` non cambia, quindi
+                # l'`onupdate` della colonna NON scatta. Misurato: senza questa
+                # riga `updated_at` resta al microsecondo della PRIMA
+                # generazione, e ogni rigenerazione riuscita successiva si
+                # dichiarerebbe stantia pur essendo allineata.
+                fy.updated_at = datetime.utcnow()
 
             # Save or update forecast balance sheet
             existing_bs = self.db.query(ForecastBalanceSheet).filter(

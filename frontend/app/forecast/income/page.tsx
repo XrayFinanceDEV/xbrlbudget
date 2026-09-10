@@ -53,6 +53,7 @@ import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw } fr
 import { cn, getErrorMessage } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 import { toast } from "sonner";
 
 const revenueChartConfig = {
@@ -280,6 +281,8 @@ export default function ForecastIncomePage() {
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
         </div>
       )}
+
+      <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
       {!loading && analysisData && historicalYears.length === 0 && (
         <Alert>

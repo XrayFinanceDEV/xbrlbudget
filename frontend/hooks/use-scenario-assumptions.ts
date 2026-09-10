@@ -43,7 +43,7 @@ export interface ScenarioAssumptionsState {
   setAssumptions: React.Dispatch<React.SetStateAction<AssumptionsMap>>;
   idratato: boolean;
   isNew: boolean; // isNew = nessuna ipotesi salvata
-  updateAssumption: (year: number, field: string, value: number | boolean | null) => void;
+  updateAssumption: (year: number, field: string, value: number | boolean | null | object) => void;
   updateAll: (field: string, value: number | boolean | null) => void; // tutti i forecastYears
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
@@ -181,7 +181,10 @@ export function useScenarioAssumptions({
     );
   }, [idratato, forecastYears, scenarioId]);
 
-  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
+  // `object` per le ipotesi strutturate scritte per anno (il piano `pregresso`
+  // del passo 6): la mappa e' `Partial<BudgetAssumptionsCreate>`, che quel
+  // campo lo dichiara gia'.
+  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null | object) => {
     setAssumptions((prev) => ({
       ...prev,
       [year]: {

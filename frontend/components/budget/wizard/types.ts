@@ -20,7 +20,10 @@ export interface StepProps {
   historical: HistoricalData;
   historicalYears: number[];
   preview: PreviewState;
-  update: (year: number, field: string, value: number | boolean | null) => void;
+  /** `object` per le ipotesi strutturate scritte per anno — il piano di
+   *  scadenziamento del pregresso (`pregresso`), che vive nel PRIMO anno di
+   *  piano e non e' ne' un numero ne' un interruttore. */
+  update: (year: number, field: string, value: number | boolean | null | object) => void;
   updateAll: (field: string, value: number | boolean | null) => void;
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;

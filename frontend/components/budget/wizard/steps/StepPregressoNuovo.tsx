@@ -10,23 +10,30 @@
 // previsti vengono da rowsPregressoNuovo (via pregressoPreview), mai
 // ricalcolati qui. FinancingLoansGrid e TaxTemporaryDifferencesGrid
 // (Task 7) si riusano cosi' come sono: non sono duplicate qui dentro.
+//
+// La tabella dello scadenziamento del circolante e' PregressoTable, e le sue
+// decisioni stanno in lib/budget-pregresso-tabella.ts: qui restano solo il
+// piano da leggere/scrivere (primo anno di piano) e l'interruttore € / %.
 import type { JSX, ReactNode } from "react";
-import { useMemo } from "react";
-import { Check } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertTriangle, Check } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { euro } from "@/lib/budget-format";
+import { PREGRESSO_LABELS, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import { boolAssumption, pregressoBase, pregressoPreview, singleYearValue } from "@/lib/budget-pregresso-step";
+import { TABELLA_KEYS, massesOf, type PregressoMode } from "@/lib/budget-pregresso-tabella";
 import { previewNotice } from "@/lib/budget-preview-notice";
+import type { Pregresso } from "@/types/api";
 import type { StepProps } from "../types";
+import { PregressoTable } from "../PregressoTable";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
 
@@ -70,20 +77,6 @@ function RepaymentInput({ field, value, uneven, onChange }: {
   );
 }
 
-/** Un Select disabilitato con un solo valore: segnaposto del lotto 2. */
-function Lotto2Select({ text }: { text: string }): JSX.Element {
-  return (
-    <Select disabled value="lotto2">
-      <SelectTrigger className="h-8 w-36 text-xs">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="lotto2">{text}</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-}
-
 const FINANCING_ROWS: YearInputRow[] = [
   { field: "financing_amount", label: "Importo €", baseLabel: "—" },
   { field: "financing_duration_years", label: "Durata (anni)", baseLabel: "—" },
@@ -106,7 +99,30 @@ const ADVANCED_ROWS: YearInputRow[] = [
 export function StepPregressoNuovo(p: StepProps): JSX.Element {
   const baseBs = p.historical[p.baseYear]?.balance;
   const base = useMemo(() => pregressoBase(baseBs), [baseBs]);
-  const preview = useMemo(() => pregressoPreview(baseBs, p.preview.data), [baseBs, p.preview.data]);
+  const preview = useMemo(
+    () => pregressoPreview(baseBs, p.preview.data, TABELLA_KEYS),
+    [baseBs, p.preview.data],
+  );
+
+  // Il piano di scadenziamento e' UNO per scenario, e vive nelle ipotesi del
+  // PRIMO anno di piano (spec §3.5): il motore lo legge da li'. Scriverlo su
+  // ogni anno lo farebbe applicare piu' volte.
+  const firstYear = p.forecastYears[0];
+  const masses = useMemo(() => massesOf(baseBs), [baseBs]);
+  // `?? {}` costruirebbe un oggetto NUOVO a ogni render, e la `useMemo` degli
+  // errori si rifarebbe ogni volta: si dipende dal campo salvato, non dal
+  // ripiego.
+  const pregressoSalvato = p.assumptions[firstYear]?.pregresso;
+  const pregresso = useMemo(() => (pregressoSalvato ?? {}) as Pregresso, [pregressoSalvato]);
+  const setPregresso = (next: Pregresso) => p.update(firstYear, "pregresso", next);
+  const [mode, setMode] = useState<PregressoMode>("eur");
+  // Diagnostica, non correzione: superare la massa di apertura e' un errore,
+  // e chi lo produce lo vede scritto — il salvataggio lo rifiuterebbe comunque
+  // con lo stesso messaggio, che pero' arriverebbe molto piu' tardi.
+  const errors = useMemo(
+    () => validatePregresso(pregresso, masses, p.forecastYears.length),
+    [pregresso, masses, p.forecastYears.length],
+  );
 
   const existingDebt = singleYearValue(p.assumptions, p.forecastYears, "existing_debt_repayment_years");
   const altriFinanz = singleYearValue(p.assumptions, p.forecastYears, "altri_finanz_repayment_years");
@@ -142,22 +158,63 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
                 onChange={(v) => p.updateAll("altri_finanz_repayment_years", v)}
               />
             </ScheduleRow>
-            <ScheduleRow label={`Crediti verso clienti al ${p.baseYear}`} small={euro(base.creditiClienti)}>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">lotto 2</Badge>
-                <Lotto2Select text="entro l'anno" />
-              </div>
-            </ScheduleRow>
-            <ScheduleRow label="Debiti tributari" small={euro(base.debitiTributari)}>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">lotto 2</Badge>
-                <span className="text-xs text-muted-foreground">si regola al passo 7</span>
-              </div>
-            </ScheduleRow>
             <p className="pt-3 text-xs text-muted-foreground">
               Con un piano dettagliato in Finanziamenti la durata generica del rimborso viene ignorata: vale il
               piano.
             </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between space-y-0">
+            <div>
+              <CardTitle className="text-base">Pregresso del circolante</CardTitle>
+              <CardDescription>
+                quando rientrano — o si pagano — i saldi al 31/12/{p.baseYear}
+              </CardDescription>
+            </div>
+            {/* Stesso interruttore a due pulsanti dell'orizzonte di piano
+                (StepScenario): l'importo canonico e' l'euro, la percentuale e'
+                una vista sulla stessa cella. */}
+            <div className="flex shrink-0 items-center gap-1">
+              <Button type="button" size="sm" variant={mode === "eur" ? "default" : "outline"}
+                onClick={() => setMode("eur")}>
+                €
+              </Button>
+              <Button type="button" size="sm" variant={mode === "pct" ? "default" : "outline"}
+                onClick={() => setMode("pct")}>
+                %
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {baseBs && firstYear !== undefined ? (
+              <PregressoTable
+                keys={TABELLA_KEYS}
+                masses={masses}
+                pregresso={pregresso}
+                forecastYears={p.forecastYears}
+                baseYear={p.baseYear}
+                mode={mode}
+                onChange={setPregresso}
+                errors={errors}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Il bilancio dell&apos;anno base non è ancora disponibile: senza quei saldi non c&apos;è nulla da
+                scadenziare.
+              </p>
+            )}
+
+            <div className="mt-3 flex items-start justify-between gap-3 border-t border-border/50 pt-3">
+              <div>
+                <div className="text-sm font-medium text-foreground">{PREGRESSO_LABELS.debiti_tributari}</div>
+                <div className="text-xs text-muted-foreground">{euro(masses.debiti_tributari)}</div>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                seguono la posizione fiscale: si regolano al passo Imposte
+              </span>
+            </div>
           </CardContent>
         </Card>
 
@@ -243,6 +300,20 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
           loading={p.preview.loading}
           error={previewNotice(p.preview)}
         >
+          {/* L'inesigibile che un override del CE ha impedito di rilevare: il
+              credito e' rimasto a bilancio, e l'utente lo credeva svalutato.
+              Il motore lo dichiara, nessuna schermata lo diceva. */}
+          {preview.writeoffIgnored.length > 0 && (
+            <div className="mt-3 space-y-1 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              {preview.writeoffIgnored.map((m) => (
+                <div key={m} className="flex gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{m}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Il fabbisogno scoperto lo dice gia' `previewNotice`, sopra, in UN
               solo posto (lib/budget-preview-notice.ts): qui resta la sola
               conferma opposta, che quel riquadro non da'. */}

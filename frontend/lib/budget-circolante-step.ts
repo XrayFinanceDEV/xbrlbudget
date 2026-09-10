@@ -62,13 +62,49 @@ export function giorniMediAuto(
 const dayLabel = (n: number | null): string => (n === null ? "n/d" : `${n} gg`);
 const autoPlaceholder = (n: number | null) => () => (n === null ? "auto" : `auto ${n}`);
 
+/** L'etichetta di ciascuno dei tre giorni medi, in un posto solo: le righe
+ *  della tabella e gli avvisi devono chiamarli allo stesso modo. */
+const GIORNI_LABELS: Record<string, string> = {
+  dso: "Giorni incasso clienti (DSO)",
+  dio: "Giorni rotazione magazzino (DIO)",
+  dpo: "Giorni pagamento fornitori (DPO)",
+};
+
 /** Le tre righe "Giorni medi": DSO, DIO, DPO. */
 export function giorniMediRows(auto: GiorniMedi): CircolanteTableRow[] {
   return [
-    { field: "dso_days", label: "Giorni incasso clienti (DSO)", baseLabel: dayLabel(auto.dso), placeholder: autoPlaceholder(auto.dso) },
-    { field: "dio_days", label: "Giorni rotazione magazzino (DIO)", baseLabel: dayLabel(auto.dio), placeholder: autoPlaceholder(auto.dio) },
-    { field: "dpo_days", label: "Giorni pagamento fornitori (DPO)", baseLabel: dayLabel(auto.dpo), placeholder: autoPlaceholder(auto.dpo) },
+    { field: "dso_days", label: GIORNI_LABELS.dso, baseLabel: dayLabel(auto.dso), placeholder: autoPlaceholder(auto.dso) },
+    { field: "dio_days", label: GIORNI_LABELS.dio, baseLabel: dayLabel(auto.dio), placeholder: autoPlaceholder(auto.dio) },
+    { field: "dpo_days", label: GIORNI_LABELS.dpo, baseLabel: dayLabel(auto.dpo), placeholder: autoPlaceholder(auto.dpo) },
   ];
+}
+
+/**
+ * I giorni medi DEDOTTI che il motore ha scartato, anno per anno
+ * (`details['degenerate_turnover_ratio']`): una rotazione che implica piu' di
+ * un anno di giacenza e' degenere, e in quell'anno il motore **riporta il
+ * saldo dell'anno base invece di scalarlo**.
+ *
+ * Senza questo avviso l'utente legge un giorno medio in tabella e non sa che
+ * quel giorno non e' stato applicato. Misurato al Task 14: il `dpo = 3.600` del
+ * fixture `holding` fa scattare davvero la guardia, non e' un caso di
+ * laboratorio.
+ *
+ * Una chiave assente vale zero — nessun avviso — non «non lo so»: e' il motore
+ * a dichiararla sempre.
+ */
+export function degenerateDaysAvvisi(data: ForecastPreviewResponse | null): string[] {
+  const anni: Record<string, number[]> = {};
+  for (const y of data?.forecast_years ?? []) {
+    for (const kind of y.details?.degenerate_turnover_ratio ?? []) {
+      (anni[kind] ??= []).push(y.year);
+    }
+  }
+  return Object.entries(anni).map(([kind, years]) =>
+    `${GIORNI_LABELS[kind] ?? kind}: il valore dedotto dall'anno base è fuori scala (oltre un anno di rotazione), ` +
+    `quindi ${years.length === 1 ? "nel" : "negli anni"} ${years.join(", ")} il motore ha riportato il saldo ` +
+    "dell'anno base invece di scalarlo.",
+  );
 }
 
 /**
@@ -230,9 +266,12 @@ export interface CircolantePreview {
   /** Gli anni che il motore ha davvero prodotto, non quelli richiesti. */
   years: number[];
   rows: PreviewRow[];
+  /** I giorni medi dedotti che il motore ha scartato: il saldo base e' stato
+   *  riportato, non scalato. Vuoto quando non scatta nulla. */
+  degenerateDays: string[];
 }
 
-const EMPTY_PREVIEW: CircolantePreview = { years: [], rows: [] };
+const EMPTY_PREVIEW: CircolantePreview = { years: [], rows: [], degenerateDays: [] };
 
 /** Dalla risposta del motore alle righe dell'anteprima. Senza anno base
  *  (SP o CE) o senza risposta non c'e' anteprima: nessuna riga, non righe
@@ -244,5 +283,9 @@ export function circolantePreview(
 ): CircolantePreview {
   if (!baseBs || !baseInc || !data) return EMPTY_PREVIEW;
   const previewYears = data.forecast_years ?? [];
-  return { years: previewYears.map((y) => y.year), rows: rowsCircolante(baseBs, baseInc, previewYears) };
+  return {
+    years: previewYears.map((y) => y.year),
+    rows: rowsCircolante(baseBs, baseInc, previewYears),
+    degenerateDays: degenerateDaysAvvisi(data),
+  };
 }

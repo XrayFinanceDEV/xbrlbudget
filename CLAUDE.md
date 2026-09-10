@@ -465,7 +465,12 @@ debt, and `sp16a_debiti_banche_breve` is recomposed at the end as bank share + o
 (`scoperto_generato`, `scoperto_residuo`). The requirement is measured **once**, in `_Overdraft.copri`
 (`calculations/forecast_engine.py`), called by `_normalize_balance_sheet_cents` after every adjustment
 including `sp_overrides`, on a net cash rebuilt from aggregates already rounded to the cent — a
-requirement worth 0,00 does not raise, a real cent is not absorbed. Free cash and overdraft never
+requirement worth 0,00 does not raise, a real cent is not absorbed. **Known defect (I2, fixed by lotto
+3A Task 2** — `docs/superpowers/plans/2026-09-10-lotto3a-motori-rendiconto.md`): with
+`cash_sweep_enabled` the sweep decides on the cash **before** `sp_overrides` are applied and is never
+re-evaluated, so an SP override that moves cash can manufacture a requirement the assumptions do not
+imply — a bare `Unfunded financing requirement` on a fundable plan — or, with an overdraft granted,
+open that overdraft in the very year the sweep repaid a loan early. Free cash and overdraft never
 coexist: net cash repays the overdraft first, **also below `cash_sweep_min_cash`, by decision of the
 owner** — keeping liquidity while paying interest on an overdraft makes no sense — and the shortfall
 is declared in `details['cassa_sotto_minimo']` and shown in the wizard preview. Interest goes into

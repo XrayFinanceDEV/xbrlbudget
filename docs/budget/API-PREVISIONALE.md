@@ -147,13 +147,31 @@ entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engi
 `intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda una versione
 propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:876`).
 
-`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:845-907`)
+`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:868-946`)
 applica TUTTE le voci del lotto — anche su anni diversi — PRIMA di rigenerare, una volta sola,
 nella STESSA transazione: un rifiuto (400 se il motore solleva un `ValueError`, 500 altrimenti —
 stessa distinzione di §2.1) fa `db.rollback()` dell'INTERO lotto, non solo dell'ultima voce, e
 `sp_overrides` resta esattamente come prima della chiamata su OGNI anno toccato. Non c'è
 un'allowlist di campi come `CE_OVERRIDE_FIELDS`: una chiave che il risultato del motore non
 riconosce è ignorata in silenzio (vedi sotto).
+
+Prima di tutto questo, però, il **corpo** è validato da
+`budget_schemas.SpOverrideRequest` (`backend/app/schemas/budget.py:439-458`): un `value` non
+numerico, un NaN/infinito, un `forecast_year` mancante o un `overrides` che non è una lista
+rispondono **422**, e nulla viene scritto né rigenerato. Fino al lotto 2 la rotta non aveva
+alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto al
+`Decimal(str(raw_value))` del motore (`forecast_engine.py:1141`, dentro `_apply_sp_overrides`),
+che solleva `decimal.InvalidOperation` — un `ArithmeticError`, non un `ValueError` — e l'unica
+risposta possibile era un **500** «Forecast regeneration failed» (M2). Il rollback era già
+corretto e nulla restava scritto: sbagliato era solo il codice. Un corpo valido si comporta
+come prima anche nella forma salvata: `_sp_override_json_value` (`budget_scenarios.py:844-860`)
+ricompone un numero della stessa specie che portava il JSON — `model_dump(mode="json")` di
+Pydantic 2 girerebbe i `Decimal` in stringhe, `jsonable_encoder` in float anche dove il corpo
+ne portava uno intero (`1000` → `1000.0`).
+
+Ricaduta sul frontend: nessuna. `patchSpOverrides` (`lib/api.ts:720-730`) manda già
+`value: number | null` (`OverrideBatchEntry`, `lib/forecast-balance-save.ts:50-54`), e
+`getErrorMessage` sa leggere il `detail` a lista di un 422 (`lib/utils.ts:32-37`).
 
 Sostituisce un pattern precedente (fino al giro di correzione 3 del task 10):
 `PUT /assumptions/{year}` **per ogni anno modificato, in parallelo** (`Promise.all` lato
@@ -586,9 +604,9 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
   (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`). Un nome fuori da questi tre
   **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
-  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:685`),
+  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`),
   e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
-  (`calculations/forecast_engine.py:726-727`). Solo le rotte tipizzate per singola riga passano dal
+  (`calculations/forecast_engine.py:850-851`). Solo le rotte tipizzate per singola riga passano dal
   `Literal` Pydantic e rispondono 422.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
@@ -628,4 +646,4 @@ del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
 | Chiave | Valore |
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
-| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` come ripiego difensivo del motore (l'API non lo raggiunge mai: il nome del driver è già un `Literal` a tre valori nello schema Pydantic, rifiutato con 422 prima di arrivare qui) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è raggiungibile**: sulla porta normale — il bulk `PUT /scenarios/{id}/assumptions` (§1), che riceve un dict e non passa dallo schema — è il motore a ignorare il driver e dichiararlo qui; il `Literal` a tre valori lo rifiuta con 422 solo sulle rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |

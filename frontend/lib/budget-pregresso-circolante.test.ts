@@ -66,6 +66,24 @@ describe("budget-pregresso-circolante", () => {
     expect(equalInstalments(100, 1)).toEqual([100]);
   });
 
+  // ── fix1 R3: stessi limiti del server (`PregressoTributariInput.acconto_pct`,
+  // `backend/app/schemas/budget.py`: `ge=0, le=200`) — senza questo controllo
+  // il client non segnala nulla e il server risponde con un 422 illeggibile.
+  it("validatePregresso: acconto_pct fuori da 0..200 e' un errore, ai due estremi inclusi valido", () => {
+    const masses = openingMasses(bs);
+    const conAcconto = (acconto_pct: number) =>
+      validatePregresso({ debiti_tributari: { opening: 96, saldo: 61, rateizzato: 35, amounts: [12, 12, 11], acconto_pct } }, masses, 3);
+    // gli estremi (0 e 200, ge/le => inclusivi) sono validi, come nello schema server
+    expect(conAcconto(0)).toEqual([]);
+    expect(conAcconto(200)).toEqual([]);
+    // appena fuori da un lato o dall'altro: errore
+    expect(conAcconto(-0.01)[0]).toMatch(/0%.*200%/);
+    expect(conAcconto(200.01)[0]).toMatch(/0%.*200%/);
+    // ben fuori, per buona misura
+    expect(conAcconto(300)[0]).toMatch(/0%.*200%/);
+    expect(conAcconto(-5)[0]).toMatch(/0%.*200%/);
+  });
+
   it("validatePregresso: un Pregresso vuoto non produce errori, e più chiavi ne accumulano più di uno", () => {
     const masses = openingMasses(bs);
     expect(validatePregresso({}, masses, 3)).toEqual([]);

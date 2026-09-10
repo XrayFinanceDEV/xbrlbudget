@@ -2,16 +2,21 @@ import { describe, expect, it } from "vitest";
 import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, PregressoKey } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { euro } from "@/lib/budget-format";
-import { validatePregresso } from "@/lib/budget-pregresso-circolante";
+import { equalInstalments, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import {
+  ACCONTO_CHIOSA,
+  DEFAULT_ACCONTO_PCT,
   DEFAULT_TAX_RATE,
   SP17E_NOTA_AUTOMATICA,
   TAX_RATE_PLACEHOLDER,
   accontoPctValue,
+  draftDisplay,
   impostePreview,
   manualTaxPosition,
+  manualTaxYears,
   pregressoIgnoredTributari,
   rateOptions,
+  rateSelectValue,
   spTributariRows,
   taxRateInputDisplay,
   taxRateValue,
@@ -342,6 +347,132 @@ describe("spTributariRows — sulla via automatica il controllo inerte sparisce"
   it("la scomparsa non e' muta: c'e' una riga che dice perche', e come farlo tornare", () => {
     expect(SP17E_NOTA_AUTOMATICA).toContain("oltre");
     expect(SP17E_NOTA_AUTOMATICA.length).toBeGreaterThan(40);
+  });
+
+  // ── fix1 R4: la nota indicava la direzione sbagliata («qui sotto» mentre la
+  // riga «Debiti tributari entro %» e' resa PRIMA della nota in StepImposte.tsx,
+  // quindi sta sopra) e citava un'etichetta che il passo Circolante non usa
+  // («Crediti tributari %» invece di «Crediti tributari»).
+  it("indica «qui sopra», non «qui sotto»: la riga sp16e e' resa prima della nota", () => {
+    expect(SP17E_NOTA_AUTOMATICA).toContain("qui sopra");
+    expect(SP17E_NOTA_AUTOMATICA).not.toContain("qui sotto");
+  });
+
+  it("cita l'etichetta del passo Circolante com'e' a schermo li', senza «%»", () => {
+    expect(SP17E_NOTA_AUTOMATICA).toContain("«Crediti tributari»");
+    expect(SP17E_NOTA_AUTOMATICA).not.toContain("Crediti tributari %");
+  });
+
+  // ── fix1 R2: la visibilita' di sp17e_growth_pct e' per ANNO, con la stessa
+  // condizione del motore — non un booleano unico su tutto il piano.
+  it("con automaticYears la riga sp17e resta ma le sue celle sugli anni automatici sono inerti", () => {
+    const rows = spTributariRows(bsTrib, true, [2027]);
+    const sp17e = rows.find((r) => r.field === "sp17e_growth_pct")!;
+    expect(sp17e.offYears).toEqual([2027]);
+    expect(sp17e.offYearsNote).toBeTruthy();
+    // sp16e resta sempre vivo: e' l'interruttore, non il controllo governato
+    const sp16e = rows.find((r) => r.field === "sp16e_growth_pct")!;
+    expect(sp16e.offYears).toBeUndefined();
+  });
+
+  it("senza automaticYears (default) sp17e non porta offYears: comportamento invariato", () => {
+    const rows = spTributariRows(bsTrib, true);
+    expect(rows.find((r) => r.field === "sp17e_growth_pct")!.offYears).toBeUndefined();
+  });
+});
+
+// ── manualTaxYears (fix1 R2) ────────────────────────────────────────────────
+describe("manualTaxYears — il complemento per anno di manualTaxPosition", () => {
+  it("il caso del revisore: sp17e=50 nel 2027 (inerte da solo), sp16e=0 solo nel 2028", () => {
+    const assumptions = asMap({ 2027: { sp17e_growth_pct: 50 }, 2028: { sp16e_growth_pct: 0 } });
+    // 2027 NON e' manuale: sp17e da solo non accende nulla nel motore
+    expect(manualTaxYears(assumptions, [2027, 2028])).toEqual([2028]);
+    // ma manualTaxPosition (il booleano "almeno un anno") e' true: la riga resta a schermo
+    expect(manualTaxPosition(assumptions, [2027, 2028])).toBe(true);
+  });
+
+  it("nessun anno manuale => lista vuota", () => {
+    expect(manualTaxYears(asMap({ 2027: { tax_rate: 27.9 } }), [2027])).toEqual([]);
+  });
+
+  it("tutti gli anni manuali => lista intera", () => {
+    const assumptions = asMap({ 2027: { sp16e_growth_pct: 0 }, 2028: { sp06e_growth_pct: 3 } });
+    expect(manualTaxYears(assumptions, [2027, 2028])).toEqual([2027, 2028]);
+  });
+});
+
+// ── ACCONTO_CHIOSA (fix1 C1) ─────────────────────────────────────────────────
+// Il proprietario ha chiesto di dirlo in chiaro: un acconto per anno vince SOLO
+// se maggiore di zero; zero vuol dire "usa la percentuale", non "zero acconti"
+// — il difetto che il Ruling 11 chiamava "il piu' silenzioso del progetto".
+describe("ACCONTO_CHIOSA", () => {
+  it("dice esplicitamente che serve un importo MAGGIORE DI ZERO per scavalcare la percentuale", () => {
+    expect(ACCONTO_CHIOSA).toMatch(/maggiore di zero/i);
+  });
+
+  it("dice esplicitamente che zero vuol dire usare la percentuale, non zero acconti", () => {
+    expect(ACCONTO_CHIOSA).toMatch(/zero.*percentuale/i);
+  });
+
+  it("niente testo sulla compensazione del credito d'imposta: il proprietario l'ha rifiutato esplicitamente", () => {
+    expect(ACCONTO_CHIOSA.toLowerCase()).not.toContain("compens");
+  });
+});
+
+// ── draftDisplay (fix1 R6) ───────────────────────────────────────────────────
+// Che cosa una casella controllata mostra mentre l'utente digita: una casella
+// appena svuotata resta VUOTA, non il valore di ripiego che il modello salva.
+describe("draftDisplay", () => {
+  it("draft null (nessuna digitazione in corso) => mostra il valore salvato", () => {
+    expect(draftDisplay(null, 100)).toBe(100);
+    expect(draftDisplay(null, 0)).toBe(0);
+  });
+
+  it("draft vuoto ('') => casella VUOTA, mai il valore salvato/di ripiego", () => {
+    // il caso misurato: dopo backspace il modello e' gia' ricaduto sul default
+    // (100 per l'acconto, 0 per il saldo), ma la casella deve restare vuota
+    expect(draftDisplay("", 100)).toBe("");
+    expect(draftDisplay("", 0)).toBe("");
+  });
+
+  it("draft con un numero => mostra quel numero, non il salvato: la digitazione non si interrompe", () => {
+    expect(draftDisplay("1", 100)).toBe(1); // "10" -> backspace -> "1": non deve tornare 100
+    expect(draftDisplay("42", 0)).toBe(42);
+  });
+
+  it("draft non numerico (testo incollato a caso) => vuoto, non NaN", () => {
+    expect(draftDisplay("abc", 100)).toBe("");
+  });
+
+  it("il caso misurato per esteso: 10 -> backspace -> 1 -> backspace -> vuoto -> 5, sul default reale del kernel", () => {
+    // simula la sequenza di onChange che StepImposte.tsx produce, e il "saved"
+    // e' esattamente cio' che withAccontoPct(..., null) scrive: DEFAULT_ACCONTO_PCT
+    expect(draftDisplay("10", DEFAULT_ACCONTO_PCT)).toBe(10);
+    expect(draftDisplay("1", DEFAULT_ACCONTO_PCT)).toBe(1);
+    expect(draftDisplay("", DEFAULT_ACCONTO_PCT)).toBe(""); // qui una mutazione "pct || 100" romperebbe: darebbe 100
+    expect(draftDisplay("5", DEFAULT_ACCONTO_PCT)).toBe(5); // la cifra successiva riparte da vuoto, non da 105/1005
+  });
+});
+
+// ── rateSelectValue (fix1 R6) ────────────────────────────────────────────────
+describe("rateSelectValue — lo stato del Select rispecchia il piano vero, o e' neutro", () => {
+  it("il piano coincide con N rate uguali => quell'opzione", () => {
+    const amounts = equalInstalments(60000, 3);
+    expect(rateSelectValue(amounts, 60000, [2, 3, 4, 5])).toBe("3");
+  });
+
+  it("un ritocco a mano su una rata (non piu' uguali) => stato neutro, non l'ultima scelta", () => {
+    const amounts = [20000, 25000, 15000]; // sommano 60.000 ma non sono uguali
+    expect(rateSelectValue(amounts, 60000, [2, 3, 4, 5])).toBe("");
+  });
+
+  it("nessuna rata dichiarata => stato neutro", () => {
+    expect(rateSelectValue([], 60000, [2, 3, 4, 5])).toBe("");
+  });
+
+  it("un'opzione non offerta (es. 6 rate, orizzonte a 5) non viene mai scelta", () => {
+    const amounts = equalInstalments(60000, 6);
+    expect(rateSelectValue(amounts, 60000, [2, 3, 4, 5])).toBe("");
   });
 });
 

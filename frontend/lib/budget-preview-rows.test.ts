@@ -445,11 +445,11 @@ describe("rowsImposteSaldoAcconto", () => {
     const rows = rowsImposteSaldoAcconto([saldoAcconto(2027)]);
     expect(rows[0].label).toBe("Pagamenti dell'anno");
     const v = (label: string) => rows.find((r) => r.label === label)!.years[0].value;
-    expect(v("Imposte dell'anno")).toBe(41230.55);
+    expect(v("Imposte correnti dell'anno")).toBe(41230.55);
     expect(v("Saldo dell'anno precedente versato")).toBe(18740.13);
     expect(v("Acconti versati")).toBe(33200.44);
     expect(v("Rate del rateizzato")).toBe(14303.31);
-    expect(v("Debito tributario a fine anno")).toBe(8030.11);
+    expect(v("Saldo d'imposta da versare l'anno dopo")).toBe(8030.11);
   });
 
   it("l'uscita di cassa e' saldo + acconti + rate, la stessa somma del kernel", () => {
@@ -491,12 +491,43 @@ describe("rowsImposteSaldoAcconto", () => {
     expect(saldo.years[1].value).toBeNull();
     expect(saldo.years[1].note).toBe("posizione tributaria manuale");
     // l'imposta dell'anno il motore la dichiara anche sulla via manuale
-    const corrente = rows.find((r) => r.label === "Imposte dell'anno")!;
+    const corrente = rows.find((r) => r.label === "Imposte correnti dell'anno")!;
     expect(corrente.years[1].value).toBe(52117.6);
     expect(corrente.years[1].note).toBeUndefined();
   });
 
   it("senza anni nessuna riga", () => {
     expect(rowsImposteSaldoAcconto([])).toEqual([]);
+  });
+
+  // ── fix1 R1: due righe della stessa anteprima (rowsImposte + questo modulo,
+  // concatenate da impostePreview) con quasi la stessa etichetta e numeri
+  // diversi — nel motore sp16e = generated_debt + residual_short di un piano a
+  // rate. Sonda misurata: sp16e 20.000 contro generated_debt 0, su due anni.
+  it("l'etichetta di generated_debt NON e' quella di sp16e (rowsImposte, riga 'trib')", () => {
+    const rows = rowsImposteSaldoAcconto([saldoAcconto(2027)]);
+    const label = rows.find((r) => r.key === "imposte-debito")!.label;
+    expect(label).toBe("Saldo d'imposta da versare l'anno dopo");
+    // la riga sp16e sta in rowsImposte, chiave "trib", etichetta "Debiti tributari a fine anno":
+    // le due frasi non devono coincidere ne' essere il singolare/plurale l'una dell'altra
+    const sp16eLabel = rowsImposte(baseInc, [year(2027)]).find((r) => r.key === "trib")!.label;
+    expect(sp16eLabel).toBe("Debiti tributari a fine anno");
+    expect(label).not.toBe(sp16eLabel);
+    // e non deve piu' contenere la stessa formula "Debito/i tributario/i a fine anno"
+    // che le rendeva facili da confondere una sotto l'altra nello stesso pannello
+    expect(label).not.toMatch(/^Debit[oi] tributari[oi] a fine anno$/);
+  });
+
+  // ── fix1 R7: ce20 (rowsImposte, "Imposte") e current_tax (qui, "Imposte
+  // correnti dell'anno") divergono con differenze temporanee non nulle: nel
+  // motore total_tax = current_tax + deferred_expense. Sonda misurata: +40.000
+  // di differenza tassabile al 25% -> ce20 - current_tax = 10.000.
+  it("l'etichetta di current_tax NON e' quella di ce20 (rowsImposte, riga 'tax')", () => {
+    const rows = rowsImposteSaldoAcconto([saldoAcconto(2027)]);
+    const label = rows.find((r) => r.key === "imposte-current")!.label;
+    expect(label).toBe("Imposte correnti dell'anno");
+    const ce20Label = rowsImposte(baseInc, [year(2027)]).find((r) => r.key === "ce20")!.label;
+    expect(ce20Label).toBe("Imposte");
+    expect(label).not.toBe(ce20Label);
   });
 });

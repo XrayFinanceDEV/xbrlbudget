@@ -11,7 +11,7 @@
 // si ricalcolano qui: le produce il motore, rowsImposte le legge dal CE che
 // il motore ha già scritto.
 import type { JSX } from "react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ import { validatePregresso } from "@/lib/budget-pregresso-circolante";
 import { massesOf } from "@/lib/budget-pregresso-tabella";
 import {
   ACCONTO_CHIOSA,
+  DEFAULT_ACCONTO_PCT,
   DEFAULT_TAX_RATE,
   MANUAL_TAX_AVVISO,
   PREGRESSO_IGNORED_AVVISO,
@@ -34,9 +35,11 @@ import {
   TRIBUTARI_KEYS,
   TRIBUTARI_TABELLA_NOTA,
   accontoPctValue,
+  draftDisplay,
   impostePreview,
-  manualTaxPosition,
+  manualTaxYears,
   rateOptions,
+  rateSelectValue,
   spTributariRows,
   taxRateInputDisplay,
   taxRateValue,
@@ -92,12 +95,24 @@ export function StepImposte(p: StepProps): JSX.Element {
 
   // La via manuale (percentuale di crescita su sp06e/sp16e) e' un'alternativa
   // al piano, non un suo complemento: e' lei a decidere se «Debiti tributari
-  // oltre %» sia a schermo, perche' fuori di li' non governa nulla.
-  const manual = useMemo(
-    () => manualTaxPosition(p.assumptions, p.forecastYears),
+  // oltre %» sia a schermo, perche' fuori di li' non governa nulla. Il motore
+  // decide PER ANNO (`manualTaxYears`): su un piano misto la riga resta a
+  // schermo (governa da qualche parte) ma le celle degli anni NON manuali
+  // restano inerti — `automaticYears` e' il complemento passato a
+  // `spTributariRows` (fix1 R2).
+  const yearsManuali = useMemo(
+    () => manualTaxYears(p.assumptions, p.forecastYears),
     [p.assumptions, p.forecastYears],
   );
-  const tributariRows = useMemo(() => spTributariRows(baseBs, manual), [baseBs, manual]);
+  const manual = yearsManuali.length > 0;
+  const automaticYears = useMemo(
+    () => p.forecastYears.filter((y) => !yearsManuali.includes(y)),
+    [p.forecastYears, yearsManuali],
+  );
+  const tributariRows = useMemo(
+    () => spTributariRows(baseBs, manual, automaticYears),
+    [baseBs, manual, automaticYears],
+  );
 
   // Il piano e' UNO per scenario e vive nelle ipotesi del PRIMO anno di piano,
   // come quello del passo 6: il motore lo legge da li', e scriverlo su ogni
@@ -118,6 +133,19 @@ export function StepImposte(p: StepProps): JSX.Element {
     [tribPlan, masses, p.forecastYears.length],
   );
   const opzioniRate = rateOptions(p.forecastYears.length);
+
+  // Bozze locali delle due caselle controllate (saldo, acconto): senza
+  // questo stato, svuotare la casella col backspace la fa ricadere subito sul
+  // valore di ripiego del piano SALVATO (0 per il saldo, 100 per l'acconto) e
+  // la digitazione successiva riparte da li' invece che da vuoto (fix1 R6).
+  // `draftDisplay` (lib, con test) decide che cosa mostrare; qui c'e' solo lo
+  // stato grezzo del testo digitato.
+  const [saldoDraft, setSaldoDraft] = useState<string | null>(null);
+  const [accontoDraft, setAccontoDraft] = useState<string | null>(null);
+  // Lo stato del `Select` «N rate uguali»: l'opzione che il piano ATTUALE
+  // rispecchia davvero, o "" (stato neutro) dopo un ritocco a mano di una
+  // singola rata (fix1 R6).
+  const rateSelected = rateSelectValue(tribPlan?.amounts ?? [], tribPlan?.rateizzato ?? 0, opzioniRate);
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
@@ -225,8 +253,13 @@ export function StepImposte(p: StepProps): JSX.Element {
                       step={100}
                       className="w-36 text-right"
                       aria-label="Saldo dell'anno precedente"
-                      value={tribPlan ? tribPlan.saldo : opening}
-                      onChange={(e) => setPregresso(withSaldo(pregresso, opening, numOrNull(e.target.value)))}
+                      placeholder="0"
+                      value={draftDisplay(saldoDraft, tribPlan ? tribPlan.saldo : opening)}
+                      onChange={(e) => {
+                        setSaldoDraft(e.target.value);
+                        setPregresso(withSaldo(pregresso, opening, numOrNull(e.target.value)));
+                      }}
+                      onBlur={() => setSaldoDraft(null)}
                     />
                     <span className="text-xs text-muted-foreground">€</span>
                   </div>
@@ -250,6 +283,12 @@ export function StepImposte(p: StepProps): JSX.Element {
                   </p>
                   {opzioniRate.length > 0 && (
                     <Select
+                      // Controllato: dopo un ritocco a mano su una singola
+                      // rata (`PregressoTable` -> `withRate`) `rateSelected`
+                      // torna "" e il Select mostra di nuovo il segnaposto
+                      // neutro invece dell'ultima scelta, che non e' piu'
+                      // quella vera (fix1 R6).
+                      value={rateSelected}
                       onValueChange={(v) => setPregresso(withRateUguali(pregresso, opening, Number(v)))}
                     >
                       <SelectTrigger className="h-8 w-36 text-xs" aria-label="Rate uguali">
@@ -290,8 +329,13 @@ export function StepImposte(p: StepProps): JSX.Element {
                       step={5}
                       className="w-24 text-right"
                       aria-label="Acconto sull'imposta dell'anno prima"
-                      value={accontoPctValue(pregresso)}
-                      onChange={(e) => setPregresso(withAccontoPct(pregresso, opening, numOrNull(e.target.value)))}
+                      placeholder={String(DEFAULT_ACCONTO_PCT)}
+                      value={draftDisplay(accontoDraft, accontoPctValue(pregresso))}
+                      onChange={(e) => {
+                        setAccontoDraft(e.target.value);
+                        setPregresso(withAccontoPct(pregresso, opening, numOrNull(e.target.value)));
+                      }}
+                      onBlur={() => setAccontoDraft(null)}
                     />
                     <span className="text-xs text-muted-foreground">%</span>
                   </div>

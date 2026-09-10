@@ -239,6 +239,7 @@ export function BudgetWizard({
     updateFinancingLoans: s.updateFinancingLoans,
     updateTemporaryDifferences: s.updateTemporaryDifferences,
     updateSpIndexing: s.updateSpIndexing,
+    updatePregresso: s.updatePregresso,
   };
 
   const active = WIZARD_STEPS.find((w) => w.key === step) ?? WIZARD_STEPS[0];

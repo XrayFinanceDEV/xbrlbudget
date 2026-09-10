@@ -12,7 +12,7 @@
 // errore, e gli errori arrivano gia' fatti da `validatePregresso`.
 import type { JSX } from "react";
 import { Fragment, useState } from "react";
-import { ChevronDown, ChevronRight, CircleOff, RefreshCw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, CircleOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ import { euro, numOrNull } from "@/lib/budget-format";
 import type { Pregresso, PregressoKey } from "@/types/api";
 import {
   PREGRESSO_VIA_USCITA,
+  cellPlaceholder,
   cellValue,
   pregressoRighe,
   residualCell,
@@ -36,9 +37,13 @@ interface CellaProps {
   mode: PregressoMode;
   target: PregressoTarget;
   onWrite: (value: number | null) => void;
+  /** L'inesigibile scadenziato che un override del CE ha impedito di
+   *  scaricare, per questo anno (rilievo 6): marca la cella dove l'utente ha
+   *  scritto la svalutazione, non solo l'anteprima a destra. */
+  warning?: string;
 }
 
-function Cella({ riga, yearIndex, year, mode, target, onWrite }: CellaProps): JSX.Element {
+function Cella({ riga, yearIndex, year, mode, target, onWrite, warning }: CellaProps): JSX.Element {
   const v = cellValue(riga.plan, yearIndex, mode, target);
   return (
     <td className="px-1 py-1 text-right">
@@ -46,9 +51,13 @@ function Cella({ riga, yearIndex, year, mode, target, onWrite }: CellaProps): JS
         type="number"
         min={0}
         step={mode === "pct" ? 0.1 : 100}
-        className="h-8 w-full min-w-[84px] text-right"
+        className={cn(
+          "h-8 w-full min-w-[84px] text-right",
+          warning && "border-amber-500 focus-visible:ring-amber-500",
+        )}
         aria-label={`${riga.label}${target === "writeoff" ? " — inesigibile" : ""} ${year}`}
-        placeholder={mode === "pct" ? "%" : "€"}
+        title={warning}
+        placeholder={cellPlaceholder(riga.plan, yearIndex, mode)}
         value={v === null ? "" : v}
         onChange={(e) => onWrite(numOrNull(e.target.value))}
       />
@@ -61,6 +70,10 @@ export function PregressoTable(props: {
    *  cosi' `TABELLA_KEYS` si passa senza un cast che toglie il `readonly`. */
   keys: readonly PregressoKey[];
   masses: Record<PregressoKey, number>;
+  /** La massa OLTRE l'esercizio di ciascun saldo (rilievo 1): condiziona la
+   *  nota di destino di `debiti_fornitori`/`crediti_commerciali`. Facoltativa
+   *  perche' il passo 7 (tributari) non ne ha una da passare. */
+  massesLong?: Record<PregressoKey, number>;
   pregresso: Pregresso;
   forecastYears: number[];
   baseYear: number;
@@ -74,13 +87,19 @@ export function PregressoTable(props: {
   /** Il titolo della colonna delle masse. Al passo 7 la massa non e' il saldo
    *  dell'anno base ma il RATEIZZATO che se ne e' dichiarato. */
   massLabel?: string;
+  /** L'inesigibile non scaricato, per anno (rilievo 6): marca la cella «di
+   *  cui inesigibile» invece di lasciare l'avviso solo nell'anteprima. Il
+   *  solo saldo con `writeoff` e' `crediti_commerciali`, quindi al passo 7
+   *  questa mappa non serve mai. */
+  writeoffIgnored?: Record<number, string>;
 }): JSX.Element {
-  const { keys, masses, pregresso, forecastYears, baseYear, mode, onChange, errors } = props;
+  const { keys, masses, pregresso, forecastYears, baseYear, mode, onChange, errors, writeoffIgnored } = props;
   const nota = props.nota ?? PREGRESSO_VIA_USCITA;
   const [aperti, setAperti] = useState<Record<string, boolean>>({});
 
-  const righe = pregressoRighe(keys, masses, pregresso);
+  const righe = pregressoRighe(keys, masses, pregresso, props.massesLong);
   const last = forecastYears.length - 1;
+  const hasWriteoffIgnored = Object.keys(writeoffIgnored ?? {}).length > 0;
 
   const write = (key: PregressoKey, yearIndex: number, target: PregressoTarget) => (value: number | null) =>
     onChange(withCell(pregresso, key, masses, yearIndex, value, mode, target));
@@ -104,7 +123,7 @@ export function PregressoTable(props: {
           <tbody>
             {righe.map((riga) => {
               const aperto = Boolean(aperti[riga.key]);
-              const residuo = residualCell(riga.plan, riga.mass, last);
+              const residuo = residualCell(riga.plan, last);
               return (
                 <Fragment key={riga.key}>
                 <tr className="border-b border-border/50 align-top">
@@ -135,6 +154,15 @@ export function PregressoTable(props: {
                       >
                         {aperto ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                         di cui inesigibile
+                        {/* Visibile anche a riga chiusa: l'inesigibile non
+                            scaricato (rilievo 6) altrimenti resterebbe
+                            invisibile finche' nessuno apre l'accordion. */}
+                        {hasWriteoffIgnored && (
+                          <AlertTriangle
+                            className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400"
+                            aria-label="inesigibile non scaricato in almeno un anno"
+                          />
+                        )}
                       </Button>
                     )}
                   </td>
@@ -172,6 +200,7 @@ export function PregressoTable(props: {
                         mode={mode}
                         target="writeoff"
                         onWrite={write(riga.key, i, "writeoff")}
+                        warning={writeoffIgnored?.[y]}
                       />
                     ))}
                     <td className="px-2 py-1" />

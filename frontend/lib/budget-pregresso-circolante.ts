@@ -26,21 +26,59 @@ export const PREGRESSO_LABELS: Record<PregressoKey, string> = {
   altri_debiti: "Altri debiti",
 };
 
+/** I crediti commerciali sono l'unica voce la cui parte OLTRE l'esercizio non
+ *  e' un solo campo: come il lato breve, `sp07` va al netto delle quote
+ *  tributarie/imposte anticipate. Estratta una volta, cosi' `openingMasses` e
+ *  `openingMassLong` non possono divergere su questa sottrazione (rilievo 1,
+ *  giro di correzione 1: la nota di destino ha bisogno della STESSA massa
+ *  lunga, non di una seconda formula). */
+function creditiComponents(b: Record<string, unknown>): { short: number; long: number } {
+  return {
+    short: num(b.sp06_crediti_breve) - num(b.sp06e_crediti_tributari_breve) - num(b.sp06f_imposte_anticipate_breve),
+    long: num(b.sp07_crediti_lungo) - num(b.sp07e_crediti_tributari_lungo) - num(b.sp07f_imposte_anticipate_lungo),
+  };
+}
+
 /** Le masse di apertura per ciascuna voce di pregresso, spec §3.1: dal
  *  bilancio base, al netto delle sottovoci tributarie/imposte anticipate sui
  *  crediti (che hanno un proprio scadenziamento altrove, non in questo). */
 export function openingMasses(bs: BalanceSheet): Record<PregressoKey, number> {
   const b = bs as unknown as Record<string, unknown>;
+  const cred = creditiComponents(b);
   return {
-    crediti_commerciali: cents(
-      num(b.sp06_crediti_breve) - num(b.sp06e_crediti_tributari_breve) - num(b.sp06f_imposte_anticipate_breve) +
-      num(b.sp07_crediti_lungo) - num(b.sp07e_crediti_tributari_lungo) - num(b.sp07f_imposte_anticipate_lungo)
-    ),
+    crediti_commerciali: cents(cred.short + cred.long),
     debiti_fornitori: cents(num(b.sp16d_debiti_fornitori_breve) + num(b.sp17d_debiti_fornitori_lungo)),
     debiti_tributari: cents(num(b.sp16e_debiti_tributari_breve) + num(b.sp17e_debiti_tributari_lungo)),
     debiti_previdenziali: cents(num(b.sp16f_debiti_previdenza_breve) + num(b.sp17f_debiti_previdenza_lungo)),
     altri_debiti: cents(num(b.sp16g_altri_debiti_breve) + num(b.sp17g_altri_debiti_lungo)),
   };
+}
+
+/** La parte OLTRE l'esercizio della massa di apertura di una voce — la stessa
+ *  scomposizione di `openingMasses`, mai una seconda formula: per i crediti
+ *  e' `sp07` al netto delle quote fiscali, esattamente come il lato breve.
+ *  Serve alla tabella (rilievo 1) per dire, riga per riga, se la parte lunga
+ *  di un saldo che "si rigenera" e' davvero coperta dal driver o no. */
+export function openingMassLong(bs: BalanceSheet, key: PregressoKey): number {
+  const b = bs as unknown as Record<string, unknown>;
+  switch (key) {
+    case "crediti_commerciali": return cents(creditiComponents(b).long);
+    case "debiti_fornitori": return cents(num(b.sp17d_debiti_fornitori_lungo));
+    case "debiti_tributari": return cents(num(b.sp17e_debiti_tributari_lungo));
+    case "debiti_previdenziali": return cents(num(b.sp17f_debiti_previdenza_lungo));
+    case "altri_debiti": return cents(num(b.sp17g_altri_debiti_lungo));
+  }
+}
+
+/** Un piano i cui importi e le cui svalutazioni sono tutti zero (o assenti)
+ *  non e' una scadenza dichiarata: vale "nessun piano", la regola del repo
+ *  "debito senza scadenza dichiarata → a breve" (CLAUDE.md § Contabilità)
+ *  applicata al punto in cui il piano nasce — e deve poter morire (rilievo 2,
+ *  giro di correzione 1). Un piano con almeno un importo non nullo resta un
+ *  piano, anche se altri anni sono a zero. */
+export function isPlanEmpty(plan: PregressoPlan): boolean {
+  const allZero = (xs: number[] | null | undefined) => (xs ?? []).every((v) => v === 0);
+  return allZero(plan.amounts) && allZero(plan.writeoff);
 }
 
 /** Quanto resta della massa di apertura dopo gli importi (e gli eventuali
@@ -73,13 +111,22 @@ export function equalInstalments(total: number, n: number): number[] {
 }
 
 /** Nuovo piano con l'importo dell'anno `yearIndex` sostituito. Immutabile:
- *  non muta `plan`, e allunga l'array di importi con zeri se `yearIndex`
- *  cade oltre la lunghezza attuale. */
-export function withAmount(plan: PregressoPlan, yearIndex: number, amount: number): PregressoPlan {
-  const amounts = [...plan.amounts];
-  while (amounts.length <= yearIndex) amounts.push(0);
-  amounts[yearIndex] = cents(amount);
-  return { ...plan, amounts };
+ *  non muta `plan`, e allunga l'array con zeri se `yearIndex` cade oltre la
+ *  lunghezza attuale.
+ *
+ * `field` sceglie la lista: `"amounts"` (il default, gli incassi/pagamenti) o
+ * `"writeoff"` (l'inesigibile, il solo campo dei crediti). Prima del giro di
+ * correzione 1 `withWriteoff` (`lib/budget-pregresso-tabella.ts`) ripeteva
+ * questa stessa funzione a mano sulla lista `writeoff`: due copie
+ * dell'arrotondamento che potevano divergere cambiandone solo una
+ * (rilievo 7). */
+export function withAmount(
+  plan: PregressoPlan, yearIndex: number, amount: number, field: "amounts" | "writeoff" = "amounts",
+): PregressoPlan {
+  const list = [...((field === "amounts" ? plan.amounts : plan.writeoff) ?? [])];
+  while (list.length <= yearIndex) list.push(0);
+  list[yearIndex] = cents(amount);
+  return field === "amounts" ? { ...plan, amounts: list } : { ...plan, writeoff: list };
 }
 
 /**

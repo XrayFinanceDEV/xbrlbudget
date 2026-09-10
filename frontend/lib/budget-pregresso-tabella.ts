@@ -20,6 +20,8 @@ import { euro } from "@/lib/budget-format";
 import {
   PREGRESSO_LABELS,
   amountToPct,
+  isPlanEmpty,
+  openingMassLong,
   openingMasses,
   pctToAmount,
   residualAfter,
@@ -91,6 +93,38 @@ const DESTINO_NOTE: Record<PregressoDestino, string> = {
     "Si rigenera dalle imposte: ogni anno di piano genera il proprio debito tributario, quindi qui si scadenzia il solo rateizzato già a bilancio.",
 };
 
+/**
+ * La nota di destino, condizionata alla massa OLTRE l'esercizio (rilievo 1,
+ * giro di correzione 1). Fornitori e crediti sono "rigenera", ma il motore
+ * rigenera dal driver (giorni medi) **solo il lato a breve**: il lato oltre,
+ * una volta scadenziato, diventa `residual_long` e ci resta — la sua
+ * percentuale di crescita smette di applicarsi (`forecast_engine.py:1780-1794`,
+ * `:2086-2093`, misurato nella revisione del task 7).
+ *
+ * `"Si rigenera"` senza condizioni resta vera SOLO quando non c'e' massa
+ * oltre l'esercizio da scadenziare (`massLong` a zero): e' il caso comune, e
+ * la frase originale del task 7 torna quella. Con massa lunga la nota lo dice
+ * esplicitamente, cifra in euro compresa — un utente che scadenzia
+ * `debiti_fornitori` deve leggere che `sp17d` si estingue, non che "si
+ * rigenera" come il resto della riga.
+ *
+ * `estingue` e `imposte` non hanno bisogno di questa condizione: sono vere su
+ * tutta la massa, breve e lunga, per costruzione (brief, tabella).
+ */
+function destinoNotaFor(destino: PregressoDestino, massLong: number): string {
+  if (destino === "rigenera" && massLong > 0) {
+    return "Il lato a breve si rigenera dai giorni medi; la parte oltre l'esercizio " +
+      `(${euro(massLong)}) si estingue con questo piano e smette di crescere alla sua percentuale.`;
+  }
+  return DESTINO_NOTE[destino];
+}
+
+/** Le masse di apertura tutte a zero, per il ripiego di `pregressoRighe`
+ *  quando il chiamante non ha (ancora) una massa lunga da passare. */
+const ZERO_MASSES: Record<PregressoKey, number> = {
+  crediti_commerciali: 0, debiti_fornitori: 0, debiti_tributari: 0, debiti_previdenziali: 0, altri_debiti: 0,
+};
+
 /** La via d'uscita, detta per esteso: chi vuole rimettere a bilancio un debito
  *  che il piano non rigenera lo scrive a mano in SP Prev. */
 export const PREGRESSO_VIA_USCITA =
@@ -101,14 +135,49 @@ export function destinoOf(key: PregressoKey): PregressoDestino {
   return DESTINI[key];
 }
 
+/**
+ * La nota `mode: "legacy"` dell'anteprima (`rowsPregressoRunoff`,
+ * `lib/budget-preview-rows.ts`): il saldo per cui NESSUN piano e' stato
+ * dichiarato, quindi il motore usa le formule di sempre. Prima del giro di
+ * correzione 1 era una frase sola per tutti e cinque i saldi — «nessun piano:
+ * tutto nel primo anno» — vera per fornitori e crediti (un driver di volume
+ * li rigenera comunque, ed e' l'ipotesi implicita di spec §3.1), ma non per
+ * previdenziali e altri debiti: senza driver il motore fa `prev × (1+%)`
+ * (misurato di nuovo su questa base, `mode: legacy`: `sp16g` cresce anno su
+ * anno, non si azzera — vedi task-7-fix1-report.md §Rilievo 4). Dire "tutto
+ * nel primo anno" su quei due sarebbe la stessa fabbricazione che CLAUDE.md
+ * vieta altrove ("diagnose, never fabricate"): il testo si completa per
+ * chiave con cio' che la voce fa davvero, non si lascia uguale per tutte.
+ *
+ * `destinoOf` decide anche qui: `rigenera`/`imposte` mantengono la chiusura
+ * nel primo anno (un driver — di volume o fiscale — sostituisce comunque il
+ * vecchio saldo), `estingue` no.
+ */
+const LEGACY_NOTE_BY_DESTINO: Record<PregressoDestino, string> = {
+  rigenera: "nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari",
+  estingue: "nessun piano: non si chiude — cresce ogni anno della percentuale impostata",
+  imposte: "nessun piano: tutto nel primo anno, poi si rigenera dalle imposte dell'anno",
+};
+
+export function legacyNoteFor(key: PregressoKey): string {
+  return LEGACY_NOTE_BY_DESTINO[destinoOf(key)];
+}
+
 /** Le masse di apertura del bilancio base, o tutte a zero quando l'anno base
  *  non c'e' ancora. Senza anno base la tabella non si rende affatto (il passo
  *  lo dice); serve perche' la forma del valore non cambi mentre i dati
  *  arrivano. */
 export function massesOf(baseBs: BalanceSheet | undefined | null): Record<PregressoKey, number> {
-  return baseBs
-    ? openingMasses(baseBs)
-    : { crediti_commerciali: 0, debiti_fornitori: 0, debiti_tributari: 0, debiti_previdenziali: 0, altri_debiti: 0 };
+  return baseBs ? openingMasses(baseBs) : ZERO_MASSES;
+}
+
+/** Le masse OLTRE l'esercizio, stesso ripiego di `massesOf` senza anno base:
+ *  serve solo alla nota di destino (`destinoNotaFor`), mai alla validazione o
+ *  al residuo — quelle restano sulla massa intera. */
+export function massesLongOf(baseBs: BalanceSheet | undefined | null): Record<PregressoKey, number> {
+  if (!baseBs) return ZERO_MASSES;
+  const keys = Object.keys(PREGRESSO_LABELS) as PregressoKey[];
+  return Object.fromEntries(keys.map((k) => [k, openingMassLong(baseBs, k)])) as Record<PregressoKey, number>;
 }
 
 export interface PregressoRiga {
@@ -127,11 +196,16 @@ export interface PregressoRiga {
   plan: PregressoPlan | null;
 }
 
-/** Le righe della tabella, nell'ordine di `keys`. */
+/** Le righe della tabella, nell'ordine di `keys`.
+ *
+ * `massesLong` e' facoltativa (default: tutte a zero) perche' il passo 7
+ * (tributari) non ne ha una da passare — la sua nota e' `imposte`, indifferente
+ * alla massa lunga — e non deve costruirne una finta solo per compilare. */
 export function pregressoRighe(
   keys: readonly PregressoKey[],
   masses: Record<PregressoKey, number>,
   pregresso: Pregresso,
+  massesLong: Record<PregressoKey, number> = ZERO_MASSES,
 ): PregressoRiga[] {
   return keys.map((key) => {
     const destino = destinoOf(key);
@@ -140,7 +214,7 @@ export function pregressoRighe(
       label: PREGRESSO_LABELS[key],
       mass: masses[key] ?? 0,
       destino,
-      destinoNota: DESTINO_NOTE[destino],
+      destinoNota: destinoNotaFor(destino, massesLong[key] ?? 0),
       writeoff: WRITEOFF_KEYS.includes(key),
       plan: (pregresso[key] as PregressoPlan | null | undefined) ?? null,
     };
@@ -177,13 +251,12 @@ export function cellValue(
   return pct === null ? null : Math.round(pct * 100) / 100;
 }
 
-/** Nuovo piano con l'inesigibile dell'anno `yearIndex` sostituito — il gemello
- *  di `withAmount` sulla lista `writeoff`, immutabile allo stesso modo. */
+/** Nuovo piano con l'inesigibile dell'anno `yearIndex` sostituito — passa da
+ *  `withAmount` (rilievo 7, giro di correzione 1): prima ripeteva a mano lo
+ *  stesso arrotondamento sulla lista `writeoff`, due copie che un cambio a
+ *  una sola avrebbe fatto divergere. */
 function withWriteoff(plan: PregressoPlan, yearIndex: number, amount: number): PregressoPlan {
-  const writeoff = [...(plan.writeoff ?? [])];
-  while (writeoff.length <= yearIndex) writeoff.push(0);
-  writeoff[yearIndex] = Math.round(amount * 100) / 100;
-  return { ...plan, writeoff };
+  return withAmount(plan, yearIndex, amount, "writeoff");
 }
 
 /**
@@ -196,6 +269,15 @@ function withWriteoff(plan: PregressoPlan, yearIndex: number, amount: number): P
  *
  * Un campo svuotato (`null`) scrive uno ZERO, non lascia il vecchio importo:
  * cancellare una cella deve togliere quell'incasso dal piano.
+ *
+ * Se il risultato e' un piano tutto a zero — importi E svalutazioni, vedi
+ * `isPlanEmpty` — la scrittura torna a `null` invece di lasciare
+ * `{opening, amounts:[0]}` (rilievo 2, giro di correzione 1): un piano che non
+ * paga nulla non e' una scadenza dichiarata, ed e' la regola del repo "debito
+ * senza scadenza dichiarata → a breve" applicata a se stessa — senza questo,
+ * l'utente che tocca e poi svuota una cella non ha modo di tornare a "nessun
+ * piano", e il residuo sparisce tutto oltre l'esercizio anche se non ha mai
+ * scadenziato nulla.
  */
 export function withCell(
   pregresso: Pregresso,
@@ -210,13 +292,31 @@ export function withCell(
   const plan: PregressoPlan = current ?? { opening: masses[key] ?? 0, amounts: [] };
   const amount = mode === "pct" ? pctToAmount(value ?? 0, plan.opening) : value ?? 0;
   const next = target === "amounts" ? withAmount(plan, yearIndex, amount) : withWriteoff(plan, yearIndex, amount);
-  return { ...pregresso, [key]: next };
+  return { ...pregresso, [key]: isPlanEmpty(next) ? null : next };
 }
 
-/** Il residuo dopo l'ultimo anno di piano. Senza piano il residuo e' TUTTA la
- *  massa: nulla e' stato scadenziato, e mostrare zero direbbe il contrario. */
-export function residualCell(plan: PregressoPlan | null, mass: number, lastIndex: number): number {
-  return plan ? residualAfter(plan, lastIndex) : mass;
+/** Il residuo dopo l'ultimo anno di piano. Senza piano il residuo e' ZERO
+ *  (rilievo 4, giro di correzione 1): non e' che non resti nulla da
+ *  scadenziare, e' che senza piano la spec (§3.1, §3.5, §6) e il motore
+ *  chiudono tutta la massa nel primo anno — mostrare la massa intera nella
+ *  colonna Residuo diceva l'opposto di cio' che l'anteprima (`rowsPregressoRunoff`,
+ *  nota "legacy") gia' affermava sulla stessa riga. */
+export function residualCell(plan: PregressoPlan | null, lastIndex: number): number {
+  return plan ? residualAfter(plan, lastIndex) : 0;
+}
+
+/**
+ * Il segnaposto della cella (spec §6, brief Step 2 — "riga vuota → tutto nel
+ * primo anno"). Senza piano la sola cifra vera da comunicare e' che TUTTO il
+ * saldo si chiude nel primo anno di piano: lo dice nella prima colonna, dove
+ * l'utente guarderebbe per scadenziarlo. Le altre celle di una riga senza
+ * piano, e ogni cella di una riga CON piano, restano l'unita' di misura della
+ * modalita' attiva — non c'e' nulla di speciale da dire su un anno che non e'
+ * il primo quando non c'e' ancora nessuna scadenza dichiarata.
+ */
+export function cellPlaceholder(plan: PregressoPlan | null, yearIndex: number, mode: PregressoMode): string {
+  if (!plan && yearIndex === 0) return "tutto nel primo anno";
+  return mode === "pct" ? "%" : "€";
 }
 
 /** Il nome leggibile dell'override che ha vinto sull'inesigibile. */
@@ -251,6 +351,29 @@ export function writeoffIgnoredAvvisi(years: ForecastPreviewYear[]): string[] {
         `${reason} impedisce di rilevarne il costo in conto economico. Il credito resta a bilancio.`,
       );
     }
+  }
+  return out;
+}
+
+/**
+ * Lo stesso avviso di `writeoffIgnoredAvvisi`, ma indicizzato sull'ANNO
+ * invece che elencato in una frase (rilievo 6, giro di correzione 1): la
+ * tabella lo usa per marcare la cella dove l'utente ha scritto la
+ * svalutazione — "di cui inesigibile" — non solo l'anteprima a destra, dove
+ * oggi e' l'unico posto in cui compare. Nessun ricalcolo: legge
+ * `pregresso_writeoff_ignored` cosi' come il motore lo dichiara, la stessa
+ * chiave e la stessa `REASON_LABELS`.
+ *
+ * Un anno assente dalla mappa vale "nessun avviso": il motore dichiara al
+ * piu' una voce per anno (il solo saldo con `writeoff` e' `crediti_commerciali`).
+ */
+export function writeoffIgnoredByYear(years: ForecastPreviewYear[]): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const y of years) {
+    const raw = ((y.details?.pregresso_writeoff_ignored ?? []) as WriteoffIgnoredRaw[])[0];
+    if (!raw) continue;
+    const reason = REASON_LABELS[raw.reason ?? ""] ?? raw.reason ?? "una modifica manuale del CE";
+    out[y.year] = `${euro(raw.requested ?? 0)} non scaricato — ${reason}`;
   }
   return out;
 }

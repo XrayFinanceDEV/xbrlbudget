@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet } from "@/types/api";
-import { amountToPct, equalInstalments, openingMasses, pctToAmount, residualAfter, validatePregresso, withAmount } from "./budget-pregresso-circolante";
+import {
+  amountToPct, equalInstalments, isPlanEmpty, openingMassLong, openingMasses, pctToAmount, residualAfter,
+  validatePregresso, withAmount,
+} from "./budget-pregresso-circolante";
 
 const bs = { sp06_crediti_breve: "500", sp06e_crediti_tributari_breve: "20", sp06f_imposte_anticipate_breve: "10",
   sp07_crediti_lungo: "40", sp07e_crediti_tributari_lungo: "0", sp07f_imposte_anticipate_lungo: "0",
@@ -76,5 +79,37 @@ describe("budget-pregresso-circolante", () => {
     expect(errs).toHaveLength(2);
     expect(errs[0]).toMatch(/supera/);
     expect(errs[1]).toMatch(/saldo \+ rateizzato/);
+  });
+
+  it("openingMassLong: la parte OLTRE l'esercizio, stessa scomposizione di openingMasses (rilievo 1)", () => {
+    // Fixture: sp07_crediti_lungo=40 (nette, nessuna quota fiscale sul lato
+    // lungo), sp17d/f/g=0, sp17e_debiti_tributari_lungo=35.
+    expect(openingMassLong(bs, "crediti_commerciali")).toBe(40);
+    expect(openingMassLong(bs, "debiti_fornitori")).toBe(0);
+    expect(openingMassLong(bs, "debiti_tributari")).toBe(35);
+    expect(openingMassLong(bs, "debiti_previdenziali")).toBe(0);
+    expect(openingMassLong(bs, "altri_debiti")).toBe(0);
+  });
+
+  it("openingMassLong dei crediti e' al netto delle quote fiscali del lato lungo, come openingMasses", () => {
+    const conQuoteLunghe = { ...bs, sp07_crediti_lungo: "100", sp07e_crediti_tributari_lungo: "15",
+      sp07f_imposte_anticipate_lungo: "5" } as unknown as BalanceSheet;
+    expect(openingMassLong(conQuoteLunghe, "crediti_commerciali")).toBe(80);
+  });
+
+  it("isPlanEmpty: tutto zero o assente vale vuoto; un solo importo non nullo tiene vivo il piano", () => {
+    expect(isPlanEmpty({ opening: 100, amounts: [] })).toBe(true);
+    expect(isPlanEmpty({ opening: 100, amounts: [0, 0] })).toBe(true);
+    expect(isPlanEmpty({ opening: 100, amounts: [0], writeoff: [0] })).toBe(true);
+    expect(isPlanEmpty({ opening: 100, amounts: [0], writeoff: null })).toBe(true);
+    expect(isPlanEmpty({ opening: 100, amounts: [0], writeoff: [5] })).toBe(false);
+    expect(isPlanEmpty({ opening: 100, amounts: [5] })).toBe(false);
+  });
+
+  it("withAmount con field='writeoff' scrive l'inesigibile, stesso arrotondamento del default 'amounts' (rilievo 7)", () => {
+    expect(withAmount({ opening: 100, amounts: [10] }, 0, 33.336, "writeoff"))
+      .toEqual({ opening: 100, amounts: [10], writeoff: [33.34] });
+    // Il default resta "amounts": la firma allargata non cambia le chiamate esistenti.
+    expect(withAmount({ opening: 100, amounts: [10] }, 1, 5)).toEqual({ opening: 100, amounts: [10, 5] });
   });
 });

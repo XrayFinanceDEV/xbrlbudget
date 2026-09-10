@@ -29,7 +29,7 @@ import { parseFieldValue } from "@/lib/budget-field-rules";
 import { euro } from "@/lib/budget-format";
 import { PREGRESSO_LABELS, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import { boolAssumption, pregressoBase, pregressoPreview, singleYearValue } from "@/lib/budget-pregresso-step";
-import { TABELLA_KEYS, massesOf, type PregressoMode } from "@/lib/budget-pregresso-tabella";
+import { TABELLA_KEYS, massesLongOf, massesOf, type PregressoMode } from "@/lib/budget-pregresso-tabella";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import { scopertoAvvisi } from "@/lib/budget-preview-rows";
 import type { Pregresso } from "@/types/api";
@@ -117,12 +117,18 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
   // ogni anno lo farebbe applicare piu' volte.
   const firstYear = p.forecastYears[0];
   const masses = useMemo(() => massesOf(baseBs), [baseBs]);
+  // La massa OLTRE l'esercizio di ciascun saldo: serve solo alla nota di
+  // destino (rilievo 1 della revisione), mai alla validazione o al residuo.
+  const massesLong = useMemo(() => massesLongOf(baseBs), [baseBs]);
   // `?? {}` costruirebbe un oggetto NUOVO a ogni render, e la `useMemo` degli
   // errori si rifarebbe ogni volta: si dipende dal campo salvato, non dal
   // ripiego.
   const pregressoSalvato = p.assumptions[firstYear]?.pregresso;
   const pregresso = useMemo(() => (pregressoSalvato ?? {}) as Pregresso, [pregressoSalvato]);
-  const setPregresso = (next: Pregresso) => p.update(firstYear, "pregresso", next);
+  // Il setter tipizzato (conflitto B): scrive sempre nel primo anno di
+  // piano, la regola vive in `withPregresso` (`lib/budget-horizon.ts`), non
+  // qui.
+  const setPregresso = (next: Pregresso) => p.updatePregresso(next);
   const [mode, setMode] = useState<PregressoMode>("eur");
   // Diagnostica, non correzione: superare la massa di apertura e' un errore,
   // e chi lo produce lo vede scritto — il salvataggio lo rifiuterebbe comunque
@@ -203,12 +209,14 @@ export function StepPregressoNuovo(p: StepProps): JSX.Element {
               <PregressoTable
                 keys={TABELLA_KEYS}
                 masses={masses}
+                massesLong={massesLong}
                 pregresso={pregresso}
                 forecastYears={p.forecastYears}
                 baseYear={p.baseYear}
                 mode={mode}
                 onChange={setPregresso}
                 errors={errors}
+                writeoffIgnored={preview.writeoffIgnoredByYear}
               />
             ) : (
               <p className="text-xs text-muted-foreground">

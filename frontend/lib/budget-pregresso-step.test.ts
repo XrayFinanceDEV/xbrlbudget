@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
+import { euro } from "@/lib/budget-format";
 import {
   boolAssumption,
   pregressoBase,
@@ -111,7 +112,7 @@ describe("boolAssumption", () => {
 
 describe("pregressoPreview", () => {
   it("senza anno base o senza risposta: nessuna riga", () => {
-    const vuota = { years: [], rows: [], unfunded: null, writeoffIgnored: [] };
+    const vuota = { years: [], rows: [], unfunded: null, writeoffIgnored: [], writeoffIgnoredByYear: {} };
     expect(pregressoPreview(undefined, response([year(2027)]))).toEqual(vuota);
     expect(pregressoPreview(baseBs, null)).toEqual(vuota);
   });
@@ -158,5 +159,20 @@ describe("pregressoPreview · pregresso di circolante", () => {
     expect(p.writeoffIgnored).toHaveLength(1);
     expect(p.writeoffIgnored[0]).toContain("2027");
     expect(pregressoPreview(baseBs, response([year(2027)]), ["crediti_commerciali"]).writeoffIgnored).toEqual([]);
+  });
+
+  it("lo stesso avviso arriva anche indicizzato sull'anno (rilievo 6): la tabella lo legge da li'", () => {
+    const conAvviso = year(2027, {
+      details: {
+        ...year(2027).details,
+        pregresso_writeoff_ignored: [
+          { saldo: "crediti_commerciali", field: "ce09d_svalutazione_crediti", requested: 5000, reason: "ce09d_override" },
+        ],
+      },
+    });
+    const p = pregressoPreview(baseBs, response([conAvviso]), ["crediti_commerciali"]);
+    expect(Object.keys(p.writeoffIgnoredByYear)).toEqual(["2027"]);
+    expect(p.writeoffIgnoredByYear[2027]).toContain(euro(5000));
+    expect(pregressoPreview(baseBs, response([year(2027)])).writeoffIgnoredByYear).toEqual({});
   });
 });

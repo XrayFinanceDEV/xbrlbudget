@@ -18,6 +18,8 @@ import {
   baseYearNote,
   forecastYearsFor,
   withDefaultsForYears,
+  withPregresso,
+  withPregressoTrimmedToHorizon,
   hydrateAssumptions,
   horizonFromSavedRows,
   type AssumptionsMap,
@@ -26,6 +28,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import type {
   BudgetScenario,
   FinancingLoanInput,
+  Pregresso,
   SpIndexingDriver,
   TemporaryDifferenceInput,
 } from "@/types/api";
@@ -43,13 +46,18 @@ export interface ScenarioAssumptionsState {
   setAssumptions: React.Dispatch<React.SetStateAction<AssumptionsMap>>;
   idratato: boolean;
   isNew: boolean; // isNew = nessuna ipotesi salvata
-  updateAssumption: (year: number, field: string, value: number | boolean | null | object) => void;
+  updateAssumption: (year: number, field: string, value: number | boolean | null) => void;
   updateAll: (field: string, value: number | boolean | null) => void; // tutti i forecastYears
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
   /** Aggancia una voce minore dello SP a un driver di volume su tutti gli anni
    *  di piano; `null` la slega. */
   updateSpIndexing: (code: string, driver: SpIndexingDriver | null) => void;
+  /** Il setter tipizzato del piano di pregresso (conflitto B della revisione
+   *  del task 7): scrive SEMPRE nel primo anno di piano (`withPregresso`,
+   *  `lib/budget-horizon.ts`), mai su un anno scelto dal chiamante — `update`
+   *  e' tornato scalare apposta, e non accetta piu' un oggetto. */
+  updatePregresso: (next: Pregresso | null) => void;
 }
 
 export function useScenarioAssumptions({
@@ -137,11 +145,15 @@ export function useScenarioAssumptions({
       // sostituisce la mappa che l'effetto dei default aveva gia' riempito al
       // mount, e senza riunirli il salvataggio manderebbe zero righe.
       const nextNumYears = horizonFromSavedRows(data, baseYear);
+      const nextForecastYears = forecastYearsFor(baseYear, nextNumYears);
+      // Il bulk salva le ipotesi anche a generazione fallita: un piano di
+      // pregresso piu' lungo dell'orizzonte puo' arrivare gia' cosi' dal
+      // server. Si accorcia qui, PRIMA del primo render, o la tabella nasce
+      // gia' bloccata (rilievo 3 della revisione del task 7).
       setAssumptions(
-        withDefaultsForYears(
-          assumptionsMap,
-          forecastYearsFor(baseYear, nextNumYears),
-          scenarioId
+        withPregressoTrimmedToHorizon(
+          withDefaultsForYears(assumptionsMap, nextForecastYears, scenarioId),
+          nextForecastYears
         )
       );
       setExistingAssumptionYears(existingYears);
@@ -172,19 +184,26 @@ export function useScenarioAssumptions({
   // righe neutre, e il salvataggio (`forecastYears.filter((y) => assumptions[y])`)
   // le manda tutte e cinque.
   //
-  // Non si ri-innesca da solo: `withDefaultsForYears` restituisce la mappa
-  // ricevuta quando non manca nulla, quindi React esce dall'aggiornamento.
+  // Non si ri-innesca da solo: `withDefaultsForYears` (e, in coda,
+  // `withPregressoTrimmedToHorizon`) restituiscono la mappa ricevuta quando
+  // non c'e' nulla da aggiungere o accorciare, quindi React esce
+  // dall'aggiornamento — stesso invariante di CLAUDE.md sulle due funzioni.
+  //
+  // L'accorciamento del pregresso vive anche qui, non solo all'idratazione
+  // (rilievo 3): l'utente puo' toccare un anno lontano e poi riportare
+  // l'orizzonte indietro nella STESSA sessione, senza un giro sul server in
+  // mezzo.
   useEffect(() => {
     if (!idratato) return;
     setAssumptions((prev) =>
-      withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined)
+      withPregressoTrimmedToHorizon(
+        withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined),
+        forecastYears
+      )
     );
   }, [idratato, forecastYears, scenarioId]);
 
-  // `object` per le ipotesi strutturate scritte per anno (il piano `pregresso`
-  // del passo 6): la mappa e' `Partial<BudgetAssumptionsCreate>`, che quel
-  // campo lo dichiara gia'.
-  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null | object) => {
+  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
     setAssumptions((prev) => ({
       ...prev,
       [year]: {
@@ -193,6 +212,14 @@ export function useScenarioAssumptions({
       },
     }));
   }, []);
+
+  /** Il piano di pregresso (Task 7, giro di correzione 1): scrive SEMPRE nel
+   *  PRIMO anno di piano, mai in quello scelto dal chiamante — la regola sta
+   *  in `withPregresso` (`lib/budget-horizon.ts`), con la sua prova, non qui
+   *  (conflitto A della revisione). */
+  const updatePregresso = useCallback((next: Pregresso | null) => {
+    setAssumptions((prev) => withPregresso(prev, forecastYears, next));
+  }, [forecastYears]);
 
   const updateFinancingLoans = useCallback((year: number, loans: FinancingLoanInput[]) => {
     setAssumptions((prev) => ({
@@ -266,5 +293,6 @@ export function useScenarioAssumptions({
     updateFinancingLoans,
     updateTemporaryDifferences,
     updateSpIndexing,
+    updatePregresso,
   };
 }

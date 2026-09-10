@@ -334,12 +334,37 @@ describe("rowsPregressoRunoff", () => {
   });
 
   it("`mode: legacy` e' un saldo SENZA piano, e lo dice: non e' un residuo di zero", () => {
+    // Altri debiti non ha un driver dietro: senza piano NON si chiude, cresce
+    // per percentuale (rilievo 4 del giro di correzione 1) — dire "tutto nel
+    // primo anno" qui sarebbe falso, non solo generico.
     const rows = rowsPregressoRunoff(
       [withPregresso(2025, { altri_debiti: { opening: 58, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
       ["altri_debiti"],
     );
     const residuo = rows.find((r) => r.label === "Altri debiti · residuo a breve")!;
-    expect(residuo.years[0].note).toBe("nessun piano: tutto nel primo anno");
+    expect(residuo.years[0].note).toBe("nessun piano: non si chiude — cresce ogni anno della percentuale impostata");
+  });
+
+  it("la nota `legacy` non e' la stessa frase per ogni saldo (rilievo 4 + rilievo 5)", () => {
+    // Ogni frase fissata alla lettera: scambiarla con quella di un altro
+    // destino deve far fallire la suite.
+    const senzaPiano = (key: string) =>
+      rowsPregressoRunoff(
+        [withPregresso(2025, { [key]: { opening: 1, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
+        [key as never],
+      ).find((r) => r.label.endsWith("· residuo a breve"))!.years[0].note;
+
+    // Fornitori e crediti: un driver di volume li rigenera comunque, la
+    // chiusura nel primo anno resta vera.
+    expect(senzaPiano("debiti_fornitori")).toBe("nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari");
+    expect(senzaPiano("crediti_commerciali")).toBe(senzaPiano("debiti_fornitori"));
+
+    // Previdenziali e altri debiti: nessun driver, crescono per percentuale.
+    expect(senzaPiano("debiti_previdenziali")).toBe("nessun piano: non si chiude — cresce ogni anno della percentuale impostata");
+    expect(senzaPiano("altri_debiti")).toBe(senzaPiano("debiti_previdenziali"));
+
+    // Le due famiglie NON coincidono.
+    expect(senzaPiano("debiti_fornitori")).not.toBe(senzaPiano("altri_debiti"));
   });
 
   it("l'inesigibile compare solo quando il motore ne dichiara uno diverso da zero", () => {

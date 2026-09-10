@@ -20,7 +20,8 @@
  * `environment: node`.
  */
 
-import type { BudgetAssumptions, BudgetAssumptionsCreate } from "@/types/api";
+import type { BudgetAssumptions, BudgetAssumptionsCreate, Pregresso, PregressoKey, PregressoPlan } from "@/types/api";
+import { isPlanEmpty } from "@/lib/budget-pregresso-circolante";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
 
@@ -342,4 +343,103 @@ export function baseYearNote(baseYear: number, years: number[]): string | null {
   // creazione dello scenario. Nessuna delle due chiose sarebbe utile.
   if (ultimo < baseYear) return null;
   return `in archivio fino al ${ultimo}`;
+}
+
+// ── Il piano di pregresso (Task 7, giro di correzione 1) ────────────────────
+// Vive nelle ipotesi del PRIMO anno di piano (spec §3.5): il motore rifiuta
+// un pregresso scritto altrove con "pregresso is allowed only in the first
+// forecast year". Le due funzioni sotto sono le sole vie di scrittura di
+// quel campo che questo modulo espone — DOVE il piano finisce, e a QUALE
+// lunghezza — cosi' la regola sta in `lib/`, provata, invece di restare un
+// effetto collaterale del fatto che il componente chiamante passi sempre
+// `firstYear` (conflitto A della revisione del task 7).
+
+const PREGRESSO_KEYS: readonly PregressoKey[] = [
+  "crediti_commerciali", "debiti_fornitori", "debiti_tributari", "debiti_previdenziali", "altri_debiti",
+];
+
+/**
+ * Scrive il piano di pregresso nella riga del PRIMO anno di piano. Un
+ * orizzonte vuoto (nessun anno previsto) non scrive nulla e restituisce la
+ * mappa ricevuta: non c'e' una "prima riga" su cui posarlo.
+ *
+ * E' anche il setter TIPIZZATO del conflitto B della revisione: `update`
+ * (`StepProps`) e' tornato al suo tipo scalare, e questa e' l'unica via per
+ * cui il pregresso — un oggetto, non uno scalare — entra nella mappa delle
+ * ipotesi.
+ */
+export function withPregresso(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+  next: Pregresso | null,
+): AssumptionsMap {
+  const firstYear = forecastYears[0];
+  if (firstYear === undefined) return assumptions;
+  return { ...assumptions, [firstYear]: { ...assumptions[firstYear], pregresso: next } };
+}
+
+/**
+ * Accorcia `amounts`/`writeoff` di ogni saldo del pregresso alla lunghezza
+ * dell'orizzonte (rilievo 3, giro di correzione 1): un piano piu' lungo
+ * dell'orizzonte di piano non ha colonne per i suoi anni in eccesso — non e'
+ * raggiungibile ne' correggibile dalla tabella — e il motore lo rifiuta
+ * intero (`validatePregresso` lo segnala, ma senza quelle colonne l'utente
+ * non puo' rimediare). Puo' succedere sia scorciando l'orizzonte dopo aver
+ * toccato un anno lontano, sia idratando ipotesi salvate quando il bulk ha
+ * gia' persistito un piano bloccato (il bulk salva anche a generazione
+ * fallita).
+ *
+ * Gli importi tagliati diventano residuo OLTRE l'orizzonte, che e' il loro
+ * significato quando non sono piu' scadenziati: non richiede una somma
+ * esplicita, la sola rimozione dall'array basta, perche' `residualAfter`
+ * somma solo gli anni ancora presenti. Dopo il taglio vale la regola della
+ * cella svuotata (rilievo 2): un piano tutto a zero torna `null`.
+ *
+ * Restituisce l'oggetto RICEVUTO, stessa identita', quando non c'e' nulla da
+ * accorciare (`pregresso` nullo compreso): e' l'invariante di CLAUDE.md che
+ * impedisce all'effetto chiamante di ri-innescarsi da solo.
+ */
+export function trimPregressoToHorizon(
+  pregresso: Pregresso | null | undefined,
+  horizon: number,
+): Pregresso | null | undefined {
+  if (!pregresso) return pregresso;
+  let out = pregresso;
+  for (const key of PREGRESSO_KEYS) {
+    const plan = pregresso[key] as PregressoPlan | null | undefined;
+    if (!plan) continue;
+    const amountsOver = plan.amounts.length > horizon;
+    const writeoffOver = (plan.writeoff ?? []).length > horizon;
+    if (!amountsOver && !writeoffOver) continue;
+    const trimmed: PregressoPlan = {
+      ...plan,
+      amounts: amountsOver ? plan.amounts.slice(0, horizon) : plan.amounts,
+      writeoff: writeoffOver ? (plan.writeoff ?? []).slice(0, horizon) : plan.writeoff,
+    };
+    out = { ...out, [key]: isPlanEmpty(trimmed) ? null : trimmed };
+  }
+  return out;
+}
+
+/**
+ * Applica `trimPregressoToHorizon` al piano vivo — quello del PRIMO anno di
+ * piano — dentro la mappa delle ipotesi. Va richiamata sia al cambio di
+ * orizzonte sia all'idratazione di righe salvate (rilievo 3): due punti
+ * diversi, la stessa funzione, cosi' non possono divergere su come si taglia
+ * un piano.
+ *
+ * Stessa identita' della mappa ricevuta quando non c'e' nulla da accorciare
+ * — compreso un orizzonte senza un primo anno.
+ */
+export function withPregressoTrimmedToHorizon(
+  assumptions: AssumptionsMap,
+  forecastYears: number[],
+): AssumptionsMap {
+  const firstYear = forecastYears[0];
+  if (firstYear === undefined) return assumptions;
+  const row = assumptions[firstYear];
+  const plan = row?.pregresso as Pregresso | null | undefined;
+  const trimmed = trimPregressoToHorizon(plan, forecastYears.length);
+  if (trimmed === plan) return assumptions;
+  return { ...assumptions, [firstYear]: { ...row, pregresso: trimmed } };
 }

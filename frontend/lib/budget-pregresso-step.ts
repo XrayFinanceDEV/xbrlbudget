@@ -18,7 +18,7 @@ import type { BalanceSheet, ForecastPreviewResponse, PregressoKey } from "@/type
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
-import { writeoffIgnoredAvvisi } from "@/lib/budget-pregresso-tabella";
+import { writeoffIgnoredAvvisi, writeoffIgnoredByYear } from "@/lib/budget-pregresso-tabella";
 import { num } from "@/lib/budget-format";
 
 export interface PregressoBase {
@@ -92,9 +92,16 @@ export interface PregressoPreview {
    *  un override del CE impediva di rilevarne il costo: il credito e' rimasto
    *  a bilancio, e va detto. Vuoto quando non c'e' nulla da dire. */
   writeoffIgnored: string[];
+  /** Lo stesso avviso, indicizzato sull'anno invece che elencato in una
+   *  frase: la tabella lo usa per marcare la cella «di cui inesigibile»
+   *  invece di lasciarlo solo nell'anteprima (rilievo 6, giro di correzione
+   *  1). Stessa lettura di `writeoffIgnored`, nessun ricalcolo. */
+  writeoffIgnoredByYear: Record<number, string>;
 }
 
-const EMPTY_PREVIEW: PregressoPreview = { years: [], rows: [], unfunded: null, writeoffIgnored: [] };
+const EMPTY_PREVIEW: PregressoPreview = {
+  years: [], rows: [], unfunded: null, writeoffIgnored: [], writeoffIgnoredByYear: {},
+};
 
 /**
  * Dalla risposta del motore a tutto cio' che l'anteprima del passo rende.
@@ -117,5 +124,6 @@ export function pregressoPreview(
     rows: [...rowsPregressoNuovo(baseBs, previewYears), ...rowsPregressoRunoff(previewYears, keys)],
     unfunded: unfundedFromError(data.error),
     writeoffIgnored: writeoffIgnoredAvvisi(previewYears),
+    writeoffIgnoredByYear: writeoffIgnoredByYear(previewYears),
   };
 }

@@ -9,6 +9,7 @@ import { computeAutoDays } from "@/lib/budget-turnover";
 import { euro, num, pctOf } from "@/lib/budget-format";
 import type { PregressoKey } from "@/types/api";
 import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
+import { legacyNoteFor } from "@/lib/budget-pregresso-tabella";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -261,9 +262,14 @@ export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewY
  * svolge `runoff_schedule` in Python.
  *
  * `mode: "legacy"` non e' un residuo di zero: e' un saldo per cui NESSUN piano
- * e' stato dichiarato, e che quindi segue le formule di sempre — il motore lo
- * chiude tutto nel primo anno. Confondere le due cose farebbe leggere «0» come
- * «pagato», e la nota esiste per questo.
+ * e' stato dichiarato, e che quindi segue le formule di sempre. La nota che lo
+ * dice NON e' la stessa frase su tutti e cinque i saldi (`legacyNoteFor`,
+ * `lib/budget-pregresso-tabella.ts`, rilievo 4 del giro di correzione 1):
+ * fornitori e crediti si chiudono davvero nel primo anno perche' un driver di
+ * volume li rigenera comunque, ma previdenziali e altri debiti — senza un
+ * driver dietro — crescono per percentuale e non si chiudono in alcun senso
+ * visibile. Confondere «nessun piano» con «residuo pagato» sarebbe un difetto
+ * a se'; dire "chiude" di un saldo che invece cresce sarebbe l'altro.
  */
 export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly PregressoKey[]): PreviewRow[] {
   if (years.length === 0) return [];
@@ -276,7 +282,7 @@ export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly
     const pick = (f: "residual_short" | "residual_long" | "closed" | "writeoff"): PreviewCell[] =>
       det.map((d) => ({ value: d ? num(d[f]) : null }));
     const residuo = pick("residual_short").map((c, i) =>
-      det[i]?.mode === "legacy" ? { ...c, note: "nessun piano: tutto nel primo anno" } : c);
+      det[i]?.mode === "legacy" ? { ...c, note: legacyNoteFor(key) } : c);
     out.push(row(`pregresso-${key}`, `${PREGRESSO_LABELS[key]} · residuo a breve`, "value",
       { value: det[0] ? num(det[0].opening) : null }, residuo));
     out.push(row(`pregresso-${key}-long`, "oltre l'esercizio", "sub", { value: null }, pick("residual_long")));

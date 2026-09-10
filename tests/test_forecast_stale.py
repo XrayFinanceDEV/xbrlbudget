@@ -23,6 +23,7 @@ esplicitamente `fy.updated_at`.
 import os
 import sys
 from datetime import datetime
+from decimal import Decimal
 
 # `backend/app/api/v1/analysis.py` importa `app.core.database` senza il
 # bootstrap di sys.path che i suoi fratelli (`budget_scenarios.py`) fanno da
@@ -71,6 +72,17 @@ def _save(db, company_id, scenario_id, *, growth=5.0, extra=None, auto_generate=
     )
 
 
+def _istante(iso):
+    """Il timestamp emesso da /analysis, riletto come istante UTC.
+
+    Mai confrontare le stringhe: `isoformat()` omette la frazione quando i
+    microsecondi sono zero, e col suffisso `Z` `"…00Z"` > `"…00.500000Z"` pur
+    essendo l'istante precedente.
+    """
+    assert iso.endswith("Z"), iso
+    return datetime.fromisoformat(iso)
+
+
 def _analysis(db, company_id, scenario_id):
     return analysis_api.get_complete_analysis(
         company_id,
@@ -97,7 +109,7 @@ def test_generazione_riuscita_non_e_stantia():
             # servono a spiegare l'avviso, non solo ad alzarlo.
             assert out["assumptions_updated_at"] is not None
             assert out["forecast_updated_at"] is not None
-            assert out["assumptions_updated_at"] < out["forecast_updated_at"]
+            assert _istante(out["assumptions_updated_at"]) < _istante(out["forecast_updated_at"])
     finally:
         engine.dispose()
 
@@ -127,7 +139,7 @@ def test_generazione_respinta_dal_bulk_rende_stantio_il_previsionale():
             assert [
                 y["income_statement"]["ce01_ricavi_vendite"] for y in dopo["forecast_years"]
             ] == ricavi_prima
-            assert dopo["assumptions_updated_at"] > dopo["forecast_updated_at"]
+            assert _istante(dopo["assumptions_updated_at"]) > _istante(dopo["forecast_updated_at"])
     finally:
         engine.dispose()
 
@@ -146,7 +158,7 @@ def test_una_rigenerazione_riuscita_torna_allineata():
             assert _save(db, company_id, sc.id, growth=7.0)["forecast_generated"] is True
             out = _analysis(db, company_id, sc.id)
             assert out["forecast_stale"] is False
-            assert out["assumptions_updated_at"] < out["forecast_updated_at"]
+            assert _istante(out["assumptions_updated_at"]) < _istante(out["forecast_updated_at"])
     finally:
         engine.dispose()
 
@@ -249,5 +261,127 @@ def test_scenario_senza_ipotesi_non_e_stantio():
             assert out["forecast_stale"] is False
             assert out["assumptions_updated_at"] is None
             assert out["forecast_updated_at"] is None
+    finally:
+        engine.dispose()
+
+
+def test_i_timestamp_escono_in_utc_esplicito_con_e_senza_frazione():
+    """Le colonne sono `default=datetime.utcnow`, cioe' UTC ingenuo: senza
+    offset `Date.parse` le legge come ora locale. Il suffisso e' `Z`.
+
+    I due formati sono entrambi reali: `isoformat()` omette la frazione quando
+    i microsecondi sono zero. Ed e' proprio questa coppia a ordinarsi al
+    contrario come stringhe (`'Z'` > `'.'`), cosa che la suite del client
+    (`budget-stale.test.ts`) usa per provare che si confrontano gli istanti.
+    """
+    senza = datetime(2026, 9, 10, 8, 0, 0)
+    con = datetime(2026, 9, 10, 8, 0, 0, 500000)
+    assumptions_iso, forecast_iso, stale = _stale([_Riga(con)], [_Riga(senza)])
+    assert assumptions_iso == "2026-09-10T08:00:00.500000Z"
+    assert forecast_iso == "2026-09-10T08:00:00Z"
+    assert stale is True
+    # La premessa che rende pericoloso il confronto di stringhe:
+    assert forecast_iso > assumptions_iso
+    assert _istante(forecast_iso) < _istante(assumptions_iso)
+
+
+# ── Infrannuale: il gemello della rigenerazione ────────────────────────────
+#
+# `IntraYearEngine._save_forecast` ha lo stesso upsert sui soli figli del
+# motore budget, e la stessa riga che tocca `fy.updated_at`. Senza un test
+# proprio quella riga si poteva togliere lasciando verde la suite intera
+# (revisione del task 13, rilievo 1): tornerebbe l'avviso «stantio» permanente
+# su ogni infrannuale rigenerato piu' di una volta.
+#
+# Le ipotesi vanno risalvate FRA le due generazioni, e non solo prima della
+# prima: altrimenti, anche senza quella riga, `updated_at` resterebbe alla
+# prima generazione — gia' piu' recente delle ipotesi — e il test passerebbe
+# per la ragione sbagliata. Due salvataggi bulk sono esattamente questo.
+
+INFRA_ROW = {
+    "forecast_year": 2025,
+    "tax_rate": 0,
+    "fixed_materials_percentage": 0,
+    "fixed_services_percentage": 0,
+    "ce01_override": 5000,
+}
+
+
+def _infrannuale(db):
+    """Riferimento 2024 a 12 mesi e parziale 2025 a 9 mesi, entrambi quadrati
+    e con utile CE == `sp13`, o il cancello di forecastabilita' li rifiuterebbe."""
+    company = models.Company(name="Infra stale", tax_id="INFRA-STALE", sector=1, user_id=USER)
+    db.add(company)
+    db.flush()
+
+    ref = models.FinancialYear(
+        company_id=company.id, year=2024, period_months=None,
+        validation_status="verified", forecastable=True,
+    )
+    db.add(ref)
+    db.flush()
+    db.add(models.BalanceSheet(
+        financial_year_id=ref.id,
+        sp09_disponibilita_liquide=Decimal("1500"),
+        sp11_capitale=Decimal("300"),
+        sp13_utile_perdita=Decimal("1200"),
+    ))
+    db.add(models.IncomeStatement(financial_year_id=ref.id, ce01_ricavi_vendite=Decimal("1200")))
+
+    partial = models.FinancialYear(
+        company_id=company.id, year=2025, period_months=9,
+        validation_status="verified", forecastable=True,
+    )
+    db.add(partial)
+    db.flush()
+    db.add(models.BalanceSheet(
+        financial_year_id=partial.id,
+        sp09_disponibilita_liquide=Decimal("1200"),
+        sp11_capitale=Decimal("300"),
+        sp13_utile_perdita=Decimal("900"),
+    ))
+    db.add(models.IncomeStatement(financial_year_id=partial.id, ce01_ricavi_vendite=Decimal("900")))
+
+    scenario = models.BudgetScenario(
+        company_id=company.id, name="Infrannuale 9M", base_year=2024,
+        scenario_type="infrannuale", period_months=9,
+    )
+    db.add(scenario)
+    db.commit()
+    return company.id, scenario.id
+
+
+def _save_infra(db, company_id, scenario_id, row):
+    return budget_scenarios.bulk_upsert_assumptions(
+        company_id,
+        scenario_id,
+        request={"assumptions": [row], "auto_generate": True},
+        user_id=USER,
+        db=db,
+    )
+
+
+def test_infrannuale_rigenerato_due_volte_non_e_stantio():
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, scenario_id = _infrannuale(db)
+
+            primo = _save_infra(db, company_id, scenario_id, INFRA_ROW)
+            assert primo["forecast_generated"] is True, primo["message"]
+            assert _analysis(db, company_id, scenario_id)["forecast_stale"] is False
+
+            secondo = _save_infra(db, company_id, scenario_id, dict(INFRA_ROW, ce01_override=6000))
+            assert secondo["forecast_generated"] is True, secondo["message"]
+
+            # Un solo ForecastYear: la seconda generazione e' passata dal ramo
+            # «anno gia' esistente», che e' quello sotto prova.
+            assert db.query(models.ForecastYear).filter(
+                models.ForecastYear.scenario_id == scenario_id
+            ).count() == 1
+
+            out = _analysis(db, company_id, scenario_id)
+            assert out["forecast_stale"] is False
+            assert _istante(out["assumptions_updated_at"]) < _istante(out["forecast_updated_at"])
     finally:
         engine.dispose()

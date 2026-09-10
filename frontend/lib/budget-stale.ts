@@ -56,6 +56,17 @@ function instante(iso: string | null | undefined): number | null {
  * Il confronto e' **stretto**: la parita' e' «allineato». I due timestamp
  * nascono da `datetime.utcnow()` e la generazione scrive dopo le ipotesi,
  * quindi un pareggio e' un caso di misura, non di disallineamento.
+ *
+ * Si confrontano gli **istanti**, mai le stringhe: il server omette la
+ * frazione quando i microsecondi sono zero, e con il suffisso `Z` l'ordine
+ * lessicografico di `"…00Z"` e `"…00.500000Z"` e' l'inverso di quello degli
+ * istanti (`'Z'` > `'.'`).
+ *
+ * La risoluzione qui e' il **millisecondo**, non il microsecondo del server:
+ * `Date` non rappresenta i microsecondi, e `….100001Z` si legge come
+ * `….100000Z` (misurato). Il troncamento puo' solo trasformare uno stantio in
+ * un pareggio — un avviso mancato, mai un avviso falso — e nel caso reale il
+ * previsionale a schermo viene da una richiesta precedente al salvataggio.
  */
 export function isForecastStale(facts: ForecastStaleFacts): boolean {
   if (!(facts.forecastYearsCount > 0)) return false;

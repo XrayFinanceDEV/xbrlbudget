@@ -1024,9 +1024,9 @@ export interface ScenarioAnalysis {
    *  sempre, anche a `false`; opzionale qui perche' una risposta piu' vecchia
    *  puo' non portarlo — e l'assenza vale «allineato». */
   forecast_stale?: boolean;
-  /** Ultima scrittura delle ipotesi dello scenario, ISO. */
+  /** Ultima scrittura delle ipotesi dello scenario, ISO in UTC con suffisso `Z`. */
   assumptions_updated_at?: string | null;
-  /** Ultima generazione del previsionale, ISO. */
+  /** Ultima generazione del previsionale, ISO in UTC con suffisso `Z`. */
   forecast_updated_at?: string | null;
 }
 

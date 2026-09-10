@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { forecastStaleFromAnalysis, isForecastStale } from "@/lib/budget-stale";
 import type { ScenarioAnalysis } from "@/types/api";
 
-const PRIMA = "2026-09-10T08:00:00.100000";
-const DOPO = "2026-09-10T08:00:00.900000";
+// Nel formato che /analysis emette davvero: ISO in UTC col suffisso `Z`.
+const PRIMA = "2026-09-10T08:00:00.100000Z";
+const DOPO = "2026-09-10T08:00:00.900000Z";
 
 describe("isForecastStale", () => {
   it("e' stantio quando le ipotesi sono piu' recenti del previsionale", () => {
@@ -78,31 +79,59 @@ describe("isForecastStale", () => {
     ).toBe(false);
   });
 
-  it("distingue istanti che cadono nello stesso secondo", () => {
-    // I due timestamp arrivano da `datetime.utcnow()`, che ha i microsecondi,
-    // e la generazione scrive subito dopo le ipotesi: una sonda che campiona
-    // solo istanti a distanza di giorni non proverebbe nulla sul caso reale.
+  it("distingue istanti che cadono nello stesso secondo, al millisecondo", () => {
+    // Il server scrive i microsecondi, ma qui la risoluzione e' il
+    // MILLISECONDO: `Date` non rappresenta i microsecondi, e `.100001Z` si
+    // legge come `.100000Z` (misurato in node). Il troncamento puo' solo
+    // trasformare uno stantio in un pareggio, cioe' un avviso mancato e mai un
+    // avviso falso; e nel caso reale salvataggio e previsionale a schermo sono
+    // due richieste HTTP distinte, non due scritture nello stesso millisecondo.
+    // Una sonda su istanti a giorni di distanza non proverebbe nulla, per
+    // questo i due casi qui sotto stanno a un millisecondo.
     expect(
       isForecastStale({
-        assumptionsUpdatedAt: "2026-09-10T08:00:00.500000",
-        forecastUpdatedAt: "2026-09-10T08:00:00.499000",
+        assumptionsUpdatedAt: "2026-09-10T08:00:00.500000Z",
+        forecastUpdatedAt: "2026-09-10T08:00:00.499000Z",
         forecastYearsCount: 2,
       }),
     ).toBe(true);
     expect(
       isForecastStale({
-        assumptionsUpdatedAt: "2026-09-10T08:00:00.499000",
-        forecastUpdatedAt: "2026-09-10T08:00:00.500000",
+        assumptionsUpdatedAt: "2026-09-10T08:00:00.499000Z",
+        forecastUpdatedAt: "2026-09-10T08:00:00.500000Z",
+        forecastYearsCount: 2,
+      }),
+    ).toBe(false);
+    // Il limite, fissato: un microsecondo di scarto non basta ad alzare
+    // l'avviso. E' il verso benigno dell'errore, non un difetto da correggere.
+    expect(
+      isForecastStale({
+        assumptionsUpdatedAt: "2026-09-10T08:00:00.100001Z",
+        forecastUpdatedAt: "2026-09-10T08:00:00.100000Z",
         forecastYearsCount: 2,
       }),
     ).toBe(false);
   });
 
-  it("confronta gli istanti, non le stringhe: una data piu' lunga non vince per lunghezza", () => {
+  it("confronta gli istanti, non le stringhe: il formato del server le ordina al contrario", () => {
+    // Coppia REALE, non costruita: `datetime.isoformat()` omette la frazione
+    // quando i microsecondi sono zero, e il server aggiunge `Z`. Come stringhe
+    // `'Z'` (0x5A) > `'.'` (0x2E), quindi `"…00Z"` precede `"…00.500000Z"`
+    // nell'ordine lessicografico ma lo segue nel tempo.
+    const SENZA_FRAZIONE = "2026-09-10T08:00:00Z";
+    const CON_FRAZIONE = "2026-09-10T08:00:00.500000Z";
+    expect(SENZA_FRAZIONE > CON_FRAZIONE).toBe(true); // la premessa del test
     expect(
       isForecastStale({
-        assumptionsUpdatedAt: "2026-09-09T23:59:59.999999",
-        forecastUpdatedAt: "2026-09-10T00:00:00",
+        assumptionsUpdatedAt: CON_FRAZIONE,
+        forecastUpdatedAt: SENZA_FRAZIONE,
+        forecastYearsCount: 2,
+      }),
+    ).toBe(true);
+    expect(
+      isForecastStale({
+        assumptionsUpdatedAt: SENZA_FRAZIONE,
+        forecastUpdatedAt: CON_FRAZIONE,
         forecastYearsCount: 2,
       }),
     ).toBe(false);

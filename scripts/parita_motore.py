@@ -672,10 +672,16 @@ def _e_vuoto(v: Any) -> bool:
         return True
     if isinstance(v, bool):
         return v is False
-    if isinstance(v, (list, dict, str)):
-        return len(v) == 0
+    # Il numero PRIMA della stringa: il driver serializza ogni `Decimal` come
+    # stringa (`_serializza`), quindi uno zero arriva qui come "0.00". Con il
+    # controllo sulla lunghezza per primo, una chiave nuova dichiarata a zero
+    # contava come divergenza, contro cio' che questa funzione dichiara — e'
+    # successo con `details.prestiti_nuovi_quota_breve` del Task 17, segnalata a
+    # 0,00 su ogni scenario senza prestito.
     if _e_numero(v):
         return D(str(v)) == 0
+    if isinstance(v, (list, dict, str)):
+        return len(v) == 0
     return False
 
 

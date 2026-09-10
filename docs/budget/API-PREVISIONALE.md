@@ -28,7 +28,7 @@ Con `auto_generate: true` il servizio sceglie il motore dal `scenario_type`
 (`IntraYearEngine` per `infrannuale`, `ForecastEngine` altrimenti) e lo esegue. Se il motore
 solleva — per il gate semantico sulla fonte, per ricavi di base negativi, per qualunque
 ragione — l'eccezione viene **catturata** e la risposta è ugualmente **200**
-(`backend/app/services/assumptions_service.py:318-327`):
+(`backend/app/services/assumptions_service.py:322-331`):
 
 ```jsonc
 { "success": true, "assumptions_saved": 2,
@@ -47,7 +47,7 @@ Due dettagli che si sbagliano facilmente:
   non si accorge di nulla.
 
 I tre chiamanti in `frontend/` controllano `forecast_generated === false` e mostrano un
-`toast.warning` col `message`: `app/budget/page.tsx:982-985`, `app/pratica/page.tsx:801`
+`toast.warning` col `message`: `app/budget/page.tsx:991-994`, `app/pratica/page.tsx:801`
 (`calculateProjectedBS`) e `:895` (`saveProjection12M`). Un quarto chiamante che se ne
 dimenticasse dipingerebbe una colonna Proiezione vuota sotto un toast verde.
 
@@ -80,17 +80,17 @@ due esiti HTTP opposti a seconda della porta da cui si è entrati.
 
 ### 2.1 Conto economico — 32 colonne `ce*_override`
 
-`BudgetAssumptions` porta **32** colonne `ce*_override` (`database/models.py:683-716`), non 31:
+`BudgetAssumptions` porta **32** colonne `ce*_override` (`database/models.py:703-736`), non 31:
 `ce01`–`ce20` meno `ce17` (sostituito dalle sue due sotto-voci), più `ce03a` (incrementi di
 immobilizzazioni per lavori interni, A.4), `ce08a`–`d`, `ce09a`–`d`, `ce11b`, `ce17`, `ce17a`,
 `ce17b`. Lo stesso insieme di 32 compare in `backend/app/schemas/budget.py` (due volte),
 nell'allowlist `_CE_OVERRIDE_FIELDS` di `budget_scenarios.py:770-779` e nella mappa
-`FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:63`.
+`FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:71`.
 
 Ogni colonna è un **valore assoluto in euro**. `NULL` = usa il calcolo del motore.
-`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:730-731`,
-`intra_year_engine.py:270-271`); `ce17a_override`/`ce17b_override` sono letti separatamente,
-**non** come netto in `ce17_override` (`forecast_engine.py:938-939`).
+`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:1647-1648`,
+`intra_year_engine.py:271-272`); `ce17a_override`/`ce17b_override` sono letti separatamente,
+**non** come netto in `ce17_override` (`forecast_engine.py:1873-1874`).
 
 Il batch:
 
@@ -116,18 +116,18 @@ mette la modifica in `pendingEdits` (**sfondo giallo + sottolineatura gialla**) 
 `/analysis` e ricarica. Una cella svuotata manda `null`. Un override **già persistito** si
 riconosce da una sottolineatura `border-b-2 border-primary` — il colore del tema, non un blu
 fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/analysis`
-(`app/forecast/income/page.tsx:505-524, 544-548`).
+(`app/forecast/income/page.tsx:508-527, 546-551`).
 
 ### 2.2 Stato patrimoniale — il sacco JSON `sp_overrides`
 
-`BudgetAssumptions.sp_overrides` è una colonna **JSON** (`models.py:680`), un dizionario
+`BudgetAssumptions.sp_overrides` è una colonna **JSON** (`models.py:700`), un dizionario
 `{campo_sp: valore}`. Non è un residuo: `/forecast/balance` è **editabile** e la scrive
-(`frontend/app/forecast/balance/page.tsx:153-183`), passando per la `PUT` per anno; entrambi i
-motori la applicano in coda al calcolo dello SP (`forecast_engine.py:1553`,
-`intra_year_engine.py:571`), e il ramo a 12 mesi del wizard della pratica ne manda
+(`frontend/app/forecast/balance/page.tsx:154-184`), passando per la `PUT` per anno; entrambi i
+motori la applicano in coda al calcolo dello SP (`forecast_engine.py:3057`,
+`intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda
 una versione propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:872`).
 
-`_apply_sp_overrides` (`forecast_engine.py:381-470`) ha tre comportamenti da conoscere:
+`_apply_sp_overrides` (`forecast_engine.py:1104-1206`) ha tre comportamenti da conoscere:
 
 1. una chiave che non esiste nel risultato è **ignorata in silenzio**;
 2. ogni valore è **clampato a ≥ 0**, tranne `sp13_utile_perdita` e
@@ -160,24 +160,24 @@ tutti gli override di stato patrimoniale.
 ## 4. I giorni di rotazione derivati dall'anno base
 
 Quando `dso_days` / `dio_days` / `dpo_days` non sono impostati nelle ipotesi, il motore li
-deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:1042`):
+deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2016`):
 
 | | formula | nota |
 |---|---|---|
-| DSO | `(sp06 − sp06e − sp06f) / ce01 × 360` | solo i crediti **commerciali**: crediti tributari e imposte anticipate sono esclusi perché dipendono dalla posizione fiscale, non dal giro d'affari (`:897-911`) |
-| DIO | `sp05 / ce01 × 360` | il denominatore è il **ricavo**, non gli acquisti (`:915-922`) |
-| DPO | `sp16d / (ce05 + ce06) × 360` | solo i debiti **verso fornitori**, non l'aggregato `sp16` (`:1012-1019`) |
+| DSO | `(sp06 − sp06e − sp06f) / ce01 × 360` | solo i crediti **commerciali**: crediti tributari e imposte anticipate sono esclusi perché dipendono dalla posizione fiscale, non dal giro d'affari (`:2214-2236`) |
+| DIO | `sp05 / ce01 × 360` | il denominatore è il **ricavo**, non gli acquisti (`:2238-2252`) |
+| DPO | `sp16d / (ce05 + ce06) × 360` | solo i debiti **verso fornitori**, non l'aggregato `sp16` (`:2429-2442`) |
 
 > **L'aliquota di default non è quella che l'app usa.** Lo schema Pydantic ha
-> `tax_rate: Decimal = 24` (`backend/app/schemas/budget.py:148`, l'IRES da sola), ma ogni
+> `tax_rate: Decimal = 24` (`backend/app/schemas/budget.py:188`, l'IRES da sola), ma ogni
 > chiamante del frontend manda **27,9** — la miscela IRES 24 + IRAP 3,9 dichiarata in
-> `STARTUP_TAX_RATE_PCT` (`app/budget/page.tsx:361`) e ripetuta letterale in
-> `app/pratica/page.tsx:780, 877` e in `lib/budget-horizon.ts:237`. Il 24% si vede solo su una
+> `STARTUP_TAX_RATE_PCT` (`app/budget/page.tsx:370`) e ripetuta letterale in
+> `app/pratica/page.tsx:780, 877` e in `lib/budget-horizon.ts:245`. Il 24% si vede solo su una
 > chiamata che ometta il campo.
 
 Il circolante scala quindi con i ricavi e i costi previsionali, **anche quando questi vengono
 da un override CE**: `_calculate_balance_sheet` legge `forecast_inc`, cioè il conto economico
-già calcolato con gli override applicati (`:875-876`). Più ricavi → più crediti; più acquisti
+già calcolato con gli override applicati (`:2133-2134`). Più ricavi → più crediti; più acquisti
 → più debiti verso fornitori; la cassa fa da pareggio, ma **solo verso l'alto**: un fabbisogno
 di cassa non diventa mai da solo debito a breve. Di default il motore solleva `Unfunded
 financing requirement <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di

@@ -51,6 +51,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
 import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
@@ -105,8 +106,10 @@ const FIELD_TO_OVERRIDE: Record<string, string> = {
 
 type YearData = ScenarioAnalysisYearData;
 
-// Key for pending edits: "year:field"
-type PendingEdits = Record<string, number | null>;
+// Key for pending edits: "year:field" -- stessa forma di PendingSpEdits
+// (SP Prev.): un alias sul tipo condiviso, non una seconda copia che
+// potrebbe divergere.
+type PendingEdits = PendingSpEdits;
 
 export default function ForecastIncomePage() {
   const router = useRouter();
@@ -173,7 +176,7 @@ export default function ForecastIncomePage() {
         };
       });
       await patchCeOverrides(selectedCompanyId, selectedScenario.id, overrides);
-      setPendingEdits({});
+      setPendingEdits((prev) => pendingEditsAfterSave(prev, "success"));
       invalidateAnalysis(selectedCompanyId, selectedScenario.id);
       // Dentro una pratica il "Vai al Rendiconto" duplicherebbe il fallback
       // della barra azioni ("Avanti: ..."): l'azione del toast resta solo
@@ -187,6 +190,12 @@ export default function ForecastIncomePage() {
       return true;
     } catch (err: any) {
       toast.error("Errore: " + getErrorMessage(err, "aggiornamento previsionale fallito"));
+      // Rilievo 6, giro di correzione 2: un salvataggio che il server ha
+      // rifiutato non deve lasciare la cella a mostrare il valore digitato
+      // come se fosse stato applicato -- stessa correzione di SP Prev.
+      // (`pendingEditsAfterSave`), lo stesso backend ora annulla anche
+      // l'override scritto (`assumptions_service.apply_ce_overrides`).
+      setPendingEdits((prev) => pendingEditsAfterSave(prev, "error"));
       return false;
     } finally {
       setSaving(false);

@@ -43,6 +43,7 @@ import {
   CheckCircle2,
   CircleDashed,
 } from "lucide-react";
+import { saveNotice } from "@/lib/budget-preview-notice";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -800,8 +801,11 @@ export default function InfraannualePage() {
       // a success toast, with the real reason only in the response message.
       if (result?.forecast_generated === false) {
         setAnalysis(null);
+        // `saveNotice` (giro di correzione 2, rilievo 6): stesso prefisso
+        // fisso del backend tradotto in italiano, non un secondo testo
+        // scritto a mano che potrebbe divergere da quello del wizard.
         toast.warning(
-          result?.message ?? "Ipotesi salvate, ma la proiezione non è stata generata"
+          result?.message ? saveNotice(result.message) : "Ipotesi salvate, ma la proiezione non è stata generata"
         );
         return;
       }
@@ -894,8 +898,11 @@ export default function InfraannualePage() {
       // Same silent-failure guard as calculateProjectedBS above.
       if (result?.forecast_generated === false) {
         setAnalysis(null);
+        // `saveNotice` (giro di correzione 2, rilievo 6): stesso prefisso
+        // fisso del backend tradotto in italiano, non un secondo testo
+        // scritto a mano che potrebbe divergere da quello del wizard.
         toast.warning(
-          result?.message ?? "Ipotesi salvate, ma la proiezione non è stata generata"
+          result?.message ? saveNotice(result.message) : "Ipotesi salvate, ma la proiezione non è stata generata"
         );
         return;
       }

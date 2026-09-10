@@ -180,10 +180,13 @@ export default function ForecastBalancePage() {
       toast.error(getErrorMessage(error, "aggiornamento dello stato patrimoniale fallito"));
       // Rilievo 6, giro di correzione 1: un salvataggio che il server ha
       // rifiutato non deve lasciare la cella a mostrare il valore digitato
-      // come se fosse stato applicato — vedi `pendingEditsAfterSave`.
-      // `updateBudgetAssumptions` puo' avere gia' scritto `sp_overrides` sul
-      // server anche se la generazione e' poi fallita: la cella torna al
-      // valore VERO, quello dell'ultimo previsionale generato con successo.
+      // come se fosse stato applicato — vedi `pendingEditsAfterSave`. La
+      // cella torna al valore VERO, quello dell'ultimo previsionale
+      // generato con successo. Giro di correzione 2: `updateBudgetAssumptions`
+      // ora annulla anche `sp_overrides` sul server se la generazione fallisce
+      // (salvataggio e rigenerazione condividono la stessa transazione,
+      // `assumptions_service.update_single_year_assumptions`) — questo reset
+      // locale resta comunque necessario, `pendingEdits` e' stato del client.
       setPendingEdits((prev) => pendingEditsAfterSave(prev, "error"));
     } finally {
       setSaving(false);

@@ -21,7 +21,7 @@
  */
 
 import type { BudgetAssumptions, BudgetAssumptionsCreate, Pregresso, PregressoKey, PregressoPlan } from "@/types/api";
-import { isPlanEmpty } from "@/lib/budget-pregresso-circolante";
+import { isPlanEmpty, normalizePregresso } from "@/lib/budget-pregresso-circolante";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
 
@@ -124,7 +124,11 @@ export function hydrateAssumptions(
       financing_duration_years: a.financing_duration_years,
       financing_interest_rate: a.financing_interest_rate,
       financing_loans: a.financing_loans ?? null,
-      pregresso: a.pregresso ?? null,
+      // `normalizePregresso`, non `a.pregresso ?? null`: la colonna torna dal
+      // server con i `Decimal` serializzati come stringa (rilievo 5, giro di
+      // correzione 1 — vedi il commento su `normalizePregresso`), e un
+      // passaggio diretto li porterebbe cosi' nella mappa idratata.
+      pregresso: normalizePregresso(a.pregresso),
       sp01_growth_pct: a.sp01_growth_pct,
       sp04_growth_pct: a.sp04_growth_pct,
       sp06e_growth_pct: a.sp06e_growth_pct,

@@ -129,6 +129,66 @@ export function withAmount(
   return field === "amounts" ? { ...plan, amounts: list } : { ...plan, writeoff: list };
 }
 
+/** Coerce un piano non-tributario ai numeri veri (vedi `normalizePregresso`
+ *  per il perche'). `writeoff` resta `null`/`undefined` quando tale: un piano
+ *  senza inesigibile e uno con inesigibile zero non sono la stessa cosa. */
+function normalizePlan(plan: PregressoPlan): PregressoPlan {
+  return {
+    opening: num(plan.opening),
+    amounts: (plan.amounts ?? []).map(num),
+    writeoff: plan.writeoff ? plan.writeoff.map(num) : plan.writeoff,
+  };
+}
+
+/** Stessa coercizione di `normalizePlan`, piu' le tre chiavi che solo il
+ *  piano tributario ha. */
+function normalizeTributari(plan: PregressoTributari): PregressoTributari {
+  return {
+    ...normalizePlan(plan),
+    saldo: num(plan.saldo),
+    rateizzato: num(plan.rateizzato),
+    acconto_pct: num(plan.acconto_pct),
+  };
+}
+
+/**
+ * Coerce OGNI campo numerico di un `Pregresso` idratato dal server a un vero
+ * `number` (rilievo 5, giro di correzione 1).
+ *
+ * Il perche': la colonna `BudgetAssumptions.pregresso` e' un bag JSON di
+ * `Decimal` (`backend/app/schemas/budget.py`, `PregressoPlanInput`/
+ * `PregressoTributariInput`). FastAPI, per rispondere, chiama
+ * `jsonable_encoder` su un modello Pydantic v2 — che per un `BaseModel` passa
+ * da `model_dump(mode="json")`, e Pydantic v2 serializza `Decimal` in quella
+ * modalita' come STRINGA (per non perdere precisione), non come numero: il
+ * tipo TypeScript `Pregresso`/`PregressoPlan` promette `number`, ma
+ * `GET /assumptions` restituisce `"6451277.6"`, non `6451277.6`.
+ *
+ * Senza questa coercizione, `residualAfter` e `validatePregresso` sommano gli
+ * importi con `+`: `0 + "6451277.6"` e' concatenazione di stringhe
+ * (`"06451277.6"`), non addizione, e la sottrazione successiva produce NaN
+ * (due punti decimali nella stringa concatenata) oppure — quando la
+ * concatenazione resta un intero valido — un numero enorme che
+ * `Math.max(0, …)` clampa silenziosamente a zero. Duplicato osservato dal
+ * collaudo: «Residuo crediti commerciali» mostrava NaN €, «Residuo rate»
+ * mostrava 0 € invece di 26.441 €, e `validatePregresso` sollevava una falsa
+ * «le rate superano il rateizzato» — tutti e tre PRIMA di questa funzione,
+ * tutti e tre scomparsi dopo.
+ *
+ * Va chiamata una volta sola, in `hydrateAssumptions`: da li' in poi ogni
+ * lettura del pregresso (tabella, anteprima, validazione) vede numeri veri.
+ */
+export function normalizePregresso(pregresso: Pregresso | null | undefined): Pregresso | null {
+  if (!pregresso) return null;
+  const out: Pregresso = {};
+  if (pregresso.crediti_commerciali) out.crediti_commerciali = normalizePlan(pregresso.crediti_commerciali);
+  if (pregresso.debiti_fornitori) out.debiti_fornitori = normalizePlan(pregresso.debiti_fornitori);
+  if (pregresso.debiti_tributari) out.debiti_tributari = normalizeTributari(pregresso.debiti_tributari);
+  if (pregresso.debiti_previdenziali) out.debiti_previdenziali = normalizePlan(pregresso.debiti_previdenziali);
+  if (pregresso.altri_debiti) out.altri_debiti = normalizePlan(pregresso.altri_debiti);
+  return out;
+}
+
 /**
  * Valida un piano di pregresso dichiarato contro le masse di apertura del
  * bilancio base e l'orizzonte di piano. Diagnostica, non corregge: restituisce

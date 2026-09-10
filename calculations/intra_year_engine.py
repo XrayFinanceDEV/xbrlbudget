@@ -6,6 +6,7 @@ Default method: Simple annualization (value * 12 / period_months)
 User can override via assumptions (growth % vs reference full year).
 The frontend converts user overrides to growth % before saving.
 """
+from datetime import datetime
 from decimal import Decimal
 import json
 from typing import Dict, List, Optional
@@ -1782,6 +1783,13 @@ class IntraYearEngine:
             fy = ForecastYear(scenario_id=scenario_id, year=year)
             self.db.add(fy)
             self.db.flush()
+        else:
+            # Stessa ragione del motore budget: qui sotto si scrive solo sui
+            # figli, quindi l'`onupdate` della colonna non scatta e
+            # `updated_at` resterebbe alla PRIMA proiezione. /analysis
+            # confronta quel timestamp con quello delle ipotesi per dichiarare
+            # stantio un previsionale piu' vecchio di esse.
+            fy.updated_at = datetime.utcnow()
 
         # Save/update balance sheet
         existing_bs = self.db.query(ForecastBalanceSheet).filter(

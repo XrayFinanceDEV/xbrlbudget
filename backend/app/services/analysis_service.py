@@ -76,6 +76,9 @@ def get_complete_analysis(
     # Calculate projection_years dynamically from forecast years count
     projection_years = len(scenario.forecast_years) if scenario.forecast_years else 0
 
+    # Il previsionale a schermo e' piu' vecchio delle ipotesi salvate?
+    assumptions_updated_at, forecast_updated_at, forecast_stale = _forecast_staleness(scenario)
+
     # Build result structure
     result = {
         "scenario": {
@@ -93,7 +96,13 @@ def get_complete_analysis(
         },
         "historical_years": [],
         "forecast_years": [],
-        "calculations": {}
+        "calculations": {},
+        # Dichiarati SEMPRE, anche a `false`/`None`: a valle una chiave assente
+        # vale zero, quindi tacere equivarrebbe a dichiararsi allineati
+        # (CLAUDE.md › «Invarianti e trappole»).
+        "forecast_stale": forecast_stale,
+        "assumptions_updated_at": assumptions_updated_at,
+        "forecast_updated_at": forecast_updated_at,
     }
 
     # 2. Get historical years (base_year - 1 and base_year)
@@ -196,6 +205,49 @@ def get_complete_analysis(
         result["calculations"]["cashflow"] = {"years": cashflow_years}
 
     return result
+
+
+def _forecast_staleness(scenario) -> tuple:
+    """Il previsionale persistito e' piu' vecchio delle ipotesi che dovrebbe
+    riflettere?
+
+    Serve perche' `PUT /scenarios/{id}/assumptions` risponde **200 con
+    `success: true`** anche quando la generazione viene respinta: le ipotesi
+    restano salvate, il `ForecastYear` no, e le viste continuano a mostrare i
+    numeri della generazione PRECEDENTE senza un segnale (CLAUDE.md ›
+    «Invarianti e trappole › Previsionale»). Lo stesso vale, per costruzione,
+    sul percorso `auto_generate=false`.
+
+    Si confrontano i timestamp, non una bandiera persistita: una bandiera puo'
+    divergere dalla realta' — la si dimentica in un percorso, o resta accesa
+    dopo una rigenerazione andata a buon fine altrove — un confronto no.
+
+    Due regole che il confronto da solo non da':
+
+    - **Nessun `ForecastYear` ⇒ `False`**, non `True`: non c'e' niente di
+      stantio da mostrare, la vista e' vuota e il vuoto si vede da solo.
+    - **Nessuna ipotesi ⇒ `False`**: manca il termine di paragone, e un
+      controllo che manca e' «non lo so», non un verdetto negativo.
+
+    Il confronto e' **stretto**: `datetime.utcnow()` ha i microsecondi e la
+    generazione scrive dopo le ipotesi, quindi la parita' e' «allineato».
+
+    Returns:
+        (assumptions_updated_at ISO | None, forecast_updated_at ISO | None, stale)
+    """
+    def _latest(rows):
+        stamps = [r.updated_at or r.created_at for r in rows or []]
+        stamps = [s for s in stamps if s is not None]
+        return max(stamps) if stamps else None
+
+    assumptions_at = _latest(scenario.assumptions)
+    forecast_at = _latest(scenario.forecast_years)
+    stale = bool(assumptions_at and forecast_at and assumptions_at > forecast_at)
+    return (
+        assumptions_at.isoformat() if assumptions_at else None,
+        forecast_at.isoformat() if forecast_at else None,
+        stale,
+    )
 
 
 def _calculate_year_metrics(

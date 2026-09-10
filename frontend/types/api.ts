@@ -1018,6 +1018,16 @@ export interface ScenarioAnalysis {
       years: ScenarioAnalysisCashflowYear[];
     };
   };
+  /** Il previsionale persistito e' piu' vecchio delle ipotesi salvate: i numeri
+   *  qui sopra sono quelli di una generazione precedente (il bulk delle ipotesi
+   *  risponde 200 anche a una generazione respinta). Il backend lo dichiara
+   *  sempre, anche a `false`; opzionale qui perche' una risposta piu' vecchia
+   *  puo' non portarlo — e l'assenza vale «allineato». */
+  forecast_stale?: boolean;
+  /** Ultima scrittura delle ipotesi dello scenario, ISO. */
+  assumptions_updated_at?: string | null;
+  /** Ultima generazione del previsionale, ISO. */
+  forecast_updated_at?: string | null;
 }
 
 // ===== Forecast Preview (anteprima motore, task 3) =====

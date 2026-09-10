@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -250,6 +251,8 @@ export default function ForecastBalancePage() {
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
         </div>
       )}
+
+      <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
       {!loading && analysisData && historicalYears.length > 0 && (
         <>

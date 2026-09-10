@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { useScenarios, useReclassifiedData, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
+import { useScenarios, useReclassifiedData, useAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
 import type { BudgetScenario } from "@/types/api";
 import {
@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -150,6 +151,16 @@ export default function ForecastReclassifiedPage() {
   );
   const loading = scenariosLoading || dataLoading;
   const error = dataError ? "Impossibile caricare i dati riclassificati" : null;
+
+  // Solo per sapere se il previsionale a schermo e' piu' vecchio delle ipotesi
+  // salvate: questa pagina legge il riclassificato, non /analysis, ma i numeri
+  // che rende vengono dallo stesso `ForecastYear`. La query e' quella delle
+  // altre viste, quindi la cache di react-query la serve senza una seconda
+  // chiamata quando e' gia' calda.
+  const { data: analysisData } = useAnalysis(
+    selectedCompanyId,
+    selectedScenario?.id ?? null
+  );
 
   // Prepare chart data by combining historical and forecast
   const prepareChartData = () => {
@@ -276,6 +287,8 @@ export default function ForecastReclassifiedPage() {
           )}
         </CardContent>
       </Card>
+
+      <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
       {!reclassifiedData ? (
         <Card>

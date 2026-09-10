@@ -123,10 +123,11 @@ def _divergenze(bs, ce, det, row):
         confronta("ce09d_svalutazione_crediti", writeoff,
                   "details['pregresso']['crediti_commerciali'].writeoff")
 
-    # ── lo scoperto di c/c (Task 12), a scoperto spento come acceso ──
-    # Le sette chiavi si dichiarano sempre: a valle una chiave assente vale zero.
+    # ── lo scoperto di c/c (Task 12) e la quota a breve dei prestiti nuovi (Task 17) ──
+    # Le otto chiavi si dichiarano sempre: a valle una chiave assente vale zero.
     for chiave in ("cassa_assorbita", "scoperto_generato", "scoperto_residuo", "oneri_scoperto",
-                   "fabbisogno_picco", "fabbisogno_picco_anno", "cassa_sotto_minimo"):
+                   "fabbisogno_picco", "fabbisogno_picco_anno", "cassa_sotto_minimo",
+                   "prestiti_nuovi_quota_breve"):
         if chiave not in det:
             fuori.append((chiave, f"{chiave}: chiave non dichiarata"))
     cassa = bs["sp09_disponibilita_liquide"]
@@ -136,6 +137,13 @@ def _divergenze(bs, ce, det, row):
     # I2: cassa libera e scoperto non convivono, neppure dopo un `sp_overrides`.
     if cassa > 0 and residuo > 0:
         fuori.append(("I2 cassa e scoperto", f"cassa {cassa} e scoperto {residuo} nello stesso anno"))
+    # La quota a breve dei prestiti nuovi sta DENTRO la quota bancaria persistita di
+    # `sp16a` (Task 17): dichiararne di piu' vorrebbe dire che l'anno dopo la si toglie
+    # da un breve che non la contiene e la si rimette nel lungo — debito dal nulla.
+    quota = D(str(det.get("prestiti_nuovi_quota_breve") or 0))
+    if not D("0") <= quota <= bs["sp16a_debiti_banche_breve"] - residuo:
+        fuori.append(("quota breve fuori da sp16a",
+                      f"quota a breve {quota}, quota bancaria di sp16a {bs['sp16a_debiti_banche_breve'] - residuo}"))
     if bs["_total_assets"] != bs["_total_liabilities"]:
         fuori.append(("quadratura", f"attivo {bs['_total_assets']} != passivo {bs['_total_liabilities']}"))
 
@@ -388,6 +396,14 @@ SENZA_NUOVO = {
         "rimborso esistente in 2 anni", ({}, {"existing_debt_repayment_years": 2})),
 }
 RESIDUO_PRESTITO = {2027: D("75000.28"), 2028: D("50000.19"), 2029: D("25000.10")}
+# ══ Task 17: la parte di quel residuo che scade l'anno dopo sta a breve ══
+#
+# Rifatta a mano sulla catena, non sulla rata arrotondata: 75.000,28 → 50.000,19
+# (75.000,28 − 25.000,0925 = 50.000,1875) toglie 25.000,09; 50.000,19 → 25.000,10
+# (25.000,0975) toglie 25.000,09; 25.000,10 → 0,01 (0,0075) toglie 25.000,09. Il
+# 2029 e' l'ultimo anno di orizzonte e la rata del 2030 conta lo stesso: il
+# calendario del contratto non sa dove finisce il piano.
+QUOTA_BREVE_PRESTITO = {2027: D("25000.09"), 2028: D("25000.09"), 2029: D("25000.09")}
 
 SQUILIBRI = {
     "nessuno": None,
@@ -436,8 +452,9 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
 
     Afferma, anno per anno: le famiglie di `_divergenze` (con I2 e cassa mai
     negativa); I1 (quota bancaria di `sp16a` e `sp17a` = gemello); I1 esteso
-    (Task 16: sul gemello con prestito nuovo, quota bancaria di `sp16a` = gemello
-    SENZA prestito, e `sp17a` = quel gemello + il residuo del prestito da solo);
+    (Task 16 e 17: sul gemello con prestito nuovo, quota bancaria di `sp16a` =
+    gemello SENZA prestito + la rata dell'anno dopo, dichiarata identica nei
+    `details`; `sp17a` = quel gemello + il residuo del prestito − quella rata);
     I4 (`scoperto_generato` = aumento del residuo, `oneri_scoperto` = residuo di
     apertura × tasso e addebitato in `ce15`, picco = massimo dei residui).
     """
@@ -498,14 +515,26 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
                         esercitati["anni I1 esteso"] += 1
                         banca_c = bs_c["sp16a_debiti_banche_breve"] - D(str(det_c["scoperto_residuo"]))
                         banca_s = bs_s["sp16a_debiti_banche_breve"] - D(str(det_s["scoperto_residuo"]))
-                        if banca_c != banca_s:
+                        quota = QUOTA_BREVE_PRESTITO[anno]
+                        # Task 17: la quota bancaria col prestito e' quella senza piu' la
+                        # rata dell'anno dopo. Una differenza diversa vuol dire che la
+                        # rata nuova ha pagato il pregresso, o che la quota a breve non e'
+                        # stata riclassificata.
+                        if banca_c - banca_s != quota:
                             fuori.append(("I1 esteso sp16a", f"{dove_g} quota bancaria {banca_c} col prestito, "
-                                                             f"{banca_s} senza: la rata nuova ha pagato il pregresso"))
-                        atteso = bs_s["sp17a_debiti_banche_lungo"] + RESIDUO_PRESTITO[anno]
+                                                             f"{banca_s} senza: differenza {banca_c - banca_s}, "
+                                                             f"quota a breve del calendario {quota}"))
+                        # Dichiarato = persistito: la chiave dice la stessa quota.
+                        dichiarata = D(str(det_c.get("prestiti_nuovi_quota_breve") or 0))
+                        if dichiarata != quota:
+                            fuori.append(("quota breve dichiarata", f"{dove_g} dichiarata {dichiarata}, "
+                                                                    f"calendario {quota}"))
+                        atteso = bs_s["sp17a_debiti_banche_lungo"] + RESIDUO_PRESTITO[anno] - quota
                         if bs_c["sp17a_debiti_banche_lungo"] != atteso:
                             fuori.append(("I1 esteso sp17a", f"{dove_g} sp17a {bs_c['sp17a_debiti_banche_lungo']}, "
                                                              f"pregresso {bs_s['sp17a_debiti_banche_lungo']} + "
-                                                             f"prestito {RESIDUO_PRESTITO[anno]} = {atteso}"))
+                                                             f"prestito {RESIDUO_PRESTITO[anno]} - quota a breve "
+                                                             f"{quota} = {atteso}"))
 
                 rows = righe(piano, primo, tutti, squilibrio, True)
                 res, mappe, anni_prev = _genera_e_leggi(db, f"scoperto-{crescita}-{scenari}", rows)

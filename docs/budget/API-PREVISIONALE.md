@@ -178,8 +178,60 @@ deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:1042`):
 Il circolante scala quindi con i ricavi e i costi previsionali, **anche quando questi vengono
 da un override CE**: `_calculate_balance_sheet` legge `forecast_inc`, cioè il conto economico
 già calcolato con gli override applicati (`:875-876`). Più ricavi → più crediti; più acquisti
-→ più debiti verso fornitori; la cassa fa da pareggio, e una cassa negativa diventa debito a
-breve.
+→ più debiti verso fornitori; la cassa fa da pareggio, ma **solo verso l'alto**: un fabbisogno
+di cassa non diventa mai da solo debito a breve. Di default il motore solleva `Unfunded
+financing requirement <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di
+ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `sp16a` e nei
+`details` (`scoperto_generato`, `scoperto_residuo`) — vedi «Forecasting Engine» in `CLAUDE.md`.
+
+## 4-bis. Il nuovo finanziamento: che cosa sta a breve
+
+Un prestito nuovo è la legacy `financing_amount` / `financing_duration_years` /
+`financing_interest_rate` della riga d'ipotesi, oppure una riga di `financing_loans[]` con
+`amount` (ed eventualmente `grace_years` e `balloon_pct`). Si rimborsa col calendario del kernel
+`new_financing_schedule` (`calculations/projection_common.py`): quote capitali costanti dopo
+l'eventuale preammortamento, maxirata insieme all'ultima rata, interessi in `ce15` sul residuo di
+apertura. Un contratto misto (`amount` e `opening_residual` sulla stessa riga) si divide in due
+contratti con le stesse condizioni: la parte nuova segue questa sezione, quella pregressa no.
+
+Il residuo del prestito **non** sta tutto in `sp17a_debiti_banche_lungo`: la parte che il
+calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il resto in `sp17a`
+(`_quota_breve_prestiti_nuovi` in `calculations/forecast_engine.py`).
+
+- Finché anche l'anno dopo è di preammortamento la quota a breve è zero; nell'anno prima della
+  maxirata la maxirata sta a breve.
+- L'ultimo anno di piano non si azzera: la rata dell'anno oltre l'orizzonte viene dal contratto.
+- La quota è la differenza fra due residui al centesimo della catena persistita, non la rata
+  arrotondata: 100.000,38 in 4 anni ha rata 25.000,095 e quota a breve 25.000,09.
+- È una riclassifica dello stato patrimoniale, non un flusso: interessi e risultato non cambiano, e
+  — **senza un `sp_overrides` su `sp16a` o `sp17a`** — nemmeno cassa e totale del debito bancario.
+  Avviene dopo il cash sweep, che rimborsa prima il debito bancario pregresso e poi il prestito
+  nuovo; il debito bancario pregresso conserva la propria ripartizione. Il rendiconto
+  (`backend/app/calculations/cashflow_detailed.py`, `cashflow.py`) non la vede nemmeno lui: il
+  circolante e' `sp16`/`sp17` **meno** `financial_debt_short`/`financial_debt_long` (non la somma dei
+  sotto-campi operativi, che puo' scostarsi di un centesimo dall'aggregato), il finanziario e'
+  `financial_debt_short`/`financial_debt_long` — mai l'aggregato grezzo
+  `sp16`/`sp17` — quindi la riclassifica fra `sp16a` e `sp17a` non attraversa il confine
+  operativo/finanziario del rendiconto.
+- `details['prestiti_nuovi_quota_breve']` dichiara la quota ogni anno, anche a zero, per quanto
+  `sp16a` ne persiste davvero.
+
+**Perché conta:** `sp16` e `sp17` stanno entrambi nel passivo, quindi il pareggio non vede dove sta
+la quota; la vedono CCN, current ratio e circolante di Altman. Sulla base del kit di test (12.345,67
+di breve e 23.456,79 di lungo pregresso, 100.000,38 in 4 anni al 4,35%) il current ratio 2027 è
+2,0794 (0,3620 il circolante di Altman, CCN/TA); con tutto il prestito oltre l'esercizio
+risultavano 2,4206 e 0,4093.
+
+Un `sp_overrides` su `sp16a` **o su `sp17a`** cambia significato rispetto a prima di questo task, e
+muove cassa e debito bancario totale della quota — in direzioni opposte, perché la riclassifica
+avviene PRIMA che gli override vengano applicati:
+- `sp16a` ora fissa un totale che **contiene** la quota. Se la porta sotto, il taglio cade prima sul
+  breve pregresso e la quota dichiarata è ciò che ne resta: un override salvato quando il prestito
+  stava tutto in `sp17a` oggi toglie anche la quota a breve dal debito (−25.000,09 di debito e di
+  cassa ogni anno, sul kit di test).
+- `sp17a` ora fissa solo la parte **oltre** la quota: la quota resta comunque a breve in `sp16a`,
+  sopra il totale forzato. Un override salvato quando il prestito stava tutto in `sp17a` oggi
+  aggiunge quindi la quota al debito (+25.000,09 di debito e di cassa ogni anno, sul kit di test).
 
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 

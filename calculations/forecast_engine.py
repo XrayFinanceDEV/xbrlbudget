@@ -4,7 +4,7 @@ Generates forecasted Income Statements and Balance Sheets based on budget assump
 """
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from database.models import (
@@ -334,6 +334,52 @@ def _residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
         raised, repayment, _ = new_financing_schedule(loans, anno)
         residuo = max(zero, residuo + raised - repayment).quantize(cent, rounding=ROUND_HALF_UP)
     return residuo
+
+
+def _quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
+    """Quanto del residuo dei prestiti NUOVI dentro `lungo` (`sp17a` grezzo a fine `anno`) scade l'anno dopo.
+
+    Il residuo nuovo e' quello che l'anno dopo trovera' all'apertura,
+    `min(sp17a, catena)`: se lo sweep ha eroso il prestito (prima il pregresso, poi
+    il nuovo), la quota si calcola su cio' che ne resta.
+
+    Il limite finale, mai oltre `lungo` arrotondato per difetto, tiene `lungo -
+    quota` non negativo. E' la condizione perche' la riclassifica sia esatta al
+    centesimo: su valori non negativi ROUND_HALF_UP e' invariante per traslazione
+    di centesimi interi, quindi `Q(lungo - quota) + quota = Q(lungo)`. Senza, un
+    lungo grezzo di 5.000,005 tutto in scadenza l'anno dopo darebbe quota 5.000,01
+    e un `sp17a` persistito di -0,01.
+
+    E' la stessa regola del pregresso scadenziato (`runoff_schedule`:
+    `residual_short = min(residuo, dovuto l'anno dopo)`), ma letta sul calendario
+    del kernel dei prestiti invece che su un elenco di importi: la quota a breve e'
+    il capitale che la catena persistita toglie al residuo nell'anno dopo. Da qui
+    discendono le tre regole del Task 17 senza un ramo per ciascuna:
+    - durante il preammortamento la rata dell'anno dopo e' zero, e la quota a breve
+      anche;
+    - nell'anno prima della maxirata la rata dell'anno dopo la contiene, e la
+      maxirata sta a breve;
+    - l'ultimo anno di orizzonte non si azzera: il calendario del contratto non sa
+      dove finisce il piano. (E' qui che la regola si separa da `runoff_schedule`,
+      che oltre l'orizzonte non ha importi e restituisce zero.)
+
+    Contano solo i prestiti gia' erogati a fine `anno`: un prestito che nasce
+    l'anno dopo non e' debito di quest'anno, ne' a breve ne' oltre.
+
+    Perche' la differenza fra due residui al centesimo e non la rata arrotondata:
+    100.000,38 in 4 anni ha rata 25.000,095, ma la catena passa da 75.000,29 a
+    50.000,20 e toglie 25.000,09. Con 25.000,10 a breve il lungo di fine anno
+    (50.000,19) risulterebbe inferiore al residuo che l'anno dopo non scade
+    (50.000,20): un centesimo di debito oltre l'esercizio che nascerebbe dal nulla.
+    """
+    zero, cent = Decimal('0'), Decimal('0.01')
+    residuo = min(lungo.quantize(cent, rounding=ROUND_HALF_UP), _residuo_prestiti_nuovi(loans, anno))
+    if residuo <= zero:
+        return zero
+    erogati = [loan for loan in (loans or ()) if int(loan['year']) <= anno]
+    _, rimborso, _ = new_financing_schedule(erogati, anno + 1)
+    dopo = max(zero, residuo - rimborso).quantize(cent, rounding=ROUND_HALF_UP)
+    return min(residuo - dopo, lungo.quantize(cent, rounding=ROUND_DOWN))
 
 
 def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
@@ -1429,6 +1475,17 @@ class ForecastEngine:
             # `outstanding` (la quota bancaria viene dal piano di rimborso).
             details['scoperto_generato'] = overdraft.raised
             details['scoperto_residuo'] = overdraft.outstanding
+            # La quota a breve dei prestiti nuovi (Task 17) si dichiara per quello
+            # che `sp16a` persiste DAVVERO: un `sp_overrides` che fissa `sp16a` (o
+            # `sp16`) sotto la quota vince sul totale, e la riduzione cade prima
+            # sul breve pregresso — la stessa precedenza dello sweep. Senza questo
+            # limite l'anno dopo toglierebbe da `sp16a` piu' di quanto contiene e
+            # lo rimetterebbe nel lungo: debito nato dal nulla, e un foglio che
+            # quadra lo stesso perche' la cassa lo assorbe.
+            details['prestiti_nuovi_quota_breve'] = min(
+                Decimal(str(details.get('prestiti_nuovi_quota_breve') or 0)),
+                max(Decimal('0'), forecast_bs['sp16a_debiti_banche_breve'] - overdraft.outstanding),
+            )
             # Lo scoperto si rimborsa per primo anche sotto la cassa minima del
             # cash sweep, per decisione del proprietario: si dichiara di quanto
             # la cassa chiude sotto quel minimo in un anno con scoperto (aperto o
@@ -2330,9 +2387,23 @@ class ForecastEngine:
         # resterebbe fermo — misurato: `sp17a` bloccato a 33.333,33 con un piano
         # a tre anni. Lo scoperto rientra solo nella quadratura finale.
         sp16a = max(ZERO, _prev('sp16a_debiti_banche_breve') - overdraft.opening)
+        # Anche la quota a breve dei prestiti NUOVI che l'anno prima ha
+        # riclassificato (Task 17) si toglie da `sp16a` qui, e torna nel lungo
+        # dove il resto del calcolo la cerca: dentro `sp16a` c'e' ancora solo il
+        # breve PREGRESSO, e la rata del pregresso — che prende prima dal breve —
+        # non paga la rata del prestito nuovo. La riclassifica si rifa' a fine
+        # anno, dopo lo sweep. Si legge dai `details` dell'anno prima, come lo
+        # scoperto: e' uno stato, non si ri-deriva dal saldo. Il `min` e' la
+        # guardia contro il debito dal nulla: la quota dichiarata non supera mai la
+        # quota bancaria persistita (`compute_forecast` la limita dopo gli
+        # `sp_overrides`), quindi di norma non morde.
+        quota_breve_apertura = min(
+            sp16a, Decimal(str((prev_details or {}).get('prestiti_nuovi_quota_breve') or 0))
+        )
+        sp16a = sp16a - quota_breve_apertura
         sp16b = _prev('sp16b_debiti_altri_finanz_breve')
         sp16c = _prev('sp16c_debiti_obbligazioni_breve')
-        sp17a = _prev('sp17a_debiti_banche_lungo')
+        sp17a = _prev('sp17a_debiti_banche_lungo') + quota_breve_apertura
         sp17b = _prev('sp17b_debiti_altri_finanz_lungo')
         sp17c = _prev('sp17c_debiti_obbligazioni_lungo')
 
@@ -2730,6 +2801,37 @@ class ForecastEngine:
                 sp16a -= pay_short; sp16 -= pay_short; sp09 -= pay_short; excess -= pay_short
                 pay_long = min(excess, sp17a)
                 sp17a -= pay_long; sp17 -= pay_long; sp09 -= pay_long; excess -= pay_long
+
+        # ── LA QUOTA A BREVE DEL PRESTITO NUOVO (Task 17) ──
+        # Fin qui `sp17a` porta TUTTO il residuo dei prestiti nuovi, anche la parte
+        # che scade entro l'anno dopo. Lasciarla oltre l'esercizio abbellisce CCN,
+        # current ratio e circolante di Altman, e il pareggio non se ne accorge:
+        # `sp16` e `sp17` stanno entrambi nel passivo (misurato dalla revisione del
+        # Task 16: current ratio 2027 2,4206 invece di 2,0794). Si sposta qui, come
+        # ULTIMA scrittura sui debiti bancari, per due ragioni:
+        # - dopo lo sweep, che rimborsa prima il pregresso e poi il prestito nuovo
+        #   (decisione del proprietario): prima dello sweep la quota nuova starebbe
+        #   in `sp16a`, che lo sweep paga per primo, davanti al lungo pregresso;
+        # - e' una riclassifica, non un flusso: cassa, interessi, risultato e
+        #   totale del debito restano quelli di sempre, anno per anno.
+        # Il residuo nuovo di fine anno e' quello che l'anno dopo trovera'
+        # all'apertura (`min(sp17a, catena)`): se lo sweep ha eroso il prestito,
+        # la quota a breve e' calcolata su cio' che ne resta.
+        #
+        # Al centesimo per costruzione: la quota e' un importo al centesimo e non
+        # supera il lungo arrotondato per difetto, quindi `Q(sp17a - quota) +
+        # quota = Q(sp17a)` e `Q(sp16a + quota) = Q(sp16a) + quota` (ROUND_HALF_UP
+        # e' invariante per traslazione di centesimi interi su valori non
+        # negativi). La ripartizione persistita e' quindi esattamente quella di
+        # prima spostata di `quota`, e l'apertura dell'anno dopo la ricompone
+        # senza perdere un centesimo. `sp16a`/`sp17a` sono in
+        # `_BANK_DEBT_SPLIT_FIELDS`: il residuo di quadratura non li riscrive.
+        quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a)
+        sp16a += quota_breve; sp16 += quota_breve
+        sp17a -= quota_breve; sp17 -= quota_breve
+        if details is not None:
+            # Sempre, anche a zero: a valle una chiave assente vale zero.
+            details['prestiti_nuovi_quota_breve'] = quota_breve
 
         # ── DETAIL BREAKDOWNS ──
 

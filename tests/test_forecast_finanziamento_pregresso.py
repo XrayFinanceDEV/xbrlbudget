@@ -23,9 +23,12 @@ il nuovo finanziamento.
 **L'oracolo non ricalcola i piani** (sarebbe un secondo motore in un test): sono
 due GEMELLI generati dallo stesso motore. Il gemello «senza prestito» dice che
 cosa fanno il pregresso e il suo piano da soli; il gemello «solo prestito», su
-un'azienda senza banca, dice che cosa fa il prestito da solo. Il nuovo prestito
-non sta mai in `sp16a`, quindi `sp16a` deve coincidere col primo gemello; e
-`sp17a` deve valere la SOMMA dei due.
+un'azienda senza banca, dice che cosa fa il prestito da solo. Dal Task 17 il
+prestito nuovo ha una quota a breve — la rata dell'anno dopo sta in `sp16a` —
+quindi TUTTI E DUE i lati devono valere la SOMMA dei gemelli: in `sp16a` e in
+`sp17a` la componente pregressa e' quella del primo, la componente nuova quella
+del secondo. (Prima del Task 17 il prestito nuovo non stava mai in `sp16a`, e
+`sp16a` doveva coincidere col solo primo gemello.)
 
 **Perche' la somma e' esatta, e perche' i piani sono scelti cosi'.** Il motore
 persiste al centesimo anno per anno, e l'arrotondamento di una somma non e' la
@@ -51,11 +54,20 @@ BREVE, LUNGO = D("12345.67"), D("23456.79")
 # Rata al mezzo centesimo: 100.000,38 / 4 = 25.000,095.
 PRESTITO = {"financing_amount": 100000.38, "financing_duration_years": 4, "financing_interest_rate": 4.35}
 
-# Il prestito da solo, persistito anno per anno (misurato sul gemello, e rifatto a
+# Il prestito da solo, persistito anno per anno in `sp16a + sp17a` (misurato sul
+# gemello, e rifatto a
 # mano: 100.000,38 − 25.000,095 = 75.000,285 → 75.000,29; − 25.000,095 = 50.000,195
 # → 50.000,20; − 25.000,095 = 25.000,105 → 25.000,11). Tre mezzi centesimi, tre
 # arrotondamenti per eccesso: e' la catena che il motore persiste per un prestito.
 SOLO_PRESTITO = {2027: D("75000.29"), 2028: D("50000.20"), 2029: D("25000.11")}
+
+# Task 17: la parte di quel residuo che scade l'anno DOPO sta a breve. E' cio' che la
+# catena toglie l'anno dopo, rifatto a mano: 75.000,29 → 50.000,20 toglie 25.000,09;
+# 50.000,20 → 25.000,11 toglie 25.000,09; 25.000,11 → 0,02 (0,015 → 0,02) toglie
+# 25.000,09. Non 25.000,10, la rata arrotondata: con quella il lungo di fine anno
+# sarebbe un centesimo sotto cio' che l'anno dopo non scade. E il 2029 non va a zero:
+# la rata del 2030 cade oltre l'orizzonte, ma il contratto ce l'ha.
+QUOTA_BREVE_PRESTITO = {2027: D("25000.09"), 2028: D("25000.09"), 2029: D("25000.09")}
 
 # Il pregresso descritto da contratti (`opening_residual`): 30.000,00 in 5 anni e
 # 5.802,46 in 2, cioe' 8.901,23 di rata il primo anno — MENO della quota a breve.
@@ -146,13 +158,15 @@ def _con_prestito(primo):
 
 def test_il_prestito_da_solo_e_la_catena_attesa():
     """L'oracolo della somma, tenuto fermo a mano: se questo cambia, cambia il kernel
-    del prestito o la quantizzazione — non il confine col pregresso."""
+    del prestito o la quantizzazione — non il confine col pregresso. E la quota a
+    breve (Task 17): la rata dell'anno dopo in `sp16a`, il resto in `sp17a`."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
             solo = _genera(db, "solo-prestito", _righe(PRESTITO), D("0"), D("0"))
-        assert {y: sp["sp17a_debiti_banche_lungo"] for y, sp in solo.items()} == SOLO_PRESTITO
-        assert all(sp["sp16a_debiti_banche_breve"] == D("0") for sp in solo.values())
+        assert {y: sp["sp16a_debiti_banche_breve"] + sp["sp17a_debiti_banche_lungo"]
+                for y, sp in solo.items()} == SOLO_PRESTITO
+        assert {y: sp["sp16a_debiti_banche_breve"] for y, sp in solo.items()} == QUOTA_BREVE_PRESTITO
     finally:
         engine.dispose()
 
@@ -174,9 +188,14 @@ def test_i1_esteso_la_componente_pregressa_non_si_accorge_del_prestito(nome, bre
             if (s["sp16a_debiti_banche_breve"], s["sp17a_debiti_banche_lungo"]) != (breve_atteso, lungo_atteso):
                 fuori.append(f"{anno} pregresso da solo: ({s['sp16a_debiti_banche_breve']}, "
                              f"{s['sp17a_debiti_banche_lungo']}), rifatto a mano ({breve_atteso}, {lungo_atteso})")
-            if c["sp16a_debiti_banche_breve"] != s["sp16a_debiti_banche_breve"]:
-                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']} col prestito, "
-                             f"{s['sp16a_debiti_banche_breve']} senza — la rata nuova ha pagato il pregresso")
+            # Task 17: in `sp16a` c'e' anche la quota a breve del prestito, e deve essere
+            # QUELLA del prestito da solo. Diversa: o la rata nuova ha pagato il
+            # pregresso, o la quota dipende dal pregresso che le sta accanto.
+            atteso_breve = s["sp16a_debiti_banche_breve"] + p["sp16a_debiti_banche_breve"]
+            if c["sp16a_debiti_banche_breve"] != atteso_breve:
+                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']}, atteso {atteso_breve} = "
+                             f"pregresso {s['sp16a_debiti_banche_breve']} + quota a breve del prestito "
+                             f"{p['sp16a_debiti_banche_breve']}")
             atteso = s["sp17a_debiti_banche_lungo"] + p["sp17a_debiti_banche_lungo"]
             if c["sp17a_debiti_banche_lungo"] != atteso:
                 fuori.append(f"{anno} sp17a: {c['sp17a_debiti_banche_lungo']}, atteso {atteso} = "
@@ -219,7 +238,8 @@ def test_un_cash_sweep_che_rimborsa_oltre_il_pregresso_non_fa_rinascere_debito()
             sp = _genera(db, "sweep-oltre", rows, BREVE, LUNGO)
         # Precondizioni: nel 2027 c'e' debito bancario pregresso e nuovo, e lo sweep
         # del 2028 ha cassa per chiuderli entrambi.
-        assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE
+        # Dal Task 17 il breve del 2027 porta anche la rata 2028 del prestito.
+        assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE + QUOTA_BREVE_PRESTITO[2027]
         assert sp[2027]["sp17a_debiti_banche_lungo"] > LUNGO
         assert sp[2028]["sp09_disponibilita_liquide"] > D("1000.55")
         for anno in (2028, 2029):
@@ -237,10 +257,13 @@ def test_la_sonda_del_ruling_40_con_i_suoi_numeri():
     try:
         with sessions() as db:
             con = _genera(db, "r40-con", _righe(_con_prestito({})), BREVE, LUNGO)
-        assert [con[y]["sp16a_debiti_banche_breve"] for y in ANNI] == [BREVE] * 3
-        # 23.456,79 di lungo pregresso fermo + la catena del prestito.
+        # Il breve pregresso fermo, piu' la quota a breve del prestito (Task 17).
+        assert [con[y]["sp16a_debiti_banche_breve"] for y in ANNI] == [
+            BREVE + QUOTA_BREVE_PRESTITO[y] for y in ANNI]
+        # 23.456,79 di lungo pregresso fermo + la catena del prestito − la sua quota a
+        # breve. Su 5197929, prima del Task 17: 98.457,08 / 73.456,99 / 48.456,90.
         assert [con[y]["sp17a_debiti_banche_lungo"] for y in ANNI] == [
-            D("98457.08"), D("73456.99"), D("48456.90")]
+            D("73456.99"), D("48456.90"), D("23456.81")]
     finally:
         engine.dispose()
 
@@ -359,9 +382,11 @@ def test_i1_esteso_vale_anche_per_il_contratto_misto():
         fuori = []
         for anno in ANNI:
             c, s, p = con[anno], senza[anno], solo[anno]
-            if c["sp16a_debiti_banche_breve"] != s["sp16a_debiti_banche_breve"]:
-                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']} col misto, "
-                             f"{s['sp16a_debiti_banche_breve']} senza la quota nuova di Mutuo B")
+            atteso_breve = s["sp16a_debiti_banche_breve"] + p["sp16a_debiti_banche_breve"]
+            if c["sp16a_debiti_banche_breve"] != atteso_breve:
+                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']} col misto, atteso "
+                             f"{atteso_breve} = pregresso {s['sp16a_debiti_banche_breve']} + quota a breve "
+                             f"della parte nuova di Mutuo B {p['sp16a_debiti_banche_breve']}")
             atteso = s["sp17a_debiti_banche_lungo"] + p["sp17a_debiti_banche_lungo"]
             if c["sp17a_debiti_banche_lungo"] != atteso:
                 fuori.append(f"{anno} sp17a: {c['sp17a_debiti_banche_lungo']}, atteso {atteso} = "

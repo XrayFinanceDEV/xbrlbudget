@@ -779,10 +779,16 @@ def _e_vuoto(v: Any) -> bool:
         return True
     if isinstance(v, bool):
         return v is False
-    if isinstance(v, (list, dict, str)):
-        return len(v) == 0
+    # Il numero PRIMA della stringa: il driver serializza ogni `Decimal` come
+    # stringa (`_serializza`), quindi uno zero arriva qui come "0.00". Con il
+    # controllo sulla lunghezza per primo, una chiave nuova dichiarata a zero
+    # contava come divergenza, contro cio' che questa funzione dichiara — e'
+    # successo con `details.prestiti_nuovi_quota_breve` del Task 17, segnalata a
+    # 0,00 su ogni scenario senza prestito.
     if _e_numero(v):
         return D(str(v)) == 0
+    if isinstance(v, (list, dict, str)):
+        return len(v) == 0
     return False
 
 
@@ -803,12 +809,15 @@ def _uguali(campo: str, a: Any, b: Any) -> bool:
         # resta non una divergenza, come dice `_e_vuoto`; una chiave nuova a
         # `None` si': `None` e' un valore dichiarato, non un'assenza.
         return presente is not None and _e_vuoto(presente)
-    if a is None and b is None:
-        return True
-    if a is None:
-        return _e_vuoto(b)
-    if b is None:
-        return _e_vuoto(a)
+    if a is None or b is None:
+        # `None` e' un valore DICHIARATO (vedi il commento su `_ASSENTE` sopra),
+        # mai equivalente a zero: l'equivalenza «vuoto = zero» vale SOLO fra
+        # chiave ASSENTE e zero (ramo sopra), non fra `None` e zero. Prima di
+        # questa restrizione (F4, giro di correzione 1 del Task 17) un campo
+        # dichiarato `None` su una versione (es. `ce05_fixed` quando "la
+        # scomposizione non esiste") e diverso da zero sull'altra si nascondeva
+        # dietro l'equivalenza con lo zero, invece di comparire come divergenza.
+        return a is None and b is None
     ultimo_pezzo = campo.rsplit(".", 1)[-1]
     if ultimo_pezzo in GIORNI_APPLICATI and _e_numero(a) and _e_numero(b):
         # Giorni DEDOTTI: confrontati con una tolleranza di 6 decimali, non

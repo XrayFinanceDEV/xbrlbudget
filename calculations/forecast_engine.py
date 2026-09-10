@@ -268,16 +268,38 @@ def _split_to_cents(fixed_part: Decimal, line_value: Decimal) -> Tuple[Decimal, 
     return fixed_q, line_value - fixed_q
 
 
+def _ha_residuo_pregresso(loan) -> bool:
+    """Vero se il contratto porta un residuo di pregresso bancario (`opening_residual` > 0).
+
+    Un solo punto per il predicato «questo e' pregresso», usato da
+    `_e_contratto_pregresso`, da `assemble_financing` (la validazione «solo nel
+    primo anno») e da `has_detailed_opening` in `_calculate_income_statement`
+    (rilievo 6 della revisione, giro di correzione 1): un contratto
+    classificato pregresso in un punto e nuovo in un altro produrrebbe interessi
+    doppi o una rata sul debito sbagliato. Con il Ruling 45 (normalizzazione dei
+    contratti misti in `assemble_financing`, la STESSA funzione) il predicato
+    resta vero al valore di facciata: dopo la normalizzazione nessun contratto
+    porta mai `amount` e `opening_residual` insieme, quindi qui non serve
+    guardare l'altro campo.
+    """
+    return Decimal(str(loan.get('opening_residual') or 0)) > 0
+
+
 def _e_contratto_pregresso(loan) -> bool:
     """Un contratto con `opening_residual` descrive debito bancario GIA' in bilancio.
 
     E' pregresso scadenziato per contratto, non un prestito nuovo: la sua rata
     riduce il debito bancario dell'anno base (dal breve, poi dal lungo), mentre
-    un prestito nuovo si rimborsa solo da se' stesso. Un contratto misto (anche
-    `amount` > 0) resta intero da questa parte: e' un contratto esistente
-    rifinanziato, e il kernel lo ammortizza come un capitale solo.
+    un prestito nuovo si rimborsa solo da se' stesso. Un contratto MISTO
+    (`amount` > 0 insieme a `opening_residual` > 0, che lo schema ammette e
+    l'interfaccia produce sulla stessa riga) non arriva mai fin qui intero:
+    `assemble_financing` lo normalizza, nell'unico punto prima di ogni uso, in
+    DUE contratti con le stesse condizioni — uno con il solo importo nuovo, uno
+    con il solo residuo pregresso (Ruling 45). Per questo il predicato basta
+    da solo: quando questa funzione gira, ogni contratto ha gia' un solo campo
+    diverso da zero.
     """
-    return Decimal(str(loan.get('opening_residual') or 0)) > 0
+    return _ha_residuo_pregresso(loan)
 
 
 def _residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
@@ -652,6 +674,16 @@ class ForecastEngine:
         "debiti_previdenziali": ("sp16f_debiti_previdenza_breve", "sp17f_debiti_previdenza_lungo"),
         "altri_debiti": ("sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo"),
     }
+
+    # I due campi che `_calculate_balance_sheet` scrive SEMPRE di proposito con
+    # la ripartizione pregresso/prestito nuovo (Task 16). Vanno in `forced_fields`
+    # incondizionatamente — non solo quando lo scoperto e' possibile, come prima
+    # di questo giro di correzione — perche' la protezione deve valere per se
+    # stessa, non per l'ordine in cui `_normalize_balance_sheet_cents` cammina
+    # a ritroso sul resto del gruppo (rilievo 4 della revisione).
+    _BANK_DEBT_SPLIT_FIELDS: "frozenset[str]" = frozenset(
+        {"sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"}
+    )
 
     @classmethod
     def _declared_sp_fields(cls) -> "frozenset[str]":
@@ -1138,6 +1170,10 @@ class ForecastEngine:
         that is still being repaid. Keeps the SP debt (sp17a) and the P&L oneri
         finanziari (ce15) in sync — the previous code added the debt but only
         charged interest in the year of erogazione.
+
+        Anche il punto in cui un contratto MISTO (`amount` e `opening_residual`
+        insieme) si normalizza in due contratti separati (Ruling 45) — vedi il
+        commento sul posto, dentro il ciclo.
         """
         financing_loans = []
         detailed_opening_total = Decimal('0')
@@ -1155,20 +1191,41 @@ class ForecastEngine:
                 opening_residual = Decimal(str(loan.get('opening_residual') or 0))
                 loan_duration = Decimal(str(loan.get('duration_years') or 0))
                 loan_rate = Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100')
-                if opening_residual > 0 and a.forecast_year != first_forecast_year:
+                if _ha_residuo_pregresso(loan) and a.forecast_year != first_forecast_year:
                     raise ValueError(
                         "opening_residual is allowed only in the first forecast year"
                     )
                 detailed_opening_total += opening_residual
-                if (loan_amount > 0 or opening_residual > 0) and loan_duration > 0:
+                if loan_duration <= 0:
+                    continue
+                condizioni = {
+                    'year': a.forecast_year,
+                    'duration': loan_duration,
+                    'rate': loan_rate,
+                    'grace_years': Decimal(str(loan.get('grace_years') or 0)),
+                    'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
+                }
+                # Ruling 45 (revisione, giro di correzione 1 — rilievo 1): un
+                # contratto MISTO — `amount` e `opening_residual` insieme, che lo
+                # schema ammette e `FinancingLoansGrid` produce sulla stessa riga
+                # — si normalizza QUI, nell'UNICO punto prima di ogni uso, in DUE
+                # contratti con le STESSE condizioni (durata, tasso,
+                # preammortamento, maxirata): uno con il solo importo nuovo, uno
+                # con il solo residuo pregresso. Un calendario di ammortamento e'
+                # lineare nel capitale — quota capitale, maxirata e interessi
+                # scalano tutti col principal — quindi la somma dei due equivale
+                # al contratto unico a meno del centesimo di arrotondamento per
+                # anno (provato dalla rete: I1 esteso sul misto = I1 esteso sul
+                # diviso in due). Senza questa normalizzazione un contratto misto
+                # restava intero dalla parte del pregresso e la sua quota nuova
+                # si prendeva «prima dal breve» come nel Ruling 40.
+                if loan_amount > 0:
                     financing_loans.append({
-                        'year': a.forecast_year,
-                        'amount': loan_amount,
-                        'opening_residual': opening_residual,
-                        'duration': loan_duration,
-                        'rate': loan_rate,
-                        'grace_years': Decimal(str(loan.get('grace_years') or 0)),
-                        'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
+                        **condizioni, 'amount': loan_amount, 'opening_residual': Decimal('0'),
+                    })
+                if opening_residual > 0:
+                    financing_loans.append({
+                        **condizioni, 'amount': Decimal('0'), 'opening_residual': opening_residual,
                     })
 
         use_detailed_existing_schedule = detailed_opening_total > 0
@@ -1303,14 +1360,21 @@ class ForecastEngine:
                         self._declared_sp_fields()
                         | self._pregresso_sp_forced_fields(pregresso)
                         | self._indexed_sp_forced_fields(details)
-                        # `sp16a` protetto quando lo scoperto puo' esserci:
-                        # la sua quota bancaria e' quella del piano di rimborso,
-                        # e il residuo di quadratura non deve poterla spostare.
-                        # Fuori da quel caso l'insieme resta identico a prima,
-                        # quindi nessuno scenario di sempre cambia bersaglio.
-                        | (frozenset({'sp16a_debiti_banche_breve'})
-                           if overdraft.allowed or overdraft.opening > Decimal('0')
-                           else frozenset())
+                        # `sp16a`/`sp17a` portano SEMPRE la ripartizione
+                        # pregresso/prestito nuovo che `_calculate_balance_sheet`
+                        # scrive di proposito (Task 16): il residuo di
+                        # quadratura non deve poterle spostare. Non e'
+                        # condizionato allo scoperto ne' a nient'altro — la
+                        # separazione gira per OGNI scenario, anche a importi
+                        # zero — perche' la protezione non puo' dipendere
+                        # dall'ordine in cui il cammino a ritroso incontra gli
+                        # altri campi del gruppo (rilievo 4 della revisione,
+                        # giro di correzione 1: oggi regge solo perche' nessun
+                        # altro campo del gruppo e' mai forzato prima di
+                        # arrivarci — misurato zero posature su questi due campi
+                        # in 44 osservazioni, ma per l'ordine del cammino, non
+                        # per una protezione esplicita).
+                        | self._BANK_DEBT_SPLIT_FIELDS
                     ),
                     details=details,
                     overdraft=overdraft,
@@ -1766,10 +1830,7 @@ class ForecastEngine:
         # erogazione. Interest is 0 automatically once the loan is fully repaid or
         # when the rate is 0.
         _, _, financing_interest = new_financing_schedule(financing_loans, assumption.forecast_year)
-        has_detailed_opening = any(
-            Decimal(str(loan.get('opening_residual') or 0)) > 0
-            for loan in (financing_loans or [])
-        )
+        has_detailed_opening = any(_ha_residuo_pregresso(loan) for loan in (financing_loans or []))
         # A detailed opening schedule replaces the historical aggregate interest
         # carry-forward; otherwise it would be charged twice.  CE15 override stays
         # the explicit escape hatch for ancillary bank charges.

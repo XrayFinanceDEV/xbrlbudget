@@ -66,8 +66,8 @@ CONTRATTI_PREGRESSO = [
 ]
 
 
-def _genera(db, user, rows, breve, lungo):
-    """Genera sul percorso persistito e restituisce `{anno: sp}`, o fallisce parlando."""
+def _genera_completo(db, user, rows, breve, lungo):
+    """Genera sul percorso persistito e restituisce `{anno: (sp, ce)}`, o fallisce parlando."""
     company_id, _ = seed_base_year(db, user_id=user)
     fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
     b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
@@ -86,7 +86,12 @@ def _genera(db, user, rows, breve, lungo):
     # `forecast_generated`, non l'HTTP 200: il bulk risponde 200 anche a un
     # previsionale rifiutato (CLAUDE.md).
     assert res["forecast_generated"] is True, f"{user}: {res['message']}"
-    return {anno: sp for anno, sp, _ce in read_forecast_maps(db, sc.id)}
+    return {anno: (sp, ce) for anno, sp, ce in read_forecast_maps(db, sc.id)}
+
+
+def _genera(db, user, rows, breve, lungo):
+    """Genera sul percorso persistito e restituisce `{anno: sp}`, o fallisce parlando."""
+    return {anno: sp for anno, (sp, _ce) in _genera_completo(db, user, rows, breve, lungo).items()}
 
 
 def _righe(primo=None, tutti=None):
@@ -236,5 +241,134 @@ def test_la_sonda_del_ruling_40_con_i_suoi_numeri():
         # 23.456,79 di lungo pregresso fermo + la catena del prestito.
         assert [con[y]["sp17a_debiti_banche_lungo"] for y in ANNI] == [
             D("98457.08"), D("73456.99"), D("48456.90")]
+    finally:
+        engine.dispose()
+
+
+# ══ Contratti misti (Ruling 45, giro di correzione 1) ══
+#
+# Uno stesso contratto puo' portare `amount` (nuovo) E `opening_residual`
+# (pregresso) insieme sulla stessa riga: lo schema lo ammette
+# (`FinancingLoanInput` chiede solo che UNO dei due sia positivo,
+# `backend/app/schemas/budget.py:66-82`) e l'interfaccia lo produce
+# (`FinancingLoansGrid.tsx:191-195,258`, le due caselle stanno sulla stessa
+# riga). Prima di questa correzione (rilievo 1 della revisione) il motore lo
+# trattava intero come pregresso e la sua quota nuova si prendeva «prima dal
+# breve», come nel Ruling 40 — misurato dalla revisione: `sp16a` 2027 a 0,00
+# col misto contro 3.444,44 con lo stesso contratto diviso in due (sonda P8).
+#
+# `assemble_financing` lo normalizza ora, in un solo punto prima di ogni uso,
+# in DUE contratti con le stesse condizioni (Ruling 45): la prova qui sotto
+# non tollera un'approssimazione — verifica che il misto produca ESATTAMENTE
+# lo stesso bilancio e lo stesso conto economico dello stesso contratto
+# scritto su due righe, perche' la normalizzazione rende le due strade
+# LETTERALMENTE lo stesso calcolo a valle.
+
+MISTO_SEMPLICE = [
+    {"name": "Mutuo misto", "amount": 20000.55, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+DIVISO_SEMPLICE = [
+    {"name": "Mutuo misto (nuovo)", "amount": 20000.55, "opening_residual": 0,
+     "duration_years": 2, "interest_rate": 2.7},
+    {"name": "Mutuo misto (pregresso)", "amount": 0, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+
+# La sonda P8 della revisione: un contratto pregresso puro (Mutuo A, 30.000,00
+# in 5 anni) accanto a un contratto MISTO (Mutuo B: 5.802,46 di residuo +
+# 20.000,55 di nuovo, 2 anni) — esattamente la combinazione su cui la
+# revisione ha misurato la divergenza.
+MISTO_P8 = [
+    {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00, "duration_years": 5, "interest_rate": 3.1},
+    {"name": "Mutuo B misto", "amount": 20000.55, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+DIVISO_P8 = [
+    {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00, "duration_years": 5, "interest_rate": 3.1},
+    {"name": "Mutuo B (nuovo)", "amount": 20000.55, "opening_residual": 0,
+     "duration_years": 2, "interest_rate": 2.7},
+    {"name": "Mutuo B (pregresso)", "amount": 0, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+
+# Il debito bancario di apertura deve coincidere con la somma dei residui
+# dichiarati (`assemble_financing` alza altrimenti): il caso «un solo
+# contratto misto» porta 5.802,46 di residuo, quindi la banca in bilancio e'
+# 5.802,46, non `BREVE`/`LUNGO` (che sono 35.802,46 — la massa di P8).
+CASI_MISTI = [
+    ("un solo contratto misto", MISTO_SEMPLICE, DIVISO_SEMPLICE, D("0"), D("5802.46")),
+    ("misto accanto a un contratto pregresso puro (sonda P8)", MISTO_P8, DIVISO_P8, BREVE, LUNGO),
+]
+
+
+@pytest.mark.parametrize("nome, misto, diviso, breve, lungo", CASI_MISTI, ids=[c[0] for c in CASI_MISTI])
+def test_contratto_misto_equivale_al_contratto_diviso_in_due(nome, misto, diviso, breve, lungo):
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            m = _genera_completo(db, f"misto-{nome}", _righe({"financing_loans": misto}), breve, lungo)
+            d = _genera_completo(db, f"diviso-{nome}", _righe({"financing_loans": diviso}), breve, lungo)
+        fuori = []
+        campi_sp = ("sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo",
+                    "sp16_debiti_breve", "sp17_debiti_lungo", "sp09_disponibilita_liquide")
+        for anno in ANNI:
+            sp_m, ce_m = m[anno]
+            sp_d, ce_d = d[anno]
+            for campo in campi_sp:
+                if sp_m[campo] != sp_d[campo]:
+                    fuori.append(f"{anno} {campo}: misto {sp_m[campo]} != diviso {sp_d[campo]} "
+                                 f"(scarto {sp_m[campo] - sp_d[campo]})")
+            if ce_m["ce15_oneri_finanziari"] != ce_d["ce15_oneri_finanziari"]:
+                fuori.append(f"{anno} ce15: misto {ce_m['ce15_oneri_finanziari']} != "
+                             f"diviso {ce_d['ce15_oneri_finanziari']} "
+                             f"(scarto {ce_m['ce15_oneri_finanziari'] - ce_d['ce15_oneri_finanziari']})")
+            if sp_m["_total_assets"] != sp_m["_total_liabilities"]:
+                fuori.append(f"{anno} quadratura misto: attivo {sp_m['_total_assets']} "
+                             f"!= passivo {sp_m['_total_liabilities']}")
+        assert not fuori, f"[{nome}]\n" + "\n".join(fuori)
+    finally:
+        engine.dispose()
+
+
+def test_i1_esteso_vale_anche_per_il_contratto_misto():
+    """La stessa I1 esteso della rete generale (Ruling 45, decisione «Atteso
+    dopo»): la componente pregressa del misto non si accorge della sua stessa
+    quota nuova, e `sp17a` e' la somma. Decomposizione manuale della sonda P8:
+    «con» ha il misto (Mutuo A + Mutuo B misto), «senza» ha solo la parte
+    pregressa di Mutuo B (Mutuo A + Mutuo B residuo, senza il suo importo
+    nuovo), «solo» ha solo la parte nuova di Mutuo B, su un'azienda senza
+    banca. Se la normalizzazione fosse sbagliata la somma non tornerebbe."""
+    engine, sessions = memory_sessions()
+    try:
+        con_loans = MISTO_P8
+        senza_loans = [
+            {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00,
+             "duration_years": 5, "interest_rate": 3.1},
+            {"name": "Mutuo B (pregresso)", "amount": 0, "opening_residual": 5802.46,
+             "duration_years": 2, "interest_rate": 2.7},
+        ]
+        solo_loans = [
+            {"name": "Mutuo B (nuovo)", "amount": 20000.55, "opening_residual": 0,
+             "duration_years": 2, "interest_rate": 2.7},
+        ]
+        with sessions() as db:
+            con = _genera(db, "p8-con", _righe({"financing_loans": con_loans}), BREVE, LUNGO)
+            senza = _genera(db, "p8-senza", _righe({"financing_loans": senza_loans}), BREVE, LUNGO)
+            solo = _genera(db, "p8-solo", _righe({"financing_loans": solo_loans}), D("0"), D("0"))
+        fuori = []
+        for anno in ANNI:
+            c, s, p = con[anno], senza[anno], solo[anno]
+            if c["sp16a_debiti_banche_breve"] != s["sp16a_debiti_banche_breve"]:
+                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']} col misto, "
+                             f"{s['sp16a_debiti_banche_breve']} senza la quota nuova di Mutuo B")
+            atteso = s["sp17a_debiti_banche_lungo"] + p["sp17a_debiti_banche_lungo"]
+            if c["sp17a_debiti_banche_lungo"] != atteso:
+                fuori.append(f"{anno} sp17a: {c['sp17a_debiti_banche_lungo']}, atteso {atteso} = "
+                             f"pregresso {s['sp17a_debiti_banche_lungo']} + "
+                             f"nuovo {p['sp17a_debiti_banche_lungo']}")
+            if c["_total_assets"] != c["_total_liabilities"]:
+                fuori.append(f"{anno} quadratura: attivo {c['_total_assets']} != passivo {c['_total_liabilities']}")
+        assert not fuori, "\n".join(fuori)
     finally:
         engine.dispose()

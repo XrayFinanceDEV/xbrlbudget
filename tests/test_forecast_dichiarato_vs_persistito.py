@@ -146,7 +146,9 @@ def _divergenze(bs, ce, det, row):
     dichiarati = (
         {campo for coppia in SHORT_LONG.values() for campo in coppia}
         | {SP_INDEXABLE_FIELDS[code] for code in det["indicizzazione"]}
-        | {"sp16a_debiti_banche_breve"}
+        # Task 16, giro di correzione 1 (rilievo 4): entrambi i lati della
+        # ripartizione pregresso/prestito nuovo, non solo il breve.
+        | {"sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"}
     )
     for posa in det["residuo_quadratura"]:
         if posa["campo"] in dichiarati:

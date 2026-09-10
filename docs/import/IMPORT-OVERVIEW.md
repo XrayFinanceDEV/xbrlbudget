@@ -308,7 +308,7 @@ raramente comparativi): `prior_bs_data`/`prior_ce_data` restano `None`.
 #### Il quinto validatore: `_validate_equity` (e il suo stato reale)
 
 Accanto ai quattro sopra esiste un validatore del **patrimonio netto**
-(`pdf_extractor_llm.py:3693`): confronta `sp11 + sp12 + sp13` con `totale_passivo` meno le
+(`pdf_extractor_llm.py:4584`): confronta `sp11 + sp12 + sp13` con `totale_passivo` meno le
 passività, e quando le due grandezze divergono oltre €1 correggerebbe le **riserve** (`sp12`), il
 solo campo del PN che può assorbire uno scarto di composizione. Il rubinetto ha tre guardie
 anti-masking, e sono la parte che vale la pena conoscere:

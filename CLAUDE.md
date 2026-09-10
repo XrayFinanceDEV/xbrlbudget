@@ -138,8 +138,8 @@ or the wrong record goes.
 - **OIC:** assets = equity + liabilities (tolerance €0.01, `config.py:235`) · CCN = current assets −
   current liabilities · MOL = RO + ammortamenti · RO is before financial items.
 - **Tax rate: the `24` in the schema is not what runs.** `24` (IRES only) is the Pydantic default
-  (`backend/app/schemas/budget.py:148`) and **no screen sends it**: every caller sends **27,9**
-  (IRES + IRAP — `STARTUP_TAX_RATE_PCT`, `frontend/app/budget/page.tsx:361`, plus three literals).
+  (`backend/app/schemas/budget.py:188`) and **no screen sends it**: every caller sends **27,9**
+  (IRES + IRAP — `STARTUP_TAX_RATE_PCT`, `frontend/app/budget/page.tsx:370`, plus three literals).
   A `ce20_override` overrides the rate altogether.
 - **Sectors** (`config.Sector`, 1-6): Industria · Commercio · Servizi · Autotrasporti · Immobiliare ·
   Edilizia. Sector **1** uses the 5-component Altman model, sectors **2-6** the 4-component one; the
@@ -269,7 +269,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **`tax_rate` è un ripiego, non l'aliquota che vince.** Il motore usa l'aliquota effettiva
   dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
   derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
-  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:1499-1509`, `_tax_components`).
+  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:1654-1664`, `_tax_components`).
 - **Promuovere una proiezione CANCELLA il `FinancialYear` annuale già esistente** per quella
   azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era
   stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un
@@ -480,10 +480,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into
-  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1112-1116`; the
-  docstring at `:1025` still says otherwise and is wrong). And both engines plug cash **upward
+  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1113-1117`; the
+  docstring at `:1027` still says otherwise and is wrong). And both engines plug cash **upward
   only**, but they part company on what a negative residual costs you: qui è **clampato a zero** con
-  una diagnostica `unfunded_financing_requirement` (`:1211-1223`) e la proiezione esce lo stesso,
+  una diagnostica `unfunded_financing_requirement` (`:1212-1224`) e la proiezione esce lo stesso,
   mentre il motore budget **solleva** e non produce nulla — salvo che lo scoperto di c/c sia concesso
   (`overdraft_allowed`), e allora il fabbisogno diventa scoperto generato dal piano, dichiarato. Un
   fabbisogno scoperto quindi si vede in un avviso sull'infrannuale, e sul previsionale in un errore

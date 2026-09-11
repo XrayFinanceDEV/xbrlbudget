@@ -20,9 +20,22 @@ La causa era doppia, e doppia e' la prova:
   (`_BANK_DEBT_FIELDS_SP16`/`_SP17`), e quando non resta nessun operativo libero
   il residuo non torna piu' sul secchio (che forzato e' per definizione):
   segue la somma delle righe nell'AGGREGATO, perche' l'aggregato del gruppo
-  DEBITI E' la loro somma (riga `sp16 = sp16a + … + sp16g`). Ma questo vale
-  solo se l'aggregato stesso non e' forzato: un `sp_overrides` su `sp16` fissa
-  il totale, e li' il centesimo resta al secchio, dichiarato.
+  DEBITI E' la loro somma (riga `sp16 = sp16a + … + sp16g`).
+
+  ~~Ma questo vale solo se l'aggregato stesso non e' forzato: un `sp_overrides`
+  su `sp16` fissa il totale, e li' il centesimo resta al secchio, dichiarato.~~
+  **Falso**, ed e' il rilievo I-1 della revisione di `6e5c0f7`: quella frase
+  descriveva un ramo che `compute_forecast` non raggiungeva MAI (gli
+  `sp_overrides` non entravano in `forced_fields`), e su cui questo stesso file
+  aveva un test costruito a mano. Ora l'aggregato forzato entra, il ramo e'
+  reale, e la risposta e' un RIFIUTO: li' il residuo non e' un centesimo di
+  arrotondamento bensi' la MASSA dell'override (sonda `AO16`: 31.666,66 di
+  cassa in meno sotto un `forecast_generated: true`, su 40 anni su 40).
+
+* **(c)** L'insieme dei campi forzati lo costruisce UNA funzione,
+  `_sp_forced_fields`, e il selettore dei dichiarati e' PER GRUPPO: un'
+  indicizzazione della sola `sp17g` non puo' togliere il ripiego al gruppo
+  `sp16` (rilievo I-2, tabella in laboratorio: `sp16_debiti_breve` −0,01).
 """
 from decimal import Decimal as D
 
@@ -189,19 +202,45 @@ def test_operativo_libero_il_residuo_va_a_lui_non_all_aggregato():
     assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0")) + _RESIDUO
 
 
-def test_aggregato_forzato_il_residuo_torna_al_secchio_dichiarato():
-    """Con il gruppo interamente forzato E l'aggregato fissato da uno
-    `sp_overrides` su `sp16`, l'aggregato non si muove: il centesimo resta sul
-    secchio e lo dichiara `residuo_quadratura` — posatura onesta, non silente."""
+def test_aggregato_forzato_senza_niente_di_libero_si_rifiuta():
+    """Gruppo interamente forzato E aggregato fissato da `sp_overrides`: non e'
+    un arrotondamento da posare, e' la massa dell'override (rilievo I-1 della
+    revisione di `6e5c0f7`), e nessun posto la accetta in onesta'.
+
+    La versione precedente di questo test asseriva il contrario («il centesimo
+    resta sul secchio e lo dichiara `residuo_quadratura`»), e il suo docstring
+    era cio' che la revisione chiamava «falso sul percorso reale»: il ramo
+    `aggregate in forced_fields` non veniva mai raggiunto da `compute_forecast`,
+    perche' gli `sp_overrides` non entravano in `forced_fields` — lo esercitava
+    solo questo test, costruito a mano. Da ora l'aggregato FORZATO ci entra
+    (quando nessuna sua voce lo e'), quindi il ramo e' reale, e la sua risposta
+    e' un rifiuto: la misura della revisione (sonda `AO16`) dice che
+    sull'altra strada si perdono 31.666,66 di cassa sotto un
+    `forecast_generated: true`, e che la cifra persistita (118.333,34) non e'
+    quella chiesta (150.000).
+    """
     forzati = frozenset(_DETTAGLI_16) | {"sp16_debiti_breve"}
-    details = {}
+    with pytest.raises(ValueError) as rv:
+        ForecastEngine._normalize_balance_sheet_cents(
+            _valori_16(), forced_fields=forzati, recompute_cash=False, details={},
+        )
+    assert "sp16_debiti_breve" in str(rv.value)
+    assert "Forza una voce di dettaglio" in str(rv.value)
+
+
+def test_aggregato_forzato_senza_residuo_non_si_rifiuta():
+    """Il rifiuto e' per la MASSA che non ha dove andare, non per la cella
+    forzata in se': se l'aggregato forzato coincide con la somma delle righe
+    il `if not residual: continue` sopra congela tutto, e la forzatura passa
+    (e' il caso documentato di `API-PREVISIONALE.md` §… — «un `sp_overrides` su
+    `sp16a` o sul suo aggregato fissa il totale: vince»)."""
+    valori = _valori_16()
+    valori["sp16_debiti_breve"] = sum(_DETTAGLI_16.values(), D("0"))
     esito = ForecastEngine._normalize_balance_sheet_cents(
-        _valori_16(), forced_fields=forzati, recompute_cash=False, details=details,
+        valori, forced_fields=frozenset(_DETTAGLI_16) | {"sp16_debiti_breve"},
+        recompute_cash=False, details={},
     )
-    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0")) + _RESIDUO
-    assert esito["sp16g_altri_debiti_breve"] == D("700.00") + _RESIDUO
-    assert details["residuo_quadratura"] == [{"campo": "sp16g_altri_debiti_breve",
-                                              "importo": _RESIDUO}]
+    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0"))
 
 
 def test_reintegro_dell_aggregato_quando_non_resta_niente_libero():
@@ -217,3 +256,153 @@ def test_reintegro_dell_aggregato_quando_non_resta_niente_libero():
         assert esito[campo] == val, f"{campo} mosso: {esito[campo]} != {val}"
     assert details["residuo_quadratura"] == [{"campo": "sp16_debiti_breve",
                                               "importo": -_RESIDUO}]
+
+
+# ─────────────── I-1: l'aggregato forzato, sul percorso di servizio ───────────────
+
+def _esito_aggregato(db, user, tag, piano=None, indice=None, anno_forza=2027):
+    """Bulk reale, `sp_overrides` sull'AGGREGATO `sp16_debiti_breve` in ogni anno."""
+    company_id = _base_year(db, user)
+    sc = budget_scenarios.create_budget_scenario(
+        company_id, BudgetScenarioCreate(company_id=company_id, name=tag, base_year=2026,
+                                         scenario_type="budget"), user_id=user, db=db)
+    ov = {"sp16_debiti_breve": "150000.00"}
+    if anno_forza is not None:
+        rows = [dict(forecast_year=y, revenue_growth_pct=D("3.33"), sp_overrides=dict(ov))
+                for y in (2027, 2028, 2029)]
+    else:
+        rows = [dict(forecast_year=y, revenue_growth_pct=D("3.33")) for y in (2027, 2028, 2029)]
+    if piano is not None:
+        rows[0]["pregresso"] = piano
+    if indice is not None:
+        rows[0]["sp_indexing"] = indice
+    res = budget_scenarios.bulk_upsert_assumptions(
+        company_id, sc.id, request={"assumptions": rows, "auto_generate": True},
+        user_id=user, db=db)
+    return res, sc.id, rows
+
+
+def test_piano_altri_aggregato_forzato_si_rifiuta_e_non_lascia_nulla(monkeypatch):
+    """Rilievo I-1: piano `altri_debiti` + `sp_overrides` su `sp16` = 150.000.
+
+    Su `6e5c0f7` risponda `forecast_generated: true` e persisteva 118.333,34:
+    la meta' dell'override sparita, la cassa a 73.661,89 invece di 105.328,55,
+    e `residuo_quadratura` che lo annotava per −31.666,66 senza che nessuna
+    schermata lo legga. Ora e' un rifiuto, e il rifiuto non lascia niente: la
+    prova distruttiva (un `PUT /assumptions` successivo senza override)
+    dimostra che la cella contesa non era rimasta scritta.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, sid, _rows = _esito_aggregato(db, "i1-piano", "x",
+                                               piano=PIANI["altri debiti"])
+            assert res["forecast_generated"] is False, res["message"]
+            assert "sp16_debiti_breve" in res["message"], res["message"]
+            assert read_forecast_maps(db, sid) == [], "un previsionale monco e' persistito"
+    finally:
+        engine.dispose()
+
+
+def test_indicizzazione_solo_sp17g_non_rifiuta_l_aggregato_sp16(monkeypatch):
+    """Rilievo I-2, parte di servizio: l'indice su `sp17g` toglie il ripiego al
+    gruppo `sp17`, NON al gruppo `sp16`. Con la condizione globale di
+    `6e5c0f7` un override di `sp16` si sarebbe rifiutato anche qui (la revisione
+    lo nota: «con la correzione di I-1, lo stesso errore farebbe RIFIUTARE un
+    override di `sp16` che ha il secchio libero»).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, sid, _rows = _esito_aggregato(db, "i2-indice-17g", "x",
+                                               indice={"sp17g": "ricavi"})
+            assert res["forecast_generated"] is True, res["message"]
+    finally:
+        engine.dispose()
+
+
+def test_aggregato_forzato_senza_piano_vince_e_il_residuo_sta_al_secchio(monkeypatch):
+    """Nessun piano, nessuna indicizzazione: il totale forzato E' il numero
+    voluto, e il centesimo di ripiego finisce sul secchio `sp16g` — mai su
+    `sp16c` (il difetto del genitore, che questa riga uccide: mutazione M1).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, sid, _rows = _esito_aggregato(db, "i1-senza-piano", "x")
+            assert res["forecast_generated"] is True, res["message"]
+            for anno, bs, ce in read_forecast_maps(db, sid):
+                assert bs["sp16_debiti_breve"] == D("150000.00"), anno
+                assert bs["sp16c_debiti_obbligazioni_breve"] == D("0"), (
+                    anno, "il residuo e' tornato a posarsi su un confine PFN: "
+                    "e' la mutazione M1, il difetto del genitore")
+                assert sum((bs[c] for c in ForecastEngine._SP16_RIGHE), D("0")) == \
+                    bs["sp16_debiti_breve"], anno
+    finally:
+        engine.dispose()
+
+
+# ─────────────── I-2: `_sp_forced_fields`, la prova pura ───────────────
+
+def test_sp_forced_fields_e_per_gruppo_non_per_unione():
+    """Mutazione M5: `and`/`or` sbagliati nella condizione del secchio.
+
+    Un'indicizzazione della SOLA `sp17g` forza `sp17d`…`sp17g` e NON tocca le
+    quattro righe di `sp16`: con la condizione globale le otto righe entravano
+    tutte, e il gruppo `sp16` restava senza ripiego (il centesimo finiva
+    sull'aggregato e da li' sulla cassa).
+    """
+    # Le CHIAVI sono i codici di `SP_INDEXABLE_FIELDS`, non i nomi di colonna:
+    # `_indexed_sp_forced_fields` mappa `code -> campo`, e una chiave scritta
+    # col nome lungo non indicizza nulla (il test sarebbe verde per vuoto).
+    da_indice = ForecastEngine._sp_forced_fields(
+        None, {"indicizzazione": {"sp17g": {"voce": "ricavi"}}})
+    assert "sp17g_altri_debiti_lungo" in da_indice, "la chiave non era quella giusta"
+    assert {"sp17d_debiti_fornitori_lungo", "sp17e_debiti_tributari_lungo",
+            "sp17f_debiti_previdenza_lungo", "sp17g_altri_debiti_lungo"} <= da_indice
+    assert not ({"sp16d_debiti_fornitori_breve", "sp16e_debiti_tributari_breve",
+                 "sp16f_debiti_previdenza_breve", "sp16g_altri_debiti_breve"} & da_indice), \
+        sorted({"sp16d_debiti_fornitori_breve", "sp16e_debiti_tributari_breve",
+                "sp16f_debiti_previdenza_breve", "sp16g_altri_debiti_breve"} & da_indice)
+
+
+def test_sp_forced_fields_nessun_piano_nessuna_indicizzazione_non_gela_nulla():
+    """Mutazione M1: `_declared_sp_fields()` rimesso dentro SEMPRE. Su questo
+    cammino non deve comparire nessuna delle otto righe operative — e' la
+    forma pura della frase «con il secchio libero il ripiego non parte mai».
+    """
+    base = ForecastEngine._sp_forced_fields(None, {})
+    assert not (set(ForecastEngine._declared_sp_fields()) & base), sorted(
+        set(ForecastEngine._declared_sp_fields()) & base)
+    assert set(ForecastEngine._BANK_DEBT_SPLIT_FIELDS) <= base
+
+
+def test_piano_altri_debiti_governa_entrambi_i_gruppi_interi():
+    """`altri_debiti` e' l'unico saldo che tocca BOTH `sp16g` e `sp17g`: li' le
+    otto righe sono tutte governate, e infatti l'aggregato forzato si rifiuta."""
+    forzati = ForecastEngine._sp_forced_fields(
+        {"altri_debiti": {"opening": 95000.00, "amounts": [47500.00, 47500.00]}}, {})
+    assert set(ForecastEngine._declared_sp_fields()) <= forzati
+
+
+def test_l_aggregato_entra_in_forced_fields_solo_se_forzato_lui_e_nessunaVoce():
+    """La meta' di I-2 che viene da I-1: `forced_fields` deve dire al
+    normalizzatore QUALI celle sono input dell'utente, e la regola non e'
+    simmetrica — una voce forzata significa che l'aggregato lo ricostruisce
+    `_apply_sp_overrides`, quindi il residuo torna un arrotondamento."""
+    class _A:
+        def __init__(self, ov):
+            self.sp_overrides = ov
+
+    assert "sp16_debiti_breve" in ForecastEngine._sp_forced_fields(
+        None, {}, _A({"sp16_debiti_breve": "150000.00"}))
+    assert "sp16_debiti_breve" not in ForecastEngine._sp_forced_fields(
+        None, {}, _A({"sp16_debiti_breve": "150000.00",
+                      "sp16d_debiti_fornitori_breve": "80000.00"}))
+    assert "sp17_debiti_lungo" in ForecastEngine._sp_forced_fields(
+        None, {}, _A({"sp17_debiti_lungo": "90000.00"}))
+    assert not any(c in ForecastEngine._sp_forced_fields(None, {}, _A(None))
+                   for c in ("sp16_debiti_breve", "sp17_debiti_lungo"))

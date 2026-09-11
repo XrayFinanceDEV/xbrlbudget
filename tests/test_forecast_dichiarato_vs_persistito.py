@@ -40,7 +40,7 @@ import pytest
 
 from backend.app.api.v1 import budget_scenarios
 from backend.app.schemas.budget import BudgetScenarioCreate
-from calculations.forecast_engine import SP_INDEXABLE_FIELDS
+from calculations.forecast_engine import ForecastEngine, SP_INDEXABLE_FIELDS
 from database.models import BalanceSheet, FinancialYear
 from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
 
@@ -68,6 +68,16 @@ CE_OVERRIDES = {
 def _q(x):
     """Al centesimo con la stessa regola del motore (`_quantize_values`)."""
     return D(str(x)).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+
+
+# I sei debiti finanziari, la cui ripartizione fra pregresso e prestito nuovo e'
+# scritta a mano da `_calculate_balance_sheet` (Task 16): un residuo di quadratura
+# posato qui non e' un centesimo, e' una rata cancellata (m-2 del giro 2).
+FINANZIARI_SEMPRE = frozenset({
+    "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+    "sp16c_debiti_obbligazioni_breve", "sp17a_debiti_banche_lungo",
+    "sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo",
+})
 
 
 def _divergenze(bs, ce, det, row):
@@ -205,9 +215,19 @@ def _divergenze(bs, ce, det, row):
         | {c for c, v in sp_ov.items() if v is not None}
     )
     for posa in det["residuo_quadratura"]:
+        if posa["campo"] in FINANZIARI_SEMPRE:
+            fuori.append((posa["campo"], f"residuo di {posa['importo']} su un debito "
+                          "finanziario: la ripartizione pregresso/prestito nuovo e' sua, "
+                          "un centesimo posato qui la cancella"))
         if posa["campo"] in dichiarati:
             fuori.append((posa["campo"],
                           f"residuo di {posa['importo']} posato su {posa['campo']}, che e' dichiarato"))
+    # m-2 del giro 2 su `6e5c0f7`: la proprieta' «i sei debiti FINANZIARI non li
+    # tocca mai» era affermata ma non asserita da nessuna parte — il motore la
+    # protegge con `_BANK_DEBT_SPLIT_FIELDS` e con `_cammino_esclusi`, e la
+    # prova che la revisione ha fatto con una copia strumentata (0 violazioni su
+    # 77 scenari, 1 su `f330730`) qui diventa un'asserzione permanente: nessuna
+    # posatura nomina un finanziario, MAI, in nessuno scenario della batteria.
     return fuori
 
 
@@ -380,6 +400,13 @@ OVERRIDE = {
     # Il LATO OLTRE con un piano attivo, invece, collide per progetto (I1-bis):
     # quegli scenari si assertiscono sul RIFIUTO, vedi `_rifiuto_atteso`.
     "SP sui campi dichiarati": {"sp_overrides": SP_FAMIGLIA},
+    # Rilievo I-1 della revisione di `6e5c0f7`, punto 4: la variante con
+    # l'AGGREGATO forzato, che e' il caso in cui il residuo non e' un
+    # centesimo bensi' la massa dell'override. Con un piano `altri_debiti`
+    # addosso (che governa i secchi di ENTRAMBI i gruppi, quindi congela tutte
+    # e otto le righe operative) deve essere RIFIUTATO; altrove c'e' ancora una
+    # riga libera che lo riceve, e il comportamento e' quello di sempre.
+    "aggregato sp16": {"sp_overrides": {"sp16_debiti_breve": 150000.00}},
 }
 
 # Due investimenti da 0,02 al 20%: due quote da 0,004 che i dettagli arrotondano
@@ -393,7 +420,7 @@ INVESTIMENTI_SOTTO_CENTESIMO = {
 }
 
 
-def _rifiuto_atteso(piano):
+def _rifiuto_atteso(piano, idx=None, ov=None):
     """Il campo oltre che il motore deve rifiutare per questo piano, o None.
 
     Stesso ordine di scansione del motore (`_LATO_OLTRE_GOVERNATO_DA_PIANO`),
@@ -402,6 +429,17 @@ def _rifiuto_atteso(piano):
     batteria NON contiene non deve generare un rifiuto (e difatti la famiglia
     l'ha lasciata perdere: vedi il commento sopra).
     """
+    if ov and "sp16_debiti_breve" in ov:
+        # Il cammino di I-1: il totale forzato si rifiuta quando nel gruppo non
+        # resta nessuna riga operativa libera. Non lo indovino a tavolino: lo
+        # chiede alla STESSA funzione del motore (`_sp_forced_fields`), che e'
+        # cio' che il normalizzatore ricevera'. Se la risposta divergesse dal
+        # motore, sarebbe il motore a sbagliare, e la variante della batteria
+        # lo direbbe come un rifiuto mancato.
+        forzati = ForecastEngine._sp_forced_fields(piano, {"indicizzazione": idx or {}})
+        libere = [c for c in ForecastEngine._SP16_RIGHE
+                  if c not in forzati and c not in ForecastEngine._BANK_DEBT_FIELDS_SP16]
+        return "sp16_debiti_breve" if not libere else None
     for saldo, campi in LATO_OLTRE_DEL_PIANO.items():
         if not (piano or {}).get(saldo):
             continue
@@ -448,7 +486,7 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
                     BudgetScenarioCreate(company_id=company_id, name="inv", base_year=2026,
                                          scenario_type="budget"),
                     user_id=user, db=db)
-                rifiutato = _rifiuto_atteso(piano) if "sp_overrides" in ov else None
+                rifiutato = _rifiuto_atteso(piano, idx, ov.get("sp_overrides")) if "sp_overrides" in ov else None
                 res = budget_scenarios.bulk_upsert_assumptions(
                     company_id, sc.id, request={"assumptions": rows, "auto_generate": True},
                     user_id=user, db=db)
@@ -478,15 +516,24 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
                         fuori.append((campo, f"[{nome_p} | {nome_i} | {nome_o} | {anno['year']}] {guasto}"))
     finally:
         engine.dispose()
-    # 96 scenari: 6 piani × 4 indicizzazioni × 4 OVERRIDE (la famiglia SP
-    # sui campi dichiarati e' il quarto). I 16 rifiuti sono i 4 piani che
-    # governano un lato oltre della famiglia (`altri debiti`,
-    # `altri + previdenziali`, `fornitori + tributari`,
-    # `tributari + previdenziali + altri`) × le 4 indicizzazioni: il piano
-    # `crediti con inesigibile` non collide perche' la famiglia non tocca
-    # `sp07` (rifiutato a parte, nel test dedicato), e `senza piano` non ha
-    # alcun calendario da contraddire.
-    assert scenari == 96 and anni == 240 and rifiutati == 16, \
+    # 120 scenari: 6 piani × 4 indicizzazioni × 5 OVERRIDE (la famiglia SP sui
+    # campi dichiarati e' il quarto, l'aggregato `sp16` forzato e' il quinto —
+    # rilievo I-1 della revisione di `6e5c0f7`, punto 4).
+    #
+    # I 37 rifiuti si scompongono cosi', e i due conti vanno fatti insieme
+    # perche' sono due CAMMINI diversi di rifiuto:
+    #   · 16 = la famiglia: 4 piani che governano un lato oltre (`altri debiti`,
+    #     `altri + previdenziali`, `fornitori + tributari`,
+    #     `tributari + previdenziali + altri`) × 4 indicizzazioni. Il piano
+    #     `crediti con inesigibile` non collide perche' la famiglia non tocca
+    #     `sp07`, e `senza piano` non ha calendario da contraddire;
+    #   · 21 = laggregato: le 3 indicizzazioni che forzavano ENTRAMBI i secchi
+    #     (`solo g`, `f + g`, `tutte e undici`) × 6 piani, + i 3 piani con
+    #     `altri_debiti` × `nessuna`. Li' non resta nessuna riga operativa libera
+    #     nel gruppo e il totale forzato e' la massa, non un centesimo (I-1);
+    #     il conteggio chiede alla STESSA `_sp_forced_fields` del motore, non a
+    #     una previsione scritta a mano.
+    assert scenari == 120 and anni == 249 and rifiutati == 37, \
         f"batteria incompleta: {scenari} scenari, {anni} anni, {rifiutati} rifiuti"
     # Il riepilogo PER CAMPO prima degli esempi, e non e' cosmesi: la prima
     # stesura elencava solo i primi 25 casi in ordine di scenario, e cosi'

@@ -577,6 +577,18 @@ dichiara invece di evitarlo.
 
 Un `sp_overrides` su `sp16a` (o sul suo aggregato `sp16`) fissa il totale: vince, e lo scoperto ne
 discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripartizione è coerente
+
+⚠️ **Il totale `sp16`/`sp17` per` non vince se il gruppo non ha piu' un ripiego.** Quando
+un piano di scadenziamento (o un'indicizzazione) del *secchio* `sp16g`/`sp17g` ha gia'
+forzato tutte le righe operative del gruppo, la differenza fra il totale richiesto e
+la somma delle righe non e' un arrotondamento: e' la massa dell'override, e non c'e'
+un campo onesto che la riceva (sul secchio il calendario la cancellerebbe l'anno
+dopo; su una riga `d`/`e`/`f` sarebbe un'obbligazione inventata). Il motore risponde
+allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve` non
+è ammesso» — sul `PATCH /sp-override` e' un 400 con rollback, e la cella non
+resta scritta. Senza piano ne' indicizzazione sul gruppo, il totale forzato continua
+a vincere come sempre (`tests/test_forecast_residuo_quadratura_sp16.py`).
+
 (il passivo è fissato dall'override qualunque sia la divisione fra banca e scoperto), e il motore
 rifiuta la combinazione con un errore esplicito invece di superare il totale.
 

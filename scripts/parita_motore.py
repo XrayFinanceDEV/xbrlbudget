@@ -454,10 +454,17 @@ def profilo_pregresso_tributari_mezzo_cent(rng: random.Random, anno_idx: int) ->
     una rata sotto il centesimo il banco non ha nessuna possibilita' di vederlo.
 
     CHE VEDA POI — misura, e non e' quella che ci si aspetterebbe. Su questa
-    griglia (5 anni, `b08a9a6` contro il giro 2) il profilo da solo non muove
-    NESSUNA CELLA: la cella forzata e' la somma delle due parti, quindi la
-    coda di mezzo centesimo resta confinata nei `details`, che il confronto del
-    banco non guarda (confronta prospetti, non dichiarazioni). La firma con cui
+    griglia (5 anni, `b08a9a6` contro il giro 2) questo profilo da solo non
+    muove NESSUNA CELLA, ma una divergenza la fa vedere lo stesso:
+    `tributari__pregresso_tributari_mezzo_cent`, anno 2029, l'importo dentro il
+    messaggio «Unfunded financing requirement» passa da 44.885,63 a 44.885,64
+    (e' la somma delle parti dichiarate, non un prospetto). Le parti si
+    sommano nella cella, quindi la coda di mezzo centesimo resta confinata nei
+    `details` — e li' il banco la VEDE, perche' `chiavi_dettagli` confronta
+    anche alcune chiavi dichiarate. Le altre quattro divergenze della griglia
+    stanno su questo profilo e su `pregresso_mezzo_cent_con_override`, con la
+    stessa forma: `generated` 0.005 → 0, `generated_debt` 38593.595 → 38593.59.
+    La firma con cui
     la revisione l'aveva vista (`sp06g` −0,01, cassa +0,01) e' di un altro
     contesto: li' la cella NON era forzata e il riallineamento riscriveva il
     `generated` di una riga mai toccata. Per quella prova serve un test che
@@ -506,8 +513,9 @@ def profilo_mezzo_cent_con_override(rng: random.Random, anno_idx: int) -> Dict[s
     FORZATA, e `profilo_pregresso_tributari_mezzo_cent` di forzature non ne ha
     nessuna — «Solo tributari, e nessun existing_debt_repayment_years: cio' che
     si misura e' l'IDENTITA' senza override», dice il suo docstring. Misurato:
-    la griglia con quel solo profilo da' 0 divergenze fra `b08a9a6` e questa
-    versione, su 5 anni e tutte e otto le fixture.
+    la griglia, con il solo profilo sopra, non puo' far vedere che cosa succede
+    quando la cella della stessa riga viene ANCHE forzata — e qui sotto c'e' la
+    misura di quando lo si fa davvero.
 
     Qui la combinazione che la griglia non aveva c'e': la rata sotto il
     centesimo E l'override sulla cella contabile della stessa riga, e il numero
@@ -515,10 +523,24 @@ def profilo_mezzo_cent_con_override(rng: random.Random, anno_idx: int) -> Dict[s
     questo profilo porta in dote e' pero' NEGATIVA, e va detta chiara perche' il
     banco non la vedra' mai: la correzione I-a non muove nessuna CELLA (la
     somma delle due parti e' la cella forzata, prima e dopo), sposta solo il
-    `generated_debt` dichiarato nei `details`, che il confronto del banco non
-    guarda. La prova che il difetto e' chiuso sta dunque nel test di proprieta'
-    `test_a_senza_override_il_riallineamento_non_cambia_niente`, non qui; questo
-    profilo esiste per non perdere la combinazione.
+    `generated_debt` dichiarato nei `details`.
+
+    CHE IL BANCO NON GUARDI I `details` ERA FALSO, e la misura del commit
+    successivo l'ha corretto: `chiavi_dettagli` confronta ANCHE alcune chiavi
+    dichiarate, e su `b08a9a6` vs HEAD, 5 anni, la griglia da' **5 divergenze
+    tutte li', nessuna in una cella**: `pregresso.altri_debiti.generated`
+    0.005 → 0, `imposte.generated_debt` 38593.595 → 38593.59 e
+    `pregresso.debiti_tributari.residual_short` 1407.105 → 1407.11 (qui,
+    2027), `imposte.saldo_paid` 31995.3414 → 31995.3364 (2028),
+    `pregresso.debiti_tributari.generated` 0.005 → 0
+    (`altri__pregresso_altri`, 2027) — piu' l'importo dentro il messaggio
+    «Unfunded financing requirement» che passa da 44.885,63 a 44.885,64
+    (`tributari__pregresso_tributari_mezzo_cent`, 2029), perche' il fabbisogno
+    e' una somma di quelle stesse parti. Quindi: la coda di mezzo centesimo
+    sparisce dai numeri dichiarati, e NESSUNA SOMMA DI BILANCIO SI MUOVE. Il
+    test di proprieta' `test_a_senza_override_il_riallineamento_non_cambia_
+    niente` resta la prova forte (confronta il previsionale, non la
+    dichiarazione); questo profilo e` la palestra che la combina con la coda.
     """
     valori = profilo_pregresso_tributari_mezzo_cent(rng, anno_idx)
     if anno_idx != 0:

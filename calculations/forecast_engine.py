@@ -958,10 +958,16 @@ class ForecastEngine:
 
         Il primo bersaglio del residuo resta il secchio di default `sp16g`/`sp17g`,
         e questo elenco entra in gioco **solo** quando quel secchio e' gia'
-        forzato — cioe' sui percorsi con piano o con indicizzazione. Sui percorsi
-        di sempre e' quindi inerte per costruzione, non per fortuna: e' cosi' che
-        la parita' regge senza doverla sperare (misurato: con il secchio libero il
-        residuo e' zero in tutte le osservazioni della sonda).
+        forzato — e PER GRUPPO (rilievo I-2 della revisione di `6e5c0f7`):
+        `sp17g` forzata non congela anche `sp16d`/`e`/`f`, che resta il ripiego
+        del proprio gruppo. La condizione globale che c'era prima posava allora
+        il centesimo sull'aggregato e sulla cassa (misurato in laboratorio:
+        "indice solo `sp17g`" -> `sp16_debiti_breve` −0,01).
+
+        Da NON leggere come una garanzia di residuo zero: con il secchio libero
+        il residuo puo' esserci, e ci finisce sopra — misurato sul banco a 2
+        anni, `tributari__crescita`, 2027, +0,01 su `sp16g`. Cio' che regge e'
+        che non viene POSATO altrove, e che quel centesimo e' dichiarato.
         """
         return frozenset(
             field for fields in cls._PREGRESSO_SP_FIELDS.values() for field in fields
@@ -1214,6 +1220,67 @@ class ForecastEngine:
                 }
         return applied, ignored
 
+    # Il secchio di ciascun gruppo e' la riga che IL GRUPPO usa come ripiego:
+    # se e' gia' forzata da un piano o da un'indicizzazione, tutte le sue righe
+    # operative lo sono (il cammino a ritroso non lascerebbe nulla di libero).
+    # Per GRUPPO, non per unione: `sp17g` forzato non deve togliere il ripiego a
+    # `sp16`, o il centesimo del gruppo `sp16` finisce sull'aggregato e sulla
+    # cassa (rilievo I-2 della revisione di `6e5c0f7`, tabella in laboratorio:
+    # "indice solo `sp17g`" -> `sp16_debiti_breve` -0,01).
+    _SP16_RIGHE: Tuple[str, ...] = (
+        "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+        "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
+        "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
+        "sp16g_altri_debiti_breve",
+    )
+    _SP17_RIGHE: Tuple[str, ...] = (
+        "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
+        "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
+        "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
+        "sp17g_altri_debiti_lungo",
+    )
+    _SP_OPERATIVI: Dict[str, Tuple[str, ...]] = {
+        "sp16g_altri_debiti_breve": ("sp16d_debiti_fornitori_breve",
+                                     "sp16e_debiti_tributari_breve",
+                                     "sp16f_debiti_previdenza_breve",
+                                     "sp16g_altri_debiti_breve"),
+        "sp17g_altri_debiti_lungo": ("sp17d_debiti_fornitori_lungo",
+                                     "sp17e_debiti_tributari_lungo",
+                                     "sp17f_debiti_previdenza_lungo",
+                                     "sp17g_altri_debiti_lungo"),
+    }
+
+    @classmethod
+    def _sp_forced_fields(cls, pregresso, details, assumption=None) -> "frozenset[str]":
+        """L'UNICA espressione dei campi `sp` che il normalizzatore non puo'
+        spostare. Costruirla a pezzi in `compute_forecast` e' cio' che ha permesso
+        alla condizione globale di I-2 (un secchio forzato = tutti e otto i
+        dichiarati) di sopravvivere alla correzione: qui motore e test guardano
+        la stessa funzione, e `test_sp_forced_fields_e_l_espressione_reale` la
+       -pinna per caso d'uso.
+
+        Tre fonti, piu' gli aggregati forzati da `sp_overrides` (I-1): un totale
+        forzato SENZA nessuna sua voce forzata e' il motore che deve rispettare
+        il numero, non il normalizzatore che deve posarci sopra un centesimo.
+        Se invece una voce del gruppo e' forzata, `_apply_sp_overrides`
+        ricostruisce comunque l'aggregato dalla somma, e li' il residuo torna un
+        arrotondamento: l'aggregato NON entra.
+        """
+        piano_o_indice = (cls._pregresso_sp_forced_fields(pregresso)
+                          | cls._indexed_sp_forced_fields(details))
+        forzati = set(piano_o_indice) | set(cls._BANK_DEBT_SPLIT_FIELDS)
+        for secchio, righe in cls._SP_OPERATIVI.items():
+            if secchio in piano_o_indice:
+                forzati.update(righe)
+        ov = getattr(assumption, 'sp_overrides', None) if assumption is not None else None
+        if isinstance(ov, dict):
+            for aggregato, righe in (("sp16_debiti_breve", cls._SP16_RIGHE),
+                                     ("sp17_debiti_lungo", cls._SP17_RIGHE)):
+                if (ov.get(aggregato) is not None
+                        and not any(ov.get(r) is not None for r in righe)):
+                    forzati.add(aggregato)
+        return frozenset(forzati)
+
     @classmethod
     def _indexed_sp_forced_fields(cls, details) -> "frozenset[str]":
         """I campi che l'indicizzazione ha scritto di proposito in questo anno.
@@ -1267,8 +1334,11 @@ class ForecastEngine:
         che il piano `altri_debiti` scrive, e un centesimo di residuo li faceva
         divergere dal numero dichiarato nei `details` (misurato: `sp17g` persistito
         12.048,41 contro 12.048,40 dichiarato). Se sono forzati, il residuo va
-        sull'ultimo campo libero del gruppo; se lo sono tutti, resta sul secchio di
-        default — un centesimo va pur posato da qualche parte. Il chiamante
+        sull'ultimo campo libero del gruppo; se nessun operativo e' libero,
+        l'aggregato diventa la somma delle righe (e la cassa si muove dello
+        stesso centesimo), dichiarato in `residuo_quadratura`; un override
+        dell'aggregato in quel caso si RIFIUTA (I-1), perche' li' il residuo non
+        e' un arrotondamento ma la massa dell'override. Il chiamante
         infrannuale non lo passa: default vuoto, stesso comportamento di sempre.
         """
         result = cls._quantize_values(values)
@@ -1343,22 +1413,8 @@ class ForecastEngine:
                 ),
                 "sp14d_altri_fondi",
             ),
-            "sp16_debiti_breve": (
-                (
-                    "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
-                    "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
-                    "sp16e_debiti_tributari_breve", "sp16f_debiti_previdenza_breve",
-                    "sp16g_altri_debiti_breve",
-                ),
-                "sp16g_altri_debiti_breve",
-            ),
-            "sp17_debiti_lungo": (
-                (
-                    "sp17a_debiti_banche_lungo", "sp17b_debiti_altri_finanz_lungo",
-                    "sp17c_debiti_obbligazioni_lungo", "sp17d_debiti_fornitori_lungo",
-                    "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
-                    "sp17g_altri_debiti_lungo",
-                ),
+            "sp16_debiti_breve": (cls._SP16_RIGHE, "sp16g_altri_debiti_breve"),
+            "sp17_debiti_lungo": (cls._SP17_RIGHE,
                 "sp17g_altri_debiti_lungo",
             ),
         }
@@ -1376,9 +1432,10 @@ class ForecastEngine:
         # obbligazionario su un'azienda che non ne ha — con segno negativo, nei
         # casi peggiori (sonda 40f0332 vs 0207c93: `sp16c −0,01 … −0,02` per
         # quattro anni su uno scenario senza piano ne' indicizzazione). Se
-        # nessun operativo e' libero il residuo resta sul secchio di default —
-        # un centesimo va pur posato da qualche parte — ma e' DICHIARATO in
-        # `residuo_quadratura`, come sempre.
+        # nessun operativo e' libero l'aggregato segue la somma (e la cassa si
+        # muove dello stesso centesimo) — ma e' DICHIARATO in
+        # `residuo_quadratura`, come sempre. Se anche l'aggregato e' forzato,
+        # niente posatura: si rifiuta, vedi I-1 nel ramo qui sotto.
         _cammino_esclusi = {
             "sp16_debiti_breve": cls._BANK_DEBT_FIELDS_SP16,
             "sp17_debiti_lungo": cls._BANK_DEBT_FIELDS_SP17,
@@ -1402,22 +1459,41 @@ class ForecastEngine:
             if target is None:
                 # Nessun operativo libero: le righe sono la dichiarazione, e
                 # l'aggregato del gruppo DEBITI e' letteramente la loro somma
-                # (riga 2961 `sp16 = sp16a + … + sp16g`) — quindi e' lui che
+                # (riga `sp16 = sp16a + … + sp16g` della costruzione) — quindi e' lui che
                 # segue la somma, come gia' fa il normalizzatore del CE quando
-                # tutti i dettagli di un gruppo sono forzati. Se invece anche
-                # l'aggregato e' forzato (uno `sp_overrides` su `sp16`/`sp17`
-                # fissa il totale), il centesimo va pur sempre posato su
-                # qualcosa: resta sul secchio di default, ed e' DICHIARATO qui
-                # sotto in `residuo_quadratura` — mai taciuto.
+                # tutti i dettagli di un gruppo sono forzati.
+                #
+                # Se pero' anche l'aggregato e' forzato, QUI SI STA FERMI (I-1
+                # della revisione di `6e5c0f7`): la versione difettosa posava il
+                # centesimo sul secchio di default, ma su quel cammino il
+                # "centesimo" non e' un arrotondamento — e' la MASSA dell'
+                # override. Misura della revisione (sonda `AO16`, fixture della
+                # rete, piano `altri_debiti` + `sp16_debiti_breve` forzata a
+                # 150.000 in ogni anno, 5 anni x 8 crescite): il persistito dice
+                # 118.333,34 contro i 150.000 richiesti, la cassa 73.661,89
+                # invece di 105.328,55 — 31.666,66 in meno sotto un
+                # `forecast_generated: true`, su 40 anni su 40. Il
+                # `residuo_quadratura` lo annota, ma nessuna schermata lo
+                # mostra. Non esiste un posto onesto per quella massa: il
+                # secchio la cancellerebbe l'anno dopo (e' I1), e scriverla su una
+                # riga d..f significherebbe inventare un'obbligazione (e' il
+                # difetto del genitore). Un residuo che vale ZERO, cioe'
+                # l'utente che ha digitato esattamente la somma delle righe, non
+                # arriva qui: il `if not residual: continue` sopra lo congela.
                 if aggregate in forced_fields:
-                    result[residual_field] += residual
-                    posati.append({'campo': residual_field, 'importo': residual})
-                else:
-                    scarto = sum(
-                        (result[field] for field in group_fields), Decimal("0")
-                    ) - result[aggregate]
-                    result[aggregate] += scarto
-                    posati.append({'campo': aggregate, 'importo': scarto})
+                    raise ValueError(
+                        f"Il totale forzato di {aggregate} non è ammesso: la "
+                        "differenza con la somma delle sue voci finirebbe su una "
+                        "riga governata da un piano di scadenziamento o da "
+                        "un'indicizzazione, e i debiti finanziari non la ricevono "
+                        "mai. Forza una voce di dettaglio della stessa schermata, "
+                        "oppure svuota la cella del totale (value: null)."
+                    )
+                scarto = sum(
+                    (result[field] for field in group_fields), Decimal("0")
+                ) - result[aggregate]
+                result[aggregate] += scarto
+                posati.append({'campo': aggregate, 'importo': scarto})
                 continue
             result[target] += residual
             posati.append({'campo': target, 'importo': residual})
@@ -1795,40 +1871,11 @@ class ForecastEngine:
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
-                    forced_fields=(
-                        # I3(a): l'elenco dei dichiarati entra QUI' solo quando
-                        # il secchio di default `sp16g`/`sp17g` e' gia' forzato
-                        # da un piano o da un'indicizzazione — come PROMETTEVA
-                        # la docstring di `_declared_sp_fields` ma il codice non
-                        # faceva (includerlo sempre forza anche d..f, libera
-                        # solo a/b/c, e il cammino a ritroso posa il residuo su
-                        # `sp16c`: la sonda 40f0332 vs 0207c93 lo misura su 6
-                        # percentuali di crescita su 8, anche NEGATIVO). Con il
-                        # secchio libero il ripiego non parte mai: il residuo
-                        # resta su `sp16g`/`sp17g` esatto come prima del lotto.
-                        (self._declared_sp_fields()
-                         if ({"sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo"}
-                             & (self._pregresso_sp_forced_fields(pregresso)
-                                | self._indexed_sp_forced_fields(details)))
-                         else frozenset())
-                        | self._pregresso_sp_forced_fields(pregresso)
-                        | self._indexed_sp_forced_fields(details)
-                        # `sp16a`/`sp17a` portano SEMPRE la ripartizione
-                        # pregresso/prestito nuovo che `_calculate_balance_sheet`
-                        # scrive di proposito (Task 16): il residuo di
-                        # quadratura non deve poterle spostare. Non e'
-                        # condizionato allo scoperto ne' a nient'altro — la
-                        # separazione gira per OGNI scenario, anche a importi
-                        # zero — perche' la protezione non puo' dipendere
-                        # dall'ordine in cui il cammino a ritroso incontra gli
-                        # altri campi del gruppo (rilievo 4 della revisione,
-                        # giro di correzione 1: oggi regge solo perche' nessun
-                        # altro campo del gruppo e' mai forzato prima di
-                        # arrivarci — misurato zero posature su questi due campi
-                        # in 44 osservazioni, ma per l'ordine del cammino, non
-                        # per una protezione esplicita).
-                        | self._BANK_DEBT_SPLIT_FIELDS
-                    ),
+                    # Un'unica funzione, non un'espressione a pezzi qui: `compute_
+                    # forecast` e i test devono costruire lo STESSO insieme, o la
+                    # guardia di I-2 (un secchio forzato = tutti e otto i
+                    # dichiarati) si puo' rompere in un punto e non nell'altro.
+                    forced_fields=self._sp_forced_fields(pregresso, details, assumption),
                     details=details,
                     overdraft=overdraft,
                 )

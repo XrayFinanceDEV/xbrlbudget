@@ -30,12 +30,14 @@ gruppo forzato, `sp16a`/`sp17a` esclusi — e verifica che:
    di default (che FORZATO lo è per definizione): segue la somma delle righe
    nell'AGGREGATO, che del gruppo è letteralmente la definizione — e resta
    dichiarato in `residuo_quadratura`.
-3. L'espressione REALE che `compute_forecast` costruisce ad ogni anno
-   (`_declared_sp_fields() | _pregresso_sp_forced_fields(pregresso) |
-   _indexed_sp_forced_fields(details) | _BANK_DEBT_SPLIT_FIELDS`) contiene
-   sempre `sp16a`/`sp17a`, anche nel caso piu' comune (nessun piano di
-   pregresso, nessuna indicizzazione) — cosi' il punto 2 non resta un fatto
-   isolato sulla sola costante.
+3. L'espressione REALE che `compute_forecast` costruisce ad ogni anno — ora
+   UNA funzione, `ForecastEngine._sp_forced_fields`, non piu' un'espressione a
+   pezzi nel chamante (rilievo I-2 della revisione di `6e5c0f7`, punto 3: la
+   versione precedente di questo docstring descriveva come reale un
+   `_declared_sp_fields()` incondizionato che il motore non costruiva gia'
+   piu') — contiene sempre `sp16a`/`sp17a`, anche nel caso piu' comune (nessun
+   piano di pregresso, nessuna indicizzazione), dove solo
+   `_BANK_DEBT_SPLIT_FIELDS` porta la protezione.
 """
 from decimal import Decimal as D
 
@@ -162,16 +164,34 @@ def test_bank_debt_split_fields_e_esattamente_i_due_campi():
 
 
 def test_compute_forecast_forza_sempre_sp16a_sp17a_anche_nel_caso_piu_comune():
-    """L'espressione REALE che `compute_forecast` costruisce ad ogni anno
-    (`_declared_sp_fields() | _pregresso_sp_forced_fields(pregresso) |
-    _indexed_sp_forced_fields(details) | _BANK_DEBT_SPLIT_FIELDS`) contiene
-    sempre `sp16a`/`sp17a` — anche nel caso piu' comune di tutti, nessun piano
-    di pregresso e nessuna indicizzazione, dove gli altri tre addendi sono
-    vuoti e solo `_BANK_DEBT_SPLIT_FIELDS` porta la protezione."""
-    forzati = (
-        ForecastEngine._declared_sp_fields()
-        | ForecastEngine._pregresso_sp_forced_fields(None)
-        | ForecastEngine._indexed_sp_forced_fields(None)
-        | ForecastEngine._BANK_DEBT_SPLIT_FIELDS
-    )
-    assert SP16A in forzati and SP17A in forzati
+    """L'espressione REALE che `compute_forecast` passa al normalizzatore e'
+    `_sp_forced_fields`, e contiene `sp16a`/`sp17a` in OGNI suo cammino: non
+    solo nel caso piu' comune (nessun piano, nessuna indicizzazione) dove gli
+    altri addendi sono vuoti e solo `_BANK_DEBT_SPLIT_FIELDS` protegge, ma
+    anche con un piano attivo, con i due secchi indexati, e con un
+    `sp_overrides` sull'aggregato (I-1: li' l'aggregato ENTRA fra i forzati, e
+    i due finanziari restano fuori dal cammino a ritroso lo stesso).
+
+    Rilievo I-2, punto 3 della revisione di `6e5c0f7`: la versione precedente
+    di questo test ricuciva a mano i quattro addendi, e descriveva come
+    «l'espressione reale» un `_declared_sp_fields()` incondizionato che il
+    motore non costruiva piu'. Ora chiama LA funzione del motore: se un giorno
+    i due cammini divergono, e' questo test che lo dice.
+    """
+    class _A:
+        def __init__(self, ov=None):
+            self.sp_overrides = ov
+
+    PIANO = {"altri_debiti": {"opening": 55000.00, "amounts": [27500.00, 27500.00]}}
+    for nome, forzati in (
+        ("nessun piano, nessuna indice",
+         ForecastEngine._sp_forced_fields(None, None)),
+        ("indice su entrambi i secchi",
+         ForecastEngine._sp_forced_fields(None, {"indicizzazione": {"sp16g": "ricavi",
+                                                                   "sp17g": "ricavi"}})),
+        ("piano altri debiti", ForecastEngine._sp_forced_fields(PIANO, None)),
+        ("piano + aggregato forzato",
+         ForecastEngine._sp_forced_fields(PIANO, None,
+                                         _A({"sp16_debiti_breve": "150000.00"}))),
+    ):
+        assert SP16A in forzati and SP17A in forzati, nome

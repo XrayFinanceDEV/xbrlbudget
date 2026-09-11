@@ -620,8 +620,10 @@ receivables, trade payables, tax payables, welfare payables, other payables): an
 `pregresso` runoff plan (`BudgetAssumptions.pregresso`, JSON, valid only on the first forecast
 year's row) schedules how much of the base-year opening mass is collected or paid in each plan
 year; whatever the day-count/growth formula would produce is added to the still-open short-term
-residual, and the entire long-term side becomes pregresso (`calculations/forecast_engine.py:2745-
-2763`, `:3104-3128`, kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
+residual, and the entire long-term side becomes pregresso (`_calculate_balance_sheet` in
+`calculations/forecast_engine.py`, the `crediti_commerciali` block for receivables and the
+`debiti_fornitori`/`debiti_previdenziali`/`altri_debiti` blocks for payables, kernel in
+`calculations/projection_common.runoff_schedule`). Without a plan a
 balance follows the same formula as before the lotto (`mode: "legacy"` in
 `details['pregresso']`), and the rounding cent of the debt group still lands on
 `sp16g`/`sp17g` — though its amount can differ by a cent when another row of the group moved

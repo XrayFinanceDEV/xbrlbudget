@@ -322,6 +322,33 @@ def test_forecast_gate_still_rejects_a_contradictory_breakdown(db_session):
         IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
 
 
+def test_forecast_gate_wraps_the_blocking_reason_in_the_italian_envelope(db_session):
+    """The final ``raise`` of ``_validate_forecast_source`` wraps every blocking reason in
+    an envelope ("{label} {anno}/{mesi}M non è utilizzabile per la previsione: ...") that is
+    split across two f-strings in the source. None of the tests above cover it: they only
+    ``match=`` the inner fragment (e.g. "utile del CE"), never the envelope text around it,
+    and the source guardian in test_messaggi_italiani.py cannot see a phrase split across
+    two literals either. Assert the full runtime string on the minimal blocking case (no
+    balance sheet / income statement rows at all -> "stato patrimoniale vuoto", the only
+    reason raised), and that no fragment of the old English wrapper ("is not forecastable")
+    survived."""
+    company = _company(db_session)
+    fy = FinancialYear(company_id=company.id, year=2025, period_months=9)
+    db_session.add(fy)
+    db_session.flush()
+
+    with pytest.raises(ValueError) as exc_info:
+        IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
+
+    messaggio = str(exc_info.value)
+    assert messaggio == (
+        "Partial source 2025/9M non è utilizzabile per la previsione: "
+        "stato patrimoniale vuoto"
+    ), messaggio
+    assert "is not" not in messaggio
+    assert "forecastable" not in messaggio
+
+
 def test_financial_year_schema_preserves_the_exact_partial_period():
     payload = FinancialYearCreate(company_id=1, year=2026, period_months=9)
     assert payload.period_months == 9

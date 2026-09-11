@@ -1801,7 +1801,7 @@ class IntraYearEngine:
                 'amount': str(sp16_total),
                 'message': (
                     "La ripartizione dei debiti a breve non è disponibile: nessuna "
-                    'categoria è stata inventata.'
+                    "categoria è stata inventata."
                 ),
             })
         return (Decimal('0'),) * 7

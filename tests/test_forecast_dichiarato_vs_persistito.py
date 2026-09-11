@@ -72,6 +72,41 @@ def _q(x):
     return D(str(x)).quantize(D("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _posizione_tributaria_dichiarata(det):
+    """`debito − credito` tributario GREZZO, come lo dichiarano i `details`.
+
+    E' la stessa quantita' che le tre celle (`sp16e`, `sp17e`, `sp06e`) vanno a
+    dire, ma presa prima della quantizzazione: sui DICHIARATI l'identita' di
+    flusso e' un numero esatto, sulle celle e' una somma di sei code (rilievo
+    m-5, giro 4). Composizione,
+    `calculations/forecast_engine.py` (ramo `saldo_acconto`):
+
+      `imposte.generated_debt`                     il saldo maturato, non pagato
+    + `pregresso['debiti_tributari'].residual_short` + `.residual_long`
+                                                   il rateizzato ancora aperto —
+                                                   SOLO in `mode: runoff`, perche'
+                                                   il runoff tributario scandisce
+                                                   il solo `rateizzato` della
+                                                   `plan_tax` con la lista
+                                                   `writeoff` VUOTA (nessuna
+                                                   scrittura di debito oltre alla
+                                                   rata); in `mode: legacy` la
+                                                   riga dichiara zeri e il debito
+                                                   e' tutto in `generated_debt`
+    - `imposte.generated_credit`                   l'eccedenza degli acconti
+    - `imposte.opening_credit_left`                il credito d'apertura residuo
+    """
+    imposte = det.get("imposte") or {}
+    pos = (D(str(imposte.get("generated_debt") or 0))
+           - D(str(imposte.get("generated_credit") or 0))
+           - D(str(imposte.get("opening_credit_left") or 0)))
+    riga = (det.get("pregresso") or {}).get("debiti_tributari") or {}
+    if riga.get("mode") == "runoff":
+        pos += (D(str(riga.get("residual_short") or 0))
+                + D(str(riga.get("residual_long") or 0)))
+    return pos
+
+
 # I sei debiti finanziari, la cui ripartizione fra pregresso e prestito nuovo e'
 # scritta a mano da `_calculate_balance_sheet` (Task 16): un residuo di quadratura
 # posato qui non e' un centesimo, e' una rata cancellata (m-2 del giro 2).
@@ -139,6 +174,25 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
         confronta("sp06e_crediti_tributari_breve",
                   D(str(imposte["generated_credit"])) + D(str(imposte["opening_credit_left"])),
                   "details['imposte']")
+        # ── rilievo m-5, punto 2 (giro 4): anche `sp16e` ancorata alla sede
+        # `imposte`, non solo a quella di riga ──
+        # Il ciclo qui sopra confronta `sp16e` con `generated + residual_short`
+        # della SOLA riga `pregresso`, e salta la cella quando un override
+        # l'ha forzata: li' responde l'altro giro (`persistito == override`),
+        # che pero' non dice nulla su quanto la sede `imposte` — quella che
+        # l'anno dopo ci si PAGA sopra — sia rimasta coerente con la cella.
+        # E' il confronto che manca, ed e' la ragione per cui la mutazione 12
+        # (passo 2 di `_realign_sp_declarations` spento) era vista solo
+        # transitivamente, dal «due sedi».
+        d_pos = det["pregresso"]["debiti_tributari"]
+        rs_pos = (D(str(d_pos["residual_short"])) if d_pos["mode"] == "runoff"
+                  else D("0"))
+        confronta("sp16e_debiti_tributari_breve",
+                  D(str(imposte["generated_debt"])) + rs_pos,
+                  "details['imposte'].generated_debt + riga.residual_short")
+        # `sp17e == q(residual_long)` NON e' qui: lo asserisce gia' il ciclo
+        # `SHORT_LONG` sopra, e per l'unica riga dove puo' valere (modo
+        # `runoff`: senza piano il runoff tributario e' tutto a zero).
     if imposte["mode"] == "saldo_acconto":
         # I1: la posizione tributaria e' dichiarata in DUE sedi (`imposte` e la
         # riga `debiti_tributari` di `pregresso`). Il confronto con la riga
@@ -191,30 +245,30 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
                           f" = {residuo}, residui dichiarati"
                           f" {dichiarati} ({d.get('residual_short')} + {d.get('residual_long')})"))
 
-    # ── rilievo M-4, punto 1 (giro 3): l'identità di flusso dell'anno dopo ──
-    # `pos(N) − [pos(N−1) + imposta − saldo − acconti − rate]` deve stare
-    # sotto i due centesimi, con
-    # `pos = sp16e + sp17e − sp06e` PERSISTITI: se la posizione tributaria si
-    # e' mossa senza che un versamento (o il calcolo dell'imposta) lo dica,
-    # l'ha mossa la cassa senza un flusso — il difetto che le due sedi
-    # riallineate da I1 promettono di non avere più. Vale dal secondo anno
-    # generato in poi, e solo se ENTRAMBI gli anni parlano in modo
-    # `saldo_acconto`: un controllo che non può correre qui è «non lo so», non
-    # un verdetto.
+    # ── rilievo M-4, punto 1 (giro 3), FORMA ESATTA (rilievo m-5, giro 4) ──
+    # `pos_d(N) − pos_d(N−1) − (imposta − saldo − acconti − rate) == 0`, con
+    # `pos_d` la posizione tributaria GREZZA come la dichiarano i `details`
+    # (non come la scrivono le celle): se la posizione si e' mossa senza che un
+    # versamento — o il calcolo dell'imposta — lo dica, l'ha mossa la cassa
+    # senza flusso, il difetto che le due sedi riallineate da I1 promettono di
+    # non avere piu'. Vale dal secondo anno generato in poi, e solo se ENTRAMBI
+    # gli anni parlano in modo `saldo_acconto`: un controllo che non puo'
+    # correre qui e' «non lo so», non un verdetto.
     #
-    # LA FORMA IN RETE E' A DUE CENTESIMI, non lo 0,00 esatto del file
-    # tributario, e non è un ammollimento di comodo: le due posizioni sono
-    # QUANTIZZATE al centesimo mentre la dichiarazione dei flussi e' GREZZA
-    # (misura: `gen_debt` 5951.85678, differenza delle celle 5951.85), quindi
-    # lo scarto legittimo vale al più 0,005 (coda della dichiarazione) + 0,01
-    # (le due code di quantizzazione) — misurato 0,0132 su
-    # `[senza piano | nessun piano | crediti giù nel 2027 | 2029]`. Il fixture
-    # del file tributario capita sulle centesime e vede 0,00; qui si dichiara
-    # la forma debole, che un flusso perso — il difetto cercato si misura in
-    # MIGLIAIA di euro, non in code — lo vede a un ordine di grandezza di
-    # distanza, e la deviazione dalla lettera del rilievo sta nel rapporto.
+    # PRIMA CORREVA SULLE CELLE, CON UNA SOGLIA DI 0,02 MOTIVATA MALE: «al piu'
+    # 0,005 + 0,01» diceva il commento, mentre le code di quantizzazione da
+    # sommare sono SEI (tre celle per due anni: `sp16e`, `sp17e`, `sp06e`),
+    # quindi il limite teorico e' 6 x 0,005 = 0,03. Misura di QUESTO giro su una
+    # copia strumentata della batteria (`RETE_LOG`, 1.272 confronti): lo scarto
+    # sulle celle arriva a 0,01392 (33 sopra 0,01, nessuno sopra 0,015) — uno
+    # 0,02 non nasconde un flusso, ma puo' dare un falso rosso su un fixture
+    # sfortunato; sui DICHIARATI grezzi lo scarto e' invece ESATTAMENTE 0 in
+    # 1.272 confronti su 1.272. Non si tratta di tollerare meno: si tratta di
+    # confrontare grandezze OMOGENEE, e di lasciare alla forma sulle celle — che
+    # gira piu' sopra, nei confronti `confronta()` di `imposte`/`pregresso` —
+    # il compito di dire che dichiarato e persistito sono lo stesso numero.
     if prec is not None:
-        bs_p, det_p = prec
+        _bs_p, det_p = prec          # le celle non servono: qui si guarda la sola dichiarazione
         i0, i1 = det.get("imposte") or {}, det_p.get("imposte") or {}
         # Sotto un override di `sp16e`/`sp06e` DELL'ANNO N il flusso dichiarato
         # dal kernel non e' quel che e' stato pagato: e' l'override stesso il
@@ -230,19 +284,16 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
                 and not forzato_pos
                 and all(k in i0 for k in ("current_tax", "saldo_paid",
                                           "acconti_paid", "rate_paid"))):
-            def _posizione(b):
-                return (D(str(b["sp16e_debiti_tributari_breve"]))
-                        + D(str(b["sp17e_debiti_tributari_lungo"]))
-                        - D(str(b["sp06e_crediti_tributari_breve"])))
-            scarto = _posizione(bs) - (_posizione(bs_p) + D(str(i0["current_tax"]))
-                                       - D(str(i0["saldo_paid"])) - D(str(i0["acconti_paid"]))
-                                       - D(str(i0["rate_paid"])))
-            if abs(scarto) > D("0.02"):
+            scarto = (_posizione_tributaria_dichiarata(det)
+                      - _posizione_tributaria_dichiarata(det_p)
+                      - (D(str(i0["current_tax"])) - D(str(i0["saldo_paid"]))
+                         - D(str(i0["acconti_paid"])) - D(str(i0["rate_paid"]))))
+            if scarto != D("0"):
                 fuori.append(("flusso tributario",
-                              f"scarto di flusso {scarto}: la posizione è cambiata senza "
-                              f"un versamento che lo dichiari (imposta {i0['current_tax']}, "
-                              f"saldo {i0['saldo_paid']}, acconti {i0['acconti_paid']}, "
-                              f"rate {i0['rate_paid']})"))
+                              f"scarto di flusso {scarto} sui dichiarati: la posizione "
+                              f"e' cambiata senza un versamento che lo dichiari "
+                              f"(imposta {i0['current_tax']}, saldo {i0['saldo_paid']}, "
+                              f"acconti {i0['acconti_paid']}, rate {i0['rate_paid']})"))
 
     # ── caso 4: le voci indicizzate ──
     for code, voce in det["indicizzazione"].items():

@@ -240,7 +240,7 @@ export default function ForecastBalancePage() {
         <ForecastLoadError error={analysisError} onRetry={() => refetchAnalysis()} className="mb-6" />
       )}
 
-      {pageStatus === "caricamento" && (
+      {pageStatus === "caricamento" && !analysisData && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
@@ -249,7 +249,7 @@ export default function ForecastBalancePage() {
 
       <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
-      {pageStatus === "pronto" && analysisData && historicalYears.length > 0 && (
+      {analysisData && historicalYears.length > 0 && (
         <>
           {/* Balance Sheet Table */}
           <Card className="mb-6">

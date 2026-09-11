@@ -283,7 +283,7 @@ export default function ForecastIncomePage() {
         <ForecastLoadError error={analysisError} onRetry={() => refetchAnalysis()} className="mb-6" />
       )}
 
-      {pageStatus === "caricamento" && (
+      {pageStatus === "caricamento" && !analysisData && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
@@ -292,7 +292,7 @@ export default function ForecastIncomePage() {
 
       <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
-      {pageStatus === "pronto" && analysisData && historicalYears.length === 0 && (
+      {analysisData && historicalYears.length === 0 && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -303,7 +303,7 @@ export default function ForecastIncomePage() {
         </Alert>
       )}
 
-      {pageStatus === "pronto" && analysisData && historicalYears.length > 0 && (
+      {analysisData && historicalYears.length > 0 && (
         <>
           {/* Income Statement Table */}
           <Card className="mb-6">

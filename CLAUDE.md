@@ -657,6 +657,9 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   balance remains: tax of the year minus the advances paid in the year (`tax_advances_paid` if greater than zero,
   otherwise 100% of the reference year's `ce20`); whatever was open at the partial month leaves cash by year end
   (`projection_common.posizione_tributaria_fine_anno`), so a budget born from the promote no longer inherits it.
+  Bank debt follows the budget engine's rules from the shared code (`projection_common.contratti_da_riga_finanziamento`,
+  `separa_prestiti_nuovi`, `quota_breve_prestiti_nuovi`): pre-existing bank debt keeps its own split and is reduced only by
+  its own instalments, a new loan amortises on its own with next year's instalment in `sp16a`.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into

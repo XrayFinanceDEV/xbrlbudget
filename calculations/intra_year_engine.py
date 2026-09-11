@@ -20,6 +20,8 @@ from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
     tfr_accrual_quota, posizione_tributaria_fine_anno, deferred_tax_position,
     new_financing_schedule, soglia_giorni_magazzino,
+    e_contratto_pregresso, contratti_da_riga_finanziamento, separa_prestiti_nuovi,
+    quota_breve_prestiti_nuovi,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -245,19 +247,10 @@ def _financing_contracts(assumption, include_opening=True):
             'rate': Decimal(str(getattr(assumption, 'financing_interest_rate', None) or 0)) / Decimal('100'),
         })
     for loan in (getattr(assumption, 'financing_loans', None) or []):
-        amount = Decimal(str(loan.get('amount') or 0))
-        opening = Decimal(str(loan.get('opening_residual') or 0)) if include_opening else Decimal('0')
-        duration = Decimal(str(loan.get('duration_years') or 0))
-        if (amount > 0 or opening > 0) and duration > 0:
-            loans.append({
-                'year': year,
-                'amount': amount,
-                'opening_residual': opening,
-                'duration': duration,
-                'rate': Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100'),
-                'grace_years': Decimal(str(loan.get('grace_years') or 0)),
-                'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
-            })
+        for contract in contratti_da_riga_finanziamento(loan, year):
+            if not include_opening and e_contratto_pregresso(contract):
+                continue
+            loans.append(contract)
     return loans
 
 
@@ -1604,11 +1597,21 @@ class IntraYearEngine:
         sp17_altri: Decimal,
         assumption,
     ):
-        """Apply bank and other-lender plans to their exact debt buckets."""
+        """Apply bank and other-lender plans to their exact debt buckets.
+
+        Shared bank-debt rules (lotto 3A, Task 4): the pre-existing bank debt keeps
+        its own split and is reduced only by its own instalments (short side first);
+        a new loan amortises on its own, with the capital quota falling due next
+        year sitting in `sp16a` (`quota_breve_prestiti_nuovi`). Total bank debt,
+        interest and cash are unchanged by the split.
+        """
         getter = lambda f: _get_field(base_bs, f)
         contracts = _financing_contracts(assumption, include_opening=True)
+        pregressi = [c for c in contracts if e_contratto_pregresso(c)]
+        nuovi = [c for c in contracts if not e_contratto_pregresso(c)]
+        anno = int(getattr(assumption, 'forecast_year', 0) or 0)
         detailed_opening = sum(
-            (Decimal(str(loan.get('opening_residual') or 0)) for loan in contracts),
+            (Decimal(str(c.get('opening_residual') or 0)) for c in pregressi),
             Decimal('0'),
         )
         if detailed_opening > 0:
@@ -1618,6 +1621,10 @@ class IntraYearEngine:
                     "The sum of financing opening residuals must equal source bank "
                     f"debt ({detailed_opening} != {bank_debt})"
                 )
+            _, rata, _ = new_financing_schedule(pregressi, anno)
+            breve = min(sp16_bank, rata)
+            sp16_bank = sp16_bank - breve
+            sp17_bank = max(Decimal('0'), sp17_bank - (rata - breve))
         else:
             instalment = financial_repayment_instalment(
                 getter, getattr(assumption, 'existing_debt_repayment_years', None))
@@ -1633,17 +1640,14 @@ class IntraYearEngine:
             altri_instalment = altri_finanz_repayment_instalment(getter, altri_years)
             sp17_altri = max(Decimal('0'), sp17_altri - altri_instalment)
 
-        raised, repayment, _ = new_financing_schedule(
-            contracts, int(getattr(assumption, 'forecast_year', 0) or 0)
-        )
-        sp17_bank += raised
-        short_repayment = min(sp16_bank, repayment)
-        sp16_bank = max(Decimal('0'), sp16_bank - short_repayment)
-        sp17_bank = max(
-            Decimal('0'), sp17_bank - (repayment - short_repayment)
-        )
+        # In the intra-year engine a new loan is born inside the projected year, so
+        # its opening residual is zero; the shared split is used all the same.
+        sp17_bank, nuovo_apertura = separa_prestiti_nuovi(sp17_bank, nuovi, anno)
+        raised, repayment, _ = new_financing_schedule(nuovi, anno)
+        residuo_nuovo = max(Decimal('0'), nuovo_apertura + raised - repayment)
+        quota = quota_breve_prestiti_nuovi(nuovi, anno, residuo_nuovo)
 
-        return sp16_bank, sp17_bank, sp17_altri
+        return sp16_bank + quota, sp17_bank + residuo_nuovo - quota, sp17_altri
 
     @staticmethod
     def _distribute_fixed_assets(source_bs, total, fields, fallback_index):

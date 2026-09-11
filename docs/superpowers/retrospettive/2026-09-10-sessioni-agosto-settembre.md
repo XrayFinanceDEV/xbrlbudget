@@ -4,7 +4,7 @@ Come ha lavorato un agente di piano su questo repo per 17 giorni di calendario: 
 costato, che cosa ha prodotto, dove ha sprecato, e che differenza c'è stata fra i due metodi
 usati (issue-driven il 1°-2 settembre, subagent-driven-development l'8-10).
 
-**La finestra è dal 24 agosto all'11 settembre 2026, misurata alle 11:03 dell'11.** Il nome del
+**La finestra è dal 24 agosto all'11 settembre 2026, misurata alle 11:17 dell'11.** Il nome del
 file e il messaggio del primo commit dicono «10 settembre»: è l'ultimo giorno di lavoro intero, e
 nell'11 settembre entrano solo le prime ore del lotto 3B e questa stessa analisi.
 
@@ -24,14 +24,14 @@ controllato, 24 aggiungendo `--all` — il ramo del lotto 2 non è ancora in `ma
 | quando | che cosa è successo | prova |
 |---|---|---|
 | 24-25 agosto | `13ecc3c9` apre il tracker: triage del rapporto del tester, tre spec, primi push. Pochissimo codice | scheda `13ecc3c9` |
-| 26-31 agosto | **fermo su questo repo**: il 24 ha 2 messaggi del proprietario, il 31 ne ha 7 e nessun agente; le sessioni di quei giorni stanno sotto altri progetti | §3 |
+| 26-31 agosto | **fermo su questo repo**: il 24 agosto ha 5 messaggi del proprietario nel giorno, il 31 ne ha 15, e nessuno dei due lancia un agente; le sessioni di quei giorni stanno sotto altri progetti | §2 |
 | 1 settembre | comincia il ciclo a issue: **32 commit**, 33 issue create, 10 chiuse lo stesso giorno da `gh issue close` dentro `1e96601e`, primi `/implement` | `git log`, `gh api` |
 | 2 settembre | **22 commit**, altre 13 issue create; due ondate di fan-out (`65f68717`, 20 `workflow-subagent`) che producono 16 commit in 14 minuti; cinque branch di fix uniti in `integrazione-lotto` (`a59b0c0`, `5019aaf`, `b38614a`, `e5d0b6a`, `4a57bb6`) | §4.1 |
 | 3-7 settembre | **fermo**: nessuna riga su questo repo | §3 |
 | 8 settembre | **53 commit**. Merge `ade2320` (11:22); trentaquattro issue chiuse fra le 11:35 e le 11:36 da una chiamata API senza `commit_id` (§5.10); `4aebaba4` (11:50) porta il corpus reale in `Test/`, implementa la guardia della #24 e la reverta (§5.6); apre il **lotto 1 SDD** | §5.6, §5.10 |
 | 9 settembre | **68 commit**. Il lotto 1 si chiude a ore 10:45 con il merge `40f0332` («percorso guidato delle ipotesi di budget in sette passi», 58 commit, 27 dei quali il giorno prima); il lotto 2 comincia e in giornata mette a segno 28 dei suoi commit | `git log -1 40f0332`, §5.3 |
 | 10 settembre | **57 commit**, 56 dei quali del lotto 2: merge per task sul proprio ramo (`288a8ca`, `5ad6112`, `e9fa4cf`, `59bf9f4`, `0334e7e`, `64f58ed`, `2571623`) e i due merge di documentazione di pi (`f356907`, `7896b13`). Revisione finale del branch alle 15:06Z (17:06 locali), poi il giro finale; il processo del coordinatore si chiude in giornata con quattro agenti in volo (`progress.md:1015`) | §5.4, §4.5 |
-| 11 settembre | **30 commit**: cominciano i piani 3A/3B, e il 3B si chiude in giornata con il merge `4aa283f` (revisione finale sonnet: 2 importanti corretti). Il lotto 2 non è ancora in `main`: 92 commit sul ramo `feat/scadenziamento-pregresso`, dei quali 16 di follow-up entrati con `1490476` | `git log --merges --since=2026-09-11` |
+| 11 settembre | **30 commit**: cominciano i piani 3A/3B, e il 3B si chiude in giornata con il merge `4aa283f` (revisione finale sonnet: 2 importanti corretti). Il lotto 2 non è ancora in `main`: 93 commit sul ramo `feat/scadenziamento-pregresso`, dei quali 16 di follow-up entrati con `1490476` | `git log --merges --since=2026-09-11` |
 
 Le issue aperte alla misurazione sono **5 su 49** (33 create il 1°, 13 il 2, una l'8, due l'11);
 44 chiuse, tutte il 1° o l'8 settembre.
@@ -40,23 +40,24 @@ Le issue aperte alla misurazione sono **5 su 49** (33 create il 1°, 13 il 2, un
 
 | Fonte | Copertura |
 |---|---|
-| Trascrizioni Claude (`~/.claude/projects/-home-peter-DEV-budget/*.jsonl`) | 12 sessioni avviate nel periodo, 99.744 righe lette, 2 scartate |
-| Trascrizioni dei subagenti (`<sessione>/subagents/**/agent-*.jsonl`) | 183 classificati, 182 con trascrizione |
+| Trascrizioni Claude (`~/.claude/projects/-home-peter-DEV-budget/*.jsonl`) | 12 sessioni avviate nel periodo, 100.207 righe lette, 2 scartate |
+| Trascrizioni dei subagenti (`<sessione>/subagents/**/agent-*.jsonl`) | 185 classificati, 184 con trascrizione |
 | `cost-state` (snapshot di fine sessione, include i subagenti) | USD 1.655,93 totali, per modello |
-| Registri SDD (`.superpowers/sdd/*/progress.md`) | 11 registri, 4.087 righe; i due del periodo: 685 + 2.219 |
+| Registri SDD (`.superpowers/sdd/*/progress.md`) | 13 registri, 4.190 righe; i due del periodo: 685 + 2.220 |
 | GitHub (`XrayFinanceDEV/xbrlbudget`) | 49 issue non-PR (44 chiuse, 5 aperte), 46 create il 1°-2 settembre |
 | `git log` su tutti i ref | 262 commit non-di-merge + 23 merge dal 24 agosto (24 con `--all`) |
 | Trascrizioni pi (`~/.pi/agent/sessions/`) | 14 run dello stesso modello locale, di cui 2 sono questa analisi |
 
-Misurazione dell'11 settembre alle 11:03, e un limite grosso da sapere subito: **la sessione
+Misurazione dell'11 settembre alle 11:17, e un limite grosso da sapere subito: **la sessione
 coordinatrice `b06623a4` era ancora viva mentre leggevo**. Le sue cifre sono quelle di uno
 snapshot, e il report che state leggendo è essa stessa uno dei lavori che quella sessione ha
-dispacciato.
+dispacciato. Il numero che vedete qui è **congelato alle 11:17**: chi rimisura dopo troverà
+valori più alti, non errori.
 
 Altri due limiti:
 
-- **Le giornate lavorative sono 8, non 17.** Il 24 e il 31 agosto hanno 2 e 7 messaggi del
-  proprietario e zero agenti; poi 01-02, 08-09-10-11 settembre. Fra il 25 e il 30 agosto e fra il
+- **Le giornate lavorative sono 8, non 17.** Il 24 e il 31 agosto hanno 5 e 15 messaggi del
+  proprietario nel giorno e **zero agenti lanciati**; poi 01-02, 08-09-10-11 settembre. Fra il 25 e il 30 agosto e fra il
   3 e il 7 settembre non c'è **nessuna** riga su questo repo: le sessioni di quei giorni stanno
   sotto altri progetti (`-home-peter-DEV-Artifacts`, 14 file; `-home-peter-DEV-formulafinance`,
   11). "Tre settimane" è quindi una finestra di calendario, non di lavoro.
@@ -69,17 +70,17 @@ Altri due limiti:
 | | valore |
 |---|---|
 | Sessioni principali | 12 (di cui una, `b06623a4`, = il 72,6% del costo e il 64% del tempo attivo) |
-| Tempo attivo (pause > 30 min escluse) | 46,4h su 462,7h di parete |
-| Subagenti lanciati | 183 · ripresi con `SendMessage` 56 volte · 10 compattazioni del contesto · 5 interruzioni di processo |
+| Tempo attivo (pause > 30 min escluse) | 46,7h su 462,9h di parete |
+| Subagenti lanciati | 185 · ripresi con `SendMessage` 56 volte · 10 compattazioni del contesto · 5 interruzioni di processo |
 | Costo (`cost-state`) | **USD 1.655,93** — opus 1.278,99 · sonnet 356,83 · fable 15,86 · haiku 4,24 |
-| Messaggi del proprietario | 178 (10 erano solo `/compact`, 13 iniettati dal ponte di orchestrazione: non richieste umane) |
-| Chiamate di strumento nei loop principali | 3.525, con 109 risultati d'errore e 102 `sleep` (44 min di attesa dichiarata) |
-| Agenti per lavoro | 70 revisioni · 49 implementazioni · 20 fan-out di workflow · 19 ri-revisioni · 10 stesure di piani · 10 collaudi · 5 ricognizioni |
-| Codice | 262 commit non-di-merge su tutti i ref (author date ≥ 24 agosto), 23 merge dal ramo controllato, due rami-lotto da 58 e 92 commit |
+| Messaggi del proprietario | 180 (10 erano solo `/compact`, 13 iniettati dal ponte di orchestrazione: non richieste umane) |
+| Chiamate di strumento nei loop principali | 3.538, con 110 risultati d'errore e 102 `sleep` (44 min di attesa dichiarata) |
+| Agenti per lavoro | 71 revisioni · 50 implementazioni · 20 fan-out di workflow · 19 ri-revisioni · 10 stesure di piani · 10 collaudi · 5 ricognizioni |
+| Codice | 262 commit non-di-merge su tutti i ref (author date ≥ 24 agosto), 23 merge dal ramo controllato, due rami-lotto da 58 e 93 commit |
 | Tracker | 49 issue (44 chiuse, 5 aperte), 46 create il 1°-2 settembre |
 
-La sessione `b06623a4` (8-11 settembre) è il coordinatore dei due lotti SDD: 29,6h attive — due
-terzi di tutto il tempo attivo del periodo — USD 1.202,60, 143 agenti, 56 riprese, 89 messaggi del
+La sessione `b06623a4` (8-11 settembre) è il coordinatore dei due lotti SDD: 29,9h attive — due
+terzi di tutto il tempo attivo del periodo — USD 1.202,60, 145 agenti, 56 riprese, 91 messaggi del
 proprietario. Per ripartirla per giorno non c'è di meglio degli snapshot `cost-state` (che non
 portano un timestamp proprio: li ho agganciati alla prima riga timestampata successiva): ≈ USD 362
 fra l'8 e il 9, ≈ USD 685 il 10, il resto l'11. È una ripartizione grezza, e il confine fra i due
@@ -98,8 +99,12 @@ sono lavoro del loop principale, appena prima del fan-out. Su tutto il 2 settemb
 22, sui giorni 1-2 sono 54.
 
 Costo dell'intero ciclo issue: **USD 367,81 in sette sessioni in due giorni** (più 21,40 nella
-sessione di setup `13ecc3c9`), cioè 6,81 USD per commit e 29,7 USD ogni 1000 righe di diff — 12.397
-righe su 54 commit (`git log --all --since=2026-09-01 --until=2026-09-03 --no-merges --numstat`). Il proprietario non è stato interrotto
+sessione di setup `13ecc3c9`), cioè **6,81 USD per commit** e **27,6 USD ogni 1000 righe** di
+`git log --all --no-merges --date=short --pretty='%x01%ad' --numstat` filtrato all'author date
+1°-2 settembre: **54 commit, 13.327 righe** (+11.233/−2.094). Attenzione a chi rimisura: lo stesso
+diff con `--since=2026-09-01 --until=2026-09-03` dà **51 commit e 12.397 righe**, perché `--since`
+ferma la traversata al primo commit più vecchio della soglia, e tre commit dell'1° settembre stanno
+dietro un merge dell'8. Le due basi non vanno mescolate: qui tutto è contato per author date. Il proprietario non è stato interrotto
 una volta durante il fan-out: le issue erano state scritte bene il giorno prima.
 
 ### 4.2 Il metodo ha tenuto la contabilità delle decisioni, e si è visto
@@ -174,8 +179,9 @@ genere di numero che, una volta scritto in un file di memoria, nessuno rimisura 
 primo conteggio che lo fa.
 
 Costo reale, sul periodo intero: **USD 1.278,99 di opus su 1.655,93 (77,2%) con 80 agenti**, contro
-USD 356,83 di sonnet con 96. A parità quasi perfetta di numero di agenti — 80 contro 96 — un agente
-opus è costato **3,9 volte** un agente sonnet.
+USD 356,83 di sonnet con 98. Il rapporto per agente va diviso, non stimato: `1.278,99 ÷ 80 = 15,99`
+contro `356,83 ÷ 98 = 3,64` → **un agente opus è costato 4,4 volte un agente sonnet**, con 80 agenti
+contro 98.
 
 ### 5.2 Venti agenti opus per fix da 150 righe
 Il fan-out del 2 settembre (`65f68717`) ha lanciato 20 `workflow-subagent` **tutti su
@@ -275,12 +281,12 @@ Bash, 23 Read, zero scritture) per 33,5M token di cache-lettura prima che il fil
 comparisse**, 4h27 dopo la prima riga. Il proprietario ha chiesto conto prima che il file
 arrivasse — «ha bruciato 643k token non sta girando in loop?» alle 21:40:44, cinque minuti prima
 della scrittura. Su tutta la vita dell'agente: 169 turni, 63,1M cache-lettura, 4 riprese, picco di
-contesto 778k. Gli altri 9 agenti di stesura piani del periodo stanno a 10,8M di
+contesto 778k. Gli altri 9 agenti di stesura piani del periodo stanno a 9,8M di
 cache-lettura in media e 11 minuti di transcript. Il caso non è un loop: **la stesura del piano non
 aveva un perimetro di ricognizione** — leggere tutto il motore per scrivere 14 task.
 
 ### 5.8 Il proprietario ha dovuto chiedere "quanti task mancano" 9 volte
-Sugli 89 messaggi in `b06623a4`, nove sono richieste di stato o di parallelizzazione: «quindi ci
+Sui 91 messaggi in `b06623a4`, nove sono richieste di stato o di parallelizzazione: «quindi ci
 manca ancora tanto?» (09 08:35), «quanti task mancano?» (09 15:28, 10 10:23), «prossimi step?»
 (09 16:17), «quindi il grosso è fatto?» (10 08:37), «non riusciamo a far partire altri task in
 parallelo?» (10 08:05), «riusciamo a far partire altri step?» (10 12:35). Tre di queste cadono
@@ -289,9 +295,9 @@ parallelo?» (10 08:05), «riusciamo a far partire altri step?» (10 12:35). Tre
 lo `stato` completo nel proprio contesto; dopo una compattazione quel quadro è l'ultima cosa che
 sopravvive, e nessuno lo ristampa.
 
-### 5.9 I 44 minuti di `sleep` e i 109 comandi falliti
-102 chiamate `sleep` nei loop principali (44 minuti di attesa dichiarata) e 109 `tool_result` con
-`is_error`, cioè 3,1 ogni 100 chiamate di strumento (3.525). Non è un dramma di per sé: è l'impronta di
+### 5.9 I 44 minuti di `sleep` e i 110 comandi falliti
+102 chiamate `sleep` nei loop principali (44 minuti di attesa dichiarata) e 110 `tool_result` con
+`is_error`, cioè 3,1 ogni 100 chiamate di strumento (3.538). Non è un dramma di per sé: è l'impronta di
 un'attesa fatta al buio, visto che lo strumento per non dormire esiste ed è stato usato **tre
 volte** in tutto il periodo (`Monitor` ×3, contro 56 `SendMessage`, 15 `ListAgents` e 8 `TaskStop`).
 
@@ -368,18 +374,18 @@ solo**.
 | | issue-driven (1-2 settembre) | SDD a lotti (8-10 settembre) |
 |---|---|---|
 | Unità di lavoro | 46 issue create in due giorni; 44 chiuse, e nessuna da un commit (§5.10) | 34 task su 2 piani (17 + 17), tracker non usato come unità |
-| Sessioni / agenti | 7 sessioni di lavoro + 1 di setup, 40 subagenti | 1 sessione coordinatrice, 143 agenti |
+| Sessioni / agenti | 7 sessioni di lavoro + 1 di setup, 40 subagenti | 1 sessione coordinatrice, 145 agenti |
 | Costo | USD 367,81 in sette sessioni di lavoro (+21,40 nella sessione di setup `13ecc3c9`) | USD 1.202,60 |
-| Commit | 54 | 150 (58 + 92 sui due rami) |
-| **USD per commit** | **6,81** | **8,02** |
-| **USD per 1000 righe di diff** | **29,7** | **32,0** |
-| Righe di codice | 12.397 (+10.305/−2.092) | 37.530 (+33.655/−3.875) |
+| Commit | 54 | 151 (58 + 93 sui due rami) |
+| **USD per commit** | **6,81** | **7,96** |
+| **USD per 1000 righe di diff** | **27,6** | **30,6** |
+| Righe di codice | 13.327 (+11.233/−2.094) | 39.287 (+35.406/−3.881) |
 | Giri di revisione per unità | non tracciati: non c'era un registro | lotto 1: 17 giri su 12 task, 5 task al secondo giro · lotto 2: task 10 al giro 3 · 19 ri-revisioni misurate nel periodo (§5.5) |
 | Decisioni registrate | 12 AskUserQuestion in 9 sessioni | 63 Ruling numerati, di cui 9 «decisione del proprietario» nel solo lotto 2 |
 | Piano corretto dopo la stesura | n/d (l'elenco delle issue *è* il piano) | 14 emendamenti (lotto 2), 0 (lotto 1) |
 | Riprese di agenti / compattazioni | 0 / 1 | 56 / 10 |
 
-**Il costo per unità prodotta è dello stesso ordine: 6,81 contro 8,02 USD a commit.** Il
+**Il costo per unità prodotta è dello stesso ordine: 6,81 contro 7,96 USD a commit.** Il
 secondo numero è però accusato a una sessione che, oltre ai due lotti, contiene i piani 3A/3B, il
 riallineamento della documentazione e il dispaccio di questa analisi: la parte attribuibile ai soli
 due lotti sta più vicina al primo. Quello che cambia è **che cosa compri** con quei dollari. Il
@@ -406,8 +412,8 @@ vedere (§5.4).
    l'ultima cosa che abbiamo fatto.
 2. **Un perimetro di ricognizione scritto nel prompt del pianificatore.** «Leggi questi N file,
    poi scrivi.» §5.7: 33,5M token e 4h27 per un piano. Gli altri 9 agenti-piano del periodo stanno a
-   10,8M di cache-lettura in media e 11 minuti di transcript: non è un limite che toglie qualità, è
-   quello che distingue i casi normali da quello degenrato.
+   9,8M di cache-lettura in media e 11 minuti di transcript: non è un limite che toglie qualità, è
+   quello che distingue i casi normali da quello degenerato.
 3. **Il modello si sceglie per compito a ogni dispaccio, e il conteggio si misura.** §5.1: 15
    agenti opus in un giorno, 29 nei due giorni del lotto 2. Rimedio concreto: una riga «motore? prima
    revisione del motore? se no, sonnet» nel prompt, e un controllo a fine lotto sui
@@ -470,7 +476,7 @@ Due avvertenze per chi rimisura:
 | `70d3b928` | 09/02 | 1h22m | 40,73 | 4 | 3 | auth JWT con token admin, poi un bug di `/forecast/income` da screenshot |
 | `65f68717` | 09/02 → 09/08 | 2h12m | 101,89 | 20 | 4 | fan-out del workflow: 16 commit in 14 minuti, 20 opus (§5.2) |
 | `4aebaba4` | 09/08 → 09/10 | 3h51m | 55,78 | 0 | 4 | #50, corpus reale in `Test/`, guardia della #24 → revert, poi debugging di pi |
-| `b06623a4` | 09/08 → 09/11 | 29h24m | 1.202,60 | 143 | 16 | coordinatore dei lotti 1 e 2, piani 3A/3B, pi |
+| `b06623a4` | 09/08 → 09/11 | 29h54m | 1.202,60 | 145 | 17 | coordinatore dei lotti 1 e 2, piani 3A/3B, pi |
 | `7a984fbb` | 09/08 | 0h24m | 7,94 | 0 | 0 | segnalazione di un utente in produzione su 4 import |
 | `90a1c2d7` | 09/10 | 0h00m | 0,42 | 0 | 0 | 14 secondi: svegliata da un messaggio di orchestrazione, non da una persona |
 

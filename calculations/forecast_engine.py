@@ -803,9 +803,11 @@ class ForecastEngine:
         # qui ci sia anche un aggregato, che `SP_EDITABLE_FIELDS` di
         # `app/forecast/balance` NON espone, e' deliberato: la chiave resta per
         # le chiamate API dirette, e il divieto serve prima di tutto a loro.
-        # Il lato BREVE dello stesso piano (`sp06` e le sue sotto-voci) NON c'e':
-        # non misurato in questo giro, e aggiungere un rifiuto non misurato e'
-        # esattamente cio' che la regola del repo vieta.
+        # Il lato BREVE dello stesso piano (`sp06` e le sue sotto-voci) NON c'e'
+        # QUI: dal giro 5 (m-3) e' rifiutato, ma altrove — in
+        # `_realign_sp_declarations`, dove si conosce la parte commerciale
+        # PERSISTITA (`sp06 − sp06e − sp06f`), non il singolo campo forzato
+        # come in questa tabella. Questo elenco resta solo il lato OLTRE.
         "crediti_commerciali": (
             "sp07_crediti_lungo",
             "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
@@ -976,6 +978,28 @@ class ForecastEngine:
             "(value: null) e lascia che la riga segua il piano."
         )
 
+    @classmethod
+    def _messaggio_override_crediti_breve(cls, forzato: Decimal, residuo: Decimal,
+                                           year: Optional[int]) -> str:
+        """Il rifiuto (m-3, giro 5) quando un override porta la parte commerciale
+        di `sp06_crediti_breve` sotto il `residual_short` che il piano dei
+        crediti commerciali deve incassare l'anno dopo. Sorella di
+        `_messaggio_override_oltre`, ma sul lato BREVE e sul verso opposto:
+        li' un valore forzato sparirebbe; qui un valore forzato genererebbe
+        un credito nuovo negativo, che il motore non modella.
+        """
+        anno = f" nel {year}" if year is not None else ""
+        return (
+            f"L'override della parte commerciale di sp06_crediti_breve{anno} non è "
+            f"ammesso: vale {_importo_it(forzato)}, ma il piano di scadenziamento "
+            f"{cls._PREGRESSO_ARTICOLI['crediti_commerciali'][1]} deve incassare "
+            f"{_importo_it(residuo)} l'anno dopo. I crediti nuovi non possono essere "
+            "negativi: sotto quella quota il `generated` dichiarato lo diventerebbe. "
+            "Non scendere sotto quella quota, oppure modifica il piano al passo "
+            f"«{cls._passo_pregresso('crediti_commerciali')}» o svuota la cella "
+            "(value: null)."
+        )
+
     @staticmethod
     def _residuo_breve_piano(piano: Dict[str, Any], year_index: int,
                              horizon: int) -> Decimal:
@@ -1030,7 +1054,8 @@ class ForecastEngine:
         return Decimal(str(x or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     @classmethod
-    def _realign_sp_declarations(cls, details: Dict[str, Any], forecast_bs: Dict[str, Any]) -> None:
+    def _realign_sp_declarations(cls, details: Dict[str, Any], forecast_bs: Dict[str, Any],
+                                  *, year: Optional[int] = None) -> None:
         """Allinea al persistito le SCOMPOSIZIONI che il motore ha dichiarato.
 
         In modo `saldo_acconto` l'anno N+1 legge `saldo_due` da
@@ -1056,6 +1081,17 @@ class ForecastEngine:
         Ovunque, senza override, la riscrittura e' un identico al centesimo
         (il banco di parita' lo conferma): si tocca solo cio' che un
         override o una posatura ha davvero mosso.
+
+        La riga `crediti_commerciali` pero' NON si clampa come i quattro
+        debiti (`res = min(rs, persisted)`, sopra): un `res` cosi' avrebbe
+        rotto l'identita' di riga che la rete M-4 asserisce. Se un
+        `sp_overrides` porta la parte commerciale persistita sotto il
+        `residual_short` che il calendario deve incassare l'anno dopo, il
+        `generated` dichiarato diventerebbe negativo — un credito nuovo
+        negativo e' economicamente un debito (anticipi da clienti), e questo
+        giro non lo modella (decisione del proprietario, 2026-09-11: «new
+        receivables can not go negative»). Il motore quindi RIFIUTA, come
+        I-c per i debiti, prima di scrivere la riga.
 
         Regola dichiarata per il credito tributario: prima si esaurisce
         `opening_credit_left` (il credito portato dall'anno prima), il resto
@@ -1133,6 +1169,13 @@ class ForecastEngine:
                           - cls._q(forecast_bs['sp06e_crediti_tributari_breve'])
                           - cls._q(forecast_bs['sp06f_imposte_anticipate_breve']))
             rs_cred = Decimal(str(d_cred.get('residual_short') or 0))
+            # (m-3, giro 5) Sotto il residuo che il calendario deve incassare
+            # l'anno dopo il `generated` dichiarato diventerebbe negativo: un
+            # credito nuovo negativo, non modellato (vedi il docstring sopra).
+            # Uguale al residuo passa (`generated` 0,00); un centesimo sotto
+            # si rifiuta, PRIMA di scrivere la riga.
+            if persistita < rs_cred:
+                raise ValueError(cls._messaggio_override_crediti_breve(persistita, rs_cred, year))
             dichiarata = Decimal(str(d_cred.get('generated') or 0)) + rs_cred
             if persistita != cls._q(dichiarata):
                 # Il `residual_short` resta GREZZO (e' il calendario, identico
@@ -2016,7 +2059,24 @@ class ForecastEngine:
             # stesso di `prestiti_nuovi_quota_breve` sopra: il motore riallinea
             # la dichiarazione al valore persistito, e l'override si porta
             # avanti come stato di apertura.
-            self._realign_sp_declarations(details, forecast_bs)
+            #
+            # (m-3, giro 5) Sui crediti commerciali il riallineamento puo'
+            # RIFIUTARE (vedi il docstring del metodo): un `ValueError` qui
+            # non e' coperto dal `try` di sopra (chiuso alla normalizzazione
+            # dello SP), quindi lo si cattura allo stesso modo — stessa forma
+            # dell'except sopra, stesso contratto per il chiamante con
+            # `stop_on_error=False` (`POST /preview`: `error` valorizzato,
+            # status 200).
+            try:
+                self._realign_sp_declarations(details, forecast_bs, year=assumption.forecast_year)
+            except ValueError as e:
+                if stop_on_error:
+                    raise
+                self._declare_peak(results)
+                return ForecastComputation(
+                    years=results,
+                    error=ForecastError(year=assumption.forecast_year, message=str(e)),
+                )
             # Lo scoperto si rimborsa per primo anche sotto la cassa minima del
             # cash sweep, per decisione del proprietario: si dichiara di quanto
             # la cassa chiude sotto quel minimo in un anno con scoperto (aperto o
@@ -3053,6 +3113,13 @@ class ForecastEngine:
         else:
             # Il piano delle rate scadenzia il solo rateizzato: il saldo non entra
             # nel runoff perche' si paga per intero nel primo anno di piano.
+            # (n-1, giro 5) Il terzo argomento e' `[]`, letterale: nessun
+            # condono/inesigibile tributario oggi. `_posizione_tributaria_
+            # dichiarata` della rete (`tests/test_forecast_dichiarato_vs_
+            # persistito.py`) si appoggia esattamente su questo per dire che
+            # la variazione del residuo e' SOLO `rate_paid` — un domani un
+            # `writeoff` tributario non vuoto romperebbe quell'identita' in
+            # silenzio, non con un fallimento esplicito.
             r = runoff_schedule(
                 plan_tax['rateizzato'] if plan_tax else ZERO,
                 plan_tax['amounts'] if plan_tax else [],

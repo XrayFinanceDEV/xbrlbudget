@@ -468,7 +468,7 @@ def test_a_senza_override_il_riallineamento_non_cambia_niente(monkeypatch, caplo
     con = _esegui("con-riallineamento")
     from calculations.forecast_engine import ForecastEngine
     monkeypatch.setattr(ForecastEngine, "_realign_sp_declarations",
-                        classmethod(lambda cls, details, forecast_bs: None))
+                        classmethod(lambda cls, details, forecast_bs, *, year=None: None))
     senza = _esegui("senza-riallineamento")
 
     assert con.keys() == senza.keys()

@@ -164,6 +164,21 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
             if d["mode"] == "runoff" and not forzato(oltre):
                 confronta(oltre, d["residual_long"], f"details['pregresso']['{saldo}'].residual_long")
 
+    # ── (n-1, giro 5) l'invariante di flusso tributario qui sotto assume ──
+    # `writeoff` sempre zero sulla riga `debiti_tributari`: il runoff
+    # tributario e' chiamato con una lista letterale vuota (nessun
+    # condono/inesigibile tributario oggi), ma la riga lo dichiara comunque,
+    # come le altre quattro. Detto ad alta voce, non solo nel commento della
+    # funzione qui sotto: se un domani smettesse di essere zero, l'identita'
+    # di flusso tributario diventerebbe silenziosamente falsa.
+    d_tax_riga = (det.get("pregresso") or {}).get("debiti_tributari") or {}
+    if D(str(d_tax_riga.get("writeoff") or 0)) != D("0"):
+        fuori.append(("writeoff tributario",
+                      f"details['pregresso']['debiti_tributari'].writeoff e' "
+                      f"{d_tax_riga.get('writeoff')}, non zero: l'identita' di flusso "
+                      "tributario (sotto, rilievo M-4 punto 1) presuppone che sia sempre "
+                      "zero e va rivista"))
+
     # ── la posizione tributaria scrive anche il CREDITO ──
     # Il confronto e' fra una DICHIARAZIONE e il persistito, non fra la riga e
     # l'override: tocca quindi correre anche quando la riga e' forzata (rilievo
@@ -258,7 +273,10 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
     # PRIMA CORREVA SULLE CELLE, CON UNA SOGLIA DI 0,02 MOTIVATA MALE: «al piu'
     # 0,005 + 0,01» diceva il commento, mentre le code di quantizzazione da
     # sommare sono SEI (tre celle per due anni: `sp16e`, `sp17e`, `sp06e`),
-    # quindi il limite teorico e' 6 x 0,005 = 0,03. Misura di QUESTO giro su una
+    # quindi il limite teorico DI QUELLA VECCHIA FORMA A SOGLIA era 6 x 0,005 =
+    # 0,03 — una soglia che, nel codice consegnato qui sotto, non esiste piu'
+    # affatto (n-2, giro 5: la forma a soglia e' stata rimossa, non ridotta a
+    # 0,03; il confronto e' `!= D("0")`, esatto). Misura di QUESTO giro su una
     # copia strumentata della batteria (`RETE_LOG`, 1.272 confronti): lo scarto
     # sulle celle arriva a 0,01392 (33 sopra 0,01, nessuno sopra 0,015) — uno
     # 0,02 non nasconde un flusso, ma puo' dare un falso rosso su un fixture
@@ -917,6 +935,23 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
                 rows = righe(piano, primo, tutti, squilibrio, True)
                 res, mappe, anni_prev = _genera_e_leggi(db, f"scoperto-{crescita}-{scenari}", rows)
                 if mappe is None:
+                    if nome_p == "crediti con inesigibile" and nome_s == "crediti giu' nel 2027":
+                        # (m-3, giro 5) Questa NON e' una divergenza: e' il
+                        # rifiuto ATTESO. Lo squilibrio forza `sp06a` a
+                        # 1.000,55 nel 2027, ma il piano dei crediti di questo
+                        # scenario deve incassare 38.333,335 l'anno dopo
+                        # (`runoff_schedule` su opening 120.000, rata
+                        # 38.333,335, anno 0) — ben sopra il forzato. Sotto il
+                        # residuo il motore ora rifiuta, come i quattro debiti
+                        # (I-c): la parte commerciale forzata farebbe
+                        # dichiarare un `generated` negativo, che sarebbe un
+                        # credito nuovo negativo — non modellato (decisione
+                        # del proprietario, 2026-09-11).
+                        if "non è ammesso" not in res["message"] or "38.333,34" not in res["message"]:
+                            fuori.append(("rifiuto crediti breve inatteso",
+                                          f"[{tag}] atteso il rifiuto m-3 con residuo 38.333,34, "
+                                          f"trovato: {res['message']}"))
+                        continue
                     fuori.append(("non generato", f"[{tag}] {res['message']}"))
                     continue
                 esercitati[nome_d] += 1
@@ -973,10 +1008,15 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
         + [f"  {v:4d}  {k}" for k, v in per_campo.most_common()]
         + ["esempi:"] + [testo for _, testo in fuori[:15]]
     )
-    assert scenari == 72 and anni == 216, f"batteria incompleta: {scenari} scenari, {anni} anni"
+    # (m-3, giro 5) 4 scenari su 72 sono ora il rifiuto ATTESO ("crediti con
+    # inesigibile" × "crediti giu' nel 2027" × i 4 `DEBITI`): contano in
+    # `scenari` (verificato sopra, per campo, che sia proprio il rifiuto m-3 e
+    # non una divergenza) ma non producono anni, ne' esercitano `esercitati`.
+    # 216 − 4×3 = 204; 18 − 1 = 17 per ciascuna delle quattro chiavi `DEBITI`.
+    assert scenari == 72 and anni == 204, f"batteria incompleta: {scenari} scenari, {anni} anni"
     # Una griglia che non accende scoperto, o non lo rimborsa, non prova I1 ne' I2.
     assert esercitati["anni con scoperto"] > 0 and esercitati["anni che rimborsano"] > 0, dict(esercitati)
-    assert all(esercitati[nome] == 18 for nome in DEBITI), dict(esercitati)
+    assert all(esercitati[nome] == 17 for nome in DEBITI), dict(esercitati)
     # 6 piani × 2 voci con prestito nuovo × 3 anni: I1 esteso non e' stato saltato.
     assert esercitati["anni I1 esteso"] == 36, dict(esercitati)
 

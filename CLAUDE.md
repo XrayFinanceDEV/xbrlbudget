@@ -401,6 +401,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   difetto. L'unica eccezione è una riga aggiunta di proposito, che si aggiorna nello stesso commit.
   Gli elenchi di **etichette** sono un'altra cosa: lì un cambiamento deliberato è legittimo, purché
   si sappia perché il testo si è mosso.
+- **Un 500 non gestito porta le intestazioni CORS**, non solo le risposte previste. `unhandled_exception_handler`
+  (`backend/app/main.py`) le aggiunge a mano perché la sua `JSONResponse` non attraversa più `CORSMiddleware` — è
+  l'`error_handler` di `ServerErrorMiddleware`, la middleware più esterna, sopra `CORSMiddleware`. Senza, qualunque
+  bug imprevisto su qualunque rotta arriva al browser come «CORS policy», mai come l'errore reale: chi guarda la
+  console per diagnosticare vede la causa sbagliata (misurato nel collaudo del lotto 2, prima di questa correzione).
+  `tests/test_cors_on_500.py` lo tiene fermo.
 
 ### Ambiente
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata

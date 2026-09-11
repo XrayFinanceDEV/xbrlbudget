@@ -267,7 +267,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   e le righe di `details['pregresso']` (`_realign_sp_declarations`), e l'anno N+1 legge saldo e
   credito d'apertura da lì. Il credito forzato riempie prima `opening_credit_left`, poi
   `generated_credit`: la ripartizione è solo dichiarativa, perché N+1 ne legge la somma.
-- **Sulle righe a giorni un override vale un anno.** `sp06a`…`sp06g` (ripartite dal DSO, `_alloc`)
+- **Sulle righe a giorni un override vale un anno.** `sp06a`, `sp06b`, `sp06c`, `sp06d`, `sp06g`
+  (le voci commerciali ripartite dal DSO, `_alloc`; `sp06e` e `sp06f` non ci sono: seguono la
+  posizione tributaria e le imposte differite, non i giorni)
   e `sp16d` (DPO) si ricalcolano ogni anno dalla formula dei giorni, non da `prev`: un
   `sp_overrides` nell'anno N fissa lo stock di N, e dall'anno N+1 la riga torna quella senza
   override. La differenza rientra come variazione del circolante dell'anno dopo, che il

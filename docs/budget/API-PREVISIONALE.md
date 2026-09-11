@@ -224,7 +224,9 @@ non si muove. Vince tranne sulle righe che il piano governa: sul lato oltre di u
 piano di scadenziamento, e sul lato breve sotto la rata dovuta l'anno dopo, l'override non è
 ammesso (§2.2).
 
-Sulle **righe a giorni** — `sp06a`…`sp06g` (ripartite dal DSO, `_alloc`) e `sp16d` (DPO) — un
+Sulle **righe a giorni** — `sp06a`, `sp06b`, `sp06c`, `sp06d`, `sp06g` (le voci commerciali
+ripartite dal DSO, `_alloc`; `sp06e` e `sp06f` non ci sono: seguono la posizione tributaria e le
+imposte differite, non i giorni) e `sp16d` (DPO) — un
 override vale invece **un anno solo**: la riga si ricalcola ogni anno dalla formula dei giorni,
 non da `prev`, quindi dall'anno N+1 torna quella senza override e la differenza rientra come
 variazione del circolante dell'anno dopo (il rendiconto la mostra come flusso operativo, non

@@ -147,9 +147,35 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
     # diretto con l'override e' quello che le tiene oneste.
     sp_ov = row.get("sp_overrides") or {}
 
+    # (Task 12, lotto 3A) Quando nessun campo neutro del gruppo e' libero, il
+    # residuo di quadratura si posa comunque sul primo di essi e si DICHIARA
+    # (`campo_dichiarato: True`). L'`importo` in `residuo_quadratura` e' pero'
+    # il residuo AL MOMENTO DELLA POSATURA, dentro `_normalize_balance_sheet_
+    # cents` — non il divario finale che questo test legge: sul percorso
+    # completo (`compute_forecast`) `_realign_sp_declarations` gira SUBITO
+    # dopo e riallinea la dichiarazione al persistito (il ramo `legacy` per
+    # intero, il ramo `runoff` con `generated = persisted − residual_short`,
+    # l'indicizzazione sempre) — chiudendo il divario a ZERO, sia che
+    # `_normalize_balance_sheet_cents` l'abbia gia' fatto lei sia che no
+    # (misura di questo task: stesso stato finale nei due casi, mai un doppio
+    # conteggio). L'`importo` posato resta quindi un TETTO, non un'uguaglianza
+    # da riprodurre: misurato su questa stessa batteria, il divario che questo
+    # confronto legge e' SEMPRE zero anche quando la posatura e' dichiarata —
+    # un'uguaglianza esatta con l'`importo` (come inizialmente previsto)
+    # produce 16 falsi positivi proprio sui campi che il riallineamento ha
+    # gia' richiuso. La tolleranza e' per campo, non globale: un campo mai
+    # toccato dal residuo di quadratura resta all'uguaglianza esatta (tetto
+    # zero).
+    tolleranze = {
+        p["campo"]: D(str(p["importo"]))
+        for p in det["residuo_quadratura"] if p.get("campo_dichiarato")
+    }
+
     def confronta(campo, atteso, chi):
         letto = bs.get(campo) if campo.startswith("sp") else ce.get(campo)
-        if _q(letto or 0) != _q(atteso):
+        scarto = _q(letto or 0) - _q(atteso)
+        tetto = abs(tolleranze.get(campo, D("0")))
+        if abs(scarto) > tetto:
             fuori.append((campo, f"{campo}: persistito {letto}, dichiarato {_q(atteso)} da {chi}"))
 
     for campo, val in sp_ov.items():
@@ -397,7 +423,12 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
             fuori.append((posa["campo"], f"residuo di {posa['importo']} su un debito "
                           "finanziario: la ripartizione pregresso/prestito nuovo e' sua, "
                           "un centesimo posato qui la cancella"))
-        if posa["campo"] in dichiarati:
+        # (Task 12, lotto 3A) Una posatura DICHIARATA (`campo_dichiarato: True`)
+        # e' esattamente il caso in cui nessun campo neutro del gruppo era
+        # libero: il contratto la manda comunque sul primo campo neutro e la
+        # dichiara, quindi non e' una violazione — la tolleranza sopra tiene
+        # onesto il confronto persistito/dichiarato su quella stessa cella.
+        if posa["campo"] in dichiarati and not posa.get("campo_dichiarato"):
             fuori.append((posa["campo"],
                           f"residuo di {posa['importo']} posato su {posa['campo']}, che e' dichiarato"))
     # m-2 del giro 2 su `6e5c0f7`: la proprieta' «i sei debiti FINANZIARI non li
@@ -475,9 +506,13 @@ PIANI = {
                              "amounts": [1333.335, 1333.335, 1333.33]},
     },
     # La forma esatta della SESTA occorrenza: `sp16e`, `sp16f` e `sp16g` tutti e
-    # tre forzati da un piano, e `sp16d` — il campo che la guardia dei giorni
-    # degeneri scrive — lasciato libero, quindi primo bersaglio del cammino a
-    # ritroso. E' il caso che una sonda campionata su rate tonde non vede.
+    # tre forzati da un piano, e `sp16d` lasciato libero. Il bersaglio non e'
+    # ne' `sp16d` "perche' e' il campo che la guardia dei giorni degeneri
+    # scrive" ne' `sp16c` (mai candidato: un debito finanziario): e' il primo
+    # campo neutro NON forzato della tabella `_CAMPI_NEUTRI_RESIDUO['sp16_debiti_
+    # breve']` (`sp16g`, `sp16f`, `sp16e`, `sp16d`, in quest'ordine) — qui
+    # `sp16d`, perche' `e`, `f` e `g` hanno un piano attivo e lui no. E' il caso
+    # che una sonda campionata su rate tonde non vede.
     "tributari + previdenziali + altri": {
         "debiti_tributari": {"opening": 10000, "saldo": 6000, "rateizzato": 4000,
                              "amounts": [1333.335, 1333.335, 1333.33]},
@@ -643,7 +678,7 @@ ANNI = (2027, 2028, 2029)
 
 @pytest.mark.parametrize("crescita", CRESCITE)
 def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeypatch):
-    """La rete permanente: 144 scenari per percentuale, 321 anni, zero divergenze.
+    """La rete permanente: 144 scenari per percentuale, 378 anni, zero divergenze.
 
     Parametrizzato sulla crescita per avere quattro esiti distinti invece di uno
     solo: quando si rompe, il messaggio dice su quale percentuale — e un difetto
@@ -723,22 +758,37 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
     # collide mai, perche' porta solo il breve e le soglie I-c del secondo anno
     # sono piu' basse dei valori forzati).
     #
-    # Gli anni 321 = 249 di prima + 24 scenari × 3 anni della variante nuova,
-    # che genera sempre; i 37 rifiuti si scompongono cosi', e i due conti
-    # vanno fatti insieme
-    # perche' sono due CAMMINI diversi di rifiuto:
+    # (Task 12, lotto 3A) I 18 rifiuti si scompongono in due CAMMINI diversi —
+    # il conteggio chiede alla STESSA `_sp_forced_fields` del motore
+    # (`_rifiuto_atteso`), non a una previsione scritta a mano, quindi segue
+    # da solo ogni volta che quella funzione cambia:
     #   · 16 = la famiglia: 4 piani che governano un lato oltre (`altri debiti`,
     #     `altri + previdenziali`, `fornitori + tributari`,
     #     `tributari + previdenziali + altri`) × 4 indicizzazioni. Il piano
     #     `crediti con inesigibile` non collide perche' la famiglia non tocca
     #     `sp07`, e `senza piano` non ha calendario da contraddire;
-    #   · 21 = l'aggregato: le 3 indicizzazioni che forzavano ENTRAMBI i secchi
-    #     (`solo g`, `f + g`, `tutte e undici`) × 6 piani, + i 3 piani con
-    #     `altri_debiti` × `nessuna`. Li' non resta nessuna riga operativa libera
-    #     nel gruppo e il totale forzato e' la massa, non un centesimo (I-1);
-    #     il conteggio chiede alla STESSA `_sp_forced_fields` del motore, non a
-    #     una previsione scritta a mano.
-    assert scenari == 144 and anni == 321 and rifiutati == 37, \
+    #   · 2 = l'aggregato: solo `fornitori + tributari` (che forza `sp16d` col
+    #     piano e `sp16e` col kernel saldo+acconto) incrociato con le due
+    #     indicizzazioni che forzano ANCHE `sp16f` e `sp16g` (`f + g`, `tutte
+    #     e undici`) esaurisce le quattro righe operative senza che nessuna
+    #     resti libera — e il totale forzato e' allora la massa dell'override,
+    #     non un centesimo (I-1).
+    #
+    #   Erano 21 prima di questo task: la protezione allargava a TUTTO il
+    #   gruppo un secchio forzato da un piano o da un'indice
+    #   (`_SP_OPERATIVI`, rimosso), quindi bastava un piano O
+    #   un'indicizzazione sul solo secchio di default per esaurire le quattro
+    #   righe. Con la regola unica di `_CAMPI_NEUTRI_RESIDUO` quell'allargamento
+    #   sposterebbe il residuo DENTRO il secchio che il piano o l'indice
+    #   dichiarano (misurato: senza la rimozione, `test_budget_pregresso.py::
+    #   test_the_quadratura_residual_never_rewrites_a_field_the_plan_wrote` e
+    #   `test_forecast_indicizzazione.py::test_the_quadratura_residual_never_
+    #   rewrites_an_indexed_voce` vanno rossi) — quindi non e' piu' in
+    #   `_sp_forced_fields`, e le righe non direttamente dichiarate dello
+    #   stesso gruppo restano libere: e' li' che il centesimo va, come prima
+    #   di questo lotto. Gli anni salgono di conseguenza (378 = 321 + 3 anni
+    #   per ciascuno dei 19 scenari che prima erano rifiutati e ora generano).
+    assert scenari == 144 and anni == 378 and rifiutati == 18, \
         f"batteria incompleta: {scenari} scenari, {anni} anni, {rifiutati} rifiuti"
     # Il riepilogo PER CAMPO prima degli esempi, e non e' cosmesi: la prima
     # stesura elencava solo i primi 25 casi in ordine di scenario, e cosi'

@@ -613,12 +613,22 @@ sarebbe contata due volte.
 `residuo_quadratura` — il bulk e l'anteprima condividono lo stesso motore e lo stesso dict,
 quindi nessuna di queste manca da una delle due porte.
 
-`residuo_quadratura` è la lista `{campo, importo}` delle posature del residuo di arrotondamento
-della normalizzazione al centesimo dello SP (`_normalize_balance_sheet_cents`): `importo` è
-quanto è stato sommato a `campo`. `campo` è il secchio del gruppo (`sp16g`, `sp06g`, …),
-l'ultimo sotto-campo operativo libero, oppure l'aggregato `sp16_debiti_breve`/`sp17_debiti_lungo`
-quando nessuna voce operativa del gruppo è libera (e allora `sp09` si muove dello stesso
-importo). Mai `sp16a/b/c`, `sp17a/b/c`. Sempre presente, anche vuota.
+`residuo_quadratura` è la lista `{campo, importo, campo_dichiarato}` delle posature del residuo
+di arrotondamento della normalizzazione al centesimo dello SP (`_normalize_balance_sheet_cents`):
+`importo` è quanto è stato sommato a `campo`. `campo` viene sempre da
+`ForecastEngine._CAMPI_NEUTRI_RESIDUO[aggregato]`, la tabella per gruppo dei soli campi **neutri**
+rispetto ai confini di KPI (mai un debito/credito finanziario, un fondo o un credito fiscale, una
+riserva a segno proprio) — il primo elemento non già scritto di proposito da un piano attivo, da
+un'indicizzazione, dalla ripartizione `sp16a`/`sp17a`, o dal kernel tributario in modo
+`saldo_acconto`. `campo_dichiarato` è `true` solo quando **nessun** campo neutro del gruppo era
+libero: il residuo va comunque sul primo di essi (mai sull'aggregato, che di quelle righe resta
+la somma) e la cella diverge per costruzione dalla sua dichiarazione altrove nei `details` — a
+meno che quella stessa dichiarazione non venga poi riallineata al persistito (pregresso in modo
+`legacy`, o `_realign_sp_declarations` per gli altri casi), nel qual caso torna a coincidere. Un
+totale forzato da `sp_overrides` **senza** nessuna voce operativa forzata, in un gruppo dove non
+resta comunque nessun campo neutro libero, si rifiuta (I-1): lì il residuo non sarebbe un
+arrotondamento ma la massa dell'override. Mai `sp16a/b/c`, `sp17a/b/c`, `sp04b`, `sp04e`, `sp06e`,
+`sp06f`, `sp07e`, `sp07f`, `sp12h`, `sp14b`, `sp14c`. Sempre presente, anche vuota.
 
 ## 8. Lo scadenziamento del pregresso
 
@@ -802,15 +812,17 @@ discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripart
 rifiuta la combinazione con un errore esplicito invece di superare il totale.
 
 ⚠️ **Il totale `sp16`/`sp17` però non vince se il gruppo non ha più un ripiego libero.** Quando
-un piano di scadenziamento (o un'indicizzazione) del *secchio* `sp16g`/`sp17g` ha già
-forzato tutte le righe operative del gruppo, la differenza fra il totale richiesto e
-la somma delle righe non è un arrotondamento: è la massa dell'override, e non c'è
-un campo onesto che la riceva (sul secchio il calendario la cancellerebbe l'anno
-dopo; su una riga `d`/`e`/`f` sarebbe un'obbligazione inventata). Il motore risponde
-allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve` non
-è ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non
-resta scritta. Senza piano né indicizzazione sul gruppo, il totale forzato continua
-a vincere come sempre (`tests/test_forecast_residuo_quadratura_sp16.py`).
+un piano di scadenziamento o un'indicizzazione ha forzato, riga per riga, **tutti e quattro** i
+campi neutri del gruppo (`d`, `e`, `f`, `g` — non basta che il *secchio* di default `sp16g`/`sp17g`
+da solo sia governato: `d`, `e`, `f` restano il ripiego libero finché non hanno anche loro un piano
+o un'indice proprio, o il kernel tributario in modo `saldo_acconto` per `e`), la differenza fra il
+totale richiesto e la somma delle righe non è un arrotondamento: è la massa dell'override, e non
+c'è un campo onesto che la riceva (su una riga governata il piano o l'indice la cancellerebbe
+l'anno dopo; sui debiti finanziari `a`/`b`/`c` sarebbe un'obbligazione inventata). Il motore
+risponde allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve` non è
+ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non resta scritta. Con
+almeno un campo neutro ancora libero nel gruppo, il totale forzato continua a vincere come sempre
+(`tests/test_forecast_residuo_neutro.py`).
 
 ## 11. Indicizzazione delle voci minori dello SP (`sp_indexing`)
 

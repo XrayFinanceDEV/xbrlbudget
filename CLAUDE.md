@@ -371,6 +371,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era
   stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un
   fallimento la annulla; un promote riuscito no.
+- **Il centesimo di quadratura dello SP si posa solo su un campo neutro del proprio gruppo**
+  (`ForecastEngine._CAMPI_NEUTRI_RESIDUO`), mai su un debito finanziario, un credito o fondo
+  fiscale, una riserva negativa: attraversare un confine di KPI cambia PFN e rendiconto di un
+  centesimo senza che nessun controllo lo veda. Se ogni campo neutro è già scritto da un piano, il
+  centesimo si posa sul primo e `details['residuo_quadratura']` lo dichiara con
+  `campo_dichiarato: true`.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
@@ -618,11 +624,11 @@ residual, and the entire long-term side becomes pregresso (`calculations/forecas
 balance follows the same formula as before the lotto (`mode: "legacy"` in
 `details['pregresso']`), and the rounding cent of the debt group still lands on
 `sp16g`/`sp17g` — though its amount can differ by a cent when another row of the group moved
-(the tax payables below). When `sp16g` (or `sp17g`) is governed by an `altri_debiti` plan or by
-an `sp_indexing` driver, no operating row of **that** group is free: the cent then makes the
-aggregate `sp16`/`sp17` equal to the sum of its rows — so cash moves by the same cent — and is
-declared in `details['residuo_quadratura']` with the aggregate as `campo`
-(`_normalize_balance_sheet_cents`). The financial rows `sp16a/b/c`, `sp17a/b/c` never receive it.
+(the tax payables below). The target is never picked by hand: it is the first field of
+`ForecastEngine._CAMPI_NEUTRI_RESIDUO[aggregate]` not already forced (a plan, an `sp_indexing`
+driver, the `sp16a`/`sp17a` split, or `sp16e` under the `saldo_acconto` tax kernel) — see
+«Invarianti e trappole › Previsionale» below for the full rule. The financial rows `sp16a/b/c`,
+`sp17a/b/c` never receive it.
 The day-count guard added by Task 14 moves numbers too, with or without a plan: a derived
 DSO/DIO/DPO whose base-year denominator is not positive, or whose implied standing exceeds 365
 days, is discarded and the base-year stock is carried instead (`degenerate_turnover_ratio`,

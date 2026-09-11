@@ -18,7 +18,7 @@ from database.models import (
 )
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota, tax_closing_position, deferred_tax_position,
+    tfr_accrual_quota, posizione_tributaria_fine_anno, deferred_tax_position,
     new_financing_schedule,
 )
 from calculations.ce_result import calculate_ce_result
@@ -1190,12 +1190,15 @@ class IntraYearEngine:
             remaining_current_tax = max(
                 Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
             )
-            sp06e, sp16e = tax_closing_position(
-                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
-                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
-                remaining_current_tax,
-                Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0)),
+            posizione = posizione_tributaria_fine_anno(
+                opening_credit=_get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                opening_debt=_get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax=remaining_current_tax,
+                current_tax=current_tax,
+                reference_tax=_get_field(ref_inc, 'ce20_imposte'),
+                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
+            sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
         sp16a, sp17a, sp17b = self._apply_debt_repayment(
@@ -1435,12 +1438,18 @@ class IntraYearEngine:
             remaining_current_tax = max(
                 Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
             )
-            sp06e, sp16e = tax_closing_position(
-                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
-                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
-                remaining_current_tax,
-                Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0)),
+            # Senza anno di riferimento l'imposta su cui commisurare gli acconti non esiste: zero, cioe'
+            # tutta l'imposta dell'anno resta da versare al 31/12 (il lato prudente), mai un acconto
+            # inventato.
+            posizione = posizione_tributaria_fine_anno(
+                opening_credit=_get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                opening_debt=_get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax=remaining_current_tax,
+                current_tax=current_tax,
+                reference_tax=Decimal('0'),
+                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
+            sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
         sp16a, sp17a, sp17b = self._apply_debt_repayment(

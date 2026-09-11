@@ -328,7 +328,9 @@ Il nuovo record nasce con `validation_status="verified"`, `forecastable=True`,
 > `tests/test_quadratura_gates.py`, che continua a descriverlo come «promote_service
 > quadratura gate». Non lo è più dal passaggio a `semantic_valid`.
 
-Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno promosso.
+Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno promosso. La proiezione promossa
+porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo versa come saldo
+(`details['imposte']['saldo_paid']`).
 
 ## 6. File chiave
 
@@ -502,8 +504,8 @@ bilancio non ne mostrerebbe traccia, senza un solo avviso.
 meccanismo (`precedente + imposte dell'anno − acconti`, con acconti a **zero** di default)
 accumulava debito tributario che non usciva mai — un difetto che quadrava, mai visto da un
 controllo. Ora ogni anno di piano paga **saldo + acconto + rate**
-(`calculations.projection_common.tax_settlement_saldo_acconto`, chiamata solo dal motore budget —
-l'infrannuale continua a usare `tax_closing_position`, invariata):
+(`calculations.projection_common.tax_settlement_saldo_acconto`, chiamata dal motore budget; l'infrannuale
+usa `posizione_tributaria_fine_anno`, con la stessa regola degli acconti (`acconti_dovuti`)):
 
 - **saldo pagato in N** = il debito tributario **generato a fine N−1**, al netto del credito
   tributario di apertura fino a capienza (l'eccedenza resta credito). Per N = 1 è la quota

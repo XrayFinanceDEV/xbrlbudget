@@ -17,7 +17,7 @@ from calculations.projection_common import (
     tfr_accrual_quota, deferred_tax_position,
     new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
-    tax_settlement_saldo_acconto,
+    tax_settlement_saldo_acconto, soglia_giorni_magazzino,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -1919,6 +1919,9 @@ class ForecastEngine:
         # base year, every later one reads the year just computed.
         prev_inc = source.base_inc
         prev_bs = source.base_bs
+        # Il settore comanda SOLO la soglia dei giorni di magazzino dedotti
+        # (Task 10): nessun altro punto del motore budget legge il settore.
+        settore = getattr(getattr(source.scenario, 'company', None), 'sector', None)
         # I `details` dell'anno precedente viaggiano con l'anno: la posizione
         # tributaria a saldo + acconto paga in N il debito generato a fine N-1,
         # e quel numero sta li'. `None` sul primo anno di piano.
@@ -1980,6 +1983,7 @@ class ForecastEngine:
                     prev_details=prev_details,
                     details=details,
                     overdraft=overdraft,
+                    settore=settore,
                     # L'anno PRECEDENTE del piano, non `forecast_year - 1`:
                     # con anni non consecutivi le due cose non coincidono, e il
                     # messaggio del kernel nominerebbe un anno che il piano non
@@ -2590,6 +2594,7 @@ class ForecastEngine:
         details=None,
         overdraft: "Optional[_Overdraft]" = None,
         previous_year: Optional[int] = None,
+        settore: Optional[int] = None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -2749,8 +2754,14 @@ class ForecastEngine:
             # quindi tacere equivarrebbe a dichiararsi puliti. E' la lista viva, che
             # i tre blocchi qui sotto riempiono man mano.
             details['degenerate_turnover_ratio'] = degenerate_days
+            # La soglia applicata si dichiara sempre, anche quando non c'e':
+            # `giorni_max: None` vuol dire «nessuna soglia» (settori 5 e 6).
+            details['soglia_giorni_magazzino'] = {
+                'settore': settore,
+                'giorni_max': soglia_giorni_magazzino(settore),
+            }
 
-        def _derived_days(stock, flow_base, name):
+        def _derived_days(stock, flow_base, name, soglia=MAX_DERIVED_TURNOVER_DAYS):
             """I giorni dedotti dall'anno base, o `None` se DEGENERI.
 
             Giacenza nulla ⇒ zero giorni, e non c'e' nulla di degenere: qualunque
@@ -2763,7 +2774,7 @@ class ForecastEngine:
                 degenerate_days.append(name)
                 return None
             days = stock / flow_base * DAYS
-            if days < 0 or days > MAX_DERIVED_TURNOVER_DAYS:
+            if days < 0 or (soglia is not None and days > soglia):
                 degenerate_days.append(name)
                 return None
             return days
@@ -2840,6 +2851,7 @@ class ForecastEngine:
         sp06 = sp06_trade + sp06e + sp06f
 
         # DIO → sp05 (inventory)
+        soglia_dio = soglia_giorni_magazzino(settore)
         dio = getattr(assumption, 'dio_days', None)
         if dio is not None:
             dio = D(str(dio))
@@ -2847,7 +2859,7 @@ class ForecastEngine:
         else:
             # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
             base_sp05 = _base('sp05_rimanenze')
-            dio = _derived_days(base_sp05, base_revenue, 'dio')
+            dio = _derived_days(base_sp05, base_revenue, 'dio', soglia=soglia_dio)
             if dio is None:
                 # Le rimanenze non hanno piano di scadenziamento: nulla da scorporare.
                 sp05 = base_sp05

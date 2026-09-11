@@ -657,7 +657,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   secco o, a scoperto concesso, in uno scoperto dichiarato.
 - **Working capital** comes from the reference year's turnover ratios. A ratio implying **more than a
   year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
-  carried instead, with a `degenerate_turnover_ratio` diagnostic — `_safe_divide` guards a zero
+  carried instead, with a `degenerate_turnover_ratio` diagnostic — except for inventory in Real
+  estate (sector 5) and Construction (6), where a stock longer than a year is the business: there the
+  ratio scales (`projection_common.soglia_giorni_magazzino`, one table for both engines; the budget
+  engine declares it in `details['soglia_giorni_magazzino']`) — `_safe_divide` guards a zero
   denominator, not a negligible one. The guard lives **only in the Python engines, and each one
   carries its own copy**: since 2026-09-02 the Proiezione tab renders the forecast this engine
   produced instead of recomputing it in TypeScript, so there is no second copy to keep in

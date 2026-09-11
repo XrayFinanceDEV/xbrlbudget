@@ -367,6 +367,17 @@ financing requirement <importo>` e non produce nulla; solo con `overdraft_allowe
 ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `sp16a` e nei
 `details` (`scoperto_generato`, `scoperto_residuo`) — vedi «Forecasting Engine» in `CLAUDE.md`.
 
+> **Per Immobiliare (5) ed Edilizia (6) la soglia sul DIO dedotto non c'è** (lotto 3A, Task 10):
+> un magazzino oltre l'anno lì è il mestiere (immobili in rimanenza, lavori in corso su ordinazione),
+> e i giorni dedotti scalano coi ricavi anche oltre 365. La tabella sta in un punto solo,
+> `projection_common.soglia_giorni_magazzino` (`None` = nessuna soglia, altrimenti 365 giorni),
+> usata da entrambi i motori. Vale **solo** per i giorni *dedotti* delle *rimanenze*: un
+> `dio_days` esplicito non passa dalla guardia in nessun settore, e DSO e DPO restano a 365
+> giorni ovunque. Il motore budget dichiara la soglia applicata ogni anno in
+> `details['soglia_giorni_magazzino']`: `{settore, giorni_max}`, con `giorni_max: null` che vuol
+> dire «nessuna soglia»; l'infrannuale aggiunge `soglia_giorni` al diagnostico
+> `degenerate_turnover_ratio` (vedi §5 di `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md`).
+
 ## 4-bis. Il nuovo finanziamento: che cosa sta a breve
 
 Un prestito nuovo è la legacy `financing_amount` / `financing_duration_years` /

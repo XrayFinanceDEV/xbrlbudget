@@ -168,6 +168,15 @@ verificata in **Rettifiche**. È la stessa regola dell'import — *misurare, mai
 
 Le aziende sane non si muovono: sotto la soglia il calcolo resta quello di prima.
 
+**Eccezione di settore per le rimanenze (lotto 3A, Task 10).** Per Immobiliare (settore 5) ed
+Edilizia (6) una giacenza oltre l'anno **è il mestiere** — immobili in rimanenza, lavori in corso
+su ordinazione — e lì la soglia non si applica alle rimanenze: il rapporto dedotto (anche oltre 1)
+scala sulla base proiettata, `None` invece di 1 come `max_ratio` di `_turnover_ratio`. La tabella
+sta in un punto solo per entrambi i motori, `projection_common.soglia_giorni_magazzino`. Le altre
+voci, in ogni settore, e un **denominatore nullo** in qualunque settore restano degeneri com'erano.
+Quando il diagnostic scatta, dichiara la soglia applicata nel campo `soglia_giorni`: `"365"`, o
+`null` dove di soglia non ce n'è — e nei settori senza soglia su `sp05_rimanenze` non scatta mai.
+
 > **La formula è duplicata**: `calculateProjectedBS` (frontend, `app/pratica/page.tsx`) e
 > `_project_balance_sheet` (backend). Devono restare d'accordo. Quando divergevano si otteneva
 > il caso peggiore — il plug di cassa del frontend scaricava i 165 M eccedenti sui debiti a

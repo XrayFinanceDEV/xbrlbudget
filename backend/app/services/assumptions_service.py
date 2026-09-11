@@ -358,7 +358,7 @@ def bulk_upsert_assumptions(
     ).first()
 
     if not scenario:
-        raise ValueError(f"Scenario {scenario_id} not found")
+        raise ValueError(f"Scenario {scenario_id} non trovato")
 
     # 2-4. Validazione condivisa col percorso di anteprima (Task 9): stesso
     # corpo malformato -> stesso messaggio, ovunque arrivi. Valida PRIMA di
@@ -430,7 +430,7 @@ def bulk_upsert_assumptions(
                 "assumptions_saved": assumptions_saved,
                 "forecast_generated": False,
                 "forecast_years": forecast_years_list,
-                "message": f"Assumptions saved successfully, but forecast generation failed: {str(e)}"
+                "message": f"Ipotesi salvate, ma il previsionale non è stato calcolato: {str(e)}"
             }
 
     return {
@@ -439,8 +439,8 @@ def bulk_upsert_assumptions(
         "assumptions_saved": assumptions_saved,
         "forecast_generated": forecast_generated,
         "forecast_years": sorted(forecast_years_list),
-        "message": "Assumptions saved and forecast generated successfully" if forecast_generated
-                   else "Assumptions saved successfully"
+        "message": "Ipotesi salvate e previsionale calcolato" if forecast_generated
+                   else "Ipotesi salvate"
     }
 
 
@@ -467,7 +467,7 @@ def get_assumptions_for_scenario(
     ).first()
 
     if not scenario:
-        raise ValueError(f"Scenario {scenario_id} not found")
+        raise ValueError(f"Scenario {scenario_id} non trovato")
 
     # Get assumptions ordered by year
     assumptions = db.query(models.BudgetAssumptions).filter(
@@ -500,7 +500,7 @@ def delete_assumptions_for_scenario(
     ).first()
 
     if not scenario:
-        raise ValueError(f"Scenario {scenario_id} not found")
+        raise ValueError(f"Scenario {scenario_id} non trovato")
 
     # Delete assumptions
     count = db.query(models.BudgetAssumptions).filter(
@@ -607,7 +607,7 @@ def apply_ce_overrides(
     Restituisce il numero di override applicati.
     """
     if not overrides:
-        raise ValueError("overrides list is required")
+        raise ValueError("Serve l'elenco degli override (overrides)")
 
     from decimal import Decimal as D
 
@@ -620,9 +620,9 @@ def apply_ce_overrides(
             value = entry.get("value")
 
             if not forecast_year or not field:
-                raise ValueError("Each override needs forecast_year and field")
+                raise ValueError("Ogni override richiede forecast_year e field")
             if field not in CE_OVERRIDE_FIELDS:
-                raise ValueError(f"Invalid override field: {field}")
+                raise ValueError(f"Campo di override non valido: {field}")
 
             if forecast_year not in assumption_cache:
                 assumption = db.query(models.BudgetAssumptions).filter(
@@ -630,7 +630,7 @@ def apply_ce_overrides(
                     models.BudgetAssumptions.forecast_year == forecast_year,
                 ).first()
                 if not assumption:
-                    raise LookupError(f"No assumptions found for year {forecast_year}")
+                    raise LookupError(f"Nessuna ipotesi per l'anno {forecast_year}")
                 assumption_cache[forecast_year] = assumption
 
             setattr(
@@ -693,7 +693,7 @@ def apply_sp_overrides(
     entry sullo stesso anno contano una volta sola).
     """
     if not overrides:
-        raise ValueError("overrides list is required")
+        raise ValueError("Serve l'elenco degli override (overrides)")
 
     try:
         assumption_cache: Dict[int, models.BudgetAssumptions] = {}
@@ -705,7 +705,7 @@ def apply_sp_overrides(
             value = entry.get("value")
 
             if not forecast_year or not field:
-                raise ValueError("Each override needs forecast_year and field")
+                raise ValueError("Ogni override richiede forecast_year e field")
 
             if forecast_year not in assumption_cache:
                 assumption = db.query(models.BudgetAssumptions).filter(
@@ -713,7 +713,7 @@ def apply_sp_overrides(
                     models.BudgetAssumptions.forecast_year == forecast_year,
                 ).first()
                 if not assumption:
-                    raise LookupError(f"No assumptions found for year {forecast_year}")
+                    raise LookupError(f"Nessuna ipotesi per l'anno {forecast_year}")
                 assumption_cache[forecast_year] = assumption
                 bag_cache[forecast_year] = dict(assumption.sp_overrides or {})
 

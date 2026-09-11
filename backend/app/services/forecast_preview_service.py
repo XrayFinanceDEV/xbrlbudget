@@ -20,7 +20,7 @@ def preview_forecast(db: Session, scenario_id: int, assumptions_list: List[Dict[
     # stesso corpo (validate_assumptions_list e' condivisa con quel percorso).
     scenario = db.query(models.BudgetScenario).filter(models.BudgetScenario.id == scenario_id).first()
     if not scenario:
-        raise ValueError(f"Budget scenario {scenario_id} not found")
+        raise ValueError(f"Scenario di budget {scenario_id} non trovato")
     # Il wizard e' budget-only: l'infrannuale ha il proprio motore
     # (IntraYearEngine) e le proprie tab (Confronto, Proiezione). Farlo
     # calcolare a questo endpoint con ForecastEngine produrrebbe due bilanci

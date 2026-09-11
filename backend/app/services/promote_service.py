@@ -26,19 +26,19 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         BudgetScenario.id == scenario_id
     ).first()
     if not scenario:
-        raise ValueError(f"Scenario {scenario_id} not found")
+        raise ValueError(f"Scenario {scenario_id} non trovato")
 
     if scenario.scenario_type != "infrannuale":
-        raise ValueError("Only infrannuale scenarios can be promoted")
+        raise ValueError("Solo gli scenari infrannuali si possono promuovere")
 
     # 2. Find the ForecastYear
     forecast_year = db.query(ForecastYear).filter(
         ForecastYear.scenario_id == scenario_id
     ).first()
     if not forecast_year:
-        raise ValueError("No projection found — run the projection first")
+        raise ValueError("Nessuna proiezione trovata: genera prima la proiezione")
     if not forecast_year.balance_sheet or not forecast_year.income_statement:
-        raise ValueError("Projection is incomplete (missing BS or IS)")
+        raise ValueError("La proiezione è incompleta (manca lo SP o il CE)")
 
     target_year = forecast_year.year
     company_id = scenario.company_id
@@ -124,7 +124,7 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     if mismatches:
         db.rollback()
         raise ValueError(
-            "Promotion aborted: field-by-field verification failed for "
+            "Promozione annullata: la verifica campo per campo non è riuscita per "
             + ", ".join(mismatches[:10])
         )
 
@@ -134,7 +134,7 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     if not target_validation.semantic_valid:
         db.rollback()
         raise ValueError(
-            "Promotion aborted: copied target failed semantic validation: "
+            "Promozione annullata: la copia non supera la validazione semantica: "
             + "; ".join(target_validation.warnings)
         )
 
@@ -145,7 +145,7 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         "financial_year_id": new_fy.id,
         "year": target_year,
         "company_id": company_id,
-        "message": f"Projection {target_year} promoted to full-year financial data",
+        "message": f"Proiezione {target_year} promossa a esercizio annuale",
         "verification": {
             "exact_match": True,
             "balance_sheet_fields": bs_verification["checked_fields"],

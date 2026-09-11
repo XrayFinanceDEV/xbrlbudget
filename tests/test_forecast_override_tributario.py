@@ -1079,3 +1079,56 @@ def test_ruling62_buco_vero_lato_lungo_sotto_si_rifiuta(monkeypatch):
             assert read_forecast_maps(db, sid) == []
     finally:
         engine.dispose()
+
+
+# ══ m-A (giro 3): articoli, importi e registro nei messaggi di rifiuto ══
+
+def test_ma_articoli_corretti_nei_messaggi(monkeypatch):
+    """«i altri debiti» e «dei altri debiti» (misura della revisione): le forme
+    con articolo vanno nel dizionario, non fissate nei message f-string.
+
+    Afferma le due forme corrette (`gli altri debiti` al nominale nel rifiuto
+    I1-bis/I-d, `degli altri debiti` al genitivo nel rifiuto I-c) e che la
+    forma mozza non ricompaia mai.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import re
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _c, _s, _r = _esito(db, "ma-oltre", _righe_base(
+                piano=PIANO_ALTRI_CENT,
+                overrides={2027: {"sp17g_altri_debiti_lungo": 250.25}}))
+            assert res["forecast_generated"] is False, res["message"]
+            assert "gli altri debiti hanno un piano" in res["message"], res["message"]
+            # «gl[i altri debiti]» contiene la stringa mozza: il guard-behind
+            # distingue «i altri» isolato da «i altri» dentro «gli altri».
+            assert not re.search(r"(?<![A-Za-z])i altri debiti", res["message"]), res["message"]
+        with sessions() as db:
+            res2, _c2, _s2, _r2 = _esito(db, "ma-breve", _righe_base(
+                piano=PIANO_ALTRI_CENT,
+                overrides={2027: {"sp16g_altri_debiti_breve": D("0")}}))
+            assert res2["forecast_generated"] is False, res2["message"]
+            assert "il piano di scadenziamento degli altri debiti" in res2["message"], res2["message"]
+            assert "dei altri debiti" not in res2["message"], res2["message"]
+    finally:
+        engine.dispose()
+
+
+def test_ma_importi_in_formato_italiano(monkeypatch):
+    """«deve pagare 1333.335» (misura della revisione): gli importi dei rifiuti
+    escono al centesimo in formato italiano, `1.333,33`, non grezzi col punto.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _c, _s, _r = _esito(db, "ma-importi", _righe_base(
+                piano=PIANO_TRIB_CENT,
+                overrides={2027: {"sp16e_debiti_tributari_breve": D("500.25")}}))
+            assert res["forecast_generated"] is False, res["message"]
+            assert "vale 500,25" in res["message"], res["message"]
+            assert "deve pagare 1.333,33" in res["message"], res["message"]
+            assert "1333.33" not in res["message"] and "500.25" not in res["message"], res["message"]
+    finally:
+        engine.dispose()

@@ -822,6 +822,20 @@ class ForecastEngine:
     _PREGRESSO_PASSO: Dict[str, str] = {"debiti_tributari": "Imposte"}
     _PREGRESSO_PASSO_DEFAULT = "Pregresso e nuovo"
 
+    # Le forme di nomea coi articoli giusti per i messaggi di rifiuto (rilievo
+    # m-A della revisione di `c8317ca`): `PREGRESSO_LABELS` e' senza articolo
+    # perche' nasce per le schermate, e i messaggi che lo precedevano con
+    # l'articolo fisso producevano «i altri debiti» e «dei altri debiti».
+    # (nominale, genitivo): «gli altri debiti hanno un piano», «il piano
+    # degli altri debiti deve pagare».
+    _PREGRESSO_ARTICOLI: Dict[str, Tuple[str, str]] = {
+        "crediti_commerciali": ("i crediti commerciali", "dei crediti commerciali"),
+        "debiti_fornitori": ("i debiti verso fornitori", "dei debiti verso fornitori"),
+        "debiti_tributari": ("i debiti tributari", "dei debiti tributari"),
+        "debiti_previdenziali": ("i debiti previdenziali", "dei debiti previdenziali"),
+        "altri_debiti": ("gli altri debiti", "degli altri debiti"),
+    }
+
     @classmethod
     def _passo_pregresso(cls, saldo: str) -> str:
         return cls._PREGRESSO_PASSO.get(saldo, cls._PREGRESSO_PASSO_DEFAULT)
@@ -899,12 +913,11 @@ class ForecastEngine:
                     and not manuale and letta_l_anno_dopo):
                 raise ValueError(
                     f"L'override di {campo_tax} non è ammesso: la posizione tributaria è a "
-                    "saldo + acconto e l'anno dopo non legge questa riga, legge la "
-                    "scomposizione dichiarata nei `details`. Il valore forzato sparirebbe senza "
-                    "alcun versamento, con la cassa ad assorbire la differenza. La via lecita "
-                    f"è il piano di scadenziamento al passo "
-                    f"{cls._passo_pregresso('debiti_tributari')}, oppure svuotare la cella "
-                    "(value: null)."
+                    "saldo + acconto e l'anno dopo riparte dai numeri del piano, non "
+                    "da questa riga. Il valore forzato sparirebbe senza alcun "
+                    "versamento, con la cassa ad assorbire la differenza. Modifica "
+                    f"il piano di scadenziamento al passo «{cls._passo_pregresso('debiti_tributari')}», "
+                    "oppure svuota la cella (value: null)."
                 )
             # (3) lato breve sotto il rateizzato che il piano deve pagare dopo.
             for saldo, (breve, _oltre) in cls._PREGRESSO_SP_FIELDS.items():
@@ -929,24 +942,28 @@ class ForecastEngine:
                 forzato = Decimal(str(ov[breve]))
                 if forzato < residuo:
                     raise ValueError(
-                        f"L'override di {breve} non è ammesso: vale {forzato}, ma il piano di "
-                        f"scadenziamento dei {PREGRESSO_LABELS[saldo]} deve pagare {residuo} "
-                        "l'anno dopo. Sotto quella quota l'override verrebbe ripristinato dal "
-                        "calendario e la stessa rata pagata due volte, con la cassa ad "
-                        "assorbire la differenza senza alcun flusso. Resti sopra la quota, "
-                        f"oppure modifichi il piano al passo {cls._passo_pregresso(saldo)} o "
-                        "svuoti la cella (value: null)."
+                        f"L'override di {breve} non è ammesso: vale "
+                        f"{_importo_it(forzato)}, ma il piano di scadenziamento "
+                        f"{cls._PREGRESSO_ARTICOLI[saldo][1]} deve pagare "
+                        f"{_importo_it(residuo)} l'anno dopo. Sotto quella quota "
+                        "l'override verrebbe ripristinato dal calendario e la "
+                        "stessa rata pagata due volte, con la cassa ad assorbire "
+                        "la differenza senza alcun flusso. Non scendere sotto "
+                        f"quella quota, oppure modifica il piano al passo "
+                        f"«{cls._passo_pregresso(saldo)}» o svuota la cella "
+                        "(value: null)."
                     )
 
     @classmethod
     def _messaggio_override_oltre(cls, campo: str, saldo: str) -> str:
         return (
-            f"L'override di {campo} non è ammesso: i {PREGRESSO_LABELS[saldo]} hanno un piano "
+            f"L'override di {campo} non è ammesso: "
+            f"{cls._PREGRESSO_ARTICOLI[saldo][0]} hanno un piano "
             "di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo "
             "compreso. Il valore forzato verrebbe salvato e cancellato in silenzio l'anno dopo, "
-            "con la cassa ad assorbire la differenza senza alcun flusso. La via lecita è "
-            f"modificare il piano al passo {cls._passo_pregresso(saldo)}, oppure svuotare la "
-            "cella (value: null) e lasciare che la riga segua il piano."
+            "con la cassa ad assorbire la differenza senza alcun flusso. Modifica il piano al "
+            f"passo «{cls._passo_pregresso(saldo)}», oppure svuota la cella "
+            "(value: null) e lascia che la riga segua il piano."
         )
 
     @staticmethod

@@ -591,6 +591,85 @@ def test_override_breve_sotto_il_rateizzato_si_rifiuta_sopra_no(monkeypatch, pia
             assert res2["forecast_generated"] is True, res2["message"]
             lette = _dettagli(db, f"i-c-sopra-{campo}", cid2, sid2, rows2)
             assert _letto(lette, 2027, campo) == _q(sopra)
+            # Rilievo m-E, punto 1: l'altra meta' del cerchio. Il rifiuto
+            # (ramo `sotto`) chiude la via rotta; qui si deve vedere che la via
+            # lecita TENGA, e il numero che lo dice non e' la cella del 2027
+            # (quella e' l'override stesso) bensi' lo scarto di flusso
+            # dell'anno dopo: un debito che si e' spostato senza un versamento
+            # che lo dice vive li', non nell'anno dell'override.
+            assert _scarto_di_flusso(lette, 2028) == D("0.00"), (
+                campo, _scarto_di_flusso(lette, 2028))
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("forzato,si_genera", [
+    (D("1333.33"), True),    # la rata che il piano deve pagare nel 2028, ESATTA
+    (D("1333.32"), False),   # un centesimo sotto: e' la rata pagata due volte
+])
+def test_i_c_confine_la_rata_dovuta_esatta_si_genera_un_centesimo_sotto_no(
+        monkeypatch, forzato, si_genera):
+    """Rilievo m-E, punto 2: il confine di I-c e' il `residual_short` del
+    piano, NON meta' di qualcosa, e la confronto e' `<` (sotto), non `<=`.
+
+    Misure della revisione (B5/B6): con piano tributario 6.000 + 4.000 e rate
+    1.333,34/1.333,33/1.333,33, forzare la rata DOVUTA l'anno dopo (1.333,33)
+    genera, con scarto di flusso 0,00; forzare 1.333,32 si rifiuta. Un `<` in
+    `<=` si vede solo qui: e' la mutazione 3 della lista del giro.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, f"i-c-confine-{forzato}", _righe_base(
+                piano=PIANO_TRIB_CENT,
+                overrides={2027: {"sp16e_debiti_tributari_breve": forzato}}))
+            if si_genera:
+                assert res["forecast_generated"] is True, res["message"]
+                lette = _dettagli(db, f"i-c-confine-{forzato}", cid, sid, rows)
+                assert _letto(lette, 2027, "sp16e_debiti_tributari_breve") == forzato
+                assert _scarto_di_flusso(lette, 2028) == D("0.00"), (
+                    _scarto_di_flusso(lette, 2028))
+                # La riga lo dichiara: quota generata 0, tutta la cella e'
+                # la rata che il calendario doveva pagare.
+                d = _riga_pregresso(lette[2027][1], "debiti_tributari")
+                assert _q(d["generated"]) == D("0.00"), d
+            else:
+                assert res["forecast_generated"] is False, res["message"]
+                assert "deve pagare" in res["message"], res["message"]
+                assert read_forecast_maps(db, sid) == []
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("forzato,apertura,generato", [
+    (D("5000.00"),  D("5000.00"), D("0.00")),       # sotto il credito d'apertura
+    (D("20000.00"), D("10000.00"), D("10000.00")),  # sopra il credito d'apertura
+])
+def test_override_sp06e_riempie_prima_il_credito_d_apertura(
+        monkeypatch, forzato, apertura, generato):
+    """Rilievo m-E, punto 5: la regola dichiarata della ripartizione forzata.
+
+    `test_override_sp06e_...` (in cima a questo file) asseriva gia' la SOMMA
+    delle due chiavi pari alla cella; qui si asserisce l'ORDINE, che e' la
+    meta' mancante: prima si esaurisce `opening_credit_left` (il credito
+    portato dall'anno prima), il resto va a `generated_credit`. Il gemello
+    senza override dichiara 10.000,00 + 24.895,58 = 34.895,58: sotto 10.000
+    tutta la cella e' credito d'apertura, sopra la eccedenza e' generata.
+    E' la mutazione 1 (ripartizione invertita) che questa riga uccide.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, f"split-{forzato}", _righe_base(
+                overrides={2027: {"sp06e_crediti_tributari_breve": forzato}}))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, f"split-{forzato}", cid, sid, rows)
+            imp = lette[2027][1]["imposte"]
+            assert _q(D(str(imp["opening_credit_left"]))) == _q(apertura), imp
+            assert _q(D(str(imp["generated_credit"]))) == _q(generato), imp
+            assert _q(apertura) + _q(generato) == _letto(lette, 2027, "sp06e_crediti_tributari_breve")
     finally:
         engine.dispose()
 

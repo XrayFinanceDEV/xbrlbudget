@@ -44,6 +44,7 @@ import pytest
 from backend.app.api.v1 import budget_scenarios
 from backend.app.schemas.budget import BudgetScenarioCreate
 from calculations.forecast_engine import ForecastEngine
+from database.models import BudgetScenario
 from tests.e2e_kit import memory_sessions, read_forecast_maps
 
 from tests.test_forecast_dichiarato_vs_persistito import (
@@ -260,7 +261,8 @@ def test_reintegro_dell_aggregato_quando_non_resta_niente_libero():
 
 # ─────────────── I-1: l'aggregato forzato, sul percorso di servizio ───────────────
 
-def _esito_aggregato(db, user, tag, piano=None, indice=None, anno_forza=2027):
+def _esito_aggregato(db, user, tag, piano=None, indice=None, anno_forza=2027,
+                     manuale=False):
     """Bulk reale, `sp_overrides` sull'AGGREGATO `sp16_debiti_breve` in ogni anno."""
     company_id = _base_year(db, user)
     sc = budget_scenarios.create_budget_scenario(
@@ -272,6 +274,14 @@ def _esito_aggregato(db, user, tag, piano=None, indice=None, anno_forza=2027):
                 for y in (2027, 2028, 2029)]
     else:
         rows = [dict(forecast_year=y, revenue_growth_pct=D("3.33")) for y in (2027, 2028, 2029)]
+    if manuale:
+        # La VIA MANUALE fiscale (le percentuali esplicite che fanno
+        # `manual_tax_position`): l'unica rotta che porta `sp16e` fuori dal
+        # calendario anche senza piano, e l'abbinamento con l'indice era da
+        # provare (rilievo m-E, punto 4).
+        for r in rows:
+            r["sp06e_growth_pct"] = 0
+            r["sp16e_growth_pct"] = 0
     if piano is not None:
         rows[0]["pregresso"] = piano
     if indice is not None:
@@ -341,6 +351,57 @@ def test_aggregato_forzato_senza_piano_vince_e_il_residuo_sta_al_secchio(monkeyp
                     "e' la mutazione M1, il difetto del genitore")
                 assert sum((bs[c] for c in ForecastEngine._SP16_RIGHE), D("0")) == \
                     bs["sp16_debiti_breve"], anno
+    finally:
+        engine.dispose()
+
+
+def test_aggregato_forzato_senza_piano_il_residuo_NOMINA_il_secchio(monkeypatch):
+    """Rilievo m-E, punto 3: il test sopra asserisce il persistito, mai la
+    DICHIARAZIONE. Qui `details['residuo_quadratura']` deve nominare
+    `sp16g_altri_debiti_breve` — la massa che si e' spostata dall'aggregato
+    al secchio deve potersi leggere, non solo quadrare.
+
+    Misura (questa coda, 2027): +15.000,00 sul secchio — l'intera differenza
+    fra il forzato 150.000,00 e il 135.000,00 delle righe.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, sid, rows = _esito_aggregato(db, "i1-nomina", "x")
+            assert res["forecast_generated"] is True, res["message"]
+            cid = db.query(BudgetScenario).filter(
+                BudgetScenario.id == sid).one().company_id
+            prev = budget_scenarios.preview_forecast_route(
+                cid, sid, request={"assumptions": rows}, user_id="i1-nomina", db=db)
+            nominato = {a["year"]: [p for p in (a["details"].get("residuo_quadratura") or [])
+                                   if p["campo"] == "sp16g_altri_debiti_breve"]
+                        for a in prev["forecast_years"]}
+            assert nominato[2027], (nominato, "nessuna posatura nomina il secchio")
+            assert D(str(nominato[2027][0]["importo"])) == D("15000.00"), nominato[2027]
+    finally:
+        engine.dispose()
+
+
+def test_aggregato_forzato_con_indice_sp16g_e_via_manuale_si_rifiuta(monkeypatch):
+    """Rilievo m-E, punto 4: I-1 sul PERCORSO DI SERVIZIO, non solo in
+    batteria. L'indice su `sp16g` congela per gruppo tutto il breve
+    (`_SP_OPERATIVI`), la via manuale toglie anche l'ultima scusa (che
+    `sp16e` segua il calendario): con nessuna riga libera il totale forzato
+    non e' un centesimo di quadratura bensi' la MASSA dell'override, e la
+    risposta e' il rifiuto — `forecast_generated is False`, come lo fu per
+    il piano di `test_piano_altri_aggregato_forzato_si_rifiuta_e_non_lascia_nulla`.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, sid, _rows = _esito_aggregato(
+                db, "i1-ind-man", "x", indice={"sp16g": "ricavi"}, manuale=True)
+            assert res["forecast_generated"] is False, res["message"]
+            assert "Il totale forzato" in res["message"], res["message"]
+            assert "sp16_debiti_breve" in res["message"], res["message"]
+            assert read_forecast_maps(db, sid) == [], "un rifiuto non lascia nulla"
     finally:
         engine.dispose()
 

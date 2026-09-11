@@ -1429,13 +1429,6 @@ class ForecastEngine:
                 }
         return applied, ignored
 
-    # Il secchio di ciascun gruppo e' la riga che IL GRUPPO usa come ripiego:
-    # se e' gia' forzata da un piano o da un'indicizzazione, tutte le sue righe
-    # operative lo sono (il cammino a ritroso non lascerebbe nulla di libero).
-    # Per GRUPPO, non per unione: `sp17g` forzato non deve togliere il ripiego a
-    # `sp16`, o il centesimo del gruppo `sp16` finisce sull'aggregato e sulla
-    # cassa (rilievo I-2 della revisione di `6e5c0f7`, tabella in laboratorio:
-    # "indice solo `sp17g`" -> `sp16_debiti_breve` -0,01).
     _SP16_RIGHE: Tuple[str, ...] = (
         "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
         "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
@@ -1448,6 +1441,21 @@ class ForecastEngine:
         "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
         "sp17g_altri_debiti_lungo",
     )
+
+    # (Task 12, lotto 3A, giro di correzione 1) L'allargamento che
+    # `_sp_forced_fields` (sotto) applica quando il SECCHIO di default di un
+    # gruppo (`sp16g`/`sp17g`) e' gia' forzato da un piano di pregresso o da
+    # un'indicizzazione: l'intero gruppo operativo (`d`, `e`, `f`, `g`) entra
+    # fra i forzati, non solo il secchio. Restaurato com'era su `24dea0f`
+    # (nome e semantica identici — la consegna `2946b6a` lo aveva rimosso, e
+    # la revisione `task-12-review-protezioni.md` ha misurato perche' non si
+    # poteva: senza, un `sp_overrides` sull'aggregato con UN SOLO campo del
+    # gruppo governato altrove non veniva piu' rifiutato — genera, scaricando
+    # la MASSA dell'override (non un centesimo: misurato fino a 31.666,66) su
+    # una riga operativa "libera" ma estranea, `sp16f`/previdenza in
+    # entrambi gli scenari misurati, `campo_dichiarato: False`). Usato SOLO
+    # dentro `_sp_forced_fields`, quindi SOLO dal cancello I-1 — vedi il
+    # commento li' sotto sul perche' sono due insiemi.
     _SP_OPERATIVI: Dict[str, Tuple[str, ...]] = {
         "sp16g_altri_debiti_breve": ("sp16d_debiti_fornitori_breve",
                                      "sp16e_debiti_tributari_breve",
@@ -1461,12 +1469,29 @@ class ForecastEngine:
 
     @classmethod
     def _sp_forced_fields(cls, pregresso, details, assumption=None) -> "frozenset[str]":
-        """L'UNICA espressione dei campi `sp` che il normalizzatore non puo'
-        spostare. Costruirla a pezzi in `compute_forecast` e' cio' che ha permesso
-        alla condizione globale di I-2 (un secchio forzato = tutti e otto i
-        dichiarati) di sopravvivere alla correzione: qui motore e test guardano
-        la stessa funzione, e `test_sp_forced_fields_e_l_espressione_reale`
-        la fissa caso per caso.
+        """L'insieme AMPIO: usato SOLO dal cancello I-1 (un `sp_overrides`
+        sull'aggregato `sp16`/`sp17` si rifiuta quando il gruppo e' governato
+        altrove), MAI per scegliere il bersaglio del residuo — quello e'
+        `_sp_target_forced_fields`, sotto.
+
+        (Task 12, lotto 3A, giro di correzione 1) Perche' sono DUE insiemi,
+        non uno (`task-12-review-protezioni.md`, Q2): la domanda del cancello
+        I-1 non e' "resta un campo libero per posarci un centesimo?" — e' "il
+        totale che l'utente ha forzato ha ancora una riga di dettaglio LIBERA
+        su cui il motore possa scaricare la MASSA di quel totale, se
+        servisse?". Le due domande hanno risposte diverse quando SOLO il
+        secchio di default e' governato: un centesimo di arrotondamento puo'
+        benissimo andare su `sp16f` (libero) anche se `sp16g` ha un piano — e'
+        esattamente cio' che `_sp_target_forced_fields` fa, senza allargamento
+        — ma un OVERRIDE dell'aggregato in quello stesso scenario non puo':
+        se il motore lasciasse un campo "libero per il centesimo" assorbire
+        anche la massa dell'override, quella massa finirebbe scritta su una
+        riga che nessun piano descrive (qui: previdenza), non dichiarata, e
+        indistinguibile da un vero debito. Il cancello deve quindi vedere il
+        gruppo COME SE fosse governato per intero non appena una sua voce lo
+        e' — l'allargamento di `_SP_OPERATIVI` — mentre la scelta del
+        bersaglio, quando il cancello NON scatta, deve restare libera di usare
+        una riga che nessun piano ha scritto.
 
         Tre fonti, piu' gli aggregati forzati da `sp_overrides` (I-1): un totale
         forzato SENZA nessuna sua voce forzata e' il motore che deve rispettare
@@ -1474,6 +1499,14 @@ class ForecastEngine:
         Se invece una voce del gruppo e' forzata, `_apply_sp_overrides`
         ricostruisce comunque l'aggregato dalla somma, e li' il residuo torna un
         arrotondamento: l'aggregato NON entra.
+
+        (Task 12, lotto 3A) Quarta fonte: `sp16e_debiti_tributari_breve` quando
+        la posizione tributaria e' governata dal kernel saldo+acconto
+        (`details['imposte']['mode'] == 'saldo_acconto'`) — la dichiarazione
+        di quella cella non sta in un piano di pregresso ne' in
+        un'indicizzazione, ma in `details['imposte']`, e vale comunque: un
+        residuo posato li' sopra la farebbe divergere dal saldo dovuto che
+        `_realign_sp_declarations` dichiara.
         """
         piano_o_indice = (cls._pregresso_sp_forced_fields(pregresso)
                           | cls._indexed_sp_forced_fields(details))
@@ -1481,6 +1514,46 @@ class ForecastEngine:
         for secchio, righe in cls._SP_OPERATIVI.items():
             if secchio in piano_o_indice:
                 forzati.update(righe)
+        if ((details or {}).get('imposte') or {}).get('mode') == 'saldo_acconto':
+            forzati.add('sp16e_debiti_tributari_breve')
+        ov = getattr(assumption, 'sp_overrides', None) if assumption is not None else None
+        if isinstance(ov, dict):
+            for aggregato, righe in (("sp16_debiti_breve", cls._SP16_RIGHE),
+                                     ("sp17_debiti_lungo", cls._SP17_RIGHE)):
+                if (ov.get(aggregato) is not None
+                        and not any(ov.get(r) is not None for r in righe)):
+                    forzati.add(aggregato)
+        return frozenset(forzati)
+
+    @classmethod
+    def _sp_target_forced_fields(cls, pregresso, details, assumption=None) -> "frozenset[str]":
+        """L'insieme STRETTO: usato SOLO per scegliere il bersaglio del
+        residuo di quadratura (domanda "ii" del docstring di `_sp_forced_
+        fields`, sopra) — mai per il cancello I-1, che guarda l'insieme
+        AMPIO. Sono i campi che i `details` hanno gia' scritto di proposito
+        e dichiarato — un piano di pregresso ATTIVO, una voce indicizzata,
+        `sp16a`/`sp17a` (la ripartizione pregresso/prestito nuovo), `sp16e`
+        quando il kernel tributario e' in modo `saldo_acconto` — SENZA
+        l'allargamento `_SP_OPERATIVI`: un piano o un indice sul solo secchio
+        di default (`sp16g`/`sp17g`) non congela anche le altre righe
+        operative dello stesso gruppo (`d`/`e`/`f`), che restano il ripiego
+        naturale del proprio gruppo, come prima di questo lotto (misurato:
+        `test_budget_pregresso.py::test_the_quadratura_residual_never_
+        rewrites_a_field_the_plan_wrote` e `test_forecast_indicizzazione.py::
+        test_the_quadratura_residual_never_rewrites_an_indexed_voce` vanno
+        rossi se questa funzione allarga).
+
+        Corpo identico a `_sp_forced_fields` meno il ciclo su `_SP_OPERATIVI`:
+        stesse tre fonti piu' l'aggregato forzato da `sp_overrides` (qui
+        innocuo per la scelta del bersaglio, dato che il nome dell'aggregato
+        non compare mai in `_CAMPI_NEUTRI_RESIDUO` — la simmetria con
+        `_sp_forced_fields` e' voluta, non un residuo di copia-incolla).
+        """
+        piano_o_indice = (cls._pregresso_sp_forced_fields(pregresso)
+                          | cls._indexed_sp_forced_fields(details))
+        forzati = set(piano_o_indice) | set(cls._BANK_DEBT_SPLIT_FIELDS)
+        if ((details or {}).get('imposte') or {}).get('mode') == 'saldo_acconto':
+            forzati.add('sp16e_debiti_tributari_breve')
         ov = getattr(assumption, 'sp_overrides', None) if assumption is not None else None
         if isinstance(ov, dict):
             for aggregato, righe in (("sp16_debiti_breve", cls._SP16_RIGHE),
@@ -1510,10 +1583,48 @@ class ForecastEngine:
             if code in SP_INDEXABLE_FIELDS
         )
 
+    # (Task 12, lotto 3A) I campi NEUTRI rispetto ai confini di KPI, per ogni
+    # gruppo che `_normalize_balance_sheet_cents` normalizza al centesimo:
+    # l'unico insieme su cui il residuo di quadratura puo' atterrare. Il
+    # primo elemento di ciascuna tupla e' il default di oggi — un gruppo
+    # senza protezioni non si sposta di un centesimo — gli altri sono
+    # l'ordine di ripiego quando il default e' forzato. Mai bersaglio:
+    # `sp04b`/`sp04e` (il primo e' un credito immobilizzato esigibile entro
+    # l'anno, il secondo e' derivato), `sp06e`/`sp06f`/`sp07e`/`sp07f`
+    # (fuori dal DSO e dalle masse del pregresso), `sp12h` (segno proprio),
+    # `sp14b` (scritta dalle imposte differite), `sp14c` (derivato),
+    # `sp16a-c`/`sp17a-c` (confine PFN e confine del rendiconto: sono un
+    # debito finanziario, mai il ripiego di un residuo di arrotondamento).
+    _CAMPI_NEUTRI_RESIDUO: Dict[str, Tuple[str, ...]] = {
+        "sp01_crediti_soci": ("sp01b_parte_da_richiamare", "sp01a_parte_richiamata"),
+        "sp02_immob_immateriali": ("sp02g_altre_immob_imm", "sp02a_costi_impianto", "sp02b_costi_sviluppo",
+                                   "sp02c_brevetti", "sp02d_concessioni", "sp02e_avviamento", "sp02f_immob_in_corso"),
+        "sp03_immob_materiali": ("sp03d_altri_beni", "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
+                                 "sp03c_attrezzature", "sp03e_immob_in_corso"),
+        "sp04_immob_finanziarie": ("sp04d_altri_titoli", "sp04a_partecipazioni", "sp04c_crediti_immob_lungo"),
+        "sp05_rimanenze": ("sp05e_acconti", "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+                           "sp05c_lavori_in_corso", "sp05d_prodotti_finiti"),
+        "sp06_crediti_breve": ("sp06g_crediti_altri_breve", "sp06d_crediti_controllanti_breve",
+                               "sp06c_crediti_collegate_breve", "sp06b_crediti_controllate_breve",
+                               "sp06a_crediti_clienti_breve"),
+        "sp07_crediti_lungo": ("sp07g_crediti_altri_lungo", "sp07d_crediti_controllanti_lungo",
+                               "sp07c_crediti_collegate_lungo", "sp07b_crediti_controllate_lungo",
+                               "sp07a_crediti_clienti_lungo"),
+        "sp12_riserve": ("sp12g_utili_perdite_portati", "sp12e_altre_riserve", "sp12a_riserva_sovrapprezzo",
+                         "sp12b_riserve_rivalutazione", "sp12c_riserva_legale", "sp12d_riserve_statutarie",
+                         "sp12f_riserva_copertura_flussi"),
+        "sp14_fondi_rischi": ("sp14d_altri_fondi", "sp14a_fondi_trattamento_quiescenza"),
+        "sp16_debiti_breve": ("sp16g_altri_debiti_breve", "sp16f_debiti_previdenza_breve",
+                              "sp16e_debiti_tributari_breve", "sp16d_debiti_fornitori_breve"),
+        "sp17_debiti_lungo": ("sp17g_altri_debiti_lungo", "sp17f_debiti_previdenza_lungo",
+                              "sp17e_debiti_tributari_lungo", "sp17d_debiti_fornitori_lungo"),
+    }
+
     @classmethod
     def _normalize_balance_sheet_cents(
         cls, values: Dict, *, recompute_cash: bool = True,
         forced_fields: "frozenset[str]" = frozenset(),
+        forced_fields_gate: "Optional[frozenset[str]]" = None,
         details: Optional[Dict[str, Any]] = None,
         overdraft: "Optional[_Overdraft]" = None,
         sweep: "Optional[_Sweep]" = None,
@@ -1542,19 +1653,50 @@ class ForecastEngine:
 
         `forced_fields` sono i campi che il motore ha scritto di proposito e ha
         gia' DICHIARATO altrove (oggi: i lati breve/oltre di un saldo con piano di
-        pregresso). Il residuo non si posa su di loro — e' la stessa cura che il
-        Task 11 ha applicato al conto economico, qui sul patrimoniale: i secchi di
-        default di `sp16`/`sp17` sono `sp16g`/`sp17g`, cioe' **esattamente** i campi
-        che il piano `altri_debiti` scrive, e un centesimo di residuo li faceva
-        divergere dal numero dichiarato nei `details` (misurato: `sp17g` persistito
-        12.048,41 contro 12.048,40 dichiarato). Se sono forzati, il residuo va
-        sull'ultimo campo libero del gruppo; se nessun operativo e' libero,
-        l'aggregato diventa la somma delle righe (e la cassa si muove dello
-        stesso centesimo), dichiarato in `residuo_quadratura`; un override
-        dell'aggregato in quel caso si RIFIUTA (I-1), perche' li' il residuo non
-        e' un arrotondamento ma la massa dell'override. Il chiamante
-        infrannuale non lo passa: default vuoto, stesso comportamento di sempre.
+        pregresso, le voci indicizzate, `sp16a`/`sp17a`, e `sp16e` quando il
+        kernel tributario e' in modo `saldo_acconto`) — l'insieme STRETTO
+        (`ForecastEngine._sp_target_forced_fields`). Il residuo non si posa
+        su di loro — e' la stessa cura che il Task 11 ha applicato al conto
+        economico, qui sul patrimoniale.
+
+        (Task 12, lotto 3A) Il bersaglio per ogni gruppo e' il primo campo di
+        `_CAMPI_NEUTRI_RESIDUO[aggregato]` NON in `forced_fields` — mai un
+        debito/credito finanziario, mai l'aggregato stesso. Se **tutti** i
+        campi neutri del gruppo sono forzati, il residuo va comunque sul primo
+        di essi (`_CAMPI_NEUTRI_RESIDUO[aggregato][0]`) e la posatura si
+        DICHIARA (`campo_dichiarato: True` in `residuo_quadratura`) — mai
+        sull'aggregato, che di quelle righe resta la somma per definizione (e
+        la cassa si muove dello stesso centesimo). Quando il bersaglio e' il lato
+        breve di un saldo che `details['pregresso']` descrive in modo
+        `legacy`, quel `generated` si riallinea dell'importo posato: dichiarato
+        = persistito vale anche per il centesimo di quadratura, non solo per
+        l'override. Il chiamante infrannuale non lo passa: default vuoto,
+        stesso comportamento di sempre.
+
+        (Task 12, lotto 3A, giro di correzione 1) `forced_fields_gate` e' un
+        SECONDO insieme, quello AMPIO (`ForecastEngine._sp_forced_fields`, con
+        l'allargamento `_SP_OPERATIVI`) — se omesso, coincide con `forced_
+        fields` (i test diretti che passano un solo `forced_fields=` non
+        cambiano comportamento). Serve SOLO al cancello I-1: un `sp_overrides`
+        sull'aggregato `sp16`/`sp17`, quando anche una SOLA voce del gruppo e'
+        governata da un piano o da un'indicizzazione, si RIFIUTA — perche' li'
+        il residuo non e' un arrotondamento ma la MASSA dell'override
+        (misurato: piano `altri_debiti` + `sp16_debiti_breve` forzata a
+        150.000, senza questo cancello ampio la massa si scriveva su
+        `sp16f_debiti_previdenza_breve`, non dichiarata, fino a 31.666,66 —
+        `task-12-review-protezioni.md`, rilievo Critico 1). Il gate guarda
+        SOLO se un campo neutro e' libero secondo l'insieme AMPIO: se lo e',
+        non rifiuta, e la scelta del bersaglio vero resta all'insieme STRETTO
+        di `forced_fields` — le due domande sono deliberatamente separate
+        (vedi il docstring di `_sp_forced_fields`), perche' un allargamento
+        unico per entrambe riapre l'una o l'altra falla (misurato in
+        `task-12-review-protezioni.md` Q2: senza la separazione, l'allargamento
+        fa fallire `test_budget_pregresso.py`/`test_forecast_indicizzazione.py`
+        se usato per il bersaglio, o lascia aperto I-1 se non usato per il
+        cancello).
         """
+        if forced_fields_gate is None:
+            forced_fields_gate = forced_fields
         result = cls._quantize_values(values)
         groups = {
             "sp01_crediti_soci": (
@@ -1638,23 +1780,37 @@ class ForecastEngine:
         posati: List[Dict[str, Any]] = []
         if details is not None:
             details['residuo_quadratura'] = posati
-        # I3(b): i sotto-campi FINANZIARI di `sp16`/`sp17` (banche, altri
-        # finanziari, obbligazioni) non possono mai essere il ripiego del
-        # cammino a ritroso. Sono un confine PFN e, dopo questo lotto, anche il
-        # confine operativo/finanziario del rendiconto (`sp16 −
-        # financial_debt_short`): un residuo posato su `sp16c` scrive debito
-        # obbligazionario su un'azienda che non ne ha — con segno negativo, nei
-        # casi peggiori (sonda 40f0332 vs 0207c93: `sp16c −0,01 … −0,02` per
-        # quattro anni su uno scenario senza piano ne' indicizzazione). Se
-        # nessun operativo e' libero l'aggregato segue la somma (e la cassa si
-        # muove dello stesso centesimo) — ma e' DICHIARATO in
-        # `residuo_quadratura`, come sempre. Se anche l'aggregato e' forzato,
-        # niente posatura: si rifiuta, vedi I-1 nel ramo qui sotto.
-        _cammino_esclusi = {
-            "sp16_debiti_breve": cls._BANK_DEBT_FIELDS_SP16,
-            "sp17_debiti_lungo": cls._BANK_DEBT_FIELDS_SP17,
-        }
-        for aggregate, (group_fields, residual_field) in groups.items():
+        # (Task 12, lotto 3A) Il bersaglio del residuo di quadratura di OGNI
+        # gruppo viene da `_CAMPI_NEUTRI_RESIDUO`, non piu' da un cammino a
+        # ritroso su `groups`: la tabella elenca, per ciascun gruppo, i soli
+        # campi neutri rispetto ai confini di KPI (mai un debito/credito
+        # finanziario, un fondo o un credito fiscale, una riserva a segno
+        # proprio — vedi il commento della tabella, sopra). Il primo elemento
+        # di ogni tupla e' il default di oggi, cosi' un gruppo senza
+        # protezioni non si sposta di un centesimo. Se **tutti** i campi
+        # neutri del gruppo sono in `forced_fields` (l'insieme STRETTO — scritti
+        # di proposito da un piano attivo, da un'indicizzazione, dalla
+        # ripartizione pregresso/prestito nuovo, o dal kernel tributario in modo
+        # `saldo_acconto`), il residuo va comunque sul primo campo neutro —
+        # mai sull'aggregato, che di quelle righe resta la somma — e la
+        # posatura si DICHIARA (`campo_dichiarato: True`).
+        #
+        # (Task 12, lotto 3A, giro di correzione 1) Il cancello I-1, PRIMA di
+        # cercare il bersaglio, guarda invece l'insieme AMPIO
+        # (`forced_fields_gate`, con l'allargamento `_SP_OPERATIVI`): un
+        # aggregato forzato da `sp_overrides` (senza alcuna voce di dettaglio
+        # forzata) quando quell'insieme AMPIO non lascia nemmeno un campo
+        # neutro libero non e' ammesso, anche se l'insieme STRETTO ne
+        # lascerebbe uno — la' la differenza non sarebbe piu' un arrotondamento
+        # ma la massa dell'override, e scriverla su una riga "libera" ma
+        # estranea (es. `sp16f` quando solo `sp16g` ha un piano) e' esattamente
+        # il difetto che il cancello ampio esiste per impedire (misura: piano
+        # `altri_debiti` + `sp16_debiti_breve` forzata a 150.000 — con
+        # l'insieme stretto da solo il residuo si scriveva su `sp16f`,
+        # 31.666,66, non dichiarato; col cancello ampio si rifiuta, persistito
+        # 118.333,34 contro i 150.000 richiesti, cassa 73.661,89 invece di
+        # 105.328,55 — `task-12-review-protezioni.md`, rilievo Critico 1).
+        for aggregate, (group_fields, _default_field) in groups.items():
             if aggregate not in result or not all(field in result for field in group_fields):
                 continue
             residual = result[aggregate] - sum(
@@ -1662,55 +1818,51 @@ class ForecastEngine:
             )
             if not residual:
                 continue
-            target = residual_field
-            if target in forced_fields:
-                esclusi = _cammino_esclusi.get(aggregate, frozenset())
-                target = next(
-                    (field for field in reversed(group_fields)
-                     if field not in forced_fields and field not in esclusi),
-                    None,
+            neutri = cls._CAMPI_NEUTRI_RESIDUO[aggregate]
+            # Cancello I-1: insieme AMPIO, PRIMA di cercare il bersaglio vero.
+            if aggregate in forced_fields_gate and not any(
+                field not in forced_fields_gate for field in neutri
+            ):
+                raise ValueError(
+                    f"Il totale forzato di {aggregate} non è ammesso: la "
+                    "differenza con la somma delle sue voci finirebbe su una "
+                    "riga governata da un piano di scadenziamento o da "
+                    "un'indicizzazione, e i debiti finanziari non la ricevono "
+                    "mai. Forza una voce di dettaglio della stessa schermata, "
+                    "oppure svuota la cella del totale (value: null)."
                 )
+            # Scelta del bersaglio vero: insieme STRETTO.
+            target = next((field for field in neutri if field not in forced_fields), None)
+            dichiarato = False
             if target is None:
-                # Nessun operativo libero: le righe sono la dichiarazione, e
-                # l'aggregato del gruppo DEBITI e' letteramente la loro somma
-                # (riga `sp16 = sp16a + … + sp16g` della costruzione) — quindi e' lui che
-                # segue la somma, come gia' fa il normalizzatore del CE quando
-                # tutti i dettagli di un gruppo sono forzati.
-                #
-                # Se pero' anche l'aggregato e' forzato, QUI SI STA FERMI (I-1
-                # della revisione di `6e5c0f7`): la versione difettosa posava il
-                # centesimo sul secchio di default, ma su quel cammino il
-                # "centesimo" non e' un arrotondamento — e' la MASSA dell'
-                # override. Misura della revisione (sonda `AO16`, fixture della
-                # rete, piano `altri_debiti` + `sp16_debiti_breve` forzata a
-                # 150.000 in ogni anno, 5 anni x 8 crescite): il persistito dice
-                # 118.333,34 contro i 150.000 richiesti, la cassa 73.661,89
-                # invece di 105.328,55 — 31.666,66 in meno sotto un
-                # `forecast_generated: true`, su 40 anni su 40. Il
-                # `residuo_quadratura` lo annota, ma nessuna schermata lo
-                # mostra. Non esiste un posto onesto per quella massa: il
-                # secchio la cancellerebbe l'anno dopo (e' I1), e scriverla su una
-                # riga d..f significherebbe inventare un'obbligazione (e' il
-                # difetto del genitore). Un residuo che vale ZERO, cioe'
-                # l'utente che ha digitato esattamente la somma delle righe, non
-                # arriva qui: il `if not residual: continue` sopra lo congela.
-                if aggregate in forced_fields:
-                    raise ValueError(
-                        f"Il totale forzato di {aggregate} non è ammesso: la "
-                        "differenza con la somma delle sue voci finirebbe su una "
-                        "riga governata da un piano di scadenziamento o da "
-                        "un'indicizzazione, e i debiti finanziari non la ricevono "
-                        "mai. Forza una voce di dettaglio della stessa schermata, "
-                        "oppure svuota la cella del totale (value: null)."
-                    )
-                scarto = sum(
-                    (result[field] for field in group_fields), Decimal("0")
-                ) - result[aggregate]
-                result[aggregate] += scarto
-                posati.append({'campo': aggregate, 'importo': scarto})
-                continue
+                # Un residuo che vale ZERO (l'utente ha digitato esattamente la
+                # somma delle righe) non arriva qui: il `if not residual:
+                # continue` sopra lo congela. Il cancello sopra ha gia' escluso
+                # il caso "aggregato forzato + nessun neutro AMPIO libero"; qui
+                # arriva solo chi ha un neutro AMPIO libero ma nessuno STRETTO
+                # (o chi non ha l'aggregato forzato affatto): mai l'aggregato,
+                # sempre il primo campo neutro, dichiarato.
+                target = neutri[0]
+                dichiarato = True
             result[target] += residual
-            posati.append({'campo': target, 'importo': residual})
+            posati.append({'campo': target, 'importo': residual, 'campo_dichiarato': dichiarato})
+            # Riallineamento (punto 4 del contratto): il bersaglio puo' essere
+            # il lato breve di un saldo che `details['pregresso']` descrive in
+            # modo `legacy` (nessun piano attivo per quel saldo, quindi NON
+            # forzato — ed e' esattamente per questo che puo' essere scelto
+            # come campo libero). Senza questo riallineamento il `generated`
+            # dichiarato divergerebbe dal persistito di questo stesso
+            # residuo: dichiarato = persistito vale anche qui.
+            if details is not None:
+                pregresso = details.get('pregresso')
+                if pregresso:
+                    for saldo, (breve, _oltre) in cls._PREGRESSO_SP_FIELDS.items():
+                        if breve != target:
+                            continue
+                        riga = pregresso.get(saldo)
+                        if riga and riga.get('mode') == 'legacy':
+                            riga['generated'] = Decimal(str(riga.get('generated') or 0)) + residual
+                        break
 
         asset_fields_without_cash = (
             "sp01_crediti_soci", "sp02_immob_immateriali",
@@ -2095,11 +2247,17 @@ class ForecastEngine:
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
-                    # Un'unica funzione, non un'espressione a pezzi qui: `compute_
-                    # forecast` e i test devono costruire lo STESSO insieme, o la
-                    # guardia di I-2 (un secchio forzato = tutti e otto i
-                    # dichiarati) si puo' rompere in un punto e non nell'altro.
-                    forced_fields=self._sp_forced_fields(pregresso, details, assumption),
+                    # Due funzioni, non una sola, e non un'espressione a pezzi
+                    # qui: `compute_forecast` e i test devono costruire gli
+                    # STESSI due insiemi, o la guardia di I-2 (un secchio
+                    # forzato = tutti e otto i dichiarati) si puo' rompere in
+                    # un punto e non nell'altro. `forced_fields` (stretto)
+                    # sceglie il bersaglio del residuo; `forced_fields_gate`
+                    # (ampio, `_SP_OPERATIVI`) e' il SOLO cancello I-1 (lotto
+                    # 3A, Task 12, giro di correzione 1 — vedi il docstring
+                    # di `_normalize_balance_sheet_cents`).
+                    forced_fields=self._sp_target_forced_fields(pregresso, details, assumption),
+                    forced_fields_gate=self._sp_forced_fields(pregresso, details, assumption),
                     details=details,
                     overdraft=overdraft,
                     sweep=sweep,

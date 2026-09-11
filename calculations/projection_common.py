@@ -19,7 +19,7 @@ module depending on the ORM object shape.
 """
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -391,3 +391,21 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
         opening_credit_left=opening_credit - used,
         cash_out=saldo_paid + acconti + rate_due,
     )
+
+
+# ── Giorni di magazzino dedotti: la soglia per settore (lotto 3A, Task 10) ──
+# Oltre un anno di giacenza un DIO dedotto smette di descrivere l'azienda — tranne dove un magazzino lungo e'
+# il mestiere: Immobiliare (5, immobili in rimanenza) ed Edilizia (6, lavori in corso). Un solo punto per la
+# tabella, usato dal motore budget e dall'infrannuale. `None` = nessuna soglia.
+GIORNI_MAGAZZINO_MAX_DEFAULT = Decimal('365')
+GIORNI_MAGAZZINO_MAX_PER_SETTORE: Dict[int, Optional[Decimal]] = {5: None, 6: None}
+
+
+def soglia_giorni_magazzino(settore) -> Optional[Decimal]:
+    """La soglia oltre cui un DIO dedotto e' degenere nel settore dato, o `None` se non ce n'e'. Settore assente o
+    non intero: la soglia di sempre."""
+    try:
+        chiave = int(settore) if settore is not None else None
+    except (TypeError, ValueError):
+        chiave = None
+    return GIORNI_MAGAZZINO_MAX_PER_SETTORE.get(chiave, GIORNI_MAGAZZINO_MAX_DEFAULT)

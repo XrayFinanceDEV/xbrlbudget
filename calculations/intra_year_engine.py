@@ -19,7 +19,7 @@ from database.models import (
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
     tfr_accrual_quota, posizione_tributaria_fine_anno, deferred_tax_position,
-    new_financing_schedule,
+    new_financing_schedule, soglia_giorni_magazzino,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -189,7 +189,7 @@ def _safe_divide(numerator, denominator, default=Decimal('0')):
 _MAX_TURNOVER_RATIO = Decimal('1')  # 365 giorni
 
 
-def _turnover_ratio(stock, base):
+def _turnover_ratio(stock, base, max_ratio=_MAX_TURNOVER_RATIO):
     """
     Rapporto giacenza/base dell'anno di riferimento, oppure ``None`` quando è
     DEGENERE — cioè quando il denominatore è così piccolo da non poter
@@ -208,7 +208,7 @@ def _turnover_ratio(stock, base):
     if base is None or base <= 0:
         return None
     ratio = stock / base
-    if ratio > _MAX_TURNOVER_RATIO:
+    if max_ratio is not None and ratio > max_ratio:
         return None
     return ratio
 
@@ -314,6 +314,8 @@ class IntraYearEngine:
     def __init__(self, db_session: Session):
         self.db = db_session
         self._diagnostics: List[Dict[str, object]] = []
+        # Letto solo da `_scaled_or_carried`, per la soglia dei giorni di magazzino (Task 10).
+        self._settore = None
 
     @staticmethod
     def _period_months_from_record(financial_year: FinancialYear) -> int:
@@ -520,6 +522,7 @@ class IntraYearEngine:
         Returns summary dict compatible with ForecastEngine.generate_forecast().
         """
         scenario = self._load_scenario(scenario_id)
+        self._settore = scenario.company.sector if scenario.company is not None else None
         partial_fy, ref_fy = self._load_financial_years(scenario)
         self._diagnostics = []
         self._validate_forecast_source(partial_fy, "Partial source")
@@ -990,7 +993,15 @@ class IntraYearEngine:
         viene DICHIARATO fra i diagnostics, così l'utente sa che quella voce
         non è stata proiettata e può correggerla in Rettifiche.
         """
-        ratio = _turnover_ratio(ref_stock, ref_base)
+        # Soglia dei giorni: per le rimanenze comanda la tabella per settore
+        # (`projection_common.soglia_giorni_magazzino`), per le altre voci quella
+        # di sempre (365 giorni = rapporto 1). `None` = nessuna soglia.
+        if field == 'sp05_rimanenze':
+            soglia = soglia_giorni_magazzino(self._settore)
+        else:
+            soglia = Decimal('365')
+        max_ratio = None if soglia is None else soglia / Decimal('365')
+        ratio = _turnover_ratio(ref_stock, ref_base, max_ratio=max_ratio)
         if ratio is not None:
             return projected_base * ratio
 
@@ -1000,6 +1011,7 @@ class IntraYearEngine:
             'severity': 'warning',
             'field': field,
             'amount': str(carried),
+            'soglia_giorni': None if soglia is None else str(soglia),
             'message': (
                 f"Rapporto di rotazione non calcolabile per {field}: la base "
                 f"dell'anno di riferimento ({ref_base}) non spiega la giacenza "

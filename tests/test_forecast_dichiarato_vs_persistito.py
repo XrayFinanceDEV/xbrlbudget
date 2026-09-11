@@ -22,11 +22,13 @@ il valore persistito e' quel numero arrotondato al centesimo. Non «vicino»: la
 quantizzazione del motore e' `ROUND_HALF_UP`, quindi la coincidenza e' esatta e
 un solo centesimo di scarto e' un difetto.
 
-**Che cosa NON copre, e perche'.** `sp06`/`sp07` sono AGGREGATI che il piano dei
-crediti commerciali scrive per intero e che `_alloc` ripartisce sulle proporzioni
-dell'anno base: la loro somma di dettagli quantizzati non e' l'aggregato
-quantizzato, e nessun `details` dichiara i singoli sotto-campi. E' la stessa
-ragione per cui `_pregresso_sp_forced_fields` lascia fuori `crediti_commerciali`.
+**Che cosa NON copre, e perche'.** Le SINGOLE sotto-voci di `sp06`/`sp07`: la
+loro somma di dettagli quantizzati non e' l'aggregato quantizzato, e nessun
+`details` dichiara i singoli sotto-campi. E' la stessa ragione per cui
+`_pregresso_sp_forced_fields` lascia fuori `crediti_commerciali`. La RIGA
+decritta (N-I3 del giro 3), invece, ora e' confrontata: la parte commerciale di
+`sp06` — `sp06 − sp06e − sp06f`, l'unica quantità che il piano dei crediti
+governa — deve coincidere col `generated + residual_short` dichiarato.
 
 **Se questo test diventa rosso** il difetto e' quasi sempre nel motore, non qui:
 qualcuno ha dichiarato un numero e ne ha persistito un altro. Allargare l'elenco
@@ -144,6 +146,17 @@ def _divergenze(bs, ce, det, row):
             fuori.append(("sp16e due sedi", f"details['imposte'] dice {imposte['generated_debt']}, "
                                             f"details['pregresso']['debiti_tributari'] dice "
                                             f"{d_tax['generated']}"))
+
+    # ── N-I3 (giro 3): la riga `crediti_commerciali` dichiara la parte
+    # commerciale di `sp06`, e il persistito la conferma ──
+    d_cred = det["pregresso"]["crediti_commerciali"]
+    commerciale = (bs["sp06_crediti_breve"]
+                   - bs["sp06e_crediti_tributari_breve"]
+                   - bs["sp06f_imposte_anticipate_breve"])
+    if _q(commerciale) != _q(D(str(d_cred["generated"])) + D(str(d_cred["residual_short"]))):
+        fuori.append(("riga crediti", f"parte commerciale di sp06 {commerciale}, dichiarato "
+                      f"{d_cred['generated']} + {d_cred['residual_short']} = "
+                      f"{D(str(d_cred['generated'])) + D(str(d_cred['residual_short']))}"))
 
     # ── caso 4: le voci indicizzate ──
     for code, voce in det["indicizzazione"].items():
@@ -356,6 +369,7 @@ def test_la_copia_diquesta_tabella_coincide_col_motore():
 
 # `sp_overrides` della famiglia I1: campi dichiarati dalla rete, parte breve.
 SP_FAMIGLIA_BREVE = {
+    "sp06a_crediti_clienti_breve": 119000.29,
     "sp06e_crediti_tributari_breve": 5000.50,
     "sp16a_debiti_banche_breve": 25000.11,
     "sp16d_debiti_fornitori_breve": 80000.37,
@@ -794,3 +808,51 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
     assert all(esercitati[nome] == 18 for nome in DEBITI), dict(esercitati)
     # 6 piani × 2 voci con prestito nuovo × 3 anni: I1 esteso non e' stato saltato.
     assert esercitati["anni I1 esteso"] == 36, dict(esercitati)
+
+
+def test_ni3_sotto_la_riga_debiti_anche_i_crediti_seguono_il_persistito(monkeypatch):
+    """N-I3 (giro 3): con un piano dei crediti, un override su `sp06a` deve
+    trovare la RIGA `crediti_commerciali` del persistito, non del calendario.
+
+    Riproduce la sonda `sonda_brevi2.py` della revisione: piano crediti 25% +
+    25% sulla massa commerciale della base (120.000), override `sp06a` 2027 =
+    106.770,89. Su `c8317ca` il 2027 dichiarava 128.330,00 contro 117.037,29
+    persistiti: `crediti_commerciali` non stava nel riallineamento di
+    `_realign_sp_declarations`, che gira solo sui quattro debiti. È rosso su
+    `c8317ca` solo su asserzione (la riga somma male nel solo anno
+    dell'override: sulle righe a giorni un override vale un anno, e dal 2028
+    la riga torna al gemello — misura della revisione, punto 4).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            user = "ni3-sonda"
+            company_id = _base_year(db, user)
+            rows = [dict(forecast_year=y, revenue_growth_pct=3.33) for y in ANNI]
+            rows[0]["pregresso"] = {"crediti_commerciali": {
+                "opening": 120000.00, "amounts": [30000.00, 30000.00]}}
+            rows[0]["sp_overrides"] = {"sp06a_crediti_clienti_breve": 106770.89}
+            sc = budget_scenarios.create_budget_scenario(
+                company_id,
+                BudgetScenarioCreate(company_id=company_id, name="ni3", base_year=2026,
+                                     scenario_type="budget"),
+                user_id=user, db=db)
+            res = budget_scenarios.bulk_upsert_assumptions(
+                company_id, sc.id, request={"assumptions": rows, "auto_generate": True},
+                user_id=user, db=db)
+            assert res["forecast_generated"] is True, res["message"]
+            prev = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=user, db=db)
+            for (_, bs, ce), anno in zip(read_forecast_maps(db, sc.id), prev["forecast_years"]):
+                d = anno["details"]["pregresso"]["crediti_commerciali"]
+                commerciale = _q(bs["sp06_crediti_breve"]
+                                 - bs["sp06e_crediti_tributari_breve"]
+                                 - bs["sp06f_imposte_anticipate_breve"])
+                dichiarata = _q(D(str(d["generated"])) + D(str(d["residual_short"])))
+                assert commerciale == dichiarata, (
+                    anno["year"], commerciale, dichiarata, d)
+                if anno["year"] == ANNI[0]:
+                    assert _q(bs["sp06a_crediti_clienti_breve"]) == D("106770.89")
+    finally:
+        engine.dispose()

@@ -1127,6 +1127,34 @@ class ForecastEngine:
                 # Serve gia' al centesimo: sotto lo usano per sottrarre il
                 # `saldo_due` dall'aggregato persistito.
                 residual_short_tax = cls._q(d.get('residual_short') or 0)
+        # 1-bis) N-I3 (giro 3, Ruling 61): la riga `crediti_commerciali` segue
+        # il persistito come i quattro debiti. Il piano dei crediti scrive il
+        # lato breve commerciale come `sp06 − sp06e − sp06f` (il generato dal
+        # DSO piu' il `residual_short` del runoff, nel ramo runoff di
+        # `_calculate_balance_sheet`); un `sp_overrides` su una sua sotto-voci
+        # (tipico: `sp06a`) muove quell'aggregato DAL DI FUORI delle
+        # dichiarazioni, e senza questo riallineamento la riga continuava a
+        # dichiarare il calendario (misura: 128.330,00 dichiarati contro
+        # 117.037,29 persistiti, sonda `sonda_brevi2.py`). Nessuno legge
+        # queste chiavi l'anno dopo (il calendario dei crediti e' guidato
+        # dalle date, non dallo stato), quindi e' riallineamento puramente
+        # dichiarativo: la somma dichiarata torna la cella descritta.
+        d_cred = (details.get('pregresso') or {}).get('crediti_commerciali')
+        if d_cred and all(c in forecast_bs for c in (
+                'sp06_crediti_breve', 'sp06e_crediti_tributari_breve',
+                'sp06f_imposte_anticipate_breve')):
+            persistita = (cls._q(forecast_bs['sp06_crediti_breve'])
+                          - cls._q(forecast_bs['sp06e_crediti_tributari_breve'])
+                          - cls._q(forecast_bs['sp06f_imposte_anticipate_breve']))
+            rs_cred = Decimal(str(d_cred.get('residual_short') or 0))
+            dichiarata = Decimal(str(d_cred.get('generated') or 0)) + rs_cred
+            if persistita != cls._q(dichiarata):
+                # Il `residual_short` resta GREZZO (e' il calendario, identico
+                # ai debiti dopo I-a): e' solo il `generated` a farsi carico
+                # dello scarto, cosi' la somma dichiarata torna ESATTA e
+                # l'identita' di riga `opening − Σclosed = rs + rl` non si
+                # scompone.
+                d_cred['generated'] = persistita - rs_cred
         # 2) `imposte`: debito e credito dichiarati seguono `sp16e`/`sp06e`.
         imposte = details.get('imposte')
         if imposte and imposte.get('mode') == 'saldo_acconto':

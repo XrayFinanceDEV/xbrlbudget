@@ -204,3 +204,32 @@ describe("stepForErrorMessage · scoperto di c/c (Task 12)", () => {
     )).toBe("pregresso-nuovo");
   });
 });
+
+describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
+  it("un rifiuto fornitori che dice «passo Pregresso e nuovo» atterra sul passo 6", () => {
+    // Messaggio reale di `_rifiuto_override_governati` (via
+    // `_messaggio_override_oltre`), generato da `c8317ca`.
+    expect(stepForErrorMessage(
+      "L'override di sp17d_debiti_fornitori_lungo non è ammesso: i debiti verso fornitori hanno un piano di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo compreso. Il valore forzato verrebbe salvato e cancellato in silenzio l'anno dopo, con la cassa ad assorbire la differenza senza alcun flusso. La via lecita è modificare il piano al passo Pregresso e nuovo, oppure svuotare la cella (value: null) e lasciare che la riga segua il piano.",
+    )).toBe("pregresso-nuovo");
+  });
+  it("vale anche con il nome del passo virgolettato", () => {
+    expect(stepForErrorMessage(
+      "Modifica il piano nel passo «Pregresso e nuovo», oppure svuota la cella (value: null).",
+    )).toBe("pregresso-nuovo");
+  });
+  it("un rifiuto tributario che nomina «Imposte» resta sul passo 7", () => {
+    // Messaggio reale del ramo `sp17e` senza piano (rilievo I-b).
+    expect(stepForErrorMessage(
+      "L'override di sp17e_debiti_tributari_lungo non è ammesso: la posizione tributaria è a saldo + acconto e l'anno dopo non legge questa riga, legge la scomposizione dichiarata nei `details`. Il valore forzato sparirebbe senza alcun versamento, con la cassa ad assorbire la differenza. La via lecita è il piano di scadenziamento al passo Imposte, oppure svuotare la cella (value: null).",
+    )).toBe("imposte");
+  });
+  it("il fabbisogno non coperto continua ad atterrare sul passo 6", () => {
+    expect(stepForErrorMessage(
+      "Unfunded financing requirement 44,885.64: add an explicit financing assumption",
+    )).toBe("pregresso-nuovo");
+  });
+  it("un errore generico atterra su Imposte come prima", () => {
+    expect(stepForErrorMessage("Revenue must be positive in the base year")).toBe("imposte");
+  });
+});

@@ -104,11 +104,22 @@ export function primaryLabel(step: WizardStepKey): string {
 }
 
 export function stepForErrorMessage(message: string): WizardStepKey {
+  // Un rifiuto che nomina il passo dove il piano sta deve atterrare lì: i
+  // messaggi del motore citano «Pregresso e nuovo» (la virgolettatura non fa
+  // testo) per i saldi scadenziabili e "Imposte" per i tributari. Prima ogni
+  // rifiuto che non parlasse di scoperto finiva al passo 7 anche quando
+  // l'errore diceva «passo Pregresso e nuovo» (rilievo m-B della revisione).
+  if (/pregresso e nuovo/i.test(message)) return "pregresso-nuovo";
   // Anche il tetto dello scoperto superato si corregge al passo 6, dove lo
   // scoperto si concede: rimandare a Imposte manderebbe l'utente nel posto
   // sbagliato con un messaggio che parla d'altro.
-  return /unfunded financing requirement|scoperto di conto corrente oltre il tetto/i.test(message)
-    ? "pregresso-nuovo" : "imposte";
+  if (/unfunded financing requirement|scoperto di conto corrente oltre il tetto/i.test(message))
+    return "pregresso-nuovo";
+  // «Imposte» come nome di passo è la meta anche qui — oggi coincide col
+  // default, ma la regola è voluta: se un passo si aggiunge, questo ramo dice
+  // dove va ciò che nomina il passo 7.
+  if (/passo\s*«?\s*imposte\b/i.test(message)) return "imposte";
+  return "imposte";
 }
 
 export function stepStorageKey(scenarioId: number): string {

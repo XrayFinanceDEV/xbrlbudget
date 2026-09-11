@@ -219,6 +219,24 @@ severità *error*: *"Add an explicit financing assumption; no debt was created a
 > motore di budget, che storicamente aumentava il debito a breve per assorbire la cassa
 > negativa. Qui il fabbisogno si **mostra**; non si finge di averlo coperto.
 
+**Il controllo si misura una volta sola, dopo gli `sp_overrides` (lotto 3A, Task 11; §11.1 del
+lotto 2).** `generate_projection` applica gli `sp_overrides` **dopo** aver proiettato lo SP, e solo
+allora normalizza e ricalcola la cassa dagli aggregati; un override che sposta il passivo o
+l'attivo — anche uno che non sposta la cassa direttamente — cambia quel residuo, quindi il
+fabbisogno va misurato sulla cifra **finale**, mai su quella calcolata prima dell'override. Ogni
+diagnostico `unfunded_financing_requirement` che il roll-forward avesse già registrato (il plug
+descritto sopra, calcolato prima degli override) viene tolto e sostituito da quello, unico, letto
+sulla cassa ricalcolata: prima di questa correzione la cassa restava congelata al valore
+pre-override — con l'override applicato ma senza ricalcolo — e il foglio persistito poteva restare
+sbilanciato dell'importo dell'override senza che alcun diagnostico lo dichiarasse con la cifra
+giusta, oppure, quando nessun errore precedeva l'override, la cassa ricalcolata **senza clamp**
+usciva negativa e restava **persistita così** (`sp09` negativa in DB). Caso del test
+(`tests/test_intra_year_override_cassa.py`): parziale a 9 mesi con `sp05_rimanenze` forzato a
+5.000.000 dà un avviso `unfunded_financing_requirement` di severità `error` per 4.998.445,00, la
+`sp09` persistita è 0,00 (mai negativa), e `promote_projection_to_financial_year` rifiuta la
+proiezione perché il foglio non quadra — esattamente come ogni altro fabbisogno scoperto di questo
+motore.
+
 ### Le sotto-voci si distribuiscono, mai si inventano
 Le quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il
 parziale nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più

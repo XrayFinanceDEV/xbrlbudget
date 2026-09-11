@@ -577,18 +577,44 @@ class IntraYearEngine:
         # sotto-campi sparirebbe dentro uno sbilancio piu' grande e gia'
         # dichiarato, senza che nessun controllo lo veda.
         #
-        # Resta condizionato il solo terzo passo, il ricalcolo di sp09 come
-        # Sigma passivo - Sigma attivo: su una diagnostica di errore
-        # rimetterebbe in cassa il residuo negativo che `_project_balance_sheet`
-        # ha appena azzerato, disfacendo il clamp e trasformando in silenzio un
-        # fabbisogno finanziario scoperto in un saldo di cassa negativo.
-        ha_errori = any(
-            diagnostic.get("severity") == "error"
-            for diagnostic in self._diagnostics
-        )
+        # §11.1 (lotto 3A, Task 11): anche il terzo passo -- il ricalcolo di sp09
+        # come Sigma passivo - Sigma attivo -- gira SEMPRE, non solo in assenza di
+        # diagnostiche d'errore. Prima, una diagnostica pre-esistente (compreso il
+        # clamp di `_project_balance_sheet`/`_project_balance_sheet_annualized`
+        # stesso, calcolato PRIMA degli `sp_overrides`) disattivava il ricalcolo:
+        # un override che spostava il passivo o l'attivo DOPO quel clamp lasciava
+        # la cassa congelata al valore pre-override, e il foglio persistito
+        # restava sbilanciato dell'importo dell'override senza che nessuna
+        # diagnostica lo dichiarasse con la cifra giusta (misurato: override di
+        # +1.000 su `sp11_capitale`, sbilancio finale scostato di 1.000 dal
+        # fabbisogno dichiarato prima dell'override). Il fabbisogno si misura una
+        # volta sola, qui sotto, sulla cassa ricalcolata DOPO gli override: ogni
+        # `unfunded_financing_requirement` gia' registrato da quei due metodi
+        # e' calcolato su una cifra pre-override ormai superata e va tolto, o
+        # resterebbe un doppione con l'importo vecchio davanti a quello giusto.
+        self._diagnostics = [
+            diagnostic for diagnostic in self._diagnostics
+            if diagnostic.get('code') != 'unfunded_financing_requirement'
+        ]
         projected_bs = ForecastEngine._normalize_balance_sheet_cents(
-            projected_bs, recompute_cash=not ha_errori
+            projected_bs, recompute_cash=True
         )
+
+        # Un residuo negativo qui e' un fabbisogno finanziario scoperto, mai una
+        # `sp09` negativa persistita: si clampa a zero e si dichiara, come ogni
+        # altro fabbisogno di questo motore (mai un debito a breve automatico).
+        cassa = projected_bs.get('sp09_disponibilita_liquide')
+        if cassa is not None and cassa < 0:
+            self._diagnostics.append({
+                'code': 'unfunded_financing_requirement',
+                'severity': 'error',
+                'amount': str(-cassa),
+                'message': (
+                    'Projected assets exceed explicit funding. Add an explicit '
+                    'financing assumption; no debt was created automatically.'
+                ),
+            })
+            projected_bs['sp09_disponibilita_liquide'] = Decimal('0.00')
 
         # Store as ForecastYear
         self._save_forecast(scenario_id, projection_year, projected_bs, projected_inc)

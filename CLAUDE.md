@@ -581,7 +581,9 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   mentre il motore budget **solleva** e non produce nulla — salvo che lo scoperto di c/c sia concesso
   (`overdraft_allowed`), e allora il fabbisogno diventa scoperto generato dal piano, dichiarato. Un
   fabbisogno scoperto quindi si vede in un avviso sull'infrannuale, e sul previsionale in un errore
-  secco o, a scoperto concesso, in uno scoperto dichiarato.
+  secco o, a scoperto concesso, in uno scoperto dichiarato — anche quando il fabbisogno nasce da un
+  `sp_overrides` che squilibra lo SP: il controllo sta sulla cassa finale, dopo la normalizzazione
+  (`generate_projection`), e mai una `sp09` negativa resta persistita.
 - **Working capital** comes from the reference year's turnover ratios. A ratio implying **more than a
   year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
   carried instead, with a `degenerate_turnover_ratio` diagnostic — `_safe_divide` guards a zero

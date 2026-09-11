@@ -822,7 +822,7 @@ class ForecastEngine:
     _PREGRESSO_PASSO: Dict[str, str] = {"debiti_tributari": "Imposte"}
     _PREGRESSO_PASSO_DEFAULT = "Pregresso e nuovo"
 
-    # Le forme di nomea coi articoli giusti per i messaggi di rifiuto (rilievo
+    # Le forme con l'articolo giusto per i messaggi di rifiuto (rilievo
     # m-A della revisione di `c8317ca`): `PREGRESSO_LABELS` e' senza articolo
     # perche' nasce per le schermate, e i messaggi che lo precedevano con
     # l'articolo fisso producevano «i altri debiti» e «dei altri debiti».
@@ -879,8 +879,9 @@ class ForecastEngine:
            volte (`P1`: +1.333,34 di scarto, con la rata dichiarata su una rata
            che l'override aveva gia' tolto).
 
-        I messaggi (rilievo M-2) nominano il saldo con `PREGRESSO_LABELS` e non
-        con la chiave tecnica, mandano al passo del wizard che LO scadenzia, e
+        I messaggi (rilievo M-2) nominano il saldo con l'articolo giusto
+        (`_PREGRESSO_ARTICOLI`, rilievo m-A) e non con la chiave tecnica,
+        mandano al passo del wizard che LO scadenzia, e
         dicono la via d'uscita: svuotare la cella. Serve, perche' un override
         proibito salvato dal bulk avvelena OGNI `PATCH` successivo sullo stesso
         scenario, anche su una cella diversa (`patch_400_loop` della revisione),
@@ -945,7 +946,7 @@ class ForecastEngine:
                     # transizione e' il kernel (a) nel calcolatore, perche'
                     # misura il TOTALE `sp16e + sp17e` che l'anno dopo legge
                     # davvero: `sonda_ni1_senza_b.py` mostra che da solo
-                    # ferma il buco vero e lascia passare le via lecite.
+                    # ferma il buco vero e lascia passare le vie lecite.
                     continue
                 residuo = cls._residuo_breve_piano(piano, year_index, horizon)
                 forzato = Decimal(str(ov[breve]))
@@ -1112,11 +1113,11 @@ class ForecastEngine:
                 # Serve gia' al centesimo: sotto lo usano per sottrarre il
                 # `saldo_due` dall'aggregato persistito.
                 residual_short_tax = cls._q(d.get('residual_short') or 0)
-        # 1-bis) N-I3 (giro 3, Ruling 61): la riga `crediti_commerciali` segue
+        # 1-bis) N-I3 (giro 3): la riga `crediti_commerciali` segue
         # il persistito come i quattro debiti. Il piano dei crediti scrive il
         # lato breve commerciale come `sp06 − sp06e − sp06f` (il generato dal
         # DSO piu' il `residual_short` del runoff, nel ramo runoff di
-        # `_calculate_balance_sheet`); un `sp_overrides` su una sua sotto-voci
+        # `_calculate_balance_sheet`); un `sp_overrides` su una sua sotto-voce
         # (tipico: `sp06a`) muove quell'aggregato DAL DI FUORI delle
         # dichiarazioni, e senza questo riallineamento la riga continuava a
         # dichiarare il calendario (misura: 128.330,00 dichiarati contro
@@ -1324,8 +1325,8 @@ class ForecastEngine:
         spostare. Costruirla a pezzi in `compute_forecast` e' cio' che ha permesso
         alla condizione globale di I-2 (un secchio forzato = tutti e otto i
         dichiarati) di sopravvivere alla correzione: qui motore e test guardano
-        la stessa funzione, e `test_sp_forced_fields_e_l_espressione_reale` la
-       -pinna per caso d'uso.
+        la stessa funzione, e `test_sp_forced_fields_e_l_espressione_reale`
+        la fissa caso per caso.
 
         Tre fonti, piu' gli aggregati forzati da `sp_overrides` (I-1): un totale
         forzato SENZA nessuna sua voce forzata e' il motore che deve rispettare

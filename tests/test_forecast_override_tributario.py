@@ -617,7 +617,7 @@ def test_override_breve_sotto_il_rateizzato_si_rifiuta_sopra_no(monkeypatch, pia
 def test_i_c_confine_la_rata_dovuta_esatta_si_genera_un_centesimo_sotto_no(
         monkeypatch, forzato, si_genera):
     """Rilievo m-E, punto 2: il confine di I-c e' il `residual_short` del
-    piano, NON meta' di qualcosa, e la confronto e' `<` (sotto), non `<=`.
+    piano, NON meta' di qualcosa, e il confronto e' `<` (sotto), non `<=`.
 
     Misure della revisione (B5/B6): con piano tributario 6.000 + 4.000 e rate
     1.333,34/1.333,33/1.333,33, forzare la rata DOVUTA l'anno dopo (1.333,33)
@@ -932,8 +932,10 @@ def test_il_messaggio_del_rifiuto_indica_passo_ed_etichetta(monkeypatch):
 # ancora aperto, il `max` taglia il deficit in silenzio: il calendario riparte
 # intero, la cassa assorbe la differenza, e lo scarto di flusso dell'anno dopo
 # e' +2.666,66 anche senza override (sonda `sonda_trans.py` della revisione).
-# Il motore ora RIFIUTA (a) nel kernel, e (b) in `_rifiuto_override_governati`
-# esenta la via manuale solo se anche l'anno dopo e' manuale.
+# Il motore ora RIFIUTA (a) nel kernel: la parte (b), l'esenzione di
+# `_rifiuto_override_governati` valida solo se anche l'anno dopo era manuale,
+# e' RITIRATA da Ruling 62. L'unica guardia della transizione e' il kernel
+# (a), perche' misura il TOTALE `sp16e + sp17e` che l'anno dopo legge davvero.
 
 PIANO_TRANS = {"debiti_tributari": {"opening": 10000.00, "saldo": 6000.00,
                                     "rateizzato": 4000.00,
@@ -1014,7 +1016,8 @@ def test_ni1_t3_override_sotto_il_rateizzato_in_anno_manuale_si_rifiuta(monkeypa
 def test_ni1_t3_patch_sp_override_rifiuta_e_rollback(monkeypatch):
     """T3 sul percorso `PATCH /sp-override`: 400 e `sp_overrides` non persistito.
 
-    L'override proibito dal rifiuto (b) non deve restare nel sacco JSON, perche'
+    L'override proibito dal rifiuto del kernel (a) non deve restare nel sacco
+    JSON, perche'
     un override proibito avvelena ogni `PATCH` successivo sullo stesso scenario
     (`patch_400_loop`, CLAUDE.md).
     """
@@ -1076,7 +1079,7 @@ def test_ni1_t2_override_sopra_il_rateizzato_genera_e_scarto_zero(monkeypatch):
 
 def test_ni1_t4_tutti_manuali_override_zero_genera(monkeypatch):
     """T4: tutti gli anni in via manuale, override `sp16e` 2027 = 0. Nessun anno
-    automatico riparte dal calendario, quindi (a)/(b) non scattano: si genera.
+    automatico riparte dal calendario, quindi il kernel (a) non scatta: si genera.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -1100,7 +1103,7 @@ def test_ni1_t4_tutti_manuali_override_zero_genera(monkeypatch):
 # (2000), ma in via manuale `sp17e` porta ancora il lato lungo (2000 in
 # `sp17e` dal runoff del 2027): il totale che il 2029 legge e' 3000, e
 # l'override del valore IDENTICO a quello del motore veniva RIFIUTATO. Con
-# (b) speso negli anni manuali (`sonda_ni1_senza_b.py`) le via lecite generano
+# (b) spento negli anni manuali (`sonda_ni1_senza_b.py`) le vie lecite generano
 # con scarto 0,00 e il kernel (a) ferma da solo il buco vero. I tre casi della
 # sonda diventano test: i primi due sono ROSSI su 25a5357 (il rifiuto (b)
 # li ferma) e verdi qui.

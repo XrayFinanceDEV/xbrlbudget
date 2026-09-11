@@ -128,7 +128,7 @@ def test_an_explicit_day_never_goes_through_the_guard(monkeypatch):
 def test_a_tiny_ce01_carries_both_receivables_and_inventory(monkeypatch):
     """Il caso reale: 10.000 di `ce01` contro 590.000 su `ce04`.
 
-    Qui il denominatore ESISTE — `_safe_divide` non avrebbe nulla da protegge­re —
+    Qui il denominatore ESISTE — `_safe_divide` non avrebbe nulla da proteggere —
     ed e' solo trascurabile: 4.320 giorni di credito e 1.800 di magazzino. Il
     rapporto e' ancora un moltiplicatore, e applicato al `ce01` proiettato porta
     crediti e rimanenze dove il fatturato vero non li giustifica. Entrambi i

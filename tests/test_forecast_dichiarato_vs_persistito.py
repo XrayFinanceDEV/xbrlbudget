@@ -26,7 +26,7 @@ un solo centesimo di scarto e' un difetto.
 loro somma di dettagli quantizzati non e' l'aggregato quantizzato, e nessun
 `details` dichiara i singoli sotto-campi. E' la stessa ragione per cui
 `_pregresso_sp_forced_fields` lascia fuori `crediti_commerciali`. La RIGA
-decritta (N-I3 del giro 3), invece, ora e' confrontata: la parte commerciale di
+descritta (N-I3 del giro 3), invece, ora e' confrontata: la parte commerciale di
 `sp06` — `sp06 − sp06e − sp06f`, l'unica quantità che il piano dei crediti
 governa — deve coincidere col `generated + residual_short` dichiarato.
 
@@ -555,7 +555,7 @@ OVERRIDE = {
     # anno di piano. Tutta la famiglia fin qui era stata messa in ogni anno,
     # e una regola applicata solo alla prima riga (la mutazione M8 della
     # revisione di `f330730`) non avrebbe mai incrociato un secondo anno
-    # forzato. Solo il BREVE: i campi oltre collisionerebbero nel rifiuto
+    # forzato. Solo il BREVE: i campi oltre colliderebbero nel rifiuto
     # I1-bis di proposito, e qui si vuole la palestra che genera.
     "SP solo anno 2": {"solo_anno": (1, dict(SP_FAMIGLIA_BREVE))},
     # Rilievo I-1 della revisione di `6e5c0f7`, punto 4: la variante con

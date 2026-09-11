@@ -161,7 +161,7 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 | **Risultato** | = risultato del CE proiettato, per costruzione |
 | **Fondo TFR** | parziale + accantonamento dei mesi residui |
 | **Debiti a breve** | con riferimento: proporzionali ai costi operativi proiettati (salvo rapporto degenere, sotto); senza: invariati |
-| **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti |
+| **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti; la quota del prestito nuovo che scade l'anno dopo sta nei debiti a breve, e il debito bancario pregresso si riduce solo con le proprie rate |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
 
 Ogni classe usa **il proprio** ammortamento: gli immateriali con la quota immateriali, i
@@ -262,6 +262,17 @@ lungo non finanziari (fornitori, tributari, previdenza), per non doppiare né so
 
 È **kernel condiviso** col budget: l'infrannuale la applica all'aggregato, il budget la ripartisce
 sulle sotto-voci. Orchestrazione diversa, formula identica per costruzione.
+
+**La rata di un prestito nuovo non consuma il debito bancario pregresso** (lotto 3A, Task 4). Il
+pregresso conserva la propria ripartizione breve/lungo e si riduce solo con le proprie rate (prima
+dal breve); il prestito nuovo si ammortizza per conto suo e mette a breve, in `sp16a`, la quota di
+capitale che scade l'anno dopo. Misurato sul test kit: 12.345,67 di pregresso e un prestito di
+120.000 / 4 anni / 5% erogato nell'anno danno `sp16a` 42.345,67 (12.345,67 + 30.000,00) e `sp17a`
+60.000,00; prima davano `sp16a` 0,00 e `sp17a` 102.345,67. Il totale del debito, gli interessi in
+`ce15` e la cassa non cambiano: la divisione è solo di scadenze. Un contratto **misto** (importo
+nuovo e residuo pregresso sulla stessa riga) viene spezzato in due contratti dalle funzioni condivise
+del kernel (`projection_common.contratti_da_riga_finanziamento`, `separa_prestiti_nuovi`,
+`quota_breve_prestiti_nuovi`), e dà gli stessi numeri di due righe separate.
 
 ## 6. I gate: cosa blocca un infrannuale
 

@@ -25,7 +25,7 @@ const RESPONSE_WITH_ERROR: ForecastPreviewResponse = {
     },
   ],
   // Il motore si e' fermato al 2026 (fabbisogno scoperto), ma il 2025 e' valido.
-  error: { year: 2026, message: "Unfunded financing requirement 12.345,67" },
+  error: { year: 2026, message: "Fabbisogno finanziario scoperto di 12.345,67" },
 };
 
 describe("previewStateFromResponse", () => {
@@ -35,7 +35,7 @@ describe("previewStateFromResponse", () => {
     expect(state.data).toEqual(RESPONSE_WITH_ERROR);
     expect(state.data?.forecast_years).toHaveLength(1);
     expect(state.data?.forecast_years[0].year).toBe(2025);
-    expect(state.data?.error).toEqual({ year: 2026, message: "Unfunded financing requirement 12.345,67" });
+    expect(state.data?.error).toEqual({ year: 2026, message: "Fabbisogno finanziario scoperto di 12.345,67" });
   });
 
   it("il canale di trasporto resta null: una 200 non e' un guasto di rete", () => {

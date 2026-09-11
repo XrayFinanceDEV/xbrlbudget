@@ -1,11 +1,10 @@
 """I messaggi del previsionale nascono in italiano, importi all'europea, codici diagnostici invariati (lotto 3A, Task 8).
 
-Task 8 e' diviso in due parti dal coordinatore (i motori sono toccati da altri agenti in parallelo,
-Task 2/4/5 di questo stesso lotto): la parte A copre i servizi e le rotte del previsionale
+Task 8 era diviso in due parti dal coordinatore (i motori erano toccati da altri agenti in parallelo,
+Task 2/4/5 di questo stesso lotto): la parte A copriva i servizi e le rotte del previsionale
 (`backend/app/services/assumptions_service.py`, `forecast_preview_service.py`, `promote_service.py`,
-`backend/app/api/v1/budget_scenarios.py`); la parte B, non ancora fatta, copre `calculations/forecast_engine.py`
-e `calculations/intra_year_engine.py`. I tre test che leggono un messaggio dei motori sono marcati `xfail`
-finche' la parte B non e' integrata: diventeranno verdi da soli, senza bisogno di essere riscritti.
+`backend/app/api/v1/budget_scenarios.py`); la parte B, qui completata, copre
+`calculations/forecast_engine.py` e `calculations/intra_year_engine.py`.
 """
 from decimal import Decimal as D
 from pathlib import Path
@@ -21,10 +20,27 @@ from tests.test_intra_year_semantics import _assumption, _zero_projection
 
 REPO = Path(__file__).resolve().parents[1]
 
-# Frammenti dei testi inglesi di oggi, solo per i file della parte A (servizi e rotte). I motori
-# (`calculations/forecast_engine.py`, `calculations/intra_year_engine.py`) sono la parte B: restano
-# in inglese fino a quel lotto, e non vanno controllati qui.
+# Frammenti dei testi inglesi di oggi, file per file: nessuno deve restare, commenti compresi.
+#
+# Ruling 9 (parte B): il brief attribuiva a `intra_year_engine.py · _get_split_investments` il
+# testo "Investments must be split into ...", che in questo codice non c'e' mai stato — la stringa
+# VERA di quel raise e' "Aggregate investments cannot be allocated automatically; provide
+# intangible_investments and/or tangible_investments" (la stessa che il brief attribuiva, per
+# errore di snapshot, al motore budget). Il file e simbolo restano quelli del brief; il frammento
+# di guardia segue la stringa vera di ciascun file, non il testo "oggi" (sbagliato) del brief:
+# `forecast_engine.py` aveva davvero "Investments must be split into ...", `intra_year_engine.py`
+# aveva davvero "Aggregate investments cannot be allocated ...".
 FRASI_INGLESI = {
+    "calculations/forecast_engine.py": [
+        "Unfunded financing requirement", "Budget scenario {scenario_id} not found", "data not found or incomplete",
+        "the overdraft gate needs", "Investments must be split", "is allowed only in the first forecast year",
+        "must equal base-year", "No assumptions found for scenario", "creditor categories are required", '"Base source"'],
+    "calculations/intra_year_engine.py": [
+        "Aggregate investments cannot be allocated", "is not a valid period", "is not a valid partial period", "diagnostics are unreadable",
+        "empty balance sheet", "SP imbalance", "profit mismatch", "source plug", "aggregate/detail mismatch",
+        "is not forecastable", "No assumptions found for scenario", 'Scenario {scenario_id} not found"',
+        "is not infrannuale type", "requires period_months between 1 and 12", "Projected assets exceed explicit funding",
+        "Short-term debt breakdown is unavailable", "must equal source bank", '"Partial source"', '"Reference source"'],
     "backend/app/services/assumptions_service.py": [
         'Scenario {scenario_id} not found"', "Assumptions saved", "forecast generated successfully",
         "overrides list is required", "needs forecast_year and field", "Invalid override field", "No assumptions found for year"],
@@ -47,14 +63,12 @@ def test_nessun_testo_inglese_del_perimetro_resta_nei_sorgenti():
     assert not fuori, "testi inglesi rimasti:\n" + "\n".join(fuori)
 
 
-@pytest.mark.xfail(reason="parte B del Task 8 (lotto 3A): _Overdraft.copri parla ancora inglese", strict=False)
 def test_il_fabbisogno_scoperto_si_dice_in_italiano_con_l_importo_all_europea():
     with pytest.raises(ValueError) as e:
         _Overdraft(allowed=False).copri(D("-1100700.90"))
     assert str(e.value).startswith("Fabbisogno finanziario scoperto di 1.100.700,90: "), str(e.value)
 
 
-@pytest.mark.xfail(reason="parte B del Task 8 (lotto 3A): il messaggio del motore budget e' ancora inglese", strict=False)
 def test_il_bulk_che_non_genera_lo_dice_in_italiano(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -73,7 +87,6 @@ def test_il_bulk_che_non_genera_lo_dice_in_italiano(monkeypatch):
         engine.dispose()
 
 
-@pytest.mark.xfail(reason="parte B del Task 8 (lotto 3A): il diagnostico dell'infrannuale e' ancora inglese", strict=False)
 def test_il_diagnostico_dell_infrannuale_e_italiano_e_il_codice_resta():
     from types import SimpleNamespace
     motore = IntraYearEngine(None)

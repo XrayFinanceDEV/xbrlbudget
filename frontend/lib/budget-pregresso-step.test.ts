@@ -125,7 +125,7 @@ describe("pregressoPreview", () => {
   });
 
   it("un fabbisogno scoperto si legge dall'errore strutturato, non si inventa", () => {
-    const p = pregressoPreview(baseBs, response([year(2027)], { year: 2028, message: "Unfunded financing requirement 1,234.56" }));
+    const p = pregressoPreview(baseBs, response([year(2027)], { year: 2028, message: "Fabbisogno finanziario scoperto di 1.234,56" }));
     expect(p.unfunded).toEqual({ year: 2028, amount: 1234.56 });
   });
 });

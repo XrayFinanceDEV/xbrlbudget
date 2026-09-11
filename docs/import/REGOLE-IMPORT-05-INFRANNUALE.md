@@ -249,7 +249,7 @@ motore.
 ### Le sotto-voci si distribuiscono, mai si inventano
 Le quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il
 parziale nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più
-un diagnostico: *"Short-term debt breakdown is unavailable; no categories were invented"* —
+un diagnostico: *"La ripartizione dei debiti a breve non è disponibile: nessuna categoria è stata inventata."* —
 esplicitamente **non** uno split 40/60 fra finanziario e operativo.
 
 ### La rata di rimborso
@@ -278,7 +278,7 @@ del kernel (`projection_common.contratti_da_riga_finanziamento`, `separa_prestit
 
 ### Gate semantico sulla fonte
 Applicato **prima di ogni calcolo**, al parziale sempre e al riferimento se presente. Solleva
-*"{label} {anno}/{mesi}M is not forecastable: …"*.
+*"{label} {anno}/{mesi}M non è utilizzabile per la previsione: …"*.
 
 | # | Causa | Soglia |
 |---|---|---|

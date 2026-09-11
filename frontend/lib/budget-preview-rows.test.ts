@@ -200,7 +200,7 @@ describe("rowsPregressoNuovo / unfundedFromError", () => {
     expect(rows.find((r) => r.key === "pfn")!.years[0].value).toBe(20 + 100 - 80);
   });
   it("estrae anno e importo dal messaggio del motore", () => {
-    expect(unfundedFromError({ year: 2028, message: "Unfunded financing requirement 84,120.50: add ..." }))
+    expect(unfundedFromError({ year: 2028, message: "Fabbisogno finanziario scoperto di 84.120,50: aggiungi ..." }))
       .toEqual({ year: 2028, amount: 84120.5 });
     expect(unfundedFromError({ year: null, message: "altro" })).toBeNull();
   });

@@ -113,7 +113,7 @@ export function stepForErrorMessage(message: string): WizardStepKey {
   // Anche il tetto dello scoperto superato si corregge al passo 6, dove lo
   // scoperto si concede: rimandare a Imposte manderebbe l'utente nel posto
   // sbagliato con un messaggio che parla d'altro.
-  if (/unfunded financing requirement|scoperto di conto corrente oltre il tetto/i.test(message))
+  if (/fabbisogno finanziario scoperto di|scoperto di conto corrente oltre il tetto/i.test(message))
     return "pregresso-nuovo";
   // «Imposte» come nome di passo è la meta anche qui — oggi coincide col
   // default, ma la regola è voluta: se un passo si aggiunge, questo ramo dice
@@ -259,9 +259,9 @@ export function saveOutcome(result: BulkSaveResult | null | undefined): SaveOutc
   if (!result || result.forecast_generated !== false) {
     return { ok: true, message: "Previsionale calcolato", step: null, route: ROUTE_DOPO_CALCOLO };
   }
-  // Il messaggio GREZZO decide il passo (la regex del motore e' in inglese);
-  // quello tradotto va al toast. `saveNotice` riusa il riconoscimento e la
-  // frase dell'anteprima — una sola traduzione, in `budget-preview-notice`.
+  // Il messaggio GREZZO decide il passo; quello mostrato all'utente va al
+  // toast. `saveNotice` riusa il riconoscimento e la frase dell'anteprima —
+  // una sola composizione del testo, in `budget-preview-notice`.
   const raw = result.message?.trim() ? result.message.trim() : "Previsionale non generato";
   return { ok: false, message: saveNotice(raw), step: stepForErrorMessage(raw), route: null };
 }

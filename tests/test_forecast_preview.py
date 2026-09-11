@@ -159,7 +159,7 @@ def test_unfunded_requirement_returns_200_with_partial_years(monkeypatch):
                 company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
             assert [y["year"] for y in out["forecast_years"]] == [2027]
             assert out["error"]["year"] == 2028
-            assert "Unfunded financing requirement" in out["error"]["message"]
+            assert "Fabbisogno finanziario scoperto" in out["error"]["message"]
     finally:
         engine.dispose()
 

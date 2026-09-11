@@ -19,7 +19,7 @@ balance untouched), so a real abbreviato XBRL / TEBE CSV company IS forecastable
 * legacy/sample_data/ISTANZA02353550391.xbrl (a real deposited XBRL, Wolters
   Kluwer "Bilancio Genya", taxonomy 2018-11-04) imports, balances, and now
   completes a full 2-year budget cycle — previously it was refused with
-  "aggregate/detail mismatch: sp04_immob_finanziarie, sp14_fondi_rischi".
+  "aggregati e dettagli non coincidono: sp04_immob_finanziarie, sp14_fondi_rischi".
 
 * A synthetic TEBE CSV carrying real stock / trade receivables / payables /
   depreciation (all published as aggregates only) now imports and forecasts —

@@ -41,7 +41,7 @@ from tests.e2e_kit import memory_sessions, seed_base_year
 USER = "stale"
 
 # Un piano di investimenti che nessuna fonte finanzia: il motore budget
-# **solleva** (`Unfunded financing requirement`) e non produce nulla, mentre
+# **solleva** (`Fabbisogno finanziario scoperto`) e non produce nulla, mentre
 # il bulk risponde comunque 200. E' il caso reale che questo task rende
 # visibile.
 UNFUNDED = {"tangible_investments": 9_000_000}

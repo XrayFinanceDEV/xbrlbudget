@@ -32,7 +32,7 @@ gruppo forzato, `sp16a`/`sp17a` esclusi — e verifica che:
    dichiarato in `residuo_quadratura`.
 3. L'espressione REALE che `compute_forecast` costruisce ad ogni anno — ora
    UNA funzione, `ForecastEngine._sp_forced_fields`, non piu' un'espressione a
-   pezzi nel chamante (rilievo I-2 della revisione di `6e5c0f7`, punto 3: la
+   pezzi nel chiamante (rilievo I-2 della revisione di `6e5c0f7`, punto 3: la
    versione precedente di questo docstring descriveva come reale un
    `_declared_sp_fields()` incondizionato che il motore non costruiva gia'
    piu') — contiene sempre `sp16a`/`sp17a`, anche nel caso piu' comune (nessun

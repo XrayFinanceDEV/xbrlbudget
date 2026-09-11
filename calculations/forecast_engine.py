@@ -1067,8 +1067,9 @@ class ForecastEngine:
         Un `sp_overrides` su quella riga e' RIFIUTATO a monte
         (`_rifiuto_override_governati`: con un piano dal rilievo I1-bis, senza
         dal rilievo I-b), quindi qui NON c'e' nulla da riallineare sul lato
-        oltre. Il giro 2 teneva in piedi un confronto-`residual_long` chamado
-        «autocHECK»: il rilievo M-3 della revisione di `c8317ca` l'ha rimosso,
+        oltre. Il giro 2 teneva in piedi un confronto-`residual_long` spacciato
+        per controllo dell'invariante: il rilievo M-3 della revisione di
+        `c8317ca` l'ha rimosso,
         perche' una riscrittura silenziosa non e' un controllo — se un domani
         una rotta ci arriva, la divergenza la deve dire la rete (`_divergenze`),
         non una copia che la ricompone a valle. Stessa rimozione per la seconda

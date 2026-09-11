@@ -442,7 +442,7 @@ def test_a_senza_override_il_riallineamento_non_cambia_niente(monkeypatch, caplo
     nell'anno dopo) lontano da qualunque confronto, a ipotesi invariate. Due
     versioni del motore che si dividono per una coda di arrotondamento, a parita'
     di override assenti, passerebbero il banco come identiche: invece qui si
-    misurra.
+    misura.
 
     Affermazione di PROPRIETA' e non di numero: lo stesso scenario, una volta
     col riallineatore e una volta disattivandolo (`monkeypatch`), deve dare lo
@@ -495,7 +495,7 @@ def test_a_senza_override_il_riallineamento_non_cambia_niente(monkeypatch, caplo
 # ─────────────────────── I-b: `sp17e` senza piano ───────────────────────
 
 def test_sp17e_senza_piano_si_rifiuta_quando_l_anno_dopo_lo_legge(monkeypatch):
-    """Rilievo I-b: in `saldo_acconto` la riga lungh tributaria la scrive il
+    """Rilievo I-b: in `saldo_acconto` il lato lungo tributario lo scrive il
     runoff, NON il persistito — e senza piano il runoff di uno zero vale zero.
 
     L'override quindi non viene "portato avanti": viene CANCELLATO, e la cassa
@@ -713,7 +713,7 @@ def _base_crediti(db, user):
         ("sp07b_crediti_controllate_lungo", "5000.00"), ("sp07c_crediti_collegate_lungo", "5000.00"),
         ("sp07e_crediti_tributari_lungo", "5000.00"), ("sp07f_imposte_anticipate_lungo", "2000.00"),
         ("sp07g_crediti_altri_lungo", "3000.00"),
-        # Il被动ivo segue: il foglio deve pareggiare, o il test misura un fabbisogno
+        # Il passivo segue: il foglio deve pareggiare, o il test misura un fabbisogno
         # invece di misurare un calendario.
         ("sp17_debiti_lungo", "90000.00"), ("sp17g_altri_debiti_lungo", "60000.00"),
     ):

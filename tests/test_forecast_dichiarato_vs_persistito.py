@@ -131,7 +131,7 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
 
     # ── la posizione tributaria scrive anche il CREDITO ──
     # Il confronto e' fra una DICHIARAZIONE e il persistito, non fra la riga e
-    # l'override: tocca quindi correrE anche quando la riga e' forzata (rilievo
+    # l'override: tocca quindi correre anche quando la riga e' forzata (rilievo
     # M-4 della revisione di `f330730` — la rete saltava questi due confronti
     # proprio sui campi forzati, ed e' li' che I1 aveva lasciato una sede incoerente).
     imposte = det["imposte"]
@@ -192,7 +192,8 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
                           f" {dichiarati} ({d.get('residual_short')} + {d.get('residual_long')})"))
 
     # ── rilievo M-4, punto 1 (giro 3): l'identità di flusso dell'anno dopo ──
-    # `pos(N) − [pos(N−1) + imposta − saldo − acconti − rate] ≈ 0` con
+    # `pos(N) − [pos(N−1) + imposta − saldo − acconti − rate]` deve stare
+    # sotto i due centesimi, con
     # `pos = sp16e + sp17e − sp06e` PERSISTITI: se la posizione tributaria si
     # e' mossa senza che un versamento (o il calcolo dell'imposta) lo dica,
     # l'ha mossa la cassa senza un flusso — il difetto che le due sedi
@@ -495,7 +496,7 @@ OVERRIDE = {
     # persistito sotto un override di cella. Gli importi stanno vicino alle
     # masse della base: mai sotto il naturale, perche' una voce di debito
     # forzata al ribasso sottrae cassa al plug e potrebbe alzare un fabbisogno
-    # che non e' c'e' — la batteria deve generare, non collidere.
+    # che non c'e' — la batteria deve generare, non collidere.
     # Il LATO OLTRE con un piano attivo, invece, collide per progetto (I1-bis):
     # quegli scenari si assertiscono sul RIFIUTO, vedi `_rifiuto_atteso`.
     "SP sui campi dichiarati": {"sp_overrides": SP_FAMIGLIA},
@@ -652,7 +653,7 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
     #     `tributari + previdenziali + altri`) × 4 indicizzazioni. Il piano
     #     `crediti con inesigibile` non collide perche' la famiglia non tocca
     #     `sp07`, e `senza piano` non ha calendario da contraddire;
-    #   · 21 = laggregato: le 3 indicizzazioni che forzavano ENTRAMBI i secchi
+    #   · 21 = l'aggregato: le 3 indicizzazioni che forzavano ENTRAMBI i secchi
     #     (`solo g`, `f + g`, `tutte e undici`) × 6 piani, + i 3 piani con
     #     `altri_debiti` × `nessuna`. Li' non resta nessuna riga operativa libera
     #     nel gruppo e il totale forzato e' la massa, non un centesimo (I-1);

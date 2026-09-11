@@ -262,7 +262,20 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   vuole e vedere il previsionale non muoversi. Solo la casella *«Azzera le modifiche manuali del
   CE previsionale»* del dialogo Ricalcola li cancella — e cancella le sole colonne il cui nome
   finisce per `_override`: `sp_overrides` (il sacco JSON scritto da `/forecast/balance`) **non
-  viene toccato**.
+  viene toccato**. Sul previsionale a saldo + acconto un override di `sp16e` o `sp06e` si porta
+  anche all'anno dopo: dopo gli override il motore riallinea al persistito `details['imposte']`
+  e le righe di `details['pregresso']` (`_realign_sp_declarations`), e l'anno N+1 legge saldo e
+  credito d'apertura da lì. Il credito forzato riempie prima `opening_credit_left`, poi
+  `generated_credit`: la ripartizione è solo dichiarativa, perché N+1 ne legge la somma.
+- **Sulle righe a giorni un override vale un anno.** `sp06a`…`sp06g` (ripartite dal DSO, `_alloc`)
+  e `sp16d` (DPO) si ricalcolano ogni anno dalla formula dei giorni, non da `prev`: un
+  `sp_overrides` nell'anno N fissa lo stock di N, e dall'anno N+1 la riga torna quella senza
+  override. La differenza rientra come variazione del circolante dell'anno dopo, che il
+  rendiconto mostra come flusso operativo: non sparisce. Vale con piano e senza, ed era così già
+  prima del lotto. Le righe che crescono da `prev` (`sp16f`, `sp16g`, il lato oltre senza piano)
+  portano invece l'override avanti. Con un piano dei crediti la riga di
+  `details['pregresso']['crediti_commerciali']` segue il persistito anche nell'anno
+  dell'override, come i quattro saldi di debito (`_realign_sp_declarations`).
 - **`sp_overrides` clampa a zero i valori negativi** (tranne `sp13_utile_perdita` e
   `sp12h_riserva_neg_azioni_proprie`) e **ignora in silenzio** una chiave che non esiste nel
   risultato: un override negativo, o scritto male, non dà errore — dà uno zero. Un override che
@@ -273,9 +286,15 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `forecast_generated: True` (difetto §11.1 della spec del lotto); e un plug che accendeva scoperto
   PRIMA dell'override lasciava poi convivere cassa e scoperto. Un override di `sp16a`/`sp16` che
   lascerebbe un fabbisogno si rifiuta: nessuno scoperto ci sta senza superare il totale forzato.
+  Un override dell'**aggregato** `sp16`/`sp17` senza override sulle sue voci mette la differenza
+  su `sp16g`/`sp17g`, mai sui debiti finanziari; se quel secchio è governato da un piano
+  `altri_debiti` o da un'indicizzazione il motore **rifiuta** l'override (400 su
+  `PATCH /sp-override`, `forecast_generated: false` sul bulk; `_normalize_balance_sheet_cents`).
+  Prima di questo giro la stessa massa finiva su `sp16c` — obbligazioni inventate — e per un
+  commit era stata cancellata in silenzio.
 - **Un override su una riga che un piano rigenera si rifiuta, in qualunque anno
   del piano** (`_LATO_OLTRE_GOVERNATO_DA_PIANO`): la cella resta salvata, l'anno
-  dopo il motore la riscrive dall'aggregato e la cassa assorbe la differenza
+  dopo la riscrive il calendario del piano e la cassa assorbe la differenza
   senza alcun flusso — il foglio quadra e nessuna rete lo vede, perché le reti
   confrontano ciò che il piano dichiara con ciò che viene persistito, e qui le
   due cose coincidono comunque. Rigovernate: `sp17d`/`sp17f`/`sp17g` coi
@@ -286,7 +305,13 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   nomina il saldo con `PREGRESSO_LABELS`, il passo del wizard che lo scadenzia
   (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari) e la via d'uscita
   (`value: null`), perché un override proibito avvelena ogni `PATCH` successivo
-  sullo stesso scenario anche su un'altra cella.
+  sullo stesso scenario anche su un'altra cella. Il bulk risponde comunque **200** con
+  `forecast_generated: false` e l'override lo salva lo stesso; `PATCH /sp-override` risponde 400
+  e annulla il lotto. Lo stesso rifiuto colpisce il lato **breve** di un saldo con piano, ma solo
+  quando il valore forzato scende sotto la rata dovuta l'anno dopo (`residual_short` del
+  calendario, `_residuo_breve_piano`): sopra quella quota l'override è lecito e si porta avanti
+  come stato d'apertura, sotto il calendario ripristinerebbe la quota e la stessa rata uscirebbe
+  due volte.
 - **`POST /preview` non scrive nulla e risponde 200 anche a un piano che si ferma**: leggere
   `error`, non lo status. Gli anni in `forecast_years` sono quelli calcolati prima dell'errore, non
   quelli chiesti: chi guarda solo lo status disegna un'anteprima monca come se fosse completa.
@@ -305,6 +330,14 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   (`calculations/projection_common.py:341-367`, `tax_settlement_saldo_acconto`). Prima di questo
   lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
   un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
+- **Un anno manuale non scarica il piano tributario sull'anno automatico.** Se un anno in via
+  manuale è seguito da un anno automatico con piano tributario, il saldo dovuto si ricostruisce
+  dal debito tributario di bilancio dell'anno manuale: quando quel debito è **inferiore** al
+  rateizzato ancora aperto il calendario ripartirebbe intero, la stessa rata uscirebbe due volte
+  e la cassa assorbirebbe la differenza senza alcun flusso — il motore lo rifiuta quindi con un
+  errore in italiano. Le vie d'uscita: tenere in via manuale anche l'anno dopo, o modificare il
+  piano nel passo «Imposte». Con la stessa logica l'esenzione della via manuale dal rifiuto
+  dell'override sotto la rata vale solo quando **anche l'anno dopo** è manuale.
 - **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
@@ -530,8 +563,19 @@ year's row) schedules how much of the base-year opening mass is collected or pai
 year; whatever the day-count/growth formula would produce is added to the still-open short-term
 residual, and the entire long-term side becomes pregresso (`calculations/forecast_engine.py:2745-
 2763`, `:3104-3128`, kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
-balance behaves exactly as before the lotto, to the cent (`mode: "legacy"` in
-`details['pregresso']`). Tax payables are the one balance whose behaviour changes **even without a
+balance follows the same formula as before the lotto (`mode: "legacy"` in
+`details['pregresso']`), and the rounding cent of the debt group still lands on
+`sp16g`/`sp17g` — though its amount can differ by a cent when another row of the group moved
+(the tax payables below). When `sp16g` (or `sp17g`) is governed by an `altri_debiti` plan or by
+an `sp_indexing` driver, no operating row of **that** group is free: the cent then makes the
+aggregate `sp16`/`sp17` equal to the sum of its rows — so cash moves by the same cent — and is
+declared in `details['residuo_quadratura']` with the aggregate as `campo`
+(`_normalize_balance_sheet_cents`). The financial rows `sp16a/b/c`, `sp17a/b/c` never receive it.
+The day-count guard added by Task 14 moves numbers too, with or without a plan: a derived
+DSO/DIO/DPO whose base-year denominator is not positive, or whose implied standing exceeds 365
+days, is discarded and the base-year stock is carried instead (`degenerate_turnover_ratio`,
+`_derived_days`) — measured on the parity bench: `holding__crescita` `sp16d` 44.772,50 →
+50.000,00. Tax payables are the one balance whose behaviour changes **even without a
 plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
 year-end N is paid as saldo in N+1, net of the opening tax credit up to its amount, and the advance
 defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` **greater than
@@ -540,7 +584,13 @@ Before this lotto tax debt never left the balance sheet and projected cash was i
 year's unpaid tax — a defect that balanced, so no check ever saw it.
 Every CE line (32 `ce*_override` columns, from `/forecast/income`) and every BS line (the
 `sp_overrides` JSON bag, from `/forecast/balance`) can be forced to an absolute value that beats the
-growth percentage. → [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md)
+growth percentage — except the rows the plan calendar regenerates: the long side of a balance with
+a runoff plan (`sp17d`/`sp17f`/`sp17g`, `sp07` and its trade sub-lines, `sp17e` even without a
+plan once the reading year runs the saldo+acconto kernel), a planned balance's short side forced
+below next year's scheduled instalment, and a forced `sp16`/`sp17` aggregate whose group has no
+free operating row. Those are refused with an Italian `ValueError` (`_rifiuto_override_governati`,
+`_normalize_balance_sheet_cents`) instead of being saved and silently overwritten. →
+[docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md)
 
 ### Intra-Year Engine (Infrannuale)
 Projects a partial year (say 9 months) to a full 12 months, against a reference full year

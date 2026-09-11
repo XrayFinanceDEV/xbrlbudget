@@ -836,3 +836,156 @@ def test_il_messaggio_del_rifiuto_indica_passo_ed_etichetta(monkeypatch):
             assert "debiti tributari" in res2["message"], res2["message"]
     finally:
         engine.dispose()
+
+
+# ══ N-I1 (Ruling 61, giro 3): la transizione «via manuale → automatico» ══
+#
+# Il ramo `else` del calcolatore tributario (primo anno di piano OPPURE anno
+# preceduto dalla via manuale) fa `saldo_due = max(0, opening - rate_aperto)`.
+# Se il debito tributario lasciato dall'anno manuale e' INFERIORE al rateizzato
+# ancora aperto, il `max` taglia il deficit in silenzio: il calendario riparte
+# intero, la cassa assorbe la differenza, e lo scarto di flusso dell'anno dopo
+# e' +2.666,66 anche senza override (sonda `sonda_trans.py` della revisione).
+# Il motore ora RIFIUTA (a) nel kernel, e (b) in `_rifiuto_override_governati`
+# esenta la via manuale solo se anche l'anno dopo e' manuale.
+
+PIANO_TRANS = {"debiti_tributari": {"opening": 10000.00, "saldo": 6000.00,
+                                    "rateizzato": 4000.00,
+                                    "amounts": [1333.34, 1333.33, 1333.33]}}
+
+
+def _righe_trans(manuale_anni, overrides=None, growth=-100):
+    """Tre anni (2027-2029); `manuale_anni` = insieme di anni in via manuale.
+
+    L'anno in via manuale porta `sp16e_growth_pct = growth` (default −100:
+    azzera il debito, che e' il caso che apre il buco); gli altri restano
+    automatici. `overrides` e' PER ANNO, come in `_righe_base`.
+    """
+    rows = []
+    for y in ANNI_3:
+        r = {"forecast_year": y, "revenue_growth_pct": 3.33}
+        if y in manuale_anni:
+            r["sp16e_growth_pct"] = growth
+        if overrides and y in overrides:
+            r["sp_overrides"] = dict(overrides[y])
+        rows.append(r)
+    rows[0]["pregresso"] = PIANO_TRANS
+    return rows
+
+
+def test_ni1_t1_transizione_manuale_auto_sotto_il_rateizzato_si_rifiuta(monkeypatch):
+    """T1: 2027 manuale con `sp16e_growth_pct = −100`, 2028 automatico, nessun
+    override. Il debito lasciato (0) e' sotto il rateizzato aperto (2.666,66):
+    il kernel (a) RIFIUTA, con l'anno 2028 nel messaggio.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _cid, sid, _rows = _esito(db, "ni1-t1", _righe_trans({2027}))
+            assert res["forecast_generated"] is False, res["message"]
+            assert "2028" in res["message"], res["message"]
+            assert "rateizz" in res["message"], res["message"]
+            assert read_forecast_maps(db, sid) == []
+    finally:
+        engine.dispose()
+
+
+def test_ni1_t3_override_sotto_il_rateizzato_in_anno_manuale_si_rifiuta(monkeypatch):
+    """T3 (percorso di servizio, bulk): override `sp16e` 2027 = 2.000 in un anno
+    manuale seguito da un anno automatico → rifiutato da (b), col messaggio
+    dell'override (piu' chiaro di quello del kernel), non con `non è ammesso`
+    generico ma con la soglia «deve pagare».
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _cid, sid, _rows = _esito(
+                db, "ni1-t3", _righe_trans({2027}, overrides={2027: {
+                    "sp16e_debiti_tributari_breve": 2000.00}}))
+            assert res["forecast_generated"] is False, res["message"]
+            assert "non è ammesso" in res["message"], res["message"]
+            assert "sp16e_debiti_tributari_breve" in res["message"], res["message"]
+            assert read_forecast_maps(db, sid) == []
+    finally:
+        engine.dispose()
+
+
+def test_ni1_t3_patch_sp_override_rifiuta_e_rollback(monkeypatch):
+    """T3 sul percorso `PATCH /sp-override`: 400 e `sp_overrides` non persistito.
+
+    L'override proibito dal rifiuto (b) non deve restare nel sacco JSON, perche'
+    un override proibito avvelena ogni `PATCH` successivo sullo stesso scenario
+    (`patch_400_loop`, CLAUDE.md).
+    """
+    from backend.app.api.v1 import budget_scenarios as bs
+    from backend.app.schemas import budget as schemas
+    from database.models import BudgetAssumptions
+    import fastapi
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id = _base_tributi(db, "ni1-t3-patch")
+            sc = bs.create_budget_scenario(
+                company_id,
+                schemas.BudgetScenarioCreate(company_id=company_id, name="t3p",
+                                             base_year=2026, scenario_type="budget"),
+                user_id="ni1-t3-patch", db=db)
+            rows = _righe_trans({2027})
+            res = bs.bulk_upsert_assumptions(
+                company_id, sc.id, request={"assumptions": rows, "auto_generate": False},
+                user_id="ni1-t3-patch", db=db)
+            assert res["success"] is True
+            req = schemas.SpOverrideRequest(overrides=[{
+                "forecast_year": 2027, "field": "sp16e_debiti_tributari_breve",
+                "value": 2000.00}])
+            with pytest.raises(fastapi.HTTPException) as exc:
+                bs.patch_sp_override(company_id, sc.id, req,
+                                     user_id="ni1-t3-patch", db=db)
+            assert exc.value.status_code == 400, exc.value.detail
+            bag = db.query(BudgetAssumptions).filter(
+                BudgetAssumptions.scenario_id == sc.id,
+                BudgetAssumptions.forecast_year == 2027).first().sp_overrides
+            assert not (bag or {}).get("sp16e_debiti_tributari_breve"), bag
+    finally:
+        engine.dispose()
+
+
+def test_ni1_t2_override_sopra_il_rateizzato_genera_e_scarto_zero(monkeypatch):
+    """T2: override `sp16e` 2027 = 5.000 (sopra il rateizzato aperto 2.666,66),
+    2028 automatico. Si genera, e lo scarto di flusso tributario del 2028 e'
+    0,00: la via lecita tiene.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(
+                db, "ni1-t2", _righe_trans({2027}, overrides={2027: {
+                    "sp16e_debiti_tributari_breve": 5000.00}}))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, "ni1-t2", cid, sid, rows)
+            assert _letto(lette, 2027, "sp16e_debiti_tributari_breve") == D("5000.00")
+            assert _scarto_di_flusso(lette, 2028) == D("0.00"), _scarto_di_flusso(lette, 2028)
+    finally:
+        engine.dispose()
+
+
+def test_ni1_t4_tutti_manuali_override_zero_genera(monkeypatch):
+    """T4: tutti gli anni in via manuale, override `sp16e` 2027 = 0. Nessun anno
+    automatico riparte dal calendario, quindi (a)/(b) non scattano: si genera.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(
+                db, "ni1-t4", _righe_trans(set(ANNI_3), overrides={2027: {
+                    "sp16e_debiti_tributari_breve": 0}}))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, "ni1-t4", cid, sid, rows)
+            assert _letto(lette, 2027, "sp16e_debiti_tributari_breve") == D("0.00")
+    finally:
+        engine.dispose()

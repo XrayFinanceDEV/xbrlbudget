@@ -22,6 +22,18 @@ from calculations.projection_common import (
 from calculations.ce_result import calculate_ce_result
 
 
+def _importo_it(value) -> str:
+    """Importo al centesimo in formato italiano per i messaggi all'utente: 1.333,34.
+
+    Solo visualizzazione (giro 3, rilievo m-A): nessun calcolo passa di qui,
+    e il round HALF_UP e' quello della quantizzazione del motore. Il lotto 3A
+    lo consolidera' in un modulo proprio.
+    """
+    q = Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    corpo = f"{abs(q):,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
+    return ("-" if q < 0 else "") + corpo
+
+
 # ── INDICIZZAZIONE DELLE VOCI MINORI DELLO SP (Task 15) ──
 #
 # «Le voci minori dei debiti si tengono o costanti o in crescita con il
@@ -899,9 +911,27 @@ class ForecastEngine:
                 piano = (pregresso or {}).get(saldo)
                 if not piano or ov.get(breve) is None:
                     continue
-                if saldo == 'debiti_tributari' and manuale:
+                if (saldo == 'debiti_tributari' and manuale
+                        and not letta_l_anno_dopo):
+                    # N-I1 (b), Ruling 61: l'esenzione della via manuale vale
+                    # solo se l'anno dopo e' manuale a sua volta, perche' e'
+                    # LUI che ripartirebbe dal totale lasciato. Con un anno
+                    # automatico dietro, un override sotto la rata ricade nel
+                    # buco che il kernel ora rifiuta (N-I1 a): il rifiuto
+                    # dell'override, piu' vicino alla causa, arriva prima.
                     continue
-                residuo = cls._residuo_breve_piano(piano, year_index, horizon)
+                if (saldo == 'debiti_tributari' and manuale
+                        and letta_l_anno_dopo):
+                    # La soglia della transizione NON e' la rata dell'anno
+                    # dopo: e' il rateizzato ancora APERTO che l'anno
+                    # automatico ripartira' dal totale lasciato (la stessa
+                    # quantita' che il kernel (a) confronta con l'apertura,
+                    # `r.residual + r.closed`). Sotto quella quota il `max`
+                    # taglierebbe il deficit: `residual_short` la racchiude
+                    # solo quando il piano paga tutto in un anno.
+                    residuo = cls._rateizzato_aperto_dopo(piano, year_index, horizon)
+                else:
+                    residuo = cls._residuo_breve_piano(piano, year_index, horizon)
                 forzato = Decimal(str(ov[breve]))
                 if forzato < residuo:
                     raise ValueError(
@@ -943,6 +973,28 @@ class ForecastEngine:
             [Decimal(str(x)) for x in (piano.get('writeoff') or [])],
             year_index, horizon,
         ).residual_short
+
+    @staticmethod
+    def _rateizzato_aperto_dopo(piano: Dict[str, Any], year_index: int,
+                                horizon: int) -> Decimal:
+        """Il rateizzato ancora APERTO all'inizio dell'anno dopo di `year_index`.
+
+        E' il `r.residual + r.closed` che il ramo `else` del calcolatore
+        tributario (N-I1) confronta col debito lasciato: sulla transizione
+        manuale→automatico e' questa la quota che il `max` può tagliare, non il
+        `residual_short` (che e' solo la rata dell'anno dopo). Il runoff
+        all'anno `year_index + 1` da' `residual + closed` = rateizzato −
+        Σrate[:year_index+1], cioe' tutto cio' che resta da rateizzare da
+        quell'anno in poi.
+        """
+        apertura = piano.get('rateizzato') if 'rateizzato' in piano else piano.get('opening')
+        r = runoff_schedule(
+            Decimal(str(apertura or 0)),
+            [Decimal(str(x)) for x in (piano.get('amounts') or [])],
+            [Decimal(str(x)) for x in (piano.get('writeoff') or [])],
+            year_index + 1, horizon,
+        )
+        return r.residual + r.closed
 
     @classmethod
     def _declared_sp_fields(cls) -> "frozenset[str]":
@@ -3022,7 +3074,26 @@ class ForecastEngine:
                     # `r.residual + r.closed` e' il rateizzato ancora aperto
                     # all'INIZIO di quest'anno: non e' saldo, e dichiararlo tale
                     # lo farebbe risultare pagato due volte.
-                    saldo_due = max(ZERO, opening_tax_debt - (r.residual + r.closed))
+                    rate_aperto = r.residual + r.closed
+                    if (year_index > 0
+                            and self._q(opening_tax_debt) < self._q(rate_aperto)):
+                        # N-I1 (Ruling 61): l'anno manuale lascia SUL TOTALE un
+                        # debito inferiore al rateizzato ancora aperto. Il `max`
+                        # taglierebbe il deficit in silenzio: il calendario
+                        # ripartirebbe intero, la cassa assorbirebbe la
+                        # differenza (misurato: scarto di flusso +2.666,66
+                        # l'anno dopo, sonda `sonda_trans.py`). Un fabbisogno
+                        # tributario non dichiarato non si tappa con un max:
+                        # si rifiuta, e l'utente decide.
+                        raise ValueError(
+                            f"Il piano dei debiti tributari non può ripartire da meno di "
+                            f"ciò che resta da rateizzare: l'anno {assumption.forecast_year} "
+                            f"esce dalla via manuale lasciando {_importo_it(opening_tax_debt)}, "
+                            f"contro i {_importo_it(rate_aperto)} ancora da rateizzare. "
+                            "Tieni in via manuale anche quest'anno, oppure modifica il piano "
+                            f"al passo «{self._passo_pregresso('debiti_tributari')}»."
+                        )
+                    saldo_due = max(ZERO, opening_tax_debt - rate_aperto)
                 opening_credit = _prev('sp06e_crediti_tributari_breve')
             # Solo un piano vero mette il saldo in `mode: runoff` (spec §5.3):
             # senza piano non c'e' nulla di scadenziato da dichiarare, e l'unica

@@ -417,7 +417,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `status: "error"`) mostra l'errore **sopra** i dati già caricati, mai al posto loro — le tre pagine leggono
   `analysisData` direttamente per questo, non solo `pageStatus`. Una nuova pagina che legge `useAnalysis` riusa
   gli stessi due moduli, non reinventa un `if (loading)` locale: è esattamente il pattern che ha lasciato per
-  mesi le tre pagine su «Caricamento...» per sempre, senza alcun segnale (collaudo del lotto 2).
+  mesi le tre pagine su «Caricamento...» per sempre, senza alcun segnale (collaudo del lotto 2). La tab Indicatori dell'infrannuale
+  (`app/pratica/page.tsx`) riusa lo stesso componente ma la propria funzione pura,
+  `lib/pratica-indicatori-status.ts`, perché lì un errore di lettura e una proiezione mai generata sono due cose
+  diverse — prima collassavano sullo stesso messaggio («Genera prima la proiezione nel passaggio 3.»), anche quando
+  la proiezione esisteva già.
 
 ### Ambiente
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata

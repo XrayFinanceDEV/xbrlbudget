@@ -375,11 +375,14 @@ Un prestito nuovo è la legacy `financing_amount` / `financing_duration_years` /
 `new_financing_schedule` (`calculations/projection_common.py`): quote capitali costanti dopo
 l'eventuale preammortamento, maxirata insieme all'ultima rata, interessi in `ce15` sul residuo di
 apertura. Un contratto misto (`amount` e `opening_residual` sulla stessa riga) si divide in due
-contratti con le stesse condizioni: la parte nuova segue questa sezione, quella pregressa no.
+contratti con le stesse condizioni (`contratti_da_riga_finanziamento` in
+`calculations/projection_common.py`, chiamata da `assemble_financing`): la parte nuova segue questa
+sezione, quella pregressa no.
 
 Il residuo del prestito **non** sta tutto in `sp17a_debiti_banche_lungo`: la parte che il
 calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il resto in `sp17a`
-(`_quota_breve_prestiti_nuovi` in `calculations/forecast_engine.py`).
+(`quota_breve_prestiti_nuovi` in `calculations/projection_common.py`; la separazione pregresso /
+prestito nuovo di apertura è `separa_prestiti_nuovi`, stessa famiglia — lotto 3A, Task 3).
 
 - Finché anche l'anno dopo è di preammortamento la quota a breve è zero; nell'anno prima della
   maxirata la maxirata sta a breve.
@@ -523,7 +526,7 @@ porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo v
 | `backend/app/api/v1/budget_scenarios.py` | `PATCH /ce-override` + `_CE_OVERRIDE_FIELDS`, `POST /generate?clear_overrides`, i 3 endpoint dei commenti AI, `POST /promote` |
 | `backend/app/services/promote_service.py` | i due cancelli, la sostituzione, la copia verificata |
 | `calculations/forecast_engine.py` | override nel CE, `_apply_sp_overrides`, DSO/DIO/DPO derivati, `validate_pregresso`, la classe `_Overdraft` |
-| `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses` |
+| `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses`, e le regole del debito bancario (`e_contratto_pregresso`, `contratti_da_riga_finanziamento`, `residuo_prestiti_nuovi`, `quota_breve_prestiti_nuovi`, `separa_prestiti_nuovi`) |
 | `calculations/intra_year_engine.py` | gli stessi override sul percorso infrannuale — **non** tocca lo scadenziamento del pregresso né l'overdraft |
 | `frontend/app/forecast/income/page.tsx` | `FIELD_TO_OVERRIDE`, `EditableCell`, `pendingEdits`, salvataggio batch |
 | `frontend/app/forecast/balance/page.tsx` | l'editor dello SP previsionale che scrive `sp_overrides` |

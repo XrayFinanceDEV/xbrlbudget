@@ -114,6 +114,32 @@ Mai negative: nessun credito d'imposta inventato.
 > dell'assunzione. Nell'interfaccia infrannuale l'override del risultato è tradotto dal frontend
 > in un'aliquota effettiva.
 
+**La posizione tributaria al 31/12** (lotto 3A, Task 5, decisione 4 del proprietario) non è più «apertura + imposta
+− acconti»: al 31/12 resta **solo il saldo dell'anno in corso**, `imposta(anno) − acconti(anno)`, positivo in
+`sp16e` e negativo in `sp06e`. Gli acconti sono `tax_advances_paid` se **maggiore di zero**, altrimenti il 100% del
+`ce20` dell'anno di riferimento; senza riferimento l'imposta su cui commisurarli non esiste, quindi **zero** —
+tutta l'imposta dell'anno resta da versare al 31/12 (il lato prudente, mai un acconto inventato). La regola è
+`projection_common.acconti_dovuti`, la stessa del motore budget, e la posizione la costruisce
+`projection_common.posizione_tributaria_fine_anno`. Quanto era aperto al mese del parziale **esce di cassa entro
+fine anno**:
+
+```
+uscita = (debito di apertura − credito di apertura) + imposta dei mesi residui − posizione netta di fine anno
+```
+
+Misurato sui test (`tests/test_intra_year_imposte.py`): apertura 1.150.949,04, imposta dell'anno 120.000, acconti
+99.247,26 → `sp16e` **20.752,74** e un'uscita di cassa di **1.250.196,30**. Prima: `sp16e` 1.171.701,78 con cassa
+immutata, e il budget nato dal promote ereditava quel debito. Nel motore la cassa resta il plug, quindi è il kernel
+a dichiarare `cash_out` e il test end-to-end a verificarlo. `sp17e` (rate oltre l'anno) non si tocca, e la via
+manuale (`sp06e_growth_pct` o `sp16e_growth_pct` valorizzati) continua a saltare la posizione automatica.
+
+**Se la cassa del parziale non copre quell'uscita** (debito tributario di apertura maggiore della cassa
+disponibile), il plug generale dell'infrannuale — §5 sotto, "Il fabbisogno scoperto è un diagnostico, non un
+debito" — clampa `sp09` a zero e dichiara `unfunded_financing_requirement`: la proiezione esce comunque, ma **non
+quadrata**, e il cancello del promote (`check_quadratura(...).semantic_valid`) la rifiuta finché l'utente non
+aggiunge un finanziamento esplicito o una rettifica — decisione del proprietario, lotto 3A, 2026-09-11: si tiene
+la regola, mai un plug al posto della diagnostica.
+
 ### Rimanenze
 Con riferimento: si applica l'**indice di rotazione del magazzino** del riferimento al costo
 materie proiettato. Senza riferimento: la giacenza parziale è portata a fine anno **invariata**.

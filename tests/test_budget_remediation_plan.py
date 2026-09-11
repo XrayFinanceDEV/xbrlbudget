@@ -9,7 +9,6 @@ from calculations.projection_common import (
     base_bank_debt,
     financial_repayment_instalment,
     new_financing_schedule,
-    tax_closing_position,
     deferred_tax_position,
 )
 
@@ -40,16 +39,15 @@ def test_infrannuale_applies_every_absolute_override_and_keeps_tax_exact():
     assert actual["ce20_imposte"] == D("19")
 
 
-def test_tax_settlement_reclassifies_overpayment_without_negative_balances():
-    assert tax_closing_position(D("100"), D("0"), D("30"), D("0")) == (
-        D("70"), D("0")
-    )
-    assert tax_closing_position(D("0"), D("50"), D("30"), D("100")) == (
-        D("20"), D("0")
-    )
-    assert tax_closing_position(D("0"), D("50"), D("30"), D("10")) == (
-        D("0"), D("70")
-    )
+def test_tax_year_end_position_reclassifies_overpayment_without_negative_balances():
+    from calculations.projection_common import posizione_tributaria_fine_anno as posizione
+
+    sopra = posizione(opening_credit=0, opening_debt=0, remaining_current_tax=D("30"), current_tax=D("30"),
+                      reference_tax=0, explicit_advances=D("100"))
+    assert (sopra.closing_credit, sopra.closing_debt) == (D("70"), D("0"))
+    sotto = posizione(opening_credit=0, opening_debt=0, remaining_current_tax=D("30"), current_tax=D("30"),
+                      reference_tax=0, explicit_advances=D("10"))
+    assert (sotto.closing_credit, sotto.closing_debt) == (D("0"), D("20"))
 
 
 def test_existing_repayment_uses_total_bank_debt_and_excludes_bonds():

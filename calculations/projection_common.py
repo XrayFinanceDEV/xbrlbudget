@@ -117,17 +117,6 @@ def tfr_accrual_quota(salari, personale_totale) -> Decimal:
     return base / TFR_DIVISOR if base > ZERO else ZERO
 
 
-def tax_closing_position(opening_credit, opening_debt, current_tax, advances):
-    """Return ``(closing_credit, closing_debt)`` after annual tax settlement.
-
-    The two sides are mutually exclusive and non-negative; overpayments are
-    reclassified to tax credits instead of producing a negative liability.
-    """
-    opening_net_debt = (opening_debt or ZERO) - (opening_credit or ZERO)
-    closing_net_debt = opening_net_debt + (current_tax or ZERO) - (advances or ZERO)
-    return max(ZERO, -closing_net_debt), max(ZERO, closing_net_debt)
-
-
 def deferred_tax_position(lines, default_tax_rate):
     """Calculate deferred-tax assets/liabilities from temporary differences.
 
@@ -327,6 +316,46 @@ def runoff_schedule(opening, amounts, writeoff, year_index, horizon) -> RunoffYe
 
 
 # ── Tax settlement: saldo + acconto kernel ──
+def acconti_dovuti(explicit_advances, reference_tax, acconto_pct=Decimal('100')) -> Decimal:
+    """Gli acconti dell'anno: l'importo esplicito se maggiore di zero, altrimenti la percentuale dell'imposta di riferimento.
+
+    Zero (il default di colonna di `tax_advances_paid`) e un negativo valgono «non dichiarato». Regola unica dei due
+    motori: il budget la chiama con l'imposta dell'anno prima, l'infrannuale con l'imposta dell'anno di riferimento.
+    """
+    d = lambda v: Decimal(str(v or 0))
+    if d(explicit_advances) > ZERO:
+        return d(explicit_advances)
+    return max(ZERO, d(reference_tax) * d(acconto_pct) / Decimal('100'))
+
+
+@dataclass(frozen=True)
+class PosizioneTributariaFineAnno:
+    closing_credit: Decimal
+    closing_debt: Decimal
+    acconti: Decimal
+    cash_out: Decimal
+
+
+def posizione_tributaria_fine_anno(*, opening_credit, opening_debt, remaining_current_tax, current_tax,
+                                   reference_tax, explicit_advances) -> PosizioneTributariaFineAnno:
+    """La posizione tributaria al 31/12 dell'infrannuale (spec lotto 3A §4.3, decisione 4 del proprietario).
+
+    Al 31/12 resta solo il saldo dell'anno in corso: imposta dell'anno meno acconti versati nell'anno. Quanto era
+    aperto al mese del parziale esce di cassa entro fine anno: `cash_out` = posizione netta di apertura + imposta
+    che matura nei mesi restanti − posizione netta di fine anno. Il budget che nasce dal promote scadenzia quel saldo.
+    """
+    d = lambda v: Decimal(str(v or 0))
+    acconti = acconti_dovuti(explicit_advances, reference_tax)
+    netto_fine = d(current_tax) - acconti
+    netto_apertura = d(opening_debt) - d(opening_credit)
+    return PosizioneTributariaFineAnno(
+        closing_credit=max(ZERO, -netto_fine),
+        closing_debt=max(ZERO, netto_fine),
+        acconti=acconti,
+        cash_out=netto_apertura + d(remaining_current_tax) - netto_fine,
+    )
+
+
 @dataclass(frozen=True)
 class TaxYear:
     saldo_paid: Decimal
@@ -340,8 +369,8 @@ class TaxYear:
 
 def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current_tax,
                                  previous_tax, acconto_pct, explicit_advances) -> TaxYear:
-    """Imposte a saldo + acconto (spec lotto 2 §3.2). Solo il motore budget:
-    l'infrannuale continua a usare tax_closing_position.
+    """Imposte a saldo + acconto (spec lotto 2 §3.2). La regola degli acconti e' `acconti_dovuti`, condivisa con
+    `posizione_tributaria_fine_anno` dell'infrannuale.
 
     L'importo esplicito di acconti (`explicit_advances`) vale come override SOLO se > ZERO.
     Lo zero (il valore di default in DB: Column(Numeric(15,2), default=0, nullable=False))
@@ -352,10 +381,7 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     d = lambda v: Decimal(str(v or 0))
     opening_credit, saldo_due, rate_due = d(opening_credit), d(saldo_due), d(rate_due)
     current_tax, previous_tax = d(current_tax), d(previous_tax)
-    if d(explicit_advances) > ZERO:
-        acconti = d(explicit_advances)
-    else:
-        acconti = max(ZERO, previous_tax * d(acconto_pct) / Decimal('100'))
+    acconti = acconti_dovuti(explicit_advances, previous_tax, acconto_pct)
     used = min(opening_credit, saldo_due)
     saldo_paid = saldo_due - used
     net = current_tax - acconti

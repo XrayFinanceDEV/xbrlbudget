@@ -643,7 +643,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   `partial × 12 / period_months`; BS values are point-in-time and are **not** annualized.
 - **Projection** (`generate_projection`): one forecast year, growth percentages applied to the
   reference year (the frontend derives them from the user's overrides). Depreciation is always
-  annualized, never grown; taxes are recomputed on projected pre-tax profit.
+  annualized, never grown; taxes are recomputed on projected pre-tax profit, and at 31/12 only the current year's
+  balance remains: tax of the year minus the advances paid in the year (`tax_advances_paid` if greater than zero,
+  otherwise 100% of the reference year's `ce20`); whatever was open at the partial month leaves cash by year end
+  (`projection_common.posizione_tributaria_fine_anno`), so a budget born from the promote no longer inherits it.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into
@@ -679,7 +682,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   projection into a full-year `FinancialYear` that can then be a budget base year. Two semantic gates
   (`check_quadratura(...).semantic_valid`, **not** a euro threshold) and a destructive replacement of
   the existing annual year — see «Invarianti e trappole › Previsionale» and
-  [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5.
+  [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5. An infrannuale whose opening
+  tax debt exceeds the partial year's cash closes with the `unfunded_financing_requirement` warning
+  and is not promotable until the user adds an explicit financing assumption or a rettifica —
+  decision of the owner, lotto 3A, 2026-09-11.
 
 ### Rettifiche (BS/IS Adjustments Journal)
 

@@ -3091,7 +3091,13 @@ class ForecastEngine:
                     # all'INIZIO di quest'anno: non e' saldo, e dichiararlo tale
                     # lo farebbe risultare pagato due volte.
                     rate_aperto = r.residual + r.closed
-                    if (year_index > 0
+                    # `plan_tax`: senza un piano tributario non c'e' nessun
+                    # rateizzato da riaprire (`rate_aperto` vale 0) e il rifiuto
+                    # nominerebbe un «passo Imposte» che l'utente non ha mai
+                    # compilato — e per di piu' su un totale negativo che il
+                    # `max` qui sotto clampa comunque a zero, come prima del
+                    # lotto (rilievo m-1).
+                    if (plan_tax and year_index > 0
                             and self._q(opening_tax_debt) < self._q(rate_aperto)):
                         # N-I1 (Ruling 61, messaggio Ruling 62): l'anno manuale
                         # lascia SUL TOTALE un debito inferiore al rateizzato

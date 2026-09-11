@@ -1218,3 +1218,47 @@ def test_ma_importi_in_formato_italiano(monkeypatch):
             assert "1333.33" not in res["message"] and "500.25" not in res["message"], res["message"]
     finally:
         engine.dispose()
+
+
+# ══ m-1 (giro 4): il rifiuto del kernel N-I1 vuole un piano tributario ══
+
+def _righe_senza_piano(anno_manuale, growth=-150, anni=ANNI_3):
+    """Anni automatici con UN solo anno in via manuale e NESSUN `pregresso`.
+
+    E' il caso D della sonda `sonda_p1.py`: senza piano il rateizzato aperto
+    vale 0, quindi il kernel non ha nulla da ripartire. Il buco che N-I1
+    chiude e' quello di UN CALENDARIO che riparte da sotto le rate ancora
+    aperte: senza calendario quel buco non esiste, e il `max` di riga clampa a
+    zero come prima del lotto.
+    """
+    rows = []
+    for y in anni:
+        r = {"forecast_year": y, "revenue_growth_pct": 3.33}
+        if y == anno_manuale:
+            r["sp16e_growth_pct"] = growth
+        rows.append(r)
+    return rows
+
+
+def test_m1_senza_piano_l_anno_manuale_sotto_zero_non_si_rifiuta(monkeypatch):
+    """Nessun piano, 2027 manuale a −150%, 2028-2029 automatici: SI GENERA.
+
+    Su `2b643ef` il kernel rifiutava nominando un «passo Imposte» che
+    l'utente non ha mai compilato, e dicendo «0,00 da rateizzare»: un criterio
+    del lotto (senza piano un saldo si comporta come prima) trasformato in
+    regressione silenziosa dall'API diretta, perche' li' lo schema non pone il
+    limite −100 che il wizard mette (`budget-field-rules.ts`).
+
+    Non afferma IL valore negativo residuo in `sp16e`: quello e' un nodo di
+    prodotto (issue agenda, m-1 punto 3), non di questo test.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, "m1-no-plan", _righe_senza_piano(2027))
+            assert res["forecast_generated"] is True, res["message"]
+            assert "non può ripartire" not in res.get("message", ""), res["message"]
+            assert len(read_forecast_maps(db, sid)) == len(rows)
+    finally:
+        engine.dispose()

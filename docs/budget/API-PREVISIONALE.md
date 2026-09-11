@@ -620,14 +620,19 @@ di arrotondamento della normalizzazione al centesimo dello SP (`_normalize_balan
 rispetto ai confini di KPI (mai un debito/credito finanziario, un fondo o un credito fiscale, una
 riserva a segno proprio) — il primo elemento non già scritto di proposito da un piano attivo, da
 un'indicizzazione, dalla ripartizione `sp16a`/`sp17a`, o dal kernel tributario in modo
-`saldo_acconto`. `campo_dichiarato` è `true` solo quando **nessun** campo neutro del gruppo era
-libero: il residuo va comunque sul primo di essi (mai sull'aggregato, che di quelle righe resta
-la somma) e la cella diverge per costruzione dalla sua dichiarazione altrove nei `details` — a
-meno che quella stessa dichiarazione non venga poi riallineata al persistito (pregresso in modo
-`legacy`, o `_realign_sp_declarations` per gli altri casi), nel qual caso torna a coincidere. Un
-totale forzato da `sp_overrides` **senza** nessuna voce operativa forzata, in un gruppo dove non
-resta comunque nessun campo neutro libero, si rifiuta (I-1): lì il residuo non sarebbe un
-arrotondamento ma la massa dell'override. Mai `sp16a/b/c`, `sp17a/b/c`, `sp04b`, `sp04e`, `sp06e`,
+`saldo_acconto` (l'insieme **STRETTO**, `ForecastEngine._sp_target_forced_fields` — lotto 3A, Task
+12, giro di correzione 1). `campo_dichiarato` è `true` solo quando **nessun** campo neutro del
+gruppo era libero secondo QUESTO insieme stretto: il residuo va comunque sul primo di essi (mai
+sull'aggregato, che di quelle righe resta la somma) e la cella diverge per costruzione dalla sua
+dichiarazione altrove nei `details` — a meno che quella stessa dichiarazione non venga poi
+riallineata al persistito (pregresso in modo `legacy`, o `_realign_sp_declarations` per gli altri
+casi), nel qual caso torna a coincidere. Un totale forzato da `sp_overrides` **senza** nessuna
+voce operativa forzata si rifiuta (I-1) quando il gruppo non ha più un ripiego libero secondo un
+secondo insieme, **AMPIO** (`ForecastEngine._sp_forced_fields`, che allarga la protezione a tutto
+il gruppo — `d`/`e`/`f`/`g` insieme — appena il *secchio* di default lo è, anche da una sola voce:
+§10 sotto ha la regola per intero, coi due insiemi e perché sono due): lì il residuo non sarebbe
+un arrotondamento ma la massa dell'override, e un campo tecnicamente libero per l'insieme stretto
+NON basta a farlo vincere. Mai `sp16a/b/c`, `sp17a/b/c`, `sp04b`, `sp04e`, `sp06e`,
 `sp06f`, `sp07e`, `sp07f`, `sp12h`, `sp14b`, `sp14c`. Sempre presente, anche vuota.
 
 ## 8. Lo scadenziamento del pregresso
@@ -812,17 +817,24 @@ discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripart
 rifiuta la combinazione con un errore esplicito invece di superare il totale.
 
 ⚠️ **Il totale `sp16`/`sp17` però non vince se il gruppo non ha più un ripiego libero.** Quando
-un piano di scadenziamento o un'indicizzazione ha forzato, riga per riga, **tutti e quattro** i
-campi neutri del gruppo (`d`, `e`, `f`, `g` — non basta che il *secchio* di default `sp16g`/`sp17g`
-da solo sia governato: `d`, `e`, `f` restano il ripiego libero finché non hanno anche loro un piano
-o un'indice proprio, o il kernel tributario in modo `saldo_acconto` per `e`), la differenza fra il
-totale richiesto e la somma delle righe non è un arrotondamento: è la massa dell'override, e non
-c'è un campo onesto che la riceva (su una riga governata il piano o l'indice la cancellerebbe
-l'anno dopo; sui debiti finanziari `a`/`b`/`c` sarebbe un'obbligazione inventata). Il motore
-risponde allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve` non è
-ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non resta scritta. Con
-almeno un campo neutro ancora libero nel gruppo, il totale forzato continua a vincere come sempre
-(`tests/test_forecast_residuo_neutro.py`).
+un piano di scadenziamento o un'indicizzazione del *secchio* di default (`sp16g`/`sp17g`) — anche
+da solo, su una sola voce del gruppo — lo ha già forzato, il cancello (`ForecastEngine.
+_sp_forced_fields`, l'insieme AMPIO: quello che allarga la protezione a **tutto** il gruppo
+operativo, `d`/`e`/`f`/`g`, quando il secchio è governato — `_SP_OPERATIVI`) considera l'intero
+gruppo indisponibile: la differenza fra il totale richiesto e la somma delle righe non è un
+arrotondamento, è la massa dell'override, e non c'è un campo onesto che la riceva (su una riga
+governata il piano o l'indice la cancellerebbe l'anno dopo; sui debiti finanziari `a`/`b`/`c`
+sarebbe un'obbligazione inventata). Non basta quindi che una sola voce del gruppo sia libera in
+senso stretto — è così che si sceglie il *bersaglio* del residuo quando il cancello non scatta
+(`ForecastEngine._sp_target_forced_fields`, l'insieme STRETTO, sopra), non se accettare l'override
+sull'aggregato: le due domande usano deliberatamente due insiemi diversi (lotto 3A, Task 12, giro
+di correzione 1 — «un totale forzato ha ancora una riga onesta su cui scaricare la SUA massa?» non
+è la stessa domanda di «resta un campo neutro su cui posare un centesimo di arrotondamento?»). Il
+motore risponde allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve`
+non è ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non resta scritta.
+Senza alcun piano né indicizzazione sul secchio di default del gruppo, il totale forzato continua
+a vincere come sempre, e un residuo eventuale si posa sul primo campo neutro libero
+(`tests/test_forecast_residuo_quadratura_sp16.py`, `tests/test_forecast_residuo_neutro.py`).
 
 ## 11. Indicizzazione delle voci minori dello SP (`sp_indexing`)
 

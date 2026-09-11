@@ -101,10 +101,22 @@ def test_senza_la_protezione_esplicita_il_residuo_non_raggiunge_piu_sp16a_sp17a(
     ripiego PER CATEGORIA (debito finanziario: confine PFN e confine del
     rendiconto), non per elenco e non per ordine. Qui restano FUORI da
     `forced_fields` — la mutazione originale del test — eppure non si
-    muovono: il centesimo segue la somma delle righe, che e' la sua
-    definizione (riga `sp16 = sp16a + … + sp16g`)."""
+    muovono, MAI: ne' sull'aggregato (Task 12, giro di correzione 1, punto 3
+    del contratto: mai piu' l'aggregato come bersaglio) ne' su un
+    finanziario — il residuo va sul primo campo NEUTRO libero, qui nessuno
+    (`b..g` sono tutti in `_REGRESSIONE_SIMULATA`), quindi sul primo della
+    tabella (`sp16g`/`sp17g`), dichiarato.
+
+    PRIMA (contratto Task 12 originale, `2946b6a`, assunzione ORA superata da
+    quel contratto stesso — non da questo giro di correzione, che tocca solo
+    il cancello I-1, non questo ramo senza `sp_overrides`): il residuo
+    ricadeva sull'AGGREGATO (`sp16_debiti_breve`/`sp17_debiti_lungo`), che
+    restava uguale alla somma delle righe FORZATE (nessuna mossa). DOPO: va
+    su `sp16g`/`sp17g` (il primo neutro), che si muove del residuo — le altre
+    righe (comprese le finanziarie, il punto di questo file) restano ferme.
+    """
     esito = ForecastEngine._normalize_balance_sheet_cents(
-        _valori(), forced_fields=_REGRESSIONE_SIMULATA, recompute_cash=False,
+        _valori(), forced_fields=_REGRESSIONE_SIMULATA, recompute_cash=False, details={},
     )
     assert esito[SP16A] == D("1000.00"), (
         f"il cammino ha ancora raggiunto sp16a: {esito[SP16A]}"
@@ -118,30 +130,39 @@ def test_senza_la_protezione_esplicita_il_residuo_non_raggiunge_piu_sp16a_sp17a(
     assert esito["sp16c_debiti_obbligazioni_breve"] == D("300.00")
     assert esito["sp17b_debiti_altri_finanz_lungo"] == D("300.00")
     assert esito["sp17c_debiti_obbligazioni_lungo"] == D("400.00")
-    # E il residuo dov'e' finito? Da nessuna riga: nell'aggregato, dichiarato.
-    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0"))
-    assert esito["sp17_debiti_lungo"] == sum(_DETTAGLI_17.values(), D("0"))
+    # DOPO: il residuo va sul primo campo neutro (mai piu' sull'aggregato),
+    # dichiarato — `d..g` sono tutti forzati da `_REGRESSIONE_SIMULATA`.
+    assert esito["sp16g_altri_debiti_breve"] == D("700.00") + _RESIDUO
+    assert esito["sp17g_altri_debiti_lungo"] == D("800.00") + _RESIDUO
+    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0")) + _RESIDUO
+    assert esito["sp17_debiti_lungo"] == sum(_DETTAGLI_17.values(), D("0")) + _RESIDUO
 
 
 def test_con_bank_debt_split_fields_il_residuo_non_tocca_mai_sp16a_sp17a():
     """La correzione: unire `_BANK_DEBT_SPLIT_FIELDS` a `forced_fields` — quello
     che `compute_forecast` fa oggi, sempre — protegge `sp16a`/`sp17a` anche
     sotto la STESSA regressione simulata sopra. La protezione non dipende
-    dall'ordine: dipende dall'essere elencati, punto."""
+    dall'ordine: dipende dall'essere elencati, punto.
+
+    `_BANK_DEBT_SPLIT_FIELDS` (`sp16a`/`sp17a`) non compare comunque mai in
+    `_CAMPI_NEUTRI_RESIDUO`: aggiungerli a `forced_fields` qui e' quindi
+    ridondante rispetto al test sopra (gia' escluso per categoria) — il senso
+    del test e' che la protezione ESPLICITA, quando c'e', non fa danni
+    nemmeno lei. Col contratto del Task 12 (giro di correzione 1) il
+    bersaglio quando tutto il resto e' forzato non e' piu' l'aggregato: e'
+    `sp16g`/`sp17g`, dichiarato — la stessa correzione del test sopra."""
     forzati = _REGRESSIONE_SIMULATA | ForecastEngine._BANK_DEBT_SPLIT_FIELDS
     esito = ForecastEngine._normalize_balance_sheet_cents(
-        _valori(), forced_fields=forzati, recompute_cash=False,
+        _valori(), forced_fields=forzati, recompute_cash=False, details={},
     )
     assert esito[SP16A] == D("1000.00"), f"sp16a spostato: {esito[SP16A]}"
     assert esito[SP17A] == D("2000.00"), f"sp17a spostato: {esito[SP17A]}"
-    # Un centesimo va pur posato da qualche parte (docstring della funzione):
-    # con l'intero gruppo forzato NON ricade piu' sul secchio di default (che
-    # forzato e' per definizione, e la dichiarazione sua — piano o indice che
-    # sia — resterebbe bugiarda): lo segue la somma delle righe, l'aggregato.
-    assert esito["sp16g_altri_debiti_breve"] == D("700.00")
-    assert esito["sp17g_altri_debiti_lungo"] == D("800.00")
-    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0"))
-    assert esito["sp17_debiti_lungo"] == sum(_DETTAGLI_17.values(), D("0"))
+    # DOPO: sul secchio di default, non piu' sull'aggregato — dichiarato,
+    # perche' col gruppo intero forzato nessun campo neutro resta libero.
+    assert esito["sp16g_altri_debiti_breve"] == D("700.00") + _RESIDUO
+    assert esito["sp17g_altri_debiti_lungo"] == D("800.00") + _RESIDUO
+    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0")) + _RESIDUO
+    assert esito["sp17_debiti_lungo"] == sum(_DETTAGLI_17.values(), D("0")) + _RESIDUO
 
 
 def test_riordinare_il_cammino_non_rompe_piu_la_protezione():

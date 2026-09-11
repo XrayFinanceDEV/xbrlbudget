@@ -202,10 +202,17 @@ scrittura hanno cinque comportamenti da conoscere:
 5. un override sul lato **oltre** di un saldo con piano di scadenziamento (`sp17d`, `sp17e`,
    `sp17f`, `sp17g`, `sp07` e le sue sotto-voci commerciali `sp07a`–`sp07d`/`sp07g`) è
    **rifiutato** con un `ValueError` in italiano, in qualunque anno del piano, l'ultimo dopo
-   l'ultima rata compreso; lo stesso sul lato **breve** quando il valore forzato scende sotto la
-   rata dovuta l'anno dopo — tranne i tributari in via manuale, dove il lato breve resta libero:
-   lì la guardia è il rifiuto sul totale `sp16e + sp17e` (§9) — e su `sp17e` anche senza piano,
-   quando l'anno che lo leggerebbe è a saldo + acconto (`_rifiuto_override_governati`). Sul
+   l'ultima rata compreso; lo stesso sul lato **breve** dei quattro debiti quando il valore
+   forzato scende sotto la rata dovuta l'anno dopo — tranne i tributari in via manuale, dove il
+   lato breve resta libero: lì la guardia è il rifiuto sul totale `sp16e + sp17e` (§9) — e su
+   `sp17e` anche senza piano, quando l'anno che lo leggerebbe è a saldo + acconto
+   (`_rifiuto_override_governati`). Sul lato breve dei **crediti commerciali** lo stesso rifiuto
+   vale sulla parte commerciale di `sp06` (l'aggregato, o una sua sotto-voce `sp06a`–`sp06d`/
+   `sp06g`, o `sp06e`/`sp06f` se la spostano): sotto il residuo a breve del piano il `generated`
+   dichiarato diventerebbe un credito nuovo negativo, e il motore lo rifiuta — ma da
+   `_realign_sp_declarations`, non da `_rifiuto_override_governati`, perché qui non c'è un unico
+   campo forzato da confrontare: il residuo si misura sul persistito (`sp06 − sp06e − sp06f`),
+   dopo che gli altri override dell'anno sono già stati applicati. Sul
    `PATCH /sp-override` è un 400 con
    rollback del lotto intero; sul bulk è `forecast_generated: false` con l'override salvato
    comunque.
@@ -214,7 +221,12 @@ Dopo gli override, le scomposizioni dei `details` seguono il persistito
 (`_realign_sp_declarations`): `details['imposte']`, le righe di `details['pregresso']` — i
 quattro saldi di debito e, dallo stesso giro, anche `crediti_commerciali` — e il `valore` di
 `details['indicizzazione'][voce]`; per la posizione tributaria il valore forzato di
-`sp16e`/`sp06e` diventa lo stato d'apertura dell'anno dopo (§9).
+`sp16e`/`sp06e` diventa lo stato d'apertura dell'anno dopo (§9). Sulla riga `crediti_commerciali`
+il riallineamento non è incondizionato come sui quattro debiti: se la parte commerciale
+persistita scende sotto il `residual_short` che il piano deve incassare l'anno dopo, il
+`generated` dichiarato diventerebbe negativo — un credito nuovo negativo, che il motore non
+modella (decisione del proprietario, 2026-09-11) — e la generazione si **rifiuta** invece di
+scrivere la riga (§2.2, punto 5).
 
 ## 3. Precedenza, e che cosa sopravvive a che cosa
 

@@ -275,9 +275,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   override. La differenza rientra come variazione del circolante dell'anno dopo, che il
   rendiconto mostra come flusso operativo: non sparisce. Vale con piano e senza, ed era così già
   prima del lotto. Le righe che crescono da `prev` (`sp16f`, `sp16g`, il lato oltre senza piano)
-  portano invece l'override avanti. Con un piano dei crediti la riga di
+  portano invece l'override avanti. La riga di
   `details['pregresso']['crediti_commerciali']` segue il persistito anche nell'anno
-  dell'override, come i quattro saldi di debito (`_realign_sp_declarations`).
+  dell'override, con piano e senza (`_realign_sp_declarations`). Un override che
+  porterebbe la parte commerciale sotto il residuo a breve del piano si rifiuta,
+  come i quattro saldi di debito.
 - **`sp_overrides` clampa a zero i valori negativi** (tranne `sp13_utile_perdita` e
   `sp12h_riserva_neg_azioni_proprie`) e **ignora in silenzio** una chiave che non esiste nel
   risultato: un override negativo, o scritto male, non dà errore — dà uno zero. Un override che
@@ -304,7 +306,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   in `saldo_acconto` (in via manuale no: lì la riga cresce da `prev` e
   l'override sopravvive), e tutta la famiglia `sp07`+`sp07a/b/c/d/g` col piano
   dei crediti. Non `sp07e`/`sp07f`, che il calendario non tocca. Il messaggio
-  nomina il saldo con `PREGRESSO_LABELS`, il passo del wizard che lo scadenzia
+  nomina il saldo con l'articolo giusto (`_PREGRESSO_ARTICOLI`), il passo del wizard che lo scadenzia
   (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari) e la via d'uscita
   (`value: null`), perché un override proibito avvelena ogni `PATCH` successivo
   sullo stesso scenario anche su un'altra cella. Il bulk risponde comunque **200** con

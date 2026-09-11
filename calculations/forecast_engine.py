@@ -1041,7 +1041,8 @@ class ForecastEngine:
         La stessa cura vale, in forma puramente dichiarativa (nessun anno
         successivo legge queste chiavi), per gli altri campi che i `details`
         scompongono: la riga `generated + residual_short` di
-        `details['pregresso']` e il `valore` di `details['indicizzazione'].
+        `details['pregresso']`, la riga `crediti_commerciali` dello stesso
+        sacco (N-I3) e il `valore` di `details['indicizzazione']`.
         Ovunque, senza override, la riscrittura e' un identico al centesimo
         (il banco di parita' lo conferma): si tocca solo cio' che un
         override o una posatura ha davvero mosso.
@@ -1053,62 +1054,47 @@ class ForecastEngine:
         credito non e' stato generato dal piano.
 
         Anche `sp17e` entra nella posizione, ma solo tramite il piano: in modo
-        `saldo_acconto` il rateizzato lo scandisce il runoff, non il bilancio, e
-        un `sp_overrides` su quella riga non ha ripercussione sull'anno dopo —
-        percio' da questo giro e' RIFIUTATO (`_rifiuto_override_governati`,
-        rilievo I-b della revisione); qui si allinea il dichiarato
-        (`residual_long`), non si riscrive il piano.
-
-        Il riallineamento di `residual_long` non e' codice morto, ma oggi non e'
-        nemmeno RAGGIUNTO: lo misurano due cose. Da un lato il rifiuto
-        (`_rifiuto_override_governati`) non lascia piu' forzare quella riga con
-        un piano (I1-bis) e nemmeno senza (rilievo I-b); dall'altro, quando nel
-        gruppo `sp17` non resta nessun operativo libero, il centesimo il
-        normalizzatore lo posa sull'AGGREGATO (misura del giro 2, piano
-        `altri_debiti` + `sp_overrides` su `sp17_debiti_lungo`: la posatura
-        nomina `sp17_debiti_lungo` per −90.000,01, mai `sp17g`) — e quella e' la
-        rotta che il rilievo I-1 della revisione di `6e5c0f7` porta al
-        rifiuto. Il ramo resta quindi come AUTOCHECK dell'invariante, non come
-        riparazione: la rete (`_divergenze`) confronta riga dichiarata e
-        persistita per ogni anno che genera, quindi un valore divergente lo
-        vede li', non qui. Stesso ruolo per la coerenza fra le due sedi di
-        `generated_debt` (rilievo M-4): un confronto che la rete faceva solo
-        sui campi NON forzati, e che ora corre sempre.
+        `saldo_acconto` il rateizzato lo scandisce il runoff, non il bilancio.
+        Un `sp_overrides` su quella riga e' RIFIUTATO a monte
+        (`_rifiuto_override_governati`: con un piano dal rilievo I1-bis, senza
+        dal rilievo I-b), quindi qui NON c'e' nulla da riallineare sul lato
+        oltre. Il giro 2 teneva in piedi un confronto-`residual_long` chamado
+        «autocHECK»: il rilievo M-3 della revisione di `c8317ca` l'ha rimosso,
+        perche' una riscrittura silenziosa non e' un controllo — se un domani
+        una rotta ci arriva, la divergenza la deve dire la rete (`_divergenze`),
+        non una copia che la ricompone a valle. Stessa rimozione per la seconda
+        sede di `generated_debt` (`d_tax['generated'] = debt`): teneva coerenti
+        le due sedi anche quando il primo riallineamento era rotto, e la
+        mutazione N6-passo1 della revisione l'aveva misurato — una sede che
+        ripara l'altra in silenzio maschera la regressione che deve denunciare.
+        La coerenza fra le due sedi ora la asserisce solo piu' la rete.
         """
-        # 1) `pregresso`: la riga breve (e, con piano, il lato oltre) segue il persistito.
+        # 1) `pregresso`: la riga breve segue il persistito dove diverge.
         residual_short_tax = Decimal('0')
-        for key, (breve, oltre) in cls._PREGRESSO_SP_FIELDS.items():
+        for key, (breve, _oltre) in cls._PREGRESSO_SP_FIELDS.items():
             d = (details.get('pregresso') or {}).get(key)
             if not d or breve not in forecast_bs:
                 continue
             persisted = Decimal(str(forecast_bs[breve]))
             if d.get('mode') == 'runoff':
-                # I-`a` del giro 2, secondo tempo: la riga si scrive SEMPRE, e
-                # si scrive al centesimo. La versione difettosa confrontava due
-                # numeri NON omogenei (rata grezza 1170.665 contro `sp16e`
-                # persistito 897.32), quindi la condizione diventava vera da
-                # sola e riscriveva `generated_debt` (0 → 0.005) lontano da
-                # qualunque forzatura; la prima correzione di questo giro ha
-                # quantizzato il confronto, e la mutazione M-2 l'ha ripresa:
-                # gate a centesimi e scrittura_condizionata lasciano nella riga
-                # il grezzo del calendario (misurato: rata 3252.825 ->
-                # `residual_short` 3252.825, `generated` 0, `sp16e` 3252.83) e la
-                # coppia dichiarata NON somiglia piu' alla cella che descrive.
-                # `res` e` `new_gen` vengono entrambi dal persistito: scriverli
-                # sempre non e' una riparazione, e' dire che la posizione e'
-                # quella, e quando niente diverge sono i valori di prima.
+                # I-`a` del giro 2, secondo tempo: il confronto e' fra quantizzati
+                # e la scrittura e' CONDIZIONATA alla divergenza (il rilievo m-C
+                # della revisione: il commento qui diceva «la riga si scrive
+                # SEMPRE», ma `if (new_gen != ... or res != ...)` la scrive solo
+                # quando qualcosa ha mosso la posizione — identita' al centesimo
+                # senza override, e il banco lo conferma). La versione difettosa
+                # confrontava due numeri NON omogenei (rata grezza 1170.665
+                # contro `sp16e` persistito 897.32), quindi la condizione
+                # diventava vera da sola e riscriveva `generated_debt`
+                # (0 → 0.005) lontano da qualunque forzatura. `res` e `new_gen`
+                # vengono entrambi dal persistito: quando la scrittura parte,
+                # non e' una riparazione, e' dire che la posizione e' quella.
                 res = cls._q(min(Decimal(str(d.get('residual_short') or 0)), persisted))
                 new_gen = persisted - res
                 if (new_gen != cls._q(d.get('generated') or 0)
                         or res != cls._q(d.get('residual_short') or 0)):
                     d['residual_short'] = res
                     d['generated'] = new_gen
-                # AutocHECK dell'invariante, non riparazione: oggi nessuna
-                # rotta ci arriva (vedi il paragrafo in fondo alla docstring).
-                if oltre in forecast_bs:
-                    oltre_p = Decimal(str(forecast_bs[oltre]))
-                    if oltre_p != cls._q(d.get('residual_long') or 0):
-                        d['residual_long'] = oltre_p
             else:
                 if persisted != cls._q(d.get('generated') or 0):
                     d['generated'] = persisted
@@ -1158,11 +1144,14 @@ class ForecastEngine:
                 debt = cls._q(max(Decimal('0'), Decimal(str(sp16e)) - residual_short_tax))
                 if debt != cls._q(imposte.get('generated_debt') or 0):
                     imposte['generated_debt'] = debt
-                # Le due sedi dichiarano lo stesso numero: la riga del pregresso
-                # e la riga `imposte` restano coerenti fra loro (rilievo M-4).
-                d_tax = (details.get('pregresso') or {}).get('debiti_tributari')
-                if d_tax is not None and cls._q(d_tax.get('generated') or 0) != cls._q(debt):
-                    d_tax['generated'] = debt
+                # La coerenza fra le DUE SEDI (riga `pregresso` e riga
+                # `imposte`) non e' piu' costruita qui: il rilievo M-3 della
+                # revisione ha rimosso la riscrittura `d_tax['generated'] =
+                # debt`, che teneva le due sedi d'accordo anche quando il
+                # riallineamento del punto 1 era rotto (mutazione N6-passo1,
+                # «non vista» proprio per questo). Chi le vuole coerenti ora
+                # e' solo la rete (`_divergenze`, confronto «sp16e due sedi»):
+                # un controllo che dichiara, non una copia che ricompone.
             sp06e = forecast_bs.get('sp06e_crediti_tributari_breve')
             if sp06e is not None:
                 sp06e = Decimal(str(sp06e))

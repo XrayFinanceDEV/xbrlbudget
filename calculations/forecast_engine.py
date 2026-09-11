@@ -18,6 +18,8 @@ from calculations.projection_common import (
     new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
     tax_settlement_saldo_acconto, soglia_giorni_magazzino,
+    e_contratto_pregresso, contratti_da_riga_finanziamento,
+    residuo_prestiti_nuovi, quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -483,106 +485,12 @@ def _split_to_cents(fixed_part: Decimal, line_value: Decimal) -> Tuple[Decimal, 
     return fixed_q, line_value - fixed_q
 
 
-def _ha_residuo_pregresso(loan) -> bool:
-    """Vero se il contratto porta un residuo di pregresso bancario (`opening_residual` > 0).
-
-    Un solo punto per il predicato «questo e' pregresso», usato da
-    `_e_contratto_pregresso`, da `assemble_financing` (la validazione «solo nel
-    primo anno») e da `has_detailed_opening` in `_calculate_income_statement`
-    (rilievo 6 della revisione, giro di correzione 1): un contratto
-    classificato pregresso in un punto e nuovo in un altro produrrebbe interessi
-    doppi o una rata sul debito sbagliato. Con il Ruling 45 (normalizzazione dei
-    contratti misti in `assemble_financing`, la STESSA funzione) il predicato
-    resta vero al valore di facciata: dopo la normalizzazione nessun contratto
-    porta mai `amount` e `opening_residual` insieme, quindi qui non serve
-    guardare l'altro campo.
-    """
-    return Decimal(str(loan.get('opening_residual') or 0)) > 0
-
-
-def _e_contratto_pregresso(loan) -> bool:
-    """Un contratto con `opening_residual` descrive debito bancario GIA' in bilancio.
-
-    E' pregresso scadenziato per contratto, non un prestito nuovo: la sua rata
-    riduce il debito bancario dell'anno base (dal breve, poi dal lungo), mentre
-    un prestito nuovo si rimborsa solo da se' stesso. Un contratto MISTO
-    (`amount` > 0 insieme a `opening_residual` > 0, che lo schema ammette e
-    l'interfaccia produce sulla stessa riga) non arriva mai fin qui intero:
-    `assemble_financing` lo normalizza, nell'unico punto prima di ogni uso, in
-    DUE contratti con le stesse condizioni — uno con il solo importo nuovo, uno
-    con il solo residuo pregresso (Ruling 45). Per questo il predicato basta
-    da solo: quando questa funzione gira, ogni contratto ha gia' un solo campo
-    diverso da zero.
-    """
-    return _ha_residuo_pregresso(loan)
-
-
-def _residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
-    """Il residuo dei soli prestiti NUOVI a fine `fino_al_anno`, come il motore lo persiste.
-
-    La catena e' quella che il previsionale ha sempre scritto per un prestito da
-    solo: residuo dell'anno prima al centesimo, piu' l'erogato, meno la rata del
-    kernel, al centesimo. Quantizzare anno per anno non e' un vezzo: un residuo
-    calcolato sul calendario grezzo differisce di un centesimo da quello
-    persistito (100.000,38 in 4 anni: 25.000,095 grezzo contro 25.000,11
-    persistito il terzo anno), e quel centesimo, tolto a `sp17a`, finirebbe
-    attribuito al debito bancario pregresso.
-    """
-    zero, cent = Decimal('0'), Decimal('0.01')
-    anni = [int(loan['year']) for loan in (loans or ())]
-    if not anni:
-        return zero
-    residuo = zero
-    for anno in range(min(anni), fino_al_anno + 1):
-        raised, repayment, _ = new_financing_schedule(loans, anno)
-        residuo = max(zero, residuo + raised - repayment).quantize(cent, rounding=ROUND_HALF_UP)
-    return residuo
-
-
-def _quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
-    """Quanto del residuo dei prestiti NUOVI dentro `lungo` (`sp17a` grezzo a fine `anno`) scade l'anno dopo.
-
-    Il residuo nuovo e' quello che l'anno dopo trovera' all'apertura,
-    `min(sp17a, catena)`: se lo sweep ha eroso il prestito (prima il pregresso, poi
-    il nuovo), la quota si calcola su cio' che ne resta.
-
-    Il limite finale, mai oltre `lungo` arrotondato per difetto, tiene `lungo -
-    quota` non negativo. E' la condizione perche' la riclassifica sia esatta al
-    centesimo: su valori non negativi ROUND_HALF_UP e' invariante per traslazione
-    di centesimi interi, quindi `Q(lungo - quota) + quota = Q(lungo)`. Senza, un
-    lungo grezzo di 5.000,005 tutto in scadenza l'anno dopo darebbe quota 5.000,01
-    e un `sp17a` persistito di -0,01.
-
-    E' la stessa regola del pregresso scadenziato (`runoff_schedule`:
-    `residual_short = min(residuo, dovuto l'anno dopo)`), ma letta sul calendario
-    del kernel dei prestiti invece che su un elenco di importi: la quota a breve e'
-    il capitale che la catena persistita toglie al residuo nell'anno dopo. Da qui
-    discendono le tre regole del Task 17 senza un ramo per ciascuna:
-    - durante il preammortamento la rata dell'anno dopo e' zero, e la quota a breve
-      anche;
-    - nell'anno prima della maxirata la rata dell'anno dopo la contiene, e la
-      maxirata sta a breve;
-    - l'ultimo anno di orizzonte non si azzera: il calendario del contratto non sa
-      dove finisce il piano. (E' qui che la regola si separa da `runoff_schedule`,
-      che oltre l'orizzonte non ha importi e restituisce zero.)
-
-    Contano solo i prestiti gia' erogati a fine `anno`: un prestito che nasce
-    l'anno dopo non e' debito di quest'anno, ne' a breve ne' oltre.
-
-    Perche' la differenza fra due residui al centesimo e non la rata arrotondata:
-    100.000,38 in 4 anni ha rata 25.000,095, ma la catena passa da 75.000,29 a
-    50.000,20 e toglie 25.000,09. Con 25.000,10 a breve il lungo di fine anno
-    (50.000,19) risulterebbe inferiore al residuo che l'anno dopo non scade
-    (50.000,20): un centesimo di debito oltre l'esercizio che nascerebbe dal nulla.
-    """
-    zero, cent = Decimal('0'), Decimal('0.01')
-    residuo = min(lungo.quantize(cent, rounding=ROUND_HALF_UP), _residuo_prestiti_nuovi(loans, anno))
-    if residuo <= zero:
-        return zero
-    erogati = [loan for loan in (loans or ()) if int(loan['year']) <= anno]
-    _, rimborso, _ = new_financing_schedule(erogati, anno + 1)
-    dopo = max(zero, residuo - rimborso).quantize(cent, rounding=ROUND_HALF_UP)
-    return min(residuo - dopo, lungo.quantize(cent, rounding=ROUND_DOWN))
+# Le regole del debito bancario vivono in `projection_common` (lotto 3A, Task 3): questi nomi restano per
+# chi li importa dal motore budget (test e helper del Task 2).
+_ha_residuo_pregresso = e_contratto_pregresso
+_e_contratto_pregresso = e_contratto_pregresso
+_residuo_prestiti_nuovi = residuo_prestiti_nuovi
+_quota_breve_prestiti_nuovi = quota_breve_prestiti_nuovi
 
 
 def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
@@ -2004,8 +1912,8 @@ class ForecastEngine:
         charged interest in the year of erogazione.
 
         Anche il punto in cui un contratto MISTO (`amount` e `opening_residual`
-        insieme) si normalizza in due contratti separati (Ruling 45) — vedi il
-        commento sul posto, dentro il ciclo.
+        insieme) si normalizza in due contratti separati (Ruling 45), ora in
+        `projection_common.contratti_da_riga_finanziamento`.
         """
         financing_loans = []
         detailed_opening_total = Decimal('0')
@@ -2019,46 +1927,15 @@ class ForecastEngine:
                     'year': a.forecast_year, 'amount': amt, 'duration': dur, 'rate': rate,
                 })
             for loan in (getattr(a, 'financing_loans', None) or []):
-                loan_amount = Decimal(str(loan.get('amount') or 0))
                 opening_residual = Decimal(str(loan.get('opening_residual') or 0))
-                loan_duration = Decimal(str(loan.get('duration_years') or 0))
-                loan_rate = Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100')
                 if _ha_residuo_pregresso(loan) and a.forecast_year != first_forecast_year:
                     raise ValueError(
                         "opening_residual is allowed only in the first forecast year"
                     )
                 detailed_opening_total += opening_residual
-                if loan_duration <= 0:
-                    continue
-                condizioni = {
-                    'year': a.forecast_year,
-                    'duration': loan_duration,
-                    'rate': loan_rate,
-                    'grace_years': Decimal(str(loan.get('grace_years') or 0)),
-                    'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
-                }
-                # Ruling 45 (revisione, giro di correzione 1 — rilievo 1): un
-                # contratto MISTO — `amount` e `opening_residual` insieme, che lo
-                # schema ammette e `FinancingLoansGrid` produce sulla stessa riga
-                # — si normalizza QUI, nell'UNICO punto prima di ogni uso, in DUE
-                # contratti con le STESSE condizioni (durata, tasso,
-                # preammortamento, maxirata): uno con il solo importo nuovo, uno
-                # con il solo residuo pregresso. Un calendario di ammortamento e'
-                # lineare nel capitale — quota capitale, maxirata e interessi
-                # scalano tutti col principal — quindi la somma dei due equivale
-                # al contratto unico a meno del centesimo di arrotondamento per
-                # anno (provato dalla rete: I1 esteso sul misto = I1 esteso sul
-                # diviso in due). Senza questa normalizzazione un contratto misto
-                # restava intero dalla parte del pregresso e la sua quota nuova
-                # si prendeva «prima dal breve» come nel Ruling 40.
-                if loan_amount > 0:
-                    financing_loans.append({
-                        **condizioni, 'amount': loan_amount, 'opening_residual': Decimal('0'),
-                    })
-                if opening_residual > 0:
-                    financing_loans.append({
-                        **condizioni, 'amount': Decimal('0'), 'opening_residual': opening_residual,
-                    })
+                # Ruling 45: la divisione del contratto misto vive in
+                # `projection_common.contratti_da_riga_finanziamento`.
+                financing_loans.extend(contratti_da_riga_finanziamento(loan, a.forecast_year))
 
         use_detailed_existing_schedule = detailed_opening_total > 0
         if use_detailed_existing_schedule:
@@ -3274,10 +3151,9 @@ class ForecastEngine:
         # calcolati su quello).
         prestiti_nuovi = [loan for loan in (financing_loans or []) if not _e_contratto_pregresso(loan)]
         contratti_pregresso = [loan for loan in (financing_loans or []) if _e_contratto_pregresso(loan)]
-        nuovo_apertura = min(
-            sp17a, _residuo_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year - 1)
+        sp17a_pregresso, nuovo_apertura = separa_prestiti_nuovi(
+            sp17a, prestiti_nuovi, assumption.forecast_year
         )
-        sp17a_pregresso = sp17a - nuovo_apertura
         # Il debito bancario pregresso di apertura, prima di ogni piano: e' cio' che
         # `details['debito_bancario']` dichiara come `apertura`, e da qui lo sweep
         # capisce quale parte del debito NON ha un piano da seguire.

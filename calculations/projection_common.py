@@ -18,8 +18,8 @@ can pass its own base-year reader (``_base`` / ``_get_field``) without this
 module depending on the ORM object shape.
 """
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import Callable, Dict, Optional
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -409,3 +409,122 @@ def soglia_giorni_magazzino(settore) -> Optional[Decimal]:
     except (TypeError, ValueError):
         chiave = None
     return GIORNI_MAGAZZINO_MAX_PER_SETTORE.get(chiave, GIORNI_MAGAZZINO_MAX_DEFAULT)
+
+
+# ── Debito bancario: le regole condivise dai due motori (lotto 3A, Task 3) ──
+
+def e_contratto_pregresso(loan) -> bool:
+    """Un contratto con `opening_residual` > 0 descrive debito bancario GIA' in bilancio (pregresso).
+
+    Dopo `contratti_da_riga_finanziamento` nessun contratto porta insieme `amount` e `opening_residual`,
+    quindi il predicato basta da solo.
+    """
+    return Decimal(str(loan.get('opening_residual') or 0)) > ZERO
+
+
+def contratti_da_riga_finanziamento(loan: Mapping[str, Any], anno: int) -> List[Dict[str, Any]]:
+    """Una riga di `financing_loans` → 0, 1 o 2 contratti del kernel (Ruling 45).
+
+    Un contratto MISTO (`amount` e `opening_residual` insieme) diventa due contratti con le stesse
+    condizioni: uno col solo importo nuovo, uno col solo residuo pregresso. Un calendario di
+    ammortamento e' lineare nel capitale, quindi la somma dei due equivale al contratto unico. Durata
+    nulla o negativa: nessun contratto (il kernel lo salterebbe comunque).
+    """
+    importo = Decimal(str(loan.get('amount') or 0))
+    residuo = Decimal(str(loan.get('opening_residual') or 0))
+    durata = Decimal(str(loan.get('duration_years') or 0))
+    if durata <= ZERO:
+        return []
+    condizioni = {
+        'year': anno,
+        'duration': durata,
+        'rate': Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100'),
+        'grace_years': Decimal(str(loan.get('grace_years') or 0)),
+        'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
+    }
+    contratti = []
+    if importo > ZERO:
+        contratti.append({**condizioni, 'amount': importo, 'opening_residual': ZERO})
+    if residuo > ZERO:
+        contratti.append({**condizioni, 'amount': ZERO, 'opening_residual': residuo})
+    return contratti
+
+
+def residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
+    """Il residuo dei soli prestiti NUOVI a fine `fino_al_anno`, come il motore lo persiste.
+
+    La catena e' quella che il previsionale ha sempre scritto per un prestito da
+    solo: residuo dell'anno prima al centesimo, piu' l'erogato, meno la rata del
+    kernel, al centesimo. Quantizzare anno per anno non e' un vezzo: un residuo
+    calcolato sul calendario grezzo differisce di un centesimo da quello
+    persistito (100.000,38 in 4 anni: 25.000,095 grezzo contro 25.000,11
+    persistito il terzo anno), e quel centesimo, tolto a `sp17a`, finirebbe
+    attribuito al debito bancario pregresso.
+    """
+    zero, cent = Decimal('0'), Decimal('0.01')
+    anni = [int(loan['year']) for loan in (loans or ())]
+    if not anni:
+        return zero
+    residuo = zero
+    for anno in range(min(anni), fino_al_anno + 1):
+        raised, repayment, _ = new_financing_schedule(loans, anno)
+        residuo = max(zero, residuo + raised - repayment).quantize(cent, rounding=ROUND_HALF_UP)
+    return residuo
+
+
+def quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
+    """Quanto del residuo dei prestiti NUOVI dentro `lungo` (`sp17a` grezzo a fine `anno`) scade l'anno dopo.
+
+    Il residuo nuovo e' quello che l'anno dopo trovera' all'apertura,
+    `min(sp17a, catena)`: se lo sweep ha eroso il prestito (prima il pregresso, poi
+    il nuovo), la quota si calcola su cio' che ne resta.
+
+    Il limite finale, mai oltre `lungo` arrotondato per difetto, tiene `lungo -
+    quota` non negativo. E' la condizione perche' la riclassifica sia esatta al
+    centesimo: su valori non negativi ROUND_HALF_UP e' invariante per traslazione
+    di centesimi interi, quindi `Q(lungo - quota) + quota = Q(lungo)`. Senza, un
+    lungo grezzo di 5.000,005 tutto in scadenza l'anno dopo darebbe quota 5.000,01
+    e un `sp17a` persistito di -0,01.
+
+    E' la stessa regola del pregresso scadenziato (`runoff_schedule`:
+    `residual_short = min(residuo, dovuto l'anno dopo)`), ma letta sul calendario
+    del kernel dei prestiti invece che su un elenco di importi: la quota a breve e'
+    il capitale che la catena persistita toglie al residuo nell'anno dopo. Da qui
+    discendono le tre regole del Task 17 senza un ramo per ciascuna:
+    - durante il preammortamento la rata dell'anno dopo e' zero, e la quota a breve
+      anche;
+    - nell'anno prima della maxirata la rata dell'anno dopo la contiene, e la
+      maxirata sta a breve;
+    - l'ultimo anno di orizzonte non si azzera: il calendario del contratto non sa
+      dove finisce il piano. (E' qui che la regola si separa da `runoff_schedule`,
+      che oltre l'orizzonte non ha importi e restituisce zero.)
+
+    Contano solo i prestiti gia' erogati a fine `anno`: un prestito che nasce
+    l'anno dopo non e' debito di quest'anno, ne' a breve ne' oltre.
+
+    Perche' la differenza fra due residui al centesimo e non la rata arrotondata:
+    100.000,38 in 4 anni ha rata 25.000,095, ma la catena passa da 75.000,29 a
+    50.000,20 e toglie 25.000,09. Con 25.000,10 a breve il lungo di fine anno
+    (50.000,19) risulterebbe inferiore al residuo che l'anno dopo non scade
+    (50.000,20): un centesimo di debito oltre l'esercizio che nascerebbe dal nulla.
+    """
+    zero, cent = Decimal('0'), Decimal('0.01')
+    residuo = min(lungo.quantize(cent, rounding=ROUND_HALF_UP), residuo_prestiti_nuovi(loans, anno))
+    if residuo <= zero:
+        return zero
+    erogati = [loan for loan in (loans or ()) if int(loan['year']) <= anno]
+    _, rimborso, _ = new_financing_schedule(erogati, anno + 1)
+    dopo = max(zero, residuo - rimborso).quantize(cent, rounding=ROUND_HALF_UP)
+    return min(residuo - dopo, lungo.quantize(cent, rounding=ROUND_DOWN))
+
+
+def separa_prestiti_nuovi(sp17a_apertura: Decimal, prestiti_nuovi, anno: int) -> Tuple[Decimal, Decimal]:
+    """(pregresso, residuo nuovo di apertura) dal debito bancario a lungo di apertura dell'anno `anno`.
+
+    Il residuo nuovo di apertura e' la catena dei prestiti nuovi a fine `anno - 1`, mai oltre
+    `sp17a_apertura`: un cash sweep o un `sp_overrides` che l'anno prima ha abbassato `sp17a` sotto la
+    catena lo ha abbassato prima sul pregresso e poi sul nuovo. Va fatto PRIMA di ogni piano di rimborso:
+    ogni debito si riduce solo col proprio rimborso (I1 esteso, Task 16 del lotto 2).
+    """
+    nuovo = min(sp17a_apertura, residuo_prestiti_nuovi(prestiti_nuovi, anno - 1))
+    return sp17a_apertura - nuovo, nuovo

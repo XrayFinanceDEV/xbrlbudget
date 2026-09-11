@@ -660,10 +660,12 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into
-  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1113-1117`; the
-  docstring at `:1027` still says otherwise and is wrong). And both engines plug cash **upward
-  only**, but they part company on what a negative residual costs you: qui è **clampato a zero** con
-  una diagnostica `unfunded_financing_requirement` (`:1212-1224`) e la proiezione esce lo stesso,
+  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py`,
+  the "Preserve YTD equity movements" comment in `_project_balance_sheet`; that same method's own
+  docstring — "reserves + previous profit" — still says otherwise and is wrong). And both engines
+  plug cash **upward only**, but they part company on what a negative residual costs you: qui è
+  **clampato a zero** con una diagnostica `unfunded_financing_requirement` (il blocco "CASH PLUG"
+  di `_project_balance_sheet`) e la proiezione esce lo stesso,
   mentre il motore budget **solleva** e non produce nulla — salvo che lo scoperto di c/c sia concesso
   (`overdraft_allowed`), e allora il fabbisogno diventa scoperto generato dal piano, dichiarato. Un
   fabbisogno scoperto quindi si vede in un avviso sull'infrannuale, e sul previsionale in un errore

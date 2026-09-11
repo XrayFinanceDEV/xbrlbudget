@@ -1619,11 +1619,15 @@ class ForecastEngine:
         forecast years.  Absorb only those rounding residuals in the generic detail
         bucket, then recompute cash from the rounded aggregate rows.
 
-        `recompute_cash=False` keeps the first two steps and drops the third.  It
-        exists for the intra-year engine, whose cash plug clamps at zero and
-        raises `unfunded_financing_requirement` rather than creating short-term
-        debt: recomputing sp09 as Sigma passivo - Sigma attivo would put the
-        negative residual straight back and undo that clamp.  Quantization and
+        `recompute_cash=False` keeps the first two steps and drops the third.
+        No production caller passes it any more (lotto 3A Task 11): the
+        intra-year engine's `generate_projection` always calls this with
+        `recompute_cash=True`, measuring its own `unfunded_financing_requirement`
+        once, after `sp_overrides` and normalization, on the recomputed cash —
+        the same rule as here. Today only the unit assertions in
+        `tests/test_forecast_residuo_quadratura_sp16.py` and
+        `tests/test_forecast_residuo_sp16a_sp17a.py` pass `recompute_cash=False`,
+        to inspect the pre-recompute residual in isolation. Quantization and
         residual absorption have nothing to do with the clamp, so they must keep
         running — a record whose sub-fields do not sum to their own aggregate is
         read downstream (`reconcileSubfields`, the anti-regression guard of

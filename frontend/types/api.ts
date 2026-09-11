@@ -922,6 +922,7 @@ export interface CashReconciliation {
   cash_ending: number;
   difference: number;
   verification_ok: boolean;
+  third_party_funds_gap: number;
 }
 
 export interface DetailedCashFlowStatement {

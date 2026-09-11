@@ -271,6 +271,10 @@ calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il re
   `financial_debt_short`/`financial_debt_long` — mai l'aggregato grezzo
   `sp16`/`sp17` — quindi la riclassifica fra `sp16a` e `sp17a` non attraversa il confine
   operativo/finanziario del rendiconto.
+- I proventi da partecipazioni (`ce13`) tolti dall'utile nel primo blocco rientrano come dividendi
+  incassati, e `cash_reconciliation.third_party_funds_gap` dichiara lo scarto fra i mezzi di terzi per
+  residuo e la variazione misurata del debito finanziario: zero quando il rendiconto classifica ogni
+  movimento.
 - `details['prestiti_nuovi_quota_breve']` dichiara la quota ogni anno, anche a zero, per quanto
   `sp16a` ne persiste davvero.
 

@@ -542,7 +542,8 @@ rotazione effettivamente usati, forzati o derivati che siano).
 dei giorni **dedotti** che il motore ha scartato: `'dso'`, `'dio'`, `'dpo'`. Un giorno dedotto è
 degenere quando il denominatore dell'anno base non è positivo, o quando il rapporto supera i 365
 giorni: oltre un anno di giacenza smette di descrivere l'azienda e descrive il proprio
-denominatore. Su un giorno degenere il motore **riporta il saldo dell'anno base** invece di
+denominatore — eccetto il DIO di Immobiliare (5) ed Edilizia (6), dove la soglia non c'è (§4
+sopra). Su un giorno degenere il motore **riporta il saldo dell'anno base** invece di
 scalarlo, e `dso_applied`/`dio_applied`/`dpo_applied` dichiarano il giorno che quel saldo vale
 davvero sul flusso proiettato (zero se il flusso è nullo), mai quello degenere. Un giorno
 **esplicito** dell'ipotesi non passa dalla guardia: è una scelta, non una derivazione. Se il

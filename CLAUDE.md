@@ -617,8 +617,9 @@ declared in `details['residuo_quadratura']` with the aggregate as `campo`
 The day-count guard added by Task 14 moves numbers too, with or without a plan: a derived
 DSO/DIO/DPO whose base-year denominator is not positive, or whose implied standing exceeds 365
 days, is discarded and the base-year stock is carried instead (`degenerate_turnover_ratio`,
-`_derived_days`) — measured on the parity bench: `holding__crescita` `sp16d` 44.772,50 →
-50.000,00. Tax payables are the one balance whose behaviour changes **even without a
+`_derived_days`) — except `dio` in sectors 5/6, where `soglia_giorni_magazzino` lifts the 365-day
+threshold (see the Working capital bullet above) — measured on the parity bench: `holding__crescita`
+`sp16d` 44.772,50 → 50.000,00. Tax payables are the one balance whose behaviour changes **even without a
 plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
 year-end N is paid as saldo in N+1, net of the opening tax credit up to its amount, and the advance
 defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` **greater than

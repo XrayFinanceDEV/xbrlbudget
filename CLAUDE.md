@@ -575,10 +575,20 @@ the answer is `scoperto_generato` year by year, with the peak in `fabbisogno_pic
 hiding a scenario choice nobody had made. Now the choice is explicit, the amount is declared in
 `details` and shown in the wizard preview — do not restore the ban in good faith: the reason for it
 is gone, not forgotten.
+**The cash sweep repays only what has no plan.** With `cash_sweep_enabled`, cash above
+`cash_sweep_min_cash` repays the overdraft first (it is already inside net cash) and then pre-existing bank debt
+**without any plan** — no contract with an opening residual and no `existing_debt_repayment_years` that year —
+short side first, then long. Grid contracts, the legacy `financing_amount` loan and pre-existing debt on a years plan
+follow **only their plan**, capital and interest alike, and the excess stays in `sp09` (owner's decision, lotto 3A).
+The sweep decides on the cash **after** `sp_overrides`, in `_normalize_balance_sheet_cents` right before
+`_Overdraft.copri`: deciding before the overrides turned a fundable plan into a funding requirement or opened an
+overdraft to pay an optional early repayment. `details['debito_bancario']`, declared every year, splits bank debt
+into `pregresso_senza_piano`, `pregresso_piano_anni` and one row per contract, and adds up exactly: Σ`breve` +
+`scoperto_residuo` = `sp16a`, Σ`lungo` = `sp17a`.
 **The share of a new loan that falls due next year sits in `sp16a`, the rest in `sp17a`**: the capital
 the kernel calendar repays the following year (zero while that year is still grace, the balloon the
-year before it falls due, and not zeroed in the last plan year), declared in
-`details['prestiti_nuovi_quota_breve']`; pre-existing bank debt keeps its own split, and P&L is
+year before it falls due, and not zeroed in the last plan year), declared per contract in
+`details['debito_bancario']['contratti']`; pre-existing bank debt keeps its own split, and P&L is
 unaffected. Leaving it all in `sp17a` overstates CCN and current ratio (2,4206 instead of 2,0794 on
 the test kit) and Altman's working capital (0,4093 instead of 0,3620) — the balance check never sees
 it, `sp16` and `sp17` are both liabilities. It also used to move the reclassified amount from the

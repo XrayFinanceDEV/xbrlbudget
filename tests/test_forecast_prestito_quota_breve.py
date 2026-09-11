@@ -41,7 +41,6 @@ from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
 BREVE, LUNGO = D("12345.67"), D("23456.79")
 ZERO = D("0")
 SP16A, SP17A, SP09 = "sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo", "sp09_disponibilita_liquide"
-QUOTA = "prestiti_nuovi_quota_breve"
 A3 = (2027, 2028, 2029)
 A4 = (2027, 2028, 2029, 2030)
 A5 = (2027, 2028, 2029, 2030, 2031)
@@ -98,8 +97,10 @@ def _scoperto(det):
 
 
 def _quota(det):
-    """La quota dichiarata. Assente vale zero — ed e' l'asserzione a dirlo, non un KeyError."""
-    return D(str(det.get(QUOTA) or 0))
+    """La quota a breve dei prestiti NUOVI dichiarata: somma dei `breve` dei contratti senza residuo iniziale in
+    `details['debito_bancario']` (lotto 3A, Task 2). Assente vale zero — ed e' l'asserzione a dirlo, non un KeyError."""
+    contratti = (det.get("debito_bancario") or {}).get("contratti") or []
+    return sum((D(str(c["breve"])) for c in contratti if D(str(c.get("residuo_iniziale") or 0)) == 0), D("0"))
 
 
 def _al_centesimo(fuori, dove, sp, det):
@@ -249,7 +250,7 @@ def test_la_rata_dell_anno_dopo_sta_a_breve_e_nient_altro_si_muove(caso):
             if p[SP16A] != quota:
                 fuori.append(f"{dove} sp16a del prestito da solo {p[SP16A]}, il calendario dice {quota}")
             if _quota(det_c) != quota:
-                fuori.append(f"{dove} quota dichiarata {det_c.get(QUOTA)}, il calendario dice {quota}")
+                fuori.append(f"{dove} quota dichiarata {_quota(det_c)}, il calendario dice {quota}")
 
             # 2. Il resto sta oltre, e il pregresso non si accorge del prestito (I1 esteso).
             if c[SP17A] != s[SP17A] + p[SP17A]:
@@ -269,16 +270,16 @@ def test_la_rata_dell_anno_dopo_sta_a_breve_e_nient_altro_si_muove(caso):
         engine.dispose()
 
 
-# ══ Il cash sweep: prima il pregresso, poi il prestito nuovo ══
+# ══ Il cash sweep: rimborsa il pregresso SENZA piano ══
 #
-# Decisione del proprietario (Ruling 44), che il giro 1 del Task 16 doveva fissare
-# con un test. La sonda 6a della revisione del Task 16: cassa 2027 senza sweep
-# 166.993,94, minimo scelto perche' lo sweep rimborsi esattamente il breve pregresso
-# piu' 10.000,55. Prima il pregresso: il breve si chiude, i 10.000,55 cadono sul
-# lungo pregresso (23.456,79 → 13.456,24) e ci restano; il prestito nuovo tiene il
-# proprio calendario. Con l'ordine opposto il prestito perderebbe 10.000,55 e il
-# pregresso resterebbe intatto: il 2030 varrebbe 23.456,79 invece di 13.456,26
-# (misurato dalla revisione).
+# La sonda 6a della revisione del Task 16: cassa 2027 senza sweep 166.993,94,
+# minimo scelto perche' lo sweep rimborsi esattamente il breve pregresso
+# piu' 10.000,55. L'eccedenza (22.346,22) non supera il pregresso (35.802,46),
+# quindi dal lotto 3A i numeri restano quelli di prima: il breve si chiude, i
+# 10.000,55 cadono sul lungo pregresso (23.456,79 → 13.456,24) e ci restano; il
+# prestito nuovo tiene il proprio calendario. Con l'ordine opposto il prestito
+# perderebbe 10.000,55 e il pregresso resterebbe intatto: il 2030 varrebbe
+# 23.456,79 invece di 13.456,26 (misurato dalla revisione).
 MINIMO_SWEEP = D("144647.72")
 CATENA_SWEEP = {2027: "75000.29", 2028: "50000.20", 2029: "25000.11", 2030: "0.02", 2031: "0.02"}
 PREGRESSO_DOPO_SWEEP = D("13456.24")
@@ -292,12 +293,13 @@ PRIMA_SWEEP = {
 }
 
 
-def test_lo_sweep_rimborsa_prima_il_pregresso_poi_il_prestito_nuovo():
+def test_lo_sweep_rimborsa_solo_il_pregresso_senza_piano():
     """L'asserzione e' sui TOTALI e sulla componente pregressa, non su `sp17a` da
     sola: dal Task 17 una parte del prestito sta a breve, e un test su `sp17a`
-    misurerebbe la riclassifica invece dell'ordine. La riclassifica si fa DOPO lo
-    sweep: fatta prima, la quota nuova starebbe in `sp16a`, che lo sweep paga per
-    primo, davanti al lungo pregresso."""
+    misurerebbe la riclassifica invece dell'ordine. Dal lotto 3A lo sweep non
+    tocca il prestito per nulla: qui l'eccedenza del 2027 (22.346,22) non supera
+    il pregresso (35.802,46), quindi i numeri restano quelli — misurato:
+    identici, cella per cella, a prima della decisione 3 del proprietario."""
     engine, sessions = memory_sessions()
     try:
         rows = _righe(A5, None, {0: {**PRESTITO, "cash_sweep_enabled": True,
@@ -320,70 +322,44 @@ def test_lo_sweep_rimborsa_prima_il_pregresso_poi_il_prestito_nuovo():
             # Il breve pregresso l'ha chiuso lo sweep: in `sp16a` c'e' solo la quota nuova.
             quota = D(QUOTA_SWEEP[anno])
             if c[SP16A] - _scoperto(det) != quota or _quota(det) != quota:
-                fuori.append(f"{dove} sp16a {c[SP16A]}, quota dichiarata {det.get(QUOTA)}, calendario {quota}")
+                fuori.append(f"{dove} sp16a {c[SP16A]}, quota dichiarata {_quota(det)}, calendario {quota}")
             _al_centesimo(fuori, dove, c, det)
         assert not fuori, "\n".join(fuori)
     finally:
         engine.dispose()
 
 
-# ══ Uno sweep che erode il prestito nuovo ══
+# ══ Uno sweep che oltre il pregresso non va ══
 #
-# La sonda 6b della revisione del Task 16, sulla stessa base: lo sweep del 2027
-# chiude tutto il pregresso, breve e lungo, e intacca il prestito. La quota a breve
-# si calcola su cio' che del prestito RESTA. Quando il resto scade tutto l'anno dopo
-# e il residuo grezzo cade sul mezzo centesimo, quel mezzo centesimo resta oltre come
-# 0,01: e' il prezzo dei totali esatti (`Q(lungo - quota) + quota = Q(lungo)`), e il
-# limite al lungo arrotondato per difetto e' cio' che lo garantisce. Senza, la quota
-# sarebbe 15.000,29, `sp17a` persisterebbe -0,01 e il debito un centesimo in meno.
-# Totale e cassa sono i numeri di `5197929`; su `5197929` la quota era zero. Gli
-# oneri finanziari non si fissano qui: sono gli stessi dello scenario senza sweep,
-# cioe' il difetto (b) della revisione del 16, che il lotto 3 correggera'.
-EROSIONE = [
-    dict(
-        nome="il resto scade tutto l'anno dopo",
-        # sweep = breve + lungo + 60.000,00: del prestito (75.000,285 grezzo) restano
-        # 15.000,285, tutti in scadenza nel 2028 (rata 25.000,095).
-        minimo="71191.48",
-        totale=("15000.29", "0", "0", "0", "0"),
-        cassa=("71191.48", "180035.96", "320042.79", "476723.80", "650608.11"),
-        quota=("15000.28", "0", "0", "0", "0"),
-        oltre=("0.01", "0", "0", "0", "0"),
-    ),
-    dict(
-        nome="una rata a breve, poi il resto",
-        # sweep = breve + lungo + 40.000,55: restano 34.999,735 → 34.999,74. Rata 2028:
-        # 34.999,74 − 9.999,65 (9.999,645) = 25.000,09 a breve. Nel 2028 restano
-        # 9.999,645, tutti in scadenza nel 2029: 9.999,64 a breve e 0,01 oltre.
-        minimo="91190.93",
-        totale=("34999.74", "9999.65", "0", "0", "0"),
-        cassa=("91190.93", "190035.61", "320042.79", "476723.80", "650608.11"),
-        quota=("25000.09", "9999.64", "0", "0", "0"),
-        oltre=("9999.65", "0.01", "0", "0", "0"),
-    ),
-]
+# Stessa base e stessi due minimi della sonda 6b della revisione del Task 16: la cassa del 2027 sopra il minimo supera il
+# pregresso (35.802,46). Dal lotto 3A (decisione 3 del proprietario) il prestito segue il suo piano, lo sweep si ferma al
+# pregresso e la cassa resta: i due minimi danno gli stessi numeri. Oracolo: gemello senza sweep meno il pregresso,
+# sullo snapshot `452112d`.
+OLTRE_IL_PREGRESSO = dict(
+    totale=("75000.29", "50000.20", "25000.11", "0.02", "0.02"),
+    cassa=("131191.48", "230036.16", "345042.90", "476723.82", "650608.13"),
+    quota=("25000.09", "25000.09", "25000.09", "0", "0"),
+    oltre=("50000.20", "25000.11", "0.02", "0.02", "0.02"),
+)
 
 
-@pytest.mark.parametrize("caso", EROSIONE, ids=[c["nome"] for c in EROSIONE])
-def test_uno_sweep_che_erode_il_prestito_lascia_a_breve_solo_cio_che_ne_resta(caso):
+@pytest.mark.parametrize("minimo", ["71191.48", "91190.93"])
+def test_uno_sweep_oltre_il_pregresso_lascia_il_prestito_al_suo_piano(minimo):
     engine, sessions = memory_sessions()
     try:
-        rows = _righe(A5, None, {0: {**PRESTITO, "cash_sweep_enabled": True,
-                                     "cash_sweep_min_cash": float(D(caso["minimo"]))}})
+        rows = _righe(A5, None, {0: {**PRESTITO, "cash_sweep_enabled": True, "cash_sweep_min_cash": float(D(minimo))}})
         with sessions() as db:
-            run = _genera(db, "erosione", rows)
-        # Precondizione: lo sweep del 2027 ha girato fino al minimo, non oltre.
-        assert run[2027][0][SP09] == D(caso["minimo"]), run[2027][0][SP09]
+            run = _genera(db, "oltre-pregresso", rows)
         fuori = []
         for i, anno in enumerate(A5):
             c, _ce, det = run[anno]
-            dove = f"[{caso['nome']} | {anno}]"
+            dove = f"[minimo {minimo} | {anno}]"
             confronti = {
-                "debito bancario sp16a+sp17a, su 5197929": (c[SP16A] + c[SP17A], caso["totale"][i]),
-                "cassa sp09, su 5197929": (c[SP09], caso["cassa"][i]),
-                "quota a breve in sp16a": (c[SP16A] - _scoperto(det), caso["quota"][i]),
-                "quota dichiarata": (_quota(det), caso["quota"][i]),
-                "oltre in sp17a": (c[SP17A], caso["oltre"][i]),
+                "debito bancario sp16a+sp17a": (c[SP16A] + c[SP17A], OLTRE_IL_PREGRESSO["totale"][i]),
+                "cassa sp09": (c[SP09], OLTRE_IL_PREGRESSO["cassa"][i]),
+                "quota a breve in sp16a": (c[SP16A] - _scoperto(det), OLTRE_IL_PREGRESSO["quota"][i]),
+                "quota dichiarata": (_quota(det), OLTRE_IL_PREGRESSO["quota"][i]),
+                "oltre in sp17a": (c[SP17A], OLTRE_IL_PREGRESSO["oltre"][i]),
             }
             for etichetta, (valore, atteso) in confronti.items():
                 if valore != D(atteso):
@@ -453,7 +429,7 @@ def test_un_override_di_sp16a_sotto_la_quota_la_riduce_e_non_crea_debito():
         sp27, _ce27, det27 = run[2027]
         assert sp27[SP16A] == D("5000.55"), sp27[SP16A]
         if _quota(det27) != D("5000.55"):
-            fuori.append(f"[2027] quota dichiarata {det27.get(QUOTA)}, sp16a persiste 5000.55 senza scoperto")
+            fuori.append(f"[2027] quota dichiarata {_quota(det27)}, sp16a persiste 5000.55 senza scoperto")
         precedente = sp27[SP16A] + sp27[SP17A]
         for anno in (2028, 2029):
             sp, _ce, det = run[anno]
@@ -461,7 +437,7 @@ def test_un_override_di_sp16a_sotto_la_quota_la_riduce_e_non_crea_debito():
             if totale != precedente - D("25000.09"):
                 fuori.append(f"[{anno}] debito bancario {totale}, atteso {precedente} − rata del prestito 25000.09")
             if _quota(det) != D("25000.09"):
-                fuori.append(f"[{anno}] quota dichiarata {det.get(QUOTA)}, calendario 25000.09")
+                fuori.append(f"[{anno}] quota dichiarata {_quota(det)}, calendario 25000.09")
             precedente = totale
         for anno in A3:
             _al_centesimo(fuori, f"[override | {anno}]", run[anno][0], run[anno][2])
@@ -493,7 +469,7 @@ def test_un_override_di_sp17a_fissa_solo_l_oltre_e_aggiunge_la_quota_al_debito()
         if sp27[SP16A] != D("37345.76"):
             fuori.append(f"[2027] sp16a {sp27[SP16A]}, atteso 37345.76 (breve pregresso + quota, override non lo tocca)")
         if _quota(det27) != D("25000.09"):
-            fuori.append(f"[2027] quota dichiarata {det27.get(QUOTA)}, attesa 25000.09 (sp16a non e' vincolato dall'override)")
+            fuori.append(f"[2027] quota dichiarata {_quota(det27)}, attesa 25000.09 (sp16a non e' vincolato dall'override)")
         precedente = sp27[SP16A] + sp27[SP17A]
         for anno in (2028, 2029):
             sp, _ce, det = run[anno]
@@ -501,7 +477,7 @@ def test_un_override_di_sp17a_fissa_solo_l_oltre_e_aggiunge_la_quota_al_debito()
             if totale != precedente - D("25000.09"):
                 fuori.append(f"[{anno}] debito bancario {totale}, atteso {precedente} − rata del prestito 25000.09")
             if _quota(det) != D("25000.09"):
-                fuori.append(f"[{anno}] quota dichiarata {det.get(QUOTA)}, calendario 25000.09")
+                fuori.append(f"[{anno}] quota dichiarata {_quota(det)}, calendario 25000.09")
             precedente = totale
         for anno in A3:
             _al_centesimo(fuori, f"[override-sp17a | {anno}]", run[anno][0], run[anno][2])

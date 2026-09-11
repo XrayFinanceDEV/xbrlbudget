@@ -210,22 +210,11 @@ def test_i1_esteso_la_componente_pregressa_non_si_accorge_del_prestito(nome, bre
         engine.dispose()
 
 
-def test_un_cash_sweep_che_rimborsa_oltre_il_pregresso_non_fa_rinascere_debito():
-    """La regola che la separazione introduce, tenuta ferma.
-
-    Il residuo del prestito nuovo all'apertura e' la catena del kernel, ma non puo'
-    superare `sp17a`: un cash sweep che l'anno prima ha rimborsato tutto il debito
-    bancario lo ha tolto prima al pregresso e poi al prestito nuovo. Nel 2028 lo
-    sweep chiude ogni debito bancario; nel 2029 la rata del kernel cade su un
-    prestito gia' estinto e deve restare a zero. Senza quel limite il pregresso
-    diventerebbe negativo e `sp17a` persisterebbe un debito negativo: denaro dal
-    nulla, e un foglio che quadra lo stesso.
-
-    Lo sweep sta SOLO nel 2028, e non per comodita': uno sweep acceso anche nel
-    2029 «rimborsa» un `sp17a` negativo (`min(eccesso, negativo)` e' negativo), lo
-    riporta a zero e gonfia la cassa. Misurato: con lo sweep in entrambi gli anni
-    la mutazione «senza limite» passava questo test.
-    """
+def test_un_cash_sweep_nel_2028_paga_il_pregresso_e_lascia_il_prestito_al_suo_piano():
+    """Lo sweep del 2028 ha cassa per chiudere pregresso E prestito nuovo. Fino al lotto 2 li chiudeva entrambi; dal lotto
+    3A il prestito segue il suo piano (decisione 3 del proprietario): nel 2028 restano 25.000,09 a breve e 25.000,11 a
+    lungo, nel 2029 la quota e i 0,02 che la catena lascia oltre, e la cassa tiene il capitale non rimborsato. Oracolo:
+    gemello senza sweep meno il pregresso (35.802,46), sullo snapshot `452112d`."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
@@ -236,15 +225,12 @@ def test_un_cash_sweep_che_rimborsa_oltre_il_pregresso_non_fa_rinascere_debito()
                 dict(forecast_year=2029, revenue_growth_pct=3.33, tax_rate=27.9),
             ]
             sp = _genera(db, "sweep-oltre", rows, BREVE, LUNGO)
-        # Precondizioni: nel 2027 c'e' debito bancario pregresso e nuovo, e lo sweep
-        # del 2028 ha cassa per chiuderli entrambi.
-        # Dal Task 17 il breve del 2027 porta anche la rata 2028 del prestito.
         assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE + QUOTA_BREVE_PRESTITO[2027]
-        assert sp[2027]["sp17a_debiti_banche_lungo"] > LUNGO
-        assert sp[2028]["sp09_disponibilita_liquide"] > D("1000.55")
-        for anno in (2028, 2029):
-            assert sp[anno]["sp16a_debiti_banche_breve"] == D("0"), anno
-            assert sp[anno]["sp17a_debiti_banche_lungo"] == D("0"), anno
+        for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "230036.16"),
+                                             2029: ("25000.09", "0.02", "345042.90")}.items():
+            assert sp[anno]["sp16a_debiti_banche_breve"] == D(breve), anno
+            assert sp[anno]["sp17a_debiti_banche_lungo"] == D(lungo), anno
+            assert sp[anno]["sp09_disponibilita_liquide"] == D(cassa), anno
             assert sp[anno]["_total_assets"] == sp[anno]["_total_liabilities"], anno
     finally:
         engine.dispose()

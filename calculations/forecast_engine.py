@@ -2,7 +2,7 @@
 Forecast Calculation Engine
 Generates forecasted Income Statements and Balance Sheets based on budget assumptions
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
@@ -257,6 +257,197 @@ class _Overdraft:
             )
         self.outstanding = fabbisogno
         return max(zero, cassa_netta), fabbisogno
+
+
+def _q2(valore) -> Decimal:
+    """Al centesimo con la regola del motore (ROUND_HALF_UP)."""
+    return Decimal(str(valore)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+@dataclass
+class _Sweep:
+    """Il cash sweep di UN anno: rimborsa il solo debito bancario pregresso SENZA piano.
+
+    Decisione 3 del proprietario (lotto 3A): i finanziamenti con un piano — contratti della
+    griglia, `financing_amount`, pregresso con `existing_debt_repayment_years` — seguono solo il
+    loro piano, capitale e interessi. `_calculate_balance_sheet` riempie perimetro e disponibile;
+    `_normalize_balance_sheet_cents` chiama `applica` sulla cassa NETTA gia' al centesimo e DOPO gli
+    `sp_overrides`, subito prima di `_Overdraft.copri` (rilievo I2 della revisione finale del
+    lotto 2: deciso prima degli override, lo sweep fabbricava un fabbisogno). Lo scoperto viene
+    prima per costruzione: la cassa netta lo contiene gia'.
+    """
+    attivo: bool = False
+    minimo: Decimal = Decimal('0')
+    breve_disponibile: Decimal = Decimal('0')
+    lungo_disponibile: Decimal = Decimal('0')
+    breve_forzato: bool = False
+    lungo_forzato: bool = False
+    rimborso_breve: Decimal = Decimal('0')
+    rimborso_lungo: Decimal = Decimal('0')
+
+    def applica(self, cassa: Decimal) -> Tuple[Decimal, Decimal, Decimal]:
+        """(cassa, pagato a breve, pagato a lungo). Un minimo negativo vale zero."""
+        zero = Decimal('0')
+        self.rimborso_breve = self.rimborso_lungo = zero
+        minimo = max(zero, _q2(self.minimo))
+        if not self.attivo or cassa <= minimo:
+            return cassa, zero, zero
+        eccesso = cassa - minimo
+        if not self.breve_forzato:
+            self.rimborso_breve = min(eccesso, max(zero, _q2(self.breve_disponibile)))
+        eccesso -= self.rimborso_breve
+        if not self.lungo_forzato:
+            self.rimborso_lungo = min(eccesso, max(zero, _q2(self.lungo_disponibile)))
+        return cassa - self.rimborso_breve - self.rimborso_lungo, self.rimborso_breve, self.rimborso_lungo
+
+
+@dataclass
+class _DebitoBancarioAnno:
+    """Le componenti del debito bancario di UN anno, grezze, come `_calculate_balance_sheet` le separa.
+
+    Al piu' uno fra `senza_piano` e `piano_anni` e' valorizzato; entrambi sono `None` quando il
+    pregresso e' descritto da contratti (`opening_residual`). `contratti` elenca OGNI contratto del
+    piano (misti gia' divisi), nell'ordine di `assemble_financing`, anche quelli non ancora erogati.
+    """
+    senza_piano: Optional[Dict[str, Decimal]] = None
+    piano_anni: Optional[Dict[str, Decimal]] = None
+    contratti: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
+    """Il residuo di UN contratto a fine `fino_al_anno`, con la catena al centesimo del motore.
+
+    Parte da `opening_residual` (zero per un prestito nuovo) prima del suo anno; un contratto non
+    ancora erogato resta al valore di partenza. Per un prestito nuovo coincide con
+    `_residuo_prestiti_nuovi([loan], fino_al_anno)`.
+    """
+    zero = Decimal('0')
+    residuo = Decimal(str(loan.get('opening_residual') or 0))
+    for anno in range(int(loan['year']), fino_al_anno + 1):
+        erogato, rimborso, _ = new_financing_schedule([loan], anno)
+        residuo = _q2(max(zero, residuo + erogato - rimborso))
+    return residuo
+
+
+def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_nuovi: Decimal,
+                         breve_pregresso: Decimal, lungo_pregresso: Decimal) -> List[Dict[str, Any]]:
+    """Le righe `contratti` di `details['debito_bancario']`, grezze (le quantizza `_dichiara_debito_bancario`).
+
+    Per ogni contratto: erogato, rimborso e interessi dell'anno dal kernel sul solo contratto, e il
+    residuo di fine anno dalla sua catena. La ripartizione ricompone ESATTAMENTE i totali che il
+    motore scrive in `sp16a`/`sp17a`:
+    - contratti nuovi: la propria quota a breve (`_quota_breve_prestiti_nuovi` sul solo contratto);
+      l'ultimo nuovo in ordine assorbe la differenza verso `quota_breve_nuovi` e verso
+      `residuo_nuovi - quota_breve_nuovi`;
+    - contratti col residuo iniziale: `breve_pregresso` si assegna in ordine, fino al residuo di
+      ciascuno; l'ultimo assorbe la differenza verso `breve_pregresso` e verso `lungo_pregresso`.
+    """
+    zero = Decimal('0')
+    righe: List[Dict[str, Any]] = []
+    for indice, loan in enumerate(loans or []):
+        erogato, rimborso, interessi = new_financing_schedule([loan], anno)
+        righe.append({
+            'indice': indice,
+            'anno': int(loan['year']),
+            'tasso': Decimal(str(loan.get('rate') or 0)) * Decimal('100'),
+            'erogato': erogato,
+            'residuo_iniziale': Decimal(str(loan.get('opening_residual') or 0)),
+            'rimborso': rimborso,
+            'interessi': interessi,
+            '_residuo': _residuo_contratto(loan, anno),
+            '_pregresso': _e_contratto_pregresso(loan),
+            '_loan': loan,
+        })
+    nuovi = [r for r in righe if not r['_pregresso']]
+    pregressi = [r for r in righe if r['_pregresso']]
+    for r in nuovi:
+        r['breve'] = _quota_breve_prestiti_nuovi([r['_loan']], anno, r['_residuo'])
+        r['lungo'] = r['_residuo'] - r['breve']
+    if nuovi:
+        ultimo = nuovi[-1]
+        ultimo['breve'] += quota_breve_nuovi - sum((r['breve'] for r in nuovi), zero)
+        ultimo['lungo'] += (residuo_nuovi - quota_breve_nuovi) - sum((r['lungo'] for r in nuovi), zero)
+    resto = breve_pregresso
+    for r in pregressi:
+        r['breve'] = min(max(zero, r['_residuo']), max(zero, resto))
+        r['lungo'] = r['_residuo'] - r['breve']
+        resto -= r['breve']
+    if pregressi:
+        ultimo = pregressi[-1]
+        ultimo['breve'] += breve_pregresso - sum((r['breve'] for r in pregressi), zero)
+        ultimo['lungo'] += lungo_pregresso - sum((r['lungo'] for r in pregressi), zero)
+    for r in righe:
+        for chiave in ('_residuo', '_pregresso', '_loan'):
+            del r[chiave]
+    return righe
+
+
+def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_Sweep]",
+                              sp16a: Decimal, sp17a: Decimal, scoperto: Decimal) -> Dict[str, Any]:
+    """`details['debito_bancario']` al centesimo, riconciliato con cio' che `sp16a`/`sp17a` persistono.
+
+    Somma dei `breve` + `scoperto` = `sp16a`, somma dei `lungo` = `sp17a`, per costruzione. La
+    differenza fra le componenti grezze quantizzate e il persistito (centesimi di arrotondamento,
+    un `sp_overrides` sul debito bancario, lo sweep) si posa cosi':
+    - in aumento, sulla «casa del pregresso»: `pregresso_senza_piano`, altrimenti
+      `pregresso_piano_anni`, altrimenti l'ultimo contratto col residuo iniziale, altrimenti
+      l'ultimo contratto nuovo;
+    - in riduzione, prima sul pregresso (le due componenti, poi i contratti col residuo dall'ultimo),
+      poi sui contratti nuovi dall'ultimo, mai sotto zero: e' la precedenza con cui la quota a breve
+      dei prestiti nuovi si riduceva sotto un override di `sp16a` fino al lotto 2.
+    """
+    zero = Decimal('0')
+    senza_piano = None
+    if debito.senza_piano is not None:
+        pagato_breve = sweep.rimborso_breve if sweep is not None else zero
+        pagato_lungo = sweep.rimborso_lungo if sweep is not None else zero
+        senza_piano = {
+            'apertura': _q2(debito.senza_piano['apertura']),
+            'rimborso_sweep': pagato_breve + pagato_lungo,
+            'breve': _q2(debito.senza_piano['breve']) - pagato_breve,
+            'lungo': _q2(debito.senza_piano['lungo']) - pagato_lungo,
+        }
+    piano_anni = None
+    if debito.piano_anni is not None:
+        piano_anni = {k: _q2(debito.piano_anni[k]) for k in ('apertura', 'rimborso', 'breve', 'lungo')}
+    contratti = [
+        {**c, **{k: _q2(c[k]) for k in ('erogato', 'residuo_iniziale', 'rimborso', 'interessi', 'breve', 'lungo')}}
+        for c in debito.contratti
+    ]
+    pregressi = [c for c in contratti if c['residuo_iniziale'] > zero]
+    nuovi = [c for c in contratti if c['residuo_iniziale'] == zero]
+    componenti_pregresso = [c for c in (senza_piano, piano_anni) if c is not None]
+    tutte = componenti_pregresso + contratti
+    casa = (componenti_pregresso[0] if componenti_pregresso
+            else pregressi[-1] if pregressi else nuovi[-1] if nuovi else None)
+    ordine_riduzione = componenti_pregresso + list(reversed(pregressi)) + list(reversed(nuovi))
+    for lato, bersaglio in (('breve', sp16a - scoperto), ('lungo', sp17a)):
+        delta = bersaglio - sum((c[lato] for c in tutte), zero)
+        if delta > zero and casa is not None:
+            casa[lato] += delta
+        elif delta < zero:
+            for c in ordine_riduzione:
+                tolto = min(max(zero, c[lato]), -delta)
+                c[lato] -= tolto
+                delta += tolto
+                if delta == zero:
+                    break
+    return {'pregresso_senza_piano': senza_piano, 'pregresso_piano_anni': piano_anni, 'contratti': contratti}
+
+
+def _quota_breve_dichiarata(prev_details) -> Decimal:
+    """La quota a breve dei prestiti NUOVI che l'anno prima ha dichiarato (e `sp16a` persistito).
+
+    Somma dei `breve` dei contratti senza residuo iniziale in `details['debito_bancario']`. Sostituisce la
+    lettura della quota a breve dei prestiti nuovi, che il lotto 3A toglie.
+    """
+    debito = (prev_details or {}).get('debito_bancario') or {}
+    return sum(
+        (Decimal(str(c.get('breve') or 0)) for c in (debito.get('contratti') or [])
+         if Decimal(str(c.get('residuo_iniziale') or 0)) == 0),
+        Decimal('0'),
+    )
+
 
 class _DictView:
     """getattr(view, 'sp09_...') su un dict del motore: previous_* senza ORM.
@@ -1069,7 +1260,7 @@ class ForecastEngine:
         quadra e nessun controllo se ne accorge (rilievo I1 della revisione
         finale del branch — regressione del Task 6, perche' la via manuale,
         che legge il patrimoniale, l'override lo portava avanti). Lo schema
-        e' quello di `prestiti_nuovi_quota_breve`: la dichiarazione si
+        e' quella di `details['debito_bancario']`: la dichiarazione si
         clampa su cio' che la riga persistita puo' reggere, e l'override si
         porta avanti come stato di apertura.
 
@@ -1419,6 +1610,7 @@ class ForecastEngine:
         forced_fields: "frozenset[str]" = frozenset(),
         details: Optional[Dict[str, Any]] = None,
         overdraft: "Optional[_Overdraft]" = None,
+        sweep: "Optional[_Sweep]" = None,
     ) -> Dict:
         """Make persisted SP hierarchy and Attivo/Passivo exact to the cent.
 
@@ -1637,6 +1829,19 @@ class ForecastEngine:
             # negativa (spec §11.1). Lo scoperto si somma a `sp16a`/`sp16` DOPO
             # il residuo di quadratura, quindi non ne crea uno nuovo. Il
             # chiamante infrannuale non passa di qui (`recompute_cash=False`).
+            # ── CASH SWEEP (opt-in) ── Qui, e non nel calcolatore: l'ultima scrittura
+            # sulla cassa prima del cancello del fabbisogno. Decide quindi sulla
+            # cassa di DOPO gli `sp_overrides` e gia' al centesimo (rilievo I2 della
+            # revisione finale del lotto 2), e rimborsa il solo debito bancario
+            # pregresso SENZA piano, prima a breve poi a lungo: cassa e debito
+            # scendono dello stesso importo, e `copri` gira una volta sola, subito
+            # dopo, sulla cassa che ne resta.
+            if sweep is not None:
+                cassa, pagato_breve, pagato_lungo = sweep.applica(cassa)
+                result["sp16a_debiti_banche_breve"] -= pagato_breve
+                result["sp16_debiti_breve"] -= pagato_breve
+                result["sp17a_debiti_banche_lungo"] -= pagato_lungo
+                result["sp17_debiti_lungo"] -= pagato_lungo
             if overdraft is not None:
                 cassa, scoperto = overdraft.copri(cassa)
                 result["sp16a_debiti_banche_breve"] += scoperto
@@ -1945,6 +2150,18 @@ class ForecastEngine:
                 ),
             )
             cassa_apertura = self._read_bs(prev_bs, 'sp09_disponibilita_liquide')
+            # Lo sweep e le componenti del debito bancario sono di QUESTO anno, come
+            # lo scoperto: il perimetro (che cosa ha un piano e che cosa non ce l'ha)
+            # lo riempie `_calculate_balance_sheet`, la cassa la decide
+            # `_normalize_balance_sheet_cents` dopo gli `sp_overrides`, e la
+            # dichiarazione la scrive qui sotto sul persistito.
+            sweep = _Sweep(
+                breve_forzato=any(sp_ov.get(c) is not None for c in
+                                  ('sp16a_debiti_banche_breve', 'sp16_debiti_breve')),
+                lungo_forzato=any(sp_ov.get(c) is not None for c in
+                                  ('sp17a_debiti_banche_lungo', 'sp17_debiti_lungo')),
+            )
+            debito = _DebitoBancarioAnno()
             try:
                 forecast_inc = self._calculate_income_statement(
                     base_inc=source.base_inc,
@@ -1986,6 +2203,8 @@ class ForecastEngine:
                     # ha (rilievo m-2).
                     previous_year=(assumptions[year_index - 1].forecast_year
                                    if year_index else source.scenario.base_year),
+                    sweep=sweep,
+                    debito_bancario=debito,
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
@@ -1996,6 +2215,7 @@ class ForecastEngine:
                     forced_fields=self._sp_forced_fields(pregresso, details, assumption),
                     details=details,
                     overdraft=overdraft,
+                    sweep=sweep,
                 )
             except ValueError as e:
                 if stop_on_error:
@@ -2035,16 +2255,23 @@ class ForecastEngine:
             # `outstanding` (la quota bancaria viene dal piano di rimborso).
             details['scoperto_generato'] = overdraft.raised
             details['scoperto_residuo'] = overdraft.outstanding
-            # La quota a breve dei prestiti nuovi (Task 17) si dichiara per quello
-            # che `sp16a` persiste DAVVERO: un `sp_overrides` che fissa `sp16a` (o
-            # `sp16`) sotto la quota vince sul totale, e la riduzione cade prima
-            # sul breve pregresso — la stessa precedenza dello sweep. Senza questo
-            # limite l'anno dopo toglierebbe da `sp16a` piu' di quanto contiene e
-            # lo rimetterebbe nel lungo: debito nato dal nulla, e un foglio che
-            # quadra lo stesso perche' la cassa lo assorbe.
-            details['prestiti_nuovi_quota_breve'] = min(
-                Decimal(str(details.get('prestiti_nuovi_quota_breve') or 0)),
-                max(Decimal('0'), forecast_bs['sp16a_debiti_banche_breve'] - overdraft.outstanding),
+            # Il DEBITO BANCARIO PER COMPONENTI si dichiara per quello che `sp16a`
+            # e `sp17a` persistono DAVVERO, dopo lo sweep e dopo gli `sp_overrides`:
+            # la somma dei `breve` piu' lo scoperto e' `sp16a`, la somma dei `lungo`
+            # e' `sp17a`, al centesimo, per costruzione (vedi il docstring di
+            # `_dichiara_debito_bancario`). Un `sp_overrides` che fissa `sp16a` (o
+            # `sp16`) sotto le componenti vince sul totale, e la riduzione cade
+            # prima sul pregresso e poi sui prestiti nuovi dall'ultimo: e' la stessa
+            # precedenza con cui, fino al lotto 2, la quota a breve si clampava su
+            # quanto `sp16a` poteva reggere. Perche' l'anno dopo togliere da `sp16a`
+            # piu' di quanto contiene significherebbe rimetterla nel lungo: debito
+            # nato dal nulla, e un foglio che quadra lo stesso perche' la cassa lo
+            # assorbe.
+            details['debito_bancario'] = _dichiara_debito_bancario(
+                debito, sweep,
+                forecast_bs['sp16a_debiti_banche_breve'],
+                forecast_bs['sp17a_debiti_banche_lungo'],
+                overdraft.outstanding,
             )
             # ── POSIZIONE TRIBUTARIA: LE DICHIARAZIONI SEGUONO IL PERSISTITO ──
             # In modo `saldo_acconto` l'anno dopo legge `saldo_due` e il credito
@@ -2056,7 +2283,7 @@ class ForecastEngine:
             # accorgeva (rilievo I1 della revisione finale del branch —
             # regressione del Task 6, perche' la via manuale, che legge il
             # patrimoniale, l'override lo portava avanti). Lo schema e' lo
-            # stesso di `prestiti_nuovi_quota_breve` sopra: il motore riallinea
+            # stesso di `details['debito_bancario']` sopra: il motore riallinea
             # la dichiarazione al valore persistito, e l'override si porta
             # avanti come stato di apertura.
             #
@@ -2590,6 +2817,8 @@ class ForecastEngine:
         details=None,
         overdraft: "Optional[_Overdraft]" = None,
         previous_year: Optional[int] = None,
+        sweep: "Optional[_Sweep]" = None,
+        debito_bancario: "Optional[_DebitoBancarioAnno]" = None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -2614,6 +2843,14 @@ class ForecastEngine:
         `overdraft` e' la concessione dello scoperto di c/c su questo anno
         (`_Overdraft`). Assente = non concesso, cioe' il comportamento di
         sempre: un plug negativo alza.
+
+        `sweep` e `debito_bancario` sono i due contenitori dell'anno (`_Sweep`,
+        `_DebitoBancarioAnno`): qui il calcolatore LI RIEMPE — il perimetro dello
+        sweep (quale parte del debito bancario non ha un piano, e con quale cassa
+        minima) e le componenti grezze del debito bancario — senza ancora toccare
+        la cassa, che e' la quadratura finale a farlo, dopo gli `sp_overrides`.
+        Assenti (`None`), come li passano i chiamanti diretti e l'infrannuale,
+        non cambia nulla: nessun perimetro dichiarato, nessuna componente.
         """
         D = Decimal
         ZERO = D('0')
@@ -2984,13 +3221,14 @@ class ForecastEngine:
         # dove il resto del calcolo la cerca: dentro `sp16a` c'e' ancora solo il
         # breve PREGRESSO, e la rata del pregresso — che prende prima dal breve —
         # non paga la rata del prestito nuovo. La riclassifica si rifa' a fine
-        # anno, dopo lo sweep. Si legge dai `details` dell'anno prima, come lo
-        # scoperto: e' uno stato, non si ri-deriva dal saldo. Il `min` e' la
-        # guardia contro il debito dal nulla: la quota dichiarata non supera mai la
-        # quota bancaria persistita (`compute_forecast` la limita dopo gli
-        # `sp_overrides`), quindi di norma non morde.
+        # anno. Si legge dai `details` dell'anno prima, come lo scoperto: e' uno
+        # stato — `details['debito_bancario']['contratti']`, la somma dei `breve`
+        # dei prestiti nuovi — non si ri-deriva dal saldo. Il `min` e' la guardia
+        # contro il debito dal nulla: la quota dichiarata non supera mai la quota
+        # bancaria persistita (`_dichiara_debito_bancario` la riconcilia con
+        # `sp16a`, override compreso), quindi di norma non morde.
         quota_breve_apertura = min(
-            sp16a, Decimal(str((prev_details or {}).get('prestiti_nuovi_quota_breve') or 0))
+            sp16a, _quota_breve_dichiarata(prev_details)
         )
         sp16a = sp16a - quota_breve_apertura
         sp16b = _prev('sp16b_debiti_altri_finanz_breve')
@@ -3024,6 +3262,10 @@ class ForecastEngine:
             sp17a, _residuo_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year - 1)
         )
         sp17a_pregresso = sp17a - nuovo_apertura
+        # Il debito bancario pregresso di apertura, prima di ogni piano: e' cio' che
+        # `details['debito_bancario']` dichiara come `apertura`, e da qui lo sweep
+        # capisce quale parte del debito NON ha un piano da seguire.
+        apertura_pregresso = sp16a + sp17a_pregresso
 
         # Handle abbreviato gap: if previous year has aggregate but no sub-field
         # detail, allocate the unaccounted portion to banche (bank debt).
@@ -3400,6 +3642,44 @@ class ForecastEngine:
         # then 0) stays on the sheet and shrinks by its rata each year instead of
         # persisting flat forever. La rata paga SOLO il prestito nuovo: mai il breve
         # pregresso (Ruling 40), mai il lungo pregresso.
+        # ── IL PERIMETRO DELLO SWEEP E LE COMPONENTI DEL DEBITO BANCARIO ──
+        # Qui, e non nello sweep: questo e' l'unico punto in cui il pregresso e' gia'
+        # passato dai propri piani (anni di rimborso, contratti col residuo) e non ha
+        # ancora incassato il prestito nuovo. Da qui lo sweep capisce quale parte del
+        # debito bancario NON ha un piano, e `details['debito_bancario']` sa quali
+        # componenti dichiarare. Restano entrambe grezze: le quantizza e le riconcilia
+        # col persistito `_dichiara_debito_bancario`, dopo la normalizzazione.
+        piano_anni_attivo = (
+            not use_detailed_existing_schedule
+            and existing_repay_years is not None
+            and D(str(existing_repay_years)) > 0
+        )
+        if debito_bancario is not None and not use_detailed_existing_schedule:
+            if piano_anni_attivo:
+                debito_bancario.piano_anni = {
+                    'apertura': apertura_pregresso,
+                    'rimborso': apertura_pregresso - (sp16a + sp17a_pregresso),
+                    'breve': sp16a,
+                    'lungo': sp17a_pregresso,
+                }
+            else:
+                debito_bancario.senza_piano = {
+                    'apertura': apertura_pregresso,
+                    'rimborso_sweep': ZERO,
+                    'breve': sp16a,
+                    'lungo': sp17a_pregresso,
+                }
+        if sweep is not None:
+            # Con un piano addosso — anni di rimborso o contratti col residuo — lo
+            # sweep non ha nulla da rimborsare: quel debito segue solo il proprio
+            # piano, capitale e interessi (decisione 3 del proprietario, lotto 3A).
+            sweep.attivo = (bool(getattr(assumption, 'cash_sweep_enabled', False))
+                            and not use_detailed_existing_schedule and not piano_anni_attivo)
+            floor = getattr(assumption, 'cash_sweep_min_cash', None)
+            sweep.minimo = D(str(floor)) if floor is not None else ZERO
+            sweep.breve_disponibile = sp16a
+            sweep.lungo_disponibile = sp17a_pregresso
+
         fin_raised, fin_repayment, _ = new_financing_schedule(
             prestiti_nuovi, assumption.forecast_year)
         nuovo_residuo = max(ZERO, nuovo_apertura + fin_raised - fin_repayment)
@@ -3422,23 +3702,11 @@ class ForecastEngine:
         # A negative implied cash balance is an uncovered funding requirement.
         if sp09 < 0 and not gate_downstream:
             overdraft.copri(sp09)
-        if bool(getattr(assumption, 'cash_sweep_enabled', False)):
-            # ── CASH SWEEP (opt-in) ── Use cash generated above the minimum floor to pay
-            # down BANK debt — short-term first (sp16a), then long-term (sp17a) — instead
-            # of letting idle cash accumulate while the debt stays flat (the client's
-            # "la cassa cresce ma il debito v/banche resta invariato"). Cash and debt are
-            # reduced by the same amount, so the balance sheet stays balanced.
-            # Sulla cassa NETTA: finche' c'e' scoperto da chiudere non c'e'
-            # eccesso, e il debito bancario ordinario non passa davanti allo
-            # scoperto.
-            floor = getattr(assumption, 'cash_sweep_min_cash', None)
-            floor = D(str(floor)) if floor is not None else ZERO
-            excess = sp09 - floor
-            if excess > ZERO:
-                pay_short = min(excess, sp16a)
-                sp16a -= pay_short; sp16 -= pay_short; sp09 -= pay_short; excess -= pay_short
-                pay_long = min(excess, sp17a)
-                sp17a -= pay_long; sp17 -= pay_long; sp09 -= pay_long; excess -= pay_long
+        # Il cash sweep non sta piu' qui: rimborsa il solo debito bancario pregresso
+        # SENZA piano e decide sulla cassa di DOPO gli `sp_overrides`, cioe' sulla
+        # cassa gia' al centesimo che `compute_forecast` porta in
+        # `_normalize_balance_sheet_cents` (rilievo I2 della revisione finale del
+        # lotto 2: deciso prima degli override, lo sweep fabbricava un fabbisogno).
 
         # ── LA QUOTA A BREVE DEL PRESTITO NUOVO (Task 17) ──
         # Fin qui `sp17a` porta TUTTO il residuo dei prestiti nuovi, anche la parte
@@ -3446,15 +3714,14 @@ class ForecastEngine:
         # current ratio e circolante di Altman, e il pareggio non se ne accorge:
         # `sp16` e `sp17` stanno entrambi nel passivo (misurato dalla revisione del
         # Task 16: current ratio 2027 2,4206 invece di 2,0794). Si sposta qui, come
-        # ULTIMA scrittura sui debiti bancari, per due ragioni:
-        # - dopo lo sweep, che rimborsa prima il pregresso e poi il prestito nuovo
-        #   (decisione del proprietario): prima dello sweep la quota nuova starebbe
-        #   in `sp16a`, che lo sweep paga per primo, davanti al lungo pregresso;
-        # - e' una riclassifica, non un flusso: cassa, interessi, risultato e
-        #   totale del debito restano quelli di sempre, anno per anno.
+        # ULTIMA scrittura sui debiti bancari, perche' e' una riclassifica, non un
+        # flusso: cassa, interessi, risultato e totale del debito restano quelli di
+        # sempre, anno per anno. Lo sweep non passa piu' di qui (sta nella
+        # normalizzazione, dopo gli override) e comunque non vede i prestiti nuovi.
         # Il residuo nuovo di fine anno e' quello che l'anno dopo trovera'
-        # all'apertura (`min(sp17a, catena)`): se lo sweep ha eroso il prestito,
-        # la quota a breve e' calcolata su cio' che ne resta.
+        # all'apertura (`min(sp17a, catena)`): se uno sweep vecchio o uno
+        # `sp_overrides` ha eroso il prestito, la quota a breve e' calcolata su
+        # cio' che ne resta.
         #
         # Al centesimo per costruzione: la quota e' un importo al centesimo e non
         # supera il lungo arrotondato per difetto, quindi `Q(sp17a - quota) +
@@ -3465,11 +3732,19 @@ class ForecastEngine:
         # senza perdere un centesimo. `sp16a`/`sp17a` sono in
         # `_BANK_DEBT_SPLIT_FIELDS`: il residuo di quadratura non li riscrive.
         quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a)
+        breve_pregresso_fine = sp16a
         sp16a += quota_breve; sp16 += quota_breve
         sp17a -= quota_breve; sp17 -= quota_breve
-        if details is not None:
-            # Sempre, anche a zero: a valle una chiave assente vale zero.
-            details['prestiti_nuovi_quota_breve'] = quota_breve
+        if debito_bancario is not None:
+            # Le componenti per contratto, grezze: il pregresso scandagliato per
+            # contratto (`opening_residual`) ha la sua ripartizione qui dentro,
+            # altrove e' tutto in `senza_piano`/`piano_anni` e ai contratti non ne
+            # va niente (`ZERO`).
+            debito_bancario.contratti = _contratti_dell_anno(
+                financing_loans, assumption.forecast_year, quota_breve, nuovo_residuo,
+                breve_pregresso_fine if use_detailed_existing_schedule else ZERO,
+                sp17a_pregresso if use_detailed_existing_schedule else ZERO,
+            )
 
         # ── DETAIL BREAKDOWNS ──
 

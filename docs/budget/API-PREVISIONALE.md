@@ -308,8 +308,8 @@ calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il re
   arrotondata: 100.000,38 in 4 anni ha rata 25.000,095 e quota a breve 25.000,09.
 - È una riclassifica dello stato patrimoniale, non un flusso: interessi e risultato non cambiano, e
   — **senza un `sp_overrides` su `sp16a` o `sp17a`** — nemmeno cassa e totale del debito bancario.
-  Avviene dopo il cash sweep, che rimborsa prima il debito bancario pregresso e poi il prestito
-  nuovo; il debito bancario pregresso conserva la propria ripartizione. Il rendiconto
+  Il cash sweep non la tocca mai: rimborsa solo lo scoperto e il debito bancario pregresso senza
+  piano (§4-ter); il debito bancario pregresso conserva la propria ripartizione. Il rendiconto
   (`backend/app/calculations/cashflow_detailed.py`, `cashflow.py`) non la vede nemmeno lui: il
   circolante e' `sp16`/`sp17` **meno** `financial_debt_short`/`financial_debt_long` (non la somma dei
   sotto-campi operativi, che puo' scostarsi di un centesimo dall'aggregato), il finanziario e'
@@ -320,8 +320,8 @@ calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il re
   incassati, e `cash_reconciliation.third_party_funds_gap` dichiara lo scarto fra i mezzi di terzi per
   residuo e la variazione misurata del debito finanziario: zero quando il rendiconto classifica ogni
   movimento.
-- `details['prestiti_nuovi_quota_breve']` dichiara la quota ogni anno, anche a zero, per quanto
-  `sp16a` ne persiste davvero.
+- `details['debito_bancario']['contratti']` dichiara ogni anno il `breve` di ogni prestito,
+  riconciliato con quanto `sp16a` persiste davvero (§4-ter).
 
 **Perché conta:** `sp16` e `sp17` stanno entrambi nel passivo, quindi il pareggio non vede dove sta
 la quota; la vedono CCN, current ratio e circolante di Altman. Sulla base del kit di test (12.345,67
@@ -339,6 +339,48 @@ avviene PRIMA che gli override vengano applicati:
 - `sp17a` ora fissa solo la parte **oltre** la quota: la quota resta comunque a breve in `sp16a`,
   sopra il totale forzato. Un override salvato quando il prestito stava tutto in `sp17a` oggi
   aggiunge quindi la quota al debito (+25.000,09 di debito e di cassa ogni anno, sul kit di test).
+
+## 4-ter. Il cash sweep e `details['debito_bancario']`
+
+Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
+
+- Lo sweep rimborsa (1) lo scoperto, come prima — la cassa netta lo contiene gia' — e (2) il debito
+  bancario pregresso **senza alcun piano**: nell'anno non ci sono contratti con residuo iniziale
+  (`opening_residual`) né `existing_debt_repayment_years` > 0. Prima la quota a breve, poi la lunga.
+  Nient'altro.
+- I contratti della griglia, il prestito nuovo della legacy `financing_amount` e il pregresso con gli
+  anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
+  spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).
+- La cassa eccedente oltre `cash_sweep_min_cash` resta in `sp09`.
+
+**Lo sweep decide una volta sola, sulla cassa di dopo gli `sp_overrides`** (rilievo I2 della revisione
+finale del lotto 2): gira in `_normalize_balance_sheet_cents`, sulla cassa gia' al centesimo, subito
+prima del cancello di `_Overdraft.copri`, e non chiama `copri` lui stesso. Deciso prima degli override
+e sulla cassa grezza, lo sweep fabbricava un fabbisogno: su un piano finanziabile rispondeva
+«Unfunded financing requirement 11.053,98», e con lo scoperto concesso rimborsava 50.000 di `sp17a`
+aprendo 11.053,98 di scoperto nello stesso anno. Un `sp_overrides` che fissa `sp16a`/`sp16` o
+`sp17a`/`sp17` fissa anche il totale: da quel lato lo sweep non paga.
+
+### `details['debito_bancario']`
+
+Si dichiara **ogni anno, anche vuota** (a valle una chiave assente vale zero), e sostituisce la
+vecchia chiave unica della quota a breve dei prestiti nuovi.
+
+| Chiave | Valore |
+|---|---|
+| `pregresso_senza_piano` | `{apertura, rimborso_sweep, breve, lungo}` quando nell'anno non ci sono contratti con `opening_residual` né `existing_debt_repayment_years` > 0; altrimenti `null` |
+| `pregresso_piano_anni` | `{apertura, rimborso, breve, lungo}` con `existing_debt_repayment_years` > 0 e nessun contratto col residuo; altrimenti `null` |
+| `contratti` | una riga per contratto (misti gia' divisi, anche non ancora erogati), nell'ordine di `financing_amount` e poi della griglia: `{indice, anno, tasso, erogato, residuo_iniziale, rimborso, interessi, breve, lungo}` |
+
+**Invariante:** somma dei `breve` + `scoperto_residuo` = `sp16a`, somma dei `lungo` = `sp17a`, al
+centesimo, ogni anno. La scrive `_dichiara_debito_bancario` DOPO la normalizzazione, dai valori
+persistiti, e la riconcilia cosi': la differenza fra le componenti grezze e il persistito (centesimi
+di arrotondamento, un `sp_overrides` sul debito bancario, lo sweep) in aumento va sulla «casa del
+pregresso» — `pregresso_senza_piano`, altrimenti `pregresso_piano_anni`, altrimenti l'ultimo
+contratto col residuo iniziale, altrimenti l'ultimo contratto nuovo; in riduzione si toglie prima al
+pregresso (le due componenti, poi i contratti col residuo dall'ultimo), poi ai contratti nuovi
+dall'ultimo, mai sotto zero. Sono spostamenti di centesimi fra componenti, non debito creato: la
+somma resta `sp16a`/`sp17a`.
 
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 

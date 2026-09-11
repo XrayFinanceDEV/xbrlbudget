@@ -407,6 +407,13 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   bug imprevisto su qualunque rotta arriva al browser come «CORS policy», mai come l'errore reale: chi guarda la
   console per diagnosticare vede la causa sbagliata (misurato nel collaudo del lotto 2, prima di questa correzione).
   `tests/test_cors_on_500.py` lo tiene fermo.
+- **CE Prev., SP Prev. e Report non restano mai su uno spinner senza uscita quando `/analysis` fallisce.** Le tre
+  pagine derivano lo stato da `lib/forecast-page-status.ts` (`caricamento`/`errore`/`pronto`, con
+  `ANALYSIS_RETRY_COUNT`/`ANALYSIS_RETRY_DELAY_MS` espliciti su `useAnalysis`) e rendono l'errore con
+  `components/budget/ForecastLoadError.tsx` — il `detail` del backend quando c'è, un testo italiano fisso per un
+  errore di rete senza corpo, sempre con «Riprova». Una nuova pagina che legge `useAnalysis` riusa gli stessi due
+  moduli, non reinventa un `if (loading)` locale: è esattamente il pattern che ha lasciato per mesi le tre pagine su
+  «Caricamento...» per sempre, senza alcun segnale (collaudo del lotto 2).
 
 ### Ambiente
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata

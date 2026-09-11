@@ -51,6 +51,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { forecastPageStatus } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
@@ -140,12 +142,12 @@ export default function ForecastIncomePage() {
     setPendingEdits({});
   }, [selectedScenario?.id]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
   const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
+  const pageStatus = forecastPageStatus(loading, analysisError);
 
   const handleCellEdit = useCallback((year: number, field: string, value: number | null) => {
     const overrideField = FIELD_TO_OVERRIDE[field];
@@ -277,14 +279,11 @@ export default function ForecastIncomePage() {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError error={analysisError} onRetry={() => refetchAnalysis()} className="mb-6" />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
@@ -293,7 +292,7 @@ export default function ForecastIncomePage() {
 
       <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
-      {!loading && analysisData && historicalYears.length === 0 && (
+      {pageStatus === "pronto" && analysisData && historicalYears.length === 0 && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -304,7 +303,7 @@ export default function ForecastIncomePage() {
         </Alert>
       )}
 
-      {!loading && analysisData && historicalYears.length > 0 && (
+      {pageStatus === "pronto" && analysisData && historicalYears.length > 0 && (
         <>
           {/* Income Statement Table */}
           <Card className="mb-6">

@@ -22,8 +22,10 @@ import {
   ComposedChart,
   Area,
 } from "recharts";
-import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info, Save } from "lucide-react";
+import { BarChart3, AlertTriangle, Loader2, Info, Save } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { forecastPageStatus } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { overridesFromPendingEdits, pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -141,12 +143,12 @@ export default function ForecastBalancePage() {
     if (!selectedCompanyId) setSelectedScenario(null);
   }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
   const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
+  const pageStatus = forecastPageStatus(loading, analysisError);
 
   useEffect(() => setPendingEdits({}), [selectedScenario?.id]);
 
@@ -234,15 +236,11 @@ export default function ForecastBalancePage() {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Errore</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError error={analysisError} onRetry={() => refetchAnalysis()} className="mb-6" />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
@@ -251,7 +249,7 @@ export default function ForecastBalancePage() {
 
       <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
-      {!loading && analysisData && historicalYears.length > 0 && (
+      {pageStatus === "pronto" && analysisData && historicalYears.length > 0 && (
         <>
           {/* Balance Sheet Table */}
           <Card className="mb-6">

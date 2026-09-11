@@ -13,6 +13,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Loader2, AlertTriangle, Sparkles, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { forecastPageStatus } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { toast } from "sonner";
 
 import { ReportTOC } from "@/components/report/report-toc";
@@ -50,12 +52,12 @@ export default function ReportPage() {
     if (!selectedCompanyId) setSelectedScenario(null);
   }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
   const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Errore nel caricamento dell'analisi" : null;
+  const pageStatus = forecastPageStatus(loading, analysisError);
 
   // Load stored AI comments when scenario/analysis changes
   useEffect(() => {
@@ -160,15 +162,15 @@ export default function ReportPage() {
         </PageHeader>
       </div>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6 print:hidden">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Errore</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError
+          error={analysisError}
+          onRetry={() => refetchAnalysis()}
+          className="mb-6 print:hidden"
+        />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && (
         <Card className="mb-6 print:hidden">
           <CardContent className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -177,7 +179,7 @@ export default function ReportPage() {
         </Card>
       )}
 
-      {!loading && !analysisData && !error && scenarios.length === 0 && (
+      {pageStatus === "pronto" && !analysisData && scenarios.length === 0 && (
         <Alert className="mb-6 print:hidden">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Nessuno Scenario</AlertTitle>

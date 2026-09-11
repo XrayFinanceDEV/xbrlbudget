@@ -765,6 +765,11 @@ def bulk_upsert_assumptions(
 
         return result
 
+    except assumptions_service.AssumptionsValidationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Ipotesi non valide: nulla è stato salvato", "errori": e.errori},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

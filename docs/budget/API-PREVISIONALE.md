@@ -6,7 +6,7 @@ esiste.
 
 | Chiamata | Che cosa scrive | Come fallisce |
 |---|---|---|
-| `PUT /companies/{id}/scenarios/{sid}/assumptions` | tutte le righe di ipotesi dello scenario | **HTTP 200 anche quando il previsionale è rifiutato** |
+| `PUT /companies/{id}/scenarios/{sid}/assumptions` | tutte le righe di ipotesi dello scenario | **HTTP 200 anche quando il previsionale è rifiutato**; **422** con `detail.errori` quando è l'input a essere invalido (§1.2) |
 | `PATCH /companies/{id}/scenarios/{sid}/ce-override` | solo le colonne `ce*_override` indicate | 400 / 404 / 500 |
 | `POST /companies/{id}/scenarios/{sid}/generate` | niente (rigenera; con `?clear_overrides=true` azzera prima) | 400 / 500 |
 | `PUT .../assumptions/{year}` (per anno, «deprecata») | una riga sola — **è la via con cui `/forecast/balance` salva gli `sp_overrides`** | 4xx |
@@ -28,7 +28,7 @@ Con `auto_generate: true` il servizio sceglie il motore dal `scenario_type`
 (`IntraYearEngine` per `infrannuale`, `ForecastEngine` altrimenti) e lo esegue. Se il motore
 solleva — per il gate semantico sulla fonte, per ricavi di base negativi, per qualunque
 ragione — l'eccezione viene **catturata** e la risposta è ugualmente **200**
-(`backend/app/services/assumptions_service.py:322-331`):
+(`backend/app/services/assumptions_service.py:427-434`):
 
 ```jsonc
 { "success": true, "assumptions_saved": 2,
@@ -73,8 +73,88 @@ non sulle stringhe: `isoformat()` omette la frazione quando i microsecondi sono 
 lessicografico di `"…00Z"` rispetto a `"…00.500000Z"` è l'inverso di quello dei due istanti.
 
 `POST /generate`, per contrasto, **non** cattura: fa 400 su `ValueError` e 500 su tutto il
-resto (`backend/app/api/v1/budget_scenarios.py:936-945`). Lo stesso motore, lo stesso errore,
+resto (`backend/app/api/v1/budget_scenarios.py:1019-1028`). Lo stesso motore, lo stesso errore,
 due esiti HTTP opposti a seconda della porta da cui si è entrati.
+
+### 1.2 Input invalido: 422, e nulla si salva
+
+Dal lotto 3A (Task 7a) il bulk distingue due rifiuti che prima uscivano dallo stesso modo, o da
+nessuno dei due. Un input **malformato** — un tetto di scoperto negativo, un acconto negativo, un
+driver di indicizzazione sconosciuto, un tasso al 500%, un anno fuori sequenza — non arriva più
+né al motore né alle colonne: ogni riga passa lo schema tipizzato `BudgetAssumptionsBulkRow` e la
+contiguità degli anni viene controllata **prima** della `DELETE` delle ipotesi esistenti
+(`backend/app/services/assumptions_service.py`, `validate_assumptions_list` e
+`validate_bulk_rows`). Un input **valido che il motore rifiuta**, invece, risponde ancora 200 con
+`forecast_generated: false`: è il paragrafo sopra, e non è cambiato.
+
+Il rifiuto esce come **422** con un `detail` strutturato, non una stringa
+(`backend/app/api/v1/budget_scenarios.py`, `except assumptions_service.AssumptionsValidationError`):
+
+```jsonc
+{ "detail": {
+    "message": "Ipotesi non valide: nulla è stato salvato",
+    "errori": [
+      { "forecast_year": 2027, "campo": "overdraft_limit",
+        "messaggio": "deve essere maggiore o uguale a 0 (ricevuto: -100)" }
+    ] } }
+```
+
+- `errori` porta **tutti** gli errori di tutte le righe in una sola risposta, nell'ordine delle
+  righe: una schermata che ne mostra solo il primo starebbe mentendo sugli altri.
+- `campo` è il percorso **punto** del campo: `overdraft_limit` in cima alla riga,
+  `sp_indexing.sp16g` dentro il sacco dei driver, `financing_loans.0.interest_rate` dentro un
+  elenco. Per un errore che non è attribuibile a una riga (il `forecast_year` che non si converte,
+  l'elenco vuoto) `forecast_year` è `null` e `campo` è il nome del campo in causa.
+- Gli errori di calendario non vengono da Pydantic ma da `validate_assumptions_list`, che ora li
+  raccoglie insieme: `l'anno di previsione 2026 deve essere successivo all'anno base 2026`,
+  `l'anno di previsione 2027 e' ripetuto`, `anni non consecutivi: dopo il 2027 viene il 2029, manca
+  il 2028`. Prima le righe 2027 e 2029 senza la 2028 venivano accettate: ricavi con un passo di
+  crescita, prestito con due.
+
+**I `null` del client non sono errori.** Le schermate svuotano una cella mandando `null`, e
+`build_assumption_row` li coalisce sui default di colonna: per questo `_senza_null` li toglie
+**prima** dello schema — sulla riga, dentro gli elenchi di `financing_loans` e
+`tax_temporary_differences`, dentro `sp_overrides` e dentro i piani di `pregresso`. Un `null` che
+arrivasse a uno schema tipizzato sarebbe un `*_type` ("tipo sbagliato: serve un numero") su un
+campo che l'utente ha semplicemente lasciato vuoto. Misurato su questo branch: **2561** righe
+passano da `validate_bulk_rows` nei **178** test che chiamano il bulk, e due sole di esse risulterebbero
+rifiutate **per colpa dei `null`** — senza la pulizia si fermerebbero
+`tests/test_forecast_preview.py::test_null_and_fractional_inputs_match_persisted_numbers` e il caso
+omonimo di `tests/test_bulk_tipizzato.py`. Sono invece **tre** i payload dei test esistenti che
+l'input-tipizzato rifiuta per un'altra ragione, e sono i tre nominati nel task: un tetto di scoperto
+negativo e una differenza temporanea senza `name` li ferma lo schema `BudgetAssumptionsBulkRow`,
+mentre un `forecast_year` "abc" non arriva fin lì — lo ferma la conversione a intero dentro
+`validate_assumptions_list`, la stessa `AssumptionsValidationError`.
+
+**Come si traduce un errore di Pydantic** (`messaggio_errore_campo`): il `type` decide il testo, e
+il valore ricevuto si mostra sempre fra parentesi — tranne per un campo mancante, dove "ricevuto:
+None" non aggiungerebbe nulla.
+
+| `type` | `messaggio` |
+|---|---|
+| `missing` | `campo obbligatorio mancante` |
+| `greater_than_equal` / `greater_than` | `deve essere maggiore o uguale a {ge}` / `deve essere maggiore di {gt}` |
+| `less_than_equal` / `less_than` | `deve essere minore o uguale a {le}` / `deve essere minore di {lt}` |
+| `literal_error` | `valore non ammesso: sono ammessi 'ricavi', 'acquisti' o 'personale'` |
+| `string_pattern_mismatch` | `valore non ammesso` |
+| `string_too_short` / `string_too_long` | `testo troppo corto (minimo {min_length} caratteri)` / `…lungo (massimo {max_length} caratteri)` |
+| `value_error` | il testo dell'eccezione sollevata dal validatore del modello — per questo i due messaggi di `FinancingLoanInput.validate_contract` sono ora in italiano |
+| `decimal_parsing` / `decimal_type` / `float_parsing` / `float_type` | `tipo sbagliato: serve un numero` |
+| `int_parsing` / `int_type` / `int_from_float` | `tipo sbagliato: serve un numero intero` |
+| `bool_parsing` / `bool_type` | `tipo sbagliato: serve vero o falso` |
+| `dict_type` / `model_type` / `model_attributes_type` | `tipo sbagliato: serve un oggetto` |
+| `list_type` / `string_type` | `tipo sbagliato: serve un elenco` / `serve un testo` |
+| qualunque altro | `valore non valido` |
+
+Una sottoclasse di `ValueError`, quindi **l'anteprima non cambia**: `AssumptionsValidationError`
+passa attraverso l'`except ValueError` di `POST /preview` e risponde 400, e su un tetto negativo è
+ancora il motore a dire il difetto vero (`ricevuto -1.000,00`, non "fabbisogno oltre il tetto
+concesso"). Il 200 con `forecast_generated: false` vale per un input **valido** che il motore
+rifiuta. Un primo anno diverso da anno base + 1 resta accettato (oggi lo è: solo gli anni ≤ anno
+base sono rifiutati). L'anteprima non applica lo schema tipizzato.
+
+Che il `detail` si legga a schermo è il **Task 7b**: oggi il wizard budget e la schermata Startup
+mostrano, su questo 422 come su ogni altro errore, un solo messaggio grezzo.
 
 ## 2. Gli override: due meccanismi, non uno
 
@@ -107,7 +187,7 @@ PATCH /companies/{id}/scenarios/{sid}/ce-override
 dall'allowlist è **400**, un anno senza riga di ipotesi è **404**, e la rigenerazione avviene
 una volta sola alla fine — **nella stessa transazione del salvataggio**
 (`assumptions_service.apply_ce_overrides`). Se la rigenerazione fallisce, lo status **dipende dal
-motivo** (`budget_scenarios.py:826-835`, `patch_ce_override`): un rigetto di dominio del motore —
+motivo** (`budget_scenarios.py:831-840`, `patch_ce_override`): un rigetto di dominio del motore —
 `ValueError`, il caso reale nella stragrande maggioranza (`Unfunded financing requirement`, un
 override incompatibile con lo scoperto, ecc.) — risponde **400**; solo un'eccezione davvero
 inattesa (un bug, non un rifiuto legittimo dell'ipotesi) risponde **500**. In ENTRAMBI i casi
@@ -147,7 +227,7 @@ entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engi
 `intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda una versione
 propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:876`).
 
-`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:868-946`)
+`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:873-951`)
 applica TUTTE le voci del lotto — anche su anni diversi — PRIMA di rigenerare, una volta sola,
 nella STESSA transazione: un rifiuto (400 se il motore solleva un `ValueError`, 500 altrimenti —
 stessa distinzione di §2.1) fa `db.rollback()` dell'INTERO lotto, non solo dell'ultima voce, e
@@ -156,7 +236,7 @@ un'allowlist di campi come `CE_OVERRIDE_FIELDS`: una chiave che il risultato del
 riconosce è ignorata in silenzio (vedi sotto).
 
 Prima di tutto questo, però, il **corpo** è validato da
-`budget_schemas.SpOverrideRequest` (`backend/app/schemas/budget.py:439-458`): un `value` non
+`budget_schemas.SpOverrideRequest` (`backend/app/schemas/budget.py:446-465`): un `value` non
 numerico, un NaN/infinito, un `forecast_year` mancante o un `overrides` che non è una lista
 rispondono **422**, e nulla viene scritto né rigenerato. Fino al lotto 2 la rotta non aveva
 alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto al
@@ -164,7 +244,7 @@ alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto a
 che solleva `decimal.InvalidOperation` — un `ArithmeticError`, non un `ValueError` — e l'unica
 risposta possibile era un **500** «Forecast regeneration failed» (M2). Il rollback era già
 corretto e nulla restava scritto: sbagliato era solo il codice. Un corpo valido si comporta
-come prima anche nella forma salvata: `_sp_override_json_value` (`budget_scenarios.py:844-860`)
+come prima anche nella forma salvata: `_sp_override_json_value` (`budget_scenarios.py:849-865`)
 ricompone un numero della stessa specie che portava il JSON — `model_dump(mode="json")` di
 Pydantic 2 girerebbe i `Decimal` in stringhe, `jsonable_encoder` in float anche dove il corpo
 ne portava uno intero (`1000` → `1000.0`).
@@ -255,7 +335,7 @@ E gli override **sopravvivono al salvataggio**:
 | `/forecast/income` → svuotare una cella | `PATCH /ce-override` con `value: null` | azzerato solo quello |
 
 `clear_overrides` scorre `assumption.__table__.columns` e mette a `None` ogni colonna il cui
-nome **finisce per `_override`** (`budget_scenarios.py:1000-1003`). `sp_overrides` finisce per
+nome **finisce per `_override`** (`budget_scenarios.py:1003-1007`). `sp_overrides` finisce per
 `_overrides`: **non viene azzerato**. La casella dice «del CE previsionale» e in questo è
 onesta, ma chi la spunta aspettandosi di tornare al previsionale puro del motore si tiene
 tutti gli override di stato patrimoniale.
@@ -406,8 +486,9 @@ POST /companies/{id}/scenarios/{sid}/preview
 ```
 
 Stesso corpo del bulk (`{"assumptions": [...]}`); bulk e anteprima condividono
-`build_assumption_row` (`backend/app/services/assumptions_service.py:99`) e
-`validate_assumptions_list`, così un campo aggiunto a un percorso non può mancare all'altro. Le
+`build_assumption_row` (`backend/app/services/assumptions_service.py:194`) e
+`validate_assumptions_list`, così un campo aggiunto a un percorso non può mancare all'altro (lo
+schema tipizzato di §1.2 sta invece solo nel bulk, e qui non gira). Le
 righe costruite sono transitorie — **mai `db.add`, mai `commit`** — e il motore le legge con
 `getattr` come farebbe con righe persistite. Rifiuta con **400** uno scenario
 `scenario_type == "infrannuale"` prima di leggere qualunque cosa: quel percorso ha il proprio
@@ -683,14 +764,17 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   dichiarato con il motivo `"voce non indicizzabile"` — non applicato a una voce che il motore
   governa in un altro modo.
 - **Valore** = uno dei **tre driver**, tipizzato `Literal["ricavi", "acquisti", "personale"]`
-  (`backend/app/schemas/budget.py:96,207,319`): `ricavi` = `ce01` previsto / `ce01` base,
+  (`backend/app/schemas/budget.py:96,207,326`): `ricavi` = `ce01` previsto / `ce01` base,
   `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
-  (`calculations/forecast_engine.py:1132-1160`, `_sp_indexing_factors`). Un nome fuori da questi tre
-  **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
-  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`),
-  e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
-  (`calculations/forecast_engine.py:1196`). Solo le rotte tipizzate per singola riga passano dal
-  `Literal` Pydantic e rispondono 422.
+  (`calculations/forecast_engine.py:1244-1273`, `_sp_indexing_factors`). Un nome fuori da questi tre
+  **lo rifiuta la porta normale dal lotto 3A**: il bulk `PUT /scenarios/{id}/assumptions` valida
+  ogni riga con lo schema tipizzato (§1.2) e risponde 422 con `campo: "sp_indexing.<codice>"`,
+  mentre prima riceveva un dict che non passava da nessuno schema
+  (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`) e il motore lo
+  ignorava dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
+  (`calculations/forecast_engine.py:1307-1308`). Quel motivo non è morto: lo percorre ancora chi
+  arriva da una porta senza schema — l'anteprima `POST /preview` (§7), che condivide solo
+  `validate_assumptions_list` — o una riga scritta a mano nel DB.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
   passo 5 del wizard («Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
@@ -729,4 +813,4 @@ del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
 | Chiave | Valore |
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
-| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è raggiungibile**: sulla porta normale — il bulk `PUT /scenarios/{id}/assumptions` (§1), che riceve un dict e non passa dallo schema — è il motore a ignorare il driver e dichiararlo qui; il `Literal` a tre valori lo rifiuta con 422 solo sulle rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |

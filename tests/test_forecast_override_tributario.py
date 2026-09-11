@@ -30,6 +30,8 @@ import pytest
 
 from backend.app.api.v1 import budget_scenarios
 from backend.app.schemas.budget import BudgetScenarioCreate
+from backend.app.services import assumptions_service
+from calculations.forecast_engine import ForecastEngine
 from database.models import BalanceSheet, FinancialYear
 from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
 
@@ -1275,23 +1277,40 @@ def test_m2_anni_non_consecutivi_il_messaggio_nomina_l_anno_vero(monkeypatch):
 
     Caso F della sonda `sonda_p1.py`: il kernel usava `assumption.forecast_year
     - 1` per dire «l'anno X esce dalla via manuale», mentre `_prev` legge
-    l'anno della riga di ipotesi precedente. Il bulk accetta anni non
+    l'anno della riga di ipotesi precedente. Il bulk accettava anni non
     consecutivi, e su quel piano il 2028 non esiste: il messaggio accusava un
     anno inventato.
+
+    Dal lotto 3A Task 7a il bulk e l'anteprima rifiutano anni con lacune con
+    un 422 (`validate_assumptions_list`), prima ancora di arrivare al motore:
+    questo test scrive le righe `BudgetAssumptions` direttamente nel DB (come
+    fa `build_assumption_row`, usato dal bulk) e chiama `ForecastEngine`
+    senza passare da quella validazione, per tenere in piedi questa guardia
+    difensiva del kernel.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
-            res, _cid, sid, _rows = _esito(db, "m2-gap", _righe_trans(
-                {2027}, anni=(2027, 2029, 2030)))
-            msg = res["message"]
-            assert res["forecast_generated"] is False, msg
+            company_id = _base_tributi(db, "m2-gap")
+            sc = budget_scenarios.create_budget_scenario(
+                company_id,
+                BudgetScenarioCreate(company_id=company_id, name="m2-gap", base_year=2026,
+                                     scenario_type="budget"),
+                user_id="m2-gap", db=db)
+            for row in _righe_trans({2027}, anni=(2027, 2029, 2030)):
+                db.add(assumptions_service.build_assumption_row(
+                    sc.id, row, forecast_year=row["forecast_year"]))
+            db.commit()
+
+            with pytest.raises(ValueError) as e:
+                ForecastEngine(db).generate_forecast(sc.id)
+            msg = str(e.value)
             assert "non può ripartire" in msg, msg
             assert "l'anno 2027 esce dalla via manuale" in msg, msg
             assert "2028" not in msg, msg
             assert "all'anno 2029" in msg, msg
-            assert read_forecast_maps(db, sid) == []
+            assert read_forecast_maps(db, sc.id) == []
     finally:
         engine.dispose()
 

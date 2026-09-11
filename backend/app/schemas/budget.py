@@ -76,9 +76,9 @@ class FinancingLoanInput(BaseModel):
     @model_validator(mode="after")
     def validate_contract(self):
         if self.amount == 0 and self.opening_residual == 0:
-            raise ValueError("amount or opening_residual must be greater than zero")
+            raise ValueError("l'importo o il residuo iniziale devono essere maggiori di zero")
         if self.grace_years >= self.duration_years:
-            raise ValueError("grace_years must be lower than duration_years")
+            raise ValueError("gli anni di preammortamento devono essere meno della durata")
         return self
 
 
@@ -264,6 +264,13 @@ class BudgetAssumptionsBase(BaseModel):
 class BudgetAssumptionsCreate(BudgetAssumptionsBase):
     """Schema for creating new BudgetAssumptions"""
     pass
+
+
+class BudgetAssumptionsBulkRow(BudgetAssumptionsBase):
+    """Una riga del bulk `PUT /assumptions`: gli stessi vincoli di `BudgetAssumptionsCreate`, senza `scenario_id` obbligatorio
+    (lo scenario e' nel percorso). Serve SOLO a validare: le righe si costruiscono ancora da `build_assumption_row`,
+    cosi' un input valido produce esattamente le righe di prima."""
+    scenario_id: Optional[int] = None
 
 
 class BudgetAssumptionsUpdate(BaseModel):

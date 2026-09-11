@@ -9,6 +9,7 @@ from decimal import Decimal
 from sqlalchemy import Numeric
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
+from pydantic import ValidationError
 import sys
 import os
 
@@ -19,6 +20,7 @@ if backend_path not in sys.path:
 
 from database import models
 from calculations.forecast_engine import ForecastEngine, prune_out_of_plan_forecast_years
+from app.schemas.budget import BudgetAssumptionsBulkRow
 
 
 _NUMERIC_COLUMNS = {
@@ -60,6 +62,91 @@ def _normalize_numeric_fields(row: models.BudgetAssumptions) -> models.BudgetAss
     return row
 
 
+class AssumptionsValidationError(ValueError):
+    """Ipotesi che le rotte tipizzate rifiutano (lotto 3A, Task 7a): `errori` e' un elenco di
+    `{forecast_year, campo, messaggio}` in italiano. Sottoclasse di `ValueError`, cosi' l'anteprima — che cattura
+    `ValueError` e risponde 400 — non cambia; il bulk la cattura prima e risponde 422."""
+
+    def __init__(self, errori):
+        self.errori = list(errori)
+        super().__init__("Ipotesi non valide: " + "; ".join(
+            (f"{e['forecast_year']} · " if e.get("forecast_year") is not None else "") + f"{e['campo']}: {e['messaggio']}"
+            for e in self.errori
+        ))
+
+
+def _errore(anno, campo, messaggio):
+    return {"forecast_year": anno, "campo": campo, "messaggio": messaggio}
+
+
+_TIPO_ATTESO = {
+    "decimal_parsing": "un numero", "decimal_type": "un numero", "float_parsing": "un numero", "float_type": "un numero",
+    "int_parsing": "un numero intero", "int_type": "un numero intero", "int_from_float": "un numero intero",
+    "bool_parsing": "vero o falso", "bool_type": "vero o falso",
+    "dict_type": "un oggetto", "model_type": "un oggetto", "model_attributes_type": "un oggetto",
+    "list_type": "un elenco", "string_type": "un testo",
+}
+
+
+def messaggio_errore_campo(err) -> str:
+    """Un errore di Pydantic in italiano, per tipo. Un tipo non mappato dice comunque che il valore non e' valido;
+    il valore ricevuto si mostra sempre, tranne per un campo mancante."""
+    tipo, ctx = err.get("type"), err.get("ctx") or {}
+    if tipo == "missing":
+        return "campo obbligatorio mancante"
+    if tipo == "greater_than_equal":
+        testo = f"deve essere maggiore o uguale a {ctx.get('ge')}"
+    elif tipo == "greater_than":
+        testo = f"deve essere maggiore di {ctx.get('gt')}"
+    elif tipo == "less_than_equal":
+        testo = f"deve essere minore o uguale a {ctx.get('le')}"
+    elif tipo == "less_than":
+        testo = f"deve essere minore di {ctx.get('lt')}"
+    elif tipo == "literal_error":
+        testo = "valore non ammesso: sono ammessi " + str(ctx.get("expected", "")).replace(" or ", " o ")
+    elif tipo == "string_pattern_mismatch":
+        testo = "valore non ammesso"
+    elif tipo == "string_too_short":
+        testo = f"testo troppo corto (minimo {ctx.get('min_length')} caratteri)"
+    elif tipo == "string_too_long":
+        testo = f"testo troppo lungo (massimo {ctx.get('max_length')} caratteri)"
+    elif tipo == "value_error":
+        testo = str(err.get("msg", "")).removeprefix("Value error, ")
+    elif tipo in _TIPO_ATTESO:
+        testo = f"tipo sbagliato: serve {_TIPO_ATTESO[tipo]}"
+    else:
+        testo = "valore non valido"
+    return f"{testo} (ricevuto: {err.get('input')!r})"
+
+
+def _senza_null(riga):
+    """`null` dal client vale «campo omesso» (`build_assumption_row` lo coalizza sul default): lo si toglie prima dello schema."""
+    pulita = {k: v for k, v in riga.items() if v is not None}
+    for chiave in ("financing_loans", "tax_temporary_differences"):
+        if isinstance(pulita.get(chiave), list):
+            pulita[chiave] = [{k: v for k, v in voce.items() if v is not None} if isinstance(voce, dict) else voce
+                              for voce in pulita[chiave]]
+    if isinstance(pulita.get("sp_overrides"), dict):
+        pulita["sp_overrides"] = {k: v for k, v in pulita["sp_overrides"].items() if v is not None}
+    if isinstance(pulita.get("pregresso"), dict):
+        pulita["pregresso"] = {k: ({kk: vv for kk, vv in piano.items() if vv is not None} if isinstance(piano, dict) else piano)
+                               for k, piano in pulita["pregresso"].items() if piano is not None}
+    return pulita
+
+
+def validate_bulk_rows(assumptions_list, forecast_years) -> None:
+    """Ogni riga del bulk contro `BudgetAssumptionsBulkRow`, tutti gli errori insieme; alza `AssumptionsValidationError`."""
+    errori = []
+    for riga, anno in zip(assumptions_list, forecast_years):
+        try:
+            BudgetAssumptionsBulkRow(**_senza_null(riga))
+        except ValidationError as exc:
+            for err in exc.errors():
+                errori.append(_errore(anno, ".".join(str(p) for p in err["loc"]), messaggio_errore_campo(err)))
+    if errori:
+        raise AssumptionsValidationError(errori)
+
+
 def validate_assumptions_list(assumptions_list: List[Dict[str, Any]], base_year: int) -> List[int]:
     """Stesso controllo per bulk e anteprima, chiamato PRIMA di qualunque lettura
     che dipenda dall'anno base: un corpo malformato e' un errore del chiamante e
@@ -76,23 +163,31 @@ def validate_assumptions_list(assumptions_list: List[Dict[str, Any]], base_year:
     prevenire (N1: sul percorso bulk, con le righe gia' committate).
     """
     if not assumptions_list:
-        raise ValueError("At least one assumption record is required")
+        raise AssumptionsValidationError([_errore(None, "assumptions", "serve almeno una riga di ipotesi")])
     years: List[int] = []
     for assumption in assumptions_list:
         if "forecast_year" not in assumption:
-            raise ValueError("Each assumption must have a forecast_year")
+            raise AssumptionsValidationError([_errore(None, "forecast_year", "ogni riga di ipotesi deve avere forecast_year")])
         raw_year = assumption["forecast_year"]
         try:
             forecast_year = int(raw_year)
         except (TypeError, ValueError):
-            raise ValueError(f"forecast_year non valido: {raw_year!r}")
-        if forecast_year <= base_year:
-            raise ValueError(
-                f"Forecast year {forecast_year} must be greater than base year {base_year}"
-            )
+            raise AssumptionsValidationError([_errore(None, "forecast_year", f"forecast_year non valido: {raw_year!r}")])
         years.append(forecast_year)
-    if len(years) != len(set(years)):
-        raise ValueError("Duplicate forecast years found in assumptions list")
+    errori = [_errore(a, "forecast_year", f"l'anno di previsione {a} deve essere successivo all'anno base {base_year}")
+              for a in years if a <= base_year]
+    visti = set()
+    for a in years:
+        if a in visti:
+            errori.append(_errore(a, "forecast_year", f"l'anno di previsione {a} e' ripetuto"))
+        visti.add(a)
+    ordinati = sorted(set(years))
+    for prima, dopo in zip(ordinati, ordinati[1:]):
+        if dopo != prima + 1:
+            errori.append(_errore(dopo, "forecast_year",
+                                  f"anni non consecutivi: dopo il {prima} viene il {dopo}, manca il {prima + 1}"))
+    if errori:
+        raise AssumptionsValidationError(errori)
     return years
 
 
@@ -271,6 +366,14 @@ def bulk_upsert_assumptions(
     # COERCIATI: il loop sotto e forecast_years_list usano quelli, mai il valore
     # grezzo del dict (N1).
     coerced_years = validate_assumptions_list(assumptions_list, scenario.base_year)
+
+    # 4-bis. Ogni riga passa LO SCHEMA TIPIZZATO, qui e prima di qualunque
+    # cancellazione (lotto 3A, Task 7a): un tetto di scoperto negativo, un acconto
+    # negativo, un driver sconosciuto o un tasso fuori scala non arrivano piu' ne'
+    # al motore ne' alle colonne. Un input valido che il motore rifiuta continua a
+    # rispondere 200 con `forecast_generated: false` (CLAUDE.md, Previsionale):
+    # questo e' un errore del chiamante, non del piano.
+    validate_bulk_rows(assumptions_list, coerced_years)
 
     # 5. Delete existing assumptions for this scenario
     db.query(models.BudgetAssumptions).filter(

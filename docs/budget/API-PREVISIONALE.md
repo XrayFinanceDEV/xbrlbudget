@@ -353,7 +353,10 @@ Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
   l'esenzione dallo sweep proprio dove manca, e lo sweep salda il residuo restante in un colpo solo —
   misurato: 35.802,46 di apertura, `existing_debt_repayment_years=3` dichiarato solo nel 2027
   (rimborso a piano 11.934,15), sweep che chiude i restanti 23.868,31 nel 2028, due anni prima della
-  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2).
+  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2). Dal wizard il caso non si produce:
+  il passo 6 «Pregresso e nuovo» scrive il campo su **tutti** gli anni di piano (`updateAll`,
+  `frontend/components/budget/wizard/steps/StepPregressoNuovo.tsx`); resta per chi chiama l'API senza ripeterlo
+  su ogni riga.
 - I contratti della griglia, il prestito nuovo della legacy `financing_amount` e il pregresso con gli
   anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
   spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).

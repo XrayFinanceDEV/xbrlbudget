@@ -755,9 +755,10 @@ class ForecastEngine:
         "sp17c_debiti_obbligazioni_lungo",
     ))
 
-    # (I1-bis, Ruling 57) Il lato OLTRE che un piano di scadenziamento scrive
-    # dal calendario e non dal persistito: un `sp_overrides` su quella riga
-    # verrebbe salvato e poi CANCELLATO IN SILENZIO l'anno dopo dal runoff
+    # (I1-bis, Ruling 57 — esteso dal rilievo I-d della revisione di `f330730`)
+    # Il lato OLTRE che un piano di scadenziamento scrive dal calendario e non
+    # dal persistito: un `sp_overrides` su quella riga verrebbe salvato e poi
+    # CANCELLATO IN SILENZIO l'anno dopo dal runoff
     # (misurato: piano fornitori, override `sp17d = 250,25`, `residual_long`
     # resta 0 e la riga torna quella del calendario — un dato che cambia
     # attraverso il confine di un KPI senza che nessuno lo dica, il tipo di
@@ -765,16 +766,183 @@ class ForecastEngine:
     # ValueError che nomina il campo e dice dove agire. Senza piano su quel
     # saldo l'override lungo e' lecito come sempre: la riga segue
     # `_prev × (1 + crescita)` e l'override si porta avanti da se'.
-    _LATO_OLTRE_GOVERNATO_DA_PIANO: Dict[str, str] = {
-        "debiti_fornitori": "sp17d_debiti_fornitori_lungo",
-        "debiti_tributari": "sp17e_debiti_tributari_lungo",
-        "debiti_previdenziali": "sp17f_debiti_previdenza_lungo",
-        "altri_debiti": "sp17g_altri_debiti_lungo",
+    #
+    # I valori sono TUPLE perche' `crediti_commerciali` non governa solo
+    # l'aggregato `sp07` (`:2529-2532`: `residual_long` del runoff + la quota
+    # tributaria), ma anche le sotto-voci che di quell'aggregato sono la
+    # ripartizione (`_alloc` su `sp07_non_deferred`, `:3120-3133`). Misura
+    # (sonda del giro 2, piano crediti 38333.335 x3 + inesigibile 1666.67,
+    # override +1000, 4 anni, valore dell'anno DOPO contro il gemello senza
+    # override):
+    #   `sp07a`  14860.00 == 14860.00 del gemello  → cancellato, da rifiutare
+    #   `sp07b/c/d/g`  idem
+    #   `sp07e`  15025.25 contro 14860.00          → sopravvive: entra
+    #       nell'aggregato come `_prev('sp07e') × crescita` (`:2527`), quindi
+    #       l'override si porta avanti da se' e NON si rifiuta
+    #   `sp07f`  3210.00 contro 3000.00            → idem (deferred `_prev`)
+    _LATO_OLTRE_GOVERNATO_DA_PIANO: Dict[str, Tuple[str, ...]] = {
+        "debiti_fornitori": ("sp17d_debiti_fornitori_lungo",),
+        "debiti_tributari": ("sp17e_debiti_tributari_lungo",),
+        "debiti_previdenziali": ("sp17f_debiti_previdenza_lungo",),
+        "altri_debiti": ("sp17g_altri_debiti_lungo",),
         # Il piano dei crediti commerciali scrive l'AGGREGATO `sp07` come
         # residuo lungo del runoff piu' la quota tributaria cresciuta: lo
-        # stesso meccanismo degli altri quattro saldi, sullo stesso lato.
-        "crediti_commerciali": "sp07_crediti_lungo",
+        # stesso meccanismo degli altri quattro saldi, sullo stesso lato. Che
+        # qui ci sia anche un aggregato, che `SP_EDITABLE_FIELDS` di
+        # `app/forecast/balance` NON espone, e' deliberato: la chiave resta per
+        # le chiamate API dirette, e il divieto serve prima di tutto a loro.
+        # Il lato BREVE dello stesso piano (`sp06` e le sue sotto-voci) NON c'e':
+        # non misurato in questo giro, e aggiungere un rifiuto non misurato e'
+        # esattamente cio' che la regola del repo vieta.
+        "crediti_commerciali": (
+            "sp07_crediti_lungo",
+            "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+            "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+            "sp07g_crediti_altri_lungo",
+        ),
     }
+
+    # Il passo del wizard che scadenzia ciascun saldo. `debiti_tributari` non sta
+    # nel passo "Pregresso e nuovo" (che lo mostra in sola lettura con scritto
+    # «si regolano al passo Imposte», `StepPregressoNuovo.tsx:233`), ma nel passo
+    # "Imposte": il rilievo M-2 della revisione, mandare l'utente al passo 6 per
+    # una voce che al passo 6 non e' modificabile vuol dire mandarlo a vuoto.
+    _PREGRESSO_PASSO: Dict[str, str] = {"debiti_tributari": "Imposte"}
+    _PREGRESSO_PASSO_DEFAULT = "Pregresso e nuovo"
+
+    @classmethod
+    def _passo_pregresso(cls, saldo: str) -> str:
+        return cls._PREGRESSO_PASSO.get(saldo, cls._PREGRESSO_PASSO_DEFAULT)
+
+    @classmethod
+    def _via_manuale_fiscale(cls, assumption) -> bool:
+        """Se questa riga di ipotesi governa la posizione tributaria a mano.
+
+        E' la stessa condizione del calcolatore (`manual_tax_position`):
+        percentuali esplicite su `sp06e`/`sp16e`. In quel ramo `sp17e` segue
+        `_prev × (1 + crescita)` e il piano e' dichiarato ignorato
+        (`pregresso_ignored`), quindi l'override SUPERVIVE all'anno dopo —
+        rifiutarlo significherebbe negare una liberta' che il motore onora
+        (rilievo M-1; la sonda `X2` della revisione misura il base che porta
+        avanti 250,25 dal 2027 al 2030).
+        """
+        return (getattr(assumption, 'sp06e_growth_pct', None) is not None
+                or getattr(assumption, 'sp16e_growth_pct', None) is not None)
+
+    @classmethod
+    def _rifiuto_override_governati(cls, pregresso, assumptions) -> None:
+        """Ogni `sp_overrides` che il piano, o il kernel fiscale, cancellerebbe.
+
+        Tre famiglie di rifiuto, con una ragione sola: la riga viene salvata, ma
+        l'anno dopo il motore la rigenera da un'altra fonte, la cassa assorbe la
+        differenza senza alcun flusso, il foglio quadra e nessuno se ne accorge.
+        E' il difetto I1 nella sua forma generale, non un caso del tributario.
+
+        1. (I1-bis + rilievo I-d) il lato OLTRE di un saldo con piano: tabella
+           `_LATO_OLTRE_GOVERNATO_DA_PIANO`, in qualunque anno del piano, dopo
+           l'ultima rata compresa;
+        2. (rilievo I-b) `sp17e` anche SENZA piano, quando l'anno che lo
+           leggerebbe e' in `saldo_acconto`: in quel ramo `sp17e = r.residual_long`
+           e senza piano `r` e' il runoff di uno zero. Misura della revisione
+           (sonde `E0`, `K4`): il valore forzato torna 0, la cassa del gemello e'
+           identica, lo scarto di flusso e' −7.000,01 / −3.000.
+        3. (rilievo I-c) il lato BREVE di un saldo con piano, ma solo quando il
+           valore forzato scende SOTTO il `residual_short` del calendario: sopra,
+           l'override e' la quota generata e si porta avanti (`P3`, `D2`);
+           sotto, la quota sottratta ricompare l'anno dopo e viene pagata due
+           volte (`P1`: +1.333,34 di scarto, con la rata dichiarata su una rata
+           che l'override aveva gia' tolto).
+
+        I messaggi (rilievo M-2) nominano il saldo con `PREGRESSO_LABELS` e non
+        con la chiave tecnica, mandano al passo del wizard che LO scadenzia, e
+        dicono la via d'uscita: svuotare la cella. Serve, perche' un override
+        proibito salvato dal bulk avvelena OGNI `PATCH` successivo sullo stesso
+        scenario, anche su una cella diversa (`patch_400_loop` della revisione),
+        e senza quella frase l'utente non ha modo di capirlo dall'errore.
+        """
+        if not assumptions:
+            return
+        horizon = len(assumptions)
+        for year_index, a in enumerate(assumptions):
+            ov = getattr(a, 'sp_overrides', None)
+            if not isinstance(ov, dict):
+                continue
+            manuale = cls._via_manuale_fiscale(a)
+            for saldo, campi in cls._LATO_OLTRE_GOVERNATO_DA_PIANO.items():
+                if not (pregresso or {}).get(saldo):
+                    continue
+                if saldo == 'debiti_tributari' and manuale:
+                    continue   # rilievo M-1: in via manuale l'override sopravvive
+                for campo in campi:
+                    if ov.get(campo) is not None:
+                        raise ValueError(cls._messaggio_override_oltre(campo, saldo))
+            # (2) `sp17e` senza piano: lo legge l'anno dopo, se c'e' e non e' manuale.
+            campo_tax = cls._LATO_OLTRE_GOVERNATO_DA_PIANO["debiti_tributari"][0]
+            letta_l_anno_dopo = (
+                year_index + 1 < horizon
+                and not cls._via_manuale_fiscale(assumptions[year_index + 1])
+            )
+            if (ov.get(campo_tax) is not None
+                    and not (pregresso or {}).get("debiti_tributari")
+                    and not manuale and letta_l_anno_dopo):
+                raise ValueError(
+                    f"L'override di {campo_tax} non è ammesso: la posizione tributaria è a "
+                    "saldo + acconto e l'anno dopo non legge questa riga, legge la "
+                    "scomposizione dichiarata nei `details`. Il valore forzato sparirebbe senza "
+                    "alcun versamento, con la cassa ad assorbire la differenza. La via lecita "
+                    f"è il piano di scadenziamento al passo "
+                    f"{cls._passo_pregresso('debiti_tributari')}, oppure svuotare la cella "
+                    "(value: null)."
+                )
+            # (3) lato breve sotto il rateizzato che il piano deve pagare dopo.
+            for saldo, (breve, _oltre) in cls._PREGRESSO_SP_FIELDS.items():
+                piano = (pregresso or {}).get(saldo)
+                if not piano or ov.get(breve) is None:
+                    continue
+                if saldo == 'debiti_tributari' and manuale:
+                    continue
+                residuo = cls._residuo_breve_piano(piano, year_index, horizon)
+                forzato = Decimal(str(ov[breve]))
+                if forzato < residuo:
+                    raise ValueError(
+                        f"L'override di {breve} non è ammesso: vale {forzato}, ma il piano di "
+                        f"scadenziamento dei {PREGRESSO_LABELS[saldo]} deve pagare {residuo} "
+                        "l'anno dopo. Sotto quella quota l'override verrebbe ripristinato dal "
+                        "calendario e la stessa rata pagata due volte, con la cassa ad "
+                        "assorbire la differenza senza alcun flusso. Resti sopra la quota, "
+                        f"oppure modifichi il piano al passo {cls._passo_pregresso(saldo)} o "
+                        "svuoti la cella (value: null)."
+                    )
+
+    @classmethod
+    def _messaggio_override_oltre(cls, campo: str, saldo: str) -> str:
+        return (
+            f"L'override di {campo} non è ammesso: i {PREGRESSO_LABELS[saldo]} hanno un piano "
+            "di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo "
+            "compreso. Il valore forzato verrebbe salvato e cancellato in silenzio l'anno dopo, "
+            "con la cassa ad assorbire la differenza senza alcun flusso. La via lecita è "
+            f"modificare il piano al passo {cls._passo_pregresso(saldo)}, oppure svuotare la "
+            "cella (value: null) e lasciare che la riga segua il piano."
+        )
+
+    @staticmethod
+    def _residuo_breve_piano(piano: Dict[str, Any], year_index: int,
+                             horizon: int) -> Decimal:
+        """Quanto pregresso quel saldo deve pagare L'ANNO DOPO di `year_index`.
+
+        E' lo stesso `residual_short` che il calcolatore posa sul lato breve
+        (`runoff_schedule`), e per il tributario e' il runoff del SOLO
+        rateizzato: il saldo non entra nel piano perche' si paga per intero nel
+        primo anno (spec §4). Non lo si legge dai `details` di un anno gia'
+        generato: il rifiuto deve arrivare prima di generare qualsiasi anno.
+        """
+        apertura = piano.get('rateizzato') if 'rateizzato' in piano else piano.get('opening')
+        return runoff_schedule(
+            Decimal(str(apertura or 0)),
+            [Decimal(str(x)) for x in (piano.get('amounts') or [])],
+            [Decimal(str(x)) for x in (piano.get('writeoff') or [])],
+            year_index, horizon,
+        ).residual_short
 
     @classmethod
     def _declared_sp_fields(cls) -> "frozenset[str]":
@@ -837,11 +1005,28 @@ class ForecastEngine:
         la ripartizione tiene attribuibile al consuntivo cio' che del
         credito non e' stato generato dal piano.
 
-        Anche `sp17e` entra nella posizione, ma solo tramite il piano: in
-        modo `saldo_acconto` il rateizzato lo scandisce il runoff, non il
-        bilancio, e un override su `sp17e` non ha ripercussione sull'anno
-        dopo — qui si allinea il dichiarato (`residual_long`), non si
-        riscrive il piano.
+        Anche `sp17e` entra nella posizione, ma solo tramite il piano: in modo
+        `saldo_acconto` il rateizzato lo scandisce il runoff, non il bilancio, e
+        un `sp_overrides` su quella riga non ha ripercussione sull'anno dopo —
+        percio' da questo giro e' RIFIUTATO (`_rifiuto_override_governati`,
+        rilievo I-b della revisione); qui si allinea il dichiarato
+        (`residual_long`), non si riscrive il piano.
+
+        Il riallineamento di `residual_long` non e' codice morto, ma oggi non e'
+        nemmeno RAGGIUNTO: lo misurano due cose. Da un lato il rifiuto
+        (`_rifiuto_override_governati`) non lascia piu' forzare quella riga con
+        un piano (I1-bis) e nemmeno senza (rilievo I-b); dall'altro, quando nel
+        gruppo `sp17` non resta nessun operativo libero, il centesimo il
+        normalizzatore lo posa sull'AGGREGATO (misura del giro 2, piano
+        `altri_debiti` + `sp_overrides` su `sp17_debiti_lungo`: la posatura
+        nomina `sp17_debiti_lungo` per −90.000,01, mai `sp17g`) — e quella e' la
+        rotta che il rilievo I-1 della revisione di `6e5c0f7` porta al
+        rifiuto. Il ramo resta quindi come AUTOCHECK dell'invariante, non come
+        riparazione: la rete (`_divergenze`) confronta riga dichiarata e
+        persistita per ogni anno che genera, quindi un valore divergente lo
+        vede li', non qui. Stesso ruolo per la coerenza fra le due sedi di
+        `generated_debt` (rilievo M-4): un confronto che la rete faceva solo
+        sui campi NON forzati, e che ora corre sempre.
         """
         # 1) `pregresso`: la riga breve (e, con piano, il lato oltre) segue il persistito.
         residual_short_tax = Decimal('0')
@@ -851,12 +1036,28 @@ class ForecastEngine:
                 continue
             persisted = Decimal(str(forecast_bs[breve]))
             if d.get('mode') == 'runoff':
-                res = min(Decimal(str(d.get('residual_short') or 0)), persisted)
+                # I-`a` del giro 2, secondo tempo: la riga si scrive SEMPRE, e
+                # si scrive al centesimo. La versione difettosa confrontava due
+                # numeri NON omogenei (rata grezza 1170.665 contro `sp16e`
+                # persistito 897.32), quindi la condizione diventava vera da
+                # sola e riscriveva `generated_debt` (0 → 0.005) lontano da
+                # qualunque forzatura; la prima correzione di questo giro ha
+                # quantizzato il confronto, e la mutazione M-2 l'ha ripresa:
+                # gate a centesimi e scrittura_condizionata lasciano nella riga
+                # il grezzo del calendario (misurato: rata 3252.825 ->
+                # `residual_short` 3252.825, `generated` 0, `sp16e` 3252.83) e la
+                # coppia dichiarata NON somiglia piu' alla cella che descrive.
+                # `res` e` `new_gen` vengono entrambi dal persistito: scriverli
+                # sempre non e' una riparazione, e' dire che la posizione e'
+                # quella, e quando niente diverge sono i valori di prima.
+                res = cls._q(min(Decimal(str(d.get('residual_short') or 0)), persisted))
                 new_gen = persisted - res
                 if (new_gen != cls._q(d.get('generated') or 0)
                         or res != cls._q(d.get('residual_short') or 0)):
                     d['residual_short'] = res
                     d['generated'] = new_gen
+                # AutocHECK dell'invariante, non riparazione: oggi nessuna
+                # rotta ci arriva (vedi il paragrafo in fondo alla docstring).
                 if oltre in forecast_bs:
                     oltre_p = Decimal(str(forecast_bs[oltre]))
                     if oltre_p != cls._q(d.get('residual_long') or 0):
@@ -865,17 +1066,25 @@ class ForecastEngine:
                 if persisted != cls._q(d.get('generated') or 0):
                     d['generated'] = persisted
             if key == 'debiti_tributari':
-                residual_short_tax = Decimal(str(d.get('residual_short') or 0))
+                # Serve gia' al centesimo: sotto lo usano per sottrarre il
+                # `saldo_due` dall'aggregato persistito.
+                residual_short_tax = cls._q(d.get('residual_short') or 0)
         # 2) `imposte`: debito e credito dichiarati seguono `sp16e`/`sp06e`.
         imposte = details.get('imposte')
         if imposte and imposte.get('mode') == 'saldo_acconto':
             sp16e = forecast_bs.get('sp16e_debiti_tributari_breve')
             if sp16e is not None:
-                debt = max(Decimal('0'), Decimal(str(sp16e)) - residual_short_tax)
+                # Scrittura SEMPRE, come sopra: la coda frazionaria del kernel
+                # (`current_tax` non quantizzato, `acconti` a percentuale) viveva
+                # nel `generated_debt` dichiarato finche' il gate la riconosceva
+                # come "gia' uguale al centesimo" — misurato 5760.04707000 contro
+                # una cella da 5760.05, cioe' una delle due parti della somma che
+                # la cella NON e' piu'.
+                debt = cls._q(max(Decimal('0'), Decimal(str(sp16e)) - residual_short_tax))
                 if debt != cls._q(imposte.get('generated_debt') or 0):
                     imposte['generated_debt'] = debt
                 # Le due sedi dichiarano lo stesso numero: la riga del pregresso
-                # e la riga `imposte` restano coerenti fra loro.
+                # e la riga `imposte` restano coerenti fra loro (rilievo M-4).
                 d_tax = (details.get('pregresso') or {}).get('debiti_tributari')
                 if d_tax is not None and cls._q(d_tax.get('generated') or 0) != cls._q(debt):
                     d_tax['generated'] = debt
@@ -885,7 +1094,7 @@ class ForecastEngine:
                 declared = (Decimal(str(imposte.get('generated_credit') or 0))
                             + Decimal(str(imposte.get('opening_credit_left') or 0)))
                 if sp06e != cls._q(declared):
-                    left = min(Decimal(str(imposte.get('opening_credit_left') or 0)), sp06e)
+                    left = cls._q(min(Decimal(str(imposte.get('opening_credit_left') or 0)), sp06e))
                     imposte['opening_credit_left'] = left
                     imposte['generated_credit'] = sp06e - left
         # 3) `indicizzazione`: il `valore` dichiarato segue la riga persistita.
@@ -1508,21 +1717,10 @@ class ForecastEngine:
             # anno alza il residuo di tutti gli anni dopo, e il singolo anno non
             # vede gli override degli altri.
             self._suppress_unrecordable_writeoffs(pregresso, assumptions)
-            # I1-bis: nessun anno va generato per poi scoprire la collisione
-            # fra un piano di scadenziamento e un override sul suo lato oltre.
-            if pregresso:
-                for a in assumptions:
-                    ov = getattr(a, 'sp_overrides', None)
-                    if not isinstance(ov, dict):
-                        continue
-                    for saldo, campo in self._LATO_OLTRE_GOVERNATO_DA_PIANO.items():
-                        if ov.get(campo) is not None and pregresso.get(saldo):
-                            raise ValueError(
-                                f"L'override di {campo} non e' ammesso: il saldo"
-                                " ha un piano di scadenziamento del pregresso"
-                                f" ('{saldo}'). Modifica il piano nel passo 6"
-                                " invece di forzare la voce."
-                            )
+            # I1-bis + i rilievi I-b/I-c/I-d/M-1 di `f330730`: nessun anno va
+            # generato per poi scoprire la collisione fra un piano (o la via
+            # `saldo_acconto`) e uno `sp_overrides` che quell'anno lo cancella.
+            type(self)._rifiuto_override_governati(pregresso, assumptions)
         except ValueError as e:
             if stop_on_error:
                 raise

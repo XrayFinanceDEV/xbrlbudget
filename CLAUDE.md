@@ -273,6 +273,20 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `forecast_generated: True` (difetto §11.1 della spec del lotto); e un plug che accendeva scoperto
   PRIMA dell'override lasciava poi convivere cassa e scoperto. Un override di `sp16a`/`sp16` che
   lascerebbe un fabbisogno si rifiuta: nessuno scoperto ci sta senza superare il totale forzato.
+- **Un override su una riga che un piano rigenera si rifiuta, in qualunque anno
+  del piano** (`_LATO_OLTRE_GOVERNATO_DA_PIANO`): la cella resta salvata, l'anno
+  dopo il motore la riscrive dall'aggregato e la cassa assorbe la differenza
+  senza alcun flusso — il foglio quadra e nessuna rete lo vede, perché le reti
+  confrontano ciò che il piano dichiara con ciò che viene persistito, e qui le
+  due cose coincidono comunque. Rigovernate: `sp17d`/`sp17f`/`sp17g` coi
+  rispettivi piani, `sp17e` anche senza piano quando l'anno che lo leggerebbe è
+  in `saldo_acconto` (in via manuale no: lì la riga cresce da `prev` e
+  l'override sopravvive), e tutta la famiglia `sp07`+`sp07a/b/c/d/g` col piano
+  dei crediti. Non `sp07e`/`sp07f`, che il calendario non tocca. Il messaggio
+  nomina il saldo con `PREGRESSO_LABELS`, il passo del wizard che lo scadenzia
+  (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari) e la via d'uscita
+  (`value: null`), perché un override proibito avvelena ogni `PATCH` successivo
+  sullo stesso scenario anche su un'altra cella.
 - **`POST /preview` non scrive nulla e risponde 200 anche a un piano che si ferma**: leggere
   `error`, non lo status. Gli anni in `forecast_years` sono quelli calcolati prima dell'errore, non
   quelli chiesti: chi guarda solo lo status disegna un'anteprima monca come se fosse completa.

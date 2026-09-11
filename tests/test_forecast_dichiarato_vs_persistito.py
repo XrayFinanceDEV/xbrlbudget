@@ -111,12 +111,16 @@ def _divergenze(bs, ce, det, row):
                 confronta(oltre, d["residual_long"], f"details['pregresso']['{saldo}'].residual_long")
 
     # ── la posizione tributaria scrive anche il CREDITO ──
+    # Il confronto e' fra una DICHIARAZIONE e il persistito, non fra la riga e
+    # l'override: tocca quindi correrE anche quando la riga e' forzata (rilievo
+    # M-4 della revisione di `f330730` — la rete saltava questi due confronti
+    # proprio sui campi forzati, ed e' li' che I1 aveva lasciato una sede incoerente).
     imposte = det["imposte"]
-    if imposte["mode"] == "saldo_acconto" and not forzato("sp06e_crediti_tributari_breve"):
+    if imposte["mode"] == "saldo_acconto":
         confronta("sp06e_crediti_tributari_breve",
                   D(str(imposte["generated_credit"])) + D(str(imposte["opening_credit_left"])),
                   "details['imposte']")
-    if imposte["mode"] == "saldo_acconto" and not forzato("sp16e_debiti_tributari_breve"):
+    if imposte["mode"] == "saldo_acconto":
         # I1: la posizione tributaria e' dichiarata in DUE sedi (`imposte` e la
         # riga `debiti_tributari` di `pregresso`). Il confronto con la riga
         # persistita lo fa gia' il ciclo qui sopra con `generated +
@@ -302,16 +306,33 @@ INDICIZZAZIONE = {
                        "sp17g": "ricavi", "sp18": "ricavi"},
 }
 
-# I1-bis: quale riga a OLTRE ciascun saldo di piano governa (la stessa tabella
-# del motore, `ForecastEngine._LATO_OLTRE_GOVERNATO_DA_PIANO`, qui duplicata
-# deliberatamente: se le due copie divergono, un test rosso lo dice).
+# I1-bis + giro 2: quale riga a OLTRE ciascun saldo di piano governa (la stessa
+# tabella del motore, `ForecastEngine._LATO_OLTRE_GOVERNATO_DA_PIANO`, qui
+# duplicata deliberatamente: se le due copie divergono, `test_la_copia_diquesta
+# tabella_coincide_col_motore` lo dice in rosso).
 LATO_OLTRE_DEL_PIANO = {
-    "debiti_fornitori": "sp17d_debiti_fornitori_lungo",
-    "debiti_tributari": "sp17e_debiti_tributari_lungo",
-    "debiti_previdenziali": "sp17f_debiti_previdenza_lungo",
-    "altri_debiti": "sp17g_altri_debiti_lungo",
-    "crediti_commerciali": "sp07_crediti_lungo",
+    "debiti_fornitori": ("sp17d_debiti_fornitori_lungo",),
+    "debiti_tributari": ("sp17e_debiti_tributari_lungo",),
+    "debiti_previdenziali": ("sp17f_debiti_previdenza_lungo",),
+    "altri_debiti": ("sp17g_altri_debiti_lungo",),
+    # Le cinque sotto-voci oltre `sp07` le aggiunge il rilievo I-d del giro 2:
+    # il piano le ripartisce dall'aggregato che rigenera lui, quindi un override
+    # su una di loro e' cancellato l'anno dopo come quello sull'aggregato.
+    "crediti_commerciali": (
+        "sp07_crediti_lungo",
+        "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+        "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+        "sp07g_crediti_altri_lungo",
+    ),
 }
+
+
+def test_la_copia_diquesta_tabella_coincide_col_motore():
+    """Il motore e questa copia devono dire la stessa cosa, campo per campo."""
+    from calculations.forecast_engine import ForecastEngine
+    assert LATO_OLTRE_DEL_PIANO == ForecastEngine._LATO_OLTRE_GOVERNATO_DA_PIANO
+    assert ForecastEngine._PREGRESSO_SP_FIELDS == SHORT_LONG
+
 
 # `sp_overrides` della famiglia I1: campi dichiarati dalla rete, parte breve.
 SP_FAMIGLIA_BREVE = {
@@ -324,9 +345,19 @@ SP_FAMIGLIA_BREVE = {
 }
 # La parte a oltre che un SENZA piano lascia libera, e che invece il motore
 # deve rifiutare dove il piano e' attivo (Ruling 57b).
+#
+# `sp17e` NON c'e' piu', e non e' una sfoltita: dal rilievo I-b di `f330730`
+# quella riga e' governata dal kernel fiscale IN OGNI SCENARIO, piano o no (in
+# modo `saldo_acconto` vale `r.residual_long`, e senza piano `r` e' il runoff di
+# uno zero), quindi forzarla e' sempre un rifiuto: tenerla qui avrebbe
+# trasformato ventiquattro scenari della batteria in ventiquattro rifiuti,
+# spegnendo la rete. Il suo rifiuto e' un test dedicato (e la batteria lo
+# riafferma per il solo `senza piano`, dove gli altri tre piani tacciono).
+# `sp07e` entra invece come nuova palestra: a oltre, non governata da nessun
+# piano dei debiti, e il motore la porta avanti da `prev`.
 SP_FAMIGLIA_OLTRE = {
     "sp17d_debiti_fornitori_lungo": 20000.37,
-    "sp17e_debiti_tributari_lungo": 7000.01,
+    "sp07e_crediti_tributari_lungo": 7000.01,
     "sp17f_debiti_previdenza_lungo": 10000.71,
     "sp17g_altri_debiti_lungo": 20000.13,
 }
@@ -365,13 +396,18 @@ INVESTIMENTI_SOTTO_CENTESIMO = {
 def _rifiuto_atteso(piano):
     """Il campo oltre che il motore deve rifiutare per questo piano, o None.
 
-    Stesso ordine di scansione del motore (`_LATO_OLTRE_GOVERNATO_DA_PIANO`).
+    Stesso ordine di scansione del motore (`_LATO_OLTRE_GOVERNATO_DA_PIANO`),
+    e la stessa regola aggiuntiva del rilievo I-b: senza piano tributario
+    `sp17e` la governa il kernel fiscale comunque, quindi un override che la
+    batteria NON contiene non deve generare un rifiuto (e difatti la famiglia
+    l'ha lasciata perdere: vedi il commento sopra).
     """
-    if not piano:
-        return None
-    for saldo, campo in LATO_OLTRE_DEL_PIANO.items():
-        if piano.get(saldo) and SP_FAMIGLIA.get(campo) is not None:
-            return campo
+    for saldo, campi in LATO_OLTRE_DEL_PIANO.items():
+        if not (piano or {}).get(saldo):
+            continue
+        for campo in campi:
+            if SP_FAMIGLIA.get(campo) is not None:
+                return campo
     return None
 
 
@@ -424,7 +460,7 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
                     rifiutati += 1
                     assert res["forecast_generated"] is False, \
                         f"[{nome_p} | {nome_i} | {nome_o}] {rifiutato} doveva essere rifiutato"
-                    assert "non e' ammesso" in res["message"] and rifiutato in res["message"], \
+                    assert "non è ammesso" in res["message"] and rifiutato in res["message"], \
                         f"[{nome_p} | {nome_i} | {nome_o}] messaggio sbagliato: {res['message']}"
                     continue
                 # `forecast_generated`, non l'HTTP 200: il bulk risponde 200 anche

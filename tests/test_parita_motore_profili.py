@@ -37,7 +37,8 @@ from calculations.forecast_engine import validate_pregresso
 from scripts.parita_motore import FIXTURES, PROFILI, costruisci_griglia
 
 SEME = 20260910
-NUOVI = ("pregresso_tributari_mezzo_cent", "pregresso_altri", "override_aggregato")
+NUOVI = ("pregresso_tributari_mezzo_cent", "pregresso_altri", "override_aggregato",
+         "pregresso_mezzo_cent_con_override")
 
 
 def _bs_di(fixture):
@@ -80,7 +81,7 @@ def _ha_mezzo_centesimo(amounts) -> bool:
 
 def test_i_tre_profili_nuovi_sono_in_coda_a_PROFILI():
     nomi = list(PROFILI)
-    assert tuple(nomi[-3:]) == NUOVI, f"non sono in coda, e le estrazioni cambierebbero: {nomi}"
+    assert tuple(nomi[-4:]) == NUOVI, f"non sono in coda, e le estrazioni cambierebbero: {nomi}"
     assert len(nomi) == len(set(nomi))
 
 

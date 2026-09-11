@@ -451,19 +451,30 @@ def profilo_pregresso_tributari_mezzo_cent(rng: random.Random, anno_idx: int) ->
     `details['imposte'].generated_debt` lontano da qualunque confronto — la
     revisione lo misura su 32 scenari su 96 della SUA batteria (rate a mezzo
     centesimo, `dump_batteria.py`, fuori griglia). Finche' `PROFILI` non ha
-    una rata sotto il centesimo il banco non lo vede MAI: due versioni che
-    si dividono di un centesimo su `sp06g` e sulla cassa, a parita' di
-    override assenti, passerebbero qui come identiche.
+    una rata sotto il centesimo il banco non ha nessuna possibilita' di vederlo.
+
+    CHE VEDA POI — misura, e non e' quella che ci si aspetterebbe. Su questa
+    griglia (5 anni, `b08a9a6` contro il giro 2) il profilo da solo non muove
+    NESSUNA CELLA: la cella forzata e' la somma delle due parti, quindi la
+    coda di mezzo centesimo resta confinata nei `details`, che il confronto del
+    banco non guarda (confronta prospetti, non dichiarazioni). La firma con cui
+    la revisione l'aveva vista (`sp06g` −0,01, cassa +0,01) e' di un altro
+    contesto: li' la cella NON era forzata e il riallineamento riscriveva il
+    `generated` di una riga mai toccata. Per quella prova serve un test che
+    guardi i `details`, e infatti c'e': `test_a_senza_override_il_riallineamento_non_cambia_niente`
+    confronta lo stesso scenario col riallineatore acceso e spento (ed e' rosso
+    su `b08a9a6`). Questo profilo resta: se un domani la coda frazionaria
+    trovasse la strada per una cella, qui si vedrebbe.
 
     Misura di QUESTO profilo (driver del banco, griglia a 5 anni, `0207c93`
     contro `b08a9a6`, fixture `tributari` — l'unico con massa tributaria):
-    `details['imposte'].generated_debt` 2027 passa da `0` a `0.005` (rata
-    1626.405, `residual_short` 1197.855: e' li' il mezzo centesimo), e il 2028
-    porta `sp06g` da `0.00` a `-0.01` con la cassa di `+0,01` — la firma che la
-    revisione descrive, senza che nessuno abbia forzato una cella. Nelle stesse
-    righe compare anche `sp16c` -> `sp16g`: quello e' I3, che su `0207c93` non
-    era ancora arrivato. Nota: la griglia estrae da UN rng per fixture, quindi
-    le cifre dipendono da `--anni`; qui sono quelle di `--anni 5`.
+    `details['imposte'].generated_debt` 2027 passa da `0` a `0.005` su una
+    cella NON forzata (rata 1626.405, `residual_short` 1197.855: e' li' il mezzo
+    centesimo), e il 2028 porta `sp06g` da `0.00` a `-0.01` con la cassa di
+    `+0,01` — la firma che la revisione descrive. Nelle stesse righe compare
+    anche `sp16c` -> `sp16g`: quello e' I3, che su `0207c93` non era ancora
+    arrivato. Nota: la griglia estrae da UN rng per fixture, quindi le cifre
+    dipendono da `--anni`; qui sono quelle di `--anni 5`.
 
     Solo tributari, e nessun `existing_debt_repayment_years`: cio' che si
     misura e' l'IDENTITA' senza override, non un'altra interazione. Le
@@ -483,6 +494,36 @@ def profilo_pregresso_tributari_mezzo_cent(rng: random.Random, anno_idx: int) ->
                                          round(rng.uniform(0.15, 0.3), 4)],
         },
     })
+    return valori
+
+
+def profilo_mezzo_cent_con_override(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Rate a mezzo centesimo PLUS una cella tributaria breve forzate, insieme.
+
+    Perche' esiste (giro 2, rilievo I-a della revisione di `f330730`). Il
+    profilo sopra, da solo, NON puo' far vedere la firma: il ramo incriminato
+    del riallineatore (`if res != declared_res`) si apre solo quando la riga e'
+    FORZATA, e `profilo_pregresso_tributari_mezzo_cent` di forzature non ne ha
+    nessuna — «Solo tributari, e nessun existing_debt_repayment_years: cio' che
+    si misura e' l'IDENTITA' senza override», dice il suo docstring. Misurato:
+    la griglia con quel solo profilo da' 0 divergenze fra `b08a9a6` e questa
+    versione, su 5 anni e tutte e otto le fixture.
+
+    Qui la combinazione che la griglia non aveva c'e': la rata sotto il
+    centesimo E l'override sulla cella contabile della stessa riga, e il numero
+    e' preso di peso da `profilo_override_ce_sp` (40000.33). L'affermazione che
+    questo profilo porta in dote e' pero' NEGATIVA, e va detta chiara perche' il
+    banco non la vedra' mai: la correzione I-a non muove nessuna CELLA (la
+    somma delle due parti e' la cella forzata, prima e dopo), sposta solo il
+    `generated_debt` dichiarato nei `details`, che il confronto del banco non
+    guarda. La prova che il difetto e' chiuso sta dunque nel test di proprieta'
+    `test_a_senza_override_il_riallineamento_non_cambia_niente`, non qui; questo
+    profilo esiste per non perdere la combinazione.
+    """
+    valori = profilo_pregresso_tributari_mezzo_cent(rng, anno_idx)
+    if anno_idx != 0:
+        return valori
+    valori["sp_overrides"] = {"sp16e_debiti_tributari_breve": _eur(rng, 40000, 40001)}
     return valori
 
 
@@ -561,6 +602,11 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "pregresso_tributari_mezzo_cent": profilo_pregresso_tributari_mezzo_cent,
     "pregresso_altri": profilo_pregresso_altri,
     "override_aggregato": profilo_override_aggregato,
+    # In CODA, dopo `override_aggregato`: l'ordine di `PROFILI` e' anche quello
+    # con cui lo STESSO rng di fixture estrae, e infilarsi in mezzo ricadrebbe su
+    # tutti i profili successivi (numero registrato del commit 1 e cifra della
+    # firma I-a incluse). Un profilo nuovo si aggiunge in fondo, sempre.
+    "pregresso_mezzo_cent_con_override": profilo_mezzo_cent_con_override,
 }
 
 

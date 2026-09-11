@@ -51,6 +51,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
@@ -115,7 +117,7 @@ export default function ForecastIncomePage() {
   const router = useRouter();
   const { pratica } = usePratica();
   const { selectedCompanyId } = useApp();
-  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const { data: scenarios = [], isLoading: scenariosLoading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const invalidateAnalysis = useInvalidateAnalysis();
@@ -140,12 +142,16 @@ export default function ForecastIncomePage() {
     setPendingEdits({});
   }, [selectedScenario?.id]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
-  const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
+  const { status: pageStatus, errorSource } = forecastPageState(
+    { loading: scenariosLoading, error: scenariosError },
+    { loading: analysisLoading, error: analysisError },
+  );
+  const loadError = errorSource === "scenarios" ? scenariosError : analysisError;
+  const retryLoad = () => (errorSource === "scenarios" ? refetchScenarios() : refetchAnalysis());
 
   const handleCellEdit = useCallback((year: number, field: string, value: number | null) => {
     const overrideField = FIELD_TO_OVERRIDE[field];
@@ -239,7 +245,7 @@ export default function ForecastIncomePage() {
     );
   }
 
-  if (scenarios.length === 0 && !loading) {
+  if (forecastScenariosEmpty({ loading: scenariosLoading, error: scenariosError }, scenarios.length)) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
@@ -277,14 +283,11 @@ export default function ForecastIncomePage() {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError error={loadError} onRetry={retryLoad} className="mb-6" />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && !analysisData && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
@@ -293,7 +296,7 @@ export default function ForecastIncomePage() {
 
       <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
-      {!loading && analysisData && historicalYears.length === 0 && (
+      {analysisData && historicalYears.length === 0 && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -304,7 +307,7 @@ export default function ForecastIncomePage() {
         </Alert>
       )}
 
-      {!loading && analysisData && historicalYears.length > 0 && (
+      {analysisData && historicalYears.length > 0 && (
         <>
           {/* Income Statement Table */}
           <Card className="mb-6">

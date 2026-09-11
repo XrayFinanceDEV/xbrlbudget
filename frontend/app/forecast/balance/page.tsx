@@ -22,8 +22,10 @@ import {
   ComposedChart,
   Area,
 } from "recharts";
-import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info, Save } from "lucide-react";
+import { BarChart3, AlertTriangle, Loader2, Info, Save } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { overridesFromPendingEdits, pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -123,7 +125,7 @@ const SP_EDITABLE_FIELDS = new Set([
 
 export default function ForecastBalancePage() {
   const { selectedCompanyId } = useApp();
-  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const { data: scenarios = [], isLoading: scenariosLoading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [pendingEdits, setPendingEdits] = useState<PendingSpEdits>({});
@@ -141,12 +143,16 @@ export default function ForecastBalancePage() {
     if (!selectedCompanyId) setSelectedScenario(null);
   }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
-  const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
+  const { status: pageStatus, errorSource } = forecastPageState(
+    { loading: scenariosLoading, error: scenariosError },
+    { loading: analysisLoading, error: analysisError },
+  );
+  const loadError = errorSource === "scenarios" ? scenariosError : analysisError;
+  const retryLoad = () => (errorSource === "scenarios" ? refetchScenarios() : refetchAnalysis());
 
   useEffect(() => setPendingEdits({}), [selectedScenario?.id]);
 
@@ -195,7 +201,7 @@ export default function ForecastBalancePage() {
     );
   }
 
-  if (scenarios.length === 0 && !loading) {
+  if (forecastScenariosEmpty({ loading: scenariosLoading, error: scenariosError }, scenarios.length)) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
@@ -234,15 +240,11 @@ export default function ForecastBalancePage() {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Errore</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError error={loadError} onRetry={retryLoad} className="mb-6" />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && !analysisData && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
@@ -251,7 +253,7 @@ export default function ForecastBalancePage() {
 
       <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
-      {!loading && analysisData && historicalYears.length > 0 && (
+      {analysisData && historicalYears.length > 0 && (
         <>
           {/* Balance Sheet Table */}
           <Card className="mb-6">

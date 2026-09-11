@@ -83,6 +83,9 @@ import { ProjectionTable } from "@/components/pratica/ProjectionTable";
 import { ExtraAccountingAlerts } from "@/components/pratica/ExtraAccountingAlerts";
 import { IndicatoriTable } from "@/components/pratica/IndicatoriTable";
 import { StampaContent } from "@/components/pratica/StampaContent";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
+import { forecastLoadErrorMessage } from "@/lib/forecast-page-status";
+import { praticaIndicatoriStatus } from "@/lib/pratica-indicatori-status";
 import {
   MONTH_LABELS,
   SECTOR_OPTIONS,
@@ -333,6 +336,7 @@ export default function InfraannualePage() {
 
   // Step 4: Results
   const [analysis, setAnalysis] = useState<ScenarioAnalysis | null>(null);
+  const [analysisError, setAnalysisError] = useState<unknown>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [extraAlerts, setExtraAlerts] = useState<Record<string, boolean>>({});
   const [ratingVisible, setRatingVisible] = useState(false);
@@ -926,12 +930,13 @@ export default function InfraannualePage() {
     if (!importResult || !scenario) return;
 
     setLoadingAnalysis(true);
+    setAnalysisError(null);
     try {
       const data = await getScenarioAnalysis(importResult.companyId, scenario.id);
       setAnalysis(data);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Errore nel caricamento analisi";
-      toast.error(msg);
+      setAnalysisError(error);
+      toast.error(forecastLoadErrorMessage(error));
     } finally {
       setLoadingAnalysis(false);
     }
@@ -1876,81 +1881,102 @@ export default function InfraannualePage() {
 
         {/* STEP 4: INDICATORI */}
         {activeTab === "results" && <div className="space-y-6">
-          {loadingAnalysis ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground" />
-                <p className="mt-2 text-muted-foreground">Caricamento indicatori...</p>
-              </CardContent>
-            </Card>
-          ) : analysis && comparison ? (
-            <>
-              <ExtraAccountingAlerts alerts={extraAlerts} onChange={(a) => { setExtraAlerts(a); setRatingVisible(false); }} />
+          {(() => {
+            const indicatoriStatus = praticaIndicatoriStatus({
+              loading: loadingAnalysis,
+              error: analysisError,
+              analysis,
+              comparison,
+            });
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Indicatori Finanziari</CardTitle>
-                  <CardDescription>
-                    {periodMonths === 12
-                      ? `Confronto: storico ${comparison.reference_year}, infrannuale 12M ${comparison.partial_year}`
-                      : `Confronto: storico ${comparison.reference_year}, infrannuale ${comparison.period_months}M ${comparison.partial_year} (annualizzato), proiezione 12M ${comparison.partial_year}`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <IndicatoriTable
-                    comparison={comparison}
-                    forecastBs={analysis.forecast_years?.[0]?.balance_sheet || {}}
-                    forecastIs={analysis.forecast_years?.[0]?.income_statement || {}}
-                    extraAlerts={extraAlerts}
-                    showRating={ratingVisible}
-                    hideProiezione={periodMonths === 12}
-                  />
-                </CardContent>
-              </Card>
+            if (indicatoriStatus === "caricamento") {
+              return (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground" />
+                    <p className="mt-2 text-muted-foreground">Caricamento indicatori...</p>
+                  </CardContent>
+                </Card>
+              );
+            }
 
-              {!ratingVisible && (
-                <div className="flex justify-center">
-                  <AlertDialog open={showNoAlertsConfirm} onOpenChange={setShowNoAlertsConfirm}>
-                    <AlertDialogTrigger asChild>
-                      <Button onClick={() => {
-                        const hasAlerts = Object.values(extraAlerts).some(Boolean);
-                        if (hasAlerts) {
-                          setRatingVisible(true);
-                        } else {
-                          setShowNoAlertsConfirm(true);
-                        }
-                      }}>
-                        <BarChart3 className="h-4 w-4 mr-2" />
-                        Calcola Rating
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Segnali Extracontabili</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Conferma che non ci sono segnali extra contabili della crisi
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Annulla</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { setShowNoAlertsConfirm(false); setRatingVisible(true); }}>
-                          Conferma
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              )}
-            </>
-          ) : (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <p className="text-muted-foreground">
-                  Genera prima la proiezione nel passaggio 3.
-                </p>
-              </CardContent>
-            </Card>
-          )}
+            if (indicatoriStatus === "errore") {
+              return <ForecastLoadError error={analysisError} onRetry={loadAnalysis} />;
+            }
+
+            if (indicatoriStatus === "non_generato") {
+              return (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <p className="text-muted-foreground">
+                      Genera prima la proiezione nel passaggio 3.
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            return (
+              <>
+                <ExtraAccountingAlerts alerts={extraAlerts} onChange={(a) => { setExtraAlerts(a); setRatingVisible(false); }} />
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Indicatori Finanziari</CardTitle>
+                    <CardDescription>
+                      {periodMonths === 12
+                        ? `Confronto: storico ${comparison!.reference_year}, infrannuale 12M ${comparison!.partial_year}`
+                        : `Confronto: storico ${comparison!.reference_year}, infrannuale ${comparison!.period_months}M ${comparison!.partial_year} (annualizzato), proiezione 12M ${comparison!.partial_year}`}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <IndicatoriTable
+                      comparison={comparison!}
+                      forecastBs={analysis!.forecast_years?.[0]?.balance_sheet || {}}
+                      forecastIs={analysis!.forecast_years?.[0]?.income_statement || {}}
+                      extraAlerts={extraAlerts}
+                      showRating={ratingVisible}
+                      hideProiezione={periodMonths === 12}
+                    />
+                  </CardContent>
+                </Card>
+
+                {!ratingVisible && (
+                  <div className="flex justify-center">
+                    <AlertDialog open={showNoAlertsConfirm} onOpenChange={setShowNoAlertsConfirm}>
+                      <AlertDialogTrigger asChild>
+                        <Button onClick={() => {
+                          const hasAlerts = Object.values(extraAlerts).some(Boolean);
+                          if (hasAlerts) {
+                            setRatingVisible(true);
+                          } else {
+                            setShowNoAlertsConfirm(true);
+                          }
+                        }}>
+                          <BarChart3 className="h-4 w-4 mr-2" />
+                          Calcola Rating
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Segnali Extracontabili</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Conferma che non ci sono segnali extra contabili della crisi
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Annulla</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => { setShowNoAlertsConfirm(false); setRatingVisible(true); }}>
+                            Conferma
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>}
 
         {/* STEP 5: STAMPA */}

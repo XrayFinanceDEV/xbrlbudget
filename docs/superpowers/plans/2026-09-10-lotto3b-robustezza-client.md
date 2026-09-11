@@ -1491,3 +1491,16 @@ Nessun commit di codice da questo task. Scrivi un rapporto in
 `/home/peter/DEV/budget/.superpowers/sdd/2026-09-10-lotto3b-robustezza-client/task-4-report.md` con: l'esito delle
 tre suite (punto 1), il rapporto del collaudo a schermo del punto 2 (comprese eventuali osservazioni non conformi),
 e l'esito di `/riallinea` (punto 3).
+
+---
+
+> **Superato dal 2026-09-11 — la revisione finale ha cambiato il design del Task 3.2/3.3.** Le pagine
+> `/forecast/income`, `/forecast/balance` e `/report` non usano `forecastPageStatus(loading, error)` a un
+> solo argomento né il gate `pageStatus === "pronto" && analysisData` descritti sopra (righe ~558-818,
+> incluso il bullet di `CLAUDE.md` proposto lì): usano invece `forecastPageState(scenarios, analysis)` e
+> `forecastScenariosEmpty` (`frontend/lib/forecast-page-status.ts`), che distinguono l'errore della lista
+> scenari da quello di `/analysis` (`errorSource`) e non nascondono mai i dati già in cache dietro un
+> errore di refetch. Il Task 3.4 (tab Indicatori, `praticaIndicatoriStatus`) risulta invece implementato
+> esattamente come descritto qui. Stato attuale: `CLAUDE.md` › «Invarianti e trappole › Frontend», bullet
+> «CE Prev., SP Prev. e Report non restano mai su uno spinner…», verificato a `ffedd1a` in
+> `docs/superpowers/allineamento/2026-09-11.md`.

@@ -71,13 +71,37 @@ class DecimalJSONResponse(JSONResponse):
 app.default_response_class = DecimalJSONResponse
 
 
+def _cors_headers_for(request: Request) -> dict:
+    """Le stesse intestazioni che CORSMiddleware aggiungerebbe a una risposta riuscita,
+    per un'origine consentita.
+
+    Servono qui perche' la JSONResponse costruita da unhandled_exception_handler non
+    attraversa piu' CORSMiddleware: l'exception_handler registrato su Exception diventa
+    l'error_handler di ServerErrorMiddleware, la middleware piu' esterna dello stack di
+    Starlette, sopra CORSMiddleware (registrato qui sopra, add_middleware). Senza queste
+    intestazioni un 500 imprevisto su qualunque rotta arriva al browser come blocco CORS,
+    mai come l'errore reale (CLAUDE.md > Invarianti e trappole > Frontend).
+    """
+    origin = request.headers.get("origin")
+    if origin and origin in cors_origins:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """Log full traceback for any unhandled exception, then return 500."""
+    """Log full traceback for any unhandled exception, then return 500 —
+    con le intestazioni CORS che CORSMiddleware non aggiunge piu' a questo punto
+    della catena (vedi _cors_headers_for)."""
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
+        headers=_cors_headers_for(request),
     )
 
 

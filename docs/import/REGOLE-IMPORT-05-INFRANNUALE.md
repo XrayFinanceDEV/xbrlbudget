@@ -133,6 +133,13 @@ immutata, e il budget nato dal promote ereditava quel debito. Nel motore la cass
 a dichiarare `cash_out` e il test end-to-end a verificarlo. `sp17e` (rate oltre l'anno) non si tocca, e la via
 manuale (`sp06e_growth_pct` o `sp16e_growth_pct` valorizzati) continua a saltare la posizione automatica.
 
+**Se la cassa del parziale non copre quell'uscita** (debito tributario di apertura maggiore della cassa
+disponibile), il plug generale dell'infrannuale — §5 sotto, "Il fabbisogno scoperto è un diagnostico, non un
+debito" — clampa `sp09` a zero e dichiara `unfunded_financing_requirement`: la proiezione esce comunque, ma **non
+quadrata**, e il cancello del promote (`check_quadratura(...).semantic_valid`) la rifiuta finché l'utente non
+aggiunge un finanziamento esplicito o una rettifica — decisione del proprietario, lotto 3A, 2026-09-11: si tiene
+la regola, mai un plug al posto della diagnostica.
+
 ### Rimanenze
 Con riferimento: si applica l'**indice di rotazione del magazzino** del riferimento al costo
 materie proiettato. Senza riferimento: la giacenza parziale è portata a fine anno **invariata**.

@@ -10,6 +10,8 @@ hypotheses. This module exercises those REPEATED paths.
 """
 from decimal import Decimal
 
+import pytest
+
 from backend.app.api.v1 import budget_scenarios, financial_years
 from backend.app.schemas.adjustments import AdjustmentsUpdate, RettificaEntry
 from backend.app.schemas.budget import BudgetScenarioCreate
@@ -225,6 +227,46 @@ def test_promote_then_budget_chain_stays_quadrato(tmp_path, monkeypatch):
         imported = _import_pdf(sessions, monkeypatch, tmp_path, "CATENA SRL")
         company_id = imported["company_id"]
         with sessions() as db:
+            # Il fixture porta 1.150.949,04 di debiti tributari contro
+            # 160.168,58 di cassa nel parziale: da quando le imposte si
+            # pagano a saldo + acconto (Task 5) quel debito esce di cassa
+            # entro il 31/12 e il gap misura ~899.443,51 -- il cancello del
+            # promote lo rifiuterebbe. Questa catena prova la quadratura
+            # promote -> budget su uno scenario FINANZIATO: una rettifica
+            # bilanciata (cassa/banche a breve) copre il fabbisogno con un
+            # margine deliberato, il cambiamento piu' piccolo che lo evita
+            # senza toccare le ipotesi del motore. Il fixture NON finanziato
+            # e' provato a parte, sotto
+            # (test_promote_rifiuta_una_proiezione_col_fabbisogno_tributario_scoperto).
+            editable = financial_years.get_adjustable_financial_year(
+                company_id, 2026, period_months=6, user_id=USER, db=db,
+            )
+            cash = Decimal(str(editable.balance_sheet["sp09_disponibilita_liquide"]))
+            bank = Decimal(str(editable.balance_sheet["sp16a_debiti_banche_breve"]))
+            debt = Decimal(str(editable.balance_sheet["sp16_debiti_breve"]))
+            bump = Decimal("950000")
+            financial_years.save_adjustments(
+                company_id, 2026,
+                AdjustmentsUpdate(
+                    balance_sheet={
+                        "sp09_disponibilita_liquide": cash + bump,
+                        "sp16_debiti_breve": debt + bump,
+                        "sp16a_debiti_banche_breve": bank + bump,
+                    },
+                    income_statement={},
+                    rettifiche_log=[RettificaEntry(
+                        id="catena-1", edited_field="sp09_disponibilita_liquide",
+                        edited_label="Disponibilita liquide", edit_delta=float(bump),
+                        counterpart_field="sp16a_debiti_banche_breve",
+                        counterpart_label="Debiti verso banche entro 12 mesi",
+                        counterpart_delta=float(bump),
+                        explanation="finanziamento a copertura del debito tributario",
+                        created_at="2026-07-21T09:00:00Z",
+                    )],
+                ),
+                period_months=6, user_id=USER, db=db,
+            )
+
             infra = budget_scenarios.create_budget_scenario(
                 company_id,
                 BudgetScenarioCreate(company_id=company_id, name="infra",
@@ -290,5 +332,75 @@ def test_promote_then_budget_chain_stays_quadrato(tmp_path, monkeypatch):
                 .all()
             )
             assert len(full_years) == 1
+    finally:
+        engine.dispose()
+
+
+def test_promote_rifiuta_una_proiezione_col_fabbisogno_tributario_scoperto(
+    tmp_path, monkeypatch
+):
+    """Sul fixture NON finanziato (nessuna rettifica di cassa, a differenza
+    di test_promote_then_budget_chain_stays_quadrato sopra) il debito
+    tributario di apertura (1.150.949,04) supera la cassa del parziale
+    (160.168,58): il motore clampa sp09 a zero e la proiezione esce non
+    quadrata. Il cancello del promote (check_quadratura(...).semantic_valid)
+    la rifiuta -- decisione del proprietario 2026-09-11, si tiene la regola,
+    mai un plug -- e la rifiuta PRIMA di cancellare l'eventuale
+    FinancialYear annuale gia' esistente (promote_service.py Step 2b gira
+    prima dello Step 3, la delete): un'azienda che aveva gia' un anno
+    annuale non lo perde per un tentativo di promote fallito."""
+    from database.models import BalanceSheet, FinancialYear, IncomeStatement
+    from tests.e2e_kit import BASE_BS, BASE_CE
+
+    engine, sessions = memory_sessions()
+    try:
+        imported = _import_pdf(sessions, monkeypatch, tmp_path, "CATENA SCOPERTA SRL")
+        company_id = imported["company_id"]
+        with sessions() as db:
+            # Un anno annuale gia' esistente per lo stesso company_id+anno,
+            # come se fosse stato importato a mano prima -- per verificare
+            # che un rifiuto del promote non lo tocchi.
+            existing_fy = FinancialYear(
+                company_id=company_id, year=2026, period_months=None,
+                validation_status="verified", forecastable=True,
+            )
+            db.add(existing_fy)
+            db.flush()
+            db.add(BalanceSheet(financial_year_id=existing_fy.id, **BASE_BS))
+            db.add(IncomeStatement(financial_year_id=existing_fy.id, **BASE_CE))
+            db.commit()
+            existing_fy_id = existing_fy.id
+
+            infra = budget_scenarios.create_budget_scenario(
+                company_id,
+                BudgetScenarioCreate(company_id=company_id, name="infra-scoperta",
+                                     base_year=2025, scenario_type="infrannuale",
+                                     period_months=6),
+                user_id=USER, db=db,
+            )
+            budget_scenarios.bulk_upsert_assumptions(
+                company_id, infra.id,
+                request={"assumptions": [{"forecast_year": 2026,
+                                          "revenue_growth_pct": 3,
+                                          "tax_rate": 24}],
+                         "auto_generate": True},
+                user_id=USER, db=db,
+            )
+
+            with pytest.raises(ValueError, match="non quadra"):
+                promote_projection_to_financial_year(db, infra.id)
+
+            full_years = (
+                db.query(FinancialYear)
+                .filter(FinancialYear.company_id == company_id,
+                        (FinancialYear.period_months == None)  # noqa: E711
+                        | (FinancialYear.period_months == 12))
+                .all()
+            )
+            assert len(full_years) == 1
+            assert full_years[0].id == existing_fy_id
+            assert full_years[0].balance_sheet.sp09_disponibilita_liquide == (
+                BASE_BS["sp09_disponibilita_liquide"]
+            )
     finally:
         engine.dispose()

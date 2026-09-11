@@ -606,7 +606,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   projection into a full-year `FinancialYear` that can then be a budget base year. Two semantic gates
   (`check_quadratura(...).semantic_valid`, **not** a euro threshold) and a destructive replacement of
   the existing annual year — see «Invarianti e trappole › Previsionale» and
-  [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5.
+  [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5. An infrannuale whose opening
+  tax debt exceeds the partial year's cash closes with the `unfunded_financing_requirement` warning
+  and is not promotable until the user adds an explicit financing assumption or a rettifica —
+  decision of the owner, lotto 3A, 2026-09-11.
 
 ### Rettifiche (BS/IS Adjustments Journal)
 

@@ -82,12 +82,19 @@ FINANZIARI_SEMPRE = frozenset({
 })
 
 
-def _divergenze(bs, ce, det, row):
+def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
     """Ogni numero dichiarato che il persistito non conferma.
 
     Restituisce coppie `(campo, spiegazione)`: il campo separato serve a
     raggruppare il fallimento per FAMIGLIA invece che per ordine di scenario
-    (vedi il messaggio in coda al test).
+    (vedi il messaggio in coda al test). `prec`, quando c'e', e' la coppia
+    `(bs, det)` dell'anno generato prima: serve all'identità di flusso
+    tributario (rilievo M-4, punto 1), che e' una frase su DUE anni. `chiuse`
+    e' il dizionario `{saldo: Σ(rata+perse) degli anni FINO a questo}` che il
+    ciclo di uno scenario accumula per la riga-identità (rilievo M-4, punto
+    3): la riga dichiara `opening` come apertura DEL PIANO (costante per anno,
+    `runoff_schedule`), quindi l'identità è `opening − Σclosed`, non
+    `opening − closed`.
     """
     fuori = []
 
@@ -157,6 +164,84 @@ def _divergenze(bs, ce, det, row):
         fuori.append(("riga crediti", f"parte commerciale di sp06 {commerciale}, dichiarato "
                       f"{d_cred['generated']} + {d_cred['residual_short']} = "
                       f"{D(str(d_cred['generated'])) + D(str(d_cred['residual_short']))}"))
+
+    # ── rilievo M-4, punto 3 (giro 3): il CONTABILE di ogni riga con piano ──
+    # `opening − Σclosed − Σwriteoff = residual_short + residual_long`, con Σ
+    # sugli anni del piano FINO a questo (l'`opening` di riga e' l'apertura
+    # del piano intero, non dell'anno: `runoff_schedule`): la rata che il
+    # calendario dice di aver pagato deve essere uscita dal residuo che
+    # dichiara, o la riga racconta un anno diverso dalla cella che descrive.
+    # Solo il modo `runoff`: in `legacy` la riga non ha calendario (rs e rl
+    # sono zero per costruzione), e pretendere l'identità lì sarebbe
+    # un'asserzione inventata.
+    for saldo, d in (det.get("pregresso") or {}).items():
+        if d.get("mode") != "runoff":
+            continue
+        if chiuse is None:
+            sigma = D(str(d.get("closed") or 0)) + D(str(d.get("writeoff") or 0))
+        else:
+            sigma = chiuse.setdefault(saldo, D("0"))
+            chiuse[saldo] = sigma
+        residuo = _q(D(str(d.get("opening") or 0)) - sigma)
+        dichiarati = _q(D(str(d.get("residual_short") or 0))
+                        + D(str(d.get("residual_long") or 0)))
+        if residuo != dichiarati:
+            fuori.append((f"riga {saldo}",
+                          f"{saldo}: apertura {d.get('opening')} − Σ chiuse {sigma}"
+                          f" = {residuo}, residui dichiarati"
+                          f" {dichiarati} ({d.get('residual_short')} + {d.get('residual_long')})"))
+
+    # ── rilievo M-4, punto 1 (giro 3): l'identità di flusso dell'anno dopo ──
+    # `pos(N) − [pos(N−1) + imposta − saldo − acconti − rate] ≈ 0` con
+    # `pos = sp16e + sp17e − sp06e` PERSISTITI: se la posizione tributaria si
+    # e' mossa senza che un versamento (o il calcolo dell'imposta) lo dica,
+    # l'ha mossa la cassa senza un flusso — il difetto che le due sedi
+    # riallineate da I1 promettono di non avere più. Vale dal secondo anno
+    # generato in poi, e solo se ENTRAMBI gli anni parlano in modo
+    # `saldo_acconto`: un controllo che non può correre qui è «non lo so», non
+    # un verdetto.
+    #
+    # LA FORMA IN RETE E' A DUE CENTESIMI, non lo 0,00 esatto del file
+    # tributario, e non è un ammollimento di comodo: le due posizioni sono
+    # QUANTIZZATE al centesimo mentre la dichiarazione dei flussi e' GREZZA
+    # (misura: `gen_debt` 5951.85678, differenza delle celle 5951.85), quindi
+    # lo scarto legittimo vale al più 0,005 (coda della dichiarazione) + 0,01
+    # (le due code di quantizzazione) — misurato 0,0132 su
+    # `[senza piano | nessun piano | crediti giù nel 2027 | 2029]`. Il fixture
+    # del file tributario capita sulle centesime e vede 0,00; qui si dichiara
+    # la forma debole, che un flusso perso — il difetto cercato si misura in
+    # MIGLIAIA di euro, non in code — lo vede a un ordine di grandezza di
+    # distanza, e la deviazione dalla lettera del rilievo sta nel rapporto.
+    if prec is not None:
+        bs_p, det_p = prec
+        i0, i1 = det.get("imposte") or {}, det_p.get("imposte") or {}
+        # Sotto un override di `sp16e`/`sp06e` DELL'ANNO N il flusso dichiarato
+        # dal kernel non e' quel che e' stato pagato: e' l'override stesso il
+        # flusso non dichiarato, e il primo confronto della rete
+        # (`persistito == override`) risponde di quella cella. Si salta SOLO
+        # l'anno forzato: l'anno DOPO l'override deve invece stare a zero per
+        # costruzione (I1: la dichiarazione riallineata porta avanti la
+        # scelta), ed e' esattamente la copertura che il rilievo M-4 chiedeva.
+        ov_now = row.get("sp_overrides") or {}
+        forzato_pos = any(ov_now.get(c) is not None for c in (
+            "sp16e_debiti_tributari_breve", "sp06e_crediti_tributari_breve"))
+        if (i0.get("mode") == "saldo_acconto" and i1.get("mode") == "saldo_acconto"
+                and not forzato_pos
+                and all(k in i0 for k in ("current_tax", "saldo_paid",
+                                          "acconti_paid", "rate_paid"))):
+            def _posizione(b):
+                return (D(str(b["sp16e_debiti_tributari_breve"]))
+                        + D(str(b["sp17e_debiti_tributari_lungo"]))
+                        - D(str(b["sp06e_crediti_tributari_breve"])))
+            scarto = _posizione(bs) - (_posizione(bs_p) + D(str(i0["current_tax"]))
+                                       - D(str(i0["saldo_paid"])) - D(str(i0["acconti_paid"]))
+                                       - D(str(i0["rate_paid"])))
+            if abs(scarto) > D("0.02"):
+                fuori.append(("flusso tributario",
+                              f"scarto di flusso {scarto}: la posizione è cambiata senza "
+                              f"un versamento che lo dichiari (imposta {i0['current_tax']}, "
+                              f"saldo {i0['saldo_paid']}, acconti {i0['acconti_paid']}, "
+                              f"rate {i0['rate_paid']})"))
 
     # ── caso 4: le voci indicizzate ──
     for code, voce in det["indicizzazione"].items():
@@ -414,6 +499,13 @@ OVERRIDE = {
     # Il LATO OLTRE con un piano attivo, invece, collide per progetto (I1-bis):
     # quegli scenari si assertiscono sul RIFIUTO, vedi `_rifiuto_atteso`.
     "SP sui campi dichiarati": {"sp_overrides": SP_FAMIGLIA},
+    # Rilievo M-4, punto 2 (giro 3): un override che cade SOLO nel secondo
+    # anno di piano. Tutta la famiglia fin qui era stata messa in ogni anno,
+    # e una regola applicata solo alla prima riga (la mutazione M8 della
+    # revisione di `f330730`) non avrebbe mai incrociato un secondo anno
+    # forzato. Solo il BREVE: i campi oltre collisionerebbero nel rifiuto
+    # I1-bis di proposito, e qui si vuole la palestra che genera.
+    "SP solo anno 2": {"solo_anno": (1, dict(SP_FAMIGLIA_BREVE))},
     # Rilievo I-1 della revisione di `6e5c0f7`, punto 4: la variante con
     # l'AGGREGATO forzato, che e' il caso in cui il residuo non e' un
     # centesimo bensi' la massa dell'override. Con un piano `altri_debiti`
@@ -471,7 +563,7 @@ ANNI = (2027, 2028, 2029)
 
 @pytest.mark.parametrize("crescita", CRESCITE)
 def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeypatch):
-    """La rete permanente: 72 scenari per percentuale, 216 anni, zero divergenze.
+    """La rete permanente: 144 scenari per percentuale, 321 anni, zero divergenze.
 
     Parametrizzato sulla crescita per avere quattro esiti distinti invece di uno
     solo: quando si rompe, il messaggio dice su quale percentuale — e un difetto
@@ -489,7 +581,12 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
                 user = f"{USER}-{crescita}-{scenari}"
                 company_id = _base_year(db, user)
                 rows = [dict(forecast_year=y, revenue_growth_pct=crescita,
-                             **INVESTIMENTI_SOTTO_CENTESIMO, **ov) for y in ANNI]
+                             **INVESTIMENTI_SOTTO_CENTESIMO,
+                             **{k: v for k, v in ov.items() if k != "solo_anno"})
+                        for y in ANNI]
+                if "solo_anno" in ov:
+                    i_ov, d_ov = ov["solo_anno"]
+                    rows[i_ov]["sp_overrides"] = dict(d_ov)
                 if piano:
                     rows[0]["pregresso"] = piano
                 if idx:
@@ -522,19 +619,33 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
                 assert res["forecast_generated"] is True, f"{nome_p}/{nome_i}/{nome_o}: {res['message']}"
                 prev = budget_scenarios.preview_forecast_route(
                     company_id, sc.id, request={"assumptions": rows}, user_id=user, db=db)
+                prec = None
+                chiuse: dict = {}
                 for (_, bs, ce), anno, row in zip(
                     read_forecast_maps(db, sc.id), prev["forecast_years"], rows
                 ):
                     anni += 1
-                    for campo, guasto in _divergenze(bs, ce, anno["details"], row):
+                    det_a = anno["details"]
+                    for _s, _d in (det_a.get("pregresso") or {}).items():
+                        chiuse[_s] = (chiuse.get(_s, D("0"))
+                                      + D(str(_d.get("closed") or 0))
+                                      + D(str(_d.get("writeoff") or 0)))
+                    for campo, guasto in _divergenze(bs, ce, det_a, row, prec=prec,
+                                                     chiuse=chiuse):
                         fuori.append((campo, f"[{nome_p} | {nome_i} | {nome_o} | {anno['year']}] {guasto}"))
+                    prec = (bs, det_a)
     finally:
         engine.dispose()
-    # 120 scenari: 6 piani × 4 indicizzazioni × 5 OVERRIDE (la famiglia SP sui
+    # 144 scenari: 6 piani × 4 indicizzazioni × 6 OVERRIDE (la famiglia SP sui
     # campi dichiarati e' il quarto, l'aggregato `sp16` forzato e' il quinto —
-    # rilievo I-1 della revisione di `6e5c0f7`, punto 4).
+    # rilievo I-1 della revisione di `6e5c0f7`, punto 4 — e l'override da solo
+    # nel secondo anno e' il sesto, rilievo M-4 punto 2: la variante nuova non
+    # collide mai, perche' porta solo il breve e le soglie I-c del secondo anno
+    # sono piu' basse dei valori forzati).
     #
-    # I 37 rifiuti si scompongono cosi', e i due conti vanno fatti insieme
+    # Gli anni 321 = 249 di prima + 24 scenari × 3 anni della variante nuova,
+    # che genera sempre; i 37 rifiuti si scompongono cosi', e i due conti
+    # vanno fatti insieme
     # perche' sono due CAMMINI diversi di rifiuto:
     #   · 16 = la famiglia: 4 piani che governano un lato oltre (`altri debiti`,
     #     `altri + previdenziali`, `fornitori + tributari`,
@@ -547,7 +658,7 @@ def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeyp
     #     nel gruppo e il totale forzato e' la massa, non un centesimo (I-1);
     #     il conteggio chiede alla STESSA `_sp_forced_fields` del motore, non a
     #     una previsione scritta a mano.
-    assert scenari == 120 and anni == 249 and rifiutati == 37, \
+    assert scenari == 144 and anni == 321 and rifiutati == 37, \
         f"batteria incompleta: {scenari} scenari, {anni} anni, {rifiutati} rifiuti"
     # Il riepilogo PER CAMPO prima degli esempi, e non e' cosmesi: la prima
     # stesura elencava solo i primi 25 casi in ordine di scenario, e cosi'
@@ -760,12 +871,20 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
                 residui = [D(str(a["details"]["scoperto_residuo"])) for a in anni_prev]
                 picco = max(residui)
                 residuo_prec = D("0")
+                prec = None
+                chiuse = {}
                 for (anno, bs, ce), prev_anno, row in zip(mappe, anni_prev, rows):
                     anni += 1
                     det = prev_anno["details"]
                     dove = f"[{tag} | {anno}]"
-                    for campo, guasto in _divergenze(bs, ce, det, row):
+                    for _s, _d in (det.get("pregresso") or {}).items():
+                        chiuse[_s] = (chiuse.get(_s, D("0"))
+                                      + D(str(_d.get("closed") or 0))
+                                      + D(str(_d.get("writeoff") or 0)))
+                    for campo, guasto in _divergenze(bs, ce, det, row, prec=prec,
+                                                     chiuse=chiuse):
                         fuori.append((campo, f"{dove} {guasto}"))
+                    prec = (bs, det)
                     residuo = D(str(det["scoperto_residuo"]))
                     esercitati["anni con scoperto"] += residuo > 0
                     esercitati["anni che rimborsano"] += residuo < residuo_prec

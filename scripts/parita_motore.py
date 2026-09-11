@@ -410,6 +410,46 @@ def profilo_pregresso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
     }
 
 
+def profilo_sweep_senza_piano(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Cash sweep sul solo debito bancario pregresso SENZA piano (lotto 3A, Task 1).
+
+    Sui fixture del kit il pregresso senza piano e' il `sp17a` di 50.000; su `banca` anche
+    il breve. Nessun prestito: e' il perimetro che lo sweep conserva anche dopo il Task 2.
+    """
+    return {"cash_sweep_enabled": True, "cash_sweep_min_cash": _eur(rng, 5000, 40000)}
+
+
+def profilo_sweep_anni_rimborso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Cash sweep con il pregresso su un piano di anni di rimborso: dal Task 2 lo sweep non lo tocca."""
+    return {
+        "cash_sweep_enabled": True,
+        "cash_sweep_min_cash": _eur(rng, 5000, 40000),
+        "existing_debt_repayment_years": _anni_frazionari(rng, 2, 5),
+    }
+
+
+def profilo_sweep_contratti(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Il contratto misto di `profilo_finanziamento_misto` con il cash sweep acceso ogni anno.
+
+    `costruisci_griglia` riempie i due `opening_residual` anche per questo profilo, col debito
+    bancario reale del fixture: senza, `assemble_financing` rifiuterebbe lo scenario.
+    """
+    valori = profilo_finanziamento_misto(rng, anno_idx)
+    valori.update({"cash_sweep_enabled": True, "cash_sweep_min_cash": _eur(rng, 5000, 40000)})
+    return valori
+
+
+def profilo_sweep_override(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Il caso I2 della revisione finale del lotto 2: un `sp_overrides` su un attivo nel primo anno,
+    lo sweep acceso e lo scoperto concesso. Fino al Task 2 lo sweep decide sulla cassa di PRIMA
+    dell'override e apre uno scoperto per pagare un rimborso anticipato."""
+    valori: Dict[str, Any] = {"cash_sweep_enabled": True, "cash_sweep_min_cash": _eur(rng, 5000, 20000)}
+    if anno_idx == 0:
+        valori["sp_overrides"] = {"sp08_attivita_finanziarie": _eur(rng, 60000, 120000)}
+        valori["overdraft_allowed"] = True
+    return valori
+
+
 # I profili nuovi vanno IN CODA: il generatore di un fixture e' consumato profilo
 # dopo profilo, quindi un profilo inserito in mezzo cambierebbe le estrazioni di
 # tutti quelli che lo seguono.
@@ -425,6 +465,10 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "finanziamento_e_rimborso": profilo_finanziamento_e_rimborso,
     "finanziamento_misto": profilo_finanziamento_misto,
     "pregresso": profilo_pregresso,
+    "sweep_senza_piano": profilo_sweep_senza_piano,
+    "sweep_anni_rimborso": profilo_sweep_anni_rimborso,
+    "sweep_contratti": profilo_sweep_contratti,
+    "sweep_override": profilo_sweep_override,
 }
 
 
@@ -441,7 +485,7 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
             anni_def = []
             for i in range(num_anni):
                 valori = profilo(rng, i)
-                if profilo_nome == "finanziamento_misto" and i == 0:
+                if profilo_nome in ("finanziamento_misto", "sweep_contratti") and i == 0:
                     # `assemble_financing` alza un ValueError se la somma dei
                     # `opening_residual` dichiarati non coincide col debito
                     # bancario dell'anno base (Decimal, entro 0,01): il profilo

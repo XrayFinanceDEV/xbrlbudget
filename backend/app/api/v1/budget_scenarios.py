@@ -394,7 +394,7 @@ def get_intra_year_comparison(
     if scenario.scenario_type != "infrannuale":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Comparison is only available for infrannuale scenarios"
+            detail="Il confronto è disponibile solo per gli scenari infrannuali"
         )
 
     try:
@@ -493,7 +493,7 @@ def promote_projection(
     if scenario.scenario_type != "infrannuale":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only infrannuale scenarios can be promoted"
+            detail="Solo gli scenari infrannuali si possono promuovere"
         )
 
     try:
@@ -566,7 +566,7 @@ def create_budget_assumptions(
     if assumptions_create.forecast_year <= scenario.base_year:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Forecast year {assumptions_create.forecast_year} must be greater than base year {scenario.base_year}"
+            detail=f"L'anno di previsione {assumptions_create.forecast_year} deve essere successivo all'anno base {scenario.base_year}"
         )
 
     # Check for duplicate (scenario_id, forecast_year)
@@ -578,7 +578,7 @@ def create_budget_assumptions(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Assumptions for year {assumptions_create.forecast_year} already exist in scenario {scenario_id}"
+            detail=f"Le ipotesi per l'anno {assumptions_create.forecast_year} esistono già nello scenario {scenario_id}"
         )
 
     # Create assumptions
@@ -635,7 +635,7 @@ def update_budget_assumptions(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Forecast generation failed: {str(e)}"
+            detail=f"Generazione del previsionale non riuscita: {str(e)}"
         )
     except Exception as e:
         logger.exception(
@@ -644,7 +644,7 @@ def update_budget_assumptions(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error during forecast generation: {str(e)}"
+            detail=f"Errore interno durante la generazione del previsionale: {str(e)}"
         )
 
     return db_assumptions
@@ -779,7 +779,7 @@ def bulk_upsert_assumptions(
         logger.exception("Error saving assumptions for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error saving assumptions: {str(e)}"
+            detail=f"Errore nel salvataggio delle ipotesi: {str(e)}"
         )
 
 
@@ -837,7 +837,7 @@ def patch_ce_override(
         logger.exception("Forecast regeneration failed after CE override patch")
         raise HTTPException(
             status_code=500,
-            detail=f"Forecast regeneration failed, no override was applied: {str(e)}"
+            detail=f"Rigenerazione del previsionale non riuscita, nessun override è stato applicato: {str(e)}"
         )
 
     return {"success": True, "applied": applied}
@@ -945,7 +945,7 @@ def patch_sp_override(
         logger.exception("Forecast regeneration failed after SP override patch")
         raise HTTPException(
             status_code=500,
-            detail=f"Forecast regeneration failed, no override was applied: {str(e)}"
+            detail=f"Rigenerazione del previsionale non riuscita, nessun override è stato applicato: {str(e)}"
         )
 
     return {"success": True, "years": years_touched}
@@ -996,7 +996,7 @@ def generate_forecasts(
     if not assumptions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot generate forecast: no assumptions found for scenario {scenario_id}. Add assumptions first."
+            detail=f"Impossibile generare il previsionale: nessuna ipotesi per lo scenario {scenario_id}. Aggiungi prima le ipotesi."
         )
 
     # Clear all CE overrides if requested
@@ -1019,13 +1019,13 @@ def generate_forecasts(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Forecast generation failed: {str(e)}"
+            detail=f"Generazione del previsionale non riuscita: {str(e)}"
         )
     except Exception as e:
         logger.exception("Forecast generation error for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error during forecast generation: {str(e)}"
+            detail=f"Errore interno durante la generazione del previsionale: {str(e)}"
         )
 
     # Build response with summary
@@ -1089,7 +1089,7 @@ def preview_forecast_route(
         logger.exception("Forecast preview failed for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error during forecast preview: {str(e)}"
+            detail=f"Errore interno durante l'anteprima del previsionale: {str(e)}"
         )
 
 

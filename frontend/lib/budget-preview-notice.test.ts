@@ -88,31 +88,18 @@ describe("saveNotice", () => {
     expect(saveNotice("qualcosa che nessuna regex riconosce")).toBe("qualcosa che nessuna regex riconosce");
   });
 
-  // Rilievo 6 (giro di correzione 1): il toast del wizard restava in inglese
-  // — «Assumptions saved successfully, but forecast generation failed: …» —
-  // anche quando il messaggio del motore, dopo i due punti, era in italiano.
-  // Il prefisso e' una stringa FISSA scritta da `assumptions_service.py:330`,
-  // non un messaggio arbitrario del motore: tradurlo non e' "inventare" —
-  // e' la stessa distinzione che il resto di questo file gia' rispetta fra
-  // testo di contorno (traducibile) e messaggio del motore (mai toccato).
-  it("il prefisso FISSO del backend va in italiano, il messaggio del motore dopo i due punti resta quello che e'", () => {
+  // Rilievo 6 (giro di correzione 1) diceva del prefisso ancora inglese; da
+  // Task 8 parte A (lotto 3A) il prefisso di `assumptions_service.py` nasce
+  // gia' in italiano alla fonte, quindi non c'e' piu' nulla da spogliare qui
+  // — i due test di prima diventano uno solo: un messaggio che ha gia' il
+  // prefisso italiano e nessun fabbisogno riconoscibile torna INVARIATO. Il
+  // resto del testo (dopo i due punti) e' ancora il motore, in inglese finche'
+  // non arriva la parte B: non e' questo test a doverlo tradurre.
+  it("un messaggio col prefisso italiano del backend e senza fabbisogno riconoscibile torna invariato", () => {
     const dalBackend =
-      "Assumptions saved successfully, but forecast generation failed: The sum of financing opening " +
-      "residuals must equal base-year bank debt (300000 != 4465659.00)";
-    expect(saveNotice(dalBackend)).toBe(
       "Ipotesi salvate, ma il previsionale non è stato calcolato: The sum of financing opening " +
-      "residuals must equal base-year bank debt (300000 != 4465659.00)"
-    );
-  });
-
-  it("il prefisso si toglie anche quando il messaggio del motore e' gia' in italiano: non lo tocca", () => {
-    const dalBackend =
-      "Assumptions saved successfully, but forecast generation failed: Scadenziamento di crediti " +
-      "commerciali: gli importi superano il saldo di apertura";
-    expect(saveNotice(dalBackend)).toBe(
-      "Ipotesi salvate, ma il previsionale non è stato calcolato: Scadenziamento di crediti " +
-      "commerciali: gli importi superano il saldo di apertura"
-    );
+      "residuals must equal base-year bank debt (300000 != 4465659.00)";
+    expect(saveNotice(dalBackend)).toBe(dalBackend);
   });
 
   it("il fabbisogno scoperto riconosciuto vince comunque sul prefisso: una frase sola, non due incollate", () => {

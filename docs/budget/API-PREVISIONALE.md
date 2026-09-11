@@ -34,7 +34,7 @@ ragione — l'eccezione viene **catturata** e la risposta è ugualmente **200**
 { "success": true, "assumptions_saved": 2,
   "forecast_generated": false,
   "forecast_years": [2025, 2026],
-  "message": "Assumptions saved successfully, but forecast generation failed: ..." }
+  "message": "Ipotesi salvate, ma il previsionale non è stato calcolato: ..." }
 ```
 
 Due dettagli che si sbagliano facilmente:

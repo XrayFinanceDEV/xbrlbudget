@@ -348,6 +348,12 @@ Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
   bancario pregresso **senza alcun piano**: nell'anno non ci sono contratti con residuo iniziale
   (`opening_residual`) né `existing_debt_repayment_years` > 0. Prima la quota a breve, poi la lunga.
   Nient'altro.
+- `existing_debt_repayment_years` si legge dalla riga di **quell'anno** e non si porta avanti da solo
+  come una percentuale di crescita: un piano a più anni che non lo ripete su ogni riga perde
+  l'esenzione dallo sweep proprio dove manca, e lo sweep salda il residuo restante in un colpo solo —
+  misurato: 35.802,46 di apertura, `existing_debt_repayment_years=3` dichiarato solo nel 2027
+  (rimborso a piano 11.934,15), sweep che chiude i restanti 23.868,31 nel 2028, due anni prima della
+  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2).
 - I contratti della griglia, il prestito nuovo della legacy `financing_amount` e il pregresso con gli
   anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
   spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).

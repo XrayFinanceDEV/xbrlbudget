@@ -203,8 +203,10 @@ scrittura hanno cinque comportamenti da conoscere:
    `sp17f`, `sp17g`, `sp07` e le sue sotto-voci commerciali `sp07a`–`sp07d`/`sp07g`) è
    **rifiutato** con un `ValueError` in italiano, in qualunque anno del piano, l'ultimo dopo
    l'ultima rata compreso; lo stesso sul lato **breve** quando il valore forzato scende sotto la
-   rata dovuta l'anno dopo, e su `sp17e` anche senza piano quando l'anno che lo leggerebbe è a
-   saldo + acconto (`_rifiuto_override_governati`). Sul `PATCH /sp-override` è un 400 con
+   rata dovuta l'anno dopo — tranne i tributari in via manuale, dove il lato breve resta libero:
+   lì la guardia è il rifiuto sul totale `sp16e + sp17e` (§9) — e su `sp17e` anche senza piano,
+   quando l'anno che lo leggerebbe è a saldo + acconto (`_rifiuto_override_governati`). Sul
+   `PATCH /sp-override` è un 400 con
    rollback del lotto intero; sul bulk è `forecast_generated: false` con l'override salvato
    comunque.
 
@@ -570,12 +572,15 @@ Uscita di cassa dell'anno = saldo + acconti + rate, attraverso il plug come tutt
 prima del lotto: i debiti tributari si muovono per crescita percentuale, e un piano tributario
 scritto insieme a quelle percentuali produce `pregresso_ignored: ["debiti_tributari"]` invece di
 applicarsi a metà. Un anno **manuale seguito da un anno automatico**, con un piano tributario,
-non è però libero: il saldo dovuto si ricostruisce dal bilancio dell'anno manuale, e se il debito
-tributario lì lasciato è **inferiore** al rateizzato ancora aperto il calendario ripartirebbe
-intero e la cassa assorbirebbe la differenza senza un versamento — il motore lo rifiuta con un
-errore in italiano. Le vie d'uscita: tenere in via manuale anche l'anno dopo, o modificare il
-piano nel passo «Imposte». Con la stessa logica, in un anno manuale seguito da un automatico si
-rifiuta anche l'override del lato breve sotto la rata (§2.2).
+non è però libero: il saldo dovuto si ricostruisce dal **totale** di debito tributario che
+l'anno manuale lascia in bilancio (`sp16e + sp17e`), e se quel totale è **inferiore** al
+rateizzato ancora aperto all'inizio dell'anno automatico il calendario ripartirebbe intero e la
+cassa assorbirebbe la differenza senza un versamento — il motore lo rifiuta con un errore in
+italiano che nomina l'anno manuale e l'anno che riparte dal piano. Tre vie d'uscita: tenere in
+via manuale anche l'anno che riparte; lasciare nell'anno manuale un debito tributario
+(`sp16e + sp17e`, per percentuale o per override) non inferiore al rateizzato aperto; modificare
+il piano nel passo «Imposte». In un anno manuale l'override del lato breve tributario resta
+comunque libero — il rifiuto (§2.2) guarda il totale che l'anno dopo legge, non il lato singolo.
 
 ### `details['imposte']` — sempre presente, ogni anno
 

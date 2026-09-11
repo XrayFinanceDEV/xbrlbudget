@@ -311,7 +311,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   quando il valore forzato scende sotto la rata dovuta l'anno dopo (`residual_short` del
   calendario, `_residuo_breve_piano`): sopra quella quota l'override è lecito e si porta avanti
   come stato d'apertura, sotto il calendario ripristinerebbe la quota e la stessa rata uscirebbe
-  due volte.
+  due volte. Per i tributari in via manuale il lato breve resta esente: lì la guardia è il
+  rifiuto sul totale `sp16e + sp17e` (bullet «Un anno manuale non scarica il piano
+  tributario», più sotto).
 - **`POST /preview` non scrive nulla e risponde 200 anche a un piano che si ferma**: leggere
   `error`, non lo status. Gli anni in `forecast_years` sono quelli calcolati prima dell'errore, non
   quelli chiesti: chi guarda solo lo status disegna un'anteprima monca come se fosse completa.
@@ -332,12 +334,15 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
 - **Un anno manuale non scarica il piano tributario sull'anno automatico.** Se un anno in via
   manuale è seguito da un anno automatico con piano tributario, il saldo dovuto si ricostruisce
-  dal debito tributario di bilancio dell'anno manuale: quando quel debito è **inferiore** al
-  rateizzato ancora aperto il calendario ripartirebbe intero, la stessa rata uscirebbe due volte
-  e la cassa assorbirebbe la differenza senza alcun flusso — il motore lo rifiuta quindi con un
-  errore in italiano. Le vie d'uscita: tenere in via manuale anche l'anno dopo, o modificare il
-  piano nel passo «Imposte». Con la stessa logica l'esenzione della via manuale dal rifiuto
-  dell'override sotto la rata vale solo quando **anche l'anno dopo** è manuale.
+  dal **totale** di debito tributario che l'anno manuale lascia in bilancio (`sp16e + sp17e`):
+  se quel totale è **inferiore** al rateizzato ancora aperto all'inizio dell'anno automatico il
+  calendario ripartirebbe intero, la stessa rata uscirebbe due volte e la cassa assorbirebbe la
+  differenza senza alcun flusso — il motore lo rifiuta con un errore in italiano che nomina
+  l'anno manuale e l'anno che riparte dal piano. Tre vie d'uscita: tenere in via manuale anche
+  l'anno che riparte; lasciare nell'anno manuale un debito tributario (`sp16e + sp17e`, per
+  percentuale o per override) non inferiore al rateizzato aperto; modificare il piano nel passo
+  «Imposte». In un anno manuale l'override del lato breve tributario resta comunque libero,
+  come prima: il rifiuto guarda il totale che l'anno dopo legge davvero, non il lato singolo.
 - **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella

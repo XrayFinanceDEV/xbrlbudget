@@ -1291,3 +1291,72 @@ def test_m2_anni_non_consecutivi_il_messaggio_nomina_l_anno_vero(monkeypatch):
             assert read_forecast_maps(db, sid) == []
     finally:
         engine.dispose()
+
+
+# ══ m-4 (giro 4): le due esenzioni I-b, che nessun test vedeva ══
+
+def _righe_ib(manuale_anni, overrides=None, anni=ANNI_3, growth=0):
+    """Righe SENZA piano tributario, con gli anni di `manuale_anni` in via
+    manuale (`sp16e_growth_pct = growth`) e override PER ANNO.
+
+    Sono i due casi della tabella di m-4, dalla sonda `sonda_ib.py`: la via
+    d'uscita dal rifiuto I-b su `sp17e` senza piano e' una delle due esenzioni
+    (`not manuale` sull'anno corrente, `letta_l_anno_dopo` sull'anno dopo), e
+    fin qui nessuna delle due era affermata da un test — le mutazioni 4 e 6
+    della revisione passavano 171/171.
+    """
+    rows = []
+    for y in anni:
+        r = {"forecast_year": y, "revenue_growth_pct": 3.33}
+        if y in manuale_anni:
+            r["sp16e_growth_pct"] = growth
+        if overrides and y in overrides:
+            r["sp_overrides"] = dict(overrides[y])
+        rows.append(r)
+    return rows
+
+
+def test_m4_ib_esenta_l_anno_corrente_manuale(monkeypatch):
+    """Caso 1: 2027 in via manuale + override `sp17e` 777,77, 2028-2029
+    automatici: si genera e il valore forzato resta nella cella.
+
+    Senza l'esenzione `not manuale` (`_rifiuto_override_governati`, la parte
+    che Ruling 62 ha messo sul ramo (2)) questo sarebbe RIFIUTATO: mutazione 4
+    della revisione, qui VISTA. In via manuale `sp17e` segue `_prev x (1 +
+    crescita)` e il piano e' dichiarato ignorato, quindi l'override sopravvive
+    davvero (rilievo M-1).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, "m4-ib-1", _righe_ib(
+                {2027}, overrides={2027: {"sp17e_debiti_tributari_lungo": 777.77}}))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, "m4-ib-1", cid, sid, rows)
+            assert _letto(lette, 2027, "sp17e_debiti_tributari_lungo") == D("777.77")
+    finally:
+        engine.dispose()
+
+
+def test_m4_ib_esenta_l_anno_dopo_manuale(monkeypatch):
+    """Caso 2: 2027 automatico + override `sp17e` 777,77, 2028-2029 in via
+    manuale: si genera e la cella vale 777,77 in TUTTI e tre gli anni.
+
+    Qui l'anno che porta il valore forzato NON e' manuale: lo salva l'altra
+    esenzione, `letta_l_anno_dopo` falsa perche' il 2028 e' in via manuale e
+    quindi quell'anno non legge `sp17e` dal ramo `saldo_acconto`. E' la
+    mutazione 6 della revisione, qui VISTA.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, "m4-ib-2", _righe_ib(
+                {2028, 2029}, overrides={2027: {"sp17e_debiti_tributari_lungo": 777.77}}))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, "m4-ib-2", cid, sid, rows)
+            for y in ANNI_3:
+                assert _letto(lette, y, "sp17e_debiti_tributari_lungo") == D("777.77"), y
+    finally:
+        engine.dispose()

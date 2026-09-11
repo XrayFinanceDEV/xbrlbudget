@@ -11,9 +11,10 @@
  *
  * `previewNotice` unifica le due fonti con una sola precedenza — il
  * trasporto se c'e', altrimenti il corpo — e traduce il caso riconoscibile
- * (fabbisogno scoperto) in importo e anno invece del messaggio inglese del
+ * (fabbisogno scoperto) in importo e anno invece del messaggio grezzo del
  * motore. Un `data.error` che la regex non riconosce non sparisce mai in
- * silenzio: torna il messaggio grezzo del motore.
+ * silenzio: torna il messaggio grezzo del motore (gia' italiano alla fonte,
+ * lotto 3A task 8).
  */
 import { unfundedAmountFromMessage, unfundedFromError } from "@/lib/budget-preview-rows";
 import type { PreviewState } from "@/lib/budget-preview-state";
@@ -52,12 +53,13 @@ export function previewNotice(preview: PreviewState): string | null {
  *
  * Il prefisso di `assumptions_service.bulk_upsert_assumptions` nasce gia'
  * in italiano («Ipotesi salvate, ma il previsionale non è stato calcolato:
- * ...», Task 8 lotto 3A) — non c'e' piu' nulla da togliere qui. Il client
- * riconosce solo il caso del fabbisogno scoperto (`unfundedAmountFromMessage`,
- * ancora ancorata al testo del motore finche' non arriva la parte B): se
- * scatta, vince e sostituisce l'intera frase, prefisso compreso, con
- * l'importo e il rimedio in una sola frase italiana. Altrimenti il messaggio
- * torna **grezzo**: meglio il testo del backend, qualunque lingua sia, di un
+ * ...», Task 8 lotto 3A), e cosi' il messaggio del motore che segue i due
+ * punti (`Fabbisogno finanziario scoperto di ...`, stesso task, parte B) —
+ * non c'e' piu' nulla da tradurre qui. Il client riconosce solo il caso del
+ * fabbisogno scoperto (`unfundedAmountFromMessage`): se scatta, vince e
+ * sostituisce l'intera frase, prefisso compreso, con l'importo e il rimedio
+ * in una sola frase italiana. Altrimenti il messaggio torna **grezzo**: e'
+ * gia' italiano alla fonte, quindi mostrarlo cosi' com'e' non e' mai un
  * testo inventato che non descrive quel guasto.
  */
 export function saveNotice(message: string): string {

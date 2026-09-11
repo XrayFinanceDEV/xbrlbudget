@@ -398,16 +398,17 @@ export function rowsImposteSaldoAcconto(years: ForecastPreviewYear[]): PreviewRo
  * L'importo del fabbisogno scoperto dentro un messaggio del motore, o `null`
  * se il messaggio e' un altro.
  *
- * Riconoscimento UNICO — una sola regex per l'anteprima (che riceve
+ * Il messaggio del motore nasce gia' italiano, importo all'europea (lotto 3A,
+ * task 8). Riconoscimento UNICO — una sola regex per l'anteprima (che riceve
  * `ForecastPreviewError`, con l'anno) e per il salvataggio in blocco (che
  * riceve una sola stringa, senza anno: `assumptions_service.py` incapsula
- * `str(e)` in «Assumptions saved successfully, but forecast generation
- * failed: …»). Due regex divergerebbero alla prima modifica del messaggio del
- * motore, e uno dei due canali tornerebbe in silenzio all'inglese grezzo.
+ * `str(e)` in «Ipotesi salvate, ma il previsionale non è stato calcolato:
+ * …»). Due regex divergerebbero alla prima modifica del messaggio del
+ * motore, e uno dei due canali tornerebbe a non riconoscere il fabbisogno.
  */
 export function unfundedAmountFromMessage(message: string): number | null {
-  const m = /Unfunded financing requirement ([\d,]+\.\d{2})/i.exec(message);
-  return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+  const m = /Fabbisogno finanziario scoperto di ([\d.]+,\d{2})/.exec(message);
+  return m ? parseFloat(m[1].replace(/\./g, "").replace(",", ".")) : null;
 }
 
 export function unfundedFromError(error: ForecastPreviewError | null): { year: number; amount: number } | null {

@@ -555,12 +555,11 @@ debt, and `sp16a_debiti_banche_breve` is recomposed at the end as bank share + o
 (`scoperto_generato`, `scoperto_residuo`). The requirement is measured **once**, in `_Overdraft.copri`
 (`calculations/forecast_engine.py`), called by `_normalize_balance_sheet_cents` after every adjustment
 including `sp_overrides`, on a net cash rebuilt from aggregates already rounded to the cent — a
-requirement worth 0,00 does not raise, a real cent is not absorbed. **Known defect (I2, fixed by lotto
-3A Task 2** — `docs/superpowers/plans/2026-09-10-lotto3a-motori-rendiconto.md`): with
-`cash_sweep_enabled` the sweep decides on the cash **before** `sp_overrides` are applied and is never
-re-evaluated, so an SP override that moves cash can manufacture a requirement the assumptions do not
-imply — a bare `Unfunded financing requirement` on a fundable plan — or, with an overdraft granted,
-open that overdraft in the very year the sweep repaid a loan early. Free cash and overdraft never
+requirement worth 0,00 does not raise, a real cent is not absorbed. **Historical defect (I2), fixed by
+lotto 3A Task 2** (`_normalize_balance_sheet_cents`): the sweep used to decide on the cash before
+`sp_overrides` were applied, and could manufacture a funding requirement the assumptions did not
+imply, or open an overdraft to repay a loan early — see "The cash sweep repays only what has no plan"
+below for the order now in force. Free cash and overdraft never
 coexist: net cash repays the overdraft first, **also below `cash_sweep_min_cash`, by decision of the
 owner** — keeping liquidity while paying interest on an overdraft makes no sense — and the shortfall
 is declared in `details['cassa_sotto_minimo']` and shown in the wizard preview. Interest goes into
@@ -578,10 +577,20 @@ the answer is `scoperto_generato` year by year, with the peak in `fabbisogno_pic
 hiding a scenario choice nobody had made. Now the choice is explicit, the amount is declared in
 `details` and shown in the wizard preview — do not restore the ban in good faith: the reason for it
 is gone, not forgotten.
+**The cash sweep repays only what has no plan.** With `cash_sweep_enabled`, cash above
+`cash_sweep_min_cash` repays the overdraft first (it is already inside net cash) and then pre-existing bank debt
+**without any plan** — no contract with an opening residual and no `existing_debt_repayment_years` that year —
+short side first, then long. Grid contracts, the legacy `financing_amount` loan and pre-existing debt on a years plan
+follow **only their plan**, capital and interest alike, and the excess stays in `sp09` (owner's decision, lotto 3A).
+The sweep decides on the cash **after** `sp_overrides`, in `_normalize_balance_sheet_cents` right before
+`_Overdraft.copri`: deciding before the overrides turned a fundable plan into a funding requirement or opened an
+overdraft to pay an optional early repayment. `details['debito_bancario']`, declared every year, splits bank debt
+into `pregresso_senza_piano`, `pregresso_piano_anni` and one row per contract, and adds up exactly: Σ`breve` +
+`scoperto_residuo` = `sp16a`, Σ`lungo` = `sp17a`.
 **The share of a new loan that falls due next year sits in `sp16a`, the rest in `sp17a`**: the capital
 the kernel calendar repays the following year (zero while that year is still grace, the balloon the
-year before it falls due, and not zeroed in the last plan year), declared in
-`details['prestiti_nuovi_quota_breve']`; pre-existing bank debt keeps its own split, and P&L is
+year before it falls due, and not zeroed in the last plan year), declared per contract in
+`details['debito_bancario']['contratti']`; pre-existing bank debt keeps its own split, and P&L is
 unaffected. Leaving it all in `sp17a` overstates CCN and current ratio (2,4206 instead of 2,0794 on
 the test kit) and Altman's working capital (0,4093 instead of 0,3620) — the balance check never sees
 it, `sp16` and `sp17` are both liabilities. It also used to move the reclassified amount from the

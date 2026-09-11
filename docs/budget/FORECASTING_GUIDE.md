@@ -279,8 +279,10 @@ si mescolano.»
   current ratio e circolante di Altman.
 - **La cassa è il pareggio e pareggia solo verso l'alto**: un fabbisogno non si converte da sé in
   debito a breve. È la casella dello scoperto a decidere (sotto).
-- **Il cash sweep** usa la cassa in eccesso per rimborsare debito: prima il debito bancario
-  pregresso e poi il prestito nuovo. Con lo scoperto acceso la cassa libera rimborsa prima lo
+- **Il cash sweep** usa la cassa in eccesso per rimborsare il debito che non ha un piano: lo
+  scoperto, e il debito bancario pregresso senza anni di rimborso e senza contratti, prima a breve
+  poi a lungo. I finanziamenti con un piano seguono solo il loro piano, e la cassa in più resta
+  in cassa. Con lo scoperto acceso la cassa libera rimborsa prima lo
   scoperto, **anche sotto la cassa minima** impostata: tenere liquidità pagando gli interessi sullo
   scoperto non avrebbe senso, e il motore dichiara quanta cassa è finita sotto quel minimo.
 

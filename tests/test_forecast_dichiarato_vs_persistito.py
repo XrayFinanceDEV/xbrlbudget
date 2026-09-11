@@ -72,6 +72,12 @@ def _q(x):
     return D(str(x)).quantize(D("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _quota_nuovi(det):
+    """La quota a breve dei soli prestiti NUOVI, dai `details['debito_bancario']`."""
+    contratti = (det.get("debito_bancario") or {}).get("contratti") or []
+    return sum((D(str(c["breve"])) for c in contratti if D(str(c.get("residuo_iniziale") or 0)) == 0), D("0"))
+
+
 def _posizione_tributaria_dichiarata(det):
     """`debito − credito` tributario GREZZO, come lo dichiarano i `details`.
 
@@ -336,11 +342,11 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
         confronta("ce09d_svalutazione_crediti", writeoff,
                   "details['pregresso']['crediti_commerciali'].writeoff")
 
-    # ── lo scoperto di c/c (Task 12) e la quota a breve dei prestiti nuovi (Task 17) ──
+    # ── lo scoperto di c/c (Task 12) e il debito bancario per componenti (Task 2) ──
     # Le otto chiavi si dichiarano sempre: a valle una chiave assente vale zero.
     for chiave in ("cassa_assorbita", "scoperto_generato", "scoperto_residuo", "oneri_scoperto",
                    "fabbisogno_picco", "fabbisogno_picco_anno", "cassa_sotto_minimo",
-                   "prestiti_nuovi_quota_breve"):
+                   "debito_bancario"):
         if chiave not in det:
             fuori.append((chiave, f"{chiave}: chiave non dichiarata"))
     cassa = bs["sp09_disponibilita_liquide"]
@@ -350,13 +356,17 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
     # I2: cassa libera e scoperto non convivono, neppure dopo un `sp_overrides`.
     if cassa > 0 and residuo > 0:
         fuori.append(("I2 cassa e scoperto", f"cassa {cassa} e scoperto {residuo} nello stesso anno"))
-    # La quota a breve dei prestiti nuovi sta DENTRO la quota bancaria persistita di
-    # `sp16a` (Task 17): dichiararne di piu' vorrebbe dire che l'anno dopo la si toglie
-    # da un breve che non la contiene e la si rimette nel lungo — debito dal nulla.
-    quota = D(str(det.get("prestiti_nuovi_quota_breve") or 0))
-    if not D("0") <= quota <= bs["sp16a_debiti_banche_breve"] - residuo:
-        fuori.append(("quota breve fuori da sp16a",
-                      f"quota a breve {quota}, quota bancaria di sp16a {bs['sp16a_debiti_banche_breve'] - residuo}"))
+    # Il debito bancario per componenti (lotto 3A, Task 2): somma dei `breve` piu' lo scoperto = `sp16a`,
+    # somma dei `lungo` = `sp17a`, al centesimo.
+    debito = det.get("debito_bancario") or {}
+    componenti = [c for c in (debito.get("pregresso_senza_piano"), debito.get("pregresso_piano_anni")) if c]
+    componenti += list(debito.get("contratti") or [])
+    breve = sum((D(str(c["breve"])) for c in componenti), D("0")) + residuo
+    lungo = sum((D(str(c["lungo"])) for c in componenti), D("0"))
+    if breve != bs["sp16a_debiti_banche_breve"]:
+        fuori.append(("debito_bancario breve", f"breve dichiarato {breve}, sp16a {bs['sp16a_debiti_banche_breve']}"))
+    if lungo != bs["sp17a_debiti_banche_lungo"]:
+        fuori.append(("debito_bancario lungo", f"lungo dichiarato {lungo}, sp17a {bs['sp17a_debiti_banche_lungo']}"))
     if bs["_total_assets"] != bs["_total_liabilities"]:
         fuori.append(("quadratura", f"attivo {bs['_total_assets']} != passivo {bs['_total_liabilities']}"))
 
@@ -921,7 +931,7 @@ def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persisti
                                                              f"{banca_s} senza: differenza {banca_c - banca_s}, "
                                                              f"quota a breve del calendario {quota}"))
                         # Dichiarato = persistito: la chiave dice la stessa quota.
-                        dichiarata = D(str(det_c.get("prestiti_nuovi_quota_breve") or 0))
+                        dichiarata = _quota_nuovi(det_c)
                         if dichiarata != quota:
                             fuori.append(("quota breve dichiarata", f"{dove_g} dichiarata {dichiarata}, "
                                                                     f"calendario {quota}"))

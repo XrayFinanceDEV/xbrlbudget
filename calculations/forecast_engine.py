@@ -1936,6 +1936,12 @@ class ForecastEngine:
                     prev_details=prev_details,
                     details=details,
                     overdraft=overdraft,
+                    # L'anno PRECEDENTE del piano, non `forecast_year - 1`:
+                    # con anni non consecutivi le due cose non coincidono, e il
+                    # messaggio del kernel nominerebbe un anno che il piano non
+                    # ha (rilievo m-2).
+                    previous_year=(assumptions[year_index - 1].forecast_year
+                                   if year_index else source.scenario.base_year),
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
@@ -2522,6 +2528,7 @@ class ForecastEngine:
         prev_details=None,
         details=None,
         overdraft: "Optional[_Overdraft]" = None,
+        previous_year: Optional[int] = None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -3109,14 +3116,22 @@ class ForecastEngine:
                         # con un max: si rifiuta, e l'utente decide. E' l'unica
                         # guardia della transizione (Ruling 62), e misura il
                         # totale `sp16e + sp17e` che l'anno dopo legge davvero.
+                        #
+                        # L'anno nominato e' `previous_year`, l'anno della riga
+                        # di ipotesi CHE PRECEDE (rilievo m-2): con un piano a
+                        # anni non consecutivi `forecast_year - 1` e' un anno
+                        # che nel piano non c'e', e il messaggio accusava lui
+                        # di essere uscito dalla via manuale.
+                        anno_prima = (previous_year if previous_year is not None
+                                      else assumption.forecast_year - 1)
                         raise ValueError(
                             f"Il piano dei debiti tributari non può ripartire da meno di "
-                            f"ciò che resta da rateizzare: l'anno {assumption.forecast_year - 1} "
+                            f"ciò che resta da rateizzare: l'anno {anno_prima} "
                             f"esce dalla via manuale lasciando {_importo_it(opening_tax_debt)}, "
                             f"ma all'anno {assumption.forecast_year} ne restano da rateizzare "
                             f"{_importo_it(rate_aperto)}. Tieni in via manuale anche l'anno "
                             f"{assumption.forecast_year}, oppure lascia nell'anno "
-                            f"{assumption.forecast_year - 1} un debito tributario (sp16e + "
+                            f"{anno_prima} un debito tributario (sp16e + "
                             f"sp17e, per percentuale o per override) non inferiore a "
                             f"{_importo_it(rate_aperto)}, o modifica il piano al passo "
                             f"«{self._passo_pregresso('debiti_tributari')}»."

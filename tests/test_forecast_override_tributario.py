@@ -1262,3 +1262,32 @@ def test_m1_senza_piano_l_anno_manuale_sotto_zero_non_si_rifiuta(monkeypatch):
             assert len(read_forecast_maps(db, sid)) == len(rows)
     finally:
         engine.dispose()
+
+
+# ══ m-2 (giro 4): con anni non consecutivi il messaggio nomina l'anno vero ══
+
+def test_m2_anni_non_consecutivi_il_messaggio_nomina_l_anno_vero(monkeypatch):
+    """Piano tributario, anni 2027/2029/2030, 2027 manuale a −100: RIFIUTATO,
+    e il messaggio nomina il 2027 (la riga che precede davvero), non il 2028.
+
+    Caso F della sonda `sonda_p1.py`: il kernel usava `assumption.forecast_year
+    - 1` per dire «l'anno X esce dalla via manuale», mentre `_prev` legge
+    l'anno della riga di ipotesi precedente. Il bulk accetta anni non
+    consecutivi, e su quel piano il 2028 non esiste: il messaggio accusava un
+    anno inventato.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _cid, sid, _rows = _esito(db, "m2-gap", _righe_trans(
+                {2027}, anni=(2027, 2029, 2030)))
+            msg = res["message"]
+            assert res["forecast_generated"] is False, msg
+            assert "non può ripartire" in msg, msg
+            assert "l'anno 2027 esce dalla via manuale" in msg, msg
+            assert "2028" not in msg, msg
+            assert "all'anno 2029" in msg, msg
+            assert read_forecast_maps(db, sid) == []
+    finally:
+        engine.dispose()

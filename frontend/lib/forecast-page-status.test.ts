@@ -1,3 +1,4 @@
+import { AxiosError } from "axios";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -39,6 +40,47 @@ describe("forecastLoadErrorMessage", () => {
   it("una risposta senza detail leggibile ricade sul messaggio generico italiano", () => {
     const err = { response: { data: {} } };
     expect(forecastLoadErrorMessage(err)).toBe("Impossibile caricare i dati previsionali.");
+  });
+
+  it("un vero AxiosError senza detail leggibile ricade sul messaggio generico italiano, mai sul testo inglese di axios", () => {
+    const err = new AxiosError(
+      "Request failed with status code 502",
+      "ERR_BAD_RESPONSE",
+      undefined,
+      undefined,
+      {
+        status: 502,
+        statusText: "Bad Gateway",
+        headers: {},
+        config: {} as never,
+        data: "<html>Bad Gateway</html>",
+      },
+    );
+    expect(forecastLoadErrorMessage(err)).toBe("Impossibile caricare i dati previsionali.");
+  });
+
+  it("un vero AxiosError con detail restituisce il detail", () => {
+    const err = new AxiosError(
+      "Request failed with status code 400",
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      {
+        status: 400,
+        statusText: "Bad Request",
+        headers: {},
+        config: {} as never,
+        data: { detail: "Scoperto oltre il tetto concesso" },
+      },
+    );
+    expect(forecastLoadErrorMessage(err)).toBe("Scoperto oltre il tetto concesso");
+  });
+
+  it("un vero AxiosError senza response e' un errore di rete: testo italiano fisso", () => {
+    const err = new AxiosError("Network Error", "ERR_NETWORK");
+    expect(forecastLoadErrorMessage(err)).toBe(
+      "Il server non ha risposto. Controlla la connessione e riprova.",
+    );
   });
 });
 

@@ -39,15 +39,23 @@ export function forecastPageStatus(loading: boolean, error: unknown): ForecastPa
  * giu', timeout, o (prima del Task 1 di questo lotto) un 500 che il browser bloccava
  * come CORS: in quel caso `error.message` sarebbe la stringa inglese di axios ("Network
  * Error"), quindi si usa un testo italiano fisso invece di propagarla.
+ *
+ * Con `.response` ma senza un `detail` leggibile (un 502 di proxy con corpo HTML, un
+ * 500 senza JSON), lo stesso rischio si ripete: un vero `AxiosError` e' anche un `Error`
+ * con `.message` sempre valorizzato, e `getErrorMessage` ricade su quel messaggio
+ * (testo inglese di axios, es. "Request failed with status code 502") **prima** del
+ * fallback italiano. Per questo qui non si passa l'errore originale a `getErrorMessage`,
+ * ma un oggetto semplice con la sola `response`: non essendo un `Error`, quel ramo non
+ * scatta e l'assenza di un `detail` leggibile arriva sempre al fallback italiano
+ * (rilievo I-2 della revisione finale del lotto 3B).
  */
 export function forecastLoadErrorMessage(error: unknown): string {
-  const hasResponse =
-    typeof error === "object" &&
-    error !== null &&
-    "response" in error &&
-    (error as { response?: unknown }).response != null;
-  if (!hasResponse) {
+  const response =
+    typeof error === "object" && error !== null
+      ? (error as { response?: unknown }).response
+      : undefined;
+  if (response == null) {
     return "Il server non ha risposto. Controlla la connessione e riprova.";
   }
-  return getErrorMessage(error, "Impossibile caricare i dati previsionali.");
+  return getErrorMessage({ response }, "Impossibile caricare i dati previsionali.");
 }

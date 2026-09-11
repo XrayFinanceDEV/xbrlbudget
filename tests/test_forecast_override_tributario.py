@@ -599,8 +599,8 @@ def test_override_breve_sotto_il_rateizzato_si_rifiuta_sopra_no(monkeypatch, pia
 
 # Le sei chiavi che il piano dei crediti COMMERCIALI rigenera: l'aggregato
 # `sp07` (il calendario lo scrive come `residual_long` + la quota fiscale
-# cresciuta, `:2529-2532`) e le cinque sotto-voci che `_alloc` ritaglia da
-# quell'aggregato sulle proporzioni dell'anno base (`:3120-3133`). Non `sp07e`
+# cresciuta, `:2745-2763`) e le cinque sotto-voci che `_alloc` ritaglia da
+# quell'aggregato sulle proporzioni dell'anno base (`:3351-3366`). Non `sp07e`
 # /`sp07f`: quelle il piano non le tocca, e stanno nel test qui sotto.
 PIANO_CREDITI_LUNGHI = {"crediti_commerciali": {"opening": 133000.00,
                                                 "amounts": [66500.00, 66500.00]}}
@@ -673,7 +673,7 @@ def test_sp07e_ed_sp07f_non_si_rifiutano_perche_sopravvivono(monkeypatch, campo)
     """Le due che il piano NON rigenera, e la guardia che lo verifica.
 
     L'altra meta' del rilievo I-d: `sp07e` entra nell'aggregato come
-    `_prev × crescita` (`:2527`), `sp07f` dal kernel del deferred. Rifiutarle
+    `_prev × crescita` (`:2757`), `sp07f` dal kernel del deferred. Rifiutarle
     sarebbe una restrizione inventata — `CLAUDE.md` vuole che ogni rifiuto abbia
     una misura dietro, non una simmetria. Misura su QUESTA fixture, override
     250,25 nel 2027: nel 2028 `sp07e` 75.03 contro 153.13 del gemello, `sp07f`

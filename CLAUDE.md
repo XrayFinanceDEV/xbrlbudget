@@ -296,7 +296,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **`tax_rate` è un ripiego, non l'aliquota che vince.** Il motore usa l'aliquota effettiva
   dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
   derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
-  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:1654-1664`, `_tax_components`).
+  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:2122-2131`, `_tax_components`).
 - **Le imposte si pagano a saldo + acconto, non ad accumulo.** Il debito tributario generato a
   fine anno N esce come saldo nell'anno N+1 — al netto del credito tributario di apertura, fino a
   capienza — e l'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
@@ -309,7 +309,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
   voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
-  peso dal residuo lungo (`calculations/forecast_engine.py:2116-2145` per i crediti, `:2442-2468`
+  peso dal residuo lungo (`calculations/forecast_engine.py:2745-2763` per i crediti, `:3104-3128`
   per fornitori/previdenziali/altri debiti). `details['pregresso'][saldo]['mode']` vale `"runoff"`
   quando è così, `"legacy"` (formule di oggi, intere) quando il saldo non ha un piano.
 - **Un previsionale mostrato può essere più vecchio delle ipotesi salvate, e si dichiara.**
@@ -528,8 +528,8 @@ receivables, trade payables, tax payables, welfare payables, other payables): an
 `pregresso` runoff plan (`BudgetAssumptions.pregresso`, JSON, valid only on the first forecast
 year's row) schedules how much of the base-year opening mass is collected or paid in each plan
 year; whatever the day-count/growth formula would produce is added to the still-open short-term
-residual, and the entire long-term side becomes pregresso (`calculations/forecast_engine.py:2116-
-2145`, `:2442-2468`, kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
+residual, and the entire long-term side becomes pregresso (`calculations/forecast_engine.py:2745-
+2763`, `:3104-3128`, kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
 balance behaves exactly as before the lotto, to the cent (`mode: "legacy"` in
 `details['pregresso']`). Tax payables are the one balance whose behaviour changes **even without a
 plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
@@ -570,7 +570,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   produced instead of recomputing it in TypeScript, so there is no second copy to keep in
   agreement with *this* one — but the budget engine is not silent on the same risk either, it has
   its own copy of the same guard (`degenerate_turnover_ratio`,
-  `calculations/forecast_engine.py:1990-2011`, Task 14 of this lotto), not shared with the one
+  `calculations/forecast_engine.py:2610-2627`, Task 14 of this lotto), not shared with the one
   here.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
 - **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a

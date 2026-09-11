@@ -88,9 +88,9 @@ nell'allowlist `CE_OVERRIDE_FIELDS` di `backend/app/services/assumptions_service
 mappa `FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:72`.
 
 Ogni colonna è un **valore assoluto in euro**. `NULL` = usa il calcolo del motore.
-`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:1647-1648`,
+`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:2115-2116`,
 `intra_year_engine.py:271-272`); `ce17a_override`/`ce17b_override` sono letti separatamente,
-**non** come netto in `ce17_override` (`forecast_engine.py:1873-1874`).
+**non** come netto in `ce17_override` (`forecast_engine.py:2341-2342`).
 
 Il batch:
 
@@ -143,7 +143,7 @@ PATCH /companies/{id}/scenarios/{sid}/sp-override
 → { "success": true, "years": 2 }
 ```
 
-entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engine.py:3069`,
+entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engine.py:3525`,
 `intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda una versione
 propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:876`).
 
@@ -160,7 +160,7 @@ Prima di tutto questo, però, il **corpo** è validato da
 numerico, un NaN/infinito, un `forecast_year` mancante o un `overrides` che non è una lista
 rispondono **422**, e nulla viene scritto né rigenerato. Fino al lotto 2 la rotta non aveva
 alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto al
-`Decimal(str(raw_value))` del motore (`forecast_engine.py:1141`, dentro `_apply_sp_overrides`),
+`Decimal(str(raw_value))` del motore (`forecast_engine.py:1594`, dentro `_apply_sp_overrides`),
 che solleva `decimal.InvalidOperation` — un `ArithmeticError`, non un `ValueError` — e l'unica
 risposta possibile era un **500** «Forecast regeneration failed» (M2). Il rollback era già
 corretto e nulla restava scritto: sbagliato era solo il codice. Un corpo valido si comporta
@@ -185,7 +185,7 @@ sola, eliminando sia la concorrenza sia il rifiuto spurio. `PUT /assumptions/{ye
 transazionale del giro 2 per un aggiornamento di un singolo anno — nessun chiamante nel
 frontend la usa più.
 
-`_apply_sp_overrides` (`forecast_engine.py:1104-1206`) ha tre comportamenti da conoscere:
+`_apply_sp_overrides` (`forecast_engine.py:1569-1690`) ha tre comportamenti da conoscere:
 
 1. una chiave che non esiste nel risultato è **ignorata in silenzio**;
 2. ogni valore è **clampato a ≥ 0**, tranne `sp13_utile_perdita` e
@@ -210,7 +210,7 @@ E gli override **sopravvivono al salvataggio**:
 | `/forecast/income` → svuotare una cella | `PATCH /ce-override` con `value: null` | azzerato solo quello |
 
 `clear_overrides` scorre `assumption.__table__.columns` e mette a `None` ogni colonna il cui
-nome **finisce per `_override`** (`budget_scenarios.py:920-924`). `sp_overrides` finisce per
+nome **finisce per `_override`** (`budget_scenarios.py:1000-1003`). `sp_overrides` finisce per
 `_overrides`: **non viene azzerato**. La casella dice «del CE previsionale» e in questo è
 onesta, ma chi la spunta aspettandosi di tornare al previsionale puro del motore si tiene
 tutti gli override di stato patrimoniale.
@@ -218,7 +218,7 @@ tutti gli override di stato patrimoniale.
 ## 4. I giorni di rotazione derivati dall'anno base
 
 Quando `dso_days` / `dio_days` / `dpo_days` non sono impostati nelle ipotesi, il motore li
-deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2016`):
+deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2484`):
 
 | | formula | nota |
 |---|---|---|
@@ -450,11 +450,11 @@ Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoIn
 comportamento di prima del lotto al centesimo (`mode: "legacy"`, sotto).
 
 - **Solo sulla riga del primo anno di piano.** `pregresso` su una riga successiva alza
-  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1181-
-  1186`). È una fotografia dell'anno base, non un'ipotesi per-anno.
+  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1786-
+  1789`). È una fotografia dell'anno base, non un'ipotesi per-anno.
 - **`opening` deve coincidere col bilancio base**, tolleranza 0,01 €, o il motore si ferma con
   «il saldo di apertura di {voce} è cambiato ({dichiarato} → {base}): rivedi lo scadenziamento»
-  (`validate_pregresso`, `calculations/forecast_engine.py:334-362`).
+  (`validate_pregresso`, `calculations/forecast_engine.py:448-520`).
 - **`amounts[i]`** è l'importo chiuso nell'anno di piano `i` (0 = il primo). Per
   `debiti_tributari` riguarda il **solo rateizzato**: il saldo dell'anno precedente si versa per
   intero nel primo anno di piano, per definizione (§9). Lunghezza ≤ orizzonte; importi ≥ 0; la
@@ -473,7 +473,7 @@ breve (`sp06`/`sp16x`); il resto sta oltre 12 mesi (`sp07`/`sp17x`). **Con un pi
 è interamente pregresso**: il motore rigenera dalla formula di oggi solo il lato a breve
 (generato + il residuo dovuto l'anno dopo), il resto del residuo ci resta per tutto il piano e la
 percentuale di crescita di quella voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`)
-smette di applicarsi (`calculations/forecast_engine.py:2116-2145` per i crediti, `:2442-2468` per
+smette di applicarsi (`calculations/forecast_engine.py:2745-2763` per i crediti, `:3104-3128` per
 fornitori/previdenziali/altri debiti). Nell'ultimo anno di piano tutto il residuo non scadenziato
 è oltre: non c'è un «anno dopo» nel piano, e il motore non inventa scadenze.
 
@@ -614,11 +614,11 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
 - **Valore** = uno dei **tre driver**, tipizzato `Literal["ricavi", "acquisti", "personale"]`
   (`backend/app/schemas/budget.py:96,207,319`): `ricavi` = `ce01` previsto / `ce01` base,
   `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
-  (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`). Un nome fuori da questi tre
+  (`calculations/forecast_engine.py:1132-1160`, `_sp_indexing_factors`). Un nome fuori da questi tre
   **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
   che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`),
   e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
-  (`calculations/forecast_engine.py:850-851`). Solo le rotte tipizzate per singola riga passano dal
+  (`calculations/forecast_engine.py:1196`). Solo le rotte tipizzate per singola riga passano dal
   `Literal` Pydantic e rispondono 422.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il

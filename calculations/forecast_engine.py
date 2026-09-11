@@ -768,16 +768,16 @@ class ForecastEngine:
     # `_prev × (1 + crescita)` e l'override si porta avanti da se'.
     #
     # I valori sono TUPLE perche' `crediti_commerciali` non governa solo
-    # l'aggregato `sp07` (`:2529-2532`: `residual_long` del runoff + la quota
+    # l'aggregato `sp07` (`:2745-2763`: `residual_long` del runoff + la quota
     # tributaria), ma anche le sotto-voci che di quell'aggregato sono la
-    # ripartizione (`_alloc` su `sp07_non_deferred`, `:3120-3133`). Misura
+    # ripartizione (`_alloc` su `sp07_non_deferred`, `:3351-3366`). Misura
     # (sonda del giro 2, piano crediti 38333.335 x3 + inesigibile 1666.67,
     # override +1000, 4 anni, valore dell'anno DOPO contro il gemello senza
     # override):
     #   `sp07a`  14860.00 == 14860.00 del gemello  → cancellato, da rifiutare
     #   `sp07b/c/d/g`  idem
     #   `sp07e`  15025.25 contro 14860.00          → sopravvive: entra
-    #       nell'aggregato come `_prev('sp07e') × crescita` (`:2527`), quindi
+    #       nell'aggregato come `_prev('sp07e') × crescita` (`:2757`), quindi
     #       l'override si porta avanti da se' e NON si rifiuta
     #   `sp07f`  3210.00 contro 3000.00            → idem (deferred `_prev`)
     _LATO_OLTRE_GOVERNATO_DA_PIANO: Dict[str, Tuple[str, ...]] = {

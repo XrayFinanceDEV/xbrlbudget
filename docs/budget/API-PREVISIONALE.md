@@ -88,9 +88,9 @@ nell'allowlist `CE_OVERRIDE_FIELDS` di `backend/app/services/assumptions_service
 mappa `FIELD_TO_OVERRIDE` di `frontend/app/forecast/income/page.tsx:72`.
 
 Ogni colonna è un **valore assoluto in euro**. `NULL` = usa il calcolo del motore.
-`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:1647-1648`,
+`ce20_override` fissa le imposte totali e scavalca `tax_rate` (`forecast_engine.py:2115-2116`,
 `intra_year_engine.py:271-272`); `ce17a_override`/`ce17b_override` sono letti separatamente,
-**non** come netto in `ce17_override` (`forecast_engine.py:1873-1874`).
+**non** come netto in `ce17_override` (`forecast_engine.py:2341-2342`).
 
 Il batch:
 
@@ -143,7 +143,7 @@ PATCH /companies/{id}/scenarios/{sid}/sp-override
 → { "success": true, "years": 2 }
 ```
 
-entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engine.py:3069`,
+entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engine.py:3525`,
 `intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda una versione
 propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:876`).
 
@@ -160,7 +160,7 @@ Prima di tutto questo, però, il **corpo** è validato da
 numerico, un NaN/infinito, un `forecast_year` mancante o un `overrides` che non è una lista
 rispondono **422**, e nulla viene scritto né rigenerato. Fino al lotto 2 la rotta non aveva
 alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto al
-`Decimal(str(raw_value))` del motore (`forecast_engine.py:1141`, dentro `_apply_sp_overrides`),
+`Decimal(str(raw_value))` del motore (`forecast_engine.py:1594`, dentro `_apply_sp_overrides`),
 che solleva `decimal.InvalidOperation` — un `ArithmeticError`, non un `ValueError` — e l'unica
 risposta possibile era un **500** «Forecast regeneration failed» (M2). Il rollback era già
 corretto e nulla restava scritto: sbagliato era solo il codice. Un corpo valido si comporta
@@ -185,20 +185,65 @@ sola, eliminando sia la concorrenza sia il rifiuto spurio. `PUT /assumptions/{ye
 transazionale del giro 2 per un aggiornamento di un singolo anno — nessun chiamante nel
 frontend la usa più.
 
-`_apply_sp_overrides` (`forecast_engine.py:1104-1206`) ha tre comportamenti da conoscere:
+`_apply_sp_overrides` (`forecast_engine.py:1569-1672`) e i controlli che corrono sulla stessa
+scrittura hanno cinque comportamenti da conoscere:
 
 1. una chiave che non esiste nel risultato è **ignorata in silenzio**;
 2. ogni valore è **clampato a ≥ 0**, tranne `sp13_utile_perdita` e
    `sp12h_riserva_neg_azioni_proprie`: un override negativo su qualunque altro campo diventa
    uno zero, senza errore;
 3. il dettaglio vince sull'aggregato, e la cassa resta la voce di pareggio a meno che non sia
-   stata forzata esplicitamente.
+   stata forzata esplicitamente;
+4. un override dell'**aggregato** `sp16`/`sp17` senza override sulle sue voci mette la
+   differenza su `sp16g`/`sp17g`; se quella voce è governata da un piano `altri_debiti` o da
+   un'indicizzazione, l'override è **rifiutato** con un `ValueError` in italiano (§10). I debiti
+   finanziari `a`/`b`/`c` non ricevono mai né questa differenza né il centesimo di
+   arrotondamento (`_sp_forced_fields`, `_normalize_balance_sheet_cents`);
+5. un override sul lato **oltre** di un saldo con piano di scadenziamento (`sp17d`, `sp17e`,
+   `sp17f`, `sp17g`, `sp07` e le sue sotto-voci commerciali `sp07a`–`sp07d`/`sp07g`) è
+   **rifiutato** con un `ValueError` in italiano, in qualunque anno del piano, l'ultimo dopo
+   l'ultima rata compreso; lo stesso sul lato **breve** dei quattro debiti quando il valore
+   forzato scende sotto la rata dovuta l'anno dopo — tranne i tributari in via manuale, dove il
+   lato breve resta libero: lì la guardia è il rifiuto sul totale `sp16e + sp17e` (§9) — e su
+   `sp17e` anche senza piano, quando l'anno che lo leggerebbe è a saldo + acconto
+   (`_rifiuto_override_governati`). Sul lato breve dei **crediti commerciali** lo stesso rifiuto
+   vale sulla parte commerciale di `sp06` (l'aggregato, o una sua sotto-voce `sp06a`–`sp06d`/
+   `sp06g`, o `sp06e`/`sp06f` se la spostano): sotto il residuo a breve del piano il `generated`
+   dichiarato diventerebbe un credito nuovo negativo, e il motore lo rifiuta — ma da
+   `_realign_sp_declarations`, non da `_rifiuto_override_governati`, perché qui non c'è un unico
+   campo forzato da confrontare: il residuo si misura sul persistito (`sp06 − sp06e − sp06f`),
+   dopo che gli altri override dell'anno sono già stati applicati. Sul
+   `PATCH /sp-override` è un 400 con
+   rollback del lotto intero; sul bulk è `forecast_generated: false` con l'override salvato
+   comunque.
+
+Dopo gli override, le scomposizioni dei `details` seguono il persistito
+(`_realign_sp_declarations`): `details['imposte']`, le righe di `details['pregresso']` — i
+quattro saldi di debito e, dallo stesso giro, anche `crediti_commerciali` — e il `valore` di
+`details['indicizzazione'][voce]`; per la posizione tributaria il valore forzato di
+`sp16e`/`sp06e` diventa lo stato d'apertura dell'anno dopo (§9). Sulla riga `crediti_commerciali`
+il riallineamento non è incondizionato come sui quattro debiti: se la parte commerciale
+persistita scende sotto il `residual_short` che il piano deve incassare l'anno dopo, il
+`generated` dichiarato diventerebbe negativo — un credito nuovo negativo, che il motore non
+modella (decisione del proprietario, 2026-09-11) — e la generazione si **rifiuta** invece di
+scrivere la riga (§2.2, punto 5).
 
 ## 3. Precedenza, e che cosa sopravvive a che cosa
 
 Un override **vince sempre** sulla percentuale di crescita della stessa riga: si può cambiare
 `revenue_growth_pct` quanto si vuole, se `ce01_override` è valorizzato il ricavo previsionale
-non si muove.
+non si muove. Vince tranne sulle righe che il piano governa: sul lato oltre di un saldo con
+piano di scadenziamento, e sul lato breve sotto la rata dovuta l'anno dopo, l'override non è
+ammesso (§2.2).
+
+Sulle **righe a giorni** — `sp06a`, `sp06b`, `sp06c`, `sp06d`, `sp06g` (le voci commerciali
+ripartite dal DSO, `_alloc`; `sp06e` e `sp06f` non ci sono: seguono la posizione tributaria e le
+imposte differite, non i giorni) e `sp16d` (DPO) — un
+override vale invece **un anno solo**: la riga si ricalcola ogni anno dalla formula dei giorni,
+non da `prev`, quindi dall'anno N+1 torna quella senza override e la differenza rientra come
+variazione del circolante dell'anno dopo (il rendiconto la mostra come flusso operativo, non
+sparisce). Era così già prima del lotto; le righe che crescono da `prev` portano invece
+l'override avanti.
 
 E gli override **sopravvivono al salvataggio**:
 
@@ -210,7 +255,7 @@ E gli override **sopravvivono al salvataggio**:
 | `/forecast/income` → svuotare una cella | `PATCH /ce-override` con `value: null` | azzerato solo quello |
 
 `clear_overrides` scorre `assumption.__table__.columns` e mette a `None` ogni colonna il cui
-nome **finisce per `_override`** (`budget_scenarios.py:920-924`). `sp_overrides` finisce per
+nome **finisce per `_override`** (`budget_scenarios.py:1000-1003`). `sp_overrides` finisce per
 `_overrides`: **non viene azzerato**. La casella dice «del CE previsionale» e in questo è
 onesta, ma chi la spunta aspettandosi di tornare al previsionale puro del motore si tiene
 tutti gli override di stato patrimoniale.
@@ -218,7 +263,7 @@ tutti gli override di stato patrimoniale.
 ## 4. I giorni di rotazione derivati dall'anno base
 
 Quando `dso_days` / `dio_days` / `dpo_days` non sono impostati nelle ipotesi, il motore li
-deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2016`):
+deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2484`):
 
 | | formula | nota |
 |---|---|---|
@@ -411,9 +456,16 @@ sarebbe contata due volte.
 `details` porta anche, sempre (ogni anno, anche a zero/vuoto): `pregresso`, `imposte`,
 `pregresso_ignored`, `pregresso_writeoff_ignored` (§8), `oneri_scoperto`, `scoperto_generato`,
 `scoperto_residuo`, `cassa_assorbita`, `fabbisogno_picco`, `fabbisogno_picco_anno`,
-`cassa_sotto_minimo` (§10), `indicizzazione`, `indicizzazione_ignorata` (§11) — il bulk e
-l'anteprima condividono lo stesso motore e lo stesso dict, quindi nessuna di queste manca da una
-delle due porte.
+`cassa_sotto_minimo` (§10), `indicizzazione`, `indicizzazione_ignorata` (§11),
+`residuo_quadratura` — il bulk e l'anteprima condividono lo stesso motore e lo stesso dict,
+quindi nessuna di queste manca da una delle due porte.
+
+`residuo_quadratura` è la lista `{campo, importo}` delle posature del residuo di arrotondamento
+della normalizzazione al centesimo dello SP (`_normalize_balance_sheet_cents`): `importo` è
+quanto è stato sommato a `campo`. `campo` è il secchio del gruppo (`sp16g`, `sp06g`, …),
+l'ultimo sotto-campo operativo libero, oppure l'aggregato `sp16_debiti_breve`/`sp17_debiti_lungo`
+quando nessuna voce operativa del gruppo è libera (e allora `sp09` si muove dello stesso
+importo). Mai `sp16a/b/c`, `sp17a/b/c`. Sempre presente, anche vuota.
 
 ## 8. Lo scadenziamento del pregresso
 
@@ -446,15 +498,17 @@ PUT /companies/{id}/scenarios/{sid}/assumptions
 Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoInput`,
 `PregressoPlanInput`, `PregressoTributariInput`): `crediti_commerciali`, `debiti_fornitori`,
 `debiti_tributari`, `debiti_previdenziali`, `altri_debiti`. Una chiave **assente o `null`** vale
-«nessun piano»: il motore usa la formula di oggi **intera**, lato breve e lato lungo, ed è il
-comportamento di prima del lotto al centesimo (`mode: "legacy"`, sotto).
+«nessun piano»: il motore usa la formula di oggi **intera**, lato breve e lato lungo
+(`mode: "legacy"`, sotto). Il centesimo di arrotondamento del gruppo debiti resta su
+`sp16g`/`sp17g` come prima, ma può valere un centesimo diverso quando un'altra riga del gruppo
+è cambiata (i tributari, §9).
 
 - **Solo sulla riga del primo anno di piano.** `pregresso` su una riga successiva alza
-  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1181-
-  1186`). È una fotografia dell'anno base, non un'ipotesi per-anno.
+  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1786-
+  1789`). È una fotografia dell'anno base, non un'ipotesi per-anno.
 - **`opening` deve coincidere col bilancio base**, tolleranza 0,01 €, o il motore si ferma con
   «il saldo di apertura di {voce} è cambiato ({dichiarato} → {base}): rivedi lo scadenziamento»
-  (`validate_pregresso`, `calculations/forecast_engine.py:334-362`).
+  (`validate_pregresso`, `calculations/forecast_engine.py:448-505`).
 - **`amounts[i]`** è l'importo chiuso nell'anno di piano `i` (0 = il primo). Per
   `debiti_tributari` riguarda il **solo rateizzato**: il saldo dell'anno precedente si versa per
   intero nel primo anno di piano, per definizione (§9). Lunghezza ≤ orizzonte; importi ≥ 0; la
@@ -473,7 +527,7 @@ breve (`sp06`/`sp16x`); il resto sta oltre 12 mesi (`sp07`/`sp17x`). **Con un pi
 è interamente pregresso**: il motore rigenera dalla formula di oggi solo il lato a breve
 (generato + il residuo dovuto l'anno dopo), il resto del residuo ci resta per tutto il piano e la
 percentuale di crescita di quella voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`)
-smette di applicarsi (`calculations/forecast_engine.py:2116-2145` per i crediti, `:2442-2468` per
+smette di applicarsi (`calculations/forecast_engine.py:2745-2763` per i crediti, `:3104-3128` per
 fornitori/previdenziali/altri debiti). Nell'ultimo anno di piano tutto il residuo non scadenziato
 è oltre: non c'è un «anno dopo» nel piano, e il motore non inventa scadenze.
 
@@ -505,8 +559,11 @@ controllo. Ora ogni anno di piano paga **saldo + acconto + rate**
 (`calculations.projection_common.tax_settlement_saldo_acconto`, chiamata solo dal motore budget —
 l'infrannuale continua a usare `tax_closing_position`, invariata):
 
-- **saldo pagato in N** = il debito tributario **generato a fine N−1**, al netto del credito
-  tributario di apertura fino a capienza (l'eccedenza resta credito). Per N = 1 è la quota
+- **saldo pagato in N** = il debito tributario **generato a fine N−1**, cioè
+  `details['imposte'].generated_debt` dell'anno N−1 — il debito generato a fine N−1 oppure, se
+  `sp16e` è stato forzato, `sp16e` persistito meno il rateizzato dovuto in N
+  (`_realign_sp_declarations`) — al netto del credito tributario di apertura fino a capienza
+  (l'eccedenza resta credito). Per N = 1 è la quota
   «saldo dell'anno precedente» che l'utente dichiara nel campo `pregresso.debiti_tributari.saldo`.
 - **acconti(N)** = `tax_advances_paid` della riga N se **maggiore di zero**, altrimenti
   `imposte(N−1) × acconto_pct / 100` — `acconto_pct` di default **100**, `imposte(0)` è `ce20`
@@ -519,14 +576,25 @@ l'infrannuale continua a usare `tax_closing_position`, invariata):
 - **debito generato a fine N** = `max(0, imposte(N) − acconti(N))`; **credito generato a fine N**
   = `max(0, acconti(N) − imposte(N))`.
 - `sp16e(N)` = debito generato + rate dovute in N+1; `sp17e(N)` = rate dovute oltre N+1;
-  `sp06e(N)` = credito generato + eccedenza del credito di apertura non ancora usata.
+  `sp06e(N)` = credito generato + eccedenza del credito di apertura non ancora usata; con un
+  override di `sp06e`, la somma di `generated_credit` e `opening_credit_left` è il valore
+  forzato, ripartito riempendo prima `opening_credit_left` e poi `generated_credit`.
 
 Uscita di cassa dell'anno = saldo + acconti + rate, attraverso il plug come tutto il resto.
 
 **Via manuale.** `sp06e_growth_pct` o `sp16e_growth_pct` valorizzati saltano tutto questo, come
 prima del lotto: i debiti tributari si muovono per crescita percentuale, e un piano tributario
 scritto insieme a quelle percentuali produce `pregresso_ignored: ["debiti_tributari"]` invece di
-applicarsi a metà.
+applicarsi a metà. Un anno **manuale seguito da un anno automatico**, con un piano tributario,
+non è però libero: il saldo dovuto si ricostruisce dal **totale** di debito tributario che
+l'anno manuale lascia in bilancio (`sp16e + sp17e`), e se quel totale è **inferiore** al
+rateizzato ancora aperto all'inizio dell'anno automatico il calendario ripartirebbe intero e la
+cassa assorbirebbe la differenza senza un versamento — il motore lo rifiuta con un errore in
+italiano che nomina l'anno manuale e l'anno che riparte dal piano. Tre vie d'uscita: tenere in
+via manuale anche l'anno che riparte; lasciare nell'anno manuale un debito tributario
+(`sp16e + sp17e`, per percentuale o per override) non inferiore al rateizzato aperto; modificare
+il piano nel passo «Imposte». In un anno manuale l'override del lato breve tributario resta
+comunque libero — il rifiuto (§2.2) guarda il totale che l'anno dopo legge, non il lato singolo.
 
 ### `details['imposte']` — sempre presente, ogni anno
 
@@ -536,9 +604,9 @@ applicarsi a metà.
 | `saldo_paid` | il saldo versato quest'anno |
 | `acconti_paid` | l'acconto versato quest'anno |
 | `rate_paid` | le rate del rateizzato versate quest'anno |
-| `generated_debt` | il debito tributario generato a fine anno (→ `sp16e` dell'anno prossimo) |
-| `generated_credit` | il credito tributario generato a fine anno |
-| `opening_credit_left` | il credito di apertura non ancora usato |
+| `generated_debt` | il debito tributario a saldo di fine anno (→ `saldo_paid` dell'anno prossimo; `sp16e` = `generated_debt` + `residual_short`; con un override di `sp16e` vale `sp16e` − `residual_short`) |
+| `generated_credit` | il credito tributario generato a fine anno — con un override di `sp06e` la loro somma è il valore forzato |
+| `opening_credit_left` | il credito di apertura non ancora usato — un override di `sp06e` riempie prima questa, poi `generated_credit` |
 | `mode` | `"saldo_acconto"` (il kernel governa) o `"manual"` (via manuale attiva: gli importi pagati sono dichiarati zero, perché non esistono — mai inventati) |
 
 ## 10. Scoperto di conto corrente (overdraft)
@@ -580,6 +648,17 @@ discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripart
 (il passivo è fissato dall'override qualunque sia la divisione fra banca e scoperto), e il motore
 rifiuta la combinazione con un errore esplicito invece di superare il totale.
 
+⚠️ **Il totale `sp16`/`sp17` però non vince se il gruppo non ha più un ripiego libero.** Quando
+un piano di scadenziamento (o un'indicizzazione) del *secchio* `sp16g`/`sp17g` ha già
+forzato tutte le righe operative del gruppo, la differenza fra il totale richiesto e
+la somma delle righe non è un arrotondamento: è la massa dell'override, e non c'è
+un campo onesto che la riceva (sul secchio il calendario la cancellerebbe l'anno
+dopo; su una riga `d`/`e`/`f` sarebbe un'obbligazione inventata). Il motore risponde
+allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve` non
+è ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non
+resta scritta. Senza piano né indicizzazione sul gruppo, il totale forzato continua
+a vincere come sempre (`tests/test_forecast_residuo_quadratura_sp16.py`).
+
 ## 11. Indicizzazione delle voci minori dello SP (`sp_indexing`)
 
 Undici voci minori dello stato patrimoniale seguono, per default, la formula di sempre —
@@ -602,11 +681,11 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
 - **Valore** = uno dei **tre driver**, tipizzato `Literal["ricavi", "acquisti", "personale"]`
   (`backend/app/schemas/budget.py:96,207,319`): `ricavi` = `ce01` previsto / `ce01` base,
   `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
-  (`calculations/forecast_engine.py:663-692`, `_sp_indexing_factors`). Un nome fuori da questi tre
+  (`calculations/forecast_engine.py:1132-1160`, `_sp_indexing_factors`). Un nome fuori da questi tre
   **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
   che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`),
   e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
-  (`calculations/forecast_engine.py:850-851`). Solo le rotte tipizzate per singola riga passano dal
+  (`calculations/forecast_engine.py:1196`). Solo le rotte tipizzate per singola riga passano dal
   `Literal` Pydantic e rispondono 422.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il

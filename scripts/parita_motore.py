@@ -181,6 +181,35 @@ def _con_tributari_pregressi(bs: Dict[str, Decimal], breve: Decimal, lungo: Deci
 
 TRIBUTARI_BS = _con_tributari_pregressi(BASE_BS, D("9876.54"), D("3210.98"))
 
+
+def _con_altri_debiti_pregressi(bs: Dict[str, Decimal], breve: Decimal, lungo: Decimal) -> Dict[str, Decimal]:
+    """Il fixture con `altri_debiti` pregressi non tondi, a breve e oltre.
+
+    Perche' esiste (giro 2, rilievo I-3 della revisione di `6e5c0f7`). Il ramo
+    nuovo del normalizzatore — nessun campo operativo del gruppo `sp16` e'
+    libero, quindi l'aggregato segue la somma delle righe e la cassa si muove
+    del centesimo — lo raggiunge solo chi FORZA il secchio `sp16g`, cioe' un
+    piano `altri_debiti` (o un'indicizzazione di `sp16g`). Ma la massa di
+    `altri_debiti` e' `sp16g + sp17g`, e su OGNI fixture di sopra e' zero:
+    `validate_pregresso` imporrebbe un piano a zero rate, e un piano a zero
+    rate non produce alcun residuo da posare. Il banco era quindi cieco sul
+    ramo per costruzione, non per sfortuna (e' il rilievo I-3 punto 2). Stessa
+    tecnica dei due fixture precedenti: la cassa riassorbe la differenza, cosi'
+    il pareggio e l'identita' aggregato/details restano esatti.
+    """
+    out = dict(bs)
+    out["sp16g_altri_debiti_breve"] = breve
+    out["sp16_debiti_breve"] = D(str(bs.get("sp16_debiti_breve", 0))) + breve
+    out["sp17g_altri_debiti_lungo"] = lungo
+    out["sp17_debiti_lungo"] = D(str(bs.get("sp17_debiti_lungo", 0))) + lungo
+    out["sp09_disponibilita_liquide"] = (
+        D(str(bs.get("sp09_disponibilita_liquide", 0))) + breve + lungo
+    )
+    return out
+
+
+ALTRI_BS = _con_altri_debiti_pregressi(BASE_BS, D("23456.79"), D("12345.67"))
+
 # Scale non tonde: preservano il rapporto di ogni fixture (quindi anche il
 # dpo = 3.600 giorni della holding) ma rendono ogni importo frazionario.
 # I fixture nuovi vanno IN CODA: ogni fixture ha il proprio generatore, quindi
@@ -193,6 +222,7 @@ FIXTURES: List[Tuple[str, Dict[str, Decimal], Dict[str, Decimal], Decimal]] = [
     ("holding_scala", HOLDING_BS, HOLDING_CE, D("1.07316")),
     ("banca", BANCA_BS, BASE_CE, D("1")),
     ("tributari", TRIBUTARI_BS, BASE_CE, D("1")),
+    ("altri", ALTRI_BS, BASE_CE, D("1")),
 ]
 
 
@@ -400,6 +430,7 @@ def profilo_pregresso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
     if anno_idx != 0:
         return {}
     return {
+        "_pregresso_chiavi": ("crediti_commerciali", "debiti_fornitori", "debiti_tributari"),
         "_pregresso_frazioni": {
             "crediti_commerciali": [round(rng.uniform(0.15, 0.35), 4), round(rng.uniform(0.15, 0.35), 4)],
             "debiti_fornitori": [round(rng.uniform(0.15, 0.35), 4), round(rng.uniform(0.15, 0.35), 4)],
@@ -407,6 +438,171 @@ def profilo_pregresso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
             "debiti_tributari_amounts": [round(rng.uniform(0.2, 0.4), 4), round(rng.uniform(0.2, 0.4), 4)],
         },
         "existing_debt_repayment_years": _anni_frazionari(rng, 3, 6),
+    }
+
+
+def profilo_pregresso_tributari_mezzo_cent(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Rateizzato tributario con rate a MEZZO centesimo e nessun override.
+
+    Perche' esiste (giro 2, rilievo I-a della revisione di `f330730`).
+    `_realign_sp_declarations` confrontava il persistito con una somma NON
+    quantizzata: con un `residual_short` sotto il centesimo la condizione
+    diventava vera ANCHE SENZA NESSUN OVERRIDE, e il motore riscriveva
+    `details['imposte'].generated_debt` lontano da qualunque confronto — la
+    revisione lo misura su 32 scenari su 96 della SUA batteria (rate a mezzo
+    centesimo, `dump_batteria.py`, fuori griglia). Finche' `PROFILI` non ha
+    una rata sotto il centesimo il banco non ha nessuna possibilita' di vederlo.
+
+    CHE VEDA POI — misura, e non e' quella che ci si aspetterebbe. Su questa
+    griglia (5 anni, `b08a9a6` contro il giro 2) questo profilo da solo non
+    muove NESSUNA CELLA, ma una divergenza la fa vedere lo stesso:
+    `tributari__pregresso_tributari_mezzo_cent`, anno 2029, l'importo dentro il
+    messaggio «Unfunded financing requirement» passa da 44.885,63 a 44.885,64
+    (e' la somma delle parti dichiarate, non un prospetto). Le parti si
+    sommano nella cella, quindi la coda di mezzo centesimo resta confinata nei
+    `details` — e li' il banco la VEDE, perche' `chiavi_dettagli` confronta
+    anche alcune chiavi dichiarate. Le altre quattro divergenze della griglia
+    stanno su questo profilo e su `pregresso_mezzo_cent_con_override`, con la
+    stessa forma: `generated` 0.005 → 0, `generated_debt` 38593.595 → 38593.59.
+    La firma con cui
+    la revisione l'aveva vista (`sp06g` −0,01, cassa +0,01) e' di un altro
+    contesto: li' la cella NON era forzata e il riallineamento riscriveva il
+    `generated` di una riga mai toccata. Per quella prova serve un test che
+    guardi i `details`, e infatti c'e': `test_a_senza_override_il_riallineamento_non_cambia_niente`
+    confronta lo stesso scenario col riallineatore acceso e spento (ed e' rosso
+    su `b08a9a6`). Questo profilo resta: se un domani la coda frazionaria
+    trovasse la strada per una cella, qui si vedrebbe.
+
+    Misura di QUESTO profilo (driver del banco, griglia a 5 anni, `0207c93`
+    contro `b08a9a6`, fixture `tributari` — l'unico con massa tributaria):
+    `details['imposte'].generated_debt` 2027 passa da `0` a `0.005` su una
+    cella NON forzata (rata 1626.405, `residual_short` 1197.855: e' li' il mezzo
+    centesimo), e il 2028 porta `sp06g` da `0.00` a `-0.01` con la cassa di
+    `+0,01` — la firma che la revisione descrive. Nelle stesse righe compare
+    anche `sp16c` -> `sp16g`: quello e' I3, che su `0207c93` non era ancora
+    arrivato. Nota: la griglia estrae da UN rng per fixture, quindi le cifre
+    dipendono da `--anni`; qui sono quelle di `--anni 5`.
+
+    Solo tributari, e nessun `existing_debt_repayment_years`: cio' che si
+    misura e' l'IDENTITA' senza override, non un'altra interazione. Le
+    percentuali di `profilo_crescita` ci stanno pero' perche' e' LI' che le
+    righe dello stato patrimoniale prendono code frazionarie: senza, la sola
+    coda del piano finisce assorbita dalla quantizzazione della riga.
+    """
+    valori = profilo_crescita(rng, anno_idx)
+    if anno_idx != 0:
+        return valori
+    valori.update({
+        "_pregresso_chiavi": ("debiti_tributari",),
+        "_pregresso_mezzo_cent": True,
+        "_pregresso_frazioni": {
+            "debiti_tributari_rateizzato_pct": round(rng.uniform(0.35, 0.55), 4),
+            "debiti_tributari_amounts": [round(rng.uniform(0.15, 0.3), 4),
+                                         round(rng.uniform(0.15, 0.3), 4)],
+        },
+    })
+    return valori
+
+
+def profilo_mezzo_cent_con_override(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Rate a mezzo centesimo PLUS una cella tributaria breve forzate, insieme.
+
+    Perche' esiste (giro 2, rilievo I-a della revisione di `f330730`). Il
+    profilo sopra, da solo, NON puo' far vedere la firma: il ramo incriminato
+    del riallineatore (`if res != declared_res`) si apre solo quando la riga e'
+    FORZATA, e `profilo_pregresso_tributari_mezzo_cent` di forzature non ne ha
+    nessuna — «Solo tributari, e nessun existing_debt_repayment_years: cio' che
+    si misura e' l'IDENTITA' senza override», dice il suo docstring. Misurato:
+    la griglia, con il solo profilo sopra, non puo' far vedere che cosa succede
+    quando la cella della stessa riga viene ANCHE forzata — e qui sotto c'e' la
+    misura di quando lo si fa davvero.
+
+    Qui la combinazione che la griglia non aveva c'e': la rata sotto il
+    centesimo E l'override sulla cella contabile della stessa riga, e il numero
+    e' preso di peso da `profilo_override_ce_sp` (40000.33). L'affermazione che
+    questo profilo porta in dote e' pero' NEGATIVA, e va detta chiara perche' il
+    banco non la vedra' mai: la correzione I-a non muove nessuna CELLA (la
+    somma delle due parti e' la cella forzata, prima e dopo), sposta solo il
+    `generated_debt` dichiarato nei `details`.
+
+    CHE IL BANCO NON GUARDI I `details` ERA FALSO, e la misura del commit
+    successivo l'ha corretto: `chiavi_dettagli` confronta ANCHE alcune chiavi
+    dichiarate, e su `b08a9a6` vs HEAD, 5 anni, la griglia da' **5 divergenze
+    tutte li', nessuna in una cella**: `pregresso.altri_debiti.generated`
+    0.005 → 0, `imposte.generated_debt` 38593.595 → 38593.59 e
+    `pregresso.debiti_tributari.residual_short` 1407.105 → 1407.11 (qui,
+    2027), `imposte.saldo_paid` 31995.3414 → 31995.3364 (2028),
+    `pregresso.debiti_tributari.generated` 0.005 → 0
+    (`altri__pregresso_altri`, 2027) — piu' l'importo dentro il messaggio
+    «Unfunded financing requirement» che passa da 44.885,63 a 44.885,64
+    (`tributari__pregresso_tributari_mezzo_cent`, 2029), perche' il fabbisogno
+    e' una somma di quelle stesse parti. Quindi: la coda di mezzo centesimo
+    sparisce dai numeri dichiarati, e NESSUNA SOMMA DI BILANCIO SI MUOVE. Il
+    test di proprieta' `test_a_senza_override_il_riallineamento_non_cambia_
+    niente` resta la prova forte (confronta il previsionale, non la
+    dichiarazione); questo profilo e` la palestra che la combina con la coda.
+    """
+    valori = profilo_pregresso_tributari_mezzo_cent(rng, anno_idx)
+    if anno_idx != 0:
+        return valori
+    valori["sp_overrides"] = {"sp16e_debiti_tributari_breve": _eur(rng, 40000, 40001)}
+    return valori
+
+
+def profilo_pregresso_altri(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Piano `altri_debiti` a mezzo centesimo: il secchio `sp16g`/`sp17g` e'
+    forzato, quindi NEL GRUPPO DEBITI non resta nessun operativo libero.
+
+    Perche' esiste (giro 2, rilievo I-3 punto 2 della revisione di `6e5c0f7`).
+    Il ramo in cui l'aggregato `sp16`/`sp17` segue la somma delle righe (e la
+    cassa si muove dello stesso centesimo) non e' raggiunto da NESSUN profilo:
+    `PROFILI` non aveva alcun piano `altri_debiti`, e `rimborso_indicizzazione`
+    che `sp16g` lo indicizza pure, ma su tutta la griglia non posa NULLA (misura
+    sotto). Il piano va pero' su un fixture la cui massa di `altri_debiti` e'
+    diversa da zero — `altri`, vedi `_con_altri_debiti_pregressi` — perche'
+    `validate_pregresso` impone che l'`opening` dichiarato sia quello del
+    bilancio base: sugli altri fixture questo profilo resta un `pregresso` vuoto.
+
+    Misura della griglia a 5 anni su `b08a9a6`, posature che nominano un
+    aggregato: `pregresso_altri` 1 anno su 37, e nessuno dei 13 profili
+    precedenti ne posa una su 494 anni (`rimborso_indicizzazione` compresa: 0
+    su 40, che sono le `I16`/`I17` della revisione — «il residuo e' zero su
+    tutta la griglia»).
+    """
+    valori = profilo_crescita(rng, anno_idx)
+    if anno_idx != 0:
+        return valori
+    valori.update({
+        "_pregresso_chiavi": ("altri_debiti",),
+        "_pregresso_mezzo_cent": True,
+        "_pregresso_frazioni": {
+            "altri_debiti": [round(rng.uniform(0.15, 0.3), 4), round(rng.uniform(0.15, 0.3), 4)],
+        },
+    })
+    return valori
+
+
+def profilo_override_aggregato(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Un `sp_overrides` SOLO sull'aggregato `sp16_debiti_breve`, senza piano.
+
+    Perche' esiste (giro 2, rilievi I-1 e I-3 della revisione di `6e5c0f7`).
+    E' l'unica ipotesi con cui il normalizzatore incontra UN FORZATO
+    SULL'AGGREGATO: con un dettaglio forzato, `_apply_sp_overrides`
+    ricostruisce comunque l'aggregato dalla somma e il residuo torna un
+    arrotondamento. L'importo qui e' il segnaposto "0": lo sostituisce
+    `costruisci_griglia` dopo il ciclo degli anni, sul `sp16_debiti_breve` REALE
+    del fixture + 15.000,37 (stessa tecnica di `profilo_finanziamento_misto`):
+    un totale forzato lontano da quello naturale farebbe scattare il cancello
+    del fabbisogno su meta' degli scenari, e il banco misurerebbe l'errore al
+    posto del centesimo.
+
+    Senza piano per scelta: con un piano `altri_debiti` addosso, da questo giro
+    in poi questo override si RIFIUTA (I-1), e la griglia smetterebbe di
+    mostrare dove la massa va a posarsi. Il rifiuto lo provano i test in
+    `tests/test_forecast_residuo_quadratura_sp16.py`.
+    """
+    return {
+        "sp_overrides": {"sp16_debiti_breve": "0"},
     }
 
 
@@ -425,7 +621,67 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "finanziamento_e_rimborso": profilo_finanziamento_e_rimborso,
     "finanziamento_misto": profilo_finanziamento_misto,
     "pregresso": profilo_pregresso,
+    "pregresso_tributari_mezzo_cent": profilo_pregresso_tributari_mezzo_cent,
+    "pregresso_altri": profilo_pregresso_altri,
+    "override_aggregato": profilo_override_aggregato,
+    # In CODA, dopo `override_aggregato`: l'ordine di `PROFILI` e' anche quello
+    # con cui lo STESSO rng di fixture estrae, e infilarsi in mezzo ricadrebbe su
+    # tutti i profili successivi (numero registrato del commit 1 e cifra della
+    # firma I-a incluse). Un profilo nuovo si aggiunge in fondo, sempre.
+    "pregresso_mezzo_cent_con_override": profilo_mezzo_cent_con_override,
 }
+
+
+def _piano_pregresso(masse: Dict[str, Decimal], frazioni: Dict[str, Any], num_anni: int,
+                     chiavi, mezzo_cent: bool = False) -> Dict[str, Any]:
+    """Le FRAZIONI del profilo diventano gli IMPORTI del fixture che le consuma.
+
+    `validate_pregresso` impone che l'`opening` di ogni saldo coincida al
+    centesimo con la massa del bilancio base, e il profilo non conosce il
+    fixture: il piano si costruisce qui, con la stessa funzione del motore
+    (`pregresso_opening_masses`). Un saldo la cui massa e' zero su questo
+    fixture resta fuori dal piano — scadenziare un euro che non c'e' alza un
+    errore, non un piano a zero.
+
+    Con `mezzo_cent` ogni rata guadagna MEZZO centesimo: e' la coda che la
+    quantizzazione della riga deve spezzare, e senza di essa un `residual_short`
+    frazionario sotto il centesimo non lo produce NULLA (rilievo I-a).
+    Il mezzo centesimo si aggiunge solo finche' rientra nel residuo, perche'
+    `validate_runoff` rifiuta un piano che eccede la massa.
+    """
+    mezzo = D("0.005") if mezzo_cent else D("0")
+
+    def _rate(opening: Decimal, quote) -> List[str]:
+        importi: List[str] = []
+        residuo = opening
+        for q in quote[:num_anni]:
+            imp = min(residuo, (opening * D(str(q))).quantize(CENT))
+            if imp + mezzo <= residuo:
+                imp += mezzo
+            importi.append(str(imp))
+            residuo -= imp
+        return importi
+
+    piano: Dict[str, Any] = {}
+    for chiave in chiavi:
+        if chiave == "debiti_tributari":
+            opening = masse[chiave]
+            if opening <= 0:
+                continue
+            rateizzato = (
+                opening * D(str(frazioni["debiti_tributari_rateizzato_pct"]))
+            ).quantize(CENT)
+            piano[chiave] = {
+                "opening": str(opening), "saldo": str(opening - rateizzato),
+                "rateizzato": str(rateizzato),
+                "amounts": _rate(rateizzato, frazioni["debiti_tributari_amounts"]),
+            }
+        else:
+            opening = masse[chiave]
+            if opening <= 0:
+                continue
+            piano[chiave] = {"opening": str(opening), "amounts": _rate(opening, frazioni[chiave])}
+    return piano
 
 
 def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
@@ -472,51 +728,34 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
                     loans = valori["financing_loans"]
                     loans[0]["opening_residual"] = str(residuo_puro)
                     loans[1]["opening_residual"] = str(residuo_misto)
-                if profilo_nome == "pregresso" and i == 0:
+                if profilo_nome.startswith("pregresso") and i == 0:
                     # L'`opening` di un saldo scadenziato deve coincidere al
                     # centesimo con la sua massa di apertura sul bilancio base
                     # (`validate_pregresso`), e il profilo non conosce il
                     # fixture che lo consuma: il piano vero si costruisce QUI,
                     # con la stessa funzione del motore
                     # (`pregresso_opening_masses`), non a occhio. Un saldo la
-                    # cui massa e' zero su questo fixture (i tributari, fuori
-                    # da `tributari`/`banca`) resta fuori dal piano —
-                    # scadenziare un euro che non c'e' alzerebbe un errore,
-                    # non un piano a zero.
-                    frazioni = valori.pop("_pregresso_frazioni")
+                    # cui massa e' zero su questo fixture (i tributari, che ce
+                    # l'hanno solo su `tributari` — vedi
+                    # `_con_tributari_pregressi` — e gli `altri_debiti`, solo su
+                    # `altri`) resta fuori dal piano.
                     masse = _masse_pregresso(lambda f: D(bs.get(f, "0")))
-
-                    def _rate(opening: Decimal, quote) -> List[str]:
-                        importi: List[str] = []
-                        residuo = opening
-                        for q in quote[:num_anni]:
-                            imp = min(residuo, (opening * D(str(q))).quantize(CENT))
-                            importi.append(str(imp))
-                            residuo -= imp
-                        return importi
-
-                    piano: Dict[str, Any] = {}
-                    for chiave in ("crediti_commerciali", "debiti_fornitori"):
-                        opening = masse[chiave]
-                        if opening <= 0:
-                            continue
-                        piano[chiave] = {
-                            "opening": str(opening),
-                            "amounts": _rate(opening, frazioni[chiave]),
-                        }
-                    opening_trib = masse["debiti_tributari"]
-                    if opening_trib > 0:
-                        rateizzato = (
-                            opening_trib * D(str(frazioni["debiti_tributari_rateizzato_pct"]))
-                        ).quantize(CENT)
-                        saldo = opening_trib - rateizzato
-                        piano["debiti_tributari"] = {
-                            "opening": str(opening_trib), "saldo": str(saldo),
-                            "rateizzato": str(rateizzato),
-                            "amounts": _rate(rateizzato, frazioni["debiti_tributari_amounts"]),
-                        }
-                    valori["pregresso"] = piano
+                    valori["pregresso"] = _piano_pregresso(
+                        masse, valori.pop("_pregresso_frazioni"), num_anni,
+                        valori.pop("_pregresso_chiavi"),
+                        bool(valori.pop("_pregresso_mezzo_cent", False)),
+                    )
                 anni_def.append({"anno": 2026 + 1 + i, "valori": valori})
+            if profilo_nome == "override_aggregato":
+                # Il segnaposto "0" del profilo diventa il totale FORZATO del
+                # fixture: un `sp16` imposto lontano dal suo valore naturale
+                # farebbe scattare il cancello del fabbisogno su meta' degli
+                # scenari, e il banco misurerebbe l'errore al posto del
+                # centesimo (stessa tecnica dei residui misti sopra — il
+                # profilo non conosce il fixture che lo consuma).
+                for a in anni_def:
+                    a["valori"]["sp_overrides"]["sp16_debiti_breve"] = str(
+                        D(bs["sp16_debiti_breve"]) + D("15000.37"))
             scenari.append({
                 "id": f"{fixture_nome}__{profilo_nome}",
                 "base_year": 2026,

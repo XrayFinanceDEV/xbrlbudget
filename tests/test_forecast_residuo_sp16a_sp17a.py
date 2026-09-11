@@ -21,20 +21,23 @@ Questo file NON rilancia il motore per intero: chiama direttamente
 gruppo forzato, `sp16a`/`sp17a` esclusi — e verifica che:
 
 1. SENZA la protezione esplicita (`forced_fields` senza `sp16a`/`sp17a`, come
-   il motore li costruiva prima di questo giro), il residuo LASCIA la voce
-   dichiarata e si posa su `sp16a`/`sp17a` — e' la prova rossa strutturale:
-   la vulnerabilita' e' reale, non ipotetica.
-2. CON `ForecastEngine._BANK_DEBT_SPLIT_FIELDS` unito a `forced_fields` (come
-   fa `compute_forecast` da questo giro in poi, incondizionatamente), lo
-   stesso identico input non sposta piu' nulla su `sp16a`/`sp17a`: il residuo
-   ricade sul secchio di default del gruppo (`sp16g`/`sp17g`), che e' il
-   comportamento dichiarato quando l'intero gruppo e' forzato.
-3. L'espressione REALE che `compute_forecast` costruisce ad ogni anno
-   (`_declared_sp_fields() | _pregresso_sp_forced_fields(pregresso) |
-   _indexed_sp_forced_fields(details) | _BANK_DEBT_SPLIT_FIELDS`) contiene
-   sempre `sp16a`/`sp17a`, anche nel caso piu' comune (nessun piano di
-   pregresso, nessuna indicizzazione) — cosi' il punto 2 non resta un fatto
-   isolato sulla sola costante.
+   il motore li costruiva prima di quel giro), il residuo NON raggiunge più
+   `sp16a`/`sp17a`: dal giro di correzione 2 (rilievo I3b) i tre lati
+   finanziari `a`/`b`/`c` di ciascun gruppo sono esclusi dal ripiego PER
+   CATEGORIA, non per elenco — la vulnerabilità che la prova rossa misurava
+   non esiste più, e questo test è il cancello che non la fa riseminare.
+2. Con l'intero gruppo forzato il residuo non ricade più nemmeno sul secchio
+   di default (che FORZATO lo è per definizione): segue la somma delle righe
+   nell'AGGREGATO, che del gruppo è letteralmente la definizione — e resta
+   dichiarato in `residuo_quadratura`.
+3. L'espressione REALE che `compute_forecast` costruisce ad ogni anno — ora
+   UNA funzione, `ForecastEngine._sp_forced_fields`, non piu' un'espressione a
+   pezzi nel chiamante (rilievo I-2 della revisione di `6e5c0f7`, punto 3: la
+   versione precedente di questo docstring descriveva come reale un
+   `_declared_sp_fields()` incondizionato che il motore non costruiva gia'
+   piu') — contiene sempre `sp16a`/`sp17a`, anche nel caso piu' comune (nessun
+   piano di pregresso, nessuna indicizzazione), dove solo
+   `_BANK_DEBT_SPLIT_FIELDS` porta la protezione.
 """
 from decimal import Decimal as D
 
@@ -91,19 +94,33 @@ _REGRESSIONE_SIMULATA = frozenset({
 })
 
 
-def test_senza_la_protezione_esplicita_il_residuo_raggiunge_sp16a_sp17a():
-    """La prova rossa strutturale: `forced_fields` COME li costruiva il motore
-    prima di questo giro (mai `sp16a`/`sp17a`) lascia il cammino a ritroso
-    libero di raggiungerli non appena il resto del gruppo e' gia' forzato."""
+def test_senza_la_protezione_esplicita_il_residuo_non_raggiunge_piu_sp16a_sp17a():
+    """Giro 2 (I3b): la vulnerabilita' strutturale che questo test dimostrava
+    — cammino a ritroso libero di arrivare ad `a` quando tutto il resto e'
+    forzato — e' stata ELIMINATA alla radice: `a`/`b`/`c` sono esclusi dal
+    ripiego PER CATEGORIA (debito finanziario: confine PFN e confine del
+    rendiconto), non per elenco e non per ordine. Qui restano FUORI da
+    `forced_fields` — la mutazione originale del test — eppure non si
+    muovono: il centesimo segue la somma delle righe, che e' la sua
+    definizione (riga `sp16 = sp16a + … + sp16g`)."""
     esito = ForecastEngine._normalize_balance_sheet_cents(
         _valori(), forced_fields=_REGRESSIONE_SIMULATA, recompute_cash=False,
     )
-    assert esito[SP16A] == D("1000.00") + _RESIDUO, (
-        f"atteso che senza la protezione il residuo raggiunga sp16a: {esito[SP16A]}"
+    assert esito[SP16A] == D("1000.00"), (
+        f"il cammino ha ancora raggiunto sp16a: {esito[SP16A]}"
     )
-    assert esito[SP17A] == D("2000.00") + _RESIDUO, (
-        f"atteso che senza la protezione il residuo raggiunga sp17a: {esito[SP17A]}"
+    assert esito[SP17A] == D("2000.00"), (
+        f"il cammino ha ancora raggiunto sp17a: {esito[SP17A]}"
     )
+    # Stesso divieto per `b` e `c`, che prima erano al riparo solo perche'
+    # nessuno li forzava mai: ora lo sono di diritto.
+    assert esito["sp16b_debiti_altri_finanz_breve"] == D("200.00")
+    assert esito["sp16c_debiti_obbligazioni_breve"] == D("300.00")
+    assert esito["sp17b_debiti_altri_finanz_lungo"] == D("300.00")
+    assert esito["sp17c_debiti_obbligazioni_lungo"] == D("400.00")
+    # E il residuo dov'e' finito? Da nessuna riga: nell'aggregato, dichiarato.
+    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0"))
+    assert esito["sp17_debiti_lungo"] == sum(_DETTAGLI_17.values(), D("0"))
 
 
 def test_con_bank_debt_split_fields_il_residuo_non_tocca_mai_sp16a_sp17a():
@@ -118,9 +135,13 @@ def test_con_bank_debt_split_fields_il_residuo_non_tocca_mai_sp16a_sp17a():
     assert esito[SP16A] == D("1000.00"), f"sp16a spostato: {esito[SP16A]}"
     assert esito[SP17A] == D("2000.00"), f"sp17a spostato: {esito[SP17A]}"
     # Un centesimo va pur posato da qualche parte (docstring della funzione):
-    # con l'intero gruppo forzato ricade sul secchio di default.
-    assert esito["sp16g_altri_debiti_breve"] == D("700.00") + _RESIDUO
-    assert esito["sp17g_altri_debiti_lungo"] == D("800.00") + _RESIDUO
+    # con l'intero gruppo forzato NON ricade piu' sul secchio di default (che
+    # forzato e' per definizione, e la dichiarazione sua — piano o indice che
+    # sia — resterebbe bugiarda): lo segue la somma delle righe, l'aggregato.
+    assert esito["sp16g_altri_debiti_breve"] == D("700.00")
+    assert esito["sp17g_altri_debiti_lungo"] == D("800.00")
+    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0"))
+    assert esito["sp17_debiti_lungo"] == sum(_DETTAGLI_17.values(), D("0"))
 
 
 def test_riordinare_il_cammino_non_rompe_piu_la_protezione():
@@ -143,16 +164,34 @@ def test_bank_debt_split_fields_e_esattamente_i_due_campi():
 
 
 def test_compute_forecast_forza_sempre_sp16a_sp17a_anche_nel_caso_piu_comune():
-    """L'espressione REALE che `compute_forecast` costruisce ad ogni anno
-    (`_declared_sp_fields() | _pregresso_sp_forced_fields(pregresso) |
-    _indexed_sp_forced_fields(details) | _BANK_DEBT_SPLIT_FIELDS`) contiene
-    sempre `sp16a`/`sp17a` — anche nel caso piu' comune di tutti, nessun piano
-    di pregresso e nessuna indicizzazione, dove gli altri tre addendi sono
-    vuoti e solo `_BANK_DEBT_SPLIT_FIELDS` porta la protezione."""
-    forzati = (
-        ForecastEngine._declared_sp_fields()
-        | ForecastEngine._pregresso_sp_forced_fields(None)
-        | ForecastEngine._indexed_sp_forced_fields(None)
-        | ForecastEngine._BANK_DEBT_SPLIT_FIELDS
-    )
-    assert SP16A in forzati and SP17A in forzati
+    """L'espressione REALE che `compute_forecast` passa al normalizzatore e'
+    `_sp_forced_fields`, e contiene `sp16a`/`sp17a` in OGNI suo cammino: non
+    solo nel caso piu' comune (nessun piano, nessuna indicizzazione) dove gli
+    altri addendi sono vuoti e solo `_BANK_DEBT_SPLIT_FIELDS` protegge, ma
+    anche con un piano attivo, con i due secchi indexati, e con un
+    `sp_overrides` sull'aggregato (I-1: li' l'aggregato ENTRA fra i forzati, e
+    i due finanziari restano fuori dal cammino a ritroso lo stesso).
+
+    Rilievo I-2, punto 3 della revisione di `6e5c0f7`: la versione precedente
+    di questo test ricuciva a mano i quattro addendi, e descriveva come
+    «l'espressione reale» un `_declared_sp_fields()` incondizionato che il
+    motore non costruiva piu'. Ora chiama LA funzione del motore: se un giorno
+    i due cammini divergono, e' questo test che lo dice.
+    """
+    class _A:
+        def __init__(self, ov=None):
+            self.sp_overrides = ov
+
+    PIANO = {"altri_debiti": {"opening": 55000.00, "amounts": [27500.00, 27500.00]}}
+    for nome, forzati in (
+        ("nessun piano, nessuna indice",
+         ForecastEngine._sp_forced_fields(None, None)),
+        ("indice su entrambi i secchi",
+         ForecastEngine._sp_forced_fields(None, {"indicizzazione": {"sp16g": "ricavi",
+                                                                   "sp17g": "ricavi"}})),
+        ("piano altri debiti", ForecastEngine._sp_forced_fields(PIANO, None)),
+        ("piano + aggregato forzato",
+         ForecastEngine._sp_forced_fields(PIANO, None,
+                                         _A({"sp16_debiti_breve": "150000.00"}))),
+    ):
+        assert SP16A in forzati and SP17A in forzati, nome

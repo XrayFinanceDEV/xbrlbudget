@@ -196,7 +196,7 @@ def test_fixed_assets_roll_forward_uses_their_own_depreciation_class():
 def test_aggregate_investments_are_not_split_fifty_fifty():
     engine = IntraYearEngine(None)
 
-    with pytest.raises(ValueError, match="cannot be allocated automatically"):
+    with pytest.raises(ValueError, match="la ripartizione automatica 50/50 è disattivata"):
         engine._project_balance_sheet_annualized(
             SimpleNamespace(),
             SimpleNamespace(),
@@ -266,7 +266,7 @@ def test_forecast_gate_rejects_ce_sp_mismatch(db_session):
     fy.balance_sheet.sp13_utile_perdita = D("0")
     db_session.flush()
 
-    with pytest.raises(ValueError, match="CE/SP profit mismatch"):
+    with pytest.raises(ValueError, match="utile del CE"):
         IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
 
 
@@ -276,7 +276,7 @@ def test_forecast_gate_rejects_persisted_source_plug(db_session):
     fy.original_bs_snapshot = '{"_plug_residual": "5"}'
     db_session.flush()
 
-    with pytest.raises(ValueError, match="source plug 5"):
+    with pytest.raises(ValueError, match="plug nella fonte 5,00"):
         IntraYearEngine(db_session)._validate_forecast_source(fy, "Partial source")
 
 

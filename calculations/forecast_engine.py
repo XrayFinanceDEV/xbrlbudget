@@ -20,6 +20,7 @@ from calculations.projection_common import (
     tax_settlement_saldo_acconto, soglia_giorni_magazzino,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
     residuo_prestiti_nuovi, quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
+    eur_it,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -148,10 +149,7 @@ class ForecastComputation:
     error: Optional[ForecastError] = None
 
 
-def _eur_it(amount: Decimal) -> str:
-    """1234567.891 -> '1.234.567,89' (ROUND_HALF_UP, come la quantizzazione del motore)."""
-    q = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return f"{q:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+_eur_it = eur_it  # alias storico: il corpo vive in calculations.projection_common (lotto 3A, task 8)
 
 
 @dataclass
@@ -219,7 +217,7 @@ class _Overdraft:
         La cassa netta si quantizza PRIMA del confronto (Ruling 37): un
         fabbisogno che vale 0,00 non alza e non accende scoperto, e un centesimo
         vero non si assorbe con una tolleranza. Senza concessione il messaggio
-        e' quello di sempre (`Unfunded financing requirement`), con l'importo
+        e' quello di sempre (`Fabbisogno finanziario scoperto`), con l'importo
         dello scoperto NUOVO; il tetto si confronta con lo scoperto IN ESSERE a
         fine anno, cioe' il fido come utilizzo massimo.
         """
@@ -229,8 +227,8 @@ class _Overdraft:
         nuovo = fabbisogno - self.opening
         if nuovo > zero and not self.allowed:
             raise ValueError(
-                f"Unfunded financing requirement {nuovo:,.2f}: add an explicit "
-                "financing assumption; no bank debt was created automatically"
+                f"Fabbisogno finanziario scoperto di {eur_it(nuovo)}: aggiungi un'ipotesi di "
+                "finanziamento esplicita; nessun debito bancario è stato creato automaticamente"
             )
         if fabbisogno > zero and self.forced_total is not None:
             raise ValueError(
@@ -321,7 +319,7 @@ def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
 
     Parte da `opening_residual` (zero per un prestito nuovo) prima del suo anno; un contratto non
     ancora erogato resta al valore di partenza. Per un prestito nuovo coincide con
-    `_residuo_prestiti_nuovi([loan], fino_al_anno)`.
+    `residuo_prestiti_nuovi([loan], fino_al_anno)` (il kernel di `calculations.projection_common`).
     """
     zero = Decimal('0')
     residuo = Decimal(str(loan.get('opening_residual') or 0))
@@ -499,19 +497,19 @@ def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
     semantico dell'infrannuale, ricavi base negativi. Alza ValueError."""
     scenario = db.query(BudgetScenario).filter(BudgetScenario.id == scenario_id).first()
     if not scenario:
-        raise ValueError(f"Budget scenario {scenario_id} not found")
+        raise ValueError(f"Scenario di budget {scenario_id} non trovato")
 
     # Get base year data (prefer full-year record)
     from database.queries import get_fy_prefer_full
     base_fy = get_fy_prefer_full(db, scenario.company_id, scenario.base_year)
     if not base_fy or not base_fy.balance_sheet or not base_fy.income_statement:
-        raise ValueError(f"Base year {scenario.base_year} data not found or incomplete")
+        raise ValueError(f"Dati dell'anno base {scenario.base_year} non trovati o incompleti")
 
     # Reuse the same semantic gate as the infrannuale engine.  A balanced
     # aggregate with missing debt/credit detail is not safe for DSO/DPO,
     # repayment schedules or cash-flow projection.
     from calculations.intra_year_engine import IntraYearEngine
-    IntraYearEngine(db)._validate_forecast_source(base_fy, "Base source")
+    IntraYearEngine(db)._validate_forecast_source(base_fy, "Anno base")
 
     base_inc = base_fy.income_statement
 
@@ -1764,7 +1762,8 @@ class ForecastEngine:
             # cui manca una riga non puo' saltare il cancello e persistere la
             # cassa netta, magari negativa, cosi' com'e'.
             raise ValueError(
-                "balance sheet incomplete: the overdraft gate needs every SP aggregate"
+                "Stato patrimoniale incompleto: il controllo dello scoperto richiede tutti "
+                "gli aggregati dello SP"
             )
         return result
 
@@ -1789,8 +1788,9 @@ class ForecastEngine:
         total = assumption.investments if assumption.investments else Decimal('0')
         if total:
             raise ValueError(
-                "Investments must be split into intangible_investments and "
-                "tangible_investments; automatic 50/50 allocation is disabled"
+                "Gli investimenti aggregati non si ripartiscono automaticamente: indica gli "
+                "investimenti immateriali e/o materiali (intangible_investments, "
+                "tangible_investments)"
             )
         return Decimal('0'), Decimal('0')
 
@@ -1930,7 +1930,8 @@ class ForecastEngine:
                 opening_residual = Decimal(str(loan.get('opening_residual') or 0))
                 if _ha_residuo_pregresso(loan) and a.forecast_year != first_forecast_year:
                     raise ValueError(
-                        "opening_residual is allowed only in the first forecast year"
+                        "Il residuo iniziale di un finanziamento (opening_residual) è ammesso "
+                        "solo nel primo anno di previsione"
                     )
                 detailed_opening_total += opening_residual
                 # Ruling 45: la divisione del contratto misto vive in
@@ -1943,8 +1944,9 @@ class ForecastEngine:
             base_bank_total = base_bank_debt(getter)
             if abs(base_bank_total - detailed_opening_total) > Decimal('0.01'):
                 raise ValueError(
-                    "The sum of financing opening residuals must equal base-year "
-                    f"bank debt ({detailed_opening_total} != {base_bank_total})"
+                    f"La somma dei residui iniziali dei finanziamenti "
+                    f"({eur_it(detailed_opening_total)}) deve coincidere con il debito "
+                    f"bancario dell'anno base ({eur_it(base_bank_total)})"
                 )
         return financing_loans, use_detailed_existing_schedule
 
@@ -1969,7 +1971,7 @@ class ForecastEngine:
         formatti i giorni per conto proprio.
         """
         if not assumptions:
-            raise ValueError(f"No assumptions found for scenario {source.scenario.id}")
+            raise ValueError(f"Nessuna ipotesi trovata per lo scenario {source.scenario.id}")
 
         try:
             financing_loans, use_detailed = self.assemble_financing(assumptions, source.base_bs)
@@ -1981,8 +1983,8 @@ class ForecastEngine:
             for extra in assumptions[1:]:
                 if getattr(extra, 'pregresso', None):
                     raise ValueError(
-                        "pregresso is allowed only in the first forecast year "
-                        "(lo scadenziamento vale solo sulla riga del primo anno)"
+                        "Lo scadenziamento del pregresso (pregresso) vale solo sulla riga del "
+                        "primo anno di previsione"
                     )
             pregresso = validate_pregresso(
                 getattr(assumptions[0], 'pregresso', None), source.base_bs, len(assumptions)
@@ -2253,7 +2255,7 @@ class ForecastEngine:
         ).order_by(BudgetAssumptions.forecast_year).all()
 
         if not assumptions:
-            raise ValueError(f"No assumptions found for scenario {scenario_id}")
+            raise ValueError(f"Nessuna ipotesi trovata per lo scenario {scenario_id}")
 
         # Un orizzonte accorciato non deve lasciare anni fantasma: il ciclo qui
         # sotto fa l'upsert dei soli anni che hanno un'ipotesi.
@@ -3484,8 +3486,8 @@ class ForecastEngine:
         gap_long = prev_sp17_agg - prev_sp17_detail
         if abs(gap_short) > Decimal('0.01') or abs(gap_long) > Decimal('0.01'):
             raise ValueError(
-                "Debt aggregate/detail mismatch: creditor categories are required; "
-                "the difference was not allocated to banks"
+                "Debiti: l'aggregato non coincide con la somma delle categorie dei creditori; "
+                "servono le categorie, e la differenza non è stata attribuita alle banche"
             )
 
         # Apply the bank repayment schedule to total bank debt (entro + oltre).

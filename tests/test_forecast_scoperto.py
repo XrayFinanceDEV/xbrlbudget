@@ -13,7 +13,7 @@ verso l'alto, e un plug negativo e' un fabbisogno scoperto. Che cosa succede
 allora dipende da una scelta ESPLICITA dell'utente, `overdraft_allowed`, spenta
 di default:
 
-- spenta: il motore solleva, `Unfunded financing requirement <importo>`, come
+- spenta: il motore solleva, `Fabbisogno finanziario scoperto di <importo>`, come
   ha sempre fatto — e ora lo fa **anche** sul percorso con override;
 - accesa: il fabbisogno diventa `sp16a_debiti_banche_breve` generato dal piano,
   dichiarato in `details['scoperto_generato']`, con un tetto opzionale
@@ -54,8 +54,8 @@ def _riga(anno, **extra):
 
 def _importo_scoperto(message):
     """L'importo dentro il messaggio del motore, con la regex del frontend."""
-    m = re.search(r"Unfunded financing requirement ([\d,]+\.\d{2})", message)
-    return D(m.group(1).replace(",", "")) if m else None
+    m = re.search(r"Fabbisogno finanziario scoperto di ([\d.]+,\d{2})", message)
+    return D(m.group(1).replace(".", "").replace(",", ".")) if m else None
 
 
 def _dettagli(db, scenario_id, rows):
@@ -577,7 +577,7 @@ def test_ruling_37_un_fabbisogno_che_vale_zero_centesimi_non_alza():
 
     L'attivita' finanziaria forzata alla cassa del piano piu' 4 millesimi porta la
     cassa esatta a -0,004: al centesimo vale 0,00 e il piano genera (su 2641305:
-    «Unfunded financing requirement 0.00»). Piu' 6 millesimi il centesimo e' vero,
+    «Fabbisogno finanziario scoperto di 0,00»). Piu' 6 millesimi il centesimo e' vero,
     e il motore alza per 0,01.
     """
     engine, sessions = memory_sessions()

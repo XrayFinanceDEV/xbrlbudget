@@ -46,6 +46,12 @@ _NON_BANK_LONG_FIELDS = (
 )
 
 
+def eur_it(amount: Decimal) -> str:
+    """1234567.891 -> '1.234.567,89' (ROUND_HALF_UP, come la quantizzazione del motore)."""
+    q = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{q:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def base_bank_debt(getter: Callable[[str], Decimal]) -> Decimal:
     """Base-year bank debt across both maturity buckets.
 

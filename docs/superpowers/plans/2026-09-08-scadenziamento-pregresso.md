@@ -1523,3 +1523,13 @@ CCN, current ratio e circolante di Altman.
 - Rete rossa sull'HEAD di partenza; parita': si muovono solo `sp16a`/`sp16` e `sp17a`/`sp17`, in coppie di segno
   opposto, negli scenari con un prestito nuovo — zero CE, zero `sp09`, zero altrove.
 - `CLAUDE.md` › Forecasting Engine e `API-PREVISIONALE.md` nello stesso commit, con cosa si rompe a ignorarlo.
+
+---
+
+> **Superato (parziale) dal lotto 3A, Task 5 — commit `b5698ce`.** Questo piano nomina
+> `tax_closing_position` come la funzione che l'infrannuale continua a usare, invariata: non è più
+> vero. Il lotto 3A l'ha rimossa da `calculations/projection_common.py` e ha unificato budget e
+> infrannuale su `posizione_tributaria_fine_anno` (stessa regola degli acconti, `acconti_dovuti`,
+> nella stessa famiglia di `tax_settlement_saldo_acconto`). Stato attuale: `CLAUDE.md` ›
+> «Intra-Year Engine», `docs/budget/API-PREVISIONALE.md` §9. (Nota aggiunta dal riallineamento
+> del 2026-09-11.)

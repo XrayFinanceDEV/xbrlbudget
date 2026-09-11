@@ -379,3 +379,13 @@ identici; nessuna stringa di avviso in pagina.
 mostrato è **più vecchio** delle `BudgetAssumptions` salvate, e un indicatore su quelle
 viste. Sta in questo lotto perché il lotto 2 introduce comunque nuove ragioni di rifiuto
 (un piano di scadenziamento incapiente), quindi la frequenza del caso aumenta.
+
+---
+
+> **Superato (parziale) dal lotto 3A, Task 5 — commit `b5698ce`.** Questa spec dichiara che
+> l'infrannuale «continua a usare `tax_closing_position`» invariata (§9): non è più vero. Il
+> lotto 3A l'ha rimossa da `calculations/projection_common.py` e ha unificato budget e
+> infrannuale su `posizione_tributaria_fine_anno` (stessa regola degli acconti, `acconti_dovuti`,
+> nella stessa famiglia di `tax_settlement_saldo_acconto`). Stato attuale: `CLAUDE.md` ›
+> «Intra-Year Engine», `docs/budget/API-PREVISIONALE.md` §9. (Nota aggiunta dal riallineamento
+> del 2026-09-11.)

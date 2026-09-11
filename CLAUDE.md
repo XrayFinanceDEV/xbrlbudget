@@ -330,13 +330,13 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **`tax_rate` è un ripiego, non l'aliquota che vince.** Il motore usa l'aliquota effettiva
   dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
   derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
-  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:2122-2131`, `_tax_components`).
+  inviato dalle schermate quasi mai è il numero applicato (`_tax_components`, `calculations/forecast_engine.py`).
 - **Le imposte si pagano a saldo + acconto, non ad accumulo.** Il debito tributario generato a
   fine anno N esce come saldo nell'anno N+1 — al netto del credito tributario di apertura, fino a
   capienza — e l'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
   `tax_advances_paid` se **maggiore di zero**: zero in quella casella non vuol dire «zero
   acconti», vuol dire «non dichiarato», e ricade sulla percentuale
-  (`calculations/projection_common.py:341-367`, `tax_settlement_saldo_acconto`). Prima di questo
+  (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`). Prima di questo
   lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
   un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
 - **Un anno manuale non scarica il piano tributario sull'anno automatico.** Se un anno in via
@@ -354,7 +354,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
   voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
-  peso dal residuo lungo (`calculations/forecast_engine.py:2745-2763` per i crediti, `:3104-3128`
+  peso dal residuo lungo (`_calculate_balance_sheet` in `calculations/forecast_engine.py`, blocco
+  `crediti_commerciali` per i crediti, blocchi `debiti_fornitori`/`debiti_previdenziali`/`altri_debiti`
   per fornitori/previdenziali/altri debiti). `details['pregresso'][saldo]['mode']` vale `"runoff"`
   quando è così, `"legacy"` (formule di oggi, intere) quando il saldo non ha un piano.
 - **Un previsionale mostrato può essere più vecchio delle ipotesi salvate, e si dichiara.**
@@ -638,7 +639,7 @@ threshold (see the Working capital bullet in «Intra-Year Engine» below) — me
 plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
 year-end N is paid as saldo in N+1, net of the opening tax credit up to its amount, and the advance
 defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` **greater than
-zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py:341-367`).
+zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`).
 Before this lotto tax debt never left the balance sheet and projected cash was inflated by one
 year's unpaid tax — a defect that balanced, so no check ever saw it.
 Every CE line (32 `ce*_override` columns, from `/forecast/income`) and every BS line (the
@@ -691,8 +692,8 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   carries its own copy**: since 2026-09-02 the Proiezione tab renders the forecast this engine
   produced instead of recomputing it in TypeScript, so there is no second copy to keep in
   agreement with *this* one — but the budget engine is not silent on the same risk either, it has
-  its own copy of the same guard (`degenerate_turnover_ratio`,
-  `calculations/forecast_engine.py:2610-2627`, Task 14 of this lotto), not shared with the one
+  its own copy of the same guard (`degenerate_turnover_ratio`, `_derived_days` in
+  `calculations/forecast_engine.py`, Task 14 of this lotto), not shared with the one
   here.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
 - **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a

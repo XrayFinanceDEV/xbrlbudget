@@ -911,27 +911,21 @@ class ForecastEngine:
                 piano = (pregresso or {}).get(saldo)
                 if not piano or ov.get(breve) is None:
                     continue
-                if (saldo == 'debiti_tributari' and manuale
-                        and not letta_l_anno_dopo):
-                    # N-I1 (b), Ruling 61: l'esenzione della via manuale vale
-                    # solo se l'anno dopo e' manuale a sua volta, perche' e'
-                    # LUI che ripartirebbe dal totale lasciato. Con un anno
-                    # automatico dietro, un override sotto la rata ricade nel
-                    # buco che il kernel ora rifiuta (N-I1 a): il rifiuto
-                    # dell'override, piu' vicino alla causa, arriva prima.
+                if saldo == 'debiti_tributari' and manuale:
+                    # Ruling 62: l'esenzione della via manuale sul lato breve
+                    # tributario vale SEMPRE, anche con l'anno dopo automatico
+                    # (sostituisce la parte (b) di Ruling 61, misurata
+                    # scorretta dalla sonda `sonda_ni1_lungo.py`: la soglia
+                    # confrontava il SOLO sp16e forzato con tutto il rateizzato
+                    # aperto, ma in via manuale `sp17e` porta ancora il lato
+                    # lungo, quindi rifiutava anche l'override del valore
+                    # identico a quello del motore). L'unica guardia della
+                    # transizione e' il kernel (a) nel calcolatore, perche'
+                    # misura il TOTALE `sp16e + sp17e` che l'anno dopo legge
+                    # davvero: `sonda_ni1_senza_b.py` mostra che da solo
+                    # ferma il buco vero e lascia passare le via lecite.
                     continue
-                if (saldo == 'debiti_tributari' and manuale
-                        and letta_l_anno_dopo):
-                    # La soglia della transizione NON e' la rata dell'anno
-                    # dopo: e' il rateizzato ancora APERTO che l'anno
-                    # automatico ripartira' dal totale lasciato (la stessa
-                    # quantita' che il kernel (a) confronta con l'apertura,
-                    # `r.residual + r.closed`). Sotto quella quota il `max`
-                    # taglierebbe il deficit: `residual_short` la racchiude
-                    # solo quando il piano paga tutto in un anno.
-                    residuo = cls._rateizzato_aperto_dopo(piano, year_index, horizon)
-                else:
-                    residuo = cls._residuo_breve_piano(piano, year_index, horizon)
+                residuo = cls._residuo_breve_piano(piano, year_index, horizon)
                 forzato = Decimal(str(ov[breve]))
                 if forzato < residuo:
                     raise ValueError(
@@ -973,28 +967,6 @@ class ForecastEngine:
             [Decimal(str(x)) for x in (piano.get('writeoff') or [])],
             year_index, horizon,
         ).residual_short
-
-    @staticmethod
-    def _rateizzato_aperto_dopo(piano: Dict[str, Any], year_index: int,
-                                horizon: int) -> Decimal:
-        """Il rateizzato ancora APERTO all'inizio dell'anno dopo di `year_index`.
-
-        E' il `r.residual + r.closed` che il ramo `else` del calcolatore
-        tributario (N-I1) confronta col debito lasciato: sulla transizione
-        manuale→automatico e' questa la quota che il `max` può tagliare, non il
-        `residual_short` (che e' solo la rata dell'anno dopo). Il runoff
-        all'anno `year_index + 1` da' `residual + closed` = rateizzato −
-        Σrate[:year_index+1], cioe' tutto cio' che resta da rateizzare da
-        quell'anno in poi.
-        """
-        apertura = piano.get('rateizzato') if 'rateizzato' in piano else piano.get('opening')
-        r = runoff_schedule(
-            Decimal(str(apertura or 0)),
-            [Decimal(str(x)) for x in (piano.get('amounts') or [])],
-            [Decimal(str(x)) for x in (piano.get('writeoff') or [])],
-            year_index + 1, horizon,
-        )
-        return r.residual + r.closed
 
     @classmethod
     def _declared_sp_fields(cls) -> "frozenset[str]":
@@ -3105,21 +3077,27 @@ class ForecastEngine:
                     rate_aperto = r.residual + r.closed
                     if (year_index > 0
                             and self._q(opening_tax_debt) < self._q(rate_aperto)):
-                        # N-I1 (Ruling 61): l'anno manuale lascia SUL TOTALE un
-                        # debito inferiore al rateizzato ancora aperto. Il `max`
-                        # taglierebbe il deficit in silenzio: il calendario
-                        # ripartirebbe intero, la cassa assorbirebbe la
-                        # differenza (misurato: scarto di flusso +2.666,66
-                        # l'anno dopo, sonda `sonda_trans.py`). Un fabbisogno
-                        # tributario non dichiarato non si tappa con un max:
-                        # si rifiuta, e l'utente decide.
+                        # N-I1 (Ruling 61, messaggio Ruling 62): l'anno manuale
+                        # lascia SUL TOTALE un debito inferiore al rateizzato
+                        # ancora aperto. Il `max` taglierebbe il deficit in
+                        # silenzio: il calendario ripartirebbe intero, la cassa
+                        # assorbirebbe la differenza (misurato: scarto di
+                        # flusso +2.666,66 l'anno dopo, sonda `sonda_trans.py`).
+                        # Un fabbisogno tributario non dichiarato non si tappa
+                        # con un max: si rifiuta, e l'utente decide. E' l'unica
+                        # guardia della transizione (Ruling 62), e misura il
+                        # totale `sp16e + sp17e` che l'anno dopo legge davvero.
                         raise ValueError(
                             f"Il piano dei debiti tributari non può ripartire da meno di "
-                            f"ciò che resta da rateizzare: l'anno {assumption.forecast_year} "
+                            f"ciò che resta da rateizzare: l'anno {assumption.forecast_year - 1} "
                             f"esce dalla via manuale lasciando {_importo_it(opening_tax_debt)}, "
-                            f"contro i {_importo_it(rate_aperto)} ancora da rateizzare. "
-                            "Tieni in via manuale anche quest'anno, oppure modifica il piano "
-                            f"al passo «{self._passo_pregresso('debiti_tributari')}»."
+                            f"ma all'anno {assumption.forecast_year} ne restano da rateizzare "
+                            f"{_importo_it(rate_aperto)}. Tieni in via manuale anche l'anno "
+                            f"{assumption.forecast_year}, oppure lascia nell'anno "
+                            f"{assumption.forecast_year - 1} un debito tributario (sp16e + "
+                            f"sp17e, per percentuale o per override) non inferiore a "
+                            f"{_importo_it(rate_aperto)}, o modifica il piano al passo "
+                            f"«{self._passo_pregresso('debiti_tributari')}»."
                         )
                     saldo_due = max(ZERO, opening_tax_debt - rate_aperto)
                 opening_credit = _prev('sp06e_crediti_tributari_breve')

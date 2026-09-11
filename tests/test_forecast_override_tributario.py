@@ -852,24 +852,34 @@ def test_il_messaggio_del_rifiuto_indica_passo_ed_etichetta(monkeypatch):
 PIANO_TRANS = {"debiti_tributari": {"opening": 10000.00, "saldo": 6000.00,
                                     "rateizzato": 4000.00,
                                     "amounts": [1333.34, 1333.33, 1333.33]}}
+# Il piano della sonda `sonda_ni1_lungo.py` del coordinatore: quattro rate
+# tonde su quattro anni, per misurare la transizione 2028→2029.
+PIANO_SONDA = {"debiti_tributari": {"opening": 10000.00, "saldo": 6000.00,
+                                    "rateizzato": 4000.00,
+                                    "amounts": [1000.00] * 4}}
+ANNI_4 = (2027, 2028, 2029, 2030)
 
 
-def _righe_trans(manuale_anni, overrides=None, growth=-100):
-    """Tre anni (2027-2029); `manuale_anni` = insieme di anni in via manuale.
+def _righe_trans(manuale_anni, overrides=None, growth=-100, anni=ANNI_3,
+                 piano=None, g17=None):
+    """Anni di piano (default 3); `manuale_anni` = insieme di anni in via manuale.
 
     L'anno in via manuale porta `sp16e_growth_pct = growth` (default −100:
-    azzera il debito, che e' il caso che apre il buco); gli altri restano
-    automatici. `overrides` e' PER ANNO, come in `_righe_base`.
+    azzera il debito, che e' il caso che apre il buco) e, se `g17` e' dato,
+    anche `sp17e_growth_pct = g17`; gli altri restano automatici. `overrides`
+    e' PER ANNO, come in `_righe_base`.
     """
     rows = []
-    for y in ANNI_3:
+    for y in anni:
         r = {"forecast_year": y, "revenue_growth_pct": 3.33}
         if y in manuale_anni:
             r["sp16e_growth_pct"] = growth
+            if g17 is not None:
+                r["sp17e_growth_pct"] = g17
         if overrides and y in overrides:
             r["sp_overrides"] = dict(overrides[y])
         rows.append(r)
-    rows[0]["pregresso"] = PIANO_TRANS
+    rows[0]["pregresso"] = piano or PIANO_TRANS
     return rows
 
 
@@ -893,9 +903,12 @@ def test_ni1_t1_transizione_manuale_auto_sotto_il_rateizzato_si_rifiuta(monkeypa
 
 def test_ni1_t3_override_sotto_il_rateizzato_in_anno_manuale_si_rifiuta(monkeypatch):
     """T3 (percorso di servizio, bulk): override `sp16e` 2027 = 2.000 in un anno
-    manuale seguito da un anno automatico → rifiutato da (b), col messaggio
-    dell'override (piu' chiaro di quello del kernel), non con `non è ammesso`
-    generico ma con la soglia «deve pagare».
+    manuale seguito da un anno automatico → RIFIUTATO (400 via kernel).
+
+    Con Ruling 62 lo ferma il kernel (a), non piu' il controllo (b) sull'anno
+    manuale: l'unica guardia della transizione e' lei, perche' misura il totale
+    `sp16e + sp17e` che l'anno dopo legge davvero. Il messaggio e' quello del
+    kernel e nomina l'anno manuale (2027) e quello che riparte (2028).
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -905,8 +918,8 @@ def test_ni1_t3_override_sotto_il_rateizzato_in_anno_manuale_si_rifiuta(monkeypa
                 db, "ni1-t3", _righe_trans({2027}, overrides={2027: {
                     "sp16e_debiti_tributari_breve": 2000.00}}))
             assert res["forecast_generated"] is False, res["message"]
-            assert "non è ammesso" in res["message"], res["message"]
-            assert "sp16e_debiti_tributari_breve" in res["message"], res["message"]
+            assert "non può ripartire" in res["message"], res["message"]
+            assert "2027" in res["message"] and "2028" in res["message"], res["message"]
             assert read_forecast_maps(db, sid) == []
     finally:
         engine.dispose()
@@ -945,6 +958,8 @@ def test_ni1_t3_patch_sp_override_rifiuta_e_rollback(monkeypatch):
                 bs.patch_sp_override(company_id, sc.id, req,
                                      user_id="ni1-t3-patch", db=db)
             assert exc.value.status_code == 400, exc.value.detail
+            # Ruling 62: lo ferma il kernel (a), e il 400 porta il SUO messaggio.
+            assert "non può ripartire" in str(exc.value.detail), exc.value.detail
             bag = db.query(BudgetAssumptions).filter(
                 BudgetAssumptions.scenario_id == sc.id,
                 BudgetAssumptions.forecast_year == 2027).first().sp_overrides
@@ -987,5 +1002,80 @@ def test_ni1_t4_tutti_manuali_override_zero_genera(monkeypatch):
             assert res["forecast_generated"] is True, res["message"]
             lette = _dettagli(db, "ni1-t4", cid, sid, rows)
             assert _letto(lette, 2027, "sp16e_debiti_tributari_breve") == D("0.00")
+    finally:
+        engine.dispose()
+
+
+# ══ Ruling 62: l'esenzione (b) di Ruling 61 rifiutava override leciti ══
+#
+# Misura del coordinatore (`sonda_ni1_lungo.py`, piano 4 x 1000 su 4 anni,
+# 2028 manuale, 2029-2030 automatici): la soglia `_rateizzato_aperto_dopo`
+# confrontava il SOLO `sp16e` forzato (1000) con TUTTO il rateizzato aperto
+# (2000), ma in via manuale `sp17e` porta ancora il lato lungo (2000 in
+# `sp17e` dal runoff del 2027): il totale che il 2029 legge e' 3000, e
+# l'override del valore IDENTICO a quello del motore veniva RIFIUTATO. Con
+# (b) speso negli anni manuali (`sonda_ni1_senza_b.py`) le via lecite generano
+# con scarto 0,00 e il kernel (a) ferma da solo il buco vero. I tre casi della
+# sonda diventano test: i primi due sono ROSSI su 25a5357 (il rifiuto (b)
+# li ferma) e verdi qui.
+
+def test_ruling62_override_identico_al_motore_genera(monkeypatch):
+    """Sonda A/B: override `sp16e` 2028 = 1000, il valore che il motore produce
+    da sé in via manuale con crescita 0: genera, scarto 2029 e 2030 = 0,00.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, "r62-1000", _righe_trans(
+                {2028}, overrides={2028: {"sp16e_debiti_tributari_breve": 1000.00}},
+                growth=0, anni=ANNI_4, piano=PIANO_SONDA))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, "r62-1000", cid, sid, rows)
+            assert _letto(lette, 2028, "sp16e_debiti_tributari_breve") == D("1000.00")
+            for y in (2029, 2030):
+                assert _scarto_di_flusso(lette, y) == D("0.00"), (y, _scarto_di_flusso(lette, y))
+    finally:
+        engine.dispose()
+
+
+def test_ruling62_override_zero_lato_lungo_in_sp17e_genera(monkeypatch):
+    """Sonda G: override `sp16e` 2028 = 0 con il lato lungo ancora in `sp17e`
+    (2000 dal runoff): il totale 2000 NON è sotto il rateizzato aperto (2000),
+    la transizione è sana, genera con scarto 0,00 negli anni automatici.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, cid, sid, rows = _esito(db, "r62-0", _righe_trans(
+                {2028}, overrides={2028: {"sp16e_debiti_tributari_breve": 0}},
+                growth=0, anni=ANNI_4, piano=PIANO_SONDA))
+            assert res["forecast_generated"] is True, res["message"]
+            lette = _dettagli(db, "r62-0", cid, sid, rows)
+            assert _letto(lette, 2028, "sp16e_debiti_tributari_breve") == D("0.00")
+            assert _letto(lette, 2028, "sp17e_debiti_tributari_lungo") == D("2000.00")
+            for y in (2029, 2030):
+                assert _scarto_di_flusso(lette, y) == D("0.00"), (y, _scarto_di_flusso(lette, y))
+    finally:
+        engine.dispose()
+
+
+def test_ruling62_buco_vero_lato_lungo_sotto_si_rifiuta(monkeypatch):
+    """Sonda H: override `sp16e` 2028 = 0 E `sp17e_growth_pct = −60`: il totale
+    lasciato (800) è sotto il rateizzato aperto (2000). Lo ferma il kernel (a),
+    e il messaggio nomina l'anno manuale (2028) e quello che riparte (2029).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _cid, sid, _rows = _esito(db, "r62-buco", _righe_trans(
+                {2028}, overrides={2028: {"sp16e_debiti_tributari_breve": 0}},
+                growth=0, g17=-60, anni=ANNI_4, piano=PIANO_SONDA))
+            assert res["forecast_generated"] is False, res["message"]
+            assert "non può ripartire" in res["message"], res["message"]
+            assert "2028" in res["message"] and "2029" in res["message"], res["message"]
+            assert read_forecast_maps(db, sid) == []
     finally:
         engine.dispose()

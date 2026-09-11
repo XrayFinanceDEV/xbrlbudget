@@ -80,8 +80,17 @@ def _ha_mezzo_centesimo(amounts) -> bool:
 
 
 def test_i_tre_profili_nuovi_sono_in_coda_a_PROFILI():
+    # Dal merge del lotto 2 dentro feat/lotto3a-motori i quattro profili
+    # NUOVI non sono piu' in coda ASSOLUTA a `PROFILI`: i quattro profili
+    # dello sweep del Task 1 (3A) sono stati accodati DOPO di loro, per la
+    # regola decisa nel merge (lotto 2 prima, Task 1 in coda). Cio' che
+    # deve restare vero — e per cui questo test esiste — e' che il blocco
+    # NUOVI resti CONTIGUO e nell'ordine dichiarato: un profilo inserito in
+    # mezzo cambierebbe le estrazioni rng di tutti quelli che lo seguono.
     nomi = list(PROFILI)
-    assert tuple(nomi[-4:]) == NUOVI, f"non sono in coda, e le estrazioni cambierebbero: {nomi}"
+    idx = nomi.index(NUOVI[0])
+    assert tuple(nomi[idx:idx + len(NUOVI)]) == NUOVI, \
+        f"non sono un blocco contiguo, e le estrazioni cambierebbero: {nomi}"
     assert len(nomi) == len(set(nomi))
 
 

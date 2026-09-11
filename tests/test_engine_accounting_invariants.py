@@ -118,7 +118,7 @@ def test_cash_plug_never_goes_negative(monkeypatch):
     breve (sp16). Il motore attuale (calculations/forecast_engine.py, sezione
     "CASH PLUG") rifiuta DELIBERATAMENTE questo comportamento — vedi il commento
     a corredo: "Creating short-term bank debt here used to hide a missing
-    scenario choice" — e solleva "Unfunded financing requirement" quando la
+    scenario choice" — e solleva "Fabbisogno finanziario scoperto" quando la
     cassa implicita sarebbe negativa, richiedendo un finanziamento esplicito
     invece di inventare un debito bancario. Questo e' il comportamento corretto
     (coerente con test_forecast_gate_rejects_*/unfunded_financing_requirement in

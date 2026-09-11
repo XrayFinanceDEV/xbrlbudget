@@ -607,5 +607,6 @@ def _serialize_cash_reconciliation(reconciliation) -> Dict[str, Any]:
         "cash_beginning": float(reconciliation.cash_beginning),
         "cash_ending": float(reconciliation.cash_ending),
         "difference": float(reconciliation.difference),
-        "verification_ok": reconciliation.verification_ok
+        "verification_ok": reconciliation.verification_ok,
+        "third_party_funds_gap": float(reconciliation.third_party_funds_gap)
     }

@@ -2,7 +2,7 @@
 Forecast Calculation Engine
 Generates forecasted Income Statements and Balance Sheets based on budget assumptions
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,7 +17,10 @@ from calculations.projection_common import (
     tfr_accrual_quota, deferred_tax_position,
     new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
-    tax_settlement_saldo_acconto,
+    tax_settlement_saldo_acconto, soglia_giorni_magazzino,
+    e_contratto_pregresso, contratti_da_riga_finanziamento,
+    residuo_prestiti_nuovi, quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
+    eur_it,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -146,10 +149,7 @@ class ForecastComputation:
     error: Optional[ForecastError] = None
 
 
-def _eur_it(amount: Decimal) -> str:
-    """1234567.891 -> '1.234.567,89' (ROUND_HALF_UP, come la quantizzazione del motore)."""
-    q = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return f"{q:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+_eur_it = eur_it  # alias storico: il corpo vive in calculations.projection_common (lotto 3A, task 8)
 
 
 @dataclass
@@ -217,7 +217,7 @@ class _Overdraft:
         La cassa netta si quantizza PRIMA del confronto (Ruling 37): un
         fabbisogno che vale 0,00 non alza e non accende scoperto, e un centesimo
         vero non si assorbe con una tolleranza. Senza concessione il messaggio
-        e' quello di sempre (`Unfunded financing requirement`), con l'importo
+        e' quello di sempre (`Fabbisogno finanziario scoperto`), con l'importo
         dello scoperto NUOVO; il tetto si confronta con lo scoperto IN ESSERE a
         fine anno, cioe' il fido come utilizzo massimo.
         """
@@ -227,8 +227,8 @@ class _Overdraft:
         nuovo = fabbisogno - self.opening
         if nuovo > zero and not self.allowed:
             raise ValueError(
-                f"Unfunded financing requirement {nuovo:,.2f}: add an explicit "
-                "financing assumption; no bank debt was created automatically"
+                f"Fabbisogno finanziario scoperto di {eur_it(nuovo)}: aggiungi un'ipotesi di "
+                "finanziamento esplicita; nessun debito bancario è stato creato automaticamente"
             )
         if fabbisogno > zero and self.forced_total is not None:
             raise ValueError(
@@ -257,6 +257,197 @@ class _Overdraft:
             )
         self.outstanding = fabbisogno
         return max(zero, cassa_netta), fabbisogno
+
+
+def _q2(valore) -> Decimal:
+    """Al centesimo con la regola del motore (ROUND_HALF_UP)."""
+    return Decimal(str(valore)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+@dataclass
+class _Sweep:
+    """Il cash sweep di UN anno: rimborsa il solo debito bancario pregresso SENZA piano.
+
+    Decisione 3 del proprietario (lotto 3A): i finanziamenti con un piano — contratti della
+    griglia, `financing_amount`, pregresso con `existing_debt_repayment_years` — seguono solo il
+    loro piano, capitale e interessi. `_calculate_balance_sheet` riempie perimetro e disponibile;
+    `_normalize_balance_sheet_cents` chiama `applica` sulla cassa NETTA gia' al centesimo e DOPO gli
+    `sp_overrides`, subito prima di `_Overdraft.copri` (rilievo I2 della revisione finale del
+    lotto 2: deciso prima degli override, lo sweep fabbricava un fabbisogno). Lo scoperto viene
+    prima per costruzione: la cassa netta lo contiene gia'.
+    """
+    attivo: bool = False
+    minimo: Decimal = Decimal('0')
+    breve_disponibile: Decimal = Decimal('0')
+    lungo_disponibile: Decimal = Decimal('0')
+    breve_forzato: bool = False
+    lungo_forzato: bool = False
+    rimborso_breve: Decimal = Decimal('0')
+    rimborso_lungo: Decimal = Decimal('0')
+
+    def applica(self, cassa: Decimal) -> Tuple[Decimal, Decimal, Decimal]:
+        """(cassa, pagato a breve, pagato a lungo). Un minimo negativo vale zero."""
+        zero = Decimal('0')
+        self.rimborso_breve = self.rimborso_lungo = zero
+        minimo = max(zero, _q2(self.minimo))
+        if not self.attivo or cassa <= minimo:
+            return cassa, zero, zero
+        eccesso = cassa - minimo
+        if not self.breve_forzato:
+            self.rimborso_breve = min(eccesso, max(zero, _q2(self.breve_disponibile)))
+        eccesso -= self.rimborso_breve
+        if not self.lungo_forzato:
+            self.rimborso_lungo = min(eccesso, max(zero, _q2(self.lungo_disponibile)))
+        return cassa - self.rimborso_breve - self.rimborso_lungo, self.rimborso_breve, self.rimborso_lungo
+
+
+@dataclass
+class _DebitoBancarioAnno:
+    """Le componenti del debito bancario di UN anno, grezze, come `_calculate_balance_sheet` le separa.
+
+    Al piu' uno fra `senza_piano` e `piano_anni` e' valorizzato; entrambi sono `None` quando il
+    pregresso e' descritto da contratti (`opening_residual`). `contratti` elenca OGNI contratto del
+    piano (misti gia' divisi), nell'ordine di `assemble_financing`, anche quelli non ancora erogati.
+    """
+    senza_piano: Optional[Dict[str, Decimal]] = None
+    piano_anni: Optional[Dict[str, Decimal]] = None
+    contratti: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
+    """Il residuo di UN contratto a fine `fino_al_anno`, con la catena al centesimo del motore.
+
+    Parte da `opening_residual` (zero per un prestito nuovo) prima del suo anno; un contratto non
+    ancora erogato resta al valore di partenza. Per un prestito nuovo coincide con
+    `residuo_prestiti_nuovi([loan], fino_al_anno)` (il kernel di `calculations.projection_common`).
+    """
+    zero = Decimal('0')
+    residuo = Decimal(str(loan.get('opening_residual') or 0))
+    for anno in range(int(loan['year']), fino_al_anno + 1):
+        erogato, rimborso, _ = new_financing_schedule([loan], anno)
+        residuo = _q2(max(zero, residuo + erogato - rimborso))
+    return residuo
+
+
+def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_nuovi: Decimal,
+                         breve_pregresso: Decimal, lungo_pregresso: Decimal) -> List[Dict[str, Any]]:
+    """Le righe `contratti` di `details['debito_bancario']`, grezze (le quantizza `_dichiara_debito_bancario`).
+
+    Per ogni contratto: erogato, rimborso e interessi dell'anno dal kernel sul solo contratto, e il
+    residuo di fine anno dalla sua catena. La ripartizione ricompone ESATTAMENTE i totali che il
+    motore scrive in `sp16a`/`sp17a`:
+    - contratti nuovi: la propria quota a breve (`_quota_breve_prestiti_nuovi` sul solo contratto);
+      l'ultimo nuovo in ordine assorbe la differenza verso `quota_breve_nuovi` e verso
+      `residuo_nuovi - quota_breve_nuovi`;
+    - contratti col residuo iniziale: `breve_pregresso` si assegna in ordine, fino al residuo di
+      ciascuno; l'ultimo assorbe la differenza verso `breve_pregresso` e verso `lungo_pregresso`.
+    """
+    zero = Decimal('0')
+    righe: List[Dict[str, Any]] = []
+    for indice, loan in enumerate(loans or []):
+        erogato, rimborso, interessi = new_financing_schedule([loan], anno)
+        righe.append({
+            'indice': indice,
+            'anno': int(loan['year']),
+            'tasso': Decimal(str(loan.get('rate') or 0)) * Decimal('100'),
+            'erogato': erogato,
+            'residuo_iniziale': Decimal(str(loan.get('opening_residual') or 0)),
+            'rimborso': rimborso,
+            'interessi': interessi,
+            '_residuo': _residuo_contratto(loan, anno),
+            '_pregresso': _e_contratto_pregresso(loan),
+            '_loan': loan,
+        })
+    nuovi = [r for r in righe if not r['_pregresso']]
+    pregressi = [r for r in righe if r['_pregresso']]
+    for r in nuovi:
+        r['breve'] = _quota_breve_prestiti_nuovi([r['_loan']], anno, r['_residuo'])
+        r['lungo'] = r['_residuo'] - r['breve']
+    if nuovi:
+        ultimo = nuovi[-1]
+        ultimo['breve'] += quota_breve_nuovi - sum((r['breve'] for r in nuovi), zero)
+        ultimo['lungo'] += (residuo_nuovi - quota_breve_nuovi) - sum((r['lungo'] for r in nuovi), zero)
+    resto = breve_pregresso
+    for r in pregressi:
+        r['breve'] = min(max(zero, r['_residuo']), max(zero, resto))
+        r['lungo'] = r['_residuo'] - r['breve']
+        resto -= r['breve']
+    if pregressi:
+        ultimo = pregressi[-1]
+        ultimo['breve'] += breve_pregresso - sum((r['breve'] for r in pregressi), zero)
+        ultimo['lungo'] += lungo_pregresso - sum((r['lungo'] for r in pregressi), zero)
+    for r in righe:
+        for chiave in ('_residuo', '_pregresso', '_loan'):
+            del r[chiave]
+    return righe
+
+
+def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_Sweep]",
+                              sp16a: Decimal, sp17a: Decimal, scoperto: Decimal) -> Dict[str, Any]:
+    """`details['debito_bancario']` al centesimo, riconciliato con cio' che `sp16a`/`sp17a` persistono.
+
+    Somma dei `breve` + `scoperto` = `sp16a`, somma dei `lungo` = `sp17a`, per costruzione. La
+    differenza fra le componenti grezze quantizzate e il persistito (centesimi di arrotondamento,
+    un `sp_overrides` sul debito bancario, lo sweep) si posa cosi':
+    - in aumento, sulla «casa del pregresso»: `pregresso_senza_piano`, altrimenti
+      `pregresso_piano_anni`, altrimenti l'ultimo contratto col residuo iniziale, altrimenti
+      l'ultimo contratto nuovo;
+    - in riduzione, prima sul pregresso (le due componenti, poi i contratti col residuo dall'ultimo),
+      poi sui contratti nuovi dall'ultimo, mai sotto zero: e' la precedenza con cui la quota a breve
+      dei prestiti nuovi si riduceva sotto un override di `sp16a` fino al lotto 2.
+    """
+    zero = Decimal('0')
+    senza_piano = None
+    if debito.senza_piano is not None:
+        pagato_breve = sweep.rimborso_breve if sweep is not None else zero
+        pagato_lungo = sweep.rimborso_lungo if sweep is not None else zero
+        senza_piano = {
+            'apertura': _q2(debito.senza_piano['apertura']),
+            'rimborso_sweep': pagato_breve + pagato_lungo,
+            'breve': _q2(debito.senza_piano['breve']) - pagato_breve,
+            'lungo': _q2(debito.senza_piano['lungo']) - pagato_lungo,
+        }
+    piano_anni = None
+    if debito.piano_anni is not None:
+        piano_anni = {k: _q2(debito.piano_anni[k]) for k in ('apertura', 'rimborso', 'breve', 'lungo')}
+    contratti = [
+        {**c, **{k: _q2(c[k]) for k in ('erogato', 'residuo_iniziale', 'rimborso', 'interessi', 'breve', 'lungo')}}
+        for c in debito.contratti
+    ]
+    pregressi = [c for c in contratti if c['residuo_iniziale'] > zero]
+    nuovi = [c for c in contratti if c['residuo_iniziale'] == zero]
+    componenti_pregresso = [c for c in (senza_piano, piano_anni) if c is not None]
+    tutte = componenti_pregresso + contratti
+    casa = (componenti_pregresso[0] if componenti_pregresso
+            else pregressi[-1] if pregressi else nuovi[-1] if nuovi else None)
+    ordine_riduzione = componenti_pregresso + list(reversed(pregressi)) + list(reversed(nuovi))
+    for lato, bersaglio in (('breve', sp16a - scoperto), ('lungo', sp17a)):
+        delta = bersaglio - sum((c[lato] for c in tutte), zero)
+        if delta > zero and casa is not None:
+            casa[lato] += delta
+        elif delta < zero:
+            for c in ordine_riduzione:
+                tolto = min(max(zero, c[lato]), -delta)
+                c[lato] -= tolto
+                delta += tolto
+                if delta == zero:
+                    break
+    return {'pregresso_senza_piano': senza_piano, 'pregresso_piano_anni': piano_anni, 'contratti': contratti}
+
+
+def _quota_breve_dichiarata(prev_details) -> Decimal:
+    """La quota a breve dei prestiti NUOVI che l'anno prima ha dichiarato (e `sp16a` persistito).
+
+    Somma dei `breve` dei contratti senza residuo iniziale in `details['debito_bancario']`. Sostituisce la
+    lettura della quota a breve dei prestiti nuovi, che il lotto 3A toglie.
+    """
+    debito = (prev_details or {}).get('debito_bancario') or {}
+    return sum(
+        (Decimal(str(c.get('breve') or 0)) for c in (debito.get('contratti') or [])
+         if Decimal(str(c.get('residuo_iniziale') or 0)) == 0),
+        Decimal('0'),
+    )
+
 
 class _DictView:
     """getattr(view, 'sp09_...') su un dict del motore: previous_* senza ORM.
@@ -292,106 +483,12 @@ def _split_to_cents(fixed_part: Decimal, line_value: Decimal) -> Tuple[Decimal, 
     return fixed_q, line_value - fixed_q
 
 
-def _ha_residuo_pregresso(loan) -> bool:
-    """Vero se il contratto porta un residuo di pregresso bancario (`opening_residual` > 0).
-
-    Un solo punto per il predicato «questo e' pregresso», usato da
-    `_e_contratto_pregresso`, da `assemble_financing` (la validazione «solo nel
-    primo anno») e da `has_detailed_opening` in `_calculate_income_statement`
-    (rilievo 6 della revisione, giro di correzione 1): un contratto
-    classificato pregresso in un punto e nuovo in un altro produrrebbe interessi
-    doppi o una rata sul debito sbagliato. Con il Ruling 45 (normalizzazione dei
-    contratti misti in `assemble_financing`, la STESSA funzione) il predicato
-    resta vero al valore di facciata: dopo la normalizzazione nessun contratto
-    porta mai `amount` e `opening_residual` insieme, quindi qui non serve
-    guardare l'altro campo.
-    """
-    return Decimal(str(loan.get('opening_residual') or 0)) > 0
-
-
-def _e_contratto_pregresso(loan) -> bool:
-    """Un contratto con `opening_residual` descrive debito bancario GIA' in bilancio.
-
-    E' pregresso scadenziato per contratto, non un prestito nuovo: la sua rata
-    riduce il debito bancario dell'anno base (dal breve, poi dal lungo), mentre
-    un prestito nuovo si rimborsa solo da se' stesso. Un contratto MISTO
-    (`amount` > 0 insieme a `opening_residual` > 0, che lo schema ammette e
-    l'interfaccia produce sulla stessa riga) non arriva mai fin qui intero:
-    `assemble_financing` lo normalizza, nell'unico punto prima di ogni uso, in
-    DUE contratti con le stesse condizioni — uno con il solo importo nuovo, uno
-    con il solo residuo pregresso (Ruling 45). Per questo il predicato basta
-    da solo: quando questa funzione gira, ogni contratto ha gia' un solo campo
-    diverso da zero.
-    """
-    return _ha_residuo_pregresso(loan)
-
-
-def _residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
-    """Il residuo dei soli prestiti NUOVI a fine `fino_al_anno`, come il motore lo persiste.
-
-    La catena e' quella che il previsionale ha sempre scritto per un prestito da
-    solo: residuo dell'anno prima al centesimo, piu' l'erogato, meno la rata del
-    kernel, al centesimo. Quantizzare anno per anno non e' un vezzo: un residuo
-    calcolato sul calendario grezzo differisce di un centesimo da quello
-    persistito (100.000,38 in 4 anni: 25.000,095 grezzo contro 25.000,11
-    persistito il terzo anno), e quel centesimo, tolto a `sp17a`, finirebbe
-    attribuito al debito bancario pregresso.
-    """
-    zero, cent = Decimal('0'), Decimal('0.01')
-    anni = [int(loan['year']) for loan in (loans or ())]
-    if not anni:
-        return zero
-    residuo = zero
-    for anno in range(min(anni), fino_al_anno + 1):
-        raised, repayment, _ = new_financing_schedule(loans, anno)
-        residuo = max(zero, residuo + raised - repayment).quantize(cent, rounding=ROUND_HALF_UP)
-    return residuo
-
-
-def _quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
-    """Quanto del residuo dei prestiti NUOVI dentro `lungo` (`sp17a` grezzo a fine `anno`) scade l'anno dopo.
-
-    Il residuo nuovo e' quello che l'anno dopo trovera' all'apertura,
-    `min(sp17a, catena)`: se lo sweep ha eroso il prestito (prima il pregresso, poi
-    il nuovo), la quota si calcola su cio' che ne resta.
-
-    Il limite finale, mai oltre `lungo` arrotondato per difetto, tiene `lungo -
-    quota` non negativo. E' la condizione perche' la riclassifica sia esatta al
-    centesimo: su valori non negativi ROUND_HALF_UP e' invariante per traslazione
-    di centesimi interi, quindi `Q(lungo - quota) + quota = Q(lungo)`. Senza, un
-    lungo grezzo di 5.000,005 tutto in scadenza l'anno dopo darebbe quota 5.000,01
-    e un `sp17a` persistito di -0,01.
-
-    E' la stessa regola del pregresso scadenziato (`runoff_schedule`:
-    `residual_short = min(residuo, dovuto l'anno dopo)`), ma letta sul calendario
-    del kernel dei prestiti invece che su un elenco di importi: la quota a breve e'
-    il capitale che la catena persistita toglie al residuo nell'anno dopo. Da qui
-    discendono le tre regole del Task 17 senza un ramo per ciascuna:
-    - durante il preammortamento la rata dell'anno dopo e' zero, e la quota a breve
-      anche;
-    - nell'anno prima della maxirata la rata dell'anno dopo la contiene, e la
-      maxirata sta a breve;
-    - l'ultimo anno di orizzonte non si azzera: il calendario del contratto non sa
-      dove finisce il piano. (E' qui che la regola si separa da `runoff_schedule`,
-      che oltre l'orizzonte non ha importi e restituisce zero.)
-
-    Contano solo i prestiti gia' erogati a fine `anno`: un prestito che nasce
-    l'anno dopo non e' debito di quest'anno, ne' a breve ne' oltre.
-
-    Perche' la differenza fra due residui al centesimo e non la rata arrotondata:
-    100.000,38 in 4 anni ha rata 25.000,095, ma la catena passa da 75.000,29 a
-    50.000,20 e toglie 25.000,09. Con 25.000,10 a breve il lungo di fine anno
-    (50.000,19) risulterebbe inferiore al residuo che l'anno dopo non scade
-    (50.000,20): un centesimo di debito oltre l'esercizio che nascerebbe dal nulla.
-    """
-    zero, cent = Decimal('0'), Decimal('0.01')
-    residuo = min(lungo.quantize(cent, rounding=ROUND_HALF_UP), _residuo_prestiti_nuovi(loans, anno))
-    if residuo <= zero:
-        return zero
-    erogati = [loan for loan in (loans or ()) if int(loan['year']) <= anno]
-    _, rimborso, _ = new_financing_schedule(erogati, anno + 1)
-    dopo = max(zero, residuo - rimborso).quantize(cent, rounding=ROUND_HALF_UP)
-    return min(residuo - dopo, lungo.quantize(cent, rounding=ROUND_DOWN))
+# Le regole del debito bancario vivono in `projection_common` (lotto 3A, Task 3): questi nomi restano per
+# chi li importa dal motore budget (test e helper del Task 2).
+_ha_residuo_pregresso = e_contratto_pregresso
+_e_contratto_pregresso = e_contratto_pregresso
+_residuo_prestiti_nuovi = residuo_prestiti_nuovi
+_quota_breve_prestiti_nuovi = quota_breve_prestiti_nuovi
 
 
 def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
@@ -400,19 +497,19 @@ def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
     semantico dell'infrannuale, ricavi base negativi. Alza ValueError."""
     scenario = db.query(BudgetScenario).filter(BudgetScenario.id == scenario_id).first()
     if not scenario:
-        raise ValueError(f"Budget scenario {scenario_id} not found")
+        raise ValueError(f"Scenario di budget {scenario_id} non trovato")
 
     # Get base year data (prefer full-year record)
     from database.queries import get_fy_prefer_full
     base_fy = get_fy_prefer_full(db, scenario.company_id, scenario.base_year)
     if not base_fy or not base_fy.balance_sheet or not base_fy.income_statement:
-        raise ValueError(f"Base year {scenario.base_year} data not found or incomplete")
+        raise ValueError(f"Dati dell'anno base {scenario.base_year} non trovati o incompleti")
 
     # Reuse the same semantic gate as the infrannuale engine.  A balanced
     # aggregate with missing debt/credit detail is not safe for DSO/DPO,
     # repayment schedules or cash-flow projection.
     from calculations.intra_year_engine import IntraYearEngine
-    IntraYearEngine(db)._validate_forecast_source(base_fy, "Base source")
+    IntraYearEngine(db)._validate_forecast_source(base_fy, "Anno base")
 
     base_inc = base_fy.income_statement
 
@@ -1069,7 +1166,7 @@ class ForecastEngine:
         quadra e nessun controllo se ne accorge (rilievo I1 della revisione
         finale del branch — regressione del Task 6, perche' la via manuale,
         che legge il patrimoniale, l'override lo portava avanti). Lo schema
-        e' quello di `prestiti_nuovi_quota_breve`: la dichiarazione si
+        e' quella di `details['debito_bancario']`: la dichiarazione si
         clampa su cio' che la riga persistita puo' reggere, e l'override si
         porta avanti come stato di apertura.
 
@@ -1332,13 +1429,6 @@ class ForecastEngine:
                 }
         return applied, ignored
 
-    # Il secchio di ciascun gruppo e' la riga che IL GRUPPO usa come ripiego:
-    # se e' gia' forzata da un piano o da un'indicizzazione, tutte le sue righe
-    # operative lo sono (il cammino a ritroso non lascerebbe nulla di libero).
-    # Per GRUPPO, non per unione: `sp17g` forzato non deve togliere il ripiego a
-    # `sp16`, o il centesimo del gruppo `sp16` finisce sull'aggregato e sulla
-    # cassa (rilievo I-2 della revisione di `6e5c0f7`, tabella in laboratorio:
-    # "indice solo `sp17g`" -> `sp16_debiti_breve` -0,01).
     _SP16_RIGHE: Tuple[str, ...] = (
         "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
         "sp16c_debiti_obbligazioni_breve", "sp16d_debiti_fornitori_breve",
@@ -1351,6 +1441,21 @@ class ForecastEngine:
         "sp17e_debiti_tributari_lungo", "sp17f_debiti_previdenza_lungo",
         "sp17g_altri_debiti_lungo",
     )
+
+    # (Task 12, lotto 3A, giro di correzione 1) L'allargamento che
+    # `_sp_forced_fields` (sotto) applica quando il SECCHIO di default di un
+    # gruppo (`sp16g`/`sp17g`) e' gia' forzato da un piano di pregresso o da
+    # un'indicizzazione: l'intero gruppo operativo (`d`, `e`, `f`, `g`) entra
+    # fra i forzati, non solo il secchio. Restaurato com'era su `24dea0f`
+    # (nome e semantica identici — la consegna `2946b6a` lo aveva rimosso, e
+    # la revisione `task-12-review-protezioni.md` ha misurato perche' non si
+    # poteva: senza, un `sp_overrides` sull'aggregato con UN SOLO campo del
+    # gruppo governato altrove non veniva piu' rifiutato — genera, scaricando
+    # la MASSA dell'override (non un centesimo: misurato fino a 31.666,66) su
+    # una riga operativa "libera" ma estranea, `sp16f`/previdenza in
+    # entrambi gli scenari misurati, `campo_dichiarato: False`). Usato SOLO
+    # dentro `_sp_forced_fields`, quindi SOLO dal cancello I-1 — vedi il
+    # commento li' sotto sul perche' sono due insiemi.
     _SP_OPERATIVI: Dict[str, Tuple[str, ...]] = {
         "sp16g_altri_debiti_breve": ("sp16d_debiti_fornitori_breve",
                                      "sp16e_debiti_tributari_breve",
@@ -1364,12 +1469,29 @@ class ForecastEngine:
 
     @classmethod
     def _sp_forced_fields(cls, pregresso, details, assumption=None) -> "frozenset[str]":
-        """L'UNICA espressione dei campi `sp` che il normalizzatore non puo'
-        spostare. Costruirla a pezzi in `compute_forecast` e' cio' che ha permesso
-        alla condizione globale di I-2 (un secchio forzato = tutti e otto i
-        dichiarati) di sopravvivere alla correzione: qui motore e test guardano
-        la stessa funzione, e `test_sp_forced_fields_e_l_espressione_reale`
-        la fissa caso per caso.
+        """L'insieme AMPIO: usato SOLO dal cancello I-1 (un `sp_overrides`
+        sull'aggregato `sp16`/`sp17` si rifiuta quando il gruppo e' governato
+        altrove), MAI per scegliere il bersaglio del residuo — quello e'
+        `_sp_target_forced_fields`, sotto.
+
+        (Task 12, lotto 3A, giro di correzione 1) Perche' sono DUE insiemi,
+        non uno (`task-12-review-protezioni.md`, Q2): la domanda del cancello
+        I-1 non e' "resta un campo libero per posarci un centesimo?" — e' "il
+        totale che l'utente ha forzato ha ancora una riga di dettaglio LIBERA
+        su cui il motore possa scaricare la MASSA di quel totale, se
+        servisse?". Le due domande hanno risposte diverse quando SOLO il
+        secchio di default e' governato: un centesimo di arrotondamento puo'
+        benissimo andare su `sp16f` (libero) anche se `sp16g` ha un piano — e'
+        esattamente cio' che `_sp_target_forced_fields` fa, senza allargamento
+        — ma un OVERRIDE dell'aggregato in quello stesso scenario non puo':
+        se il motore lasciasse un campo "libero per il centesimo" assorbire
+        anche la massa dell'override, quella massa finirebbe scritta su una
+        riga che nessun piano descrive (qui: previdenza), non dichiarata, e
+        indistinguibile da un vero debito. Il cancello deve quindi vedere il
+        gruppo COME SE fosse governato per intero non appena una sua voce lo
+        e' — l'allargamento di `_SP_OPERATIVI` — mentre la scelta del
+        bersaglio, quando il cancello NON scatta, deve restare libera di usare
+        una riga che nessun piano ha scritto.
 
         Tre fonti, piu' gli aggregati forzati da `sp_overrides` (I-1): un totale
         forzato SENZA nessuna sua voce forzata e' il motore che deve rispettare
@@ -1377,6 +1499,14 @@ class ForecastEngine:
         Se invece una voce del gruppo e' forzata, `_apply_sp_overrides`
         ricostruisce comunque l'aggregato dalla somma, e li' il residuo torna un
         arrotondamento: l'aggregato NON entra.
+
+        (Task 12, lotto 3A) Quarta fonte: `sp16e_debiti_tributari_breve` quando
+        la posizione tributaria e' governata dal kernel saldo+acconto
+        (`details['imposte']['mode'] == 'saldo_acconto'`) — la dichiarazione
+        di quella cella non sta in un piano di pregresso ne' in
+        un'indicizzazione, ma in `details['imposte']`, e vale comunque: un
+        residuo posato li' sopra la farebbe divergere dal saldo dovuto che
+        `_realign_sp_declarations` dichiara.
         """
         piano_o_indice = (cls._pregresso_sp_forced_fields(pregresso)
                           | cls._indexed_sp_forced_fields(details))
@@ -1384,6 +1514,46 @@ class ForecastEngine:
         for secchio, righe in cls._SP_OPERATIVI.items():
             if secchio in piano_o_indice:
                 forzati.update(righe)
+        if ((details or {}).get('imposte') or {}).get('mode') == 'saldo_acconto':
+            forzati.add('sp16e_debiti_tributari_breve')
+        ov = getattr(assumption, 'sp_overrides', None) if assumption is not None else None
+        if isinstance(ov, dict):
+            for aggregato, righe in (("sp16_debiti_breve", cls._SP16_RIGHE),
+                                     ("sp17_debiti_lungo", cls._SP17_RIGHE)):
+                if (ov.get(aggregato) is not None
+                        and not any(ov.get(r) is not None for r in righe)):
+                    forzati.add(aggregato)
+        return frozenset(forzati)
+
+    @classmethod
+    def _sp_target_forced_fields(cls, pregresso, details, assumption=None) -> "frozenset[str]":
+        """L'insieme STRETTO: usato SOLO per scegliere il bersaglio del
+        residuo di quadratura (domanda "ii" del docstring di `_sp_forced_
+        fields`, sopra) — mai per il cancello I-1, che guarda l'insieme
+        AMPIO. Sono i campi che i `details` hanno gia' scritto di proposito
+        e dichiarato — un piano di pregresso ATTIVO, una voce indicizzata,
+        `sp16a`/`sp17a` (la ripartizione pregresso/prestito nuovo), `sp16e`
+        quando il kernel tributario e' in modo `saldo_acconto` — SENZA
+        l'allargamento `_SP_OPERATIVI`: un piano o un indice sul solo secchio
+        di default (`sp16g`/`sp17g`) non congela anche le altre righe
+        operative dello stesso gruppo (`d`/`e`/`f`), che restano il ripiego
+        naturale del proprio gruppo, come prima di questo lotto (misurato:
+        `test_budget_pregresso.py::test_the_quadratura_residual_never_
+        rewrites_a_field_the_plan_wrote` e `test_forecast_indicizzazione.py::
+        test_the_quadratura_residual_never_rewrites_an_indexed_voce` vanno
+        rossi se questa funzione allarga).
+
+        Corpo identico a `_sp_forced_fields` meno il ciclo su `_SP_OPERATIVI`:
+        stesse tre fonti piu' l'aggregato forzato da `sp_overrides` (qui
+        innocuo per la scelta del bersaglio, dato che il nome dell'aggregato
+        non compare mai in `_CAMPI_NEUTRI_RESIDUO` — la simmetria con
+        `_sp_forced_fields` e' voluta, non un residuo di copia-incolla).
+        """
+        piano_o_indice = (cls._pregresso_sp_forced_fields(pregresso)
+                          | cls._indexed_sp_forced_fields(details))
+        forzati = set(piano_o_indice) | set(cls._BANK_DEBT_SPLIT_FIELDS)
+        if ((details or {}).get('imposte') or {}).get('mode') == 'saldo_acconto':
+            forzati.add('sp16e_debiti_tributari_breve')
         ov = getattr(assumption, 'sp_overrides', None) if assumption is not None else None
         if isinstance(ov, dict):
             for aggregato, righe in (("sp16_debiti_breve", cls._SP16_RIGHE),
@@ -1413,12 +1583,51 @@ class ForecastEngine:
             if code in SP_INDEXABLE_FIELDS
         )
 
+    # (Task 12, lotto 3A) I campi NEUTRI rispetto ai confini di KPI, per ogni
+    # gruppo che `_normalize_balance_sheet_cents` normalizza al centesimo:
+    # l'unico insieme su cui il residuo di quadratura puo' atterrare. Il
+    # primo elemento di ciascuna tupla e' il default di oggi — un gruppo
+    # senza protezioni non si sposta di un centesimo — gli altri sono
+    # l'ordine di ripiego quando il default e' forzato. Mai bersaglio:
+    # `sp04b`/`sp04e` (il primo e' un credito immobilizzato esigibile entro
+    # l'anno, il secondo e' derivato), `sp06e`/`sp06f`/`sp07e`/`sp07f`
+    # (fuori dal DSO e dalle masse del pregresso), `sp12h` (segno proprio),
+    # `sp14b` (scritta dalle imposte differite), `sp14c` (derivato),
+    # `sp16a-c`/`sp17a-c` (confine PFN e confine del rendiconto: sono un
+    # debito finanziario, mai il ripiego di un residuo di arrotondamento).
+    _CAMPI_NEUTRI_RESIDUO: Dict[str, Tuple[str, ...]] = {
+        "sp01_crediti_soci": ("sp01b_parte_da_richiamare", "sp01a_parte_richiamata"),
+        "sp02_immob_immateriali": ("sp02g_altre_immob_imm", "sp02a_costi_impianto", "sp02b_costi_sviluppo",
+                                   "sp02c_brevetti", "sp02d_concessioni", "sp02e_avviamento", "sp02f_immob_in_corso"),
+        "sp03_immob_materiali": ("sp03d_altri_beni", "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
+                                 "sp03c_attrezzature", "sp03e_immob_in_corso"),
+        "sp04_immob_finanziarie": ("sp04d_altri_titoli", "sp04a_partecipazioni", "sp04c_crediti_immob_lungo"),
+        "sp05_rimanenze": ("sp05e_acconti", "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+                           "sp05c_lavori_in_corso", "sp05d_prodotti_finiti"),
+        "sp06_crediti_breve": ("sp06g_crediti_altri_breve", "sp06d_crediti_controllanti_breve",
+                               "sp06c_crediti_collegate_breve", "sp06b_crediti_controllate_breve",
+                               "sp06a_crediti_clienti_breve"),
+        "sp07_crediti_lungo": ("sp07g_crediti_altri_lungo", "sp07d_crediti_controllanti_lungo",
+                               "sp07c_crediti_collegate_lungo", "sp07b_crediti_controllate_lungo",
+                               "sp07a_crediti_clienti_lungo"),
+        "sp12_riserve": ("sp12g_utili_perdite_portati", "sp12e_altre_riserve", "sp12a_riserva_sovrapprezzo",
+                         "sp12b_riserve_rivalutazione", "sp12c_riserva_legale", "sp12d_riserve_statutarie",
+                         "sp12f_riserva_copertura_flussi"),
+        "sp14_fondi_rischi": ("sp14d_altri_fondi", "sp14a_fondi_trattamento_quiescenza"),
+        "sp16_debiti_breve": ("sp16g_altri_debiti_breve", "sp16f_debiti_previdenza_breve",
+                              "sp16e_debiti_tributari_breve", "sp16d_debiti_fornitori_breve"),
+        "sp17_debiti_lungo": ("sp17g_altri_debiti_lungo", "sp17f_debiti_previdenza_lungo",
+                              "sp17e_debiti_tributari_lungo", "sp17d_debiti_fornitori_lungo"),
+    }
+
     @classmethod
     def _normalize_balance_sheet_cents(
         cls, values: Dict, *, recompute_cash: bool = True,
         forced_fields: "frozenset[str]" = frozenset(),
+        forced_fields_gate: "Optional[frozenset[str]]" = None,
         details: Optional[Dict[str, Any]] = None,
         overdraft: "Optional[_Overdraft]" = None,
+        sweep: "Optional[_Sweep]" = None,
     ) -> Dict:
         """Make persisted SP hierarchy and Attivo/Passivo exact to the cent.
 
@@ -1427,11 +1636,15 @@ class ForecastEngine:
         forecast years.  Absorb only those rounding residuals in the generic detail
         bucket, then recompute cash from the rounded aggregate rows.
 
-        `recompute_cash=False` keeps the first two steps and drops the third.  It
-        exists for the intra-year engine, whose cash plug clamps at zero and
-        raises `unfunded_financing_requirement` rather than creating short-term
-        debt: recomputing sp09 as Sigma passivo - Sigma attivo would put the
-        negative residual straight back and undo that clamp.  Quantization and
+        `recompute_cash=False` keeps the first two steps and drops the third.
+        No production caller passes it any more (lotto 3A Task 11): the
+        intra-year engine's `generate_projection` always calls this with
+        `recompute_cash=True`, measuring its own `unfunded_financing_requirement`
+        once, after `sp_overrides` and normalization, on the recomputed cash —
+        the same rule as here. Today only the unit assertions in
+        `tests/test_forecast_residuo_quadratura_sp16.py` and
+        `tests/test_forecast_residuo_sp16a_sp17a.py` pass `recompute_cash=False`,
+        to inspect the pre-recompute residual in isolation. Quantization and
         residual absorption have nothing to do with the clamp, so they must keep
         running — a record whose sub-fields do not sum to their own aggregate is
         read downstream (`reconcileSubfields`, the anti-regression guard of
@@ -1440,19 +1653,50 @@ class ForecastEngine:
 
         `forced_fields` sono i campi che il motore ha scritto di proposito e ha
         gia' DICHIARATO altrove (oggi: i lati breve/oltre di un saldo con piano di
-        pregresso). Il residuo non si posa su di loro — e' la stessa cura che il
-        Task 11 ha applicato al conto economico, qui sul patrimoniale: i secchi di
-        default di `sp16`/`sp17` sono `sp16g`/`sp17g`, cioe' **esattamente** i campi
-        che il piano `altri_debiti` scrive, e un centesimo di residuo li faceva
-        divergere dal numero dichiarato nei `details` (misurato: `sp17g` persistito
-        12.048,41 contro 12.048,40 dichiarato). Se sono forzati, il residuo va
-        sull'ultimo campo libero del gruppo; se nessun operativo e' libero,
-        l'aggregato diventa la somma delle righe (e la cassa si muove dello
-        stesso centesimo), dichiarato in `residuo_quadratura`; un override
-        dell'aggregato in quel caso si RIFIUTA (I-1), perche' li' il residuo non
-        e' un arrotondamento ma la massa dell'override. Il chiamante
-        infrannuale non lo passa: default vuoto, stesso comportamento di sempre.
+        pregresso, le voci indicizzate, `sp16a`/`sp17a`, e `sp16e` quando il
+        kernel tributario e' in modo `saldo_acconto`) — l'insieme STRETTO
+        (`ForecastEngine._sp_target_forced_fields`). Il residuo non si posa
+        su di loro — e' la stessa cura che il Task 11 ha applicato al conto
+        economico, qui sul patrimoniale.
+
+        (Task 12, lotto 3A) Il bersaglio per ogni gruppo e' il primo campo di
+        `_CAMPI_NEUTRI_RESIDUO[aggregato]` NON in `forced_fields` — mai un
+        debito/credito finanziario, mai l'aggregato stesso. Se **tutti** i
+        campi neutri del gruppo sono forzati, il residuo va comunque sul primo
+        di essi (`_CAMPI_NEUTRI_RESIDUO[aggregato][0]`) e la posatura si
+        DICHIARA (`campo_dichiarato: True` in `residuo_quadratura`) — mai
+        sull'aggregato, che di quelle righe resta la somma per definizione (e
+        la cassa si muove dello stesso centesimo). Quando il bersaglio e' il lato
+        breve di un saldo che `details['pregresso']` descrive in modo
+        `legacy`, quel `generated` si riallinea dell'importo posato: dichiarato
+        = persistito vale anche per il centesimo di quadratura, non solo per
+        l'override. Il chiamante infrannuale non lo passa: default vuoto,
+        stesso comportamento di sempre.
+
+        (Task 12, lotto 3A, giro di correzione 1) `forced_fields_gate` e' un
+        SECONDO insieme, quello AMPIO (`ForecastEngine._sp_forced_fields`, con
+        l'allargamento `_SP_OPERATIVI`) — se omesso, coincide con `forced_
+        fields` (i test diretti che passano un solo `forced_fields=` non
+        cambiano comportamento). Serve SOLO al cancello I-1: un `sp_overrides`
+        sull'aggregato `sp16`/`sp17`, quando anche una SOLA voce del gruppo e'
+        governata da un piano o da un'indicizzazione, si RIFIUTA — perche' li'
+        il residuo non e' un arrotondamento ma la MASSA dell'override
+        (misurato: piano `altri_debiti` + `sp16_debiti_breve` forzata a
+        150.000, senza questo cancello ampio la massa si scriveva su
+        `sp16f_debiti_previdenza_breve`, non dichiarata, fino a 31.666,66 —
+        `task-12-review-protezioni.md`, rilievo Critico 1). Il gate guarda
+        SOLO se un campo neutro e' libero secondo l'insieme AMPIO: se lo e',
+        non rifiuta, e la scelta del bersaglio vero resta all'insieme STRETTO
+        di `forced_fields` — le due domande sono deliberatamente separate
+        (vedi il docstring di `_sp_forced_fields`), perche' un allargamento
+        unico per entrambe riapre l'una o l'altra falla (misurato in
+        `task-12-review-protezioni.md` Q2: senza la separazione, l'allargamento
+        fa fallire `test_budget_pregresso.py`/`test_forecast_indicizzazione.py`
+        se usato per il bersaglio, o lascia aperto I-1 se non usato per il
+        cancello).
         """
+        if forced_fields_gate is None:
+            forced_fields_gate = forced_fields
         result = cls._quantize_values(values)
         groups = {
             "sp01_crediti_soci": (
@@ -1536,23 +1780,37 @@ class ForecastEngine:
         posati: List[Dict[str, Any]] = []
         if details is not None:
             details['residuo_quadratura'] = posati
-        # I3(b): i sotto-campi FINANZIARI di `sp16`/`sp17` (banche, altri
-        # finanziari, obbligazioni) non possono mai essere il ripiego del
-        # cammino a ritroso. Sono un confine PFN e, dopo questo lotto, anche il
-        # confine operativo/finanziario del rendiconto (`sp16 −
-        # financial_debt_short`): un residuo posato su `sp16c` scrive debito
-        # obbligazionario su un'azienda che non ne ha — con segno negativo, nei
-        # casi peggiori (sonda 40f0332 vs 0207c93: `sp16c −0,01 … −0,02` per
-        # quattro anni su uno scenario senza piano ne' indicizzazione). Se
-        # nessun operativo e' libero l'aggregato segue la somma (e la cassa si
-        # muove dello stesso centesimo) — ma e' DICHIARATO in
-        # `residuo_quadratura`, come sempre. Se anche l'aggregato e' forzato,
-        # niente posatura: si rifiuta, vedi I-1 nel ramo qui sotto.
-        _cammino_esclusi = {
-            "sp16_debiti_breve": cls._BANK_DEBT_FIELDS_SP16,
-            "sp17_debiti_lungo": cls._BANK_DEBT_FIELDS_SP17,
-        }
-        for aggregate, (group_fields, residual_field) in groups.items():
+        # (Task 12, lotto 3A) Il bersaglio del residuo di quadratura di OGNI
+        # gruppo viene da `_CAMPI_NEUTRI_RESIDUO`, non piu' da un cammino a
+        # ritroso su `groups`: la tabella elenca, per ciascun gruppo, i soli
+        # campi neutri rispetto ai confini di KPI (mai un debito/credito
+        # finanziario, un fondo o un credito fiscale, una riserva a segno
+        # proprio — vedi il commento della tabella, sopra). Il primo elemento
+        # di ogni tupla e' il default di oggi, cosi' un gruppo senza
+        # protezioni non si sposta di un centesimo. Se **tutti** i campi
+        # neutri del gruppo sono in `forced_fields` (l'insieme STRETTO — scritti
+        # di proposito da un piano attivo, da un'indicizzazione, dalla
+        # ripartizione pregresso/prestito nuovo, o dal kernel tributario in modo
+        # `saldo_acconto`), il residuo va comunque sul primo campo neutro —
+        # mai sull'aggregato, che di quelle righe resta la somma — e la
+        # posatura si DICHIARA (`campo_dichiarato: True`).
+        #
+        # (Task 12, lotto 3A, giro di correzione 1) Il cancello I-1, PRIMA di
+        # cercare il bersaglio, guarda invece l'insieme AMPIO
+        # (`forced_fields_gate`, con l'allargamento `_SP_OPERATIVI`): un
+        # aggregato forzato da `sp_overrides` (senza alcuna voce di dettaglio
+        # forzata) quando quell'insieme AMPIO non lascia nemmeno un campo
+        # neutro libero non e' ammesso, anche se l'insieme STRETTO ne
+        # lascerebbe uno — la' la differenza non sarebbe piu' un arrotondamento
+        # ma la massa dell'override, e scriverla su una riga "libera" ma
+        # estranea (es. `sp16f` quando solo `sp16g` ha un piano) e' esattamente
+        # il difetto che il cancello ampio esiste per impedire (misura: piano
+        # `altri_debiti` + `sp16_debiti_breve` forzata a 150.000 — con
+        # l'insieme stretto da solo il residuo si scriveva su `sp16f`,
+        # 31.666,66, non dichiarato; col cancello ampio si rifiuta, persistito
+        # 118.333,34 contro i 150.000 richiesti, cassa 73.661,89 invece di
+        # 105.328,55 — `task-12-review-protezioni.md`, rilievo Critico 1).
+        for aggregate, (group_fields, _default_field) in groups.items():
             if aggregate not in result or not all(field in result for field in group_fields):
                 continue
             residual = result[aggregate] - sum(
@@ -1560,55 +1818,51 @@ class ForecastEngine:
             )
             if not residual:
                 continue
-            target = residual_field
-            if target in forced_fields:
-                esclusi = _cammino_esclusi.get(aggregate, frozenset())
-                target = next(
-                    (field for field in reversed(group_fields)
-                     if field not in forced_fields and field not in esclusi),
-                    None,
+            neutri = cls._CAMPI_NEUTRI_RESIDUO[aggregate]
+            # Cancello I-1: insieme AMPIO, PRIMA di cercare il bersaglio vero.
+            if aggregate in forced_fields_gate and not any(
+                field not in forced_fields_gate for field in neutri
+            ):
+                raise ValueError(
+                    f"Il totale forzato di {aggregate} non è ammesso: la "
+                    "differenza con la somma delle sue voci finirebbe su una "
+                    "riga governata da un piano di scadenziamento o da "
+                    "un'indicizzazione, e i debiti finanziari non la ricevono "
+                    "mai. Forza una voce di dettaglio della stessa schermata, "
+                    "oppure svuota la cella del totale (value: null)."
                 )
+            # Scelta del bersaglio vero: insieme STRETTO.
+            target = next((field for field in neutri if field not in forced_fields), None)
+            dichiarato = False
             if target is None:
-                # Nessun operativo libero: le righe sono la dichiarazione, e
-                # l'aggregato del gruppo DEBITI e' letteramente la loro somma
-                # (riga `sp16 = sp16a + … + sp16g` della costruzione) — quindi e' lui che
-                # segue la somma, come gia' fa il normalizzatore del CE quando
-                # tutti i dettagli di un gruppo sono forzati.
-                #
-                # Se pero' anche l'aggregato e' forzato, QUI SI STA FERMI (I-1
-                # della revisione di `6e5c0f7`): la versione difettosa posava il
-                # centesimo sul secchio di default, ma su quel cammino il
-                # "centesimo" non e' un arrotondamento — e' la MASSA dell'
-                # override. Misura della revisione (sonda `AO16`, fixture della
-                # rete, piano `altri_debiti` + `sp16_debiti_breve` forzata a
-                # 150.000 in ogni anno, 5 anni x 8 crescite): il persistito dice
-                # 118.333,34 contro i 150.000 richiesti, la cassa 73.661,89
-                # invece di 105.328,55 — 31.666,66 in meno sotto un
-                # `forecast_generated: true`, su 40 anni su 40. Il
-                # `residuo_quadratura` lo annota, ma nessuna schermata lo
-                # mostra. Non esiste un posto onesto per quella massa: il
-                # secchio la cancellerebbe l'anno dopo (e' I1), e scriverla su una
-                # riga d..f significherebbe inventare un'obbligazione (e' il
-                # difetto del genitore). Un residuo che vale ZERO, cioe'
-                # l'utente che ha digitato esattamente la somma delle righe, non
-                # arriva qui: il `if not residual: continue` sopra lo congela.
-                if aggregate in forced_fields:
-                    raise ValueError(
-                        f"Il totale forzato di {aggregate} non è ammesso: la "
-                        "differenza con la somma delle sue voci finirebbe su una "
-                        "riga governata da un piano di scadenziamento o da "
-                        "un'indicizzazione, e i debiti finanziari non la ricevono "
-                        "mai. Forza una voce di dettaglio della stessa schermata, "
-                        "oppure svuota la cella del totale (value: null)."
-                    )
-                scarto = sum(
-                    (result[field] for field in group_fields), Decimal("0")
-                ) - result[aggregate]
-                result[aggregate] += scarto
-                posati.append({'campo': aggregate, 'importo': scarto})
-                continue
+                # Un residuo che vale ZERO (l'utente ha digitato esattamente la
+                # somma delle righe) non arriva qui: il `if not residual:
+                # continue` sopra lo congela. Il cancello sopra ha gia' escluso
+                # il caso "aggregato forzato + nessun neutro AMPIO libero"; qui
+                # arriva solo chi ha un neutro AMPIO libero ma nessuno STRETTO
+                # (o chi non ha l'aggregato forzato affatto): mai l'aggregato,
+                # sempre il primo campo neutro, dichiarato.
+                target = neutri[0]
+                dichiarato = True
             result[target] += residual
-            posati.append({'campo': target, 'importo': residual})
+            posati.append({'campo': target, 'importo': residual, 'campo_dichiarato': dichiarato})
+            # Riallineamento (punto 4 del contratto): il bersaglio puo' essere
+            # il lato breve di un saldo che `details['pregresso']` descrive in
+            # modo `legacy` (nessun piano attivo per quel saldo, quindi NON
+            # forzato — ed e' esattamente per questo che puo' essere scelto
+            # come campo libero). Senza questo riallineamento il `generated`
+            # dichiarato divergerebbe dal persistito di questo stesso
+            # residuo: dichiarato = persistito vale anche qui.
+            if details is not None:
+                pregresso = details.get('pregresso')
+                if pregresso:
+                    for saldo, (breve, _oltre) in cls._PREGRESSO_SP_FIELDS.items():
+                        if breve != target:
+                            continue
+                        riga = pregresso.get(saldo)
+                        if riga and riga.get('mode') == 'legacy':
+                            riga['generated'] = Decimal(str(riga.get('generated') or 0)) + residual
+                        break
 
         asset_fields_without_cash = (
             "sp01_crediti_soci", "sp02_immob_immateriali",
@@ -1637,6 +1891,19 @@ class ForecastEngine:
             # negativa (spec §11.1). Lo scoperto si somma a `sp16a`/`sp16` DOPO
             # il residuo di quadratura, quindi non ne crea uno nuovo. Il
             # chiamante infrannuale non passa di qui (`recompute_cash=False`).
+            # ── CASH SWEEP (opt-in) ── Qui, e non nel calcolatore: l'ultima scrittura
+            # sulla cassa prima del cancello del fabbisogno. Decide quindi sulla
+            # cassa di DOPO gli `sp_overrides` e gia' al centesimo (rilievo I2 della
+            # revisione finale del lotto 2), e rimborsa il solo debito bancario
+            # pregresso SENZA piano, prima a breve poi a lungo: cassa e debito
+            # scendono dello stesso importo, e `copri` gira una volta sola, subito
+            # dopo, sulla cassa che ne resta.
+            if sweep is not None:
+                cassa, pagato_breve, pagato_lungo = sweep.applica(cassa)
+                result["sp16a_debiti_banche_breve"] -= pagato_breve
+                result["sp16_debiti_breve"] -= pagato_breve
+                result["sp17a_debiti_banche_lungo"] -= pagato_lungo
+                result["sp17_debiti_lungo"] -= pagato_lungo
             if overdraft is not None:
                 cassa, scoperto = overdraft.copri(cassa)
                 result["sp16a_debiti_banche_breve"] += scoperto
@@ -1647,7 +1914,8 @@ class ForecastEngine:
             # cui manca una riga non puo' saltare il cancello e persistere la
             # cassa netta, magari negativa, cosi' com'e'.
             raise ValueError(
-                "balance sheet incomplete: the overdraft gate needs every SP aggregate"
+                "Stato patrimoniale incompleto: il controllo dello scoperto richiede tutti "
+                "gli aggregati dello SP"
             )
         return result
 
@@ -1672,8 +1940,9 @@ class ForecastEngine:
         total = assumption.investments if assumption.investments else Decimal('0')
         if total:
             raise ValueError(
-                "Investments must be split into intangible_investments and "
-                "tangible_investments; automatic 50/50 allocation is disabled"
+                "Gli investimenti aggregati non si ripartiscono automaticamente: indica gli "
+                "investimenti immateriali e/o materiali (intangible_investments, "
+                "tangible_investments)"
             )
         return Decimal('0'), Decimal('0')
 
@@ -1795,8 +2064,8 @@ class ForecastEngine:
         charged interest in the year of erogazione.
 
         Anche il punto in cui un contratto MISTO (`amount` e `opening_residual`
-        insieme) si normalizza in due contratti separati (Ruling 45) — vedi il
-        commento sul posto, dentro il ciclo.
+        insieme) si normalizza in due contratti separati (Ruling 45), ora in
+        `projection_common.contratti_da_riga_finanziamento`.
         """
         financing_loans = []
         detailed_opening_total = Decimal('0')
@@ -1810,46 +2079,16 @@ class ForecastEngine:
                     'year': a.forecast_year, 'amount': amt, 'duration': dur, 'rate': rate,
                 })
             for loan in (getattr(a, 'financing_loans', None) or []):
-                loan_amount = Decimal(str(loan.get('amount') or 0))
                 opening_residual = Decimal(str(loan.get('opening_residual') or 0))
-                loan_duration = Decimal(str(loan.get('duration_years') or 0))
-                loan_rate = Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100')
                 if _ha_residuo_pregresso(loan) and a.forecast_year != first_forecast_year:
                     raise ValueError(
-                        "opening_residual is allowed only in the first forecast year"
+                        "Il residuo iniziale di un finanziamento (opening_residual) è ammesso "
+                        "solo nel primo anno di previsione"
                     )
                 detailed_opening_total += opening_residual
-                if loan_duration <= 0:
-                    continue
-                condizioni = {
-                    'year': a.forecast_year,
-                    'duration': loan_duration,
-                    'rate': loan_rate,
-                    'grace_years': Decimal(str(loan.get('grace_years') or 0)),
-                    'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
-                }
-                # Ruling 45 (revisione, giro di correzione 1 — rilievo 1): un
-                # contratto MISTO — `amount` e `opening_residual` insieme, che lo
-                # schema ammette e `FinancingLoansGrid` produce sulla stessa riga
-                # — si normalizza QUI, nell'UNICO punto prima di ogni uso, in DUE
-                # contratti con le STESSE condizioni (durata, tasso,
-                # preammortamento, maxirata): uno con il solo importo nuovo, uno
-                # con il solo residuo pregresso. Un calendario di ammortamento e'
-                # lineare nel capitale — quota capitale, maxirata e interessi
-                # scalano tutti col principal — quindi la somma dei due equivale
-                # al contratto unico a meno del centesimo di arrotondamento per
-                # anno (provato dalla rete: I1 esteso sul misto = I1 esteso sul
-                # diviso in due). Senza questa normalizzazione un contratto misto
-                # restava intero dalla parte del pregresso e la sua quota nuova
-                # si prendeva «prima dal breve» come nel Ruling 40.
-                if loan_amount > 0:
-                    financing_loans.append({
-                        **condizioni, 'amount': loan_amount, 'opening_residual': Decimal('0'),
-                    })
-                if opening_residual > 0:
-                    financing_loans.append({
-                        **condizioni, 'amount': Decimal('0'), 'opening_residual': opening_residual,
-                    })
+                # Ruling 45: la divisione del contratto misto vive in
+                # `projection_common.contratti_da_riga_finanziamento`.
+                financing_loans.extend(contratti_da_riga_finanziamento(loan, a.forecast_year))
 
         use_detailed_existing_schedule = detailed_opening_total > 0
         if use_detailed_existing_schedule:
@@ -1857,8 +2096,9 @@ class ForecastEngine:
             base_bank_total = base_bank_debt(getter)
             if abs(base_bank_total - detailed_opening_total) > Decimal('0.01'):
                 raise ValueError(
-                    "The sum of financing opening residuals must equal base-year "
-                    f"bank debt ({detailed_opening_total} != {base_bank_total})"
+                    f"La somma dei residui iniziali dei finanziamenti "
+                    f"({eur_it(detailed_opening_total)}) deve coincidere con il debito "
+                    f"bancario dell'anno base ({eur_it(base_bank_total)})"
                 )
         return financing_loans, use_detailed_existing_schedule
 
@@ -1883,7 +2123,7 @@ class ForecastEngine:
         formatti i giorni per conto proprio.
         """
         if not assumptions:
-            raise ValueError(f"No assumptions found for scenario {source.scenario.id}")
+            raise ValueError(f"Nessuna ipotesi trovata per lo scenario {source.scenario.id}")
 
         try:
             financing_loans, use_detailed = self.assemble_financing(assumptions, source.base_bs)
@@ -1895,8 +2135,8 @@ class ForecastEngine:
             for extra in assumptions[1:]:
                 if getattr(extra, 'pregresso', None):
                     raise ValueError(
-                        "pregresso is allowed only in the first forecast year "
-                        "(lo scadenziamento vale solo sulla riga del primo anno)"
+                        "Lo scadenziamento del pregresso (pregresso) vale solo sulla riga del "
+                        "primo anno di previsione"
                     )
             pregresso = validate_pregresso(
                 getattr(assumptions[0], 'pregresso', None), source.base_bs, len(assumptions)
@@ -1919,6 +2159,9 @@ class ForecastEngine:
         # base year, every later one reads the year just computed.
         prev_inc = source.base_inc
         prev_bs = source.base_bs
+        # Il settore comanda SOLO la soglia dei giorni di magazzino dedotti
+        # (Task 10): nessun altro punto del motore budget legge il settore.
+        settore = getattr(getattr(source.scenario, 'company', None), 'sector', None)
         # I `details` dell'anno precedente viaggiano con l'anno: la posizione
         # tributaria a saldo + acconto paga in N il debito generato a fine N-1,
         # e quel numero sta li'. `None` sul primo anno di piano.
@@ -1945,6 +2188,18 @@ class ForecastEngine:
                 ),
             )
             cassa_apertura = self._read_bs(prev_bs, 'sp09_disponibilita_liquide')
+            # Lo sweep e le componenti del debito bancario sono di QUESTO anno, come
+            # lo scoperto: il perimetro (che cosa ha un piano e che cosa non ce l'ha)
+            # lo riempie `_calculate_balance_sheet`, la cassa la decide
+            # `_normalize_balance_sheet_cents` dopo gli `sp_overrides`, e la
+            # dichiarazione la scrive qui sotto sul persistito.
+            sweep = _Sweep(
+                breve_forzato=any(sp_ov.get(c) is not None for c in
+                                  ('sp16a_debiti_banche_breve', 'sp16_debiti_breve')),
+                lungo_forzato=any(sp_ov.get(c) is not None for c in
+                                  ('sp17a_debiti_banche_lungo', 'sp17_debiti_lungo')),
+            )
+            debito = _DebitoBancarioAnno()
             try:
                 forecast_inc = self._calculate_income_statement(
                     base_inc=source.base_inc,
@@ -1980,22 +2235,32 @@ class ForecastEngine:
                     prev_details=prev_details,
                     details=details,
                     overdraft=overdraft,
+                    settore=settore,
                     # L'anno PRECEDENTE del piano, non `forecast_year - 1`:
                     # con anni non consecutivi le due cose non coincidono, e il
                     # messaggio del kernel nominerebbe un anno che il piano non
                     # ha (rilievo m-2).
                     previous_year=(assumptions[year_index - 1].forecast_year
                                    if year_index else source.scenario.base_year),
+                    sweep=sweep,
+                    debito_bancario=debito,
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
-                    # Un'unica funzione, non un'espressione a pezzi qui: `compute_
-                    # forecast` e i test devono costruire lo STESSO insieme, o la
-                    # guardia di I-2 (un secchio forzato = tutti e otto i
-                    # dichiarati) si puo' rompere in un punto e non nell'altro.
-                    forced_fields=self._sp_forced_fields(pregresso, details, assumption),
+                    # Due funzioni, non una sola, e non un'espressione a pezzi
+                    # qui: `compute_forecast` e i test devono costruire gli
+                    # STESSI due insiemi, o la guardia di I-2 (un secchio
+                    # forzato = tutti e otto i dichiarati) si puo' rompere in
+                    # un punto e non nell'altro. `forced_fields` (stretto)
+                    # sceglie il bersaglio del residuo; `forced_fields_gate`
+                    # (ampio, `_SP_OPERATIVI`) e' il SOLO cancello I-1 (lotto
+                    # 3A, Task 12, giro di correzione 1 — vedi il docstring
+                    # di `_normalize_balance_sheet_cents`).
+                    forced_fields=self._sp_target_forced_fields(pregresso, details, assumption),
+                    forced_fields_gate=self._sp_forced_fields(pregresso, details, assumption),
                     details=details,
                     overdraft=overdraft,
+                    sweep=sweep,
                 )
             except ValueError as e:
                 if stop_on_error:
@@ -2035,16 +2300,23 @@ class ForecastEngine:
             # `outstanding` (la quota bancaria viene dal piano di rimborso).
             details['scoperto_generato'] = overdraft.raised
             details['scoperto_residuo'] = overdraft.outstanding
-            # La quota a breve dei prestiti nuovi (Task 17) si dichiara per quello
-            # che `sp16a` persiste DAVVERO: un `sp_overrides` che fissa `sp16a` (o
-            # `sp16`) sotto la quota vince sul totale, e la riduzione cade prima
-            # sul breve pregresso — la stessa precedenza dello sweep. Senza questo
-            # limite l'anno dopo toglierebbe da `sp16a` piu' di quanto contiene e
-            # lo rimetterebbe nel lungo: debito nato dal nulla, e un foglio che
-            # quadra lo stesso perche' la cassa lo assorbe.
-            details['prestiti_nuovi_quota_breve'] = min(
-                Decimal(str(details.get('prestiti_nuovi_quota_breve') or 0)),
-                max(Decimal('0'), forecast_bs['sp16a_debiti_banche_breve'] - overdraft.outstanding),
+            # Il DEBITO BANCARIO PER COMPONENTI si dichiara per quello che `sp16a`
+            # e `sp17a` persistono DAVVERO, dopo lo sweep e dopo gli `sp_overrides`:
+            # la somma dei `breve` piu' lo scoperto e' `sp16a`, la somma dei `lungo`
+            # e' `sp17a`, al centesimo, per costruzione (vedi il docstring di
+            # `_dichiara_debito_bancario`). Un `sp_overrides` che fissa `sp16a` (o
+            # `sp16`) sotto le componenti vince sul totale, e la riduzione cade
+            # prima sul pregresso e poi sui prestiti nuovi dall'ultimo: e' la stessa
+            # precedenza con cui, fino al lotto 2, la quota a breve si clampava su
+            # quanto `sp16a` poteva reggere. Perche' l'anno dopo togliere da `sp16a`
+            # piu' di quanto contiene significherebbe rimetterla nel lungo: debito
+            # nato dal nulla, e un foglio che quadra lo stesso perche' la cassa lo
+            # assorbe.
+            details['debito_bancario'] = _dichiara_debito_bancario(
+                debito, sweep,
+                forecast_bs['sp16a_debiti_banche_breve'],
+                forecast_bs['sp17a_debiti_banche_lungo'],
+                overdraft.outstanding,
             )
             # ── POSIZIONE TRIBUTARIA: LE DICHIARAZIONI SEGUONO IL PERSISTITO ──
             # In modo `saldo_acconto` l'anno dopo legge `saldo_due` e il credito
@@ -2056,7 +2328,7 @@ class ForecastEngine:
             # accorgeva (rilievo I1 della revisione finale del branch —
             # regressione del Task 6, perche' la via manuale, che legge il
             # patrimoniale, l'override lo portava avanti). Lo schema e' lo
-            # stesso di `prestiti_nuovi_quota_breve` sopra: il motore riallinea
+            # stesso di `details['debito_bancario']` sopra: il motore riallinea
             # la dichiarazione al valore persistito, e l'override si porta
             # avanti come stato di apertura.
             #
@@ -2141,7 +2413,7 @@ class ForecastEngine:
         ).order_by(BudgetAssumptions.forecast_year).all()
 
         if not assumptions:
-            raise ValueError(f"No assumptions found for scenario {scenario_id}")
+            raise ValueError(f"Nessuna ipotesi trovata per lo scenario {scenario_id}")
 
         # Un orizzonte accorciato non deve lasciare anni fantasma: il ciclo qui
         # sotto fa l'upsert dei soli anni che hanno un'ipotesi.
@@ -2590,6 +2862,9 @@ class ForecastEngine:
         details=None,
         overdraft: "Optional[_Overdraft]" = None,
         previous_year: Optional[int] = None,
+        sweep: "Optional[_Sweep]" = None,
+        debito_bancario: "Optional[_DebitoBancarioAnno]" = None,
+        settore: Optional[int] = None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -2614,6 +2889,14 @@ class ForecastEngine:
         `overdraft` e' la concessione dello scoperto di c/c su questo anno
         (`_Overdraft`). Assente = non concesso, cioe' il comportamento di
         sempre: un plug negativo alza.
+
+        `sweep` e `debito_bancario` sono i due contenitori dell'anno (`_Sweep`,
+        `_DebitoBancarioAnno`): qui il calcolatore LI RIEMPE — il perimetro dello
+        sweep (quale parte del debito bancario non ha un piano, e con quale cassa
+        minima) e le componenti grezze del debito bancario — senza ancora toccare
+        la cassa, che e' la quadratura finale a farlo, dopo gli `sp_overrides`.
+        Assenti (`None`), come li passano i chiamanti diretti e l'infrannuale,
+        non cambia nulla: nessun perimetro dichiarato, nessuna componente.
         """
         D = Decimal
         ZERO = D('0')
@@ -2749,8 +3032,14 @@ class ForecastEngine:
             # quindi tacere equivarrebbe a dichiararsi puliti. E' la lista viva, che
             # i tre blocchi qui sotto riempiono man mano.
             details['degenerate_turnover_ratio'] = degenerate_days
+            # La soglia applicata si dichiara sempre, anche quando non c'e':
+            # `giorni_max: None` vuol dire «nessuna soglia» (settori 5 e 6).
+            details['soglia_giorni_magazzino'] = {
+                'settore': settore,
+                'giorni_max': soglia_giorni_magazzino(settore),
+            }
 
-        def _derived_days(stock, flow_base, name):
+        def _derived_days(stock, flow_base, name, soglia=MAX_DERIVED_TURNOVER_DAYS):
             """I giorni dedotti dall'anno base, o `None` se DEGENERI.
 
             Giacenza nulla ⇒ zero giorni, e non c'e' nulla di degenere: qualunque
@@ -2763,7 +3052,7 @@ class ForecastEngine:
                 degenerate_days.append(name)
                 return None
             days = stock / flow_base * DAYS
-            if days < 0 or days > MAX_DERIVED_TURNOVER_DAYS:
+            if days < 0 or (soglia is not None and days > soglia):
                 degenerate_days.append(name)
                 return None
             return days
@@ -2840,6 +3129,7 @@ class ForecastEngine:
         sp06 = sp06_trade + sp06e + sp06f
 
         # DIO → sp05 (inventory)
+        soglia_dio = soglia_giorni_magazzino(settore)
         dio = getattr(assumption, 'dio_days', None)
         if dio is not None:
             dio = D(str(dio))
@@ -2847,7 +3137,7 @@ class ForecastEngine:
         else:
             # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
             base_sp05 = _base('sp05_rimanenze')
-            dio = _derived_days(base_sp05, base_revenue, 'dio')
+            dio = _derived_days(base_sp05, base_revenue, 'dio', soglia=soglia_dio)
             if dio is None:
                 # Le rimanenze non hanno piano di scadenziamento: nulla da scorporare.
                 sp05 = base_sp05
@@ -2984,13 +3274,14 @@ class ForecastEngine:
         # dove il resto del calcolo la cerca: dentro `sp16a` c'e' ancora solo il
         # breve PREGRESSO, e la rata del pregresso — che prende prima dal breve —
         # non paga la rata del prestito nuovo. La riclassifica si rifa' a fine
-        # anno, dopo lo sweep. Si legge dai `details` dell'anno prima, come lo
-        # scoperto: e' uno stato, non si ri-deriva dal saldo. Il `min` e' la
-        # guardia contro il debito dal nulla: la quota dichiarata non supera mai la
-        # quota bancaria persistita (`compute_forecast` la limita dopo gli
-        # `sp_overrides`), quindi di norma non morde.
+        # anno. Si legge dai `details` dell'anno prima, come lo scoperto: e' uno
+        # stato — `details['debito_bancario']['contratti']`, la somma dei `breve`
+        # dei prestiti nuovi — non si ri-deriva dal saldo. Il `min` e' la guardia
+        # contro il debito dal nulla: la quota dichiarata non supera mai la quota
+        # bancaria persistita (`_dichiara_debito_bancario` la riconcilia con
+        # `sp16a`, override compreso), quindi di norma non morde.
         quota_breve_apertura = min(
-            sp16a, Decimal(str((prev_details or {}).get('prestiti_nuovi_quota_breve') or 0))
+            sp16a, _quota_breve_dichiarata(prev_details)
         )
         sp16a = sp16a - quota_breve_apertura
         sp16b = _prev('sp16b_debiti_altri_finanz_breve')
@@ -3020,10 +3311,13 @@ class ForecastEngine:
         # calcolati su quello).
         prestiti_nuovi = [loan for loan in (financing_loans or []) if not _e_contratto_pregresso(loan)]
         contratti_pregresso = [loan for loan in (financing_loans or []) if _e_contratto_pregresso(loan)]
-        nuovo_apertura = min(
-            sp17a, _residuo_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year - 1)
+        sp17a_pregresso, nuovo_apertura = separa_prestiti_nuovi(
+            sp17a, prestiti_nuovi, assumption.forecast_year
         )
-        sp17a_pregresso = sp17a - nuovo_apertura
+        # Il debito bancario pregresso di apertura, prima di ogni piano: e' cio' che
+        # `details['debito_bancario']` dichiara come `apertura`, e da qui lo sweep
+        # capisce quale parte del debito NON ha un piano da seguire.
+        apertura_pregresso = sp16a + sp17a_pregresso
 
         # Handle abbreviato gap: if previous year has aggregate but no sub-field
         # detail, allocate the unaccounted portion to banche (bank debt).
@@ -3350,8 +3644,8 @@ class ForecastEngine:
         gap_long = prev_sp17_agg - prev_sp17_detail
         if abs(gap_short) > Decimal('0.01') or abs(gap_long) > Decimal('0.01'):
             raise ValueError(
-                "Debt aggregate/detail mismatch: creditor categories are required; "
-                "the difference was not allocated to banks"
+                "Debiti: l'aggregato non coincide con la somma delle categorie dei creditori; "
+                "servono le categorie, e la differenza non è stata attribuita alle banche"
             )
 
         # Apply the bank repayment schedule to total bank debt (entro + oltre).
@@ -3400,6 +3694,44 @@ class ForecastEngine:
         # then 0) stays on the sheet and shrinks by its rata each year instead of
         # persisting flat forever. La rata paga SOLO il prestito nuovo: mai il breve
         # pregresso (Ruling 40), mai il lungo pregresso.
+        # ── IL PERIMETRO DELLO SWEEP E LE COMPONENTI DEL DEBITO BANCARIO ──
+        # Qui, e non nello sweep: questo e' l'unico punto in cui il pregresso e' gia'
+        # passato dai propri piani (anni di rimborso, contratti col residuo) e non ha
+        # ancora incassato il prestito nuovo. Da qui lo sweep capisce quale parte del
+        # debito bancario NON ha un piano, e `details['debito_bancario']` sa quali
+        # componenti dichiarare. Restano entrambe grezze: le quantizza e le riconcilia
+        # col persistito `_dichiara_debito_bancario`, dopo la normalizzazione.
+        piano_anni_attivo = (
+            not use_detailed_existing_schedule
+            and existing_repay_years is not None
+            and D(str(existing_repay_years)) > 0
+        )
+        if debito_bancario is not None and not use_detailed_existing_schedule:
+            if piano_anni_attivo:
+                debito_bancario.piano_anni = {
+                    'apertura': apertura_pregresso,
+                    'rimborso': apertura_pregresso - (sp16a + sp17a_pregresso),
+                    'breve': sp16a,
+                    'lungo': sp17a_pregresso,
+                }
+            else:
+                debito_bancario.senza_piano = {
+                    'apertura': apertura_pregresso,
+                    'rimborso_sweep': ZERO,
+                    'breve': sp16a,
+                    'lungo': sp17a_pregresso,
+                }
+        if sweep is not None:
+            # Con un piano addosso — anni di rimborso o contratti col residuo — lo
+            # sweep non ha nulla da rimborsare: quel debito segue solo il proprio
+            # piano, capitale e interessi (decisione 3 del proprietario, lotto 3A).
+            sweep.attivo = (bool(getattr(assumption, 'cash_sweep_enabled', False))
+                            and not use_detailed_existing_schedule and not piano_anni_attivo)
+            floor = getattr(assumption, 'cash_sweep_min_cash', None)
+            sweep.minimo = D(str(floor)) if floor is not None else ZERO
+            sweep.breve_disponibile = sp16a
+            sweep.lungo_disponibile = sp17a_pregresso
+
         fin_raised, fin_repayment, _ = new_financing_schedule(
             prestiti_nuovi, assumption.forecast_year)
         nuovo_residuo = max(ZERO, nuovo_apertura + fin_raised - fin_repayment)
@@ -3422,23 +3754,11 @@ class ForecastEngine:
         # A negative implied cash balance is an uncovered funding requirement.
         if sp09 < 0 and not gate_downstream:
             overdraft.copri(sp09)
-        if bool(getattr(assumption, 'cash_sweep_enabled', False)):
-            # ── CASH SWEEP (opt-in) ── Use cash generated above the minimum floor to pay
-            # down BANK debt — short-term first (sp16a), then long-term (sp17a) — instead
-            # of letting idle cash accumulate while the debt stays flat (the client's
-            # "la cassa cresce ma il debito v/banche resta invariato"). Cash and debt are
-            # reduced by the same amount, so the balance sheet stays balanced.
-            # Sulla cassa NETTA: finche' c'e' scoperto da chiudere non c'e'
-            # eccesso, e il debito bancario ordinario non passa davanti allo
-            # scoperto.
-            floor = getattr(assumption, 'cash_sweep_min_cash', None)
-            floor = D(str(floor)) if floor is not None else ZERO
-            excess = sp09 - floor
-            if excess > ZERO:
-                pay_short = min(excess, sp16a)
-                sp16a -= pay_short; sp16 -= pay_short; sp09 -= pay_short; excess -= pay_short
-                pay_long = min(excess, sp17a)
-                sp17a -= pay_long; sp17 -= pay_long; sp09 -= pay_long; excess -= pay_long
+        # Il cash sweep non sta piu' qui: rimborsa il solo debito bancario pregresso
+        # SENZA piano e decide sulla cassa di DOPO gli `sp_overrides`, cioe' sulla
+        # cassa gia' al centesimo che `compute_forecast` porta in
+        # `_normalize_balance_sheet_cents` (rilievo I2 della revisione finale del
+        # lotto 2: deciso prima degli override, lo sweep fabbricava un fabbisogno).
 
         # ── LA QUOTA A BREVE DEL PRESTITO NUOVO (Task 17) ──
         # Fin qui `sp17a` porta TUTTO il residuo dei prestiti nuovi, anche la parte
@@ -3446,15 +3766,14 @@ class ForecastEngine:
         # current ratio e circolante di Altman, e il pareggio non se ne accorge:
         # `sp16` e `sp17` stanno entrambi nel passivo (misurato dalla revisione del
         # Task 16: current ratio 2027 2,4206 invece di 2,0794). Si sposta qui, come
-        # ULTIMA scrittura sui debiti bancari, per due ragioni:
-        # - dopo lo sweep, che rimborsa prima il pregresso e poi il prestito nuovo
-        #   (decisione del proprietario): prima dello sweep la quota nuova starebbe
-        #   in `sp16a`, che lo sweep paga per primo, davanti al lungo pregresso;
-        # - e' una riclassifica, non un flusso: cassa, interessi, risultato e
-        #   totale del debito restano quelli di sempre, anno per anno.
+        # ULTIMA scrittura sui debiti bancari, perche' e' una riclassifica, non un
+        # flusso: cassa, interessi, risultato e totale del debito restano quelli di
+        # sempre, anno per anno. Lo sweep non passa piu' di qui (sta nella
+        # normalizzazione, dopo gli override) e comunque non vede i prestiti nuovi.
         # Il residuo nuovo di fine anno e' quello che l'anno dopo trovera'
-        # all'apertura (`min(sp17a, catena)`): se lo sweep ha eroso il prestito,
-        # la quota a breve e' calcolata su cio' che ne resta.
+        # all'apertura (`min(sp17a, catena)`): se uno sweep vecchio o uno
+        # `sp_overrides` ha eroso il prestito, la quota a breve e' calcolata su
+        # cio' che ne resta.
         #
         # Al centesimo per costruzione: la quota e' un importo al centesimo e non
         # supera il lungo arrotondato per difetto, quindi `Q(sp17a - quota) +
@@ -3465,11 +3784,19 @@ class ForecastEngine:
         # senza perdere un centesimo. `sp16a`/`sp17a` sono in
         # `_BANK_DEBT_SPLIT_FIELDS`: il residuo di quadratura non li riscrive.
         quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a)
+        breve_pregresso_fine = sp16a
         sp16a += quota_breve; sp16 += quota_breve
         sp17a -= quota_breve; sp17 -= quota_breve
-        if details is not None:
-            # Sempre, anche a zero: a valle una chiave assente vale zero.
-            details['prestiti_nuovi_quota_breve'] = quota_breve
+        if debito_bancario is not None:
+            # Le componenti per contratto, grezze: il pregresso scandagliato per
+            # contratto (`opening_residual`) ha la sua ripartizione qui dentro,
+            # altrove e' tutto in `senza_piano`/`piano_anni` e ai contratti non ne
+            # va niente (`ZERO`).
+            debito_bancario.contratti = _contratti_dell_anno(
+                financing_loans, assumption.forecast_year, quota_breve, nuovo_residuo,
+                breve_pregresso_fine if use_detailed_existing_schedule else ZERO,
+                sp17a_pregresso if use_detailed_existing_schedule else ZERO,
+            )
 
         # ── DETAIL BREAKDOWNS ──
 

@@ -73,7 +73,7 @@ def test_five_year_budget_stays_exact_to_the_cent(monkeypatch, scale, growth):
                 # instead of engineering an artificial financing schedule that
                 # would just mask the finding.
                 assert result["forecast_generated"] is False
-                assert "Unfunded financing requirement" in result["message"], result["message"]
+                assert "Fabbisogno finanziario scoperto" in result["message"], result["message"]
                 return
 
             assert result["forecast_generated"] is True, result["message"]

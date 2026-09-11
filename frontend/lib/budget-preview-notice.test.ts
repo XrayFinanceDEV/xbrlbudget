@@ -20,19 +20,19 @@ describe("previewNotice", () => {
       loading: false,
       error: "Rete non raggiungibile",
       data: { scenario_id: 1, base_year: 2024, forecast_years: [],
-        error: { year: 2028, message: "Unfunded financing requirement 1,000.00: add a financing assumption" } },
+        error: { year: 2028, message: "Fabbisogno finanziario scoperto di 1.000,00: aggiungi un'ipotesi di finanziamento esplicita; nessun debito bancario è stato creato automaticamente" } },
     };
     expect(previewNotice(preview)).toBe("Rete non raggiungibile");
   });
 
-  it("fabbisogno scoperto riconosciuto: importo e anno, non il messaggio inglese del motore", () => {
+  it("fabbisogno scoperto riconosciuto: importo e anno, non il messaggio grezzo del motore", () => {
     const notice = previewNotice(withData({
-      year: 2028, message: "Unfunded financing requirement 84,120.50: add a financing assumption",
+      year: 2028, message: "Fabbisogno finanziario scoperto di 84.120,50: aggiungi un'ipotesi di finanziamento esplicita; nessun debito bancario è stato creato automaticamente",
     }));
     expect(notice).not.toBeNull();
     expect(notice).toContain("2028");
     expect(notice).toMatch(/84\.1|84120/); // formatCurrency arrotonda, ma l'importo resta leggibile
-    expect(notice).not.toContain("Unfunded financing requirement");
+    expect(notice).not.toContain("nessun debito bancario è stato creato");
   });
 
   it("data.error che la regex non riconosce -> il messaggio grezzo, mai null in silenzio", () => {
@@ -48,18 +48,19 @@ describe("previewNotice", () => {
 
 describe("saveNotice", () => {
   // Il messaggio esatto del backend (assumptions_service.py:326 attorno a
-  // forecast_engine.py:1373), quello che il collaudo ha visto nel toast.
+  // forecast_engine.py:1373), quello che il collaudo ha visto nel toast —
+  // gia' italiano alla fonte, importo all'europea (Task 8 lotto 3A).
   const DAL_BACKEND =
-    "Assumptions saved successfully, but forecast generation failed: Unfunded financing " +
-    "requirement 195,418,034.86: add an explicit financing assumption; no bank debt was " +
-    "created automatically";
+    "Ipotesi salvate, ma il previsionale non è stato calcolato: Fabbisogno finanziario " +
+    "scoperto di 195.418.034,86: aggiungi un'ipotesi di finanziamento esplicita; nessun " +
+    "debito bancario è stato creato automaticamente";
 
-  it("il fabbisogno scoperto arriva in italiano, con le migliaia all'europea", () => {
+  it("il fabbisogno scoperto arriva formattato, con le migliaia all'europea", () => {
     const notice = saveNotice(DAL_BACKEND);
     expect(notice).toContain("Fabbisogno finanziario scoperto");
     expect(notice).toContain("195.418.035");
-    expect(notice).not.toContain("Unfunded");
-    expect(notice).not.toContain("financing assumption");
+    expect(notice).not.toContain("nessun debito bancario è stato creato");
+    expect(notice).not.toContain("aggiungi un'ipotesi di finanziamento esplicita");
   });
 
   it("dice che le ipotesi SONO salvate: e' solo il previsionale a non essere stato generato", () => {
@@ -73,46 +74,37 @@ describe("saveNotice", () => {
     expect(saveNotice(DAL_BACKEND)).not.toMatch(/scoperto nel \d{4}/);
   });
 
-  it("la frase e' LA STESSA dell'anteprima: una sola traduzione, non due", () => {
-    const daSalvataggio = saveNotice("Unfunded financing requirement 84,120.50: add a financing assumption");
+  it("la frase e' LA STESSA dell'anteprima: una sola composizione del testo, non due", () => {
+    const daSalvataggio = saveNotice(
+      "Fabbisogno finanziario scoperto di 84.120,50: aggiungi un'ipotesi di finanziamento esplicita");
     const daAnteprima = previewNotice(withData({
-      year: 2028, message: "Unfunded financing requirement 84,120.50: add a financing assumption",
+      year: 2028,
+      message: "Fabbisogno finanziario scoperto di 84.120,50: aggiungi un'ipotesi di finanziamento esplicita",
     }));
     const coda = "Il previsionale si ferma qui:";
     expect(daSalvataggio.slice(daSalvataggio.indexOf(coda)))
       .toBe(daAnteprima!.slice(daAnteprima!.indexOf(coda)));
   });
 
-  it("un messaggio SENZA il prefisso noto del backend resta GREZZO: meglio l'inglese di un testo inventato", () => {
+  it("un messaggio SENZA il prefisso noto del backend resta GREZZO: meglio il testo del motore di un testo inventato", () => {
     expect(saveNotice("Previsionale non generato")).toBe("Previsionale non generato");
     expect(saveNotice("qualcosa che nessuna regex riconosce")).toBe("qualcosa che nessuna regex riconosce");
   });
 
-  // Rilievo 6 (giro di correzione 1): il toast del wizard restava in inglese
-  // — «Assumptions saved successfully, but forecast generation failed: …» —
-  // anche quando il messaggio del motore, dopo i due punti, era in italiano.
-  // Il prefisso e' una stringa FISSA scritta da `assumptions_service.py:330`,
-  // non un messaggio arbitrario del motore: tradurlo non e' "inventare" —
-  // e' la stessa distinzione che il resto di questo file gia' rispetta fra
-  // testo di contorno (traducibile) e messaggio del motore (mai toccato).
-  it("il prefisso FISSO del backend va in italiano, il messaggio del motore dopo i due punti resta quello che e'", () => {
+  // Rilievo 6 (giro di correzione 1) diceva del prefisso ancora inglese; da
+  // Task 8 parte A (lotto 3A) il prefisso di `assumptions_service.py` nasce
+  // gia' in italiano alla fonte, quindi non c'e' piu' nulla da spogliare qui
+  // — i due test di prima diventano uno solo: un messaggio che ha gia' il
+  // prefisso italiano e nessun fabbisogno riconoscibile torna INVARIATO. Il
+  // resto del testo (dopo i due punti) e' anch'esso italiano dalla parte B
+  // (lotto 3A, task 8): non e' questo test a doverlo verificare parola per
+  // parola, solo a dire che il client non lo tocca.
+  it("un messaggio col prefisso italiano del backend e senza fabbisogno riconoscibile torna invariato", () => {
     const dalBackend =
-      "Assumptions saved successfully, but forecast generation failed: The sum of financing opening " +
-      "residuals must equal base-year bank debt (300000 != 4465659.00)";
-    expect(saveNotice(dalBackend)).toBe(
-      "Ipotesi salvate, ma il previsionale non è stato calcolato: The sum of financing opening " +
-      "residuals must equal base-year bank debt (300000 != 4465659.00)"
-    );
-  });
-
-  it("il prefisso si toglie anche quando il messaggio del motore e' gia' in italiano: non lo tocca", () => {
-    const dalBackend =
-      "Assumptions saved successfully, but forecast generation failed: Scadenziamento di crediti " +
-      "commerciali: gli importi superano il saldo di apertura";
-    expect(saveNotice(dalBackend)).toBe(
-      "Ipotesi salvate, ma il previsionale non è stato calcolato: Scadenziamento di crediti " +
-      "commerciali: gli importi superano il saldo di apertura"
-    );
+      "Ipotesi salvate, ma il previsionale non è stato calcolato: La somma dei residui iniziali " +
+      "dei finanziamenti (300.000,00) deve coincidere con il debito bancario dell'anno base " +
+      "(4.465.659,00)";
+    expect(saveNotice(dalBackend)).toBe(dalBackend);
   });
 
   it("il fabbisogno scoperto riconosciuto vince comunque sul prefisso: una frase sola, non due incollate", () => {

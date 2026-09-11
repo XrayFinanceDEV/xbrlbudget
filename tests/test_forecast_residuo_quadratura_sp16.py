@@ -36,6 +36,19 @@ La causa era doppia, e doppia e' la prova:
   `_sp_forced_fields`, e il selettore dei dichiarati e' PER GRUPPO: un'
   indicizzazione della sola `sp17g` non puo' togliere il ripiego al gruppo
   `sp16` (rilievo I-2, tabella in laboratorio: `sp16_debiti_breve` −0,01).
+
+  (Task 12, lotto 3A, giro di correzione 1) Da questo giro `_sp_forced_fields`
+  e' l'insieme AMPIO (con l'allargamento `_SP_OPERATIVI`, restaurato) e serve
+  SOLO al cancello I-1, sopra — MAI a scegliere il bersaglio del residuo: per
+  quello c'e' un secondo insieme, STRETTO, `_sp_target_forced_fields`, senza
+  l'allargamento. La rimozione totale dell'allargamento (una consegna
+  intermedia di questo stesso task) aveva tolto anche la protezione
+  intra-gruppo che questo punto (c) presuppone — riaprendo I-1 in una forma
+  peggiore: un `sp_overrides` sull'aggregato con una SOLA voce del gruppo
+  governata non veniva piu' rifiutato, e la massa dell'override finiva su una
+  riga estranea, non dichiarata (`task-12-review-protezioni.md`). Il punto
+  (c) torna quindi vero con la stessa forza di prima — ma solo perche' il
+  cancello guarda l'insieme AMPIO, non perche' l'allargamento sia sparito.
 """
 from decimal import Decimal as D
 
@@ -245,18 +258,46 @@ def test_aggregato_forzato_senza_residuo_non_si_rifiuta():
 
 
 def test_reintegro_dell_aggregato_quando_non_resta_niente_libero():
-    """Gruppo interamente forzato, aggregato NO: segue la somma delle righe,
-    e la posatura nomina l'aggregato (chiave dichiarata anche qui)."""
+    """Gruppo interamente forzato, aggregato NO: MAI piu' l'aggregato come
+    bersaglio (punto 3 del contratto del Task 12) — il residuo va sul primo
+    campo NEUTRO (`sp16g`, il primo di `_CAMPI_NEUTRI_RESIDUO['sp16_debiti_
+    breve']`) e la posatura si DICHIARA. L'aggregato non viene mai riscritto
+    da questo ramo: resta il valore forzato in ingresso, che coincide con la
+    somma delle righe aggiornate per costruzione (il residuo e' definito
+    proprio come `aggregato - somma(righe)`).
+
+    PRIMA (contratto Task 12 originale, `2946b6a`, assunzione ORA superata):
+    l'aggregato assorbiva (`sp16_debiti_breve == somma delle righe forzate`,
+    nessuna riga mossa, la posatura nominava l'AGGREGATO). Col separatore del
+    giro di correzione 1 la scelta del bersaglio (`forced_fields`, insieme
+    STRETTO) e' rimasta la stessa di `2946b6a` per QUESTO caso (nessun
+    `sp_overrides` sull'aggregato: il cancello I-1 — insieme AMPIO — non
+    scatta nemmeno qui, dato che l'aggregato non e' fra i campi passati),
+    quindi il DOPO qui sotto e' identico a quanto gia' valeva prima del giro
+    di correzione 1 (la mutazione ha riguardato SOLO il cancello, mai questo
+    ramo): la riscrittura serve solo a correggere l'assunzione ormai
+    superata di questo test, non un comportamento cambiato dal giro 1.
+    """
     forzati = frozenset(_DETTAGLI_16)
     details = {}
     esito = ForecastEngine._normalize_balance_sheet_cents(
         _valori_16(), forced_fields=forzati, recompute_cash=False, details=details,
     )
-    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0"))
+    # DOPO: il bersaglio e' `sp16g` (primo neutro), non l'aggregato.
+    assert esito["sp16g_altri_debiti_breve"] == D("700.00") + _RESIDUO
     for campo, val in _DETTAGLI_16.items():
+        if campo == "sp16g_altri_debiti_breve":
+            continue
         assert esito[campo] == val, f"{campo} mosso: {esito[campo]} != {val}"
-    assert details["residuo_quadratura"] == [{"campo": "sp16_debiti_breve",
-                                              "importo": -_RESIDUO}]
+    # L'aggregato resta il valore forzato in ingresso (mai riscritto qui), e
+    # torna a coincidere con la somma delle righe DOPO la posatura.
+    assert esito["sp16_debiti_breve"] == sum(_DETTAGLI_16.values(), D("0")) + _RESIDUO
+    assert esito["sp16_debiti_breve"] == sum(
+        (esito[c] for c in _DETTAGLI_16), D("0")
+    )
+    assert details["residuo_quadratura"] == [{"campo": "sp16g_altri_debiti_breve",
+                                              "importo": _RESIDUO,
+                                              "campo_dichiarato": True}]
 
 
 # ─────────────── I-1: l'aggregato forzato, sul percorso di servizio ───────────────

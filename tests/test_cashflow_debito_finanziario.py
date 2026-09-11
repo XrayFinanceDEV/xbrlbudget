@@ -46,7 +46,9 @@ sui fixture `holding`/`holding_scala` (30.000,00 e 32.194,80 — esattamente
 mai da nessuna parte i dividendi sottratti all'operativo alla riga ~120
 (`profit_before_adjustments`). E' un difetto preesistente e indipendente dal
 debito bancario (il fixture holding non ha ne' `sp16a/b/c` ne' `sp17` non
-zero), fuori dal perimetro di F1: dichiarato qui, non corretto.
+zero), fuori dal perimetro di F1: dichiarato qui, non corretto. Corretto dal lotto 3A (Task 6):
+`dividends_received` rimette `ce13` nell'operativo e lo scarto e' zero anche sulla holding
+(`tests/test_cashflow_dividendi.py`).
 """
 from decimal import Decimal as D
 
@@ -150,8 +152,7 @@ def test_il_residuo_dei_mezzi_di_terzi_uguaglia_il_debito_finanziario_misurato()
     (un residuo quadra sempre, con qualunque classificazione): il netto dei
     mezzi di terzi deve coincidere con Delta(financial_debt_short +
     financial_debt_long). Su questo scenario (nessun provento da
-    partecipazioni) lo scarto e' zero in ogni anno — vedi il docstring del
-    modulo per dove NON lo e' (fixture holding, fuori perimetro)."""
+    partecipazioni) lo scarto e' zero in ogni anno."""
     engine, Session_ = memory_sessions()
     db = Session_()
     rows = _righe(A3, per_anno={0: PRESTITO})

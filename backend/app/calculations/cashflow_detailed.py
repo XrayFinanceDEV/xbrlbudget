@@ -242,8 +242,10 @@ class DetailedCashFlowCalculator:
         # Taxes paid (negative because it's an outflow)
         taxes_paid = -income_taxes
 
-        # Dividends received (already in profit)
-        dividends_received = Decimal("0")
+        # Dividends received (OIC 10): `ce13` was taken out of profit above as a non-operating item
+        # (`profit_before_adjustments`); in the projection it is cash — nothing books it as a
+        # receivable — so it comes back here. Left at zero it silently moved into third-party funds.
+        dividends_received = dividends
 
         # Use of provisions (negative because it's a cash outflow when provisions are used)
         # Split into two components:
@@ -444,12 +446,17 @@ class DetailedCashFlowCalculator:
         # Verification: total cashflow should equal actual cash change
         verification_ok = abs(total_cashflow - actual_cash_change) < Decimal("1.0")  # Allow 1 euro tolerance
 
+        # Declared, never corrected: third-party funds are a residual, so any movement this statement
+        # does not classify ends up there. Zero means the residual IS the measured change in financial debt.
+        third_party_funds_gap = debt_net - delta_total_debt
+
         cash_reconciliation = CashReconciliation(
             total_cashflow=R(total_cashflow),
             cash_beginning=R(cash_beginning),
             cash_ending=R(cash_ending),
             difference=R(actual_cash_change),
-            verification_ok=verification_ok
+            verification_ok=verification_ok,
+            third_party_funds_gap=R(third_party_funds_gap)
         )
 
         # Return complete statement

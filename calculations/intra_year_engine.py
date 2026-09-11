@@ -18,8 +18,10 @@ from database.models import (
 )
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota, tax_closing_position, deferred_tax_position,
-    new_financing_schedule,
+    tfr_accrual_quota, posizione_tributaria_fine_anno, deferred_tax_position,
+    new_financing_schedule, soglia_giorni_magazzino,
+    e_contratto_pregresso, contratti_da_riga_finanziamento, separa_prestiti_nuovi,
+    quota_breve_prestiti_nuovi, eur_it,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -189,7 +191,7 @@ def _safe_divide(numerator, denominator, default=Decimal('0')):
 _MAX_TURNOVER_RATIO = Decimal('1')  # 365 giorni
 
 
-def _turnover_ratio(stock, base):
+def _turnover_ratio(stock, base, max_ratio=_MAX_TURNOVER_RATIO):
     """
     Rapporto giacenza/base dell'anno di riferimento, oppure ``None`` quando è
     DEGENERE — cioè quando il denominatore è così piccolo da non poter
@@ -208,7 +210,7 @@ def _turnover_ratio(stock, base):
     if base is None or base <= 0:
         return None
     ratio = stock / base
-    if ratio > _MAX_TURNOVER_RATIO:
+    if max_ratio is not None and ratio > max_ratio:
         return None
     return ratio
 
@@ -245,19 +247,10 @@ def _financing_contracts(assumption, include_opening=True):
             'rate': Decimal(str(getattr(assumption, 'financing_interest_rate', None) or 0)) / Decimal('100'),
         })
     for loan in (getattr(assumption, 'financing_loans', None) or []):
-        amount = Decimal(str(loan.get('amount') or 0))
-        opening = Decimal(str(loan.get('opening_residual') or 0)) if include_opening else Decimal('0')
-        duration = Decimal(str(loan.get('duration_years') or 0))
-        if (amount > 0 or opening > 0) and duration > 0:
-            loans.append({
-                'year': year,
-                'amount': amount,
-                'opening_residual': opening,
-                'duration': duration,
-                'rate': Decimal(str(loan.get('interest_rate') or 0)) / Decimal('100'),
-                'grace_years': Decimal(str(loan.get('grace_years') or 0)),
-                'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
-            })
+        for contract in contratti_da_riga_finanziamento(loan, year):
+            if not include_opening and e_contratto_pregresso(contract):
+                continue
+            loans.append(contract)
     return loans
 
 
@@ -292,8 +285,9 @@ def _get_split_investments(assumption):
     total = Decimal(str(assumption.investments)) if assumption.investments else Decimal('0')
     if total != 0:
         raise ValueError(
-            "Aggregate investments cannot be allocated automatically; provide "
-            "intangible_investments and/or tangible_investments"
+            "Gli investimenti vanno divisi fra immateriali e materiali "
+            "(intangible_investments, tangible_investments): la ripartizione "
+            "automatica 50/50 è disattivata"
         )
     return Decimal('0'), Decimal('0')
 
@@ -314,6 +308,8 @@ class IntraYearEngine:
     def __init__(self, db_session: Session):
         self.db = db_session
         self._diagnostics: List[Dict[str, object]] = []
+        # Letto solo da `_scaled_or_carried`, per la soglia dei giorni di magazzino (Task 10).
+        self._settore = None
 
     @staticmethod
     def _period_months_from_record(financial_year: FinancialYear) -> int:
@@ -326,15 +322,15 @@ class IntraYearEngine:
         period_months = financial_year.period_months
         if isinstance(period_months, bool):
             raise ValueError(
-                f"Financial year {financial_year.year} is not a valid period "
+                f"L'esercizio {financial_year.year} non ha un periodo valido "
                 f"(period_months={period_months!r})"
             )
         if period_months is None or period_months == 12:
             return 12
         if not isinstance(period_months, int) or not 1 <= period_months <= 11:
             raise ValueError(
-                f"Financial year {financial_year.year} is not a valid partial period "
-                f"(period_months={period_months!r}; expected 1-11 or full year)"
+                f"L'esercizio {financial_year.year} non ha un periodo parziale valido "
+                f"(period_months={period_months!r}; attesi 1-11 o l'anno intero)"
             )
         return period_months
 
@@ -373,21 +369,23 @@ class IntraYearEngine:
                             bs[key] = Decimal(str(snapshot[key]))
             except (TypeError, ValueError, json.JSONDecodeError):
                 raise ValueError(
-                    f"{label}: original balance-sheet diagnostics are unreadable"
+                    f"{label}: le diagnostiche originali dello stato patrimoniale non "
+                    "sono leggibili"
                 )
 
         result = check_quadratura(bs, ce)
         blocking: List[str] = []
         if result.is_empty:
-            blocking.append("empty balance sheet")
+            blocking.append("stato patrimoniale vuoto")
         if abs(result.sbilancio) > Decimal("0.01"):
-            blocking.append(f"SP imbalance {result.sbilancio}")
+            blocking.append(f"SP non quadrato di {eur_it(result.sbilancio)}")
         if not result.utile_match:
             blocking.append(
-                f"CE/SP profit mismatch {result.utile_ce} vs {result.sp13}"
+                f"utile del CE ({eur_it(result.utile_ce)}) diverso da sp13 "
+                f"({eur_it(result.sp13)})"
             )
         if result.plug_residual > Decimal("0.01"):
-            blocking.append(f"source plug {result.plug_residual}")
+            blocking.append(f"plug nella fonte {eur_it(result.plug_residual)}")
 
         breakdowns_used_by_engine = {
             "sp04_immob_finanziarie",
@@ -430,15 +428,15 @@ class IntraYearEngine:
         }
         if unsafe_hierarchy:
             details = ", ".join(
-                f"{key} ({difference})"
+                f"{key} ({eur_it(difference)})"
                 for key, difference in sorted(unsafe_hierarchy.items())
             )
-            blocking.append(f"aggregate/detail mismatch: {details}")
+            blocking.append(f"aggregati e dettagli non coincidono: {details}")
 
         if blocking:
             raise ValueError(
-                f"{label} {financial_year.year}/{financial_year.period_months}M is not "
-                f"forecastable: {'; '.join(blocking)}"
+                f"{label} {financial_year.year}/{financial_year.period_months}M non è "
+                f"utilizzabile per la previsione: {'; '.join(blocking)}"
             )
 
     def get_comparison(self, scenario_id: int) -> Dict:
@@ -520,11 +518,12 @@ class IntraYearEngine:
         Returns summary dict compatible with ForecastEngine.generate_forecast().
         """
         scenario = self._load_scenario(scenario_id)
+        self._settore = scenario.company.sector if scenario.company is not None else None
         partial_fy, ref_fy = self._load_financial_years(scenario)
         self._diagnostics = []
-        self._validate_forecast_source(partial_fy, "Partial source")
+        self._validate_forecast_source(partial_fy, "Anno parziale")
         if ref_fy is not None:
-            self._validate_forecast_source(ref_fy, "Reference source")
+            self._validate_forecast_source(ref_fy, "Anno di riferimento")
 
         # Load assumptions (single year for infrannuale)
         assumption = self.db.query(BudgetAssumptions).filter(
@@ -532,7 +531,7 @@ class IntraYearEngine:
         ).first()
 
         if not assumption:
-            raise ValueError(f"No assumptions found for scenario {scenario_id}")
+            raise ValueError(f"Nessuna ipotesi trovata per lo scenario {scenario_id}")
 
         period_months = self._period_months_from_record(partial_fy)
         projection_year = assumption.forecast_year
@@ -577,18 +576,45 @@ class IntraYearEngine:
         # sotto-campi sparirebbe dentro uno sbilancio piu' grande e gia'
         # dichiarato, senza che nessun controllo lo veda.
         #
-        # Resta condizionato il solo terzo passo, il ricalcolo di sp09 come
-        # Sigma passivo - Sigma attivo: su una diagnostica di errore
-        # rimetterebbe in cassa il residuo negativo che `_project_balance_sheet`
-        # ha appena azzerato, disfacendo il clamp e trasformando in silenzio un
-        # fabbisogno finanziario scoperto in un saldo di cassa negativo.
-        ha_errori = any(
-            diagnostic.get("severity") == "error"
-            for diagnostic in self._diagnostics
-        )
+        # §11.1 (lotto 3A, Task 11): anche il terzo passo -- il ricalcolo di sp09
+        # come Sigma passivo - Sigma attivo -- gira SEMPRE, non solo in assenza di
+        # diagnostiche d'errore. Prima, una diagnostica pre-esistente (compreso il
+        # clamp di `_project_balance_sheet`/`_project_balance_sheet_annualized`
+        # stesso, calcolato PRIMA degli `sp_overrides`) disattivava il ricalcolo:
+        # un override che spostava il passivo o l'attivo DOPO quel clamp lasciava
+        # la cassa congelata al valore pre-override, e il foglio persistito
+        # restava sbilanciato dell'importo dell'override senza che nessuna
+        # diagnostica lo dichiarasse con la cifra giusta (misurato: override di
+        # +1.000 su `sp11_capitale`, sbilancio finale scostato di 1.000 dal
+        # fabbisogno dichiarato prima dell'override). Il fabbisogno si misura una
+        # volta sola, qui sotto, sulla cassa ricalcolata DOPO gli override: ogni
+        # `unfunded_financing_requirement` gia' registrato da quei due metodi
+        # e' calcolato su una cifra pre-override ormai superata e va tolto, o
+        # resterebbe un doppione con l'importo vecchio davanti a quello giusto.
+        self._diagnostics = [
+            diagnostic for diagnostic in self._diagnostics
+            if diagnostic.get('code') != 'unfunded_financing_requirement'
+        ]
         projected_bs = ForecastEngine._normalize_balance_sheet_cents(
-            projected_bs, recompute_cash=not ha_errori
+            projected_bs, recompute_cash=True
         )
+
+        # Un residuo negativo qui e' un fabbisogno finanziario scoperto, mai una
+        # `sp09` negativa persistita: si clampa a zero e si dichiara, come ogni
+        # altro fabbisogno di questo motore (mai un debito a breve automatico).
+        cassa = projected_bs.get('sp09_disponibilita_liquide')
+        if cassa is not None and cassa < 0:
+            self._diagnostics.append({
+                'code': 'unfunded_financing_requirement',
+                'severity': 'error',
+                'amount': str(-cassa),
+                'message': (
+                    "L'attivo proiettato supera le fonti di finanziamento esplicite: "
+                    "aggiungi un'ipotesi di finanziamento esplicita; nessun debito è "
+                    "stato creato automaticamente."
+                ),
+            })
+            projected_bs['sp09_disponibilita_liquide'] = Decimal('0.00')
 
         # Store as ForecastYear
         self._save_forecast(scenario_id, projection_year, projected_bs, projected_inc)
@@ -609,16 +635,16 @@ class IntraYearEngine:
             BudgetScenario.id == scenario_id
         ).first()
         if not scenario:
-            raise ValueError(f"Scenario {scenario_id} not found")
+            raise ValueError(f"Scenario {scenario_id} non trovato")
         if scenario.scenario_type != 'infrannuale':
-            raise ValueError(f"Scenario {scenario_id} is not infrannuale type")
+            raise ValueError(f"Lo scenario {scenario_id} non è di tipo infrannuale")
         if (
             isinstance(scenario.period_months, bool)
             or not isinstance(scenario.period_months, int)
             or not 1 <= scenario.period_months <= 12
         ):
             raise ValueError(
-                f"Scenario {scenario_id} requires period_months between 1 and 12"
+                f"Lo scenario {scenario_id} richiede period_months fra 1 e 12"
             )
         return scenario
 
@@ -990,7 +1016,15 @@ class IntraYearEngine:
         viene DICHIARATO fra i diagnostics, così l'utente sa che quella voce
         non è stata proiettata e può correggerla in Rettifiche.
         """
-        ratio = _turnover_ratio(ref_stock, ref_base)
+        # Soglia dei giorni: per le rimanenze comanda la tabella per settore
+        # (`projection_common.soglia_giorni_magazzino`), per le altre voci quella
+        # di sempre (365 giorni = rapporto 1). `None` = nessuna soglia.
+        if field == 'sp05_rimanenze':
+            soglia = soglia_giorni_magazzino(self._settore)
+        else:
+            soglia = Decimal('365')
+        max_ratio = None if soglia is None else soglia / Decimal('365')
+        ratio = _turnover_ratio(ref_stock, ref_base, max_ratio=max_ratio)
         if ratio is not None:
             return projected_base * ratio
 
@@ -1000,6 +1034,7 @@ class IntraYearEngine:
             'severity': 'warning',
             'field': field,
             'amount': str(carried),
+            'soglia_giorni': None if soglia is None else str(soglia),
             'message': (
                 f"Rapporto di rotazione non calcolabile per {field}: la base "
                 f"dell'anno di riferimento ({ref_base}) non spiega la giacenza "
@@ -1190,12 +1225,15 @@ class IntraYearEngine:
             remaining_current_tax = max(
                 Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
             )
-            sp06e, sp16e = tax_closing_position(
-                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
-                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
-                remaining_current_tax,
-                Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0)),
+            posizione = posizione_tributaria_fine_anno(
+                opening_credit=_get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                opening_debt=_get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax=remaining_current_tax,
+                current_tax=current_tax,
+                reference_tax=_get_field(ref_inc, 'ce20_imposte'),
+                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
+            sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
         sp16a, sp17a, sp17b = self._apply_debt_repayment(
@@ -1218,8 +1256,9 @@ class IntraYearEngine:
                 'severity': 'error',
                 'amount': str(funding_gap),
                 'message': (
-                    'Projected assets exceed explicit funding. Add an explicit '
-                    'financing assumption; no debt was created automatically.'
+                    "L'attivo proiettato supera le fonti di finanziamento esplicite: "
+                    "aggiungi un'ipotesi di finanziamento esplicita; nessun debito è "
+                    "stato creato automaticamente."
                 ),
             })
 
@@ -1435,12 +1474,18 @@ class IntraYearEngine:
             remaining_current_tax = max(
                 Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
             )
-            sp06e, sp16e = tax_closing_position(
-                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
-                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
-                remaining_current_tax,
-                Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0)),
+            # Senza anno di riferimento l'imposta su cui commisurare gli acconti non esiste: zero, cioe'
+            # tutta l'imposta dell'anno resta da versare al 31/12 (il lato prudente), mai un acconto
+            # inventato.
+            posizione = posizione_tributaria_fine_anno(
+                opening_credit=_get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                opening_debt=_get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax=remaining_current_tax,
+                current_tax=current_tax,
+                reference_tax=Decimal('0'),
+                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
+            sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
         sp16a, sp17a, sp17b = self._apply_debt_repayment(
@@ -1461,8 +1506,9 @@ class IntraYearEngine:
                 'severity': 'error',
                 'amount': str(funding_gap),
                 'message': (
-                    'Projected assets exceed explicit funding. Add an explicit '
-                    'financing assumption; no debt was created automatically.'
+                    "L'attivo proiettato supera le fonti di finanziamento esplicite: "
+                    "aggiungi un'ipotesi di finanziamento esplicita; nessun debito è "
+                    "stato creato automaticamente."
                 ),
             })
 
@@ -1557,20 +1603,35 @@ class IntraYearEngine:
         sp17_altri: Decimal,
         assumption,
     ):
-        """Apply bank and other-lender plans to their exact debt buckets."""
+        """Apply bank and other-lender plans to their exact debt buckets.
+
+        Shared bank-debt rules (lotto 3A, Task 4): the pre-existing bank debt keeps
+        its own split and is reduced only by its own instalments (short side first);
+        a new loan amortises on its own, with the capital quota falling due next
+        year sitting in `sp16a` (`quota_breve_prestiti_nuovi`). Total bank debt,
+        interest and cash are unchanged by the split.
+        """
         getter = lambda f: _get_field(base_bs, f)
         contracts = _financing_contracts(assumption, include_opening=True)
+        pregressi = [c for c in contracts if e_contratto_pregresso(c)]
+        nuovi = [c for c in contracts if not e_contratto_pregresso(c)]
+        anno = int(getattr(assumption, 'forecast_year', 0) or 0)
         detailed_opening = sum(
-            (Decimal(str(loan.get('opening_residual') or 0)) for loan in contracts),
+            (Decimal(str(c.get('opening_residual') or 0)) for c in pregressi),
             Decimal('0'),
         )
         if detailed_opening > 0:
             bank_debt = base_bank_debt(getter)
             if abs(bank_debt - detailed_opening) > Decimal('0.01'):
                 raise ValueError(
-                    "The sum of financing opening residuals must equal source bank "
-                    f"debt ({detailed_opening} != {bank_debt})"
+                    f"La somma dei residui iniziali dei finanziamenti "
+                    f"({eur_it(detailed_opening)}) deve coincidere con il debito "
+                    f"bancario della fonte ({eur_it(bank_debt)})"
                 )
+            _, rata, _ = new_financing_schedule(pregressi, anno)
+            breve = min(sp16_bank, rata)
+            sp16_bank = sp16_bank - breve
+            sp17_bank = max(Decimal('0'), sp17_bank - (rata - breve))
         else:
             instalment = financial_repayment_instalment(
                 getter, getattr(assumption, 'existing_debt_repayment_years', None))
@@ -1586,17 +1647,14 @@ class IntraYearEngine:
             altri_instalment = altri_finanz_repayment_instalment(getter, altri_years)
             sp17_altri = max(Decimal('0'), sp17_altri - altri_instalment)
 
-        raised, repayment, _ = new_financing_schedule(
-            contracts, int(getattr(assumption, 'forecast_year', 0) or 0)
-        )
-        sp17_bank += raised
-        short_repayment = min(sp16_bank, repayment)
-        sp16_bank = max(Decimal('0'), sp16_bank - short_repayment)
-        sp17_bank = max(
-            Decimal('0'), sp17_bank - (repayment - short_repayment)
-        )
+        # In the intra-year engine a new loan is born inside the projected year, so
+        # its opening residual is zero; the shared split is used all the same.
+        sp17_bank, nuovo_apertura = separa_prestiti_nuovi(sp17_bank, nuovi, anno)
+        raised, repayment, _ = new_financing_schedule(nuovi, anno)
+        residuo_nuovo = max(Decimal('0'), nuovo_apertura + raised - repayment)
+        quota = quota_breve_prestiti_nuovi(nuovi, anno, residuo_nuovo)
 
-        return sp16_bank, sp17_bank, sp17_altri
+        return sp16_bank + quota, sp17_bank + residuo_nuovo - quota, sp17_altri
 
     @staticmethod
     def _distribute_fixed_assets(source_bs, total, fields, fallback_index):
@@ -1742,8 +1800,8 @@ class IntraYearEngine:
                 'severity': 'error',
                 'amount': str(sp16_total),
                 'message': (
-                    'Short-term debt breakdown is unavailable; no categories were '
-                    'invented.'
+                    "La ripartizione dei debiti a breve non è disponibile: nessuna "
+                    "categoria è stata inventata."
                 ),
             })
         return (Decimal('0'),) * 7

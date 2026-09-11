@@ -242,7 +242,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   anni delle **ipotesi salvate**, non degli anni prodotti — a restare vuoto è
   `analysis.forecast_years` della `GET` successiva. Ignorarlo dipinge una colonna Proiezione
   vuota sotto un toast verde. `PATCH /ce-override` e `POST /generate`, sullo stesso motore e
-  sullo stesso errore, rispondono invece 4xx/5xx.
+  sullo stesso errore, rispondono invece 4xx/5xx. Un input che le rotte tipizzate rifiutano non
+  arriva fin li': il bulk valida ogni riga con `BudgetAssumptionsBulkRow` e la contiguita' degli
+  anni **prima** di cancellare, e risponde **422** con `detail.errori`
+  (`{forecast_year, campo, messaggio}`, in italiano) senza salvare nulla.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §6, `docs/budget/API-PREVISIONALE.md` §1
 - **Un override di cella rifiutato dal motore non resta persistito** — vale per SP Prev.
   (`PATCH /sp-override`, un solo lotto per tutti gli anni toccati) e CE Prev. (`PATCH /ce-override`),
@@ -327,13 +330,13 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **`tax_rate` è un ripiego, non l'aliquota che vince.** Il motore usa l'aliquota effettiva
   dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
   derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
-  inviato dalle schermate quasi mai è il numero applicato (`calculations/forecast_engine.py:2122-2131`, `_tax_components`).
+  inviato dalle schermate quasi mai è il numero applicato (`_tax_components`, `calculations/forecast_engine.py`).
 - **Le imposte si pagano a saldo + acconto, non ad accumulo.** Il debito tributario generato a
   fine anno N esce come saldo nell'anno N+1 — al netto del credito tributario di apertura, fino a
   capienza — e l'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
   `tax_advances_paid` se **maggiore di zero**: zero in quella casella non vuol dire «zero
   acconti», vuol dire «non dichiarato», e ricade sulla percentuale
-  (`calculations/projection_common.py:341-367`, `tax_settlement_saldo_acconto`). Prima di questo
+  (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`). Prima di questo
   lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
   un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
 - **Un anno manuale non scarica il piano tributario sull'anno automatico.** Se un anno in via
@@ -351,7 +354,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
   voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
-  peso dal residuo lungo (`calculations/forecast_engine.py:2745-2763` per i crediti, `:3104-3128`
+  peso dal residuo lungo (`_calculate_balance_sheet` in `calculations/forecast_engine.py`, blocco
+  `crediti_commerciali` per i crediti, blocchi `debiti_fornitori`/`debiti_previdenziali`/`altri_debiti`
   per fornitori/previdenziali/altri debiti). `details['pregresso'][saldo]['mode']` vale `"runoff"`
   quando è così, `"legacy"` (formule di oggi, intere) quando il saldo non ha un piano.
 - **Un previsionale mostrato può essere più vecchio delle ipotesi salvate, e si dichiara.**
@@ -368,6 +372,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   azienda e quell'anno (`period_months` `NULL` o `12`), con BS e IS in cascata: anche se era
   stato importato a mano. La cancellazione è dentro la stessa transazione della copia, quindi un
   fallimento la annulla; un promote riuscito no.
+- **Il centesimo di quadratura dello SP si posa solo su un campo neutro del proprio gruppo**
+  (`ForecastEngine._CAMPI_NEUTRI_RESIDUO`), mai su un debito finanziario, un credito o fondo
+  fiscale, una riserva negativa: attraversare un confine di KPI cambia PFN e rendiconto di un
+  centesimo senza che nessun controllo lo veda. Se ogni campo neutro è già scritto da un piano, il
+  centesimo si posa sul primo e `details['residuo_quadratura']` lo dichiara con
+  `campo_dichiarato: true`.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
@@ -542,7 +552,7 @@ variable/fixed — the fixed share defaults to 40% and is editable per assumptio
 plug** (`sp09_disponibilita_liquide`), and it plugs **upward only**: a negative plug is an uncovered
 funding requirement. What happens then is **the user's explicit choice**, `overdraft_allowed` (per
 assumption year), which is **off by default** — so every existing scenario behaves as before.
-**Off:** the engine **raises**, `Unfunded financing requirement <importo>`, and produces nothing; the
+**Off:** the engine **raises**, `Fabbisogno finanziario scoperto di <importo>`, and produces nothing; the
 way out is an explicit financing assumption, never a retry (an overdraft already open from an earlier
 year can still be repaid, not increased). **On:** the requirement becomes an overdraft **generated by
 the plan**, a component kept apart from pre-existing bank debt and from new financing **in the
@@ -552,12 +562,11 @@ debt, and `sp16a_debiti_banche_breve` is recomposed at the end as bank share + o
 (`scoperto_generato`, `scoperto_residuo`). The requirement is measured **once**, in `_Overdraft.copri`
 (`calculations/forecast_engine.py`), called by `_normalize_balance_sheet_cents` after every adjustment
 including `sp_overrides`, on a net cash rebuilt from aggregates already rounded to the cent — a
-requirement worth 0,00 does not raise, a real cent is not absorbed. **Known defect (I2, fixed by lotto
-3A Task 2** — `docs/superpowers/plans/2026-09-10-lotto3a-motori-rendiconto.md`): with
-`cash_sweep_enabled` the sweep decides on the cash **before** `sp_overrides` are applied and is never
-re-evaluated, so an SP override that moves cash can manufacture a requirement the assumptions do not
-imply — a bare `Unfunded financing requirement` on a fundable plan — or, with an overdraft granted,
-open that overdraft in the very year the sweep repaid a loan early. Free cash and overdraft never
+requirement worth 0,00 does not raise, a real cent is not absorbed. **Historical defect (I2), fixed by
+lotto 3A Task 2** (`_normalize_balance_sheet_cents`): the sweep used to decide on the cash before
+`sp_overrides` were applied, and could manufacture a funding requirement the assumptions did not
+imply, or open an overdraft to repay a loan early — see "The cash sweep repays only what has no plan"
+below for the order now in force. Free cash and overdraft never
 coexist: net cash repays the overdraft first, **also below `cash_sweep_min_cash`, by decision of the
 owner** — keeping liquidity while paying interest on an overdraft makes no sense — and the shortfall
 is declared in `details['cassa_sotto_minimo']` and shown in the wizard preview. Interest goes into
@@ -575,10 +584,20 @@ the answer is `scoperto_generato` year by year, with the peak in `fabbisogno_pic
 hiding a scenario choice nobody had made. Now the choice is explicit, the amount is declared in
 `details` and shown in the wizard preview — do not restore the ban in good faith: the reason for it
 is gone, not forgotten.
+**The cash sweep repays only what has no plan.** With `cash_sweep_enabled`, cash above
+`cash_sweep_min_cash` repays the overdraft first (it is already inside net cash) and then pre-existing bank debt
+**without any plan** — no contract with an opening residual and no `existing_debt_repayment_years` that year —
+short side first, then long. Grid contracts, the legacy `financing_amount` loan and pre-existing debt on a years plan
+follow **only their plan**, capital and interest alike, and the excess stays in `sp09` (owner's decision, lotto 3A).
+The sweep decides on the cash **after** `sp_overrides`, in `_normalize_balance_sheet_cents` right before
+`_Overdraft.copri`: deciding before the overrides turned a fundable plan into a funding requirement or opened an
+overdraft to pay an optional early repayment. `details['debito_bancario']`, declared every year, splits bank debt
+into `pregresso_senza_piano`, `pregresso_piano_anni` and one row per contract, and adds up exactly: Σ`breve` +
+`scoperto_residuo` = `sp16a`, Σ`lungo` = `sp17a`.
 **The share of a new loan that falls due next year sits in `sp16a`, the rest in `sp17a`**: the capital
 the kernel calendar repays the following year (zero while that year is still grace, the balloon the
-year before it falls due, and not zeroed in the last plan year), declared in
-`details['prestiti_nuovi_quota_breve']`; pre-existing bank debt keeps its own split, and P&L is
+year before it falls due, and not zeroed in the last plan year), declared per contract in
+`details['debito_bancario']['contratti']`; pre-existing bank debt keeps its own split, and P&L is
 unaffected. Leaving it all in `sp17a` overstates CCN and current ratio (2,4206 instead of 2,0794 on
 the test kit) and Altman's working capital (0,4093 instead of 0,3620) — the balance check never sees
 it, `sp16` and `sp17` are both liabilities. It also used to move the reclassified amount from the
@@ -601,25 +620,28 @@ receivables, trade payables, tax payables, welfare payables, other payables): an
 `pregresso` runoff plan (`BudgetAssumptions.pregresso`, JSON, valid only on the first forecast
 year's row) schedules how much of the base-year opening mass is collected or paid in each plan
 year; whatever the day-count/growth formula would produce is added to the still-open short-term
-residual, and the entire long-term side becomes pregresso (`calculations/forecast_engine.py:2745-
-2763`, `:3104-3128`, kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
+residual, and the entire long-term side becomes pregresso (`_calculate_balance_sheet` in
+`calculations/forecast_engine.py`, the `crediti_commerciali` block for receivables and the
+`debiti_fornitori`/`debiti_previdenziali`/`altri_debiti` blocks for payables, kernel in
+`calculations/projection_common.runoff_schedule`). Without a plan a
 balance follows the same formula as before the lotto (`mode: "legacy"` in
 `details['pregresso']`), and the rounding cent of the debt group still lands on
 `sp16g`/`sp17g` — though its amount can differ by a cent when another row of the group moved
-(the tax payables below). When `sp16g` (or `sp17g`) is governed by an `altri_debiti` plan or by
-an `sp_indexing` driver, no operating row of **that** group is free: the cent then makes the
-aggregate `sp16`/`sp17` equal to the sum of its rows — so cash moves by the same cent — and is
-declared in `details['residuo_quadratura']` with the aggregate as `campo`
-(`_normalize_balance_sheet_cents`). The financial rows `sp16a/b/c`, `sp17a/b/c` never receive it.
+(the tax payables below). The target is never picked by hand: it is the first field of
+`ForecastEngine._CAMPI_NEUTRI_RESIDUO[aggregate]` not already forced (a plan, an `sp_indexing`
+driver, the `sp16a`/`sp17a` split, or `sp16e` under the `saldo_acconto` tax kernel) — see
+«Invarianti e trappole › Previsionale» below for the full rule. The financial rows `sp16a/b/c`,
+`sp17a/b/c` never receive it.
 The day-count guard added by Task 14 moves numbers too, with or without a plan: a derived
 DSO/DIO/DPO whose base-year denominator is not positive, or whose implied standing exceeds 365
 days, is discarded and the base-year stock is carried instead (`degenerate_turnover_ratio`,
-`_derived_days`) — measured on the parity bench: `holding__crescita` `sp16d` 44.772,50 →
-50.000,00. Tax payables are the one balance whose behaviour changes **even without a
+`_derived_days`) — except `dio` in sectors 5/6, where `soglia_giorni_magazzino` lifts the 365-day
+threshold (see the Working capital bullet in «Intra-Year Engine» below) — measured on the parity bench: `holding__crescita`
+`sp16d` 44.772,50 → 50.000,00. Tax payables are the one balance whose behaviour changes **even without a
 plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
 year-end N is paid as saldo in N+1, net of the opening tax credit up to its amount, and the advance
 defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` **greater than
-zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py:341-367`).
+zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`).
 Before this lotto tax debt never left the balance sheet and projected cash was inflated by one
 year's unpaid tax — a defect that balanced, so no check ever saw it.
 Every CE line (32 `ce*_override` columns, from `/forecast/income`) and every BS line (the
@@ -640,27 +662,40 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   `partial × 12 / period_months`; BS values are point-in-time and are **not** annualized.
 - **Projection** (`generate_projection`): one forecast year, growth percentages applied to the
   reference year (the frontend derives them from the user's overrides). Depreciation is always
-  annualized, never grown; taxes are recomputed on projected pre-tax profit.
+  annualized, never grown; taxes are recomputed on projected pre-tax profit, and at 31/12 only the current year's
+  balance remains: tax of the year minus the advances paid in the year (`tax_advances_paid` if greater than zero,
+  otherwise 100% of the reference year's `ce20`); whatever was open at the partial month leaves cash by year end
+  (`projection_common.posizione_tributaria_fine_anno`), so a budget born from the promote no longer inherits it.
+  Bank debt follows the budget engine's rules from the shared code (`projection_common.contratti_da_riga_finanziamento`,
+  `separa_prestiti_nuovi`, `quota_breve_prestiti_nuovi`): pre-existing bank debt keeps its own split and is reduced only by
+  its own instalments, a new loan amortises on its own with next year's instalment in `sp16a`.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into
-  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py:1113-1117`; the
-  docstring at `:1027` still says otherwise and is wrong). And both engines plug cash **upward
-  only**, but they part company on what a negative residual costs you: qui è **clampato a zero** con
-  una diagnostica `unfunded_financing_requirement` (`:1212-1224`) e la proiezione esce lo stesso,
+  reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py`,
+  the "Preserve YTD equity movements" comment in `_project_balance_sheet`; that same method's own
+  docstring — "reserves + previous profit" — still says otherwise and is wrong). And both engines
+  plug cash **upward only**, but they part company on what a negative residual costs you: qui è
+  **clampato a zero** con una diagnostica `unfunded_financing_requirement` (il blocco "CASH PLUG"
+  di `_project_balance_sheet`) e la proiezione esce lo stesso,
   mentre il motore budget **solleva** e non produce nulla — salvo che lo scoperto di c/c sia concesso
   (`overdraft_allowed`), e allora il fabbisogno diventa scoperto generato dal piano, dichiarato. Un
-  fabbisogno scoperto quindi si vede in un avviso sull'infrannuale, e sul previsionale in un errore
-  secco o, a scoperto concesso, in uno scoperto dichiarato.
+  fabbisogno scoperto quindi si vede in una diagnostica d'errore sull'infrannuale, e sul previsionale in un errore
+  secco o, a scoperto concesso, in uno scoperto dichiarato — anche quando il fabbisogno nasce da un
+  `sp_overrides` che squilibra lo SP: il controllo sta sulla cassa finale, dopo la normalizzazione
+  (`generate_projection`), e mai una `sp09` negativa resta persistita.
 - **Working capital** comes from the reference year's turnover ratios. A ratio implying **more than a
   year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
-  carried instead, with a `degenerate_turnover_ratio` diagnostic — `_safe_divide` guards a zero
+  carried instead, with a `degenerate_turnover_ratio` diagnostic — except for inventory in Real
+  estate (sector 5) and Construction (6), where a stock longer than a year is the business: there the
+  ratio scales (`projection_common.soglia_giorni_magazzino`, one table for both engines; the budget
+  engine declares it in `details['soglia_giorni_magazzino']`) — `_safe_divide` guards a zero
   denominator, not a negligible one. The guard lives **only in the Python engines, and each one
   carries its own copy**: since 2026-09-02 the Proiezione tab renders the forecast this engine
   produced instead of recomputing it in TypeScript, so there is no second copy to keep in
   agreement with *this* one — but the budget engine is not silent on the same risk either, it has
-  its own copy of the same guard (`degenerate_turnover_ratio`,
-  `calculations/forecast_engine.py:2610-2627`, Task 14 of this lotto), not shared with the one
+  its own copy of the same guard (`degenerate_turnover_ratio`, `_derived_days` in
+  `calculations/forecast_engine.py`, Task 14 of this lotto), not shared with the one
   here.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
 - **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a
@@ -676,7 +711,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   projection into a full-year `FinancialYear` that can then be a budget base year. Two semantic gates
   (`check_quadratura(...).semantic_valid`, **not** a euro threshold) and a destructive replacement of
   the existing annual year — see «Invarianti e trappole › Previsionale» and
-  [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5.
+  [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5. An infrannuale whose opening
+  tax debt exceeds the partial year's cash closes with the `unfunded_financing_requirement` diagnostic
+  (`severity: 'error'`, not a warning) and is not promotable until the user adds an explicit financing assumption or a rettifica —
+  decision of the owner, lotto 3A, 2026-09-11.
 
 ### Rettifiche (BS/IS Adjustments Journal)
 

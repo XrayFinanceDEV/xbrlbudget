@@ -159,7 +159,7 @@ def test_unfunded_requirement_returns_200_with_partial_years(monkeypatch):
                 company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
             assert [y["year"] for y in out["forecast_years"]] == [2027]
             assert out["error"]["year"] == 2028
-            assert "Unfunded financing requirement" in out["error"]["message"]
+            assert "Fabbisogno finanziario scoperto" in out["error"]["message"]
     finally:
         engine.dispose()
 
@@ -218,9 +218,11 @@ def test_forecast_year_convertible_string_succeeds_on_both_endpoints(monkeypatch
         engine.dispose()
 
 
-def test_forecast_year_not_convertible_is_400_and_writes_nothing_on_both_endpoints(monkeypatch):
-    """N1: un forecast_year che non si converte a intero e' un 400 con
-    messaggio, mai un 500 — e non scrive nulla, nemmeno le righe valide dello
+def test_forecast_year_not_convertible_is_rejected_and_writes_nothing_on_both_endpoints(monkeypatch):
+    """N1: un forecast_year che non si converte a intero e' un errore con
+    messaggio, mai un 500 — 400 sull'anteprima, 422 sul bulk (dal lotto 3A,
+    Task 7a, perche' la validazione delle righe ora gira prima di scrivere)
+    — e non scrive nulla, nemmeno le righe valide dello
     stesso corpo: la validazione gira TUTTA prima di qualunque scrittura, cosi'
     un corpo misto (una riga buona + una con "abc") non lascia il bulk a meta'
     con la tabella scritta e la risposta che dice il contrario."""
@@ -247,7 +249,9 @@ def test_forecast_year_not_convertible_is_400_and_writes_nothing_on_both_endpoin
             with pytest.raises(HTTPException) as e:
                 budget_scenarios.bulk_upsert_assumptions(
                     company_id, sc.id, request={"assumptions": rows, "auto_generate": True}, user_id=USER, db=db)
-            assert e.value.status_code == 400
+            assert e.value.status_code == 422
+            assert e.value.detail["errori"] == [{"forecast_year": None, "campo": "forecast_year",
+                                                "messaggio": "forecast_year non valido: 'abc'"}]
             assert db.query(models.BudgetAssumptions).filter(
                 models.BudgetAssumptions.scenario_id == sc.id).count() == 0
             assert db.query(models.ForecastYear).filter(

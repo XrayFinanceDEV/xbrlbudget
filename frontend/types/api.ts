@@ -922,6 +922,7 @@ export interface CashReconciliation {
   cash_ending: number;
   difference: number;
   verification_ok: boolean;
+  third_party_funds_gap: number;
 }
 
 export interface DetailedCashFlowStatement {
@@ -1074,6 +1075,52 @@ export interface PregressoWriteoffIgnored {
   reason: string;
 }
 
+/** Il pregresso bancario SENZA alcun piano (ne' contratto col residuo iniziale
+ *  ne' `existing_debt_repayment_years`), quanto lo sweep ne ha rimborsato
+ *  nell'anno (`rimborso_sweep`, zero senza sweep o senza eccesso di cassa). */
+export interface DebitoBancarioSenzaPiano {
+  apertura: number;
+  rimborso_sweep: number;
+  breve: number;
+  lungo: number;
+}
+
+/** Il pregresso bancario con `existing_debt_repayment_years`: lo sweep non lo
+ *  tocca mai, `rimborso` e' quanto il calendario del piano rimborsa nell'anno. */
+export interface DebitoBancarioPianoAnni {
+  apertura: number;
+  rimborso: number;
+  breve: number;
+  lungo: number;
+}
+
+/** Una riga per contratto (misti gia' divisi in pregresso/nuovo, anche non
+ *  ancora erogati), nell'ordine di `financing_amount` e poi della griglia. */
+export interface DebitoBancarioContratto {
+  indice: number;
+  anno: number;
+  tasso: number;
+  erogato: number;
+  residuo_iniziale: number;
+  rimborso: number;
+  interessi: number;
+  breve: number;
+  lungo: number;
+}
+
+/** Il debito bancario per componenti, riconciliato con cio' che `sp16a`/`sp17a`
+ *  persistono DAVVERO dopo lo sweep e dopo gli `sp_overrides`
+ *  (`forecast_engine.py`, `_dichiara_debito_bancario`). Al piu' uno fra
+ *  `pregresso_senza_piano` e `pregresso_piano_anni` e' valorizzato; entrambi
+ *  sono `null` quando il pregresso e' descritto solo da contratti col residuo
+ *  iniziale. Invariante: somma dei `breve` di ogni componente piu'
+ *  `scoperto_residuo` = `sp16a`; somma dei `lungo` = `sp17a`, al centesimo. */
+export interface DebitoBancarioAnno {
+  pregresso_senza_piano: DebitoBancarioSenzaPiano | null;
+  pregresso_piano_anni: DebitoBancarioPianoAnni | null;
+  contratti: DebitoBancarioContratto[];
+}
+
 export interface ForecastYearDetails {
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
@@ -1121,11 +1168,11 @@ export interface ForecastYearDetails {
    *  scoperto: lo scoperto si rimborsa per primo anche sotto il minimo, per
    *  decisione del proprietario, e lo si dichiara. Zero senza sweep o senza scoperto. */
   cassa_sotto_minimo?: number;
-  /** La quota del prestito nuovo che scade entro l'anno dopo, spostata da `sp17a`
-   *  a `sp16a` (`forecast_engine.py`, `details['prestiti_nuovi_quota_breve']`):
-   *  il motore la scrive su OGNI anno, anche a zero, perche' a valle una chiave
-   *  assente vale zero. */
-  prestiti_nuovi_quota_breve: number;
+  /** Il debito bancario per componenti (`forecast_engine.py`,
+   *  `details['debito_bancario']`, lotto 3A task 2 — sostituisce
+   *  `prestiti_nuovi_quota_breve`, che sparisce): il motore lo scrive su OGNI
+   *  anno, anche vuoto, perche' a valle una chiave assente vale zero. */
+  debito_bancario: DebitoBancarioAnno;
   /** I conflitti fra un aggregato di CE forzato e la somma dei suoi dettagli,
    *  dove ha vinto l'aggregato (`forecast_engine.py`,
    *  `details['override_conflicts']`): lista sempre presente su ogni anno di uno

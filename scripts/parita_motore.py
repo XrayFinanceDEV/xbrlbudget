@@ -210,6 +210,26 @@ def _con_altri_debiti_pregressi(bs: Dict[str, Decimal], breve: Decimal, lungo: D
 
 ALTRI_BS = _con_altri_debiti_pregressi(BASE_BS, D("23456.79"), D("12345.67"))
 
+
+def _con_magazzino_lungo(bs: Dict[str, Decimal], rimanenze: Decimal) -> Dict[str, Decimal]:
+    """Il fixture del kit con un magazzino oltre l'anno (lotto 3A, Task 9).
+
+    Perche' esiste: la guardia dei giorni dedotti tiene fermo un DIO oltre 365 giorni; il lotto 3A la toglie per
+    Immobiliare (5) ed Edilizia (6), dove un magazzino lungo e' normale. Le rimanenze salgono a `rimanenze` (1.000.000
+    sui 600.000 di ricavi del kit = 600 giorni) e le riserve riassorbono la differenza: il CE resta quello del kit, e
+    il cancello utile CE = `sp13` regge.
+    """
+    out = dict(bs)
+    delta = rimanenze - D(str(bs.get("sp05_rimanenze", 0)))
+    out["sp05_rimanenze"] = rimanenze
+    out["sp05a_materie_prime"] = D(str(bs.get("sp05a_materie_prime", 0))) + delta
+    out["sp12_riserve"] = D(str(bs.get("sp12_riserve", 0))) + delta
+    out["sp12e_altre_riserve"] = D(str(bs.get("sp12e_altre_riserve", 0))) + delta
+    return out
+
+
+MAGAZZINO_BS = _con_magazzino_lungo(BASE_BS, D("1000000"))
+
 # Scale non tonde: preservano il rapporto di ogni fixture (quindi anche il
 # dpo = 3.600 giorni della holding) ma rendono ogni importo frazionario.
 # I fixture nuovi vanno IN CODA: ogni fixture ha il proprio generatore, quindi
@@ -223,7 +243,12 @@ FIXTURES: List[Tuple[str, Dict[str, Decimal], Dict[str, Decimal], Decimal]] = [
     ("banca", BANCA_BS, BASE_CE, D("1")),
     ("tributari", TRIBUTARI_BS, BASE_CE, D("1")),
     ("altri", ALTRI_BS, BASE_CE, D("1")),
+    ("edilizia_magazzino", MAGAZZINO_BS, BASE_CE, D("1")),
+    ("industria_magazzino", MAGAZZINO_BS, BASE_CE, D("1")),
 ]
+
+# Il settore di ogni fixture; assente = 1, Industria.
+SETTORE_FIXTURE: Dict[str, int] = {"edilizia_magazzino": 6}
 
 
 def _scala(valori: Dict[str, Decimal], fattore: Decimal) -> Dict[str, str]:
@@ -606,6 +631,46 @@ def profilo_override_aggregato(rng: random.Random, anno_idx: int) -> Dict[str, A
     }
 
 
+def profilo_sweep_senza_piano(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Cash sweep sul solo debito bancario pregresso SENZA piano (lotto 3A, Task 1).
+
+    Sui fixture del kit il pregresso senza piano e' il `sp17a` di 50.000; su `banca` anche
+    il breve. Nessun prestito: e' il perimetro che lo sweep conserva anche dopo il Task 2.
+    """
+    return {"cash_sweep_enabled": True, "cash_sweep_min_cash": _eur(rng, 5000, 40000)}
+
+
+def profilo_sweep_anni_rimborso(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Cash sweep con il pregresso su un piano di anni di rimborso: dal Task 2 lo sweep non lo tocca."""
+    return {
+        "cash_sweep_enabled": True,
+        "cash_sweep_min_cash": _eur(rng, 5000, 40000),
+        "existing_debt_repayment_years": _anni_frazionari(rng, 2, 5),
+    }
+
+
+def profilo_sweep_contratti(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Il contratto misto di `profilo_finanziamento_misto` con il cash sweep acceso ogni anno.
+
+    `costruisci_griglia` riempie i due `opening_residual` anche per questo profilo, col debito
+    bancario reale del fixture: senza, `assemble_financing` rifiuterebbe lo scenario.
+    """
+    valori = profilo_finanziamento_misto(rng, anno_idx)
+    valori.update({"cash_sweep_enabled": True, "cash_sweep_min_cash": _eur(rng, 5000, 40000)})
+    return valori
+
+
+def profilo_sweep_override(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Il caso I2 della revisione finale del lotto 2: un `sp_overrides` su un attivo nel primo anno,
+    lo sweep acceso e lo scoperto concesso. Fino al Task 2 lo sweep decide sulla cassa di PRIMA
+    dell'override e apre uno scoperto per pagare un rimborso anticipato."""
+    valori: Dict[str, Any] = {"cash_sweep_enabled": True, "cash_sweep_min_cash": _eur(rng, 5000, 20000)}
+    if anno_idx == 0:
+        valori["sp_overrides"] = {"sp08_attivita_finanziarie": _eur(rng, 60000, 120000)}
+        valori["overdraft_allowed"] = True
+    return valori
+
+
 # I profili nuovi vanno IN CODA: il generatore di un fixture e' consumato profilo
 # dopo profilo, quindi un profilo inserito in mezzo cambierebbe le estrazioni di
 # tutti quelli che lo seguono.
@@ -629,6 +694,10 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     # tutti i profili successivi (numero registrato del commit 1 e cifra della
     # firma I-a incluse). Un profilo nuovo si aggiunge in fondo, sempre.
     "pregresso_mezzo_cent_con_override": profilo_mezzo_cent_con_override,
+    "sweep_senza_piano": profilo_sweep_senza_piano,
+    "sweep_anni_rimborso": profilo_sweep_anni_rimborso,
+    "sweep_contratti": profilo_sweep_contratti,
+    "sweep_override": profilo_sweep_override,
 }
 
 
@@ -697,7 +766,7 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
             anni_def = []
             for i in range(num_anni):
                 valori = profilo(rng, i)
-                if profilo_nome == "finanziamento_misto" and i == 0:
+                if profilo_nome in ("finanziamento_misto", "sweep_contratti") and i == 0:
                     # `assemble_financing` alza un ValueError se la somma dei
                     # `opening_residual` dichiarati non coincide col debito
                     # bancario dell'anno base (Decimal, entro 0,01): il profilo
@@ -759,6 +828,7 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
             scenari.append({
                 "id": f"{fixture_nome}__{profilo_nome}",
                 "base_year": 2026,
+                "settore": SETTORE_FIXTURE.get(fixture_nome, 1),
                 "bs": bs,
                 "ce": ce,
                 "anni": anni_def,
@@ -888,7 +958,7 @@ DRIVER = textwrap.dedent('''\
             try:
                 company = Company(
                     name=f"parita {sid}", tax_id=f"PARITA{indice:04d}",
-                    sector=1, user_id="parita-motore",
+                    sector=scenario_def.get("settore", 1), user_id="parita-motore",
                 )
                 db.add(company)
                 db.flush()

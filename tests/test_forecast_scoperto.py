@@ -13,7 +13,7 @@ verso l'alto, e un plug negativo e' un fabbisogno scoperto. Che cosa succede
 allora dipende da una scelta ESPLICITA dell'utente, `overdraft_allowed`, spenta
 di default:
 
-- spenta: il motore solleva, `Unfunded financing requirement <importo>`, come
+- spenta: il motore solleva, `Fabbisogno finanziario scoperto di <importo>`, come
   ha sempre fatto — e ora lo fa **anche** sul percorso con override;
 - accesa: il fabbisogno diventa `sp16a_debiti_banche_breve` generato dal piano,
   dichiarato in `details['scoperto_generato']`, con un tetto opzionale
@@ -54,8 +54,8 @@ def _riga(anno, **extra):
 
 def _importo_scoperto(message):
     """L'importo dentro il messaggio del motore, con la regex del frontend."""
-    m = re.search(r"Unfunded financing requirement ([\d,]+\.\d{2})", message)
-    return D(m.group(1).replace(",", "")) if m else None
+    m = re.search(r"Fabbisogno finanziario scoperto di ([\d.]+,\d{2})", message)
+    return D(m.group(1).replace(".", "").replace(",", ".")) if m else None
 
 
 def _dettagli(db, scenario_id, rows):
@@ -174,27 +174,22 @@ def test_tetto_dello_scoperto_solleva_e_nomina_i_due_importi():
         engine.dispose()
 
 
-def test_tetto_negativo_ha_un_messaggio_onesto_non_quello_del_tetto_superato():
-    """`overdraft_limit` negativo: lo schema Pydantic lo vieta (`ge=0`), ma il
-    bulk `PUT /assumptions` scrive `BudgetAssumptions` da un dict grezzo
-    (`assumptions_service.build_assumption_row`) che non passa da quello
-    schema — un tetto negativo arriva fino al motore. Resta un errore (il
-    comportamento non cambia), ma il messaggio nomina il difetto vero — un
-    tetto che non ha senso — invece di travestirsi da "fabbisogno oltre il
-    tetto concesso", che varrebbe anche a fabbisogno zero.
-    """
+def test_tetto_negativo_rifiutato_dal_bulk_e_dichiarato_dal_motore_in_anteprima():
+    """Dal lotto 3A (Task 7a) il bulk valida le righe con lo schema tipizzato: un tetto negativo non arriva piu' al
+    motore per quella porta. L'anteprima non valida lo schema, e li' il motore continua a dire il difetto vero."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
             _, sid = _scenario(db, "scoperto-tetto-negativo")
             rows = [_riga(2027, overdraft_allowed=True, overdraft_limit=-1000)]
-            res = assumptions_service.bulk_upsert_assumptions(db, sid, rows, auto_generate=True)
-
-        assert res["forecast_generated"] is False, res["message"]
-        assert "Il limite di scoperto non puo' essere negativo" in res["message"], res["message"]
-        assert "ricevuto -1.000,00" in res["message"], res["message"]
-        assert "tetto concesso" not in res["message"], res["message"]
-
+            with pytest.raises(assumptions_service.AssumptionsValidationError) as e:
+                assumptions_service.bulk_upsert_assumptions(db, sid, [dict(r) for r in rows], auto_generate=True)
+            assert e.value.errori == [{"forecast_year": 2027, "campo": "overdraft_limit",
+                                       "messaggio": "deve essere maggiore o uguale a 0 (ricevuto: -1000)"}]
+            _dettagli_anni, errore = _dettagli(db, sid, rows)
+        assert "Il limite di scoperto non puo' essere negativo" in errore["message"], errore
+        assert "ricevuto -1.000,00" in errore["message"], errore
+        assert "tetto concesso" not in errore["message"], errore
         with sessions() as db2:
             assert db2.query(ForecastBalanceSheet).count() == 0
     finally:
@@ -582,7 +577,7 @@ def test_ruling_37_un_fabbisogno_che_vale_zero_centesimi_non_alza():
 
     L'attivita' finanziaria forzata alla cassa del piano piu' 4 millesimi porta la
     cassa esatta a -0,004: al centesimo vale 0,00 e il piano genera (su 2641305:
-    «Unfunded financing requirement 0.00»). Piu' 6 millesimi il centesimo e' vero,
+    «Fabbisogno finanziario scoperto di 0,00»). Piu' 6 millesimi il centesimo e' vero,
     e il motore alza per 0,01.
     """
     engine, sessions = memory_sessions()

@@ -341,7 +341,7 @@ def test_receivables_plan_leaves_the_deferred_tax_quota_of_sp07_alone(monkeypatc
     try:
         with sessions() as db:
             company_id, _ = seed_base_year(db, user_id=USER)
-            differences = [{"kind": "deductible", "maturity": "long",
+            differences = [{"name": "Differenza temporanea 1", "kind": "deductible", "maturity": "long",
                             "opening_amount": 0, "additions": 40000, "reversals": 0,
                             "tax_rate": 25}]
             rows = [dict(forecast_year=y, tax_temporary_differences=differences, **MANUAL_TAX)

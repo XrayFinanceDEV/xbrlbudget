@@ -110,7 +110,7 @@ def test_solo_la_combinazione_e_valida_il_salvataggio_riesce():
 
             # 2027 da solo: il 2028 resta intatto e il suo fabbisogno emerge
             # comunque -- rifiutato.
-            with pytest.raises(ValueError, match="Unfunded financing requirement"):
+            with pytest.raises(ValueError, match="Fabbisogno finanziario scoperto"):
                 assumptions_service.apply_sp_overrides(
                     db, scenario,
                     [{"forecast_year": 2027, "field": "sp16a_debiti_banche_breve",

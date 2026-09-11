@@ -34,7 +34,7 @@ describe("budget-wizard-steps", () => {
     expect(nextStep("scenario")).toBe("fatturato");
     expect(nextStep("imposte")).toBeNull();
     expect(prevStep("scenario")).toBeNull();
-    expect(stepForErrorMessage("Unfunded financing requirement 84,120.00: add ...")).toBe("pregresso-nuovo");
+    expect(stepForErrorMessage("Fabbisogno finanziario scoperto di 84.120,00: aggiungi ...")).toBe("pregresso-nuovo");
     expect(stepForErrorMessage("altro")).toBe("imposte");
     expect(stepStorageKey(12)).toBe("budget-wizard-step:12");
   });
@@ -146,13 +146,13 @@ describe("saveOutcome", () => {
   it("un previsionale rifiutato torna 200: la verita' e' in forecast_generated", () => {
     const out = saveOutcome({
       forecast_generated: false,
-      message: "Unfunded financing requirement 84,120.00",
+      message: "Fabbisogno finanziario scoperto di 84.120,00",
     });
     expect(out.ok).toBe(false);
-    // Il toast e' in italiano — `saveNotice`, la stessa frase dell'anteprima —
-    // ma il PASSO si decide sul messaggio grezzo, che e' in inglese.
+    // Il toast e' la stessa frase dell'anteprima (`saveNotice`), rifinita
+    // dal riconoscimento del fabbisogno; il PASSO si decide sul messaggio
+    // grezzo, gia' italiano alla fonte.
     expect(out.message).toContain("Fabbisogno finanziario scoperto");
-    expect(out.message).not.toContain("Unfunded");
     expect(out.step).toBe("pregresso-nuovo");
   });
   it("un rifiuto non naviga MAI: niente toast verde su una Proiezione vuota", () => {
@@ -226,7 +226,7 @@ describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
   });
   it("il fabbisogno non coperto continua ad atterrare sul passo 6", () => {
     expect(stepForErrorMessage(
-      "Unfunded financing requirement 44,885.64: add an explicit financing assumption",
+      "Fabbisogno finanziario scoperto di 44.885,64: aggiungi un'ipotesi di finanziamento esplicita",
     )).toBe("pregresso-nuovo");
   });
   it("un errore generico atterra su Imposte come prima", () => {

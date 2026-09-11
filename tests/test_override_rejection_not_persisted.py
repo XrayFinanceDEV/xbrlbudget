@@ -146,8 +146,8 @@ def test_override_sp16a_accettato_persiste_normalmente():
 
 def test_ce_override_che_sbilancia_la_cassa_rifiutato_non_persiste_su_get():
     """Senza scoperto concesso, un costo di materie prime forzato a un
-    valore enorme sbilancia la cassa: il motore solleva "Unfunded financing
-    requirement" e NESSUNO dei due `ce*_override` del lotto deve restare
+    valore enorme sbilancia la cassa: il motore solleva "Fabbisogno finanziario
+    scoperto" e NESSUNO dei due `ce*_override` del lotto deve restare
     scritto — l'atomicita' vale sul lotto intero, non voce per voce."""
     engine, sessions = memory_sessions()
     try:
@@ -163,7 +163,7 @@ def test_ce_override_che_sbilancia_la_cassa_rifiutato_non_persiste_su_get():
             assert prima.ce05_override is None
             assert prima.ce07_override is None
 
-            with pytest.raises(ValueError, match="Unfunded financing requirement"):
+            with pytest.raises(ValueError, match="Fabbisogno finanziario scoperto"):
                 assumptions_service.apply_ce_overrides(
                     db, scenario,
                     [

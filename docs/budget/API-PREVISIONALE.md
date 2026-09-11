@@ -6,7 +6,7 @@ esiste.
 
 | Chiamata | Che cosa scrive | Come fallisce |
 |---|---|---|
-| `PUT /companies/{id}/scenarios/{sid}/assumptions` | tutte le righe di ipotesi dello scenario | **HTTP 200 anche quando il previsionale è rifiutato** |
+| `PUT /companies/{id}/scenarios/{sid}/assumptions` | tutte le righe di ipotesi dello scenario | **HTTP 200 anche quando il previsionale è rifiutato**; **422** con `detail.errori` quando è l'input a essere invalido (§1.2) |
 | `PATCH /companies/{id}/scenarios/{sid}/ce-override` | solo le colonne `ce*_override` indicate | 400 / 404 / 500 |
 | `POST /companies/{id}/scenarios/{sid}/generate` | niente (rigenera; con `?clear_overrides=true` azzera prima) | 400 / 500 |
 | `PUT .../assumptions/{year}` (per anno, «deprecata») | una riga sola — **è la via con cui `/forecast/balance` salva gli `sp_overrides`** | 4xx |
@@ -28,13 +28,13 @@ Con `auto_generate: true` il servizio sceglie il motore dal `scenario_type`
 (`IntraYearEngine` per `infrannuale`, `ForecastEngine` altrimenti) e lo esegue. Se il motore
 solleva — per il gate semantico sulla fonte, per ricavi di base negativi, per qualunque
 ragione — l'eccezione viene **catturata** e la risposta è ugualmente **200**
-(`backend/app/services/assumptions_service.py:322-331`):
+(`backend/app/services/assumptions_service.py:427-434`):
 
 ```jsonc
 { "success": true, "assumptions_saved": 2,
   "forecast_generated": false,
   "forecast_years": [2025, 2026],
-  "message": "Assumptions saved successfully, but forecast generation failed: ..." }
+  "message": "Ipotesi salvate, ma il previsionale non è stato calcolato: ..." }
 ```
 
 Due dettagli che si sbagliano facilmente:
@@ -73,8 +73,88 @@ non sulle stringhe: `isoformat()` omette la frazione quando i microsecondi sono 
 lessicografico di `"…00Z"` rispetto a `"…00.500000Z"` è l'inverso di quello dei due istanti.
 
 `POST /generate`, per contrasto, **non** cattura: fa 400 su `ValueError` e 500 su tutto il
-resto (`backend/app/api/v1/budget_scenarios.py:936-945`). Lo stesso motore, lo stesso errore,
+resto (`backend/app/api/v1/budget_scenarios.py:1019-1028`). Lo stesso motore, lo stesso errore,
 due esiti HTTP opposti a seconda della porta da cui si è entrati.
+
+### 1.2 Input invalido: 422, e nulla si salva
+
+Dal lotto 3A (Task 7a) il bulk distingue due rifiuti che prima uscivano dallo stesso modo, o da
+nessuno dei due. Un input **malformato** — un tetto di scoperto negativo, un acconto negativo, un
+driver di indicizzazione sconosciuto, un tasso al 500%, un anno fuori sequenza — non arriva più
+né al motore né alle colonne: ogni riga passa lo schema tipizzato `BudgetAssumptionsBulkRow` e la
+contiguità degli anni viene controllata **prima** della `DELETE` delle ipotesi esistenti
+(`backend/app/services/assumptions_service.py`, `validate_assumptions_list` e
+`validate_bulk_rows`). Un input **valido che il motore rifiuta**, invece, risponde ancora 200 con
+`forecast_generated: false`: è il paragrafo sopra, e non è cambiato.
+
+Il rifiuto esce come **422** con un `detail` strutturato, non una stringa
+(`backend/app/api/v1/budget_scenarios.py`, `except assumptions_service.AssumptionsValidationError`):
+
+```jsonc
+{ "detail": {
+    "message": "Ipotesi non valide: nulla è stato salvato",
+    "errori": [
+      { "forecast_year": 2027, "campo": "overdraft_limit",
+        "messaggio": "deve essere maggiore o uguale a 0 (ricevuto: -100)" }
+    ] } }
+```
+
+- `errori` porta **tutti** gli errori di tutte le righe in una sola risposta, nell'ordine delle
+  righe: una schermata che ne mostra solo il primo starebbe mentendo sugli altri.
+- `campo` è il percorso **punto** del campo: `overdraft_limit` in cima alla riga,
+  `sp_indexing.sp16g` dentro il sacco dei driver, `financing_loans.0.interest_rate` dentro un
+  elenco. Per un errore che non è attribuibile a una riga (il `forecast_year` che non si converte,
+  l'elenco vuoto) `forecast_year` è `null` e `campo` è il nome del campo in causa.
+- Gli errori di calendario non vengono da Pydantic ma da `validate_assumptions_list`, che ora li
+  raccoglie insieme: `l'anno di previsione 2026 deve essere successivo all'anno base 2026`,
+  `l'anno di previsione 2027 e' ripetuto`, `anni non consecutivi: dopo il 2027 viene il 2029, manca
+  il 2028`. Prima le righe 2027 e 2029 senza la 2028 venivano accettate: ricavi con un passo di
+  crescita, prestito con due.
+
+**I `null` del client non sono errori.** Le schermate svuotano una cella mandando `null`, e
+`build_assumption_row` li coalisce sui default di colonna: per questo `_senza_null` li toglie
+**prima** dello schema — sulla riga, dentro gli elenchi di `financing_loans` e
+`tax_temporary_differences`, dentro `sp_overrides` e dentro i piani di `pregresso`. Un `null` che
+arrivasse a uno schema tipizzato sarebbe un `*_type` ("tipo sbagliato: serve un numero") su un
+campo che l'utente ha semplicemente lasciato vuoto. Misurato su questo branch: **2561** righe
+passano da `validate_bulk_rows` nei **178** test che chiamano il bulk, e due sole di esse risulterebbero
+rifiutate **per colpa dei `null`** — senza la pulizia si fermerebbero
+`tests/test_forecast_preview.py::test_null_and_fractional_inputs_match_persisted_numbers` e il caso
+omonimo di `tests/test_bulk_tipizzato.py`. Sono invece **tre** i payload dei test esistenti che
+l'input-tipizzato rifiuta per un'altra ragione, e sono i tre nominati nel task: un tetto di scoperto
+negativo e una differenza temporanea senza `name` li ferma lo schema `BudgetAssumptionsBulkRow`,
+mentre un `forecast_year` "abc" non arriva fin lì — lo ferma la conversione a intero dentro
+`validate_assumptions_list`, la stessa `AssumptionsValidationError`.
+
+**Come si traduce un errore di Pydantic** (`messaggio_errore_campo`): il `type` decide il testo, e
+il valore ricevuto si mostra sempre fra parentesi — tranne per un campo mancante, dove "ricevuto:
+None" non aggiungerebbe nulla.
+
+| `type` | `messaggio` |
+|---|---|
+| `missing` | `campo obbligatorio mancante` |
+| `greater_than_equal` / `greater_than` | `deve essere maggiore o uguale a {ge}` / `deve essere maggiore di {gt}` |
+| `less_than_equal` / `less_than` | `deve essere minore o uguale a {le}` / `deve essere minore di {lt}` |
+| `literal_error` | `valore non ammesso: sono ammessi 'ricavi', 'acquisti' o 'personale'` |
+| `string_pattern_mismatch` | `valore non ammesso` |
+| `string_too_short` / `string_too_long` | `testo troppo corto (minimo {min_length} caratteri)` / `…lungo (massimo {max_length} caratteri)` |
+| `value_error` | il testo dell'eccezione sollevata dal validatore del modello — per questo i due messaggi di `FinancingLoanInput.validate_contract` sono ora in italiano |
+| `decimal_parsing` / `decimal_type` / `float_parsing` / `float_type` | `tipo sbagliato: serve un numero` |
+| `int_parsing` / `int_type` / `int_from_float` | `tipo sbagliato: serve un numero intero` |
+| `bool_parsing` / `bool_type` | `tipo sbagliato: serve vero o falso` |
+| `dict_type` / `model_type` / `model_attributes_type` | `tipo sbagliato: serve un oggetto` |
+| `list_type` / `string_type` | `tipo sbagliato: serve un elenco` / `serve un testo` |
+| qualunque altro | `valore non valido` |
+
+Una sottoclasse di `ValueError`, quindi **l'anteprima non cambia**: `AssumptionsValidationError`
+passa attraverso l'`except ValueError` di `POST /preview` e risponde 400, e su un tetto negativo è
+ancora il motore a dire il difetto vero (`ricevuto -1.000,00`, non "fabbisogno oltre il tetto
+concesso"). Il 200 con `forecast_generated: false` vale per un input **valido** che il motore
+rifiuta. Un primo anno diverso da anno base + 1 resta accettato (oggi lo è: solo gli anni ≤ anno
+base sono rifiutati). L'anteprima non applica lo schema tipizzato.
+
+Che il `detail` si legga a schermo è il **Task 7b**: oggi il wizard budget e la schermata Startup
+mostrano, su questo 422 come su ogni altro errore, un solo messaggio grezzo.
 
 ## 2. Gli override: due meccanismi, non uno
 
@@ -107,8 +187,8 @@ PATCH /companies/{id}/scenarios/{sid}/ce-override
 dall'allowlist è **400**, un anno senza riga di ipotesi è **404**, e la rigenerazione avviene
 una volta sola alla fine — **nella stessa transazione del salvataggio**
 (`assumptions_service.apply_ce_overrides`). Se la rigenerazione fallisce, lo status **dipende dal
-motivo** (`budget_scenarios.py:826-835`, `patch_ce_override`): un rigetto di dominio del motore —
-`ValueError`, il caso reale nella stragrande maggioranza (`Unfunded financing requirement`, un
+motivo** (`budget_scenarios.py:831-840`, `patch_ce_override`): un rigetto di dominio del motore —
+`ValueError`, il caso reale nella stragrande maggioranza (`Fabbisogno finanziario scoperto`, un
 override incompatibile con lo scoperto, ecc.) — risponde **400**; solo un'eccezione davvero
 inattesa (un bug, non un rifiuto legittimo dell'ipotesi) risponde **500**. In ENTRAMBI i casi
 **nessuno** degli override del lotto resta scritto: `db.rollback()` disfa tutto cio' che la
@@ -147,7 +227,7 @@ entrambi i motori applicano il sacco in coda al calcolo dello SP (`forecast_engi
 `intra_year_engine.py:572`), e il ramo a 12 mesi del wizard della pratica ne manda una versione
 propria, con tutte le voci SP del periodo (`app/pratica/page.tsx:876`).
 
-`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:868-946`)
+`PATCH /sp-override` (`assumptions_service.apply_sp_overrides`, `budget_scenarios.py:873-951`)
 applica TUTTE le voci del lotto — anche su anni diversi — PRIMA di rigenerare, una volta sola,
 nella STESSA transazione: un rifiuto (400 se il motore solleva un `ValueError`, 500 altrimenti —
 stessa distinzione di §2.1) fa `db.rollback()` dell'INTERO lotto, non solo dell'ultima voce, e
@@ -156,7 +236,7 @@ un'allowlist di campi come `CE_OVERRIDE_FIELDS`: una chiave che il risultato del
 riconosce è ignorata in silenzio (vedi sotto).
 
 Prima di tutto questo, però, il **corpo** è validato da
-`budget_schemas.SpOverrideRequest` (`backend/app/schemas/budget.py:439-458`): un `value` non
+`budget_schemas.SpOverrideRequest` (`backend/app/schemas/budget.py:446-465`): un `value` non
 numerico, un NaN/infinito, un `forecast_year` mancante o un `overrides` che non è una lista
 rispondono **422**, e nulla viene scritto né rigenerato. Fino al lotto 2 la rotta non aveva
 alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto al
@@ -164,7 +244,7 @@ alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto a
 che solleva `decimal.InvalidOperation` — un `ArithmeticError`, non un `ValueError` — e l'unica
 risposta possibile era un **500** «Forecast regeneration failed» (M2). Il rollback era già
 corretto e nulla restava scritto: sbagliato era solo il codice. Un corpo valido si comporta
-come prima anche nella forma salvata: `_sp_override_json_value` (`budget_scenarios.py:844-860`)
+come prima anche nella forma salvata: `_sp_override_json_value` (`budget_scenarios.py:849-865`)
 ricompone un numero della stessa specie che portava il JSON — `model_dump(mode="json")` di
 Pydantic 2 girerebbe i `Decimal` in stringhe, `jsonable_encoder` in float anche dove il corpo
 ne portava uno intero (`1000` → `1000.0`).
@@ -255,7 +335,7 @@ E gli override **sopravvivono al salvataggio**:
 | `/forecast/income` → svuotare una cella | `PATCH /ce-override` con `value: null` | azzerato solo quello |
 
 `clear_overrides` scorre `assumption.__table__.columns` e mette a `None` ogni colonna il cui
-nome **finisce per `_override`** (`budget_scenarios.py:1000-1003`). `sp_overrides` finisce per
+nome **finisce per `_override`** (`budget_scenarios.py:1003-1007`). `sp_overrides` finisce per
 `_overrides`: **non viene azzerato**. La casella dice «del CE previsionale» e in questo è
 onesta, ma chi la spunta aspettandosi di tornare al previsionale puro del motore si tiene
 tutti gli override di stato patrimoniale.
@@ -282,10 +362,21 @@ Il circolante scala quindi con i ricavi e i costi previsionali, **anche quando q
 da un override CE**: `_calculate_balance_sheet` legge `forecast_inc`, cioè il conto economico
 già calcolato con gli override applicati (`:2133-2134`). Più ricavi → più crediti; più acquisti
 → più debiti verso fornitori; la cassa fa da pareggio, ma **solo verso l'alto**: un fabbisogno
-di cassa non diventa mai da solo debito a breve. Di default il motore solleva `Unfunded
-financing requirement <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di
+di cassa non diventa mai da solo debito a breve. Di default il motore solleva `Fabbisogno
+finanziario scoperto di <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di
 ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `sp16a` e nei
 `details` (`scoperto_generato`, `scoperto_residuo`) — vedi «Forecasting Engine» in `CLAUDE.md`.
+
+> **Per Immobiliare (5) ed Edilizia (6) la soglia sul DIO dedotto non c'è** (lotto 3A, Task 10):
+> un magazzino oltre l'anno lì è il mestiere (immobili in rimanenza, lavori in corso su ordinazione),
+> e i giorni dedotti scalano coi ricavi anche oltre 365. La tabella sta in un punto solo,
+> `projection_common.soglia_giorni_magazzino` (`None` = nessuna soglia, altrimenti 365 giorni),
+> usata da entrambi i motori. Vale **solo** per i giorni *dedotti* delle *rimanenze*: un
+> `dio_days` esplicito non passa dalla guardia in nessun settore, e DSO e DPO restano a 365
+> giorni ovunque. Il motore budget dichiara la soglia applicata ogni anno in
+> `details['soglia_giorni_magazzino']`: `{settore, giorni_max}`, con `giorni_max: null` che vuol
+> dire «nessuna soglia»; l'infrannuale aggiunge `soglia_giorni` al diagnostico
+> `degenerate_turnover_ratio` (vedi §5 di `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md`).
 
 ## 4-bis. Il nuovo finanziamento: che cosa sta a breve
 
@@ -295,11 +386,14 @@ Un prestito nuovo è la legacy `financing_amount` / `financing_duration_years` /
 `new_financing_schedule` (`calculations/projection_common.py`): quote capitali costanti dopo
 l'eventuale preammortamento, maxirata insieme all'ultima rata, interessi in `ce15` sul residuo di
 apertura. Un contratto misto (`amount` e `opening_residual` sulla stessa riga) si divide in due
-contratti con le stesse condizioni: la parte nuova segue questa sezione, quella pregressa no.
+contratti con le stesse condizioni (`contratti_da_riga_finanziamento` in
+`calculations/projection_common.py`, chiamata da `assemble_financing`): la parte nuova segue questa
+sezione, quella pregressa no.
 
 Il residuo del prestito **non** sta tutto in `sp17a_debiti_banche_lungo`: la parte che il
 calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il resto in `sp17a`
-(`_quota_breve_prestiti_nuovi` in `calculations/forecast_engine.py`).
+(`quota_breve_prestiti_nuovi` in `calculations/projection_common.py`; la separazione pregresso /
+prestito nuovo di apertura è `separa_prestiti_nuovi`, stessa famiglia — lotto 3A, Task 3).
 
 - Finché anche l'anno dopo è di preammortamento la quota a breve è zero; nell'anno prima della
   maxirata la maxirata sta a breve.
@@ -308,16 +402,20 @@ calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il re
   arrotondata: 100.000,38 in 4 anni ha rata 25.000,095 e quota a breve 25.000,09.
 - È una riclassifica dello stato patrimoniale, non un flusso: interessi e risultato non cambiano, e
   — **senza un `sp_overrides` su `sp16a` o `sp17a`** — nemmeno cassa e totale del debito bancario.
-  Avviene dopo il cash sweep, che rimborsa prima il debito bancario pregresso e poi il prestito
-  nuovo; il debito bancario pregresso conserva la propria ripartizione. Il rendiconto
+  Il cash sweep non la tocca mai: rimborsa solo lo scoperto e il debito bancario pregresso senza
+  piano (§4-ter); il debito bancario pregresso conserva la propria ripartizione. Il rendiconto
   (`backend/app/calculations/cashflow_detailed.py`, `cashflow.py`) non la vede nemmeno lui: il
   circolante e' `sp16`/`sp17` **meno** `financial_debt_short`/`financial_debt_long` (non la somma dei
   sotto-campi operativi, che puo' scostarsi di un centesimo dall'aggregato), il finanziario e'
   `financial_debt_short`/`financial_debt_long` — mai l'aggregato grezzo
   `sp16`/`sp17` — quindi la riclassifica fra `sp16a` e `sp17a` non attraversa il confine
   operativo/finanziario del rendiconto.
-- `details['prestiti_nuovi_quota_breve']` dichiara la quota ogni anno, anche a zero, per quanto
-  `sp16a` ne persiste davvero.
+- I proventi da partecipazioni (`ce13`) tolti dall'utile nel primo blocco rientrano come dividendi
+  incassati, e `cash_reconciliation.third_party_funds_gap` dichiara lo scarto fra i mezzi di terzi per
+  residuo e la variazione misurata del debito finanziario: zero quando il rendiconto classifica ogni
+  movimento.
+- `details['debito_bancario']['contratti']` dichiara ogni anno il `breve` di ogni prestito,
+  riconciliato con quanto `sp16a` persiste davvero (§4-ter).
 
 **Perché conta:** `sp16` e `sp17` stanno entrambi nel passivo, quindi il pareggio non vede dove sta
 la quota; la vedono CCN, current ratio e circolante di Altman. Sulla base del kit di test (12.345,67
@@ -335,6 +433,57 @@ avviene PRIMA che gli override vengano applicati:
 - `sp17a` ora fissa solo la parte **oltre** la quota: la quota resta comunque a breve in `sp16a`,
   sopra il totale forzato. Un override salvato quando il prestito stava tutto in `sp17a` oggi
   aggiunge quindi la quota al debito (+25.000,09 di debito e di cassa ogni anno, sul kit di test).
+
+## 4-ter. Il cash sweep e `details['debito_bancario']`
+
+Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
+
+- Lo sweep rimborsa (1) lo scoperto, come prima — la cassa netta lo contiene gia' — e (2) il debito
+  bancario pregresso **senza alcun piano**: nell'anno non ci sono contratti con residuo iniziale
+  (`opening_residual`) né `existing_debt_repayment_years` > 0. Prima la quota a breve, poi la lunga.
+  Nient'altro.
+- `existing_debt_repayment_years` si legge dalla riga di **quell'anno** e non si porta avanti da solo
+  come una percentuale di crescita: un piano a più anni che non lo ripete su ogni riga perde
+  l'esenzione dallo sweep proprio dove manca, e lo sweep salda il residuo restante in un colpo solo —
+  misurato: 35.802,46 di apertura, `existing_debt_repayment_years=3` dichiarato solo nel 2027
+  (rimborso a piano 11.934,15), sweep che chiude i restanti 23.868,31 nel 2028, due anni prima della
+  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2). Dal wizard il caso non si produce:
+  il passo 6 «Pregresso e nuovo» scrive il campo su **tutti** gli anni di piano (`updateAll`,
+  `frontend/components/budget/wizard/steps/StepPregressoNuovo.tsx`); resta per chi chiama l'API senza ripeterlo
+  su ogni riga.
+- I contratti della griglia, il prestito nuovo della legacy `financing_amount` e il pregresso con gli
+  anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
+  spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).
+- La cassa eccedente oltre `cash_sweep_min_cash` resta in `sp09`.
+
+**Lo sweep decide una volta sola, sulla cassa di dopo gli `sp_overrides`** (rilievo I2 della revisione
+finale del lotto 2): gira in `_normalize_balance_sheet_cents`, sulla cassa gia' al centesimo, subito
+prima del cancello di `_Overdraft.copri`, e non chiama `copri` lui stesso. Deciso prima degli override
+e sulla cassa grezza, lo sweep fabbricava un fabbisogno: su un piano finanziabile rispondeva
+«Fabbisogno finanziario scoperto di 11.053,98», e con lo scoperto concesso rimborsava 50.000 di `sp17a`
+aprendo 11.053,98 di scoperto nello stesso anno. Un `sp_overrides` che fissa `sp16a`/`sp16` o
+`sp17a`/`sp17` fissa anche il totale: da quel lato lo sweep non paga.
+
+### `details['debito_bancario']`
+
+Si dichiara **ogni anno, anche vuota** (a valle una chiave assente vale zero), e sostituisce la
+vecchia chiave unica della quota a breve dei prestiti nuovi.
+
+| Chiave | Valore |
+|---|---|
+| `pregresso_senza_piano` | `{apertura, rimborso_sweep, breve, lungo}` quando nell'anno non ci sono contratti con `opening_residual` né `existing_debt_repayment_years` > 0; altrimenti `null` |
+| `pregresso_piano_anni` | `{apertura, rimborso, breve, lungo}` con `existing_debt_repayment_years` > 0 e nessun contratto col residuo; altrimenti `null` |
+| `contratti` | una riga per contratto (misti gia' divisi, anche non ancora erogati), nell'ordine di `financing_amount` e poi della griglia: `{indice, anno, tasso, erogato, residuo_iniziale, rimborso, interessi, breve, lungo}` |
+
+**Invariante:** somma dei `breve` + `scoperto_residuo` = `sp16a`, somma dei `lungo` = `sp17a`, al
+centesimo, ogni anno. La scrive `_dichiara_debito_bancario` DOPO la normalizzazione, dai valori
+persistiti, e la riconcilia cosi': la differenza fra le componenti grezze e il persistito (centesimi
+di arrotondamento, un `sp_overrides` sul debito bancario, lo sweep) in aumento va sulla «casa del
+pregresso» — `pregresso_senza_piano`, altrimenti `pregresso_piano_anni`, altrimenti l'ultimo
+contratto col residuo iniziale, altrimenti l'ultimo contratto nuovo; in riduzione si toglie prima al
+pregresso (le due componenti, poi i contratti col residuo dall'ultimo), poi ai contratti nuovi
+dall'ultimo, mai sotto zero. Sono spostamenti di centesimi fra componenti, non debito creato: la
+somma resta `sp16a`/`sp17a`.
 
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 
@@ -373,7 +522,9 @@ Il nuovo record nasce con `validation_status="verified"`, `forecastable=True`,
 > `tests/test_quadratura_gates.py`, che continua a descriverlo come «promote_service
 > quadratura gate». Non lo è più dal passaggio a `semantic_valid`.
 
-Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno promosso.
+Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno promosso. La proiezione promossa
+porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo versa come saldo
+(`details['imposte']['saldo_paid']`).
 
 ## 6. File chiave
 
@@ -386,7 +537,7 @@ Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno
 | `backend/app/api/v1/budget_scenarios.py` | `PATCH /ce-override` + `_CE_OVERRIDE_FIELDS`, `POST /generate?clear_overrides`, i 3 endpoint dei commenti AI, `POST /promote` |
 | `backend/app/services/promote_service.py` | i due cancelli, la sostituzione, la copia verificata |
 | `calculations/forecast_engine.py` | override nel CE, `_apply_sp_overrides`, DSO/DIO/DPO derivati, `validate_pregresso`, la classe `_Overdraft` |
-| `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses` |
+| `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses`, e le regole del debito bancario (`e_contratto_pregresso`, `contratti_da_riga_finanziamento`, `residuo_prestiti_nuovi`, `quota_breve_prestiti_nuovi`, `separa_prestiti_nuovi`) |
 | `calculations/intra_year_engine.py` | gli stessi override sul percorso infrannuale — **non** tocca lo scadenziamento del pregresso né l'overdraft |
 | `frontend/app/forecast/income/page.tsx` | `FIELD_TO_OVERRIDE`, `EditableCell`, `pendingEdits`, salvataggio batch |
 | `frontend/app/forecast/balance/page.tsx` | l'editor dello SP previsionale che scrive `sp_overrides` |
@@ -402,8 +553,9 @@ POST /companies/{id}/scenarios/{sid}/preview
 ```
 
 Stesso corpo del bulk (`{"assumptions": [...]}`); bulk e anteprima condividono
-`build_assumption_row` (`backend/app/services/assumptions_service.py:99`) e
-`validate_assumptions_list`, così un campo aggiunto a un percorso non può mancare all'altro. Le
+`build_assumption_row` (`backend/app/services/assumptions_service.py:194`) e
+`validate_assumptions_list`, così un campo aggiunto a un percorso non può mancare all'altro (lo
+schema tipizzato di §1.2 sta invece solo nel bulk, e qui non gira). Le
 righe costruite sono transitorie — **mai `db.add`, mai `commit`** — e il motore le legge con
 `getattr` come farebbe con righe persistite. Rifiuta con **400** uno scenario
 `scenario_type == "infrannuale"` prima di leggere qualunque cosa: quel percorso ha il proprio
@@ -446,7 +598,8 @@ rotazione effettivamente usati, forzati o derivati che siano).
 dei giorni **dedotti** che il motore ha scartato: `'dso'`, `'dio'`, `'dpo'`. Un giorno dedotto è
 degenere quando il denominatore dell'anno base non è positivo, o quando il rapporto supera i 365
 giorni: oltre un anno di giacenza smette di descrivere l'azienda e descrive il proprio
-denominatore. Su un giorno degenere il motore **riporta il saldo dell'anno base** invece di
+denominatore — eccetto il DIO di Immobiliare (5) ed Edilizia (6), dove la soglia non c'è (§4
+sopra). Su un giorno degenere il motore **riporta il saldo dell'anno base** invece di
 scalarlo, e `dso_applied`/`dio_applied`/`dpo_applied` dichiarano il giorno che quel saldo vale
 davvero sul flusso proiettato (zero se il flusso è nullo), mai quello degenere. Un giorno
 **esplicito** dell'ipotesi non passa dalla guardia: è una scelta, non una derivazione. Se il
@@ -460,12 +613,27 @@ sarebbe contata due volte.
 `residuo_quadratura` — il bulk e l'anteprima condividono lo stesso motore e lo stesso dict,
 quindi nessuna di queste manca da una delle due porte.
 
-`residuo_quadratura` è la lista `{campo, importo}` delle posature del residuo di arrotondamento
-della normalizzazione al centesimo dello SP (`_normalize_balance_sheet_cents`): `importo` è
-quanto è stato sommato a `campo`. `campo` è il secchio del gruppo (`sp16g`, `sp06g`, …),
-l'ultimo sotto-campo operativo libero, oppure l'aggregato `sp16_debiti_breve`/`sp17_debiti_lungo`
-quando nessuna voce operativa del gruppo è libera (e allora `sp09` si muove dello stesso
-importo). Mai `sp16a/b/c`, `sp17a/b/c`. Sempre presente, anche vuota.
+`residuo_quadratura` è la lista `{campo, importo, campo_dichiarato}` delle posature del residuo
+di arrotondamento della normalizzazione al centesimo dello SP (`_normalize_balance_sheet_cents`):
+`importo` è quanto è stato sommato a `campo`. `campo` viene sempre da
+`ForecastEngine._CAMPI_NEUTRI_RESIDUO[aggregato]`, la tabella per gruppo dei soli campi **neutri**
+rispetto ai confini di KPI (mai un debito/credito finanziario, un fondo o un credito fiscale, una
+riserva a segno proprio) — il primo elemento non già scritto di proposito da un piano attivo, da
+un'indicizzazione, dalla ripartizione `sp16a`/`sp17a`, o dal kernel tributario in modo
+`saldo_acconto` (l'insieme **STRETTO**, `ForecastEngine._sp_target_forced_fields` — lotto 3A, Task
+12, giro di correzione 1). `campo_dichiarato` è `true` solo quando **nessun** campo neutro del
+gruppo era libero secondo QUESTO insieme stretto: il residuo va comunque sul primo di essi (mai
+sull'aggregato, che di quelle righe resta la somma) e la cella diverge per costruzione dalla sua
+dichiarazione altrove nei `details` — a meno che quella stessa dichiarazione non venga poi
+riallineata al persistito (pregresso in modo `legacy`, o `_realign_sp_declarations` per gli altri
+casi), nel qual caso torna a coincidere. Un totale forzato da `sp_overrides` **senza** nessuna
+voce operativa forzata si rifiuta (I-1) quando il gruppo non ha più un ripiego libero secondo un
+secondo insieme, **AMPIO** (`ForecastEngine._sp_forced_fields`, che allarga la protezione a tutto
+il gruppo — `d`/`e`/`f`/`g` insieme — appena il *secchio* di default lo è, anche da una sola voce:
+§10 sotto ha la regola per intero, coi due insiemi e perché sono due): lì il residuo non sarebbe
+un arrotondamento ma la massa dell'override, e un campo tecnicamente libero per l'insieme stretto
+NON basta a farlo vincere. Mai `sp16a/b/c`, `sp17a/b/c`, `sp04b`, `sp04e`, `sp06e`,
+`sp06f`, `sp07e`, `sp07f`, `sp12h`, `sp14b`, `sp14c`. Sempre presente, anche vuota.
 
 ## 8. Lo scadenziamento del pregresso
 
@@ -504,8 +672,9 @@ Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoIn
 è cambiata (i tributari, §9).
 
 - **Solo sulla riga del primo anno di piano.** `pregresso` su una riga successiva alza
-  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1786-
-  1789`). È una fotografia dell'anno base, non un'ipotesi per-anno.
+  `Lo scadenziamento del pregresso (pregresso) vale solo sulla riga del primo anno di previsione`
+  (`calculations/forecast_engine.py:1786-1789`). È una fotografia dell'anno base, non un'ipotesi
+  per-anno.
 - **`opening` deve coincidere col bilancio base**, tolleranza 0,01 €, o il motore si ferma con
   «il saldo di apertura di {voce} è cambiato ({dichiarato} → {base}): rivedi lo scadenziamento»
   (`validate_pregresso`, `calculations/forecast_engine.py:448-505`).
@@ -556,8 +725,8 @@ bilancio non ne mostrerebbe traccia, senza un solo avviso.
 meccanismo (`precedente + imposte dell'anno − acconti`, con acconti a **zero** di default)
 accumulava debito tributario che non usciva mai — un difetto che quadrava, mai visto da un
 controllo. Ora ogni anno di piano paga **saldo + acconto + rate**
-(`calculations.projection_common.tax_settlement_saldo_acconto`, chiamata solo dal motore budget —
-l'infrannuale continua a usare `tax_closing_position`, invariata):
+(`calculations.projection_common.tax_settlement_saldo_acconto`, chiamata dal motore budget; l'infrannuale
+usa `posizione_tributaria_fine_anno`, con la stessa regola degli acconti (`acconti_dovuti`)):
 
 - **saldo pagato in N** = il debito tributario **generato a fine N−1**, cioè
   `details['imposte'].generated_debt` dell'anno N−1 — il debito generato a fine N−1 oppure, se
@@ -613,7 +782,7 @@ comunque libero — il rifiuto (§2.2) guarda il totale che l'anno dopo legge, n
 
 La cassa proiettata pluggia **solo verso l'alto**: un plug negativo è un fabbisogno scoperto.
 `overdraft_allowed` (per anno di ipotesi, **`false` di default**) decide che cosa succede: spento,
-il motore **solleva** `Unfunded financing requirement <importo>` e non produce nulla, come sempre;
+il motore **solleva** `Fabbisogno finanziario scoperto di <importo>` e non produce nulla, come sempre;
 acceso, il fabbisogno diventa uno scoperto **generato dal piano**, componente separato dal debito
 bancario pregresso e dal nuovo finanziamento — anche nell'aritmetica, non solo nei `details`
 (`calculations/forecast_engine.py`, classe `_Overdraft`). `overdraft_limit` (opzionale, ≥ 0) è il
@@ -649,15 +818,24 @@ discende — zero con cassa netta non negativa; con un fabbisogno nessuna ripart
 rifiuta la combinazione con un errore esplicito invece di superare il totale.
 
 ⚠️ **Il totale `sp16`/`sp17` però non vince se il gruppo non ha più un ripiego libero.** Quando
-un piano di scadenziamento (o un'indicizzazione) del *secchio* `sp16g`/`sp17g` ha già
-forzato tutte le righe operative del gruppo, la differenza fra il totale richiesto e
-la somma delle righe non è un arrotondamento: è la massa dell'override, e non c'è
-un campo onesto che la riceva (sul secchio il calendario la cancellerebbe l'anno
-dopo; su una riga `d`/`e`/`f` sarebbe un'obbligazione inventata). Il motore risponde
-allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve` non
-è ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non
-resta scritta. Senza piano né indicizzazione sul gruppo, il totale forzato continua
-a vincere come sempre (`tests/test_forecast_residuo_quadratura_sp16.py`).
+un piano di scadenziamento o un'indicizzazione del *secchio* di default (`sp16g`/`sp17g`) — anche
+da solo, su una sola voce del gruppo — lo ha già forzato, il cancello (`ForecastEngine.
+_sp_forced_fields`, l'insieme AMPIO: quello che allarga la protezione a **tutto** il gruppo
+operativo, `d`/`e`/`f`/`g`, quando il secchio è governato — `_SP_OPERATIVI`) considera l'intero
+gruppo indisponibile: la differenza fra il totale richiesto e la somma delle righe non è un
+arrotondamento, è la massa dell'override, e non c'è un campo onesto che la riceva (su una riga
+governata il piano o l'indice la cancellerebbe l'anno dopo; sui debiti finanziari `a`/`b`/`c`
+sarebbe un'obbligazione inventata). Non basta quindi che una sola voce del gruppo sia libera in
+senso stretto — è così che si sceglie il *bersaglio* del residuo quando il cancello non scatta
+(`ForecastEngine._sp_target_forced_fields`, l'insieme STRETTO, sopra), non se accettare l'override
+sull'aggregato: le due domande usano deliberatamente due insiemi diversi (lotto 3A, Task 12, giro
+di correzione 1 — «un totale forzato ha ancora una riga onesta su cui scaricare la SUA massa?» non
+è la stessa domanda di «resta un campo neutro su cui posare un centesimo di arrotondamento?»). Il
+motore risponde allora `forecast_generated: false` con «Il totale forzato di `sp16_debiti_breve`
+non è ammesso» — sul `PATCH /sp-override` è un 400 con rollback, e la cella non resta scritta.
+Senza alcun piano né indicizzazione sul secchio di default del gruppo, il totale forzato continua
+a vincere come sempre, e un residuo eventuale si posa sul primo campo neutro libero
+(`tests/test_forecast_residuo_quadratura_sp16.py`, `tests/test_forecast_residuo_neutro.py`).
 
 ## 11. Indicizzazione delle voci minori dello SP (`sp_indexing`)
 
@@ -679,14 +857,17 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   dichiarato con il motivo `"voce non indicizzabile"` — non applicato a una voce che il motore
   governa in un altro modo.
 - **Valore** = uno dei **tre driver**, tipizzato `Literal["ricavi", "acquisti", "personale"]`
-  (`backend/app/schemas/budget.py:96,207,319`): `ricavi` = `ce01` previsto / `ce01` base,
+  (`backend/app/schemas/budget.py:96,207,326`): `ricavi` = `ce01` previsto / `ce01` base,
   `acquisti` = `(ce05+ce06)` previsto / base, `personale` = `ce08` previsto / base
-  (`calculations/forecast_engine.py:1132-1160`, `_sp_indexing_factors`). Un nome fuori da questi tre
-  **non è rifiutato sulla porta normale**: il bulk `PUT /scenarios/{id}/assumptions` riceve un dict
-  che non passa dallo schema (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`),
-  e il motore lo ignora dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
-  (`calculations/forecast_engine.py:1196`). Solo le rotte tipizzate per singola riga passano dal
-  `Literal` Pydantic e rispondono 422.
+  (`calculations/forecast_engine.py:1244-1273`, `_sp_indexing_factors`). Un nome fuori da questi tre
+  **lo rifiuta la porta normale dal lotto 3A**: il bulk `PUT /scenarios/{id}/assumptions` valida
+  ogni riga con lo schema tipizzato (§1.2) e risponde 422 con `campo: "sp_indexing.<codice>"`,
+  mentre prima riceveva un dict che non passava da nessuno schema
+  (`request: Any = Body(...)`, `backend/app/api/v1/budget_scenarios.py:699`) e il motore lo
+  ignorava dichiarandolo in `indicizzazione_ignorata` con il motivo `"driver sconosciuto"`
+  (`calculations/forecast_engine.py:1307-1308`). Quel motivo non è morto: lo percorre ancora chi
+  arriva da una porta senza schema — l'anteprima `POST /preview` (§7), che condivide solo
+  `validate_assumptions_list` — o una riga scritta a mano nel DB.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
   passo 5 del wizard («Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
@@ -725,4 +906,4 @@ del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
 | Chiave | Valore |
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
-| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è raggiungibile**: sulla porta normale — il bulk `PUT /scenarios/{id}/assumptions` (§1), che riceve un dict e non passa dallo schema — è il motore a ignorare il driver e dichiararlo qui; il `Literal` a tre valori lo rifiuta con 422 solo sulle rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |

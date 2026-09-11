@@ -114,6 +114,32 @@ Mai negative: nessun credito d'imposta inventato.
 > dell'assunzione. Nell'interfaccia infrannuale l'override del risultato è tradotto dal frontend
 > in un'aliquota effettiva.
 
+**La posizione tributaria al 31/12** (lotto 3A, Task 5, decisione 4 del proprietario) non è più «apertura + imposta
+− acconti»: al 31/12 resta **solo il saldo dell'anno in corso**, `imposta(anno) − acconti(anno)`, positivo in
+`sp16e` e negativo in `sp06e`. Gli acconti sono `tax_advances_paid` se **maggiore di zero**, altrimenti il 100% del
+`ce20` dell'anno di riferimento; senza riferimento l'imposta su cui commisurarli non esiste, quindi **zero** —
+tutta l'imposta dell'anno resta da versare al 31/12 (il lato prudente, mai un acconto inventato). La regola è
+`projection_common.acconti_dovuti`, la stessa del motore budget, e la posizione la costruisce
+`projection_common.posizione_tributaria_fine_anno`. Quanto era aperto al mese del parziale **esce di cassa entro
+fine anno**:
+
+```
+uscita = (debito di apertura − credito di apertura) + imposta dei mesi residui − posizione netta di fine anno
+```
+
+Misurato sui test (`tests/test_intra_year_imposte.py`): apertura 1.150.949,04, imposta dell'anno 120.000, acconti
+99.247,26 → `sp16e` **20.752,74** e un'uscita di cassa di **1.250.196,30**. Prima: `sp16e` 1.171.701,78 con cassa
+immutata, e il budget nato dal promote ereditava quel debito. Nel motore la cassa resta il plug, quindi è il kernel
+a dichiarare `cash_out` e il test end-to-end a verificarlo. `sp17e` (rate oltre l'anno) non si tocca, e la via
+manuale (`sp06e_growth_pct` o `sp16e_growth_pct` valorizzati) continua a saltare la posizione automatica.
+
+**Se la cassa del parziale non copre quell'uscita** (debito tributario di apertura maggiore della cassa
+disponibile), il plug generale dell'infrannuale — §5 sotto, "Il fabbisogno scoperto è un diagnostico, non un
+debito" — clampa `sp09` a zero e dichiara `unfunded_financing_requirement`: la proiezione esce comunque, ma **non
+quadrata**, e il cancello del promote (`check_quadratura(...).semantic_valid`) la rifiuta finché l'utente non
+aggiunge un finanziamento esplicito o una rettifica — decisione del proprietario, lotto 3A, 2026-09-11: si tiene
+la regola, mai un plug al posto della diagnostica.
+
 ### Rimanenze
 Con riferimento: si applica l'**indice di rotazione del magazzino** del riferimento al costo
 materie proiettato. Senza riferimento: la giacenza parziale è portata a fine anno **invariata**.
@@ -135,7 +161,7 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 | **Risultato** | = risultato del CE proiettato, per costruzione |
 | **Fondo TFR** | parziale + accantonamento dei mesi residui |
 | **Debiti a breve** | con riferimento: proporzionali ai costi operativi proiettati (salvo rapporto degenere, sotto); senza: invariati |
-| **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti |
+| **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti; la quota del prestito nuovo che scade l'anno dopo sta nei debiti a breve, e il debito bancario pregresso si riduce solo con le proprie rate |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
 
 Ogni classe usa **il proprio** ammortamento: gli immateriali con la quota immateriali, i
@@ -168,6 +194,15 @@ verificata in **Rettifiche**. È la stessa regola dell'import — *misurare, mai
 
 Le aziende sane non si muovono: sotto la soglia il calcolo resta quello di prima.
 
+**Eccezione di settore per le rimanenze (lotto 3A, Task 10).** Per Immobiliare (settore 5) ed
+Edilizia (6) una giacenza oltre l'anno **è il mestiere** — immobili in rimanenza, lavori in corso
+su ordinazione — e lì la soglia non si applica alle rimanenze: il rapporto dedotto (anche oltre 1)
+scala sulla base proiettata, `None` invece di 1 come `max_ratio` di `_turnover_ratio`. La tabella
+sta in un punto solo per entrambi i motori, `projection_common.soglia_giorni_magazzino`. Le altre
+voci, in ogni settore, e un **denominatore nullo** in qualunque settore restano degeneri com'erano.
+Quando il diagnostic scatta, dichiara la soglia applicata nel campo `soglia_giorni`: `"365"`, o
+`null` dove di soglia non ce n'è — e nei settori senza soglia su `sp05_rimanenze` non scatta mai.
+
 > **La formula è duplicata**: `calculateProjectedBS` (frontend, `app/pratica/page.tsx`) e
 > `_project_balance_sheet` (backend). Devono restare d'accordo. Quando divergevano si otteneva
 > il caso peggiore — il plug di cassa del frontend scaricava i 165 M eccedenti sui debiti a
@@ -193,10 +228,28 @@ severità *error*: *"Add an explicit financing assumption; no debt was created a
 > motore di budget, che storicamente aumentava il debito a breve per assorbire la cassa
 > negativa. Qui il fabbisogno si **mostra**; non si finge di averlo coperto.
 
+**Il controllo si misura una volta sola, dopo gli `sp_overrides` (lotto 3A, Task 11; §11.1 del
+lotto 2).** `generate_projection` applica gli `sp_overrides` **dopo** aver proiettato lo SP, e solo
+allora normalizza e ricalcola la cassa dagli aggregati; un override che sposta il passivo o
+l'attivo — anche uno che non sposta la cassa direttamente — cambia quel residuo, quindi il
+fabbisogno va misurato sulla cifra **finale**, mai su quella calcolata prima dell'override. Ogni
+diagnostico `unfunded_financing_requirement` che il roll-forward avesse già registrato (il plug
+descritto sopra, calcolato prima degli override) viene tolto e sostituito da quello, unico, letto
+sulla cassa ricalcolata: prima di questa correzione la cassa restava congelata al valore
+pre-override — con l'override applicato ma senza ricalcolo — e il foglio persistito poteva restare
+sbilanciato dell'importo dell'override senza che alcun diagnostico lo dichiarasse con la cifra
+giusta, oppure, quando nessun errore precedeva l'override, la cassa ricalcolata **senza clamp**
+usciva negativa e restava **persistita così** (`sp09` negativa in DB). Caso del test
+(`tests/test_intra_year_override_cassa.py`): parziale a 9 mesi con `sp05_rimanenze` forzato a
+5.000.000 dà un avviso `unfunded_financing_requirement` di severità `error` per 4.998.445,00, la
+`sp09` persistita è 0,00 (mai negativa), e `promote_projection_to_financial_year` rifiuta la
+proiezione perché il foglio non quadra — esattamente come ogni altro fabbisogno scoperto di questo
+motore.
+
 ### Le sotto-voci si distribuiscono, mai si inventano
 Le quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il
 parziale nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più
-un diagnostico: *"Short-term debt breakdown is unavailable; no categories were invented"* —
+un diagnostico: *"La ripartizione dei debiti a breve non è disponibile: nessuna categoria è stata inventata."* —
 esplicitamente **non** uno split 40/60 fra finanziario e operativo.
 
 ### La rata di rimborso
@@ -210,11 +263,22 @@ lungo non finanziari (fornitori, tributari, previdenza), per non doppiare né so
 È **kernel condiviso** col budget: l'infrannuale la applica all'aggregato, il budget la ripartisce
 sulle sotto-voci. Orchestrazione diversa, formula identica per costruzione.
 
+**La rata di un prestito nuovo non consuma il debito bancario pregresso** (lotto 3A, Task 4). Il
+pregresso conserva la propria ripartizione breve/lungo e si riduce solo con le proprie rate (prima
+dal breve); il prestito nuovo si ammortizza per conto suo e mette a breve, in `sp16a`, la quota di
+capitale che scade l'anno dopo. Misurato sul test kit: 12.345,67 di pregresso e un prestito di
+120.000 / 4 anni / 5% erogato nell'anno danno `sp16a` 42.345,67 (12.345,67 + 30.000,00) e `sp17a`
+60.000,00; prima davano `sp16a` 0,00 e `sp17a` 102.345,67. Il totale del debito, gli interessi in
+`ce15` e la cassa non cambiano: la divisione è solo di scadenze. Un contratto **misto** (importo
+nuovo e residuo pregresso sulla stessa riga) viene spezzato in due contratti dalle funzioni condivise
+del kernel (`projection_common.contratti_da_riga_finanziamento`, `separa_prestiti_nuovi`,
+`quota_breve_prestiti_nuovi`), e dà gli stessi numeri di due righe separate.
+
 ## 6. I gate: cosa blocca un infrannuale
 
 ### Gate semantico sulla fonte
 Applicato **prima di ogni calcolo**, al parziale sempre e al riferimento se presente. Solleva
-*"{label} {anno}/{mesi}M is not forecastable: …"*.
+*"{label} {anno}/{mesi}M non è utilizzabile per la previsione: …"*.
 
 | # | Causa | Soglia |
 |---|---|---|

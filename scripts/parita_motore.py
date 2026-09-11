@@ -181,6 +181,26 @@ def _con_tributari_pregressi(bs: Dict[str, Decimal], breve: Decimal, lungo: Deci
 
 TRIBUTARI_BS = _con_tributari_pregressi(BASE_BS, D("9876.54"), D("3210.98"))
 
+
+def _con_magazzino_lungo(bs: Dict[str, Decimal], rimanenze: Decimal) -> Dict[str, Decimal]:
+    """Il fixture del kit con un magazzino oltre l'anno (lotto 3A, Task 9).
+
+    Perche' esiste: la guardia dei giorni dedotti tiene fermo un DIO oltre 365 giorni; il lotto 3A la toglie per
+    Immobiliare (5) ed Edilizia (6), dove un magazzino lungo e' normale. Le rimanenze salgono a `rimanenze` (1.000.000
+    sui 600.000 di ricavi del kit = 600 giorni) e le riserve riassorbono la differenza: il CE resta quello del kit, e
+    il cancello utile CE = `sp13` regge.
+    """
+    out = dict(bs)
+    delta = rimanenze - D(str(bs.get("sp05_rimanenze", 0)))
+    out["sp05_rimanenze"] = rimanenze
+    out["sp05a_materie_prime"] = D(str(bs.get("sp05a_materie_prime", 0))) + delta
+    out["sp12_riserve"] = D(str(bs.get("sp12_riserve", 0))) + delta
+    out["sp12e_altre_riserve"] = D(str(bs.get("sp12e_altre_riserve", 0))) + delta
+    return out
+
+
+MAGAZZINO_BS = _con_magazzino_lungo(BASE_BS, D("1000000"))
+
 # Scale non tonde: preservano il rapporto di ogni fixture (quindi anche il
 # dpo = 3.600 giorni della holding) ma rendono ogni importo frazionario.
 # I fixture nuovi vanno IN CODA: ogni fixture ha il proprio generatore, quindi
@@ -193,7 +213,12 @@ FIXTURES: List[Tuple[str, Dict[str, Decimal], Dict[str, Decimal], Decimal]] = [
     ("holding_scala", HOLDING_BS, HOLDING_CE, D("1.07316")),
     ("banca", BANCA_BS, BASE_CE, D("1")),
     ("tributari", TRIBUTARI_BS, BASE_CE, D("1")),
+    ("edilizia_magazzino", MAGAZZINO_BS, BASE_CE, D("1")),
+    ("industria_magazzino", MAGAZZINO_BS, BASE_CE, D("1")),
 ]
+
+# Il settore di ogni fixture; assente = 1, Industria.
+SETTORE_FIXTURE: Dict[str, int] = {"edilizia_magazzino": 6}
 
 
 def _scala(valori: Dict[str, Decimal], fattore: Decimal) -> Dict[str, str]:
@@ -564,6 +589,7 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
             scenari.append({
                 "id": f"{fixture_nome}__{profilo_nome}",
                 "base_year": 2026,
+                "settore": SETTORE_FIXTURE.get(fixture_nome, 1),
                 "bs": bs,
                 "ce": ce,
                 "anni": anni_def,
@@ -693,7 +719,7 @@ DRIVER = textwrap.dedent('''\
             try:
                 company = Company(
                     name=f"parita {sid}", tax_id=f"PARITA{indice:04d}",
-                    sector=1, user_id="parita-motore",
+                    sector=scenario_def.get("settore", 1), user_id="parita-motore",
                 )
                 db.add(company)
                 db.flush()

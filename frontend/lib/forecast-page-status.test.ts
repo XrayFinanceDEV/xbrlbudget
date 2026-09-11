@@ -5,7 +5,9 @@ import {
   ANALYSIS_RETRY_COUNT,
   ANALYSIS_RETRY_DELAY_MS,
   forecastLoadErrorMessage,
+  forecastPageState,
   forecastPageStatus,
+  forecastScenariosEmpty,
 } from "./forecast-page-status";
 
 describe("forecastPageStatus", () => {
@@ -81,6 +83,78 @@ describe("forecastLoadErrorMessage", () => {
     expect(forecastLoadErrorMessage(err)).toBe(
       "Il server non ha risposto. Controlla la connessione e riprova.",
     );
+  });
+});
+
+describe("forecastPageState", () => {
+  it("scenari in caricamento: caricamento, nessuna sorgente d'errore", () => {
+    const result = forecastPageState(
+      { loading: true, error: null },
+      { loading: false, error: null },
+    );
+    expect(result).toEqual({ status: "caricamento", errorSource: null });
+  });
+
+  it("analisi in caricamento (scenari pronti): caricamento", () => {
+    const result = forecastPageState(
+      { loading: false, error: null },
+      { loading: true, error: null },
+    );
+    expect(result).toEqual({ status: "caricamento", errorSource: null });
+  });
+
+  it("la lista scenari fallita e' un errore con sorgente \"scenarios\", anche se l'analisi non ha mai girato", () => {
+    const scenariosError = new Error("500");
+    const result = forecastPageState(
+      { loading: false, error: scenariosError },
+      { loading: false, error: null },
+    );
+    expect(result).toEqual({ status: "errore", errorSource: "scenarios" });
+  });
+
+  it("solo /analysis fallita (scenari caricati) e' un errore con sorgente \"analysis\"", () => {
+    const analysisError = new Error("500");
+    const result = forecastPageState(
+      { loading: false, error: null },
+      { loading: false, error: analysisError },
+    );
+    expect(result).toEqual({ status: "errore", errorSource: "analysis" });
+  });
+
+  it("un errore sulla lista scenari vince su un errore di /analysis: la lista viene prima nella sequenza", () => {
+    const scenariosError = new Error("scenari");
+    const analysisError = new Error("analisi");
+    const result = forecastPageState(
+      { loading: false, error: scenariosError },
+      { loading: false, error: analysisError },
+    );
+    expect(result.errorSource).toBe("scenarios");
+  });
+
+  it("nessun errore, nessun caricamento: pronto", () => {
+    const result = forecastPageState(
+      { loading: false, error: null },
+      { loading: false, error: null },
+    );
+    expect(result).toEqual({ status: "pronto", errorSource: null });
+  });
+});
+
+describe("forecastScenariosEmpty", () => {
+  it("vero solo quando la lista si e' caricata davvero ed e' vuota", () => {
+    expect(forecastScenariosEmpty({ loading: false, error: null }, 0)).toBe(true);
+  });
+
+  it("falso mentre la lista sta ancora caricando, anche a zero elementi", () => {
+    expect(forecastScenariosEmpty({ loading: true, error: null }, 0)).toBe(false);
+  });
+
+  it("falso quando la lista e' fallita, anche a zero elementi (rilievo 1 del collaudo finale)", () => {
+    expect(forecastScenariosEmpty({ loading: false, error: new Error("500") }, 0)).toBe(false);
+  });
+
+  it("falso quando la lista contiene elementi", () => {
+    expect(forecastScenariosEmpty({ loading: false, error: null }, 2)).toBe(false);
   });
 });
 

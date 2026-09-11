@@ -13,7 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Loader2, AlertTriangle, Sparkles, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { forecastPageStatus } from "@/lib/forecast-page-status";
+import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { toast } from "sonner";
 
@@ -35,7 +35,7 @@ import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 export default function ReportPage() {
   const { selectedCompanyId, selectedCompany } = useApp();
 
-  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const { data: scenarios = [], isLoading: scenariosLoading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [aiComments, setAiComments] = useState<ReportAICommentsResponse>({});
@@ -56,8 +56,12 @@ export default function ReportPage() {
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
-  const loading = scenariosLoading || analysisLoading;
-  const pageStatus = forecastPageStatus(loading, analysisError);
+  const { status: pageStatus, errorSource } = forecastPageState(
+    { loading: scenariosLoading, error: scenariosError },
+    { loading: analysisLoading, error: analysisError },
+  );
+  const loadError = errorSource === "scenarios" ? scenariosError : analysisError;
+  const retryLoad = () => (errorSource === "scenarios" ? refetchScenarios() : refetchAnalysis());
 
   // Load stored AI comments when scenario/analysis changes
   useEffect(() => {
@@ -164,13 +168,13 @@ export default function ReportPage() {
 
       {pageStatus === "errore" && (
         <ForecastLoadError
-          error={analysisError}
-          onRetry={() => refetchAnalysis()}
+          error={loadError}
+          onRetry={retryLoad}
           className="mb-6 print:hidden"
         />
       )}
 
-      {pageStatus === "caricamento" && (
+      {pageStatus === "caricamento" && !analysisData && (
         <Card className="mb-6 print:hidden">
           <CardContent className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -179,7 +183,8 @@ export default function ReportPage() {
         </Card>
       )}
 
-      {pageStatus === "pronto" && !analysisData && scenarios.length === 0 && (
+      {pageStatus === "pronto" && !analysisData &&
+        forecastScenariosEmpty({ loading: scenariosLoading, error: scenariosError }, scenarios.length) && (
         <Alert className="mb-6 print:hidden">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Nessuno Scenario</AlertTitle>

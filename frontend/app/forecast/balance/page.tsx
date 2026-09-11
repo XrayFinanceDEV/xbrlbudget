@@ -24,7 +24,7 @@ import {
 } from "recharts";
 import { BarChart3, AlertTriangle, Loader2, Info, Save } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
-import { forecastPageStatus } from "@/lib/forecast-page-status";
+import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { overridesFromPendingEdits, pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -125,7 +125,7 @@ const SP_EDITABLE_FIELDS = new Set([
 
 export default function ForecastBalancePage() {
   const { selectedCompanyId } = useApp();
-  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const { data: scenarios = [], isLoading: scenariosLoading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [pendingEdits, setPendingEdits] = useState<PendingSpEdits>({});
@@ -147,8 +147,12 @@ export default function ForecastBalancePage() {
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
-  const loading = scenariosLoading || analysisLoading;
-  const pageStatus = forecastPageStatus(loading, analysisError);
+  const { status: pageStatus, errorSource } = forecastPageState(
+    { loading: scenariosLoading, error: scenariosError },
+    { loading: analysisLoading, error: analysisError },
+  );
+  const loadError = errorSource === "scenarios" ? scenariosError : analysisError;
+  const retryLoad = () => (errorSource === "scenarios" ? refetchScenarios() : refetchAnalysis());
 
   useEffect(() => setPendingEdits({}), [selectedScenario?.id]);
 
@@ -197,7 +201,7 @@ export default function ForecastBalancePage() {
     );
   }
 
-  if (scenarios.length === 0 && !loading) {
+  if (forecastScenariosEmpty({ loading: scenariosLoading, error: scenariosError }, scenarios.length)) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
@@ -237,7 +241,7 @@ export default function ForecastBalancePage() {
       </Card>
 
       {pageStatus === "errore" && (
-        <ForecastLoadError error={analysisError} onRetry={() => refetchAnalysis()} className="mb-6" />
+        <ForecastLoadError error={loadError} onRetry={retryLoad} className="mb-6" />
       )}
 
       {pageStatus === "caricamento" && !analysisData && (

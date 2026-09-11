@@ -32,6 +32,59 @@ export function forecastPageStatus(loading: boolean, error: unknown): ForecastPa
 }
 
 /**
+ * CE Prev., SP Prev. e Report fanno DUE richieste in sequenza: prima la
+ * lista scenari (`useScenarios`), poi `/analysis` (`useAnalysis`, abilitata
+ * solo dopo che uno scenario e' stato selezionato dalla lista). Le tre
+ * pagine leggevano solo l'errore della seconda: quando falliva la PRIMA
+ * (es. backend giu', 500), `useAnalysis` restava `enabled: false` e non
+ * produceva mai un errore suo, mentre `scenarios` di default cadeva su `[]`
+ * — indistinguibile da "azienda senza scenari" (rilievo 1 del collaudo
+ * finale del lotto 3B). Questa funzione decide lo stato UNA volta, cosi'
+ * le tre pagine non ripetono a mano la stessa logica (spec §3.2).
+ */
+export interface ForecastQueryState {
+  loading: boolean;
+  error: unknown;
+}
+
+/** Quale delle due richieste ha fallito, se una ha fallito. La lista scenari
+ * viene prima nella sequenza e vince: se e' lei a fallire, l'analisi non
+ * gira nemmeno. */
+export type ForecastErrorSource = "scenarios" | "analysis" | null;
+
+export interface ForecastPageState {
+  status: ForecastPageStatus;
+  errorSource: ForecastErrorSource;
+}
+
+export function forecastPageState(
+  scenarios: ForecastQueryState,
+  analysis: ForecastQueryState,
+): ForecastPageState {
+  const loading = scenarios.loading || analysis.loading;
+  const errorSource: ForecastErrorSource = scenarios.error
+    ? "scenarios"
+    : analysis.error
+      ? "analysis"
+      : null;
+  const error = errorSource === "scenarios" ? scenarios.error : analysis.error;
+  return { status: forecastPageStatus(loading, error), errorSource };
+}
+
+/**
+ * "Nessuno scenario budget trovato" e' vero SOLO quando la lista si e'
+ * caricata davvero ed e' vuota — mai mentre sta ancora caricando, e mai
+ * quando e' fallita (altrimenti un 500 sulla lista si presenta come
+ * "azienda senza scenari", lo stesso rilievo 1 di cui sopra).
+ */
+export function forecastScenariosEmpty(
+  scenarios: ForecastQueryState,
+  count: number,
+): boolean {
+  return !scenarios.loading && !scenarios.error && count === 0;
+}
+
+/**
  * Il messaggio da mostrare per un errore di caricamento previsionale.
  *
  * Un errore Axios con `.response` e' arrivato dal server: il `detail` vince

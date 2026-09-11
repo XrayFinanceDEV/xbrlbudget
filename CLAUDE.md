@@ -407,17 +407,27 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   bug imprevisto su qualunque rotta arriva al browser come «CORS policy», mai come l'errore reale: chi guarda la
   console per diagnosticare vede la causa sbagliata (misurato nel collaudo del lotto 2, prima di questa correzione).
   `tests/test_cors_on_500.py` lo tiene fermo.
-- **CE Prev., SP Prev. e Report non restano mai su uno spinner senza uscita quando `/analysis` fallisce, e non
-  nascondono mai dati già caricati.** Le tre pagine derivano lo stato da `lib/forecast-page-status.ts`
-  (`caricamento`/`errore`/`pronto`, con `ANALYSIS_RETRY_COUNT`/`ANALYSIS_RETRY_DELAY_MS` espliciti su
-  `useAnalysis`) e rendono l'errore con `components/budget/ForecastLoadError.tsx` — il `detail` del backend
-  quando c'è, un testo italiano fisso per un errore di rete senza corpo, sempre con «Riprova». Lo spinner compare
-  solo quando non c'è ancora nulla in cache (`caricamento` **e** nessun `analysisData`); un refetch in
-  background che fallisce su una query già andata a buon fine (TanStack Query mantiene `data` sotto
-  `status: "error"`) mostra l'errore **sopra** i dati già caricati, mai al posto loro — le tre pagine leggono
-  `analysisData` direttamente per questo, non solo `pageStatus`. Una nuova pagina che legge `useAnalysis` riusa
-  gli stessi due moduli, non reinventa un `if (loading)` locale: è esattamente il pattern che ha lasciato per
-  mesi le tre pagine su «Caricamento...» per sempre, senza alcun segnale (collaudo del lotto 2). La tab Indicatori dell'infrannuale
+- **CE Prev., SP Prev. e Report non restano mai su uno spinner senza uscita quando la lista scenari o
+  `/analysis` fallisce, e non nascondono mai dati già caricati.** Le tre pagine fanno due richieste in
+  sequenza — prima `useScenarios`, poi `useAnalysis` (abilitata solo dopo che uno scenario è stato
+  selezionato dalla lista) — e derivano lo stato da `lib/forecast-page-status.ts`: `forecastPageState`
+  combina i due `{ loading, error }` in uno stato unico (`caricamento`/`errore`/`pronto`, con
+  `ANALYSIS_RETRY_COUNT`/`ANALYSIS_RETRY_DELAY_MS` espliciti su `useAnalysis`) e dice quale delle due
+  richieste ha fallito (`errorSource`, la lista vince se è lei a fallire — senza scenario selezionato
+  `useAnalysis` resta disabilitata e non produce mai un errore suo). Le pagine rendono l'errore con
+  `components/budget/ForecastLoadError.tsx`, sempre con «Riprova» che rilancia la richiesta indicata da
+  `errorSource` — la lista scenari se è lei ad aver fallito, l'analisi se è lei. **Un elenco scenari
+  vuoto non è la stessa cosa di un elenco fallito**: `forecastScenariosEmpty` è vera solo quando la
+  lista si è caricata davvero ed è vuota, mai mentre carica e mai su un suo errore — prima le tre pagine
+  cadevano sul default `[]` di `useScenarios` e un 500 sulla lista si presentava come «Nessuno scenario
+  budget trovato», senza «Riprova» (rilievo 1 del collaudo finale del lotto 3B). Lo spinner compare solo
+  quando non c'è ancora nulla in cache (`caricamento` **e** nessun `analysisData`, guardia che vale anche
+  per Report); un refetch in background che fallisce su una query già andata a buon fine (TanStack Query
+  mantiene `data` sotto `status: "error"`) mostra l'errore **sopra** i dati già caricati, mai al posto
+  loro — le tre pagine leggono `analysisData` direttamente per questo, non solo `pageStatus`. Una nuova
+  pagina che legge `useScenarios`/`useAnalysis` riusa questi stessi moduli, non reinventa un `if
+  (loading)` locale: è esattamente il pattern che ha lasciato per mesi le tre pagine su «Caricamento...»
+  per sempre, senza alcun segnale (collaudo del lotto 2). La tab Indicatori dell'infrannuale
   (`app/pratica/page.tsx`) riusa lo stesso componente ma la propria funzione pura,
   `lib/pratica-indicatori-status.ts`, perché lì un errore di lettura e una proiezione mai generata sono due cose
   diverse — prima collassavano sullo stesso messaggio («Genera prima la proiezione nel passaggio 3.»), anche quando

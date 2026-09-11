@@ -783,13 +783,6 @@ def _generate_partial_matrix_case_gap(
         engine.dispose()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "lotto 3A Task 11: la diagnostica dell'infrannuale precede gli "
-        "sp_overrides"
-    ),
-)
 @pytest.mark.parametrize(
     "period_months,positive_equity,other_reserve_roman,negative_style,interest_style",
     FULL_WORKFLOW_CASES[2:],

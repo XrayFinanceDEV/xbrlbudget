@@ -911,13 +911,22 @@ class ForecastEngine:
             if (ov.get(campo_tax) is not None
                     and not (pregresso or {}).get("debiti_tributari")
                     and not manuale and letta_l_anno_dopo):
+                # Ruling 63 (coda del giro 3): questo ramo arriva SOLO senza
+                # piano tributario (`not (pregresso or {}).get(...)`), e da
+                # `2b3024f` il messaggio diceva «riparte dai numeri del piano»
+                # e «Modifica il piano ... al passo»: qui un piano non c'e'.
+                # La strada resta «Imposte» perche' e' LI' che si imposta il
+                # piano che questo messaggio ora chiede di mettere.
                 raise ValueError(
-                    f"L'override di {campo_tax} non è ammesso: la posizione tributaria è a "
-                    "saldo + acconto e l'anno dopo riparte dai numeri del piano, non "
-                    "da questa riga. Il valore forzato sparirebbe senza alcun "
-                    "versamento, con la cassa ad assorbire la differenza. Modifica "
-                    f"il piano di scadenziamento al passo «{cls._passo_pregresso('debiti_tributari')}», "
-                    "oppure svuota la cella (value: null)."
+                    f"L'override di {campo_tax} non è ammesso: la posizione "
+                    "tributaria è a saldo + acconto, e l'anno dopo riparte dal "
+                    "saldo e dalle rate che questa posizione dichiara, non da "
+                    "questa riga. Il valore forzato sparirebbe senza alcun "
+                    "versamento, con la cassa ad assorbire la differenza. "
+                    f"Imposta un piano di scadenziamento "
+                    f"{cls._PREGRESSO_ARTICOLI['debiti_tributari'][1]} al passo "
+                    f"«{cls._passo_pregresso('debiti_tributari')}», oppure "
+                    "svuota la cella (value: null)."
                 )
             # (3) lato breve sotto il rateizzato che il piano deve pagare dopo.
             for saldo, (breve, _oltre) in cls._PREGRESSO_SP_FIELDS.items():

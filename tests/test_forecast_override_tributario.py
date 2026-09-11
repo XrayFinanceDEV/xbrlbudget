@@ -512,6 +512,13 @@ def test_sp17e_senza_piano_si_rifiuta_quando_l_anno_dopo_lo_legge(monkeypatch):
             assert res["forecast_generated"] is False, res["message"]
             assert "sp17e_debiti_tributari_lungo" in res["message"], res["message"]
             assert "non è ammesso" in res["message"], res["message"]
+            # Ruling 63: qui il piano NON c'e' (il ramo lo pretende), quindi
+            # il messaggio deve CHIEDERE di metterlo, non di modificare ciò
+            # che non esiste: «Modifica il piano» era la strada verso un
+            # nulla che l'utente avrebbe cercato al passo 6 senza trovarlo.
+            assert "Imposta un piano" in res["message"], res["message"]
+            assert "Modifica il piano" not in res["message"], res["message"]
+            assert "«Imposte»" in res["message"], res["message"]
             assert read_forecast_maps(db, sid) == []
             # E l'ultimo anno NO: nessuno lo legge dopo, quindi la stessa cifra
             # e' una forzatura legittima (il confine del rifiuto e' "l'anno che

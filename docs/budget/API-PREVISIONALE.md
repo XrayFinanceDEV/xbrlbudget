@@ -188,7 +188,7 @@ dall'allowlist è **400**, un anno senza riga di ipotesi è **404**, e la rigene
 una volta sola alla fine — **nella stessa transazione del salvataggio**
 (`assumptions_service.apply_ce_overrides`). Se la rigenerazione fallisce, lo status **dipende dal
 motivo** (`budget_scenarios.py:831-840`, `patch_ce_override`): un rigetto di dominio del motore —
-`ValueError`, il caso reale nella stragrande maggioranza (`Unfunded financing requirement`, un
+`ValueError`, il caso reale nella stragrande maggioranza (`Fabbisogno finanziario scoperto`, un
 override incompatibile con lo scoperto, ecc.) — risponde **400**; solo un'eccezione davvero
 inattesa (un bug, non un rifiuto legittimo dell'ipotesi) risponde **500**. In ENTRAMBI i casi
 **nessuno** degli override del lotto resta scritto: `db.rollback()` disfa tutto cio' che la
@@ -362,8 +362,8 @@ Il circolante scala quindi con i ricavi e i costi previsionali, **anche quando q
 da un override CE**: `_calculate_balance_sheet` legge `forecast_inc`, cioè il conto economico
 già calcolato con gli override applicati (`:2133-2134`). Più ricavi → più crediti; più acquisti
 → più debiti verso fornitori; la cassa fa da pareggio, ma **solo verso l'alto**: un fabbisogno
-di cassa non diventa mai da solo debito a breve. Di default il motore solleva `Unfunded
-financing requirement <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di
+di cassa non diventa mai da solo debito a breve. Di default il motore solleva `Fabbisogno
+finanziario scoperto di <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di
 ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `sp16a` e nei
 `details` (`scoperto_generato`, `scoperto_residuo`) — vedi «Forecasting Engine» in `CLAUDE.md`.
 
@@ -460,7 +460,7 @@ Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
 finale del lotto 2): gira in `_normalize_balance_sheet_cents`, sulla cassa gia' al centesimo, subito
 prima del cancello di `_Overdraft.copri`, e non chiama `copri` lui stesso. Deciso prima degli override
 e sulla cassa grezza, lo sweep fabbricava un fabbisogno: su un piano finanziabile rispondeva
-«Unfunded financing requirement 11.053,98», e con lo scoperto concesso rimborsava 50.000 di `sp17a`
+«Fabbisogno finanziario scoperto di 11.053,98», e con lo scoperto concesso rimborsava 50.000 di `sp17a`
 aprendo 11.053,98 di scoperto nello stesso anno. Un `sp_overrides` che fissa `sp16a`/`sp16` o
 `sp17a`/`sp17` fissa anche il totale: da quel lato lo sweep non paga.
 
@@ -657,8 +657,9 @@ Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoIn
 è cambiata (i tributari, §9).
 
 - **Solo sulla riga del primo anno di piano.** `pregresso` su una riga successiva alza
-  `pregresso is allowed only in the first forecast year` (`calculations/forecast_engine.py:1786-
-  1789`). È una fotografia dell'anno base, non un'ipotesi per-anno.
+  `Lo scadenziamento del pregresso (pregresso) vale solo sulla riga del primo anno di previsione`
+  (`calculations/forecast_engine.py:1786-1789`). È una fotografia dell'anno base, non un'ipotesi
+  per-anno.
 - **`opening` deve coincidere col bilancio base**, tolleranza 0,01 €, o il motore si ferma con
   «il saldo di apertura di {voce} è cambiato ({dichiarato} → {base}): rivedi lo scadenziamento»
   (`validate_pregresso`, `calculations/forecast_engine.py:448-505`).
@@ -766,7 +767,7 @@ comunque libero — il rifiuto (§2.2) guarda il totale che l'anno dopo legge, n
 
 La cassa proiettata pluggia **solo verso l'alto**: un plug negativo è un fabbisogno scoperto.
 `overdraft_allowed` (per anno di ipotesi, **`false` di default**) decide che cosa succede: spento,
-il motore **solleva** `Unfunded financing requirement <importo>` e non produce nulla, come sempre;
+il motore **solleva** `Fabbisogno finanziario scoperto di <importo>` e non produce nulla, come sempre;
 acceso, il fabbisogno diventa uno scoperto **generato dal piano**, componente separato dal debito
 bancario pregresso e dal nuovo finanziamento — anche nell'aritmetica, non solo nei `details`
 (`calculations/forecast_engine.py`, classe `_Overdraft`). `overdraft_limit` (opzionale, ≥ 0) è il

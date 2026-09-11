@@ -47,43 +47,21 @@ export function previewNotice(preview: PreviewState): string | null {
 }
 
 /**
- * Il prefisso ESATTO che `assumptions_service.py:330` antepone al messaggio
- * del motore quando il bulk delle assumptions rifiuta il previsionale —
- * `f"Assumptions saved successfully, but forecast generation failed: {e}"`.
- * E' una stringa FISSA scritta da questo repo, non un messaggio arbitrario
- * del motore: toglierla e sostituirla con l'italiano non e' "inventare" un
- * testo per un guasto che non si riconosce (quello resta vietato, vedi
- * `saveNotice`) — e' la stessa distinzione che governa gia' tutto il resto
- * di questo file fra testo di CONTORNO (traducibile) e messaggio del motore
- * (mai toccato, qualunque lingua sia).
- *
- * Rilievo 6, giro di correzione 1: senza questo il toast del wizard restava
- * in inglese anche quando il messaggio del motore, dopo i due punti, era gia'
- * in italiano — l'incoerenza di lingua che CLAUDE.md gia' registrava come
- * osservazione, qui diventata la correzione esplicita che il collaudo chiede.
- */
-const BACKEND_WRAPPER_RE = /^Assumptions saved successfully, but forecast generation failed: /;
-const BACKEND_WRAPPER_IT = "Ipotesi salvate, ma il previsionale non è stato calcolato: ";
-
-/**
  * Il messaggio del salvataggio in blocco quando il previsionale e' stato
  * rifiutato, tradotto quando e' riconoscibile.
  *
- * Il salvataggio e' andato a buon fine anche in questo caso — le ipotesi
- * restano persistite, e' solo il previsionale a non essere stato generato —
- * quindi la frase lo dice prima di spiegare il perche'.
- *
- * Due traduzioni indipendenti, in ordine: prima il caso riconoscibile
- * (fabbisogno scoperto, `unfundedAmountFromMessage`) — se scatta, vince e
- * sostituisce l'intera frase, prefisso compreso. Altrimenti si toglie solo
- * il prefisso FISSO del backend, se c'e' (`BACKEND_WRAPPER_RE`): il resto —
- * il messaggio del motore — non si traduce mai, in nessuno dei due rami. Un
- * messaggio che non ha ne' l'uno ne' l'altro torna **grezzo**: meglio
- * l'inglese del motore di un testo inventato che non descrive quel guasto.
+ * Il prefisso di `assumptions_service.bulk_upsert_assumptions` nasce gia'
+ * in italiano («Ipotesi salvate, ma il previsionale non è stato calcolato:
+ * ...», Task 8 lotto 3A) — non c'e' piu' nulla da togliere qui. Il client
+ * riconosce solo il caso del fabbisogno scoperto (`unfundedAmountFromMessage`,
+ * ancora ancorata al testo del motore finche' non arriva la parte B): se
+ * scatta, vince e sostituisce l'intera frase, prefisso compreso, con
+ * l'importo e il rimedio in una sola frase italiana. Altrimenti il messaggio
+ * torna **grezzo**: meglio il testo del backend, qualunque lingua sia, di un
+ * testo inventato che non descrive quel guasto.
  */
 export function saveNotice(message: string): string {
   const amount = unfundedAmountFromMessage(message);
   if (amount !== null) return `Ipotesi salvate. ${unfundedText(amount, null)}`;
-  const senzaPrefisso = message.replace(BACKEND_WRAPPER_RE, "");
-  return senzaPrefisso === message ? message : `${BACKEND_WRAPPER_IT}${senzaPrefisso}`;
+  return message;
 }

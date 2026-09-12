@@ -2,6 +2,7 @@ import type { IntraYearComparisonItem } from "@/types/api";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { VP_CODES, ATTIVO_CODES, PASSIVO_CODES } from "@/lib/pratica-codes";
 import { labelOf } from "@/lib/ivcee-catalog";
+import { deltaPct } from "@/lib/pratica-format";
 
 export function buildBalanceItemsWithTotals(
   rawItems: IntraYearComparisonItem[],
@@ -29,7 +30,7 @@ export function buildBalanceItemsWithTotals(
   }));
 
   const byCode = new Map(items.map((i) => [i.code, i]));
-  const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
+  const safePct = (a: number, b: number) => deltaPct(a, b) ?? 0;
 
   const v = (code: string, key: "partial_value" | "reference_value" | "annualized_value" | "prior_value") =>
     byCode.get(code)?.[key] ?? 0;
@@ -200,7 +201,7 @@ export function buildIncomeItemsWithEbitda(
 ): IntraYearComparisonItem[] {
   const byCode = new Map(items.map((i) => [i.code, i]));
   const factor = 12 / periodMonths;
-  const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
+  const safePct = (a: number, b: number) => deltaPct(a, b) ?? 0;
 
   const v = (code: string, key: "partial_value" | "reference_value" | "prior_value") =>
     byCode.get(code)?.[key] ?? 0;

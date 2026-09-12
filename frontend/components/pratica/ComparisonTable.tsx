@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatEuro, formatPct } from "@/lib/pratica-format";
+import { formatEuro, formatPct, deltaPct } from "@/lib/pratica-format";
 import { ALWAYS_SHOW_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
 import type { IntraYearComparisonItem } from "@/types/api";
 
@@ -199,9 +199,10 @@ export function ComparisonTable({
                   if (isNaN(compareValue)) {
                     return <TableCell className="text-right text-sm text-muted-foreground">-</TableCell>;
                   }
-                  const delta = item.reference_value !== 0
-                    ? ((compareValue - item.reference_value) / Math.abs(item.reference_value)) * 100
-                    : 0;
+                  const delta = deltaPct(compareValue, item.reference_value);
+                  if (delta === null) {
+                    return <TableCell className="text-right text-sm text-muted-foreground">-</TableCell>;
+                  }
                   const isPositive = delta > 1;
                   const isNegative = delta < -1;
                   return (

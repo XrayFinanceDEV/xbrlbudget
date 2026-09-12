@@ -97,3 +97,20 @@ inutilizzabili.
 `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5). Qui **non** è stato corretto: cambiare il
 denominatore sposta i valori degli indicatori, quindi i punteggi, quindi il rating di crisi,
 per **ogni** azienda — una decisione più grande dell'aggiunta di un grafico.
+
+## La riga DIFFERENZA (Attivo − Passivo): `deltaPct`
+
+Prima di questo task, la percentuale di variazione di Stampa/Confronto/Proiezione confrontava il
+riferimento con zero ESATTO: sulla riga «DIFFERENZA (Attivo - Passivo)» — un valore che per
+identità contabile dovrebbe annullarsi, ma arriva dal backend come somma client di ~10 `float`
+(`Decimal` → `float` via `DecimalJSONResponse`) che lascia un residuo `~1e-9..1e-13` invece di `0`
+letterale — dividere uno sbilancio vero, anche piccolo, per un residuo di quell'ordine dava una
+percentuale a 12-15 cifre (`+2366097483366300.0%`, indagine del 2026-09-11).
+
+`deltaPct` (`frontend/lib/pratica-format.ts`) arrotonda il riferimento al centesimo — la stessa
+tolleranza di quadratura di `config.py:235` — prima di deciderlo "assente" (`null`, reso come
+`-`): usato da `StampaContent.tsx`, `ComparisonTable.tsx` e `ProjectionTable.tsx`, le tre copie
+inline della stessa formula sono sparite. `formatPct` ha in più una rete secondaria per un
+valore non finito (`NaN`/`Infinity` → `-`), senza alcun tetto di magnitudine: un tetto fisso
+nasconderebbe un'anomalia reale molto grande ma legittima, e la causa dell'esplosione è già
+rimossa alla fonte.

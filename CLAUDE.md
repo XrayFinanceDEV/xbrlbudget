@@ -362,7 +362,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `forecast_stale` in `/analysis` è `true` quando l'ultima scrittura delle ipotesi è successiva
   all'ultima generazione riuscita — capita perché il bulk risponde 200 anche a una generazione
   respinta, e per costruzione sul percorso `auto_generate=false`
-  (`backend/app/services/analysis_service.py:211-260`, `_forecast_staleness`). Nessun
+  (`backend/app/services/forecast_freshness.py`, richiamato da `analysis_service.py`). Nessun
   `ForecastYear` o nessuna ipotesi ⇒ `false`: un controllo che manca è «non lo so», mai un
   verdetto negativo. `assumptions_updated_at`/`forecast_updated_at` escono **UTC esplicito con
   la `Z`**: le colonne sono `datetime.utcnow()` ingenuo, ed emetterle senza dichiarare il fuso le
@@ -767,7 +767,8 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   rigenerare il motore; il rendiconto legge lo stesso `ForecastYear`. Un secondo motore ri-diverge
   alla prima modifica del primo.
 - **Promote** (`POST /scenarios/{id}/promote`, `backend/app/services/promote_service.py`): copies the
-  projection into a full-year `FinancialYear` that can then be a budget base year. Two semantic gates
+  projection into a full-year `FinancialYear` that can then be a budget base year. A freshness
+  precondition followed by two semantic gates
   (`check_quadratura(...).semantic_valid`, **not** a euro threshold) and a destructive replacement of
   the existing annual year — see «Invarianti e trappole › Previsionale» and
   [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) §5. An infrannuale whose opening

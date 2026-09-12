@@ -94,7 +94,7 @@ fonte autorevole**; queste voci sono da correggere nei documenti citati.
 | D2 | `SC_PLUG_REJECT_PCT` (20%) è una soglia di rifiuto | Non rifiuta nulla: scala solo la severità del testo del warning fra "parziale" e "prevalentemente stimata" | `pdf_importer.py:194`, `:788-797` |
 | D3 | `enforce_ce_sp_identity` riallinea il CE (plug in `ce04`/`ce12`, spostamento in riserve con cap 10%) | È **puramente diagnostico**: espone `_ce_sp_difference` e non muta né CE né SP | `iv_cee_hierarchy.py:520-553` |
 | D4 | `reconcile_ivcee_balance` tampona la differenza (`cap_frac=0.05`) | Ritorna una copia invariata e riporta la differenza. `cap_frac` è tenuto solo per compatibilità di firma | `iv_cee_hierarchy.py:493-517` |
-| D5 | Il gate di promozione è "€5" | È il gate `semantic_valid` completo, non una soglia in euro | `promote_service.py:46-57` |
+| D5 | Il gate di promozione è "€5" | Prima di scrivere servono una proiezione non obsoleta e il gate `semantic_valid` completo, non una soglia in euro; dopo la copia il gate semantico viene ripetuto | `forecast_freshness.py`; `promote_service.py` |
 | D6 | La tassonomia copre 124 file / 77 unici | Il corpus è a **214 file fisici / 137 contenuti unici** | `IMPORT-ROUTING-TAXONOMY.md:2-4`; manifest corrente |
 | D7 | Il blocco B richiede `legal_skeleton AND coge_codes>=5` | La soglia `coge_codes>=5` la richiede **solo B2**; B1 e B3 no | `IMPORT-ROUTING-TAXONOMY.md:142` vs `bilancio_classifier.py:227-238` |
 | D8 | I segnali `sit_contabile` e `dare_avere` sono elencati fra i discriminanti | Sono **calcolati e mai letti** da nessuna regola: puramente diagnostici | `bilancio_classifier.py:73`, `:117` |

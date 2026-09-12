@@ -57,7 +57,8 @@ Se l'utente esce dal wizard invece di leggere il toast, o è passato dal percors
 `auto_generate=false`, le pagine successive (CE Prev., SP Prev., Riclassificato, Rendiconto,
 Report) continuavano a mostrare i numeri della generazione **precedente**, senza alcun segnale.
 `GET /companies/{id}/scenarios/{sid}/analysis` porta ora tre campi per questo
-(`backend/app/services/analysis_service.py:211-260`, `_forecast_staleness`):
+(`backend/app/services/forecast_freshness.py`; `analysis_service.py` lo usa senza duplicare il
+confronto):
 
 | Campo | Valore |
 |---|---|
@@ -514,7 +515,7 @@ La sequenza, in `backend/app/services/promote_service.py`:
 5. **Secondo cancello semantico, dopo la scrittura e prima del commit:** confronto campo per campo fra
    sorgente e copia (`_verify_copy`) **più** una seconda `check_quadratura` sul bersaglio
    copiato. Un fallimento fa `rollback()` dell'intera transazione — quindi **anche il record
-   annuale cancellato al punto 2 torna al suo posto** (`:107-139`).
+   annuale cancellato al punto 3 torna al suo posto**.
 
 Il nuovo record nasce con `validation_status="verified"`, `forecastable=True`,
 `parser_version="promoted-projection-v3-verified-copy"` e un `validation_report` che dichiara
@@ -529,16 +530,19 @@ Dopo il promote si crea normalmente uno scenario budget con `base_year` = l'anno
 porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo versa come saldo
 (`details['imposte']['saldo_paid']`).
 
-## 6. File chiave
+## 6. Implementazione e migrazione
+
+### File chiave
 
 | File | Che cosa contiene |
 |---|---|
 | `database/models.py` | `BudgetAssumptions` — le 32 colonne `ce*_override`, `sp_overrides`, `pregresso`, `overdraft_allowed`/`overdraft_limit` |
 | `backend/app/schemas/budget.py` | gli stessi campi lato Pydantic (`PregressoInput` e le sue due sotto-classi comprese) |
 | `backend/app/services/assumptions_service.py` | il bulk, e il `try/except` che produce il 200 con `forecast_generated: false` |
-| `backend/app/services/analysis_service.py` | `_forecast_staleness` — `forecast_stale`, `assumptions_updated_at`, `forecast_updated_at` (§1.1) |
+| `backend/app/services/forecast_freshness.py` | unica misura condivisa di freschezza — `forecast_stale`, `assumptions_updated_at`, `forecast_updated_at` (§1.1) |
+| `backend/app/services/analysis_service.py` | compone `/analysis` e vi aggiunge lo stato di freschezza condiviso |
 | `backend/app/api/v1/budget_scenarios.py` | `PATCH /ce-override` + `_CE_OVERRIDE_FIELDS`, `POST /generate?clear_overrides`, i 3 endpoint dei commenti AI, `POST /promote` |
-| `backend/app/services/promote_service.py` | i due cancelli, la sostituzione, la copia verificata |
+| `backend/app/services/promote_service.py` | precondizione di freschezza, due cancelli semantici, sostituzione e copia verificata |
 | `calculations/forecast_engine.py` | override nel CE, `_apply_sp_overrides`, DSO/DIO/DPO derivati, `validate_pregresso`, la classe `_Overdraft` |
 | `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses`, e le regole del debito bancario (`e_contratto_pregresso`, `contratti_da_riga_finanziamento`, `residuo_prestiti_nuovi`, `quota_breve_prestiti_nuovi`, `separa_prestiti_nuovi`) |
 | `calculations/intra_year_engine.py` | gli stessi override sul percorso infrannuale — **non** tocca lo scadenziamento del pregresso né l'overdraft |
@@ -547,6 +551,20 @@ porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo v
 | `frontend/lib/pratica-codes.ts` | `CE_OVERRIDE_FIELD_BY_CODE`, `buildCeOverridePayload` |
 | `frontend/lib/api.ts` | `bulkUpsertAssumptions`, `patchCeOverrides`, `generateForecast(clearOverrides)`, `promoteProjection`, `previewForecast` |
 | `backend/app/services/forecast_preview_service.py` | il servizio dell'anteprima: `load_forecast_source` + `compute_forecast(stop_on_error=False)`, nessuna sessione toccata |
+
+### Migrazione del database
+
+I database SQLite già esistenti richiedono la colonna
+`budget_scenarios.ai_comments_infrannuale_updated_at`, usata per datare i commenti della Stampa.
+Dopo un backup, dalla root del repository:
+
+```bash
+python migrate_db.py /percorso/al/financial_analysis.db
+```
+
+Lo script è additivo e idempotente. Nel deployment Docker viene eseguito automaticamente
+dall'entrypoint del backend sul database configurato; `init_db()` crea già la colonna nei database
+nuovi.
 
 ## 7. Anteprima — stesso motore, nessuna scrittura
 

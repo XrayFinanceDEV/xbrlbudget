@@ -253,7 +253,7 @@ Il progresso del wizard (`importResult`, `scenario`, `fiscalYear`, `periodMonths
 Senza rimedio, dopo il refresh lo stepper mostra uno step avanzato mentre gli auto-load restano
 fermi al loro guard `!importResult || !scenario`: pagina bianca, nessun errore.
 
-Un effetto in `app/pratica/page.tsx:359-407` tenta la riidratazione **esattamente una volta**
+Un effetto in `app/pratica/page.tsx` tenta la riidratazione **esattamente una volta**
 (guardia con `useRef`, non con soli scalari nel dep-array: un secondo tentativo potrebbe partire
 mentre il primo è ancora in corso). Vale per il solo workflow `bilancio`, e solo se
 `analysisStep` è oltre Import. Recupera azienda e scenario infrannuale dal server, ripopola i
@@ -273,6 +273,7 @@ riaprire» e ritorno allo step Import. Un 500, timeout o errore di rete non risc
 | Modulo | Che cosa contiene |
 |---|---|
 | `lib/pratica-steps.ts` | fasi, step, gate, `blockedStep`, `rescueStep` — nessun React |
+| `lib/pratica-rehydration.ts` | classifica il recupero iniziale: solo `404` è contesto mancante; rete, timeout e `5xx` sono riprovabili |
 | `lib/pratica-format.ts` | formattazione |
 | `lib/pratica-codes.ts` | tabelle di codici IV-CEE, `DETAIL_PARENTS`, `EXTRA_ALERT_DEFS` |
 | `lib/pratica-reconcile.ts` | `reconcileSubfields` |
@@ -362,6 +363,7 @@ degli indicatori nel complesso.
 | `frontend/contexts/PraticaContext.tsx` | lo stato della pratica e la sua persistenza |
 | `frontend/lib/pratica-steps.ts` | fasi, step, gate, `blockedStep`, `rescueStep`, `gateReason` |
 | `frontend/lib/pratica-steps.test.ts` | 29 casi; l'unica suite che copre i gate |
+| `frontend/lib/pratica-rehydration.ts` | politica pura `404`/errore transitorio usata dalla riidratazione |
 | `frontend/components/PraticaStepper.tsx` | le due righe dello stepper |
 | `frontend/components/Navigation.tsx` | sceglie fra stepper e nav piatta |
 | `frontend/contexts/PraticaActionContext.tsx` | `usePrimaryAction`, il registro a token |
@@ -448,6 +450,17 @@ colonna (`ReportComments`, `ai_comments_service.py:32-66`).
 | `GET .../infrannuale/ai-comments` | restituisce `{comments, comments_updated_at, forecast_updated_at, comments_stale}` |
 | `POST .../infrannuale/ai-comments` | genera con Haiku dal `ctx` ricevuto, salva, restituisce |
 | `PUT .../infrannuale/ai-comments` | salva le modifiche dell'utente, nessuna chiamata al modello |
+
+Esempio della risposta GET (le date sono UTC con `Z`, oppure `null`):
+
+```json
+{
+  "comments": { "overall": "…" },
+  "comments_updated_at": "2026-09-12T08:30:00Z",
+  "forecast_updated_at": "2026-09-12T09:00:00Z",
+  "comments_stale": true
+}
+```
 
 **Il contesto lo costruisce il client.** `buildAICtx()`
 (`components/pratica/StampaContent.tsx:211-264`) mette insieme scenario, `income_map`,

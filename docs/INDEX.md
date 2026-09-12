@@ -59,7 +59,7 @@ sono elencati nel §5 dell'indice).
 
 | Doc | Cosa copre |
 |-----|------------|
-| [API-PREVISIONALE.md](budget/API-PREVISIONALE.md) | Le quattro superfici che scrivono su uno scenario: bulk assumptions e il suo 200 bugiardo, override CE/SP, `clear_overrides`, promote |
+| [API-PREVISIONALE.md](budget/API-PREVISIONALE.md) | Le superfici che scrivono su uno scenario, `forecast_stale`, override CE/SP, `clear_overrides` e promote con precondizione di freschezza |
 | [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) | Guida utente al modulo Budget & Forecasting (workflow UI) |
 | [TEST_BUDGET_API.md](budget/TEST_BUDGET_API.md) | Riferimento/test degli endpoint REST degli scenari budget |
 | [FINAL-REPORT-PDF.md](budget/FINAL-REPORT-PDF.md) | Specifica del report PDF (gap analysis vs report di riferimento) |
@@ -68,11 +68,11 @@ sono elencati nel §5 dell'indice).
 
 | Doc | Cosa copre |
 |-----|------------|
-| [PRATICA-PERCORSO.md](frontend/PRATICA-PERCORSO.md) | Il percorso «Pratica»: due workflow, tre fasi, i gate, la barra azioni, la riidratazione, le tab Proiezione e Stampa |
+| [PRATICA-PERCORSO.md](frontend/PRATICA-PERCORSO.md) | Il percorso «Pratica»: gate e barra azioni, riidratazione con retry, Proiezione e Stampa con freschezza dei commenti AI |
 | [RETTIFICHE.md](frontend/RETTIFICHE.md) | Il giornale delle rettifiche: le due sotto-tab, i tre modi di proposta, il selettore contropartita, persistenza e guardie |
 | [LAYOUT-SP-CE.md](frontend/LAYOUT-SP-CE.md) | Il catalogo IV-CEE, i quattro elenchi di righe, i file da toccare per aggiungere una voce, il test di parità |
 | [TAILWIND-E-CLASSI.md](frontend/TAILWIND-E-CLASSI.md) | Dove possono vivere i nomi di classe: `content`, il fallimento silenzioso, come verificarlo davvero |
-| [INDICATORI-E-STAMPA.md](frontend/INDICATORI-E-STAMPA.md) | I due grafici degli indicatori condivisi fra tab e Stampa, regole di stampa/PDF, limite del denominatore `ce01` |
+| [INDICATORI-E-STAMPA.md](frontend/INDICATORI-E-STAMPA.md) | Grafici condivisi, precisione dei valori, regole di stampa/PDF e avviso sui commenti AI obsoleti |
 
 ## Configurazione delle agent skill — [`agents/`](agents/)
 

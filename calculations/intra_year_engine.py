@@ -7,7 +7,7 @@ User can override via assumptions (growth % vs reference full year).
 The frontend converts user overrides to growth % before saving.
 """
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
@@ -1958,7 +1958,16 @@ class IntraYearEngine:
                 'code': 'tax_settlement_reclass_below_zero',
                 'severity': 'warning',
                 'field': campo,
-                'amount': str(residuo),
+                # Al centesimo, con la modalita' degli altri campi monetari del motore
+                # (`ROUND_HALF_UP`, come `eur_it`, `BaseCalculator.round_decimal` e
+                # `ForecastEngine._quantize_values`): `residuo` e' il resto di una
+                # divisione di rotazione e arriva con ventotto decimali (misurato
+                # '283333.3333333333333333333333'), o con un centesimo non
+                # normalizzato (misurato '-400000.000'). Si quantizza, non si
+                # ricalcola: il segno e' quello di `correzione - applicato`.
+                'amount': str(Decimal(str(residuo)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )),
                 'message': (
                     # Nessun importo nel testo: la cifra che conta vive nel payload
                     # `amount`, come per `unfunded_financing_requirement` e

@@ -152,7 +152,9 @@ l'**attivo** (stiamo incassando). **Mai** un aumento di passività a fronte di u
 stesura di questa regola, che applicava il solo lato debito in entrambi i casi, su uno scenario reale
 del database fabbricava **+144.188,46 di `sp16g`**, peggiorando la PFN senza alcun evento.
 Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo si dichiara con
-`tax_settlement_reclass_below_zero` (campo nominato e importo), lasciando la cassa dov'è. Un secondo
+`tax_settlement_reclass_below_zero` (campo nominato e importo **quantizzato al centesimo**, come ogni
+altro importo del motore — `residuo` nasce da una divisione di rotazione e senza quantizzazione
+usciva con ventotto decimali), lasciando la cassa dov'è. Un secondo
 bersaglio sarebbe il vecchio plug. Nel **testo** del messaggio non c'è alcun importo, solo il nome del
 campo: la cifra che conta vive nel payload `amount`. Dire "trova solo X di capienza" avrebbe infatti
 significato, sul lato debito, mostrare una capienza **negativa** (`applicato` è negativo per

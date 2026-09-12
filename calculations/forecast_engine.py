@@ -19,7 +19,7 @@ from calculations.projection_common import (
     pregresso_opening_masses, runoff_schedule, validate_runoff,
     tax_settlement_saldo_acconto, soglia_giorni_magazzino,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
-    residuo_prestiti_nuovi, quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
+    quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
     eur_it,
 )
 from calculations.ce_result import calculate_ce_result

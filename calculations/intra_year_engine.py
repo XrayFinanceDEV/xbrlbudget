@@ -2214,7 +2214,7 @@ class IntraYearEngine:
             return tuple(_get_field(ref_bs, f) * r for f in fields)
         if sp17_operativo_total != 0:
             self._diagnostics.append({
-                'code': 'missing_short_debt_breakdown',
+                'code': 'missing_long_debt_breakdown',
                 'severity': 'error',
                 'amount': str(sp17_operativo_total),
                 'message': (

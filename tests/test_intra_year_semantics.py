@@ -260,6 +260,26 @@ def test_missing_debt_breakdown_is_not_invented_as_forty_sixty_split():
     assert engine._diagnostics[0]["code"] == "missing_short_debt_breakdown"
 
 
+def test_debito_operativo_senza_dettaglio_il_lungo_non_si_chiama_breve():
+    """Minore 1 della revisione finale dell'ondata: _distribute_sp17_operativo
+    (funzione nuova di quell'ondata) etichettava il proprio diagnostico
+    ``missing_short_debt_breakdown`` — il testo diceva «a lungo», il codice
+    «breve». I crediti hanno due codici distinti dalla stessa ondata
+    (``missing_short/long_receivables_breakdown``); ora il debito fa lo
+    stesso. Un riferimento senza dettaglio operativo né a breve né a lungo
+    deve produrre due voci con due codici diversi, non due voci omonime."""
+    engine = IntraYearEngine(None)
+
+    breve = engine._distribute_sp16_operativo(SimpleNamespace(), D("1000"))
+    lungo = engine._distribute_sp17_operativo(SimpleNamespace(), D("500"))
+
+    assert breve == (D("0"),) * 4
+    assert lungo == (D("0"),) * 4
+    assert [item["code"] for item in engine._diagnostics] == [
+        "missing_short_debt_breakdown", "missing_long_debt_breakdown",
+    ]
+
+
 def test_forecast_gate_rejects_ce_sp_mismatch(db_session):
     company = _company(db_session)
     fy = _financial_year(db_session, company.id, 2025, 9, profit=D("10"))

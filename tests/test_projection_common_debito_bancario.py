@@ -58,8 +58,16 @@ def test_un_contratto_col_residuo_e_pregresso_uno_nuovo_no():
 
 
 def test_il_motore_budget_usa_le_funzioni_condivise_non_una_copia():
-    # `_residuo_prestiti_nuovi` non e' piu' un alias di forecast_engine (Task 7/C, rimosso: zero
-    # chiamanti interni). Il kernel si testa qui direttamente, non via un alias del motore budget.
-    assert callable(getattr(comune, "residuo_prestiti_nuovi", None))
+    # `residuo_prestiti_nuovi` non e' piu' ne' un alias ne' un import di forecast_engine
+    # (Task 7/C rimuove l'alias morto, Task 10 l'ultimo import senza chiamanti): il
+    # motore non deve poter ospitare una seconda implementazione della regola.
+    assert "residuo_prestiti_nuovi" not in vars(motore_budget)
+    # E il kernel lo raggiunge comunque per la via vera: la quota a breve che il
+    # motore calcola con `_quota_breve_prestiti_nuovi` pesa il residuo col kernel
+    # condiviso, non con una copia propria. Se quota_breve smettesse di chiamare
+    # residuo_prestiti_nuovi, o ne chiamasse un'altra, questa asserzione si
+    # spezza: e' il filo che prima reggeva l'identita' diretta dell'alias.
+    assert (motore_budget._quota_breve_prestiti_nuovi.__globals__.get("residuo_prestiti_nuovi")
+            is comune.residuo_prestiti_nuovi)
     assert motore_budget._quota_breve_prestiti_nuovi is getattr(comune, "quota_breve_prestiti_nuovi", None)
     assert motore_budget._e_contratto_pregresso is getattr(comune, "e_contratto_pregresso", None)

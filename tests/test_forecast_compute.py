@@ -123,6 +123,6 @@ def test_override_blanks_the_split_and_stop_on_error_false_keeps_partial_years(m
             partial = ForecastEngine(db).compute_forecast(source, rows, stop_on_error=False)
             assert [y.year for y in partial.years] == [2027]
             assert partial.error.year == 2028
-            assert "Unfunded financing requirement" in partial.error.message
+            assert "Fabbisogno finanziario scoperto" in partial.error.message
     finally:
         engine.dispose()

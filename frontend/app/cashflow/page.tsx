@@ -4,11 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
-import { useScenarios, useDetailedCashflow, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
+import { useScenarios, useDetailedCashflow, useAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -40,6 +41,13 @@ export default function CashflowPage() {
     selectedScenarioId
   );
   const error = cashflowError ? "Impossibile caricare il rendiconto finanziario" : null;
+
+  // Solo per sapere se il previsionale a schermo e' piu' vecchio delle ipotesi
+  // salvate: il rendiconto legge il proprio endpoint, ma i suoi anni
+  // previsionali vengono dallo stesso `ForecastYear`. La query e' quella delle
+  // altre viste, quindi la cache di react-query la serve senza una seconda
+  // chiamata quando e' gia' calda.
+  const { data: analysisData } = useAnalysis(selectedCompanyId, selectedScenarioId);
 
   if (loading && !cashflowData) {
     return (
@@ -231,6 +239,8 @@ export default function CashflowPage() {
           </CardContent>
         </Card>
       )}
+
+      <ForecastStaleBanner analysis={analysisData} className="mb-6" />
 
       {/* Detailed Cash Flow Table */}
       <Card>

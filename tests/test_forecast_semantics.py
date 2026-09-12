@@ -18,7 +18,7 @@ def test_legacy_total_investment_is_not_split_fifty_fifty():
         investments=D("100"),
     )
 
-    with pytest.raises(ValueError, match="automatic 50/50 allocation is disabled"):
+    with pytest.raises(ValueError, match="non si ripartiscono automaticamente"):
         ForecastEngine._get_split_investments(assumption)
 
 

@@ -29,6 +29,7 @@ Ondata A (parallela):  1 · 2 · 3 · 4
 Ondata B (sequenziale, stesso file): 5 (dopo 1,3) → 6 (dopo 2,3,5)
 Ondata C (parallela):  7 (dopo 4,5) · 8 (dopo 4,6)
 Ondata D:              9 (haiku) · 10 (collaudatore)
+Ondata E:              11 (fatto, in A) · 6 → 15 → 14 → 12 · 13 (frontend, parallelo)
 ```
 
 | Task | Modello | Perché |
@@ -46,7 +47,7 @@ Ondata D:              9 (haiku) · 10 (collaudatore)
 - Modify `calculations/forecast_engine.py` — `validate_pregresso()`, lettura del piano in `compute_forecast`, `_calculate_balance_sheet` (quattro saldi + imposte), `_calculate_income_statement` (`ce09d`), `details.pregresso` / `details.imposte` / `details.pregresso_ignored`.
 - Modify `database/models.py` (`pregresso = Column(JSON, nullable=True)`), `migrate_db.py`, `backend/app/schemas/budget.py` (`PregressoInput` e sotto-modelli, campo su Base/Update), `backend/app/services/assumptions_service.py` (`build_assumption_row`: `pregresso=jsonable_encoder(...)`).
 - Create `tests/test_projection_common_runoff.py`, `tests/test_budget_pregresso.py`.
-- Frontend: `types/api.ts` (tipi `Pregresso*`, `details` estesi), `lib/budget-pregresso.ts` (+ test), `lib/budget-preview-rows.ts` (+ righe nuove nei test), `hooks/use-scenario-assumptions.ts` (idrata `pregresso`), `components/budget/wizard/steps/StepPregressoNuovo.tsx`, `steps/StepImposte.tsx`, `components/budget/wizard/PregressoTable.tsx`.
+- Frontend: `types/api.ts` (tipi `Pregresso*`, `details` estesi), `lib/budget-pregresso-circolante.ts` (+ test), `lib/budget-preview-rows.ts` (+ righe nuove nei test), `hooks/use-scenario-assumptions.ts` (idrata `pregresso`), `components/budget/wizard/steps/StepPregressoNuovo.tsx`, `steps/StepImposte.tsx`, `components/budget/wizard/PregressoTable.tsx`.
 
 ---
 
@@ -366,12 +367,21 @@ def test_build_assumption_row_carries_pregresso_as_json():
 
 ---
 
-### Task 4: `lib/budget-pregresso.ts`
+### Task 4: `lib/budget-pregresso-circolante.ts`
+
+**Rinomina decisa in corso d'opera (2026-09-09, Ruling 15).** Il modulo si chiama
+`budget-pregresso-circolante.ts`, non `budget-pregresso.ts`. Motivo: `lib/budget-pregresso-step.ts`
+esiste gia' dal lotto 1 e governa lo scadenziamento del **debito bancario** pregresso sullo stesso
+passo 6 del wizard; questo modulo governa il pregresso del **circolante** (crediti commerciali,
+fornitori, tributari, previdenziali, altri debiti). Due moduli il cui nome differisce per un
+suffisso che non nomina la differenza sono un invito a importare quello sbagliato — e i task 7 e 8
+ne importeranno uno dei due.
+
 
 **Modello:** sonnet · **Ondata:** A
 
 **Files:**
-- Create: `frontend/lib/budget-pregresso.ts`, `frontend/lib/budget-pregresso.test.ts`
+- Create: `frontend/lib/budget-pregresso-circolante.ts`, `frontend/lib/budget-pregresso-circolante.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -427,7 +437,7 @@ describe("budget-pregresso", () => {
 - [ ] **Step 3: Implementare**
 
 ```ts
-// frontend/lib/budget-pregresso.ts
+// frontend/lib/budget-pregresso-circolante.ts
 import type { BalanceSheet, Pregresso, PregressoKey, PregressoPlan, PregressoTributari } from "@/types/api";
 
 const num = (v: unknown): number => (typeof v === "number" ? v : parseFloat(String(v ?? "0")) || 0);
@@ -489,8 +499,8 @@ export function validatePregresso(p: Pregresso, masses: Record<PregressoKey, num
 }
 ```
 
-- [ ] **Step 4: Verificare** — `npx vitest run lib/budget-pregresso && npx tsc --noEmit` → PASS.
-- [ ] **Step 5: Commit** — `git add frontend/lib/budget-pregresso.ts frontend/lib/budget-pregresso.test.ts && git commit -m "feat(budget): modulo puro dello scadenziamento del pregresso"`
+- [ ] **Step 4: Verificare** — `npx vitest run lib/budget-pregresso-circolante && npx tsc --noEmit` → PASS.
+- [ ] **Step 5: Commit** — `git add frontend/lib/budget-pregresso-circolante.ts frontend/lib/budget-pregresso-circolante.test.ts && git commit -m "feat(budget): modulo puro dello scadenziamento del pregresso"`
 
 ---
 
@@ -733,6 +743,16 @@ Alla fine del calcolatore, prima del `return`:
 
 (`generated` è un dict riempito dove ogni saldo viene calcolato.) Le imposte popolano la loro parte nel Task 6; **in questo task** `details['imposte']` va comunque dichiarato con `mode: 'manual'` e zeri, così il contratto vale già.
 
+**Vincolo aggiunto in corso d'opera (2026-09-09), e non è una raccomandazione.** Il Task 3 ha reso
+`pregresso`, `imposte` e `pregresso_ignored` campi **obbligatori** di `ForecastYearDetails` in
+`frontend/types/api.ts` (commit `eb73cb2`). Da adesso il tipo promette più di quanto l'API
+mantenga, e a raddrizzarlo è questo task: il motore deve dichiarare **tutte e tre le chiavi per
+ogni anno, sempre** — anche quando non c'è alcun piano, anche vuote, anche a zero. Serve un test
+che lo tenga fermo su uno scenario **senza** `pregresso`: le tre chiavi ci sono, `pregresso` è un
+dict vuoto o con i saldi a zero, `pregresso_ignored` è una lista vuota, `imposte` ha
+`mode: 'manual'`. Senza quel test, al merge il tipo TypeScript è una bugia e nessuno se ne
+accorge: una chiave assente, a valle, vale zero — quindi tacere equivale a dichiararsi puliti.
+
 - [ ] **Step 6: `ce09d` in `_calculate_income_statement`**
 
 Firma `(..., pregresso=None, year_index=0, details=None)`; a `:743`:
@@ -756,7 +776,12 @@ Firma `(..., pregresso=None, year_index=0, details=None)`; a `:743`:
 **Modello:** opus · **Ondata:** B (dopo 2, 3, 5; stesso file del Task 5)
 
 **Files:**
-- Modify: `calculations/forecast_engine.py` (`_calculate_balance_sheet:1069-1091`)
+- Modify: `calculations/forecast_engine.py` — il blocco delle imposte dentro
+  `_calculate_balance_sheet` e' a **`:1244-1258`** (`tax_advances`, la chiamata a
+  `tax_closing_position`, `sp06e`/`sp16e`). L'aliquota e la scomposizione stanno in
+  `_tax_components` (`:718-750`). *(Il piano diceva `:1069-1091`: numero di riga di `main`
+  prima del lotto 1, che ha spostato 398 righe in questo file. Quel tratto e' `_sp_growth`
+  e il preambolo del circolante — il posto sbagliato. Corretto in pre-volo, 2026-09-09.)*
 - Test: `tests/test_budget_pregresso.py` (sezione imposte)
 
 - [ ] **Step 1: Test**
@@ -859,7 +884,7 @@ def test_manual_tax_position_ignores_the_plan_and_says_so(monkeypatch):
             r = runoff_schedule(rateizzato, rate_plan, [], year_index, horizon)
             runoff["debiti_tributari"] = r
             acconto_pct = plan_tax["acconto_pct"] if plan_tax else D('100')
-            explicit = getattr(assumption, 'tax_advances_paid', None)
+            explicit = getattr(assumption, 'tax_advances_paid', None)   # 0 = non dichiarato: vedi la nota qui sotto
             tax_year = tax_settlement_saldo_acconto(
                 opening_credit=opening_credit, saldo_due=saldo_due, rate_due=r.closed,
                 current_tax=current_tax, previous_tax=previous_tax, acconto_pct=acconto_pct, explicit_advances=explicit)
@@ -884,6 +909,19 @@ Rimuovere il calcolo di `sp17e` a `:1091` (ora dentro i due rami). `_base_inc` �
                                    'generated_debt': ZERO, 'generated_credit': ZERO, 'opening_credit_left': ZERO, 'mode': 'manual'})
 ```
 
+**Nota del pre-volo (2026-09-09, Ruling 11) — `tax_advances_paid = 0` significa «non
+dichiarato», non «zero acconti».** La colonna e' `Numeric(15,2), default=0, nullable=False`
+(`database/models.py:645`) e lo schema Pydantic ha anch'esso `default=Decimal("0")`
+(`backend/app/schemas/budget.py:149`): `None` non arriva mai al kernel, quindi lo zero e'
+l'unico valore che puo' voler dire «l'utente non ha detto nulla». Per questo
+`tax_settlement_saldo_acconto` ricade sulla percentuale quando l'importo esplicito e' zero, e
+NON va cambiato in `is not None`: renderebbe `acconto_pct` lettera morta per ogni scenario che
+non ha mai toccato quel campo. **Chi vuole dichiarare zero acconti mette `acconto_pct = 0`**, che
+da' esattamente zero. Conseguenza vincolante per il Task 8: il passo delle imposte espone la
+**percentuale di acconto**, non una casella d'importo «acconti versati» — una casella in cui
+l'utente scrive 0 e ottiene altro sarebbe il difetto silenzioso peggiore che questo repo
+conosca.
+
 Il tributario senza piano usa `saldo_due = massa intera` (tutto saldo, niente rateizzato: spec §4) e `runoff_schedule(ZERO, [], ...)`.
 
 - [ ] **Step 4: Verificare** — le suite del Task 5 più `tests/test_intra_year_semantics.py tests/test_intra_year_plug_negativo.py tests/test_intra_year_end_to_end_periods.py tests/test_infrannuale_dual_year.py` → PASS. **`test_taxes_follow_the_explicit_rate`** e gli altri test degli invarianti che leggono `sp16e` su scenari a posizione automatica **cambiano numeri per costruzione**: verificare che ciò che affermano sia ancora vero sotto la nuova regola e aggiornare solo l'aspettativa, mai la regola, spiegando nel commit.
@@ -897,6 +935,57 @@ Il tributario senza piano usa `saldo_due = massa intera` (tutto saldo, niente ra
 ### Task 7: Passo 6 — la tabella del pregresso
 
 **Modello:** sonnet · **Ondata:** C (dopo 4, 5)
+
+**Da raccogliere dal Task 14 (commit `bd15e8b`).** Il motore dichiara ora
+`details['degenerate_turnover_ratio']` — lista dei giorni medi derivati risultati fuori scala, per
+cui il motore **riporta il saldo base invece di scalarlo** — ma **nessuna schermata la rende**: il
+tipo c'e', il dato arriva, e il passo «Capitale circolante» mostra solo i giorni. Un utente vede
+un giorno medio e non sa che quel giorno non e' stato applicato. Va mostrato nel passo dei giorni
+medi (non in questa tabella: e' un passo diverso, dichiararlo nel commit). Misurato al Task 14: il
+fixture `holding` dell'`e2e_kit` ha `dpo = 3.600` e la guardia vi scatta davvero — non e' un caso
+di laboratorio.
+
+
+**Da raccogliere dal Task 5 (round 2, commit `8535097`).** Il motore dichiara ora
+`details['pregresso_writeoff_ignored']` — lista di `{saldo, field, requested, reason}`, sempre
+presente e vuota quando non c'e' nulla da dire — per gli anni in cui un inesigibile scadenziato
+**non** e' stato scaricato perche' un `ce09d_override`/`ce09_override` dell'utente impediva di
+rilevarne il costo. L'implementatore **non** ha aggiunto la chiave a `ForecastYearDetails` in
+`frontend/types/api.ts`, di proposito: e' il file di un altro task, e la direzione e' quella
+sicura — l'API dichiara **piu'** di quanto il tipo prometta, mai meno. **Aggiungerla e' compito
+di questo task**, e la tabella del pregresso deve mostrare quella riga: un credito che l'utente
+credeva di aver svalutato e che invece e' rimasto a bilancio va detto, non lasciato dedurre.
+
+
+**Aggiunta del proprietario, verificata nel motore (2026-09-09).** «Probabilmente oggi il piano
+non genera tutte le sottospecie di debiti o crediti previsionali ma solo quelli del circolante.»
+Misurato su `calculations/forecast_engine.py` (versione `6b7d7f3`), ed e' cosi' — anche piu' netto:
+
+| Voce | Come nasce nel previsionale | Scadenziando tutto il pregresso |
+|---|---|---|
+| crediti commerciali (`sp06_trade`) | **driver**: `ricavi previsti × DSO / 360` (`:1343`), poi spartito pro quota fra `sp06a..d`, `sp06g` (`:1742`) | la voce **si rigenera**: cambia la composizione, non sparisce |
+| rimanenze (`sp05`) | **driver**: `ricavi previsti × DIO / 360` (`:1356`) | si rigenera |
+| debiti fornitori (`sp16d`) | **driver**: `acquisti previsti × DPO / 360` (`:1487`) | si rigenera |
+| debiti banche (`sp16a`/`sp17a`) | piano di rimborso + nuovi finanziamenti | segue il proprio piano |
+| tributari (`sp06e`/`sp16e`) | imposte (Task 6) | segue le imposte |
+| previdenziali (`sp16f`/`sp17f`) | `base × fattore personale` se agganciati, altrimenti `prev × (1+%)` (`:1525-1529`) | **si estingue**, se non agganciati |
+| altri debiti (`sp16g`/`sp17g`), fornitori lungo (`sp17d`), tributari lungo (`sp17e`) | `prev × (1+%)` (`:1512-1514`, `:1490`) | **si estingue** |
+
+Cioe': il piano **genera** da un driver soltanto le tre voci del circolante; le banche e le imposte
+seguono un piano proprio; **tutto il resto e' riportato con una percentuale**, non generato. Con il
+Ruling 16 (il generato nasce al netto della massa dichiarata), scadenziare l'intera massa di una
+voce riportata la porta a **zero e ce la lascia** — ed e' il comportamento voluto: parole del
+proprietario, «se scadenzio un debito pregresso che poi non si rigenera dal piano previsionale, il
+debito si deve estinguere».
+
+**Conseguenza vincolante per questo task:** la tabella del pregresso deve **dire all'utente quale
+delle due cose accadra' alla voce che sta scadenziando**, riga per riga. Una voce che si rigenera
+dal driver e una che si estingue per sempre si dichiarano allo stesso modo e si comportano in
+modo opposto: senza quell'indicazione l'utente azzera «altri debiti» e scopre mesi dopo che non
+sono piu' tornati. Serve anche la via d'uscita, detta esplicitamente nella copy: chi vuole
+rimettere un debito lo inserisce a mano in **SP Prev.** (`sp_overrides`), e da li' alleggerisce
+il cashflow. Testo in italiano, icone `lucide-react`, nessuna emoji.
+
 
 **Files:**
 - Create: `frontend/components/budget/wizard/PregressoTable.tsx`
@@ -927,6 +1016,24 @@ Tabella: `Voce | Saldo {baseYear} | anno… | Residuo`. Per riga: `PREGRESSO_LAB
 
 **Modello:** sonnet · **Ondata:** C (dopo 4, 6)
 
+**Due decisioni prese dopo il Task 6 (2026-09-09), da rispettare alla lettera.**
+
+1. **`sp17e_growth_pct` non si mostra sulla via automatica** (Ruling 19). Dal Task 6 quel saldo
+   lo governano le imposte, quindi la percentuale e' **inerte**: oggi il campo e' esposto come
+   «Debiti tributari oltre %» in `frontend/lib/budget-imposte-step.ts:74`, l'utente lo imposta e
+   non succede nulla, **senza errore**. E' la classe di difetto peggiore che questo repo conosca.
+   Sulla via automatica il controllo sparisce, con una riga che dice perche'; resta attivo solo
+   sulla via manuale (`manual_tax_position`), dove governa davvero qualcosa. Lo stesso vale per
+   `sp16e_growth_pct` se e' nelle stesse condizioni: verificarlo, non presumerlo.
+
+2. **Il credito tributario compensa il saldo e basta** (decisione del proprietario, fra tre
+   opzioni). `used = min(opening_credit, saldo_due)` nel kernel resta com'e', e **non** va
+   aggiunta una spiegazione a schermo: il proprietario ha scartato esplicitamente anche
+   quell'opzione. Conseguenza misurata dall'implementatore del Task 6, da conoscere senza
+   correggerla: su un fixture piatto `sp06e` resta a 33.200 per tutti gli anni di piano. Se
+   qualcuno in futuro la segnala come difetto, non lo e': e' una scelta, ed e' registrata qui.
+
+
 **Files:**
 - Modify: `frontend/components/budget/wizard/steps/StepImposte.tsx`, `frontend/lib/budget-preview-rows.ts` (+ test)
 
@@ -953,9 +1060,476 @@ Tabella: `Voce | Saldo {baseYear} | anno… | Residuo`. Per riga: `PREGRESSO_LAB
 - [ ] `docs/frontend/PRATICA-PERCORSO.md`: passi 6 e 7 completi. `docs/superpowers/2026-09-08-nota-costruttori-sp-infrannuale.md`: invariata, già cita il lotto.
 - [ ] Commit `docs(budget): scadenziamento del pregresso e imposte a saldo + acconto`.
 
+**Aggiunta in pre-volo (2026-09-09) — l'invariante di `CLAUDE.md` sulla cassa lo riscrive il
+Task 12, non questo task.** Il testo esatto da scrivere e' nello **Step 7 del Task 12**, e ci va
+nello **stesso commit** del codice che lo rende vero: `CLAUDE.md` descrive il codice com'e', non
+com'e' previsto che diventi, e in questo repo una riga di documentazione su otto e' gia'
+sbagliata. Qui, nel Task 9, resta solo la **verifica**: rileggere quel paragrafo dopo il Task 12
+e controllare che dica quello che il codice fa davvero, misurandolo.
+
+
 ### Task 10: Collaudo
 
 **Modello:** collaudatore
 
 - [ ] Server accesi (backend riavviato). Perimetro: scenario esistente senza piano → SP Prev. identico a prima **tranne** `sp16e`/`sp06e`/cassa (imposte), da spiegare nel report; crediti 80/20; fornitori con residuo oltre l'orizzonte; tributari 3 rate → `sp17e`; inesigibile → `ce09d` in CE Prev.; errore di massa → messaggio onesto sia in anteprima sia al salvataggio; rendiconto: il flusso del pregresso compare nel circolante.
 - [ ] Rilievi → fix con test → commit; merge del branch.
+
+---
+
+## Ondata E — quattro difetti assegnati in pre-volo (2026-09-09)
+
+Questi quattro task **non c'erano** nel piano originale. Due li aveva assegnati il proprietario a
+questo lotto (spec §11); due li ha trovati il banco di sensibilità (`scripts/sensibilita_ipotesi.py`)
+alla fine del lotto 1. Il perché di ciascuno sta nella scansione di pre-volo, in
+`.superpowers/sdd/2026-09-08-scadenziamento-pregresso/progress.md`.
+
+A differenza dei task 1-10, questi sono **correzioni di difetto**: il piano dà il contratto e i
+test, non la trascrizione. L'implementatore legge il codice e decide la forma, dentro il contratto.
+
+**Ordine:** il **Task 11 va prima del Task 5** — il lotto scrive `ce09d` e la normalizzazione oggi
+lo sovrascrive. Gli altri tre sono indipendenti da 1-10.
+
+---
+
+### Task 11: Un override di dettaglio sopravvive alla normalizzazione
+
+**Modello:** sonnet · **Ondata:** A (prima del Task 5)
+
+**Files:**
+- Modify: `calculations/forecast_engine.py` — `_normalize_income_statement_cents` (`:171-210`),
+  il suo unico chiamante (`:572`), e il punto di `_calculate_income_statement` che conosce gli
+  override (`ce08` a `:845-853`, `ce09` subito sotto)
+- Test: `tests/test_forecast_override_residuo.py` (nuovo)
+
+**Il difetto, misurato.** `ce08d` è onorato a `:853`
+(`assumption.ce08d_override if … is not None else max(0, ce08 − a − b − c)`) e **cancellato** a
+`:190-193`:
+
+```python
+residual = result[aggregate] - sum((result[field] for field in details), Decimal("0"))
+result[details[-1]] += residual      # details[-1] E' ce08d
+```
+
+Senza override il residuo è zero al centesimo e la riga è innocua: è per quello che il difetto
+non si vede. Con `ce08d_override` il residuo vale `ce08 − (a+b+c+d_override)` e ci finisce
+sopra: l'utente scrive un numero, ne vede un altro, nessun errore. Vale identico per
+`ce09d_svalutazione_crediti`, che è `details[-1]` del gruppo `ce09` — **cioè esattamente il campo
+in cui questo lotto scrive l'inesigibile** (spec §3.4). Senza questa correzione il Task 5 scrive
+in un campo che il passaggio successivo riscrive.
+
+**Contratto:**
+
+1. Il residuo di gruppo si posa sull'**ultimo dettaglio senza override esplicito**.
+2. Se **tutti** i dettagli del gruppo hanno un override e l'aggregato **non** ce l'ha,
+   l'aggregato viene ricalcolato come loro somma.
+3. Se anche l'aggregato ha un override e i due sono in conflitto, **vince l'aggregato** (è ciò
+   che accade oggi), il residuo va sull'ultimo dettaglio, e il conflitto viene **dichiarato** —
+   mai taciuto — in `details['override_conflicts']` come lista di
+   `{"aggregate": <campo>, "declared": <Decimal>, "details_sum": <Decimal>}`.
+   Regola di casa: *diagnose, never fabricate*.
+4. **Parità:** senza alcun override di dettaglio, ogni numero prodotto oggi resta identico al
+   centesimo. È l'unica cosa che i test esistenti devono continuare a dimostrare.
+
+Il normalizzatore oggi riceve solo `values` e non sa nulla degli override: passargli l'insieme
+dei nomi di campo forzati è parte del task (un parametro keyword con default vuoto, così il
+chiamante infrannuale — se ce n'è uno — non cambia comportamento).
+
+- [ ] **Step 1: Test che falliscono**
+
+Quattro casi, tutti su `compute_forecast` con un `BudgetAssumptions` staccato (il banco di
+sensibilità mostra come si costruisce: `scripts/sensibilita_ipotesi.py`, `_default_di_schema`):
+
+```python
+def test_ce08d_override_sopravvive():
+    # ce08d_override = 7.000 con ce08 aggregato piu' alto: la riga persistita vale 7.000
+def test_ce09d_override_sopravvive():
+    # stesso su ce09d_svalutazione_crediti
+def test_residuo_va_sul_dettaglio_non_forzato():
+    # ce08d forzato, ce08c libero: il residuo si posa su ce08c, e a+b+c+d == ce08
+def test_conflitto_dichiarato():
+    # ce08 e tutti e quattro i dettagli forzati e incoerenti:
+    # ce08 vince, e details['override_conflicts'] contiene la riga
+```
+
+- [ ] **Step 2: Verifica che falliscano** — `backend/venv/bin/python -m pytest tests/test_forecast_override_residuo.py -v`
+- [ ] **Step 3: Implementa il contratto**
+- [ ] **Step 4: Verde, più `tests/test_budget_*.py` e `tests/test_forecast*.py` interi (parità)**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 12: La cassa non esce negativa — diventa scoperto di c/c, se concesso, e sempre dichiarata
+
+**Modello:** opus · **Ondata:** E (dopo l'ondata C — tocca anche l'anteprima del wizard)
+
+**Files:**
+- Modify: `database/models.py` (`BudgetAssumptions`: due colonne nuove), `migrate_db.py`
+  (voce `"budget_assumptions"`, `:92`), `backend/app/schemas/budget.py`
+  (`BudgetAssumptionsBase` e `BudgetAssumptionsUpdate`)
+- Modify: `calculations/forecast_engine.py` — il cancello del plug (`:1372-1375`), il blocco che
+  con la cassa in eccesso rimborsa il debito bancario (`:1378-1387`), `sp16a` (`:1209`, `:1334`,
+  `:1355`), `ce15` (`:948-963`), e i `details`
+- Modify: `frontend/types/api.ts`, `frontend/lib/budget-preview-rows.ts`,
+  il passo «nuovi finanziamenti» del wizard, `frontend/components/budget/wizard/` (avviso)
+- Test: `tests/test_forecast_scoperto.py` (nuovo), `frontend/lib/budget-preview-rows.test.ts`
+
+**Il difetto di partenza** e' la spec §11.1: leggerlo li', con il frammento che lo misura
+(`sp_overrides={"sp05_rimanenze": 5000000}` → `sp09 = −4.779.777,78` sotto
+`forecast_generated: True`). `_apply_sp_overrides` clampa a zero (`:466-468`), poi
+`_normalize_balance_sheet_cents(recompute_cash=True)` ricalcola `sp09 = passivo − attivo senza
+cassa` **senza clamp e senza sollevare** (`:584`), e scavalca il clamp.
+
+**Ruling del proprietario (2026-09-09), che sostituisce quello del controllore.** «La cassa
+negativa non esiste in senso stretto: diventa debito bancario a breve nuovo da piano» — **ma
+solo se l'utente lo concede**, e **l'utente va sempre avvertito che il piano assorbe cassa**.
+
+Questo contraddice la lettera di `CLAUDE.md` («non diventa debito a breve — creare `sp16a` li'
+nascondeva una scelta di scenario mancante»). La ragione storica di quell'invariante era il
+**silenzio**, non il debito: il debito compariva senza che nessuno lo avesse chiesto. Qui la
+scelta di scenario e' esplicita (una concessione dell'utente) e il debito e' dichiarato nei
+`details` e mostrato in anteprima, quindi la ragione decade. **L'invariante in `CLAUDE.md` va
+riscritto in questo stesso lotto** (Task 9), non lasciato a contraddire il codice.
+
+**Contratto:**
+
+1. Due ipotesi nuove su `BudgetAssumptions`, per anno come tutte le altre:
+   `overdraft_allowed` (`Boolean`, default `False`) e `overdraft_limit`
+   (`Numeric(15,2)`, `nullable=True` = concesso senza tetto). Migrazione **additiva**: uno
+   scenario esistente si ritrova `overdraft_allowed = False`, cioe' il comportamento di oggi.
+2. Cassa negativa con `overdraft_allowed = False` ⇒ il motore **solleva** come oggi, stesso
+   messaggio, stesso testo. Nessun test esistente cambia.
+3. Cassa negativa con `overdraft_allowed = True` ⇒ `sp09 = 0` e l'importo scoperto diventa
+   **`sp16a_debiti_banche_breve` generato dal piano**, distinto nei `details` dal debito
+   bancario pregresso (e' esattamente il confine che questo lotto esiste per tracciare).
+   Se `overdraft_limit` e' valorizzato e il fabbisogno lo supera, il motore **solleva** per la
+   parte eccedente, con un messaggio che dice il tetto e l'importo richiesto.
+4. Vale su **entrambi** i percorsi: il plug normale (`:1372-1375`) e il ricalcolo finale dopo
+   un `sp_overrides` (`:584`). Da nessuno dei due puo' uscire una cassa negativa persistita.
+5. **Interessi, senza circolarita'.** Lo scoperto matura oneri finanziari al
+   `financing_interest_rate` gia' presente fra le ipotesi, **calcolati su un saldo noto prima
+   che il CE si chiuda** — cioe' sullo scoperto in apertura d'anno, mai su quello che l'anno
+   stesso sta generando: altrimenti l'interesse cambia la cassa che determina l'interesse.
+   Confluiscono in `ce15` e sono dichiarati a parte in `details['oneri_scoperto']`.
+   `financing_interest_rate` assente ⇒ zero, e lo si dichiara lo stesso.
+6. **Rimborso.** Lo scoperto non e' eterno: il blocco che gia' esiste a `:1378-1387` — la cassa
+   in eccesso abbatte il debito bancario, prima a breve poi a lungo — lo assorbe negli anni
+   successivi. Verificare che lo faccia; se non lo fa, e' parte del task.
+7. **L'avviso, che e' il punto.** `details` dichiara **sempre**, anche a zero (CLAUDE.md ›
+   Invarianti — una chiave assente vale zero, quindi tacere equivale a dichiararsi puliti):
+   - `cassa_assorbita`: di quanto il piano riduce la cassa nell'anno (apertura − chiusura,
+     zero se la cassa cresce). Si dichiara **anche quando la cassa resta positiva**: e' la cosa
+     di cui l'utente va avvertito.
+   - `scoperto_generato`: lo scoperto nato nell'anno. `scoperto_residuo`: quello in essere a
+     fine anno. `oneri_scoperto`: gli interessi del punto 5.
+   L'anteprima del wizard mostra un avviso quando `cassa_assorbita > 0` — testo in italiano,
+   icona `lucide-react`, nessuna emoji — e un avviso piu' forte quando `scoperto_generato > 0`,
+   che dice l'importo. Con `overdraft_allowed = False` e un fabbisogno scoperto l'anteprima
+   gia' oggi mostra l'errore del motore: quel percorso non cambia.
+8. **Lo scoperto e' anche uno strumento di misura, non solo una valvola** (indicazione del
+   proprietario, 2026-09-09): «l'utente vuole testare un piano stressato per vedere quanta
+   finanza serve con quelle ipotesi». Accendere `overdraft_allowed` senza tetto e' quindi una
+   **modalita' di misura** legittima, non un ripiego, e la risposta che l'utente cerca e'
+   `scoperto_generato` anno per anno. L'anteprima non si limita all'avviso: mostra il
+   **fabbisogno di picco** e **l'anno in cui cade**, che sono il numero e la data che si portano
+   in banca. Il motore li dichiara in `details['fabbisogno_picco']` e
+   `details['fabbisogno_picco_anno']` — sempre, anche a zero.
+
+- [ ] **Step 1: Il test che misura il difetto di oggi** — il frammento della spec §11.1
+  trasformato in test: con `overdraft_allowed` non concesso, `bulk_upsert_assumptions(...)` con
+  quell'override deve dare `forecast_generated is False` e la ragione in `message` (CLAUDE.md:
+  il bulk risponde 200 anche a un previsionale rifiutato — si legge `forecast_generated`, non lo
+  status), e **nessun** `ForecastBalanceSheet` con `sp09 < 0` deve esistere a valle.
+- [ ] **Step 2: Il test dello scoperto concesso** — stesso scenario con
+  `overdraft_allowed = True`: la generazione riesce, `sp09 == 0`, `sp16a` cresce esattamente
+  dell'importo che prima era negativo, `details['scoperto_generato']` lo dichiara.
+  Poi il tetto: `overdraft_limit` sotto il fabbisogno ⇒ solleva, e il messaggio nomina i due
+  importi.
+- [ ] **Step 3: Il test del giro d'anno** — anno 1 genera scoperto, anno 2 genera cassa in
+  eccesso: lo scoperto si riduce, e gli oneri dell'anno 2 sono calcolati sul saldo di apertura.
+- [ ] **Step 4: Il test di parita'** — uno scenario senza scoperto e senza override produce
+  **gli stessi numeri di oggi al centesimo**, e `details['cassa_assorbita']` e' dichiarato.
+- [ ] **Step 5: Implementa** — colonne, migrazione, schema, motore, `details`, tipi, anteprima,
+  avviso, controllo nel passo «nuovi finanziamenti» del wizard.
+- [ ] **Step 6: Verde** — `tests/test_budget_*.py`, `tests/test_forecast*.py`,
+  `tests/test_intra*.py` (il ramo `recompute_cash=False` dell'infrannuale **non cambia in
+  nulla**: Global Constraints), `npx vitest run budget-preview-rows`, `npx tsc --noEmit`
+- [ ] **Step 7: `CLAUDE.md` — la correzione va nello STESSO commit del codice che la rende vera**
+
+Nella sezione «Forecasting Engine (Budget)», sostituire il periodo che oggi dice
+«It does **not** become short-term debt — creating `sp16a` there used to hide a missing
+scenario choice — so the way out is an explicit financing assumption, never a retry.»
+con un testo che dica queste cose, in questo ordine:
+
+- La cassa plugga sempre e solo **verso l'alto**: un plug negativo e' un fabbisogno scoperto.
+- Che cosa succede allora dipende da **una scelta esplicita dell'utente**, `overdraft_allowed`,
+  che di default e' **spenta** — quindi ogni scenario esistente si comporta come prima.
+- Spenta: il motore **solleva**, `Unfunded financing requirement <importo>`, e non produce nulla.
+- Accesa: il fabbisogno diventa `sp16a_debiti_banche_breve` **generato dal piano**, tenuto
+  distinto nei `details` dal debito bancario pregresso, con oneri finanziari calcolati sul
+  saldo di **apertura** (mai su quello che l'anno stesso genera: sarebbe circolare) e un tetto
+  opzionale `overdraft_limit` oltre il quale il motore torna a sollevare.
+- **Perche' esiste**: un piano stressato e' una cosa che si vuole poter far girare — serve a
+  misurare **quanta finanza richiedono quelle ipotesi**, e la risposta e' `scoperto_generato`
+  anno per anno, con il picco in `fabbisogno_picco`.
+- **Perche' il divieto c'era**: la vecchia regola vietava `sp16a` perche' compariva **muto**,
+  nascondendo una scelta di scenario mai fatta. Oggi la scelta e' esplicita e l'importo e'
+  dichiarato in `details` e mostrato in anteprima. Scriverlo, cosi' che nessuno ripristini il
+  divieto in buona fede fra sei mesi.
+- Aggiungere infine, sempre in quella sezione o nella riga di «Invarianti e trappole ›
+  Previsionale» che parla di `sp_overrides`: il ricalcolo finale della cassa
+  (`_normalize_balance_sheet_cents(recompute_cash=True)`) **non scavalca piu'** il clamp degli
+  override — era il difetto §11.1 della spec.
+
+Non riscrivere la sezione intera e non toccare l'invariante dell'infrannuale, che **non cambia**:
+li' il plug negativo resta clampato a zero con la diagnostica `unfunded_financing_requirement`.
+
+- [ ] **Step 8: Commit**
+
+---
+
+### Task 13: Un previsionale più vecchio delle ipotesi si dichiara
+
+**Modello:** sonnet · **Ondata:** E (indipendente da 1-10)
+
+**Files:**
+- Modify: `backend/app/services/` — il servizio che compone `GET /scenarios/{id}/analysis`
+- Modify: `backend/app/schemas/` — il campo nuovo sullo schema di `/analysis`
+- Modify: `frontend/types/api.ts`
+- Create: `frontend/components/budget/ForecastStaleBanner.tsx`
+- Modify: le cinque viste che leggono `/analysis` e mostrano il previsionale — `app/forecast/income`,
+  `app/forecast/balance`, `app/forecast/reclassified`, `app/cashflow`, `app/report`
+- Test: `tests/test_forecast_stale.py` (nuovo), `frontend/lib/budget-stale.test.ts` (nuovo)
+
+**Il difetto** è la spec §11.2. Il bulk risponde 200 a un previsionale rifiutato: le ipotesi
+restano salvate, il `ForecastYear` no, e le cinque viste mostrano i numeri **precedenti** senza
+un segnale.
+
+**Ruling del controllore (2026-09-09) sul meccanismo: confronto di timestamp, nessuna colonna
+nuova.** `BudgetAssumptions` e `ForecastYear` hanno entrambi `created_at`/`updated_at`
+(`database/models.py:718-719` e `:738-739`). Il previsionale è **stantio** quando
+`max(updated_at delle assumptions dello scenario) > max(updated_at dei ForecastYear dello
+scenario)`. Motivo: una bandiera persistita può divergere dalla realtà, un confronto no — ed è
+vero per costruzione anche sul percorso `auto_generate=false`, dove il previsionale *è*
+davvero più vecchio delle ipotesi. Costo se sbaglio: un falso positivo se due scritture cadono
+nello stesso microsecondo — `datetime.utcnow()` ha i microsecondi, e la generazione scrive
+**dopo** le ipotesi nella stessa transazione, quindi il confronto stretto `>` regge.
+
+**Contratto:**
+
+1. `/analysis` dichiara **sempre** `forecast_stale: bool`, anche `false` (CLAUDE.md ›
+   Invarianti: una chiave assente vale zero, quindi tacere equivale a dichiararsi puliti), più
+   `assumptions_updated_at` e `forecast_updated_at` in ISO, per poter spiegare l'avviso.
+2. Nessun `ForecastYear` ⇒ `forecast_stale` è `false` (non c'è niente di stantio da mostrare:
+   la vista è vuota, e il vuoto si vede).
+3. La decisione sta in un modulo puro `frontend/lib/budget-stale.ts` con la sua suite in
+   `environment: node` — **`jsdom` non è installato e non va installato**; il componente rende
+   soltanto (CLAUDE.md › Frontend: `lib/budget-*` non importa mai da `app/` o `components/`).
+4. Il banner dice, in italiano: che i numeri a schermo sono di una generazione **precedente**
+   alle ipotesi salvate, e che per allinearli si rigenera. Nessuna emoji, icona `lucide-react`.
+
+- [ ] **Step 1: Test backend che fallisce** — salvare ipotesi con generazione respinta, poi
+  `GET /analysis`: `forecast_stale is True`. E il caso pulito: dopo una generazione riuscita,
+  `False`.
+- [ ] **Step 2: Test del modulo puro** — la funzione decide su due stringhe ISO più il conteggio
+  degli anni; casi: stantio, allineato, nessun previsionale, timestamp mancante.
+- [ ] **Step 3: Implementa backend, tipo, modulo, componente, e le cinque viste**
+- [ ] **Step 4: Verde: pytest del file nuovo, `npx vitest run budget-stale`, `npx tsc --noEmit`**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 14: Giorni medi automatici degeneri — la guardia che il motore budget non ha
+
+**Modello:** opus · **Ondata:** E (indipendente da 1-10)
+
+**Files:**
+- Modify: `calculations/forecast_engine.py` — `_calculate_balance_sheet`, `base_revenue` (`:1083`)
+  e i tre punti che dichiarano i giorni applicati (`:1118`, `:1131`, `:1230`)
+- Test: `tests/test_forecast_giorni_degeneri.py` (nuovo)
+
+**Il difetto.** `base_revenue = base_inc.ce01_ricavi_vendite or D('1')`. Quel `or D('1')` non è
+una guardia: è un denominatore inventato. Su un'azienda il cui valore della produzione sta in
+`ce04` — o su un anno base con `ce01` a zero — i giorni medi automatici escono a scala
+astronomica, il circolante ci si adegua, e **nessun controllo se ne accorge**: il foglio quadra
+lo stesso. Il motore infrannuale la guardia ce l'ha (`_turnover_ratio → None` con diagnostica
+`degenerate_turnover_ratio`, `CLAUDE.md` › Intra-Year Engine); il motore budget no.
+
+**Ruling del controllore (2026-09-09): si aggiunge la guardia, NON si cambia che cosa conta come
+ricavo.** Allargare `base_revenue` a `ce01+ce04` cambierebbe i numeri di ogni azienda con `ce04`
+diverso da zero, e i Global Constraints di questo lotto impongono la parità al centesimo su ciò
+che il piano non tocca. La guardia invece non scatta mai su un'azienda sana, quindi la parità
+regge. Costo se sbaglio: un'azienda con giorni medi reali sopra i 365 vede il proprio saldo base
+riportato invece che scalato — e un avviso che glielo dice, invece di un numero assurdo muto.
+
+**Contratto:**
+
+1. Un giorno medio **derivato** (non esplicito) è **degenere** quando `> 365` o `< 0`, o quando
+   `ce01` dell'anno base è `<= 0`. La soglia è la stessa che usa il banco di sensibilità nel
+   rilievo G1 (`scripts/sensibilita_ipotesi.py:315-324`) e la stessa nozione dell'infrannuale
+   («più di un anno di magazzino»).
+2. Su un giorno degenere il motore **non scala**: riporta il saldo dell'anno base per quella
+   voce (crediti, rimanenze o debiti commerciali), come fa l'infrannuale.
+3. Lo dichiara: `details['degenerate_turnover_ratio']` è una **lista** dei nomi dei giorni
+   caduti (`'dso'`, `'dio'`, `'dpo'`), **sempre presente**, vuota quando non scatta nulla.
+   `dso_applied`/`dio_applied`/`dpo_applied` restano dichiarati e riportano il giorno **davvero
+   applicato**, non quello degenere.
+4. Un giorno **esplicito** dell'utente non passa dalla guardia: è una scelta, non una derivazione.
+5. **Parità:** su ogni scenario dei test esistenti nessun giorno è degenere, quindi ogni numero
+   resta identico al centesimo.
+
+- [ ] **Step 1: Test che fallisce** — anno base con `ce01 = 0` e ricavi in `ce04`, crediti
+  commerciali a 120.000: oggi `dso_applied` esce fuori scala; dopo, `dso` è degenere, `sp06a`
+  proiettato vale il saldo base, e `details['degenerate_turnover_ratio'] == ['dso']`.
+- [ ] **Step 2: Test di non-degenerazione** — l'`e2e_kit` normale: la lista è **vuota** e i tre
+  giorni applicati sono quelli di oggi.
+- [ ] **Step 3: Implementa**
+- [ ] **Step 4: Verde su `tests/test_budget_*.py` e `tests/test_forecast*.py` interi**
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 15: Le voci minori dello SP possono essere indicizzate a un driver
+
+**Modello:** opus · **Ondata:** E, **dopo il Task 6 e prima del 14** (stesso file, `forecast_engine.py`)
+
+**Files:**
+- Modify: `database/models.py` (`BudgetAssumptions`: un campo JSON), `migrate_db.py`,
+  `backend/app/schemas/budget.py`
+- Modify: `calculations/forecast_engine.py` — `_calculate_balance_sheet`, il blocco delle voci
+  minori (`_sp_growth` e' definito a `:1294`; le righe indicizzabili stanno a `:1300`, `:1490`,
+  `:1512-1514`, `:1525-1529`)
+- Modify: `frontend/types/api.ts`, `hooks/use-scenario-assumptions.ts`, il passo «voci minori SP»
+  del wizard
+- Test: `tests/test_forecast_indicizzazione.py` (nuovo), test del passo nel frontend
+
+**Perche' esiste** (indicazione del proprietario, 2026-09-09): «le voci minori dei debiti si
+tengono o costanti o in crescita con il fatturato. Aumenta il volume aumenta tutto, questa e' un
+po' la prassi, ma non e' facile tradurla in numeri».
+
+Due fatti misurati sul motore (versione `6b7d7f3`) che inquadrano il task:
+
+1. **Oggi il default e' «costante», non «cresce col fatturato».** `_sp_growth` restituisce `ZERO`
+   quando la percentuale non e' impostata (`:1294-1298`), quindi una voce minore lasciata in pace
+   resta ferma per tutto il piano. La prassi descritta non e' il default: e' qualcosa che l'utente
+   deve digitare riga per riga.
+2. **Il meccanismo esiste gia', cablato su una voce sola.** I debiti previdenziali «agganciati» si
+   calcolano `base × (costo del personale previsto / costo del personale base)` (`:1525-1526`):
+   indicizzati a un driver e applicati all'**anno base**, non composti sul saldo dell'anno prima.
+   E' esattamente «aumenta il volume aumenta tutto», e risolve la difficolta' che il proprietario
+   solleva — indicizzare sulla base **non accumula deriva**, mentre `prev × (1+%)` composto per
+   cinque anni sì. Questo task generalizza quella forma, non ne inventa una nuova.
+
+**Contratto:**
+
+1. Un campo JSON nullable su `BudgetAssumptions`, `sp_indexing`, che mappa il codice di una voce
+   al suo driver: `{"sp16g": "ricavi", "sp17d": "acquisti", "sp16f": "personale"}`. Migrazione
+   **additiva**. **Chiave assente = costante**, cioe' il comportamento di oggi (`prev × (1+%)`,
+   con la percentuale che l'utente ha messo o zero): ogni scenario esistente e ogni test esistente
+   restano identici al centesimo. E' il vincolo su cui verrai giudicato.
+2. Tre driver, e solo tre: `ricavi` (`ce01` previsto / `ce01` base), `acquisti`
+   (`ce05 + ce06`), `personale` (`ce08`). Il denominatore a zero non produce un fattore: produce
+   **costante**, e lo si dichiara (vedi punto 5) — mai una divisione per un valore inventato.
+3. Formula, identica nella forma a quella dei previdenziali: `valore = base_della_voce × fattore`,
+   dove il `base_della_voce` e' quello dell'**anno base**, non dell'anno precedente. Non si
+   compone.
+4. **Una voce con un piano di scadenziamento NON e' indicizzabile** (Ruling 17, deciso dopo il
+   round 1 del Task 5). Dichiarare un piano significa «questo saldo lo sto estinguendo»;
+   dichiarare un driver significa «questo saldo si rigenera col volume». Sono due affermazioni
+   contraddittorie sulla stessa voce, e il motore non ne inventa una terza. La chiave di
+   indicizzazione su una voce con piano viene **ignorata e dichiarata** in
+   `details['indicizzazione_ignorata']`, esattamente come per i tributari e le banche del punto 6.
+   Motivo tecnico, misurato: `validate_pregresso` impone che l'apertura dichiarata coincida col
+   bilancio base, quindi per una voce con piano `base − massa` e' **sempre** zero — un fattore
+   moltiplicato per zero resta zero, e l'indicizzazione sarebbe codice morto che l'utente crede
+   attivo. L'interfaccia deve impedire di scegliere le due cose insieme, non lasciarle convivere
+   e poi ignorarne una.
+5. **`details` sempre dichiarati**, anche vuoti: `details['indicizzazione']` mappa ogni voce
+   indicizzata al driver usato e al fattore applicato, e dichiara le voci per cui il driver era
+   **degenere** (denominatore a zero) e si e' ricaduti su costante. Una chiave assente, a valle,
+   vale zero: tacere equivale a dichiararsi puliti.
+6. **Voci escluse, e non e' una dimenticanza:** i tributari (`sp06e`, `sp16e`, `sp17e`) sono
+   governati dalle imposte dal Task 6 in poi, e le banche (`sp16a`, `sp17a`) dal piano di
+   rimborso. Indicizzarli significherebbe avere due padroni per lo stesso numero. Se il campo
+   contiene una di quelle chiavi, viene **ignorato e dichiarato** in
+   `details['indicizzazione_ignorata']`, non applicato in silenzio.
+7. **L'interfaccia dice la cosa che oggi non dice nessuno**: nel passo «voci minori SP», per ogni
+   voce, se resta **costante per tutto il piano** oppure a quale driver e' agganciata. La
+   sorpresa vera di oggi non e' l'assenza dell'indicizzazione: e' che una voce lasciata vuota
+   resti ferma senza che nulla lo dica. Testo in italiano, icone `lucide-react`, nessuna emoji.
+
+- [ ] **Step 1: I test che falliscono** — (a) voce indicizzata a `ricavi` con ricavi +20%: il
+  saldo vale `base × 1,2`, non `prev × (1+%)`; (b) driver degenere (`ce01` base a zero): la voce
+  resta costante e `details` lo dichiara; (c) voce indicizzata **e** con piano di pregresso: il
+  driver e' ignorato, la voce si estingue col piano, e `details['indicizzazione_ignorata']` la
+  nomina; (d) chiave su `sp16e`: ignorata e dichiarata; (e) **parita'**: nessun `sp_indexing` ⇒
+  ogni numero identico al centesimo.
+- [ ] **Step 2: Verificare che falliscano** — e, come i task 4, 5 e 11 di questo lotto, provare
+  che le asserzioni **discriminino**: rompere a mano il ramo su una copia di lavoro del file
+  (backup fuori dal repo, ripristino con `cp`, **mai** un `git checkout`) e misurare che fallisca
+  il solo test dedicato.
+- [ ] **Step 3: Implementa** — campo, migrazione, schema, motore, `details`, tipi, passo del wizard.
+- [ ] **Step 4: Verde** — `tests/test_budget_*.py`, `tests/test_forecast*.py`,
+  `tests/test_intra*.py` (l'infrannuale **non cambia**), `npx tsc --noEmit`, suite frontend.
+- [ ] **Step 5: Commit**
+
+---
+
+### Task 16: La rata del nuovo finanziamento paga il proprio debito, non il debito bancario pregresso
+
+**Aggiunto il 2026-09-10 per decisione del proprietario** («Adesso, in questo lotto»), dopo che la
+ri-revisione del Task 12 ha confermato il difetto con una sonda. **Modello:** opus (motore).
+
+**Il difetto.** In `calculations/forecast_engine.py` (circa riga 2550)
+`short_fin_repayment = min(sp16a, fin_repayment)` fa consumare alla rata del **nuovo** finanziamento la
+quota bancaria **pregressa** a breve. Un'azienda con `sp16a` pregresso 12.345,67 e nessun piano di rimborso
+lo vede restare costante senza nuovo prestito, e andare a 0 nel primo anno con un nuovo finanziamento. E' la
+famiglia del rilievo 2 del Task 12, rimasta fuori perche' non riguarda lo scoperto. Il banco di parita' non
+poteva vederlo: i suoi fixture hanno `sp16a` a zero.
+
+**Contratto:**
+- **I1 esteso** — ogni debito si riduce solo con il proprio rimborso: la componente pregressa di
+  `sp16a`/`sp17a` e' identica, anno per anno, con e senza il nuovo finanziamento (finche' la cassa non richiede
+  scoperto; oltre, vale gia' I1 del Task 12). Un debito pregresso scadenziato che il piano non rigenera si
+  estingue (Ruling 16); uno **non** scadenziato non sparisce perche' e' arrivato un prestito nuovo.
+- SP quadrato al centesimo; dichiarato = persistito; cancello unico `_Overdraft.copri` invariato.
+- **Rete rossa sul codice di prima**: test dedicato (`sp16a` pregresso non tondo senza piano e con piano,
+  `sp17a` pregresso > 0, nuovo finanziamento con rate al mezzo centesimo) ed estensione del campionamento di
+  `tests/test_forecast_dichiarato_vs_persistito.py`; entrambi falliscono su `5ad6112`, passano dopo.
+- **Banco di parita'** (commit separato): un fixture con debito bancario pregresso > 0 a breve e a lungo;
+  le celle si muovono **solo** negli scenari con debito pregresso e nuovo finanziamento insieme.
+- `CLAUDE.md` › Forecasting Engine dice gia' «le rate pagano il proprio debito»: dopo questo task diventa vera;
+  si ritocca solo se non dice esattamente cio' che il motore fa.
+
+---
+
+### Task 17: Il prestito nuovo ha una quota a breve
+
+**Aggiunto il 2026-09-10 per decisione del proprietario** («Adesso, in questo lotto»), dopo che la revisione
+del Task 16 lo ha confermato con una sonda. **Modello:** opus (motore). Parte dall'HEAD del giro 1 del Task 16:
+toccano la stessa ripartizione `sp16a`/`sp17a` e vanno in serie.
+
+**Il difetto.** Tutto il residuo del prestito nuovo sta in `sp17a`, anche la quota che scade l'anno dopo. Sulla
+base del kit i 25.000,10 in scadenza stanno a lungo: riclassificati, il current ratio 2027 passa da 2,4206 a
+2,0794 e la CCN scende di 25.000,10. `sp16` e `sp17` sono entrambi nel passivo: il pareggio non lo vede, lo vedono
+CCN, current ratio e circolante di Altman.
+
+**Contratto:**
+- La quota di ogni prestito nuovo che il calendario del kernel rimborsa nell'anno successivo sta in `sp16a`
+  (preammortamento: zero; maxirata: a breve l'anno prima); il resto in `sp17a`.
+- Il debito bancario pregresso invariato (I1 esteso del Task 16); per i contratti misti la sola parte nuova.
+- Totale del debito, cassa, CE invariati anno per anno; scoperto (I1-I4 del Task 12) e cash sweep (prima il
+  pregresso, decisione del proprietario) invariati; la ripartizione protetta dal residuo di quadratura.
+- Rete rossa sull'HEAD di partenza; parita': si muovono solo `sp16a`/`sp16` e `sp17a`/`sp17`, in coppie di segno
+  opposto, negli scenari con un prestito nuovo — zero CE, zero `sp09`, zero altrove.
+- `CLAUDE.md` › Forecasting Engine e `API-PREVISIONALE.md` nello stesso commit, con cosa si rompe a ignorarlo.
+
+---
+
+> **Superato (parziale) dal lotto 3A, Task 5 — commit `b5698ce`.** Questo piano nomina
+> `tax_closing_position` come la funzione che l'infrannuale continua a usare, invariata: non è più
+> vero. Il lotto 3A l'ha rimossa da `calculations/projection_common.py` e ha unificato budget e
+> infrannuale su `posizione_tributaria_fine_anno` (stessa regola degli acconti, `acconti_dovuti`,
+> nella stessa famiglia di `tax_settlement_saldo_acconto`). Stato attuale: `CLAUDE.md` ›
+> «Intra-Year Engine», `docs/budget/API-PREVISIONALE.md` §9. (Nota aggiunta dal riallineamento
+> del 2026-09-11.)

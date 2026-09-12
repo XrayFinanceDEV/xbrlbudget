@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
+from decimal import Decimal
 import logging
 import sys
 import os
@@ -393,7 +394,7 @@ def get_intra_year_comparison(
     if scenario.scenario_type != "infrannuale":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Comparison is only available for infrannuale scenarios"
+            detail="Il confronto è disponibile solo per gli scenari infrannuali"
         )
 
     try:
@@ -492,7 +493,7 @@ def promote_projection(
     if scenario.scenario_type != "infrannuale":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only infrannuale scenarios can be promoted"
+            detail="Solo gli scenari infrannuali si possono promuovere"
         )
 
     try:
@@ -565,7 +566,7 @@ def create_budget_assumptions(
     if assumptions_create.forecast_year <= scenario.base_year:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Forecast year {assumptions_create.forecast_year} must be greater than base year {scenario.base_year}"
+            detail=f"L'anno di previsione {assumptions_create.forecast_year} deve essere successivo all'anno base {scenario.base_year}"
         )
 
     # Check for duplicate (scenario_id, forecast_year)
@@ -577,7 +578,7 @@ def create_budget_assumptions(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Assumptions for year {assumptions_create.forecast_year} already exist in scenario {scenario_id}"
+            detail=f"Le ipotesi per l'anno {assumptions_create.forecast_year} esistono già nello scenario {scenario_id}"
         )
 
     # Create assumptions
@@ -604,34 +605,47 @@ def update_budget_assumptions(
     db: Session = Depends(get_db),
 ):
     """
-    Update budget assumptions for a specific forecast year
+    Update budget assumptions for a specific forecast year, then regenerate
+    the forecast in the SAME transaction.
 
-    Only provided fields will be updated
+    Only provided fields will be updated. A rejected regeneration rolls back
+    the update: a GET afterward reads the assumptions exactly as they were
+    before this call (CLAUDE.md § Previsionale/Frontend -- an override the
+    engine rejects is never persisted, only applied-and-reflected or neither).
     """
+    from app.services import assumptions_service
+
     # Validate scenario belongs to company
-    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
-
-    # Find assumptions for this year
-    db_assumptions = db.query(models.BudgetAssumptions).filter(
-        models.BudgetAssumptions.scenario_id == scenario_id,
-        models.BudgetAssumptions.forecast_year == year
-    ).first()
-
-    if not db_assumptions:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Assumptions for year {year} not found in scenario {scenario_id}"
-        )
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     # Update only provided fields
     update_data = _json_safe_assumption_fields(
         assumptions_update.model_dump(exclude_unset=True)
     )
-    for field, value in update_data.items():
-        setattr(db_assumptions, field, value)
 
-    db.commit()
-    db.refresh(db_assumptions)
+    try:
+        db_assumptions = assumptions_service.update_single_year_assumptions(
+            db, scenario, year, update_data
+        )
+    except LookupError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Generazione del previsionale non riuscita: {str(e)}"
+        )
+    except Exception as e:
+        logger.exception(
+            "Forecast regeneration failed after assumptions update, scenario=%s year=%s",
+            scenario_id, year,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Errore interno durante la generazione del previsionale: {str(e)}"
+        )
 
     return db_assumptions
 
@@ -751,6 +765,11 @@ def bulk_upsert_assumptions(
 
         return result
 
+    except assumptions_service.AssumptionsValidationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Ipotesi non valide: nulla è stato salvato", "errori": e.errori},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -760,23 +779,11 @@ def bulk_upsert_assumptions(
         logger.exception("Error saving assumptions for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error saving assumptions: {str(e)}"
+            detail=f"Errore nel salvataggio delle ipotesi: {str(e)}"
         )
 
 
 # ===== CE Override (direct forecast editing) =====
-
-# All CE override fields that can be patched from the forecast income table
-_CE_OVERRIDE_FIELDS = {
-    "ce01_override", "ce02_override", "ce03_override", "ce03a_override", "ce04_override",
-    "ce05_override", "ce06_override", "ce07_override", "ce08_override",
-    "ce08a_override", "ce08b_override", "ce08c_override", "ce08d_override",
-    "ce09_override", "ce09a_override", "ce09b_override", "ce09c_override", "ce09d_override",
-    "ce10_override", "ce11_override", "ce11b_override", "ce12_override",
-    "ce13_override", "ce14_override", "ce15_override", "ce16_override",
-    "ce17_override", "ce17a_override", "ce17b_override",
-    "ce18_override", "ce19_override", "ce20_override",
-}
 
 @router.patch(
     "/companies/{company_id}/scenarios/{scenario_id}/ce-override",
@@ -791,7 +798,10 @@ def patch_ce_override(
     db: Session = Depends(get_db),
 ):
     """
-    Update one or more CE overrides, then regenerate the forecast once.
+    Update one or more CE overrides, then regenerate the forecast once, in
+    the SAME transaction: a rejected regeneration rolls back the WHOLE
+    batch, not just the last entry (CLAUDE.md § Previsionale/Frontend -- an
+    override the engine rejects is never persisted).
 
     **Request body:**
     ```json
@@ -806,7 +816,9 @@ def patch_ce_override(
 
     Set `value` to `null` to clear an override and revert to engine calculation.
     """
-    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    from app.services import assumptions_service
+
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     if isinstance(request, dict):
         request_data = request
@@ -814,58 +826,129 @@ def patch_ce_override(
         request_data = request.model_dump() if hasattr(request, 'model_dump') else request
 
     overrides = request_data.get("overrides", [])
-    if not overrides:
-        raise HTTPException(status_code=400, detail="overrides list is required")
-
-    from decimal import Decimal as D
-
-    # Cache assumption rows per year to avoid repeated queries
-    assumption_cache: dict = {}
-    applied = 0
-
-    for entry in overrides:
-        forecast_year = entry.get("forecast_year")
-        field = entry.get("field")
-        value = entry.get("value")
-
-        if not forecast_year or not field:
-            raise HTTPException(status_code=400, detail="Each override needs forecast_year and field")
-        if field not in _CE_OVERRIDE_FIELDS:
-            raise HTTPException(status_code=400, detail=f"Invalid override field: {field}")
-
-        if forecast_year not in assumption_cache:
-            assumption = db.query(models.BudgetAssumptions).filter(
-                models.BudgetAssumptions.scenario_id == scenario_id,
-                models.BudgetAssumptions.forecast_year == forecast_year
-            ).first()
-            if not assumption:
-                raise HTTPException(status_code=404, detail=f"No assumptions found for year {forecast_year}")
-            assumption_cache[forecast_year] = assumption
-
-        setattr(assumption_cache[forecast_year], field, D(str(value)) if value is not None else None)
-        applied += 1
-
-    db.commit()
-
-    # Regenerate forecast once
-    scenario = db.query(models.BudgetScenario).filter(
-        models.BudgetScenario.id == scenario_id
-    ).first()
 
     try:
-        if scenario.scenario_type == "infrannuale":
-            from calculations.intra_year_engine import IntraYearEngine
-            engine = IntraYearEngine(db)
-            engine.generate_projection(scenario_id)
-        else:
-            from calculations.forecast_engine import ForecastEngine
-            engine = ForecastEngine(db)
-            engine.generate_forecast(scenario_id)
+        applied = assumptions_service.apply_ce_overrides(db, scenario, overrides)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Forecast regeneration failed after CE override patch")
-        raise HTTPException(status_code=500, detail=f"Overrides saved but forecast regeneration failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Rigenerazione del previsionale non riuscita, nessun override è stato applicato: {str(e)}"
+        )
 
     return {"success": True, "applied": applied}
+
+
+# Una sola copia: alla rotta CE equivalente non serve, perche' lei scrive nelle
+# colonne `ce*_override` (Numeric), dove un Decimal non cambia forma;
+# qui invece il valore finisce dentro un sacco JSON, e la forma e' contenuto.
+def _sp_override_json_value(value: Optional[Decimal]) -> Any:
+    """Rida' al valore validato da Pydantic la forma numerica del corpo.
+
+    `apply_sp_overrides` scrive il valore com'e' nel sacco JSON `sp_overrides`,
+    e quel sacco finora conteneva i numeri usciti da `json.loads` della
+    richiesta. Passare un Decimal cambierebbe la forma salvata:
+    `model_dump(mode="json")` (Pydantic 2) lo gira in STRINGA, `jsonable_encoder`
+    in float anche dove il corpo ne portava uno intero (`1000` -> `1000.0`). Un
+    integrale resta `int`, il resto e' `float` -- identico a oggi, e il motore
+    rilegge comunque con `Decimal(str(...))`, quindi il previsionale non si
+    muove di un centesimo (M2).
+    """
+    if value is None:
+        return None
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+
+@router.patch(
+    "/companies/{company_id}/scenarios/{scenario_id}/sp-override",
+    response_model=Any,
+    summary="Batch-patch SP overrides across one or more years and regenerate forecast once"
+)
+def patch_sp_override(
+    company_id: int,
+    scenario_id: int,
+    request: budget_schemas.SpOverrideRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Update one or more SP overrides, possibly across MULTIPLE forecast
+    years, then regenerate the forecast once, in the SAME transaction: a
+    rejected regeneration rolls back the WHOLE batch -- every year touched
+    by this call, not just one (CLAUDE.md § Previsionale/Frontend -- an
+    override the engine rejects is never persisted; "una correzione che
+    tocca piu' campi si applica tutta o niente").
+
+    Replaces looping N `PUT /assumptions/{year}` calls in parallel for a
+    multi-year edit (SP Prev., giro di correzione 3): after giro 2 each PUT
+    regenerates the WHOLE scenario in its own transaction, and N of those in
+    parallel on SQLite risked "database is locked" plus spurious rejections
+    (a year validated without yet seeing the sibling year's uncommitted
+    edit). This route applies every edit first, then regenerates once.
+
+    **Request body:**
+    ```json
+    {
+        "overrides": [
+            { "forecast_year": 2025, "field": "sp16a_debiti_banche_breve", "value": 400000.55 },
+            { "forecast_year": 2026, "field": "sp16a_debiti_banche_breve", "value": 350000.00 },
+            { "forecast_year": 2025, "field": "sp06a_crediti_clienti_breve", "value": null }
+        ]
+    }
+    ```
+
+    `field` is the key inside that year's `sp_overrides` JSON bag -- there is
+    no fixed allowlist (unlike CE's `CE_OVERRIDE_FIELDS`): a key the engine's
+    result does not recognize is ignored in silence, same as every other
+    `sp_overrides` write (CLAUDE.md § Previsionale). Set `value` to `null` to
+    clear that key and revert to engine calculation. Multiple entries for the
+    same year merge into that year's SAME bag.
+
+    **Validation:** the body is checked by `budget_schemas.SpOverrideRequest`
+    before anything is written or regenerated, so a non-numeric `value`, a
+    NaN/Infinity, a missing `forecast_year` or an `overrides` that is not a
+    list answers **422**. Before that they reached `Decimal(str(raw_value))`
+    inside the engine, whose `decimal.InvalidOperation` is an `ArithmeticError`
+    and not a `ValueError`, and the only answer this route could give was a
+    500 (M2). Nothing was ever left written in either case -- the rollback was
+    already correct, only the status code was not.
+    """
+    from app.services import assumptions_service
+
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+
+    # Il corpo e' gia' valido qui: Pydantic ha rifiutato un 422 prima che si
+    # scrivesse e si rigenerasse qualunque cosa (M2). `value` torna numero
+    # nella forma che aveva nel corpo, perche' il sacco salvato non cambi.
+    overrides = [
+        {
+            "forecast_year": entry.forecast_year,
+            "field": entry.field,
+            "value": _sp_override_json_value(entry.value),
+        }
+        for entry in request.overrides
+    ]
+
+    try:
+        years_touched = assumptions_service.apply_sp_overrides(db, scenario, overrides)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Forecast regeneration failed after SP override patch")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Rigenerazione del previsionale non riuscita, nessun override è stato applicato: {str(e)}"
+        )
+
+    return {"success": True, "years": years_touched}
 
 
 # ===== Forecast Generation Endpoint =====
@@ -913,7 +996,7 @@ def generate_forecasts(
     if not assumptions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot generate forecast: no assumptions found for scenario {scenario_id}. Add assumptions first."
+            detail=f"Impossibile generare il previsionale: nessuna ipotesi per lo scenario {scenario_id}. Aggiungi prima le ipotesi."
         )
 
     # Clear all CE overrides if requested
@@ -936,13 +1019,13 @@ def generate_forecasts(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Forecast generation failed: {str(e)}"
+            detail=f"Generazione del previsionale non riuscita: {str(e)}"
         )
     except Exception as e:
         logger.exception("Forecast generation error for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error during forecast generation: {str(e)}"
+            detail=f"Errore interno durante la generazione del previsionale: {str(e)}"
         )
 
     # Build response with summary
@@ -1006,7 +1089,7 @@ def preview_forecast_route(
         logger.exception("Forecast preview failed for scenario=%s", scenario_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error during forecast preview: {str(e)}"
+            detail=f"Errore interno durante l'anteprima del previsionale: {str(e)}"
         )
 
 

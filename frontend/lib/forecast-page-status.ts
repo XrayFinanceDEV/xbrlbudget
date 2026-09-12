@@ -1,0 +1,114 @@
+/**
+ * CE Prev., SP Prev. e Report leggono tutte `useAnalysis` (`hooks/use-queries.ts`) e
+ * restavano su "Caricamento..." senza alcun segnale quando `/analysis` falliva: il
+ * `detail` del backend veniva scartato in favore di una stringa fissa, e non c'era modo
+ * di ritentare se non un refresh completo della pagina (rilievo 3 del collaudo del lotto
+ * 2, `.superpowers/sdd/2026-09-08-scadenziamento-pregresso/task-10-report-parte1.md`
+ * righe 354-377).
+ *
+ * Le tre pagine derivano il proprio stato da qui, e rendono l'errore con
+ * `components/budget/ForecastLoadError.tsx`: nessuna delle due decide da sola. Come
+ * `lib/budget-stale.ts`, questo modulo resta puro e testabile in `environment: node` —
+ * jsdom non e' installato in questo progetto, quindi il componente non ha una sua suite,
+ * solo questa.
+ */
+import { getErrorMessage } from "@/lib/utils";
+
+export type ForecastPageStatus = "caricamento" | "errore" | "pronto";
+
+/**
+ * Tentativi e attesa espliciti per `useAnalysis`: prima erano solo il default globale
+ * di `components/providers.tsx` (mai testato per questa query in particolare), e un
+ * cambiamento futuro di quel default avrebbe allungato la finestra di caricamento
+ * apparente senza che nessuna suite se ne accorgesse.
+ */
+export const ANALYSIS_RETRY_COUNT = 1;
+export const ANALYSIS_RETRY_DELAY_MS = 1000;
+
+export function forecastPageStatus(loading: boolean, error: unknown): ForecastPageStatus {
+  if (loading) return "caricamento";
+  if (error) return "errore";
+  return "pronto";
+}
+
+/**
+ * CE Prev., SP Prev. e Report fanno DUE richieste in sequenza: prima la
+ * lista scenari (`useScenarios`), poi `/analysis` (`useAnalysis`, abilitata
+ * solo dopo che uno scenario e' stato selezionato dalla lista). Le tre
+ * pagine leggevano solo l'errore della seconda: quando falliva la PRIMA
+ * (es. backend giu', 500), `useAnalysis` restava `enabled: false` e non
+ * produceva mai un errore suo, mentre `scenarios` di default cadeva su `[]`
+ * — indistinguibile da "azienda senza scenari" (rilievo 1 del collaudo
+ * finale del lotto 3B). Questa funzione decide lo stato UNA volta, cosi'
+ * le tre pagine non ripetono a mano la stessa logica (spec §3.2).
+ */
+export interface ForecastQueryState {
+  loading: boolean;
+  error: unknown;
+}
+
+/** Quale delle due richieste ha fallito, se una ha fallito. La lista scenari
+ * viene prima nella sequenza e vince: se e' lei a fallire, l'analisi non
+ * gira nemmeno. */
+export type ForecastErrorSource = "scenarios" | "analysis" | null;
+
+export interface ForecastPageState {
+  status: ForecastPageStatus;
+  errorSource: ForecastErrorSource;
+}
+
+export function forecastPageState(
+  scenarios: ForecastQueryState,
+  analysis: ForecastQueryState,
+): ForecastPageState {
+  const loading = scenarios.loading || analysis.loading;
+  const errorSource: ForecastErrorSource = scenarios.error
+    ? "scenarios"
+    : analysis.error
+      ? "analysis"
+      : null;
+  const error = errorSource === "scenarios" ? scenarios.error : analysis.error;
+  return { status: forecastPageStatus(loading, error), errorSource };
+}
+
+/**
+ * "Nessuno scenario budget trovato" e' vero SOLO quando la lista si e'
+ * caricata davvero ed e' vuota — mai mentre sta ancora caricando, e mai
+ * quando e' fallita (altrimenti un 500 sulla lista si presenta come
+ * "azienda senza scenari", lo stesso rilievo 1 di cui sopra).
+ */
+export function forecastScenariosEmpty(
+  scenarios: ForecastQueryState,
+  count: number,
+): boolean {
+  return !scenarios.loading && !scenarios.error && count === 0;
+}
+
+/**
+ * Il messaggio da mostrare per un errore di caricamento previsionale.
+ *
+ * Un errore Axios con `.response` e' arrivato dal server: il `detail` vince
+ * (`getErrorMessage`). Senza `.response` non c'e' stato alcun corpo da leggere — rete
+ * giu', timeout, o (prima del Task 1 di questo lotto) un 500 che il browser bloccava
+ * come CORS: in quel caso `error.message` sarebbe la stringa inglese di axios ("Network
+ * Error"), quindi si usa un testo italiano fisso invece di propagarla.
+ *
+ * Con `.response` ma senza un `detail` leggibile (un 502 di proxy con corpo HTML, un
+ * 500 senza JSON), lo stesso rischio si ripete: un vero `AxiosError` e' anche un `Error`
+ * con `.message` sempre valorizzato, e `getErrorMessage` ricade su quel messaggio
+ * (testo inglese di axios, es. "Request failed with status code 502") **prima** del
+ * fallback italiano. Per questo qui non si passa l'errore originale a `getErrorMessage`,
+ * ma un oggetto semplice con la sola `response`: non essendo un `Error`, quel ramo non
+ * scatta e l'assenza di un `detail` leggibile arriva sempre al fallback italiano
+ * (rilievo I-2 della revisione finale del lotto 3B).
+ */
+export function forecastLoadErrorMessage(error: unknown): string {
+  const response =
+    typeof error === "object" && error !== null
+      ? (error as { response?: unknown }).response
+      : undefined;
+  if (response == null) {
+    return "Il server non ha risposto. Controlla la connessione e riprova.";
+  }
+  return getErrorMessage({ response }, "Impossibile caricare i dati previsionali.");
+}

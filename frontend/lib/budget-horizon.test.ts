@@ -3,12 +3,17 @@ import {
   forecastYearsFor,
   defaultAssumption,
   withDefaultsForYears,
+  withPregresso,
+  trimPregressoToHorizon,
+  withPregressoTrimmedToHorizon,
   baseYearNote,
   hydrateAssumptions,
   horizonFromSavedRows,
   assumptionRowsForSave,
+  type AssumptionsMap,
 } from "@/lib/budget-horizon";
-import type { BudgetAssumptions } from "@/types/api";
+import { residualAfter, validatePregresso } from "@/lib/budget-pregresso-circolante";
+import type { BudgetAssumptions, Pregresso, PregressoKey } from "@/types/api";
 
 /**
  * Riga `BudgetAssumptions` completa, con tutti i campi valorizzati a un
@@ -45,6 +50,8 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     altri_finanz_repayment_years: null,
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
+    overdraft_allowed: false,
+    overdraft_limit: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,
     interest_rate_receivables: 0,
@@ -75,6 +82,7 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     sp17f_growth_pct: null,
     sp17g_growth_pct: null,
     sp18_growth_pct: null,
+    sp_indexing: null,
     sp_overrides: null,
     ce01_override: null,
     ce02_override: null,
@@ -108,6 +116,7 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     ce18_override: null,
     ce19_override: null,
     ce20_override: null,
+    pregresso: null,
     created_at: "",
     updated_at: "",
     ...overrides,
@@ -234,19 +243,19 @@ describe("hydrateAssumptions", () => {
     "financing_interest_rate", "financing_loans", "fixed_materials_growth_pct",
     "fixed_materials_percentage", "fixed_services_growth_pct", "fixed_services_percentage",
     "forecast_year", "intangible_investments", "investments", "other_costs_growth_pct",
-    "other_revenue_growth_pct", "payables_short_growth_pct", "personnel_growth_pct",
-    "previdenza_scales_with_personnel", "receivables_long_growth_pct",
+    "other_revenue_growth_pct", "overdraft_allowed", "overdraft_limit", "payables_short_growth_pct", "personnel_growth_pct",
+    "pregresso", "previdenza_scales_with_personnel", "receivables_long_growth_pct",
     "receivables_short_growth_pct", "rent_growth_pct", "revenue_growth_pct", "scenario_id",
     "sp01_growth_pct", "sp04_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
     "sp08_growth_pct", "sp10_growth_pct", "sp14_growth_pct", "sp16e_growth_pct",
     "sp16f_growth_pct", "sp16g_growth_pct", "sp17d_growth_pct", "sp17e_growth_pct",
-    "sp17f_growth_pct", "sp17g_growth_pct", "sp18_growth_pct", "sp_overrides",
+    "sp17f_growth_pct", "sp17g_growth_pct", "sp18_growth_pct", "sp_indexing", "sp_overrides",
     "tangible_investments", "tax_advances_paid", "tax_rate", "tax_temporary_differences",
     "tfr_accrual_suspended", "variable_materials_growth_pct", "variable_services_growth_pct",
   ];
 
-  it("scrive esattamente le 87 chiavi congelate, ordinate", () => {
-    expect(CHIAVI_ATTESE.length).toBe(87);
+  it("scrive esattamente le 91 chiavi congelate, ordinate", () => {
+    expect(CHIAVI_ATTESE.length).toBe(91);
     const out = hydrateAssumptions([fixtureRow({ forecast_year: 2026 })], 1);
     expect(Object.keys(out[2026]).sort()).toEqual([...CHIAVI_ATTESE].sort());
   });
@@ -279,6 +288,72 @@ describe("hydrateAssumptions", () => {
     expect(out[2026].tax_advances_paid).toBe(0);
     expect(out[2026].tax_temporary_differences).toBeNull();
   });
+
+  it(
+    "coerce un pregresso tornato dal server con importi-STRINGA a numeri veri (rilievo 5, giro di correzione 1)",
+    () => {
+      // JSON reale osservato dal collaudo su GET /scenarios/{id}/assumptions
+      // (task-10-report-parte1.md, righe 668-679): la colonna `pregresso` e'
+      // un bag di `Decimal`, e Pydantic v2 li serializza come STRINGA in
+      // "json mode" — anche se il tipo `Pregresso` promette `number`.
+      const pregressoDalServer = {
+        crediti_commerciali: {
+          opening: "7657687.3",
+          amounts: ["6451277.6", "806409.7"],
+          writeoff: ["400000"],
+        },
+        debiti_tributari: {
+          opening: "146441",
+          saldo: "60000",
+          rateizzato: "86441",
+          amounts: ["20000", "20000", "20000"],
+          acconto_pct: "100",
+        },
+      } as unknown as Pregresso;
+
+      const row = {
+        ...fixtureRow({ forecast_year: 2026 }),
+        pregresso: pregressoDalServer,
+      } as unknown as BudgetAssumptions;
+      const out = hydrateAssumptions([row], 1);
+      const p = out[2026].pregresso!;
+
+      // Ogni campo numerico e' un vero `number`, non la stringa arrivata dal
+      // server: e' la causa, non solo il sintomo.
+      expect(typeof p.crediti_commerciali!.opening).toBe("number");
+      expect(typeof p.crediti_commerciali!.amounts[0]).toBe("number");
+      expect(typeof p.crediti_commerciali!.writeoff![0]).toBe("number");
+      expect(typeof p.debiti_tributari!.rateizzato).toBe("number");
+
+      // Residuo crediti commerciali: l'intera massa e' gia' stata
+      // scadenziata (importi + inesigibile = apertura), quindi deve fare
+      // ZERO — non NaN. Senza coercizione la somma concatena le stringhe
+      // ("0" + "6451277.6" + "806409.7" ha due punti decimali) e
+      // `plan.opening - quella_stringa` e' NaN.
+      expect(residualAfter(p.crediti_commerciali!, 1)).toBe(0);
+
+      // Nessuna validazione falsa sui debiti tributari: le tre rate
+      // (60.000) stanno ben dentro il rateizzato (86.441). Senza
+      // coercizione la somma concatenata delle rate resta un intero valido
+      // ma enormemente piu' grande, e la validazione la legge come "le rate
+      // superano il rateizzato".
+      const masses: Record<PregressoKey, number> = {
+        crediti_commerciali: p.crediti_commerciali!.opening,
+        debiti_fornitori: 0,
+        debiti_tributari: p.debiti_tributari!.opening,
+        debiti_previdenziali: 0,
+        altri_debiti: 0,
+      };
+      expect(validatePregresso(p, masses, 5)).toEqual([]);
+
+      // Residuo rate (passo 7, tabella): il rateizzato meno le rate
+      // versate, 86.441 − 60.000 = 26.441 — non azzerato da un confronto
+      // fra stringhe concatenate che il clamp `Math.max(0, …)` schiaccia a
+      // zero silenziosamente.
+      const tabellaPlan = { ...p.debiti_tributari!, opening: p.debiti_tributari!.rateizzato };
+      expect(residualAfter(tabellaPlan, 2)).toBe(26441);
+    },
+  );
 });
 
 describe("horizonFromSavedRows", () => {
@@ -319,7 +394,7 @@ describe("assumptionRowsForSave", () => {
     const attese = Object.keys(map[2026]).sort();
     // Ancorato all'elenco congelato di `hydrateAssumptions`: se il numero si
     // muove, il difetto e' li' e questo test non si aggiorna per zittirlo.
-    expect(attese.length).toBe(87);
+    expect(attese.length).toBe(91);
     const rows = assumptionRowsForSave(map, [2026, 2027], 7);
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(Object.keys(row).sort()).toEqual(attese);
@@ -346,5 +421,107 @@ describe("assumptionRowsForSave", () => {
     const [row] = assumptionRowsForSave(map, [2026], 7);
     expect(row.ce09_override).toBe(12345);
     expect(row.revenue_growth_pct).toBe(8);
+  });
+});
+
+// ── Il piano di pregresso: dove vive, e come si accorcia (Task 7, giro 1) ───
+
+describe("withPregresso (conflitto A + B)", () => {
+  it("scrive il piano nella riga del PRIMO anno di piano, non in un altro", () => {
+    const p: Pregresso = { altri_debiti: { opening: 58, amounts: [58] } };
+    const out = withPregresso({}, [2026, 2027, 2028], p);
+    expect(out[2026].pregresso).toBe(p);
+    expect(out[2027]).toBeUndefined();
+    expect(out[2028]).toBeUndefined();
+  });
+
+  it("conserva il resto della riga del primo anno, non la sostituisce", () => {
+    const map: AssumptionsMap = { 2026: { forecast_year: 2026, revenue_growth_pct: 5 } };
+    const out = withPregresso(map, [2026, 2027], { altri_debiti: { opening: 1, amounts: [1] } });
+    expect(out[2026].revenue_growth_pct).toBe(5);
+    expect(out[2026].pregresso).toEqual({ altri_debiti: { opening: 1, amounts: [1] } });
+  });
+
+  it("un orizzonte senza anni non scrive nulla: restituisce la mappa ricevuta", () => {
+    const map: AssumptionsMap = {};
+    expect(withPregresso(map, [], { altri_debiti: { opening: 1, amounts: [1] } })).toBe(map);
+  });
+
+  it("null e' un valore scrivibile: azzera il piano invece di lasciare quello vecchio", () => {
+    const map = withPregresso({}, [2026], { altri_debiti: { opening: 1, amounts: [1] } });
+    const out = withPregresso(map, [2026], null);
+    expect(out[2026].pregresso).toBeNull();
+  });
+});
+
+describe("trimPregressoToHorizon (rilievo 3)", () => {
+  it("un piano nullo o assente resta tale, stessa identita'", () => {
+    expect(trimPregressoToHorizon(null, 3)).toBeNull();
+    expect(trimPregressoToHorizon(undefined, 3)).toBeUndefined();
+  });
+
+  it("un piano che sta gia' nell'orizzonte non si tocca: STESSA identita' (invariante CLAUDE.md)", () => {
+    const p: Pregresso = { altri_debiti: { opening: 58, amounts: [20, 20] } };
+    expect(trimPregressoToHorizon(p, 3)).toBe(p);
+    expect(trimPregressoToHorizon(p, 2)).toBe(p);
+  });
+
+  it("un piano piu' lungo dell'orizzonte si accorcia: gli anni tagliati diventano residuo oltre", () => {
+    const p: Pregresso = { altri_debiti: { opening: 58000, amounts: [10000, 10000, 10000, 10000, 10000] } };
+    const out = trimPregressoToHorizon(p, 3);
+    expect(out).not.toBe(p);
+    expect(out?.altri_debiti).toEqual({ opening: 58000, amounts: [10000, 10000, 10000] });
+  });
+
+  it("accorcia anche l'inesigibile, indipendentemente dagli importi", () => {
+    const p: Pregresso = {
+      crediti_commerciali: { opening: 100000, amounts: [10000, 10000], writeoff: [1000, 1000, 1000, 1000] },
+    };
+    const out = trimPregressoToHorizon(p, 2);
+    expect(out?.crediti_commerciali).toEqual({ opening: 100000, amounts: [10000, 10000], writeoff: [1000, 1000] });
+  });
+
+  it("un piano che, dopo il taglio, resta tutto a zero torna null (rilievo 2 applicato al taglio)", () => {
+    const p: Pregresso = { altri_debiti: { opening: 58000, amounts: [58000, 0, 0, 0, 0] } };
+    const out = trimPregressoToHorizon(p, 1);
+    expect(out?.altri_debiti).toEqual({ opening: 58000, amounts: [58000] });
+
+    const tuttoZero: Pregresso = { altri_debiti: { opening: 58000, amounts: [0, 0, 0, 0, 0] } };
+    expect(trimPregressoToHorizon(tuttoZero, 2)?.altri_debiti).toBeNull();
+  });
+
+  it("piu' saldi lunghi insieme si accorciano tutti, gli altri restano intatti", () => {
+    const p: Pregresso = {
+      debiti_fornitori: { opening: 300, amounts: [100, 100, 100, 100] },
+      altri_debiti: { opening: 58, amounts: [58] },
+    };
+    const out = trimPregressoToHorizon(p, 2);
+    expect(out?.debiti_fornitori).toEqual({ opening: 300, amounts: [100, 100] });
+    expect(out?.altri_debiti).toBe(p.altri_debiti);
+  });
+});
+
+describe("withPregressoTrimmedToHorizon (rilievo 3, sui due punti di chiamata)", () => {
+  it("accorcia il piano del primo anno alla lunghezza dell'orizzonte", () => {
+    const map: AssumptionsMap = {
+      2026: { forecast_year: 2026, pregresso: { altri_debiti: { opening: 58000, amounts: [10000, 10000, 10000, 10000, 10000] } } },
+    };
+    const out = withPregressoTrimmedToHorizon(map, [2026, 2027, 2028]);
+    expect(out[2026].pregresso?.altri_debiti).toEqual({ opening: 58000, amounts: [10000, 10000, 10000] });
+  });
+
+  it("restituisce la STESSA mappa quando non c'e' nulla da accorciare", () => {
+    const map: AssumptionsMap = { 2026: { forecast_year: 2026, pregresso: null } };
+    expect(withPregressoTrimmedToHorizon(map, [2026, 2027])).toBe(map);
+
+    const senzaPrimoAnno: AssumptionsMap = {};
+    expect(withPregressoTrimmedToHorizon(senzaPrimoAnno, [])).toBe(senzaPrimoAnno);
+  });
+
+  it("un piano gia' dentro l'orizzonte non tocca la mappa: stessa identita'", () => {
+    const map: AssumptionsMap = {
+      2026: { forecast_year: 2026, pregresso: { altri_debiti: { opening: 58, amounts: [58] } } },
+    };
+    expect(withPregressoTrimmedToHorizon(map, [2026, 2027, 2028])).toBe(map);
   });
 });

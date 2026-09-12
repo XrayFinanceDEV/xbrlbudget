@@ -34,7 +34,7 @@ describe("budget-wizard-steps", () => {
     expect(nextStep("scenario")).toBe("fatturato");
     expect(nextStep("imposte")).toBeNull();
     expect(prevStep("scenario")).toBeNull();
-    expect(stepForErrorMessage("Unfunded financing requirement 84,120.00: add ...")).toBe("pregresso-nuovo");
+    expect(stepForErrorMessage("Fabbisogno finanziario scoperto di 84.120,00: aggiungi ...")).toBe("pregresso-nuovo");
     expect(stepForErrorMessage("altro")).toBe("imposte");
     expect(stepStorageKey(12)).toBe("budget-wizard-step:12");
   });
@@ -146,13 +146,13 @@ describe("saveOutcome", () => {
   it("un previsionale rifiutato torna 200: la verita' e' in forecast_generated", () => {
     const out = saveOutcome({
       forecast_generated: false,
-      message: "Unfunded financing requirement 84,120.00",
+      message: "Fabbisogno finanziario scoperto di 84.120,00",
     });
     expect(out.ok).toBe(false);
-    // Il toast e' in italiano — `saveNotice`, la stessa frase dell'anteprima —
-    // ma il PASSO si decide sul messaggio grezzo, che e' in inglese.
+    // Il toast e' la stessa frase dell'anteprima (`saveNotice`), rifinita
+    // dal riconoscimento del fabbisogno; il PASSO si decide sul messaggio
+    // grezzo, gia' italiano alla fonte.
     expect(out.message).toContain("Fabbisogno finanziario scoperto");
-    expect(out.message).not.toContain("Unfunded");
     expect(out.step).toBe("pregresso-nuovo");
   });
   it("un rifiuto non naviga MAI: niente toast verde su una Proiezione vuota", () => {
@@ -194,5 +194,42 @@ describe("horizonLabel", () => {
   it("nessun anno di piano non e' un intervallo a rovescio", () => {
     expect(horizonLabel(0, 2026)).toBe("Nessun anno di piano");
     expect(horizonLabel(-2, 2026)).toBe("Nessun anno di piano");
+  });
+});
+
+describe("stepForErrorMessage · scoperto di c/c (Task 12)", () => {
+  it("il tetto dello scoperto superato riporta al passo in cui lo scoperto si concede", () => {
+    expect(stepForErrorMessage(
+      "Scoperto di conto corrente oltre il tetto concesso: servono 5.014.777,78, il tetto concesso e' 100.000,00",
+    )).toBe("pregresso-nuovo");
+  });
+});
+
+describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
+  it("un rifiuto fornitori che dice «passo Pregresso e nuovo» atterra sul passo 6", () => {
+    // Messaggio reale di `_rifiuto_override_governati` (via
+    // `_messaggio_override_oltre`), generato da `c8317ca`.
+    expect(stepForErrorMessage(
+      "L'override di sp17d_debiti_fornitori_lungo non è ammesso: i debiti verso fornitori hanno un piano di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo compreso. Il valore forzato verrebbe salvato e cancellato in silenzio l'anno dopo, con la cassa ad assorbire la differenza senza alcun flusso. La via lecita è modificare il piano al passo Pregresso e nuovo, oppure svuotare la cella (value: null) e lasciare che la riga segua il piano.",
+    )).toBe("pregresso-nuovo");
+  });
+  it("vale anche con il nome del passo virgolettato", () => {
+    expect(stepForErrorMessage(
+      "Modifica il piano nel passo «Pregresso e nuovo», oppure svuota la cella (value: null).",
+    )).toBe("pregresso-nuovo");
+  });
+  it("un rifiuto tributario che nomina «Imposte» resta sul passo 7", () => {
+    // Messaggio reale del ramo `sp17e` senza piano (rilievo I-b).
+    expect(stepForErrorMessage(
+      "L'override di sp17e_debiti_tributari_lungo non è ammesso: la posizione tributaria è a saldo + acconto e l'anno dopo non legge questa riga, legge la scomposizione dichiarata nei `details`. Il valore forzato sparirebbe senza alcun versamento, con la cassa ad assorbire la differenza. La via lecita è il piano di scadenziamento al passo Imposte, oppure svuotare la cella (value: null).",
+    )).toBe("imposte");
+  });
+  it("il fabbisogno non coperto continua ad atterrare sul passo 6", () => {
+    expect(stepForErrorMessage(
+      "Fabbisogno finanziario scoperto di 44.885,64: aggiungi un'ipotesi di finanziamento esplicita",
+    )).toBe("pregresso-nuovo");
+  });
+  it("un errore generico atterra su Imposte come prima", () => {
+    expect(stepForErrorMessage("Revenue must be positive in the base year")).toBe("imposte");
   });
 });

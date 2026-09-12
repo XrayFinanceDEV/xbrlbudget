@@ -45,3 +45,11 @@ confronto e un altro nella proiezione.
 Suite da tenere verdi: `tests/test_intra_year_semantics.py`,
 `test_intra_year_plug_negativo.py`, `test_intra_year_end_to_end_periods.py`,
 `test_infrannuale_dual_year.py`.
+
+---
+
+> **Rinominata dal lotto 3A, Task 5 — commit `b5698ce`.** `tax_closing_position` non esiste più:
+> entrambi i costruttori chiamano ora `projection_common.posizione_tributaria_fine_anno`
+> (`calculations/intra_year_engine.py:1228,1480`). La duplicazione descritta sopra resta
+> invariata — i due metodi esistono ancora entrambi — solo il nome della funzione tributaria è
+> cambiato. (Nota aggiunta dal riallineamento del 2026-09-11.)

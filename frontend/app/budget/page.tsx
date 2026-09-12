@@ -21,6 +21,8 @@ import {
 import { formatCurrency } from "@/lib/formatters";
 import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
 import { getErrorMessage } from "@/lib/utils";
+import { righeErroriIpotesi } from "@/lib/budget-bulk-errors";
+import { saveNotice } from "@/lib/budget-preview-notice";
 import { patchPraticaPerScenarioAperto } from "@/lib/pratica-ingresso";
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
 import { BudgetWizard } from "@/components/budget/wizard/BudgetWizard";
@@ -989,8 +991,11 @@ function ScenarioFormStartup({
       // The backend returns success:true even when generation fails
       // (assumptions_service.py:318-327) — check the explicit flag.
       if (result?.forecast_generated === false) {
+        // `saveNotice` (giro di correzione 2, rilievo 6): stesso prefisso
+        // fisso del backend tradotto in italiano del wizard, non un secondo
+        // testo scritto a mano che potrebbe divergerne.
         toast.warning(
-          result?.message ?? "Ipotesi salvate, ma il previsionale non è stato generato"
+          result?.message ? saveNotice(result.message) : "Ipotesi salvate, ma il previsionale non è stato generato"
         );
       } else {
         toast.success("Scenario salvato e previsionale calcolato con successo!");
@@ -998,7 +1003,18 @@ function ScenarioFormStartup({
       onSaved();
     } catch (err: any) {
       console.error("Error saving scenario:", err);
-      toast.error(getErrorMessage(err, "Impossibile salvare lo scenario"));
+      const righe = righeErroriIpotesi(err);
+      if (righe) {
+        toast.error("Ipotesi non salvate: correggi i campi indicati", {
+          description: (
+            <ul className="list-disc pl-4">
+              {righe.map((riga) => <li key={riga}>{riga}</li>)}
+            </ul>
+          ),
+        });
+      } else {
+        toast.error(getErrorMessage(err, "Impossibile salvare lo scenario"));
+      }
     } finally {
       setLoading(false);
     }

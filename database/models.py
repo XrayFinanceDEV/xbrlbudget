@@ -625,6 +625,16 @@ class BudgetAssumptions(Base):
     cash_sweep_enabled = Column(Boolean, default=False, nullable=False)
     cash_sweep_min_cash = Column(Numeric(15, 2), nullable=True)  # Cash floor to keep (NULL = 0)
 
+    # Scoperto di conto corrente (opt-in, per forecast year): la cassa plugga solo
+    # verso l'alto, e un plug negativo e' un fabbisogno scoperto. Spento (il
+    # default) il motore alza e non produce nulla, come ha sempre fatto — quindi
+    # ogni scenario esistente si comporta come prima. Acceso, il fabbisogno diventa
+    # `sp16a_debiti_banche_breve` generato dal piano, dichiarato nei `details` e
+    # distinto dal debito bancario pregresso. Serve anche a MISURARE: un piano
+    # stressato lo si vuole poter far girare per leggere quanta finanza richiede.
+    overdraft_allowed = Column(Boolean, default=False, nullable=False)
+    overdraft_limit = Column(Numeric(15, 2), nullable=True)  # NULL = concesso senza tetto
+
     # TFR accrual suspension: companies with >60 employees pay the maturing TFR to the
     # INPS treasury fund instead of accruing it internally. When True, the TFR fund
     # (sp15) stops growing for this forecast year (the ce08a cost stays in the P&L).
@@ -654,6 +664,16 @@ class BudgetAssumptions(Base):
     financing_duration_years = Column(Numeric(10, 2), default=0, nullable=False)  # Loan duration in years
     financing_interest_rate = Column(Numeric(10, 6), default=0, nullable=False)  # Loan interest rate %
     financing_loans = Column(JSON, nullable=True)  # Additional loans for the same forecast year
+
+    pregresso = Column(JSON, nullable=True)  # Scadenziamento del pregresso, solo riga del primo anno (spec lotto 2)
+
+    # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15):
+    # {"sp16g": "ricavi", "sp17d": "acquisti", "sp16f": "personale"}. Chiave
+    # ASSENTE = costante, cioe' il comportamento di sempre (`prev × (1+%)`).
+    # Il motore applica `stock dell'anno base × fattore del driver` — la forma
+    # gia' cablata su `previdenza_scales_with_personnel`, che indicizza e non
+    # compone, cosi' un piano a cinque anni non accumula deriva.
+    sp_indexing = Column(JSON, nullable=True)
 
     # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
     sp01_growth_pct = Column(Numeric(10, 6), nullable=True)  # Crediti verso soci

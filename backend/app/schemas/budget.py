@@ -3,7 +3,7 @@ Pydantic schemas for Budget and Forecast models
 """
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 from decimal import Decimal
 
 
@@ -76,9 +76,9 @@ class FinancingLoanInput(BaseModel):
     @model_validator(mode="after")
     def validate_contract(self):
         if self.amount == 0 and self.opening_residual == 0:
-            raise ValueError("amount or opening_residual must be greater than zero")
+            raise ValueError("l'importo o il residuo iniziale devono essere maggiori di zero")
         if self.grace_years >= self.duration_years:
-            raise ValueError("grace_years must be lower than duration_years")
+            raise ValueError("gli anni di preammortamento devono essere meno della durata")
         return self
 
 
@@ -91,6 +91,40 @@ class TemporaryDifferenceInput(BaseModel):
     additions: Decimal = Field(default=Decimal("0"), ge=0)
     reversals: Decimal = Field(default=Decimal("0"), ge=0)
     tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+
+
+SpIndexingDriver = Literal["ricavi", "acquisti", "personale"]
+"""I tre driver di volume, e solo tre (Task 15 §2).
+
+`ricavi` = `ce01` previsto / `ce01` base · `acquisti` = `ce05 + ce06` ·
+`personale` = `ce08`. Un quarto nome e' un errore del chiamante e va rifiutato
+qui: il motore non inventa un fattore per un driver che non conosce, e un 422
+dice al client che cosa ha sbagliato meglio di una chiave silenziosamente
+ignorata.
+"""
+
+
+class PregressoPlanInput(BaseModel):
+    """Runoff plan for a working capital item (receivables or payables)."""
+    opening: Decimal = Field(..., ge=0)
+    amounts: List[Decimal] = Field(default_factory=list)
+    writeoff: Optional[List[Decimal]] = None  # solo crediti_commerciali
+
+
+class PregressoTributariInput(PregressoPlanInput):
+    """Runoff plan for tax payables with settlement details."""
+    saldo: Decimal = Field(default=Decimal("0"), ge=0)
+    rateizzato: Decimal = Field(default=Decimal("0"), ge=0)
+    acconto_pct: Decimal = Field(default=Decimal("100"), ge=0, le=200)
+
+
+class PregressoInput(BaseModel):
+    """Opening balances and runoff schedules for working capital items and tax payables."""
+    crediti_commerciali: Optional[PregressoPlanInput] = None
+    debiti_fornitori: Optional[PregressoPlanInput] = None
+    debiti_tributari: Optional[PregressoTributariInput] = None
+    debiti_previdenziali: Optional[PregressoPlanInput] = None
+    altri_debiti: Optional[PregressoPlanInput] = None
 
 
 class BudgetAssumptionsBase(BaseModel):
@@ -134,6 +168,12 @@ class BudgetAssumptionsBase(BaseModel):
     cash_sweep_enabled: bool = False
     cash_sweep_min_cash: Optional[Decimal] = None
 
+    # Scoperto di c/c (opt-in): un fabbisogno scoperto diventa sp16a generato dal
+    # piano invece di far alzare il motore. Spento = comportamento di sempre.
+    overdraft_allowed: bool = False
+    # None = concesso senza tetto; negativo non ha senso (un fido non e' un credito).
+    overdraft_limit: Optional[Decimal] = Field(default=None, ge=0)
+
     # TFR accrual suspended (TFR paid to INPS, fund stops growing this year)
     tfr_accrual_suspended: bool = False
 
@@ -158,6 +198,13 @@ class BudgetAssumptionsBase(BaseModel):
     financing_duration_years: Decimal = Field(default=Decimal("0"))
     financing_interest_rate: Decimal = Field(default=Decimal("0"))
     financing_loans: Optional[List[FinancingLoanInput]] = None
+
+    # Scadenziamento del pregresso (runoff schedules for working capital and tax payables)
+    pregresso: Optional[PregressoInput] = None
+
+    # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15).
+    # Chiave assente = costante, cioe' il comportamento di sempre.
+    sp_indexing: Optional[Dict[str, SpIndexingDriver]] = None
 
     # SP line item growth % overrides (None = 0% / carry forward unchanged)
     sp01_growth_pct: Optional[Decimal] = None
@@ -219,6 +266,19 @@ class BudgetAssumptionsCreate(BudgetAssumptionsBase):
     pass
 
 
+class BudgetAssumptionsBulkRow(BudgetAssumptionsBase):
+    """Una riga del bulk `PUT /assumptions`: gli stessi vincoli di `BudgetAssumptionsCreate`, senza `scenario_id` obbligatorio
+    (lo scenario e' nel percorso). Serve SOLO a validare: le righe si costruiscono ancora da `build_assumption_row`,
+    cosi' un input valido produce esattamente le righe di prima. `extra="forbid"` SOLO qui (non su
+    `BudgetAssumptionsBase`/`BudgetAssumptionsCreate`, entrambe usate altrove): un campo sconosciuto
+    nel corpo del bulk oggi viene accettato e scartato in silenzio da pydantic (default
+    `extra="ignore"`) -- un refuso o un campo rinominato lato frontend non arriva mai a un errore,
+    sparisce e basta. `BudgetAssumptionsBulkRow` e' l'unica classe che questo file istanzia da un
+    dict di client (`validate_bulk_rows`, unico chiamante); nessun altro schema del bulk cambia."""
+    model_config = ConfigDict(extra="forbid")
+    scenario_id: Optional[int] = None
+
+
 class BudgetAssumptionsUpdate(BaseModel):
     """Schema for updating BudgetAssumptions"""
     forecast_year: Optional[int] = Field(None, ge=2000, le=2100)
@@ -246,6 +306,8 @@ class BudgetAssumptionsUpdate(BaseModel):
     altri_finanz_repayment_years: Optional[Decimal] = None
     cash_sweep_enabled: Optional[bool] = None
     cash_sweep_min_cash: Optional[Decimal] = None
+    overdraft_allowed: Optional[bool] = None
+    overdraft_limit: Optional[Decimal] = Field(None, ge=0)
     tfr_accrual_suspended: Optional[bool] = None
     previdenza_scales_with_personnel: Optional[bool] = None
     interest_rate_receivables: Optional[Decimal] = None
@@ -261,6 +323,13 @@ class BudgetAssumptionsUpdate(BaseModel):
     financing_duration_years: Optional[Decimal] = None
     financing_interest_rate: Optional[Decimal] = None
     financing_loans: Optional[List[FinancingLoanInput]] = None
+
+    # Scadenziamento del pregresso
+    pregresso: Optional[PregressoInput] = None
+
+    # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15).
+    # Chiave assente = costante, cioe' il comportamento di sempre.
+    sp_indexing: Optional[Dict[str, SpIndexingDriver]] = None
 
     # SP line item growth % overrides
     sp01_growth_pct: Optional[Decimal] = None
@@ -378,3 +447,25 @@ class IntraYearComparison(BaseModel):
     period_months: int
     income_items: List[IntraYearComparisonItem]
     balance_items: List[IntraYearComparisonItem]
+
+
+# Override Request Schemas
+class SpOverrideEntry(BaseModel):
+    """One cell edit of SP Prev.: `{forecast_year, field, value}`.
+
+    `value` is a Decimal so that a non-numeric body is refused HERE, by
+    Pydantic (422), and never reaches the engine, where
+    `Decimal(str(raw_value))` raises `decimal.InvalidOperation` -- an
+    `ArithmeticError`, not a `ValueError`, which the route could only report
+    as a 500 (final review of the lotto 2, M2). NaN and infinities are
+    refused too: either would silently poison every projected line.
+    `value: null` means "clear this key", same as before.
+    """
+    forecast_year: int
+    field: str
+    value: Optional[Decimal] = Field(default=None, allow_inf_nan=False)
+
+
+class SpOverrideRequest(BaseModel):
+    """Body of `PATCH /companies/{id}/scenarios/{id}/sp-override`."""
+    overrides: List[SpOverrideEntry]

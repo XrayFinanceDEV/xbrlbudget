@@ -6,6 +6,7 @@ in a single response. This simplifies the API by consolidating multiple endpoint
 """
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
+from datetime import timezone
 from decimal import Decimal
 import sys
 import os
@@ -76,6 +77,9 @@ def get_complete_analysis(
     # Calculate projection_years dynamically from forecast years count
     projection_years = len(scenario.forecast_years) if scenario.forecast_years else 0
 
+    # Il previsionale a schermo e' piu' vecchio delle ipotesi salvate?
+    assumptions_updated_at, forecast_updated_at, forecast_stale = _forecast_staleness(scenario)
+
     # Build result structure
     result = {
         "scenario": {
@@ -93,7 +97,13 @@ def get_complete_analysis(
         },
         "historical_years": [],
         "forecast_years": [],
-        "calculations": {}
+        "calculations": {},
+        # Dichiarati SEMPRE, anche a `false`/`None`: a valle una chiave assente
+        # vale zero, quindi tacere equivarrebbe a dichiararsi allineati
+        # (CLAUDE.md › «Invarianti e trappole»).
+        "forecast_stale": forecast_stale,
+        "assumptions_updated_at": assumptions_updated_at,
+        "forecast_updated_at": forecast_updated_at,
     }
 
     # 2. Get historical years (base_year - 1 and base_year)
@@ -196,6 +206,74 @@ def get_complete_analysis(
         result["calculations"]["cashflow"] = {"years": cashflow_years}
 
     return result
+
+
+def _forecast_staleness(scenario) -> tuple:
+    """Il previsionale persistito e' piu' vecchio delle ipotesi che dovrebbe
+    riflettere?
+
+    Serve perche' `PUT /scenarios/{id}/assumptions` risponde **200 con
+    `success: true`** anche quando la generazione viene respinta: le ipotesi
+    restano salvate, il `ForecastYear` no, e le viste continuano a mostrare i
+    numeri della generazione PRECEDENTE senza un segnale (CLAUDE.md ›
+    «Invarianti e trappole › Previsionale»). Lo stesso vale, per costruzione,
+    sul percorso `auto_generate=false`.
+
+    Si confrontano i timestamp, non una bandiera persistita: una bandiera puo'
+    divergere dalla realta' — la si dimentica in un percorso, o resta accesa
+    dopo una rigenerazione andata a buon fine altrove — un confronto no.
+
+    Due regole che il confronto da solo non da':
+
+    - **Nessun `ForecastYear` ⇒ `False`**, non `True`: non c'e' niente di
+      stantio da mostrare, la vista e' vuota e il vuoto si vede da solo.
+    - **Nessuna ipotesi ⇒ `False`**: manca il termine di paragone, e un
+      controllo che manca e' «non lo so», non un verdetto negativo.
+
+    Il confronto e' **stretto**: `datetime.utcnow()` ha i microsecondi e la
+    generazione scrive dopo le ipotesi, quindi la parita' e' «allineato».
+
+    I due timestamp escono in **UTC esplicito, col suffisso `Z`**. Le colonne
+    sono `default=datetime.utcnow`, cioe' UTC *ingenuo*: emesso cosi' com'e',
+    `Date.parse` lo legge come ora LOCALE (misurato in Europe/Rome: `08:00`
+    diventa `06:00Z`) e il primo che lo mostra a schermo lo sposta di due ore.
+    Il verdetto non ne dipende, perche' confronta due valori della stessa base.
+    Nota per chi li confronta come stringhe: `isoformat()` OMETTE la frazione
+    quando i microsecondi sono zero, e poiche' `'Z'` > `'.'` l'ordine
+    lessicografico di `"…00Z"` e `"…00.500000Z"` e' l'inverso di quello degli
+    istanti. Si confrontano gli istanti, mai le stringhe.
+
+    Returns:
+        (assumptions_updated_at ISO UTC `Z` | None,
+         forecast_updated_at ISO UTC `Z` | None,
+         stale)
+    """
+    def _latest(rows):
+        stamps = [r.updated_at or r.created_at for r in rows or []]
+        stamps = [s for s in stamps if s is not None]
+        return max(stamps) if stamps else None
+
+    assumptions_at = _latest(scenario.assumptions)
+    forecast_at = _latest(scenario.forecast_years)
+    stale = bool(assumptions_at and forecast_at and assumptions_at > forecast_at)
+
+    def _iso_utc(stamp):
+        # Colonne ingenue per costruzione (`default=datetime.utcnow`): il
+        # suffisso dichiara la base che il valore ha gia'. Un valore con fuso
+        # si porta prima in UTC e si spoglia: accodare `Z` a un `+00:00`
+        # darebbe una stringa che `Date.parse` non legge, e l'avviso si
+        # spegnerebbe senza che nessuno se ne accorga.
+        if stamp is None:
+            return None
+        if stamp.tzinfo is not None:
+            stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+        return stamp.isoformat() + "Z"
+
+    return (
+        _iso_utc(assumptions_at),
+        _iso_utc(forecast_at),
+        stale,
+    )
 
 
 def _calculate_year_metrics(
@@ -529,5 +607,6 @@ def _serialize_cash_reconciliation(reconciliation) -> Dict[str, Any]:
         "cash_beginning": float(reconciliation.cash_beginning),
         "cash_ending": float(reconciliation.cash_ending),
         "difference": float(reconciliation.difference),
-        "verification_ok": reconciliation.verification_ok
+        "verification_ok": reconciliation.verification_ok,
+        "third_party_funds_gap": float(reconciliation.third_party_funds_gap)
     }

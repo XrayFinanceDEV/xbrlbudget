@@ -18,11 +18,14 @@ const RESPONSE_WITH_ERROR: ForecastPreviewResponse = {
         dso_applied: 60,
         dio_applied: 30,
         dpo_applied: 45,
+        pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } },
+        imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" },
+        degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [] }, override_conflicts: [],
       },
     },
   ],
   // Il motore si e' fermato al 2026 (fabbisogno scoperto), ma il 2025 e' valido.
-  error: { year: 2026, message: "Unfunded financing requirement 12.345,67" },
+  error: { year: 2026, message: "Fabbisogno finanziario scoperto di 12.345,67" },
 };
 
 describe("previewStateFromResponse", () => {
@@ -32,7 +35,7 @@ describe("previewStateFromResponse", () => {
     expect(state.data).toEqual(RESPONSE_WITH_ERROR);
     expect(state.data?.forecast_years).toHaveLength(1);
     expect(state.data?.forecast_years[0].year).toBe(2025);
-    expect(state.data?.error).toEqual({ year: 2026, message: "Unfunded financing requirement 12.345,67" });
+    expect(state.data?.error).toEqual({ year: 2026, message: "Fabbisogno finanziario scoperto di 12.345,67" });
   });
 
   it("il canale di trasporto resta null: una 200 non e' un guasto di rete", () => {

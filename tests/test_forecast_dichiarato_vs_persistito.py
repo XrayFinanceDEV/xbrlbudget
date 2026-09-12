@@ -1,0 +1,1157 @@
+"""L'invariante: nessun numero persistito diverge da quello dichiarato.
+
+**Perche' questo file esiste.** Il residuo di quadratura che riscrive una riga
+gia' dichiarata e' stato trovato **cinque volte** in `forecast_engine.py`:
+
+| # | Dove | Chiuso da |
+|---|---|---|
+| 1 | conto economico, righe con `*_override` (Task 11) | `_forced_ce_residual_fields` |
+| 2 | `ce09d`, l'inesigibile scadenziato (Task 5) | `_engine_forced_ce_fields` |
+| 3 | `sp16g`/`sp17g` scritti da un piano (Task 5 round 2) | `_pregresso_sp_forced_fields` |
+| 4 | le voci indicizzate a un driver (Task 15) | `_indexed_sp_forced_fields` |
+| 5 | `sp16e`/`sp16f`, il ripiego quando il secchio e' forzato (Task 15 round 1) | `_declared_sp_fields` |
+
+Ogni volta da chi lo **cercava** con una sonda usa-e-getta, mai da chi leggeva; e
+ogni sonda e' stata buttata dopo l'uso, cosi' la volta dopo si ripartiva da zero.
+Tappare l'ennesimo caso significa garantirsi il successivo: questo file e' la
+sonda che resta.
+
+**Che cosa afferma.** Su ogni anno di ogni scenario della batteria, per ogni
+numero che il motore **dichiara** — nei `details` o accettando un override —
+il valore persistito e' quel numero arrotondato al centesimo. Non «vicino»: la
+quantizzazione del motore e' `ROUND_HALF_UP`, quindi la coincidenza e' esatta e
+un solo centesimo di scarto e' un difetto.
+
+**Che cosa NON copre, e perche'.** Le SINGOLE sotto-voci di `sp06`/`sp07`: la
+loro somma di dettagli quantizzati non e' l'aggregato quantizzato, e nessun
+`details` dichiara i singoli sotto-campi. E' la stessa ragione per cui
+`_pregresso_sp_forced_fields` lascia fuori `crediti_commerciali`. La RIGA
+descritta (N-I3 del giro 3), invece, ora e' confrontata: la parte commerciale di
+`sp06` — `sp06 − sp06e − sp06f`, l'unica quantità che il piano dei crediti
+governa — deve coincidere col `generated + residual_short` dichiarato.
+
+**Se questo test diventa rosso** il difetto e' quasi sempre nel motore, non qui:
+qualcuno ha dichiarato un numero e ne ha persistito un altro. Allargare l'elenco
+delle esenzioni per farlo tornare verde e' il modo di riaprire il caso numero sei.
+"""
+import itertools
+from collections import Counter
+from decimal import ROUND_HALF_UP, Decimal as D
+
+import pytest
+
+from backend.app.api.v1 import budget_scenarios
+from backend.app.schemas.budget import BudgetScenarioCreate
+from calculations.forecast_engine import ForecastEngine, SP_INDEXABLE_FIELDS
+from database.models import BalanceSheet, FinancialYear
+from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
+
+USER = "invariante"
+
+# I quattro debiti che `details['pregresso']` descrive riga per riga. I crediti
+# commerciali non ci sono: vedi il docstring del modulo.
+SHORT_LONG = {
+    "debiti_fornitori": ("sp16d_debiti_fornitori_breve", "sp17d_debiti_fornitori_lungo"),
+    "debiti_tributari": ("sp16e_debiti_tributari_breve", "sp17e_debiti_tributari_lungo"),
+    "debiti_previdenziali": ("sp16f_debiti_previdenza_breve", "sp17f_debiti_previdenza_lungo"),
+    "altri_debiti": ("sp16g_altri_debiti_breve", "sp17g_altri_debiti_lungo"),
+}
+
+# Gli override di CE che cadono DENTRO un gruppo con un secchio di residuo
+# (`ce08`, `ce09`): sono esattamente quelli del caso 1.
+CE_OVERRIDES = {
+    "ce09c_override": "ce09c_svalutazioni",
+    "ce09d_override": "ce09d_svalutazione_crediti",
+    "ce08d_override": "ce08d_altri_costi_personale",
+    "ce08a_override": "ce08a_tfr_accrual",
+}
+
+
+def _q(x):
+    """Al centesimo con la stessa regola del motore (`_quantize_values`)."""
+    return D(str(x)).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _quota_nuovi(det):
+    """La quota a breve dei soli prestiti NUOVI, dai `details['debito_bancario']`."""
+    contratti = (det.get("debito_bancario") or {}).get("contratti") or []
+    return sum((D(str(c["breve"])) for c in contratti if D(str(c.get("residuo_iniziale") or 0)) == 0), D("0"))
+
+
+def _posizione_tributaria_dichiarata(det):
+    """`debito − credito` tributario GREZZO, come lo dichiarano i `details`.
+
+    E' la stessa quantita' che le tre celle (`sp16e`, `sp17e`, `sp06e`) vanno a
+    dire, ma presa prima della quantizzazione: sui DICHIARATI l'identita' di
+    flusso e' un numero esatto, sulle celle e' una somma di sei code (rilievo
+    m-5, giro 4). Composizione,
+    `calculations/forecast_engine.py` (ramo `saldo_acconto`):
+
+      `imposte.generated_debt`                     il saldo maturato, non pagato
+    + `pregresso['debiti_tributari'].residual_short` + `.residual_long`
+                                                   il rateizzato ancora aperto —
+                                                   SOLO in `mode: runoff`, perche'
+                                                   il runoff tributario scandisce
+                                                   il solo `rateizzato` della
+                                                   `plan_tax` con la lista
+                                                   `writeoff` VUOTA (nessuna
+                                                   scrittura di debito oltre alla
+                                                   rata); in `mode: legacy` la
+                                                   riga dichiara zeri e il debito
+                                                   e' tutto in `generated_debt`
+    - `imposte.generated_credit`                   l'eccedenza degli acconti
+    - `imposte.opening_credit_left`                il credito d'apertura residuo
+    """
+    imposte = det.get("imposte") or {}
+    pos = (D(str(imposte.get("generated_debt") or 0))
+           - D(str(imposte.get("generated_credit") or 0))
+           - D(str(imposte.get("opening_credit_left") or 0)))
+    riga = (det.get("pregresso") or {}).get("debiti_tributari") or {}
+    if riga.get("mode") == "runoff":
+        pos += (D(str(riga.get("residual_short") or 0))
+                + D(str(riga.get("residual_long") or 0)))
+    return pos
+
+
+# I sei debiti finanziari, la cui ripartizione fra pregresso e prestito nuovo e'
+# scritta a mano da `_calculate_balance_sheet` (Task 16): un residuo di quadratura
+# posato qui non e' un centesimo, e' una rata cancellata (m-2 del giro 2).
+FINANZIARI_SEMPRE = frozenset({
+    "sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+    "sp16c_debiti_obbligazioni_breve", "sp17a_debiti_banche_lungo",
+    "sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo",
+})
+
+
+def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
+    """Ogni numero dichiarato che il persistito non conferma.
+
+    Restituisce coppie `(campo, spiegazione)`: il campo separato serve a
+    raggruppare il fallimento per FAMIGLIA invece che per ordine di scenario
+    (vedi il messaggio in coda al test). `prec`, quando c'e', e' la coppia
+    `(bs, det)` dell'anno generato prima: serve all'identità di flusso
+    tributario (rilievo M-4, punto 1), che e' una frase su DUE anni. `chiuse`
+    e' il dizionario `{saldo: Σ(rata+perse) degli anni FINO a questo}` che il
+    ciclo di uno scenario accumula per la riga-identità (rilievo M-4, punto
+    3): la riga dichiara `opening` come apertura DEL PIANO (costante per anno,
+    `runoff_schedule`), quindi l'identità è `opening − Σclosed`, non
+    `opening − closed`.
+    """
+    fuori = []
+
+    # (Ruling 57c) Un campo forzato da SP Prev. non si confronta piu' riga per
+    # riga con le scomposizioni dei `details`: l'asserzione diventa
+    # «persistito == override», e vince lei (precedente: il writeoff con
+    # `ce09d_override`). Le righe di `details` che lo descrivevano restano
+    # quelle che il motore ha riallineato al persistito (I1): il confronto
+    # diretto con l'override e' quello che le tiene oneste.
+    sp_ov = row.get("sp_overrides") or {}
+
+    # (Task 12, lotto 3A) Quando nessun campo neutro del gruppo e' libero, il
+    # residuo di quadratura si posa comunque sul primo di essi e si DICHIARA
+    # (`campo_dichiarato: True`). L'`importo` in `residuo_quadratura` e' pero'
+    # il residuo AL MOMENTO DELLA POSATURA, dentro `_normalize_balance_sheet_
+    # cents` — non il divario finale che questo test legge: sul percorso
+    # completo (`compute_forecast`) `_realign_sp_declarations` gira SUBITO
+    # dopo e riallinea la dichiarazione al persistito (il ramo `legacy` per
+    # intero, il ramo `runoff` con `generated = persisted − residual_short`,
+    # l'indicizzazione sempre) — chiudendo il divario a ZERO, sia che
+    # `_normalize_balance_sheet_cents` l'abbia gia' fatto lei sia che no
+    # (misura di questo task: stesso stato finale nei due casi, mai un doppio
+    # conteggio).
+    #
+    # (Task 12, lotto 3A, giro di correzione 1) Il confronto e' quindi con
+    # ZERO, non con un TETTO pari all'importo posato — rilievo Importante di
+    # `task-12-review-contratto.md` §C: un tetto lascia passare un difetto
+    # PARZIALE del riallineamento (misurato dal revisore iniettando meta'
+    # correzione nel ramo `runoff` di `_realign_sp_declarations`: scarto reale
+    # −0,01 su una tolleranza dichiarata di 0,02, invisibile al tetto perche'
+    # strettamente dentro il suo raggio). L'uguaglianza col brief («scarto ==
+    # importo dichiarato», cioe' il divario TRANSITORIO dentro
+    # `_normalize_balance_sheet_cents`) resta sbagliata per un'altra ragione,
+    # misurata dall'esecutore: produce 16 falsi positivi, perche' quello che
+    # legge questo confronto e' il divario FINALE (dopo il riallineamento),
+    # sempre chiuso a zero — non il residuo di passaggio. Confrontare sempre
+    # con zero coglie entrambi i casi: un campo mai toccato dal residuo di
+    # quadratura ci arriva gia' a zero per definizione, e un campo con una
+    # posatura dichiarata ci arriva a zero SOLO se il riallineamento ha fatto
+    # il suo lavoro per intero — misurato su questa stessa batteria (144
+    # scenari, 321 anni): lo scarto e' sempre 0 col codice consegnato, e
+    # diventa immediatamente visibile (−0,01) con la mutazione iniettata sopra
+    # (vedi il rapporto del giro di correzione 1 per la prova).
+    def confronta(campo, atteso, chi):
+        letto = bs.get(campo) if campo.startswith("sp") else ce.get(campo)
+        scarto = _q(letto or 0) - _q(atteso)
+        if scarto != D("0"):
+            fuori.append((campo, f"{campo}: persistito {letto}, dichiarato {_q(atteso)} da {chi}"))
+
+    for campo, val in sp_ov.items():
+        if val is not None and campo in bs:
+            confronta(campo, D(str(val)), "sp_overrides")
+
+    def forzato(campo):
+        return sp_ov.get(campo) is not None
+
+    # ── casi 3 e 5: i quattro debiti, con o senza piano ──
+    for saldo, (breve, oltre) in SHORT_LONG.items():
+        if not forzato(breve):
+            d = det["pregresso"][saldo]
+            confronta(breve, D(str(d["generated"])) + D(str(d["residual_short"])),
+                      f"details['pregresso']['{saldo}']")
+            # Senza piano il lato oltre segue la propria percentuale e i `details`
+            # non lo descrivono: dichiarare un confronto li' sarebbe inventarlo.
+            if d["mode"] == "runoff" and not forzato(oltre):
+                confronta(oltre, d["residual_long"], f"details['pregresso']['{saldo}'].residual_long")
+
+    # ── (n-1, giro 5) l'invariante di flusso tributario qui sotto assume ──
+    # `writeoff` sempre zero sulla riga `debiti_tributari`: il runoff
+    # tributario e' chiamato con una lista letterale vuota (nessun
+    # condono/inesigibile tributario oggi), ma la riga lo dichiara comunque,
+    # come le altre quattro. Detto ad alta voce, non solo nel commento della
+    # funzione qui sotto: se un domani smettesse di essere zero, l'identita'
+    # di flusso tributario diventerebbe silenziosamente falsa.
+    d_tax_riga = (det.get("pregresso") or {}).get("debiti_tributari") or {}
+    if D(str(d_tax_riga.get("writeoff") or 0)) != D("0"):
+        fuori.append(("writeoff tributario",
+                      f"details['pregresso']['debiti_tributari'].writeoff e' "
+                      f"{d_tax_riga.get('writeoff')}, non zero: l'identita' di flusso "
+                      "tributario (sotto, rilievo M-4 punto 1) presuppone che sia sempre "
+                      "zero e va rivista"))
+
+    # ── la posizione tributaria scrive anche il CREDITO ──
+    # Il confronto e' fra una DICHIARAZIONE e il persistito, non fra la riga e
+    # l'override: tocca quindi correre anche quando la riga e' forzata (rilievo
+    # M-4 della revisione di `f330730` — la rete saltava questi due confronti
+    # proprio sui campi forzati, ed e' li' che I1 aveva lasciato una sede incoerente).
+    imposte = det["imposte"]
+    if imposte["mode"] == "saldo_acconto":
+        confronta("sp06e_crediti_tributari_breve",
+                  D(str(imposte["generated_credit"])) + D(str(imposte["opening_credit_left"])),
+                  "details['imposte']")
+        # ── rilievo m-5, punto 2 (giro 4): anche `sp16e` ancorata alla sede
+        # `imposte`, non solo a quella di riga ──
+        # Il ciclo qui sopra confronta `sp16e` con `generated + residual_short`
+        # della SOLA riga `pregresso`, e salta la cella quando un override
+        # l'ha forzata: li' responde l'altro giro (`persistito == override`),
+        # che pero' non dice nulla su quanto la sede `imposte` — quella che
+        # l'anno dopo ci si PAGA sopra — sia rimasta coerente con la cella.
+        # E' il confronto che manca, ed e' la ragione per cui la mutazione 12
+        # (passo 2 di `_realign_sp_declarations` spento) era vista solo
+        # transitivamente, dal «due sedi».
+        d_pos = det["pregresso"]["debiti_tributari"]
+        rs_pos = (D(str(d_pos["residual_short"])) if d_pos["mode"] == "runoff"
+                  else D("0"))
+        confronta("sp16e_debiti_tributari_breve",
+                  D(str(imposte["generated_debt"])) + rs_pos,
+                  "details['imposte'].generated_debt + riga.residual_short")
+        # `sp17e == q(residual_long)` NON e' qui: lo asserisce gia' il ciclo
+        # `SHORT_LONG` sopra, e per l'unica riga dove puo' valere (modo
+        # `runoff`: senza piano il runoff tributario e' tutto a zero).
+    if imposte["mode"] == "saldo_acconto":
+        # I1: la posizione tributaria e' dichiarata in DUE sedi (`imposte` e la
+        # riga `debiti_tributari` di `pregresso`). Il confronto con la riga
+        # persistita lo fa gia' il ciclo qui sopra con `generated +
+        # residual_short` (e con il rateizzato del piano non sarebbe corretto
+        # ripeterlo qui: `generated_debt` e' solo la quota di saldo); cio' che
+        # nessun altro confronto garantisce e' che le due sedi dicano LO STESSO
+        # numero anche sotto un override (Ruling 57a: «dichiarato = persistito
+        # vale per ogni chiave»).
+        d_tax = det["pregresso"]["debiti_tributari"]
+        if _q(D(str(imposte["generated_debt"]))) != _q(D(str(d_tax["generated"]))):
+            fuori.append(("sp16e due sedi", f"details['imposte'] dice {imposte['generated_debt']}, "
+                                            f"details['pregresso']['debiti_tributari'] dice "
+                                            f"{d_tax['generated']}"))
+
+    # ── N-I3 (giro 3): la riga `crediti_commerciali` dichiara la parte
+    # commerciale di `sp06`, e il persistito la conferma ──
+    d_cred = det["pregresso"]["crediti_commerciali"]
+    commerciale = (bs["sp06_crediti_breve"]
+                   - bs["sp06e_crediti_tributari_breve"]
+                   - bs["sp06f_imposte_anticipate_breve"])
+    if _q(commerciale) != _q(D(str(d_cred["generated"])) + D(str(d_cred["residual_short"]))):
+        fuori.append(("riga crediti", f"parte commerciale di sp06 {commerciale}, dichiarato "
+                      f"{d_cred['generated']} + {d_cred['residual_short']} = "
+                      f"{D(str(d_cred['generated'])) + D(str(d_cred['residual_short']))}"))
+
+    # ── rilievo M-4, punto 3 (giro 3): il CONTABILE di ogni riga con piano ──
+    # `opening − Σclosed − Σwriteoff = residual_short + residual_long`, con Σ
+    # sugli anni del piano FINO a questo (l'`opening` di riga e' l'apertura
+    # del piano intero, non dell'anno: `runoff_schedule`): la rata che il
+    # calendario dice di aver pagato deve essere uscita dal residuo che
+    # dichiara, o la riga racconta un anno diverso dalla cella che descrive.
+    # Solo il modo `runoff`: in `legacy` la riga non ha calendario (rs e rl
+    # sono zero per costruzione), e pretendere l'identità lì sarebbe
+    # un'asserzione inventata.
+    for saldo, d in (det.get("pregresso") or {}).items():
+        if d.get("mode") != "runoff":
+            continue
+        if chiuse is None:
+            sigma = D(str(d.get("closed") or 0)) + D(str(d.get("writeoff") or 0))
+        else:
+            sigma = chiuse.setdefault(saldo, D("0"))
+            chiuse[saldo] = sigma
+        residuo = _q(D(str(d.get("opening") or 0)) - sigma)
+        dichiarati = _q(D(str(d.get("residual_short") or 0))
+                        + D(str(d.get("residual_long") or 0)))
+        if residuo != dichiarati:
+            fuori.append((f"riga {saldo}",
+                          f"{saldo}: apertura {d.get('opening')} − Σ chiuse {sigma}"
+                          f" = {residuo}, residui dichiarati"
+                          f" {dichiarati} ({d.get('residual_short')} + {d.get('residual_long')})"))
+
+    # ── rilievo M-4, punto 1 (giro 3), FORMA ESATTA (rilievo m-5, giro 4) ──
+    # `pos_d(N) − pos_d(N−1) − (imposta − saldo − acconti − rate) == 0`, con
+    # `pos_d` la posizione tributaria GREZZA come la dichiarano i `details`
+    # (non come la scrivono le celle): se la posizione si e' mossa senza che un
+    # versamento — o il calcolo dell'imposta — lo dica, l'ha mossa la cassa
+    # senza flusso, il difetto che le due sedi riallineate da I1 promettono di
+    # non avere piu'. Vale dal secondo anno generato in poi, e solo se ENTRAMBI
+    # gli anni parlano in modo `saldo_acconto`: un controllo che non puo'
+    # correre qui e' «non lo so», non un verdetto.
+    #
+    # PRIMA CORREVA SULLE CELLE, CON UNA SOGLIA DI 0,02 MOTIVATA MALE: «al piu'
+    # 0,005 + 0,01» diceva il commento, mentre le code di quantizzazione da
+    # sommare sono SEI (tre celle per due anni: `sp16e`, `sp17e`, `sp06e`),
+    # quindi il limite teorico DI QUELLA VECCHIA FORMA A SOGLIA era 6 x 0,005 =
+    # 0,03 — una soglia che, nel codice consegnato qui sotto, non esiste piu'
+    # affatto (n-2, giro 5: la forma a soglia e' stata rimossa, non ridotta a
+    # 0,03; il confronto e' `!= D("0")`, esatto). Misura di QUESTO giro su una
+    # copia strumentata della batteria (`RETE_LOG`, 1.272 confronti): lo scarto
+    # sulle celle arriva a 0,01392 (33 sopra 0,01, nessuno sopra 0,015) — uno
+    # 0,02 non nasconde un flusso, ma puo' dare un falso rosso su un fixture
+    # sfortunato; sui DICHIARATI grezzi lo scarto e' invece ESATTAMENTE 0 in
+    # 1.272 confronti su 1.272. Non si tratta di tollerare meno: si tratta di
+    # confrontare grandezze OMOGENEE, e di lasciare alla forma sulle celle — che
+    # gira piu' sopra, nei confronti `confronta()` di `imposte`/`pregresso` —
+    # il compito di dire che dichiarato e persistito sono lo stesso numero.
+    if prec is not None:
+        _bs_p, det_p = prec          # le celle non servono: qui si guarda la sola dichiarazione
+        i0, i1 = det.get("imposte") or {}, det_p.get("imposte") or {}
+        # Sotto un override di `sp16e`/`sp06e` DELL'ANNO N il flusso dichiarato
+        # dal kernel non e' quel che e' stato pagato: e' l'override stesso il
+        # flusso non dichiarato, e il primo confronto della rete
+        # (`persistito == override`) risponde di quella cella. Si salta SOLO
+        # l'anno forzato: l'anno DOPO l'override deve invece stare a zero per
+        # costruzione (I1: la dichiarazione riallineata porta avanti la
+        # scelta), ed e' esattamente la copertura che il rilievo M-4 chiedeva.
+        ov_now = row.get("sp_overrides") or {}
+        forzato_pos = any(ov_now.get(c) is not None for c in (
+            "sp16e_debiti_tributari_breve", "sp06e_crediti_tributari_breve"))
+        if (i0.get("mode") == "saldo_acconto" and i1.get("mode") == "saldo_acconto"
+                and not forzato_pos
+                and all(k in i0 for k in ("current_tax", "saldo_paid",
+                                          "acconti_paid", "rate_paid"))):
+            scarto = (_posizione_tributaria_dichiarata(det)
+                      - _posizione_tributaria_dichiarata(det_p)
+                      - (D(str(i0["current_tax"])) - D(str(i0["saldo_paid"]))
+                         - D(str(i0["acconti_paid"])) - D(str(i0["rate_paid"]))))
+            if scarto != D("0"):
+                fuori.append(("flusso tributario",
+                              f"scarto di flusso {scarto} sui dichiarati: la posizione "
+                              f"e' cambiata senza un versamento che lo dichiari "
+                              f"(imposta {i0['current_tax']}, saldo {i0['saldo_paid']}, "
+                              f"acconti {i0['acconti_paid']}, rate {i0['rate_paid']})"))
+
+    # ── caso 4: le voci indicizzate ──
+    for code, voce in det["indicizzazione"].items():
+        if not forzato(SP_INDEXABLE_FIELDS[code]):
+            confronta(SP_INDEXABLE_FIELDS[code], voce["valore"], f"details['indicizzazione']['{code}']")
+
+    # ── caso 1: un override vince, e vince fino in fondo ──
+    for attr, riga in CE_OVERRIDES.items():
+        if row.get(attr) is not None:
+            confronta(riga, row[attr], attr)
+
+    # ── caso 2: l'inesigibile scadenziato finisce in `ce09d` per intero ──
+    # Solo quando c'e' davvero un inesigibile: senza, `ce09d` e' il dettaglio di
+    # CHIUSURA del gruppo `ce09` e prendersi il residuo e' il suo mestiere, non un
+    # difetto (`_engine_forced_ce_fields` lo forza con la stessa condizione).
+    # Preteserlo comunque e' un'asserzione sbagliata, non una rete piu' fitta: la
+    # prima stesura lo faceva e dichiarava 112 divergenze inesistenti.
+    # E con un override della riga (o del suo aggregato) l'inesigibile e'
+    # soppresso e vince l'override, che il ciclo qui sopra ha gia' confrontato.
+    writeoff = D(str(det["pregresso"]["crediti_commerciali"]["writeoff"]))
+    if writeoff > 0 and row.get("ce09d_override") is None and row.get("ce09_override") is None:
+        confronta("ce09d_svalutazione_crediti", writeoff,
+                  "details['pregresso']['crediti_commerciali'].writeoff")
+
+    # ── lo scoperto di c/c (Task 12) e il debito bancario per componenti (Task 2) ──
+    # Le otto chiavi si dichiarano sempre: a valle una chiave assente vale zero.
+    for chiave in ("cassa_assorbita", "scoperto_generato", "scoperto_residuo", "oneri_scoperto",
+                   "fabbisogno_picco", "fabbisogno_picco_anno", "cassa_sotto_minimo",
+                   "debito_bancario"):
+        if chiave not in det:
+            fuori.append((chiave, f"{chiave}: chiave non dichiarata"))
+    cassa = bs["sp09_disponibilita_liquide"]
+    residuo = D(str(det.get("scoperto_residuo") or 0))
+    if cassa < 0:
+        fuori.append(("sp09 negativa", f"cassa persistita {cassa}"))
+    # I2: cassa libera e scoperto non convivono, neppure dopo un `sp_overrides`.
+    if cassa > 0 and residuo > 0:
+        fuori.append(("I2 cassa e scoperto", f"cassa {cassa} e scoperto {residuo} nello stesso anno"))
+    # Il debito bancario per componenti (lotto 3A, Task 2): somma dei `breve` piu' lo scoperto = `sp16a`,
+    # somma dei `lungo` = `sp17a`, al centesimo.
+    debito = det.get("debito_bancario") or {}
+    componenti = [c for c in (debito.get("pregresso_senza_piano"), debito.get("pregresso_piano_anni")) if c]
+    componenti += list(debito.get("contratti") or [])
+    breve = sum((D(str(c["breve"])) for c in componenti), D("0")) + residuo
+    lungo = sum((D(str(c["lungo"])) for c in componenti), D("0"))
+    if breve != bs["sp16a_debiti_banche_breve"]:
+        fuori.append(("debito_bancario breve", f"breve dichiarato {breve}, sp16a {bs['sp16a_debiti_banche_breve']}"))
+    if lungo != bs["sp17a_debiti_banche_lungo"]:
+        fuori.append(("debito_bancario lungo", f"lungo dichiarato {lungo}, sp17a {bs['sp17a_debiti_banche_lungo']}"))
+    if bs["_total_assets"] != bs["_total_liabilities"]:
+        fuori.append(("quadratura", f"attivo {bs['_total_assets']} != passivo {bs['_total_liabilities']}"))
+
+    # Il residuo di quadratura non si posa MAI su un campo la cui dichiarazione
+    # comanda il MOTORE. E' la stessa affermazione dei confronti qui sopra,
+    # presa dall'altro capo: quelli guardano l'esito, questo guarda l'atto.
+    # Ma "dichiarato" non vuol dire "elencato nei `details`": una riga in modo
+    # legacy HA un `generated` che realign_ scrive eguale al persistito, quindi
+    # un centesimo posato li' sopravvive dichiarato anche l'anno dopo (ed e' il
+    # comportamento pre-lotto: il secchio libero lo riceveva). Inviolabili sono
+    # le righe la cui memoria sta ALTROVE dal bilancio: il calendario del piano
+    # (modo runoff), l'indicizzazione (che riporta alla BASE, non al prev), la
+    # ripartizione bancaria, e cio' che un override dell'utente ha fissato.
+    dichiarati = (
+        {campo for saldo, coppia in SHORT_LONG.items()
+         if det["pregresso"][saldo]["mode"] == "runoff" for campo in coppia}
+        | {SP_INDEXABLE_FIELDS[code] for code in det["indicizzazione"]}
+        # Task 16, giro di correzione 1 (rilievo 4): entrambi i lati della
+        # ripartizione pregresso/prestito nuovo, non solo il breve.
+        | {"sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo"}
+        # Il secchio forzato da un piano/indice e' inviolabile anche se la sua
+        # riga e' legacy: dove la batteria arriva, un centesimo su una riga che
+        # l'utente ha forzato dalla schermata SP Prev. cancellere' l'override.
+        | {c for c, v in sp_ov.items() if v is not None}
+    )
+    for posa in det["residuo_quadratura"]:
+        if posa["campo"] in FINANZIARI_SEMPRE:
+            fuori.append((posa["campo"], f"residuo di {posa['importo']} su un debito "
+                          "finanziario: la ripartizione pregresso/prestito nuovo e' sua, "
+                          "un centesimo posato qui la cancella"))
+        # (Task 12, lotto 3A) Una posatura DICHIARATA (`campo_dichiarato: True`)
+        # e' esattamente il caso in cui nessun campo neutro del gruppo era
+        # libero: il contratto la manda comunque sul primo campo neutro e la
+        # dichiara, quindi non e' una violazione — la tolleranza sopra tiene
+        # onesto il confronto persistito/dichiarato su quella stessa cella.
+        if posa["campo"] in dichiarati and not posa.get("campo_dichiarato"):
+            fuori.append((posa["campo"],
+                          f"residuo di {posa['importo']} posato su {posa['campo']}, che e' dichiarato"))
+    # m-2 del giro 2 su `6e5c0f7`: la proprieta' «i sei debiti FINANZIARI non li
+    # tocca mai» era affermata ma non asserita da nessuna parte — il motore la
+    # protegge con `_BANK_DEBT_SPLIT_FIELDS` e con `_cammino_esclusi`, e la
+    # prova che la revisione ha fatto con una copia strumentata (0 violazioni su
+    # 77 scenari, 1 su `f330730`) qui diventa un'asserzione permanente: nessuna
+    # posatura nomina un finanziario, MAI, in nessuno scenario della batteria.
+    return fuori
+
+
+def _base_year(db, user):
+    """Un anno base con massa su OGNI voce che la batteria mette alla prova.
+
+    Il fixture del kit tiene tutto il passivo su `sp16d`/`sp17a` e lascia a zero
+    le voci minori: un fattore che moltiplica zero, e un residuo che si posa su
+    una riga vuota, passerebbero qualunque asserzione.
+    """
+    company_id, _ = seed_base_year(db, user_id=user)
+    fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
+    b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
+    b.sp16_debiti_breve = D("145000.00")
+    # `sp16b` non e' un riempitivo: dopo che i quattro debiti dichiarati sono
+    # tutti forzati, e' li' (o su `sp16c`) che il residuo di quadratura si posa.
+    # A zero non si vedrebbe la differenza fra «posato» e «non posato».
+    b.sp16b_debiti_altri_finanz_breve = D("5000.00")
+    b.sp16d_debiti_fornitori_breve = D("80000.00")
+    b.sp16e_debiti_tributari_breve = D("10000.00")
+    b.sp16f_debiti_previdenza_breve = D("15000.00")
+    b.sp16g_altri_debiti_breve = D("35000.00")
+    b.sp17a_debiti_banche_lungo = D("0.00")
+    b.sp17d_debiti_fornitori_lungo = D("20000.00")
+    b.sp17f_debiti_previdenza_lungo = D("10000.00")
+    b.sp17g_altri_debiti_lungo = D("20000.00")
+    b.sp03_immob_materiali = D("140000.00")
+    b.sp04_immob_finanziarie = D("20000.00")
+    b.sp04a_partecipazioni = D("20000.00")
+    b.sp01_crediti_soci = D("3000.00")
+    b.sp01b_parte_da_richiamare = D("3000.00")
+    b.sp08_attivita_finanziarie = D("4000.00")
+    b.sp10_ratei_risconti_attivi = D("5000.00")
+    b.sp14_fondi_rischi = D("6000.00")
+    b.sp14d_altri_fondi = D("6000.00")
+    b.sp18_ratei_risconti_passivi = D("2000.00")
+    # Attivo 40+140+50+120+31+3+20+4+5 = 413 · Passivo 100+60+20+30+145+50+6+2 = 413
+    b.sp09_disponibilita_liquide = D("31000.00")
+    db.commit()
+    return company_id
+
+
+# Le masse dei piani sono quelle del bilancio base qui sopra: `validate_pregresso`
+# impone che coincidano, e un piano che non le rispetta non arriva al motore.
+#
+# **Le rate sono TERZI, non numeri tondi, e non e' un vezzo.** Il residuo di
+# quadratura nasce per definizione dall'arrotondamento: una batteria fatta di
+# 100.000 e 40.000 non lo produce mai, e una sonda cosi' campionata conclude
+# «zero occorrenze» mentre il difetto e' li'. Terzi arrotondati al centesimo non
+# bastano: `runoff_schedule` li restituisce esatti, e il residuo resta zero
+# (misurato). Servono rate con il MEZZO centesimo, che e' la coda che la
+# quantizzazione deve spezzare. E' successo davvero — la sesta
+# occorrenza della trappola (residuo su `sp16d` con piu' piani insieme) era
+# sfuggita a una sonda giusta ma campionata su rate tonde. Terzi e code decimali
+# sono quindi parte della rete quanto le asserzioni.
+PIANI = {
+    "senza piano": None,
+    "altri debiti": {"altri_debiti": {"opening": 55000,
+                                      "amounts": [18333.335, 18333.335, 18333.33]}},
+    "altri + previdenziali": {
+        "altri_debiti": {"opening": 55000, "amounts": [18333.335, 18333.335, 18333.33]},
+        "debiti_previdenziali": {"opening": 25000, "amounts": [8333.335, 8333.335, 8333.33]},
+    },
+    "fornitori + tributari": {
+        "debiti_fornitori": {"opening": 100000, "amounts": [33333.335, 33333.335, 33333.33]},
+        "debiti_tributari": {"opening": 10000, "saldo": 6000, "rateizzato": 4000,
+                             "amounts": [1333.335, 1333.335, 1333.33]},
+    },
+    # La forma esatta della SESTA occorrenza: `sp16e`, `sp16f` e `sp16g` tutti e
+    # tre forzati da un piano, e `sp16d` lasciato libero. Il bersaglio non e'
+    # ne' `sp16d` "perche' e' il campo che la guardia dei giorni degeneri
+    # scrive" ne' `sp16c` (mai candidato: un debito finanziario): e' il primo
+    # campo neutro NON forzato della tabella `_CAMPI_NEUTRI_RESIDUO['sp16_debiti_
+    # breve']` (`sp16g`, `sp16f`, `sp16e`, `sp16d`, in quest'ordine) — qui
+    # `sp16d`, perche' `e`, `f` e `g` hanno un piano attivo e lui no. E' il caso
+    # che una sonda campionata su rate tonde non vede.
+    "tributari + previdenziali + altri": {
+        "debiti_tributari": {"opening": 10000, "saldo": 6000, "rateizzato": 4000,
+                             "amounts": [1333.335, 1333.335, 1333.33]},
+        "debiti_previdenziali": {"opening": 25000, "amounts": [8333.335, 8333.335, 8333.33]},
+        "altri_debiti": {"opening": 55000, "amounts": [18333.335, 18333.335, 18333.33]},
+    },
+    # Con inesigibile: e' il piano che fa scrivere `ce09d` al motore (caso 2).
+    "crediti con inesigibile": {
+        "crediti_commerciali": {"opening": 120000, "amounts": [38333.335, 38333.335, 38333.33],
+                                "writeoff": [1666.67, 0, 0]},
+    },
+}
+
+INDICIZZAZIONE = {
+    "nessuna": None,
+    "solo g": {"sp16g": "ricavi", "sp17g": "ricavi"},
+    # Due righe dello stesso gruppo: e' la combinazione che spinge il residuo
+    # oltre il secchio e oltre `sp16f`, fino ai tributari (caso 5).
+    "f + g": {"sp16f": "ricavi", "sp17f": "ricavi",
+              "sp16g": "acquisti", "sp17g": "acquisti"},
+    "tutte e undici": {"sp01": "ricavi", "sp04": "ricavi", "sp08": "ricavi",
+                       "sp10": "acquisti", "sp14": "personale", "sp16f": "personale",
+                       "sp16g": "ricavi", "sp17d": "acquisti", "sp17f": "personale",
+                       "sp17g": "ricavi", "sp18": "ricavi"},
+}
+
+# I1-bis + giro 2: quale riga a OLTRE ciascun saldo di piano governa (la stessa
+# tabella del motore, `ForecastEngine._LATO_OLTRE_GOVERNATO_DA_PIANO`, qui
+# duplicata deliberatamente: se le due copie divergono, `test_la_copia_diquesta
+# tabella_coincide_col_motore` lo dice in rosso).
+LATO_OLTRE_DEL_PIANO = {
+    "debiti_fornitori": ("sp17d_debiti_fornitori_lungo",),
+    "debiti_tributari": ("sp17e_debiti_tributari_lungo",),
+    "debiti_previdenziali": ("sp17f_debiti_previdenza_lungo",),
+    "altri_debiti": ("sp17g_altri_debiti_lungo",),
+    # Le cinque sotto-voci oltre `sp07` le aggiunge il rilievo I-d del giro 2:
+    # il piano le ripartisce dall'aggregato che rigenera lui, quindi un override
+    # su una di loro e' cancellato l'anno dopo come quello sull'aggregato.
+    "crediti_commerciali": (
+        "sp07_crediti_lungo",
+        "sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+        "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+        "sp07g_crediti_altri_lungo",
+    ),
+}
+
+
+def test_la_copia_diquesta_tabella_coincide_col_motore():
+    """Il motore e questa copia devono dire la stessa cosa, campo per campo."""
+    from calculations.forecast_engine import ForecastEngine
+    assert LATO_OLTRE_DEL_PIANO == ForecastEngine._LATO_OLTRE_GOVERNATO_DA_PIANO
+    assert ForecastEngine._PREGRESSO_SP_FIELDS == SHORT_LONG
+
+
+# `sp_overrides` della famiglia I1: campi dichiarati dalla rete, parte breve.
+SP_FAMIGLIA_BREVE = {
+    "sp06a_crediti_clienti_breve": 119000.29,
+    "sp06e_crediti_tributari_breve": 5000.50,
+    "sp16a_debiti_banche_breve": 25000.11,
+    "sp16d_debiti_fornitori_breve": 80000.37,
+    "sp16e_debiti_tributari_breve": 10000.71,
+    "sp16f_debiti_previdenza_breve": 15000.13,
+    "sp16g_altri_debiti_breve": 35000.19,
+}
+# La parte a oltre che un SENZA piano lascia libera, e che invece il motore
+# deve rifiutare dove il piano e' attivo (Ruling 57b).
+#
+# `sp17e` NON c'e' piu', e non e' una sfoltita: dal rilievo I-b di `f330730`
+# quella riga e' governata dal kernel fiscale IN OGNI SCENARIO, piano o no (in
+# modo `saldo_acconto` vale `r.residual_long`, e senza piano `r` e' il runoff di
+# uno zero), quindi forzarla e' sempre un rifiuto: tenerla qui avrebbe
+# trasformato ventiquattro scenari della batteria in ventiquattro rifiuti,
+# spegnendo la rete. Il suo rifiuto e' un test dedicato (e la batteria lo
+# riafferma per il solo `senza piano`, dove gli altri tre piani tacciono).
+# `sp07e` entra invece come nuova palestra: a oltre, non governata da nessun
+# piano dei debiti, e il motore la porta avanti da `prev`.
+SP_FAMIGLIA_OLTRE = {
+    "sp17d_debiti_fornitori_lungo": 20000.37,
+    "sp07e_crediti_tributari_lungo": 7000.01,
+    "sp17f_debiti_previdenza_lungo": 10000.71,
+    "sp17g_altri_debiti_lungo": 20000.13,
+}
+SP_FAMIGLIA = {**SP_FAMIGLIA_BREVE, **SP_FAMIGLIA_OLTRE}
+
+
+OVERRIDE = {
+    "nessuno": {},
+    "dentro ce08 e ce09": {"ce09c_override": 1234.56, "ce08d_override": 3333.33,
+                           "ce08a_override": 777.77},
+    # `ce09d` sopprime l'inesigibile del piano: l'override vince due volte.
+    "anche ce09d": {"ce09d_override": 4321.99, "ce08d_override": 1111.11},
+    # La famiglia di `sp_overrides` sui campi dichiarati (I1 della revisione
+    # finale): finche' la batteria aveva SOLO override di CE, la rete non
+    # poteva vedere che la posizione tributaria dichiarata divergeva dal
+    # persistito sotto un override di cella. Gli importi stanno vicino alle
+    # masse della base: mai sotto il naturale, perche' una voce di debito
+    # forzata al ribasso sottrae cassa al plug e potrebbe alzare un fabbisogno
+    # che non c'e' — la batteria deve generare, non collidere.
+    # Il LATO OLTRE con un piano attivo, invece, collide per progetto (I1-bis):
+    # quegli scenari si assertiscono sul RIFIUTO, vedi `_rifiuto_atteso`.
+    "SP sui campi dichiarati": {"sp_overrides": SP_FAMIGLIA},
+    # Rilievo M-4, punto 2 (giro 3): un override che cade SOLO nel secondo
+    # anno di piano. Tutta la famiglia fin qui era stata messa in ogni anno,
+    # e una regola applicata solo alla prima riga (la mutazione M8 della
+    # revisione di `f330730`) non avrebbe mai incrociato un secondo anno
+    # forzato. Solo il BREVE: i campi oltre colliderebbero nel rifiuto
+    # I1-bis di proposito, e qui si vuole la palestra che genera.
+    "SP solo anno 2": {"solo_anno": (1, dict(SP_FAMIGLIA_BREVE))},
+    # Rilievo I-1 della revisione di `6e5c0f7`, punto 4: la variante con
+    # l'AGGREGATO forzato, che e' il caso in cui il residuo non e' un
+    # centesimo bensi' la massa dell'override. Con un piano `altri_debiti`
+    # addosso (che governa i secchi di ENTRAMBI i gruppi, quindi congela tutte
+    # e otto le righe operative) deve essere RIFIUTATO; altrove c'e' ancora una
+    # riga libera che lo riceve, e il comportamento e' quello di sempre.
+    "aggregato sp16": {"sp_overrides": {"sp16_debiti_breve": 150000.00}},
+}
+
+# Due investimenti da 0,02 al 20%: due quote da 0,004 che i dettagli arrotondano
+# in giu' e l'aggregato in su, cioe' un residuo di +0,01 su `ce09` — la stessa
+# costruzione con cui il Task 5 dimostro' il caso 2. Senza, il gruppo `ce09` non
+# ha alcun residuo da posare e disattivare `_engine_forced_ce_fields` non produce
+# nulla che si possa misurare (verificato: la rete lo lasciava sfuggire).
+INVESTIMENTI_SOTTO_CENTESIMO = {
+    "intangible_investments": 0.02, "tangible_investments": 0.02,
+    "depreciation_rate": 20, "depreciation_rate_intangible": 20,
+}
+
+
+def _rifiuto_atteso(piano, idx=None, ov=None):
+    """Il campo oltre che il motore deve rifiutare per questo piano, o None.
+
+    Stesso ordine di scansione del motore (`_LATO_OLTRE_GOVERNATO_DA_PIANO`),
+    e la stessa regola aggiuntiva del rilievo I-b: senza piano tributario
+    `sp17e` la governa il kernel fiscale comunque, quindi un override che la
+    batteria NON contiene non deve generare un rifiuto (e difatti la famiglia
+    l'ha lasciata perdere: vedi il commento sopra).
+    """
+    if ov and "sp16_debiti_breve" in ov:
+        # Il cammino di I-1: il totale forzato si rifiuta quando nel gruppo non
+        # resta nessuna riga operativa libera. Non lo indovino a tavolino: lo
+        # chiede alla STESSA funzione del motore (`_sp_forced_fields`), che e'
+        # cio' che il normalizzatore ricevera'. Se la risposta divergesse dal
+        # motore, sarebbe il motore a sbagliare, e la variante della batteria
+        # lo direbbe come un rifiuto mancato.
+        forzati = ForecastEngine._sp_forced_fields(piano, {"indicizzazione": idx or {}})
+        libere = [c for c in ForecastEngine._SP16_RIGHE
+                  if c not in forzati and c not in ForecastEngine._BANK_DEBT_FIELDS_SP16]
+        return "sp16_debiti_breve" if not libere else None
+    for saldo, campi in LATO_OLTRE_DEL_PIANO.items():
+        if not (piano or {}).get(saldo):
+            continue
+        for campo in campi:
+            if SP_FAMIGLIA.get(campo) is not None:
+                return campo
+    return None
+
+
+# Percentuali scelte perche' producono frazioni di centesimo su piu' righe: e'
+# li' che il residuo di quadratura nasce.
+CRESCITE = (1.11, 3.33, 7.77, 0.37)
+ANNI = (2027, 2028, 2029)
+
+
+@pytest.mark.parametrize("crescita", CRESCITE)
+def test_nessun_numero_persistito_diverge_da_quello_dichiarato(crescita, monkeypatch):
+    """La rete permanente: 144 scenari per percentuale, 378 anni, zero divergenze.
+
+    Parametrizzato sulla crescita per avere quattro esiti distinti invece di uno
+    solo: quando si rompe, il messaggio dice su quale percentuale — e un difetto
+    che dipende dall'arrotondamento dipende quasi sempre da quella.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    fuori, scenari, anni, rifiutati = [], 0, 0, 0
+    try:
+        with sessions() as db:
+            for (nome_p, piano), (nome_i, idx), (nome_o, ov) in itertools.product(
+                PIANI.items(), INDICIZZAZIONE.items(), OVERRIDE.items()
+            ):
+                scenari += 1
+                user = f"{USER}-{crescita}-{scenari}"
+                company_id = _base_year(db, user)
+                rows = [dict(forecast_year=y, revenue_growth_pct=crescita,
+                             **INVESTIMENTI_SOTTO_CENTESIMO,
+                             **{k: v for k, v in ov.items() if k != "solo_anno"})
+                        for y in ANNI]
+                if "solo_anno" in ov:
+                    i_ov, d_ov = ov["solo_anno"]
+                    rows[i_ov]["sp_overrides"] = dict(d_ov)
+                if piano:
+                    rows[0]["pregresso"] = piano
+                if idx:
+                    for r in rows:
+                        r["sp_indexing"] = idx
+                sc = budget_scenarios.create_budget_scenario(
+                    company_id,
+                    BudgetScenarioCreate(company_id=company_id, name="inv", base_year=2026,
+                                         scenario_type="budget"),
+                    user_id=user, db=db)
+                rifiutato = _rifiuto_atteso(piano, idx, ov.get("sp_overrides")) if "sp_overrides" in ov else None
+                res = budget_scenarios.bulk_upsert_assumptions(
+                    company_id, sc.id, request={"assumptions": rows, "auto_generate": True},
+                    user_id=user, db=db)
+                if rifiutato:
+                    # I1-bis: con un piano attivo sul saldo, l'override sul suo
+                    # lato oltre deve essere RIFIUTATO, non salvato per essere
+                    # cancellato l'anno dopo. Il rifiuto si legge dal
+                    # `forecast_generated`, non dall'HTTP 200 (CLAUDE.md).
+                    rifiutati += 1
+                    assert res["forecast_generated"] is False, \
+                        f"[{nome_p} | {nome_i} | {nome_o}] {rifiutato} doveva essere rifiutato"
+                    assert "non è ammesso" in res["message"] and rifiutato in res["message"], \
+                        f"[{nome_p} | {nome_i} | {nome_o}] messaggio sbagliato: {res['message']}"
+                    continue
+                # `forecast_generated`, non l'HTTP 200: il bulk risponde 200 anche
+                # a un previsionale rifiutato (CLAUDE.md). Uno scenario che non
+                # genera non e' un caso in meno da controllare: e' la batteria che
+                # ha smesso di provare quello che dice di provare.
+                assert res["forecast_generated"] is True, f"{nome_p}/{nome_i}/{nome_o}: {res['message']}"
+                prev = budget_scenarios.preview_forecast_route(
+                    company_id, sc.id, request={"assumptions": rows}, user_id=user, db=db)
+                prec = None
+                chiuse: dict = {}
+                for (_, bs, ce), anno, row in zip(
+                    read_forecast_maps(db, sc.id), prev["forecast_years"], rows
+                ):
+                    anni += 1
+                    det_a = anno["details"]
+                    for _s, _d in (det_a.get("pregresso") or {}).items():
+                        chiuse[_s] = (chiuse.get(_s, D("0"))
+                                      + D(str(_d.get("closed") or 0))
+                                      + D(str(_d.get("writeoff") or 0)))
+                    for campo, guasto in _divergenze(bs, ce, det_a, row, prec=prec,
+                                                     chiuse=chiuse):
+                        fuori.append((campo, f"[{nome_p} | {nome_i} | {nome_o} | {anno['year']}] {guasto}"))
+                    prec = (bs, det_a)
+    finally:
+        engine.dispose()
+    # 144 scenari: 6 piani × 4 indicizzazioni × 6 OVERRIDE (la famiglia SP sui
+    # campi dichiarati e' il quarto, l'aggregato `sp16` forzato e' il quinto —
+    # rilievo I-1 della revisione di `6e5c0f7`, punto 4 — e l'override da solo
+    # nel secondo anno e' il sesto, rilievo M-4 punto 2: la variante nuova non
+    # collide mai, perche' porta solo il breve e le soglie I-c del secondo anno
+    # sono piu' basse dei valori forzati).
+    #
+    # (Task 12, lotto 3A, giro di correzione 1) I 37 rifiuti si scompongono in
+    # due CAMMINI diversi — il conteggio chiede alla STESSA `_sp_forced_fields`
+    # del motore (`_rifiuto_atteso`), non a una previsione scritta a mano,
+    # quindi segue da solo ogni volta che quella funzione cambia:
+    #   · 16 = la famiglia: 4 piani che governano un lato oltre (`altri debiti`,
+    #     `altri + previdenziali`, `fornitori + tributari`,
+    #     `tributari + previdenziali + altri`) × 4 indicizzazioni. Il piano
+    #     `crediti con inesigibile` non collide perche' la famiglia non tocca
+    #     `sp07`, e `senza piano` non ha calendario da contraddire;
+    #   · 21 = l'aggregato: `_sp_forced_fields` (l'insieme AMPIO, il SOLO
+    #     usato dal cancello I-1 dal giro di correzione 1 — non piu' quello
+    #     che sceglie il bersaglio del residuo, vedi il commento della
+    #     funzione nel motore) allarga a TUTTO il gruppo operativo
+    #     (`_SP_OPERATIVI`) un secchio di default (`sp16g`/`sp17g`) forzato
+    #     da un piano O da un'indicizzazione — non serve che siano entrambi.
+    #     Delle 24 combinazioni piano × indicizzazione, esaurisce le quattro
+    #     righe di `sp16` in 21: le tre che NON lo fanno sono quelle in cui
+    #     NESSUNO dei due tocca `sp16g` direttamente — `senza piano` +
+    #     `nessuna`, `fornitori + tributari` + `nessuna` (quel piano forza
+    #     solo `sp16d`/`sp16e`, mai il secchio), `crediti con inesigibile` +
+    #     `nessuna` (quel piano non tocca `sp16` affatto). Enumerato con
+    #     `ForecastEngine._sp_forced_fields` su tutte le 24 combinazioni
+    #     (vedi il rapporto del giro di correzione 1): 21 esauriscono, 3 no.
+    #
+    #   Erano 18 nella consegna precedente di questo task (`2946b6a`): quella
+    #   consegna usava l'insieme STRETTO anche per il cancello I-1 — senza
+    #   l'allargamento, un piano o un'indicizzazione sul solo secchio di
+    #   default lasciava libere le altre tre righe del gruppo, quindi
+    #   l'aggregato forzato non veniva quasi mai rifiutato (solo 2 casi, dove
+    #   le righe erano TUTTE forzate direttamente, senza bisogno di
+    #   allargamento: `fornitori + tributari` × `f + g`/`tutte e undici`).
+    #   La revisione (`task-12-review-protezioni.md`, rilievo Critico 1) ha
+    #   misurato che questo NON e' innocuo: senza il cancello ampio, un
+    #   `sp_overrides` sull'aggregato con un solo campo del gruppo governato
+    #   scriveva la MASSA dell'override (non un centesimo, fino a 31.666,66)
+    #   su una riga operativa libera ma estranea (`sp16f`, non dichiarata) —
+    #   esattamente il difetto che I-1 esisteva per impedire, spostato
+    #   dall'aggregato a un dettaglio. La separazione del giro di correzione 1
+    #   ripristina l'allargamento SOLO per il cancello (`_sp_forced_fields`,
+    #   insieme AMPIO) e lo tiene SOLO li': la scelta del bersaglio del
+    #   residuo (quando il cancello non scatta) resta sull'insieme STRETTO
+    #   (`_sp_target_forced_fields`, senza allargamento) — per questo
+    #   `test_budget_pregresso.py::test_the_quadratura_residual_never_
+    #   rewrites_a_field_the_plan_wrote` e `test_forecast_indicizzazione.py::
+    #   test_the_quadratura_residual_never_rewrites_an_indexed_voce` restano
+    #   verdi anche col cancello ampio ripristinato: quegli scenari non hanno
+    #   un `sp_overrides` sull'aggregato, quindi il cancello non scatta mai
+    #   per loro, e la scelta del bersaglio usa comunque l'insieme stretto.
+    #   Gli anni scendono di conseguenza (321 = 378 − 3 anni per ciascuno dei
+    #   19 scenari che nella consegna precedente generavano e ora tornano a
+    #   rifiutare).
+    assert scenari == 144 and anni == 321 and rifiutati == 37, \
+        f"batteria incompleta: {scenari} scenari, {anni} anni, {rifiutati} rifiuti"
+    # Il riepilogo PER CAMPO prima degli esempi, e non e' cosmesi: la prima
+    # stesura elencava solo i primi 25 casi in ordine di scenario, e cosi'
+    # facendo NASCONDEVA che il residuo finiva anche su `sp16d` — cioe' proprio
+    # la sesta occorrenza che si stava cercando. Un messaggio troncato per
+    # posizione dice quale scenario e' andato per primo, non quale famiglia si e'
+    # rotta.
+    per_campo = Counter(campo for campo, _ in fuori)
+    assert not fuori, "\n".join(
+        [f"{len(fuori)} divergenze su {anni} anni", "per campo:"]
+        + [f"  {v:4d}  {k}" for k, v in per_campo.most_common()]
+        + ["esempi:"] + [testo for _, testo in fuori[:15]]
+    )
+
+
+# ══ Lo scoperto ACCESO, dove i difetti vivevano (Task 12, giro di correzione 1) ══
+#
+# La prima stesura del Task 12 fu verificata da una sonda usa-e-getta, e i due
+# difetti che la revisione trovo' stavano proprio fuori da quella sonda: i piani
+# di rimborso (la rata del debito esistente e quella del nuovo finanziamento
+# pagavano lo scoperto invece del proprio debito) e un `sp_overrides` dopo il
+# plug (cassa e scoperto insieme, misura gonfiata fino al doppio). Qui entrano
+# nella griglia.
+#
+# L'oracolo di I1 non ricalcola i piani di rimborso — sarebbe un secondo motore
+# in un test: e' lo STESSO scenario senza lo stress ne' gli override, il
+# «gemello». I debiti bancari non dipendono ne' dagli investimenti ne' dalla
+# cassa, quindi quota bancaria di `sp16a` e `sp17a` devono coincidere con quelle
+# del gemello, con o senza scoperto.
+
+PRESTITO = {"financing_amount": 100000.37, "financing_duration_years": 4}
+
+DEBITI = {
+    "nessun piano": ({}, {}),
+    # Rate al mezzo centesimo: (12.345,67 + 23.456,79) / 3 = 11.934,153…
+    "rimborso esistente in 3 anni": ({}, {"existing_debt_repayment_years": 3}),
+    # 100.000,37 / 4 = 25.000,0925 all'anno.
+    "nuovo finanziamento": (PRESTITO, {}),
+    # Task 16: pregresso a breve e oltre CON il suo piano, e un prestito nuovo nello
+    # stesso scenario. Il piano in 2 anni si estingue nel 2028 e l'orizzonte arriva
+    # al 2029: e' l'anno in cui la rata del pregresso, sopravvissuta al pregresso,
+    # si mangiava il prestito nuovo. 35.802,46 / 2 = 17.901,23, al centesimo: il
+    # mezzo centesimo sta nel prestito, e la somma di I1 esteso resta esatta.
+    "rimborso in 2 anni + nuovo finanziamento": (PRESTITO, {"existing_debt_repayment_years": 2}),
+}
+
+# ══ I1 esteso (Task 16): il prestito nuovo non tocca il debito bancario pregresso ══
+#
+# Questa griglia conteneva gia' debito bancario pregresso e un prestito nuovo,
+# ma il gemello di I1 AVEVA LO STESSO PRESTITO: lo scenario stressato e il suo
+# gemello sbagliavano allo stesso modo, e la rata nuova che azzerava 12.345,67 di
+# breve pregresso passava inosservata (Ruling 40). Il confronto giusto e' con lo
+# stesso scenario SENZA prestito.
+#
+# Che cosa resta del prestito nuovo, da solo, persistito anno per anno (misurato:
+# lo stesso prestito su un'azienda senza banca). Non dipende ne' dal pregresso ne'
+# dalla crescita: e' la catena del kernel al centesimo.
+SENZA_NUOVO = {
+    "nuovo finanziamento": ("nessun piano", ({}, {})),
+    "rimborso in 2 anni + nuovo finanziamento": (
+        "rimborso esistente in 2 anni", ({}, {"existing_debt_repayment_years": 2})),
+}
+RESIDUO_PRESTITO = {2027: D("75000.28"), 2028: D("50000.19"), 2029: D("25000.10")}
+# ══ Task 17: la parte di quel residuo che scade l'anno dopo sta a breve ══
+#
+# Rifatta a mano sulla catena, non sulla rata arrotondata: 75.000,28 → 50.000,19
+# (75.000,28 − 25.000,0925 = 50.000,1875) toglie 25.000,09; 50.000,19 → 25.000,10
+# (25.000,0975) toglie 25.000,09; 25.000,10 → 0,01 (0,0075) toglie 25.000,09. Il
+# 2029 e' l'ultimo anno di orizzonte e la rata del 2030 conta lo stesso: il
+# calendario del contratto non sa dove finisce il piano.
+QUOTA_BREVE_PRESTITO = {2027: D("25000.09"), 2028: D("25000.09"), 2029: D("25000.09")}
+
+SQUILIBRI = {
+    "nessuno": None,
+    # Il rilievo 1: un'attivita' forzata DOPO il plug, nel primo anno stressato.
+    "crediti giu' nel 2027": (0, {"sp06a_crediti_clienti_breve": 1000.55}),
+    "rimanenze su nel 2028": (1, {"sp05a_materie_prime": 91234.565}),
+}
+
+TASSO = 6.135
+STRESS_2027 = 180123.455
+
+
+def _base_year_con_banca(db, user):
+    """La base della rete piu' debito bancario pregresso non tondo, a breve e oltre."""
+    company_id = _base_year(db, user)
+    fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
+    b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
+    breve, lungo = D("12345.67"), D("23456.79")
+    b.sp16a_debiti_banche_breve = breve
+    b.sp16_debiti_breve += breve
+    b.sp17a_debiti_banche_lungo = lungo
+    b.sp17_debiti_lungo += lungo
+    b.sp09_disponibilita_liquide += breve + lungo
+    db.commit()
+    return company_id
+
+
+def _genera_e_leggi(db, user, rows):
+    company_id = _base_year_con_banca(db, user)
+    sc = budget_scenarios.create_budget_scenario(
+        company_id,
+        BudgetScenarioCreate(company_id=company_id, name="scoperto", base_year=2026, scenario_type="budget"),
+        user_id=user, db=db)
+    res = budget_scenarios.bulk_upsert_assumptions(
+        company_id, sc.id, request={"assumptions": rows, "auto_generate": True}, user_id=user, db=db)
+    if not res["forecast_generated"]:
+        return res, None, None
+    prev = budget_scenarios.preview_forecast_route(company_id, sc.id, request={"assumptions": rows},
+                                                   user_id=user, db=db)
+    return res, read_forecast_maps(db, sc.id), prev["forecast_years"]
+
+
+@pytest.mark.parametrize("crescita", CRESCITE)
+def test_lo_scoperto_acceso_resta_separato_dai_debiti_e_dichiarato_come_persistito(crescita, monkeypatch):
+    """72 scenari per percentuale, 216 anni, piu' 30 gemelli: zero divergenze.
+
+    Afferma, anno per anno: le famiglie di `_divergenze` (con I2 e cassa mai
+    negativa); I1 (quota bancaria di `sp16a` e `sp17a` = gemello); I1 esteso
+    (Task 16 e 17: sul gemello con prestito nuovo, quota bancaria di `sp16a` =
+    gemello SENZA prestito + la rata dell'anno dopo, dichiarata identica nei
+    `details`; `sp17a` = quel gemello + il residuo del prestito − quella rata);
+    I4 (`scoperto_generato` = aumento del residuo, `oneri_scoperto` = residuo di
+    apertura × tasso e addebitato in `ce15`, picco = massimo dei residui).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    fuori, scenari, anni = [], 0, 0
+    esercitati = Counter()
+
+    def righe(piano, primo, tutti, squilibrio, stress):
+        rows = [dict(forecast_year=y, revenue_growth_pct=crescita, **INVESTIMENTI_SOTTO_CENTESIMO,
+                     overdraft_allowed=True, financing_interest_rate=TASSO, **tutti) for y in ANNI]
+        rows[0].update(primo)
+        if piano:
+            rows[0]["pregresso"] = piano
+        if stress:
+            rows[0]["tangible_investments"] = STRESS_2027
+            if squilibrio:
+                rows[squilibrio[0]]["sp_overrides"] = squilibrio[1]
+        return rows
+
+    try:
+        with sessions() as db:
+            gemelli = {}
+
+            def gemello(nome_p, piano, nome_d, primo, tutti):
+                """Lo scenario senza stress ne' override, generato una volta per chiave."""
+                chiave = (nome_p, nome_d)
+                if chiave not in gemelli:
+                    res_g, mappe_g, anni_g = _genera_e_leggi(
+                        db, f"gemello-{crescita}-{nome_p}-{nome_d}", righe(piano, primo, tutti, None, False))
+                    if mappe_g is None:
+                        fuori.append(("non generato", f"[gemello {nome_p} | {nome_d}] {res_g['message']}"))
+                        return None
+                    gemelli[chiave] = {y: (bs, ce, a["details"]) for (y, bs, ce), a in zip(mappe_g, anni_g)}
+                return gemelli[chiave]
+
+            for (nome_p, piano), (nome_d, (primo, tutti)), (nome_s, squilibrio) in itertools.product(
+                PIANI.items(), DEBITI.items(), SQUILIBRI.items()
+            ):
+                scenari += 1
+                tag = f"{nome_p} | {nome_d} | {nome_s}"
+
+                gem = gemello(nome_p, piano, nome_d, primo, tutti)
+                if gem is None:
+                    continue
+
+                # I1 esteso, una volta per gemello: il prestito nuovo non muove la
+                # quota bancaria pregressa di `sp16a`, e in `sp17a` si somma e basta.
+                # Sul gemello e non sullo scenario stressato: lo stressato e' gia'
+                # legato al suo gemello da I1 qui sotto, quindi lo e' anche a questo.
+                if nome_d in SENZA_NUOVO and nome_s == next(iter(SQUILIBRI)):
+                    nome_senza, (primo_s, tutti_s) = SENZA_NUOVO[nome_d]
+                    senza = gemello(nome_p, piano, nome_senza, primo_s, tutti_s)
+                    for anno in (ANNI if senza is not None else ()):
+                        bs_c, _ce_c, det_c = gem[anno]
+                        bs_s, _ce_s, det_s = senza[anno]
+                        dove_g = f"[{nome_p} | {nome_d} | gemello | {anno}]"
+                        esercitati["anni I1 esteso"] += 1
+                        banca_c = bs_c["sp16a_debiti_banche_breve"] - D(str(det_c["scoperto_residuo"]))
+                        banca_s = bs_s["sp16a_debiti_banche_breve"] - D(str(det_s["scoperto_residuo"]))
+                        quota = QUOTA_BREVE_PRESTITO[anno]
+                        # Task 17: la quota bancaria col prestito e' quella senza piu' la
+                        # rata dell'anno dopo. Una differenza diversa vuol dire che la
+                        # rata nuova ha pagato il pregresso, o che la quota a breve non e'
+                        # stata riclassificata.
+                        if banca_c - banca_s != quota:
+                            fuori.append(("I1 esteso sp16a", f"{dove_g} quota bancaria {banca_c} col prestito, "
+                                                             f"{banca_s} senza: differenza {banca_c - banca_s}, "
+                                                             f"quota a breve del calendario {quota}"))
+                        # Dichiarato = persistito: la chiave dice la stessa quota.
+                        dichiarata = _quota_nuovi(det_c)
+                        if dichiarata != quota:
+                            fuori.append(("quota breve dichiarata", f"{dove_g} dichiarata {dichiarata}, "
+                                                                    f"calendario {quota}"))
+                        atteso = bs_s["sp17a_debiti_banche_lungo"] + RESIDUO_PRESTITO[anno] - quota
+                        if bs_c["sp17a_debiti_banche_lungo"] != atteso:
+                            fuori.append(("I1 esteso sp17a", f"{dove_g} sp17a {bs_c['sp17a_debiti_banche_lungo']}, "
+                                                             f"pregresso {bs_s['sp17a_debiti_banche_lungo']} + "
+                                                             f"prestito {RESIDUO_PRESTITO[anno]} - quota a breve "
+                                                             f"{quota} = {atteso}"))
+
+                rows = righe(piano, primo, tutti, squilibrio, True)
+                res, mappe, anni_prev = _genera_e_leggi(db, f"scoperto-{crescita}-{scenari}", rows)
+                if mappe is None:
+                    if nome_p == "crediti con inesigibile" and nome_s == "crediti giu' nel 2027":
+                        # (m-3, giro 5) Questa NON e' una divergenza: e' il
+                        # rifiuto ATTESO. Lo squilibrio forza `sp06a` a
+                        # 1.000,55 nel 2027, ma il piano dei crediti di questo
+                        # scenario deve incassare 38.333,335 l'anno dopo
+                        # (`runoff_schedule` su opening 120.000, rata
+                        # 38.333,335, anno 0) — ben sopra il forzato. Sotto il
+                        # residuo il motore ora rifiuta, come i quattro debiti
+                        # (I-c): la parte commerciale forzata farebbe
+                        # dichiarare un `generated` negativo, che sarebbe un
+                        # credito nuovo negativo — non modellato (decisione
+                        # del proprietario, 2026-09-11).
+                        if "non è ammesso" not in res["message"] or "38.333,34" not in res["message"]:
+                            fuori.append(("rifiuto crediti breve inatteso",
+                                          f"[{tag}] atteso il rifiuto m-3 con residuo 38.333,34, "
+                                          f"trovato: {res['message']}"))
+                        continue
+                    fuori.append(("non generato", f"[{tag}] {res['message']}"))
+                    continue
+                esercitati[nome_d] += 1
+                residui = [D(str(a["details"]["scoperto_residuo"])) for a in anni_prev]
+                picco = max(residui)
+                residuo_prec = D("0")
+                prec = None
+                chiuse = {}
+                for (anno, bs, ce), prev_anno, row in zip(mappe, anni_prev, rows):
+                    anni += 1
+                    det = prev_anno["details"]
+                    dove = f"[{tag} | {anno}]"
+                    for _s, _d in (det.get("pregresso") or {}).items():
+                        chiuse[_s] = (chiuse.get(_s, D("0"))
+                                      + D(str(_d.get("closed") or 0))
+                                      + D(str(_d.get("writeoff") or 0)))
+                    for campo, guasto in _divergenze(bs, ce, det, row, prec=prec,
+                                                     chiuse=chiuse):
+                        fuori.append((campo, f"{dove} {guasto}"))
+                    prec = (bs, det)
+                    residuo = D(str(det["scoperto_residuo"]))
+                    esercitati["anni con scoperto"] += residuo > 0
+                    esercitati["anni che rimborsano"] += residuo < residuo_prec
+                    bs_g, ce_g, det_g = gem[anno]
+                    residuo_g = D(str(det_g["scoperto_residuo"]))
+                    # I1: i piani di rimborso pagano il proprio debito, mai lo scoperto.
+                    if bs["sp17a_debiti_banche_lungo"] != bs_g["sp17a_debiti_banche_lungo"]:
+                        fuori.append(("I1 sp17a", f"{dove} sp17a {bs['sp17a_debiti_banche_lungo']}, "
+                                                  f"il piano dice {bs_g['sp17a_debiti_banche_lungo']}"))
+                    banca = bs["sp16a_debiti_banche_breve"] - residuo
+                    banca_g = bs_g["sp16a_debiti_banche_breve"] - residuo_g
+                    if banca != banca_g:
+                        fuori.append(("I1 sp16a banca", f"{dove} quota bancaria {banca}, il piano dice {banca_g}"))
+                    # I4: dichiarato = persistito.
+                    generato = D(str(det["scoperto_generato"]))
+                    if generato != max(D("0"), residuo - residuo_prec):
+                        fuori.append(("I4 generato", f"{dove} generato {generato}, residuo {residuo_prec} -> {residuo}"))
+                    oneri = D(str(det["oneri_scoperto"]))
+                    if oneri != _q(residuo_prec * D(str(TASSO)) / D("100")):
+                        fuori.append(("I4 oneri", f"{dove} oneri {oneri} sul residuo d'apertura {residuo_prec}"))
+                    if ce["ce15_oneri_finanziari"] - oneri != ce_g["ce15_oneri_finanziari"] - D(str(det_g["oneri_scoperto"])):
+                        fuori.append(("I4 ce15", f"{dove} ce15 {ce['ce15_oneri_finanziari']} con oneri {oneri}"))
+                    if D(str(det["fabbisogno_picco"])) != picco:
+                        fuori.append(("I4 picco", f"{dove} picco {det['fabbisogno_picco']}, massimo dei residui {picco}"))
+                    anno_picco = ANNI[residui.index(picco)] if picco > 0 else None
+                    if det["fabbisogno_picco_anno"] != anno_picco:
+                        fuori.append(("I4 picco anno", f"{dove} anno {det['fabbisogno_picco_anno']} invece di {anno_picco}"))
+                    residuo_prec = residuo
+    finally:
+        engine.dispose()
+    per_campo = Counter(campo for campo, _ in fuori)
+    assert not fuori, "\n".join(
+        [f"{len(fuori)} divergenze su {anni} anni ({scenari} scenari)", "per campo:"]
+        + [f"  {v:4d}  {k}" for k, v in per_campo.most_common()]
+        + ["esempi:"] + [testo for _, testo in fuori[:15]]
+    )
+    # (m-3, giro 5) 4 scenari su 72 sono ora il rifiuto ATTESO ("crediti con
+    # inesigibile" × "crediti giu' nel 2027" × i 4 `DEBITI`): contano in
+    # `scenari` (verificato sopra, per campo, che sia proprio il rifiuto m-3 e
+    # non una divergenza) ma non producono anni, ne' esercitano `esercitati`.
+    # 216 − 4×3 = 204; 18 − 1 = 17 per ciascuna delle quattro chiavi `DEBITI`.
+    assert scenari == 72 and anni == 204, f"batteria incompleta: {scenari} scenari, {anni} anni"
+    # Una griglia che non accende scoperto, o non lo rimborsa, non prova I1 ne' I2.
+    assert esercitati["anni con scoperto"] > 0 and esercitati["anni che rimborsano"] > 0, dict(esercitati)
+    assert all(esercitati[nome] == 17 for nome in DEBITI), dict(esercitati)
+    # 6 piani × 2 voci con prestito nuovo × 3 anni: I1 esteso non e' stato saltato.
+    assert esercitati["anni I1 esteso"] == 36, dict(esercitati)
+
+
+def test_ni3_sotto_la_riga_debiti_anche_i_crediti_seguono_il_persistito(monkeypatch):
+    """N-I3 (giro 3): con un piano dei crediti, un override su `sp06a` deve
+    trovare la RIGA `crediti_commerciali` del persistito, non del calendario.
+
+    Riproduce la sonda `sonda_brevi2.py` della revisione: piano crediti 25% +
+    25% sulla massa commerciale della base (120.000), override `sp06a` 2027 =
+    106.770,89. Su `c8317ca` il 2027 dichiarava 128.330,00 contro 117.037,29
+    persistiti: `crediti_commerciali` non stava nel riallineamento di
+    `_realign_sp_declarations`, che gira solo sui quattro debiti. È rosso su
+    `c8317ca` solo su asserzione (la riga somma male nel solo anno
+    dell'override: sulle righe a giorni un override vale un anno, e dal 2028
+    la riga torna al gemello — misura della revisione, punto 4).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            user = "ni3-sonda"
+            company_id = _base_year(db, user)
+            rows = [dict(forecast_year=y, revenue_growth_pct=3.33) for y in ANNI]
+            rows[0]["pregresso"] = {"crediti_commerciali": {
+                "opening": 120000.00, "amounts": [30000.00, 30000.00]}}
+            rows[0]["sp_overrides"] = {"sp06a_crediti_clienti_breve": 106770.89}
+            sc = budget_scenarios.create_budget_scenario(
+                company_id,
+                BudgetScenarioCreate(company_id=company_id, name="ni3", base_year=2026,
+                                     scenario_type="budget"),
+                user_id=user, db=db)
+            res = budget_scenarios.bulk_upsert_assumptions(
+                company_id, sc.id, request={"assumptions": rows, "auto_generate": True},
+                user_id=user, db=db)
+            assert res["forecast_generated"] is True, res["message"]
+            prev = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=user, db=db)
+            for (_, bs, ce), anno in zip(read_forecast_maps(db, sc.id), prev["forecast_years"]):
+                d = anno["details"]["pregresso"]["crediti_commerciali"]
+                commerciale = _q(bs["sp06_crediti_breve"]
+                                 - bs["sp06e_crediti_tributari_breve"]
+                                 - bs["sp06f_imposte_anticipate_breve"])
+                dichiarata = _q(D(str(d["generated"])) + D(str(d["residual_short"])))
+                assert commerciale == dichiarata, (
+                    anno["year"], commerciale, dichiarata, d)
+                if anno["year"] == ANNI[0]:
+                    assert _q(bs["sp06a_crediti_clienti_breve"]) == D("106770.89")
+    finally:
+        engine.dispose()

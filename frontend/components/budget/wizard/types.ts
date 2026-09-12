@@ -2,7 +2,7 @@
 // (spec 2026-09-08 §4). Types only, no runtime code: the steps (task 11-14)
 // and the shared components in this directory (task 8) both import from here
 // so the shape of a step's props exists in exactly one place.
-import type { FinancingLoanInput, TemporaryDifferenceInput } from "@/types/api";
+import type { FinancingLoanInput, Pregresso, SpIndexingDriver, TemporaryDifferenceInput } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { HistoricalData } from "@/lib/budget-trend";
 // Dichiarazione unica in lib/ (lib/ non puo' importare da components/): qui
@@ -24,4 +24,14 @@ export interface StepProps {
   updateAll: (field: string, value: number | boolean | null) => void;
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
+  /** Aggancia (o slega, con `null`) una voce minore dello SP a un driver di
+   *  volume, su tutti gli anni di piano. */
+  updateSpIndexing: (code: string, driver: SpIndexingDriver | null) => void;
+  /** Il setter tipizzato del piano di scadenziamento del pregresso: scrive
+   *  SEMPRE nella riga del PRIMO anno di piano (spec §3.5) — non e' ne' un
+   *  numero ne' un interruttore, quindi non passa da `update` (conflitto B
+   *  della revisione del task 7: `update` e' tornato al suo tipo scalare, e
+   *  chi ha bisogno di scrivere un oggetto ha un setter dedicato, non un
+   *  terzo tipo unito a quello di tutti gli altri campi). */
+  updatePregresso: (next: Pregresso | null) => void;
 }

@@ -6,7 +6,10 @@
 import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
-import { num, pctOf } from "@/lib/budget-format";
+import { euro, num, pctOf } from "@/lib/budget-format";
+import type { ForecastPreviewResponse } from "@/types/api";
+import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
+import { legacyNoteFor, type TabellaPregressoKey } from "@/lib/budget-pregresso-tabella";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -251,6 +254,49 @@ export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewY
   ];
 }
 
+/**
+ * Il pregresso di circolante che il motore ha davvero scadenziato, saldo per
+ * saldo (Task 7): apertura in colonna base, poi per ogni anno il residuo a
+ * breve, quello oltre l'esercizio, il chiuso e — dove c'e' — l'inesigibile.
+ * Lettura pura di `details.pregresso`: qui non si scadenzia nulla, il piano lo
+ * svolge `runoff_schedule` in Python.
+ *
+ * `mode: "legacy"` non e' un residuo di zero: e' un saldo per cui NESSUN piano
+ * e' stato dichiarato, e che quindi segue le formule di sempre. La nota che lo
+ * dice NON e' la stessa frase su tutti e cinque i saldi (`legacyNoteFor`,
+ * `lib/budget-pregresso-tabella.ts`, rilievo 4 del giro di correzione 1):
+ * fornitori e crediti si chiudono davvero nel primo anno perche' un driver di
+ * volume li rigenera comunque, ma previdenziali e altri debiti — senza un
+ * driver dietro — crescono per percentuale e non si chiudono in alcun senso
+ * visibile. Confondere «nessun piano» con «residuo pagato» sarebbe un difetto
+ * a se'; dire "chiude" di un saldo che invece cresce sarebbe l'altro.
+ */
+export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly TabellaPregressoKey[]): PreviewRow[] {
+  if (years.length === 0) return [];
+  const empty = (): PreviewCell[] => years.map(() => ({ value: null }));
+  const out: PreviewRow[] = [
+    row("pregresso-head", "Pregresso: residuo a breve · oltre", "total", { value: null }, empty()),
+  ];
+  for (const key of keys) {
+    const det = years.map((y) => y.details.pregresso?.[key] ?? null);
+    const pick = (f: "residual_short" | "residual_long" | "closed" | "writeoff"): PreviewCell[] =>
+      det.map((d) => ({ value: d ? num(d[f]) : null }));
+    const residuo = pick("residual_short").map((c, i) =>
+      det[i]?.mode === "legacy" ? { ...c, note: legacyNoteFor(key) } : c);
+    out.push(row(`pregresso-${key}`, `${PREGRESSO_LABELS[key]} · residuo a breve`, "value",
+      { value: det[0] ? num(det[0].opening) : null }, residuo));
+    out.push(row(`pregresso-${key}-long`, "oltre l'esercizio", "sub", { value: null }, pick("residual_long")));
+    out.push(row(`pregresso-${key}-closed`, "chiuso nell'anno", "sub", { value: null }, pick("closed")));
+    // L'inesigibile esiste sul solo piano dei crediti: si mostra quando il
+    // motore ne dichiara uno, invece di aggiungere quattro righe a zero.
+    const writeoff = pick("writeoff");
+    if (writeoff.some((c) => c.value !== null && c.value !== 0)) {
+      out.push(row(`pregresso-${key}-writeoff`, "di cui inesigibile", "sub", { value: null }, writeoff));
+    }
+  }
+  return out;
+}
+
 export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {
   const g = (i: Record<string, unknown>, k: string) => num(i[k]);
   // Risultato ante imposte ricapitolato dal CE gia' scritto dal motore: stessa
@@ -268,24 +314,189 @@ export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear
     r("net", "Utile netto", "kpi"), r("trib", "Debiti tributari a fine anno", "value")];
 }
 
+/** Un anno sulla VIA MANUALE non ha una liquidazione da mostrare: il motore
+ *  dichiara zero invece di inventare gli importi, e uno zero letto come
+ *  «versato niente» sarebbe peggio del vuoto. */
+const IMPOSTE_MANUALE = "posizione tributaria manuale";
+
+/**
+ * Come si sono PAGATE le imposte di ogni anno (Task 8): il saldo maturato a
+ * fine anno precedente, l'acconto sull'anno in corso, la rata del tributario
+ * rateizzato, e cio' che resta aperto a fine anno.
+ *
+ * Lettura pura di `details.imposte`: il kernel e'
+ * `tax_settlement_saldo_acconto` (`calculations/projection_common.py`), qui
+ * non si liquida nulla. L'uscita di cassa e' l'unica somma, ed e' la stessa
+ * del kernel (`saldo_paid + acconti_paid + rate_paid`).
+ *
+ * `mode: "manual"` non e' un anno pagato a zero: e' un anno in cui una
+ * percentuale di crescita su `sp06e`/`sp16e` ha preso il posto del piano. Le
+ * celle di quegli anni restano VUOTE con la loro nota — tranne l'imposta
+ * dell'anno, che il motore dichiara in entrambe le vie. Quando ogni anno e'
+ * manuale non resta nulla da incolonnare: una riga sola, con la nota.
+ */
+export function rowsImposteSaldoAcconto(years: ForecastPreviewYear[]): PreviewRow[] {
+  if (years.length === 0) return [];
+  // Una chiave assente vale zero, ma il MODO assente non e' «automatico»:
+  // senza `imposte` non c'e' liquidazione da mostrare, e la riga si comporta
+  // come sulla via manuale invece di stampare colonne di zeri.
+  const det = years.map((y) => y.details?.imposte ?? null);
+  const manuale = det.map((d) => d === null || d.mode !== "saldo_acconto");
+  const head = row("imposte-pagamenti", "Pagamenti dell'anno", "total", { value: null },
+    years.map((_, i) => (manuale[i] ? { value: null, note: IMPOSTE_MANUALE } : { value: null })));
+  if (manuale.every(Boolean)) return [head];
+
+  const cells = (f: (d: NonNullable<(typeof det)[number]>) => number, sempre = false): PreviewCell[] =>
+    det.map((d, i) =>
+      d !== null && (sempre || !manuale[i]) ? { value: num(f(d)) } : { value: null, note: IMPOSTE_MANUALE });
+  const someNonZero = (cs: PreviewCell[]) => cs.some((c) => c.value !== null && c.value !== 0);
+
+  const out: PreviewRow[] = [head];
+  // L'imposta dell'anno il motore la dichiara anche sulla via manuale: e' la
+  // sola cifra vera di quegli anni, e nasconderla direbbe meno del dovuto.
+  //
+  // «correnti», non «dell'anno»: nel motore `total_tax = current_tax +
+  // deferred_expense` (`forecast_engine.py:1287`) e questa riga legge SOLO
+  // `current_tax`, la componente che partecipa alla liquidazione di
+  // saldo/acconto — la riga «Imposte» del CE ricapitolato (`rowsImposte`,
+  // sopra) e' invece `ce20`, il totale. Con differenze temporanee non nulle le
+  // due divergono davvero (misurato: sonda del motore, +40.000 di differenza
+  // tassabile al 25% -> ce20 − current_tax = 10.000, l'imposta differita), e la stessa
+  // etichetta sulle due righe farebbe leggere due numeri diversi come se
+  // fossero la stessa cosa (fix1 R7).
+  out.push(row("imposte-current", "Imposte correnti dell'anno", "value", { value: null },
+    cells((d) => d.current_tax, true)));
+  out.push(row("imposte-saldo", "Saldo dell'anno precedente versato", "sub", { value: null },
+    cells((d) => d.saldo_paid)));
+  out.push(row("imposte-acconti", "Acconti versati", "sub", { value: null },
+    cells((d) => d.acconti_paid)));
+  // Le rate esistono solo con un rateizzato scadenziato, il credito solo
+  // quando l'acconto ha superato l'imposta: righe a zero fisso non si mostrano.
+  const rate = cells((d) => d.rate_paid);
+  if (someNonZero(rate)) out.push(row("imposte-rate", "Rate del rateizzato", "sub", { value: null }, rate));
+  out.push(row("imposte-cassa", "Uscita di cassa per imposte", "kpi", { value: null },
+    cells((d) => d.saldo_paid + d.acconti_paid + d.rate_paid)));
+  // «Saldo d'imposta da versare l'anno dopo», non «Debito tributario a fine
+  // anno»: quella riga sta gia' sopra (`rowsImposte`, chiave "trib") ed e'
+  // `sp16e` — nel motore `sp16e = generated_debt + residual_short` del piano a
+  // rate (`forecast_engine.py:2117`), quindi con un piano a rate le due righe
+  // divergono SEMPRE della rata a breve (misurato: sonda del motore, 20.000
+  // contro 0 su due anni). `generated_debt` e' solo la parte generata
+  // dall'imposta dell'anno, senza il rateizzato pregresso: due etichette
+  // quasi identiche sopra due numeri diversi, nello stesso riquadro, erano il
+  // difetto (fix1 R1).
+  out.push(row("imposte-debito", "Saldo d'imposta da versare l'anno dopo", "value", { value: null },
+    cells((d) => d.generated_debt)));
+  const credito = cells((d) => d.generated_credit);
+  if (someNonZero(credito)) {
+    out.push(row("imposte-credito", "Credito tributario a fine anno", "value", { value: null }, credito));
+  }
+  return out;
+}
+
 /**
  * L'importo del fabbisogno scoperto dentro un messaggio del motore, o `null`
  * se il messaggio e' un altro.
  *
- * Riconoscimento UNICO — una sola regex per l'anteprima (che riceve
+ * Il messaggio del motore nasce gia' italiano, importo all'europea (lotto 3A,
+ * task 8). Riconoscimento UNICO — una sola regex per l'anteprima (che riceve
  * `ForecastPreviewError`, con l'anno) e per il salvataggio in blocco (che
  * riceve una sola stringa, senza anno: `assumptions_service.py` incapsula
- * `str(e)` in «Assumptions saved successfully, but forecast generation
- * failed: …»). Due regex divergerebbero alla prima modifica del messaggio del
- * motore, e uno dei due canali tornerebbe in silenzio all'inglese grezzo.
+ * `str(e)` in «Ipotesi salvate, ma il previsionale non è stato calcolato:
+ * …»). Due regex divergerebbero alla prima modifica del messaggio del
+ * motore, e uno dei due canali tornerebbe a non riconoscere il fabbisogno.
  */
 export function unfundedAmountFromMessage(message: string): number | null {
-  const m = /Unfunded financing requirement ([\d,]+\.\d{2})/i.exec(message);
-  return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+  const m = /Fabbisogno finanziario scoperto di ([\d.]+,\d{2})/.exec(message);
+  return m ? parseFloat(m[1].replace(/\./g, "").replace(",", ".")) : null;
 }
 
 export function unfundedFromError(error: ForecastPreviewError | null): { year: number; amount: number } | null {
   if (!error || error.year === null) return null;
   const amount = unfundedAmountFromMessage(error.message);
   return amount === null ? null : { year: error.year, amount };
+}
+
+// ── Cassa assorbita e scoperto di c/c (Task 12) ────────────────────────────
+
+export interface ScopertoAnno {
+  year: number; cassaAssorbita: number; scopertoGenerato: number; scopertoResiduo: number; cassaSottoMinimo: number;
+}
+
+export interface ScopertoAvvisi {
+  anni: ScopertoAnno[];
+  /** Il fabbisogno di picco del piano e l'anno in cui cade: il numero e la data
+   *  che si portano in banca. `null` quando il motore non dichiara scoperto. */
+  picco: { amount: number; year: number } | null;
+  /** Avviso tenue: il piano consuma cassa, anche se la cassa resta positiva. */
+  cassa: string | null;
+  /** Avviso forte: il piano ha acceso uno scoperto, con gli importi. */
+  scoperto: string | null;
+  /** La cassa chiusa sotto la cassa minima del cash sweep per rimborsare lo
+   *  scoperto: una decisione del proprietario, e la si dichiara. */
+  sottoMinimo: string | null;
+}
+
+/**
+ * Gli avvisi di cassa e di scoperto dell'anteprima, letti da cio' che il motore
+ * DICHIARA (`details.cassa_assorbita`, `scoperto_*`, `fabbisogno_picco*`): qui
+ * non si deriva nulla, e il picco non si ricalcola come massimo dei residui —
+ * lo dichiara il motore, uguale su ogni anno.
+ *
+ * Una chiave assente vale zero (il tipo le tiene facoltative): e' la lettura
+ * prudente, perche' il motore le dichiara sempre, e un'anteprima di una
+ * versione vecchia non deve inventare un avviso.
+ *
+ * L'avviso di cassa esiste anche senza scoperto, ed e' il punto: l'utente
+ * deve sapere che il piano gli consuma liquidita' PRIMA che diventi uno
+ * scoperto. Con lo scoperto spento e un fabbisogno scoperto il motore si
+ * ferma, e quel caso lo dice gia' `previewNotice`: qui non si ripete.
+ */
+export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
+  const anni = years.map((y) => ({
+    year: y.year,
+    cassaAssorbita: num(y.details.cassa_assorbita),
+    scopertoGenerato: num(y.details.scoperto_generato),
+    scopertoResiduo: num(y.details.scoperto_residuo),
+    cassaSottoMinimo: num(y.details.cassa_sotto_minimo),
+  }));
+  const primo = years[0]?.details;
+  const pAmount = num(primo?.fabbisogno_picco);
+  const pYear = primo?.fabbisogno_picco_anno ?? null;
+  const picco = pAmount > 0 && pYear !== null ? { amount: pAmount, year: pYear } : null;
+
+  const assorbita = anni.filter((a) => a.cassaAssorbita > 0);
+  const cassa = assorbita.length === 0 ? null
+    : `Il piano assorbe cassa: ${assorbita.map((a) => `${euro(a.cassaAssorbita)} nel ${a.year}`).join(", ")}. `
+      + "La liquidità si riduce anche dove resta positiva.";
+
+  const generato = anni.filter((a) => a.scopertoGenerato > 0);
+  const scoperto = generato.length === 0 && picco === null ? null
+    : `Scoperto di conto corrente generato dal piano: ${
+      generato.map((a) => `${euro(a.scopertoGenerato)} nel ${a.year}`).join(", ") || "nessuno nuovo"}. `
+      + (picco ? `Fabbisogno di picco ${euro(picco.amount)} nel ${picco.year}: è la finanza che queste ipotesi richiedono.` : "");
+
+  const sotto = anni.filter((a) => a.cassaSottoMinimo > 0);
+  const sottoMinimo = sotto.length === 0 ? null
+    : `Lo scoperto si rimborsa per primo, anche sotto la cassa minima del cash sweep: la cassa chiude ${
+      sotto.map((a) => `${euro(a.cassaSottoMinimo)} sotto il minimo nel ${a.year}`).join(", ")}. `
+      + "Tenere liquidità pagando interessi sullo scoperto non avrebbe senso.";
+
+  return { anni, picco, cassa, scoperto, sottoMinimo };
+}
+
+/**
+ * Se il passo 6 puo' confermare «la cassa resta positiva in tutti gli anni».
+ *
+ * Solo con una risposta del motore SENZA errore, con anni prodotti e senza
+ * alcuno scoperto. Un errore qualunque — anche uno che nessuna regex riconosce,
+ * come il tetto dello scoperto superato — basta a tacere: prima la conferma
+ * compariva sotto il riquadro che diceva il contrario, perche' l'errore del
+ * tetto non e' un «unfunded» e un piano fermo al primo anno non ha anni da cui
+ * leggere uno scoperto.
+ */
+export function confermaCassaPositiva(data: ForecastPreviewResponse | null, avvisi: ScopertoAvvisi): boolean {
+  if (!data || data.error) return false;
+  if ((data.forecast_years ?? []).length === 0) return false;
+  return avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
 }

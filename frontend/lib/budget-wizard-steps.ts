@@ -43,6 +43,7 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "tangible_investments", "intangible_investments",
     "depreciation_rate", "depreciation_rate_intangible",
     "asset_disposal_nbv", "asset_disposal_proceeds", "cash_sweep_enabled", "cash_sweep_min_cash",
+    "overdraft_allowed", "overdraft_limit",
   ],
   imposte: ["tax_rate", "tax_advances_paid", "tax_temporary_differences", "sp16e_growth_pct", "sp17e_growth_pct"],
 };
@@ -103,7 +104,22 @@ export function primaryLabel(step: WizardStepKey): string {
 }
 
 export function stepForErrorMessage(message: string): WizardStepKey {
-  return /unfunded financing requirement/i.test(message) ? "pregresso-nuovo" : "imposte";
+  // Un rifiuto che nomina il passo dove il piano sta deve atterrare lì: i
+  // messaggi del motore citano «Pregresso e nuovo» (la virgolettatura non fa
+  // testo) per i saldi scadenziabili e "Imposte" per i tributari. Prima ogni
+  // rifiuto che non parlasse di scoperto finiva al passo 7 anche quando
+  // l'errore diceva «passo Pregresso e nuovo» (rilievo m-B della revisione).
+  if (/pregresso e nuovo/i.test(message)) return "pregresso-nuovo";
+  // Anche il tetto dello scoperto superato si corregge al passo 6, dove lo
+  // scoperto si concede: rimandare a Imposte manderebbe l'utente nel posto
+  // sbagliato con un messaggio che parla d'altro.
+  if (/fabbisogno finanziario scoperto di|scoperto di conto corrente oltre il tetto/i.test(message))
+    return "pregresso-nuovo";
+  // «Imposte» come nome di passo è la meta anche qui — oggi coincide col
+  // default, ma la regola è voluta: se un passo si aggiunge, questo ramo dice
+  // dove va ciò che nomina il passo 7.
+  if (/passo\s*«?\s*imposte\b/i.test(message)) return "imposte";
+  return "imposte";
 }
 
 export function stepStorageKey(scenarioId: number): string {
@@ -243,9 +259,9 @@ export function saveOutcome(result: BulkSaveResult | null | undefined): SaveOutc
   if (!result || result.forecast_generated !== false) {
     return { ok: true, message: "Previsionale calcolato", step: null, route: ROUTE_DOPO_CALCOLO };
   }
-  // Il messaggio GREZZO decide il passo (la regex del motore e' in inglese);
-  // quello tradotto va al toast. `saveNotice` riusa il riconoscimento e la
-  // frase dell'anteprima — una sola traduzione, in `budget-preview-notice`.
+  // Il messaggio GREZZO decide il passo; quello mostrato all'utente va al
+  // toast. `saveNotice` riusa il riconoscimento e la frase dell'anteprima —
+  // una sola composizione del testo, in `budget-preview-notice`.
   const raw = result.message?.trim() ? result.message.trim() : "Previsionale non generato";
   return { ok: false, message: saveNotice(raw), step: stepForErrorMessage(raw), route: null };
 }

@@ -427,6 +427,49 @@ export interface TemporaryDifferenceInput {
   tax_rate?: number | null;
 }
 
+export type PregressoKey = "crediti_commerciali" | "debiti_fornitori" | "debiti_tributari" | "debiti_previdenziali" | "altri_debiti";
+
+export interface PregressoPlan {
+  opening: number;
+  amounts: number[];
+  writeoff?: number[] | null;
+}
+
+export interface PregressoTributari extends PregressoPlan {
+  saldo: number;
+  rateizzato: number;
+  acconto_pct: number;
+}
+
+export interface Pregresso {
+  crediti_commerciali?: PregressoPlan | null;
+  debiti_fornitori?: PregressoPlan | null;
+  debiti_tributari?: PregressoTributari | null;
+  debiti_previdenziali?: PregressoPlan | null;
+  altri_debiti?: PregressoPlan | null;
+}
+
+export interface PregressoDetail {
+  opening: number;
+  closed: number;
+  writeoff: number;
+  residual_short: number;
+  residual_long: number;
+  generated: number;
+  mode: "legacy" | "runoff";
+}
+
+export interface ImposteDetail {
+  current_tax: number;
+  saldo_paid: number;
+  acconti_paid: number;
+  rate_paid: number;
+  generated_debt: number;
+  generated_credit: number;
+  opening_credit_left: number;
+  mode: "saldo_acconto" | "manual";
+}
+
 export interface BudgetAssumptions {
   id: number;
   scenario_id: number;
@@ -455,6 +498,11 @@ export interface BudgetAssumptions {
   altri_finanz_repayment_years: number | null;
   cash_sweep_enabled: boolean;
   cash_sweep_min_cash: number | null;
+  /** Scoperto di c/c concesso: un fabbisogno scoperto diventa `sp16a` generato dal
+   *  piano invece di fermare il motore. Spento (default) = comportamento di sempre. */
+  overdraft_allowed: boolean;
+  /** Tetto dello scoperto; `null` = concesso senza tetto. */
+  overdraft_limit: number | null;
   tfr_accrual_suspended: boolean;
   previdenza_scales_with_personnel: boolean;
   interest_rate_receivables: number;
@@ -485,6 +533,7 @@ export interface BudgetAssumptions {
   sp17f_growth_pct: number | null;
   sp17g_growth_pct: number | null;
   sp18_growth_pct: number | null;
+  sp_indexing: Record<string, SpIndexingDriver> | null;
   sp_overrides: Record<string, number> | null;
   ce02_override: number | null;
   ce03_override: number | null;
@@ -518,6 +567,7 @@ export interface BudgetAssumptions {
   ce17a_override: number | null;
   ce17b_override: number | null;
   ce20_override: number | null;
+  pregresso: Pregresso | null;
   created_at: string;
   updated_at: string;
 }
@@ -549,6 +599,8 @@ export interface BudgetAssumptionsCreate {
   altri_finanz_repayment_years?: number | null;
   cash_sweep_enabled?: boolean;
   cash_sweep_min_cash?: number | null;
+  overdraft_allowed?: boolean;
+  overdraft_limit?: number | null;
   tfr_accrual_suspended?: boolean;
   previdenza_scales_with_personnel?: boolean;
   interest_rate_receivables?: number;
@@ -579,6 +631,7 @@ export interface BudgetAssumptionsCreate {
   sp17f_growth_pct?: number | null;
   sp17g_growth_pct?: number | null;
   sp18_growth_pct?: number | null;
+  sp_indexing?: Record<string, SpIndexingDriver> | null;
   sp_overrides?: Record<string, number> | null;
   ce02_override?: number | null;
   ce03_override?: number | null;
@@ -612,6 +665,7 @@ export interface BudgetAssumptionsCreate {
   ce17a_override?: number | null;
   ce17b_override?: number | null;
   ce20_override?: number | null;
+  pregresso?: Pregresso | null;
 }
 
 export interface ForecastBalanceSheet {
@@ -868,6 +922,7 @@ export interface CashReconciliation {
   cash_ending: number;
   difference: number;
   verification_ok: boolean;
+  third_party_funds_gap: number;
 }
 
 export interface DetailedCashFlowStatement {
@@ -971,14 +1026,158 @@ export interface ScenarioAnalysis {
       years: ScenarioAnalysisCashflowYear[];
     };
   };
+  /** Il previsionale persistito e' piu' vecchio delle ipotesi salvate: i numeri
+   *  qui sopra sono quelli di una generazione precedente (il bulk delle ipotesi
+   *  risponde 200 anche a una generazione respinta). Il backend lo dichiara
+   *  sempre, anche a `false`; opzionale qui perche' una risposta piu' vecchia
+   *  puo' non portarlo — e l'assenza vale «allineato». */
+  forecast_stale?: boolean;
+  /** Ultima scrittura delle ipotesi dello scenario, ISO in UTC con suffisso `Z`. */
+  assumptions_updated_at?: string | null;
+  /** Ultima generazione del previsionale, ISO in UTC con suffisso `Z`. */
+  forecast_updated_at?: string | null;
 }
 
 // ===== Forecast Preview (anteprima motore, task 3) =====
+
+/** I tre driver di volume a cui una voce minore dello SP puo' essere agganciata
+ *  (Task 15). Il motore applica `stock dell'anno base × fattore del driver`. */
+export type SpIndexingDriver = "ricavi" | "acquisti" | "personale";
+
+/** Che cosa il motore ha davvero indicizzato in un anno, voce per voce. */
+export interface IndicizzazioneVoce {
+  driver: SpIndexingDriver;
+  fattore: number;
+  /** L'importo che il motore ha DAVVERO scritto sulla voce. Non e' ridondante
+   *  con `fattore`: `sp04` sottrae le svalutazioni cumulate e `sp14` con
+   *  differenze temporanee somma la quota del deferred. */
+  valore: number;
+  /** La `sp*_growth_pct` della stessa voce esiste ma non e' stata applicata:
+   *  vince il driver. */
+  percentuale_ignorata: boolean;
+}
+
+/** Una chiave che NON ha avuto effetto, col perche'. Dichiarata sempre, anche a
+ *  lista vuota: a valle una chiave assente vale zero. */
+export interface IndicizzazioneIgnorata {
+  voce: string;
+  driver: string;
+  motivo: string;
+}
+
+/** Un inesigibile chiesto dal piano dei crediti e NON scaricato, col perche':
+ *  `reason` e' il nome dell'override che ha vinto (`ce09d_override` o
+ *  `ce09_override`), `requested` l'importo chiesto. */
+export interface PregressoWriteoffIgnored {
+  saldo: PregressoKey;
+  field: string;
+  requested: number;
+  reason: string;
+}
+
+/** Il pregresso bancario SENZA alcun piano (ne' contratto col residuo iniziale
+ *  ne' `existing_debt_repayment_years`), quanto lo sweep ne ha rimborsato
+ *  nell'anno (`rimborso_sweep`, zero senza sweep o senza eccesso di cassa). */
+export interface DebitoBancarioSenzaPiano {
+  apertura: number;
+  rimborso_sweep: number;
+  breve: number;
+  lungo: number;
+}
+
+/** Il pregresso bancario con `existing_debt_repayment_years`: lo sweep non lo
+ *  tocca mai, `rimborso` e' quanto il calendario del piano rimborsa nell'anno. */
+export interface DebitoBancarioPianoAnni {
+  apertura: number;
+  rimborso: number;
+  breve: number;
+  lungo: number;
+}
+
+/** Una riga per contratto (misti gia' divisi in pregresso/nuovo, anche non
+ *  ancora erogati), nell'ordine di `financing_amount` e poi della griglia. */
+export interface DebitoBancarioContratto {
+  indice: number;
+  anno: number;
+  tasso: number;
+  erogato: number;
+  residuo_iniziale: number;
+  rimborso: number;
+  interessi: number;
+  breve: number;
+  lungo: number;
+}
+
+/** Il debito bancario per componenti, riconciliato con cio' che `sp16a`/`sp17a`
+ *  persistono DAVVERO dopo lo sweep e dopo gli `sp_overrides`
+ *  (`forecast_engine.py`, `_dichiara_debito_bancario`). Al piu' uno fra
+ *  `pregresso_senza_piano` e `pregresso_piano_anni` e' valorizzato; entrambi
+ *  sono `null` quando il pregresso e' descritto solo da contratti col residuo
+ *  iniziale. Invariante: somma dei `breve` di ogni componente piu'
+ *  `scoperto_residuo` = `sp16a`; somma dei `lungo` = `sp17a`, al centesimo. */
+export interface DebitoBancarioAnno {
+  pregresso_senza_piano: DebitoBancarioSenzaPiano | null;
+  pregresso_piano_anni: DebitoBancarioPianoAnni | null;
+  contratti: DebitoBancarioContratto[];
+}
 
 export interface ForecastYearDetails {
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
   dso_applied: number; dio_applied: number; dpo_applied: number;
+  /** I giorni medi DEDOTTI caduti nella guardia (`'dso' | 'dio' | 'dpo'`):
+   *  il motore ha riportato il saldo dell'anno base invece di scalarlo.
+   *  Sempre presente, vuoto quando non scatta nulla. */
+  degenerate_turnover_ratio: ('dso' | 'dio' | 'dpo')[];
+  pregresso: Record<PregressoKey, PregressoDetail>;
+  imposte: ImposteDetail;
+  pregresso_ignored: PregressoKey[];
+  indicizzazione: Record<string, IndicizzazioneVoce>;
+  indicizzazione_ignorata: IndicizzazioneIgnorata[];
+  /** Le svalutazioni (`ce09c`) rilevate dall'anno base a questo anno compreso:
+   *  cio' che il conto economico ha gia' tolto a `sp04` e che non rientra. */
+  svalutazioni_cumulate: number;
+  /** Dove il residuo di arrotondamento e' stato posato, e quanto. Vuoto quando
+   *  non c'era nulla da posare: un centesimo che si sposta senza che nessuno lo
+   *  dica e' il modo in cui la stessa trappola e' rimasta invisibile sei volte. */
+  residuo_quadratura: { campo: string; importo: number }[];
+  /** L'inesigibile scadenziato che un override di CE ha impedito di
+   *  rilevare, e che quindi NON e' stato scaricato dai crediti: il credito
+   *  e' rimasto a bilancio. Il motore la dichiara sempre, anche vuota
+   *  (`forecast_engine.py`, `details['pregresso_writeoff_ignored']`), su
+   *  OGNI anno che produce (`compute_forecast` la scrive prima di ogni
+   *  `results.append`, e non c'e' un `return` prima): il tipo la promette
+   *  obbligatoria per lo stesso motivo. */
+  pregresso_writeoff_ignored: PregressoWriteoffIgnored[];
+  /** Di quanto il piano riduce la cassa nell'anno (apertura - chiusura, zero se
+   *  cresce). Dichiarata anche quando la cassa resta positiva: e' l'avviso che
+   *  arriva PRIMA dello scoperto. Facoltative per la stessa ragione di
+   *  `pregresso_writeoff_ignored`: il tipo promette meno dell'API, mai di piu'. */
+  cassa_assorbita?: number;
+  /** Lo scoperto di c/c nato nell'anno (`sp16a` generato dal piano). */
+  scoperto_generato?: number;
+  /** Lo scoperto in essere a fine anno, distinto dal debito bancario pregresso. */
+  scoperto_residuo?: number;
+  /** Gli oneri dello scoperto, maturati sul saldo di APERTURA (in `ce15`). */
+  oneri_scoperto?: number;
+  /** Il fabbisogno di picco del PIANO, uguale su ogni anno, e l'anno in cui cade
+   *  (`null` senza scoperto). */
+  fabbisogno_picco?: number;
+  fabbisogno_picco_anno?: number | null;
+  /** Di quanto la cassa chiude sotto `cash_sweep_min_cash` in un anno con
+   *  scoperto: lo scoperto si rimborsa per primo anche sotto il minimo, per
+   *  decisione del proprietario, e lo si dichiara. Zero senza sweep o senza scoperto. */
+  cassa_sotto_minimo?: number;
+  /** Il debito bancario per componenti (`forecast_engine.py`,
+   *  `details['debito_bancario']`, lotto 3A task 2 — sostituisce
+   *  `prestiti_nuovi_quota_breve`, che sparisce): il motore lo scrive su OGNI
+   *  anno, anche vuoto, perche' a valle una chiave assente vale zero. */
+  debito_bancario: DebitoBancarioAnno;
+  /** I conflitti fra un aggregato di CE forzato e la somma dei suoi dettagli,
+   *  dove ha vinto l'aggregato (`forecast_engine.py`,
+   *  `details['override_conflicts']`): lista sempre presente su ogni anno di uno
+   *  scenario budget, vuota quando nessun override crea conflitto. */
+  override_conflicts: { aggregate: string; declared: number; details_sum: number }[];
 }
 
 export interface ForecastPreviewYear {

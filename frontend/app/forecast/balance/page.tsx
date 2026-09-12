@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useScenarios, useAnalysis, useInvalidateAnalysis, getPreferredScenario, usePreferredBudgetScenarioId } from "@/hooks/use-queries";
-import { generateForecast, getBudgetAssumptions, updateBudgetAssumptions } from "@/lib/api";
+import { patchSpOverrides } from "@/lib/api";
 import { formatCurrency, formatPercentage, parseItalianAmount } from "@/lib/formatters";
 import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import type {
@@ -22,12 +22,16 @@ import {
   ComposedChart,
   Area,
 } from "recharts";
-import { BarChart3, AlertTriangle, AlertCircle, Loader2, Info, Save } from "lucide-react";
+import { BarChart3, AlertTriangle, Loader2, Info, Save } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
+import { overridesFromPendingEdits, pendingEditsAfterSave, type PendingSpEdits } from "@/lib/forecast-balance-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/page-header";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -119,11 +123,9 @@ const SP_EDITABLE_FIELDS = new Set([
   "sp18_ratei_risconti_passivi",
 ]);
 
-type PendingSpEdits = Record<string, number | null>;
-
 export default function ForecastBalancePage() {
   const { selectedCompanyId } = useApp();
-  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const { data: scenarios = [], isLoading: scenariosLoading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [pendingEdits, setPendingEdits] = useState<PendingSpEdits>({});
@@ -141,12 +143,16 @@ export default function ForecastBalancePage() {
     if (!selectedCompanyId) setSelectedScenario(null);
   }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
-  const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Impossibile caricare i dati previsionali" : null;
+  const { status: pageStatus, errorSource } = forecastPageState(
+    { loading: scenariosLoading, error: scenariosError },
+    { loading: analysisLoading, error: analysisError },
+  );
+  const loadError = errorSource === "scenarios" ? scenariosError : analysisError;
+  const retryLoad = () => (errorSource === "scenarios" ? refetchScenarios() : refetchAnalysis());
 
   useEffect(() => setPendingEdits({}), [selectedScenario?.id]);
 
@@ -154,30 +160,28 @@ export default function ForecastBalancePage() {
     if (!selectedCompanyId || !selectedScenario || Object.keys(pendingEdits).length === 0) return;
     setSaving(true);
     try {
-      const assumptions = await getBudgetAssumptions(selectedCompanyId, selectedScenario.id);
-      const editsByYear = new Map<number, Array<[string, number | null]>>();
-      Object.entries(pendingEdits).forEach(([key, value]) => {
-        const [yearRaw, field] = key.split(":");
-        const year = Number.parseInt(yearRaw, 10);
-        editsByYear.set(year, [...(editsByYear.get(year) ?? []), [field, value]]);
-      });
-      await Promise.all(Array.from(editsByYear.entries()).map(async ([year, edits]) => {
-        const current = assumptions.find((item) => item.forecast_year === year);
-        const spOverrides = { ...(current?.sp_overrides ?? {}) };
-        edits.forEach(([field, value]) => {
-          if (value === null) delete spOverrides[field];
-          else spOverrides[field] = value;
-        });
-        await updateBudgetAssumptions(selectedCompanyId, selectedScenario.id, year, {
-          sp_overrides: Object.keys(spOverrides).length > 0 ? spOverrides : null,
-        });
-      }));
-      await generateForecast(selectedCompanyId, selectedScenario.id);
-      setPendingEdits({});
+      const overrides = overridesFromPendingEdits(pendingEdits);
+      await patchSpOverrides(selectedCompanyId, selectedScenario.id, overrides);
+      setPendingEdits((prev) => pendingEditsAfterSave(prev, "success"));
       invalidateAnalysis(selectedCompanyId, selectedScenario.id);
       toast.success("Stato patrimoniale aggiornato");
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "aggiornamento dello stato patrimoniale fallito"));
+      // Rilievo 6, giro di correzione 1: un salvataggio che il server ha
+      // rifiutato non deve lasciare la cella a mostrare il valore digitato
+      // come se fosse stato applicato -- vedi `pendingEditsAfterSave`. La
+      // cella torna al valore VERO, quello dell'ultimo previsionale
+      // generato con successo. Giro di correzione 2: la rotta ora annulla
+      // anche `sp_overrides` sul server se la generazione fallisce
+      // (salvataggio e rigenerazione condividono la stessa transazione,
+      // `assumptions_service.apply_sp_overrides`) -- questo reset locale
+      // resta comunque necessario, `pendingEdits` e' stato del client.
+      // Giro di correzione 3: un UNICO `PATCH /sp-override` sostituisce
+      // gli N `PUT /assumptions/{year}` in parallelo di prima -- ogni
+      // anno del lotto si applica o si annulla insieme agli altri, in
+      // una rigenerazione sola (mai piu' rigenerazioni concorrenti sullo
+      // stesso scenario, mai un anno validato senza l'altro).
+      setPendingEdits((prev) => pendingEditsAfterSave(prev, "error"));
     } finally {
       setSaving(false);
     }
@@ -197,7 +201,7 @@ export default function ForecastBalancePage() {
     );
   }
 
-  if (scenarios.length === 0 && !loading) {
+  if (forecastScenariosEmpty({ loading: scenariosLoading, error: scenariosError }, scenarios.length)) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
@@ -236,22 +240,20 @@ export default function ForecastBalancePage() {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Errore</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError error={loadError} onRetry={retryLoad} className="mb-6" />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && !analysisData && (
         <div className="text-center py-12">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Caricamento...</p>
         </div>
       )}
 
-      {!loading && analysisData && historicalYears.length > 0 && (
+      <ForecastStaleBanner analysis={analysisData} className="mb-6" />
+
+      {analysisData && historicalYears.length > 0 && (
         <>
           {/* Balance Sheet Table */}
           <Card className="mb-6">

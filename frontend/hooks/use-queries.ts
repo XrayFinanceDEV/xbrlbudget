@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { usePratica } from "@/contexts/PraticaContext";
 import type { BudgetScenario } from "@/types/api";
+import { ANALYSIS_RETRY_COUNT, ANALYSIS_RETRY_DELAY_MS } from "@/lib/forecast-page-status";
 
 // Query key factory — centralizes all cache keys
 export const queryKeys = {
@@ -94,6 +95,8 @@ export function useAnalysis(
     queryKey: queryKeys.analysis(companyId!, scenarioId!),
     queryFn: () => getScenarioAnalysis(companyId!, scenarioId!),
     enabled: !!companyId && !!scenarioId,
+    retry: ANALYSIS_RETRY_COUNT,
+    retryDelay: ANALYSIS_RETRY_DELAY_MS,
   });
 }
 

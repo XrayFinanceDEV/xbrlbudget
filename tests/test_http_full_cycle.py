@@ -172,6 +172,25 @@ def test_http_full_cycle_import_to_analysis(client, tmp_path):
     assert generated.status_code == 200, generated.text
     assert generated.json()["forecast_generated"] is True
 
+    # Task 5 (lotto 3A, decisione del proprietario 2026-09-11): il debito
+    # tributario di apertura di questo fixture esce di cassa entro il 31/12 e
+    # la cassa del parziale non basta -- il motore clampa sp09 a zero e
+    # dichiara lo scoperto. bulk_upsert_assumptions scarta i diagnostics del
+    # motore (assumptions_service.py), quindi si rigenera per leggerli: stesse
+    # ipotesi gia' salvate, chiamata idempotente.
+    regenerated = client.post(
+        f"/api/v1/companies/{company_id}/scenarios/{scenario_id}/generate",
+        headers=_auth("user-a"),
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    diagnostics = regenerated.json()["diagnostics"]
+    gap = next(
+        (Decimal(str(d["amount"])) for d in diagnostics
+         if d["code"] == "unfunded_financing_requirement"),
+        None,
+    )
+    assert gap is not None, "atteso il fabbisogno tributario dichiarato"
+
     analysis = client.get(
         f"/api/v1/companies/{company_id}/scenarios/{scenario_id}/analysis",
         headers=_auth("user-a"),
@@ -183,13 +202,16 @@ def test_http_full_cycle_import_to_analysis(client, tmp_path):
     fb = forecast[0]["balance_sheet"]
     # La response schema (BalanceSheetData) non espone total_liabilities: lo
     # ricostruiamo dagli aggregati che SONO nella response (come fa la ORM
-    # property total_liabilities in database/models.py), poi verifichiamo che
-    # sui float serializzati la quadratura regga al centesimo.
+    # property total_liabilities in database/models.py).
     total_liabilities = (
         fb["total_equity"] + fb["total_debt"] + fb["sp14_fondi_rischi"]
         + fb["sp15_tfr"] + fb["sp18_ratei_risconti_passivi"]
     )
-    assert abs(fb["total_assets"] - total_liabilities) < 0.005
+    sbilancio = Decimal(str(fb["total_assets"])) - Decimal(str(total_liabilities))
+    # Il clamp lascia la proiezione NON quadrata (Invarianti "un divario si
+    # dichiara, non si tappa"): lo sbilancio residuo coincide con l'importo
+    # dichiarato dalla diagnostica, entro un centesimo.
+    assert abs(sbilancio - gap) < Decimal("0.01")
 
 
 def test_cross_user_isolation_is_a_404(client, tmp_path):

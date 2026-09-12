@@ -31,9 +31,10 @@ BASE_BS = {
     # see also tests/test_intra_year_semantics.py::
     # test_forecast_gate_rejects_debt_aggregate_without_breakdown). A real
     # import always carries this typed breakdown; a hand-seeded base year
-    # must too, or every forecast generation raises "not forecastable:
-    # aggregate/detail mismatch". One bucket per aggregate is enough to
-    # reconcile — the specific bucket is chosen to match what the engine
+    # must too, or every forecast generation raises "non è utilizzabile per
+    # la previsione: aggregati e dettagli non coincidono". One bucket per
+    # aggregate is enough to reconcile — the specific bucket is chosen to
+    # match what the engine
     # actually drives off of it (sp06a for DSO, sp16d for DPO, sp17a for the
     # bank-debt repayment schedule).
     "sp05a_materie_prime": Decimal("50000"),
@@ -67,8 +68,9 @@ HOLDING_BS = {
     # calculations/intra_year_engine.py _validate_forecast_source gates on
     # sp04/sp12/sp16 (among others) needing aggregate == Σdetail. The holding
     # fixture carries nonzero sp04/sp12/sp16 aggregates with no detail
-    # sub-field, which raises "not forecastable: aggregate/detail mismatch".
-    # One bucket per aggregate reconciles it, matching BASE_BS's convention.
+    # sub-field, which raises "non è utilizzabile per la previsione:
+    # aggregati e dettagli non coincidono". One bucket per aggregate
+    # reconciles it, matching BASE_BS's convention.
     "sp04a_partecipazioni": Decimal("350000"),
     "sp12e_altre_riserve": Decimal("130000"),
     "sp16d_debiti_fornitori_breve": Decimal("50000"),

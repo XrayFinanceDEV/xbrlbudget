@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatEuro, formatPct } from "@/lib/pratica-format";
+import { formatEuro, formatPct, deltaPct } from "@/lib/pratica-format";
 import { EDITABLE_CE_CODES, ALWAYS_SHOW_CODES, VP_CODES, EXTRA_ALERT_DEFS } from "@/lib/pratica-codes";
 import {
   computeIndicators,
@@ -204,8 +204,8 @@ export function StampaContent({
 
   // Helper: delta % between two values
   const deltaFmt = (proj: number, ref: number) => {
-    if (ref === 0) return <span className="text-muted-foreground">-</span>;
-    const d = ((proj - ref) / Math.abs(ref)) * 100;
+    const d = deltaPct(proj, ref);
+    if (d === null) return <span className="text-muted-foreground">-</span>;
     return (
       <span className={d > 1 ? "text-green-600 dark:text-green-400" : d < -1 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}>
         {d > 0 ? "+" : ""}{formatPct(d)}

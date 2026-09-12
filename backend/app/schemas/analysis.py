@@ -185,6 +185,31 @@ class CompleteAnalysisResponse(BaseModel):
         }
         """
     )
+    forecast_stale: bool = Field(
+        default=False,
+        description=(
+            "True quando il previsionale persistito e' PIU' VECCHIO delle ipotesi "
+            "salvate: i numeri qui sotto sono quelli di una generazione precedente. "
+            "Succede perche' il bulk delle ipotesi risponde 200 anche a una "
+            "generazione respinta, e sul percorso `auto_generate=false`. "
+            "Dichiarato SEMPRE, anche a false: una chiave assente vale zero, quindi "
+            "tacere equivarrebbe a dichiararsi allineati. Nessun ForecastYear => false."
+        ),
+    )
+    assumptions_updated_at: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ultima scrittura delle ipotesi dello scenario, ISO 8601 in UTC col suffisso Z "
+            "(la frazione manca quando i microsecondi sono zero); None se non ce ne sono"
+        ),
+    )
+    forecast_updated_at: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ultima generazione del previsionale, ISO 8601 in UTC col suffisso Z "
+            "(la frazione manca quando i microsecondi sono zero); None se non e' mai stato generato"
+        ),
+    )
 
 
 # ===== Bulk Assumptions Request/Response Schemas =====

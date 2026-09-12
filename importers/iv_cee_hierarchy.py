@@ -28,6 +28,7 @@ from decimal import Decimal
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from calculations.ce_result import calculate_ce_result
+from calculations.projection_common import eur_it
 
 logger = logging.getLogger(__name__)
 
@@ -489,11 +490,11 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
     # le estrazioni vuote dei parser C — es. AITEC PROVVISORIO). Un vuoto NON quadra.
     is_empty = att <= tol and pas <= tol
     if is_empty:
-        warnings.append(f"ESTRAZIONE VUOTA: attivo {att:,.2f} / passivo {pas:,.2f} ~ 0 "
+        warnings.append(f"ESTRAZIONE VUOTA: attivo {eur_it(att)} / passivo {eur_it(pas)} ~ 0 "
                         f"— nessun dato estratto (NON quadra)")
     elif abs(sbil) > tol:
-        warnings.append(f"BILANCIO NON QUADRATO: attivo {att:,.2f} != passivo {pas:,.2f} "
-                        f"(sbilancio {sbil:,.2f})")
+        warnings.append(f"BILANCIO NON QUADRATO: attivo {eur_it(att)} != passivo {eur_it(pas)} "
+                        f"(sbilancio {eur_it(sbil)})")
 
     # Anti-masking: _plug_residual (esposto dall'estrattore) misura la massa della fonte NON
     # classificata in alcuna voce IV-CEE. Nessun plug viene applicato — il bilancio resta come
@@ -504,7 +505,7 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
     masked = False
     if att > 0 and plug > max(tol, _MASK_PCT * att):
         masked = True
-        warnings.append(f"QUADRATURA MASCHERATA: residuo {plug:,.2f} ({100 * plug / att:.1f}% "
+        warnings.append(f"QUADRATURA MASCHERATA: residuo {eur_it(plug)} ({100 * plug / att:.1f}% "
                         f"del totale) non classificato — composizione non affidabile")
 
     utile_ce = None
@@ -520,15 +521,15 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
         utile_tol = max(Decimal("2"), att * Decimal("0.001"))
         if abs(utile_ce - sp13) > utile_tol:
             utile_match = False
-            warnings.append(f"Utile CE {utile_ce:,.2f} != sp13 {sp13:,.2f} "
-                            f"(diff {utile_ce - sp13:,.2f})")
+            warnings.append(f"Utile CE {eur_it(utile_ce)} != sp13 {eur_it(sp13)} "
+                            f"(diff {eur_it(utile_ce - sp13)})")
 
     hierarchy_differences = _aggregate_detail_differences(bs, ce, tol)
     hierarchy_consistent = not hierarchy_differences
     for aggregate, diff in hierarchy_differences.items():
         warnings.append(
             f"GERARCHIA INCOERENTE: {aggregate} differisce dalla somma dettagli "
-            f"di {diff:,.2f}"
+            f"di {eur_it(diff)}"
         )
 
     # ``quadra`` retains its public name but is no longer allowed to hide a CE/SP
@@ -615,8 +616,8 @@ def reconcile_ivcee_balance(bs: Dict[str, Decimal],
     if abs(gap) > Decimal("0.01"):
         result["_unexplained_balance_difference"] = gap
         logger.warning(
-            f"[{label}] IV-CEE non quadrato: attivo {att:,.2f}, passivo {pas:,.2f}, "
-            f"differenza {gap:,.2f}; nessun valore contabile è stato modificato"
+            f"[{label}] IV-CEE non quadrato: attivo {eur_it(att)}, passivo {eur_it(pas)}, "
+            f"differenza {eur_it(gap)}; nessun valore contabile è stato modificato"
         )
     declared_passivo = (
         _D(declared.get("passivo")) if declared and declared.get("passivo") is not None else None
@@ -668,8 +669,8 @@ def declare_unclassified_mass(bs: Dict[str, Decimal],
         )
     elif shortfall > Decimal("0.01"):
         logger.warning(
-            f"[{label}] massa stampata NON classificata: {shortfall:,.2f} "
-            f"(attivo classificato {att:,.2f}, passivo {pas:,.2f})"
+            f"[{label}] massa stampata NON classificata: {eur_it(shortfall)} "
+            f"(attivo classificato {eur_it(att)}, passivo {eur_it(pas)})"
         )
     return out
 
@@ -725,8 +726,8 @@ def enforce_ce_sp_identity(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decima
     if abs(gap) > tol:
         result["_ce_sp_difference"] = gap
         logger.warning(
-            f"[{label}] CE↔SP incoerente: utile CE {ce_result:,.2f}, sp13 {sp13:,.2f}, "
-            f"differenza {gap:,.2f}; nessuna voce CE/SP è stata modificata"
+            f"[{label}] CE↔SP incoerente: utile CE {eur_it(ce_result)}, sp13 {eur_it(sp13)}, "
+            f"differenza {eur_it(gap)}; nessuna voce CE/SP è stata modificata"
         )
 
     if declared:

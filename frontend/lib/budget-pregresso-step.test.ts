@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
+import { euro } from "@/lib/budget-format";
 import {
   boolAssumption,
   pregressoBase,
@@ -29,7 +30,7 @@ const year = (y: number, over: Partial<ForecastPreviewYear> = {}): ForecastPrevi
     sp16b_debiti_altri_finanz_breve: 40, sp17b_debiti_altri_finanz_lungo: 130,
     sp02_immob_immateriali: 8, sp03_immob_materiali: 85, sp09_disponibilita_liquide: 90,
   },
-  details: { ce05_fixed: null, ce05_variable: null, ce06_fixed: null, ce06_variable: null, dso_applied: 60, dio_applied: 45, dpo_applied: 78 },
+  details: { ce05_fixed: null, ce05_variable: null, ce06_fixed: null, ce06_variable: null, dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [] }, override_conflicts: [] },
   ...over,
 });
 
@@ -111,8 +112,9 @@ describe("boolAssumption", () => {
 
 describe("pregressoPreview", () => {
   it("senza anno base o senza risposta: nessuna riga", () => {
-    expect(pregressoPreview(undefined, response([year(2027)]))).toEqual({ years: [], rows: [], unfunded: null });
-    expect(pregressoPreview(baseBs, null)).toEqual({ years: [], rows: [], unfunded: null });
+    const vuota = { years: [], rows: [], unfunded: null, writeoffIgnored: [], writeoffIgnoredByYear: {} };
+    expect(pregressoPreview(undefined, response([year(2027)]))).toEqual(vuota);
+    expect(pregressoPreview(baseBs, null)).toEqual(vuota);
   });
 
   it("gli anni sono quelli che il motore ha davvero prodotto", () => {
@@ -123,7 +125,54 @@ describe("pregressoPreview", () => {
   });
 
   it("un fabbisogno scoperto si legge dall'errore strutturato, non si inventa", () => {
-    const p = pregressoPreview(baseBs, response([year(2027)], { year: 2028, message: "Unfunded financing requirement 1,234.56" }));
+    const p = pregressoPreview(baseBs, response([year(2027)], { year: 2028, message: "Fabbisogno finanziario scoperto di 1.234,56" }));
     expect(p.unfunded).toEqual({ year: 2028, amount: 1234.56 });
+  });
+});
+
+// ── Il pregresso scadenziato nell'anteprima (Task 7) ────────────────────────
+describe("pregressoPreview · pregresso di circolante", () => {
+  it("senza chiavi l'anteprima e' quella di prima: nessuna riga di pregresso", () => {
+    const p = pregressoPreview(baseBs, response([year(2027)]));
+    expect(p.rows.some((r) => r.label.endsWith("· residuo a breve"))).toBe(false);
+  });
+
+  it("con le chiavi le righe del residuo si aggiungono SOTTO quelle di debito e cassa", () => {
+    const p = pregressoPreview(baseBs, response([year(2027)]), ["altri_debiti"]);
+    const pfn = p.rows.findIndex((r) => r.key === "pfn");
+    const head = p.rows.findIndex((r) => r.label === "Pregresso: residuo a breve · oltre");
+    expect(pfn).toBeGreaterThanOrEqual(0);
+    expect(head).toBeGreaterThan(pfn);
+    expect(p.rows.some((r) => r.label === "Altri debiti · residuo a breve")).toBe(true);
+  });
+
+  it("l'inesigibile non scaricato arriva all'interfaccia, invece di restare nei details", () => {
+    const conAvviso = year(2027, {
+      details: {
+        ...year(2027).details,
+        pregresso_writeoff_ignored: [
+          { saldo: "crediti_commerciali", field: "ce09d_svalutazione_crediti", requested: 5000, reason: "ce09d_override" },
+        ],
+      },
+    });
+    const p = pregressoPreview(baseBs, response([conAvviso]), ["crediti_commerciali"]);
+    expect(p.writeoffIgnored).toHaveLength(1);
+    expect(p.writeoffIgnored[0]).toContain("2027");
+    expect(pregressoPreview(baseBs, response([year(2027)]), ["crediti_commerciali"]).writeoffIgnored).toEqual([]);
+  });
+
+  it("lo stesso avviso arriva anche indicizzato sull'anno (rilievo 6): la tabella lo legge da li'", () => {
+    const conAvviso = year(2027, {
+      details: {
+        ...year(2027).details,
+        pregresso_writeoff_ignored: [
+          { saldo: "crediti_commerciali", field: "ce09d_svalutazione_crediti", requested: 5000, reason: "ce09d_override" },
+        ],
+      },
+    });
+    const p = pregressoPreview(baseBs, response([conAvviso]), ["crediti_commerciali"]);
+    expect(Object.keys(p.writeoffIgnoredByYear)).toEqual(["2027"]);
+    expect(p.writeoffIgnoredByYear[2027]).toContain(euro(5000));
+    expect(pregressoPreview(baseBs, response([year(2027)])).writeoffIgnoredByYear).toEqual({});
   });
 });

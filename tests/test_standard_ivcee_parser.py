@@ -321,6 +321,7 @@ def test_pdf_to_adjustments_to_assumptions_full_workflow_matrix(
     from backend.app.services.promote_service import (
         promote_projection_to_financial_year,
     )
+    from calculations.intra_year_engine import IntraYearEngine
     from database.db import Base
     from database.models import FinancialYear, ForecastYear
     from importers import pdf_importer
@@ -456,7 +457,14 @@ def test_pdf_to_adjustments_to_assumptions_full_workflow_matrix(
                                     # expose a sizeable explicit funding need.
                                     # Fund the valid-path matrix deliberately;
                                     # uncovered needs have separate diagnostic tests.
-                                    "amount": 500000 if is_partial else 20000,
+                                    # Sul percorso annuale il fabbisogno e' salito da
+                                    # quando le imposte si pagano a saldo + acconto: il
+                                    # debito tributario di apertura di questo fixture
+                                    # (794.335,07 o 1.150.949,04) non e' piu' un saldo
+                                    # che si riporta, e' un saldo che si VERSA nel primo
+                                    # anno di piano. Senza uno scadenziamento va coperto,
+                                    # esattamente come dice il messaggio del motore.
+                                    "amount": 500000 if is_partial else 1400000,
                                     "duration_years": 5,
                                     "interest_rate": 4,
                                     "grace_years": 1,
@@ -499,10 +507,18 @@ def test_pdf_to_adjustments_to_assumptions_full_workflow_matrix(
             )
             assert [forecast.year for forecast in forecasts] == forecast_years
             for forecast in forecasts:
-                assert (
-                    forecast.balance_sheet.total_assets
-                    == forecast.balance_sheet.total_liabilities
-                )
+                # Task 5 (lotto 3A, decisione del proprietario 2026-09-11): sui
+                # tre casi parziali di questa matrice il debito tributario
+                # d'apertura esce di cassa entro il 31/12 e non basta nemmeno
+                # col finanziamento di ripiego sotto -- il motore clampa sp09 a
+                # zero e la proiezione NON quadra piu' (verificato sotto, dopo
+                # il ciclo). Sui due casi annuali (budget engine) la
+                # quadratura regge come prima.
+                if not is_partial:
+                    assert (
+                        forecast.balance_sheet.total_assets
+                        == forecast.balance_sheet.total_liabilities
+                    )
                 bs_values = {
                     column.name: Decimal(
                         str(getattr(forecast.balance_sheet, column.name, None) or 0)
@@ -518,7 +534,8 @@ def test_pdf_to_adjustments_to_assumptions_full_workflow_matrix(
                     if column.name.startswith("ce")
                 }
                 validation = check_quadratura(bs_values, ce_values)
-                assert validation.semantic_valid, validation.warnings
+                if not is_partial:
+                    assert validation.semantic_valid, validation.warnings
                 assert (
                     sum(
                         (
@@ -555,17 +572,254 @@ def test_pdf_to_adjustments_to_assumptions_full_workflow_matrix(
                 )
 
             if is_partial:
-                promoted = promote_projection_to_financial_year(db, scenario.id)
-                assert promoted["verification"]["exact_match"] is True
-                assert promoted["verification"]["semantic_valid"] is True
-                promoted_year = db.query(FinancialYear).filter(
-                    FinancialYear.id == promoted["financial_year_id"]
+                # bulk_upsert_assumptions scarta i diagnostics del motore
+                # (backend/app/services/assumptions_service.py): si rigenera
+                # per leggerli, idempotente sulle ipotesi gia' salvate (stesso
+                # pattern del test HTTP full-cycle).
+                proj_result = IntraYearEngine(db).generate_projection(scenario.id)
+                gap = next(
+                    (
+                        Decimal(d["amount"])
+                        for d in proj_result["diagnostics"]
+                        if d["code"] == "unfunded_financing_requirement"
+                    ),
+                    None,
+                )
+                assert gap is not None, "atteso il fabbisogno tributario dichiarato"
+                assert gap > 0
+                unfunded_forecast = db.query(ForecastYear).filter(
+                    ForecastYear.scenario_id == scenario.id
                 ).one()
-                assert promoted_year.year == 2026
-                assert promoted_year.period_months is None
-                assert promoted_year.forecastable is True
+                sbilancio = (
+                    unfunded_forecast.balance_sheet.total_assets
+                    - unfunded_forecast.balance_sheet.total_liabilities
+                )
+                assert sbilancio > 0
+                # Il cancello del promote (check_quadratura(...).semantic_valid)
+                # rifiuta una proiezione non quadrata: nessun promote qui.
+                with pytest.raises(ValueError, match="non quadra"):
+                    promote_projection_to_financial_year(db, scenario.id)
     finally:
         engine.dispose()
+
+
+def _generate_partial_matrix_case_gap(
+    tmp_path,
+    monkeypatch,
+    period_months,
+    positive_equity,
+    other_reserve_roman,
+    negative_style,
+    interest_style,
+    case_name,
+):
+    """Import -> rettifica -> scenario infrannuale -> ipotesi per UNA riga
+    (anno 2026, index 0), esattamente i valori che il ramo parziale della
+    matrice sopra usa per ogni caso -- i tre casi partial condividono la
+    stessa riga di ipotesi, solo il PDF di partenza cambia. Fattorizzato per
+    non duplicare l'intero workflow nel test xfail sotto.
+
+    Ritorna (gap, sbilancio) come Decimal: `gap` e' l'importo dichiarato da
+    `unfunded_financing_requirement` (None se assente), `sbilancio` e'
+    total_assets - total_liabilities della proiezione persistita.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.app.api.v1 import budget_scenarios, financial_years
+    from backend.app.schemas.adjustments import AdjustmentsUpdate, RettificaEntry
+    from backend.app.schemas.budget import BudgetScenarioCreate
+    from calculations.intra_year_engine import IntraYearEngine
+    from database.db import Base
+    from database.models import ForecastYear
+    from importers import pdf_importer
+
+    pdf = tmp_path / f"{case_name}.pdf"
+    _write_compact_infrannual_pdf(
+        pdf,
+        period_months=period_months,
+        positive_equity=positive_equity,
+        other_reserve_roman=other_reserve_roman,
+        negative_style=negative_style,
+        interest_style=interest_style,
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", sessions)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    user_id = "workflow-matrix-gap"
+
+    try:
+        imported = pdf_importer.import_pdf_balance_sheet(
+            file_path=str(pdf),
+            fiscal_year=2026,
+            company_name=case_name,
+            create_company=True,
+            sector=1,
+            period_months=period_months,
+            user_id=user_id,
+        )
+        assert imported["success"] is True
+        company_id = imported["company_id"]
+
+        with sessions() as db:
+            editable = financial_years.get_adjustable_financial_year(
+                company_id, 2026, period_months=period_months, user_id=user_id, db=db,
+            )
+            original_cash = Decimal(
+                str(editable.balance_sheet["sp09_disponibilita_liquide"])
+            )
+            original_bank_debt = Decimal(
+                str(editable.balance_sheet["sp16a_debiti_banche_breve"])
+            )
+            original_total_debt = Decimal(
+                str(editable.balance_sheet["sp16_debiti_breve"])
+            )
+            financial_years.save_adjustments(
+                company_id,
+                2026,
+                AdjustmentsUpdate(
+                    balance_sheet={
+                        "sp09_disponibilita_liquide": original_cash + Decimal("1000"),
+                        "sp16_debiti_breve": original_total_debt + Decimal("1000"),
+                        "sp16a_debiti_banche_breve": original_bank_debt + Decimal("1000"),
+                    },
+                    income_statement={},
+                    rettifiche_log=[
+                        RettificaEntry(
+                            id="matrix-cash-debt",
+                            edited_field="sp09_disponibilita_liquide",
+                            edited_label="Disponibilita liquide",
+                            edit_delta=1000,
+                            counterpart_field="sp16a_debiti_banche_breve",
+                            counterpart_label="Debiti verso banche entro 12 mesi",
+                            counterpart_delta=1000,
+                            explanation="Rettifica bilanciata del test end-to-end",
+                            created_at="2026-07-20T12:00:00Z",
+                        )
+                    ],
+                ),
+                period_months=period_months,
+                user_id=user_id,
+                db=db,
+            )
+
+            scenario = budget_scenarios.create_budget_scenario(
+                company_id,
+                BudgetScenarioCreate(
+                    company_id=company_id,
+                    name=f"Scenario {case_name}",
+                    base_year=2025,
+                    scenario_type="infrannuale",
+                    period_months=period_months,
+                ),
+                user_id=user_id,
+                db=db,
+            )
+            # Stessa riga di ipotesi che il ramo parziale della matrice sopra
+            # costruisce per index=0 (forecast_year 2026).
+            assumptions = [
+                {
+                    "forecast_year": 2026,
+                    "revenue_growth_pct": 5,
+                    "personnel_growth_pct": 2,
+                    "fixed_materials_percentage": 40,
+                    "fixed_services_percentage": 40,
+                    "tax_rate": 24,
+                    "tangible_investments": 10000,
+                    "ce01_override": 850000,
+                    "sp_overrides": {"sp11_capitale": 51000},
+                    "financing_loans": [
+                        {
+                            "name": "Mutuo matrice",
+                            "amount": 500000,
+                            "duration_years": 5,
+                            "interest_rate": 4,
+                            "grace_years": 1,
+                            "balloon_pct": 10,
+                        }
+                    ],
+                    "tax_temporary_differences": [
+                        {
+                            "name": "Fondo temporaneo",
+                            "kind": "deductible",
+                            "maturity": "short",
+                            "opening_amount": 1200,
+                            "additions": 300,
+                            "reversals": 100,
+                            "tax_rate": 24,
+                        }
+                    ],
+                }
+            ]
+            budget_scenarios.bulk_upsert_assumptions(
+                company_id,
+                scenario.id,
+                request={"assumptions": assumptions, "auto_generate": True},
+                user_id=user_id,
+                db=db,
+            )
+
+            proj_result = IntraYearEngine(db).generate_projection(scenario.id)
+            gap = next(
+                (
+                    Decimal(d["amount"])
+                    for d in proj_result["diagnostics"]
+                    if d["code"] == "unfunded_financing_requirement"
+                ),
+                None,
+            )
+            forecast = db.query(ForecastYear).filter(
+                ForecastYear.scenario_id == scenario.id
+            ).one()
+            sbilancio = (
+                forecast.balance_sheet.total_assets
+                - forecast.balance_sheet.total_liabilities
+            )
+            return gap, sbilancio
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "period_months,positive_equity,other_reserve_roman,negative_style,interest_style",
+    FULL_WORKFLOW_CASES[2:],
+)
+def test_full_workflow_matrix_partial_gap_equals_declared_amount(
+    tmp_path,
+    monkeypatch,
+    period_months,
+    positive_equity,
+    other_reserve_roman,
+    negative_style,
+    interest_style,
+):
+    """Sui tre casi parziali della matrice l'importo dichiarato da
+    `unfunded_financing_requirement` DOVREBBE coincidere con lo sbilancio
+    TA-TP finale della proiezione (regge al centesimo quando le ipotesi non
+    portano `sp_overrides`, misurato dalla revisione del Task 5 sul caso
+    HTTP: -0,002). Qui NON regge: ciascuno dei tre casi porta lo stesso
+    `sp_overrides` su sp11_capitale (50.000 -> 51.000, +1.000 di patrimonio),
+    e in `_project_balance_sheet_annualized` la diagnostica viene registrata
+    PRIMA che `ForecastEngine._apply_sp_overrides` sposti il passivo di
+    quell'importo -- difetto preesistente a Task 5 (non introdotto qui, non
+    toccato dal suo diff), che e' il Task 11 dello stesso lotto. xfail strict:
+    se un giorno regge, e' il segnale che il Task 11 e' stato fatto."""
+    case_name = f"gap-{period_months or 12}m-{negative_style}"
+    gap, sbilancio = _generate_partial_matrix_case_gap(
+        tmp_path,
+        monkeypatch,
+        period_months,
+        positive_equity,
+        other_reserve_roman,
+        negative_style,
+        interest_style,
+        case_name,
+    )
+    assert gap is not None
+    assert abs(gap - sbilancio) < Decimal("0.01")
 
 
 def test_contradictory_source_is_rejected_before_api_key_fallback(

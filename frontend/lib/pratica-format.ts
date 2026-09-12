@@ -32,7 +32,27 @@ export function formatEuro(value: number): string {
 }
 
 export function formatPct(value: number): string {
+  if (!Number.isFinite(value)) return "-";
   return `${value.toFixed(1)}%`;
+}
+
+/**
+ * Percentuale di variazione fra un valore corrente e un riferimento, `null` quando il
+ * riferimento è zero AL CENTESIMO (stessa tolleranza di quadratura di `config.py:235`,
+ * `VALIDATION_RULES["balance_sheet_tolerance"] = 0.01`), non zero esatto.
+ *
+ * Perché: un riferimento che per identità contabile DOVREBBE annullarsi (es. la riga
+ * "DIFFERENZA (Attivo - Passivo)" di Stampa/Confronto/Proiezione) arriva dal backend come somma
+ * di ~10 `float` via Decimal→float (`DecimalJSONResponse`); la somma in virgola mobile non è
+ * associativa e può lasciare un residuo dell'ordine di 1e-9..1e-13 invece di 0 letterale.
+ * Dividere uno sbilancio vero anche piccolo per un residuo di quell'ordine dà una percentuale a
+ * 12-15 cifre (osservato: +2366097483366300.0%, indagine-3 del 2026-09-11). Un confronto con
+ * zero esatto non intercetta il residuo; arrotondare al centesimo prima del confronto sì, e non
+ * sposta nessuna riga sana (il residuo è ~9 ordini di grandezza sotto un centesimo).
+ */
+export function deltaPct(current: number, reference: number): number | null {
+  if (Math.round(reference * 100) === 0) return null;
+  return ((current - reference) / Math.abs(reference)) * 100;
 }
 
 // Format number with Italian thousand separators (4.246.479) for input display

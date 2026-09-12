@@ -13,6 +13,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Loader2, AlertTriangle, Sparkles, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
+import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { toast } from "sonner";
 
 import { ReportTOC } from "@/components/report/report-toc";
@@ -28,11 +30,12 @@ import { ReportCashflow } from "@/components/report/report-cashflow";
 import { ReportAppendices } from "@/components/report/report-appendices";
 import { ReportNotes } from "@/components/report/report-notes";
 import { ReportAIComment } from "@/components/report/report-ai-comment";
+import { ForecastStaleBanner } from "@/components/budget/ForecastStaleBanner";
 
 export default function ReportPage() {
   const { selectedCompanyId, selectedCompany } = useApp();
 
-  const { data: scenarios = [], isLoading: scenariosLoading } = useScenarios(selectedCompanyId);
+  const { data: scenarios = [], isLoading: scenariosLoading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const preferredScenarioId = usePreferredBudgetScenarioId(selectedCompanyId);
   const [selectedScenario, setSelectedScenario] = useState<BudgetScenario | null>(null);
   const [aiComments, setAiComments] = useState<ReportAICommentsResponse>({});
@@ -49,12 +52,16 @@ export default function ReportPage() {
     if (!selectedCompanyId) setSelectedScenario(null);
   }, [scenarios, selectedCompanyId, selectedScenario, preferredScenarioId]);
 
-  const { data: analysisData, isLoading: analysisLoading, error: analysisError } = useAnalysis(
+  const { data: analysisData, isLoading: analysisLoading, error: analysisError, refetch: refetchAnalysis } = useAnalysis(
     selectedCompanyId,
     selectedScenario?.id ?? null
   );
-  const loading = scenariosLoading || analysisLoading;
-  const error = analysisError ? "Errore nel caricamento dell'analisi" : null;
+  const { status: pageStatus, errorSource } = forecastPageState(
+    { loading: scenariosLoading, error: scenariosError },
+    { loading: analysisLoading, error: analysisError },
+  );
+  const loadError = errorSource === "scenarios" ? scenariosError : analysisError;
+  const retryLoad = () => (errorSource === "scenarios" ? refetchScenarios() : refetchAnalysis());
 
   // Load stored AI comments when scenario/analysis changes
   useEffect(() => {
@@ -159,15 +166,15 @@ export default function ReportPage() {
         </PageHeader>
       </div>
 
-      {error && (
-        <Alert variant="destructive" className="mb-6 print:hidden">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Errore</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {pageStatus === "errore" && (
+        <ForecastLoadError
+          error={loadError}
+          onRetry={retryLoad}
+          className="mb-6 print:hidden"
+        />
       )}
 
-      {loading && (
+      {pageStatus === "caricamento" && !analysisData && (
         <Card className="mb-6 print:hidden">
           <CardContent className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -176,7 +183,8 @@ export default function ReportPage() {
         </Card>
       )}
 
-      {!loading && !analysisData && !error && scenarios.length === 0 && (
+      {pageStatus === "pronto" && !analysisData &&
+        forecastScenariosEmpty({ loading: scenariosLoading, error: scenariosError }, scenarios.length) && (
         <Alert className="mb-6 print:hidden">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Nessuno Scenario</AlertTitle>
@@ -186,6 +194,10 @@ export default function ReportPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      {/* print:hidden come ogni altro avviso di questa pagina: e' rivolto a chi
+          guarda lo schermo prima di stampare, non al destinatario del report. */}
+      <ForecastStaleBanner analysis={analysisData} className="mb-6 print:hidden" />
 
       {analysisData && (
         <div className="flex gap-6 print:block">

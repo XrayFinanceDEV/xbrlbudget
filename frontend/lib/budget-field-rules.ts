@@ -82,6 +82,9 @@ const RULES = {
   asset_disposal_proceeds: eur({ nullable: true }),
   cash_sweep_enabled: bool,
   cash_sweep_min_cash: eur({ nullable: true }),
+  overdraft_allowed: bool,
+  // Vuoto = concesso senza tetto: e' la modalita' di misura del fabbisogno.
+  overdraft_limit: eur({ nullable: true }),
   tfr_accrual_suspended: bool,
   previdenza_scales_with_personnel: bool,
 

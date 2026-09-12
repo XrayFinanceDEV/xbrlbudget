@@ -17,7 +17,8 @@
 import type { BalanceSheet, ForecastPreviewResponse } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { baseBankDebt } from "@/lib/base-bank-debt";
-import { rowsPregressoNuovo, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
+import { rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError, type PreviewRow } from "@/lib/budget-preview-rows";
+import { writeoffIgnoredAvvisi, writeoffIgnoredByYear, type TabellaPregressoKey } from "@/lib/budget-pregresso-tabella";
 import { num } from "@/lib/budget-format";
 
 export interface PregressoBase {
@@ -87,9 +88,20 @@ export interface PregressoPreview {
   years: number[];
   rows: PreviewRow[];
   unfunded: { year: number; amount: number } | null;
+  /** Gli anni in cui un inesigibile scadenziato NON e' stato scaricato perche'
+   *  un override del CE impediva di rilevarne il costo: il credito e' rimasto
+   *  a bilancio, e va detto. Vuoto quando non c'e' nulla da dire. */
+  writeoffIgnored: string[];
+  /** Lo stesso avviso, indicizzato sull'anno invece che elencato in una
+   *  frase: la tabella lo usa per marcare la cella «di cui inesigibile»
+   *  invece di lasciarlo solo nell'anteprima (rilievo 6, giro di correzione
+   *  1). Stessa lettura di `writeoffIgnored`, nessun ricalcolo. */
+  writeoffIgnoredByYear: Record<number, string>;
 }
 
-const EMPTY_PREVIEW: PregressoPreview = { years: [], rows: [], unfunded: null };
+const EMPTY_PREVIEW: PregressoPreview = {
+  years: [], rows: [], unfunded: null, writeoffIgnored: [], writeoffIgnoredByYear: {},
+};
 
 /**
  * Dalla risposta del motore a tutto cio' che l'anteprima del passo rende.
@@ -100,13 +112,18 @@ const EMPTY_PREVIEW: PregressoPreview = { years: [], rows: [], unfunded: null };
  */
 export function pregressoPreview(
   baseBs: BalanceSheet | undefined | null,
-  data: ForecastPreviewResponse | null
+  data: ForecastPreviewResponse | null,
+  keys: readonly TabellaPregressoKey[] = [],
 ): PregressoPreview {
   if (!baseBs || !data) return EMPTY_PREVIEW;
   const previewYears = data.forecast_years ?? [];
   return {
     years: previewYears.map((y) => y.year),
-    rows: rowsPregressoNuovo(baseBs, previewYears),
+    // Debito/cassa/PFN, poi il pregresso scadenziato: due letture dello stesso
+    // `forecast_years`, nessun ricalcolo.
+    rows: [...rowsPregressoNuovo(baseBs, previewYears), ...rowsPregressoRunoff(previewYears, keys)],
     unfunded: unfundedFromError(data.error),
+    writeoffIgnored: writeoffIgnoredAvvisi(previewYears),
+    writeoffIgnoredByYear: writeoffIgnoredByYear(previewYears),
   };
 }

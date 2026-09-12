@@ -114,6 +114,91 @@ Mai negative: nessun credito d'imposta inventato.
 > dell'assunzione. Nell'interfaccia infrannuale l'override del risultato è tradotto dal frontend
 > in un'aliquota effettiva.
 
+**La posizione tributaria al 31/12** (lotto 3A, Task 5, decisione 4 del proprietario) non è più «apertura + imposta
+− acconti»: al 31/12 resta **solo il saldo dell'anno in corso**, `imposta(anno) − acconti(anno)`, positivo in
+`sp16e` e negativo in `sp06e`. Gli acconti sono `tax_advances_paid` se **maggiore di zero**, altrimenti il 100% del
+`ce20` dell'anno di riferimento; senza riferimento l'imposta su cui commisurarli non esiste, quindi **zero** —
+tutta l'imposta dell'anno resta da versare al 31/12 (il lato prudente, mai un acconto inventato). La regola è
+`projection_common.acconti_dovuti`, la stessa del motore budget, e la posizione la costruisce
+`projection_common.posizione_tributaria_fine_anno`. Quanto era aperto al mese del parziale **esce di cassa entro
+fine anno**:
+
+```
+uscita = (debito di apertura − credito di apertura) + imposta dei mesi residui − posizione netta di fine anno
+```
+
+Misurato sui test (`tests/test_intra_year_imposte.py`): apertura 1.150.949,04, imposta dell'anno 120.000, acconti
+99.247,26 → `sp16e` **20.752,74** e un'uscita di cassa di **1.250.196,30**. Prima: `sp16e` 1.171.701,78 con cassa
+immutata, e il budget nato dal promote ereditava quel debito. Nel motore la cassa resta il plug, quindi è il kernel
+a dichiarare `cash_out` e il test end-to-end a verificarlo. `sp17e` (rate oltre l'anno) non si tocca, e la via
+manuale (`sp06e_growth_pct` o `sp16e_growth_pct` valorizzati) continua a saltare la posizione automatica.
+
+**La differenza fra `cash_out` e le righe è il conguaglio, e si posa sul lato che si è mosso.**
+`sp16e` e `sp06e` non nascono dal kernel: nascono dalla **rotazione** del circolante (Task 1/2), che
+porta via la percentuale di crescita del riferimento, e posano la massa non riconosciuta su
+`sp16g`/`sp06g`. Quando la sostituzione fiscale li riscrive, dal `g` se ne va (o ci torna) la
+**quota di rotazione `x`**, non il debito di apertura `P_d` che è quello che `cash_out` misura. La
+riga da sola muove dunque cassa per `(chiusura − x)`, non per `cash_out`, e lo scarto era assorbito
+dal plug senza che nessun flusso lo nominasse:
+
+```
+correzione = −cash_out − [(chiusura_debito − x_debito) − (chiusura_credito − x_credito)]
+```
+
+La contropartita la sceglie il **verso**, e una sola (ruling del coordinatore, 2026-09-12):
+conguaglio **negativo** → `sp16g_altri_debiti_breve` **scende** (stiamo pagando un debito, non
+incrementandolo); conguaglio **positivo** → `sp06g_crediti_altri_breve` scende, cioè si scarica
+l'**attivo** (stiamo incassando). **Mai** un aumento di passività a fronte di un incasso: la prima
+stesura di questa regola, che applicava il solo lato debito in entrambi i casi, su uno scenario reale
+del database fabbricava **+144.188,46 di `sp16g`**, peggiorando la PFN senza alcun evento.
+Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo si dichiara con
+`tax_settlement_reclass_below_zero` (campo nominato e importo **quantizzato al centesimo**, come ogni
+altro importo del motore — `residuo` nasce da una divisione di rotazione e senza quantizzazione
+usciva con ventotto decimali), lasciando la cassa dov'è. Un secondo
+bersaglio sarebbe il vecchio plug. Nel **testo** del messaggio non c'è alcun importo, solo il nome del
+campo: la cifra che conta vive nel payload `amount`. Dire "trova solo X di capienza" avrebbe infatti
+significato, sul lato debito, mostrare una capienza **negativa** (`applicato` è negativo per
+costruzione), e una capienza esiste o non esiste (rilievo di revisione, 2026-09-12).
+
+**Il residuo dichiarato è misurato *prima* degli `sp_overrides`, e può quindi sottostimare.** Se un
+override insiste sullo stesso campo neutro (`sp16g` o `sp06g`), la parte che il conguaglio ha applicato
+viene sovrascritta dall'override — un override vince sulla riga, per costruzione — la cassa non si muove
+per nulla, e il warning riporta solo ciò che il motore non era riuscito a collocare: resta corto
+dell'importo cancellato. Vale per qualunque anno e qualunque campo neutro, non è la particolarità di
+uno scenario; chi legge quel warning deve sapere che può sottostimare, e perché.
+
+I due rami non sono simmetrici, e non per disattenzione: sul **ramo col riferimento** il Task 2 ha
+già portato `sp06e` al valore governato **prima** dei riassorbimenti, quindi il credito non lascia
+alcun residuo implicito e la formula è **solo debito** (`x_credito = chiusura_credito` per
+costruzione); sul **ramo annualizzato** (nessun anno pieno importato) la riga combinata
+`sp06e, sp16e = ...` gira **dopo** i riassorbimenti e perde massa su entrambi i lati, quindi lì la
+forma è **bidirezionale**. Non si è riordinato nulla: il change aggiunge solo il flusso dichiarato.
+
+Misurato sugli 8 scenari infrannuali del database di riferimento (cinque producono una proiezione;
+gli altri tre falliscono prima per dati mancanti, invariati prima e dopo). **L'ancora della colonna
+«Prima» è l'albero dopo i Task 1-2, commit `4d5bce4`** — non la base dell'ondata, contro la quale lo
+scenario 4 risulterebbe invece già sbilanciato di 5.509,29:
+
+| Scenario | Prima | Dopo |
+|---|---|---|
+| 4 | cassa 15.271,65, `sp16g` 26.093,20, foglio quadrato | cassa 0,00 (clamp), `sp16g` 8.964,79, sbilancio 1.856,76 dichiarato da `unfunded_financing_requirement` — un fabbisogno che prima non esisteva |
+| 5 | `sp16g` 20.617,43, cassa invariata | persistito **identico**, ma con residuo dichiarato −30.712,76: la parte applicata (3.614,28) viene cancellata da `sp_overrides.sp16g` dell'utente — l'istanza della regola qui sopra |
+| 8 | `sp16g` 0,00, cassa invariata | cassa **ferma** com'era, `sp16g` 0,00 (nessuna passività negativa), residuo dichiarato −14.306,93 |
+| 12 (ramo annualizzato) | `sp16g` 134.484,00 | `sp16g` 123.086,00, cassa −11.398,00, nessun residuo |
+| 18 (conguaglio positivo) | `sp06g` 33.131,63, cassa 1.468.473,63 | `sp06g` 0,00, cassa 1.501.605,26, `sp16g` **invariato**, residuo dichiarato +111.056,83 |
+
+Su `tests/test_intra_year_crediti_commerciali.py` la stessa regola muove di 5.000,00 l'aggregato
+`sp06`: il fixture porta 5.000,00 di credito tributario d'apertura, e da qui quel credito si incassa.
+La massa non è persa, passa dall'attivo alla liquidità — le due asserzioni leggevano 200.000,00
+perché prima di questo change non c'era alcun meccanismo che lo muovesse.
+
+**Se la cassa del parziale non copre quell'uscita** (debito tributario di apertura maggiore della cassa
+disponibile), il plug generale dell'infrannuale — §5 sotto, "Il fabbisogno scoperto è un diagnostico, non un
+debito" — clampa `sp09` a zero e dichiara `unfunded_financing_requirement`: la proiezione esce comunque, ma **non
+quadrata**, e il cancello del promote (`check_quadratura(...).semantic_valid`) la rifiuta finché l'utente non
+aggiunge un finanziamento esplicito o una rettifica — decisione del proprietario, lotto 3A, 2026-09-11: si tiene
+la regola, mai un plug al posto della diagnostica.
+
 ### Rimanenze
 Con riferimento: si applica l'**indice di rotazione del magazzino** del riferimento al costo
 materie proiettato. Senza riferimento: la giacenza parziale è portata a fine anno **invariata**.
@@ -129,13 +214,13 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 |---|---|
 | **Immobilizzazioni immateriali / materiali** | parziale − **ammortamento residuo della propria classe**, clampato a zero, + nuovi investimenti della classe |
 | **Immobilizzazioni finanziarie** | invariate: **mai ammortizzate** |
-| **Crediti a breve** | con riferimento: proporzionali ai ricavi proiettati (salvo rapporto degenere, sotto); poi meno la **svalutazione residua** |
+| **Crediti a breve** | **aggregato**: con riferimento, proporzionale ai ricavi proiettati (salvo rapporto degenere, sotto), poi meno la **svalutazione residua**; **composizione** (verso clienti/controllate/collegate/controllanti/altri): sempre dal parziale, mai dal riferimento — crediti tributari e imposte anticipate esclusi, governati altrove |
 | **Crediti oltre, attività finanziarie, ratei, fondi rischi** | invariati dal parziale |
 | **Capitale e riserve** | **presi dal parziale così come sono** |
 | **Risultato** | = risultato del CE proiettato, per costruzione |
 | **Fondo TFR** | parziale + accantonamento dei mesi residui |
-| **Debiti a breve** | con riferimento: proporzionali ai costi operativi proiettati (salvo rapporto degenere, sotto); senza: invariati |
-| **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti |
+| **Debiti a breve** | **debito finanziario (banche/altri finanziatori/obbligazioni)**: invariato dal parziale, come i debiti a lungo sotto; **residuo operativo** (fornitori/tributari/previdenziali/altri): con riferimento proporzionale ai costi operativi proiettati (salvo rapporto degenere, sotto), senza riferimento invariato |
+| **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti; la quota del prestito nuovo che scade l'anno dopo sta nei debiti a breve, e il debito bancario pregresso si riduce solo con le proprie rate |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
 
 Ogni classe usa **il proprio** ammortamento: gli immateriali con la quota immateriali, i
@@ -143,8 +228,10 @@ materiali con la quota materiali. Mai incrociati.
 
 ### Rapporti di rotazione degeneri: si riporta, non si moltiplica
 
-Le tre voci "proporzionali" della tabella — rimanenze, crediti a breve, debiti a breve — si
-scalano su un rapporto letto dall'anno di riferimento (`giacenza / base economica`). Quel
+Le voci "proporzionali" della tabella — le rimanenze, l'aggregato dei crediti a breve e il **solo
+residuo operativo** dei debiti a breve — si scalano su un rapporto letto dall'anno di riferimento
+(`giacenza / base economica`). Il **debito finanziario** non ruota: `sp16a-c`/`sp17a-c` si porta
+avanti dal parziale come blocco a sé, in entrambi i regimi (§Le sotto-voci, sotto). Quel
 rapporto è valido solo se la base **può spiegare** la giacenza.
 
 > **Un rapporto oltre un anno di giacenza è DEGENERE: non descrive l'azienda, descrive il
@@ -167,6 +254,15 @@ promote a budget lo rifiutava — correttamente. Il ripiego emette un diagnostic
 verificata in **Rettifiche**. È la stessa regola dell'import — *misurare, mai fabbricare*.
 
 Le aziende sane non si muovono: sotto la soglia il calcolo resta quello di prima.
+
+**Eccezione di settore per le rimanenze (lotto 3A, Task 10).** Per Immobiliare (settore 5) ed
+Edilizia (6) una giacenza oltre l'anno **è il mestiere** — immobili in rimanenza, lavori in corso
+su ordinazione — e lì la soglia non si applica alle rimanenze: il rapporto dedotto (anche oltre 1)
+scala sulla base proiettata, `None` invece di 1 come `max_ratio` di `_turnover_ratio`. La tabella
+sta in un punto solo per entrambi i motori, `projection_common.soglia_giorni_magazzino`. Le altre
+voci, in ogni settore, e un **denominatore nullo** in qualunque settore restano degeneri com'erano.
+Quando il diagnostic scatta, dichiara la soglia applicata nel campo `soglia_giorni`: `"365"`, o
+`null` dove di soglia non ce n'è — e nei settori senza soglia su `sp05_rimanenze` non scatta mai.
 
 > **La formula è duplicata**: `calculateProjectedBS` (frontend, `app/pratica/page.tsx`) e
 > `_project_balance_sheet` (backend). Devono restare d'accordo. Quando divergevano si otteneva
@@ -193,11 +289,72 @@ severità *error*: *"Add an explicit financing assumption; no debt was created a
 > motore di budget, che storicamente aumentava il debito a breve per assorbire la cassa
 > negativa. Qui il fabbisogno si **mostra**; non si finge di averlo coperto.
 
+**Il controllo si misura una volta sola, dopo gli `sp_overrides` (lotto 3A, Task 11; §11.1 del
+lotto 2).** `generate_projection` applica gli `sp_overrides` **dopo** aver proiettato lo SP, e solo
+allora normalizza e ricalcola la cassa dagli aggregati; un override che sposta il passivo o
+l'attivo — anche uno che non sposta la cassa direttamente — cambia quel residuo, quindi il
+fabbisogno va misurato sulla cifra **finale**, mai su quella calcolata prima dell'override. Ogni
+diagnostico `unfunded_financing_requirement` che il roll-forward avesse già registrato (il plug
+descritto sopra, calcolato prima degli override) viene tolto e sostituito da quello, unico, letto
+sulla cassa ricalcolata: prima di questa correzione la cassa restava congelata al valore
+pre-override — con l'override applicato ma senza ricalcolo — e il foglio persistito poteva restare
+sbilanciato dell'importo dell'override senza che alcun diagnostico lo dichiarasse con la cifra
+giusta, oppure, quando nessun errore precedeva l'override, la cassa ricalcolata **senza clamp**
+usciva negativa e restava **persistita così** (`sp09` negativa in DB). Caso del test
+(`tests/test_intra_year_override_cassa.py`): parziale a 9 mesi con `sp05_rimanenze` forzato a
+5.000.000 dà un avviso `unfunded_financing_requirement` di severità `error` per 4.998.445,00, la
+`sp09` persistita è 0,00 (mai negativa), e `promote_projection_to_financial_year` rifiuta la
+proiezione perché il foglio non quadra — esattamente come ogni altro fabbisogno scoperto di questo
+motore.
+
 ### Le sotto-voci si distribuiscono, mai si inventano
-Le quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il
-parziale nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più
-un diagnostico: *"Short-term debt breakdown is unavailable; no categories were invented"* —
-esplicitamente **non** uno split 40/60 fra finanziario e operativo.
+Vale per il **residuo operativo** di `sp16`/`sp17` (fornitori/tributari/previdenziali/altri): le
+quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il parziale
+nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più un
+diagnostico — e il testo esatto cambia col regime, sono stringhe che l'utente legge a schermo: nel
+regime 1 a breve *"La ripartizione del debito operativo a breve (fornitori/tributario/previdenziale/
+altri) non è disponibile: nessuna categoria è stata inventata."* e oltre anno *"La ripartizione del
+debito operativo a lungo (fornitori/tributario/previdenziale/altri) non è disponibile: nessuna
+categoria è stata inventata."* (`_distribute_sp16_operativo`/`_distribute_sp17_operativo`); nel
+regime 2, dove il ripiego è il distributore generale e comprende **anche** il finanziario, a breve
+*"La ripartizione dei debiti a breve non è disponibile: nessuna categoria è stata inventata."*
+(`_distribute_sp16`) e oltre anno quote zero **senza** diagnostico (`_distribute_sp17`).
+
+Il **debito finanziario** (banche/altri finanziatori/obbligazioni, `sp16a-c`/`sp17a-c`) **non**
+segue questa regola: si porta avanti dal parziale come blocco a sé, in ENTRAMBI i regimi — mai
+dalla proporzione del riferimento — perché un mutuo non è trainato dal fatturato o dai costi
+operativi (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-1-debito-bancario.md`,
+2026-09-11 — spazio di lavoro **fuori dal repo**, quei file non sono mai stati in git). Quando il riferimento non ha alcun
+dettaglio finanziario (nessuna delle tre categorie popolata) e il parziale sì, il motore lo
+dichiara con `reference_financial_debt_undetailed` (severità *warning*: non è un errore, è il
+motivo per cui la ripartizione viene dal parziale invece che dal riferimento).
+
+I **crediti a breve e a lungo** (`sp06`/`sp07`) seguono una regola diversa da entrambe le
+precedenti: l'aggregato resta trainato dal fatturato (rotazione/DSO, sopra), ma la
+**composizione** delle sotto-voci (verso clienti/controllate/collegate/controllanti/altri) viene
+**sempre** dal parziale — mai dal riferimento, in nessuno dei due regimi — perché un riferimento
+senza dettaglio reale (il 98% dei bilanci annuali: aggregato positivo e nessuna delle sei
+sotto-voci non di ripiego mai popolata — 373 su 377 al 2026-09-12; stessa forma lato debito: 355 su 362
+all'indagine 2026-09-11, 373 su 378 al 2026-09-12; il denominatore si muove fra una misura e
+l'altra perche' il database di riferimento e' vivo, quindi la cifra e' una misura datata, non un
+invariante da rincorrere) riclassificava in
+silenzio il credito verso clienti in "altri crediti" (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/`,
+2026-09-12, fuori dal repo come sopra). Il credito
+tributario (`sp06e`) e le imposte anticipate (`sp06f`/`sp07f`, quando impostate esplicitamente)
+sono **esclusi** dalla ripartizione prima che avvenga — il loro valore viene dalla posizione
+tributaria di fine anno o dalle differite, mai da una quota proporzionale che verrebbe poi
+scartata: prima di questa correzione quella quota scartata spariva silenziosamente in cassa (fino
+a 39.781,69 su un caso reale). L'esclusione preventiva vale sul **ramo col riferimento**, e per ciascuna riga solo dove
+qualcuno la governa davvero (`sp06_escludi` include `sp06e` ogni volta che
+`sp06e_governed` non è `None`, cioè in via automatica; `sp06f`/`sp07f` solo con differite
+impostate): in via **manuale** (`sp06e_growth_pct`/`sp16e_growth_pct` valorizzate) il kernel è saltato
+e `sp06e` resta una quota proporzionale del parziale, e sul **ramo annualizzato** un'esclusione
+preventiva non c'è per nulla: differite e posizione tributaria sostituiscono le righe **dopo** i
+riassorbimenti, le prime con un blocco `if tax_lines:` proprio, la seconda con la riga combinata
+`sp06e, sp16e = ...` (§conguaglio sopra). Quando il riferimento non ha alcun dettaglio reale sui crediti (solo
+il secchio "altri") e il parziale sì, il motore lo dichiara con
+`reference_receivables_undetailed` (severità *warning*, informativo: la ripartizione viene comunque
+dal parziale, con o senza il segnale).
 
 ### La rata di rimborso
 ```
@@ -210,11 +367,22 @@ lungo non finanziari (fornitori, tributari, previdenza), per non doppiare né so
 È **kernel condiviso** col budget: l'infrannuale la applica all'aggregato, il budget la ripartisce
 sulle sotto-voci. Orchestrazione diversa, formula identica per costruzione.
 
+**La rata di un prestito nuovo non consuma il debito bancario pregresso** (lotto 3A, Task 4). Il
+pregresso conserva la propria ripartizione breve/lungo e si riduce solo con le proprie rate (prima
+dal breve); il prestito nuovo si ammortizza per conto suo e mette a breve, in `sp16a`, la quota di
+capitale che scade l'anno dopo. Misurato sul test kit: 12.345,67 di pregresso e un prestito di
+120.000 / 4 anni / 5% erogato nell'anno danno `sp16a` 42.345,67 (12.345,67 + 30.000,00) e `sp17a`
+60.000,00; prima davano `sp16a` 0,00 e `sp17a` 102.345,67. Il totale del debito, gli interessi in
+`ce15` e la cassa non cambiano: la divisione è solo di scadenze. Un contratto **misto** (importo
+nuovo e residuo pregresso sulla stessa riga) viene spezzato in due contratti dalle funzioni condivise
+del kernel (`projection_common.contratti_da_riga_finanziamento`, `separa_prestiti_nuovi`,
+`quota_breve_prestiti_nuovi`), e dà gli stessi numeri di due righe separate.
+
 ## 6. I gate: cosa blocca un infrannuale
 
 ### Gate semantico sulla fonte
 Applicato **prima di ogni calcolo**, al parziale sempre e al riferimento se presente. Solleva
-*"{label} {anno}/{mesi}M is not forecastable: …"*.
+*"{label} {anno}/{mesi}M non è utilizzabile per la previsione: …"*.
 
 | # | Causa | Soglia |
 |---|---|---|

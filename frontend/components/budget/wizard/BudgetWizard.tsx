@@ -44,6 +44,7 @@ import {
   type WizardStepKey,
 } from "@/lib/budget-wizard-steps";
 import { getErrorMessage } from "@/lib/utils";
+import { righeErroriIpotesi } from "@/lib/budget-bulk-errors";
 import type { BudgetScenario } from "@/types/api";
 import { WizardRail } from "./WizardRail";
 import type { StepProps } from "./types";
@@ -188,7 +189,18 @@ export function BudgetWizard({
         router.push(esito.route);
       }
     } catch (err) {
-      toast.error(getErrorMessage(err, "Impossibile salvare le ipotesi"));
+      const righe = righeErroriIpotesi(err);
+      if (righe) {
+        toast.error("Ipotesi non salvate: correggi i campi indicati", {
+          description: (
+            <ul className="list-disc pl-4">
+              {righe.map((riga) => <li key={riga}>{riga}</li>)}
+            </ul>
+          ),
+        });
+      } else {
+        toast.error(getErrorMessage(err, "Impossibile salvare le ipotesi"));
+      }
     } finally {
       setSaving(false);
     }
@@ -238,6 +250,8 @@ export function BudgetWizard({
     updateAll: s.updateAll,
     updateFinancingLoans: s.updateFinancingLoans,
     updateTemporaryDifferences: s.updateTemporaryDifferences,
+    updateSpIndexing: s.updateSpIndexing,
+    updatePregresso: s.updatePregresso,
   };
 
   const active = WIZARD_STEPS.find((w) => w.key === step) ?? WIZARD_STEPS[0];

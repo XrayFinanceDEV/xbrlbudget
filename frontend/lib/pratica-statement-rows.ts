@@ -29,7 +29,7 @@ export function buildBalanceItemsWithTotals(
   }));
 
   const byCode = new Map(items.map((i) => [i.code, i]));
-  const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
+  const safePct = (a: number, b: number) => (Math.round(b * 100) !== 0 ? (a / b) * 100 : 0);
 
   const v = (code: string, key: "partial_value" | "reference_value" | "annualized_value" | "prior_value") =>
     byCode.get(code)?.[key] ?? 0;
@@ -200,7 +200,7 @@ export function buildIncomeItemsWithEbitda(
 ): IntraYearComparisonItem[] {
   const byCode = new Map(items.map((i) => [i.code, i]));
   const factor = 12 / periodMonths;
-  const safePct = (a: number, b: number) => (b !== 0 ? (a / b) * 100 : 0);
+  const safePct = (a: number, b: number) => (Math.round(b * 100) !== 0 ? (a / b) * 100 : 0);
 
   const v = (code: string, key: "partial_value" | "reference_value" | "prior_value") =>
     byCode.get(code)?.[key] ?? 0;

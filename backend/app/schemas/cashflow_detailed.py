@@ -114,6 +114,10 @@ class CashReconciliation(BaseModel):
     cash_ending: Decimal = Field(description="Disponibilità liquide alla fine dell'esercizio")
     difference: Decimal = Field(description="Differenza")
     verification_ok: bool = Field(description="VERIFICA: difference matches total_cashflow")
+    third_party_funds_gap: Decimal = Field(
+        default=Decimal("0"),
+        description="Scarto fra i mezzi di terzi calcolati per residuo e la variazione misurata del debito finanziario (dichiarato, non corretto)",
+    )
 
 
 # ===== Complete Detailed Cash Flow Statement =====

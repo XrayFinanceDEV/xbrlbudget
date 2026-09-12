@@ -1,0 +1,385 @@
+"""La rata del nuovo finanziamento paga il proprio debito, non il debito bancario pregresso.
+
+**Il difetto** (Ruling 40, confermato con una sonda dal ri-revisore del Task 12):
+`sp16a` pregresso di 12.345,67 senza alcun piano di rimborso restava 12.345,67
+ogni anno senza nuovo prestito, e andava a **zero nel primo anno** con un nuovo
+finanziamento. La rata del prestito NUOVO si prendeva «prima dal breve», e il
+breve era tutto debito bancario pregresso.
+
+**La stessa famiglia, all'altro capo** (misurata da questa rete, non dal Ruling
+40): la rata del piano del pregresso (`existing_debt_repayment_years`) non si
+ferma quando il pregresso e' estinto — e' una rata fissa sull'esposizione
+dell'anno base, tenuta a bada dal solo `max(0, …)` — e, finche' `sp17a` conteneva
+anche il prestito nuovo, si mangiava quello: con un piano a 2 anni su un orizzonte
+di 3, `sp17a` del 2029 valeva 7.098,88 invece dei 25.000,11 del prestito da solo
+(misurato su 5ad6112 con il prestito di questo file).
+
+**Il principio** (il proprietario): «bisogna dividere le voci patrimoniali
+generate dal previsionale dallo scadenziamento del pregresso». Invariante I1
+esteso: ogni debito si riduce solo con il proprio rimborso, quindi la
+componente pregressa di `sp16a`/`sp17a` e' identica, anno per anno, con e senza
+il nuovo finanziamento.
+
+**L'oracolo non ricalcola i piani** (sarebbe un secondo motore in un test): sono
+due GEMELLI generati dallo stesso motore. Il gemello «senza prestito» dice che
+cosa fanno il pregresso e il suo piano da soli; il gemello «solo prestito», su
+un'azienda senza banca, dice che cosa fa il prestito da solo. Dal Task 17 il
+prestito nuovo ha una quota a breve — la rata dell'anno dopo sta in `sp16a` —
+quindi TUTTI E DUE i lati devono valere la SOMMA dei gemelli: in `sp16a` e in
+`sp17a` la componente pregressa e' quella del primo, la componente nuova quella
+del secondo. (Prima del Task 17 il prestito nuovo non stava mai in `sp16a`, e
+`sp16a` doveva coincidere col solo primo gemello.)
+
+**Perche' la somma e' esatta, e perche' i piani sono scelti cosi'.** Il motore
+persiste al centesimo anno per anno, e l'arrotondamento di una somma non e' la
+somma degli arrotondamenti. La somma torna esatta quando uno dei due addendi si
+muove di centesimi interi: ROUND_HALF_UP e' invariante per traslazione di un
+multiplo di 0,01. Per questo il pregresso ha passi al centesimo (35.802,46 / 2 =
+17.901,23; contratti dettagliati da 6.000,00 e 2.901,23) e il MEZZO centesimo sta
+tutto nel prestito: 100.000,38 / 4 = 25.000,095, una rata che cade esattamente
+sul confine di arrotondamento — e' li' che una sonda con importi tondi dichiara
+«zero occorrenze».
+"""
+from decimal import Decimal as D
+
+import pytest
+
+from backend.app.services import assumptions_service
+from database.models import BalanceSheet, BudgetScenario, FinancialYear
+from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
+
+ANNI = (2027, 2028, 2029)
+BREVE, LUNGO = D("12345.67"), D("23456.79")
+
+# Rata al mezzo centesimo: 100.000,38 / 4 = 25.000,095.
+PRESTITO = {"financing_amount": 100000.38, "financing_duration_years": 4, "financing_interest_rate": 4.35}
+
+# Il prestito da solo, persistito anno per anno in `sp16a + sp17a` (misurato sul
+# gemello, e rifatto a
+# mano: 100.000,38 − 25.000,095 = 75.000,285 → 75.000,29; − 25.000,095 = 50.000,195
+# → 50.000,20; − 25.000,095 = 25.000,105 → 25.000,11). Tre mezzi centesimi, tre
+# arrotondamenti per eccesso: e' la catena che il motore persiste per un prestito.
+SOLO_PRESTITO = {2027: D("75000.29"), 2028: D("50000.20"), 2029: D("25000.11")}
+
+# Task 17: la parte di quel residuo che scade l'anno DOPO sta a breve. E' cio' che la
+# catena toglie l'anno dopo, rifatto a mano: 75.000,29 → 50.000,20 toglie 25.000,09;
+# 50.000,20 → 25.000,11 toglie 25.000,09; 25.000,11 → 0,02 (0,015 → 0,02) toglie
+# 25.000,09. Non 25.000,10, la rata arrotondata: con quella il lungo di fine anno
+# sarebbe un centesimo sotto cio' che l'anno dopo non scade. E il 2029 non va a zero:
+# la rata del 2030 cade oltre l'orizzonte, ma il contratto ce l'ha.
+QUOTA_BREVE_PRESTITO = {2027: D("25000.09"), 2028: D("25000.09"), 2029: D("25000.09")}
+
+# Il pregresso descritto da contratti (`opening_residual`): 30.000,00 in 5 anni e
+# 5.802,46 in 2, cioe' 8.901,23 di rata il primo anno — MENO della quota a breve.
+# E' la forma in cui la rata del prestito nuovo trova ancora breve da mangiare.
+CONTRATTI_PREGRESSO = [
+    {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00, "duration_years": 5, "interest_rate": 3.1},
+    {"name": "Mutuo B", "amount": 0, "opening_residual": 5802.46, "duration_years": 2, "interest_rate": 2.7},
+]
+
+
+def _genera_completo(db, user, rows, breve, lungo):
+    """Genera sul percorso persistito e restituisce `{anno: (sp, ce)}`, o fallisce parlando."""
+    company_id, _ = seed_base_year(db, user_id=user)
+    fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
+    b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
+    # Il kit tiene 50.000 su `sp17a`: lo si sostituisce, non lo si somma.
+    delta_lungo = lungo - b.sp17a_debiti_banche_lungo
+    b.sp16a_debiti_banche_breve = breve
+    b.sp16_debiti_breve += breve
+    b.sp17a_debiti_banche_lungo = lungo
+    b.sp17_debiti_lungo += delta_lungo
+    b.sp09_disponibilita_liquide += breve + delta_lungo
+    db.commit()
+    sc = BudgetScenario(company_id=company_id, name=user, base_year=2026, scenario_type="budget")
+    db.add(sc)
+    db.commit()
+    res = assumptions_service.bulk_upsert_assumptions(db, sc.id, [dict(r) for r in rows], auto_generate=True)
+    # `forecast_generated`, non l'HTTP 200: il bulk risponde 200 anche a un
+    # previsionale rifiutato (CLAUDE.md).
+    assert res["forecast_generated"] is True, f"{user}: {res['message']}"
+    return {anno: (sp, ce) for anno, sp, ce in read_forecast_maps(db, sc.id)}
+
+
+def _genera(db, user, rows, breve, lungo):
+    """Genera sul percorso persistito e restituisce `{anno: sp}`, o fallisce parlando."""
+    return {anno: sp for anno, (sp, _ce) in _genera_completo(db, user, rows, breve, lungo).items()}
+
+
+def _righe(primo=None, tutti=None):
+    rows = [dict(forecast_year=y, revenue_growth_pct=3.33, tax_rate=27.9, **(tutti or {})) for y in ANNI]
+    rows[0].update(primo or {})
+    return rows
+
+
+CASI = [
+    # (nome, breve, lungo, ipotesi del primo anno, ipotesi di tutti gli anni)
+    ("breve senza piano", BREVE, LUNGO, {}, {}),
+    # 35.802,46 / 2 = 17.901,23: il piano si estingue nel 2028, l'orizzonte arriva al 2029.
+    ("breve e lungo con piano in 2 anni", BREVE, LUNGO, {}, {"existing_debt_repayment_years": 2}),
+    ("breve e lungo con contratti dettagliati", BREVE, LUNGO, {"financing_loans": CONTRATTI_PREGRESSO}, {}),
+    # Solo lungo: senza piano il codice di prima era gia' giusto (il breve non
+    # c'era); con il piano no, perche' la rata del pregresso sopravvive al pregresso.
+    ("solo lungo senza piano", D("0"), LUNGO, {}, {}),
+    # 23.456,78 e non 23.456,79: da solo il lungo e' TUTTA la base del piano, e
+    # 23.456,79 / 2 = 11.728,395 metterebbe il mezzo centesimo anche sul pregresso —
+    # misurato: la somma dei gemelli sbaglia allora di un centesimo senza alcun difetto.
+    ("solo lungo con piano in 2 anni", D("0"), D("23456.78"), {}, {"existing_debt_repayment_years": 2}),
+]
+
+
+# Che cosa fa il pregresso DA SOLO, `(sp16a, sp17a)` anno per anno, rifatto a mano.
+# Serve perche' i due gemelli condividono il motore: un difetto che sbaglia il piano
+# del pregresso in ENTRAMBI (per esempio i contratti `opening_residual` presi per
+# prestiti nuovi, e mai rimborsati) lascia la somma esatta e passerebbe inosservato.
+#   piano in 2 anni: 35.802,46 / 2 = 17.901,23 — il breve 12.345,67 per primo, poi
+#     5.555,56 dal lungo (17.901,23); nel 2028 il resto; nel 2029 il `max` a zero.
+#   contratti: 6.000,00 + 2.901,23 = 8.901,23 nel 2027 (breve a 3.444,44), 8.901,23
+#     nel 2028 (breve a zero, 5.456,79 dal lungo: 18.000,00), 6.000,00 nel 2029.
+#   solo lungo in 2 anni: 23.456,78 / 2 = 11.728,39.
+PREGRESSO_DA_SOLO = {
+    "breve senza piano": [(BREVE, LUNGO)] * 3,
+    "breve e lungo con piano in 2 anni": [(D("0"), D("17901.23")), (D("0"), D("0")), (D("0"), D("0"))],
+    "breve e lungo con contratti dettagliati": [
+        (D("3444.44"), LUNGO), (D("0"), D("18000.00")), (D("0"), D("12000.00"))],
+    "solo lungo senza piano": [(D("0"), LUNGO)] * 3,
+    "solo lungo con piano in 2 anni": [(D("0"), D("11728.39")), (D("0"), D("0")), (D("0"), D("0"))],
+}
+
+
+def _con_prestito(primo):
+    """Il primo anno col prestito aggiunto. Con i contratti dettagliati il prestito
+    nuovo e' la legacy `financing_amount` accanto a loro: `assemble_financing`
+    li mette nello stesso elenco, ed e' li' che il motore deve separarli."""
+    out = dict(primo)
+    out.update(PRESTITO)
+    return out
+
+
+def test_il_prestito_da_solo_e_la_catena_attesa():
+    """L'oracolo della somma, tenuto fermo a mano: se questo cambia, cambia il kernel
+    del prestito o la quantizzazione — non il confine col pregresso. E la quota a
+    breve (Task 17): la rata dell'anno dopo in `sp16a`, il resto in `sp17a`."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            solo = _genera(db, "solo-prestito", _righe(PRESTITO), D("0"), D("0"))
+        assert {y: sp["sp16a_debiti_banche_breve"] + sp["sp17a_debiti_banche_lungo"]
+                for y, sp in solo.items()} == SOLO_PRESTITO
+        assert {y: sp["sp16a_debiti_banche_breve"] for y, sp in solo.items()} == QUOTA_BREVE_PRESTITO
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("nome, breve, lungo, primo, tutti", CASI, ids=[c[0] for c in CASI])
+def test_i1_esteso_la_componente_pregressa_non_si_accorge_del_prestito(nome, breve, lungo, primo, tutti):
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            con = _genera(db, f"con-{nome}", _righe(_con_prestito(primo), tutti), breve, lungo)
+            senza = _genera(db, f"senza-{nome}", _righe(primo, tutti), breve, lungo)
+            # Il prestito da solo, con le STESSE ipotesi fuorche' il pregresso: su
+            # un'azienda senza banca non c'e' piano ne' contratto da applicare.
+            solo = _genera(db, f"solo-{nome}", _righe(PRESTITO), D("0"), D("0"))
+
+        fuori = []
+        for anno, (breve_atteso, lungo_atteso) in zip(ANNI, PREGRESSO_DA_SOLO[nome]):
+            c, s, p = con[anno], senza[anno], solo[anno]
+            if (s["sp16a_debiti_banche_breve"], s["sp17a_debiti_banche_lungo"]) != (breve_atteso, lungo_atteso):
+                fuori.append(f"{anno} pregresso da solo: ({s['sp16a_debiti_banche_breve']}, "
+                             f"{s['sp17a_debiti_banche_lungo']}), rifatto a mano ({breve_atteso}, {lungo_atteso})")
+            # Task 17: in `sp16a` c'e' anche la quota a breve del prestito, e deve essere
+            # QUELLA del prestito da solo. Diversa: o la rata nuova ha pagato il
+            # pregresso, o la quota dipende dal pregresso che le sta accanto.
+            atteso_breve = s["sp16a_debiti_banche_breve"] + p["sp16a_debiti_banche_breve"]
+            if c["sp16a_debiti_banche_breve"] != atteso_breve:
+                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']}, atteso {atteso_breve} = "
+                             f"pregresso {s['sp16a_debiti_banche_breve']} + quota a breve del prestito "
+                             f"{p['sp16a_debiti_banche_breve']}")
+            atteso = s["sp17a_debiti_banche_lungo"] + p["sp17a_debiti_banche_lungo"]
+            if c["sp17a_debiti_banche_lungo"] != atteso:
+                fuori.append(f"{anno} sp17a: {c['sp17a_debiti_banche_lungo']}, atteso {atteso} = "
+                             f"pregresso {s['sp17a_debiti_banche_lungo']} + prestito {p['sp17a_debiti_banche_lungo']}")
+            # Nessun denaro dal nulla: il foglio quadra al centesimo ogni anno.
+            if c["_total_assets"] != c["_total_liabilities"]:
+                fuori.append(f"{anno} quadratura: attivo {c['_total_assets']} != passivo {c['_total_liabilities']}")
+            if c["sp09_disponibilita_liquide"] < 0:
+                fuori.append(f"{anno} cassa negativa {c['sp09_disponibilita_liquide']}")
+        assert not fuori, f"[{nome}]\n" + "\n".join(fuori)
+    finally:
+        engine.dispose()
+
+
+def test_un_cash_sweep_nel_2028_paga_il_pregresso_e_lascia_il_prestito_al_suo_piano():
+    """Lo sweep del 2028 ha cassa per chiudere pregresso E prestito nuovo. Fino al lotto 2 li chiudeva entrambi; dal lotto
+    3A il prestito segue il suo piano (decisione 3 del proprietario): nel 2028 restano 25.000,09 a breve e 25.000,11 a
+    lungo, nel 2029 la quota e i 0,02 che la catena lascia oltre, e la cassa tiene il capitale non rimborsato. Oracolo:
+    gemello senza sweep meno il pregresso (35.802,46), sullo snapshot `452112d`."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            sweep = {"cash_sweep_enabled": True, "cash_sweep_min_cash": 1000.55}
+            rows = [
+                dict(forecast_year=2027, revenue_growth_pct=3.33, tax_rate=27.9, **PRESTITO),
+                dict(forecast_year=2028, revenue_growth_pct=3.33, tax_rate=27.9, **sweep),
+                dict(forecast_year=2029, revenue_growth_pct=3.33, tax_rate=27.9),
+            ]
+            sp = _genera(db, "sweep-oltre", rows, BREVE, LUNGO)
+        assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE + QUOTA_BREVE_PRESTITO[2027]
+        for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "230036.16"),
+                                             2029: ("25000.09", "0.02", "345042.90")}.items():
+            assert sp[anno]["sp16a_debiti_banche_breve"] == D(breve), anno
+            assert sp[anno]["sp17a_debiti_banche_lungo"] == D(lungo), anno
+            assert sp[anno]["sp09_disponibilita_liquide"] == D(cassa), anno
+            assert sp[anno]["_total_assets"] == sp[anno]["_total_liabilities"], anno
+    finally:
+        engine.dispose()
+
+
+def test_la_sonda_del_ruling_40_con_i_suoi_numeri():
+    """La sonda del ri-revisore, a scoperto spento: 12.345,67 di breve pregresso,
+    nessun piano, un prestito nuovo. Su 5ad6112 il breve andava a zero nel 2027."""
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            con = _genera(db, "r40-con", _righe(_con_prestito({})), BREVE, LUNGO)
+        # Il breve pregresso fermo, piu' la quota a breve del prestito (Task 17).
+        assert [con[y]["sp16a_debiti_banche_breve"] for y in ANNI] == [
+            BREVE + QUOTA_BREVE_PRESTITO[y] for y in ANNI]
+        # 23.456,79 di lungo pregresso fermo + la catena del prestito − la sua quota a
+        # breve. Su 5197929, prima del Task 17: 98.457,08 / 73.456,99 / 48.456,90.
+        assert [con[y]["sp17a_debiti_banche_lungo"] for y in ANNI] == [
+            D("73456.99"), D("48456.90"), D("23456.81")]
+    finally:
+        engine.dispose()
+
+
+# ══ Contratti misti (Ruling 45, giro di correzione 1) ══
+#
+# Uno stesso contratto puo' portare `amount` (nuovo) E `opening_residual`
+# (pregresso) insieme sulla stessa riga: lo schema lo ammette
+# (`FinancingLoanInput` chiede solo che UNO dei due sia positivo,
+# `backend/app/schemas/budget.py:66-82`) e l'interfaccia lo produce
+# (`FinancingLoansGrid.tsx:191-195,258`, le due caselle stanno sulla stessa
+# riga). Prima di questa correzione (rilievo 1 della revisione) il motore lo
+# trattava intero come pregresso e la sua quota nuova si prendeva «prima dal
+# breve», come nel Ruling 40 — misurato dalla revisione: `sp16a` 2027 a 0,00
+# col misto contro 3.444,44 con lo stesso contratto diviso in due (sonda P8).
+#
+# `assemble_financing` lo normalizza ora, in un solo punto prima di ogni uso,
+# in DUE contratti con le stesse condizioni (Ruling 45): la prova qui sotto
+# non tollera un'approssimazione — verifica che il misto produca ESATTAMENTE
+# lo stesso bilancio e lo stesso conto economico dello stesso contratto
+# scritto su due righe, perche' la normalizzazione rende le due strade
+# LETTERALMENTE lo stesso calcolo a valle.
+
+MISTO_SEMPLICE = [
+    {"name": "Mutuo misto", "amount": 20000.55, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+DIVISO_SEMPLICE = [
+    {"name": "Mutuo misto (nuovo)", "amount": 20000.55, "opening_residual": 0,
+     "duration_years": 2, "interest_rate": 2.7},
+    {"name": "Mutuo misto (pregresso)", "amount": 0, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+
+# La sonda P8 della revisione: un contratto pregresso puro (Mutuo A, 30.000,00
+# in 5 anni) accanto a un contratto MISTO (Mutuo B: 5.802,46 di residuo +
+# 20.000,55 di nuovo, 2 anni) — esattamente la combinazione su cui la
+# revisione ha misurato la divergenza.
+MISTO_P8 = [
+    {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00, "duration_years": 5, "interest_rate": 3.1},
+    {"name": "Mutuo B misto", "amount": 20000.55, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+DIVISO_P8 = [
+    {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00, "duration_years": 5, "interest_rate": 3.1},
+    {"name": "Mutuo B (nuovo)", "amount": 20000.55, "opening_residual": 0,
+     "duration_years": 2, "interest_rate": 2.7},
+    {"name": "Mutuo B (pregresso)", "amount": 0, "opening_residual": 5802.46,
+     "duration_years": 2, "interest_rate": 2.7},
+]
+
+# Il debito bancario di apertura deve coincidere con la somma dei residui
+# dichiarati (`assemble_financing` alza altrimenti): il caso «un solo
+# contratto misto» porta 5.802,46 di residuo, quindi la banca in bilancio e'
+# 5.802,46, non `BREVE`/`LUNGO` (che sono 35.802,46 — la massa di P8).
+CASI_MISTI = [
+    ("un solo contratto misto", MISTO_SEMPLICE, DIVISO_SEMPLICE, D("0"), D("5802.46")),
+    ("misto accanto a un contratto pregresso puro (sonda P8)", MISTO_P8, DIVISO_P8, BREVE, LUNGO),
+]
+
+
+@pytest.mark.parametrize("nome, misto, diviso, breve, lungo", CASI_MISTI, ids=[c[0] for c in CASI_MISTI])
+def test_contratto_misto_equivale_al_contratto_diviso_in_due(nome, misto, diviso, breve, lungo):
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            m = _genera_completo(db, f"misto-{nome}", _righe({"financing_loans": misto}), breve, lungo)
+            d = _genera_completo(db, f"diviso-{nome}", _righe({"financing_loans": diviso}), breve, lungo)
+        fuori = []
+        campi_sp = ("sp16a_debiti_banche_breve", "sp17a_debiti_banche_lungo",
+                    "sp16_debiti_breve", "sp17_debiti_lungo", "sp09_disponibilita_liquide")
+        for anno in ANNI:
+            sp_m, ce_m = m[anno]
+            sp_d, ce_d = d[anno]
+            for campo in campi_sp:
+                if sp_m[campo] != sp_d[campo]:
+                    fuori.append(f"{anno} {campo}: misto {sp_m[campo]} != diviso {sp_d[campo]} "
+                                 f"(scarto {sp_m[campo] - sp_d[campo]})")
+            if ce_m["ce15_oneri_finanziari"] != ce_d["ce15_oneri_finanziari"]:
+                fuori.append(f"{anno} ce15: misto {ce_m['ce15_oneri_finanziari']} != "
+                             f"diviso {ce_d['ce15_oneri_finanziari']} "
+                             f"(scarto {ce_m['ce15_oneri_finanziari'] - ce_d['ce15_oneri_finanziari']})")
+            if sp_m["_total_assets"] != sp_m["_total_liabilities"]:
+                fuori.append(f"{anno} quadratura misto: attivo {sp_m['_total_assets']} "
+                             f"!= passivo {sp_m['_total_liabilities']}")
+        assert not fuori, f"[{nome}]\n" + "\n".join(fuori)
+    finally:
+        engine.dispose()
+
+
+def test_i1_esteso_vale_anche_per_il_contratto_misto():
+    """La stessa I1 esteso della rete generale (Ruling 45, decisione «Atteso
+    dopo»): la componente pregressa del misto non si accorge della sua stessa
+    quota nuova, e `sp17a` e' la somma. Decomposizione manuale della sonda P8:
+    «con» ha il misto (Mutuo A + Mutuo B misto), «senza» ha solo la parte
+    pregressa di Mutuo B (Mutuo A + Mutuo B residuo, senza il suo importo
+    nuovo), «solo» ha solo la parte nuova di Mutuo B, su un'azienda senza
+    banca. Se la normalizzazione fosse sbagliata la somma non tornerebbe."""
+    engine, sessions = memory_sessions()
+    try:
+        con_loans = MISTO_P8
+        senza_loans = [
+            {"name": "Mutuo A", "amount": 0, "opening_residual": 30000.00,
+             "duration_years": 5, "interest_rate": 3.1},
+            {"name": "Mutuo B (pregresso)", "amount": 0, "opening_residual": 5802.46,
+             "duration_years": 2, "interest_rate": 2.7},
+        ]
+        solo_loans = [
+            {"name": "Mutuo B (nuovo)", "amount": 20000.55, "opening_residual": 0,
+             "duration_years": 2, "interest_rate": 2.7},
+        ]
+        with sessions() as db:
+            con = _genera(db, "p8-con", _righe({"financing_loans": con_loans}), BREVE, LUNGO)
+            senza = _genera(db, "p8-senza", _righe({"financing_loans": senza_loans}), BREVE, LUNGO)
+            solo = _genera(db, "p8-solo", _righe({"financing_loans": solo_loans}), D("0"), D("0"))
+        fuori = []
+        for anno in ANNI:
+            c, s, p = con[anno], senza[anno], solo[anno]
+            atteso_breve = s["sp16a_debiti_banche_breve"] + p["sp16a_debiti_banche_breve"]
+            if c["sp16a_debiti_banche_breve"] != atteso_breve:
+                fuori.append(f"{anno} sp16a: {c['sp16a_debiti_banche_breve']} col misto, atteso "
+                             f"{atteso_breve} = pregresso {s['sp16a_debiti_banche_breve']} + quota a breve "
+                             f"della parte nuova di Mutuo B {p['sp16a_debiti_banche_breve']}")
+            atteso = s["sp17a_debiti_banche_lungo"] + p["sp17a_debiti_banche_lungo"]
+            if c["sp17a_debiti_banche_lungo"] != atteso:
+                fuori.append(f"{anno} sp17a: {c['sp17a_debiti_banche_lungo']}, atteso {atteso} = "
+                             f"pregresso {s['sp17a_debiti_banche_lungo']} + "
+                             f"nuovo {p['sp17a_debiti_banche_lungo']}")
+            if c["_total_assets"] != c["_total_liabilities"]:
+                fuori.append(f"{anno} quadratura: attivo {c['_total_assets']} != passivo {c['_total_liabilities']}")
+        assert not fuori, "\n".join(fuori)
+    finally:
+        engine.dispose()

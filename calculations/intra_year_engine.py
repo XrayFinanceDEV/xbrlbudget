@@ -7,7 +7,7 @@ User can override via assumptions (growth % vs reference full year).
 The frontend converts user overrides to growth % before saving.
 """
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
@@ -1956,14 +1956,33 @@ class IntraYearEngine:
                 'code': 'tax_settlement_reclass_below_zero',
                 'severity': 'warning',
                 'field': campo,
-                'amount': str(residuo),
+                # Al centesimo, con la modalita' degli altri campi monetari del motore
+                # (`ROUND_HALF_UP`, come `eur_it`, `BaseCalculator.round_decimal` e
+                # `ForecastEngine._quantize_values`): `residuo` e' il resto di una
+                # divisione di rotazione e arriva con ventotto decimali (misurato
+                # '283333.3333333333333333333333'), o con un centesimo non
+                # normalizzato (misurato '-400000.000'). Si quantizza, non si
+                # ricalcola: il segno e' quello di `correzione - applicato`.
+                'amount': str(Decimal(str(residuo)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )),
                 'message': (
-                    "Il conguaglio fiscale di " + eur_it(correzione) + " trova solo "
-                    + eur_it(applicato) + " di capienza in " + campo + ": il residuo di "
-                    + eur_it(residuo) + " non ha contropartita e la cassa non lo "
-                    "registra. Un campo neutro non scende sotto zero per definizione, "
-                    "e cercarne un secondo vorrebbe dire fabbricare massa: integrare "
-                    "con un'ipotesi di finanziamento esplicita o con una rettifica."
+                    # Nessun importo nel testo: la cifra che conta vive nel payload
+                    # `amount`, come per `unfunded_financing_requirement` e
+                    # `missing_short_debt_breakdown` in questo stesso file (brief,
+                    # 'Trappole note'). Scrivere "trova solo X di capienza" voleva
+                    # inoltre dire mostrare una capienza NEGATIVA sul lato debito,
+                    # dove X = `applicato` e' negativo per costruzione: una capienza
+                    # esiste o non esiste (rilievo di revisione, 2026-09-12).
+                    ("Il conguaglio fiscale non trova alcuna capienza in " + campo
+                     + ": il residuo non ha contropartita e la cassa non lo registra. ")
+                    if capienza <= Decimal('0') else
+                    ("Il conguaglio fiscale supera la capienza disponibile in " + campo
+                     + ": la parte che ci sta viene applicata, il residuo no. ")
+                ) + (
+                    "Un campo neutro non scende sotto zero per definizione, e cercarne "
+                    "un secondo vorrebbe dire fabbricare massa: integrare con un'ipotesi "
+                    "di finanziamento esplicita o con una rettifica."
                 ),
             })
         return sp16g, sp06g

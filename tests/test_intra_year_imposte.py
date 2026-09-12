@@ -1,4 +1,5 @@
 """Al 31/12 l'infrannuale lascia solo il saldo d'imposta dell'anno (lotto 3A, Task 5, decisione 4 del proprietario)."""
+import re
 from decimal import Decimal as D
 
 import pytest
@@ -368,6 +369,43 @@ def test_la_capienza_insufficiente_lato_attivo_si_dichiara_e_non_si_inventa():
     assert guardia[0]['field'] == 'sp06g_crediti_altri_breve'
 
 
+def test_l_importo_della_diagnostica_e_quantizzato_al_centesimo():
+    """Rilievo del giro di correzione 2: `amount` era lo `str()` di un `Decimal` grezzo,
+    e il grezzo qui nasce da una divisione di rotazione. Due facce dello stesso difetto,
+    entrambe misurate su fixture reali: '283333.3333333333333333333333' (ventotto
+    decimali, lato credito) e '-400000.000' (il centesimo c'e', ma non e' normalizzato,
+    lato debito). Dal giro 1 il messaggio non porta piu' importi, quindi la divergenza
+    fra testo e payload non si vede piu' a schermo: resta nel payload, che e' cio' che
+    un consumatore a valle legge. Si quantizza, non si ricalcola: il segno e' quello di
+    `correzione - applicato`."""
+    _RIF_C = dict(sp16a_debiti_banche_breve=D("600000"), sp16e_debiti_tributari_breve=D("200000"),
+                  sp16g_altri_debiti_breve=D("200000"), sp06a_crediti_clienti_breve=D("1000000"))
+    _PAR_C = dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
+                  sp16e_debiti_tributari_breve=D("200000"), sp06a_crediti_clienti_breve=D("590000"),
+                  sp06e_crediti_tributari_breve=D("300000"), sp06g_crediti_altri_breve=D("10000"))
+
+    db = _sessione()
+    _, scenario = _infrannuale_grezzo(db, rif=_RIF_C, parziale=_PAR_C)
+    _, result = _proietta(db, scenario)
+    guardia = [d for d in result['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
+    assert len(guardia) == 1
+    assert re.fullmatch(r'-?\d+\.\d{2}', guardia[0]['amount']), guardia[0]['amount']
+    assert guardia[0]['amount'] == "283333.33"          # 283.333,333...HALF_UP, segno invariato
+    assert D(guardia[0]['amount']) > D("0")
+
+    db2 = _sessione()
+    _, scenario2 = _infrannuale_grezzo(
+        db2, rif=_RIF_MISTOSENZAG,
+        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
+                      sp16e_debiti_tributari_breve=D("600000")))
+    _, result2 = _proietta(db2, scenario2)
+    guardia2 = [d for d in result2['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
+    assert len(guardia2) == 1
+    assert re.fullmatch(r'-?\d+\.\d{2}', guardia2[0]['amount']), guardia2[0]['amount']
+    assert guardia2[0]['amount'] == "-400000.00"        # -400000.000 normalizzato, non ricalcolato
+    assert D(guardia2[0]['amount']) < D("0")
+
+
 def test_senza_riferimento_il_conguaglio_guarda_anche_il_lato_credito():
     """Ramo annualizzato (nessun anno pieno importato): qui il Task 2 non è passato e
     la riga combinata `sp06e, sp16e = ...` gira dopo i riassorbimenti, quindi perde
@@ -395,3 +433,48 @@ def test_senza_riferimento_il_conguaglio_guarda_anche_il_lato_credito():
     assert sp.total_assets == sp.total_liabilities
     assert not [d for d in result['diagnostics']
                 if d['code'] == 'tax_settlement_reclass_below_zero']
+
+
+def test_il_messaggio_del_residuo_non_mostra_mai_una_capienza_negativa():
+    """Rilievo 1 del giro di correzione sul Task 3 (revisione 2026-09-12). Sul lato debito
+    `applicato` e' NEGATIVO per costruzione (`applicato = -min(-correzione, capienza)`), e
+    il testo lo inseriva comunque nella frase "trova solo X di capienza": sullo scenario
+    5 reale usciva "trova solo -3.614,28 di capienza". Una capienza esiste o non esiste.
+
+    Il payload non cambia -- `amount` resta il residuo, in segno e valore: e' la frase che
+    va corretta, e questo test la fissa. Nessuna cifra nel testo (brief, 'Trappole note':
+    `eur_it` non si usa qui, come in `unfunded_financing_requirement`), quindi nessun
+    numero negativo puo' ricomparirci perche' non ce n'e' nessuno.
+    """
+    db = _sessione()
+    _, scenario = _infrannuale_grezzo(
+        db, rif=_RIF_MISTO,
+        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
+                      sp16e_debiti_tributari_breve=D("500000")))
+    sp, result = _proietta(db, scenario)
+    # Apertura 500.000,00, quota di rotazione x 200.000,00 -> conguaglio -300.000,00 su
+    # una capienza di 200.000,00: se ne applica -200.000,00, il residuo e' -100.000,00.
+    assert sp.sp16g_altri_debiti_breve == D("0.00")
+    guardia = [d for d in result['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
+    assert len(guardia) == 1
+    assert D(guardia[0]['amount']) == D("-100000.00")
+    assert guardia[0]['field'] == 'sp16g_altri_debiti_breve'
+    messaggio = guardia[0]['message']
+    assert 'sp16g_altri_debiti_breve' in messaggio          # il campo lo nomina comunque
+    assert 'supera la capienza disponibile' in messaggio   # capienza parziale
+    assert not re.search(r'-\s*\d', messaggio), messaggio          # nessuna cifra negativa
+    assert not re.search(r'\d{1,3}(\.\d{3})*,\d{2}', messaggio), messaggio  # nessun eur_it
+
+    # Capienza zero: la frase deve DIRE che la capienza non c'e', restando senza numeri.
+    db2 = _sessione()
+    _, scenario2 = _infrannuale_grezzo(
+        db2, rif=_RIF_MISTOSENZAG,
+        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
+                      sp16e_debiti_tributari_breve=D("600000")))
+    sp2, result2 = _proietta(db2, scenario2)
+    assert sp2.sp16g_altri_debiti_breve == D("0.00")
+    guardia2 = [d for d in result2['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
+    assert len(guardia2) == 1
+    assert D(guardia2[0]['amount']) == D("-400000.00")
+    assert 'non trova alcuna capienza' in guardia2[0]['message']
+    assert not re.search(r'-\s*\d', guardia2[0]['message']), guardia2[0]['message']

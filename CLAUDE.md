@@ -679,8 +679,13 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   (naming the field) and cash stays where it was — a second target would be the old plug. A rejected
   conguaglio can surface as a *new* `unfunded_financing_requirement` (scenario 4 of the reference DB:
   cash 15.271,65 → 0, sheet out of balance by 1.856,76, which is the correct reason for promote to
-  refuse). On scenario 5 the applied part is then erased by the user's `sp_overrides.sp16g`, which wins
-  over the row: the sheet persists unchanged and only the diagnostic moves.
+  refuse). **The declared residual is measured *before* `sp_overrides`, so it can understate**: if an
+  override insists on the same neutral field (`sp16g` or `sp06g`), the part the conguaglio applied is
+  overwritten by the override (an override beats the row, by design), cash does not move at all, and
+  the warning reports only what the engine could not place — short by exactly the erased amount. That
+  holds for any year and any neutral field, not as a quirk of one scenario; on the reference DB the
+  instance is scenario 5, where `sp_overrides.sp16g` = 20.617,43 erases the 3.614,28 applied part and
+  the sheet persists unchanged with only the diagnostic moving.
   Financial debt (`sp16a-c`/`sp17a-c`: banks, other lenders, bonds) is carried forward from the
   partial year's own split, as its own block — never rebuilt from the reference year's proportions,
   because a real loan is not driven by turnover. Only the operating residual of `sp16`/`sp17`

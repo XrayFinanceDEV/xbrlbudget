@@ -105,7 +105,9 @@ riferimento con zero ESATTO: sulla riga «DIFFERENZA (Attivo - Passivo)» — un
 identità contabile dovrebbe annullarsi, ma arriva dal backend come somma client di ~10 `float`
 (`Decimal` → `float` via `DecimalJSONResponse`) che lascia un residuo `~1e-9..1e-13` invece di `0`
 letterale — dividere uno sbilancio vero, anche piccolo, per un residuo di quell'ordine dava una
-percentuale a 12-15 cifre (`+2366097483366300.0%`, indagine del 2026-09-11).
+percentuale a 12-15 cifre (`+2366097483366300.0%`,
+`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-3-stampa-percentuale.md`,
+2026-09-11 — spazio di lavoro **fuori dal repo**, il file non è mai stato in git).
 
 `deltaPct` (`frontend/lib/pratica-format.ts`) arrotonda il riferimento al centesimo — la stessa
 tolleranza di quadratura di `config.py:235` — prima di deciderlo "assente" (`null`, reso come

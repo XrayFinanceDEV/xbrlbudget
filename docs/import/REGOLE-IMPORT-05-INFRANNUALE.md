@@ -175,7 +175,9 @@ costruzione); sul **ramo annualizzato** (nessun anno pieno importato) la riga co
 forma è **bidirezionale**. Non si è riordinato nulla: il change aggiunge solo il flusso dichiarato.
 
 Misurato sugli 8 scenari infrannuali del database di riferimento (cinque producono una proiezione;
-gli altri tre falliscono prima per dati mancanti, invariati prima e dopo):
+gli altri tre falliscono prima per dati mancanti, invariati prima e dopo). **L'ancora della colonna
+«Prima» è l'albero dopo i Task 1-2, commit `4d5bce4`** — non la base dell'ondata, contro la quale lo
+scenario 4 risulterebbe invece già sbilanciato di 5.509,29:
 
 | Scenario | Prima | Dopo |
 |---|---|---|
@@ -226,8 +228,10 @@ materiali con la quota materiali. Mai incrociati.
 
 ### Rapporti di rotazione degeneri: si riporta, non si moltiplica
 
-Le tre voci "proporzionali" della tabella — rimanenze, crediti a breve, debiti a breve — si
-scalano su un rapporto letto dall'anno di riferimento (`giacenza / base economica`). Quel
+Le voci "proporzionali" della tabella — le rimanenze, l'aggregato dei crediti a breve e il **solo
+residuo operativo** dei debiti a breve — si scalano su un rapporto letto dall'anno di riferimento
+(`giacenza / base economica`). Il **debito finanziario** non ruota: `sp16a-c`/`sp17a-c` si porta
+avanti dal parziale come blocco a sé, in entrambi i regimi (§Le sotto-voci, sotto). Quel
 rapporto è valido solo se la base **può spiegare** la giacenza.
 
 > **Un rapporto oltre un anno di giacenza è DEGENERE: non descrive l'azienda, descrive il
@@ -306,14 +310,21 @@ motore.
 ### Le sotto-voci si distribuiscono, mai si inventano
 Vale per il **residuo operativo** di `sp16`/`sp17` (fornitori/tributari/previdenziali/altri): le
 quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il parziale
-nel regime 2). Se la fonte non ha alcuna ripartizione operativa, tutte le quote sono **zero** più
-un diagnostico: *"La ripartizione del debito operativo a breve (fornitori/tributario/previdenziale/
-altri) non è disponibile: nessuna categoria è stata inventata."*
+nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più un
+diagnostico — e il testo esatto cambia col regime, sono stringhe che l'utente legge a schermo: nel
+regime 1 a breve *"La ripartizione del debito operativo a breve (fornitori/tributario/previdenziale/
+altri) non è disponibile: nessuna categoria è stata inventata."* e oltre anno *"La ripartizione del
+debito operativo a lungo (fornitori/tributario/previdenziale/altri) non è disponibile: nessuna
+categoria è stata inventata."* (`_distribute_sp16_operativo`/`_distribute_sp17_operativo`); nel
+regime 2, dove il ripiego è il distributore generale e comprende **anche** il finanziario, a breve
+*"La ripartizione dei debiti a breve non è disponibile: nessuna categoria è stata inventata."*
+(`_distribute_sp16`) e oltre anno quote zero **senza** diagnostico (`_distribute_sp17`).
 
 Il **debito finanziario** (banche/altri finanziatori/obbligazioni, `sp16a-c`/`sp17a-c`) **non**
 segue questa regola: si porta avanti dal parziale come blocco a sé, in ENTRAMBI i regimi — mai
 dalla proporzione del riferimento — perché un mutuo non è trainato dal fatturato o dai costi
-operativi (`indagine-1-debito-bancario.md`, 2026-09-11). Quando il riferimento non ha alcun
+operativi (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-1-debito-bancario.md`,
+2026-09-11 — spazio di lavoro **fuori dal repo**, quei file non sono mai stati in git). Quando il riferimento non ha alcun
 dettaglio finanziario (nessuna delle tre categorie popolata) e il parziale sì, il motore lo
 dichiara con `reference_financial_debt_undetailed` (severità *warning*: non è un errore, è il
 motivo per cui la ripartizione viene dal parziale invece che dal riferimento).
@@ -322,13 +333,23 @@ I **crediti a breve e a lungo** (`sp06`/`sp07`) seguono una regola diversa da en
 precedenti: l'aggregato resta trainato dal fatturato (rotazione/DSO, sopra), ma la
 **composizione** delle sotto-voci (verso clienti/controllate/collegate/controllanti/altri) viene
 **sempre** dal parziale — mai dal riferimento, in nessuno dei due regimi — perché un riferimento
-senza dettaglio reale (il 98% dei bilanci annuali completi, come per il debito) riclassificava in
-silenzio il credito verso clienti in "altri crediti" (`indagine-2`, 2026-09-12). Il credito
+senza dettaglio reale (il 98% dei bilanci annuali: aggregato positivo e nessuna delle sei
+sotto-voci non di ripiego mai popolata — 373 su 377 oggi; stessa forma lato debito: 355 su 362
+all'indagine 2026-09-11, 373 su 378 oggi) riclassificava in
+silenzio il credito verso clienti in "altri crediti" (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/`,
+2026-09-12, fuori dal repo come sopra). Il credito
 tributario (`sp06e`) e le imposte anticipate (`sp06f`/`sp07f`, quando impostate esplicitamente)
 sono **esclusi** dalla ripartizione prima che avvenga — il loro valore viene dalla posizione
 tributaria di fine anno o dalle differite, mai da una quota proporzionale che verrebbe poi
 scartata: prima di questa correzione quella quota scartata spariva silenziosamente in cassa (fino
-a 39.781,69 su un caso reale). Quando il riferimento non ha alcun dettaglio reale sui crediti (solo
+a 39.781,69 su un caso reale). L'esclusione preventiva vale sul **ramo col riferimento**, e per ciascuna riga solo dove
+qualcuno la governa davvero (`sp06_escludi` include `sp06e` ogni volta che
+`sp06e_governed` non è `None`, cioè in via automatica; `sp06f`/`sp07f` solo con differite
+impostate): in via **manuale** (`sp06e_growth_pct`/`sp16e_growth_pct` valorizzate) il kernel è saltato
+e `sp06e` resta una quota proporzionale del parziale, e sul **ramo annualizzato** un'esclusione
+preventiva non c'è per nulla: differite e posizione tributaria sostituiscono le righe **dopo** i
+riassorbimenti, le prime con un blocco `if tax_lines:` proprio, la seconda con la riga combinata
+`sp06e, sp16e = ...` (§conguaglio sopra). Quando il riferimento non ha alcun dettaglio reale sui crediti (solo
 il secchio "altri") e il parziale sì, il motore lo dichiara con
 `reference_receivables_undetailed` (severità *warning*, informativo: la ripartizione viene comunque
 dal parziale, con o senza il segnale).

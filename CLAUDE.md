@@ -691,8 +691,12 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   because a real loan is not driven by turnover. Only the operating residual of `sp16`/`sp17`
   (fornitori/tributari/previdenziali/altri) still rotates on the reference year's cost-turnover
   ratio. When the reference year has no financial-debt detail at all while the partial year does
-  (98% of full-year balance sheets have none — see the bullet above on `base_bank_debt`), the split
-  used to be silently reclassified into "altri debiti" (indagine-1-debito-bancario.md, 2026-09-11);
+  (98% of full-year balance sheets have none: positive `sp16`/`sp17` aggregate with all six
+  financial sub-lines zero — 355 of 362 at measurement, see the bullet above on `base_bank_debt`),
+  the split
+  used to be silently reclassified into "altri debiti"
+  (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-1-debito-bancario.md`,
+  2026-09-11 — a session workspace **outside the repo**, never in git);
   now it is declared, `reference_financial_debt_undetailed` (severity `warning`). Bank debt is then
   reduced only by its own instalments via the shared code
   (`projection_common.contratti_da_riga_finanziamento`, `separa_prestiti_nuovi`,
@@ -713,8 +717,10 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   secco o, a scoperto concesso, in uno scoperto dichiarato — anche quando il fabbisogno nasce da un
   `sp_overrides` che squilibra lo SP: il controllo sta sulla cassa finale, dopo la normalizzazione
   (`generate_projection`), e mai una `sp09` negativa resta persistita.
-- **Working capital** comes from the reference year's turnover ratios. A ratio implying **more than a
-  year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
+- **Working capital rotates on the reference year's turnover ratios — the inventory and
+  receivables aggregates and the operating-debt residual only; financial debt
+  (`sp16a-c`/`sp17a-c`) never rotates, it is carried from the partial year as its own block
+  (bullet above).** A ratio implying **more than a year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
   carried instead, with a `degenerate_turnover_ratio` diagnostic — except for inventory in Real
   estate (sector 5) and Construction (6), where a stock longer than a year is the business: there the
   ratio scales (`projection_common.soglia_giorni_magazzino`, one table for both engines; the budget
@@ -727,12 +733,23 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   `calculations/forecast_engine.py`, Task 14 of this lotto), not shared with the one
   here. Receivables (`sp06`/`sp07`) split into sub-categories using the **partial** year's own mix,
   never the reference's, in either regime: a reference lacking real receivables detail (98% of
-  full-year balance sheets, same precondition as the bank-debt defect above) used to reclassify real
-  trade receivables into "altri crediti" silently (indagine-2, 2026-09-12: 1.090.958,55 on the test
-  company). Tax receivables (`sp06e`) and prepaid taxes (`sp06f`/`sp07f`, when temporary-difference
-  lines are set) are excluded from that split *before* it runs — their value comes from the year-end
-  tax settlement / deferred-tax mechanism, never a proportional share that gets discarded afterward,
-  which used to leak into cash silently (39.781,69 on a real scenario, no diagnostic). A reference
+  full-year balance sheets: positive `sp06` aggregate with the six non-fallback sub-lines all
+  zero — 373 of 377 today, the same shape as the bank-debt precondition above) used to reclassify real
+  trade receivables into "altri crediti" silently
+  (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/`, 2026-09-12 — outside the repo, as
+  above: 1.090.958,55 on the test company). Tax receivables (`sp06e`) and prepaid taxes
+  (`sp06f`/`sp07f`, when temporary-difference lines are set) are excluded from that split *before*
+  it runs **only on the reference branch, and per line only where something actually governs it**
+  — `sp06e` when the tax settlement runs automatically — their
+  value comes from the year-end tax settlement / deferred-tax mechanism, never a proportional
+  share that gets discarded afterward, which used to leak into cash silently (39.781,69 on a real
+  scenario, no diagnostic). The other two regimes read differently: in **manual** tax mode
+  (`sp06e_growth_pct`/`sp16e_growth_pct` set) the kernel is skipped and `sp06e` stays a
+  proportional share of the partial mix, and on the **annualized** branch there is no
+  pre-exclusion at all — the deferred-tax lines and the tax position are substituted *after* the
+  absorption blocks, the former by their own `if tax_lines:` block, the latter by the combined
+  `sp06e, sp16e = ...` line.
+  A reference
   lacking real receivables detail while the partial has some declares
   `reference_receivables_undetailed` (severity `warning`) — informational only: the split always
   comes from the partial, with or without the signal.

@@ -144,11 +144,15 @@ differenza A−B e il risultato netto ci starebbero le imposte, e non sarebbe ri
 
 Gli importi dentro questi messaggi — e quelli delle diagnostiche di quadratura più a valle
 (`check_quadratura` in `importers/iv_cee_hierarchy.py`: ESTRAZIONE VUOTA, BILANCIO NON QUADRATO,
-QUADRATURA MASCHERATA, GERARCHIA INCOERENTE, CE↔SP incoerente; il 400 della guardia Rettifiche in
+QUADRATURA MASCHERATA, GERARCHIA INCOERENTE; `enforce_ce_sp_identity`, stesso file: CE↔SP
+incoerente — entrambe misurano e dichiarano soltanto, non modificano una voce contabile; il 400
+della guardia Rettifiche in
 `backend/app/api/v1/financial_years.py`; gli avvisi di route C in `importers/pdf_importer.py`) —
 si scrivono in formato italiano (`eur_it`/l'helper locale `_it_amount`), mai `{x:,.2f}` alla
 americana: un messaggio in italiano con "1,470,357.32" invece di "1.470.357,32" è stato un
-difetto reale, corretto in un'ondata successiva al lotto 3A (indagine-2-promote.md, 2026-09-11).
+difetto reale, corretto in un'ondata successiva al lotto 3A
+(`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-2-promote.md`, 2026-09-11 —
+spazio di lavoro **fuori dal repo**, non è mai stato in git).
 
 ## 6. Dopo il gate strutturale: la quadratura
 

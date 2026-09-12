@@ -1380,6 +1380,16 @@ class IntraYearEngine:
         ))
 
         if not manual_tax_position:
+            # `cash_out` e' l'uscita di cassa dichiarata dal kernel (spec lotto
+            # 3A Task 5). Su questo ramo la sostituzione tocca solo il lato
+            # debito: il Task 2 ha gia' portato `sp06e` al suo valore governato
+            # PRIMA del riassorbimento, quindi il credito non lascia residuo
+            # implicito. `sp16e` qui vale ancora la quota-riferimento proiettata
+            # da `_distribute_sp16_operativo` (Task 1) -- un numero senza
+            # relazione col vero debito tributario del parziale.
+            sp16g, sp06g = self._applica_conguaglio_tributario(
+                sp16g, sp06g, -posizione.cash_out - (sp16e_governed - sp16e)
+            )
             sp16e = sp16e_governed
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
@@ -1631,6 +1641,16 @@ class IntraYearEngine:
                 current_tax=current_tax,
                 reference_tax=Decimal('0'),
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+            )
+            # Qui il Task 2 non e' passato: la riga combinata qui sotto gira DOPO
+            # i riassorbimenti e perde massa su ENTRAMBI i lati, quindi il
+            # conguaglio si misura anche su `sp06e` (decisione del coordinatore,
+            # 2026-09-12). Non si riordina nulla: solo il flusso dichiarato.
+            sp16g, sp06g = self._applica_conguaglio_tributario(
+                sp16g, sp06g,
+                -posizione.cash_out
+                - ((posizione.closing_debt - sp16e)
+                   - (posizione.closing_credit - sp06e)),
             )
             sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
@@ -1895,6 +1915,59 @@ class IntraYearEngine:
             ratio = sp07_total / total
             return tuple(_get_field(ref_bs, field) * ratio for field in fields)
         return (Decimal('0'),) * 7
+    def _applica_conguaglio_tributario(self, sp16g, sp06g, correzione):
+        """Posa il conguaglio fiscale sulla contropartita del lato che si è mosso.
+
+        ``correzione`` è la differenza fra l'uscita di cassa che la posizione
+        tributaria dichiara (``-cash_out``) e quella che le righe di bilancio hanno
+        già prodotto da sole: senza di qui la massa che il kernel toglie a
+        ``sp16e`` (e, sul ramo senza riferimento, a ``sp06e``) finisce in cassa come
+        plug puro, il foglio quadra e nessuna rete se ne accorge.
+
+        La contropartita è UNA SOLA e la sceglie il verso del conguaglio (ruling del
+        coordinatore, 2026-09-12 — il brief ne prevedeva una sola, e sbagliava il
+        caso credito): negativo (si paga più di quanto si incassa) su
+        ``sp16g_altri_debiti_breve``, che diminuisce; positivo (si incassa il credito
+        tributario d'apertura) su ``sp06g_crediti_altri_breve``, che diminuisce: è l'attivo che si scarica
+        (lì quella massa la riclassifica davvero il Task 2), mai un aumento di
+        passività: incassare un credito non è un finanziamento, e i
+        +144.188,46 di `sp16g` della prima stesura, misurati su uno scenario reale,
+        erano massa inventata che peggiorava la PFN senza alcun evento.
+
+        Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo
+        si dichiara, col nome del campo rimasto senza capienza. Cercare un secondo
+        bersaglio è come il vecchio plug.
+        """
+        if correzione == Decimal('0'):
+            return sp16g, sp06g
+        if correzione < Decimal('0'):
+            campo = 'sp16g_altri_debiti_breve'
+            capienza = max(Decimal('0'), sp16g)
+            applicato = -min(-correzione, capienza)
+            sp16g += applicato
+        else:
+            campo = 'sp06g_crediti_altri_breve'
+            capienza = max(Decimal('0'), sp06g)
+            applicato = min(correzione, capienza)
+            sp06g -= applicato
+        residuo = correzione - applicato
+        if residuo != Decimal('0'):
+            self._diagnostics.append({
+                'code': 'tax_settlement_reclass_below_zero',
+                'severity': 'warning',
+                'field': campo,
+                'amount': str(residuo),
+                'message': (
+                    "Il conguaglio fiscale di " + eur_it(correzione) + " trova solo "
+                    + eur_it(applicato) + " di capienza in " + campo + ": il residuo di "
+                    + eur_it(residuo) + " non ha contropartita e la cassa non lo "
+                    "registra. Un campo neutro non scende sotto zero per definizione, "
+                    "e cercarne un secondo vorrebbe dire fabbricare massa: integrare "
+                    "con un'ipotesi di finanziamento esplicita o con una rettifica."
+                ),
+            })
+        return sp16g, sp06g
+
     def _declare_reference_receivables_undetailed(self, aggregate, ref_bs, partial_bs):
         """Dichiara quando il bilancio di riferimento non ha ALCUN dettaglio
         REALE sui crediti (nessuna delle 6 sotto-voci di ``aggregate``, escluso

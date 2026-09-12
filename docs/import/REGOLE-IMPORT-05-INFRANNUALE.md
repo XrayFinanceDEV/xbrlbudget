@@ -133,6 +133,51 @@ immutata, e il budget nato dal promote ereditava quel debito. Nel motore la cass
 a dichiarare `cash_out` e il test end-to-end a verificarlo. `sp17e` (rate oltre l'anno) non si tocca, e la via
 manuale (`sp06e_growth_pct` o `sp16e_growth_pct` valorizzati) continua a saltare la posizione automatica.
 
+**La differenza fra `cash_out` e le righe è il conguaglio, e si posa sul lato che si è mosso.**
+`sp16e` e `sp06e` non nascono dal kernel: nascono dalla **rotazione** del circolante (Task 1/2), che
+porta via la percentuale di crescita del riferimento, e posano la massa non riconosciuta su
+`sp16g`/`sp06g`. Quando la sostituzione fiscale li riscrive, dal `g` se ne va (o ci torna) la
+**quota di rotazione `x`**, non il debito di apertura `P_d` che è quello che `cash_out` misura. La
+riga da sola muove dunque cassa per `(chiusura − x)`, non per `cash_out`, e lo scarto era assorbito
+dal plug senza che nessun flusso lo nominasse:
+
+```
+correzione = −cash_out − [(chiusura_debito − x_debito) − (chiusura_credito − x_credito)]
+```
+
+La contropartita la sceglie il **verso**, e una sola (ruling del coordinatore, 2026-09-12):
+conguaglio **negativo** → `sp16g_altri_debiti_breve` **scende** (stiamo pagando un debito, non
+incrementandolo); conguaglio **positivo** → `sp06g_crediti_altri_breve` scende, cioè si scarica
+l'**attivo** (stiamo incassando). **Mai** un aumento di passività a fronte di un incasso: la prima
+stesura di questa regola, che applicava il solo lato debito in entrambi i casi, su uno scenario reale
+del database fabbricava **+144.188,46 di `sp16g`**, peggiorando la PFN senza alcun evento.
+Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo si dichiara con
+`tax_settlement_reclass_below_zero` (campo nominato e importo), lasciando la cassa dov'è. Un secondo
+bersaglio sarebbe il vecchio plug.
+
+I due rami non sono simmetrici, e non per disattenzione: sul **ramo col riferimento** il Task 2 ha
+già portato `sp06e` al valore governato **prima** dei riassorbimenti, quindi il credito non lascia
+alcun residuo implicito e la formula è **solo debito** (`x_credito = chiusura_credito` per
+costruzione); sul **ramo annualizzato** (nessun anno pieno importato) la riga combinata
+`sp06e, sp16e = ...` gira **dopo** i riassorbimenti e perde massa su entrambi i lati, quindi lì la
+forma è **bidirezionale**. Non si è riordinato nulla: il change aggiunge solo il flusso dichiarato.
+
+Misurato sugli 8 scenari infrannuali del database di riferimento (cinque producono una proiezione;
+gli altri tre falliscono prima per dati mancanti, invariati prima e dopo):
+
+| Scenario | Prima | Dopo |
+|---|---|---|
+| 4 | cassa 15.271,65, `sp16g` 26.093,20, foglio quadrato | cassa 0,00 (clamp), `sp16g` 8.964,79, sbilancio 1.856,76 dichiarato da `unfunded_financing_requirement` — un fabbisogno che prima non esisteva |
+| 5 | `sp16g` 20.617,43, cassa invariata | persistito **identico**, ma con residuo dichiarato −30.712,76: la parte applicata (3.614,28) viene cancellata da `sp_overrides.sp16g` dell'utente, che vince sulla riga |
+| 8 | `sp16g` 0,00, cassa invariata | cassa **ferma** com'era, `sp16g` 0,00 (nessuna passività negativa), residuo dichiarato −14.306,93 |
+| 12 (ramo annualizzato) | `sp16g` 134.484,00 | `sp16g` 123.086,00, cassa −11.398,00, nessun residuo |
+| 18 (conguaglio positivo) | `sp06g` 33.131,63, cassa 1.468.473,63 | `sp06g` 0,00, cassa 1.501.605,26, `sp16g` **invariato**, residuo dichiarato +111.056,83 |
+
+Su `tests/test_intra_year_crediti_commerciali.py` la stessa regola muove di 5.000,00 l'aggregato
+`sp06`: il fixture porta 5.000,00 di credito tributario d'apertura, e da qui quel credito si incassa.
+La massa non è persa, passa dall'attivo alla liquidità — le due asserzioni leggevano 200.000,00
+perché prima di questo change non c'era alcun meccanismo che lo muovesse.
+
 **Se la cassa del parziale non copre quell'uscita** (debito tributario di apertura maggiore della cassa
 disponibile), il plug generale dell'infrannuale — §5 sotto, "Il fabbisogno scoperto è un diagnostico, non un
 debito" — clampa `sp09` a zero e dichiara `unfunded_financing_requirement`: la proiezione esce comunque, ma **non

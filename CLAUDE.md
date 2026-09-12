@@ -666,6 +666,21 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   balance remains: tax of the year minus the advances paid in the year (`tax_advances_paid` if greater than zero,
   otherwise 100% of the reference year's `ce20`); whatever was open at the partial month leaves cash by year end
   (`projection_common.posizione_tributaria_fine_anno`), so a budget born from the promote no longer inherits it.
+  **The rows do not produce that cash movement by themselves, and the gap is a declared flow now.**
+  `sp16e`/`sp06e` arrive from the working-capital *rotation* (reference growth + the `g` bucket), so the
+  tax substitution moves cash by `closing − x` (the rotation share), not by the `cash_out` the kernel
+  measures. `_applica_conguaglio_tributario` closes exactly that gap — `correzione = -cash_out -
+  (closing_debt - x_debt)` on the reference branch, two-sided on the annualized one (whose combined
+  `sp06e, sp16e = ...` line runs *after* the absorption blocks and loses mass on both sides). The
+  counterpart depends on the **sign**: negative → `sp16g` **decreases** (settling a debt), positive →
+  `sp06g` decreases (collecting a credit, i.e. the asset side) — never an increase in liabilities, which
+  fabricated +144.188,46 of `sp16g` on a real scenario in the one-sided first cut. No field goes below
+  zero: the part that fits applies, the residual is declared as `tax_settlement_reclass_below_zero`
+  (naming the field) and cash stays where it was — a second target would be the old plug. A rejected
+  conguaglio can surface as a *new* `unfunded_financing_requirement` (scenario 4 of the reference DB:
+  cash 15.271,65 → 0, sheet out of balance by 1.856,76, which is the correct reason for promote to
+  refuse). On scenario 5 the applied part is then erased by the user's `sp_overrides.sp16g`, which wins
+  over the row: the sheet persists unchanged and only the diagnostic moves.
   Financial debt (`sp16a-c`/`sp17a-c`: banks, other lenders, bonds) is carried forward from the
   partial year's own split, as its own block — never rebuilt from the reference year's proportions,
   because a real loan is not driven by turnover. Only the operating residual of `sp16`/`sp17`

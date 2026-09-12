@@ -48,6 +48,8 @@ CASI = {
                            "valore non ammesso: sono ammessi 'ricavi', 'acquisti' o 'personale' (ricevuto: 'magia')"),
     "tasso al 500%": ({"financing_loans": [{"amount": 50000, "duration_years": 3, "interest_rate": 500}]},
                       "financing_loans.0.interest_rate", "deve essere minore o uguale a 100 (ricevuto: 500)"),
+    "campo sconosciuto": ({"campo_a_caso_che_non_esiste": 42}, "campo_a_caso_che_non_esiste",
+                          "campo sconosciuto, non ammesso (ricevuto: 42)"),
 }
 
 
@@ -111,7 +113,8 @@ def test_i_null_del_client_non_sono_errori_e_un_primo_anno_dopo_base_piu_uno_res
                  "tax_advances_paid": None, "cash_sweep_min_cash": None, "overdraft_limit": None,
                  "sp_overrides": {"sp10_ratei_risconti_attivi": None},
                  "financing_loans": [{"name": None, "amount": 50000, "opening_residual": 0, "duration_years": 5,
-                                      "interest_rate": 3, "grace_years": None, "balloon_pct": None}]},
+                                      "interest_rate": 3, "grace_years": None, "balloon_pct": None}],
+                 "sp_indexing": {"sp16g": None}},
                 {"forecast_year": 2028, "revenue_growth_pct": 5},
             ]
             esito = budget_scenarios.bulk_upsert_assumptions(

@@ -104,6 +104,8 @@ def messaggio_errore_campo(err) -> str:
         testo = f"deve essere minore di {ctx.get('lt')}"
     elif tipo == "literal_error":
         testo = "valore non ammesso: sono ammessi " + str(ctx.get("expected", "")).replace(" or ", " o ")
+    elif tipo == "extra_forbidden":
+        testo = "campo sconosciuto, non ammesso"
     elif tipo == "string_pattern_mismatch":
         testo = "valore non ammesso"
     elif tipo == "string_too_short":
@@ -128,6 +130,13 @@ def _senza_null(riga):
                               for voce in pulita[chiave]]
     if isinstance(pulita.get("sp_overrides"), dict):
         pulita["sp_overrides"] = {k: v for k, v in pulita["sp_overrides"].items() if v is not None}
+    # Come `sp_overrides`: un valore nullo per una voce di `sp_indexing` vale "questa voce non e'
+    # indicizzata" (il motore stesso la tratterebbe come "driver sconosciuto", innocuo -- vedi
+    # calculations/forecast_engine.py:_resolve_sp_indexing), non un errore di schema. Prima di
+    # questa riga un `null` qui dentro alzava 422 sull'INTERO bulk (literal_error sul tipo
+    # Literal["ricavi","acquisti","personale"]).
+    if isinstance(pulita.get("sp_indexing"), dict):
+        pulita["sp_indexing"] = {k: v for k, v in pulita["sp_indexing"].items() if v is not None}
     if isinstance(pulita.get("pregresso"), dict):
         pulita["pregresso"] = {k: ({kk: vv for kk, vv in piano.items() if vv is not None} if isinstance(piano, dict) else piano)
                                for k, piano in pulita["pregresso"].items() if piano is not None}

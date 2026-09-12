@@ -104,3 +104,36 @@ describe("buildIncomeItemsWithEbitda", () => {
     expect(() => buildIncomeItemsWithEbitda([], 12)).not.toThrow();
   });
 });
+
+// `pct_of_reference` e' un RAPPORTO sul riferimento (partial/ref*100, formula del backend
+// in calculations/intra_year_engine.py:473/:491), non una VARIAZIONE: lo legge
+// pratica-highlights.ts confrontandolo con la frazione d'anno trascorsa
+// (period_months/12*100). Le righe grezze portano il pct calcolato dal server;
+// `safePct` in questo file decide il pct delle righe SINTETICHE (totali, EBITDA),
+// che il client costruisce da solo. Un EBITDA in linea col calendario a 9 mesi deve
+// dare 75, non -25: la guardia al centesimo serviva solo contro il denominatore
+// residuo, non contro la semantica del rapporto.
+describe("pct_of_reference resta un rapporto, non una variazione", () => {
+  const raw = [
+    item("ce01_ricavi_vendite", 75, 100),
+    item("ce05_materie_prime", 0, 0),
+    item("ce06_servizi", 0, 0),
+    item("ce08_costi_personale", 0, 0),
+    item("ce09_ammortamenti", 0, 0),
+  ];
+
+  it("riga sintetica EBITDA in linea col calendario a 9 mesi: pct_of_reference = 75, non -25", () => {
+    const out = buildIncomeItemsWithEbitda(raw, 9);
+    // EBITDA parziale = 75 - 0 = 75, riferimento = 100 - 0 = 100.
+    const ebitda = out.find((i) => i.code === "_ebitda");
+    expect(ebitda?.pct_of_reference).toBe(75);
+  });
+
+  it("il rapporto di una riga sintetica non esplode su un riferimento residuo sotto il centesimo", () => {
+    // Ricavi 5.509,29 su un riferimento che dovrebbe annullarsi (residuo di somma float).
+    const residuo = [item("ce01_ricavi_vendite", 5509.29, 3.725290298461914e-9)];
+    const out = buildIncomeItemsWithEbitda(residuo, 9);
+    const ebitda = out.find((i) => i.code === "_ebitda");
+    expect(ebitda?.pct_of_reference).toBe(0);
+  });
+});

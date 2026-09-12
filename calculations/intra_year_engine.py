@@ -7,7 +7,7 @@ User can override via assumptions (growth % vs reference full year).
 The frontend converts user overrides to growth % before saving.
 """
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
@@ -233,7 +233,7 @@ def _get_total_investments(assumption) -> Decimal:
     return Decimal(str(inv))
 
 
-def _financing_contracts(assumption, include_opening=True):
+def _financing_contracts(assumption):
     """Normalize legacy and detailed financing inputs for the shared kernel."""
     year = int(getattr(assumption, 'forecast_year', 0) or 0)
     loans = []
@@ -248,8 +248,6 @@ def _financing_contracts(assumption, include_opening=True):
         })
     for loan in (getattr(assumption, 'financing_loans', None) or []):
         for contract in contratti_da_riga_finanziamento(loan, year):
-            if not include_opening and e_contratto_pregresso(contract):
-                continue
             loans.append(contract)
     return loans
 
@@ -799,7 +797,7 @@ class IntraYearEngine:
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else _get_field(partial_inc, 'ce14_altri_proventi_finanziari') * factor
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else _get_field(partial_inc, 'ce15_oneri_finanziari') * factor
         if assumption.ce15_override is None:
-            contracts = _financing_contracts(assumption, include_opening=True)
+            contracts = _financing_contracts(assumption)
             _, _, financing_interest = new_financing_schedule(
                 contracts,
                 int(getattr(assumption, 'forecast_year', 0) or 0),
@@ -934,7 +932,7 @@ class IntraYearEngine:
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else ann('ce14_altri_proventi_finanziari')
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else ann('ce15_oneri_finanziari')
         if assumption.ce15_override is None:
-            contracts = _financing_contracts(assumption, include_opening=True)
+            contracts = _financing_contracts(assumption)
             _, _, financing_interest = new_financing_schedule(
                 contracts,
                 int(getattr(assumption, 'forecast_year', 0) or 0),
@@ -1004,7 +1002,7 @@ class IntraYearEngine:
         result = apply_ce_overrides(result, assumption)
         _, _, result['ce20_imposte'] = _tax_components(result, assumption)
         return result
-    def _scaled_or_carried(self, field, ref_stock, ref_base, projected_base, partial_bs):
+    def _scaled_or_carried(self, field, ref_stock, ref_base, projected_base, partial_bs, carried_value=None):
         """
         Scala una giacenza col rapporto di rotazione dell'anno di riferimento;
         se quel rapporto è DEGENERE riporta la giacenza infrannuale osservata.
@@ -1028,7 +1026,7 @@ class IntraYearEngine:
         if ratio is not None:
             return projected_base * ratio
 
-        carried = _get_field(partial_bs, field)
+        carried = _get_field(partial_bs, field) if carried_value is None else carried_value
         self._diagnostics.append({
             'code': 'degenerate_turnover_ratio',
             'severity': 'warning',
@@ -1043,6 +1041,50 @@ class IntraYearEngine:
             ),
         })
         return carried
+
+    def _declare_reference_financial_debt_undetailed(self, aggregate, ref_bs, partial_fields):
+        """Dichiara quando il bilancio di riferimento non ha ALCUN dettaglio
+        finanziario (banche/altri finanziatori/obbligazioni) su ``aggregate``
+        (``sp16`` o ``sp17``) mentre il periodo parziale sì. Non è un errore:
+        è il motivo per cui il debito finanziario proiettato viene portato
+        avanti dal parziale come blocco a sé invece che dalla proporzione del
+        riferimento (decisione B, indagine-1-debito-bancario.md, 2026-09-11).
+        Fedele alla convenzione già in uso in questo motore per le altre
+        diagnostiche di questa famiglia (``degenerate_turnover_ratio``,
+        ``missing_short_debt_breakdown``): si dichiara solo quando la
+        condizione scatta davvero, mai un \"nessun problema\" ad ogni
+        proiezione -- l'assenza della chiave vale zero, non un tacere."""
+        ref_fin_fields = {
+            'sp16': (
+                'sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                'sp16c_debiti_obbligazioni_breve',
+            ),
+            'sp17': (
+                'sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                'sp17c_debiti_obbligazioni_lungo',
+            ),
+        }[aggregate]
+        ref_has_detail = any(
+            _get_field(ref_bs, f) != 0 for f in ref_fin_fields
+        )
+        partial_amounts = {f: v for f, v in partial_fields if v != 0}
+        if ref_has_detail or not partial_amounts:
+            return
+        totale = sum(partial_amounts.values(), Decimal('0'))
+        self._diagnostics.append({
+            'code': 'reference_financial_debt_undetailed',
+            'severity': 'warning',
+            'aggregate': aggregate,
+            'fields': {f: str(v) for f, v in partial_amounts.items()},
+            'amount': str(totale),
+            'message': (
+                f"Il bilancio di riferimento non ha dettaglio finanziario su "
+                f"{aggregate} (banche/altri finanziatori/obbligazioni tutte a "
+                f"zero): il debito finanziario del periodo parziale "
+                f"({eur_it(totale)}) è stato portato avanti così com'è, non "
+                f"ridistribuito con le proporzioni del riferimento."
+            ),
+        })
 
     def _project_balance_sheet(
         self,
@@ -1111,7 +1153,17 @@ class IntraYearEngine:
         ref_sp05 = _get_field(ref_bs, 'sp05_rimanenze')
         ref_sp06 = _get_field(ref_bs, 'sp06_crediti_breve')
         ref_sp07 = _get_field(ref_bs, 'sp07_crediti_lungo')
-        ref_sp16 = _get_field(ref_bs, 'sp16_debiti_breve')
+        # Financial debt (banche/altri finanziatori/obbligazioni) is not driven
+        # by operating costs: it is carried forward from the partial year as
+        # its own block (below), never scaled by this ratio. Only the
+        # OPERATING residual of sp16 (fornitori/tributari/previdenziali/altri)
+        # rotates with the reference year's cost turnover.
+        ref_sp16_operativo = (
+            _get_field(ref_bs, 'sp16_debiti_breve')
+            - _get_field(ref_bs, 'sp16a_debiti_banche_breve')
+            - _get_field(ref_bs, 'sp16b_debiti_altri_finanz_breve')
+            - _get_field(ref_bs, 'sp16c_debiti_obbligazioni_breve')
+        )
         ref_costs = (
             _get_field(ref_inc, 'ce05_materie_prime') +
             _get_field(ref_inc, 'ce06_servizi') +
@@ -1173,15 +1225,93 @@ class IntraYearEngine:
         )
         sp15 = _get_field(partial_bs, 'sp15_tfr') + remaining_tfr_accrual
 
-        # Short-term debt: proportional to operating costs (turnover ratio)
-        sp16 = self._scaled_or_carried(
-            'sp16_debiti_breve', ref_sp16, ref_costs, projected_costs, partial_bs,
+        # Financial debt (banche/altri finanziatori/obbligazioni) is carried
+        # forward from the partial year as its own block -- exactly like sp17
+        # below -- and is changed only by the explicit repayment/financing
+        # rules in _apply_debt_repayment. It is never scaled by the
+        # cost-turnover ratio and never redistributed with the reference
+        # year's proportions (decisione B, indagine-1-debito-bancario.md):
+        # a real mutuo is not driven by fatturato/costi. Only the OPERATING
+        # residual (fornitori/tributari/previdenziali/altri) rotates.
+        partial_sp16a = _get_field(partial_bs, 'sp16a_debiti_banche_breve')
+        partial_sp16b = _get_field(partial_bs, 'sp16b_debiti_altri_finanz_breve')
+        partial_sp16c = _get_field(partial_bs, 'sp16c_debiti_obbligazioni_breve')
+        partial_sp16_fin = partial_sp16a + partial_sp16b + partial_sp16c
+        partial_sp16_operativo = (
+            _get_field(partial_bs, 'sp16_debiti_breve') - partial_sp16_fin
         )
+        self._declare_reference_financial_debt_undetailed(
+            'sp16', ref_bs,
+            (
+                ('sp16a_debiti_banche_breve', partial_sp16a),
+                ('sp16b_debiti_altri_finanz_breve', partial_sp16b),
+                ('sp16c_debiti_obbligazioni_breve', partial_sp16c),
+            ),
+        )
+
+        # Short-term OPERATING debt: proportional to operating costs (turnover ratio)
+        sp16_operativo = self._scaled_or_carried(
+            'sp16_debiti_breve_operativo', ref_sp16_operativo, ref_costs,
+            projected_costs, partial_bs, carried_value=partial_sp16_operativo,
+        )
+        sp16 = partial_sp16_fin + sp16_operativo
 
         # Long-term debt starts from the actual YTD balance; only explicit repayment
         # and financing assumptions may change it.
         sp17 = _get_field(partial_bs, 'sp17_debiti_lungo')
+        partial_sp17a = _get_field(partial_bs, 'sp17a_debiti_banche_lungo')
+        partial_sp17b = _get_field(partial_bs, 'sp17b_debiti_altri_finanz_lungo')
+        partial_sp17c = _get_field(partial_bs, 'sp17c_debiti_obbligazioni_lungo')
+        partial_sp17_fin = partial_sp17a + partial_sp17b + partial_sp17c
+        self._declare_reference_financial_debt_undetailed(
+            'sp17', ref_bs,
+            (
+                ('sp17a_debiti_banche_lungo', partial_sp17a),
+                ('sp17b_debiti_altri_finanz_lungo', partial_sp17b),
+                ('sp17c_debiti_obbligazioni_lungo', partial_sp17c),
+            ),
+        )
         sp18 = _get_field(partial_bs, 'sp18_ratei_risconti_passivi')
+
+        # Tax position is derived BEFORE the receivables split, not after:
+        # sp06e (crediti tributari) and, when deferred-tax lines are set,
+        # sp06f/sp07f are GOVERNED fields -- their value comes from the tax
+        # kernel / deferred-tax mechanism, never from a turnover-driven
+        # proportional split. Computing them first lets the operating pool
+        # exclude them up front, so no mass is ever assigned to them by
+        # _distribute_sp06_operativo/_distribute_sp07_operativo and then
+        # discarded (indagine-2, 2026-09-12): a naive split that still
+        # includes them can assign a share to sp06e which the tax kernel then
+        # overwrites, and the discarded mass silently reappears as cash --
+        # measured on azienda 48 scenario 8, ~39.781,69.
+        current_tax, deferred, _ = _tax_components(projected_inc, assumption)
+        tax_lines = getattr(assumption, 'tax_temporary_differences', None) or []
+        manual_tax_position = (
+            getattr(assumption, 'sp06e_growth_pct', None) is not None
+            or getattr(assumption, 'sp16e_growth_pct', None) is not None
+        )
+        sp06e_governed = None
+        sp16e_governed = None
+        if not manual_tax_position:
+            remaining_current_tax = max(
+                Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
+            )
+            posizione = posizione_tributaria_fine_anno(
+                opening_credit=_get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                opening_debt=_get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+                remaining_current_tax=remaining_current_tax,
+                current_tax=current_tax,
+                reference_tax=_get_field(ref_inc, 'ce20_imposte'),
+                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+            )
+            sp06e_governed, sp16e_governed = posizione.closing_credit, posizione.closing_debt
+        sp06f_governed = None
+        sp07f_governed = None
+        sp14b_governed = None
+        if tax_lines:
+            sp06f_governed = deferred['short_asset']
+            sp07f_governed = deferred['long_asset']
+            sp14b_governed = deferred['liability']
 
         # Break down debts before applying creditor-specific movements. The bank
         # repayment uses total bank exposure and pays the short bucket first;
@@ -1192,11 +1322,50 @@ class IntraYearEngine:
         sp03a, sp03b, sp03c, sp03d, sp03e = self._distribute_sp03(partial_bs, sp03)
         sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(ref_bs, sp04)
         sp05a, sp05b, sp05c, sp05d, sp05e = self._distribute_sp05(ref_bs, sp05)
-        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(ref_bs, sp06)
-        sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = self._distribute_sp07(ref_bs, sp07)
+        # Receivables: composition of the OPERATING residual (never sp06e/
+        # sp06f/sp07f when they are governed above) comes from the PARTIAL
+        # year's own mix -- never a different year's, exactly like the
+        # financial debt block (Task 1) -- because the reference lacking
+        # receivables detail used to zero out real trade receivables
+        # silently (indagine-2, azienda 237: 1.090.958,55 masked as 'altri
+        # crediti'). Declared, never silent, when the reference gives no
+        # corroborating detail at all.
+        self._declare_reference_receivables_undetailed('sp06', ref_bs, partial_bs)
+        self._declare_reference_receivables_undetailed('sp07', ref_bs, partial_bs)
+        sp06_escludi = (
+            (('sp06e_crediti_tributari_breve',) if sp06e_governed is not None else ())
+            + (('sp06f_imposte_anticipate_breve',) if sp06f_governed is not None else ())
+        )
+        sp07_escludi = (
+            ('sp07f_imposte_anticipate_lungo',) if sp07f_governed is not None else ()
+        )
+        sp06_governed_mass = (sp06e_governed or Decimal('0')) + (sp06f_governed or Decimal('0'))
+        sp07_governed_mass = sp07f_governed or Decimal('0')
+        sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06_operativo(
+            partial_bs, sp06 - sp06_governed_mass, sp06_escludi
+        )
+        sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = self._distribute_sp07_operativo(
+            partial_bs, sp07 - sp07_governed_mass, sp07_escludi
+        )
+        if sp06e_governed is not None:
+            sp06e = sp06e_governed
+        if sp06f_governed is not None:
+            sp06f = sp06f_governed
+        if sp07f_governed is not None:
+            sp07f = sp07f_governed
         sp14a, sp14b, sp14c, sp14d = self._distribute_sp14(partial_bs, sp14)
-        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(ref_bs, sp16)
-        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(ref_bs, sp17)
+        if sp14b_governed is not None:
+            sp14b = sp14b_governed
+            sp14 = sp14a + sp14b + sp14c + sp14d
+        sp16a, sp16b, sp16c = partial_sp16a, partial_sp16b, partial_sp16c
+        sp16d, sp16e, sp16f, sp16g = self._distribute_sp16_operativo(
+            ref_bs, sp16_operativo
+        )
+        sp17a, sp17b, sp17c = partial_sp17a, partial_sp17b, partial_sp17c
+        sp17_operativo = sp17 - partial_sp17_fin
+        sp17d, sp17e, sp17f, sp17g = self._distribute_sp17_operativo(
+            ref_bs, sp17_operativo
+        )
         sp06g += max(Decimal('0'), sp06 - sum(
             (sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g), Decimal('0')
         ))
@@ -1210,30 +1379,18 @@ class IntraYearEngine:
             (sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g), Decimal('0')
         ))
 
-        current_tax, deferred, _ = _tax_components(projected_inc, assumption)
-        tax_lines = getattr(assumption, 'tax_temporary_differences', None) or []
-        if tax_lines:
-            sp06f = deferred['short_asset']
-            sp07f = deferred['long_asset']
-            sp14b = deferred['liability']
-            sp14 = sp14a + sp14b + sp14c + sp14d
-        manual_tax_position = (
-            getattr(assumption, 'sp06e_growth_pct', None) is not None
-            or getattr(assumption, 'sp16e_growth_pct', None) is not None
-        )
         if not manual_tax_position:
-            remaining_current_tax = max(
-                Decimal('0'), current_tax - _get_field(partial_inc, 'ce20_imposte')
+            # `cash_out` e' l'uscita di cassa dichiarata dal kernel (spec lotto
+            # 3A Task 5). Su questo ramo la sostituzione tocca solo il lato
+            # debito: il Task 2 ha gia' portato `sp06e` al suo valore governato
+            # PRIMA del riassorbimento, quindi il credito non lascia residuo
+            # implicito. `sp16e` qui vale ancora la quota-riferimento proiettata
+            # da `_distribute_sp16_operativo` (Task 1) -- un numero senza
+            # relazione col vero debito tributario del parziale.
+            sp16g, sp06g = self._applica_conguaglio_tributario(
+                sp16g, sp06g, -posizione.cash_out - (sp16e_governed - sp16e)
             )
-            posizione = posizione_tributaria_fine_anno(
-                opening_credit=_get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
-                opening_debt=_get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
-                remaining_current_tax=remaining_current_tax,
-                current_tax=current_tax,
-                reference_tax=_get_field(ref_inc, 'ce20_imposte'),
-                explicit_advances=getattr(assumption, 'tax_advances_paid', None),
-            )
-            sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
+            sp16e = sp16e_governed
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
         sp16a, sp17a, sp17b = self._apply_debt_repayment(
@@ -1485,6 +1642,16 @@ class IntraYearEngine:
                 reference_tax=Decimal('0'),
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
+            # Qui il Task 2 non e' passato: la riga combinata qui sotto gira DOPO
+            # i riassorbimenti e perde massa su ENTRAMBI i lati, quindi il
+            # conguaglio si misura anche su `sp06e` (decisione del coordinatore,
+            # 2026-09-12). Non si riordina nulla: solo il flusso dichiarato.
+            sp16g, sp06g = self._applica_conguaglio_tributario(
+                sp16g, sp06g,
+                -posizione.cash_out
+                - ((posizione.closing_debt - sp16e)
+                   - (posizione.closing_credit - sp06e)),
+            )
             sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
@@ -1612,7 +1779,7 @@ class IntraYearEngine:
         interest and cash are unchanged by the split.
         """
         getter = lambda f: _get_field(base_bs, f)
-        contracts = _financing_contracts(assumption, include_opening=True)
+        contracts = _financing_contracts(assumption)
         pregressi = [c for c in contracts if e_contratto_pregresso(c)]
         nuovi = [c for c in contracts if not e_contratto_pregresso(c)]
         anno = int(getattr(assumption, 'forecast_year', 0) or 0)
@@ -1748,6 +1915,182 @@ class IntraYearEngine:
             ratio = sp07_total / total
             return tuple(_get_field(ref_bs, field) * ratio for field in fields)
         return (Decimal('0'),) * 7
+    def _applica_conguaglio_tributario(self, sp16g, sp06g, correzione):
+        """Posa il conguaglio fiscale sulla contropartita del lato che si è mosso.
+
+        ``correzione`` è la differenza fra l'uscita di cassa che la posizione
+        tributaria dichiara (``-cash_out``) e quella che le righe di bilancio hanno
+        già prodotto da sole: senza di qui la massa che il kernel toglie a
+        ``sp16e`` (e, sul ramo senza riferimento, a ``sp06e``) finisce in cassa come
+        plug puro, il foglio quadra e nessuna rete se ne accorge.
+
+        La contropartita è UNA SOLA e la sceglie il verso del conguaglio (ruling del
+        coordinatore, 2026-09-12 — il brief ne prevedeva una sola, e sbagliava il
+        caso credito): negativo (si paga più di quanto si incassa) su
+        ``sp16g_altri_debiti_breve``, che diminuisce; positivo (si incassa il credito
+        tributario d'apertura) su ``sp06g_crediti_altri_breve``, che diminuisce: è l'attivo che si scarica
+        (lì quella massa la riclassifica davvero il Task 2), mai un aumento di
+        passività: incassare un credito non è un finanziamento, e i
+        +144.188,46 di `sp16g` della prima stesura, misurati su uno scenario reale,
+        erano massa inventata che peggiorava la PFN senza alcun evento.
+
+        Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo
+        si dichiara, col nome del campo rimasto senza capienza. Cercare un secondo
+        bersaglio è come il vecchio plug.
+        """
+        if correzione == Decimal('0'):
+            return sp16g, sp06g
+        if correzione < Decimal('0'):
+            campo = 'sp16g_altri_debiti_breve'
+            capienza = max(Decimal('0'), sp16g)
+            applicato = -min(-correzione, capienza)
+            sp16g += applicato
+        else:
+            campo = 'sp06g_crediti_altri_breve'
+            capienza = max(Decimal('0'), sp06g)
+            applicato = min(correzione, capienza)
+            sp06g -= applicato
+        residuo = correzione - applicato
+        if residuo != Decimal('0'):
+            self._diagnostics.append({
+                'code': 'tax_settlement_reclass_below_zero',
+                'severity': 'warning',
+                'field': campo,
+                # Al centesimo, con la modalita' degli altri campi monetari del motore
+                # (`ROUND_HALF_UP`, come `eur_it`, `BaseCalculator.round_decimal` e
+                # `ForecastEngine._quantize_values`): `residuo` e' il resto di una
+                # divisione di rotazione e arriva con ventotto decimali (misurato
+                # '283333.3333333333333333333333'), o con un centesimo non
+                # normalizzato (misurato '-400000.000'). Si quantizza, non si
+                # ricalcola: il segno e' quello di `correzione - applicato`.
+                'amount': str(Decimal(str(residuo)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )),
+                'message': (
+                    # Nessun importo nel testo: la cifra che conta vive nel payload
+                    # `amount`, come per `unfunded_financing_requirement` e
+                    # `missing_short_debt_breakdown` in questo stesso file (brief,
+                    # 'Trappole note'). Scrivere "trova solo X di capienza" voleva
+                    # inoltre dire mostrare una capienza NEGATIVA sul lato debito,
+                    # dove X = `applicato` e' negativo per costruzione: una capienza
+                    # esiste o non esiste (rilievo di revisione, 2026-09-12).
+                    ("Il conguaglio fiscale non trova alcuna capienza in " + campo
+                     + ": il residuo non ha contropartita e la cassa non lo registra. ")
+                    if capienza <= Decimal('0') else
+                    ("Il conguaglio fiscale supera la capienza disponibile in " + campo
+                     + ": la parte che ci sta viene applicata, il residuo no. ")
+                ) + (
+                    "Un campo neutro non scende sotto zero per definizione, e cercarne "
+                    "un secondo vorrebbe dire fabbricare massa: integrare con un'ipotesi "
+                    "di finanziamento esplicita o con una rettifica."
+                ),
+            })
+        return sp16g, sp06g
+
+    def _declare_reference_receivables_undetailed(self, aggregate, ref_bs, partial_bs):
+        """Dichiara quando il bilancio di riferimento non ha ALCUN dettaglio
+        REALE sui crediti (nessuna delle 6 sotto-voci di ``aggregate``, escluso
+        il secchio di ripiego 'g') mentre il periodo parziale si': la
+        composizione usata (sempre quella del parziale, mai quella del
+        riferimento) non e' corroborata dal riferimento. Diagnostica
+        informativa: a differenza del debito finanziario (Task 1), qui non
+        azzera piu' nulla -- _distribute_sp06_operativo/_distribute_sp07_operativo
+        leggono sempre partial_bs -- quindi non segnala un ramo di calcolo
+        diverso, solo una qualita' del dato di riferimento (indagine-2,
+        2026-09-12)."""
+        fields = {
+            'sp06': (
+                'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+                'sp06g_crediti_altri_breve',
+            ),
+            'sp07': (
+                'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+                'sp07g_crediti_altri_lungo',
+            ),
+        }[aggregate]
+        # 'g' e' il secchio di ripiego: un riferimento che ha SOLO 'g' non da'
+        # alcun segnale reale sulla composizione (esattamente come per il
+        # debito finanziario, dove si guardano solo le 3 voci reali, mai il
+        # ripiego). Le altre 6 voci sono la 'detail' che conta.
+        campi_reali = fields[:-1]
+        ref_has_detail = any(_get_field(ref_bs, f) != 0 for f in campi_reali)
+        partial_total = sum((_get_field(partial_bs, f) for f in fields), Decimal('0'))
+        if ref_has_detail or partial_total == 0:
+            return
+        self._diagnostics.append({
+            'code': 'reference_receivables_undetailed',
+            'severity': 'warning',
+            'aggregate': aggregate,
+            'amount': str(partial_total),
+            'message': (
+                f"Il bilancio di riferimento non ha dettaglio sui crediti su "
+                f"{aggregate}: la ripartizione ({eur_it(partial_total)}) usa la "
+                f"composizione del periodo parziale, non corroborata dal "
+                f"riferimento."
+            ),
+        })
+
+    def _distribute_sp06_operativo(self, source_bs, sp06_operativo_total, escludi=()):
+        """Distribuisce solo il residuo di sp06 NON governato altrove (sp06e
+        dal cuneo fiscale, sp06f dalle differite quando impostate) usando la
+        composizione del PARZIALE -- mai di un anno diverso -- esattamente
+        come il debito finanziario (Task 1). I campi in ``escludi`` non
+        ricevono mai una quota: il loro valore viene assegnato altrove, dal
+        chiamante."""
+        fields = (
+            'sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+            'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+            'sp06e_crediti_tributari_breve', 'sp06f_imposte_anticipate_breve',
+            'sp06g_crediti_altri_breve',
+        )
+        pool = tuple(f for f in fields if f not in escludi)
+        total = sum((_get_field(source_bs, f) for f in pool), Decimal('0'))
+        shares = {}
+        if total > 0:
+            r = sp06_operativo_total / total
+            shares = {f: _get_field(source_bs, f) * r for f in pool}
+        elif sp06_operativo_total != 0:
+            self._diagnostics.append({
+                'code': 'missing_short_receivables_breakdown',
+                'severity': 'error',
+                'amount': str(sp06_operativo_total),
+                'message': (
+                    "La ripartizione dei crediti operativi a breve non e' "
+                    "disponibile: nessuna categoria e' stata inventata."
+                ),
+            })
+        return tuple(shares.get(f, Decimal('0')) for f in fields)
+
+    def _distribute_sp07_operativo(self, source_bs, sp07_operativo_total, escludi=()):
+        """Mirror di _distribute_sp06_operativo per i crediti a lungo."""
+        fields = (
+            'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+            'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+            'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+            'sp07g_crediti_altri_lungo',
+        )
+        pool = tuple(f for f in fields if f not in escludi)
+        total = sum((_get_field(source_bs, f) for f in pool), Decimal('0'))
+        shares = {}
+        if total > 0:
+            r = sp07_operativo_total / total
+            shares = {f: _get_field(source_bs, f) * r for f in pool}
+        elif sp07_operativo_total != 0:
+            self._diagnostics.append({
+                'code': 'missing_long_receivables_breakdown',
+                'severity': 'error',
+                'amount': str(sp07_operativo_total),
+                'message': (
+                    "La ripartizione dei crediti operativi a lungo non e' "
+                    "disponibile: nessuna categoria e' stata inventata."
+                ),
+            })
+        return tuple(shares.get(f, Decimal('0')) for f in fields)
+
 
     def _distribute_sp04(self, ref_bs, sp04_total):
         """Distribute sp04 into sub-categories proportionally from reference."""
@@ -1829,6 +2172,58 @@ class IntraYearEngine:
                 _get_field(ref_bs, 'sp17g_altri_debiti_lungo') * r,
             )
         return (Decimal('0'),) * 7
+
+    def _distribute_sp16_operativo(self, ref_bs, sp16_operativo_total):
+        """Distribute only the OPERATING residual of sp16 (fornitori/
+        tributari/previdenziali/altri) using the reference year's
+        proportions. Financial debt (banche/altri finanziatori/obbligazioni,
+        sp16a-c) is never part of this residual: it is carried forward from
+        the partial year as its own block (decisione B,
+        indagine-1-debito-bancario.md) and is not touched here."""
+        fields = (
+            'sp16d_debiti_fornitori_breve', 'sp16e_debiti_tributari_breve',
+            'sp16f_debiti_previdenza_breve', 'sp16g_altri_debiti_breve',
+        )
+        total = sum((_get_field(ref_bs, f) for f in fields), Decimal('0'))
+        if total > 0:
+            r = sp16_operativo_total / total
+            return tuple(_get_field(ref_bs, f) * r for f in fields)
+        if sp16_operativo_total != 0:
+            self._diagnostics.append({
+                'code': 'missing_short_debt_breakdown',
+                'severity': 'error',
+                'amount': str(sp16_operativo_total),
+                'message': (
+                    "La ripartizione del debito operativo a breve (fornitori/"
+                    "tributario/previdenziale/altri) non è disponibile: "
+                    "nessuna categoria è stata inventata."
+                ),
+            })
+        return (Decimal('0'),) * 4
+
+    def _distribute_sp17_operativo(self, ref_bs, sp17_operativo_total):
+        """Distribute only the OPERATING residual of sp17 -- mirrors
+        _distribute_sp16_operativo for the long-term side."""
+        fields = (
+            'sp17d_debiti_fornitori_lungo', 'sp17e_debiti_tributari_lungo',
+            'sp17f_debiti_previdenza_lungo', 'sp17g_altri_debiti_lungo',
+        )
+        total = sum((_get_field(ref_bs, f) for f in fields), Decimal('0'))
+        if total > 0:
+            r = sp17_operativo_total / total
+            return tuple(_get_field(ref_bs, f) * r for f in fields)
+        if sp17_operativo_total != 0:
+            self._diagnostics.append({
+                'code': 'missing_long_debt_breakdown',
+                'severity': 'error',
+                'amount': str(sp17_operativo_total),
+                'message': (
+                    "La ripartizione del debito operativo a lungo (fornitori/"
+                    "tributario/previdenziale/altri) non è disponibile: "
+                    "nessuna categoria è stata inventata."
+                ),
+            })
+        return (Decimal('0'),) * 4
 
     def _save_forecast(self, scenario_id: int, year: int, bs_data: Dict, inc_data: Dict):
         """Save projected data as ForecastYear + ForecastBalanceSheet + ForecastIncomeStatement."""

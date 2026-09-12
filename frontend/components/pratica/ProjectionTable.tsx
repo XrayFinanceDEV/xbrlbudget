@@ -15,6 +15,7 @@ import {
   formatPct,
   formatInputNumber,
   parseInputNumber,
+  deltaPct,
 } from "@/lib/pratica-format";
 import { ALWAYS_SHOW_CODES, DETAIL_PARENTS, EDITABLE_CE_CODES, VP_CODES } from "@/lib/pratica-codes";
 import type { IntraYearComparisonItem } from "@/types/api";
@@ -162,11 +163,9 @@ export function ProjectionTable({
             else if (item.code === "_net_profit") projValue = projNetProfit;
             else projValue = getProjectedValue(item);
 
-            const delta = item.reference_value !== 0
-              ? ((projValue - item.reference_value) / Math.abs(item.reference_value)) * 100
-              : 0;
-            const isPositive = delta > 1;
-            const isNegative = delta < -1;
+            const delta = deltaPct(projValue, item.reference_value);
+            const isPositive = delta !== null && delta > 1;
+            const isNegative = delta !== null && delta < -1;
 
             return (
               <TableRow
@@ -222,7 +221,7 @@ export function ProjectionTable({
                 )}
                 {/* Delta % */}
                 <TableCell className="text-right text-sm">
-                  {isPctRow ? (
+                  {isPctRow || delta === null ? (
                     <span className="text-muted-foreground">-</span>
                   ) : (
                     <span

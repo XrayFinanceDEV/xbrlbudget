@@ -269,7 +269,13 @@ class BudgetAssumptionsCreate(BudgetAssumptionsBase):
 class BudgetAssumptionsBulkRow(BudgetAssumptionsBase):
     """Una riga del bulk `PUT /assumptions`: gli stessi vincoli di `BudgetAssumptionsCreate`, senza `scenario_id` obbligatorio
     (lo scenario e' nel percorso). Serve SOLO a validare: le righe si costruiscono ancora da `build_assumption_row`,
-    cosi' un input valido produce esattamente le righe di prima."""
+    cosi' un input valido produce esattamente le righe di prima. `extra="forbid"` SOLO qui (non su
+    `BudgetAssumptionsBase`/`BudgetAssumptionsCreate`, entrambe usate altrove): un campo sconosciuto
+    nel corpo del bulk oggi viene accettato e scartato in silenzio da pydantic (default
+    `extra="ignore"`) -- un refuso o un campo rinominato lato frontend non arriva mai a un errore,
+    sparisce e basta. `BudgetAssumptionsBulkRow` e' l'unica classe che questo file istanzia da un
+    dict di client (`validate_bulk_rows`, unico chiamante); nessun altro schema del bulk cambia."""
+    model_config = ConfigDict(extra="forbid")
     scenario_id: Optional[int] = None
 
 

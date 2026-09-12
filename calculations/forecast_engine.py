@@ -19,7 +19,7 @@ from calculations.projection_common import (
     pregresso_opening_masses, runoff_schedule, validate_runoff,
     tax_settlement_saldo_acconto, soglia_giorni_magazzino,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
-    residuo_prestiti_nuovi, quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
+    quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
     eur_it,
 )
 from calculations.ce_result import calculate_ce_result
@@ -483,11 +483,16 @@ def _split_to_cents(fixed_part: Decimal, line_value: Decimal) -> Tuple[Decimal, 
     return fixed_q, line_value - fixed_q
 
 
-# Le regole del debito bancario vivono in `projection_common` (lotto 3A, Task 3): questi nomi restano per
-# chi li importa dal motore budget (test e helper del Task 2).
+# Le regole del debito bancario vivono in `projection_common` (lotto 3A, Task 3). Questi TRE nomi
+# restano perche' il corpo di QUESTO modulo li usa ancora come proprie abbreviazioni interne, non
+# solo chi li importa dai test: `_ha_residuo_pregresso`/`_e_contratto_pregresso` in
+# `_contratti_dell_anno`, `assemble_financing`, `_calculate_balance_sheet`;
+# `_quota_breve_prestiti_nuovi` in `_contratti_dell_anno` e `_calculate_balance_sheet`. Un quarto
+# alias, `_residuo_prestiti_nuovi`, non aveva invece alcun chiamante qui dentro (il kernel
+# equivalente e' reimplementato localmente da `_residuo_contratto`): rimosso -- il test che ne
+# confrontava l'identita' importa ora `projection_common.residuo_prestiti_nuovi` direttamente.
 _ha_residuo_pregresso = e_contratto_pregresso
 _e_contratto_pregresso = e_contratto_pregresso
-_residuo_prestiti_nuovi = residuo_prestiti_nuovi
 _quota_breve_prestiti_nuovi = quota_breve_prestiti_nuovi
 
 

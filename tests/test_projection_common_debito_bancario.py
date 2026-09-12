@@ -1,7 +1,9 @@
 """Le tre regole del debito bancario vivono in `projection_common` e il motore budget le usa (lotto 3A, Task 3).
 
 Numeri: la catena del prestito 100.000,38 / 4 anni / 4,35% erogato nel 2027, misurata sullo snapshot `452112d`
-con `forecast_engine._residuo_prestiti_nuovi` e `_quota_breve_prestiti_nuovi`.
+con `projection_common.residuo_prestiti_nuovi` e `forecast_engine._quota_breve_prestiti_nuovi` (il solo dei
+due che il motore usa ancora come proprio alias interno -- `_residuo_prestiti_nuovi` era un alias morto,
+rimosso in questo task).
 """
 from decimal import Decimal as D
 
@@ -56,6 +58,17 @@ def test_un_contratto_col_residuo_e_pregresso_uno_nuovo_no():
 
 
 def test_il_motore_budget_usa_le_funzioni_condivise_non_una_copia():
-    assert motore_budget._residuo_prestiti_nuovi is getattr(comune, "residuo_prestiti_nuovi", None)
+    # `residuo_prestiti_nuovi` non e' piu' ne' un alias ne' un import di forecast_engine
+    # (Task 7/C rimuove l'alias morto, Task 10 l'ultimo import senza chiamanti): il
+    # motore non deve poter ospitare una seconda implementazione della regola.
+    assert "residuo_prestiti_nuovi" not in vars(motore_budget)
+    # E il kernel lo raggiunge comunque per la via vera: la quota a breve pesa il
+    # residuo col kernel condiviso, non con una copia propria. Si guarda ai nomi che
+    # il BYTECODE della funzione referenzia, non ai suoi `__globals__`: `__globals__`
+    # e' il dizionario del modulo `projection_common`, quindi vi troverebbe
+    # `residuo_prestiti_nuovi` anche se `quota_breve` non lo chiamasse affatto --
+    # un'asserzione che non morde e che, peggio, sembra mordere. Cosi' invece cade
+    # davvero se `quota_breve` smette di chiamarlo o ne chiama un altro.
+    assert "residuo_prestiti_nuovi" in comune.quota_breve_prestiti_nuovi.__code__.co_names
     assert motore_budget._quota_breve_prestiti_nuovi is getattr(comune, "quota_breve_prestiti_nuovi", None)
     assert motore_budget._e_contratto_pregresso is getattr(comune, "e_contratto_pregresso", None)

@@ -11,6 +11,7 @@ from database.models import (
     FinancialYear, BalanceSheet, IncomeStatement,
     ForecastBalanceSheet, ForecastIncomeStatement,
 )
+from app.services.forecast_freshness import forecast_staleness
 
 
 def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
@@ -39,6 +40,15 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         raise ValueError("Nessuna proiezione trovata: genera prima la proiezione")
     if not forecast_year.balance_sheet or not forecast_year.income_statement:
         raise ValueError("La proiezione è incompleta (manca lo SP o il CE)")
+
+    assumptions_at, forecast_at, forecast_stale = forecast_staleness(scenario)
+    if forecast_stale:
+        raise ValueError(
+            "La proiezione non è aggiornata alle ipotesi salvate: "
+            f"ipotesi aggiornate il {assumptions_at}, proiezione generata il "
+            f"{forecast_at}. Torna alla tab Proiezione e usa «Calcola "
+            "Proiezione SP» prima di proseguire al Budget."
+        )
 
     target_year = forecast_year.year
     company_id = scenario.company_id

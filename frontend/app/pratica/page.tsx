@@ -87,6 +87,10 @@ import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { forecastLoadErrorMessage } from "@/lib/forecast-page-status";
 import { praticaIndicatoriStatus } from "@/lib/pratica-indicatori-status";
 import {
+  praticaRehydrationFailure,
+  type PraticaRehydrationFailure,
+} from "@/lib/pratica-rehydration";
+import {
   MONTH_LABELS,
   SECTOR_OPTIONS,
   formatEuro,
@@ -383,16 +387,58 @@ export default function InfraannualePage() {
   // 4 stati locali; gli effetti già esistenti (auto-load Rettifiche, auto-load
   // Confronto, auto-load Analisi) fanno il resto da soli quando vedono
   // importResult/scenario valorizzati. Se il context non ha abbastanza dati
-  // (companyId/infrannualeScenarioId mancanti) o la fetch fallisce, fallback
-  // onesto: si torna allo step Import e si spiega perché — mai una pagina
-  // bianca.
+  // (companyId/infrannualeScenarioId mancanti) o il server risponde 404,
+  // fallback onesto: si torna allo step Import. Un errore transitorio conserva
+  // invece lo step e offre Riprova — mai una pagina bianca.
   //
   // Guardia con useRef (non solo scalari in dep-array): l'effetto deve
   // tentare la riidratazione ESATTAMENTE una volta, altrimenti un secondo
   // tentativo potrebbe partire mentre il primo è ancora in corso (dipende da
   // pratica?.analysisStep, che può cambiare per altri motivi nel frattempo).
   const rehydrationAttempted = useRef(false);
-  const [rehydrationFailed, setRehydrationFailed] = useState(false);
+  const rehydrationCompanyId = pratica?.companyId;
+  const rehydrationScenarioId = pratica?.infrannualeScenarioId;
+  const rehydrationFiscalYear = pratica?.fiscalYear;
+  const rehydrationPeriodMonths = pratica?.periodMonths;
+  const [rehydrationFailure, setRehydrationFailure] = useState<{
+    kind: PraticaRehydrationFailure;
+    error: unknown;
+  } | null>(null);
+
+  const rehydratePratica = useCallback(async () => {
+    if (rehydrationCompanyId == null || rehydrationScenarioId == null) {
+      setRehydrationFailure({ kind: "not_found", error: null });
+      setActiveTab("import");
+      return;
+    }
+
+    const companyId = rehydrationCompanyId;
+    const infrannualeScenarioId = rehydrationScenarioId;
+    try {
+      const [company, scenarioData] = await Promise.all([
+        getCompany(companyId),
+        getBudgetScenario(companyId, infrannualeScenarioId),
+      ]);
+      setScenario(scenarioData);
+      setImportResult({ companyId, companyName: company.name });
+      setFiscalYear(rehydrationFiscalYear ?? scenarioData.base_year + 1);
+      setPeriodMonths(rehydrationPeriodMonths ?? scenarioData.period_months ?? 12);
+      setRehydrationFailure(null);
+    } catch (error) {
+      const kind = praticaRehydrationFailure(error);
+      setRehydrationFailure({ kind, error });
+      // Solo un 404 prova che lo stato server non esiste piu'. Un 500 o un
+      // errore di rete non deve mai riscrivere analysisStep in localStorage.
+      if (kind === "not_found") setActiveTab("import");
+    }
+  }, [
+    rehydrationCompanyId,
+    rehydrationScenarioId,
+    rehydrationFiscalYear,
+    rehydrationPeriodMonths,
+    setActiveTab,
+  ]);
+
   useEffect(() => {
     if (rehydrationAttempted.current) return;
     if (!pratica) return; // context non ancora letto da localStorage
@@ -404,29 +450,12 @@ export default function InfraannualePage() {
 
     if (pratica.companyId == null || pratica.infrannualeScenarioId == null) {
       rehydrationAttempted.current = true;
-      setRehydrationFailed(true);
-      setActiveTab("import");
+      void rehydratePratica();
       return;
     }
 
     rehydrationAttempted.current = true;
-    const companyId = pratica.companyId;
-    const infrannualeScenarioId = pratica.infrannualeScenarioId;
-    (async () => {
-      try {
-        const [company, scenarioData] = await Promise.all([
-          getCompany(companyId),
-          getBudgetScenario(companyId, infrannualeScenarioId),
-        ]);
-        setScenario(scenarioData);
-        setImportResult({ companyId, companyName: company.name });
-        setFiscalYear(pratica.fiscalYear ?? scenarioData.base_year + 1);
-        setPeriodMonths(pratica.periodMonths ?? scenarioData.period_months ?? 12);
-      } catch {
-        setRehydrationFailed(true);
-        setActiveTab("import");
-      }
-    })();
+    void rehydratePratica();
     // Deliberatamente sugli scalari, non sull'oggetto pratica: l'effetto deve
     // tentare la riidratazione una volta sola (vedi rehydrationAttempted),
     // dipendere dall'oggetto lo rifarebbe scattare a ogni updatePratica
@@ -440,7 +469,7 @@ export default function InfraannualePage() {
     pratica?.fiscalYear,
     pratica?.periodMonths,
     importResult,
-    setActiveTab,
+    rehydratePratica,
   ]);
 
   // Helper: create scenario and advance to comparison step
@@ -1085,7 +1114,7 @@ export default function InfraannualePage() {
     <>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        {rehydrationFailed && (
+        {rehydrationFailure?.kind === "not_found" && (
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Pratica da riaprire</AlertTitle>
@@ -1095,6 +1124,14 @@ export default function InfraannualePage() {
               home.
             </AlertDescription>
           </Alert>
+        )}
+
+        {rehydrationFailure?.kind === "transient" && (
+          <ForecastLoadError
+            error={rehydrationFailure.error}
+            onRetry={() => void rehydratePratica()}
+            className="mb-6"
+          />
         )}
 
         {blocked && (

@@ -6,7 +6,6 @@ in a single response. This simplifies the API by consolidating multiple endpoint
 """
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
-from datetime import timezone
 from decimal import Decimal
 import sys
 import os
@@ -25,6 +24,7 @@ from app.schemas import balance_sheet as bs_schemas
 from app.schemas import income_statement as inc_schemas
 from app.schemas import budget as budget_schemas
 from pdf_service.em_score import calculate_em_score, get_em_score_description
+from app.services.forecast_freshness import forecast_staleness
 
 
 def get_complete_analysis(
@@ -248,32 +248,7 @@ def _forecast_staleness(scenario) -> tuple:
          forecast_updated_at ISO UTC `Z` | None,
          stale)
     """
-    def _latest(rows):
-        stamps = [r.updated_at or r.created_at for r in rows or []]
-        stamps = [s for s in stamps if s is not None]
-        return max(stamps) if stamps else None
-
-    assumptions_at = _latest(scenario.assumptions)
-    forecast_at = _latest(scenario.forecast_years)
-    stale = bool(assumptions_at and forecast_at and assumptions_at > forecast_at)
-
-    def _iso_utc(stamp):
-        # Colonne ingenue per costruzione (`default=datetime.utcnow`): il
-        # suffisso dichiara la base che il valore ha gia'. Un valore con fuso
-        # si porta prima in UTC e si spoglia: accodare `Z` a un `+00:00`
-        # darebbe una stringa che `Date.parse` non legge, e l'avviso si
-        # spegnerebbe senza che nessuno se ne accorga.
-        if stamp is None:
-            return None
-        if stamp.tzinfo is not None:
-            stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
-        return stamp.isoformat() + "Z"
-
-    return (
-        _iso_utc(assumptions_at),
-        _iso_utc(forecast_at),
-        stale,
-    )
+    return forecast_staleness(scenario)
 
 
 def _calculate_year_metrics(

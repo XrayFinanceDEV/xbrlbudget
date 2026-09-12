@@ -88,6 +88,7 @@ MIGRATIONS = {
         ("ai_comment_break_even",              "TEXT"),
         ("ai_comment_cashflow",                "TEXT"),
         ("ai_comments_infrannuale",            "TEXT"),
+        ("ai_comments_infrannuale_updated_at", "DATETIME"),
     ],
     "budget_assumptions": [
         ("intangible_investments",             "NUMERIC(15,2) DEFAULT 0 NOT NULL"),

@@ -823,11 +823,18 @@ export interface InfrannualeAIComments {
   indicatori?: string;
 }
 
+export interface InfrannualeAICommentsStatus {
+  comments: InfrannualeAIComments;
+  comments_updated_at: string | null;
+  forecast_updated_at: string | null;
+  comments_stale: boolean;
+}
+
 export const getInfrannualeAIComments = async (
   companyId: number,
   scenarioId: number,
-): Promise<InfrannualeAIComments> => {
-  const { data } = await api.get<InfrannualeAIComments>(
+): Promise<InfrannualeAICommentsStatus> => {
+  const { data } = await api.get<InfrannualeAICommentsStatus>(
     `/companies/${companyId}/scenarios/${scenarioId}/infrannuale/ai-comments`
   );
   return data;

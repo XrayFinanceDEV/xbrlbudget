@@ -505,18 +505,52 @@ def generate_infrannuale_comments(ctx: Dict[str, Any]) -> Dict[str, str]:
 
 
 import json as _json
+from datetime import datetime, timezone
 
 
-def get_infrannuale_comments(db: Session, scenario_id: int) -> Dict[str, str]:
-    """Read stored infrannuale AI comments (JSON) from BudgetScenario."""
+def _iso_utc(stamp):
+    if stamp is None:
+        return None
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+    return stamp.isoformat() + "Z"
+
+
+def get_infrannuale_comments(db: Session, scenario_id: int) -> Dict[str, Any]:
+    """Read comments together with their freshness against the projection."""
     scenario = db.query(BudgetScenario).filter(BudgetScenario.id == scenario_id).first()
-    if not scenario or not scenario.ai_comments_infrannuale:
-        return {}
+    if not scenario:
+        return {
+            "comments": {}, "comments_updated_at": None,
+            "forecast_updated_at": None, "comments_stale": False,
+        }
+    comments = {}
     try:
-        data = _json.loads(scenario.ai_comments_infrannuale)
-        return data if isinstance(data, dict) else {}
+        data = _json.loads(scenario.ai_comments_infrannuale or "{}")
+        comments = data if isinstance(data, dict) else {}
     except Exception:
-        return {}
+        comments = {}
+
+    forecast_stamps = [
+        row.updated_at or row.created_at
+        for row in scenario.forecast_years or []
+        if row.updated_at or row.created_at
+    ]
+    forecast_at = max(forecast_stamps) if forecast_stamps else None
+    comments_at = scenario.ai_comments_infrannuale_updated_at
+    # I commenti legacy non hanno una data affidabile: se esistono, dichiararli
+    # aggiornati sarebbe un falso negativo proprio sui testi trovati da #55.
+    stale = bool(
+        comments
+        and forecast_at
+        and (comments_at is None or forecast_at > comments_at)
+    )
+    return {
+        "comments": comments,
+        "comments_updated_at": _iso_utc(comments_at),
+        "forecast_updated_at": _iso_utc(forecast_at),
+        "comments_stale": stale,
+    }
 
 
 def save_infrannuale_comments(db: Session, scenario_id: int, comments: Dict[str, str]) -> None:
@@ -528,4 +562,7 @@ def save_infrannuale_comments(db: Session, scenario_id: int, comments: Dict[str,
     allowed = {"overall", "ce_confronto", "sp_confronto", "ce_proiezione", "sp_proiezione", "indicatori"}
     cleaned = {k: v for k, v in comments.items() if k in allowed and isinstance(v, str)}
     scenario.ai_comments_infrannuale = _json.dumps(cleaned) if cleaned else None
+    scenario.ai_comments_infrannuale_updated_at = (
+        datetime.now(timezone.utc).replace(tzinfo=None) if cleaned else None
+    )
     db.commit()

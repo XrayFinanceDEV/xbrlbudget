@@ -17,10 +17,11 @@ import {
 } from "@/lib/api";
 import type { IntraYearComparison, IntraYearComparisonItem } from "@/types/api";
 import { toast } from "sonner";
-import { Loader2, Printer, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2, Printer, Sparkles } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -80,6 +81,8 @@ export function StampaContent({
   const { updatePratica } = usePratica();
   const [promoting, setPromoting] = useState(false);
   const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
+  const [aiCommentsStale, setAiCommentsStale] = useState(false);
+  const [aiCommentsDirty, setAiCommentsDirty] = useState(false);
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
   const refYear = comparison.reference_year;
   const partialYear = comparison.partial_year;
@@ -90,18 +93,32 @@ export function StampaContent({
     if (!companyId || !scenarioId) return;
     let cancelled = false;
     getInfrannualeAIComments(companyId, scenarioId)
-      .then((data) => { if (!cancelled) setAiComments(data); })
-      .catch(() => { if (!cancelled) setAiComments({}); });
+      .then((data) => {
+        if (!cancelled) {
+          setAiComments(data.comments);
+          setAiCommentsStale(data.comments_stale);
+          setAiCommentsDirty(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAiComments({});
+          setAiCommentsStale(false);
+        }
+      });
     return () => { cancelled = true; };
   }, [companyId, scenarioId]);
 
   const handleCommentChange = (key: keyof InfrannualeAIComments, value: string) => {
     setAiComments((prev) => ({ ...prev, [key]: value }));
+    setAiCommentsDirty(true);
   };
   const handleCommentBlur = async () => {
-    if (!companyId || !scenarioId) return;
+    if (!companyId || !scenarioId || !aiCommentsDirty) return;
     try {
       await saveInfrannualeAIComments(companyId, scenarioId, aiComments);
+      setAiCommentsStale(false);
+      setAiCommentsDirty(false);
     } catch {
       toast.error("Errore nel salvataggio del commento");
     }
@@ -282,6 +299,8 @@ export function StampaContent({
         toast.info("Nessun commento generato (chiave API mancante?)");
       } else {
         setAiComments(data);
+        setAiCommentsStale(false);
+        setAiCommentsDirty(false);
         toast.success("Commenti AI generati");
       }
     } catch {
@@ -401,6 +420,18 @@ export function StampaContent({
           Stampa PDF
         </Button>
       </div>
+
+      {aiCommentsStale && (
+        <Alert className="border-amber-500/50 bg-amber-50 text-amber-900 [&>svg]:text-amber-600 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100 dark:[&>svg]:text-amber-400">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Commenti non aggiornati</AlertTitle>
+          <AlertDescription>
+            Questi commenti precedono l&apos;ultima proiezione e potrebbero non
+            descrivere i numeri riportati nel documento. Rigenera i commenti AI
+            oppure aggiornali manualmente prima di consegnare la stampa.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Header */}
       <div className="relative print:mb-4 stampa-blocco">

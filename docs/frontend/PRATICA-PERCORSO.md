@@ -259,10 +259,11 @@ mentre il primo è ancora in corso). Vale per il solo workflow `bilancio`, e sol
 `analysisStep` è oltre Import. Recupera azienda e scenario infrannuale dal server, ripopola i
 quattro stati locali, e lascia che gli auto-load esistenti facciano il resto.
 
-Quando il context non ha abbastanza dati (`companyId` o `infrannualeScenarioId` mancanti) o la
-fetch fallisce, il ripiego è **onesto**: un `Alert` italiano «Pratica da riaprire» — riparti
-dall'importazione o riapri la pratica dalla home — e ritorno allo step Import. Mai un `<main>`
-vuoto.
+Quando il context non ha abbastanza dati (`companyId` o `infrannualeScenarioId` mancanti), o il
+server risponde con un 404 vero, il ripiego è **onesto**: un `Alert` italiano «Pratica da
+riaprire» e ritorno allo step Import. Un 500, timeout o errore di rete non riscrive mai
+`analysisStep`: conserva lo step persistito e mostra «Riprova». La distinzione è pura e testata in
+`lib/pratica-rehydration.ts`. Mai un `<main>` vuoto.
 
 ## 7. I moduli, e la regola di dipendenza
 
@@ -444,7 +445,7 @@ colonna (`ReportComments`, `ai_comments_service.py:32-66`).
 
 | Endpoint (scoped sullo scenario) | Che cosa fa |
 |---|---|
-| `GET .../infrannuale/ai-comments` | restituisce il dizionario salvato (`{}` se non c'è) |
+| `GET .../infrannuale/ai-comments` | restituisce `{comments, comments_updated_at, forecast_updated_at, comments_stale}` |
 | `POST .../infrannuale/ai-comments` | genera con Haiku dal `ctx` ricevuto, salva, restituisce |
 | `PUT .../infrannuale/ai-comments` | salva le modifiche dell'utente, nessuna chiamata al modello |
 
@@ -459,11 +460,15 @@ non può stare lì. Il modello è quello condiviso con l'import PDF (`PDF_LLM_MO
 Senza `ANTHROPIC_API_KEY` la generazione restituisce `{}` — nessun errore, nessun mezzo
 commento — e il client mostra *«Nessun commento generato (chiave API mancante?)»*.
 
-**Persistenza:** una sola colonna `TEXT`, `BudgetScenario.ai_comments_infrannuale`
-(`database/models.py:562`), con dentro il dizionario serializzato in JSON. Il salvataggio
+**Persistenza:** `BudgetScenario.ai_comments_infrannuale` contiene il dizionario serializzato
+in JSON; `ai_comments_infrannuale_updated_at` data il bundle. Il salvataggio
 tiene **solo le sei chiavi note** e scarta silenziosamente tutto il resto
 (`ai_comments_service.py:527-530`), restituendo comunque `{"success": true}`: un settimo
 commento aggiunto lato client si scriverebbe «con successo» e sparirebbe al ricaricamento.
+Il GET confronta la data con l'ultimo `ForecastYear`: se la proiezione è più recente, oppure
+esistono commenti legacy senza data, `comments_stale` è vero. La Stampa conserva i testi ma
+mostra un avviso anche nel PDF; una generazione o una modifica manuale realmente salvata li
+riallinea.
 
 **Resa e stampa:** ogni `CommentBlock` è una `Textarea` shadcn legata a `aiComments[k]`;
 `onChange` aggiorna lo stato locale, `onBlur` persiste con `PUT`. In stampa la `Textarea` è

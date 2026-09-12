@@ -560,6 +560,7 @@ class BudgetScenario(Base):
     # Infrannuale (intra-year) AI comments — JSON dict:
     # {overall, ce_confronto, sp_confronto, ce_proiezione, sp_proiezione, indicatori}
     ai_comments_infrannuale = Column(Text, nullable=True)
+    ai_comments_infrannuale_updated_at = Column(DateTime, nullable=True)
 
     # Relationships
     company = relationship("Company", back_populates="budget_scenarios")

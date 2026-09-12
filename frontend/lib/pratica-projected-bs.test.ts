@@ -65,4 +65,23 @@ describe("projectedItemsFromForecast", () => {
     expect(out![0].reference_value).toBe(520_000);
     expect(out![1].annualized_value).toBe(31_500);
   });
+
+  it("conserva i centesimi del forecast fino al formattatore", () => {
+    const out = projectedItemsFromForecast(
+      [item("sp11_capitale", 0), item("sp15_tfr", 0)],
+      { sp11_capitale: 461_257.43, sp15_tfr: 170_991.08 },
+    );
+    expect(out!.map((row) => row.annualized_value)).toEqual([
+      461_257.43,
+      170_991.08,
+    ]);
+  });
+
+  it("conserva i centesimi anche nel ripiego sul parziale", () => {
+    const out = projectedItemsFromForecast(
+      [item("sp18_ratei_risconti_passivi", 178_663.25)],
+      { sp11_capitale: 1 },
+    );
+    expect(out![0].annualized_value).toBe(178_663.25);
+  });
 });

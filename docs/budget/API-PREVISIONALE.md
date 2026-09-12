@@ -500,15 +500,18 @@ così l'anno proiettato può fare da anno base a uno scenario budget successivo.
 
 La sequenza, in `backend/app/services/promote_service.py`:
 
-1. **Primo cancello, prima di scrivere:** `check_quadratura(...).semantic_valid` sulla
-   proiezione (`:46-57`). Non è una soglia in euro: è pareggio **e** identità CE↔SP **e**
+1. **Freschezza, prima di scrivere:** la proiezione viene rifiutata se è più vecchia delle
+   ipotesi salvate. Il confronto è quello condiviso con `/analysis` in
+   `services/forecast_freshness.py`; il messaggio rimanda a «Calcola Proiezione SP».
+2. **Cancello semantico, prima di scrivere:** `check_quadratura(...).semantic_valid` sulla
+   proiezione. Non è una soglia in euro: è pareggio **e** identità CE↔SP **e**
    non-mascheramento **e** coerenza aggregati/dettagli.
-2. **Sostituzione:** un `FinancialYear` annuale già esistente per company+anno
+3. **Sostituzione:** un `FinancialYear` annuale già esistente per company+anno
    (`period_months` `NULL` **o** `12`) viene **cancellato** con tutto il suo BS/IS in cascata
    (`:59-67`). Un anno importato a mano per lo stesso anno viene distrutto.
-3. **Copia** per intersezione di colonne fra i modelli Forecast e i modelli definitivi
+4. **Copia** per intersezione di colonne fra i modelli Forecast e i modelli definitivi
    (`_copy_columns`), saltando pk/fk e timestamp.
-4. **Secondo cancello, dopo la scrittura e prima del commit:** confronto campo per campo fra
+5. **Secondo cancello semantico, dopo la scrittura e prima del commit:** confronto campo per campo fra
    sorgente e copia (`_verify_copy`) **più** una seconda `check_quadratura` sul bersaglio
    copiato. Un fallimento fa `rollback()` dell'intera transazione — quindi **anche il record
    annuale cancellato al punto 2 torna al suo posto** (`:107-139`).

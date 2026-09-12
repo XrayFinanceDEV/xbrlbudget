@@ -41,6 +41,9 @@ export function projectedItemsFromForecast(
     ...item,
     // Il motore proietta anche i sotto-campi; se una voce non arriva la si
     // porta avanti dal parziale, invece di mostrarla a zero.
-    annualized_value: Math.round(forecastBS[item.code] ?? item.partial_value),
+    // I centesimi restano intatti fino al formattatore. Arrotondare ogni voce
+    // qui fa divergere la somma degli arrotondamenti dall'arrotondamento del
+    // totale e puo' mostrare una falsa differenza Attivo - Passivo (#56).
+    annualized_value: forecastBS[item.code] ?? item.partial_value,
   }));
 }

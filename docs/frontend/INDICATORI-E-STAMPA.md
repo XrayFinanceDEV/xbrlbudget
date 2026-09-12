@@ -124,3 +124,14 @@ colonna Delta % delle tre tabelle; `pct_of_reference` (`safePct` in
 trascorsa — un EBITDA in linea col calendario a 9 mesi dà 75, non −25. Le due copie di
 `safePct` condividono con `deltaPct` solo la guardia al centesimo sul denominatore residuo,
 non la formula.
+
+## Centesimi della Proiezione e commenti della Stampa
+
+`projectedItemsFromForecast` conserva i centesimi prodotti dal motore: l'arrotondamento avviene
+solo nel formattatore. Arrotondare ogni voce prima di costruire i totali può mostrare una falsa
+«DIFFERENZA (Attivo - Passivo)» di 1 € su un bilancio che quadra al centesimo.
+
+I sei commenti infrannuali hanno una data di aggiornamento separata. Se l'ultimo `ForecastYear` è
+più recente — oppure il commento è legacy e non ha una data — la Stampa mostra «Commenti non
+aggiornati» sia a schermo sia nel PDF. Il testo non viene cancellato: rigenerarlo o salvarne una
+modifica manuale lo riallinea.

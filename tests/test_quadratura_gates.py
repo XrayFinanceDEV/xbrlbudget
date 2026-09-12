@@ -8,6 +8,7 @@ Run: python -m pytest tests/test_quadratura_gates.py -v
 """
 import os
 import sys
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -83,6 +84,8 @@ def test_promote_raises_on_unbalanced_projection(monkeypatch):
         id = 1
         scenario_type = "infrannuale"
         company_id = 7
+        assumptions = []
+        forecast_years = []
 
     class _Query:
         def __init__(self, obj):
@@ -103,6 +106,64 @@ def test_promote_raises_on_unbalanced_projection(monkeypatch):
 
     with pytest.raises(ValueError, match="non quadra"):
         ps.promote_projection_to_financial_year(_DB(), 1)
+
+
+def test_promote_rifiuta_un_forecast_stantio_prima_di_cancellare_lesercizio_esistente():
+    """La promozione e' distruttiva: la guardia deve scattare prima del delete."""
+    from app.services import promote_service as ps
+    from database.models import ForecastBalanceSheet, ForecastIncomeStatement
+
+    old = datetime(2026, 9, 12, 8, 0)
+    new = old + timedelta(minutes=1)
+
+    class _Stamped:
+        def __init__(self, updated_at):
+            self.updated_at = updated_at
+            self.created_at = updated_at
+
+    class _FY(_Stamped):
+        year = 2026
+        balance_sheet = ForecastBalanceSheet(
+            sp09_disponibilita_liquide=D("500"), sp11_capitale=D("500")
+        )
+        income_statement = ForecastIncomeStatement()
+
+    forecast = _FY(old)
+
+    class _Scenario:
+        id = 1
+        scenario_type = "infrannuale"
+        company_id = 7
+        assumptions = [_Stamped(new)]
+        forecast_years = [forecast]
+
+    class _Query:
+        def __init__(self, obj):
+            self._obj = obj
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return self._obj
+
+    class _DB:
+        deleted = []
+
+        def query(self, model):
+            if model.__name__ == "BudgetScenario":
+                return _Query(_Scenario())
+            if model.__name__ == "ForecastYear":
+                return _Query(forecast)
+            return _Query(object())
+
+        def delete(self, obj):
+            self.deleted.append(obj)
+
+    db = _DB()
+    with pytest.raises(ValueError, match="non è aggiornata.*Calcola Proiezione SP"):
+        ps.promote_projection_to_financial_year(db, 1)
+    assert db.deleted == []
 
 
 # --------------------------------------------- check_quadratura on import dicts

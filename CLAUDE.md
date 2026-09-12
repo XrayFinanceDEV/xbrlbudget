@@ -462,6 +462,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   tiene `overall`, `ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`
   e **scarta il resto senza dirlo**, restituendo comunque `{"success": true}`: un settimo
   commento aggiunto lato client si salva «con successo» e sparisce al ricaricamento.
+  La loro data vive in `ai_comments_infrannuale_updated_at`: il GET restituisce anche
+  `comments_stale`, confrontato con l'ultimo `ForecastYear`. I commenti legacy senza data sono
+  stantii per prudenza. La Stampa conserva il testo editabile ma mostra l'avviso anche nel PDF.
 - **Gli elenchi di codici congelati in `ivcee-catalog-parity.test.ts` non si aggiornano per far
   tornare verde la suite.** Se cambiano, una vista ha perso o riordinato una riga: è quello il
   difetto. L'unica eccezione è una riga aggiunta di proposito, che si aggiorna nello stesso commit.
@@ -771,6 +774,9 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   tax debt exceeds the partial year's cash closes with the `unfunded_financing_requirement` diagnostic
   (`severity: 'error'`, not a warning) and is not promotable until the user adds an explicit financing assumption or a rettifica —
   decision of the owner, lotto 3A, 2026-09-11.
+  Prima di qualunque cancellazione, il promote rifiuta anche un `ForecastYear` più vecchio delle
+  ipotesi salvate: la misura è la stessa di `forecast_stale` e vive in
+  `services/forecast_freshness.py`.
 
 ### Rettifiche (BS/IS Adjustments Journal)
 

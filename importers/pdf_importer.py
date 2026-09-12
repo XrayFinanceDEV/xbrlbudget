@@ -1382,9 +1382,9 @@ def import_pdf_balance_sheet(
                             source = f"{source}+vision({'+'.join(_rescued_sections)})"
                     except Exception as _vr_err:
                         logger.warning(f"Route C: riscatto vision saltato: {_vr_err}")
-                others = ", ".join(f"{s}={r:,.0f}" for r, _b, _c, s in candidates)
+                others = ", ".join(f"{s}={_it_amount(r)}" for r, _b, _c, s in candidates)
                 logger.info(f"Route C: scelto estrattore '{source}' (residuo minore "
-                            f"{residual:,.0f}); candidati: {others}")
+                            f"{_it_amount(residual)}); candidati: {others}")
                 # Surface the residual as a NON-blocking flag (never reject): a large residual
                 # means part of the source mass was not classified into any IV-CEE field, so the
                 # composition is partly unexplained — refined in Rettifiche. The statement is
@@ -1395,7 +1395,7 @@ def import_pdf_balance_sheet(
                     _sev = ("prevalentemente stimata"
                             if residual > SC_PLUG_REJECT_PCT * _tot else "parziale")
                     sc_quadratura_warnings.append(
-                        f"BILANCIO NON QUADRATO ({_sev}): residuo {residual:,.0f} "
+                        f"BILANCIO NON QUADRATO ({_sev}): residuo {_it_amount(residual)} "
                         f"({_pct:.0f}% del totale) non classificato in alcuna voce — "
                         f"correggere in Rettifiche"
                     )

@@ -45,3 +45,12 @@ def test_tutte_nelle_attese_esce_zero(tmp_path):
     esito = _esegui(_json(tmp_path), "--attese", "*__finanziamento|balance_sheet.*", "*|income_statement.ce15_*")
     assert esito.returncode == 0, esito.stdout
     assert "fuori dalle attese: 0" in esito.stdout
+
+
+def test_nessun_pattern_ammette_nulla_tutte_fuori_uscita_uno(tmp_path):
+    esito = _esegui(_json(tmp_path), "--attese")
+    assert esito.returncode == 1, esito.stdout
+    assert "fuori dalle attese: 3" in esito.stdout
+    assert "[base__finanziamento · 2028] balance_sheet.sp17a_debiti_banche_lungo: 0,00 -> 10,00" in esito.stdout
+    assert "[banca__finanziamento · 2028] balance_sheet.sp17a_debiti_banche_lungo: 1,00 -> 2,00" in esito.stdout
+    assert "[base__crescita · 2027] income_statement.ce15_oneri_finanziari: 1,00 -> 2,00" in esito.stdout

@@ -233,7 +233,7 @@ def _get_total_investments(assumption) -> Decimal:
     return Decimal(str(inv))
 
 
-def _financing_contracts(assumption, include_opening=True):
+def _financing_contracts(assumption):
     """Normalize legacy and detailed financing inputs for the shared kernel."""
     year = int(getattr(assumption, 'forecast_year', 0) or 0)
     loans = []
@@ -248,8 +248,6 @@ def _financing_contracts(assumption, include_opening=True):
         })
     for loan in (getattr(assumption, 'financing_loans', None) or []):
         for contract in contratti_da_riga_finanziamento(loan, year):
-            if not include_opening and e_contratto_pregresso(contract):
-                continue
             loans.append(contract)
     return loans
 
@@ -799,7 +797,7 @@ class IntraYearEngine:
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else _get_field(partial_inc, 'ce14_altri_proventi_finanziari') * factor
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else _get_field(partial_inc, 'ce15_oneri_finanziari') * factor
         if assumption.ce15_override is None:
-            contracts = _financing_contracts(assumption, include_opening=True)
+            contracts = _financing_contracts(assumption)
             _, _, financing_interest = new_financing_schedule(
                 contracts,
                 int(getattr(assumption, 'forecast_year', 0) or 0),
@@ -934,7 +932,7 @@ class IntraYearEngine:
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else ann('ce14_altri_proventi_finanziari')
         ce15 = assumption.ce15_override if assumption.ce15_override is not None else ann('ce15_oneri_finanziari')
         if assumption.ce15_override is None:
-            contracts = _financing_contracts(assumption, include_opening=True)
+            contracts = _financing_contracts(assumption)
             _, _, financing_interest = new_financing_schedule(
                 contracts,
                 int(getattr(assumption, 'forecast_year', 0) or 0),
@@ -1761,7 +1759,7 @@ class IntraYearEngine:
         interest and cash are unchanged by the split.
         """
         getter = lambda f: _get_field(base_bs, f)
-        contracts = _financing_contracts(assumption, include_opening=True)
+        contracts = _financing_contracts(assumption)
         pregressi = [c for c in contracts if e_contratto_pregresso(c)]
         nuovi = [c for c in contracts if not e_contratto_pregresso(c)]
         anno = int(getattr(assumption, 'forecast_year', 0) or 0)

@@ -155,7 +155,7 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 |---|---|
 | **Immobilizzazioni immateriali / materiali** | parziale − **ammortamento residuo della propria classe**, clampato a zero, + nuovi investimenti della classe |
 | **Immobilizzazioni finanziarie** | invariate: **mai ammortizzate** |
-| **Crediti a breve** | con riferimento: proporzionali ai ricavi proiettati (salvo rapporto degenere, sotto); poi meno la **svalutazione residua** |
+| **Crediti a breve** | **aggregato**: con riferimento, proporzionale ai ricavi proiettati (salvo rapporto degenere, sotto), poi meno la **svalutazione residua**; **composizione** (verso clienti/controllate/collegate/controllanti/altri): sempre dal parziale, mai dal riferimento — crediti tributari e imposte anticipate esclusi, governati altrove |
 | **Crediti oltre, attività finanziarie, ratei, fondi rischi** | invariati dal parziale |
 | **Capitale e riserve** | **presi dal parziale così come sono** |
 | **Risultato** | = risultato del CE proiettato, per costruzione |
@@ -260,6 +260,21 @@ operativi (`indagine-1-debito-bancario.md`, 2026-09-11). Quando il riferimento n
 dettaglio finanziario (nessuna delle tre categorie popolata) e il parziale sì, il motore lo
 dichiara con `reference_financial_debt_undetailed` (severità *warning*: non è un errore, è il
 motivo per cui la ripartizione viene dal parziale invece che dal riferimento).
+
+I **crediti a breve e a lungo** (`sp06`/`sp07`) seguono una regola diversa da entrambe le
+precedenti: l'aggregato resta trainato dal fatturato (rotazione/DSO, sopra), ma la
+**composizione** delle sotto-voci (verso clienti/controllate/collegate/controllanti/altri) viene
+**sempre** dal parziale — mai dal riferimento, in nessuno dei due regimi — perché un riferimento
+senza dettaglio reale (il 98% dei bilanci annuali completi, come per il debito) riclassificava in
+silenzio il credito verso clienti in "altri crediti" (`indagine-2`, 2026-09-12). Il credito
+tributario (`sp06e`) e le imposte anticipate (`sp06f`/`sp07f`, quando impostate esplicitamente)
+sono **esclusi** dalla ripartizione prima che avvenga — il loro valore viene dalla posizione
+tributaria di fine anno o dalle differite, mai da una quota proporzionale che verrebbe poi
+scartata: prima di questa correzione quella quota scartata spariva silenziosamente in cassa (fino
+a 39.781,69 su un caso reale). Quando il riferimento non ha alcun dettaglio reale sui crediti (solo
+il secchio "altri") e il parziale sì, il motore lo dichiara con
+`reference_receivables_undetailed` (severità *warning*, informativo: la ripartizione viene comunque
+dal parziale, con o senza il segnale).
 
 ### La rata di rimborso
 ```

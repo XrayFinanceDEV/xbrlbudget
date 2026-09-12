@@ -705,7 +705,17 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   agreement with *this* one — but the budget engine is not silent on the same risk either, it has
   its own copy of the same guard (`degenerate_turnover_ratio`, `_derived_days` in
   `calculations/forecast_engine.py`, Task 14 of this lotto), not shared with the one
-  here.
+  here. Receivables (`sp06`/`sp07`) split into sub-categories using the **partial** year's own mix,
+  never the reference's, in either regime: a reference lacking real receivables detail (98% of
+  full-year balance sheets, same precondition as the bank-debt defect above) used to reclassify real
+  trade receivables into "altri crediti" silently (indagine-2, 2026-09-12: 1.090.958,55 on the test
+  company). Tax receivables (`sp06e`) and prepaid taxes (`sp06f`/`sp07f`, when temporary-difference
+  lines are set) are excluded from that split *before* it runs — their value comes from the year-end
+  tax settlement / deferred-tax mechanism, never a proportional share that gets discarded afterward,
+  which used to leak into cash silently (39.781,69 on a real scenario, no diagnostic). A reference
+  lacking real receivables detail while the partial has some declares
+  `reference_receivables_undetailed` (severity `warning`) — informational only: the split always
+  comes from the partial, with or without the signal.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
 - **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a
   schermo (i sottototali delle 22 righe di CE che l'utente digita) sta nel client; tutto ciò che

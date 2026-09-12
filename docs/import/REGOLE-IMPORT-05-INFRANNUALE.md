@@ -334,8 +334,10 @@ precedenti: l'aggregato resta trainato dal fatturato (rotazione/DSO, sopra), ma 
 **composizione** delle sotto-voci (verso clienti/controllate/collegate/controllanti/altri) viene
 **sempre** dal parziale — mai dal riferimento, in nessuno dei due regimi — perché un riferimento
 senza dettaglio reale (il 98% dei bilanci annuali: aggregato positivo e nessuna delle sei
-sotto-voci non di ripiego mai popolata — 373 su 377 oggi; stessa forma lato debito: 355 su 362
-all'indagine 2026-09-11, 373 su 378 oggi) riclassificava in
+sotto-voci non di ripiego mai popolata — 373 su 377 al 2026-09-12; stessa forma lato debito: 355 su 362
+all'indagine 2026-09-11, 373 su 378 al 2026-09-12; il denominatore si muove fra una misura e
+l'altra perche' il database di riferimento e' vivo, quindi la cifra e' una misura datata, non un
+invariante da rincorrere) riclassificava in
 silenzio il credito verso clienti in "altri crediti" (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/`,
 2026-09-12, fuori dal repo come sopra). Il credito
 tributario (`sp06e`) e le imposte anticipate (`sp06f`/`sp07f`, quando impostate esplicitamente)

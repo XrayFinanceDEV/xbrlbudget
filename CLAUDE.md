@@ -692,7 +692,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   (fornitori/tributari/previdenziali/altri) still rotates on the reference year's cost-turnover
   ratio. When the reference year has no financial-debt detail at all while the partial year does
   (98% of full-year balance sheets have none: positive `sp16`/`sp17` aggregate with all six
-  financial sub-lines zero — 355 of 362 at measurement, see the bullet above on `base_bank_debt`),
+  financial sub-lines zero — 355 of 362 measured 2026-09-11, see the bullet above on `base_bank_debt`),
   the split
   used to be silently reclassified into "altri debiti"
   (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-1-debito-bancario.md`,
@@ -734,7 +734,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   here. Receivables (`sp06`/`sp07`) split into sub-categories using the **partial** year's own mix,
   never the reference's, in either regime: a reference lacking real receivables detail (98% of
   full-year balance sheets: positive `sp06` aggregate with the six non-fallback sub-lines all
-  zero — 373 of 377 today, the same shape as the bank-debt precondition above) used to reclassify real
+  zero — 373 of 377 measured 2026-09-12, the same shape as the bank-debt precondition above) used to reclassify real
   trade receivables into "altri crediti" silently
   (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/`, 2026-09-12 — outside the repo, as
   above: 1.090.958,55 on the test company). Tax receivables (`sp06e`) and prepaid taxes

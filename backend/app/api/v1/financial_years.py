@@ -4,6 +4,7 @@ Financial Year API endpoints
 import json
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
+from calculations.projection_common import eur_it
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 import sys
@@ -446,12 +447,12 @@ def save_adjustments(
     )
     worsened = []
     if new_imb > cur_imb + ADJUSTMENTS_BALANCE_TOL:
-        worsened.append(f"Attivo−Passivo {cur_imb:,.2f}→{new_imb:,.2f}")
+        worsened.append(f"Attivo−Passivo {eur_it(cur_imb)}→{eur_it(new_imb)}")
     if new_ce_gap > cur_ce_gap + ADJUSTMENTS_BALANCE_TOL:
-        worsened.append(f"CE−SP13 {cur_ce_gap:,.2f}→{new_ce_gap:,.2f}")
+        worsened.append(f"CE−SP13 {eur_it(cur_ce_gap)}→{eur_it(new_ce_gap)}")
     if new_hierarchy_gap > cur_hierarchy_gap + ADJUSTMENTS_BALANCE_TOL:
         worsened.append(
-            f"aggregati−dettagli {cur_hierarchy_gap:,.2f}→{new_hierarchy_gap:,.2f}"
+            f"aggregati−dettagli {eur_it(cur_hierarchy_gap)}→{eur_it(new_hierarchy_gap)}"
         )
     if worsened:
         raise HTTPException(

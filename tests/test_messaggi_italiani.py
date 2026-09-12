@@ -97,3 +97,117 @@ def test_il_diagnostico_dell_infrannuale_e_italiano_e_il_codice_resta():
     assert diagnostico["message"] == (
         "L'attivo proiettato supera le fonti di finanziamento esplicite: aggiungi un'ipotesi di finanziamento "
         "esplicita; nessun debito è stato creato automaticamente.")
+
+
+def test_check_quadratura_dice_lo_sbilancio_all_europea():
+    """Il 400 di POST /scenarios/{id}/promote (promote_service.py) concatena
+    validation.warnings senza riformattarli: se check_quadratura scrive gli importi
+    all'americana, il 400 li mostra all'americana (indagine-2, parte B, 2026-09-11:
+    '1,470,357.32' invece di '1.470.357,32'). Sbilancio scelto identico a quello del
+    collaudo: 5.509,29."""
+    from decimal import Decimal as D
+
+    from importers.iv_cee_hierarchy import check_quadratura
+
+    bs = {"sp09_disponibilita_liquide": D("1470357.32"), "sp11_capitale": D("1464848.03")}
+    q = check_quadratura(bs, None)
+    assert not q.quadra
+    messaggio = "; ".join(q.warnings)
+    assert "5.509,29" in messaggio, messaggio
+    assert "1.470.357,32" in messaggio, messaggio
+    assert "1.464.848,03" in messaggio, messaggio
+    assert "5,509.29" not in messaggio, messaggio
+    assert "1,470,357.32" not in messaggio, messaggio
+
+
+def test_save_adjustments_worsening_message_is_italian_formatted():
+    """PUT /adjustments (save_adjustments, backend/app/api/v1/financial_years.py) rifiuta una
+    modifica che peggiora lo sbilancio con un 400 il cui messaggio, prima di questa correzione,
+    formattava gli importi all'americana -- stesso difetto di classe di
+    importers/iv_cee_hierarchy.py (indagine-2 parte B), perimetro esteso dal coordinatore
+    nell'assemblaggio di questo piano. Costruzione ORM diretta (sqlite in memoria), niente
+    import PDF: save_adjustments si chiama come funzione semplice, senza passare per FastAPI
+    (stesso pattern di tests/test_lifecycle_repeat.py, righe 184/204/248)."""
+    from decimal import Decimal as D
+
+    import pytest
+    from fastapi import HTTPException
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.app.api.v1 import financial_years
+    from backend.app.schemas.adjustments import AdjustmentsUpdate
+    from database.db import Base
+    from database.models import BalanceSheet, Company, FinancialYear, IncomeStatement
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    azienda = Company(name="IT AMOUNT SRL", tax_id="ITAMOUNT01", sector=1, user_id="msg-it")
+    db.add(azienda); db.flush()
+    fy = FinancialYear(company_id=azienda.id, year=2026, period_months=None,
+                        validation_status="verified", forecastable=True)
+    db.add(fy); db.flush()
+    db.add(BalanceSheet(financial_year_id=fy.id, sp09_disponibilita_liquide=D("100000"),
+                         sp11_capitale=D("100000")))
+    db.add(IncomeStatement(financial_year_id=fy.id))
+    db.commit()
+
+    with pytest.raises(HTTPException) as esc:
+        financial_years.save_adjustments(
+            azienda.id, 2026,
+            AdjustmentsUpdate(
+                balance_sheet={"sp09_disponibilita_liquide": D("1334567.89")},
+                income_statement={}, rettifiche_log=[],
+            ),
+            period_months=None, user_id="msg-it", db=db,
+        )
+    detail = esc.value.detail
+    assert esc.value.status_code == 400
+    assert "1.234.567,89" in detail, detail
+    assert "1,234,567.89" not in detail, detail
+
+
+def test_route_c_bilancio_non_quadrato_usa_it_amount():
+    """Route C (situazione contabile, importers/pdf_importer.py:1385-1398) formattava il residuo
+    non classificato con {:,.0f} -- stesso difetto di classe, propagato parola per parola dal
+    frontend (ImportPanel.tsx). L'helper _it_amount e' gia' presente nello stesso file: questo
+    test lo esercita direttamente (una prova end-to-end con un documento route-C ambiguo e'
+    fuori dal perimetro pratico di questo task -- vedi la nota di onesta' nel rapporto di fine
+    task)."""
+    from decimal import Decimal as D
+
+    from importers.pdf_importer import _it_amount
+
+    assert _it_amount(D("12345.6")) == "12.345,60"
+    assert _it_amount(D("1234567.89")) == "1.234.567,89"
+
+
+def test_nessun_formato_americano_residuo_nei_tre_moduli_del_perimetro():
+    """Grep-based: nessuna delle righe toccate da questo task deve piu' contenere un formato
+    americano (`:,.2f` o `:,.0f` su un importo). Non sostituisce le prove sopra (che verificano
+    anche il comportamento), ma chiude il perimetro con una rete che non dipende da un fixture.
+
+    La rete e' sulle RIGHE DI MESSAGGIO, non sul file intero nudo: in pdf_importer.py il
+    pattern {:,.2f} vive per NECESSITA' anche nell'implementazione dei due helper italiani
+    (_it_amount riga 78 e _euro_it riga 287 -- li' il formato americano e' il MEZZO con cui
+    nasce l'italiano, non un messaggio), e sopravvive una riga non toccata dal perimetro di
+    questo task: il logger.info di route C 'contra-netting applicato ({_contra:,.0f} ...)'
+    (riga 1318, solo log, non utente-facing) che il brief non elenca fra le sue occorrenze.
+    Quest'ultima e' segnalata nel rapporto del task come residuo noto, per il collaudo."""
+    import re
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    pattern = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*:,\.(0|1|2)f\}")
+    for percorso in (
+        "importers/iv_cee_hierarchy.py",
+        "backend/app/api/v1/financial_years.py",
+        "importers/pdf_importer.py",
+    ):
+        for n, riga in enumerate((repo / percorso).read_text(encoding="utf-8").splitlines(), 1):
+            if ".replace('#', '.')" in riga:  # implementazione helper italiano: mezzo, non messaggio
+                continue
+            if "_contra:,.0f" in riga:  # riga 1318 (continuazione del log contra-netting): fuori perimetro, solo log
+                continue
+            assert not pattern.search(riga), f"{percorso}:{n}: {riga.strip()}"

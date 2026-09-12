@@ -211,7 +211,7 @@ def test_http_full_cycle_import_to_analysis(client, tmp_path):
     # Il clamp lascia la proiezione NON quadrata (Invarianti "un divario si
     # dichiara, non si tappa"): lo sbilancio residuo coincide con l'importo
     # dichiarato dalla diagnostica, entro un centesimo.
-    assert abs(abs(sbilancio) - gap) < Decimal("0.01")
+    assert abs(sbilancio - gap) < Decimal("0.01")
 
 
 def test_cross_user_isolation_is_a_404(client, tmp_path):

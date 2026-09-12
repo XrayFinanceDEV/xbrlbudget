@@ -114,3 +114,11 @@ inline della stessa formula sono sparite. `formatPct` ha in più una rete second
 valore non finito (`NaN`/`Infinity` → `-`), senza alcun tetto di magnitudine: un tetto fisso
 nasconderebbe un'anomalia reale molto grande ma legittima, e la causa dell'esplosione è già
 rimossa alla fonte.
+
+Attenzione a non unificare le due grandezze: `deltaPct` è la **variazione** mostrata nella
+colonna Delta % delle tre tabelle; `pct_of_reference` (`safePct` in
+`frontend/lib/pratica-statement-rows.ts`, sulle righe sintetiche) resta il **rapporto**
+`parziale / riferimento`, che `pratica-highlights.ts` confronta con la frazione d'anno
+trascorsa — un EBITDA in linea col calendario a 9 mesi dà 75, non −25. Le due copie di
+`safePct` condividono con `deltaPct` solo la guardia al centesimo sul denominatore residuo,
+non la formula.

@@ -211,7 +211,7 @@ def _proietta(db, scenario, *, con_conguaglio=True):
     """Esegue la proiezione; `con_conguaglio=False` neutralizza SOLO il blocco del
     Task 3, cioè la stessa identica proiezione di prima di questo change. Sul codice
     precedente il metodo non esiste: la corsa "senza" è allora identica a quella
-    "con", e l'assereione differenziale cade sul numero — prova rossa pulita."""
+    "con", e l'asserzione differenziale cade sul numero — prova rossa pulita."""
     originale = getattr(IntraYearEngine, '_applica_conguaglio_tributario', None)
     if not con_conguaglio and originale is not None:
         IntraYearEngine._applica_conguaglio_tributario = (

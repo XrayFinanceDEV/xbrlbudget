@@ -1004,7 +1004,7 @@ class IntraYearEngine:
         result = apply_ce_overrides(result, assumption)
         _, _, result['ce20_imposte'] = _tax_components(result, assumption)
         return result
-    def _scaled_or_carried(self, field, ref_stock, ref_base, projected_base, partial_bs):
+    def _scaled_or_carried(self, field, ref_stock, ref_base, projected_base, partial_bs, carried_value=None):
         """
         Scala una giacenza col rapporto di rotazione dell'anno di riferimento;
         se quel rapporto è DEGENERE riporta la giacenza infrannuale osservata.
@@ -1028,7 +1028,7 @@ class IntraYearEngine:
         if ratio is not None:
             return projected_base * ratio
 
-        carried = _get_field(partial_bs, field)
+        carried = _get_field(partial_bs, field) if carried_value is None else carried_value
         self._diagnostics.append({
             'code': 'degenerate_turnover_ratio',
             'severity': 'warning',
@@ -1043,6 +1043,50 @@ class IntraYearEngine:
             ),
         })
         return carried
+
+    def _declare_reference_financial_debt_undetailed(self, aggregate, ref_bs, partial_fields):
+        """Dichiara quando il bilancio di riferimento non ha ALCUN dettaglio
+        finanziario (banche/altri finanziatori/obbligazioni) su ``aggregate``
+        (``sp16`` o ``sp17``) mentre il periodo parziale sì. Non è un errore:
+        è il motivo per cui il debito finanziario proiettato viene portato
+        avanti dal parziale come blocco a sé invece che dalla proporzione del
+        riferimento (decisione B, indagine-1-debito-bancario.md, 2026-09-11).
+        Fedele alla convenzione già in uso in questo motore per le altre
+        diagnostiche di questa famiglia (``degenerate_turnover_ratio``,
+        ``missing_short_debt_breakdown``): si dichiara solo quando la
+        condizione scatta davvero, mai un \"nessun problema\" ad ogni
+        proiezione -- l'assenza della chiave vale zero, non un tacere."""
+        ref_fin_fields = {
+            'sp16': (
+                'sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve',
+                'sp16c_debiti_obbligazioni_breve',
+            ),
+            'sp17': (
+                'sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo',
+                'sp17c_debiti_obbligazioni_lungo',
+            ),
+        }[aggregate]
+        ref_has_detail = any(
+            _get_field(ref_bs, f) != 0 for f in ref_fin_fields
+        )
+        partial_amounts = {f: v for f, v in partial_fields if v != 0}
+        if ref_has_detail or not partial_amounts:
+            return
+        totale = sum(partial_amounts.values(), Decimal('0'))
+        self._diagnostics.append({
+            'code': 'reference_financial_debt_undetailed',
+            'severity': 'warning',
+            'aggregate': aggregate,
+            'fields': {f: str(v) for f, v in partial_amounts.items()},
+            'amount': str(totale),
+            'message': (
+                f"Il bilancio di riferimento non ha dettaglio finanziario su "
+                f"{aggregate} (banche/altri finanziatori/obbligazioni tutte a "
+                f"zero): il debito finanziario del periodo parziale "
+                f"({eur_it(totale)}) è stato portato avanti così com'è, non "
+                f"ridistribuito con le proporzioni del riferimento."
+            ),
+        })
 
     def _project_balance_sheet(
         self,
@@ -1111,7 +1155,17 @@ class IntraYearEngine:
         ref_sp05 = _get_field(ref_bs, 'sp05_rimanenze')
         ref_sp06 = _get_field(ref_bs, 'sp06_crediti_breve')
         ref_sp07 = _get_field(ref_bs, 'sp07_crediti_lungo')
-        ref_sp16 = _get_field(ref_bs, 'sp16_debiti_breve')
+        # Financial debt (banche/altri finanziatori/obbligazioni) is not driven
+        # by operating costs: it is carried forward from the partial year as
+        # its own block (below), never scaled by this ratio. Only the
+        # OPERATING residual of sp16 (fornitori/tributari/previdenziali/altri)
+        # rotates with the reference year's cost turnover.
+        ref_sp16_operativo = (
+            _get_field(ref_bs, 'sp16_debiti_breve')
+            - _get_field(ref_bs, 'sp16a_debiti_banche_breve')
+            - _get_field(ref_bs, 'sp16b_debiti_altri_finanz_breve')
+            - _get_field(ref_bs, 'sp16c_debiti_obbligazioni_breve')
+        )
         ref_costs = (
             _get_field(ref_inc, 'ce05_materie_prime') +
             _get_field(ref_inc, 'ce06_servizi') +
@@ -1173,14 +1227,52 @@ class IntraYearEngine:
         )
         sp15 = _get_field(partial_bs, 'sp15_tfr') + remaining_tfr_accrual
 
-        # Short-term debt: proportional to operating costs (turnover ratio)
-        sp16 = self._scaled_or_carried(
-            'sp16_debiti_breve', ref_sp16, ref_costs, projected_costs, partial_bs,
+        # Financial debt (banche/altri finanziatori/obbligazioni) is carried
+        # forward from the partial year as its own block -- exactly like sp17
+        # below -- and is changed only by the explicit repayment/financing
+        # rules in _apply_debt_repayment. It is never scaled by the
+        # cost-turnover ratio and never redistributed with the reference
+        # year's proportions (decisione B, indagine-1-debito-bancario.md):
+        # a real mutuo is not driven by fatturato/costi. Only the OPERATING
+        # residual (fornitori/tributari/previdenziali/altri) rotates.
+        partial_sp16a = _get_field(partial_bs, 'sp16a_debiti_banche_breve')
+        partial_sp16b = _get_field(partial_bs, 'sp16b_debiti_altri_finanz_breve')
+        partial_sp16c = _get_field(partial_bs, 'sp16c_debiti_obbligazioni_breve')
+        partial_sp16_fin = partial_sp16a + partial_sp16b + partial_sp16c
+        partial_sp16_operativo = (
+            _get_field(partial_bs, 'sp16_debiti_breve') - partial_sp16_fin
         )
+        self._declare_reference_financial_debt_undetailed(
+            'sp16', ref_bs,
+            (
+                ('sp16a_debiti_banche_breve', partial_sp16a),
+                ('sp16b_debiti_altri_finanz_breve', partial_sp16b),
+                ('sp16c_debiti_obbligazioni_breve', partial_sp16c),
+            ),
+        )
+
+        # Short-term OPERATING debt: proportional to operating costs (turnover ratio)
+        sp16_operativo = self._scaled_or_carried(
+            'sp16_debiti_breve_operativo', ref_sp16_operativo, ref_costs,
+            projected_costs, partial_bs, carried_value=partial_sp16_operativo,
+        )
+        sp16 = partial_sp16_fin + sp16_operativo
 
         # Long-term debt starts from the actual YTD balance; only explicit repayment
         # and financing assumptions may change it.
         sp17 = _get_field(partial_bs, 'sp17_debiti_lungo')
+        partial_sp17a = _get_field(partial_bs, 'sp17a_debiti_banche_lungo')
+        partial_sp17b = _get_field(partial_bs, 'sp17b_debiti_altri_finanz_lungo')
+        partial_sp17c = _get_field(partial_bs, 'sp17c_debiti_obbligazioni_lungo')
+        partial_sp17_fin = partial_sp17a + partial_sp17b + partial_sp17c
+        self._declare_reference_financial_debt_undetailed(
+            'sp17', ref_bs,
+            (
+                ('sp17a_debiti_banche_lungo', partial_sp17a),
+                ('sp17b_debiti_altri_finanz_lungo', partial_sp17b),
+                ('sp17c_debiti_obbligazioni_lungo', partial_sp17c),
+            ),
+        )
         sp18 = _get_field(partial_bs, 'sp18_ratei_risconti_passivi')
 
         # Break down debts before applying creditor-specific movements. The bank
@@ -1195,8 +1287,15 @@ class IntraYearEngine:
         sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g = self._distribute_sp06(ref_bs, sp06)
         sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = self._distribute_sp07(ref_bs, sp07)
         sp14a, sp14b, sp14c, sp14d = self._distribute_sp14(partial_bs, sp14)
-        sp16a, sp16b, sp16c, sp16d, sp16e, sp16f, sp16g = self._distribute_sp16(ref_bs, sp16)
-        sp17a, sp17b, sp17c, sp17d, sp17e, sp17f, sp17g = self._distribute_sp17(ref_bs, sp17)
+        sp16a, sp16b, sp16c = partial_sp16a, partial_sp16b, partial_sp16c
+        sp16d, sp16e, sp16f, sp16g = self._distribute_sp16_operativo(
+            ref_bs, sp16_operativo
+        )
+        sp17a, sp17b, sp17c = partial_sp17a, partial_sp17b, partial_sp17c
+        sp17_operativo = sp17 - partial_sp17_fin
+        sp17d, sp17e, sp17f, sp17g = self._distribute_sp17_operativo(
+            ref_bs, sp17_operativo
+        )
         sp06g += max(Decimal('0'), sp06 - sum(
             (sp06a, sp06b, sp06c, sp06d, sp06e, sp06f, sp06g), Decimal('0')
         ))
@@ -1829,6 +1928,58 @@ class IntraYearEngine:
                 _get_field(ref_bs, 'sp17g_altri_debiti_lungo') * r,
             )
         return (Decimal('0'),) * 7
+
+    def _distribute_sp16_operativo(self, ref_bs, sp16_operativo_total):
+        """Distribute only the OPERATING residual of sp16 (fornitori/
+        tributari/previdenziali/altri) using the reference year's
+        proportions. Financial debt (banche/altri finanziatori/obbligazioni,
+        sp16a-c) is never part of this residual: it is carried forward from
+        the partial year as its own block (decisione B,
+        indagine-1-debito-bancario.md) and is not touched here."""
+        fields = (
+            'sp16d_debiti_fornitori_breve', 'sp16e_debiti_tributari_breve',
+            'sp16f_debiti_previdenza_breve', 'sp16g_altri_debiti_breve',
+        )
+        total = sum((_get_field(ref_bs, f) for f in fields), Decimal('0'))
+        if total > 0:
+            r = sp16_operativo_total / total
+            return tuple(_get_field(ref_bs, f) * r for f in fields)
+        if sp16_operativo_total != 0:
+            self._diagnostics.append({
+                'code': 'missing_short_debt_breakdown',
+                'severity': 'error',
+                'amount': str(sp16_operativo_total),
+                'message': (
+                    "La ripartizione del debito operativo a breve (fornitori/"
+                    "tributario/previdenziale/altri) non è disponibile: "
+                    "nessuna categoria è stata inventata."
+                ),
+            })
+        return (Decimal('0'),) * 4
+
+    def _distribute_sp17_operativo(self, ref_bs, sp17_operativo_total):
+        """Distribute only the OPERATING residual of sp17 -- mirrors
+        _distribute_sp16_operativo for the long-term side."""
+        fields = (
+            'sp17d_debiti_fornitori_lungo', 'sp17e_debiti_tributari_lungo',
+            'sp17f_debiti_previdenza_lungo', 'sp17g_altri_debiti_lungo',
+        )
+        total = sum((_get_field(ref_bs, f) for f in fields), Decimal('0'))
+        if total > 0:
+            r = sp17_operativo_total / total
+            return tuple(_get_field(ref_bs, f) * r for f in fields)
+        if sp17_operativo_total != 0:
+            self._diagnostics.append({
+                'code': 'missing_short_debt_breakdown',
+                'severity': 'error',
+                'amount': str(sp17_operativo_total),
+                'message': (
+                    "La ripartizione del debito operativo a lungo (fornitori/"
+                    "tributario/previdenziale/altri) non è disponibile: "
+                    "nessuna categoria è stata inventata."
+                ),
+            })
+        return (Decimal('0'),) * 4
 
     def _save_forecast(self, scenario_id: int, year: int, bs_data: Dict, inc_data: Dict):
         """Save projected data as ForecastYear + ForecastBalanceSheet + ForecastIncomeStatement."""

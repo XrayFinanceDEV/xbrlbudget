@@ -113,3 +113,99 @@ def _proietta(**ipotesi):
 def test_la_proiezione_persiste_la_ripartizione_e_la_cassa_non_cambia(ipotesi, attesi):
     """Oggi: prestito nuovo 0,00 / 102.345,67, misto e due righe 0,00 / 99.259,25; cassa 285.000,00 e 281.296,30."""
     assert _proietta(**ipotesi) == tuple(D(v) for v in attesi)
+
+
+def _stato_sp16(**over):
+    """Stato patrimoniale minimo per i tre test nuovi (indagine-1-debito-bancario.md):
+    solo i campi di sp16/sp17 e il minimo per far quadrare Attivo=Passivo (sp09, sp11)."""
+    zero = D("0")
+    base = dict(
+        sp16_debiti_breve=zero, sp16a_debiti_banche_breve=zero, sp16b_debiti_altri_finanz_breve=zero,
+        sp16c_debiti_obbligazioni_breve=zero, sp16d_debiti_fornitori_breve=zero, sp16e_debiti_tributari_breve=zero,
+        sp16f_debiti_previdenza_breve=zero, sp16g_altri_debiti_breve=zero,
+        sp17_debiti_lungo=zero, sp17a_debiti_banche_lungo=zero, sp17b_debiti_altri_finanz_lungo=zero,
+        sp17c_debiti_obbligazioni_lungo=zero, sp17d_debiti_fornitori_lungo=zero, sp17e_debiti_tributari_lungo=zero,
+        sp17f_debiti_previdenza_lungo=zero, sp17g_altri_debiti_lungo=zero,
+        sp09_disponibilita_liquide=D("500000"), sp11_capitale=D("100000"),
+    )
+    base.update(over)
+    return base
+
+
+def _proietta_con_riferimento(stato_riferimento, stato_parziale, **ipotesi):
+    """Come _proietta, ma con uno stato patrimoniale DIVERSO per l'anno di
+    riferimento (2024, pieno) e per il parziale (2025, 9 mesi) -- _proietta usa
+    lo stesso stato per entrambi, quindi non puo' esercitare la ripartizione
+    reference vs. partial che ha causato indagine-1-debito-bancario.md."""
+    db = _sessione()
+    azienda = Company(name="Banca infra 2", tax_id="BANCA-INFRA-2", sector=1)
+    db.add(azienda)
+    db.flush()
+    fy_ref = FinancialYear(company_id=azienda.id, year=2024, period_months=None,
+                           validation_status="verified", forecastable=True)
+    db.add(fy_ref); db.flush()
+    db.add(BalanceSheet(financial_year_id=fy_ref.id, **stato_riferimento))
+    db.add(IncomeStatement(financial_year_id=fy_ref.id))
+    fy_par = FinancialYear(company_id=azienda.id, year=2025, period_months=9,
+                           validation_status="verified", forecastable=True)
+    db.add(fy_par); db.flush()
+    db.add(BalanceSheet(financial_year_id=fy_par.id, **stato_parziale))
+    db.add(IncomeStatement(financial_year_id=fy_par.id))
+    scenario = BudgetScenario(company_id=azienda.id, name="infra2", base_year=2024,
+                              scenario_type="infrannuale", period_months=9)
+    db.add(scenario); db.flush()
+    db.add(BudgetAssumptions(scenario_id=scenario.id, forecast_year=2025, tax_rate=D("0"),
+                             fixed_materials_percentage=D("0"), fixed_services_percentage=D("0"), **ipotesi))
+    db.commit()
+    result = IntraYearEngine(db).generate_projection(scenario.id)
+    sp = db.query(ForecastYear).filter(ForecastYear.scenario_id == scenario.id).one().balance_sheet
+    return sp, result['diagnostics']
+
+
+def test_il_debito_bancario_si_porta_avanti_dal_parziale_quando_il_riferimento_non_ha_dettaglio():
+    """indagine-1-debito-bancario.md: un riferimento senza dettaglio finanziario
+    (tutto sp16g, il 98% dei bilanci annuali del database) NON deve azzerare il
+    debito bancario reale del parziale. Prima della correzione: sp16a 0,00."""
+    ref = _stato_sp16(sp16_debiti_breve=D("100000"), sp16g_altri_debiti_breve=D("100000"),
+                       sp09_disponibilita_liquide=D("200000"))
+    parziale = _stato_sp16(sp16_debiti_breve=D("50000"), sp16a_debiti_banche_breve=D("30000"),
+                            sp16d_debiti_fornitori_breve=D("20000"), sp09_disponibilita_liquide=D("150000"))
+    sp, diagnostics = _proietta_con_riferimento(ref, parziale)
+    assert sp.sp16a_debiti_banche_breve == D("30000.00")
+    assert sp.sp16_debiti_breve == D("50000.00")
+    codici = [d['code'] for d in diagnostics]
+    assert 'reference_financial_debt_undetailed' in codici
+    diag = next(d for d in diagnostics if d['code'] == 'reference_financial_debt_undetailed')
+    assert diag['aggregate'] == 'sp16'
+    assert diag['severity'] == 'warning'
+    assert diag['fields'] == {'sp16a_debiti_banche_breve': '30000.00'}
+
+
+def test_nessuna_regressione_quando_il_riferimento_ha_dettaglio_bancario():
+    """Il caso "che funziona" di indagine-1 (fase 2, azienda 21/scenario 4): il
+    riferimento ha una propria quota bancaria, diversa da quella del parziale.
+    Prima della correzione la quota veniva comunque RISCALATA sulla proporzione
+    del riferimento (40% del totale, qui 32.000,00); dopo, il debito bancario
+    prende il valore ESATTO del parziale (25.000,00), mai una proporzione presa
+    da un anno diverso."""
+    ref = _stato_sp16(sp16_debiti_breve=D("100000"), sp16a_debiti_banche_breve=D("40000"),
+                       sp16d_debiti_fornitori_breve=D("60000"), sp09_disponibilita_liquide=D("200000"))
+    parziale = _stato_sp16(sp16_debiti_breve=D("80000"), sp16a_debiti_banche_breve=D("25000"),
+                            sp16d_debiti_fornitori_breve=D("55000"), sp09_disponibilita_liquide=D("180000"))
+    sp, diagnostics = _proietta_con_riferimento(ref, parziale)
+    assert sp.sp16a_debiti_banche_breve == D("25000.00")
+    assert not any(d['code'] == 'reference_financial_debt_undetailed' for d in diagnostics)
+
+
+def test_il_debito_bancario_scende_della_rata_non_della_rotazione():
+    """Riferimento senza dettaglio finanziario + piano di rimborso attivo
+    (existing_debt_repayment_years=5): il debito bancario del parziale
+    (100.000,00) scende della RATA (100.000,00/5=20.000,00), non della
+    proporzione del riferimento (che lo azzererebbe)."""
+    ref = _stato_sp16(sp16_debiti_breve=D("100000"), sp16g_altri_debiti_breve=D("100000"),
+                       sp09_disponibilita_liquide=D("200000"))
+    parziale = _stato_sp16(sp16_debiti_breve=D("120000"), sp16a_debiti_banche_breve=D("100000"),
+                            sp16d_debiti_fornitori_breve=D("20000"), sp09_disponibilita_liquide=D("220000"))
+    sp, diagnostics = _proietta_con_riferimento(ref, parziale, existing_debt_repayment_years=D("5"))
+    assert sp.sp16a_debiti_banche_breve == D("80000.00")
+    assert any(d['code'] == 'reference_financial_debt_undetailed' for d in diagnostics)

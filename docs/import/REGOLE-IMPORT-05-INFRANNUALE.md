@@ -160,7 +160,7 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 | **Capitale e riserve** | **presi dal parziale così come sono** |
 | **Risultato** | = risultato del CE proiettato, per costruzione |
 | **Fondo TFR** | parziale + accantonamento dei mesi residui |
-| **Debiti a breve** | con riferimento: proporzionali ai costi operativi proiettati (salvo rapporto degenere, sotto); senza: invariati |
+| **Debiti a breve** | **debito finanziario (banche/altri finanziatori/obbligazioni)**: invariato dal parziale, come i debiti a lungo sotto; **residuo operativo** (fornitori/tributari/previdenziali/altri): con riferimento proporzionale ai costi operativi proiettati (salvo rapporto degenere, sotto), senza riferimento invariato |
 | **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti; la quota del prestito nuovo che scade l'anno dopo sta nei debiti a breve, e il debito bancario pregresso si riduce solo con le proprie rate |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
 
@@ -247,10 +247,19 @@ proiezione perché il foglio non quadra — esattamente come ogni altro fabbisog
 motore.
 
 ### Le sotto-voci si distribuiscono, mai si inventano
-Le quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il
-parziale nel regime 2). Se la fonte non ha alcuna ripartizione, tutte le quote sono **zero** più
-un diagnostico: *"La ripartizione dei debiti a breve non è disponibile: nessuna categoria è stata inventata."* —
-esplicitamente **non** uno split 40/60 fra finanziario e operativo.
+Vale per il **residuo operativo** di `sp16`/`sp17` (fornitori/tributari/previdenziali/altri): le
+quote si distribuiscono **proporzionalmente** alla fonte (il riferimento nel regime 1, il parziale
+nel regime 2). Se la fonte non ha alcuna ripartizione operativa, tutte le quote sono **zero** più
+un diagnostico: *"La ripartizione del debito operativo a breve (fornitori/tributario/previdenziale/
+altri) non è disponibile: nessuna categoria è stata inventata."*
+
+Il **debito finanziario** (banche/altri finanziatori/obbligazioni, `sp16a-c`/`sp17a-c`) **non**
+segue questa regola: si porta avanti dal parziale come blocco a sé, in ENTRAMBI i regimi — mai
+dalla proporzione del riferimento — perché un mutuo non è trainato dal fatturato o dai costi
+operativi (`indagine-1-debito-bancario.md`, 2026-09-11). Quando il riferimento non ha alcun
+dettaglio finanziario (nessuna delle tre categorie popolata) e il parziale sì, il motore lo
+dichiara con `reference_financial_debt_undetailed` (severità *warning*: non è un errore, è il
+motivo per cui la ripartizione viene dal parziale invece che dal riferimento).
 
 ### La rata di rimborso
 ```

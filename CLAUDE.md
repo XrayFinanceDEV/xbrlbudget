@@ -666,9 +666,18 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   balance remains: tax of the year minus the advances paid in the year (`tax_advances_paid` if greater than zero,
   otherwise 100% of the reference year's `ce20`); whatever was open at the partial month leaves cash by year end
   (`projection_common.posizione_tributaria_fine_anno`), so a budget born from the promote no longer inherits it.
-  Bank debt follows the budget engine's rules from the shared code (`projection_common.contratti_da_riga_finanziamento`,
-  `separa_prestiti_nuovi`, `quota_breve_prestiti_nuovi`): pre-existing bank debt keeps its own split and is reduced only by
-  its own instalments, a new loan amortises on its own with next year's instalment in `sp16a`.
+  Financial debt (`sp16a-c`/`sp17a-c`: banks, other lenders, bonds) is carried forward from the
+  partial year's own split, as its own block — never rebuilt from the reference year's proportions,
+  because a real loan is not driven by turnover. Only the operating residual of `sp16`/`sp17`
+  (fornitori/tributari/previdenziali/altri) still rotates on the reference year's cost-turnover
+  ratio. When the reference year has no financial-debt detail at all while the partial year does
+  (98% of full-year balance sheets have none — see the bullet above on `base_bank_debt`), the split
+  used to be silently reclassified into "altri debiti" (indagine-1-debito-bancario.md, 2026-09-11);
+  now it is declared, `reference_financial_debt_undetailed` (severity `warning`). Bank debt is then
+  reduced only by its own instalments via the shared code
+  (`projection_common.contratti_da_riga_finanziamento`, `separa_prestiti_nuovi`,
+  `quota_breve_prestiti_nuovi`): pre-existing bank debt keeps its own split, a new loan amortises on
+  its own with next year's instalment in `sp16a`.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §3-§4
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into

@@ -1960,12 +1960,22 @@ class IntraYearEngine:
                 'field': campo,
                 'amount': str(residuo),
                 'message': (
-                    "Il conguaglio fiscale di " + eur_it(correzione) + " trova solo "
-                    + eur_it(applicato) + " di capienza in " + campo + ": il residuo di "
-                    + eur_it(residuo) + " non ha contropartita e la cassa non lo "
-                    "registra. Un campo neutro non scende sotto zero per definizione, "
-                    "e cercarne un secondo vorrebbe dire fabbricare massa: integrare "
-                    "con un'ipotesi di finanziamento esplicita o con una rettifica."
+                    # Nessun importo nel testo: la cifra che conta vive nel payload
+                    # `amount`, come per `unfunded_financing_requirement` e
+                    # `missing_short_debt_breakdown` in questo stesso file (brief,
+                    # 'Trappole note'). Scrivere "trova solo X di capienza" voleva
+                    # inoltre dire mostrare una capienza NEGATIVA sul lato debito,
+                    # dove X = `applicato` e' negativo per costruzione: una capienza
+                    # esiste o non esiste (rilievo di revisione, 2026-09-12).
+                    ("Il conguaglio fiscale non trova alcuna capienza in " + campo
+                     + ": il residuo non ha contropartita e la cassa non lo registra. ")
+                    if capienza <= Decimal('0') else
+                    ("Il conguaglio fiscale supera la capienza disponibile in " + campo
+                     + ": la parte che ci sta viene applicata, il residuo no. ")
+                ) + (
+                    "Un campo neutro non scende sotto zero per definizione, e cercarne "
+                    "un secondo vorrebbe dire fabbricare massa: integrare con un'ipotesi "
+                    "di finanziamento esplicita o con una rettifica."
                 ),
             })
         return sp16g, sp06g

@@ -153,7 +153,17 @@ stesura di questa regola, che applicava il solo lato debito in entrambi i casi, 
 del database fabbricava **+144.188,46 di `sp16g`**, peggiorando la PFN senza alcun evento.
 Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo si dichiara con
 `tax_settlement_reclass_below_zero` (campo nominato e importo), lasciando la cassa dov'è. Un secondo
-bersaglio sarebbe il vecchio plug.
+bersaglio sarebbe il vecchio plug. Nel **testo** del messaggio non c'è alcun importo, solo il nome del
+campo: la cifra che conta vive nel payload `amount`. Dire "trova solo X di capienza" avrebbe infatti
+significato, sul lato debito, mostrare una capienza **negativa** (`applicato` è negativo per
+costruzione), e una capienza esiste o non esiste (rilievo di revisione, 2026-09-12).
+
+**Il residuo dichiarato è misurato *prima* degli `sp_overrides`, e può quindi sottostimare.** Se un
+override insiste sullo stesso campo neutro (`sp16g` o `sp06g`), la parte che il conguaglio ha applicato
+viene sovrascritta dall'override — un override vince sulla riga, per costruzione — la cassa non si muove
+per nulla, e il warning riporta solo ciò che il motore non era riuscito a collocare: resta corto
+dell'importo cancellato. Vale per qualunque anno e qualunque campo neutro, non è la particolarità di
+uno scenario; chi legge quel warning deve sapere che può sottostimare, e perché.
 
 I due rami non sono simmetrici, e non per disattenzione: sul **ramo col riferimento** il Task 2 ha
 già portato `sp06e` al valore governato **prima** dei riassorbimenti, quindi il credito non lascia
@@ -168,7 +178,7 @@ gli altri tre falliscono prima per dati mancanti, invariati prima e dopo):
 | Scenario | Prima | Dopo |
 |---|---|---|
 | 4 | cassa 15.271,65, `sp16g` 26.093,20, foglio quadrato | cassa 0,00 (clamp), `sp16g` 8.964,79, sbilancio 1.856,76 dichiarato da `unfunded_financing_requirement` — un fabbisogno che prima non esisteva |
-| 5 | `sp16g` 20.617,43, cassa invariata | persistito **identico**, ma con residuo dichiarato −30.712,76: la parte applicata (3.614,28) viene cancellata da `sp_overrides.sp16g` dell'utente, che vince sulla riga |
+| 5 | `sp16g` 20.617,43, cassa invariata | persistito **identico**, ma con residuo dichiarato −30.712,76: la parte applicata (3.614,28) viene cancellata da `sp_overrides.sp16g` dell'utente — l'istanza della regola qui sopra |
 | 8 | `sp16g` 0,00, cassa invariata | cassa **ferma** com'era, `sp16g` 0,00 (nessuna passività negativa), residuo dichiarato −14.306,93 |
 | 12 (ramo annualizzato) | `sp16g` 134.484,00 | `sp16g` 123.086,00, cassa −11.398,00, nessun residuo |
 | 18 (conguaglio positivo) | `sp06g` 33.131,63, cassa 1.468.473,63 | `sp06g` 0,00, cassa 1.501.605,26, `sp16g` **invariato**, residuo dichiarato +111.056,83 |

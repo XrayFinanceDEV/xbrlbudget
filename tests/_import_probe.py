@@ -11,6 +11,7 @@ and optimistic on route C.
 
 CLI (needs the local, gitignored `Test/` corpus):
     python tests/_import_probe.py "<file.pdf>" [standard|ocr]
+    python tests/_import_probe.py "<file.pdf>" --fiscal-year 2025 --period-months 9
     python tests/_import_probe.py --dir "<folder>" [standard|ocr] [--json out.jsonl]
 """
 import argparse
@@ -92,12 +93,20 @@ def _mineru_context(file_path: str):
     return build_extraction_context(asyncio.run(_go()))
 
 
-def probe(file_path: str, method: str = "standard") -> dict:
+def probe(
+    file_path: str,
+    method: str = "standard",
+    *,
+    fiscal_year: int | None = None,
+    period_months: int | None = None,
+) -> dict:
     """Import one file; never raises. Returns a flat result record."""
     rec = {
         "file": os.path.basename(file_path),
         "sha256": sha256_of(file_path),
         "method": method,
+        "fiscal_year": fiscal_year,
+        "period_months": period_months,
         "ok": False,
         "error": None,
         "route": None,
@@ -116,6 +125,13 @@ def probe(file_path: str, method: str = "standard") -> dict:
         "prior_year_imported": None,
         "warnings": [],
         "masked": None,
+        # Live-route evidence: #50 needs to prove that the partial comparative
+        # path keeps the single-year current column and that its wrong-column
+        # guard does not fire spuriously.  These observations never alter the
+        # extractor results; the wrappers below only count/record them.
+        "single_current_field_counts": [],
+        "dual_current_field_counts": [],
+        "single_year_read_comparative": [],
         # {colonna_db: str(Decimal)} per ogni sp*/ce* non nullo. Stringhe, mai float:
         # i confronti di baseline su float producono falsi diff da arrotondamento.
         "fields": {},
@@ -129,16 +145,61 @@ def probe(file_path: str, method: str = "standard") -> dict:
         return rec
 
     try:
-        res = import_pdf_balance_sheet(
-            file_path=file_path,
-            company_id=None,
-            fiscal_year=None,
-            company_name=os.path.splitext(os.path.basename(file_path))[0][:60],
-            create_company=True,
-            sector=1,
-            user_id="probe-user",
-            extraction_context=ctx,
-        )
+        import importers.pdf_extractor_llm as llm
+        import importers.pdf_importer as pi
+
+        original_single = llm.extract_pdf_with_llm
+        original_dual = llm.extract_pdf_both_years_with_llm
+        original_guard = pi._single_year_read_prior_column
+
+        def _accounting_field_count(*statements):
+            return sum(
+                1
+                for statement in statements
+                for name, value in (statement or {}).items()
+                if (name.startswith("sp") or name.startswith("ce"))
+                and not name.startswith("_")
+                and _str_dec(value) not in (None, "0")
+            )
+
+        def observed_single(*args, **kwargs):
+            bs, ce = original_single(*args, **kwargs)
+            rec["single_current_field_counts"].append(
+                _accounting_field_count(bs, ce)
+            )
+            return bs, ce
+
+        def observed_dual(*args, **kwargs):
+            bs, ce, prior_bs, prior_ce = original_dual(*args, **kwargs)
+            rec["dual_current_field_counts"].append(
+                _accounting_field_count(bs, ce)
+            )
+            return bs, ce, prior_bs, prior_ce
+
+        def observed_guard(*args, **kwargs):
+            verdict = original_guard(*args, **kwargs)
+            rec["single_year_read_comparative"].append(bool(verdict))
+            return verdict
+
+        llm.extract_pdf_with_llm = observed_single
+        llm.extract_pdf_both_years_with_llm = observed_dual
+        pi._single_year_read_prior_column = observed_guard
+        try:
+            res = import_pdf_balance_sheet(
+                file_path=file_path,
+                company_id=None,
+                fiscal_year=fiscal_year,
+                company_name=os.path.splitext(os.path.basename(file_path))[0][:60],
+                create_company=True,
+                sector=1,
+                period_months=period_months,
+                user_id="probe-user",
+                extraction_context=ctx,
+            )
+        finally:
+            llm.extract_pdf_with_llm = original_single
+            llm.extract_pdf_both_years_with_llm = original_dual
+            pi._single_year_read_prior_column = original_guard
         rec["ok"] = bool(res.get("success", True))
         rec["macro_area"] = res.get("macro_area")
         rec["macro_subcategory"] = res.get("macro_subcategory")
@@ -242,6 +303,8 @@ def main():
     ap.add_argument("--dir", action="store_true", help="target is a folder")
     ap.add_argument("--json", default=None, help="write JSONL results here")
     ap.add_argument("--only", default=None, help="substring filter on filename")
+    ap.add_argument("--fiscal-year", type=int, default=None)
+    ap.add_argument("--period-months", type=int, choices=range(1, 12), default=None)
     args = ap.parse_args()
 
     if args.dir or os.path.isdir(args.target):
@@ -254,7 +317,12 @@ def main():
 
     out = open(args.json, "w", encoding="utf-8") if args.json else None
     for p in files:
-        rec = probe(p, args.method)
+        rec = probe(
+            p,
+            args.method,
+            fiscal_year=args.fiscal_year,
+            period_months=args.period_months,
+        )
         status = "OK  " if rec["ok"] and not rec["error"] else "FAIL"
         extra = ""
         if rec["ok"]:

@@ -32,11 +32,19 @@ router = APIRouter()
 _ASSUMPTION_JSON_FIELDS = {
     "financing_loans", "tax_temporary_differences", "sp_overrides",
 }
+_SCENARIO_JSON_FIELDS = {"extra_accounting_alerts", "narrative_blocks"}
 
 
 def _json_safe_assumption_fields(values: Dict[str, Any]) -> Dict[str, Any]:
     """Convert nested Decimal-bearing assumption structures for JSON columns."""
     for field in _ASSUMPTION_JSON_FIELDS.intersection(values):
+        values[field] = jsonable_encoder(values[field])
+    return values
+
+
+def _json_safe_scenario_fields(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Encode only the scenario JSON columns before SQLAlchemy persists them."""
+    for field in _SCENARIO_JSON_FIELDS.intersection(values):
         values[field] = jsonable_encoder(values[field])
     return values
 
@@ -280,7 +288,9 @@ def create_budget_scenario(
         )
 
     # Create scenario
-    db_scenario = models.BudgetScenario(**scenario_create.model_dump())
+    db_scenario = models.BudgetScenario(**_json_safe_scenario_fields(
+        scenario_create.model_dump()
+    ))
     db.add(db_scenario)
     db.commit()
     db.refresh(db_scenario)
@@ -333,7 +343,9 @@ def update_budget_scenario(
         )
 
     # Update only provided fields
-    update_data = scenario_update.model_dump(exclude_unset=True)
+    update_data = _json_safe_scenario_fields(
+        scenario_update.model_dump(exclude_unset=True)
+    )
     for field, value in update_data.items():
         setattr(db_scenario, field, value)
 

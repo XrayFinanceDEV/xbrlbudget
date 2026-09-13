@@ -11,12 +11,11 @@ class FinancialYearBase(BaseModel):
     """Base FinancialYear schema"""
     company_id: int
     year: int = Field(..., ge=2000, le=2100)
-    promoted_from_scenario_id: Optional[int] = None
-    workflow_origin: Optional[WorkflowOrigin] = None
 
 
 class FinancialYearCreate(FinancialYearBase):
     """Schema for creating a new FinancialYear"""
+    model_config = ConfigDict(extra="forbid")
     period_months: Optional[int] = Field(None, ge=1, le=12)
 
 
@@ -31,6 +30,8 @@ class FinancialYearInDB(FinancialYearBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    promoted_from_scenario_id: Optional[int] = None
+    workflow_origin: Optional[WorkflowOrigin] = None
     period_months: Optional[int] = None
     validation_status: str = "legacy"
     validation_report: Optional[str] = None

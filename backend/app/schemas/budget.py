@@ -1,7 +1,7 @@
 """
 Pydantic schemas for Budget and Forecast models
 """
-from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, Field, ConfigDict, StrictBool, field_validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Literal
 from decimal import Decimal
@@ -21,6 +21,19 @@ NarrativeBlockId = Literal[
     "financial_outlook",
     "risks_and_actions",
 ]
+
+
+class ExtraAccountingAlerts(BaseModel):
+    """The seven frontend alert flags, persisted as a sparse JSON object."""
+    model_config = ConfigDict(extra="forbid")
+
+    retribuzioni: StrictBool = False
+    fornitori: StrictBool = False
+    banche: StrictBool = False
+    inps: StrictBool = False
+    inail: StrictBool = False
+    riscossione: StrictBool = False
+    iva: StrictBool = False
 
 
 class NarrativeBlock(BaseModel):
@@ -49,10 +62,19 @@ def _validate_explicitly_supplied_fields(value: Optional[List[str]]) -> Optional
     """Keep the JSON list unambiguous; NULL remains the legacy-unknown marker."""
     if value is None:
         return value
-    if any(not field.strip() for field in value):
-        raise ValueError("Explicitly supplied field names must not be blank")
+    if any(not field or field != field.strip() for field in value):
+        raise ValueError("Explicitly supplied field names must not be blank or padded")
     if len(value) != len(set(value)):
         raise ValueError("Explicitly supplied field names must be unique")
+    allowed_fields = set(BudgetAssumptionsBase.model_fields).difference({
+        "scenario_id", "forecast_year", "explicitly_supplied_fields",
+    })
+    unknown = set(value).difference(allowed_fields)
+    if unknown:
+        raise ValueError(
+            "Explicitly supplied fields must be BudgetAssumptions schema fields: "
+            + ", ".join(sorted(unknown))
+        )
     return value
 
 
@@ -67,7 +89,7 @@ class BudgetScenarioBase(BaseModel):
     # Pratica chain / workflow (2026-07-06). Additive, nullable.
     source_scenario_id: Optional[int] = None
     workflow_type: Optional[WorkflowType] = None
-    extra_accounting_alerts: Optional[List[ExtraAccountingAlertCode]] = None
+    extra_accounting_alerts: Optional[ExtraAccountingAlerts] = None
     extra_accounting_alerts_updated_at: Optional[datetime] = None
     narrative_blocks: Optional[NarrativeBlocks] = None
     narrative_blocks_updated_at: Optional[datetime] = None
@@ -100,7 +122,7 @@ class BudgetScenarioUpdate(BaseModel):
     period_months: Optional[int] = Field(None, ge=1, le=12)
     source_scenario_id: Optional[int] = None
     workflow_type: Optional[WorkflowType] = None
-    extra_accounting_alerts: Optional[List[ExtraAccountingAlertCode]] = None
+    extra_accounting_alerts: Optional[ExtraAccountingAlerts] = None
     extra_accounting_alerts_updated_at: Optional[datetime] = None
     narrative_blocks: Optional[NarrativeBlocks] = None
     narrative_blocks_updated_at: Optional[datetime] = None

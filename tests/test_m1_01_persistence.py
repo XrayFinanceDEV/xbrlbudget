@@ -15,6 +15,7 @@ from backend.app.schemas.budget import (
     BudgetAssumptionsCreate,
     BudgetScenario,
     BudgetScenarioCreate,
+    BudgetScenarioUpdate,
     NarrativeBlocks,
 )
 from backend.app.schemas.financial_year import FinancialYear, FinancialYearCreate
@@ -116,11 +117,16 @@ def test_orm_and_pydantic_round_trip_json_and_nullable_provenance(tmp_path):
         name="Budget 2027",
         base_year=2026,
         workflow_type="bilancio",
-        extra_accounting_alerts=["banche", "iva"],
+        extra_accounting_alerts={"banche": True, "iva": False},
         narrative_blocks=narrative,
         narrative_source_hash=SOURCE_HASH,
     )
-    financial_year = FinancialYearModel(company=company, year=2026)
+    financial_year = FinancialYearModel(
+        company=company,
+        year=2026,
+        promoted_from_scenario_id=42,
+        workflow_origin="promoted_projection",
+    )
     assumptions = BudgetAssumptions(
         scenario=scenario,
         forecast_year=2027,
@@ -133,16 +139,16 @@ def test_orm_and_pydantic_round_trip_json_and_nullable_provenance(tmp_path):
     persisted_scenario = session.get(BudgetScenarioModel, scenario.id)
     persisted_year = session.get(FinancialYearModel, financial_year.id)
     persisted_assumptions = session.get(BudgetAssumptions, assumptions.id)
-    assert persisted_scenario.extra_accounting_alerts == ["banche", "iva"]
+    assert persisted_scenario.extra_accounting_alerts == {"banche": True, "iva": False}
     assert persisted_scenario.narrative_blocks == narrative
     assert persisted_scenario.narrative_source_hash == SOURCE_HASH
     assert persisted_assumptions.explicitly_supplied_fields == ["revenue_growth_pct", "tax_rate"]
-    assert persisted_year.promoted_from_scenario_id is None
-    assert persisted_year.workflow_origin is None
+    assert persisted_year.promoted_from_scenario_id == 42
+    assert persisted_year.workflow_origin == "promoted_projection"
     assert BudgetScenario.model_validate(persisted_scenario).narrative_blocks.blocks[0].id == "executive_summary"
     validated_year = FinancialYear.model_validate(persisted_year)
-    assert validated_year.promoted_from_scenario_id is None
-    assert validated_year.workflow_origin is None
+    assert validated_year.promoted_from_scenario_id == 42
+    assert validated_year.workflow_origin == "promoted_projection"
 
 
 def test_controlled_values_and_explicit_field_list_validation():
@@ -151,7 +157,7 @@ def test_controlled_values_and_explicit_field_list_validation():
         name="Budget",
         base_year=2026,
         workflow_type="startup",
-        extra_accounting_alerts=["retribuzioni", "inps"],
+        extra_accounting_alerts={"retribuzioni": True, "inps": False},
         narrative_blocks={
             "schema_version": 1,
             "blocks": [{
@@ -164,23 +170,31 @@ def test_controlled_values_and_explicit_field_list_validation():
         },
         narrative_source_hash=SOURCE_HASH,
     )
-    assert scenario.extra_accounting_alerts == ["retribuzioni", "inps"]
+    assert scenario.extra_accounting_alerts.retribuzioni is True
+    assert scenario.extra_accounting_alerts.inps is False
     assert BudgetAssumptionsCreate(
         scenario_id=1,
         forecast_year=2027,
         explicitly_supplied_fields=["revenue_growth_pct"],
     ).explicitly_supplied_fields == ["revenue_growth_pct"]
-    assert FinancialYearCreate(
-        company_id=1, year=2026, workflow_origin="promoted_projection"
-    ).workflow_origin == "promoted_projection"
-
     with pytest.raises(ValidationError):
         BudgetScenarioCreate(company_id=1, name="Budget", base_year=2026, workflow_type="unknown")
     with pytest.raises(ValidationError):
-        FinancialYearCreate(company_id=1, year=2026, workflow_origin="unknown")
+        FinancialYearCreate(company_id=1, year=2026, workflow_origin="promoted_projection")
     with pytest.raises(ValidationError):
         BudgetScenarioCreate(
-            company_id=1, name="Budget", base_year=2026, extra_accounting_alerts=["unknown"]
+            company_id=1, name="Budget", base_year=2026,
+            extra_accounting_alerts={"unknown": True},
+        )
+    with pytest.raises(ValidationError):
+        BudgetScenarioCreate(
+            company_id=1, name="Budget", base_year=2026,
+            extra_accounting_alerts={"iva": "true"},
+        )
+    with pytest.raises(ValidationError):
+        BudgetScenarioCreate(
+            company_id=1, name="Budget", base_year=2026,
+            extra_accounting_alerts={"iva": 1},
         )
     with pytest.raises(ValidationError):
         NarrativeBlocks.model_validate({
@@ -199,3 +213,70 @@ def test_controlled_values_and_explicit_field_list_validation():
             forecast_year=2027,
             explicitly_supplied_fields=["revenue_growth_pct", "revenue_growth_pct"],
         )
+    for invalid_fields in (
+        [" "],
+        [" tax_rate"],
+        ["invented_field"],
+        ["scenario_id"],
+        ["forecast_year"],
+        ["explicitly_supplied_fields"],
+    ):
+        with pytest.raises(ValidationError):
+            BudgetAssumptionsCreate(
+                scenario_id=1,
+                forecast_year=2027,
+                explicitly_supplied_fields=invalid_fields,
+            )
+
+
+def test_scenario_routes_encode_narrative_datetimes_for_json_columns():
+    """The create/update route handlers must serialize JSON-column datetimes."""
+    from backend.app.api.v1 import budget_scenarios
+    from tests.e2e_kit import memory_sessions, seed_base_year
+
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as session:
+            company_id, _ = seed_base_year(session, user_id="m1-01-user", year=2026)
+            created = budget_scenarios.create_budget_scenario(
+                company_id,
+                BudgetScenarioCreate(
+                    company_id=company_id,
+                    name="M1 JSON",
+                    base_year=2026,
+                    extra_accounting_alerts={"banche": True, "iva": False},
+                    narrative_blocks={
+                        "schema_version": 1,
+                        "blocks": [{
+                            "id": "executive_summary",
+                            "text": "Create narrative",
+                            "origin": "user",
+                            "updated_at": "2026-09-13T12:00:00",
+                            "source_hash": SOURCE_HASH,
+                        }],
+                    },
+                ),
+                user_id="m1-01-user",
+                db=session,
+            )
+            updated = budget_scenarios.update_budget_scenario(
+                company_id,
+                created.id,
+                BudgetScenarioUpdate(narrative_blocks={
+                    "schema_version": 1,
+                    "blocks": [{
+                        "id": "executive_summary",
+                        "text": "Updated narrative",
+                        "origin": "user",
+                        "updated_at": "2026-09-13T13:00:00",
+                        "source_hash": SOURCE_HASH,
+                    }],
+                }),
+                user_id="m1-01-user",
+                db=session,
+            )
+            assert updated.extra_accounting_alerts["banche"] is True
+            assert updated.extra_accounting_alerts["iva"] is False
+            assert updated.narrative_blocks["blocks"][0]["updated_at"] == "2026-09-13T13:00:00"
+    finally:
+        engine.dispose()

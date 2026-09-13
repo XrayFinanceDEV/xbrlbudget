@@ -116,16 +116,16 @@ class BudgetScenarioCreate(BudgetScenarioBase):
     # `workflow_type` remain on the shared base model for responses/legacy
     # callers, but the endpoint rejects either if supplied and derives them.
     workflow_intent: Optional[WorkflowIntent] = None
+    # Creation is intentionally non-idempotent by default.  Callers that are
+    # retrying a known creation may opt into exact active-scenario reuse.
+    reuse_existing: bool = False
 
 
 class BudgetScenarioUpdate(BaseModel):
     """Schema for updating a BudgetScenario"""
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    base_year: Optional[int] = Field(None, ge=2000, le=2100)
-    scenario_type: Optional[str] = None
-    period_months: Optional[int] = Field(None, ge=1, le=12)
-    source_scenario_id: Optional[int] = None
-    workflow_type: Optional[WorkflowType] = None
     extra_accounting_alerts: Optional[ExtraAccountingAlerts] = None
     extra_accounting_alerts_updated_at: Optional[datetime] = None
     narrative_blocks: Optional[NarrativeBlocks] = None

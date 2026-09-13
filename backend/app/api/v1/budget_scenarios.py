@@ -308,19 +308,23 @@ def create_budget_scenario(
         period_months=scenario_create.period_months,
         workflow_intent=scenario_create.workflow_intent,
     )
-    reusable = find_active_reusable_scenario(
-        db,
-        company_id=company_id,
-        base_year=scenario_create.base_year,
-        name=scenario_create.name,
-        provenance=provenance,
-    )
-    if reusable:
-        return reusable
+    if scenario_create.reuse_existing:
+        reusable = find_active_reusable_scenario(
+            db,
+            company_id=company_id,
+            base_year=scenario_create.base_year,
+            name=scenario_create.name,
+            scenario_type=scenario_create.scenario_type,
+            period_months=scenario_create.period_months,
+            provenance=provenance,
+        )
+        if reusable:
+            return reusable
 
     # Create scenario
     scenario_values = scenario_create.model_dump()
     scenario_values.pop("workflow_intent", None)
+    scenario_values.pop("reuse_existing", None)
     scenario_values.pop("source_scenario_id", None)
     scenario_values.pop("workflow_type", None)
     scenario_values["workflow_type"] = provenance.workflow_type
@@ -351,31 +355,6 @@ def update_budget_scenario(
     """
     # Validate scenario belongs to company
     db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
-
-    # Validate the resolved scenario, not only a changed base year: changing the
-    # period or switching to infrannuale changes which FinancialYear is required.
-    supplied = scenario_update.model_fields_set
-    resolved_base_year = (
-        scenario_update.base_year if "base_year" in supplied else db_scenario.base_year
-    )
-    resolved_type = (
-        scenario_update.scenario_type
-        if "scenario_type" in supplied
-        else db_scenario.scenario_type
-    )
-    resolved_period = (
-        scenario_update.period_months
-        if "period_months" in supplied
-        else db_scenario.period_months
-    )
-    if supplied.intersection({"base_year", "scenario_type", "period_months"}):
-        validate_scenario_input_data(
-            company_id,
-            resolved_base_year,
-            resolved_type,
-            db,
-            resolved_period,
-        )
 
     # Update only provided fields
     update_data = _json_safe_scenario_fields(

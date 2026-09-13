@@ -3,13 +3,16 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.api.v1.budget_scenarios import create_budget_scenario
-from backend.app.schemas.budget import BudgetScenarioCreate
+from backend.app.schemas.budget import BudgetScenarioCreate, BudgetScenarioUpdate
 from backend.app.services.promote_service import promote_projection_to_financial_year
-from backend.app.services.scenario_provenance import derive_scenario_provenance
+from backend.app.services.scenario_provenance import (
+    ScenarioProvenance, derive_scenario_provenance, find_active_reusable_scenario,
+)
 from database.db import Base
 from database.models import (
     BalanceSheet, BudgetScenario, Company, FinancialYear, ForecastBalanceSheet,
@@ -80,7 +83,7 @@ def test_forged_lineage_is_rejected_before_creation(db_session):
     assert db_session.query(BudgetScenario).count() == 0
 
 
-def test_promoted_infrannuale_derives_exact_lineage_and_reuses_it(db_session):
+def test_promoted_infrannuale_derives_exact_lineage_and_explicitly_reuses_it(db_session):
     company = _company(db_session)
     source = BudgetScenario(
         company_id=company.id, name="Infra 6M", base_year=2025,
@@ -94,11 +97,64 @@ def test_promoted_infrannuale_derives_exact_lineage_and_reuses_it(db_session):
     )
 
     first = _create(db_session, company.id, name="  Budget   2027 ")
-    second = _create(db_session, company.id, name="budget 2027")
+    second = _create(
+        db_session, company.id, name="budget 2027", reuse_existing=True,
+    )
 
     assert first.id == second.id
     assert first.workflow_type == "infrannuale"
     assert first.source_scenario_id == source.id
+
+
+def test_same_name_creation_is_distinct_unless_reuse_is_explicit(db_session):
+    company = _company(db_session)
+    _full_year(db_session, company.id, 2026)
+
+    first = _create(db_session, company.id, name="  Budget   2027 ")
+    second = _create(db_session, company.id, name="budget 2027")
+    reused = _create(
+        db_session, company.id, name="BUDGET 2027", reuse_existing=True,
+    )
+
+    assert first.id != second.id
+    assert reused.id == first.id
+
+
+def test_explicit_reuse_identity_includes_scenario_period(db_session):
+    company = _company(db_session)
+    provenance = ScenarioProvenance("bilancio", None)
+    six_month = BudgetScenario(
+        company_id=company.id, name="Budget 2027", base_year=2026,
+        scenario_type="budget", period_months=6, workflow_type="bilancio",
+    )
+    seven_month = BudgetScenario(
+        company_id=company.id, name="Budget 2027", base_year=2026,
+        scenario_type="budget", period_months=7, workflow_type="bilancio",
+    )
+    db_session.add_all([six_month, seven_month])
+    db_session.commit()
+
+    reused = find_active_reusable_scenario(
+        db_session, company_id=company.id, base_year=2026, name=" budget 2027 ",
+        scenario_type="budget", period_months=7, provenance=provenance,
+    )
+    assert reused.id == seven_month.id
+
+
+@pytest.mark.parametrize(
+    "immutable_field,value",
+    [
+        ("source_scenario_id", 12),
+        ("workflow_type", "bilancio"),
+        ("base_year", 2027),
+        ("scenario_type", "infrannuale"),
+        ("period_months", 6),
+    ],
+)
+def test_update_rejects_lineage_and_topology_fields(immutable_field, value):
+    with pytest.raises(ValidationError) as error:
+        BudgetScenarioUpdate.model_validate({immutable_field: value})
+    assert error.value.errors()[0]["type"] == "extra_forbidden"
 
 
 def test_archived_or_wrong_lineage_is_never_reused(db_session):
@@ -285,3 +341,37 @@ def test_repromotion_preserves_same_source_and_archives_different_lineage(db_ses
     # A second promote from the same source must leave its active budget alone.
     promote_projection_to_financial_year(db_session, new_source.id)
     assert db_session.get(BudgetScenario, matching.id).is_active == 1
+
+
+def test_12_month_replacement_archives_old_lineage_but_keeps_bilancio(db_session, valid_promote):
+    company = _company(db_session)
+    old_source = BudgetScenario(
+        company_id=company.id, name="Old 6M", base_year=2025,
+        scenario_type="infrannuale", period_months=6,
+    )
+    full_year_source = BudgetScenario(
+        company_id=company.id, name="New 12M", base_year=2025,
+        scenario_type="infrannuale", period_months=12,
+    )
+    db_session.add_all([old_source, full_year_source])
+    db_session.flush()
+    _forecast(db_session, full_year_source)
+    _full_year(
+        db_session, company.id, 2026,
+        promoted_from=old_source.id, origin="promoted_projection",
+    )
+    old_lineage = BudgetScenario(
+        company_id=company.id, name="Budget old lineage", base_year=2026,
+        workflow_type="infrannuale", source_scenario_id=old_source.id, is_active=1,
+    )
+    ordinary_budget = BudgetScenario(
+        company_id=company.id, name="Budget ordinary", base_year=2026,
+        workflow_type="bilancio", source_scenario_id=None, is_active=1,
+    )
+    db_session.add_all([old_lineage, ordinary_budget])
+    db_session.commit()
+
+    promote_projection_to_financial_year(db_session, full_year_source.id)
+
+    assert db_session.get(BudgetScenario, old_lineage.id).is_active == 0
+    assert db_session.get(BudgetScenario, ordinary_budget.id).is_active == 1

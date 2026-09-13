@@ -77,13 +77,12 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         FinancialYear.year == target_year,
         (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
     ).first()
-    replaces_different_lineage = bool(existing) and (
-        existing.workflow_origin != "promoted_projection"
-        or existing.promoted_from_scenario_id != scenario.id
-    )
-    if is_lineage_source and replaces_different_lineage:
-        # Keep an already-created budget only when it belongs to this exact
-        # source.  Archiving preserves its assumptions and generated values.
+    if existing:
+        # A replacement changes the accounting source used by every active
+        # budget for this company/year.  Retain only budgets tied to the exact
+        # new lineage (or to the ordinary full-year lineage for a 12M source).
+        expected_workflow_type = "infrannuale" if is_lineage_source else "bilancio"
+        expected_source_scenario_id = scenario.id if is_lineage_source else None
         active_budgets = db.query(BudgetScenario).filter(
             BudgetScenario.company_id == company_id,
             BudgetScenario.base_year == target_year,
@@ -92,8 +91,8 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         ).all()
         for budget in active_budgets:
             if not (
-                budget.workflow_type == "infrannuale"
-                and budget.source_scenario_id == scenario.id
+                budget.workflow_type == expected_workflow_type
+                and budget.source_scenario_id == expected_source_scenario_id
             ):
                 budget.is_active = 0
 

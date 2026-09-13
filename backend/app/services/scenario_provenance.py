@@ -73,14 +73,18 @@ def find_active_reusable_scenario(
     company_id: int,
     base_year: int,
     name: str,
+    scenario_type: str,
+    period_months: Optional[int],
     provenance: ScenarioProvenance,
 ) -> Optional[BudgetScenario]:
-    """Return only an active scenario with the exact derived lineage."""
+    """Return an active scenario only when every creation identity matches."""
     normalized_name = normalize_scenario_name(name)
     candidates = db.query(BudgetScenario).filter(
         BudgetScenario.company_id == company_id,
         BudgetScenario.base_year == base_year,
         BudgetScenario.is_active == 1,
+        BudgetScenario.scenario_type == scenario_type,
+        BudgetScenario.period_months == period_months,
         BudgetScenario.workflow_type == provenance.workflow_type,
         BudgetScenario.source_scenario_id == provenance.source_scenario_id,
     ).all()

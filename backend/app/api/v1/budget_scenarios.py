@@ -271,6 +271,15 @@ def create_budget_scenario(
     # Validate company exists and belongs to user
     validate_company_exists(company_id, user_id, db)
 
+    # Lineage is server-owned.  Keep these fields in the shared schema for
+    # response compatibility, while treating any create-time value as forged.
+    supplied = scenario_create.model_fields_set
+    if supplied.intersection({"source_scenario_id", "workflow_type"}):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="source_scenario_id e workflow_type sono derivati dal server",
+        )
+
     # Validate the data this scenario needs (base year, or partial year for infrannuale)
     validate_scenario_input_data(
         company_id,
@@ -287,10 +296,36 @@ def create_budget_scenario(
             detail="Company ID in URL must match company_id in request body"
         )
 
+    from app.services.scenario_provenance import (
+        derive_scenario_provenance,
+        find_active_reusable_scenario,
+    )
+    provenance = derive_scenario_provenance(
+        db,
+        company_id=company_id,
+        base_year=scenario_create.base_year,
+        scenario_type=scenario_create.scenario_type,
+        period_months=scenario_create.period_months,
+        workflow_intent=scenario_create.workflow_intent,
+    )
+    reusable = find_active_reusable_scenario(
+        db,
+        company_id=company_id,
+        base_year=scenario_create.base_year,
+        name=scenario_create.name,
+        provenance=provenance,
+    )
+    if reusable:
+        return reusable
+
     # Create scenario
-    db_scenario = models.BudgetScenario(**_json_safe_scenario_fields(
-        scenario_create.model_dump()
-    ))
+    scenario_values = scenario_create.model_dump()
+    scenario_values.pop("workflow_intent", None)
+    scenario_values.pop("source_scenario_id", None)
+    scenario_values.pop("workflow_type", None)
+    scenario_values["workflow_type"] = provenance.workflow_type
+    scenario_values["source_scenario_id"] = provenance.source_scenario_id
+    db_scenario = models.BudgetScenario(**_json_safe_scenario_fields(scenario_values))
     db.add(db_scenario)
     db.commit()
     db.refresh(db_scenario)

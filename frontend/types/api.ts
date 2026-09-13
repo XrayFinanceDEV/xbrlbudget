@@ -373,6 +373,7 @@ export interface BudgetScenarioCreate {
   base_year: number;
   scenario_type?: "budget" | "infrannuale";
   period_months?: number;
+  workflow_intent?: "startup";
   description?: string;
   is_active?: number;
 }

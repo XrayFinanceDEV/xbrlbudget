@@ -7,7 +7,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import {
-  getBudgetScenarios,
   createBudgetScenario,
   promoteProjection,
   getInfrannualeAIComments,
@@ -347,28 +346,20 @@ export function StampaContent({
         baseYear = fiscalYear;
       }
 
-      // Riuso, non duplicazione: doppio click o ritorno sui propri passi
-      // non devono generare due scenari budget per lo stesso anno base.
-      const existing = await getBudgetScenarios(companyId);
-      const reusable = existing.find(
-        (s) => s.scenario_type !== "infrannuale" && s.base_year === baseYear,
-      );
-      const budget =
-        reusable ??
-        (await createBudgetScenario(companyId, {
-          company_id: companyId,
-          name: `Budget ${baseYear + 1}–${baseYear + 3}`,
-          base_year: baseYear,
-          scenario_type: "budget",
-        }));
+      // The server derives provenance and returns only an exact active reuse;
+      // a generic client-side base-year lookup would cross workflow lineages.
+      const budget = await createBudgetScenario(companyId, {
+        company_id: companyId,
+        name: `Budget ${baseYear + 1}–${baseYear + 3}`,
+        base_year: baseYear,
+        scenario_type: "budget",
+      });
 
       updatePratica({ budgetScenarioId: budget.id });
       await refreshCompanies();
       await refreshYears();
       toast.success(
-        reusable
-          ? "Scenario budget esistente riaperto"
-          : "Scenario budget creato",
+        "Scenario budget pronto",
       );
       router.push("/budget");
     } catch (err: unknown) {

@@ -8,6 +8,7 @@ from decimal import Decimal
 
 
 WorkflowType = Literal["infrannuale", "bilancio", "startup"]
+WorkflowIntent = Literal["startup"]
 WorkflowOrigin = Literal["imported", "manual", "startup_opening", "promoted_projection"]
 ExtraAccountingAlertCode = Literal[
     "retribuzioni", "fornitori", "banche", "inps", "inail", "riscossione", "iva",
@@ -111,7 +112,10 @@ class BudgetScenarioBase(BaseModel):
 
 class BudgetScenarioCreate(BudgetScenarioBase):
     """Schema for creating a new BudgetScenario"""
-    pass
+    # This is the sole client-provided workflow hint.  `source_scenario_id` and
+    # `workflow_type` remain on the shared base model for responses/legacy
+    # callers, but the endpoint rejects either if supplied and derives them.
+    workflow_intent: Optional[WorkflowIntent] = None
 
 
 class BudgetScenarioUpdate(BaseModel):

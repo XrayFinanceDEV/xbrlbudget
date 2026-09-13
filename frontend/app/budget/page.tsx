@@ -547,6 +547,7 @@ function StartupSetup({
         company_id: company.id,
         name: name.trim(),
         base_year: openingYear,
+        workflow_intent: "startup",
         description: description.trim() || undefined,
         is_active: 1,
       });

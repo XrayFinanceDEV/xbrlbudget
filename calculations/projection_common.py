@@ -391,9 +391,15 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     used = min(opening_credit, saldo_due)
     saldo_paid = saldo_due - used
     net = current_tax - acconti
+    # This is not diagnostic precision: year N+1 pays ``generated_debt`` as
+    # its opening ``saldo_due``.  Keep that state at the same cent precision
+    # as the balance-sheet cell it represents, otherwise a fractional tail
+    # (for example 5760.04707000 behind a 5760.05 cell) changes next year's
+    # cash while remaining invisible in the persisted accounts (#51).
+    generated_debt = max(ZERO, net).quantize(CENT, rounding=ROUND_HALF_UP)
     return TaxYear(
         saldo_paid=saldo_paid, acconti_paid=acconti, rate_paid=rate_due,
-        generated_debt=max(ZERO, net), generated_credit=max(ZERO, -net),
+        generated_debt=generated_debt, generated_credit=max(ZERO, -net),
         opening_credit_left=opening_credit - used,
         cash_out=saldo_paid + acconti + rate_due,
     )

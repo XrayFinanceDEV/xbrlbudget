@@ -763,8 +763,11 @@ usa `posizione_tributaria_fine_anno`, con la stessa regola degli acconti (`accon
   imposta `acconto_pct = 0`.
 - **rate pagate in N** = l'importo del piano `pregresso.debiti_tributari.amounts` per l'anno N —
   scadenzia il **solo rateizzato**, mai il saldo.
-- **debito generato a fine N** = `max(0, imposte(N) − acconti(N))`; **credito generato a fine N**
-  = `max(0, acconti(N) − imposte(N))`.
+- **debito generato a fine N** = `Q(max(0, imposte(N) − acconti(N)))`, con `Q` al centesimo
+  `ROUND_HALF_UP` già nel kernel; **credito generato a fine N** =
+  `max(0, acconti(N) − imposte(N))`. La quantizzazione del debito è a monte perché quel numero
+  non è solo diagnostico: diventa il `saldo_due` pagato in N+1. Una coda frazionaria nascosta
+  dietro la cella di bilancio muoverebbe altrimenti la cassa dell'anno dopo.
 - `sp16e(N)` = debito generato + rate dovute in N+1; `sp17e(N)` = rate dovute oltre N+1;
   `sp06e(N)` = credito generato + eccedenza del credito di apertura non ancora usata; con un
   override di `sp06e`, la somma di `generated_credit` e `opening_credit_left` è il valore
@@ -794,7 +797,7 @@ comunque libero — il rifiuto (§2.2) guarda il totale che l'anno dopo legge, n
 | `saldo_paid` | il saldo versato quest'anno |
 | `acconti_paid` | l'acconto versato quest'anno |
 | `rate_paid` | le rate del rateizzato versate quest'anno |
-| `generated_debt` | il debito tributario a saldo di fine anno (→ `saldo_paid` dell'anno prossimo; `sp16e` = `generated_debt` + `residual_short`; con un override di `sp16e` vale `sp16e` − `residual_short`) |
+| `generated_debt` | il debito tributario a saldo di fine anno, già al centesimo nel kernel (→ `saldo_paid` dell'anno prossimo; `sp16e` = `generated_debt` + `residual_short`; con un override di `sp16e` vale `sp16e` − `residual_short`) |
 | `generated_credit` | il credito tributario generato a fine anno — con un override di `sp06e` la loro somma è il valore forzato |
 | `opening_credit_left` | il credito di apertura non ancora usato — un override di `sp06e` riempie prima questa, poi `generated_credit` |
 | `mode` | `"saldo_acconto"` (il kernel governa) o `"manual"` (via manuale attiva: gli importi pagati sono dichiarati zero, perché non esistono — mai inventati) |

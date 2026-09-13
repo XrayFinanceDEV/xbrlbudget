@@ -88,3 +88,13 @@ def test_zero_acconto_pct_without_explicit_means_no_advances():
     assert t.acconti_paid == D("0"), "Zero percentuale ⇒ zero acconti"
     assert t.cash_out == D("0"), "Cash-out non comprende acconti quando acconto_pct=0"
     assert t.generated_debt == D("100"), "Debito è l'intera imposta corrente"
+
+
+def test_generated_debt_is_quantized_before_becoming_next_year_saldo_due():
+    """The tax kernel returns accounting state, not a hidden fractional tail."""
+    t = tax_settlement_saldo_acconto(
+        opening_credit=D("0"), saldo_due=D("0"), rate_due=D("0"),
+        current_tax=D("5760.04707000"), previous_tax=D("0"),
+        acconto_pct=D("0"), explicit_advances=None,
+    )
+    assert t.generated_debt == D("5760.05")

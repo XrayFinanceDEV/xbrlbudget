@@ -400,13 +400,10 @@ def test_a_rate_sotto_il_centesimo_le_parti_dicono_la_cella(monkeypatch):
     vera da due numeri NON omogenei; ora il confronto e' fra quantizzati e la
     riga, al centesimo, dice il vero: 3252.825 + 0 = 3252.83 = `sp16e`.
 
-    La coda grezza RESTA nei `details` (`residual_short` 3252.825,
-    `generated_debt` 5760.04707000), e NON e' un dimenticatoio: quantizzarla
-    vuol dire cambiare il `saldo_due` che l'anno dopo ci si paga sopra, e la
-    misura dice quanto costa — un centesimo di cassa su otto scenari gia'
-    fissati nei test (`test_forecast_scoperto`, `test_forecast_prestito_quota_
-    breve`: 204440.71 invece di 204440.72). E' un nodo per l'owner, non una
-    correzione da infilare in un giro di fix: vedi il rapporto del giro.
+    Il `residual_short` resta grezzo per conservare l'identita' del calendario;
+    `generated_debt`, invece, e' una cifra di bilancio e dal fix #51 nasce gia'
+    al centesimo nel kernel. L'anno dopo lo usa come `saldo_due`, quindi una
+    coda frazionaria nascosta qui non sarebbe descrittiva: muoverebbe la cassa.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -421,9 +418,14 @@ def test_a_rate_sotto_il_centesimo_le_parti_dicono_la_cella(monkeypatch):
             for y in ANNI_3:
                 riga = lette[y][0]
                 d = _riga_pregresso(lette[y][1], "debiti_tributari")
+                generated_debt = D(str(lette[y][1]["imposte"]["generated_debt"]))
+                assert generated_debt == _q(generated_debt), (
+                    y, "generated_debt conserva una coda sotto il centesimo",
+                    generated_debt,
+                )
                 assert _q(d["generated"]) + _q(d["residual_short"]) == _q(
                     riga["sp16e_debiti_tributari_breve"]), (y, d)
-                assert _q(D(str(lette[y][1]["imposte"]["generated_debt"]))) + _q(
+                assert generated_debt + _q(
                     d["residual_short"]) == _q(riga["sp16e_debiti_tributari_breve"]), (
                     y, lette[y][1]["imposte"], d)
                 assert _q(D(str(lette[y][1]["imposte"]["generated_credit"]))) + _q(
@@ -809,6 +811,62 @@ def test_senza_piano_crediti_nessuna_sottovoce_si_rifiuta(monkeypatch):
                 assert res["forecast_generated"] is True, f"{campo}: {res['message']}"
                 lette = _dettagli(db, f"i-d-senza-piano-{campo}", cid, sid, rows)
                 assert _letto(lette, 2027, campo) == D("250.25"), campo
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("campo,si_porta_avanti", [
+    ("sp06a_crediti_clienti_breve", False),
+    ("sp06g_crediti_altri_breve", False),
+    ("sp16d_debiti_fornitori_breve", False),
+    ("sp06e_crediti_tributari_breve", True),
+    ("sp16a_debiti_banche_breve", True),
+    ("sp16g_altri_debiti_breve", True),
+])
+def test_issue52_un_override_di_stock_dura_secondo_il_driver_della_riga(
+        monkeypatch, campo, si_porta_avanti):
+    """#52: distinguish one-year stocks from state carried into year N+1.
+
+    DSO/DPO rows are deliberately recomputed from the next year's driver.  An
+    override fixes year N, then the N+1 working-capital movement reverses it;
+    it is not silently lost.  Tax, bank, and ``prev``-grown rows carry their
+    closing state instead.  A blanket rejection of every short-side override
+    would therefore remove two valid and different product semantics.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            tag = f"issue52-{campo}"
+            rows = _righe_base(overrides={2027: {campo: 250.25}})
+            res, cid, sid, rows = _esito(db, tag, rows, base=_base_crediti)
+            assert res["forecast_generated"] is True, res["message"]
+            actual = _dettagli(db, tag, cid, sid, rows)
+
+            twin_tag = f"issue52-gemello-{campo}"
+            twin_rows = _righe_base()
+            twin_res, twin_cid, twin_sid, twin_rows = _esito(
+                db, twin_tag, twin_rows, base=_base_crediti
+            )
+            assert twin_res["forecast_generated"] is True, twin_res["message"]
+            twin = _dettagli(db, twin_tag, twin_cid, twin_sid, twin_rows)
+
+        assert _letto(actual, 2027, campo) == D("250.25")
+        if si_porta_avanti:
+            assert _letto(actual, 2028, campo) == D("250.25")
+            assert _letto(actual, 2028, campo) != _letto(twin, 2028, campo)
+        else:
+            assert _letto(actual, 2028, campo) == _letto(twin, 2028, campo)
+            # The closing cash rejoins the twin because the stock has been
+            # regenerated, but its year-on-year movement is different by the
+            # exact cash displacement created by the override in year N.
+            cash = "sp09_disponibilita_liquide"
+            assert _letto(actual, 2028, cash) == _letto(twin, 2028, cash)
+            actual_movement = _letto(actual, 2028, cash) - _letto(actual, 2027, cash)
+            twin_movement = _letto(twin, 2028, cash) - _letto(twin, 2027, cash)
+            assert actual_movement - twin_movement == -(
+                _letto(actual, 2027, cash) - _letto(twin, 2027, cash)
+            )
     finally:
         engine.dispose()
 

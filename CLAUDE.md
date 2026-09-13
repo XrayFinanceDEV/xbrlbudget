@@ -336,7 +336,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   capienza — e l'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
   `tax_advances_paid` se **maggiore di zero**: zero in quella casella non vuol dire «zero
   acconti», vuol dire «non dichiarato», e ricade sulla percentuale
-  (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`). Prima di questo
+  (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`). Il debito generato
+  nasce già quantizzato al centesimo nel kernel: è la cifra di bilancio che N+1 usa come
+  `saldo_due`, non una misura descrittiva a precisione libera. Prima di questo
   lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
   un'imposta all'anno, ed era un difetto che quadrava — nessun controllo se ne accorgeva.
 - **Un anno manuale non scarica il piano tributario sull'anno automatico.** Se un anno in via

@@ -301,8 +301,8 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
 
     # ── rilievo M-4, punto 1 (giro 3), FORMA ESATTA (rilievo m-5, giro 4) ──
     # `pos_d(N) − pos_d(N−1) − (imposta − saldo − acconti − rate) == 0`, con
-    # `pos_d` la posizione tributaria GREZZA come la dichiarano i `details`
-    # (non come la scrivono le celle): se la posizione si e' mossa senza che un
+    # `pos_d` la posizione tributaria come la dichiarano i `details`: se la
+    # posizione si e' mossa senza che un
     # versamento — o il calcolo dell'imposta — lo dica, l'ha mossa la cassa
     # senza flusso, il difetto che le due sedi riallineate da I1 promettono di
     # non avere piu'. Vale dal secondo anno generato in poi, e solo se ENTRAMBI
@@ -319,11 +319,12 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
     # copia strumentata della batteria (`RETE_LOG`, 1.272 confronti): lo scarto
     # sulle celle arriva a 0,01392 (33 sopra 0,01, nessuno sopra 0,015) — uno
     # 0,02 non nasconde un flusso, ma puo' dare un falso rosso su un fixture
-    # sfortunato; sui DICHIARATI grezzi lo scarto e' invece ESATTAMENTE 0 in
-    # 1.272 confronti su 1.272. Non si tratta di tollerare meno: si tratta di
-    # confrontare grandezze OMOGENEE, e di lasciare alla forma sulle celle — che
-    # gira piu' sopra, nei confronti `confronta()` di `imposte`/`pregresso` —
-    # il compito di dire che dichiarato e persistito sono lo stesso numero.
+    # sfortunato; sui DICHIARATI grezzi lo scarto era invece ESATTAMENTE 0 in
+    # 1.272 confronti su 1.272. Da #51 il lato positivo della posizione non e'
+    # piu' grezzo: `generated_debt` nasce al centesimo perche' e' la cifra che
+    # N+1 paga come `saldo_due`. L'oracolo resta esatto, senza tolleranze:
+    # applica la stessa Q al netto positivo `current_tax - acconti_paid` prima
+    # del confronto; il credito resta alla precisione del kernel.
     if prec is not None:
         _bs_p, det_p = prec          # le celle non servono: qui si guarda la sola dichiarazione
         i0, i1 = det.get("imposte") or {}, det_p.get("imposte") or {}
@@ -341,10 +342,14 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
                 and not forzato_pos
                 and all(k in i0 for k in ("current_tax", "saldo_paid",
                                           "acconti_paid", "rate_paid"))):
+            netto_generato = (D(str(i0["current_tax"]))
+                              - D(str(i0["acconti_paid"])))
+            if netto_generato > 0:
+                netto_generato = _q(netto_generato)
             scarto = (_posizione_tributaria_dichiarata(det)
                       - _posizione_tributaria_dichiarata(det_p)
-                      - (D(str(i0["current_tax"])) - D(str(i0["saldo_paid"]))
-                         - D(str(i0["acconti_paid"])) - D(str(i0["rate_paid"]))))
+                      - (netto_generato - D(str(i0["saldo_paid"]))
+                         - D(str(i0["rate_paid"]))))
             if scarto != D("0"):
                 fuori.append(("flusso tributario",
                               f"scarto di flusso {scarto} sui dichiarati: la posizione "

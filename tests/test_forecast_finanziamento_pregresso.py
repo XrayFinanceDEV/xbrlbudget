@@ -227,7 +227,7 @@ def test_un_cash_sweep_nel_2028_paga_il_pregresso_e_lascia_il_prestito_al_suo_pi
             sp = _genera(db, "sweep-oltre", rows, BREVE, LUNGO)
         assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE + QUOTA_BREVE_PRESTITO[2027]
         for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "230036.16"),
-                                             2029: ("25000.09", "0.02", "345042.90")}.items():
+                                             2029: ("25000.09", "0.02", "345042.89")}.items():
             assert sp[anno]["sp16a_debiti_banche_breve"] == D(breve), anno
             assert sp[anno]["sp17a_debiti_banche_lungo"] == D(lungo), anno
             assert sp[anno]["sp09_disponibilita_liquide"] == D(cassa), anno

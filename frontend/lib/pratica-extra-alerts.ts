@@ -98,3 +98,22 @@ export function extraAlertsDirty(
   const b = normalizeExtraAlerts(loaded);
   return EXTRA_ALERT_KEYS.some((key) => a[key] !== b[key]);
 }
+
+/**
+ * Il salvataggio è consentito solo dopo una GET riuscita per lo scenario
+ * corrente. Un errore di PUT non entra qui: conserva il dirty state e rende
+ * possibile un nuovo tentativo.
+ */
+export function canSaveExtraAlerts({
+  dirty,
+  loaded,
+  loading,
+  saving,
+}: {
+  dirty: boolean;
+  loaded: boolean;
+  loading: boolean;
+  saving: boolean;
+}): boolean {
+  return dirty && loaded && !loading && !saving;
+}

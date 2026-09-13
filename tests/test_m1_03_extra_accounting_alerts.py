@@ -106,6 +106,12 @@ def test_get_defaults_null_and_put_round_trips_all_keys_including_false(client):
     assert saved.json()["updated_at"] is not None
     assert saved.json()["updated_at"].endswith(("Z", "+00:00"))
 
+    generic = client.get(
+        f"/api/v1/companies/{client.ids['company']}/scenarios/{client.ids['infra']}"
+    )
+    assert generic.status_code == 200, generic.text
+    assert generic.json()["extra_accounting_alerts_updated_at"].endswith(("Z", "+00:00"))
+
     from database.models import BudgetScenario
     with client.sessions() as db:
         row = db.get(BudgetScenario, client.ids["infra"])

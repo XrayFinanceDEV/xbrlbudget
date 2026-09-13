@@ -1,8 +1,8 @@
 """
 Pydantic schemas for Budget and Forecast models
 """
-from pydantic import BaseModel, Field, ConfigDict, StrictBool, field_validator, model_validator
-from datetime import datetime
+from pydantic import BaseModel, Field, ConfigDict, StrictBool, field_serializer, field_validator, model_validator
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Literal
 from decimal import Decimal
 
@@ -118,6 +118,18 @@ class BudgetScenarioBase(BaseModel):
     )
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
+
+    @field_serializer("extra_accounting_alerts_updated_at")
+    def serialize_extra_accounting_alerts_updated_at(
+        self, value: Optional[datetime], _info,
+    ) -> Optional[datetime]:
+        if value is None:
+            return None
+        return (
+            value.replace(tzinfo=timezone.utc)
+            if value.tzinfo is None
+            else value.astimezone(timezone.utc)
+        )
 
     @model_validator(mode="after")
     def validate_infrannuale_period(self):

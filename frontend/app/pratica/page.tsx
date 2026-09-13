@@ -117,6 +117,7 @@ import {
 import { buildConfrontoHighlights } from "@/lib/pratica-highlights";
 import {
   createEmptyExtraAlerts,
+  canSaveExtraAlerts,
   extraAlertsDirty,
   normalizeExtraAlerts,
   serializeExtraAlerts,
@@ -364,8 +365,13 @@ export default function InfraannualePage() {
   const [savingExtraAlerts, setSavingExtraAlerts] = useState(false);
   const [loadingExtraAlerts, setLoadingExtraAlerts] = useState(false);
   const [extraAlertsError, setExtraAlertsError] = useState<string | null>(null);
+  const [extraAlertsLoadedFor, setExtraAlertsLoadedFor] = useState<string | null>(null);
   const extraAlertsRequest = useRef(0);
   const extraAlertsEditVersion = useRef(0);
+  const extraAlertsScenarioKey =
+    importResult?.companyId && scenario?.scenario_type === "infrannuale"
+      ? `${importResult.companyId}:${scenario.id}`
+      : null;
   const [ratingVisible, setRatingVisible] = useState(false);
   const [showNoAlertsConfirm, setShowNoAlertsConfirm] = useState(false);
 
@@ -1004,16 +1010,17 @@ export default function InfraannualePage() {
     }
   }, [activeTab, analysis, scenario, loadAnalysis]);
 
-  // The scenario can change during a rehydration/import while a previous GET
-  // is in flight. A monotonically increasing request id keeps an old response
-  // from replacing the new scenario's local edits.
-  useEffect(() => {
+  // A load generation is shared by automatic loads and explicit retries. It
+  // prevents a stale scenario response from becoming saveable, while the edit
+  // version prevents a pre-edit response from replacing newer checkbox input.
+  const loadExtraAlerts = useCallback((clearForScenario = false) => {
     const requestId = ++extraAlertsRequest.current;
     const companyId = importResult?.companyId;
     if (!companyId || !scenario || scenario.scenario_type !== "infrannuale") {
       const empty = createEmptyExtraAlerts();
       setExtraAlerts(empty);
       setLoadedExtraAlerts(empty);
+      setExtraAlertsLoadedFor(null);
       setExtraAlertsError(null);
       setSavingExtraAlerts(false);
       setLoadingExtraAlerts(false);
@@ -1021,11 +1028,15 @@ export default function InfraannualePage() {
     }
 
     const editVersion = extraAlertsEditVersion.current;
-    // Clear the previous scenario immediately: it must never be displayed or
-    // become a save payload while this scenario's GET is still in flight.
-    const empty = createEmptyExtraAlerts();
-    setExtraAlerts(empty);
-    setLoadedExtraAlerts(empty);
+    if (clearForScenario) {
+      // Clear the previous scenario immediately: it must never be displayed
+      // or become a save payload while this scenario's GET is still in flight.
+      const empty = createEmptyExtraAlerts();
+      setExtraAlerts(empty);
+      setLoadedExtraAlerts(empty);
+      setSavingExtraAlerts(false);
+    }
+    setExtraAlertsLoadedFor(null);
     setLoadingExtraAlerts(true);
     setExtraAlertsError(null);
     void getExtraAccountingAlerts(companyId, scenario.id)
@@ -1033,6 +1044,7 @@ export default function InfraannualePage() {
         if (extraAlertsRequest.current !== requestId) return;
         const normalized = normalizeExtraAlerts(response.alerts);
         setLoadedExtraAlerts(normalized);
+        setExtraAlertsLoadedFor(extraAlertsScenarioKey);
         // A user may toggle a checkbox while this GET is outstanding. The
         // response is still the authoritative loaded snapshot, but it must
         // not replace their newer local edit.
@@ -1047,12 +1059,26 @@ export default function InfraannualePage() {
       .finally(() => {
         if (extraAlertsRequest.current === requestId) setLoadingExtraAlerts(false);
       });
-  }, [importResult?.companyId, scenario?.id, scenario?.scenario_type]);
+  }, [extraAlertsScenarioKey, importResult?.companyId, scenario?.id, scenario?.scenario_type]);
+
+  useEffect(() => {
+    loadExtraAlerts(true);
+  }, [loadExtraAlerts]);
 
   const extraAlertsDirtyState = extraAlertsDirty(extraAlerts, loadedExtraAlerts);
+  const extraAlertsLoaded = extraAlertsLoadedFor === extraAlertsScenarioKey;
+  const extraAlertsSaveEnabled = canSaveExtraAlerts({
+    dirty: extraAlertsDirtyState,
+    loaded: extraAlertsLoaded,
+    loading: loadingExtraAlerts,
+    saving: savingExtraAlerts,
+  });
   const saveExtraAlerts = useCallback(async () => {
     const companyId = importResult?.companyId;
-    if (!companyId || !scenario || scenario.scenario_type !== "infrannuale") return;
+    if (
+      !companyId || !scenario || scenario.scenario_type !== "infrannuale" ||
+      !extraAlertsLoaded || loadingExtraAlerts || savingExtraAlerts
+    ) return;
 
     const requestId = extraAlertsRequest.current;
     const editVersion = extraAlertsEditVersion.current;
@@ -1081,7 +1107,14 @@ export default function InfraannualePage() {
     } finally {
       if (extraAlertsRequest.current === requestId) setSavingExtraAlerts(false);
     }
-  }, [extraAlerts, importResult?.companyId, scenario]);
+  }, [
+    extraAlerts,
+    extraAlertsLoaded,
+    importResult?.companyId,
+    loadingExtraAlerts,
+    savingExtraAlerts,
+    scenario,
+  ]);
 
   const goFromComparison = useCallback(async () => {
     if (periodMonths === 12) {
@@ -2076,10 +2109,13 @@ export default function InfraannualePage() {
                     setRatingVisible(false);
                   }}
                   dirty={extraAlertsDirtyState}
+                  loaded={extraAlertsLoaded}
                   loading={loadingExtraAlerts}
                   saving={savingExtraAlerts}
                   error={extraAlertsError}
+                  saveEnabled={extraAlertsSaveEnabled}
                   onSave={() => void saveExtraAlerts()}
+                  onRetry={() => loadExtraAlerts()}
                 />
 
                 <Card>

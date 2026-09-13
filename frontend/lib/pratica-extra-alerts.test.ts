@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EXTRA_ALERT_DEFS } from "./pratica-codes";
 import {
   EXTRA_ALERT_KEYS,
+  canSaveExtraAlerts,
   createEmptyExtraAlerts,
   extraAlertsDirty,
   normalizeExtraAlerts,
@@ -196,5 +197,31 @@ describe("extraAlertsDirty", () => {
     expect(extraAlertsDirty(withFlag("banche", true), { banche: "true" })).toBe(
       true,
     );
+  });
+});
+
+describe("canSaveExtraAlerts", () => {
+  it("blocca il salvataggio finché la GET dello scenario corrente non riesce", () => {
+    expect(
+      canSaveExtraAlerts({ dirty: true, loaded: false, loading: false, saving: false }),
+    ).toBe(false);
+    expect(
+      canSaveExtraAlerts({ dirty: true, loaded: false, loading: true, saving: false }),
+    ).toBe(false);
+  });
+
+  it("permette il retry dopo un PUT fallito, ma non durante load o save", () => {
+    expect(
+      canSaveExtraAlerts({ dirty: true, loaded: true, loading: false, saving: false }),
+    ).toBe(true);
+    expect(
+      canSaveExtraAlerts({ dirty: true, loaded: true, loading: true, saving: false }),
+    ).toBe(false);
+    expect(
+      canSaveExtraAlerts({ dirty: true, loaded: true, loading: false, saving: true }),
+    ).toBe(false);
+    expect(
+      canSaveExtraAlerts({ dirty: false, loaded: true, loading: false, saving: false }),
+    ).toBe(false);
   });
 });

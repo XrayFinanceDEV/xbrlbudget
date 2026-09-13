@@ -19,18 +19,24 @@ export function ExtraAccountingAlerts({
   alerts,
   onChange,
   dirty,
+  loaded,
   loading,
   saving,
   error,
+  saveEnabled,
   onSave,
+  onRetry,
 }: {
   alerts: ExtraAccountingAlertsState;
   onChange: (alerts: ExtraAccountingAlertsState) => void;
   dirty: boolean;
+  loaded: boolean;
   loading: boolean;
   saving: boolean;
   error: string | null;
+  saveEnabled: boolean;
   onSave: () => void;
+  onRetry: () => void;
 }) {
   const activeCount = Object.values(alerts).filter(Boolean).length;
 
@@ -57,6 +63,7 @@ export function ExtraAccountingAlerts({
               <Checkbox
                 id={`alert-${def.key}`}
                 checked={alerts[key]}
+                disabled={!loaded || loading}
                 onCheckedChange={(checked) =>
                   onChange({ ...alerts, [key]: !!checked })
                 }
@@ -74,7 +81,7 @@ export function ExtraAccountingAlerts({
           })}
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button onClick={onSave} disabled={!dirty || saving || loading} size="sm">
+          <Button onClick={onSave} disabled={!saveEnabled} size="sm">
             {saving ? "Salvataggio…" : "Salva segnali"}
           </Button>
           {dirty && !saving && (
@@ -85,10 +92,20 @@ export function ExtraAccountingAlerts({
           {loading && !saving && (
             <span className="text-sm text-muted-foreground">Caricamento segnali…</span>
           )}
-          {!dirty && !loading && !saving && !error && (
+          {loaded && !dirty && !loading && !saving && !error && (
             <span className="text-sm text-muted-foreground">Salvato</span>
           )}
-          {error && (
+          {error && !loaded && (
+            <span role="alert" className="text-sm text-destructive">
+              {error} Riprova il caricamento.
+            </span>
+          )}
+          {error && !loaded && (
+            <Button onClick={onRetry} disabled={loading} size="sm" variant="outline">
+              Riprova caricamento
+            </Button>
+          )}
+          {error && loaded && (
             <span role="alert" className="text-sm text-destructive">
               {error} Riprova il salvataggio.
             </span>

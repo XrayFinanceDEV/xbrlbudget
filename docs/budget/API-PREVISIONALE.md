@@ -121,8 +121,9 @@ Il rifiuto esce come **422** con un `detail` strutturato, non una stringa
 **prima** dello schema — sulla riga, dentro gli elenchi di `financing_loans` e
 `tax_temporary_differences`, dentro `sp_overrides` e dentro i piani di `pregresso`. Un `null` che
 arrivasse a uno schema tipizzato sarebbe un `*_type` ("tipo sbagliato: serve un numero") su un
-campo che l'utente ha semplicemente lasciato vuoto. Misurato su questo branch: **2561** righe
-passano da `validate_bulk_rows` nei **178** test che chiamano il bulk, e due sole di esse risulterebbero
+campo che l'utente ha semplicemente lasciato vuoto. Misurato il **2026-09-13** su `c907fee`:
+**3761** righe passano da `validate_bulk_rows` in **1305** chiamate provenienti da **234** test,
+e due sole di esse risulterebbero
 rifiutate **per colpa dei `null`** — senza la pulizia si fermerebbero
 `tests/test_forecast_preview.py::test_null_and_fractional_inputs_match_persisted_numbers` e il caso
 omonimo di `tests/test_bulk_tipizzato.py`. Sono invece **tre** i payload dei test esistenti che

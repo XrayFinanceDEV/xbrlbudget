@@ -4,7 +4,10 @@
 
 ## 1. Perché
 
-La retrospettiva delle sessioni (24 agosto → 11 settembre, `docs/superpowers/retrospettive/2026-09-10-sessioni-agosto-settembre.md`) e il proprietario convergono su un guasto: le ricerche che precedono spec e piani poggiano su documentazione in parte falsa, e ciò che si scopre in esecuzione non torna nei documenti.
+La retrospettiva delle sessioni (24 agosto → 11 settembre; riferimento storico
+`docs/superpowers/retrospettive/2026-09-10-sessioni-agosto-settembre.md`, non più disponibile nel
+repository) e il proprietario convergono su un guasto: le ricerche che precedono spec e piani
+poggiano su documentazione in parte falsa, e ciò che si scopre in esecuzione non torna nei documenti.
 
 Lo strumento contro la deriva esiste già, `/riallinea` (`.claude/skills/riallinea/SKILL.md`, `scripts/riallinea.py`), ma nessuno lo lancia:
 - due rapporti in quattro settimane (`docs/superpowers/allineamento/2026-08-14.md`, `2026-09-10.md`), contro l'obiettivo «trovato entro una settimana» della sua spec (`docs/superpowers/specs/2026-08-14-agente-riallineamento-design.md:37`);

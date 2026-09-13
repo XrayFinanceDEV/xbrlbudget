@@ -22,22 +22,41 @@
 #
 # Environment overrides:
 #   GATE_PYTHON     Python interpreter that has the backend dependencies.
+#                   It is validated with an import-pytest sentinel, so a no-op
+#                   binary (e.g. /bin/true) can never fake a green backend gate.
 #                   Default order: backend/venv/bin/python,
 #                   backend/venv/Scripts/python.exe, then python3 on PATH.
-#   GATE_FRONTEND   Frontend directory. Default: <repo root>/frontend
+#
+# The frontend gates always run against <repo root>/frontend — there is no
+# source-directory override — and invoke node_modules/.bin binaries directly:
+# nothing is installed and nothing is ever fetched through npx at run time.
 #
 # Exit codes: 0 on success; otherwise the exit code of the first failing
-# subcommand; 2 for gate misuse (bad mode, missing interpreter or node_modules).
+# subcommand; 2 for gate misuse (bad mode, unusable interpreter, missing
+# local frontend binaries).
 
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
+FRONTEND="$ROOT/frontend"
+
+# Sentinel printed by a validated interpreter; guards against a no-op binary
+# (e.g. GATE_PYTHON=/bin/true) exiting 0 without ever importing pytest.
+PYTHON_SENTINEL="verify_report_gate.python_ok"
 
 die() {
     echo "verify_report_gate: $*" >&2
     exit 2
 }
+
+TMP_DB=""
+cleanup_tmp_db() {
+    if [ -n "$TMP_DB" ]; then
+        rm -f -- "$TMP_DB"
+    fi
+}
+trap cleanup_tmp_db EXIT
 
 pick_python() {
     if [ -n "${GATE_PYTHON:-}" ]; then
@@ -51,12 +70,12 @@ pick_python() {
     command -v python3 || command -v python || return 1
 }
 
-FRONTEND="${GATE_FRONTEND:-$ROOT/frontend}"
-
-require_frontend() {
+require_frontend_bin() {
     [ -d "$FRONTEND/node_modules" ] || \
-        die "no node_modules in $FRONTEND — run 'npm install' there first (this gate never installs dependencies)"
-    command -v npm >/dev/null 2>&1 || die "npm not on PATH"
+        die "no node_modules in $FRONTEND — run 'npm install' there first (this gate never installs and never fetches anything)"
+    [ -x "$FRONTEND/node_modules/.bin/$1" ] || \
+        die "frontend dependency '$1' missing from $FRONTEND/node_modules/.bin — run 'npm install' in frontend/ (this gate has no npx download fallback)"
+    command -v node >/dev/null 2>&1 || die "node not on PATH"
 }
 
 # run_gate <label> <command...> — fail-fast, preserves the command's exit code.
@@ -75,32 +94,34 @@ run_gate() {
 
 gate_backend() {
     py="$(pick_python)" || die "no Python interpreter found (set GATE_PYTHON or create backend/venv)"
-    tmp_db="$(mktemp "${TMPDIR:-/tmp}/verify_report_gate.XXXXXX.db")" || die "mktemp failed"
+    sentinel="$(GATE_PY_SENTINEL="$PYTHON_SENTINEL" "$py" -c 'import os, pytest; print(os.environ["GATE_PY_SENTINEL"])' 2>/dev/null || true)"
+    [ "$sentinel" = "$PYTHON_SENTINEL" ] || \
+        die "'$py' is not a Python interpreter that can import pytest (set GATE_PYTHON or create backend/venv)"
+    TMP_DB="$(mktemp "${TMPDIR:-/tmp}/verify_report_gate.XXXXXX.db")" || die "mktemp failed"
     # The test suite builds its own engines; the throwaway DATABASE_PATH is a
     # belt-and-braces guard so this gate can never touch a production DB file.
-    # shellcheck disable=SC2064
-    trap "rm -f '$tmp_db'" EXIT
+    # (TMP_DB is removed on exit by cleanup_tmp_db, safely for odd paths.)
     if [ $# -eq 0 ]; then
         set -- tests
     fi
-    env -u ANTHROPIC_API_KEY DATABASE_PATH="$tmp_db" \
+    env -u ANTHROPIC_API_KEY DATABASE_PATH="$TMP_DB" \
         "$py" -m pytest "$@" -q --ignore=tests/corpus -p no:cacheprovider \
         -W ignore::DeprecationWarning
 }
 
 gate_vitest() {
-    require_frontend
-    ( cd "$FRONTEND" && npx vitest run "$@" )
+    require_frontend_bin vitest
+    ( cd "$FRONTEND" && ./node_modules/.bin/vitest run "$@" )
 }
 
 gate_types() {
-    require_frontend
-    ( cd "$FRONTEND" && npx tsc --noEmit )
+    require_frontend_bin tsc
+    ( cd "$FRONTEND" && ./node_modules/.bin/tsc --noEmit )
 }
 
 gate_build() {
-    require_frontend
-    ( cd "$FRONTEND" && npm run build )
+    require_frontend_bin next
+    ( cd "$FRONTEND" && ./node_modules/.bin/next build )
 }
 
 mode="${1:-full}"
@@ -131,7 +152,7 @@ case "$mode" in
         run_gate "frontend: next production build" gate_build
         ;;
     -h|--help|help)
-        sed -n '2,30p' "${BASH_SOURCE[0]}"
+        awk 'NR>1 && /^set -u/{exit} /^#/{print}' "${BASH_SOURCE[0]}"
         ;;
     *)
         echo "usage: scripts/verify_report_gate.sh [full|backend|vitest|types|build] [extra args]" >&2

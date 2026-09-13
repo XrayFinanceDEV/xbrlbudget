@@ -15,25 +15,30 @@ nel comando documentato.
 scripts/verify_report_gate.sh                  # FULL: suite backend, Vitest, tsc, build
 scripts/verify_report_gate.sh full             # identico
 scripts/verify_report_gate.sh backend [PATH…]  # mirata: pytest (PATH sostituisce "tests")
-scripts/verify_report_gate.sh vitest  [ARG…]   # mirata: npx vitest run
-scripts/verify_report_gate.sh types            # mirata: npx tsc --noEmit
-scripts/verify_report_gate.sh build            # mirata: npm run build
+scripts/verify_report_gate.sh vitest  [ARG…]   # mirata: vitest run
+scripts/verify_report_gate.sh types            # mirata: tsc --noEmit
+scripts/verify_report_gate.sh build            # mirata: next build di produzione
 ```
 
 La modalità `full` è quella dei gate di integrazione; le modalità mirate sono
-per i task piccoli. I conteggi dei test li stampano i runner stessi: il
-criterio è **zero nuovi fallimenti**, mai una cifra storica fissata (la suite
-salta i test condizionali ai file corpus/debug non presenti nel checkout,
-quindi i numeri di skipped variano fra worktree).
+per i task piccoli. I gate frontend girano **sempre** su `<root>/frontend`:
+non esiste un override della sorgente, e i binari invocati sono quelli locali
+in `frontend/node_modules/.bin` (mai `npx`, che potrebbe scaricare). La
+riuso dei `node_modules` da un altro checkout è una scelta di setup esterna
+(es. symlink), non una opzione dello script.
+
+I conteggi dei test li stampano i runner stessi: il criterio è **zero nuovi
+fallimenti**, mai una cifra storica fissata (la suite salta i test condizionali
+ai file corpus/debug non presenti nel checkout, quindi i numeri di `skipped`
+variano fra worktree).
 
 ## Override di ambiente
 
 | Variabile | Default | Uso |
 |---|---|---|
-| `GATE_PYTHON` | `backend/venv/bin/python` → `backend/venv/Scripts/python.exe` → `python3` da PATH | interprete con le dipendenze backend (es. worktree senza venv proprio) |
-| `GATE_FRONTEND` | `<root>/frontend` | directory frontend con `node_modules` già installato |
+| `GATE_PYTHON` | `backend/venv/bin/python` → `backend/venv/Scripts/python.exe` → `python3` da PATH | interprete con le dipendenze backend (es. worktree senza venv proprio). Viene validato con un sentinel `import pytest`: un binario inerte (es. `/bin/true`) esce con errore 2 prima di qualsiasi esecuzione |
 
-Esempio (worktree senza venv né `node_modules`):
+Esempio (worktree senza venv):
 
 ```bash
 GATE_PYTHON=/path/al/budget/backend/venv/bin/python scripts/verify_report_gate.sh full
@@ -42,30 +47,38 @@ GATE_PYTHON=/path/al/budget/backend/venv/bin/python scripts/verify_report_gate.s
 ## Exit code
 
 `0` tutto verde; il codice del primo subcomando fallito (pytest/Vitest/tsc/build)
-in caso di gate rosso; `2` per uso errato o dipendenze assenti (il messaggio
-dice quale `npm install`/venv manca).
+in caso di gate rosso; `2` per uso errato o prerequisiti mancanti (interprete
+non valido, binari frontend locali assenti — il messaggio dice quale `npm
+install`/venv manca).
 
 ## Perché il Jenkinsfile non esegue il gate (decisione M1-00)
 
-Nessuna stage `Test` è stata aggiunta: nell'ambiente Jenkins attuale il gate
-non è eseguibile in modo sano, per tre motivi misurati sul repo:
+Nessuna stage `Test` è stata aggiunta. Fatti misurati nel repo, non ipotesi
+sull'ambiente:
 
-1. **L'agente Jenkins non ha le dipendenze.** Ogni stage del `Jenkinsfile` è
-   solo `docker compose` / `checkout`: non esiste alcun `pip install` né
-   `npm ci`, quindi `pytest`, `vitest`, `tsc` e `next build` non hanno un
-   interprete/node_modules dove girare. Installarli a ogni build viola la
-   regola "lo script non installa dipendenze" e non sta nel `timeout` di
-   15 minuti accanto al `docker compose build --no-cache` già esistente.
-2. **Il gate non gira nemmeno dentro l'immagine.** `Dockerfile.backend` copia
-   solo il codice di produzione (`config.py`, `database/`, `calculations/`,
-   `importers/`, `pdf_service/`, `backend/`): `tests/` e i file corpus non
-   entrano nell'immagine, e aggiungerli richiederebbe di modificare i
-   Dockerfile, fuori dallo scope di M1-00.
-3. **La health check non è un gate di regressione** (lo dice esplicitamente il
-   piano): continua a non esserlo, e il gate va lanciato a mano (o in CI
-   dedicata) prima di spingere su un integration branch.
+1. **Il `Jenkinsfile` non definisce alcun punto di preparazione delle
+   dipendenze.** Le sue stage sono `Checkout`, `Generate env`, `Build`,
+   `Deploy`, `Health check`, `Cleanup`; ogni step è `checkout`, `writeFile` o
+   comandi `docker compose`/`sh` di deploy. Non c'è nessuna fase in cui un
+   venv Python o i `node_modules` del frontend vengano creati o aggiornati
+   sull'agente, e lo script del gate richiede entrambi già presenti (non
+   installa nulla).
+2. **Nessuna immagine del repo contiene i test.** `Dockerfile.backend` copia
+   solo codice di produzione (`config.py`, `database/`, `calculations/`,
+   `importers/`, `pdf_service/`, `backend/`, `migrate_db.py`); `tests/` e i
+   file corpus non entrano nell'immagine, quindi il gate non può girare
+   nemmeno come container one-shot a partire dagli artefatti esistenti.
+   Copiare `tests/` o aggiungere una variante `dev` significherebbe modificare
+   i Dockerfile, fuori dallo scope di M1-00.
+3. La pipeline ha un `timeout(time: 15, unit: 'MINUTES')` e una stage `Build`
+   con `docker compose build --no-cache --parallel`: il tempo residuo
+   disponibile per eventuali step di test sull'agente, alle condizioni reali
+   di quella macchina, **non è stato misurato** e non viene affermato nulla
+   al riguardo.
 
-Appena esisterà un agente con venv e `node_modules` (o un'immagine `dev` con
-`tests/` copiata), la stage `Test` che chiama
-`scripts/verify_report_gate.sh full` prima di `Deploy` è un'aggiunta di una
-decina di righe, senza modifiche allo script.
+La decisione registrata è quindi: il gate resta eseguito fuori dalla pipeline
+(a mano o da una CI dedicata) fino a quando chi possiede il deploy sceglie
+dove farlo girare — un'immagine con `tests/` e dipendenze, oppure una fase di
+setup sull'agente. Entrambe le vie sono modifiche ad altri file, non allo
+script, che è già pronto per essere invocato da una stage `Test` con una riga:
+`sh 'scripts/verify_report_gate.sh full'` prima di `Deploy`.

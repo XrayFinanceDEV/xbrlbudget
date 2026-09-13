@@ -429,6 +429,13 @@ imposte modificate: le imposte proiettate arrivano al motore come `ce20_override
 sull'aliquota. Il resto — precedenza degli override, che cosa li azzera, come si legge
 `forecast_generated` — è in [`docs/budget/API-PREVISIONALE.md`](../budget/API-PREVISIONALE.md).
 
+La stessa risposta porta sempre `diagnostics`. `app/pratica/page.tsx` le conserva dopo il calcolo e
+`ForecastDiagnostics` le mostra in Proiezione, Indicatori e Stampa; `warning` usa un avviso normale,
+`error` la variante distruttiva. L'errore non impedisce di ispezionare i passi successivi: il blocco
+della promozione resta al gate semantico server-side, che è l'unico giudice dei dati persistiti.
+Quando l'utente cambia un override o invalida i dati a monte, la lista viene svuotata insieme alla
+proiezione per non mostrare un rilievo riferito a numeri vecchi.
+
 > **Trappola:** `buildBalanceItemsWithTotals` non deve **mai** sovrascrivere
 > `annualized_value` quando è chiamata da `calculateProjectedBS`. La Proiezione usa quel campo
 > per trasportare i valori di SP proiettati; la riconciliazione per anno tocca solo

@@ -110,14 +110,11 @@ def test_i_crediti_verso_clienti_si_portano_avanti_dal_parziale_quando_il_riferi
     ref = _stato_sp06(sp06_crediti_breve=_RIF_TOTALE, sp06g_crediti_altri_breve=_RIF_TOTALE,
                        sp11_capitale=D("700000"))
     bs, diagnostics = _proietta_crediti(ref, D("1000000"), _PARZIALE)
-    # `sp06` qui non e' piu' 200.000,00: il fixture porta 5.000,00 di credito tributario
-    # d'apertura e dal Task 3 quel credito si incassa, con contropartita su `sp06g` (il
-    # lato che si e' davvero mosso). L'aggregato scende di 5.000,00 e la cassa sale di
-    # 5.000,00: la massa non e' persa, si e' spostata da un credito a una disponibilita'.
-    assert bs.sp06_crediti_breve == D("195000.00")  # 200.000,00 - 5.000,00 incassati
-    assert bs.sp09_disponibilita_liquide == D("425000.00")
-    assert (D("200000.00") - bs.sp06_crediti_breve
-            == bs.sp09_disponibilita_liquide - D("420000.00") == D("5000.00"))
+    # Il riferimento non porta crediti fiscali: tutti i 200.000 sono il pool
+    # operativo da proiettare. Il credito tributario del parziale si chiude nel
+    # proprio campo governato, senza consumare il secchio `g`.
+    assert bs.sp06_crediti_breve == D("200000.00")
+    assert bs.sp09_disponibilita_liquide == D("420000.00")
     assert bs.sp06a_crediti_clienti_breve == D("156521.74")  # non piu' zero
     codici = [d['code'] for d in diagnostics]
     assert 'reference_receivables_undetailed' in codici
@@ -147,18 +144,10 @@ def test_il_credito_tributario_non_riceve_una_quota_dalla_ripartizione_poi_scart
     quota proporzionale, che il calcolo fiscale automatico (manual_tax_position
     False, nessun sp06e_growth_pct/sp16e_growth_pct impostato) scarta subito
     dopo sostituendola col proprio valore -- la massa scartata spariva in
-    cassa (indagine-2): prima della correzione sp06 finale 160.000,00 invece
-    di 200.000,00 (mancano esattamente i 40.000,00 di sp06e), sp09
-    460.000,00 invece di 420.000,00. Dopo: sp06e e' escluso dalla
-    ripartizione PRIMA che avvenga, e l'aggregato torna a conservare la
-    massa esattamente."""
+    cassa (indagine-2). Ora i 40.000 fiscali sono esclusi anche dal rapporto:
+    il pool operativo vero è 160.000, non 200.000 da riclassificare."""
     ref = _stato_sp06(sp06_crediti_breve=_RIF_TOTALE, sp06e_crediti_tributari_breve=D("40000"),
                        sp06g_crediti_altri_breve=D("160000"), sp11_capitale=D("700000"))
     bs, _diagnostics = _proietta_crediti(ref, D("1000000"), _PARZIALE)
-    # Nessuna massa persa nemmeno qui, ma dal Task 3 i 5.000,00 di credito tributario
-    # d'apertura del parziale non stanno piu' dentro `sp06`: sono cassa. La conserva-
-    # zione va letta sulle due righe insieme, non piu' sull'aggregato da solo.
-    assert bs.sp06_crediti_breve == D("195000.00")
-    assert bs.sp09_disponibilita_liquide == D("425000.00")
-    assert (D("200000.00") - bs.sp06_crediti_breve
-            == bs.sp09_disponibilita_liquide - D("420000.00") == D("5000.00"))
+    assert bs.sp06_crediti_breve == D("160000.00")
+    assert bs.sp09_disponibilita_liquide == D("460000.00")

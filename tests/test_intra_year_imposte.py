@@ -1,5 +1,4 @@
 """Al 31/12 l'infrannuale lascia solo il saldo d'imposta dell'anno (lotto 3A, Task 5, decisione 4 del proprietario)."""
-import re
 from decimal import Decimal as D
 
 import pytest
@@ -208,20 +207,8 @@ def _infrannuale_grezzo(db, *, riferimento=True, rif=None, parziale=None,
     return azienda, scenario
 
 
-def _proietta(db, scenario, *, con_conguaglio=True):
-    """Esegue la proiezione; `con_conguaglio=False` neutralizza SOLO il blocco del
-    Task 3, cioè la stessa identica proiezione di prima di questo change. Sul codice
-    precedente il metodo non esiste: la corsa "senza" è allora identica a quella
-    "con", e l'asserzione differenziale cade sul numero — prova rossa pulita."""
-    originale = getattr(IntraYearEngine, '_applica_conguaglio_tributario', None)
-    if not con_conguaglio and originale is not None:
-        IntraYearEngine._applica_conguaglio_tributario = (
-            lambda self, sp16g, sp06g, correzione: (sp16g, sp06g))
-    try:
-        result = IntraYearEngine(db).generate_projection(scenario.id)
-    finally:
-        if originale is not None:
-            IntraYearEngine._applica_conguaglio_tributario = originale
+def _proietta(db, scenario):
+    result = IntraYearEngine(db).generate_projection(scenario.id)
     sp = db.query(ForecastYear).filter(ForecastYear.scenario_id == scenario.id).one().balance_sheet
     return sp, result
 
@@ -233,108 +220,34 @@ _RIF_MISTOSENZAG = dict(sp16a_debiti_banche_breve=D("600000"),
                         sp16d_debiti_fornitori_breve=D("200000"))
 
 
-def test_il_conguaglio_riporta_la_cassa_a_cash_out_anche_con_sp16_a_composizione_mista():
-    """Debito di riferimento 200.000,00 tributari + 200.000,00 altri; quello vero del
-    parziale 400.000,00. La rotation posa su `sp16e` la quota del riferimento
-    (x = 200.000,00), il kernel la sostituisce con 0 e `cash_out` dice 400.000,00:
-    prima di questo change la cassa si muoveva di −200.000,00 (solo la sostituzione
-    di riga), gli altri 200.000,00 sparivano nel plug senza alcun flusso."""
-    db = _sessione()
-    _, scenario = _infrannuale_grezzo(
-        db, rif=_RIF_MISTO,
-        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("400000")))
-    cassa_senza, _ = _proietta(db, scenario, con_conguaglio=False)
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(
-        db2, rif=_RIF_MISTO,
-        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("400000")))
-    sp, result = _proietta(db2, scenario2)
-    cash_out = D("400000")                       # kernel: apertura 400.000, niente imposta nuova
-    x = D("200000")                              # quota-riferimento su sp16e
-    assert sp.sp09_disponibilita_liquide == cassa_senza.sp09_disponibilita_liquide + (
-        -cash_out - (D("0") - x))
-    assert sp.sp16e_debiti_tributari_breve == D("0.00")
-    assert sp.sp16g_altri_debiti_breve == D("0.00")          # il conguaglio se l'è presa tutta
-    assert sp.sp16a_debiti_banche_breve == D("600000.00")    # il finanziario non si tocca (Task 1)
-    assert sp.total_assets == sp.total_liabilities
-    assert not [d for d in result['diagnostics']
-                if d['code'] == 'tax_settlement_reclass_below_zero']
+def test_la_posizione_tributaria_non_partecipa_alla_rotazione_dei_debiti_operativi():
+    """La capienza di un secchio del riferimento non governa più il pagamento.
 
-
-def test_il_credito_tributario_d_apertura_esce_dagli_altri_crediti_mai_da_un_passivita():
-    """Apertura: debito tributario 200.000,00 e credito tributario 300.000,00, nessuna
-    imposta nuova → `cash_out` = −100.000,00, un INCASSO. Il conguaglio viene positivo
-    e la contropartita giusta è l'attivo (`sp06g`, dove il Task 2 ha riclassificato la
-    massa del credito), non un aumento di `sp16g`: la prima stesura del brief faceva
-    quello e su uno scenario reale fabbricava 144.188,46 di passività (ruling del
-    coordinatore, 2026-09-12)."""
-    db = _sessione()
-    _, scenario = _infrannuale_grezzo(
-        db,
-        rif=dict(sp16a_debiti_banche_breve=D("600000"), sp16e_debiti_tributari_breve=D("200000"),
-                 sp16g_altri_debiti_breve=D("200000"),
-                 sp06a_crediti_clienti_breve=D("1000000")),
-        parziale=dict(sp11_capitale=D("2000000"),
-                      sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("200000"),
-                      sp06a_crediti_clienti_breve=D("400000"),
-                      sp06e_crediti_tributari_breve=D("300000"),
-                      sp06g_crediti_altri_breve=D("200000")))
-    cassa_senza, _ = _proietta(db, scenario, con_conguaglio=False)
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(
-        db2,
-        rif=dict(sp16a_debiti_banche_breve=D("600000"), sp16e_debiti_tributari_breve=D("200000"),
-                 sp16g_altri_debiti_breve=D("200000"),
-                 sp06a_crediti_clienti_breve=D("1000000")),
-        parziale=dict(sp11_capitale=D("2000000"),
-                      sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("200000"),
-                      sp06a_crediti_clienti_breve=D("400000"),
-                      sp06e_crediti_tributari_breve=D("300000"),
-                      sp06g_crediti_altri_breve=D("200000")))
-    sp, result = _proietta(db2, scenario2)
-    # con - senza = il solo conguaglio = -cash_out - (chiusura - x) = +300.000,00
-    assert sp.sp09_disponibilita_liquide == cassa_senza.sp09_disponibilita_liquide + (
-        D("100000") - (D("0") - D("200000")))
-    assert sp.sp16g_altri_debiti_breve == D("200000.00")    # nessuna passività inventata
-    assert sp.sp06g_crediti_altri_breve == D("33333.33")    # 1.000.000 * 200/600 - 300.000
-    assert sp.sp06_crediti_breve == D("700000.00")          # aggregato ridotto di 300.000
-    assert sp.total_assets == sp.total_liabilities
-    assert not [d for d in result['diagnostics']
-                if d['code'] == 'tax_settlement_reclass_below_zero']
-
-
-def test_la_capienza_insufficiente_lato_passivo_si_dichiara_e_non_si_inventa():
-    """`sp16g` del riferimento è a zero (la massa sta sui fornitori): il conguaglio di
-    −400.000,00 non ha dove posarsi. Si applica quel che ci sta (nulla), si dichiara il
-    residuo, e la cassa resta dov'era — una passività negativa sarebbe massa inventata,
-    e un secondo bersaglio è il vecchio plug."""
+    Il parziale apre con 600.000 di debito tributario e nessun debito operativo;
+    il riferimento contiene 200.000 di fornitori e 200.000 tributari. A fine anno
+    restano i soli 200.000 di fornitori proiettati: il debito tributario si chiude
+    per intero e la cassa registra −600.000 + 200.000, indipendentemente da sp16g.
+    """
     db = _sessione()
     _, scenario = _infrannuale_grezzo(
         db, rif=_RIF_MISTOSENZAG,
         parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
                       sp16e_debiti_tributari_breve=D("600000")))
-    cassa_senza, _ = _proietta(db, scenario, con_conguaglio=False)
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(
-        db2, rif=_RIF_MISTOSENZAG,
-        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("600000")))
-    sp, result = _proietta(db2, scenario2)
-    assert sp.sp09_disponibilita_liquide == cassa_senza.sp09_disponibilita_liquide
+    sp, result = _proietta(db, scenario)
+    assert sp.sp09_disponibilita_liquide == D("2800000.00")
+    assert sp.sp16e_debiti_tributari_breve == D("0.00")
+    assert sp.sp16d_debiti_fornitori_breve == D("200000.00")
     assert sp.sp16g_altri_debiti_breve == D("0.00")
-    guardia = [d for d in result['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
-    assert len(guardia) == 1 and D(guardia[0]['amount']) == D("-400000.00")
-    assert guardia[0]['field'] == 'sp16g_altri_debiti_breve'
+    assert sp.sp16a_debiti_banche_breve == D("600000.00")
+    assert sp.total_assets == sp.total_liabilities
+    assert not [d for d in result['diagnostics']
+                if d['code'] == 'tax_settlement_reclass_below_zero']
 
 
-def test_la_capienza_insufficiente_lato_attivo_si_dichiara_e_non_si_inventa():
-    """Stesso meccanismo sul lato credito: il conguaglio positivo di 300.000,00 trova
-    solo 16.666,67 di `sp06g` (la composizione del parziale è quasi tutta clienti).
-    Si azzera quel campo, il residuo si dichiara, e nessun debito sale."""
+def test_il_credito_tributario_si_incassa_senza_consumare_altri_crediti():
+    """L'incasso del credito fiscale è dato dal passaggio apertura→chiusura della
+    posizione governata. Non deve essere limitato dalla quota casuale di sp06g.
+    """
     db = _sessione()
     _, scenario = _infrannuale_grezzo(
         db,
@@ -344,137 +257,39 @@ def test_la_capienza_insufficiente_lato_attivo_si_dichiara_e_non_si_inventa():
         parziale=dict(sp11_capitale=D("2000000"),
                       sp16a_debiti_banche_breve=D("600000"),
                       sp16e_debiti_tributari_breve=D("200000"),
-                      sp06a_crediti_clienti_breve=D("590000"),
+                      sp06a_crediti_clienti_breve=D("400000"),
                       sp06e_crediti_tributari_breve=D("300000"),
-                      sp06g_crediti_altri_breve=D("10000")))
-    cassa_senza, _ = _proietta(db, scenario, con_conguaglio=False)
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(
-        db2,
-        rif=dict(sp16a_debiti_banche_breve=D("600000"), sp16e_debiti_tributari_breve=D("200000"),
-                 sp16g_altri_debiti_breve=D("200000"),
-                 sp06a_crediti_clienti_breve=D("1000000")),
-        parziale=dict(sp11_capitale=D("2000000"),
-                      sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("200000"),
-                      sp06a_crediti_clienti_breve=D("590000"),
-                      sp06e_crediti_tributari_breve=D("300000"),
-                      sp06g_crediti_altri_breve=D("10000")))
-    sp, result = _proietta(db2, scenario2)
-    assert sp.sp06g_crediti_altri_breve == D("0.00")
+                      sp06g_crediti_altri_breve=D("200000")))
+    sp, result = _proietta(db, scenario)
+    assert sp.sp09_disponibilita_liquide == D("1800000.00")
     assert sp.sp16g_altri_debiti_breve == D("200000.00")
-    guardia = [d for d in result['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
-    assert len(guardia) == 1
-    assert abs(D(guardia[0]['amount']) - D("283333.33")) <= D("0.01")   # l'importo non è ancora quantizzato ai centesimi
-    assert guardia[0]['field'] == 'sp06g_crediti_altri_breve'
+    assert sp.sp06g_crediti_altri_breve == D("333333.33")
+    assert sp.sp06_crediti_breve == D("1000000.00")
+    assert sp.sp06e_crediti_tributari_breve == D("0.00")
+    assert sp.total_assets == sp.total_liabilities
+    assert not [d for d in result['diagnostics']
+                if d['code'] == 'tax_settlement_reclass_below_zero']
 
 
-def test_l_importo_della_diagnostica_e_quantizzato_al_centesimo():
-    """Rilievo del giro di correzione 2: `amount` era lo `str()` di un `Decimal` grezzo,
-    e il grezzo qui nasce da una divisione di rotazione. Due facce dello stesso difetto,
-    entrambe misurate su fixture reali: '283333.3333333333333333333333' (ventotto
-    decimali, lato credito) e '-400000.000' (il centesimo c'e', ma non e' normalizzato,
-    lato debito). Dal giro 1 il messaggio non porta piu' importi, quindi la divergenza
-    fra testo e payload non si vede piu' a schermo: resta nel payload, che e' cio' che
-    un consumatore a valle legge. Si quantizza, non si ricalcola: il segno e' quello di
-    `correzione - applicato`."""
-    _RIF_C = dict(sp16a_debiti_banche_breve=D("600000"), sp16e_debiti_tributari_breve=D("200000"),
-                  sp16g_altri_debiti_breve=D("200000"), sp06a_crediti_clienti_breve=D("1000000"))
-    _PAR_C = dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                  sp16e_debiti_tributari_breve=D("200000"), sp06a_crediti_clienti_breve=D("590000"),
-                  sp06e_crediti_tributari_breve=D("300000"), sp06g_crediti_altri_breve=D("10000"))
-
-    db = _sessione()
-    _, scenario = _infrannuale_grezzo(db, rif=_RIF_C, parziale=_PAR_C)
-    _, result = _proietta(db, scenario)
-    guardia = [d for d in result['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
-    assert len(guardia) == 1
-    assert re.fullmatch(r'-?\d+\.\d{2}', guardia[0]['amount']), guardia[0]['amount']
-    assert guardia[0]['amount'] == "283333.33"          # 283.333,333...HALF_UP, segno invariato
-    assert D(guardia[0]['amount']) > D("0")
-
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(
-        db2, rif=_RIF_MISTOSENZAG,
-        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("600000")))
-    _, result2 = _proietta(db2, scenario2)
-    guardia2 = [d for d in result2['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
-    assert len(guardia2) == 1
-    assert re.fullmatch(r'-?\d+\.\d{2}', guardia2[0]['amount']), guardia2[0]['amount']
-    assert guardia2[0]['amount'] == "-400000.00"        # -400000.000 normalizzato, non ricalcolato
-    assert D(guardia2[0]['amount']) < D("0")
-
-
-def test_senza_riferimento_il_conguaglio_guarda_anche_il_lato_credito():
-    """Ramo annualizzato (nessun anno pieno importato): qui il Task 2 non è passato e
-    la riga combinata `sp06e, sp16e = ...` gira dopo i riassorbimenti, quindi perde
-    massa su ENTRAMBI i lati. Il conguaglio deve misurarsi su tutti e due (forma della
-    bozza originale, `credito_pre_swap`): con la sola quota debito la cassa si
-    muoverebbe di −300.000,00 invece dei −400.000,00 dichiarati da `cash_out`."""
+def test_senza_riferimento_il_cash_out_deriva_dalla_posizione_e_dal_ce():
+    """Sul ramo annualizzato il movimento completo nasce già da utile e saldi
+    fiscali: −100.000 di imposta residua, −100.000 di debito chiuso e +200.000
+    di credito finale producono i −400.000 dichiarati dal kernel, senza plug.
+    """
     db = _sessione()
     T5PAR = dict(sp11_capitale=D("2000000"),
                  sp16a_debiti_banche_breve=D("100000"),
                  sp16e_debiti_tributari_breve=D("100000"),
                  sp16g_altri_debiti_breve=D("100000"),
                  sp06a_crediti_clienti_breve=D("200000"))
-    _, scenario = _infrannuale_grezzo(db, riferimento=False, parziale=T5PAR,
-                                      acconti=D("300000"), current_tax=D("100000"))
-    cassa_senza, _ = _proietta(db, scenario, con_conguaglio=False)
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(db2, riferimento=False, parziale=T5PAR,
-                                       acconti=D("300000"), current_tax=D("100000"))
-    sp, result = _proietta(db2, scenario2)
-    # cash_out = 400.000,00; righe: debito -100.000,00 e credito +200.000,00 => -300.000,00
-    # di implicito: il conguaglio che manca \u00e8 -100.000,00, non -300.000,00.
-    assert sp.sp09_disponibilita_liquide == cassa_senza.sp09_disponibilita_liquide - D("100000")
-    assert sp.sp16g_altri_debiti_breve == D("0.00")
+    _, scenario = _infrannuale_grezzo(
+        db, riferimento=False, parziale=T5PAR,
+        acconti=D("300000"), current_tax=D("100000")
+    )
+    sp, result = _proietta(db, scenario)
+    assert sp.sp09_disponibilita_liquide == D("1700000.00")
+    assert sp.sp16g_altri_debiti_breve == D("100000.00")
     assert sp.sp06e_crediti_tributari_breve == D("200000.00")
     assert sp.total_assets == sp.total_liabilities
     assert not [d for d in result['diagnostics']
                 if d['code'] == 'tax_settlement_reclass_below_zero']
-
-
-def test_il_messaggio_del_residuo_non_mostra_mai_una_capienza_negativa():
-    """Rilievo 1 del giro di correzione sul Task 3 (revisione 2026-09-12). Sul lato debito
-    `applicato` e' NEGATIVO per costruzione (`applicato = -min(-correzione, capienza)`), e
-    il testo lo inseriva comunque nella frase "trova solo X di capienza": sullo scenario
-    5 reale usciva "trova solo -3.614,28 di capienza". Una capienza esiste o non esiste.
-
-    Il payload non cambia -- `amount` resta il residuo, in segno e valore: e' la frase che
-    va corretta, e questo test la fissa. Nessuna cifra nel testo (brief, 'Trappole note':
-    `eur_it` non si usa qui, come in `unfunded_financing_requirement`), quindi nessun
-    numero negativo puo' ricomparirci perche' non ce n'e' nessuno.
-    """
-    db = _sessione()
-    _, scenario = _infrannuale_grezzo(
-        db, rif=_RIF_MISTO,
-        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("500000")))
-    sp, result = _proietta(db, scenario)
-    # Apertura 500.000,00, quota di rotazione x 200.000,00 -> conguaglio -300.000,00 su
-    # una capienza di 200.000,00: se ne applica -200.000,00, il residuo e' -100.000,00.
-    assert sp.sp16g_altri_debiti_breve == D("0.00")
-    guardia = [d for d in result['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
-    assert len(guardia) == 1
-    assert D(guardia[0]['amount']) == D("-100000.00")
-    assert guardia[0]['field'] == 'sp16g_altri_debiti_breve'
-    messaggio = guardia[0]['message']
-    assert 'sp16g_altri_debiti_breve' in messaggio          # il campo lo nomina comunque
-    assert 'supera la capienza disponibile' in messaggio   # capienza parziale
-    assert not re.search(r'-\s*\d', messaggio), messaggio          # nessuna cifra negativa
-    assert not re.search(r'\d{1,3}(\.\d{3})*,\d{2}', messaggio), messaggio  # nessun eur_it
-
-    # Capienza zero: la frase deve DIRE che la capienza non c'e', restando senza numeri.
-    db2 = _sessione()
-    _, scenario2 = _infrannuale_grezzo(
-        db2, rif=_RIF_MISTOSENZAG,
-        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
-                      sp16e_debiti_tributari_breve=D("600000")))
-    sp2, result2 = _proietta(db2, scenario2)
-    assert sp2.sp16g_altri_debiti_breve == D("0.00")
-    guardia2 = [d for d in result2['diagnostics'] if d['code'] == 'tax_settlement_reclass_below_zero']
-    assert len(guardia2) == 1
-    assert D(guardia2[0]['amount']) == D("-400000.00")
-    assert 'non trova alcuna capienza' in guardia2[0]['message']
-    assert not re.search(r'-\s*\d', guardia2[0]['message']), guardia2[0]['message']

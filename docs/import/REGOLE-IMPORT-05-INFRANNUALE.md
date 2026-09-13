@@ -133,64 +133,18 @@ immutata, e il budget nato dal promote ereditava quel debito. Nel motore la cass
 a dichiarare `cash_out` e il test end-to-end a verificarlo. `sp17e` (rate oltre l'anno) non si tocca, e la via
 manuale (`sp06e_growth_pct` o `sp16e_growth_pct` valorizzati) continua a saltare la posizione automatica.
 
-**La differenza fra `cash_out` e le righe è il conguaglio, e si posa sul lato che si è mosso.**
-`sp16e` e `sp06e` non nascono dal kernel: nascono dalla **rotazione** del circolante (Task 1/2), che
-porta via la percentuale di crescita del riferimento, e posano la massa non riconosciuta su
-`sp16g`/`sp06g`. Quando la sostituzione fiscale li riscrive, dal `g` se ne va (o ci torna) la
-**quota di rotazione `x`**, non il debito di apertura `P_d` che è quello che `cash_out` misura. La
-riga da sola muove dunque cassa per `(chiusura − x)`, non per `cash_out`, e lo scarto era assorbito
-dal plug senza che nessun flusso lo nominasse:
+**La posizione fiscale è fuori dalle rotazioni del circolante.** In modalità automatica
+`sp06e` e `sp16e` vengono sottratti dagli stock di riferimento e dagli stock parziali prima di
+calcolare DSO/DPO; se sono configurate differenze temporanee, anche `sp06f` è escluso. Il rapporto
+proietta quindi soltanto crediti e debiti operativi reali, mentre i campi fiscali ricevono
+direttamente la chiusura del kernel.
 
-```
-correzione = −cash_out − [(chiusura_debito − x_debito) − (chiusura_credito − x_credito)]
-```
-
-La contropartita la sceglie il **verso**, e una sola (ruling del coordinatore, 2026-09-12):
-conguaglio **negativo** → `sp16g_altri_debiti_breve` **scende** (stiamo pagando un debito, non
-incrementandolo); conguaglio **positivo** → `sp06g_crediti_altri_breve` scende, cioè si scarica
-l'**attivo** (stiamo incassando). **Mai** un aumento di passività a fronte di un incasso: la prima
-stesura di questa regola, che applicava il solo lato debito in entrambi i casi, su uno scenario reale
-del database fabbricava **+144.188,46 di `sp16g`**, peggiorando la PFN senza alcun evento.
-Nessun campo scende sotto zero: si applica la parte che ci sta e il residuo si dichiara con
-`tax_settlement_reclass_below_zero` (campo nominato e importo **quantizzato al centesimo**, come ogni
-altro importo del motore — `residuo` nasce da una divisione di rotazione e senza quantizzazione
-usciva con ventotto decimali), lasciando la cassa dov'è. Un secondo
-bersaglio sarebbe il vecchio plug. Nel **testo** del messaggio non c'è alcun importo, solo il nome del
-campo: la cifra che conta vive nel payload `amount`. Dire "trova solo X di capienza" avrebbe infatti
-significato, sul lato debito, mostrare una capienza **negativa** (`applicato` è negativo per
-costruzione), e una capienza esiste o non esiste (rilievo di revisione, 2026-09-12).
-
-**Il residuo dichiarato è misurato *prima* degli `sp_overrides`, e può quindi sottostimare.** Se un
-override insiste sullo stesso campo neutro (`sp16g` o `sp06g`), la parte che il conguaglio ha applicato
-viene sovrascritta dall'override — un override vince sulla riga, per costruzione — la cassa non si muove
-per nulla, e il warning riporta solo ciò che il motore non era riuscito a collocare: resta corto
-dell'importo cancellato. Vale per qualunque anno e qualunque campo neutro, non è la particolarità di
-uno scenario; chi legge quel warning deve sapere che può sottostimare, e perché.
-
-I due rami non sono simmetrici, e non per disattenzione: sul **ramo col riferimento** il Task 2 ha
-già portato `sp06e` al valore governato **prima** dei riassorbimenti, quindi il credito non lascia
-alcun residuo implicito e la formula è **solo debito** (`x_credito = chiusura_credito` per
-costruzione); sul **ramo annualizzato** (nessun anno pieno importato) la riga combinata
-`sp06e, sp16e = ...` gira **dopo** i riassorbimenti e perde massa su entrambi i lati, quindi lì la
-forma è **bidirezionale**. Non si è riordinato nulla: il change aggiunge solo il flusso dichiarato.
-
-Misurato sugli 8 scenari infrannuali del database di riferimento (cinque producono una proiezione;
-gli altri tre falliscono prima per dati mancanti, invariati prima e dopo). **L'ancora della colonna
-«Prima» è l'albero dopo i Task 1-2, commit `4d5bce4`** — non la base dell'ondata, contro la quale lo
-scenario 4 risulterebbe invece già sbilanciato di 5.509,29:
-
-| Scenario | Prima | Dopo |
-|---|---|---|
-| 4 | cassa 15.271,65, `sp16g` 26.093,20, foglio quadrato | cassa 0,00 (clamp), `sp16g` 8.964,79, sbilancio 1.856,76 dichiarato da `unfunded_financing_requirement` — un fabbisogno che prima non esisteva |
-| 5 | `sp16g` 20.617,43, cassa invariata | persistito **identico**, ma con residuo dichiarato −30.712,76: la parte applicata (3.614,28) viene cancellata da `sp_overrides.sp16g` dell'utente — l'istanza della regola qui sopra |
-| 8 | `sp16g` 0,00, cassa invariata | cassa **ferma** com'era, `sp16g` 0,00 (nessuna passività negativa), residuo dichiarato −14.306,93 |
-| 12 (ramo annualizzato) | `sp16g` 134.484,00 | `sp16g` 123.086,00, cassa −11.398,00, nessun residuo |
-| 18 (conguaglio positivo) | `sp06g` 33.131,63, cassa 1.468.473,63 | `sp06g` 0,00, cassa 1.501.605,26, `sp16g` **invariato**, residuo dichiarato +111.056,83 |
-
-Su `tests/test_intra_year_crediti_commerciali.py` la stessa regola muove di 5.000,00 l'aggregato
-`sp06`: il fixture porta 5.000,00 di credito tributario d'apertura, e da qui quel credito si incassa.
-La massa non è persa, passa dall'attivo alla liquidità — le due asserzioni leggevano 200.000,00
-perché prima di questo change non c'era alcun meccanismo che lo muovesse.
+Questa separazione rende inutile un conguaglio su `sp06g` o `sp16g`: la variazione fra posizione
+fiscale di apertura e di chiusura, insieme all'imposta dei mesi residui già inclusa nel risultato
+economico, produce per identità esattamente `cash_out`. La capienza di una voce «altri» non decide
+più se un pagamento o un incasso fiscale esiste. Sui due casi reali che prima lasciavano residui
+(scenari 8 e 18 del database di riferimento), `tax_settlement_reclass_below_zero` non viene più
+emessa perché il residuo non nasce più.
 
 **Se la cassa del parziale non copre quell'uscita** (debito tributario di apertura maggiore della cassa
 disponibile), il plug generale dell'infrannuale — §5 sotto, "Il fabbisogno scoperto è un diagnostico, non un
@@ -214,7 +168,9 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 `forecast_generated`. È questa la route di produzione usata dall'infrannuale:
 le diagnostiche del motore non richiedono una seconda chiamata a `POST /generate`.
 Il percorso le mostra nelle tre viste a valle — Proiezione, Indicatori e Stampa —
-distinguendo visivamente `warning` da `error`. La lista vuota è dichiarata anche
+distinguendo visivamente `warning` da `error`. Una diagnostica d'errore non nasconde le viste:
+la promozione viene eventualmente fermata dal gate semantico server-side sui dati persistiti.
+La lista vuota è dichiarata anche
 quando non ci sono rilievi; una chiave assente non è usata come sinonimo di esito
 pulito.
 
@@ -230,7 +186,7 @@ pulito.
 | **Capitale e riserve** | **presi dal parziale così come sono** |
 | **Risultato** | = risultato del CE proiettato, per costruzione |
 | **Fondo TFR** | parziale + accantonamento dei mesi residui |
-| **Debiti a breve** | **debito finanziario (banche/altri finanziatori/obbligazioni)**: invariato dal parziale, come i debiti a lungo sotto; **residuo operativo** (fornitori/tributari/previdenziali/altri): con riferimento proporzionale ai costi operativi proiettati (salvo rapporto degenere, sotto), senza riferimento invariato |
+| **Debiti a breve** | **debito finanziario (banche/altri finanziatori/obbligazioni)**: invariato dal parziale, come i debiti a lungo sotto; **residuo operativo non fiscale** (fornitori/previdenziali/altri): con riferimento proporzionale ai costi operativi proiettati (salvo rapporto degenere, sotto), senza riferimento invariato; `sp16e` è governato dalla posizione tributaria |
 | **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti; la quota del prestito nuovo che scade l'anno dopo sta nei debiti a breve, e il debito bancario pregresso si riduce solo con le proprie rate |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
 
@@ -265,6 +221,15 @@ promote a budget lo rifiutava — correttamente. Il ripiego emette un diagnostic
 verificata in **Rettifiche**. È la stessa regola dell'import — *misurare, mai fabbricare*.
 
 Le aziende sane non si muovono: sotto la soglia il calcolo resta quello di prima.
+
+**Contraddizione col parziale (#59).** Un rapporto può essere plausibile nel riferimento e tuttavia
+produrre una chiusura incompatibile con lo stock già osservato. Per periodi da **3 a 11 mesi**, se
+lo stock proiettato è inferiore al **50%** di quello parziale, il motore riporta lo stock osservato
+ed emette `turnover_projection_below_observed` (`warning`) con valore proiettato, valore riportato,
+mesi e soglia. Sotto tre mesi il confronto è «non valutabile» e non emette un verdetto; a 12 mesi
+non esiste un parziale da estrapolare. Valori osservati nulli non attivano la guardia. Sul database
+di riferimento la soglia separa lo scenario 8 (9% sui crediti, 4% sui debiti operativi) dagli altri
+scenari infrannuali misurabili (almeno 85%); un secondo caso sintetico fissa il confine nei test.
 
 **Eccezione di settore per le rimanenze (lotto 3A, Task 10).** Per Immobiliare (settore 5) ed
 Edilizia (6) una giacenza oltre l'anno **è il mestiere** — immobili in rimanenza, lavori in corso

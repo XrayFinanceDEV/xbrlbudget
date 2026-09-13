@@ -136,12 +136,15 @@ def test_lo_stato_patrimoniale_proiettato_quadra():
 
 
 def test_un_rapporto_sano_resta_intatto():
-    """La guardia deve toccare SOLO i casi degeneri."""
+    """Un rapporto sano senza contraddizione col parziale resta intatto."""
     partial_bs, partial_inc, ref_bs, ref_inc, projected_inc = _scenario_aic()
     # Riferimento sano: 1.000.000 di ricavi, 250.000 di crediti (91 giorni).
     ref_inc.ce01_ricavi_vendite = D("1000000")
     ref_bs.sp06_crediti_breve = D("250000")
     projected_inc["ce01_ricavi_vendite"] = D("1200000")
+    # 300.000 proiettati sono il 60% dei 500.000 già osservati: sopra la
+    # soglia conservativa del 50%, quindi non c'è una contraddizione.
+    partial_bs.sp06_crediti_breve = D("500000")
 
     result = IntraYearEngine(None)._project_balance_sheet(
         partial_bs, partial_inc, ref_bs, projected_inc, ref_inc, _assumption(), 9

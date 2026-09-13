@@ -34,6 +34,7 @@ ragione — l'eccezione viene **catturata** e la risposta è ugualmente **200**
 { "success": true, "assumptions_saved": 2,
   "forecast_generated": false,
   "forecast_years": [2025, 2026],
+  "diagnostics": [],
   "message": "Ipotesi salvate, ma il previsionale non è stato calcolato: ..." }
 ```
 
@@ -45,6 +46,9 @@ Due dettagli che si sbagliano facilmente:
   anni previsionali prodotti. A restare vuoto è `analysis.forecast_years` della successiva
   `GET /analysis`. Chi controlla `forecast_years.length` invece di `forecast_generated`
   non si accorge di nulla.
+- `diagnostics` è dichiarato sempre. Su una generazione infrannuale riuscita contiene gli
+  avvisi/errori restituiti dal motore; su generazione non richiesta o fallita è `[]`. Vive
+  accanto a `forecast_generated`, non lo sostituisce.
 
 I tre chiamanti in `frontend/` controllano `forecast_generated === false` e mostrano un
 `toast.warning` col `message`: `app/budget/page.tsx:991-994`, `app/pratica/page.tsx:801`

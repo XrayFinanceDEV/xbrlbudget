@@ -374,6 +374,7 @@ export interface BudgetScenarioCreate {
   scenario_type?: "budget" | "infrannuale";
   period_months?: number;
   workflow_intent?: "startup";
+  reuse_existing?: boolean;
   description?: string;
   is_active?: number;
 }

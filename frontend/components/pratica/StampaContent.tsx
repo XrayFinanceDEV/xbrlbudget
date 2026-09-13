@@ -353,6 +353,7 @@ export function StampaContent({
         name: `Budget ${baseYear + 1}–${baseYear + 3}`,
         base_year: baseYear,
         scenario_type: "budget",
+        reuse_existing: true,
       });
 
       updatePratica({ budgetScenarioId: budget.id });

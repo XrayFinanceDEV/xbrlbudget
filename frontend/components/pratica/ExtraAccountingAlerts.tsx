@@ -9,13 +9,28 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EXTRA_ALERT_DEFS } from "@/lib/pratica-codes";
+import type {
+  ExtraAccountingAlertKey,
+  ExtraAccountingAlerts as ExtraAccountingAlertsState,
+} from "@/lib/pratica-extra-alerts";
+import { Button } from "@/components/ui/button";
 
 export function ExtraAccountingAlerts({
   alerts,
   onChange,
+  dirty,
+  loading,
+  saving,
+  error,
+  onSave,
 }: {
-  alerts: Record<string, boolean>;
-  onChange: (alerts: Record<string, boolean>) => void;
+  alerts: ExtraAccountingAlertsState;
+  onChange: (alerts: ExtraAccountingAlertsState) => void;
+  dirty: boolean;
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  onSave: () => void;
 }) {
   const activeCount = Object.values(alerts).filter(Boolean).length;
 
@@ -35,13 +50,15 @@ export function ExtraAccountingAlerts({
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          {EXTRA_ALERT_DEFS.map((def, idx) => (
+          {EXTRA_ALERT_DEFS.map((def, idx) => {
+            const key = def.key as ExtraAccountingAlertKey;
+            return (
             <div key={def.key} className="flex items-start gap-3">
               <Checkbox
                 id={`alert-${def.key}`}
-                checked={!!alerts[def.key]}
+                checked={alerts[key]}
                 onCheckedChange={(checked) =>
-                  onChange({ ...alerts, [def.key]: !!checked })
+                  onChange({ ...alerts, [key]: !!checked })
                 }
                 className="mt-0.5"
               />
@@ -53,7 +70,29 @@ export function ExtraAccountingAlerts({
                 {def.label}
               </label>
             </div>
-          ))}
+            );
+          })}
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <Button onClick={onSave} disabled={!dirty || saving || loading} size="sm">
+            {saving ? "Salvataggio…" : "Salva segnali"}
+          </Button>
+          {dirty && !saving && (
+            <span className="text-sm text-amber-700 dark:text-amber-400">
+              Modifiche non salvate
+            </span>
+          )}
+          {loading && !saving && (
+            <span className="text-sm text-muted-foreground">Caricamento segnali…</span>
+          )}
+          {!dirty && !loading && !saving && !error && (
+            <span className="text-sm text-muted-foreground">Salvato</span>
+          )}
+          {error && (
+            <span role="alert" className="text-sm text-destructive">
+              {error} Riprova il salvataggio.
+            </span>
+          )}
         </div>
       </CardContent>
     </Card>

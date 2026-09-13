@@ -361,10 +361,27 @@ export interface BudgetScenario {
   period_months: number | null;
   source_scenario_id?: number | null;
   workflow_type?: "infrannuale" | "bilancio" | "startup" | null;
+  extra_accounting_alerts?: ExtraAccountingAlerts | null;
+  extra_accounting_alerts_updated_at?: string | null;
   description: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ExtraAccountingAlerts {
+  retribuzioni: boolean;
+  fornitori: boolean;
+  banche: boolean;
+  inps: boolean;
+  inail: boolean;
+  riscossione: boolean;
+  iva: boolean;
+}
+
+export interface ExtraAccountingAlertsResponse {
+  alerts: ExtraAccountingAlerts;
+  updated_at: string | null;
 }
 
 export interface BudgetScenarioCreate {

@@ -250,6 +250,64 @@ def get_budget_scenario(
     return scenario
 
 
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/extra-accounting-alerts",
+    response_model=budget_schemas.ExtraAccountingAlertsResponse,
+)
+def get_extra_accounting_alerts(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return the normalized, scenario-owned infrannuale alert map."""
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Gli alert extracontabili sono disponibili solo per scenari infrannuali",
+        )
+
+    from app.services.extra_accounting_alerts_service import (
+        normalize_extra_accounting_alerts,
+        utc_aware,
+    )
+    return {
+        "alerts": normalize_extra_accounting_alerts(scenario.extra_accounting_alerts),
+        "updated_at": utc_aware(scenario.extra_accounting_alerts_updated_at),
+    }
+
+
+@router.put(
+    "/companies/{company_id}/scenarios/{scenario_id}/extra-accounting-alerts",
+    response_model=budget_schemas.ExtraAccountingAlertsResponse,
+)
+def put_extra_accounting_alerts(
+    company_id: int,
+    scenario_id: int,
+    alerts: budget_schemas.ExtraAccountingAlertsUpdate,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Atomically replace every alert flag and set its server-owned UTC time."""
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Gli alert extracontabili sono disponibili solo per scenari infrannuali",
+        )
+
+    from app.services.extra_accounting_alerts_service import (
+        normalize_extra_accounting_alerts,
+        save_extra_accounting_alerts,
+    )
+    updated_at = save_extra_accounting_alerts(db, scenario, alerts)
+    return {
+        "alerts": normalize_extra_accounting_alerts(scenario.extra_accounting_alerts),
+        "updated_at": updated_at,
+    }
+
+
 @router.post(
     "/companies/{company_id}/scenarios",
     response_model=budget_schemas.BudgetScenario,
@@ -274,10 +332,13 @@ def create_budget_scenario(
     # Lineage is server-owned.  Keep these fields in the shared schema for
     # response compatibility, while treating any create-time value as forged.
     supplied = scenario_create.model_fields_set
-    if supplied.intersection({"source_scenario_id", "workflow_type"}):
+    if supplied.intersection({
+        "source_scenario_id", "workflow_type", "extra_accounting_alerts",
+        "extra_accounting_alerts_updated_at",
+    }):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="source_scenario_id e workflow_type sono derivati dal server",
+            detail="lineage e alert extracontabili sono derivati dal server",
         )
 
     # Validate the data this scenario needs (base year, or partial year for infrannuale)
@@ -327,6 +388,8 @@ def create_budget_scenario(
     scenario_values.pop("reuse_existing", None)
     scenario_values.pop("source_scenario_id", None)
     scenario_values.pop("workflow_type", None)
+    scenario_values.pop("extra_accounting_alerts", None)
+    scenario_values.pop("extra_accounting_alerts_updated_at", None)
     scenario_values["workflow_type"] = provenance.workflow_type
     scenario_values["source_scenario_id"] = provenance.source_scenario_id
     db_scenario = models.BudgetScenario(**_json_safe_scenario_fields(scenario_values))

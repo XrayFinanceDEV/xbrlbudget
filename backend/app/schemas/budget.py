@@ -37,6 +37,25 @@ class ExtraAccountingAlerts(BaseModel):
     iva: StrictBool = False
 
 
+class ExtraAccountingAlertsUpdate(BaseModel):
+    """Complete client payload accepted only by the dedicated alerts endpoint."""
+    model_config = ConfigDict(extra="forbid")
+
+    retribuzioni: StrictBool
+    fornitori: StrictBool
+    banche: StrictBool
+    inps: StrictBool
+    inail: StrictBool
+    riscossione: StrictBool
+    iva: StrictBool
+
+
+class ExtraAccountingAlertsResponse(BaseModel):
+    """Normalized alert flags plus their server-owned modification time."""
+    alerts: ExtraAccountingAlerts
+    updated_at: Optional[datetime] = None
+
+
 class NarrativeBlock(BaseModel):
     """One stable report narrative block and the data revision it describes."""
     id: NarrativeBlockId
@@ -126,8 +145,6 @@ class BudgetScenarioUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    extra_accounting_alerts: Optional[ExtraAccountingAlerts] = None
-    extra_accounting_alerts_updated_at: Optional[datetime] = None
     narrative_blocks: Optional[NarrativeBlocks] = None
     narrative_blocks_updated_at: Optional[datetime] = None
     narrative_source_hash: Optional[str] = Field(

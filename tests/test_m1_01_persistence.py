@@ -244,7 +244,6 @@ def test_scenario_routes_encode_narrative_datetimes_for_json_columns():
                     company_id=company_id,
                     name="M1 JSON",
                     base_year=2026,
-                    extra_accounting_alerts={"banche": True, "iva": False},
                     narrative_blocks={
                         "schema_version": 1,
                         "blocks": [{
@@ -275,8 +274,6 @@ def test_scenario_routes_encode_narrative_datetimes_for_json_columns():
                 user_id="m1-01-user",
                 db=session,
             )
-            assert updated.extra_accounting_alerts["banche"] is True
-            assert updated.extra_accounting_alerts["iva"] is False
             assert updated.narrative_blocks["blocks"][0]["updated_at"] == "2026-09-13T13:00:00"
     finally:
         engine.dispose()

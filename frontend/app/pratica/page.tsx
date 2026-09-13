@@ -13,6 +13,8 @@ import {
   getCompanyYears,
   createBudgetScenario,
   getBudgetScenario,
+  getExtraAccountingAlerts,
+  putExtraAccountingAlerts,
   bulkUpsertAssumptions,
   getIntraYearComparison,
   getScenarioAnalysis,
@@ -113,6 +115,13 @@ import {
   buildIncomeItemsWithEbitda,
 } from "@/lib/pratica-statement-rows";
 import { buildConfrontoHighlights } from "@/lib/pratica-highlights";
+import {
+  createEmptyExtraAlerts,
+  extraAlertsDirty,
+  normalizeExtraAlerts,
+  serializeExtraAlerts,
+  type ExtraAccountingAlerts as ExtraAccountingAlertsState,
+} from "@/lib/pratica-extra-alerts";
 
 export default function InfraannualePage() {
   const router = useRouter();
@@ -346,7 +355,17 @@ export default function InfraannualePage() {
   const [analysisError, setAnalysisError] = useState<unknown>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [projectionDiagnostics, setProjectionDiagnostics] = useState<ForecastDiagnostic[]>([]);
-  const [extraAlerts, setExtraAlerts] = useState<Record<string, boolean>>({});
+  const [extraAlerts, setExtraAlerts] = useState<ExtraAccountingAlertsState>(
+    createEmptyExtraAlerts,
+  );
+  const [loadedExtraAlerts, setLoadedExtraAlerts] = useState<ExtraAccountingAlertsState>(
+    createEmptyExtraAlerts,
+  );
+  const [savingExtraAlerts, setSavingExtraAlerts] = useState(false);
+  const [loadingExtraAlerts, setLoadingExtraAlerts] = useState(false);
+  const [extraAlertsError, setExtraAlertsError] = useState<string | null>(null);
+  const extraAlertsRequest = useRef(0);
+  const extraAlertsEditVersion = useRef(0);
   const [ratingVisible, setRatingVisible] = useState(false);
   const [showNoAlertsConfirm, setShowNoAlertsConfirm] = useState(false);
 
@@ -984,6 +1003,85 @@ export default function InfraannualePage() {
       loadAnalysis();
     }
   }, [activeTab, analysis, scenario, loadAnalysis]);
+
+  // The scenario can change during a rehydration/import while a previous GET
+  // is in flight. A monotonically increasing request id keeps an old response
+  // from replacing the new scenario's local edits.
+  useEffect(() => {
+    const requestId = ++extraAlertsRequest.current;
+    const companyId = importResult?.companyId;
+    if (!companyId || !scenario || scenario.scenario_type !== "infrannuale") {
+      const empty = createEmptyExtraAlerts();
+      setExtraAlerts(empty);
+      setLoadedExtraAlerts(empty);
+      setExtraAlertsError(null);
+      setSavingExtraAlerts(false);
+      setLoadingExtraAlerts(false);
+      return;
+    }
+
+    const editVersion = extraAlertsEditVersion.current;
+    // Clear the previous scenario immediately: it must never be displayed or
+    // become a save payload while this scenario's GET is still in flight.
+    const empty = createEmptyExtraAlerts();
+    setExtraAlerts(empty);
+    setLoadedExtraAlerts(empty);
+    setLoadingExtraAlerts(true);
+    setExtraAlertsError(null);
+    void getExtraAccountingAlerts(companyId, scenario.id)
+      .then((response) => {
+        if (extraAlertsRequest.current !== requestId) return;
+        const normalized = normalizeExtraAlerts(response.alerts);
+        setLoadedExtraAlerts(normalized);
+        // A user may toggle a checkbox while this GET is outstanding. The
+        // response is still the authoritative loaded snapshot, but it must
+        // not replace their newer local edit.
+        if (extraAlertsEditVersion.current === editVersion) {
+          setExtraAlerts(normalized);
+        }
+      })
+      .catch((error: unknown) => {
+        if (extraAlertsRequest.current !== requestId) return;
+        setExtraAlertsError(getErrorMessage(error));
+      })
+      .finally(() => {
+        if (extraAlertsRequest.current === requestId) setLoadingExtraAlerts(false);
+      });
+  }, [importResult?.companyId, scenario?.id, scenario?.scenario_type]);
+
+  const extraAlertsDirtyState = extraAlertsDirty(extraAlerts, loadedExtraAlerts);
+  const saveExtraAlerts = useCallback(async () => {
+    const companyId = importResult?.companyId;
+    if (!companyId || !scenario || scenario.scenario_type !== "infrannuale") return;
+
+    const requestId = extraAlertsRequest.current;
+    const editVersion = extraAlertsEditVersion.current;
+    setSavingExtraAlerts(true);
+    setExtraAlertsError(null);
+    try {
+      const response = await putExtraAccountingAlerts(
+        companyId,
+        scenario.id,
+        serializeExtraAlerts(extraAlerts),
+      );
+      if (extraAlertsRequest.current !== requestId) return;
+      const normalized = normalizeExtraAlerts(response.alerts);
+      setLoadedExtraAlerts(normalized);
+      // PUT can finish after a new toggle; retain that local value and leave
+      // it dirty against the just-saved server snapshot for a subsequent save.
+      if (extraAlertsEditVersion.current === editVersion) {
+        setExtraAlerts(normalized);
+      }
+      toast.success("Segnali extracontabili salvati");
+    } catch (error: unknown) {
+      if (extraAlertsRequest.current !== requestId) return;
+      const message = getErrorMessage(error);
+      setExtraAlertsError(message);
+      toast.error(`Salvataggio segnali non riuscito: ${message}`);
+    } finally {
+      if (extraAlertsRequest.current === requestId) setSavingExtraAlerts(false);
+    }
+  }, [extraAlerts, importResult?.companyId, scenario]);
 
   const goFromComparison = useCallback(async () => {
     if (periodMonths === 12) {
@@ -1970,7 +2068,19 @@ export default function InfraannualePage() {
 
             return (
               <>
-                <ExtraAccountingAlerts alerts={extraAlerts} onChange={(a) => { setExtraAlerts(a); setRatingVisible(false); }} />
+                <ExtraAccountingAlerts
+                  alerts={extraAlerts}
+                  onChange={(alerts) => {
+                    extraAlertsEditVersion.current += 1;
+                    setExtraAlerts(alerts);
+                    setRatingVisible(false);
+                  }}
+                  dirty={extraAlertsDirtyState}
+                  loading={loadingExtraAlerts}
+                  saving={savingExtraAlerts}
+                  error={extraAlertsError}
+                  onSave={() => void saveExtraAlerts()}
+                />
 
                 <Card>
                   <CardHeader>

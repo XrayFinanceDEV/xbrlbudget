@@ -483,6 +483,28 @@ export const updateBudgetScenario = async (
   return data;
 };
 
+export const getExtraAccountingAlerts = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<import('@/types/api').ExtraAccountingAlertsResponse> => {
+  const { data } = await api.get<import('@/types/api').ExtraAccountingAlertsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/extra-accounting-alerts`,
+  );
+  return data;
+};
+
+export const putExtraAccountingAlerts = async (
+  companyId: number,
+  scenarioId: number,
+  alerts: import('@/types/api').ExtraAccountingAlerts,
+): Promise<import('@/types/api').ExtraAccountingAlertsResponse> => {
+  const { data } = await api.put<import('@/types/api').ExtraAccountingAlertsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/extra-accounting-alerts`,
+    alerts,
+  );
+  return data;
+};
+
 export const deleteBudgetScenario = async (
   companyId: number,
   scenarioId: number

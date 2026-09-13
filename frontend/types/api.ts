@@ -381,9 +381,6 @@ export interface BudgetScenarioCreate {
 
 export interface BudgetScenarioUpdate {
   name?: string;
-  base_year?: number;
-  scenario_type?: string;
-  period_months?: number;
   description?: string;
   is_active?: number;
 }

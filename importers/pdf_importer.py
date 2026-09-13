@@ -445,6 +445,30 @@ def _map_sc_keys(data: Dict[str, Decimal]) -> Dict[str, Decimal]:
     return result
 
 
+def _extract_route_c_last_resort(llm_extract):
+    """Run the IV-CEE last resort without claiming a gross-vs-net measurement.
+
+    Route C documents can print gross control totals while the IV-CEE extractor
+    correctly nets contra-assets.  The extractor's unclassified-mass diagnostic
+    is therefore not comparable on this route: keep the keys explicit, but mark
+    the measurement as unknown for both the current and comparative years.
+
+    ``llm_extract`` is injected so this production seam is testable without an
+    API call or a corpus document capable of exhausting both route-C parsers.
+    """
+    from importers.iv_cee_hierarchy import withdraw_unclassified_mass
+
+    balance_sheet_data, income_data, prior_bs_data, prior_ce_data = llm_extract()
+    balance_sheet_data.update(
+        withdraw_unclassified_mass("route-c-ultima-risorsa")
+    )
+    if prior_bs_data:
+        prior_bs_data.update(
+            withdraw_unclassified_mass("route-c-ultima-risorsa-prior")
+        )
+    return balance_sheet_data, income_data, prior_bs_data, prior_ce_data
+
+
 def _apply_vision_rescue(file_path: str,
                          balance_sheet_data: Dict[str, Decimal],
                          income_data: Dict[str, Decimal],
@@ -1408,21 +1432,10 @@ def import_pdf_balance_sheet(
                 # both extractors empty → IV-CEE LLM as a genuine last resort
                 logger.warning("Route C: entrambi gli estrattori vuoti; "
                                "ultimo tentativo con l'estrattore IV-CEE LLM")
-                balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
-                # L'estrattore IV-CEE ha appena misurato la propria massa non
-                # classificata contro i totali che il DOCUMENTO stampa. Qui il
-                # documento e' una situazione contabile: se e' a presentazione
-                # lorda quei totali comprendono i fondi ammortamento (su entrambi
-                # i lati) e la perdita parcheggiata sull'attivo, e lo scarto
-                # contro un'estrazione correttamente NETTATA e' massa che E'
-                # stata classificata — non massa persa. Sulle rotte A/B il
-                # confronto e' fra grandezze omogenee e resta com'e'.
-                from importers.iv_cee_hierarchy import withdraw_unclassified_mass
-                balance_sheet_data.update(withdraw_unclassified_mass("route-c-ultima-risorsa"))
-                if prior_bs_data:
-                    prior_bs_data.update(
-                        withdraw_unclassified_mass("route-c-ultima-risorsa-prior")
-                    )
+                (balance_sheet_data, income_data,
+                 prior_bs_data, prior_ce_data) = _extract_route_c_last_resort(
+                    _llm_extract
+                )
         if not is_trial_balance:
             # IV CEE format (routes A/B) — use LLM extraction
             balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()

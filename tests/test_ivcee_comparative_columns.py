@@ -29,6 +29,7 @@ from importers.iv_cee_hierarchy import (
     withdraw_unclassified_mass,
 )
 from importers.reliability import AccountStatus, assess
+from importers.pdf_importer import _extract_route_c_last_resort
 from importers.pdf_extractor_llm import (
     _column_of,
     _labelled_column_anchors,
@@ -721,3 +722,35 @@ def test_sulle_rotte_a_b_la_misura_resta_quella_di_prima():
 
     assert misurato["_unclassified_mass"] == D("178663.25")
     assert misurato["_unclassified_mass_measured"] == D("1")
+
+
+def test_l_ultima_risorsa_route_c_ritira_la_misura_su_entrambi_gli_anni():
+    """Prova il cablaggio di produzione, non soltanto il helper diagnostico.
+
+    Nessun PDF disponibile esaurisce davvero entrambi gli estrattori di route C.
+    La seam iniettata esercita esattamente il ramo successivo senza rete: il
+    candidato IV-CEE arriva con una misura gross-vs-net inaffidabile, che deve
+    essere ritirata sul corrente e sul comparato lasciando invariati CE e valori.
+    """
+    calls = []
+    current_bs = {**_nettato(), "_unclassified_mass": D("3700000"),
+                  "_unclassified_mass_measured": D("1")}
+    prior_bs = {**_nettato(), "_unclassified_mass": D("2500000"),
+                "_unclassified_mass_measured": D("1")}
+    current_ce = {"ce01_ricavi_vendite": D("100")}
+    prior_ce = {"ce01_ricavi_vendite": D("90")}
+
+    def extraction():
+        calls.append("called")
+        return current_bs, current_ce, prior_bs, prior_ce
+
+    current, ce, prior, prior_income = _extract_route_c_last_resort(extraction)
+
+    assert calls == ["called"]
+    assert current["totale_attivo"] == D("3130000.00")
+    assert prior["totale_attivo"] == D("3130000.00")
+    assert current["_unclassified_mass"] == prior["_unclassified_mass"] == D("0")
+    assert current["_unclassified_mass_measured"] == D("0")
+    assert prior["_unclassified_mass_measured"] == D("0")
+    assert ce is current_ce
+    assert prior_income is prior_ce

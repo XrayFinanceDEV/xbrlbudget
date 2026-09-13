@@ -1,10 +1,59 @@
 """
 Pydantic schemas for Budget and Forecast models
 """
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Literal
 from decimal import Decimal
+
+
+WorkflowType = Literal["infrannuale", "bilancio", "startup"]
+WorkflowOrigin = Literal["imported", "manual", "startup_opening", "promoted_projection"]
+ExtraAccountingAlertCode = Literal[
+    "retribuzioni", "fornitori", "banche", "inps", "inail", "riscossione", "iva",
+]
+NarrativeBlockOrigin = Literal["ai", "user", "migrated"]
+NarrativeBlockId = Literal[
+    "executive_summary",
+    "adjustments_and_closing",
+    "budget_assumptions",
+    "economic_outlook",
+    "financial_outlook",
+    "risks_and_actions",
+]
+
+
+class NarrativeBlock(BaseModel):
+    """One stable report narrative block and the data revision it describes."""
+    id: NarrativeBlockId
+    text: str = Field(..., min_length=1)
+    origin: NarrativeBlockOrigin
+    updated_at: datetime
+    source_hash: str = Field(..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+class NarrativeBlocks(BaseModel):
+    """Versioned JSON container persisted on a budget scenario."""
+    schema_version: Literal[1] = 1
+    blocks: List[NarrativeBlock] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_block_ids(self):
+        ids = [block.id for block in self.blocks]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Narrative block IDs must be unique")
+        return self
+
+
+def _validate_explicitly_supplied_fields(value: Optional[List[str]]) -> Optional[List[str]]:
+    """Keep the JSON list unambiguous; NULL remains the legacy-unknown marker."""
+    if value is None:
+        return value
+    if any(not field.strip() for field in value):
+        raise ValueError("Explicitly supplied field names must not be blank")
+    if len(value) != len(set(value)):
+        raise ValueError("Explicitly supplied field names must be unique")
+    return value
 
 
 # BudgetScenario Schemas
@@ -17,7 +66,14 @@ class BudgetScenarioBase(BaseModel):
     period_months: Optional[int] = Field(default=None, ge=1, le=12)
     # Pratica chain / workflow (2026-07-06). Additive, nullable.
     source_scenario_id: Optional[int] = None
-    workflow_type: Optional[str] = None  # "infrannuale" | "bilancio" | "startup"
+    workflow_type: Optional[WorkflowType] = None
+    extra_accounting_alerts: Optional[List[ExtraAccountingAlertCode]] = None
+    extra_accounting_alerts_updated_at: Optional[datetime] = None
+    narrative_blocks: Optional[NarrativeBlocks] = None
+    narrative_blocks_updated_at: Optional[datetime] = None
+    narrative_source_hash: Optional[str] = Field(
+        None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
 
@@ -43,7 +99,14 @@ class BudgetScenarioUpdate(BaseModel):
     scenario_type: Optional[str] = None
     period_months: Optional[int] = Field(None, ge=1, le=12)
     source_scenario_id: Optional[int] = None
-    workflow_type: Optional[str] = None
+    workflow_type: Optional[WorkflowType] = None
+    extra_accounting_alerts: Optional[List[ExtraAccountingAlertCode]] = None
+    extra_accounting_alerts_updated_at: Optional[datetime] = None
+    narrative_blocks: Optional[NarrativeBlocks] = None
+    narrative_blocks_updated_at: Optional[datetime] = None
+    narrative_source_hash: Optional[str] = Field(
+        None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     description: Optional[str] = None
     is_active: Optional[int] = Field(None, ge=0, le=1)
 
@@ -131,6 +194,12 @@ class BudgetAssumptionsBase(BaseModel):
     """Base BudgetAssumptions schema"""
     scenario_id: int
     forecast_year: int = Field(..., ge=2000, le=2100)
+    explicitly_supplied_fields: Optional[List[str]] = None
+
+    @field_validator("explicitly_supplied_fields")
+    @classmethod
+    def validate_explicitly_supplied_fields(cls, value):
+        return _validate_explicitly_supplied_fields(value)
 
     # Revenue assumptions
     revenue_growth_pct: Decimal = Field(default=Decimal("0"))
@@ -282,6 +351,7 @@ class BudgetAssumptionsBulkRow(BudgetAssumptionsBase):
 class BudgetAssumptionsUpdate(BaseModel):
     """Schema for updating BudgetAssumptions"""
     forecast_year: Optional[int] = Field(None, ge=2000, le=2100)
+    explicitly_supplied_fields: Optional[List[str]] = None
     revenue_growth_pct: Optional[Decimal] = None
     other_revenue_growth_pct: Optional[Decimal] = None
     variable_materials_growth_pct: Optional[Decimal] = None
@@ -384,6 +454,11 @@ class BudgetAssumptionsUpdate(BaseModel):
     ce17a_override: Optional[Decimal] = None
     ce17b_override: Optional[Decimal] = None
     ce20_override: Optional[Decimal] = None
+
+    @field_validator("explicitly_supplied_fields")
+    @classmethod
+    def validate_explicitly_supplied_fields(cls, value):
+        return _validate_explicitly_supplied_fields(value)
 
 
 class BudgetAssumptionsInDB(BudgetAssumptionsBase):

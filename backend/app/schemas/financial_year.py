@@ -4,12 +4,15 @@ Pydantic schemas for FinancialYear model
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from typing import Any, Dict, Optional
+from .budget import WorkflowOrigin
 
 
 class FinancialYearBase(BaseModel):
     """Base FinancialYear schema"""
     company_id: int
     year: int = Field(..., ge=2000, le=2100)
+    promoted_from_scenario_id: Optional[int] = None
+    workflow_origin: Optional[WorkflowOrigin] = None
 
 
 class FinancialYearCreate(FinancialYearBase):

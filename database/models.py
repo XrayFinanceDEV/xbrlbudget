@@ -58,6 +58,11 @@ class FinancialYear(Base):
     source_sha256 = Column(String(64), nullable=True, default=None, index=True)
     parser_version = Column(String(50), nullable=True, default=None)
     forecastable = Column(Boolean, nullable=False, default=False)
+    # Promotion provenance is intentionally not a foreign key until the deletion
+    # semantics for a source scenario have been decided.
+    promoted_from_scenario_id = Column(Integer, nullable=True, index=True)
+    # NULL is a legacy record whose origin cannot be established reliably.
+    workflow_origin = Column(String(30), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -562,6 +567,14 @@ class BudgetScenario(Base):
     ai_comments_infrannuale = Column(Text, nullable=True)
     ai_comments_infrannuale_updated_at = Column(DateTime, nullable=True)
 
+    # Additive report-final persistence. NULL distinguishes records created
+    # before this provenance was available from an explicitly empty payload.
+    extra_accounting_alerts = Column(JSON, nullable=True)
+    extra_accounting_alerts_updated_at = Column(DateTime, nullable=True)
+    narrative_blocks = Column(JSON, nullable=True)
+    narrative_blocks_updated_at = Column(DateTime, nullable=True)
+    narrative_source_hash = Column(String(64), nullable=True)
+
     # Relationships
     company = relationship("Company", back_populates="budget_scenarios")
     assumptions = relationship("BudgetAssumptions", back_populates="scenario", cascade="all, delete-orphan")
@@ -581,6 +594,9 @@ class BudgetAssumptions(Base):
     id = Column(Integer, primary_key=True, index=True)
     scenario_id = Column(Integer, ForeignKey("budget_scenarios.id"), nullable=False)
     forecast_year = Column(Integer, nullable=False)  # e.g., 2025, 2026, 2027
+    # JSON list; NULL means legacy provenance is unknown, while [] means no
+    # assumption value was explicitly supplied for this forecast year.
+    explicitly_supplied_fields = Column(JSON, nullable=True)
 
     # Revenue assumptions (% vs base year)
     revenue_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # % change in revenue

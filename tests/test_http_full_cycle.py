@@ -175,15 +175,10 @@ def test_http_full_cycle_import_to_analysis(client, tmp_path):
     # Task 5 (lotto 3A, decisione del proprietario 2026-09-11): il debito
     # tributario di apertura di questo fixture esce di cassa entro il 31/12 e
     # la cassa del parziale non basta -- il motore clampa sp09 a zero e
-    # dichiara lo scoperto. bulk_upsert_assumptions scarta i diagnostics del
-    # motore (assumptions_service.py), quindi si rigenera per leggerli: stesse
-    # ipotesi gia' salvate, chiamata idempotente.
-    regenerated = client.post(
-        f"/api/v1/companies/{company_id}/scenarios/{scenario_id}/generate",
-        headers=_auth("user-a"),
-    )
-    assert regenerated.status_code == 200, regenerated.text
-    diagnostics = regenerated.json()["diagnostics"]
+    # dichiara lo scoperto. Il bulk e' il percorso usato dalla pratica e deve
+    # consegnare le stesse diagnostiche prodotte dal motore, senza costringere
+    # il client a una seconda generazione.
+    diagnostics = generated.json()["diagnostics"]
     gap = next(
         (Decimal(str(d["amount"])) for d in diagnostics
          if d["code"] == "unfunded_financing_requirement"),

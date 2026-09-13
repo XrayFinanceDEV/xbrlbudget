@@ -793,6 +793,15 @@ export interface ForecastIncomeStatement {
   revenue: number;
 }
 
+export interface ForecastDiagnostic {
+  code: string;
+  severity: "warning" | "error" | string;
+  message: string;
+  amount?: string | number;
+  field?: string;
+  [key: string]: unknown;
+}
+
 export interface ForecastGenerationResult {
   scenario_id: number;
   scenario_name: string;
@@ -808,7 +817,18 @@ export interface ForecastGenerationResult {
     ebit: number;
     net_profit: number;
   }>;
+  diagnostics: ForecastDiagnostic[];
   generated_at: string;
+}
+
+export interface BulkAssumptionsResult {
+  success: boolean;
+  scenario_id: number;
+  assumptions_saved: number;
+  forecast_generated: boolean;
+  forecast_years: number[];
+  diagnostics: ForecastDiagnostic[];
+  message: string;
 }
 
 // Cash Flow Statement

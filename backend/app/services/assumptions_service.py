@@ -421,15 +421,21 @@ def bulk_upsert_assumptions(
 
     # 8. Generate forecasts if requested
     forecast_generated = False
+    diagnostics = []
     if auto_generate:
         try:
             if scenario.scenario_type == "infrannuale":
                 from calculations.intra_year_engine import IntraYearEngine
                 engine = IntraYearEngine(db)
-                engine.generate_projection(scenario_id)
+                generation_result = engine.generate_projection(scenario_id)
             else:
                 engine = ForecastEngine(db)
-                engine.generate_forecast(scenario_id)
+                generation_result = engine.generate_forecast(scenario_id)
+            # Il bulk e' il percorso di produzione dell'infrannuale. Le
+            # diagnostiche sono parte dell'esito del motore tanto quanto il
+            # flag di generazione: scartarle equivale a dichiarare il piano
+            # pulito quando il motore ha invece misurato un residuo.
+            diagnostics = generation_result.get("diagnostics", [])
             forecast_generated = True
         except Exception as e:
             # If forecast generation fails, return success for assumptions but note failure
@@ -439,6 +445,7 @@ def bulk_upsert_assumptions(
                 "assumptions_saved": assumptions_saved,
                 "forecast_generated": False,
                 "forecast_years": forecast_years_list,
+                "diagnostics": [],
                 "message": f"Ipotesi salvate, ma il previsionale non è stato calcolato: {str(e)}"
             }
 
@@ -448,6 +455,7 @@ def bulk_upsert_assumptions(
         "assumptions_saved": assumptions_saved,
         "forecast_generated": forecast_generated,
         "forecast_years": sorted(forecast_years_list),
+        "diagnostics": diagnostics,
         "message": "Ipotesi salvate e previsionale calcolato" if forecast_generated
                    else "Ipotesi salvate"
     }

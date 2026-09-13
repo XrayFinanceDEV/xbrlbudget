@@ -677,8 +677,8 @@ export const bulkUpsertAssumptions = async (
   companyId: number,
   scenarioId: number,
   payload: { assumptions: Record<string, unknown>[]; auto_generate: boolean }
-): Promise<{ success: boolean; forecast_generated: boolean; forecast_years: number[]; message?: string }> => {
-  const { data } = await api.put(
+): Promise<import('@/types/api').BulkAssumptionsResult> => {
+  const { data } = await api.put<import('@/types/api').BulkAssumptionsResult>(
     `/companies/${companyId}/scenarios/${scenarioId}/assumptions`,
     payload
   );

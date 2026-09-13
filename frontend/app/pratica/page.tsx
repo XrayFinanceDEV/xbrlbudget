@@ -26,6 +26,7 @@ import type {
   IntraYearComparisonItem,
   ScenarioAnalysis,
   RettificaEntry,
+  ForecastDiagnostic,
 } from "@/types/api";
 import { toast } from "sonner";
 import {
@@ -81,6 +82,7 @@ import { RettificheTab } from "@/components/pratica/RettificheTab";
 import { ComparisonTable } from "@/components/pratica/ComparisonTable";
 import { ProjectionTable } from "@/components/pratica/ProjectionTable";
 import { ExtraAccountingAlerts } from "@/components/pratica/ExtraAccountingAlerts";
+import { ForecastDiagnostics } from "@/components/pratica/ForecastDiagnostics";
 import { IndicatoriTable } from "@/components/pratica/IndicatoriTable";
 import { StampaContent } from "@/components/pratica/StampaContent";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
@@ -168,6 +170,7 @@ export default function InfraannualePage() {
     setComparison(null);
     setProjectedBS(null);
     setAnalysis(null);
+    setProjectionDiagnostics([]);
     if (hadProjection) {
       toast.warning("Bilancio modificato — ricalcola la proiezione");
     }
@@ -342,6 +345,7 @@ export default function InfraannualePage() {
   const [analysis, setAnalysis] = useState<ScenarioAnalysis | null>(null);
   const [analysisError, setAnalysisError] = useState<unknown>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [projectionDiagnostics, setProjectionDiagnostics] = useState<ForecastDiagnostic[]>([]);
   const [extraAlerts, setExtraAlerts] = useState<Record<string, boolean>>({});
   const [ratingVisible, setRatingVisible] = useState(false);
   const [showNoAlertsConfirm, setShowNoAlertsConfirm] = useState(false);
@@ -783,6 +787,7 @@ export default function InfraannualePage() {
     // perche' i numeri di prima non valgono piu' e inventarne altri e' il
     // difetto che questa funzione aveva (#22, #39, #40, #41).
     setProjectedBS(null);
+    setProjectionDiagnostics([]);
     setCalculatingBS(true);
 
     // Save assumptions to backend and generate forecast
@@ -828,6 +833,7 @@ export default function InfraannualePage() {
         }],
         auto_generate: true,
       });
+      setProjectionDiagnostics(result.diagnostics ?? []);
       // The backend returns success:true even when generation fails
       // (assumptions_service.py:210-217) — check the explicit flag, otherwise
       // the Indicatori tab silently renders an empty "Proiezione" column after
@@ -878,6 +884,7 @@ export default function InfraannualePage() {
     // Su 12 mesi il parziale E' l'anno intero, ma la proiezione resta quella
     // che il motore persiste: la si rilegge dopo il salvataggio, come sopra.
     setProjectedBS(null);
+    setProjectionDiagnostics([]);
     setCalculatingBS(true);
 
     // Calculate growth rates from imported 12M values vs reference year
@@ -928,6 +935,7 @@ export default function InfraannualePage() {
         }],
         auto_generate: true,
       });
+      setProjectionDiagnostics(result.diagnostics ?? []);
       // Same silent-failure guard as calculateProjectedBS above.
       if (result?.forecast_generated === false) {
         setAnalysis(null);
@@ -1159,6 +1167,12 @@ export default function InfraannualePage() {
         )}
 
         {!blocked && (<>
+
+        {(activeTab === "projection" || activeTab === "results" || activeTab === "stampa") && (
+          <div className="mb-6">
+            <ForecastDiagnostics diagnostics={projectionDiagnostics} />
+          </div>
+        )}
 
         {/* STEP 0: ANAGRAFICHE */}
         {activeTab === "anagrafiche" && (
@@ -1853,6 +1867,7 @@ export default function InfraannualePage() {
                 onOverrideChange={(code, value) => {
                   setOverrides((prev) => ({ ...prev, [code]: value }));
                   setProjectedBS(null); // Recalculate needed
+                  setProjectionDiagnostics([]);
                 }}
               />
             </CardContent>

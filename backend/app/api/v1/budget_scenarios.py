@@ -23,6 +23,7 @@ from app.core.auth import get_current_user_id
 from app.core.ownership import validate_company_owned_by_user
 from app.schemas import budget as budget_schemas
 from app.schemas import forecast as forecast_schemas
+from app.schemas import analysis as analysis_schemas
 from database import models
 from calculations.forecast_engine import ForecastEngine
 
@@ -690,7 +691,7 @@ def delete_budget_assumptions(
 
 @router.put(
     "/companies/{company_id}/scenarios/{scenario_id}/assumptions",
-    response_model=Any,
+    response_model=analysis_schemas.BulkAssumptionsResponse,
     summary="Bulk upsert assumptions for all forecast years"
 )
 def bulk_upsert_assumptions(
@@ -740,8 +741,6 @@ def bulk_upsert_assumptions(
     - Frontend needs only ONE API call instead of 4+
     """
     from app.services import assumptions_service
-    from app.schemas import analysis as analysis_schemas
-
     # Validate scenario belongs to company
     validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 

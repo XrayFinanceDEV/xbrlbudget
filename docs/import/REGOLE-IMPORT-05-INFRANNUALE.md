@@ -207,6 +207,17 @@ Le *variazioni* a CE si annualizzano sempre. Vale comunque la guardia sui rappor
 
 ## 5. Il roll-forward dello Stato Patrimoniale
 
+### Diagnostiche consegnate al percorso Pratica
+
+`PUT /companies/{company_id}/scenarios/{scenario_id}/assumptions` con
+`auto_generate=true` restituisce sempre `diagnostics` accanto a
+`forecast_generated`. È questa la route di produzione usata dall'infrannuale:
+le diagnostiche del motore non richiedono una seconda chiamata a `POST /generate`.
+Il percorso le mostra nelle tre viste a valle — Proiezione, Indicatori e Stampa —
+distinguendo visivamente `warning` da `error`. La lista vuota è dichiarata anche
+quando non ci sono rilievi; una chiave assente non è usata come sinonimo di esito
+pulito.
+
 > **Le voci patrimoniali sono stock puntuali: non si annualizzano.** Nel confronto, il "valore
 > annualizzato" di una voce di SP è il valore parziale stesso.
 

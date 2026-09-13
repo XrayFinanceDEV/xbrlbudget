@@ -253,4 +253,8 @@ class BulkAssumptionsResponse(BaseModel):
     assumptions_saved: int
     forecast_generated: bool
     forecast_years: List[int]
+    diagnostics: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Avvisi e errori dichiarati dal motore durante la generazione",
+    )
     message: str

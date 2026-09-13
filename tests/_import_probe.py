@@ -29,6 +29,12 @@ if ROOT not in sys.path:
 
 def _load_env():
     """Make ANTHROPIC_API_KEY available exactly like the running backend does."""
+    if os.environ.get("REPORT_GATE_NO_DOTENV"):
+        # Regression-gate isolation (scripts/verify_report_gate.sh): when the
+        # gate asks for a credential-free run, never open backend/.env or .env,
+        # so neither this import nor any later _load_env() call can repopulate
+        # secrets. Outside the gate behaviour is unchanged.
+        return
     if os.environ.get("ANTHROPIC_API_KEY"):
         return
     for cand in (os.path.join(ROOT, "backend", ".env"), os.path.join(ROOT, ".env")):

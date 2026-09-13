@@ -23,9 +23,24 @@ scripts/verify_report_gate.sh build            # mirata: next build di produzion
 La modalità `full` è quella dei gate di integrazione; le modalità mirate sono
 per i task piccoli. I gate frontend girano **sempre** su `<root>/frontend`:
 non esiste un override della sorgente, e i binari invocati sono quelli locali
-in `frontend/node_modules/.bin` (mai `npx`, che potrebbe scaricare). La
-riuso dei `node_modules` da un altro checkout è una scelta di setup esterna
+in `frontend/node_modules/.bin` (mai `npx`, che potrebbe scaricare). Il riuso
+dei `node_modules` da un altro checkout è una scelta di setup esterna
 (es. symlink), non una opzione dello script.
+
+### Isolamento segreti / test live
+
+Il gate backend esporta `REPORT_GATE_NO_DOTENV=1` e rimuove con `env -u`
+le variabili note di opt-in verso sistemi esterni o corpus locale:
+`ANTHROPIC_API_KEY`, `SUPABASE_JWT_SECRET`, `ADMIN_API_KEY`, `TEST_USER_EMAIL`,
+`TEST_USER_PASSWORD`, `PROBE_SAMPLE_PDF`, `IMPORT_CORPUS_ROOT`. Su questi
+percorsi verificati l'effetto è: `tests/_import_probe._load_env()` esce prima
+di aprire `backend/.env` o la `.env` di root — né l'import del modulo né una
+chiamata successiva può ripopolare i segreti da lì — e i consumer noti delle
+variabili rimosse (tutti `skipif`/monkeypatch) risultano deterministicamente
+saltati, mai falliti. Non viene affermata l'assenza di altre letture di env o
+di accessi di rete da parte di diverso codice, né per i gate frontend. È una
+protezione in più rispetto al solo `env -u ANTHROPIC_API_KEY` del comando
+documentato M1-10; fuori dal marker `_load_env()` si comporta come prima.
 
 I conteggi dei test li stampano i runner stessi: il criterio è **zero nuovi
 fallimenti**, mai una cifra storica fissata (la suite salta i test condizionali
@@ -56,13 +71,11 @@ install`/venv manca).
 Nessuna stage `Test` è stata aggiunta. Fatti misurati nel repo, non ipotesi
 sull'ambiente:
 
-1. **Il `Jenkinsfile` non definisce alcun punto di preparazione delle
-   dipendenze.** Le sue stage sono `Checkout`, `Generate env`, `Build`,
-   `Deploy`, `Health check`, `Cleanup`; ogni step è `checkout`, `writeFile` o
-   comandi `docker compose`/`sh` di deploy. Non c'è nessuna fase in cui un
-   venv Python o i `node_modules` del frontend vengano creati o aggiornati
-   sull'agente, e lo script del gate richiede entrambi già presenti (non
-   installa nulla).
+1. **Il `Jenkinsfile` non definisce alcuna stage di provisioning dipendenze
+   né di test.** Le sue stage sono `Checkout`, `Generate env`, `Build`,
+   `Deploy`, `Health check`, `Cleanup`: nessuna di esse crea o aggiorna un
+   venv Python o i `node_modules` del frontend, e lo script del gate richiede
+   entrambi già presenti (non installa nulla).
 2. **Nessuna immagine del repo contiene i test.** `Dockerfile.backend` copia
    solo codice di produzione (`config.py`, `database/`, `calculations/`,
    `importers/`, `pdf_service/`, `backend/`, `migrate_db.py`); `tests/` e i

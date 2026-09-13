@@ -8,8 +8,14 @@
 # production frontend build. Each subcommand's exit code is preserved.
 #
 # The script never installs dependencies and never reads the production
-# database: DATABASE_PATH is forced to a throwaway file and ANTHROPIC_API_KEY
-# is unset for the backend run, exactly as in the documented command.
+# database: DATABASE_PATH is forced to a throwaway file, and the backend run
+# sets REPORT_GATE_NO_DOTENV=1 (tests/_import_probe.py then never opens
+# backend/.env or the root .env) while unsetting the known opt-in live/corpus
+# variables (ANTHROPIC_API_KEY, SUPABASE_JWT_SECRET, ADMIN_API_KEY, TEST_USER_*,
+# PROBE_SAMPLE_PDF, IMPORT_CORPUS_ROOT), whose consumers are all skipif/
+# monkeypatch gated — verified paths only; no claim is made about other env
+# reads or about the frontend gates. The DATABASE_PATH part matches the
+# documented M1-10 command minus ambient state.
 #
 # Usage (from anywhere in the repo; the script is root-relative):
 #   scripts/verify_report_gate.sh                  # full: all four gates
@@ -104,7 +110,15 @@ gate_backend() {
     if [ $# -eq 0 ]; then
         set -- tests
     fi
-    env -u ANTHROPIC_API_KEY DATABASE_PATH="$TMP_DB" \
+    # Secret/live-test isolation (Terra review of 5c69eaa): REPORT_GATE_NO_DOTENV
+    # makes tests/_import_probe.py return from _load_env() before opening any
+    # .env, and the -u flags strip the known opt-in live/corpus variables, so
+    # those specific verified paths cannot repopulate secrets or reach external
+    # systems from inside the gate.
+    env -u ANTHROPIC_API_KEY -u SUPABASE_JWT_SECRET -u ADMIN_API_KEY \
+        -u TEST_USER_EMAIL -u TEST_USER_PASSWORD -u PROBE_SAMPLE_PDF \
+        -u IMPORT_CORPUS_ROOT \
+        REPORT_GATE_NO_DOTENV=1 DATABASE_PATH="$TMP_DB" \
         "$py" -m pytest "$@" -q --ignore=tests/corpus -p no:cacheprovider \
         -W ignore::DeprecationWarning
 }

@@ -10,8 +10,33 @@ from app.core.auth import get_current_user_id
 from app.core.ownership import validate_company_owned_by_user
 from app.services.analysis_service import get_complete_analysis
 from app.services.ai_comments_service import generate_report_comments, get_stored_comments, save_comments
+from app.schemas.final_report import FinalReportModel
+from app.services.final_report_service import (
+    FinalReportChainConflict, FinalReportNotFound, assemble_final_report,
+)
+from app.api.v1.budget_scenarios import validate_scenario_belongs_to_company
 
 router = APIRouter()
+
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/final-report",
+    response_model=FinalReportModel,
+    summary="Get the assembled final report",
+)
+def get_final_report(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> FinalReportModel:
+    validate_company_owned_by_user(db, company_id, user_id)
+    try:
+        return assemble_final_report(db, company_id, scenario_id)
+    except FinalReportNotFound as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+    except FinalReportChainConflict as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
 
 
 @router.get(
@@ -30,7 +55,7 @@ def get_ai_comments(
     db: Session = Depends(get_db),
 ):
     """Return stored AI comments for 3 report sections."""
-    validate_company_owned_by_user(db, company_id, user_id)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
     return get_stored_comments(db, scenario_id)
 
 
@@ -83,6 +108,6 @@ def save_ai_comments(
     db: Session = Depends(get_db),
 ):
     """Save user-edited AI comments to DB without LLM call."""
-    validate_company_owned_by_user(db, company_id, user_id)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
     save_comments(db, scenario_id, comments)
     return get_stored_comments(db, scenario_id)

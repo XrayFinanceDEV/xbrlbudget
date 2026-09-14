@@ -155,6 +155,7 @@ def test_liquidity_series_reads_cash_and_the_models_financial_debt_helper():
                 bank_short=Decimal("40"), bank_long=Decimal("60"))
     series = _build([row])
     liquidity = _series(series, "liquidity_debt")
+    assert liquidity.title == "Cassa e debito finanziario"
     assert _metric(liquidity, "cash").values == [Decimal("33.30")]
     assert _metric(liquidity, "financial_debt").values == [row.balance_sheet.financial_debt_total]
 
@@ -227,6 +228,7 @@ def test_pfn_and_dscr_are_read_verbatim_when_supplied():
     series = _build(rows,
                     net_financial_position_by_year={2027: "-106.70", "2028": Decimal("12")},
                     dscr_by_year={2027: 1.25, 2028: None})
+    assert _series(series, "liquidity_debt").title == "Cassa, debito finanziario e PFN"
     assert _metric(_series(series, "liquidity_debt"), "pfn").values == [Decimal("-106.70"), Decimal("12")]
     assert _metric(_series(series, "coverage"), "dscr").values == [Decimal("1.25"), None]
 

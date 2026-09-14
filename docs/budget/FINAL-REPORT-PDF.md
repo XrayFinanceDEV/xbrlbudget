@@ -1,5 +1,11 @@
 # Gap Analysis: PDF Report vs /report Implementation
 
+> **Documento storico / backlog M2.** Questa è una gap analysis della precedente famiglia di
+> componenti `report-*` rispetto a un PDF di riferimento, non la descrizione del `/report`
+> corrente. Da M1 la pagina usa il modello finale canonico server-driven, con 12 sezioni e stampa
+> browser solo come anteprima; l'esportazione PDF server resta lavoro M2. Per il comportamento
+> attuale consulta `FORECASTING_GUIDE.md` e `API-PREVISIONALE.md`.
+
 Reference PDF: `docs/OBICON_S.R.L._Relazione_Analisi_Indici_&_Rating_Anni_2023-2023.pdf` (40 pages)
 
 ## MATCHING WELL (no changes needed)
@@ -322,7 +328,7 @@ Missing from `report-break-even.tsx`:
 
 ---
 
-## Implementation Priority
+## Backlog di implementazione M2 (storico)
 
 1. **Italian descriptions** for all ratios/indices (biggest visual gap)
 2. **Structural cross-matrices** (3.4-3.6) with situation assessments

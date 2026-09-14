@@ -891,8 +891,9 @@ rifiutato** (vedi «Invarianti e trappole › Previsionale»).
 and `/aziende` redirect here) · `/budget` (scenario assumptions, and the Startup workflow) ·
 `/forecast/income` (**editable** P&L: cells → batch save → BS adapts) · `/forecast/balance`
 (**editable**: cells write `sp_overrides`, not `*_override` columns) · `/forecast/reclassified`
-(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (11 sections, mirrors the
-PDF) · `/import` (works, but unlinked from the nav — the pratica Import step is the normal way in).
+(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (12 sezioni canoniche,
+modellate dal read model server; la stampa browser è solo anteprima, il PDF server è M2) · `/import`
+(works, but unlinked from the nav — the pratica Import step is the normal way in).
 
 ---
 
@@ -910,7 +911,7 @@ giusto è il codice, non `/docs`.
 | Come si costruisce un budget e che cosa fa il motore di previsione? | [docs/budget/FORECASTING_GUIDE.md](docs/budget/FORECASTING_GUIDE.md) |
 | Salvi le ipotesi e il previsionale non si muove, o non sai che cosa azzera un override? | [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) |
 | Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
-| Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
+| Quali differenze storiche restano per il PDF server M2, non per il `/report` corrente? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
 | Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
 | Lo stepper della pratica blocca un passaggio, o il wizard si perde dopo un refresh? | [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) |
 | Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre? | [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md) |

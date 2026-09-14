@@ -936,3 +936,48 @@ del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
 | `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |
+
+## 12. Report finale — contratto di lettura canonico
+
+Il report finale è un modello versionato, assemblato lato server: il caricamento della pagina usa
+esclusivamente la lettura `GET /companies/{company_id}/scenarios/{scenario_id}/final-report`.
+La GET non rigenera forecast, non genera prosa AI e non salva modifiche; restituisce il modello
+canonico o `404` se risorsa/catena non esistono e `409` se la catena della pratica è incoerente.
+Il contratto supporta esattamente `workflow_type: "bilancio"`, `"infrannuale"` e `"startup"`.
+Nel caso infrannuale porta inoltre `source_scenario` e `infrannual_closing`; negli altri due non
+inventa un blocco di chiusura.
+
+`schema_version` è attualmente `1`. Il renderer deve rifiutare, dichiarare come non supportato e
+non interpretare un payload che non rispetta tale schema; può invece mostrare loading, errore con
+retry, oppure un modello valido con readiness `ready`, `draft` o `blocked` e diagnostica. Il
+modello porta le revisioni delle fonti, qualità dei dati, rettifiche, chiusura, ipotesi e stato di
+freschezza, affinché il client non deduca questi fatti da dati incompleti.
+
+### Ordine e contenuto del renderer
+
+Le dodici sezioni stabili sono: `scope`, `executive-summary`, `sources`, `adjustments`, `closing`,
+`assumptions`, `income-forecast`, `balance-forecast`, `cashflow-sustainability`,
+`indicators-risks`, `diagnostics`, `appendices`. Il modello porta sei `chart_series` canoniche:
+`income_results`, `margins`, `cashflows`, `liquidity_debt`, `working_capital_days` e `coverage`;
+il renderer deve offrire per ciascuna una tabella accessibile delle categorie e serie, non una
+serie calcolata localmente. Le sei narrazioni hanno gli id `executive_summary`,
+`adjustments_and_closing`, `budget_assumptions`, `economic_outlook`, `financial_outlook` e
+`risks_and_actions`, con provenienza e freschezza dichiarate dal server.
+
+Ogni valore monetario o quantitativo del report è `DecimalString`, quindi una stringa JSON che
+corrisponde esattamente a `^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$`. Non inviare né aspettarsi un numero
+JSON, notazione esponenziale, separatori locali/migliaia, `NaN` o infinito; la formattazione
+italiana è responsabilità della visualizzazione, non del contratto.
+
+### Azioni esplicite, separate dalla GET
+
+- `POST /companies/{company_id}/scenarios/{scenario_id}/final-report/narrative/generate` genera
+  esplicitamente le sei narrazioni dal modello canonico e restituisce il report aggiornato.
+- `PUT /companies/{company_id}/scenarios/{scenario_id}/final-report/narrative` salva blocchi
+  narrativi scritti dall'utente e restituisce il report aggiornato; non invoca il generatore.
+- Quando `forecast_stale` rende il previsionale obsoleto, la UI deve eseguire la generazione del
+  forecast prevista per lo scenario e poi **refetch** della GET finale. Non mascherare la
+  rigenerazione come un semplice reload e non usarla per rigenerare la prosa.
+
+La stampa browser è soltanto un'anteprima del renderer; non è il PDF ufficiale e non cambia il
+modello.

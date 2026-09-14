@@ -180,7 +180,11 @@ def build_chart_series(
         liquidity_metrics.append(_metric("pfn", "PFN", supplied(net_financial_position_by_year)))
     liquidity_debt = ChartSeries(
         id="liquidity_debt",
-        title="Cassa, debito finanziario e PFN",
+        title=(
+            "Cassa, debito finanziario e PFN"
+            if net_financial_position_by_year is not None
+            else "Cassa e debito finanziario"
+        ),
         unit="eur",
         categories=years,
         series=liquidity_metrics,

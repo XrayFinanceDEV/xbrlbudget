@@ -439,3 +439,48 @@ di superare il totale forzato.
 **Vedi anche:** [API-PREVISIONALE.md](API-PREVISIONALE.md) per i corpi delle chiamate e le precedenze
 formali, [../frontend/PRATICA-PERCORSO.md](../frontend/PRATICA-PERCORSO.md) per il percorso dentro
 una pratica.
+
+---
+
+## Report finale canonico
+
+La pagina **Report finale** non ricostruisce conti, grafici o commenti nel browser: carica una
+sola volta il modello finale assemblato dal server e lo rende nell'ordine editoriale canonico.
+Vale per le tre pratiche: **bilancio** (annuale), **infrannuale** (con scenario sorgente e dati di
+chiusura) e **startup**. Scegli uno scenario budget, attendi il caricamento e usa il tasto
+**Riprova** se la lettura fallisce; uno stato di caricamento, un errore recuperabile e un modello
+con schema non supportato sono casi distinti, non un report parzialmente interpretato.
+
+Il report ha queste **12 sezioni**, nello stesso ordine dell'indice: Copertina e perimetro;
+Sintesi esecutiva; Origine e qualità dei dati; Rettifiche apportate; Dall'infrannuale alla
+chiusura; Ipotesi del budget; Conto economico previsionale; Stato patrimoniale previsionale;
+Flussi di cassa e sostenibilità finanziaria; Indicatori e rischi; Diagnostica e punti da
+verificare; Appendici e metodologia. La sezione di chiusura è significativa per l'infrannuale;
+nelle altre due pratiche il modello dichiara esplicitamente che quei dati non si applicano.
+
+Prima di usare il report come consegna, leggi il banner di **readiness** (`ready`, `draft` o
+`blocked`) e la diagnostica. Il modello espone anche qualità delle fonti, rettifiche, chiusura,
+ipotesi, revisione delle sorgenti e freschezza di previsionale/narrazione: sono dati forniti dal
+server, non deduzioni della pagina. Se le ipotesi sono più recenti del previsionale, il banner
+chiede di rigenerare; l'azione genera il forecast e poi ricarica il modello finale. Non è un
+semplice refresh e non modifica i commenti narrativi.
+
+### Grafici, commenti e stampa
+
+Le sei serie server-provided sono: risultati economici, margini, flussi di cassa, liquidità e
+debito, giorni del capitale circolante e copertura. Ogni grafico offre anche una tabella testuale
+accessibile con categorie e valori: la tabella è l'alternativa leggibile da tecnologie assistive e
+non una seconda elaborazione. Le sei narrazioni corrispondono a sintesi esecutiva, rettifiche e
+chiusura, ipotesi di budget, prospettiva economica, prospettiva finanziaria, rischi e azioni.
+
+**Rigenera commenti** è esplicito: richiede al server una nuova narrazione e aggiorna il modello.
+Ogni commento può invece essere modificato e salvato esplicitamente, senza chiamare il modello
+linguistico. Provenienza (`ai`, `user`, `migrated`) e freschezza (`fresh`, `stale`, `missing`)
+restano visibili, quindi una prosa vecchia non diventa una conclusione corrente per errore.
+**Anteprima stampa** usa la stampa del browser soltanto per la revisione visiva: non produce il
+PDF ufficiale e non è una procedura di esportazione certificata.
+
+Gli importi del modello finale sono `DecimalString`: stringhe JSON decimali, non numeri JSON né
+valori formattati per la UI. La forma accettata è `^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$`; non sono
+ammessi esponente, separatore delle migliaia, virgola decimale, `NaN` o infinito. Il client può
+formattare tali stringhe per la lettura, ma non deve ricalcolare né sostituirle con floating point.

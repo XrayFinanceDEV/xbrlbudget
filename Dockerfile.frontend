@@ -6,6 +6,10 @@ RUN npm ci
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
+# final-report.ts imports the contract from the repository-level sibling.
+# Keep that path available in the builder rather than relying on a local
+# monorepo checkout being present inside the image.
+COPY contracts/ /contracts/
 COPY frontend/ .
 # Ensure public dir exists (Next.js standalone expects it)
 RUN mkdir -p public

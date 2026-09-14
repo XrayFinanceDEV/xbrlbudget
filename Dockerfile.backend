@@ -17,6 +17,7 @@ COPY database/ database/
 COPY calculations/ calculations/
 COPY importers/ importers/
 COPY pdf_service/ pdf_service/
+COPY contracts/ contracts/
 COPY backend/ backend/
 COPY migrate_db.py migrate_db.py
 

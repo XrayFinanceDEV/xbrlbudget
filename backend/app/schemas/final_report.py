@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
+import re
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationInfo, field_serializer, model_validator
 
 
 FINAL_REPORT_SCHEMA_VERSION = 1
@@ -21,6 +22,32 @@ _VOLATILE_HASH_FIELDS = frozenset({
     "generated_at", "model_hash", "source_hash", "created_at", "updated_at",
     "revision_at", "checked_at", "calculated_at", "generated_by",
 })
+_PLAIN_DECIMAL_RE = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$")
+
+
+def _plain_decimal(value: object) -> Decimal:
+    """Parse the one Decimal spelling admitted by the v1 JSON wire contract."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("financial decimals must be finite")
+        return value
+    if not isinstance(value, str) or not _PLAIN_DECIMAL_RE.fullmatch(value):
+        raise ValueError("financial decimals must be plain finite JSON strings (no floats or exponent notation)")
+    parsed = Decimal(value)
+    if not parsed.is_finite():  # defensive: the grammar already rules this out
+        raise ValueError("financial decimals must be finite")
+    return parsed
+
+
+PlainDecimal = Annotated[Decimal, BeforeValidator(_plain_decimal)]
+
+
+_CATALOG_PATH = Path(__file__).resolve().parents[3] / "contracts" / "final_report_assumption_sections.json"
+ASSUMPTION_SECTION_CATALOG: list[dict[str, object]] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+_CATALOG_FIELDS = {
+    section["key"]: frozenset([*section["fields"], *section.get("nested_fields", [])])
+    for section in ASSUMPTION_SECTION_CATALOG
+}
 
 
 class ContractModel(BaseModel):
@@ -30,8 +57,9 @@ class ContractModel(BaseModel):
     @field_serializer("*", when_used="json", check_fields=False)
     def _serialize_decimal(self, value):
         if isinstance(value, Decimal):
-            # ``str`` preserves the supplied accounting precision (including zeroes).
-            return str(value)
+            # ``format(..., "f")`` never emits Decimal exponent notation and
+            # preserves accounting precision, including trailing zeroes.
+            return format(value, "f")
         return value
 
     @model_validator(mode="before")
@@ -52,7 +80,12 @@ class ContractModel(BaseModel):
 
 
 def _canonical_value(value, *, volatile: bool) -> object:
-    """Return JSON-safe data with deterministic object order and decimal spelling."""
+    """Return JSON-safe hash data with deterministic object order.
+
+    This operates after Pydantic validation/default materialisation.  Therefore
+    Decimal instances are the *only* numeric values canonicalised; a string
+    such as an identifier that merely resembles a number is ordinary data.
+    """
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="python")
     if isinstance(value, Decimal):
@@ -60,18 +93,9 @@ def _canonical_value(value, *, volatile: bool) -> object:
             raise ValueError("canonical JSON rejects non-finite Decimal values")
         normalized = value.normalize()
         return "0" if normalized == 0 else format(normalized, "f")
-    if isinstance(value, str) and value and value[0] in "-0123456789":
-        # Decimal values cross the JSON wire as strings.  Normalize only valid
-        # decimal spellings; identifiers such as `fy-10` remain untouched.
-        try:
-            numeric = Decimal(value)
-        except InvalidOperation:
-            pass
-        else:
-            if numeric.is_finite() and str(numeric) == value:
-                normalized = numeric.normalize()
-                return "0" if normalized == 0 else format(normalized, "f")
     if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, list) or isinstance(value, tuple):
         return [_canonical_value(item, volatile=volatile) for item in value]
@@ -189,10 +213,10 @@ class AdjustmentEntry(ContractModel):
     id: str
     edited_field: str
     edited_label: str
-    edit_delta: Decimal
+    edit_delta: PlainDecimal
     counterpart_field: str
     counterpart_label: str
-    counterpart_delta: Decimal
+    counterpart_delta: PlainDecimal
     explanation: Optional[str] = None
     created_at: datetime
 
@@ -200,47 +224,56 @@ class AdjustmentEntry(ContractModel):
 class Adjustments(ContractModel):
     confirmed: bool
     entries: list[AdjustmentEntry] = Field(default_factory=list)
-    net_effect: Decimal
+    net_effect: PlainDecimal
 
 
 class ClosingValue(ContractModel):
     code: str
     label: str
-    observed: Optional[Decimal] = None
-    comparable: Optional[Decimal] = None
-    automatic: Optional[Decimal] = None
-    override: Optional[Decimal] = None
-    closing_used: Decimal
+    observed: Optional[PlainDecimal] = None
+    comparable: Optional[PlainDecimal] = None
+    automatic: Optional[PlainDecimal] = None
+    override: Optional[PlainDecimal] = None
+    closing_used: PlainDecimal
+
+
+class ExtraAccountingAlerts(ContractModel):
+    """The seven persisted M1-03 alert flags; no display-only aliases."""
+    retribuzioni: bool
+    fornitori: bool
+    banche: bool
+    inps: bool
+    inail: bool
+    riscossione: bool
+    iva: bool
 
 
 class InfrannualClosing(ContractModel):
-    period_end: str
+    period_end: date
     values: list[ClosingValue] = Field(min_length=1)
-    # Preserve the complete persisted M1-03 seven-boolean alert map, not a
-    # display-only list that would lose an explicit false value.
-    extra_accounting_alerts: dict[str, bool] = Field(default_factory=dict)
+    extra_accounting_alerts: ExtraAccountingAlerts
 
 
 class FinancingLoan(ContractModel):
     name: Optional[str] = None
-    amount: Decimal
-    opening_residual: Decimal
+    amount: PlainDecimal
+    opening_residual: PlainDecimal
     duration_years: int = Field(gt=0)
-    interest_rate: Decimal
+    interest_rate: PlainDecimal
     grace_years: int = Field(ge=0)
-    balloon_pct: Decimal
+    balloon_pct: PlainDecimal
 
 
 class RunoffPlan(ContractModel):
-    opening: Decimal
-    amounts: list[Decimal]
-    writeoff: Optional[list[Decimal]] = None
+    opening: PlainDecimal
+    amounts: list[PlainDecimal]
+    writeoff: Optional[list[PlainDecimal]] = None
 
 
 class TaxRunoffPlan(RunoffPlan):
-    saldo: Decimal
-    rateizzato: Decimal
-    acconto_pct: Decimal
+    saldo: PlainDecimal
+    rateizzato: PlainDecimal
+    acconto_pct: PlainDecimal
 
 
 class Pregresso(ContractModel):
@@ -255,16 +288,43 @@ class TemporaryDifference(ContractModel):
     name: str
     kind: Literal["deductible", "taxable"]
     maturity: Literal["short", "long"]
-    opening_amount: Decimal
-    additions: Decimal
-    reversals: Decimal
-    tax_rate: Optional[Decimal] = None
+    opening_amount: PlainDecimal
+    additions: PlainDecimal
+    reversals: PlainDecimal
+    tax_rate: Optional[PlainDecimal] = None
+
+
+CEOverrideField = Literal[
+    "ce01_override", "ce02_override", "ce03_override", "ce03a_override",
+    "ce04_override", "ce05_override", "ce06_override", "ce07_override",
+    "ce08_override", "ce08a_override", "ce08b_override", "ce08c_override",
+    "ce08d_override", "ce09_override", "ce09a_override", "ce09b_override",
+    "ce09c_override", "ce09d_override", "ce10_override", "ce11_override",
+    "ce11b_override", "ce12_override", "ce13_override", "ce14_override",
+    "ce15_override", "ce16_override", "ce17_override", "ce17a_override",
+    "ce17b_override", "ce18_override", "ce19_override", "ce20_override",
+]
+
+
+class CEOverride(ContractModel):
+    field: CEOverrideField
+    value: PlainDecimal
+
+
+class SPIndexing(ContractModel):
+    field: str = Field(pattern=r"^sp\d{2}[a-z]?(?:_[a-z]+)*$")
+    driver: Literal["ricavi", "acquisti", "personale"]
+
+
+class SPOverride(ContractModel):
+    field: str = Field(pattern=r"^sp\d{2}[a-z]?(?:_[a-z]+)*$")
+    value: PlainDecimal
 
 
 class AssumptionValue(ContractModel):
     field: str
     label: str
-    values: list[Optional[Decimal]] = Field(min_length=1)
+    values: list[Optional[PlainDecimal]] = Field(min_length=1)
     # `legacy_unknown` is an explicit read-model outcome for a NULL
     # explicitly_supplied_fields record.  This contract never infers it by
     # comparing an amount with a default; persisting new provenance is M1-05B.
@@ -273,12 +333,31 @@ class AssumptionValue(ContractModel):
     financing_loans: Optional[list[FinancingLoan]] = None
     pregresso: Optional[Pregresso] = None
     temporary_differences: Optional[list[TemporaryDifference]] = None
+    ce_overrides: Optional[list[CEOverride]] = None
+    sp_indexing: Optional[list[SPIndexing]] = None
+    sp_overrides: Optional[list[SPOverride]] = None
 
     @model_validator(mode="after")
     def nested_value_has_a_known_field(self):
-        nested = (self.financing_loans is not None) + (self.pregresso is not None) + (self.temporary_differences is not None)
+        nested = sum((
+            self.financing_loans is not None, self.pregresso is not None,
+            self.temporary_differences is not None, self.ce_overrides is not None,
+            self.sp_indexing is not None, self.sp_overrides is not None,
+        ))
         if nested > 1:
             raise ValueError("an assumption value has at most one nested table")
+        if self.financing_loans is not None and self.field != "financing_loans":
+            raise ValueError("financing_loans data is only valid for the financing_loans field")
+        if self.pregresso is not None and self.field != "pregresso":
+            raise ValueError("pregresso data is only valid for the pregresso field")
+        if self.temporary_differences is not None and self.field != "tax_temporary_differences":
+            raise ValueError("temporary_differences data is only valid for tax_temporary_differences")
+        if self.ce_overrides is not None and self.field != "ce_overrides":
+            raise ValueError("ce_overrides data is only valid for the ce_overrides field")
+        if self.sp_indexing is not None and self.field != "sp_indexing":
+            raise ValueError("sp_indexing data is only valid for the sp_indexing field")
+        if self.sp_overrides is not None and self.field != "sp_overrides":
+            raise ValueError("sp_overrides data is only valid for the sp_overrides field")
         return self
 
 
@@ -287,11 +366,19 @@ class AssumptionSection(ContractModel):
     title: str
     assumptions: list[AssumptionValue] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def fields_belong_to_section_catalog(self):
+        allowed = _CATALOG_FIELDS[self.key]
+        invalid = [assumption.field for assumption in self.assumptions if assumption.field not in allowed]
+        if invalid:
+            raise ValueError(f"assumption fields are not valid for {self.key}: {', '.join(invalid)}")
+        return self
+
 
 class FinancialLine(ContractModel):
     code: str
     label: str
-    value: Decimal
+    value: PlainDecimal
 
 
 class ForecastYear(ContractModel):
@@ -309,7 +396,7 @@ class Forecast(ContractModel):
 class ChartMetric(ContractModel):
     key: str
     label: str
-    values: list[Optional[Decimal]] = Field(min_length=1)
+    values: list[Optional[PlainDecimal]] = Field(min_length=1)
 
 
 class ChartSeries(ContractModel):
@@ -354,7 +441,7 @@ class FinalReportModel(ContractModel):
     narrative: list[NarrativeBlock] = Field(min_length=6, max_length=6)
 
     @model_validator(mode="after")
-    def enforce_v1_shape(self):
+    def enforce_v1_shape(self, info: ValidationInfo):
         expected_sections = [item["key"] for item in ASSUMPTION_SECTION_CATALOG]
         if [section.key for section in self.assumption_sections] != expected_sections:
             raise ValueError("assumption_sections must use the seven canonical wizard groups in order")
@@ -369,6 +456,21 @@ class FinalReportModel(ContractModel):
             raise ValueError("infrannual_closing is omitted for non-infrannuale reports")
         if [year.year for year in self.forecast.years] != self.practice.periods.forecast_years:
             raise ValueError("forecast years must match practice periods")
+        forecast_years = self.practice.periods.forecast_years
+        if any(series.categories != forecast_years for series in self.chart_series):
+            raise ValueError("chart categories must match practice forecast years")
+        if self.readiness.status == "ready":
+            if any(not source.available for source in self.source_revisions):
+                raise ValueError("ready reports require every source revision to be available")
+            if any(reason.severity == "error" for reason in self.readiness.reasons):
+                raise ValueError("ready reports cannot carry error readiness reasons")
+        if not (info.context or {}).get("skip_hash_validation"):
+            expected_source = self.calculate_source_hash()
+            expected_model = self.calculate_model_hash()
+            if self.source_hash != expected_source:
+                raise ValueError("source_hash must match the validated report source hash")
+            if self.model_hash != expected_model:
+                raise ValueError("model_hash must match the validated report model hash")
         return self
 
     def calculate_source_hash(self) -> str:
@@ -376,7 +478,3 @@ class FinalReportModel(ContractModel):
 
     def calculate_model_hash(self) -> str:
         return model_hash(self)
-
-
-_CATALOG_PATH = Path(__file__).resolve().parents[3] / "contracts" / "final_report_assumption_sections.json"
-ASSUMPTION_SECTION_CATALOG: list[dict[str, object]] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))

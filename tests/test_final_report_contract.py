@@ -66,11 +66,31 @@ def test_canonical_hash_changes_for_material_value_and_keeps_decimal_precision()
     assert '"120.00"' in report.model_dump_json()
 
 
+def test_canonical_decimal_normalizes_only_for_hashing_and_rejects_non_finite_values():
+    assert canonical_json({"amount": Decimal("1.00")}) == canonical_json({"amount": Decimal("1.0")})
+    assert canonical_json({"amount": "1.00"}) == canonical_json({"amount": "1.0"})
+    with pytest.raises(ValueError, match="non-finite"):
+        canonical_json({"amount": Decimal("NaN")})
+
+
+def test_legacy_unknown_is_an_explicit_read_model_value_not_a_writer_inference():
+    report = FinalReportModel.model_validate(load_fixture("infrannuale.json"))
+    provenance = report.assumption_sections[4].assumptions[0].provenance
+    assert provenance == "legacy_unknown"
+    service = (ROOT / "backend" / "app" / "services" / "assumptions_service.py").read_text(encoding="utf-8")
+    assert "explicitly_supplied_fields" not in service
+
+
 def test_assumption_catalog_is_exactly_the_current_wizard_without_dead_fields():
     catalog_keys = [item["key"] for item in ASSUMPTION_SECTION_CATALOG]
     assert catalog_keys == ["scenario", "fatturato", "costi", "altre-voci-ce", "circolante", "pregresso-nuovo", "imposte"]
     fields = [field for item in ASSUMPTION_SECTION_CATALOG for field in item["fields"]]
+    nested_fields = [field for item in ASSUMPTION_SECTION_CATALOG for field in item.get("nested_fields", [])]
     assert len(fields) == len(set(fields))
+    assert set(nested_fields) == {"ce_overrides", "sp_indexing", "sp_overrides", "pregresso"}
+    # These are structured component inputs, deliberately represented as nested
+    # tables/envelopes instead of pretending they are scalar wizard STEP_FIELDS.
+    assert "investments" not in fields + nested_fields
 
     wizard = (ROOT / "frontend" / "lib" / "budget-wizard-steps.ts").read_text(encoding="utf-8")
     step_body = wizard.split("export const STEP_FIELDS:", 1)[1].split("/**", 1)[0]

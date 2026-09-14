@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Literal, Optional, Union
 
@@ -56,7 +56,21 @@ def _canonical_value(value, *, volatile: bool) -> object:
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="python")
     if isinstance(value, Decimal):
-        return str(value)
+        if not value.is_finite():
+            raise ValueError("canonical JSON rejects non-finite Decimal values")
+        normalized = value.normalize()
+        return "0" if normalized == 0 else format(normalized, "f")
+    if isinstance(value, str) and value and value[0] in "-0123456789":
+        # Decimal values cross the JSON wire as strings.  Normalize only valid
+        # decimal spellings; identifiers such as `fy-10` remain untouched.
+        try:
+            numeric = Decimal(value)
+        except InvalidOperation:
+            pass
+        else:
+            if numeric.is_finite() and str(numeric) == value:
+                normalized = numeric.normalize()
+                return "0" if normalized == 0 else format(normalized, "f")
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, list) or isinstance(value, tuple):
@@ -251,6 +265,9 @@ class AssumptionValue(ContractModel):
     field: str
     label: str
     values: list[Optional[Decimal]] = Field(min_length=1)
+    # `legacy_unknown` is an explicit read-model outcome for a NULL
+    # explicitly_supplied_fields record.  This contract never infers it by
+    # comparing an amount with a default; persisting new provenance is M1-05B.
     provenance: Literal["user", "automatic", "default", "override", "ignored", "legacy_unknown"]
     active: bool
     financing_loans: Optional[list[FinancingLoan]] = None

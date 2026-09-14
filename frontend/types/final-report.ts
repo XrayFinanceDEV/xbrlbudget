@@ -11,7 +11,7 @@ export type ChartId = "income_results" | "margins" | "cashflows" | "liquidity_de
 export type NarrativeId = "executive_summary" | "adjustments_and_closing" | "budget_assumptions" | "economic_outlook" | "financial_outlook" | "risks_and_actions";
 export type AssumptionSectionKey = "scenario" | "fatturato" | "costi" | "altre-voci-ce" | "circolante" | "pregresso-nuovo" | "imposte";
 
-export interface AssumptionSectionCatalogEntry { key: AssumptionSectionKey; title: string; fields: readonly string[] }
+export interface AssumptionSectionCatalogEntry { key: AssumptionSectionKey; title: string; fields: readonly string[]; nested_fields?: readonly string[] }
 export interface CompanyIdentity { id: number; name: string; tax_id: string | null }
 export interface ScenarioIdentity { id: number; name: string; base_year: number; period_months?: number | null }
 export interface Periods { historical_year: number | null; closing_year: number | null; forecast_years: number[] }

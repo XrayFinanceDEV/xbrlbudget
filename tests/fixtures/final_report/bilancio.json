@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-14T11:00:00Z",
-  "model_hash": "875e9a37086f8760f28404ad25521283c91964b8c4e1f00a31695f07515b9085",
-  "source_hash": "2ed1f8f73bcbdf1219ab70ba4f71a17ca78e14c37b6109790af0c463f4dd9973",
+  "model_hash": "ee732beb3166f97ab55b026953bba5692b53fb2ec8d256b7a2e109d39dad81ff",
+  "source_hash": "3f52b8a7dd6c2b35fd66d31a7699e7c4b31870336cbb183b10513a2fa6361a5a",
   "company": {
     "id": 2,
     "name": "Bilancio Spa",

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-14T12:00:00Z",
-  "model_hash": "ca82c929624a845039289f7d9ddbcac232f51301333e2d3fcaf93a6dc0418454",
-  "source_hash": "25148e51e6ee58fb5e6fe8af324e3a648a5f805c74632c72b5243ba67e89a633",
+  "model_hash": "85a836cca606d8258ca6d48c6b9da1d07b7eb103193f7fa78fbe508d0b0f6d0d",
+  "source_hash": "f813e9357fe656ad6abe2cb44f99b40a5cd97fcf630616037f2ea632c79112f8",
   "company": {
     "id": 3,
     "name": "Startup Srl",

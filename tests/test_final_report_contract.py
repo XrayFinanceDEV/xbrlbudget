@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from fastapi.encoders import jsonable_encoder
 
 from backend.app.schemas.final_report import (
     ASSUMPTION_SECTION_CATALOG,
@@ -47,6 +48,20 @@ def test_workflow_specific_closing_is_omitted_and_float_money_is_rejected():
     infrannual["forecast"]["years"][0]["income_statement"][0]["value"] = 1.25
     with pytest.raises(ValueError, match="exact JSON strings"):
         FinalReportModel.model_validate(infrannual)
+
+
+def test_annual_wire_serialization_omits_closing_and_round_trips_through_fastapi():
+    for name in ("bilancio.json", "startup.json"):
+        report = FinalReportModel.model_validate(load_fixture(name))
+        assert "infrannual_closing" not in report.model_dump(mode="json")
+        assert "infrannual_closing" not in json.loads(report.model_dump_json())
+        encoded = jsonable_encoder(report)
+        assert "infrannual_closing" not in encoded
+        round_trip = FinalReportModel.model_validate(encoded)
+        assert round_trip.model_dump(mode="json") == encoded
+
+    infrannual = FinalReportModel.model_validate(load_fixture("infrannuale.json"))
+    assert "infrannual_closing" in jsonable_encoder(infrannual)
 
 
 def test_canonical_hash_ignores_key_order_and_volatile_timestamps():
@@ -150,6 +165,56 @@ def test_v1_material_invariants_and_exact_alert_keys_are_enforced():
         FinalReportModel.model_validate(report)
 
 
+def test_forecast_years_are_unique_and_ready_reports_have_renderable_statements():
+    report = load_fixture("infrannuale.json")
+    report["practice"]["periods"]["forecast_years"] = [2027, 2027, 2029]
+    with pytest.raises(ValueError, match="unique"):
+        FinalReportModel.model_validate(report)
+
+    report = load_fixture("bilancio.json")
+    report["forecast"]["years"][0]["cashflow"] = []
+    with pytest.raises(ValueError, match="non-empty income_statement"):
+        FinalReportModel.model_validate(report)
+
+
+@pytest.mark.parametrize("path", [
+    ("company", "id"),
+    ("practice", "budget_scenario", "id"),
+    ("practice", "budget_scenario", "base_year"),
+    ("practice", "periods", "forecast_years", 0),
+    ("forecast", "years", 0, "year"),
+    ("chart_series", 0, "categories", 0),
+])
+@pytest.mark.parametrize("invalid", ["2027", True])
+def test_integer_contract_fields_do_not_coerce_wire_strings_or_booleans(path, invalid):
+    report = load_fixture("infrannuale.json")
+    target = report
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = invalid
+    with pytest.raises(ValueError):
+        FinalReportModel.model_validate(report)
+
+
+def test_iso_dates_and_defaulted_nullable_fields_have_explicit_wire_parity():
+    report = load_fixture("infrannuale.json")
+    report["generated_at"] = "2026-02-30T10:00:00Z"
+    with pytest.raises(ValueError, match="ISO datetime"):
+        FinalReportModel.model_validate(report)
+
+    report = load_fixture("infrannuale.json")
+    report["infrannual_closing"]["period_end"] = "2026-09-31"
+    with pytest.raises(ValueError, match="ISO calendar"):
+        FinalReportModel.model_validate(report)
+
+    report = load_fixture("bilancio.json")
+    report["company"].pop("tax_id")
+    report["source_revisions"][0].pop("available")
+    report["readiness"].pop("reasons")
+    parsed = FinalReportModel.model_validate(report, context={"skip_hash_validation": True})
+    assert parsed.company.tax_id is None and parsed.source_revisions[0].available is True and parsed.readiness.reasons == []
+
+
 def test_assumptions_must_belong_to_their_catalog_section():
     report = load_fixture("infrannuale.json")
     report["assumption_sections"][1]["assumptions"][0]["field"] = "dso_days"
@@ -163,6 +228,24 @@ def test_fixture_represents_each_catalogued_nested_assumption_structure():
     assert next(value for value in values if value.field == "ce_overrides").ce_overrides[0].field == "ce02_override"
     assert next(value for value in values if value.field == "sp_indexing").sp_indexing[0].driver == "ricavi"
     assert next(value for value in values if value.field == "sp_overrides").sp_overrides[0].value == Decimal("50.00")
+
+
+def test_fixture_has_non_vacuous_financing_tax_and_boolean_assumptions():
+    report = FinalReportModel.model_validate(load_fixture("infrannuale.json"))
+    values = {assumption.field: assumption for section in report.assumption_sections for assumption in section.assumptions}
+    assert values["financing_loans"].financing_loans[0].amount == Decimal("100000.00")
+    assert values["pregresso"].pregresso.debiti_tributari.rateizzato == Decimal("90")
+    assert values["tax_temporary_differences"].temporary_differences[0].kind == "deductible"
+    for field in ("cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended"):
+        assert all(isinstance(value, bool) for value in values[field].values)
+
+
+@pytest.mark.parametrize("invalid", [{"unexpected": "object"}, ["nested"], "1"])
+def test_assumption_scalars_reject_mixed_object_values(invalid):
+    report = load_fixture("infrannuale.json")
+    report["assumption_sections"][5]["assumptions"][1]["values"][0] = invalid
+    with pytest.raises(ValueError):
+        FinalReportModel.model_validate(report)
 
 
 def test_assumption_catalog_is_exactly_the_current_wizard_without_dead_fields():

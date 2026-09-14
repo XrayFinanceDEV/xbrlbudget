@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationInfo, field_serializer, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, StrictInt, ValidationInfo, field_serializer, model_serializer, model_validator
 
 
 FINAL_REPORT_SCHEMA_VERSION = 1
@@ -40,6 +40,39 @@ def _plain_decimal(value: object) -> Decimal:
 
 
 PlainDecimal = Annotated[Decimal, BeforeValidator(_plain_decimal)]
+AssumptionScalar = Union[PlainDecimal, StrictBool, None]
+
+
+def _iso_date(value: object) -> date:
+    """Accept date objects in-process and canonical extended ISO dates on the wire."""
+    if isinstance(value, datetime):
+        raise ValueError("dates must be ISO calendar dates, not datetimes")
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("dates must be extended ISO calendar strings")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("dates must be valid ISO calendar strings") from error
+
+
+def _iso_datetime(value: object) -> datetime:
+    """Accept datetime objects in-process and RFC 3339-like ISO datetimes on the wire."""
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?", value,
+    ):
+        raise ValueError("datetimes must be extended ISO datetime strings")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("datetimes must be valid ISO datetime strings") from error
+
+
+ISODate = Annotated[date, BeforeValidator(_iso_date)]
+ISODatetime = Annotated[datetime, BeforeValidator(_iso_datetime)]
 
 
 _CATALOG_PATH = Path(__file__).resolve().parents[3] / "contracts" / "final_report_assumption_sections.json"
@@ -48,6 +81,10 @@ _CATALOG_FIELDS = {
     section["key"]: frozenset([*section["fields"], *section.get("nested_fields", [])])
     for section in ASSUMPTION_SECTION_CATALOG
 }
+_BOOLEAN_ASSUMPTION_FIELDS = frozenset({
+    "cash_sweep_enabled", "overdraft_allowed",
+    "previdenza_scales_with_personnel", "tfr_accrual_suspended",
+})
 
 
 class ContractModel(BaseModel):
@@ -142,22 +179,28 @@ def model_hash(value: object) -> str:
 
 
 class CompanyIdentity(ContractModel):
-    id: int
+    id: StrictInt
     name: str
     tax_id: Optional[str] = None
 
 
 class ScenarioIdentity(ContractModel):
-    id: int
+    id: StrictInt
     name: str
-    base_year: int = Field(ge=2000, le=2100)
-    period_months: Optional[int] = Field(default=None, ge=1, le=12)
+    base_year: StrictInt = Field(ge=2000, le=2100)
+    period_months: Optional[StrictInt] = Field(default=None, ge=1, le=12)
 
 
 class Periods(ContractModel):
-    historical_year: Optional[int] = Field(default=None, ge=2000, le=2100)
-    closing_year: Optional[int] = Field(default=None, ge=2000, le=2100)
-    forecast_years: list[int] = Field(min_length=1)
+    historical_year: Optional[StrictInt] = Field(default=None, ge=2000, le=2100)
+    closing_year: Optional[StrictInt] = Field(default=None, ge=2000, le=2100)
+    forecast_years: list[StrictInt] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def forecast_years_are_unique(self):
+        if len(set(self.forecast_years)) != len(self.forecast_years):
+            raise ValueError("forecast years must be unique")
+        return self
 
 
 class InfrannualPractice(ContractModel):
@@ -188,7 +231,7 @@ class SourceRevision(ContractModel):
     source: Literal["historical_financial_year", "adjustments", "source_scenario", "budget_assumptions", "forecast", "narrative", "calculation_engine"]
     identifier: Optional[str] = None
     revision: Optional[str] = None
-    revision_at: Optional[datetime] = None
+    revision_at: Optional[ISODatetime] = None
     available: bool = True
 
 
@@ -218,7 +261,7 @@ class AdjustmentEntry(ContractModel):
     counterpart_label: str
     counterpart_delta: PlainDecimal
     explanation: Optional[str] = None
-    created_at: datetime
+    created_at: ISODatetime
 
 
 class Adjustments(ContractModel):
@@ -249,7 +292,7 @@ class ExtraAccountingAlerts(ContractModel):
 
 
 class InfrannualClosing(ContractModel):
-    period_end: date
+    period_end: ISODate
     values: list[ClosingValue] = Field(min_length=1)
     extra_accounting_alerts: ExtraAccountingAlerts
 
@@ -258,9 +301,9 @@ class FinancingLoan(ContractModel):
     name: Optional[str] = None
     amount: PlainDecimal
     opening_residual: PlainDecimal
-    duration_years: int = Field(gt=0)
+    duration_years: StrictInt = Field(gt=0)
     interest_rate: PlainDecimal
-    grace_years: int = Field(ge=0)
+    grace_years: StrictInt = Field(ge=0)
     balloon_pct: PlainDecimal
 
 
@@ -324,7 +367,7 @@ class SPOverride(ContractModel):
 class AssumptionValue(ContractModel):
     field: str
     label: str
-    values: list[Optional[PlainDecimal]] = Field(min_length=1)
+    values: list[AssumptionScalar] = Field(min_length=1)
     # `legacy_unknown` is an explicit read-model outcome for a NULL
     # explicitly_supplied_fields record.  This contract never infers it by
     # comparing an amount with a default; persisting new provenance is M1-05B.
@@ -339,6 +382,11 @@ class AssumptionValue(ContractModel):
 
     @model_validator(mode="after")
     def nested_value_has_a_known_field(self):
+        if self.field in _BOOLEAN_ASSUMPTION_FIELDS:
+            if any(value is not None and not isinstance(value, bool) for value in self.values):
+                raise ValueError(f"{self.field} accepts only boolean or null scalar values")
+        elif any(isinstance(value, bool) for value in self.values):
+            raise ValueError("non-boolean assumptions accept only Decimal strings or null scalar values")
         nested = sum((
             self.financing_loans is not None, self.pregresso is not None,
             self.temporary_differences is not None, self.ce_overrides is not None,
@@ -382,7 +430,7 @@ class FinancialLine(ContractModel):
 
 
 class ForecastYear(ContractModel):
-    year: int = Field(ge=2000, le=2100)
+    year: StrictInt = Field(ge=2000, le=2100)
     income_statement: list[FinancialLine]
     balance_sheet: list[FinancialLine]
     cashflow: list[FinancialLine]
@@ -403,7 +451,7 @@ class ChartSeries(ContractModel):
     id: Literal["income_results", "margins", "cashflows", "liquidity_debt", "working_capital_days", "coverage"]
     title: str
     unit: Literal["eur", "percent", "days", "ratio"]
-    categories: list[int] = Field(min_length=1)
+    categories: list[StrictInt] = Field(min_length=1)
     series: list[ChartMetric] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -417,14 +465,14 @@ class NarrativeBlock(ContractModel):
     id: Literal["executive_summary", "adjustments_and_closing", "budget_assumptions", "economic_outlook", "financial_outlook", "risks_and_actions"]
     text: str
     provenance: Literal["ai", "user", "migrated"]
-    updated_at: datetime
+    updated_at: ISODatetime
     source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     freshness: Literal["fresh", "stale", "missing"]
 
 
 class FinalReportModel(ContractModel):
     schema_version: Literal[1] = FINAL_REPORT_SCHEMA_VERSION
-    generated_at: datetime
+    generated_at: ISODatetime
     model_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     company: CompanyIdentity
@@ -439,6 +487,14 @@ class FinalReportModel(ContractModel):
     diagnostics: list[Diagnostic] = Field(default_factory=list)
     chart_series: list[ChartSeries] = Field(min_length=6, max_length=6)
     narrative: list[NarrativeBlock] = Field(min_length=6, max_length=6)
+
+    @model_serializer(mode="wrap")
+    def serialize_v1_wire_shape(self, handler):
+        """Annual/startup JSON never has an infrannual closing key, even as null."""
+        serialized = handler(self)
+        if self.practice.workflow_type != "infrannuale":
+            serialized.pop("infrannual_closing", None)
+        return serialized
 
     @model_validator(mode="after")
     def enforce_v1_shape(self, info: ValidationInfo):
@@ -464,6 +520,12 @@ class FinalReportModel(ContractModel):
                 raise ValueError("ready reports require every source revision to be available")
             if any(reason.severity == "error" for reason in self.readiness.reasons):
                 raise ValueError("ready reports cannot carry error readiness reasons")
+            # V1's smallest renderable ready forecast includes the three
+            # financial statements for every forecast year. Calculations are
+            # supplementary and may legitimately be empty.
+            required_statements = ("income_statement", "balance_sheet", "cashflow")
+            if any(not getattr(year, statement) for year in self.forecast.years for statement in required_statements):
+                raise ValueError("ready reports require non-empty income_statement, balance_sheet, and cashflow for every forecast year")
         if not (info.context or {}).get("skip_hash_validation"):
             expected_source = self.calculate_source_hash()
             expected_model = self.calculate_model_hash()

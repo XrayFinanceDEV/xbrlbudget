@@ -9,7 +9,7 @@
  * senza dover inferire nulla. Gli alert extra-contabili completano il quadro
  * e non toccano i numeri.
  *
- * Su bilancio e startup la sezione dice esplicitamente di non applicabile:
+ * Su bilancio e startup la sezione dice esplicitamente che non è applicabile:
  * il documento non tace una sezione prevista dall'indice (§6.1).
  */
 
@@ -41,7 +41,7 @@ export function ReportClosing({ workflow, closing }: ReportClosingProps) {
         <Card>
           <CardContent className="py-4 print:py-2">
             <h2 id="final-report-closing-title" className="mb-1 text-xl font-bold print:text-lg">
-              Dall'infrannuale alla chiusura
+              Dall&apos;infrannuale alla chiusura
             </h2>
             <p className="text-sm text-muted-foreground print:text-xs" data-testid="chiusura-non-applicabile">
               {workflow === "infrannuale"
@@ -59,13 +59,13 @@ export function ReportClosing({ workflow, closing }: ReportClosingProps) {
       <Card>
         <CardContent className="py-4 print:py-2">
           <h2 id="final-report-closing-title" className="mb-1 text-xl font-bold print:text-lg">
-            Dall'infrannuale alla chiusura
+            Dall&apos;infrannuale alla chiusura
           </h2>
           <p className="mb-3 text-sm text-muted-foreground print:text-xs">
             Confronto fra progressivo alla data del {formatDateItalian(closing.period_end)},
             proiezione a fine esercizio e valore di chiusura usato come base del budget.
             Un trattino (<span className="font-medium">—</span>) indica un valore non
-            presente: uno 0,00 è uno zero, non un'assenza.
+            presente: uno 0,00 è uno zero, non un&apos;assenza.
           </p>
 
           <table className="w-full text-sm print:text-xs">

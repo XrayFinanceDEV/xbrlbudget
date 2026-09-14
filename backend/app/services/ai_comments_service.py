@@ -15,6 +15,8 @@ Produces 10 short Italian-language comments for the report page:
 """
 import logging
 import os
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import anthropic
@@ -576,6 +578,9 @@ NARRATIVE_IDS = (
     "executive_summary", "adjustments_and_closing", "budget_assumptions",
     "economic_outlook", "financial_outlook", "risks_and_actions",
 )
+_NARRATIVE_ORIGINS = {"ai", "user", "migrated"}
+_NARRATIVE_SOURCE_HASH = re.compile(r"^[0-9a-f]{64}$")
+_NARRATIVE_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 # Only one-to-one semantic correspondences are promoted.  The remaining legacy
 # fields are deliberately retained below: joining several old comments into a
@@ -622,6 +627,68 @@ def _raw_narrative(scenario: BudgetScenario) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def safe_narrative_source_hash(value: Any, fallback: Any = None) -> str:
+    """Return persisted narrative provenance only when it meets the wire contract."""
+    for candidate in (value, fallback):
+        if isinstance(candidate, str) and _NARRATIVE_SOURCE_HASH.fullmatch(candidate):
+            return candidate
+    return "0" * 64
+
+
+def _safe_narrative_timestamp(value: Any, fallback: Any = None) -> datetime:
+    """Parse persisted JSON timestamps without adding clock-dependent read state."""
+    for candidate in (value, fallback):
+        if isinstance(candidate, datetime):
+            parsed = candidate
+        elif isinstance(candidate, str):
+            try:
+                parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            except (TypeError, ValueError, OverflowError):
+                continue
+        else:
+            continue
+        try:
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return _NARRATIVE_EPOCH
+
+
+def _normalized_narrative_block(item: dict, scenario: BudgetScenario) -> dict | None:
+    """Project one untrusted persisted JSON object into the report's strict shape."""
+    block_id, text = item.get("id"), item.get("text")
+    if block_id not in NARRATIVE_IDS or not isinstance(text, str):
+        return None
+    origin = item.get("origin")
+    return {
+        "id": block_id,
+        "text": text,
+        "origin": origin if isinstance(origin, str) and origin in _NARRATIVE_ORIGINS else "migrated",
+        "updated_at": _safe_narrative_timestamp(
+            item.get("updated_at"), getattr(scenario, "narrative_blocks_updated_at", None),
+        ),
+        "source_hash": safe_narrative_source_hash(
+            item.get("source_hash"), getattr(scenario, "narrative_source_hash", None),
+        ),
+    }
+
+
+def _narrative_storage_block(item: dict, source_hash: str) -> dict:
+    """Serialize a normalized block back into the JSON column on explicit writes."""
+    timestamp = _safe_narrative_timestamp(item.get("updated_at"))
+    return {
+        "id": item["id"],
+        "text": item["text"],
+        "origin": (
+            item.get("origin")
+            if isinstance(item.get("origin"), str) and item.get("origin") in _NARRATIVE_ORIGINS
+            else "migrated"
+        ),
+        "updated_at": timestamp.isoformat().replace("+00:00", "Z"),
+        "source_hash": safe_narrative_source_hash(item.get("source_hash"), source_hash),
+    }
+
+
 def _legacy_narrative(scenario: BudgetScenario) -> tuple[dict[str, dict], dict[str, dict[str, str]]]:
     """Return conservative read-compatible blocks and every unmapped legacy text."""
     mapped: dict[str, dict] = {}
@@ -657,11 +724,19 @@ def _legacy_narrative(scenario: BudgetScenario) -> tuple[dict[str, dict], dict[s
 def read_narrative_blocks(scenario: BudgetScenario) -> tuple[dict[str, dict], dict[str, dict[str, str]]]:
     """Read persisted blocks plus a non-destructive compatibility projection."""
     raw = _raw_narrative(scenario)
-    stored = {
-        item.get("id"): dict(item)
-        for item in raw.get("blocks", []) if isinstance(item, dict)
-        and item.get("id") in NARRATIVE_IDS and isinstance(item.get("text"), str)
-    }
+    raw_blocks = raw.get("blocks", [])
+    if not isinstance(raw_blocks, (list, tuple)):
+        raw_blocks = ()
+    stored: dict[str, dict] = {}
+    for raw_item in raw_blocks:
+        item = _normalized_narrative_block(raw_item, scenario) if isinstance(raw_item, dict) else None
+        if item is None:
+            continue
+        previous = stored.get(item["id"])
+        # Corrupt duplicate records must not silently demote an already valid
+        # user-owned block.  Other ties retain first-seen persisted order.
+        if previous is None or (previous["origin"] != "user" and item["origin"] == "user"):
+            stored[item["id"]] = item
     legacy, recovered = _legacy_narrative(scenario)
     for block_id, item in legacy.items():
         stored.setdefault(block_id, item)
@@ -683,7 +758,12 @@ def narrative_blocks_for_report(scenario: BudgetScenario, current_source_hash: s
     for block_id in NARRATIVE_IDS:
         item = stored.get(block_id)
         text = str(item.get("text", "")) if item else ""
-        source = str(item.get("source_hash") or getattr(scenario, "narrative_source_hash", None) or "0" * 64) if item else "0" * 64
+        source = (
+            safe_narrative_source_hash(
+                item.get("source_hash"), getattr(scenario, "narrative_source_hash", None),
+            )
+            if item else "0" * 64
+        )
         if not text:
             freshness = "missing"
         elif current_source_hash and source != current_source_hash:
@@ -694,7 +774,12 @@ def narrative_blocks_for_report(scenario: BudgetScenario, current_source_hash: s
             "id": block_id,
             "text": text,
             "origin": item.get("origin", "migrated") if item else "migrated",
-            "updated_at": item.get("updated_at") if item else now,
+            "updated_at": (
+                _safe_narrative_timestamp(
+                    item.get("updated_at"), getattr(scenario, "narrative_blocks_updated_at", None),
+                )
+                if item else now
+            ),
             "source_hash": source,
             "freshness": freshness,
         })
@@ -702,15 +787,16 @@ def narrative_blocks_for_report(scenario: BudgetScenario, current_source_hash: s
 
 
 def _write_narrative(scenario: BudgetScenario, blocks: dict[str, dict], recovered: dict[str, dict[str, str]], source_hash: str) -> None:
+    normalized_source_hash = safe_narrative_source_hash(source_hash)
     scenario.narrative_blocks = {
         "schema_version": 1,
-        "blocks": [blocks[key] for key in NARRATIVE_IDS if key in blocks],
+        "blocks": [_narrative_storage_block(blocks[key], normalized_source_hash) for key in NARRATIVE_IDS if key in blocks],
         # This is intentionally outside the renderer contract.  It is a lossless
         # recovery drawer for legacy text which could not be safely auto-mapped.
         "legacy_unmapped": recovered,
     }
     scenario.narrative_blocks_updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    scenario.narrative_source_hash = source_hash
+    scenario.narrative_source_hash = normalized_source_hash
 
 
 def save_user_narrative_blocks(db: Session, scenario_id: int, edits: dict[str, str], source_hash: str) -> None:

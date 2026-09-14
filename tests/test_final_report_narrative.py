@@ -1,13 +1,22 @@
 """M1-07 unified narrative endpoints, freshness, and legacy compatibility."""
+import asyncio
 import json
+from pathlib import Path
+import sys
 from decimal import Decimal
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+BACKEND = Path(__file__).resolve().parents[1] / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 
 
 USER = "final-report-narrative-user"
@@ -19,9 +28,7 @@ BLOCKS = (
 
 @pytest.fixture()
 def narrative():
-    # The application bootstrap installs backend/ on sys.path.  It must happen
-    # before app.* imports, otherwise the same module can be loaded twice.
-    from backend.app.main import app
+    from app.main import app
     from database.db import Base
     from database.models import (
         BalanceSheet, BudgetAssumptions, BudgetScenario, Company, FinancialYear,
@@ -55,6 +62,15 @@ def narrative():
 
 def _generated(prefix="ai"):
     return {block: f"{prefix} {block}" for block in BLOCKS}
+
+
+def _asgi_get(app, path: str):
+    """Exercise the actual route without TestClient's application lifespan."""
+    async def request():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.get(path)
+    return asyncio.run(asyncio.wait_for(request(), timeout=5))
 
 
 def test_get_is_pure_and_explicit_generation_uses_canonical_model(narrative, monkeypatch):
@@ -135,8 +151,100 @@ def test_legacy_mapping_is_conservative_and_foreign_narrative_is_hidden(narrativ
     assert recovered["budget"]["dashboard_comment"] == "Da recuperare"
     assert recovered["infrannuale"]["overall"] == "Seconda sintesi"
     assert recovered["infrannuale"]["ce_confronto"] == "Confronto CE"
+    with narrative.sessions() as db:
+        legacy_report = reports.get_final_report(
+            narrative.ids["company"], narrative.ids["scenario"], USER, db,
+        )
+    legacy_blocks = {block.id: block for block in legacy_report.narrative}
+    assert legacy_blocks["executive_summary"].text == "Sintesi legacy"
+    assert legacy_blocks["economic_outlook"].text == "Outlook CE"
     with narrative.sessions() as db, pytest.raises(HTTPException) as error:
         reports.generate_final_report_narrative_endpoint(
             narrative.ids["company"], narrative.ids["foreign"], USER, db,
         )
     assert error.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("raw_blocks", "expected_user_text"),
+    [
+        (None, None),
+        ([
+            {
+                "id": "executive_summary", "text": "Testo utente integro",
+                "origin": "user", "source_hash": "UPPERCASE", "updated_at": "not-a-timestamp",
+            },
+            {
+                "id": "economic_outlook", "text": "Testo con origine corrotta",
+                "origin": [], "source_hash": 12, "updated_at": [],
+            },
+        ], "Testo utente integro"),
+    ],
+    ids=("blocks-none", "origin-list"),
+)
+def test_route_normalizes_malformed_persisted_narrative_without_losing_user_text(
+    narrative, monkeypatch, raw_blocks, expected_user_text,
+):
+    """Malformed JSON is storage input, never a reason for the report GET to 500."""
+    import fastapi.routing
+    from app.main import app
+    from app.core.auth import get_current_user_id
+    from app.core import database as core_db
+    from app.core.config import settings
+    from database.models import BudgetScenario
+
+    async def override_get_db():
+        db = narrative.sessions()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    async def override_user_id():
+        return USER
+
+    async def run_sync_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", None)
+    monkeypatch.setattr(settings, "DEV_USER_ID", USER)
+    # The sandbox cannot start AnyIO's worker threads reliably.  Keep the real
+    # ASGI route, routing dependencies and response-model validation in play,
+    # but run its synchronous handler inline under the transport timeout.
+    monkeypatch.setattr(fastapi.routing, "run_in_threadpool", run_sync_inline)
+    app.dependency_overrides[core_db.get_db] = override_get_db
+    app.dependency_overrides[get_current_user_id] = override_user_id
+    try:
+        with narrative.sessions() as db:
+            scenario = db.get(BudgetScenario, narrative.ids["scenario"])
+            scenario.narrative_source_hash = "not-a-sha256"
+            scenario.narrative_blocks = {
+                "blocks": raw_blocks,
+            }
+            db.commit()
+
+        path = f"/api/v1/companies/{narrative.ids['company']}/scenarios/{narrative.ids['scenario']}/final-report"
+        first, second = _asgi_get(app, path), _asgi_get(app, path)
+        assert first.status_code == second.status_code == 200, first.text
+        blocks = {item["id"]: item for item in first.json()["narrative"]}
+        if expected_user_text is not None:
+            assert (blocks["executive_summary"]["text"], blocks["executive_summary"]["provenance"]) == (
+                expected_user_text, "user",
+            )
+            assert blocks["economic_outlook"]["provenance"] == "migrated"
+            assert all(blocks[ident]["source_hash"] == "0" * 64 for ident in ("executive_summary", "economic_outlook"))
+            assert all(blocks[ident]["updated_at"] == "1970-01-01T00:00:00Z" for ident in ("executive_summary", "economic_outlook"))
+        assert (first.json()["source_hash"], first.json()["model_hash"]) == (
+            second.json()["source_hash"], second.json()["model_hash"],
+        )
+        with narrative.sessions() as db:
+            persisted = db.get(BudgetScenario, narrative.ids["scenario"])
+            assert persisted.narrative_source_hash == "not-a-sha256"
+            assert persisted.narrative_blocks["blocks"] == raw_blocks
+        assert _asgi_get(
+            app,
+            f"/api/v1/companies/{narrative.ids['company']}/scenarios/{narrative.ids['foreign']}/final-report",
+        ).status_code == 404
+    finally:
+        app.dependency_overrides.pop(core_db.get_db, None)
+        app.dependency_overrides.pop(get_current_user_id, None)

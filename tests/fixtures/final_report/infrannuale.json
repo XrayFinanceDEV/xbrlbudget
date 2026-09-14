@@ -1,0 +1,41 @@
+{
+  "schema_version": 1, "generated_at": "2026-09-14T10:00:00Z", "model_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "company": {"id": 1, "name": "Officina Aurora Srl", "tax_id": "IT001"},
+  "practice": {"workflow_type": "infrannuale", "budget_scenario": {"id": 30, "name": "Budget 2027-2029", "base_year": 2026}, "source_scenario": {"id": 20, "name": "Infrannuale settembre", "base_year": 2026, "period_months": 9}, "periods": {"historical_year": 2025, "closing_year": 2026, "forecast_years": [2027, 2028, 2029]}},
+  "source_revisions": [{"source": "historical_financial_year", "identifier": "fy-10", "revision": "r3", "revision_at": "2026-09-01T08:00:00Z"}],
+  "readiness": {"status": "draft", "reasons": [{"code": "forecast_stale", "severity": "warning", "section": "forecast", "message": "Forecast da rigenerare"}]},
+  "source_data_quality": {"status": "partial", "diagnostics": []},
+  "adjustments": {"confirmed": true, "entries": [{"id": "adj-1", "edited_field": "ce01_ricavi_vendite", "edited_label": "Ricavi", "edit_delta": "120.00", "counterpart_field": "sp09_disponibilita_liquide", "counterpart_label": "Cassa", "counterpart_delta": "-120.00", "explanation": null, "created_at": "2026-09-02T08:00:00Z"}], "net_effect": "0.00"},
+  "infrannual_closing": {"period_end": "2026-09-30", "values": [{"code": "ce01_ricavi_vendite", "label": "Ricavi", "observed": "900.00", "comparable": null, "automatic": "1200.00", "override": null, "closing_used": "1200.00"}], "extra_accounting_alerts": ["inventory_count_pending"]},
+  "assumption_sections": [
+    {"key": "scenario", "title": "Scenario", "assumptions": []},
+    {"key": "fatturato", "title": "Fatturato", "assumptions": [{"field": "revenue_growth_pct", "label": "Crescita ricavi", "values": ["5.125", "4.00", "3.50"], "provenance": "user", "active": true}]},
+    {"key": "costi", "title": "Costi principali", "assumptions": []},
+    {"key": "altre-voci-ce", "title": "Altre voci CE", "assumptions": []},
+    {"key": "circolante", "title": "Capitale circolante", "assumptions": [{"field": "dso_days", "label": "DSO", "values": [null, "58", "55"], "provenance": "legacy_unknown", "active": true}]},
+    {"key": "pregresso-nuovo", "title": "Pregresso e nuovo", "assumptions": [{"field": "financing_loans", "label": "Finanziamenti", "values": [null, null, null], "provenance": "user", "active": true, "financing_loans": [{"name": "Mutuo", "amount": "100000.00", "opening_residual": "0.00", "duration_years": 5, "interest_rate": "3.25", "grace_years": 0, "balloon_pct": "0"}]}]},
+    {"key": "imposte", "title": "Imposte", "assumptions": []}
+  ],
+  "forecast": {"years": [
+    {"year": 2027, "income_statement": [{"code": "revenue", "label": "Ricavi", "value": "1261.500"}], "balance_sheet": [{"code": "cash", "label": "Cassa", "value": "80.00"}], "cashflow": [{"code": "operating", "label": "Flusso operativo", "value": "40.00"}], "calculations": [{"code": "dscr", "label": "DSCR", "value": "1.20"}]},
+    {"year": 2028, "income_statement": [{"code": "revenue", "label": "Ricavi", "value": "1311.96"}], "balance_sheet": [{"code": "cash", "label": "Cassa", "value": "95.00"}], "cashflow": [{"code": "operating", "label": "Flusso operativo", "value": "45.00"}], "calculations": [{"code": "dscr", "label": "DSCR", "value": "1.30"}]},
+    {"year": 2029, "income_statement": [{"code": "revenue", "label": "Ricavi", "value": "1357.88"}], "balance_sheet": [{"code": "cash", "label": "Cassa", "value": "100.00"}], "cashflow": [{"code": "operating", "label": "Flusso operativo", "value": "50.00"}], "calculations": [{"code": "dscr", "label": "DSCR", "value": "1.40"}]}
+  ]},
+  "diagnostics": [{"code": "legacy_assumption_provenance", "severity": "warning", "section": "assumptions", "message": "Origine storica non disponibile"}],
+  "chart_series": [
+    {"id": "income_results", "title": "Ricavi, EBITDA e utile", "unit": "eur", "categories": [2027, 2028, 2029], "series": [{"key": "revenue", "label": "Ricavi", "values": ["1261.500", "1311.96", "1357.88"]}]},
+    {"id": "margins", "title": "Margini", "unit": "percent", "categories": [2027, 2028, 2029], "series": [{"key": "ebitda_margin", "label": "EBITDA margin", "values": ["12.0", "12.5", "13.0"]}]},
+    {"id": "cashflows", "title": "Flussi", "unit": "eur", "categories": [2027, 2028, 2029], "series": [{"key": "operating", "label": "Operativo", "values": ["40", "45", "50"]}]},
+    {"id": "liquidity_debt", "title": "Cassa e debito", "unit": "eur", "categories": [2027, 2028, 2029], "series": [{"key": "cash", "label": "Cassa", "values": ["80", "95", "100"]}]},
+    {"id": "working_capital_days", "title": "Giorni circolante", "unit": "days", "categories": [2027, 2028, 2029], "series": [{"key": "dso", "label": "DSO", "values": [null, "58", "55"]}]},
+    {"id": "coverage", "title": "Copertura", "unit": "ratio", "categories": [2027, 2028, 2029], "series": [{"key": "dscr", "label": "DSCR", "values": ["1.20", "1.30", "1.40"]}]}
+  ],
+  "narrative": [
+    {"id": "executive_summary", "text": "Sintesi", "provenance": "user", "updated_at": "2026-09-03T08:00:00Z", "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "freshness": "fresh"},
+    {"id": "adjustments_and_closing", "text": "Chiusura", "provenance": "ai", "updated_at": "2026-09-03T08:00:00Z", "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "freshness": "stale"},
+    {"id": "budget_assumptions", "text": "Ipotesi", "provenance": "migrated", "updated_at": "2026-09-03T08:00:00Z", "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "freshness": "fresh"},
+    {"id": "economic_outlook", "text": "Economia", "provenance": "ai", "updated_at": "2026-09-03T08:00:00Z", "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "freshness": "fresh"},
+    {"id": "financial_outlook", "text": "Finanza", "provenance": "ai", "updated_at": "2026-09-03T08:00:00Z", "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "freshness": "missing"},
+    {"id": "risks_and_actions", "text": "Rischi", "provenance": "user", "updated_at": "2026-09-03T08:00:00Z", "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "freshness": "fresh"}
+  ]
+}

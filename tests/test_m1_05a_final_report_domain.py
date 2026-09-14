@@ -235,6 +235,64 @@ def test_dangling_explicit_link_is_broken_and_not_finalizable(db_session):
     assert resolve_source_scenario(db_session, missing).match is ChainMatch.BROKEN
 
 
+def test_explicit_link_rejects_incompatible_workflow_source_year_and_marker(db_session):
+    company = _company(db_session)
+    compatible = _scenario(
+        db_session, company.id, name="Infrannuale 2025", scenario_type="infrannuale",
+        base_year=2025, period_months=9, workflow_type="infrannuale",
+    )
+    incompatible_year = _scenario(
+        db_session, company.id, name="Infrannuale 2024", scenario_type="infrannuale",
+        base_year=2024, period_months=9, workflow_type="infrannuale",
+    )
+    incompatible_origin_workflow = _scenario(
+        db_session, company.id, name="Infrannuale con workflow errato", scenario_type="infrannuale",
+        base_year=2025, period_months=9, workflow_type="bilancio",
+    )
+    not_an_origin = _scenario(db_session, company.id, name="Budget ordinario", base_year=2025)
+
+    wrong_workflow = _scenario(
+        db_session, company.id, name="Workflow bilancio", base_year=2026,
+        workflow_type="bilancio", source_scenario_id=compatible.id,
+    )
+    wrong_year = _scenario(
+        db_session, company.id, name="Anno incoerente", base_year=2026,
+        workflow_type="infrannuale", source_scenario_id=incompatible_year.id,
+    )
+    wrong_type = _scenario(
+        db_session, company.id, name="Tipo incoerente", base_year=2026,
+        workflow_type="infrannuale", source_scenario_id=not_an_origin.id,
+    )
+    wrong_origin_workflow = _scenario(
+        db_session, company.id, name="Workflow sorgente incoerente", base_year=2026,
+        workflow_type="infrannuale", source_scenario_id=incompatible_origin_workflow.id,
+    )
+    marker_origin = _scenario(
+        db_session, company.id, name="Infrannuale 2026 A", scenario_type="infrannuale",
+        base_year=2026, period_months=9, workflow_type="infrannuale",
+    )
+    explicit_other_origin = _scenario(
+        db_session, company.id, name="Infrannuale 2026 B", scenario_type="infrannuale",
+        base_year=2026, period_months=6, workflow_type="infrannuale",
+    )
+    _annual_year(
+        db_session, company.id, 2027, promoted_from_scenario_id=marker_origin.id,
+        workflow_origin="promoted_projection",
+    )
+    wrong_marker = _scenario(
+        db_session, company.id, name="Marcatore incoerente", base_year=2027,
+        workflow_type="infrannuale", source_scenario_id=explicit_other_origin.id,
+    )
+
+    db_session.stop_counting()
+    for budget in (wrong_workflow, wrong_year, wrong_type, wrong_origin_workflow, wrong_marker):
+        resolution = resolve_source_scenario(db_session, budget)
+        assert resolution.match is ChainMatch.BROKEN
+        assert not resolution.finalizable
+        assert [diagnostic.code for diagnostic in resolution.diagnostics] == ["chain_source_incompatible"]
+    assert db_session.writes == []
+
+
 def test_promotion_marker_pointing_at_a_non_infrannuale_scenario_invents_nothing(db_session):
     company = _company(db_session)
     wrong = _scenario(db_session, company.id, name="Altro budget", base_year=2024)
@@ -242,7 +300,42 @@ def test_promotion_marker_pointing_at_a_non_infrannuale_scenario_invents_nothing
                  workflow_origin="promoted_projection")
     budget = _scenario(db_session, company.id, name="Budget", base_year=2026)
 
-    assert resolve_source_scenario(db_session, budget).match is ChainMatch.NONE
+    db_session.stop_counting()
+    resolution = resolve_source_scenario(db_session, budget)
+
+    assert resolution.match is ChainMatch.BROKEN
+    assert not resolution.finalizable and resolution.source_scenario is None
+    assert [diagnostic.code for diagnostic in resolution.diagnostics] == ["chain_source_incompatible"]
+    assert [diagnostic.severity for diagnostic in resolution.diagnostics] == ["error"]
+    assert budget.source_scenario_id is None
+    assert db_session.writes == []
+
+
+def test_legacy_marker_outside_annualization_window_is_not_replaced_or_written(db_session):
+    company = _company(db_session)
+    stale_marker = _scenario(
+        db_session, company.id, name="Infrannuale 2024", scenario_type="infrannuale",
+        base_year=2024, period_months=9,
+    )
+    _scenario(
+        db_session, company.id, name="Compatibile ma non marcato", scenario_type="infrannuale",
+        base_year=2025, period_months=9,
+    )
+    _annual_year(
+        db_session, company.id, 2026, promoted_from_scenario_id=stale_marker.id,
+        workflow_origin="promoted_projection",
+    )
+    budget = _scenario(db_session, company.id, name="Budget legacy", base_year=2026)
+
+    db_session.stop_counting()
+    resolution = resolve_source_scenario(db_session, budget)
+
+    assert resolution.match is ChainMatch.BROKEN
+    assert not resolution.finalizable and resolution.source_scenario is None
+    assert [diagnostic.code for diagnostic in resolution.diagnostics] == ["chain_source_incompatible"]
+    assert [diagnostic.severity for diagnostic in resolution.diagnostics] == ["error"]
+    assert budget.source_scenario_id is None
+    assert db_session.writes == []
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +399,45 @@ def test_reconciliation_holds_for_negative_movements_and_rejects_mismatches():
     assert [d.severity for d in broken.diagnostics] == ["error"]
     assert "sp09_disponibilita_liquide" in broken.diagnostics[0].message
 
-    assert reconcile_adjustments(before, after, [_confirm()]).balanced is True
+    confirm_only = reconcile_adjustments(before, after, [_confirm()])
+    assert not confirm_only.balanced  # confirmation is not an economic journal row
+    assert confirm_only.adjustments == {}
+    assert reconcile_adjustments(before, before, [_confirm()]).balanced is True
+
+
+def test_reconciliation_covers_snapshot_union_and_aggregates_duplicate_split_rows():
+    entries = [
+        _rettifica(1, edit_delta=100.0, counterpart_delta=-60.0),
+        _rettifica(2, edit_delta=0.0, counterpart_delta=-40.0),  # UI split row
+        _rettifica(3, edited_field="sp09_disponibilita_liquide", edit_delta=25.0,
+                   counterpart_field="sp16g_altri_debiti_breve", counterpart_delta=-25.0),
+    ]
+    before = {
+        "sp09_disponibilita_liquide": Decimal("0"),
+        "ce01_ricavi_vendite": Decimal("0"),
+        "sp16g_altri_debiti_breve": Decimal("0"),
+        "sp99_only_before": Decimal("2"),
+    }
+    after = {
+        "sp09_disponibilita_liquide": Decimal("125"),
+        "ce01_ricavi_vendite": Decimal("-100"),
+        "sp16g_altri_debiti_breve": Decimal("-25"),
+        "ce99_only_after": Decimal("7"),
+    }
+
+    result = reconcile_adjustments(before, after, entries)
+
+    assert result.adjustments == {
+        "sp09_disponibilita_liquide": Decimal("125.0"),
+        "ce01_ricavi_vendite": Decimal("-100.0"),
+        "sp16g_altri_debiti_breve": Decimal("-25.0"),
+    }
+    assert not result.balanced
+    assert result.differences == {
+        "ce99_only_after": Decimal("7"),
+        "sp99_only_before": Decimal("-2"),
+    }
+    assert [diagnostic.code for diagnostic in result.diagnostics] == ["adjustments_unreconciled"]
 
 
 # ---------------------------------------------------------------------------
@@ -409,3 +540,28 @@ def test_a_single_entry_correction_is_declared_not_absorbed():
     assert result.balanced
     assert [d.code for d in result.diagnostics] == ["adjustments_unposted_mass"]
     assert result.unposted == Decimal("-100.0")
+
+
+def test_real_correggi_import_writer_shape_declares_its_edit_mass():
+    """The UI writer stores the one-sided mass in ``edit_delta``, not the sentinel."""
+    writer_entry = {
+        "id": "ui-correggi-import",
+        "edited_field": "sp09_disponibilita_liquide",
+        "edited_label": "Disponibilità liquide",
+        "edit_delta": 75,
+        "counterpart_field": "_correzione_import",
+        "counterpart_label": "Correzione importazione",
+        "counterpart_delta": 0,
+        "explanation": "Correzione dato importato",
+        "created_at": "2026-09-01T10:00:00",
+    }
+
+    assert signed_deltas([writer_entry]) == {"sp09_disponibilita_liquide": Decimal("75")}
+    assert unposted_mass([writer_entry]) == Decimal("75")
+    result = reconcile_adjustments(
+        {"sp09_disponibilita_liquide": Decimal("10")},
+        {"sp09_disponibilita_liquide": Decimal("85")},
+        [writer_entry],
+    )
+    assert result.balanced and result.unposted == Decimal("75")
+    assert [diagnostic.code for diagnostic in result.diagnostics] == ["adjustments_unposted_mass"]

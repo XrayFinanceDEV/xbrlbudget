@@ -47,9 +47,9 @@ from database.models import BudgetScenario, FinancialYear
 # attest «Conferma e prosegui». It carries no economic movement by design.
 CONFIRM_ENTRY_TYPE = "confirm"
 
-# Counterpart pseudo-field used by the single-entry "Correggi Import" mode: it is
-# a label, not a statement column, so it contributes no signed delta.
-NON_POSTING_COUNTERPART = "_correzione_import"
+# Pseudo-field used by the single-entry "Correggi Import" mode: it is a label,
+# not a statement column, so it contributes no signed statement delta.
+UNPOSTED_SENTINEL_FIELD = "_correzione_import"
 
 ZERO = Decimal("0")
 
@@ -118,9 +118,33 @@ def _is_infrannuale_origin(scenario: Optional[BudgetScenario]) -> bool:
     return bool(
         scenario is not None
         and scenario.scenario_type == "infrannuale"
+        # ``NULL`` is the legacy spelling of the workflow inferred from the
+        # scenario type.  A different, persisted workflow is never a source of
+        # the infrannuale promotion chain.
+        and scenario.workflow_type in (None, "infrannuale")
         and scenario.period_months is not None
         and 1 <= scenario.period_months <= 11
     )
+
+
+def _is_annualized_origin_for(scenario: BudgetScenario, origin: Optional[BudgetScenario]) -> bool:
+    """Whether ``origin`` could have produced ``scenario`` through promotion.
+
+    This deliberately mirrors the facts persisted by ``promote_service`` and
+    ``derive_scenario_provenance``: only a 1--11 month infrannuale becomes the
+    following full-year exercise.  It does not infer extra requirements (for
+    example that a legacy row must already have a workflow label).
+    """
+    return bool(
+        scenario.scenario_type != "infrannuale"
+        and _is_infrannuale_origin(origin)
+        and origin.base_year + 1 == scenario.base_year
+    )
+
+
+def _explicit_origin_is_compatible(scenario: BudgetScenario, origin: Optional[BudgetScenario]) -> bool:
+    """Explicit links are server-owned and must name the infrannuale chain."""
+    return scenario.workflow_type == "infrannuale" and _is_annualized_origin_for(scenario, origin)
 
 
 def _full_year(db: Session, company_id: int, year: int) -> Optional[FinancialYear]:
@@ -135,25 +159,14 @@ def _full_year(db: Session, company_id: int, year: int) -> Optional[FinancialYea
 def _legacy_candidates(db: Session, scenario: BudgetScenario) -> tuple[BudgetScenario, ...]:
     """Deterministic origins for a scenario that never stored its link.
 
-    Two signals are trusted, in this order:
-
-    1. the annual exercise of ``scenario.base_year`` records
-       ``promoted_from_scenario_id`` — promotion wrote that marker even when the
-       budget row predates ``source_scenario_id``;
-    2. otherwise, only a legacy row whose workflow is undeclared or explicitly
-       ``infrannuale`` may search for an infrannuale scenario that closes into
-       this base year.  A declared ``bilancio`` or ``startup`` is the head of its
-       own practice and must never acquire a phantom parent.
+    Only a legacy row whose workflow is undeclared or explicitly
+    ``infrannuale`` may search for an infrannuale scenario that closes into this
+    base year.  A declared ``bilancio`` or ``startup`` is the head of its own
+    practice and must never acquire a phantom parent.  The promotion marker is
+    resolved separately: when it exists it is a persisted declaration, never a
+    hint that may be replaced by this heuristic.
     """
-    promoted = _full_year(db, scenario.company_id, scenario.base_year)
-    promoted_source_id = getattr(promoted, "promoted_from_scenario_id", None)
-    if promoted_source_id is not None:
-        origin = db.get(BudgetScenario, promoted_source_id)
-        if origin is None or origin.company_id != scenario.company_id:
-            return ()
-        return (origin,)
-
-    if scenario.workflow_type in ("bilancio", "startup"):
+    if scenario.workflow_type not in (None, "infrannuale"):
         return ()
 
     candidates = (
@@ -169,7 +182,7 @@ def _legacy_candidates(db: Session, scenario: BudgetScenario) -> tuple[BudgetSce
         .order_by(BudgetScenario.id)
         .all()
     )
-    return tuple(candidates)
+    return tuple(candidate for candidate in candidates if _is_annualized_origin_for(scenario, candidate))
 
 
 def resolve_source_scenario(db: Session, scenario: BudgetScenario) -> ChainResolution:
@@ -185,6 +198,8 @@ def resolve_source_scenario(db: Session, scenario: BudgetScenario) -> ChainResol
 
 def _resolve_source_scenario(db: Session, scenario: BudgetScenario) -> ChainResolution:
     explicit_id = getattr(scenario, "source_scenario_id", None)
+    promoted = _full_year(db, scenario.company_id, scenario.base_year)
+    marker_source_id = getattr(promoted, "promoted_from_scenario_id", None)
     if explicit_id is not None:
         origin = db.get(BudgetScenario, explicit_id)
         if origin is None or origin.company_id != scenario.company_id:
@@ -201,12 +216,81 @@ def _resolve_source_scenario(db: Session, scenario: BudgetScenario) -> ChainReso
                     ),
                 ),
             )
+        if not _explicit_origin_is_compatible(scenario, origin) or (
+            marker_source_id is not None and marker_source_id != origin.id
+        ):
+            return ChainResolution(
+                ChainMatch.BROKEN,
+                candidate_ids=(origin.id,),
+                diagnostics=(
+                    _diagnostic(
+                        "chain_source_incompatible",
+                        "error",
+                        "chain",
+                        "Lo scenario di origine indicato non è compatibile con la "
+                        "catena infrannuale annualizzata o con il marcatore "
+                        "dell'esercizio di base: il report resta consultabile ma non "
+                        "è finalizzabile.",
+                    ),
+                ),
+            )
         return ChainResolution(ChainMatch.EXPLICIT, source_scenario=origin)
 
     if scenario.scenario_type == "infrannuale":
         # This scenario IS the intra-year source: a practice head has no parent,
         # and searching for one would invent a chain that never existed.
         return ChainResolution(ChainMatch.NONE)
+
+    # Promotion persists this marker even for annual scenarios predating
+    # ``source_scenario_id``.  Therefore its mere presence is a declaration of
+    # lineage: a missing, foreign or incompatible target is a broken chain, not
+    # permission to find a more convenient legacy candidate.
+    if marker_source_id is not None:
+        origin = db.get(BudgetScenario, marker_source_id)
+        if origin is None or origin.company_id != scenario.company_id:
+            return ChainResolution(
+                ChainMatch.BROKEN,
+                candidate_ids=(marker_source_id,),
+                diagnostics=(
+                    _diagnostic(
+                        "chain_source_missing",
+                        "error",
+                        "chain",
+                        "Il marcatore di promozione indica uno scenario non disponibile "
+                        "per questa azienda: il report resta consultabile ma non è "
+                        "finalizzabile.",
+                    ),
+                ),
+            )
+        if not _is_annualized_origin_for(scenario, origin):
+            return ChainResolution(
+                ChainMatch.BROKEN,
+                candidate_ids=(origin.id,),
+                diagnostics=(
+                    _diagnostic(
+                        "chain_source_incompatible",
+                        "error",
+                        "chain",
+                        "Il marcatore di promozione indica uno scenario non compatibile "
+                        "con la catena infrannuale annualizzata: il report resta "
+                        "consultabile ma non è finalizzabile.",
+                    ),
+                ),
+            )
+        return ChainResolution(
+            ChainMatch.UNIQUE_INFERRED,
+            source_scenario=origin,
+            candidate_ids=(origin.id,),
+            diagnostics=(
+                _diagnostic(
+                    "legacy_chain_inferred",
+                    "warning",
+                    "chain",
+                    "Collegamento di catena dedotto dal percorso legacy: non è stato "
+                    "scritto alcun collegamento nello database.",
+                ),
+            ),
+        )
 
     candidates = _legacy_candidates(db, scenario)
     if not candidates:
@@ -280,9 +364,9 @@ def is_confirmed(entries: Iterable[Any]) -> bool:
 
 
 #: Field names that are labels, not statement columns. ``_correzione_import`` is
-#: the counterpart the single-entry "Correggi Import" mode writes; a delta parked
-#: on it is mass that is not posted anywhere, so it is declared, never absorbed.
-NON_POSTING_FIELDS = frozenset({NON_POSTING_COUNTERPART})
+#: the sentinel written by the single-entry "Correggi Import" mode; its economic
+#: mass is deliberately declared rather than absorbed into statement deltas.
+UNPOSTED_SENTINEL_FIELDS = frozenset({UNPOSTED_SENTINEL_FIELD})
 
 
 def _legs(entry: Any) -> Iterable[tuple[str, str]]:
@@ -301,20 +385,29 @@ def signed_deltas(entries: Iterable[Any]) -> dict[str, Decimal]:
     for entry in economic_entries(entries):
         for name, delta_name in _legs(entry):
             code = _field(entry, name)
-            if not code or code in NON_POSTING_FIELDS:
+            if not code or code in UNPOSTED_SENTINEL_FIELDS:
                 continue
             deltas[code] = deltas.get(code, ZERO) + _decimal(_field(entry, delta_name))
     return deltas
 
 
 def unposted_mass(entries: Iterable[Any]) -> Decimal:
-    """What an economic entry moved onto a label instead of a statement field."""
+    """Economic mass parked on an unposted sentinel instead of a statement field.
+
+    The UI writer's actual ``Correggi Import`` shape is ``counterpart_delta=0``
+    and carries the one-sided movement in ``edit_delta``.  Older rows can carry
+    the mass on the sentinel counterpart itself, so retain that representation
+    whenever it is non-zero.
+    """
     total = ZERO
     for entry in economic_entries(entries):
         for name, delta_name in _legs(entry):
             code = _field(entry, name)
-            if code in NON_POSTING_FIELDS:
-                total += _decimal(_field(entry, delta_name))
+            if code in UNPOSTED_SENTINEL_FIELDS:
+                delta = _decimal(_field(entry, delta_name))
+                if name == "counterpart_field" and delta == ZERO:
+                    delta = _decimal(_field(entry, "edit_delta"))
+                total += delta
     return total
 
 
@@ -387,15 +480,19 @@ def reconcile_adjustments(
 
     ``before``/``after`` are the two snapshots of one exercise with the balance
     sheet and the income statement merged (the shape
-    ``GET .../adjustable`` already returns).  Only the fields the journal moved
-    are checked: the aggregate of a moved detail is recomputed by the Rettifiche
-    layer itself (``recalcAggregates``), and restating that rule here would be a
-    second copy of it — the very drift this milestone exists to avoid.
+    ``GET .../adjustable`` already returns).  Every key visible in either
+    snapshot or in the aggregated journal is checked, so a persisted drift that
+    has no journal row cannot hide behind an otherwise balanced correction.
     """
+    entries = list(entries)
     adjustments = signed_deltas(entries)
     differences: dict[str, Decimal] = {}
     unposted = unposted_mass(entries)
-    for code, delta in adjustments.items():
+    # ``signed_deltas`` aggregates repeated and split rows.  Sorting the full
+    # union gives both a deterministic diagnostic and a stable mapping shape.
+    all_codes = (set(before) | set(after) | set(adjustments)) - UNPOSTED_SENTINEL_FIELDS
+    for code in sorted(all_codes):
+        delta = adjustments.get(code, ZERO)
         actual = _decimal(after.get(code)) - _decimal(before.get(code))
         if abs(actual - delta) > tolerance:
             differences[code] = actual - delta

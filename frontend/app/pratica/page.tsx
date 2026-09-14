@@ -1059,7 +1059,7 @@ export default function InfraannualePage() {
       .finally(() => {
         if (extraAlertsRequest.current === requestId) setLoadingExtraAlerts(false);
       });
-  }, [extraAlertsScenarioKey, importResult?.companyId, scenario?.id, scenario?.scenario_type]);
+  }, [extraAlertsScenarioKey, importResult?.companyId, scenario]);
 
   useEffect(() => {
     loadExtraAlerts(true);

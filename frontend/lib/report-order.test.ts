@@ -29,6 +29,6 @@ describe("ordine del report finale", () => {
     expect(page).not.toContain("useAnalysis(");
     expect(page).not.toContain("useScenarios(");
     expect(page).toContain("generateForecast(selectedCompanyId, scenarioId)");
-    expect(page).toContain("await report.refetch()");
+    expect(page).toContain("regenerateFinalReport(() => generateForecast(selectedCompanyId, scenarioId), report.refetch)");
   });
 });

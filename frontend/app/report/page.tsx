@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { PageHeader } from "@/components/page-header";
 import { ReportTOC } from "@/components/report/report-toc";
-import { chartRows, hasStaleForecast, narrativeFor, statementRows, type ForecastStatement } from "@/components/report/final-report-adapters";
+import { hasStaleForecast, narrativeFor } from "@/components/report/final-report-adapters";
 import { ReportScope } from "@/components/final-report/Scope";
 import { ReportSources } from "@/components/final-report/Sources";
 import { ReportAdjustments } from "@/components/final-report/Adjustments";
@@ -21,7 +21,10 @@ import { ReportClosing } from "@/components/final-report/Closing";
 import { AssumptionsSections } from "@/components/final-report/AssumptionsSections";
 import { ReadinessBanner } from "@/components/final-report/ReadinessBanner";
 import { DiagnosticsPanel } from "@/components/final-report/DiagnosticsPanel";
+import { FinalReportChart } from "@/components/final-report/ChartSeries";
+import { ForecastValueTable } from "@/components/final-report/ForecastValueTable";
 import { generateFinalReportNarrative, generateForecast, getFinalReport, saveFinalReportNarrative } from "@/lib/api";
+import { regenerateFinalReport } from "@/lib/final-report-actions";
 import { getErrorMessage } from "@/lib/utils";
 import type { FinalReportModel, NarrativeBlock } from "@/types/final-report";
 
@@ -30,25 +33,8 @@ const NARRATIVE_TITLES: Record<NarrativeBlock["id"], string> = {
   budget_assumptions: "Commento sulle ipotesi", economic_outlook: "Prospettiva economica",
   financial_outlook: "Prospettiva finanziaria", risks_and_actions: "Rischi e azioni suggerite",
 };
-const STATEMENT_TITLES: Record<ForecastStatement, string> = {
-  income_statement: "Conto economico previsionale", balance_sheet: "Stato patrimoniale previsionale",
-  cashflow: "Flussi di cassa", calculations: "Calcoli e indicatori disponibili",
-};
-
-function ValueTable({ report, statement }: { report: FinalReportModel; statement: ForecastStatement }) {
-  const rows = statementRows(report, statement);
-  return <div className="overflow-x-auto"><table className="w-full text-sm print:text-xs">
-    <caption className="sr-only">{STATEMENT_TITLES[statement]} per anno di previsione</caption>
-    <thead><tr><th scope="col" className="border-b px-3 py-1.5 text-left font-medium print:px-1">Voce</th>{report.forecast.years.map((year) => <th key={year.year} scope="col" className="border-b px-3 py-1.5 text-right font-medium print:px-1">{year.year}</th>)}</tr></thead>
-    <tbody>{rows.map((row) => <tr key={row.code}><th scope="row" className="border-b px-3 py-1.5 text-left font-medium print:px-1">{row.label}<span className="ml-1 text-xs font-normal text-muted-foreground">{row.code}</span></th>{row.values.map((value, index) => <td key={index} className="border-b px-3 py-1.5 text-right tabular-nums print:px-1">{value ?? "—"}</td>)}</tr>)}</tbody>
-  </table></div>;
-}
-
 function ChartSeriesTable({ report, ids }: { report: FinalReportModel; ids: FinalReportModel["chart_series"][number]["id"][] }) {
-  return <div className="space-y-5">{report.chart_series.filter((series) => ids.includes(series.id)).map((series) => <div key={series.id} className="overflow-x-auto print:break-inside-avoid">
-    <h3 className="mb-1 text-base font-semibold">{series.title}</h3><p className="mb-2 text-xs text-muted-foreground">Unità: {series.unit}</p>
-    <table className="w-full text-sm print:text-xs"><caption className="sr-only">Serie {series.title}</caption><thead><tr><th scope="col" className="border-b px-3 py-1.5 text-left font-medium print:px-1">Serie</th>{series.categories.map((year) => <th key={year} scope="col" className="border-b px-3 py-1.5 text-right font-medium print:px-1">{year}</th>)}</tr></thead><tbody>{chartRows(series).map((row) => <tr key={row.key}><th scope="row" className="border-b px-3 py-1.5 text-left font-medium print:px-1">{row.label}</th>{row.values.map((value, index) => <td key={index} className="border-b px-3 py-1.5 text-right tabular-nums print:px-1">{value ?? "—"}</td>)}</tr>)}</tbody></table>
-  </div>)}</div>;
+  return <div className="space-y-5">{report.chart_series.filter((series) => ids.includes(series.id)).map((series) => <FinalReportChart key={series.id} series={series} />)}</div>;
 }
 
 function NarrativeCard({ block, onSave }: { block: NarrativeBlock; onSave: (id: NarrativeBlock["id"], text: string) => Promise<void> }) {
@@ -84,7 +70,7 @@ export default function ReportPage() {
   const regenerate = async () => {
     if (!selectedCompanyId || !scenarioId) return;
     setRegenerating(true);
-    try { await generateForecast(selectedCompanyId, scenarioId); await report.refetch(); toast.success("Previsionale rigenerato; stato del report aggiornato"); }
+    try { await regenerateFinalReport(() => generateForecast(selectedCompanyId, scenarioId), report.refetch); toast.success("Previsionale rigenerato; stato del report aggiornato"); }
     catch (error) { toast.error(getErrorMessage(error, "Impossibile rigenerare il previsionale")); }
     finally { setRegenerating(false); }
   };
@@ -112,12 +98,12 @@ export default function ReportPage() {
       <section id="adjustments" className="report-section"><ReportAdjustments adjustments={model.adjustments} /><div className="mt-3"><NarrativeCard block={narrativeFor(model, "adjustments_and_closing")} onSave={saveNarrative} /></div></section>
       <section id="closing" className="report-section"><ReportClosing workflow={model.practice.workflow_type} closing={model.practice.workflow_type === "infrannuale" ? model.infrannual_closing : undefined} /></section>
       <section id="assumptions" className="report-section"><AssumptionsSections model={model} /><div className="mt-3"><NarrativeCard block={narrativeFor(model, "budget_assumptions")} onSave={saveNarrative} /></div></section>
-      <section id="income-forecast" className="report-section"><Card><CardHeader><CardTitle>Conto economico previsionale</CardTitle></CardHeader><CardContent className="space-y-5"><ValueTable report={model} statement="income_statement" /><ChartSeriesTable report={model} ids={["income_results", "margins"]} /><NarrativeCard block={narrativeFor(model, "economic_outlook")} onSave={saveNarrative} /></CardContent></Card></section>
-      <section id="balance-forecast" className="report-section"><Card><CardHeader><CardTitle>Stato patrimoniale previsionale</CardTitle></CardHeader><CardContent><ValueTable report={model} statement="balance_sheet" /></CardContent></Card></section>
-      <section id="cashflow-sustainability" className="report-section"><Card><CardHeader><CardTitle>Flussi di cassa e sostenibilità finanziaria</CardTitle></CardHeader><CardContent className="space-y-5"><ValueTable report={model} statement="cashflow" /><ChartSeriesTable report={model} ids={["cashflows", "liquidity_debt"]} /><NarrativeCard block={narrativeFor(model, "financial_outlook")} onSave={saveNarrative} /></CardContent></Card></section>
+      <section id="income-forecast" className="report-section"><Card><CardHeader><CardTitle>Conto economico previsionale</CardTitle></CardHeader><CardContent className="space-y-5"><ForecastValueTable report={model} statement="income_statement" /><ChartSeriesTable report={model} ids={["income_results", "margins"]} /><NarrativeCard block={narrativeFor(model, "economic_outlook")} onSave={saveNarrative} /></CardContent></Card></section>
+      <section id="balance-forecast" className="report-section"><Card><CardHeader><CardTitle>Stato patrimoniale previsionale</CardTitle></CardHeader><CardContent><ForecastValueTable report={model} statement="balance_sheet" /></CardContent></Card></section>
+      <section id="cashflow-sustainability" className="report-section"><Card><CardHeader><CardTitle>Flussi di cassa e sostenibilità finanziaria</CardTitle></CardHeader><CardContent className="space-y-5"><ForecastValueTable report={model} statement="cashflow" /><ChartSeriesTable report={model} ids={["cashflows", "liquidity_debt"]} /><NarrativeCard block={narrativeFor(model, "financial_outlook")} onSave={saveNarrative} /></CardContent></Card></section>
       <section id="indicators-risks" className="report-section"><Card><CardHeader><CardTitle>Indicatori e rischi</CardTitle></CardHeader><CardContent className="space-y-5"><ChartSeriesTable report={model} ids={["working_capital_days", "coverage"]} /><NarrativeCard block={narrativeFor(model, "risks_and_actions")} onSave={saveNarrative} /></CardContent></Card></section>
       <section id="diagnostics" className="report-section"><DiagnosticsPanel diagnostics={model.diagnostics} /></section>
-      <section id="appendices" className="report-section"><Card><CardHeader><CardTitle>Appendici e metodologia</CardTitle></CardHeader><CardContent><Accordion type="multiple" className="print:block"><AccordionItem value="calculations"><AccordionTrigger>Calcoli disponibili</AccordionTrigger><AccordionContent><ValueTable report={model} statement="calculations" /></AccordionContent></AccordionItem><AccordionItem value="methodology"><AccordionTrigger>Nota metodologica</AccordionTrigger><AccordionContent>I valori, le serie, la readiness e la diagnostica provengono dal modello finale versionato; questa pagina non ricalcola formule finanziarie.</AccordionContent></AccordionItem></Accordion></CardContent></Card></section>
+      <section id="appendices" className="report-section"><Card><CardHeader><CardTitle>Appendici e metodologia</CardTitle></CardHeader><CardContent><Accordion type="multiple" className="print:block"><AccordionItem value="calculations"><AccordionTrigger>Calcoli disponibili</AccordionTrigger><AccordionContent><ForecastValueTable report={model} statement="calculations" /></AccordionContent></AccordionItem><AccordionItem value="source-detail"><AccordionTrigger>Dettaglio di ipotesi e rettifiche</AccordionTrigger><AccordionContent><p>Il dettaglio disponibile nel modello è già riportato nelle sezioni <a className="underline" href="#adjustments">Rettifiche apportate</a> e <a className="underline" href="#assumptions">Ipotesi del budget</a>, per non duplicare le tabelle principali. Se il modello dichiara un dettaglio assente, quella sezione lo indica esplicitamente.</p></AccordionContent></AccordionItem><AccordionItem value="methodology"><AccordionTrigger>Nota metodologica</AccordionTrigger><AccordionContent>I valori, le serie, la readiness e la diagnostica provengono dal modello finale versionato; questa pagina non ricalcola formule finanziarie.</AccordionContent></AccordionItem></Accordion></CardContent></Card></section>
     </main></div> : null}
   </div>;
 }

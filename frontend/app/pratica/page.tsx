@@ -1066,7 +1066,7 @@ export default function InfraannualePage() {
   }, [loadExtraAlerts]);
 
   const extraAlertsDirtyState = extraAlertsDirty(extraAlerts, loadedExtraAlerts);
-  const extraAlertsLoaded = extraAlertsLoadedFor === extraAlertsScenarioKey;
+  const extraAlertsLoaded = extraAlertsScenarioKey !== null && extraAlertsLoadedFor === extraAlertsScenarioKey;
   const extraAlertsSaveEnabled = canSaveExtraAlerts({
     dirty: extraAlertsDirtyState,
     loaded: extraAlertsLoaded,

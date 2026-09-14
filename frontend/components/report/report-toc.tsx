@@ -44,6 +44,7 @@ export function ReportTOC() {
           <button
             key={section.id}
             onClick={() => scrollTo(section.id)}
+            aria-current={activeId === section.id ? "location" : undefined}
             className={cn(
               "block w-full text-left text-sm px-2 py-1.5 rounded-md transition-colors",
               activeId === section.id

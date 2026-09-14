@@ -9,10 +9,14 @@ from app.core.database import get_db
 from app.core.auth import get_current_user_id
 from app.core.ownership import validate_company_owned_by_user
 from app.services.analysis_service import get_complete_analysis
-from app.services.ai_comments_service import generate_report_comments, get_stored_comments, save_comments
-from app.schemas.final_report import FinalReportModel
+from app.services.ai_comments_service import (
+    generate_final_report_narrative, generate_report_comments, get_stored_comments,
+    save_comments, save_generated_narrative_blocks, save_user_narrative_blocks,
+)
+from app.schemas.final_report import FinalReportModel, NarrativeSaveRequest
 from app.services.final_report_service import (
     FinalReportChainConflict, FinalReportNotFound, assemble_final_report,
+    narrative_source_hash,
 )
 from app.api.v1.budget_scenarios import validate_scenario_belongs_to_company
 
@@ -37,6 +41,58 @@ def get_final_report(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     except FinalReportChainConflict as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+
+
+def _assemble_or_http(db: Session, company_id: int, scenario_id: int) -> FinalReportModel:
+    try:
+        return assemble_final_report(db, company_id, scenario_id)
+    except FinalReportNotFound as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+    except FinalReportChainConflict as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+
+
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/final-report/narrative/generate",
+    response_model=FinalReportModel,
+    summary="Explicitly generate unified final-report narrative",
+)
+def generate_final_report_narrative_endpoint(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> FinalReportModel:
+    """Call the LLM only on demand, using the canonical server report model."""
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    report = _assemble_or_http(db, company_id, scenario_id)
+    generated = generate_final_report_narrative(report)
+    if generated:
+        # Normalize the canonical report to economic provenance so filling
+        # missing prose cannot immediately make its own output stale.
+        save_generated_narrative_blocks(db, scenario_id, generated, narrative_source_hash(report))
+    return _assemble_or_http(db, company_id, scenario_id)
+
+
+@router.put(
+    "/companies/{company_id}/scenarios/{scenario_id}/final-report/narrative",
+    response_model=FinalReportModel,
+    summary="Save user-authored unified final-report narrative blocks",
+)
+def save_final_report_narrative(
+    company_id: int,
+    scenario_id: int,
+    request: NarrativeSaveRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> FinalReportModel:
+    """Persist manual edits separately from generation and mark them as user text."""
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    report = _assemble_or_http(db, company_id, scenario_id)
+    save_user_narrative_blocks(
+        db, scenario_id, {block.id: block.text for block in request.blocks}, narrative_source_hash(report),
+    )
+    return _assemble_or_http(db, company_id, scenario_id)
 
 
 @router.get(
@@ -75,7 +131,7 @@ def generate_ai_comments(
     db: Session = Depends(get_db),
 ):
     """Generate AI comments via Haiku, persist to DB, return result."""
-    validate_company_owned_by_user(db, company_id, user_id)
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
     try:
         analysis_data = get_complete_analysis(db, company_id, scenario_id)

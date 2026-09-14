@@ -18,9 +18,10 @@ from app.schemas.final_report import (
     ASSUMPTION_SECTION_CATALOG, AnnualPractice, CompanyIdentity, Diagnostic,
     FinalReportModel, FinancialLine, Forecast, ForecastYear, InfrannualPractice,
     NarrativeBlock, Periods, Readiness, ScenarioIdentity, SourceDataQuality,
-    SourceRevision, StartupPractice,
+    SourceRevision, StartupPractice, canonical_hash,
 )
 from app.services.analysis_service import get_complete_analysis
+from app.services.ai_comments_service import narrative_blocks_for_report
 from app.services.final_report_assumptions import build_assumption_sections
 from app.services.final_report_charts import build_chart_series
 from app.services.final_report_domain import (
@@ -180,25 +181,74 @@ def _forecast_rows(scenario: BudgetScenario, analysis: dict[str, Any], required_
     return result
 
 
-def _narrative(scenario: BudgetScenario, generated_at: datetime, diagnostics: list[Diagnostic]) -> list[NarrativeBlock]:
-    raw = getattr(scenario, "narrative_blocks", None) or {}
-    blocks = raw.get("blocks", []) if isinstance(raw, dict) else []
-    by_id = {item.get("id"): item for item in blocks if isinstance(item, dict) and item.get("id") in NARRATIVE_IDS}
+def _narrative(
+    scenario: BudgetScenario, generated_at: datetime, diagnostics: list[Diagnostic],
+    current_source_hash: str | None = None,
+) -> list[NarrativeBlock]:
+    """Attach persisted/legacy prose and calculate freshness without writing."""
+    by_id = {item["id"]: item for item in narrative_blocks_for_report(scenario, current_source_hash)}
     output: list[NarrativeBlock] = []
     for ident in NARRATIVE_IDS:
         item = by_id.get(ident)
-        if item:
+        if item and item.get("text"):
             output.append(NarrativeBlock(
-                id=ident, text=str(item.get("text", "")), provenance=item.get("origin", "migrated"),
+                id=ident, text=str(item["text"]), provenance=item.get("origin", "migrated"),
                 updated_at=_stamp(item.get("updated_at") or scenario.narrative_blocks_updated_at),
-                source_hash=str(item.get("source_hash") or scenario.narrative_source_hash or "0" * 64),
-                freshness="fresh",
+                source_hash=str(item.get("source_hash") or "0" * 64),
+                freshness=item.get("freshness", "fresh"),
             ))
         else:
-            diagnostics.append(_diagnostic("narrative_missing", "warning", "narrative", f"Blocco narrativo {ident} non disponibile."))
+            # Keep M1-06's draft signal, but only once: subsequent freshness
+            # projection must remain a pure hash-independent read operation.
+            if current_source_hash is None:
+                diagnostics.append(_diagnostic("narrative_missing", "warning", "narrative", f"Blocco narrativo {ident} non disponibile."))
             output.append(NarrativeBlock(id=ident, text="", provenance="migrated", updated_at=generated_at,
                                          source_hash="0" * 64, freshness="missing"))
     return output
+
+
+def narrative_source_hash(report: FinalReportModel) -> str:
+    """Stable economic provenance for prose, independent of prose availability.
+
+    ``FinalReportModel.source_hash`` remains backward-compatible with the v1
+    contract.  It intentionally includes report readiness/revisions, some of
+    which vary as missing narrative is filled.  Narrative blocks instead use
+    this normalized subset so generating prose cannot immediately stale it.
+    """
+    payload = report.model_dump(mode="python")
+    payload.pop("narrative", None)
+    payload["source_revisions"] = [
+        item for item in payload.get("source_revisions", [])
+        if getattr(item, "source", item.get("source") if isinstance(item, dict) else None) != "narrative"
+    ]
+    for key in ("diagnostics",):
+        payload[key] = [
+            item for item in payload.get(key, [])
+            if getattr(item, "section", item.get("section") if isinstance(item, dict) else None) != "narrative"
+        ]
+    readiness = payload.get("readiness")
+    if isinstance(readiness, dict):
+        reasons = [
+            item for item in readiness.get("reasons", [])
+            if item.get("section") != "narrative"
+        ]
+        readiness["reasons"] = reasons
+        readiness["status"] = (
+            "blocked" if any(item.get("severity") == "error" for item in reasons)
+            else "draft" if reasons else "ready"
+        )
+    quality = payload.get("source_data_quality")
+    if isinstance(quality, dict):
+        diagnostics = [
+            item for item in quality.get("diagnostics", [])
+            if item.get("section") != "narrative"
+        ]
+        quality["diagnostics"] = diagnostics
+        quality["status"] = (
+            "legacy" if any(str(item.get("code", "")).startswith("legacy_") for item in diagnostics)
+            else "partial" if diagnostics else "complete"
+        )
+    return canonical_hash(payload)
 
 
 def _source_revisions(
@@ -422,6 +472,9 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int) -> Fin
             payload["infrannual_closing"] = closing
         report = FinalReportModel.model_validate(payload, context={"skip_hash_validation": True})
         payload["source_hash"] = report.calculate_source_hash()
+        # Narrative freshness compares each persisted block hash with a
+        # normalized economic source hash, so this second projection is stable.
+        payload["narrative"] = _narrative(scenario, generated_at, diagnostics, narrative_source_hash(report))
         report = FinalReportModel.model_validate(payload, context={"skip_hash_validation": True})
         payload["model_hash"] = report.calculate_model_hash()
         return FinalReportModel.model_validate(payload)

@@ -566,3 +566,203 @@ def save_infrannuale_comments(db: Session, scenario_id: int, comments: Dict[str,
         datetime.now(timezone.utc).replace(tzinfo=None) if cleaned else None
     )
     db.commit()
+
+
+# ========================================================================
+# Unified final-report narrative (M1-07)
+# ========================================================================
+
+NARRATIVE_IDS = (
+    "executive_summary", "adjustments_and_closing", "budget_assumptions",
+    "economic_outlook", "financial_outlook", "risks_and_actions",
+)
+
+# Only one-to-one semantic correspondences are promoted.  The remaining legacy
+# fields are deliberately retained below: joining several old comments into a
+# new prose block would silently change their meaning and provenance.
+_LEGACY_BUDGET_MAPPING = {
+    "overall_comment": "executive_summary",
+    "income_margins_comment": "economic_outlook",
+    "cashflow_comment": "financial_outlook",
+}
+_LEGACY_INFRANNUALE_MAPPING = {
+    "overall": "executive_summary",
+    "ce_proiezione": "economic_outlook",
+    "sp_proiezione": "financial_outlook",
+    "indicatori": "risks_and_actions",
+}
+
+
+class FinalReportNarrative(pydantic.BaseModel):
+    """The only LLM output shape accepted for the final report."""
+    executive_summary: str
+    adjustments_and_closing: str
+    budget_assumptions: str
+    economic_outlook: str
+    financial_outlook: str
+    risks_and_actions: str
+
+
+_FINAL_NARRATIVE_PROMPT = (
+    "Sei un analista finanziario senior italiano. Redigi i sei blocchi di una "
+    "relazione finale: sintesi, rettifiche/chiusura, ipotesi, prospettiva "
+    "economica, prospettiva finanziaria, rischi e azioni. Mantieni un tono "
+    "professionale, non inventare dati e separa chiaramente rischi da fatti. "
+    + _NUMBER_FORMAT_RULE + " Usa il tool fornito."
+)
+
+
+def _raw_narrative(scenario: BudgetScenario) -> dict:
+    raw = getattr(scenario, "narrative_blocks", None)
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (TypeError, ValueError):
+            raw = None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _legacy_narrative(scenario: BudgetScenario) -> tuple[dict[str, dict], dict[str, dict[str, str]]]:
+    """Return conservative read-compatible blocks and every unmapped legacy text."""
+    mapped: dict[str, dict] = {}
+    recovered: dict[str, dict[str, str]] = {"budget": {}, "infrannuale": {}}
+    budget = {
+        key: getattr(scenario, column, None)
+        for key, column in _COMMENT_FIELDS
+        if isinstance(getattr(scenario, column, None), str) and getattr(scenario, column, None).strip()
+    }
+    try:
+        intra_raw = _json.loads(scenario.ai_comments_infrannuale or "{}")
+    except (TypeError, ValueError):
+        intra_raw = {}
+    infrannuale = {
+        key: value for key, value in (intra_raw.items() if isinstance(intra_raw, dict) else [])
+        if isinstance(value, str) and value.strip()
+    }
+    for namespace, values, mapping in (
+        ("budget", budget, _LEGACY_BUDGET_MAPPING),
+        ("infrannuale", infrannuale, _LEGACY_INFRANNUALE_MAPPING),
+    ):
+        for key, text in values.items():
+            target = mapping.get(key)
+            # A target that has already been claimed by another old field is
+            # ambiguous; keep the source text available for a manual choice.
+            if target is None or target in mapped:
+                recovered[namespace][key] = text
+            else:
+                mapped[target] = {"id": target, "text": text, "origin": "migrated"}
+    return mapped, {key: value for key, value in recovered.items() if value}
+
+
+def read_narrative_blocks(scenario: BudgetScenario) -> tuple[dict[str, dict], dict[str, dict[str, str]]]:
+    """Read persisted blocks plus a non-destructive compatibility projection."""
+    raw = _raw_narrative(scenario)
+    stored = {
+        item.get("id"): dict(item)
+        for item in raw.get("blocks", []) if isinstance(item, dict)
+        and item.get("id") in NARRATIVE_IDS and isinstance(item.get("text"), str)
+    }
+    legacy, recovered = _legacy_narrative(scenario)
+    for block_id, item in legacy.items():
+        stored.setdefault(block_id, item)
+    persisted_recovery = raw.get("legacy_unmapped")
+    if isinstance(persisted_recovery, dict):
+        for namespace, values in persisted_recovery.items():
+            if isinstance(values, dict):
+                recovered.setdefault(str(namespace), {}).update({
+                    str(key): value for key, value in values.items() if isinstance(value, str)
+                })
+    return stored, recovered
+
+
+def narrative_blocks_for_report(scenario: BudgetScenario, current_source_hash: str | None = None) -> list[dict]:
+    """Project storage into six stable read-only blocks without database writes."""
+    stored, _ = read_narrative_blocks(scenario)
+    now = datetime.now(timezone.utc)
+    result = []
+    for block_id in NARRATIVE_IDS:
+        item = stored.get(block_id)
+        text = str(item.get("text", "")) if item else ""
+        source = str(item.get("source_hash") or getattr(scenario, "narrative_source_hash", None) or "0" * 64) if item else "0" * 64
+        if not text:
+            freshness = "missing"
+        elif current_source_hash and source != current_source_hash:
+            freshness = "stale"
+        else:
+            freshness = "fresh"
+        result.append({
+            "id": block_id,
+            "text": text,
+            "origin": item.get("origin", "migrated") if item else "migrated",
+            "updated_at": item.get("updated_at") if item else now,
+            "source_hash": source,
+            "freshness": freshness,
+        })
+    return result
+
+
+def _write_narrative(scenario: BudgetScenario, blocks: dict[str, dict], recovered: dict[str, dict[str, str]], source_hash: str) -> None:
+    scenario.narrative_blocks = {
+        "schema_version": 1,
+        "blocks": [blocks[key] for key in NARRATIVE_IDS if key in blocks],
+        # This is intentionally outside the renderer contract.  It is a lossless
+        # recovery drawer for legacy text which could not be safely auto-mapped.
+        "legacy_unmapped": recovered,
+    }
+    scenario.narrative_blocks_updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    scenario.narrative_source_hash = source_hash
+
+
+def save_user_narrative_blocks(db: Session, scenario_id: int, edits: dict[str, str], source_hash: str) -> None:
+    scenario = db.get(BudgetScenario, scenario_id)
+    if scenario is None:
+        return
+    blocks, recovered = read_narrative_blocks(scenario)
+    stamp = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    for block_id, text in edits.items():
+        if block_id in NARRATIVE_IDS and isinstance(text, str) and text.strip():
+            blocks[block_id] = {"id": block_id, "text": text, "origin": "user", "updated_at": stamp, "source_hash": source_hash}
+    _write_narrative(scenario, blocks, recovered, source_hash)
+    db.commit()
+
+
+def save_generated_narrative_blocks(db: Session, scenario_id: int, generated: dict[str, str], source_hash: str) -> None:
+    """Save AI output, but never replace a block explicitly owned by the user."""
+    scenario = db.get(BudgetScenario, scenario_id)
+    if scenario is None:
+        return
+    blocks, recovered = read_narrative_blocks(scenario)
+    stamp = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    for block_id in NARRATIVE_IDS:
+        text = generated.get(block_id)
+        if not isinstance(text, str) or not text.strip() or blocks.get(block_id, {}).get("origin") == "user":
+            continue
+        blocks[block_id] = {"id": block_id, "text": text, "origin": "ai", "updated_at": stamp, "source_hash": source_hash}
+    _write_narrative(scenario, blocks, recovered, source_hash)
+    db.commit()
+
+
+def generate_final_report_narrative(report: Any) -> dict[str, str]:
+    """Generate from the server-assembled FinalReportModel, never browser data."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        logger.debug("No ANTHROPIC_API_KEY set — skipping final-report narrative")
+        return {}
+    try:
+        context = report.model_dump(mode="json")
+        context.pop("narrative", None)
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=PDF_LLM_MODEL,
+            max_tokens=AI_COMMENTS_MAX_TOKENS,
+            system=_FINAL_NARRATIVE_PROMPT,
+            messages=[{"role": "user", "content": "Dati canonici del report finale:\n\n" + _json.dumps(context, ensure_ascii=False, sort_keys=True)}],
+            tools=[_build_tool_schema(FinalReportNarrative, "final_report_narrative")],
+            tool_choice={"type": "tool", "name": "final_report_narrative"},
+        )
+        for block in response.content:
+            if block.type == "tool_use":
+                return FinalReportNarrative.model_validate(block.input).model_dump()
+    except Exception as error:
+        logger.warning("Final-report narrative generation failed: %s", error)
+    return {}

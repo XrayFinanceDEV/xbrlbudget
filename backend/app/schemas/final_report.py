@@ -470,6 +470,23 @@ class NarrativeBlock(ContractModel):
     freshness: Literal["fresh", "stale", "missing"]
 
 
+class NarrativeEdit(ContractModel):
+    """Explicit user-authored replacement for one stable narrative block."""
+    id: Literal["executive_summary", "adjustments_and_closing", "budget_assumptions", "economic_outlook", "financial_outlook", "risks_and_actions"]
+    text: str = Field(min_length=1)
+
+
+class NarrativeSaveRequest(ContractModel):
+    """A partial save keeps unrelated generated or migrated blocks intact."""
+    blocks: list[NarrativeEdit] = Field(min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def unique_ids(self):
+        if len({block.id for block in self.blocks}) != len(self.blocks):
+            raise ValueError("narrative block IDs must be unique")
+        return self
+
+
 class FinalReportModel(ContractModel):
     schema_version: Literal[1] = FINAL_REPORT_SCHEMA_VERSION
     generated_at: ISODatetime

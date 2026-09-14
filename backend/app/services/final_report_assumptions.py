@@ -516,12 +516,13 @@ def _pregresso(rows: Sequence[Any], field: str) -> tuple[Optional[PregressoContr
 def _legacy_investments_diagnostics(rows: Sequence[Any]) -> list[Diagnostic]:
     """`investments` is inert only while the splits exist or it is zero.
 
-    Valued alone it stops the engine (`_get_split_investments` raises), so it
-    must surface as a diagnostic and never as an inert dead-field footnote.
+    Valued alone it stops the engine (`_get_split_investments` raises on any
+    non-zero total, whatever its sign), so it must surface as a diagnostic and
+    never as an inert dead-field footnote.
     """
     blocked = [
         row for row in rows
-        if (_decimal(getattr(row, "investments", None)) or ZERO) > ZERO
+        if (_decimal(getattr(row, "investments", None)) or ZERO) != ZERO
         and (_decimal(getattr(row, "intangible_investments", None)) or ZERO) <= ZERO
         and (_decimal(getattr(row, "tangible_investments", None)) or ZERO) <= ZERO
     ]

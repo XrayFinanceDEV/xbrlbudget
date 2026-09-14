@@ -201,6 +201,16 @@ def test_zero_investments_is_silent():
     assert "legacy_investments_without_split" not in _codes(read_model.diagnostics)
 
 
+def test_negative_investments_without_split_also_raises_a_diagnostic():
+    # `_get_split_investments` rejects the total with `if total:`: any non-zero
+    # value stops generation, whatever its sign. A negative legacy total must
+    # therefore activate the diagnostic exactly like a positive one.
+    read_model = _build(_row(2027, supplied=[], investments=Decimal("-12000")))
+    assert "legacy_investments_without_split" in _codes(read_model.diagnostics)
+    emitted = {a.field for section in read_model.sections for a in section.assumptions}
+    assert "investments" not in emitted
+
+
 def test_pregoresso_on_a_later_row_is_declared():
     read_model = _build(
         _row(2027, supplied=[]),

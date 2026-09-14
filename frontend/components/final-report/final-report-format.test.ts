@@ -47,6 +47,24 @@ describe("final-report-format", () => {
     expect(formatNumber(null)).toBe(MISSING_VALUE);
   });
 
+  it("formatta DecimalString lunghi senza perdere cifre o arrotondare la frazione", () => {
+    const huge = "900719925474099312345678901234567890.12345678901234567890";
+    const hugeFormatted = "900.719.925.474.099.312.345.678.901.234.567.890,12345678901234567890";
+
+    expect(formatEuro(huge)).toBe(eur(hugeFormatted));
+    expect(formatNumber(`-${huge}`)).toBe(`-${hugeFormatted}`);
+    expect(formatSignedEuro(huge)).toBe(`+${eur(hugeFormatted)}`);
+  });
+
+  it("conserva segno e zero canonici senza passare dalla precisione numerica", () => {
+    expect(formatEuro("-9007199254740993.000000000000000001")).toBe(
+      eur("-9.007.199.254.740.993,000000000000000001"),
+    );
+    expect(formatSignedEuro("0")).toBe(eur("0,00"));
+    expect(formatSignedEuro("-0.000")).toBe(eur("-0,000"));
+    expect(formatNumber(null)).toBe(MISSING_VALUE);
+  });
+
   it("formatDateItalian: spezza l'ISO senza fuso, il giorno non si sposta", () => {
     expect(formatDateItalian("2026-09-30")).toBe("30/09/2026");
     expect(formatDateItalian("2026-01-01")).toBe("01/01/2026");

@@ -28,27 +28,22 @@ import type {
 /** Il trattino lungo è «non presente», e vale solo per l'assenza. */
 export const MISSING_VALUE = "—";
 
-const euros = new Intl.NumberFormat("it-IT", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-  // `useGrouping: true`, non l'`"auto"` di default: l'auto di CLDR non separa
-  // le migliaia sotto le 5 cifre (1200 esce «1200,00 €»), e in un documento
-  // contabile una cifra tonda e una millesimata devono somigliarsi.
-  useGrouping: true,
-});
+const DECIMAL_STRING_RE = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?$/;
 
-const numbers = new Intl.NumberFormat("it-IT", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-  useGrouping: true,
-});
+/**
+ * Formatta direttamente il contratto `DecimalString`: convertire un importo
+ * contabile in un numero JavaScript prima di renderlo troncherebbe cifre oltre
+ * `MAX_SAFE_INTEGER` e le frazioni lunghe. Le cifre della frazione non vengono
+ * mai arrotondate; si completa soltanto a due decimali quando necessario.
+ */
+function formatCanonicalDecimal(value: DecimalString): string | null {
+  const match = DECIMAL_STRING_RE.exec(value);
+  if (!match) return null;
 
-function toNumber(value: DecimalString | null | undefined): number | null {
-  if (value === null || value === undefined) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  const [, sign, integer, inputFraction = ""] = match;
+  const groupedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const fraction = inputFraction.padEnd(2, "0");
+  return `${sign}${groupedInteger},${fraction}`;
 }
 
 /**
@@ -56,9 +51,9 @@ function toNumber(value: DecimalString | null | undefined): number | null {
  * formatta la stringa decimale del modello, al centesimo com'è persistita.
  */
 export function formatEuro(value: DecimalString | null | undefined): string {
-  const n = toNumber(value);
-  if (n === null) return value === null || value === undefined ? MISSING_VALUE : String(value);
-  return euros.format(n);
+  if (value === null || value === undefined) return MISSING_VALUE;
+  const formatted = formatCanonicalDecimal(value);
+  return formatted === null ? String(value) : `${formatted}\u00a0€`;
 }
 
 /**
@@ -67,17 +62,17 @@ export function formatEuro(value: DecimalString | null | undefined): string {
  * sull'assenza. Il segno è nel testo, non nel colore della cella.
  */
 export function formatSignedEuro(value: DecimalString | null | undefined): string {
-  const n = toNumber(value);
-  if (n === null) return value === null || value === undefined ? MISSING_VALUE : String(value);
-  if (n > 0) return `+${euros.format(n)}`;
-  return euros.format(n);
+  if (value === null || value === undefined) return MISSING_VALUE;
+  const formatted = formatCanonicalDecimal(value);
+  if (formatted === null) return String(value);
+  const isPositive = !value.startsWith("-") && /[1-9]/.test(value);
+  return `${isPositive ? "+" : ""}${formatted}\u00a0€`;
 }
 
 /** Numero puro (giorni, indici) senza simbolo di valuta. */
 export function formatNumber(value: DecimalString | null | undefined): string {
-  const n = toNumber(value);
-  if (n === null) return value === null || value === undefined ? MISSING_VALUE : String(value);
-  return numbers.format(n);
+  if (value === null || value === undefined) return MISSING_VALUE;
+  return formatCanonicalDecimal(value) ?? String(value);
 }
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/;

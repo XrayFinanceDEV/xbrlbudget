@@ -10,7 +10,7 @@
  */
 
 import { Card, CardContent } from "@/components/ui/card";
-import type { CompanyIdentity, Practice, Readiness } from "@/types/final-report";
+import type { CompanyIdentity, Practice, Readiness, ScenarioIdentity } from "@/types/final-report";
 import { CircleCheck, TriangleAlert, CircleX } from "lucide-react";
 import {
   formatDateItalian,
@@ -33,6 +33,31 @@ const STATO_ICONE = {
   draft: TriangleAlert,
   blocked: CircleX,
 } as const;
+
+const NON_APPLICABILE: Record<Exclude<Practice["workflow_type"], "infrannuale">, string> = {
+  bilancio: "Non applicabile nel percorso da bilancio",
+  startup: "Non applicabile nel percorso startup",
+};
+
+function scenarioSorgenteLabel(
+  workflowType: Practice["workflow_type"],
+  sourceScenario: ScenarioIdentity | null | undefined,
+): string {
+  if (!sourceScenario) {
+    return workflowType === "infrannuale" ? "Non dichiarato" : NON_APPLICABILE[workflowType];
+  }
+
+  const periodo =
+    workflowType === "infrannuale"
+      ? ` · ${periodMonthsLabel(sourceScenario.period_months)}`
+      : "";
+  return `${sourceScenario.name} (#${sourceScenario.id}) · anno base ${sourceScenario.base_year}${periodo}`;
+}
+
+function annoChiusuraLabel(workflowType: Practice["workflow_type"], closingYear: number | null): string {
+  if (closingYear !== null) return String(closingYear);
+  return workflowType === "infrannuale" ? "Non dichiarato" : NON_APPLICABILE[workflowType];
+}
 
 function Rigga({ etichetta, valore }: { etichetta: string; valore: string }) {
   return (
@@ -111,35 +136,15 @@ export function ReportScope({ company, practice, generated_at, readiness }: Repo
                 etichetta="Scenario budget"
                 valore={`${budget_scenario.name} (#${budget_scenario.id}) · anno base ${budget_scenario.base_year}`}
               />
-              {practice.workflow_type === "infrannuale" && (
-                <Rigga
-                  etichetta="Scenario sorgente"
-                  valore={`${practice.source_scenario.name} (#${practice.source_scenario.id}) · anno base ${practice.source_scenario.base_year} · ${periodMonthsLabel(practice.source_scenario.period_months)}`}
-                />
-              )}
-              {practice.workflow_type !== "infrannuale" && practice.source_scenario && (
-                <Rigga
-                  etichetta="Scenario sorgente"
-                  valore={`${practice.source_scenario.name} (#${practice.source_scenario.id})`}
-                />
-              )}
+              <Rigga
+                etichetta="Scenario sorgente"
+                valore={scenarioSorgenteLabel(workflow_type, practice.source_scenario)}
+              />
               <Rigga etichetta="Anno storico di riferimento" valore={annoStorico} />
-              {workflow_type === "infrannuale" && (
-                <Rigga
-                  etichetta="Anno di chiusura attesa"
-                  valore={
-                    periods.closing_year !== null
-                      ? String(periods.closing_year)
-                      : "Non dichiarato"
-                  }
-                />
-              )}
-              {workflow_type !== "infrannuale" && periods.closing_year !== null && (
-                <Rigga
-                  etichetta="Anno di chiusura attesa"
-                  valore={String(periods.closing_year)}
-                />
-              )}
+              <Rigga
+                etichetta="Anno di chiusura attesa"
+                valore={annoChiusuraLabel(workflow_type, periods.closing_year)}
+              />
               <Rigga
                 etichetta="Orizzonte di previsione"
                 valore={`${periods.forecast_years.join(", ")} (${periods.forecast_years.length} ${periods.forecast_years.length === 1 ? "anno" : "anni"})`}

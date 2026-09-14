@@ -34,13 +34,15 @@ describe("ReportScope (copertina e perimetro)", () => {
     expect(html).toContain("2027, 2028, 2029");
   });
 
-  it("bilancio: nessun scenario sorgente, storico dichiarato, nessuna chiusura infrannuale", () => {
+  it("bilancio: i campi non applicabili sono dichiarati, non omessi", () => {
     const html = render(BILANCIO);
     expect(html).toContain("Percorso da bilancio");
-    expect(html).not.toContain("Scenario sorgente");
+    expect(html).toContain("Scenario sorgente");
+    expect(html).toContain("Non applicabile nel percorso da bilancio");
     expect(html).toContain("Anno storico di riferimento");
     expect(html).toContain("2026");
-    expect(html).not.toContain("Anno di chiusura attesa");
+    expect(html).toContain("Anno di chiusura attesa");
+    expect(html.match(/Non applicabile nel percorso da bilancio/g)).toHaveLength(2);
     expect(html).toContain("Documento: Definitivo");
     // tax_id null: assenza dichiarata, non campo saltato.
     expect(html).toContain("codice fiscale non dichiarato");
@@ -49,7 +51,10 @@ describe("ReportScope (copertina e perimetro)", () => {
   it("startup: assenza dello storico detta con parole sue, stato bloccato leggibile", () => {
     const html = render(STARTUP);
     expect(html).toContain("Percorso startup");
-    expect(html).not.toContain("Scenario sorgente");
+    expect(html).toContain("Scenario sorgente");
+    expect(html).toContain("Non applicabile nel percorso startup");
+    expect(html).toContain("Anno di chiusura attesa");
+    expect(html.match(/Non applicabile nel percorso startup/g)).toHaveLength(2);
     expect(html).toContain("Nessuno storico: il piano parte dai saldi di apertura");
     expect(html).toContain("Documento: Bloccato");
     expect(html).toContain("IT003");
@@ -91,5 +96,18 @@ describe("ReportScope (copertina e perimetro)", () => {
     const html = render(report);
     expect(html).toContain("Scenario sorgente");
     expect(html).toContain("Infrannuale residuo");
+  });
+
+  it("infrannuale: scenario sorgente e anno di chiusura assenti restano esplicitamente non dichiarati", () => {
+    const report = structuredClone(INFRANNUALE) as FinalReportModel & {
+      practice: { source_scenario?: null; periods: { closing_year: null } };
+    };
+    report.practice.source_scenario = null;
+    report.practice.periods.closing_year = null;
+
+    const html = render(report);
+    expect(html).toContain("Scenario sorgente");
+    expect(html).toContain("Anno di chiusura attesa");
+    expect(html.match(/Non dichiarato/g)).toHaveLength(2);
   });
 });

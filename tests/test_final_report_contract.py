@@ -31,6 +31,20 @@ def test_final_report_fixtures_validate(name):
     assert report.model_dump(mode="json")["schema_version"] == 1
 
 
+def test_workflow_specific_closing_is_omitted_and_float_money_is_rejected():
+    annual = load_fixture("bilancio.json")
+    assert "infrannual_closing" not in annual
+    FinalReportModel.model_validate(annual)
+    annual["infrannual_closing"] = None
+    with pytest.raises(ValueError, match="omitted"):
+        FinalReportModel.model_validate(annual)
+
+    infrannual = load_fixture("infrannuale.json")
+    infrannual["forecast"]["years"][0]["income_statement"][0]["value"] = 1.25
+    with pytest.raises(ValueError, match="exact JSON strings"):
+        FinalReportModel.model_validate(infrannual)
+
+
 def test_canonical_hash_ignores_key_order_and_volatile_timestamps():
     report = load_fixture("infrannuale.json")
     reordered = json.loads(json.dumps(report, sort_keys=True))
@@ -60,8 +74,14 @@ def test_assumption_catalog_is_exactly_the_current_wizard_without_dead_fields():
 
     wizard = (ROOT / "frontend" / "lib" / "budget-wizard-steps.ts").read_text(encoding="utf-8")
     step_body = wizard.split("export const STEP_FIELDS:", 1)[1].split("/**", 1)[0]
-    wizard_fields = re.findall(r'"([a-z0-9_]+)"', step_body)
+    wizard_sections = {}
+    for match in re.finditer(r'(?P<key>"[^"]+"|[a-z_]+):\s*\[(?P<fields>.*?)\]', step_body, re.DOTALL):
+        key = match.group("key").strip('"')
+        wizard_sections[key] = re.findall(r'"([a-z0-9_]+)"', match.group("fields"))
+    wizard_fields = [field for section in wizard_sections.values() for field in section]
     dead_body = wizard.split("export const DEAD_FIELDS", 1)[1].split("] as const", 1)[0]
     dead_fields = set(re.findall(r'"([a-z0-9_]+)"', dead_body))
-    assert set(fields) == set(wizard_fields)
+    assert set(catalog_keys) == set(wizard_sections)
+    assert len(wizard_fields) == len(set(wizard_fields)), "the current wizard itself has duplicate fields"
+    assert [item["fields"] for item in ASSUMPTION_SECTION_CATALOG] == [wizard_sections[key] for key in catalog_keys]
     assert not dead_fields.intersection(fields)

@@ -6,7 +6,7 @@
   "readiness": {"status": "draft", "reasons": [{"code": "forecast_stale", "severity": "warning", "section": "forecast", "message": "Forecast da rigenerare"}]},
   "source_data_quality": {"status": "partial", "diagnostics": []},
   "adjustments": {"confirmed": true, "entries": [{"id": "adj-1", "edited_field": "ce01_ricavi_vendite", "edited_label": "Ricavi", "edit_delta": "120.00", "counterpart_field": "sp09_disponibilita_liquide", "counterpart_label": "Cassa", "counterpart_delta": "-120.00", "explanation": null, "created_at": "2026-09-02T08:00:00Z"}], "net_effect": "0.00"},
-  "infrannual_closing": {"period_end": "2026-09-30", "values": [{"code": "ce01_ricavi_vendite", "label": "Ricavi", "observed": "900.00", "comparable": null, "automatic": "1200.00", "override": null, "closing_used": "1200.00"}], "extra_accounting_alerts": ["inventory_count_pending"]},
+  "infrannual_closing": {"period_end": "2026-09-30", "values": [{"code": "ce01_ricavi_vendite", "label": "Ricavi", "observed": "900.00", "comparable": null, "automatic": "1200.00", "override": null, "closing_used": "1200.00"}], "extra_accounting_alerts": {"inventory_count_pending": true, "bank_reconciliation_pending": false}},
   "assumption_sections": [
     {"key": "scenario", "title": "Scenario", "assumptions": []},
     {"key": "fatturato", "title": "Fatturato", "assumptions": [{"field": "revenue_growth_pct", "label": "Crescita ricavi", "values": ["5.125", "4.00", "3.50"], "provenance": "user", "active": true}]},

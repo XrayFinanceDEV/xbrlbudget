@@ -34,6 +34,22 @@ class ContractModel(BaseModel):
             return str(value)
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_float_anywhere(cls, value):
+        """The canonical wire format never accepts lossy JSON float amounts."""
+        def visit(item):
+            if isinstance(item, float):
+                raise ValueError("financial decimals must be exact JSON strings, never floats")
+            if isinstance(item, dict):
+                for nested in item.values():
+                    visit(nested)
+            elif isinstance(item, list):
+                for nested in item:
+                    visit(nested)
+        visit(value)
+        return value
+
 
 def _canonical_value(value, *, volatile: bool) -> object:
     """Return JSON-safe data with deterministic object order and decimal spelling."""
@@ -186,7 +202,9 @@ class ClosingValue(ContractModel):
 class InfrannualClosing(ContractModel):
     period_end: str
     values: list[ClosingValue] = Field(min_length=1)
-    extra_accounting_alerts: list[str] = Field(default_factory=list)
+    # Preserve the complete persisted M1-03 seven-boolean alert map, not a
+    # display-only list that would lose an explicit false value.
+    extra_accounting_alerts: dict[str, bool] = Field(default_factory=dict)
 
 
 class FinancingLoan(ContractModel):
@@ -327,10 +345,11 @@ class FinalReportModel(ContractModel):
             raise ValueError("chart_series must contain each of the six canonical series exactly once")
         if len({block.id for block in self.narrative}) != 6:
             raise ValueError("narrative must contain each of the six canonical blocks exactly once")
+        has_closing = "infrannual_closing" in self.model_fields_set
         if self.practice.workflow_type == "infrannuale" and self.infrannual_closing is None:
             raise ValueError("infrannuale reports require infrannual_closing")
-        if self.practice.workflow_type != "infrannuale" and self.infrannual_closing is not None:
-            raise ValueError("only infrannuale reports may contain infrannual_closing")
+        if self.practice.workflow_type != "infrannuale" and has_closing:
+            raise ValueError("infrannual_closing is omitted for non-infrannuale reports")
         if [year.year for year in self.forecast.years] != self.practice.periods.forecast_years:
             raise ValueError("forecast years must match practice periods")
         return self
@@ -342,5 +361,5 @@ class FinalReportModel(ContractModel):
         return model_hash(self)
 
 
-_CATALOG_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "final_report" / "assumption_sections.json"
+_CATALOG_PATH = Path(__file__).resolve().parents[3] / "contracts" / "final_report_assumption_sections.json"
 ASSUMPTION_SECTION_CATALOG: list[dict[str, object]] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))

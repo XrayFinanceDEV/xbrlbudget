@@ -13,6 +13,11 @@ describe("FinalReportModel v1 runtime contract", () => {
     expect(() => parseFinalReportModel({ ...bilancio, schema_version: 2 })).toThrow(/Unsupported/);
   });
 
+  it("requires closing only for the infrannuale workflow", () => {
+    expect(isFinalReportModel(bilancio)).toBe(true);
+    expect(isFinalReportModel({ ...bilancio, infrannual_closing: null })).toBe(false);
+  });
+
   it("uses the same seven group catalog as the fixtures", () => {
     expect(ASSUMPTION_SECTION_CATALOG).toHaveLength(7);
     expect(infrannuale.assumption_sections.map((section) => section.key)).toEqual(ASSUMPTION_SECTION_CATALOG.map((section) => section.key));

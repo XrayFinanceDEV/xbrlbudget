@@ -512,59 +512,62 @@ mappa campo → passo sono dati puri in `frontend/lib/budget-wizard-steps.ts`
 
 | # | Passo | Gruppo | Campi (`STEP_FIELDS`) |
 |---|---|---|---|
-| 1 | Scenario | Impostazione | nessuno — nome, anno base, orizzonte |
+| 1 | Scenario | Impostazione | `inflation_pct` |
 | 2 | Fatturato | Conto economico | `revenue_growth_pct`, `other_revenue_growth_pct` |
-| 3 | Costi principali | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `personnel_growth_pct`, `rent_growth_pct` |
-| 4 | Altre voci CE | Conto economico | `other_costs_growth_pct` |
-| 5 | Capitale circolante | Stato patrimoniale | `dso_days`, `dio_days`, `dpo_days`, `receivables_long_growth_pct`, tredici `sp*_growth_pct` (sp01, sp04, sp06e, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended` |
-| 6 | Pregresso e nuovo | Stato patrimoniale | `existing_debt_repayment_years`, `altri_finanz_repayment_years`, `financing_loans`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
+| 3 | Costi | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `fixed_materials_growth_auto`, `fixed_services_growth_auto`, `personnel_growth_pct`, `rent_growth_pct`, `other_costs_growth_pct` |
+| 4 | Capitale circolante | Stato patrimoniale | `dso_days`, `dio_days`, `dpo_days`, `receivables_long_growth_pct` |
+| 5 | Patrimoniale pregresso | Stato patrimoniale | `bank_lines_amount`, `bank_lines_rule`, `bank_lines_rate`, `financing_loans`, `existing_debt_repayment_years`, `altri_finanz_repayment_years` |
+| 6 | Patrimoniale piano | Stato patrimoniale | tredici `sp*_growth_pct` (sp01, sp04, sp06e, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
 | 7 | Imposte | Stato patrimoniale | `tax_rate`, `tax_advances_paid`, `tax_temporary_differences`, `sp16e_growth_pct`, `sp17e_growth_pct` |
 
-`STEP_FIELDS` non porta `pregresso` (né la sua sotto-chiave `debiti_tributari`): è un campo
-**unico per scenario**, scritto sempre nella riga del primo anno di piano da un setter dedicato
-(`p.updatePregresso`, regola in `lib/budget-horizon.ts`), non da `updateAll`/`update` come le
-percentuali di crescita. Il passo 6 (`components/budget/wizard/steps/StepPregressoNuovo.tsx`)
-mostra la card «Pregresso del circolante» — una tabella `PregressoTable` con quattro righe
-(crediti commerciali, debiti verso fornitori, debiti previdenziali, altri debiti) — e il passo 7
-(`StepImposte.tsx`) la card «Pagamento dei debiti tributari» con la quinta riga, i cui dati vivono
-sotto la stessa chiave `pregresso.debiti_tributari`.
+Il giro di rilievi del 15/09 ha spostato i confini fra i passi (`fixed_materials_growth_auto` e
+`other_costs_growth_pct` sono entrati nel 3; le quindici voci minori dello SP e i loro driver
+`sp_indexing` sono usciti dal vecchio passo «Capitale circolante» — oggi il 4 — verso il 6;
+`existing_debt_repayment_years`/`altri_finanz_repayment_years`/`financing_loans` sono passati dal
+vecchio «Pregresso e nuovo» al 5, insieme ai due campi nuovi dei fidi separati) senza cambiare il
+contratto di `STEP_FIELDS`: resta la mappa campo → passo su cui si basano `railBadges`,
+`stepsUpTo` e la persistenza del progresso in `localStorage`.
 
-**Cella vuota = nessun piano.** `PregressoTable` non riempie mai di zeri una riga senza piano: la
-prima cella porta il segnaposto «tutto nel primo anno» (`cellPlaceholder`,
-`lib/budget-pregresso-tabella.ts`) e il resto della riga resta un'unità di misura (`€`/`%`), non
-un valore. Un piano che arriva a somma zero (importi e inesigibile compresi) torna `null` — cioè
-di nuovo «nessun piano» — invece di restare un oggetto `{opening, amounts:[0]}`: è la stessa
-regola di casa «debito senza scadenza dichiarata → a breve» applicata al pregresso, e permette di
-tornare a «nessun piano» semplicemente svuotando le celle toccate.
+`STEP_FIELDS` non porta `pregresso` (né le sue sotto-chiavi): è un campo **unico per scenario**,
+scritto sempre nella riga del primo anno di piano da un setter dedicato (`p.updatePregresso`,
+regola in `lib/budget-horizon.ts`), non da `updateAll`/`update` come le percentuali di crescita.
+Vive tutto al passo 5 (`components/budget/wizard/steps/StepPatrimonialePregresso.tsx`), che rende
+la card «Altre voci oltre 12 mesi» con `oltreRows`/`OLTRE_NOTA`/`OLTRE_STATI`
+(`lib/budget-pregresso-oltre.ts`): crediti commerciali e debiti verso fornitori hanno sempre una
+riga (il motore li rigenera dal driver, quindi il pregresso va chiuso esplicitamente); debiti
+previdenziali e altri debiti solo se c'è massa oltre 12 mesi nel bilancio base; i debiti tributari
+rateizzati (decisione del proprietario del 15/09: lasciano il vecchio passo «Imposte») hanno una
+riga quando il debito tributario oltre l'esercizio dell'anno base è positivo, o quando un piano
+tributario è già salvato. Il vecchio componente `PregressoTable` e il modulo
+`lib/budget-pregresso-tabella.ts` — con `cellPlaceholder` e la sua regola «cella vuota = nessun
+piano» — sono spariti insieme alla card unica del vecchio passo 7: ogni riga oggi porta il proprio
+importo per anno in una tabella normale, e uno stato («chiuso», «resta aperto», «nessun movimento
+nel piano», «oltre il saldo») che `OLTRE_STATI` rende come chip.
 
-**Nota di destino condizionata al lato lungo.** Sotto l'etichetta di ogni riga, `PregressoTable`
-mostra perché quella voce ha (o non ha) senso scadenziare: «si rigenera» (crediti, fornitori —
-il motore ne crea di nuovi dal volume), «non si rigenera» (previdenziali, altri debiti), «si
-rigenera dalle imposte» (tributari). Per crediti e fornitori la frase **cambia se c'è massa oltre
-l'esercizio da scadenziare**: quando c'è, la nota lo dice in chiaro, cifra in euro compresa — il
-lato a breve continua a rigenerarsi dai giorni medi, ma la parte oltre l'esercizio si estingue con
-il piano e smette di crescere alla propria percentuale (`destinoNotaFor`, stesso file). Senza
-massa oltre l'esercizio la frase resta quella generica «si rigenera».
-
-**Il taglio all'orizzonte.** Un piano più lungo dell'orizzonte di piano (scritto scorciando gli
-anni dopo aver toccato un anno lontano, o idratato da ipotesi salvate con un bulk che ha
+**Il taglio all'orizzonte resta.** Un piano più lungo dell'orizzonte di piano (scritto scorciando
+gli anni dopo aver toccato un anno lontano, o idratato da ipotesi salvate con un bulk che ha
 persistito un piano bloccato — il bulk salva anche a generazione fallita) non ha colonne per i
 suoi anni in eccesso: `trimPregressoToHorizon`, richiamata da `withPregressoTrimmedToHorizon` sul
-piano vivo del primo anno (`lib/budget-horizon.ts:402-443`), lo accorcia alla lunghezza
-dell'orizzonte sia al cambio d'orizzonte sia a ogni idratazione di righe salvate — stessa funzione
-nei due punti, così non possono divergere su come si taglia un piano. Gli importi tagliati non
-spariscono: diventano residuo oltre l'orizzonte, perché `residualAfter` somma solo gli anni
-ancora presenti nell'array.
+piano vivo del primo anno (`lib/budget-horizon.ts`), lo accorcia alla lunghezza dell'orizzonte sia
+al cambio d'orizzonte sia a ogni idratazione di righe salvate — stessa funzione nei due punti,
+così non possono divergere su come si taglia un piano. Gli importi tagliati non spariscono:
+diventano residuo oltre l'orizzonte, perché `residualAfter` somma solo gli anni ancora presenti
+nell'array. Questo meccanismo non è mai stato dentro `PregressoTable`: sopravvive tale e quale al
+nuovo passo 5.
 
-**Gli avvisi dello scoperto, a due livelli.** La colonna dell'anteprima del passo 6 legge
-`scopertoAvvisi` (`lib/budget-preview-rows.ts:455-486`) e mostra, quando ricorrono: un avviso
+**Gli avvisi dello scoperto, a due livelli.** La colonna dell'anteprima del passo 6 «Patrimoniale
+piano» legge `scopertoAvvisi` (`lib/budget-preview-rows.ts`) e mostra, quando ricorrono: un avviso
 **ambra**, mite, quando il piano assorbe cassa anche restando positiva (`cassa_assorbita > 0` in
 almeno un anno — arriva PRIMA che diventi scoperto, non dopo); un avviso **rosso**, forte, quando
 il piano genera davvero scoperto (`scoperto_generato > 0`, col fabbisogno di picco e l'anno in cui
 cade). Un terzo avviso, ambra come il primo, dichiara quando la cassa chiude sotto il minimo del
-cash sweep perché lo scoperto si rimborsa per primo anche lì (`cassa_sotto_minimo > 0`) — la
-conferma opposta, «la cassa resta positiva in tutti gli anni», compare solo senza errore, con anni
-prodotti e senza alcuno scoperto.
+cash sweep perché lo scoperto (o, nel regime esplicito dei fidi separati, il debito senza piano)
+si rimborsa per primo anche lì (`cassa_sotto_minimo > 0`) — la conferma opposta, «la cassa resta
+positiva in tutti gli anni», compare solo senza errore, con anni prodotti e senza alcuno scoperto.
+Con i fidi separati al passo 5 questi tre avvisi non bastano più da soli: `avvisiFidi`
+(`lib/budget-piano-step.ts`) legge `details['avviso_fidi']` e mostra, anno per anno, quando il
+piano ha tirato sui fidi oltre l'importo di partenza — un avviso che non ferma mai il piano, a
+differenza dello scoperto spento di default fuori da quel regime.
 
 **`sp17e_growth_pct` è visibile per anno, non per scenario.** Dentro l'accordion «Posizione
 tributaria manuale» del passo 7, la riga «Debiti tributari oltre %» compare solo quando almeno un
@@ -572,22 +575,25 @@ anno del piano usa la via manuale (`sp06e_growth_pct`/`sp16e_growth_pct` valoriz
 riga), e su un piano **misto** — alcuni anni manuali, altri no — le celle degli anni automatici
 restano inerti con un titolo che lo spiega (`SP17E_NOTA_ANNO_AUTOMATICO`), invece di applicarsi a
 un anno che il motore governa altrove. Quando nessun anno è manuale la riga sparisce del tutto
-invece di restare a schermo spenta (`SP17E_NOTA_AUTOMATICA`, `lib/budget-imposte-step.ts:116-
-125`).
+invece di restare a schermo spenta (`SP17E_NOTA_AUTOMATICA`, `lib/budget-imposte-step.ts`). La via
+manuale resta un'alternativa al piano del passo 5 (saldo, rateizzato, acconti), non un suo
+complemento: quando è attiva il motore ignora quel piano e lo dichiara.
 
 **La casella «Acconti versati nell'anno» è in euro, e zero non vuol dire zero.** È lo stesso campo
 `tax_advances_paid` di sempre, per anno; il motore lo legge come acconto esplicito **solo se
 maggiore di zero** — zero è il valore con cui la colonna dice «non compilata», non «zero acconti»,
 e in quel caso ricade sulla percentuale della card («Acconto sull'imposta dell'anno prima»,
-default 100%). Chi vuole davvero versare zero acconti deve impostare quella percentuale a zero,
-non svuotare la casella in euro (`ACCONTO_CHIOSA`, `lib/budget-imposte-step.ts:357-359` — lo
-stesso comportamento del kernel, `calculations/projection_common.py:346-350`).
+default 100%, al passo 7). Chi vuole davvero versare zero acconti deve impostare quella
+percentuale a zero, non svuotare la casella in euro (`ACCONTO_CHIOSA`,
+`lib/budget-imposte-step.ts` — lo stesso comportamento del kernel,
+`calculations/projection_common.py:346-350`).
 
 `primaryLabel` rende «Salva e calcola previsionale» solo sul passo 7 («Avanti» altrove); gli
 altri sei passi avanzano senza toccare il server. `stepForErrorMessage` rimanda al passo
-«Pregresso e nuovo» un errore di fabbisogno scoperto (`/unfunded financing requirement/i`),
-altrimenti al passo «Imposte» — gli unici due punti dove un errore del motore ha un passo
-plausibile a cui appartenere. Il progresso persiste per scenario in `localStorage`
+«Patrimoniale pregresso» ogni messaggio del motore che lo nomina (i saldi scadenziabili col
+pregresso, fidi compresi); al passo «Patrimoniale piano» un fabbisogno finanziario scoperto, un
+tetto dello scoperto superato o una liquidazione TFR oltre il fondo; al passo «Imposte» il resto
+— che è anche il ripiego di default. Il progresso persiste per scenario in `localStorage`
 (`stepStorageKey`).
 
 **`DEAD_FIELDS`** (`investments`, `receivables_short_growth_pct`, `payables_short_growth_pct`,
@@ -607,10 +613,12 @@ plausibile a cui appartenere. Il progresso persiste per scenario in `localStorag
   valore non nullo in quella colonna non è inerte, ferma la generazione. Le altre quattro il
   motore non le legge davvero: non compaiono in `calculations/`.
 
-Il componente del passo 3 (`components/budget/wizard/steps/StepCosti.tsx`) applica l'invariante
-di CLAUDE.md sulla quota fissa: lo slider chiama `p.updateAll(field, v)` e scrive lo stesso
-valore su **tutti** gli anni di piano, mentre la riga «quota fissa» della tabella per anno
-(`p.update(year, field, v)`) corregge un singolo anno. Uno scenario con quote diverse fra anni
-mostra l'avviso *«Valori diversi per anno: muovendo lo slider … li allinei tutti a quello che
+Il componente del passo 3 «Costi» (`components/budget/wizard/steps/StepCosti.tsx`) applica
+l'invariante di CLAUDE.md sulla quota fissa: lo slider chiama `p.updateAll(field, v)` e scrive lo
+stesso valore su **tutti** gli anni di piano. Non c'è più, in tabella, una riga «quota fissa» per
+anno che corregga un singolo anno da sola — il modello resta per anno, ma l'unico modo di
+scriverlo dall'interfaccia è lo slider: uno scenario con quote diverse fra anni (un'ipotesi
+salvata prima di questo giro, o scritta da un'altra via) mostra l'avviso *«Valori diversi per
+anno: muovendo lo slider — o digitando nella casella qui accanto — li allinei tutti a quello che
 imposti»* — non un blocco, perché il componente non sa quale dei valori discordi sia quello
-«giusto».
+«giusto», e l'allineamento avviene solo al primo tocco.

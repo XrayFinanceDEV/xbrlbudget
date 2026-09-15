@@ -1,0 +1,1100 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Percorso Ipotesi Budget</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f5f7fa; --card:#ffffff; --ink:#0f172a; --ink-2:#334155; --muted:#64748b; --muted-2:#94a3b8;
+  --border:#e2e8f0; --border-2:#cbd5e1; --input:#ffffff; --ro:#f1f5f9;
+  --accent:#2563eb; --accent-ink:#1d4ed8; --accent-soft:#e8f0fe;
+  --fixed:#3b82f6; --fixed-soft:#dbeafe; --fixed-ink:#1e40af;
+  --var:#d97706; --var-soft:#fdebc8; --var-ink:#92400e;
+  --good:#15803d; --good-soft:#dcfce7; --warn:#b45309; --warn-soft:#fef3c7; --bad:#b91c1c; --bad-soft:#fee2e2;
+  --auto:#6d28d9; --auto-soft:#ede9fe;
+  --shadow:0 1px 2px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.04);
+  --radius:8px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b1220; --card:#111a2b; --ink:#f1f5f9; --ink-2:#cbd5e1; --muted:#94a3b8; --muted-2:#64748b;
+    --border:#243044; --border-2:#334155; --input:#0f1829; --ro:#17223a;
+    --accent:#60a5fa; --accent-ink:#93c5fd; --accent-soft:#172554;
+    --fixed:#60a5fa; --fixed-soft:#1e3a8a; --fixed-ink:#bfdbfe;
+    --var:#f59e0b; --var-soft:#4a2f07; --var-ink:#fcd9a0;
+    --good:#4ade80; --good-soft:#14342a; --warn:#fbbf24; --warn-soft:#3f2e0c; --bad:#f87171; --bad-soft:#441a1a;
+    --auto:#a78bfa; --auto-soft:#2e1f5e;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b1220; --card:#111a2b; --ink:#f1f5f9; --ink-2:#cbd5e1; --muted:#94a3b8; --muted-2:#64748b;
+  --border:#243044; --border-2:#334155; --input:#0f1829; --ro:#17223a;
+  --accent:#60a5fa; --accent-ink:#93c5fd; --accent-soft:#172554;
+  --fixed:#60a5fa; --fixed-soft:#1e3a8a; --fixed-ink:#bfdbfe;
+  --var:#f59e0b; --var-soft:#4a2f07; --var-ink:#fcd9a0;
+  --good:#4ade80; --good-soft:#14342a; --warn:#fbbf24; --warn-soft:#3f2e0c; --bad:#f87171; --bad-soft:#441a1a;
+  --auto:#a78bfa; --auto-soft:#2e1f5e;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.45}
+.num,input[type=number],.ptab td,.ytab td{font-variant-numeric:tabular-nums}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+button{font:inherit;color:inherit}
+
+/* shell */
+.top{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;padding:10px 24px;border-bottom:1px solid var(--border);background:var(--card)}
+.top .brand{font-weight:600}
+.top .crumb{color:var(--muted);font-size:13px}
+.top .demo{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.demo-legacy{font-size:12px;color:var(--muted)}
+.top .proto{font-size:12px;color:var(--warn);background:var(--warn-soft);border-radius:999px;padding:3px 10px;font-weight:500}
+.pratica{border-bottom:1px solid var(--border);background:var(--card)}
+.pratica .in{max-width:1280px;margin:0 auto;padding-inline:28px}
+.pratica .r1{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;padding-block:8px}
+.pratica .who b{display:block;font-size:13px;font-weight:600}
+.pratica .who span{font-size:11.5px;color:var(--muted)}
+.pratica .phases{display:flex;align-items:center;gap:4px}
+.pratica .ph{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:none;border:0}
+.pratica .ph.done{color:var(--ink)}
+.pratica .ph.on{background:var(--ink);color:var(--card)}
+.pratica .ph i{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+.pratica .ln{width:16px;height:1px;background:var(--border)}
+.pratica .sp{flex:1}
+.pratica .exit{font-size:12.5px;color:var(--muted);background:none;border:0;cursor:pointer}
+.pratica .r2{display:flex;align-items:center;gap:2px;overflow-x:auto}
+.pratica .tab{padding:8px 12px;font-size:13px;color:var(--muted);border:0;border-bottom:2px solid transparent;background:none;white-space:nowrap}
+.pratica .tab.on{color:var(--ink);font-weight:600;border-bottom-color:var(--ink)}
+.pratica .sep{width:1px;height:20px;background:var(--border);margin:0 8px}
+
+/* rail */
+.rail{display:flex;align-items:stretch;margin:0 0 14px;overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow)}
+.rail .grp{display:flex;flex-direction:column;flex:1 0 auto}
+.rail .grp+.grp{border-left:1px solid var(--border)}
+.rail .glab{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;padding:6px 12px 0}
+.rail .grow{display:flex}
+.rail .step{display:flex;align-items:center;gap:8px;padding:6px 12px 10px;background:none;border:0;cursor:pointer;color:var(--muted);white-space:nowrap;position:relative}
+.rail .step:hover{color:var(--ink)}
+.rail .step .dot{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--border-2);display:grid;place-items:center;font-size:11px;font-weight:600;flex:none}
+.rail .step .t{font-size:13px;font-weight:500}
+.rail .step.new .t::after{content:"nuovo";margin-left:6px;font-size:10px;font-weight:600;color:var(--auto);background:var(--auto-soft);border-radius:999px;padding:1px 6px;vertical-align:1px}
+.rail .step.todo .dot{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+.rail .step.todo .t::after{content:"da integrare";margin-left:6px;font-size:10px;font-weight:600;color:var(--warn);background:var(--warn-soft);border-radius:999px;padding:1px 6px;vertical-align:1px}
+.migr{margin:0 0 14px;border:1px solid var(--border);border-left:0;border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow);display:grid;grid-template-columns:1fr 1fr;overflow:hidden}
+@media (max-width:760px){.migr{grid-template-columns:1fr}}
+.migr>div{padding:12px 16px}
+.migr>div+div{border-left:1px solid var(--border)}
+.migr h3{margin:0 0 6px;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center}
+.migr ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:12.5px;color:var(--ink-2)}
+.migr .go{background:none;border:0;padding:0;color:var(--accent-ink);cursor:pointer;text-decoration:underline;font-size:12.5px}
+.rail .step.active{color:var(--ink)}
+.rail .step.active .dot{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
+.rail .step.active::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent);border-radius:2px 2px 0 0}
+.rail .step.done .dot{background:var(--good);border-color:var(--good);color:#fff}
+.rail .step:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rail .foot{margin-left:auto;align-self:center;padding:0 14px;font-size:12px;color:var(--muted);white-space:nowrap;border-left:1px solid var(--border)}
+.rail .foot b{color:var(--ink);font-weight:500}
+
+/* decisioni aperte */
+.decisions{margin:0 0 20px;border:1px dashed var(--border-2);border-radius:var(--radius);background:var(--card)}
+.decisions summary{cursor:pointer;padding:9px 14px;font-size:13px;color:var(--ink-2);font-weight:500;list-style:none;display:flex;gap:8px;align-items:center}
+.decisions summary::-webkit-details-marker{display:none}
+.decisions summary .chev{transition:transform .15s}
+.decisions[open] summary .chev{transform:rotate(90deg)}
+.decisions summary span.m{color:var(--muted);font-weight:400}
+.decisions ol{margin:0;padding:0 18px 12px 38px;display:grid;gap:6px;font-size:13px;color:var(--ink-2)}
+.decisions ol li b{font-weight:600;color:var(--ink)}
+.decisions ol li em{font-style:normal;color:var(--muted)}
+.decisions ol li.done{color:var(--muted)}
+.decisions ol li.done b{color:var(--good)}
+.decisions ol li.hl{background:var(--warn-soft);border-radius:4px;margin-left:-6px;padding-left:6px}
+
+/* main */
+.main{max-width:1280px;margin:0 auto;padding:20px 28px 96px}
+.head{margin-bottom:18px}
+.head h1{font-size:22px;margin:0;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.head .lead{color:var(--muted);margin:4px 0 0;max-width:70ch}
+.cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;align-items:start}
+.cols.wide-left{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
+@media (max-width:1100px){.cols,.cols.wide-left{grid-template-columns:1fr}}
+.pane{display:flex;flex-direction:column;gap:16px;min-width:0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0}
+.card .hd{padding:13px 18px 10px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 10px}
+.card .hd h2{font-size:15px;margin:0;font-weight:600}
+.card .hd .q{color:var(--muted);font-size:13px}
+.card .hd .chip{margin-left:auto}
+.card .bd{padding:12px 18px 16px}
+.card.pv{border-color:var(--border-2)}
+.card.pv .hd{background:linear-gradient(0deg,transparent,var(--bg))}
+.card.flat{box-shadow:none;background:transparent;border-style:dashed}
+.pv-title{display:flex;align-items:center;gap:8px}
+.pv-title .live{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-soft)}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+
+/* form */
+label.f{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500}
+input[type=text],input[type=number],select,textarea{width:100%;background:var(--input);border:1px solid var(--border-2);border-radius:6px;padding:6px 8px;color:var(--ink);font:inherit}
+input[type=number]{text-align:right}
+input::placeholder{color:var(--muted-2)}
+input.auto-val{color:var(--fixed-ink);background:var(--fixed-soft);border-color:transparent}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media (max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+.seg{display:inline-flex;border:1px solid var(--border-2);border-radius:6px;overflow:hidden;vertical-align:middle}
+.seg button{background:var(--input);border:0;padding:5px 12px;cursor:pointer;color:var(--ink-2);font-size:13px}
+.seg button+button{border-left:1px solid var(--border-2)}
+.seg button.on{background:var(--ink);color:var(--card);font-weight:500}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.btn{border:1px solid var(--border-2);background:var(--card);border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:500}
+.btn.primary{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;font-weight:500;line-height:1.4;white-space:nowrap}
+.chip.auto{background:var(--auto-soft);color:var(--auto)}
+.chip.fixed{background:var(--fixed-soft);color:var(--fixed-ink)}
+.chip.var{background:var(--var-soft);color:var(--var-ink)}
+.chip.good{background:var(--good-soft);color:var(--good)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.in{background:var(--good-soft);color:var(--good)}
+.chip.out{background:var(--bad-soft);color:var(--bad)}
+button.chip.open{border:1px dashed var(--warn);background:transparent;color:var(--warn);cursor:pointer}
+button.chip.open:focus-visible{outline:2px solid var(--warn);outline-offset:1px}
+.note{font-size:12px;color:var(--muted);margin-top:8px;max-width:75ch}
+.hint{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;background:var(--bg);border:1px solid var(--border);font-size:12.5px;color:var(--ink-2)}
+.hint.warn{background:var(--warn-soft);border-color:transparent;color:var(--warn)}
+.hint.bad{background:var(--bad-soft);border-color:transparent;color:var(--bad)}
+.hint svg{flex:none;margin-top:2px}
+.hint b{font-weight:600}
+.stack-gap{display:grid;gap:10px}
+
+/* year input table */
+.wrap{overflow-x:auto}
+.ytab{width:100%;border-collapse:collapse}
+.ytab th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding:6px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+.ytab th:first-child{text-align:left}
+.ytab td{padding:5px 6px;border-bottom:1px solid var(--border);vertical-align:middle}
+.ytab tr:last-child td{border-bottom:0}
+.ytab td.lbl{color:var(--ink-2);min-width:160px}
+.ytab td.lbl small{display:block;color:var(--muted);font-size:11.5px}
+.ytab td.base{color:var(--muted);text-align:right;white-space:nowrap}
+.ytab td.in{width:104px;min-width:96px}
+.ytab td.in input{padding:5px 6px}
+.ytab td.in.w{width:auto;min-width:112px}
+.ytab td.in.r{width:74px;min-width:70px}
+.ytab td.ro{text-align:right;color:var(--ink-2);white-space:nowrap}
+.ytab td.ro span{display:inline-block;background:var(--ro);border-radius:5px;padding:5px 8px;min-width:64px}
+.ytab td.end{text-align:right;white-space:nowrap}
+.ytab td.end small{display:block}
+.ytab tr.group td{padding-top:14px;font-weight:600;color:var(--ink);border-bottom:0;font-size:12.5px}
+.ytab tr.group td small{font-weight:400;color:var(--muted);margin-left:6px}
+.ytab tr.group td .sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+/* sliders */
+.split{padding:10px 0;border-bottom:1px solid var(--border)}
+.split:last-child{border-bottom:0}
+.split .r1{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.split .r1 .nm{font-weight:500}
+.split .r1 .amt{color:var(--muted)}
+.split .r2{display:grid;grid-template-columns:1fr 100px;gap:12px;align-items:center;margin-top:6px}
+.split input[type=range]{width:100%;accent-color:var(--fixed)}
+.split .pct{display:flex;align-items:center;gap:4px}
+.bar{display:flex;height:26px;border-radius:5px;overflow:hidden;margin-top:8px;font-size:12px;font-weight:500}
+.bar .f{background:var(--fixed-soft);color:var(--fixed-ink);display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden}
+.bar .v{background:var(--var-soft);color:var(--var-ink);display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden}
+.unit{color:var(--muted);font-size:11px;margin-left:2px}
+
+/* preview tables */
+.ptab{width:100%;border-collapse:collapse}
+.ptab th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding:6px 8px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+.ptab th:first-child{text-align:left}
+.ptab th.base{color:var(--muted-2)}
+.ptab td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+.ptab td:first-child{text-align:left;color:var(--ink-2);white-space:normal;min-width:150px}
+.ptab td.base{color:var(--muted)}
+.ptab tr.sub td{font-size:12.5px;color:var(--muted)}
+.ptab tr.sub td:first-child{padding-left:18px}
+.ptab tr.tot td{font-weight:600;border-top:1px solid var(--border-2);background:var(--bg)}
+.ptab tr.kpi td{font-weight:600;color:var(--ink)}
+.ptab tr.grp td{padding-top:12px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;border-bottom:0}
+.ptab tr:last-child td{border-bottom:0}
+.ptab td .pc{display:block;font-size:11px;color:var(--muted);font-weight:400}
+.ptab td.neg{color:var(--bad)}
+.ptab td.pos{color:var(--good)}
+.ptab td .d{font-size:11px;color:var(--muted);margin-left:4px}
+.ptab td .d.up{color:var(--good)}
+.ptab td .d.dn{color:var(--bad)}
+.ptab td.fixed{color:var(--fixed-ink)}
+.ptab td.var{color:var(--var-ink)}
+.ptab td.muted{color:var(--muted-2)}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+@media (max-width:700px){.tiles{grid-template-columns:1fr 1fr}}
+.tile{border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+.tile .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.tile .v{font-size:18px;font-weight:600;margin-top:2px}
+.tile .s{font-size:11.5px;color:var(--muted)}
+.spark{display:block;width:100%;height:56px;margin-bottom:6px}
+.divider{height:1px;background:var(--border);margin:12px 0}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 12px;padding:8px 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:0}
+.row .l{color:var(--ink-2);min-width:0;flex:1 1 220px}
+.row .l small{display:block;color:var(--muted);font-size:11.5px}
+.row .r{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.row .r input[type=number]{width:96px}
+.row .r select{width:auto}
+.row .amt{font-weight:500;min-width:88px;text-align:right}
+.row.alert .l{color:var(--bad)}
+
+/* formula */
+.formula{border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:10px 12px;display:grid;gap:4px;font-size:12.5px}
+.formula .ln{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.formula .ln .mono{color:var(--ink)}
+.formula .ln.res{border-top:1px solid var(--border-2);padding-top:5px;margin-top:2px;font-weight:600}
+.formula .cap{color:var(--muted);font-size:11.5px}
+
+.nf-list{display:grid;gap:10px}
+.nf{border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:10px 12px;display:grid;gap:8px}
+.nf .nf-hd{display:flex;align-items:center;gap:8px}
+.nf .nf-hd input{font-weight:600;font-size:14px;border-color:transparent;background:transparent;padding:4px 6px;margin-left:-6px}
+.nf .nf-hd input:hover{border-color:var(--border-2)}
+.nf .nf-hd .sum{margin-left:auto;white-space:nowrap;font-size:12.5px;color:var(--muted)}
+.nf .nf-hd .sum b{color:var(--ink);font-weight:600}
+.nf .nf-hd .del{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;padding:2px 6px}
+.nf .nf-hd .del:hover{color:var(--bad)}
+.nf .flds{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media (max-width:640px){.nf .flds{grid-template-columns:1fr 1fr}}
+.nf .flds label{font-size:11px}
+.loan-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px}
+.checks{display:grid;gap:4px;margin-top:10px;font-size:12.5px;color:var(--ink-2)}
+.checks div{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:6px 10px;border-radius:6px;background:var(--bg)}
+.ytab td.nm{min-width:170px}
+.ytab td.nm input{font-weight:500}
+.ytab td.x{width:28px;text-align:center}
+.ytab td.x button{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:4px}
+.ytab td.x button:hover{color:var(--bad)}
+.msc{display:grid;gap:8px}
+.msc .row2{display:grid;grid-template-columns:40px minmax(0,1fr) 64px;align-items:center;gap:10px;font-size:12px}
+.msc .yr{color:var(--muted)}
+.msc .trk{position:relative;height:18px;border-radius:0 4px 4px 0;background:var(--ro)}
+.msc .rev{position:absolute;left:0;top:0;bottom:0;background:var(--border-2);border-radius:0 4px 4px 0}
+.msc .gap{position:absolute;top:3px;bottom:3px;border-radius:2px}
+.msc .gap.ok{background:var(--good)}
+.msc .gap.ko{background:repeating-linear-gradient(135deg,var(--bad) 0 3px,transparent 3px 6px)}
+.msc .bep{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);box-shadow:0 0 0 2px var(--card)}
+.msc .val{text-align:right;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.msc .val small{display:block;font-weight:400;color:var(--muted)}
+.msc .row2:hover .trk{outline:1px solid var(--border-2)}
+.msc .key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted);margin-top:2px}
+.msc .key i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:5px;vertical-align:0}
+.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}
+.switch input{width:16px;height:16px;accent-color:var(--accent)}
+
+/* action bar */
+.actions{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--border);padding:10px 28px;display:flex;align-items:center;gap:12px;z-index:5}
+.actions .st{margin-right:auto;color:var(--muted);font-size:12.5px}
+.scr{display:none}
+.scr.on{display:block}
+@media (max-width:640px){
+  .main{padding:16px 16px 110px}
+  .pratica .in{padding-inline:16px}
+  .top{padding:10px 16px}
+  .actions{padding:10px 16px;flex-wrap:wrap}
+  .rail .foot{display:none}
+}
+</style>
+
+<div class="top">
+  <span class="brand">XBRL Budget</span>
+  <span class="crumb">navbar dell'app · invariata</span>
+  <div class="demo"><span>Caso d'esempio</span>
+    <div class="seg" id="case"><button class="on" data-case="normale" id="case-normale">Rossi Meccanica</button><button data-case="zero" id="case-zero">Fornitori a zero</button></div>
+  </div>
+  <label class="switch demo-legacy" for="legacy-on"><input type="checkbox" id="legacy-on">Scenario salvato prima</label>
+  <span class="proto">Prototipo · numeri di esempio</span>
+</div>
+<div class="pratica"><div class="in">
+  <div class="r1">
+    <div class="who"><b id="who-name">Rossi Meccanica S.r.l.</b><span>Bilancio 2026 · base del piano</span></div>
+    <nav class="phases" aria-label="Fasi della pratica">
+      <span class="ph done">1 Dati</span><span class="ln"></span>
+      <span class="ph done">2 Analisi</span><span class="ln"></span>
+      <span class="ph on"><i></i>3 Previsionale</span>
+    </nav>
+    <span class="sp"></span>
+    <button class="exit">Esci dalla pratica</button>
+  </div>
+  <nav class="r2" aria-label="Passaggi: Previsionale">
+    <span class="tab on">Budget</span><span class="sep"></span>
+    <span class="tab">Indici</span><span class="tab">CE Prev.</span><span class="tab">SP Prev.</span><span class="tab">Riclassificato</span><span class="tab">Rendiconto</span><span class="tab">Report</span>
+  </nav>
+</div></div>
+
+<main class="main">
+  <nav class="rail" id="stepper" aria-label="Passi delle ipotesi"></nav>
+
+  <div id="legacy-banner"></div>
+  <details class="decisions" id="decisions">
+    <summary><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 6 6 6-6 6"/></svg>9 decisioni prese il 14/09/2026 <span class="m">· cosa cambia rispetto al percorso attuale</span></summary>
+    <ol id="dec-list">
+      <li data-d="1" class="done"><b>Scenari già salvati:</b> alla prima apertura si ricalcola ciò che si può (parte variabile e fissa, «rimborso in N anni» convertito in rimborsi per anno); il resto lo integra l'utente, e la guida dei passi segna dove. <em>Deciso dal proprietario, 2026-09-14 · prova l'interruttore «Scenario salvato prima».</em></li>
+      <li data-d="2" class="done"><b>Parte fissa di materie prime e servizi:</b> precompilata con l'inflazione del passo 1, modificabile anno per anno (anche a 0). <em>Deciso dal proprietario, 2026-09-14.</em></li>
+      <li data-d="3" class="done"><b>Ricavi e altri ricavi:</b> partono da 0, niente seme dalla tendenza storica: è la parte che l'utente deve ipotizzare. <em>Deciso dal proprietario, 2026-09-14.</em></li>
+      <li data-d="4" class="done"><b>Punto di pareggio:</b> sul MOL, con un mini grafico del margine di sicurezza. <em>Deciso dal proprietario, 2026-09-14.</em></li>
+      <li data-d="5" class="done"><b>Debiti verso banche a breve:</b> l'utente li divide in fidi e anticipi su fatture (si rinnovano, restano aperti nel piano) e quota dei mutui entro 12 mesi (la rata del primo anno dei finanziamenti). <em>Deciso dal proprietario, 2026-09-14.</em></li>
+      <li data-d="6" class="done"><b>Crediti oltre 12 mesi:</b> scadenziati a mano, con la possibilità di dichiararli non incassati nel piano (es. partite infragruppo). <em>Deciso dal proprietario, 2026-09-14.</em></li>
+      <li data-d="7" class="done"><b>Oltre 12 mesi non estinto nel piano:</b> è lecito, il residuo resta aperto in bilancio. Nessun blocco e nessun avviso: lo stato lo dichiara. <em>Deciso dal proprietario, 2026-09-14.</em></li>
+      <li data-d="8" class="done"><b>Debiti verso fornitori a zero nell'anno di partenza:</b> è un problema di riclassifica, non del percorso. Si segnala soltanto, ai passi 4 e 5. <em>Deciso dal proprietario, 2026-09-14 · prova il caso «Fornitori a zero».</em></li>
+      <li data-d="9" class="done"><b>Cassa in eccesso:</b> i mutui seguono solo i loro rimborsi; la cassa oltre la minima abbatte le linee autoliquidanti (fidi e anticipi separati al passo 5): si usa meno banca. <em>Deciso dal proprietario, 2026-09-14.</em></li>
+    </ol>
+  </details>
+
+  <!-- 1 SCENARIO -->
+  <section class="scr" data-step="1">
+    <div class="head"><h1>Scenario</h1><p class="lead">Da dove parte il piano e quanto lontano guarda. Tutto il resto si misura rispetto al bilancio 2026.</p></div>
+    <div class="cols">
+      <div class="pane">
+        <div class="card"><div class="hd"><h2>Informazioni</h2></div><div class="bd stack-gap">
+          <div class="grid2">
+            <div><label class="f" for="sc-name">Nome scenario</label><input type="text" id="sc-name" value="Piano 2027-2029 · base"></div>
+            <div><label class="f" for="sc-base">Anno base</label><input type="text" id="sc-base" value="2026 · bilancio annuale" disabled></div>
+          </div>
+          <div><label class="f" for="sc-desc">Descrizione</label><textarea id="sc-desc" rows="2">Scenario prudenziale per rinnovo affidamento.</textarea></div>
+          <div><span class="f" style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500">Orizzonte</span>
+            <div class="seg" id="horizon"><button class="on" data-h="3" id="h3">3 anni</button><button data-h="5" id="h5">5 anni</button></div>
+          </div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Inflazione attesa</h2><span class="q">vale per tutto il piano</span></div><div class="bd">
+          <div class="row"><div class="l">Inflazione annua<small>Precompila la crescita della parte fissa di materie prime e servizi (passo 3), dove puoi correggerla anno per anno.</small></div>
+            <div class="r"><input type="number" id="infl" step="0.1" value="2"><span class="unit">%</span></div></div>
+          <div class="note">L'inflazione non tocca i ricavi: le ipotesi sul fatturato le scrivi al passo 2, partendo da 0.</div>
+        </div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Bilancio 2026 · anno base</h2></div></div><div class="bd">
+          <div class="tiles">
+            <div class="tile"><div class="k">Ricavi</div><div class="v">2.450.000</div><div class="s">+6,1% sul 2025</div></div>
+            <div class="tile"><div class="k">MOL</div><div class="v">350.000</div><div class="s">14,3% dei ricavi</div></div>
+            <div class="tile"><div class="k">PFN</div><div class="v">672.000</div><div class="s">1,9× il MOL</div></div>
+            <div class="tile"><div class="k">Rating FGPMI</div><div class="v">BBB</div><div class="s">Z-Score 2,41</div></div>
+          </div>
+          <div class="wrap"><table class="ptab"><thead><tr><th></th><th>2024</th><th>2025</th><th>2026</th></tr></thead><tbody>
+            <tr><td>Ricavi delle vendite</td><td>2.180.000</td><td>2.310.000</td><td>2.450.000</td></tr>
+            <tr class="sub"><td>Materie prime</td><td>39,8%</td><td>40,2%</td><td>40,0%</td></tr>
+            <tr class="sub"><td>Servizi</td><td>17,5%</td><td>17,3%</td><td>17,1%</td></tr>
+            <tr class="sub"><td>Personale</td><td>24,9%</td><td>24,6%</td><td>24,9%</td></tr>
+            <tr class="kpi"><td>MOL</td><td>282.000</td><td>318.000</td><td>350.000</td></tr>
+            <tr><td>Giorni incasso · giacenza · pagamento</td><td>66 · 118 · 81</td><td>64 · 115 · 80</td><td id="hist-days">62 · 112 · 78</td></tr>
+          </tbody></table></div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 FATTURATO -->
+  <section class="scr" data-step="2">
+    <div class="head"><h1>Fatturato</h1><p class="lead">Quanto crescono i ricavi, anno per anno. È l'ipotesi principale del piano: tutto parte da 0 e lo decidi tu. La parte variabile dei costi segue questa curva senza altre ipotesi.</p></div>
+    <div class="cols">
+      <div class="pane">
+        <div class="card"><div class="hd"><h2>Variazione % sull'anno precedente</h2></div><div class="bd wrap">
+          <table class="ytab" id="rev-tab"></table>
+          <div class="note">Per riferimento: tendenza storica 2024-2026 dei ricavi +6,0% annuo. Non viene applicata.</div>
+        </div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Ricavi proiettati</h2></div></div><div class="bd">
+          <svg class="spark" id="rev-spark" viewBox="0 0 400 56" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="wrap"><table class="ptab" id="rev-pv"></table></div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 COSTI -->
+  <section class="scr" data-step="3">
+    <div class="head"><h1>Costi</h1><p class="lead">Quanto è fisso, e il resto segue da solo: la parte variabile cresce con i ricavi, la parte fissa con l'inflazione. A mano restano solo personale, godimento beni di terzi e oneri diversi.</p></div>
+    <div class="cols">
+      <div class="pane">
+        <div class="card"><div class="hd"><h2>Quanto è fisso</h2><span class="q">al variare del fatturato, quale parte resta costante?</span></div><div class="bd"><div id="splits"></div>
+          <div class="legend" style="margin-top:10px"><span><i style="background:var(--var)"></i>la parte variabile segue il fatturato in proporzione: nessuna ipotesi da inserire</span><span><i style="background:var(--fixed)"></i>la parte fissa parte dall'inflazione, correggibile qui sotto</span></div></div></div>
+        <div class="card"><div class="hd"><h2>Come si muovono i costi</h2></div><div class="bd wrap">
+          <table class="ytab" id="cost-tab"></table>
+          <div class="note">Le caselle azzurre seguono ancora l'inflazione: cambiano se la cambi al passo 1. Una casella che hai scritto resta tua; svuotala per tornare all'inflazione. <button class="btn" id="reset-fixed" style="padding:3px 10px;font-size:12px;margin-left:6px">Riallinea all'inflazione</button></div>
+        </div></div>
+        <div class="card flat"><div class="hd"><h2>Calcolate in altri passi</h2><span class="chip auto">automatico</span></div><div class="bd">
+          <div class="row"><div class="l">Ammortamenti<small>quote esistenti più i nuovi investimenti</small></div><div class="r"><span class="chip">passo 6</span></div></div>
+          <div class="row"><div class="l">Oneri finanziari<small>mutui esistenti, nuovi finanziamenti, scoperto</small></div><div class="r"><span class="chip">passi 5 e 6</span></div></div>
+          <div class="row"><div class="l">Imposte<small>aliquota effettiva o forzata</small></div><div class="r"><span class="chip">passo 7</span></div></div>
+          <div class="note">Un valore forzato a mano in CE Prev. vince su queste regole finché non lo azzeri dal dialogo Ricalcola.</div>
+        </div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Costi e margine</h2></div></div><div class="bd wrap">
+          <table class="ptab" id="cost-pv"></table>
+        </div></div>
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Punto di pareggio sul MOL</h2></div></div><div class="bd">
+          <div class="msc" id="bep-chart" role="img" aria-label="Margine di sicurezza per anno"></div>
+          <div class="formula" id="bep-formula" style="margin-top:12px"></div>
+          <div class="wrap" style="margin-top:10px"><table class="ptab" id="bep-pv"></table></div>
+        </div></div>
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Conto economico fino all'ante imposte</h2></div></div><div class="bd wrap">
+          <table class="ptab" id="ce-pv"></table>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 CIRCOLANTE -->
+  <section class="scr" data-step="4">
+    <div class="head"><h1>Capitale circolante</h1><p class="lead">Giorni medi di incasso, giacenza e pagamento. Vuoto significa «come nel 2026».</p></div>
+    <div class="cols">
+      <div class="pane">
+        <div id="wc-alert"></div>
+        <div class="card"><div class="hd"><h2>Giorni medi</h2></div><div class="bd wrap">
+          <table class="ytab" id="wc-tab"></table>
+          <div class="note">I giorni del 2026 sono calcolati sui soli crediti verso clienti e debiti verso fornitori, su 360 giorni. Crediti e debiti del 2026 si chiudono nel 2027 (passo 5): questi giorni generano quelli nuovi.</div>
+        </div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Circolante proiettato</h2></div></div><div class="bd wrap">
+          <table class="ptab" id="wc-pv"></table>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 PATRIMONIALE PREGRESSO -->
+  <section class="scr" data-step="5">
+    <div class="head"><h1>Patrimoniale pregresso</h1><p class="lead">I saldi al 31/12/2026 e come si chiudono. Le voci a breve si liquidano nel primo anno del piano; quelle oltre 12 mesi le scadenzi tu, anno per anno.</p></div>
+    <div class="cols wide-left">
+      <div class="pane">
+        <div class="card"><div class="hd"><h2>A breve · si chiudono nel <span class="y1"></span></h2><span class="q">nessun piano da impostare</span></div><div class="bd" id="short-list"></div></div>
+        <div class="hint"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <div>Un credito poco esigibile o un debito rateizzato non va lasciato a breve: spostalo <b>oltre 12 mesi in Rettifiche</b> (o nell'infrannuale) e scadenzialo qui sotto.</div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Scadenziamento pregresso</h2></div><span class="q">flussi di cassa</span></div><div class="bd wrap">
+          <table class="ptab" id="preg-pv"></table>
+        </div></div>
+      </div>
+    </div>
+    <div class="pane" style="margin-top:16px">
+        <div class="card"><div class="hd"><h2>Altre voci oltre 12 mesi · scadenziamento a mano</h2><span class="q">importi incassati o pagati in ciascun anno</span></div><div class="bd wrap">
+          <table class="ytab" id="long-tab"></table>
+          <div class="note">Quello che non scadenzi resta aperto in bilancio a fine piano: è lecito, la colonna «resta» lo dichiara.</div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Debiti verso banche</h2><span class="q" id="bank-q"></span></div><div class="bd">
+          <div class="eyebrow" style="margin-bottom:4px">1 · Dividi i debiti a breve</div>
+          <div class="row"><div class="l"><label for="fidi-amt">Fidi e anticipi su fatture</label><small>si rinnovano: restano aperti nel piano, non si rimborsano</small></div>
+            <div class="r"><select id="fidi-rule" aria-label="Andamento dei fidi nel piano"><option value="costante">Costanti</option><option value="ricavi">Seguono i ricavi</option></select><input type="number" id="fidi-amt" step="1000"><span class="unit">€</span></div></div>
+          <div class="row"><div class="l">Quota dei mutui entro 12 mesi<small>il resto dei debiti a breve: è la rata <span class="y1"></span> dei finanziamenti qui sotto</small></div>
+            <div class="r"><span class="amt num" id="quota-mutui"></span></div></div>
+          <div class="eyebrow" style="margin:14px 0 4px">2 · Scadenzia i finanziamenti</div>
+          <div class="wrap"><table class="ytab" id="loans-tab"></table></div>
+          <div class="loan-actions"><button class="btn" id="loans-add">+ Aggiungi finanziamento</button><button class="btn" id="loans-merge">Unisci in un solo finanziamento</button><span class="note" style="margin:0">Per fare in fretta: un unico finanziamento con il totale, e scadenzi quello.</span></div>
+          <div id="loans-check" class="checks"></div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Altri finanziatori</h2><span class="q">spesso finanziamenti soci, rimborsati molto in là</span></div><div class="bd">
+          <div class="wrap"><table class="ytab" id="others-tab"></table></div>
+          <div class="loan-actions"><button class="btn" id="others-add">+ Aggiungi finanziatore</button><span class="note" style="margin:0">Anni vuoti = nessun rimborso nel piano: il debito resta in bilancio oltre la fine del piano.</span></div>
+          <div id="others-check" class="checks"></div>
+        </div></div>
+    </div>
+  </section>
+
+  <!-- 6 PATRIMONIALE PIANO -->
+  <section class="scr" data-step="6">
+    <div class="head"><h1>Patrimoniale piano</h1><p class="lead">Ciò che il previsionale genera: voci minori, investimenti, nuova finanza. La cassa chiude il foglio.</p></div>
+    <div class="cols">
+      <div class="pane">
+        <div class="card"><div class="hd"><h2>Voci minori · regola nel piano</h2></div><div class="bd" id="minor-list"></div></div>
+        <div class="card"><div class="hd"><h2>Fondo TFR</h2><span class="q" id="tfr-q"></span></div><div class="bd">
+          <div class="row"><div class="l">Accantonamento annuo<small>retribuzioni / 13,5 · si calcola dal personale del passo 3 (retribuzioni stimate al 70% del costo del personale se il bilancio non le separa)</small></div>
+            <div class="r"><label class="switch" for="tfr-susp" style="font-size:12.5px"><input type="checkbox" id="tfr-susp">versato a fondi esterni o INPS</label></div></div>
+          <div class="wrap" style="margin-top:6px"><table class="ytab" id="tfr-tab"></table></div>
+          <div class="note">Liquidazioni: pensionamenti, dimissioni, licenziamenti. Escono di cassa nell'anno e riducono il fondo.</div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Nuovi investimenti</h2></div><div class="bd wrap">
+          <table class="ytab" id="capex-tab"></table>
+          <div class="grid2" style="margin-top:10px">
+            <div><label class="f" for="amm-mat">Ammortamento materiali %</label><input type="number" id="amm-mat" value="10"></div>
+            <div><label class="f" for="amm-imm">Ammortamento immateriali %</label><input type="number" id="amm-imm" value="20"></div>
+          </div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Nuovi finanziamenti</h2><span class="q" id="nf-q"></span></div><div class="bd">
+          <div class="nf-list" id="nf-list"></div>
+          <div class="loan-actions"><button class="btn" id="nf-add">+ Aggiungi finanziamento</button><span class="note" style="margin:0">Più linee nello stesso anno, o una per anno. Dai un nome riconoscibile: la banca con cui stai trattando.</span></div>
+          <div class="note">Rata capitale costante dopo il preammortamento; la quota dell'anno successivo va nei debiti a breve.</div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Cassa e scoperto</h2></div><div class="bd">
+          <div class="row"><div class="l"><label class="switch" for="ovd-on"><input type="checkbox" id="ovd-on">Concedi lo scoperto di conto corrente</label><small>Spento: se la cassa va sotto zero il previsionale non si genera. Acceso: il fabbisogno diventa scoperto, dichiarato anno per anno.</small></div>
+            <div class="r"><label class="f" for="ovd-limit" style="margin:0">Tetto €</label><input type="number" id="ovd-limit" value="0" step="10000"></div></div>
+          <div class="row"><div class="l"><label class="switch" for="sweep-on"><input type="checkbox" id="sweep-on">Usa la cassa in eccesso per ridurre fidi e anticipi</label><small>La cassa sopra la minima abbatte le linee autoliquidanti del passo 5: si usa meno banca. I mutui e i nuovi finanziamenti seguono solo i loro rimborsi. Lo scoperto si chiude comunque da solo appena la cassa torna positiva.</small></div>
+            <div class="r"><label class="f" for="sweep-min" style="margin:0">Cassa minima €</label><input type="number" id="sweep-min" value="50000" step="10000"></div></div>
+        </div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Debito, cassa e PFN</h2></div></div><div class="bd">
+          <div class="wrap"><table class="ptab" id="debt-pv"></table></div>
+          <div id="debt-warn" style="margin-top:10px"></div>
+        </div></div>
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Altri crediti e debiti del piano</h2></div><span class="q">dalle voci minori</span></div><div class="bd wrap">
+          <table class="ptab" id="minor-pv"></table>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 IMPOSTE -->
+  <section class="scr" data-step="7">
+    <div class="head"><h1>Imposte</h1><p class="lead">Calcolate sull'utile ante imposte e pagate a saldo più acconto. Il debito tributario del 2026 non si imposta qui: si chiude al passo 5. È l'ultimo passo: il previsionale completo si ritocca in CE Prev. e SP Prev.</p></div>
+    <div class="cols">
+      <div class="pane">
+        <div class="card"><div class="hd"><h2>Aliquota</h2></div><div class="bd">
+          <div class="row"><div class="l">Aliquota effettiva 2026<small>imposte 2026 / utile ante imposte 2026</small></div><div class="r"><span class="num">27,9%</span><span class="chip auto" id="rate-used">usata dal piano</span></div></div>
+          <div class="row"><div class="l"><label for="tax-rate">Aliquota forzata</label><small>vuota = usa l'effettiva</small></div><div class="r"><input type="number" id="tax-rate" placeholder="27,9" step="0.1"><span class="unit">%</span></div></div>
+        </div></div>
+        <div class="card"><div class="hd"><h2>Acconti</h2></div><div class="bd">
+          <div class="row"><div class="l"><label for="tax-adv">Acconti versati nell'anno</label><small>0 = il 100% dell'imposta dell'anno prima</small></div><div class="r"><input type="number" id="tax-adv" value="0" step="1000"><span class="unit">€</span></div></div>
+          <div class="note">Se gli acconti superano l'imposta dell'anno, la differenza diventa credito tributario.</div>
+        </div></div>
+        <div class="card flat"><div class="bd">
+          <div class="row"><div class="l">Debiti tributari 2026 a breve<small id="trib-short-note">saldo pagato nel 2027</small></div><div class="r"><span class="chip">passo 5</span></div></div>
+          <div class="row"><div class="l">Debiti tributari rateizzati<small>oltre 12 mesi, scadenziati a mano</small></div><div class="r"><span class="chip">passo 5</span></div></div>
+        </div></div>
+      </div>
+      <div class="pane">
+        <div class="card pv"><div class="hd"><div class="pv-title"><span class="live"></span><h2>Imposte e risultato netto</h2></div></div><div class="bd wrap">
+          <table class="ptab" id="tax-pv"></table>
+        </div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="actions">
+  <span class="st" id="act-status">Passo 1 di 7</span>
+  <button class="btn" id="prev">Indietro</button>
+  <button class="btn primary" id="next">Avanti</button>
+</div>
+
+<script>
+/* ---------- modello finto, solo prototipo ---------- */
+const BY=2026;
+const STEPS=[
+  {n:1,t:"Scenario",g:"Impostazione"},
+  {n:2,t:"Fatturato",g:"Conto economico"},
+  {n:3,t:"Costi",g:"Conto economico"},
+  {n:4,t:"Capitale circolante",g:"Stato patrimoniale"},
+  {n:5,t:"Patrimoniale pregresso",g:"Stato patrimoniale",isNew:true},
+  {n:6,t:"Patrimoniale piano",g:"Stato patrimoniale",isNew:true},
+  {n:7,t:"Imposte",g:"Stato patrimoniale"},
+];
+const BASE0={rev:2450000,other:35000,mat:980000,serv:420000,pers:610000,god:85000,od:40000,amm:120000,of:28000,
+  immob:1180000,rim:306000,clienti:422000,credOltre:30000,altriCred:48000,credTrib:18000,rateiA:12000,cash:118000,
+  bankTot:640000,bankBreve:172500,socio:150000,forn:322000,tribBreve:61000,tribRate:35000,previd:28000,altriDeb:45000,altriDebOltre:40000,
+  tfr:160000,fondi:20000,rateiP:10000};
+const CASES={normale:{name:"Rossi Meccanica S.r.l.",forn:322000,altriDeb:45000},zero:{name:"Prova Ambienta · caso fornitori a zero",forn:0,altriDeb:367000}};
+let caseKey="normale";
+const B=()=>({...BASE0,forn:CASES[caseKey].forn,altriDeb:CASES[caseKey].altriDeb});
+const LOANS0=[
+  {name:"Mutuo Intesa 2022",res:330000,rate:3.8,rep:[82500,82500,82500,82500,0]},
+  {name:"Chirografario MCC 2024",res:220000,rate:4.6,rep:[0,55000,55000,55000,55000]}];
+const OTHERS0=[{name:"Finanziamento soci",res:150000,rate:0,rep:[0,0,0,0,0]}];
+const BASE_EBT=202000, BASE_TAX=56358;
+
+const S={
+  horizon:3, infl:2,
+  g:{rev:[0,0,0,0,0],other:[0,0,0,0,0],matF:[null,null,null,null,null],servF:[null,null,null,null,null],pers:[0,0,0,0,0],god:[0,0,0,0,0],od:[0,0,0,0,0]},
+  share:{mat:35,serv:60},
+  wc:{dso:[null,null,null,null,null],dio:[null,null,null,null,null],dpo:[null,null,null,null,null]},
+  fidi:{amt:90000,rule:"costante",rate:5},
+  loans:LOANS0.map(l=>({...l,rep:[...l.rep]})), others:OTHERS0.map(l=>({...l,rep:[...l.rep]})),
+  credOltreFuori:false,
+  tfr:{susp:false,pay:[0,50000,0,0,0]},
+  sched:{tribRate:[12000,12000,11000,0,0],altriDebOltre:[0,0,0,0,0],credOltre:[10000,0,0,0,0]},
+  minor:{altriCred:{rule:"costante",pct:0},rateiA:{rule:"costante",pct:0},fondi:{rule:"costante",pct:0},previd:{rule:"pers",pct:0},altriDeb:{rule:"costante",pct:0},rateiP:{rule:"costante",pct:0}},
+  capex:{mat:[150000,80000,60000,60000,60000],imm:[20000,0,0,0,0]}, ammMat:10, ammImm:20,
+  nf:[{name:"Nuovo finanziamento BPM",amt:500000,year:2027,dur:6,pre:1,rate:4.5}],
+  ovd:{on:false,limit:0}, sweep:{on:false,min:50000},
+  taxRate:null, taxAdv:0,
+};
+let step=1;
+let legacy=false; const TODO=new Set([1,5]);
+const DEFAULT_S=JSON.parse(JSON.stringify(S));
+function applyLegacy(onState){
+  const d=JSON.parse(JSON.stringify(DEFAULT_S));
+  if(onState){
+    d.g.rev=[6,5,4,4,4]; d.g.other=[2,2,2,2,2]; d.g.pers=[3,3,3,3,3]; d.g.god=[2,2,2,2,2]; d.g.od=[2,2,2,2,2]; d.g.matF=[3,3,3,3,3]; d.g.servF=[2.5,2.5,2.5,2.5,2.5];
+    d.fidi={amt:0,rule:"costante",rate:5};
+    d.loans=[{name:"Debiti verso banche · da «rimborso in 4 anni»",res:640000,rate:4.2,rep:[160000,160000,160000,160000,0]}];
+    d.others=[{name:"Altri finanziatori · da «rimborso in 5 anni»",res:150000,rate:0,rep:[30000,30000,30000,30000,30000]}];
+    d.sched.tribRate=[0,0,0,0,0]; d.sched.credOltre=[0,0,0,0,0];
+  }
+  Object.keys(d).forEach(k=>S[k]=d[k]);
+  document.getElementById("infl").value=S.infl;
+}
+function renderLegacy(){
+  const el=document.getElementById("legacy-banner");
+  el.innerHTML=legacy?`<div class="migr">
+    <div><h3><span class="chip good">ricalcolato</span>All'apertura</h3><ul>
+      <li>Parte variabile di materie prime e servizi: le vecchie percentuali sono sostituite dalla crescita dei ricavi.</li>
+      <li>Parte fissa: le vecchie percentuali restano, perché sono già un'ipotesi scritta dall'utente.</li>
+      <li>«Rimborso in 4 anni» delle banche e «in 5 anni» degli altri finanziatori: convertiti in un finanziamento ciascuno, con rimborsi uguali per anno.</li>
+      <li>Ricavi, personale, godimento e oneri diversi: tenuti come erano salvati.</li>
+      <li>Il previsionale cambierà al prossimo salvataggio: CE Prev. e SP Prev. mostrano ancora quello vecchio.</li></ul></div>
+    <div><h3><span class="chip warn">da integrare</span>Serve il tuo intervento</h3><ul>
+      <li>Inflazione attesa: il vecchio scenario non la salvava. <button class="go" data-go="1">Passo 1</button></li>
+      <li>Debiti verso banche: dividi i 172.500 € a breve fra fidi e anticipi (si rinnovano) e quota dei mutui; il resto è un solo finanziamento da 640.000 €, da spacchettare nei contratti veri o confermare. <button class="go" data-go="5">Passo 5</button></li>
+      <li>Voci oltre 12 mesi: il vecchio scenario non le scadenziava. Verifica se tributari rateizzati, altri debiti e crediti hanno movimenti nel piano, o restano aperti. <button class="go" data-go="5">Passo 5</button></li></ul></div>
+  </div>`:"";
+  el.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(+b.dataset.go));
+}
+
+const fmt=n=>new Intl.NumberFormat("it-IT",{maximumFractionDigits:0}).format(Math.round(n)+0);
+const pct=(n,d=1)=>new Intl.NumberFormat("it-IT",{minimumFractionDigits:d,maximumFractionDigits:d}).format(isFinite(n)?n:0)+"%";
+const sgn=(n,d=1)=>(n>0?"+":"")+pct(n,d);
+const years=()=>Array.from({length:S.horizon},(_,i)=>BY+1+i);
+const num=v=>{const x=parseFloat(String(v).replace(",","."));return isNaN(x)?0:x};
+const baseDays=()=>{const b=B();return{dso:b.clienti/b.rev*360,dio:b.rim/b.mat*360,dpo:(b.mat+b.serv+b.god)>0?b.forn/(b.mat+b.serv+b.god)*360:0}};
+
+function compute(){
+  const b=B(), Y=years(), bd=baseDays(), out=[];
+  const liab0=b.bankTot+b.socio+b.forn+b.tribBreve+b.tribRate+b.previd+b.altriDeb+b.altriDebOltre+b.tfr+b.fondi+b.rateiP;
+  const assets0=b.immob+b.rim+b.clienti+b.credOltre+b.altriCred+b.credTrib+b.rateiA+b.cash;
+  let p={rev:b.rev,other:b.other,pers:b.pers,god:b.god,od:b.od,
+    matF:b.mat*S.share.mat/100,matV:b.mat*(1-S.share.mat/100),servF:b.serv*S.share.serv/100,servV:b.serv*(1-S.share.serv/100),
+    immob:b.immob,lres:S.loans.map(l=>l.res),ores:S.others.map(l=>l.res),nfres:S.nf.map(()=>0),tribRate:b.tribRate,credOltre:b.credOltre,altriDebOltre:b.altriDebOltre,
+    ovd:0,tfr:b.tfr,cn:assets0-liab0,tax:BASE_TAX,minor:{altriCred:b.altriCred,rateiA:b.rateiA,fondi:b.fondi,previd:b.previd,altriDeb:b.altriDeb,rateiP:b.rateiP}};
+  let capexCumM=0,capexCumI=0;
+  Y.forEach((y,i)=>{
+    const r={y,i};
+    r.gRev=S.g.rev[i];
+    r.rev=p.rev*(1+S.g.rev[i]/100); r.other=p.other*(1+S.g.other[i]/100);
+    r.matV=p.matV*(1+S.g.rev[i]/100); r.servV=p.servV*(1+S.g.rev[i]/100);
+    r.matF=p.matF*(1+(S.g.matF[i]??S.infl)/100); r.servF=p.servF*(1+(S.g.servF[i]??S.infl)/100);
+    r.mat=r.matF+r.matV; r.serv=r.servF+r.servV;
+    r.pers=p.pers*(1+S.g.pers[i]/100); r.god=p.god*(1+S.g.god[i]/100); r.od=p.od*(1+S.g.od[i]/100);
+    r.cv=r.matV+r.servV; r.cf=r.matF+r.servF+r.pers+r.god+r.od;
+    r.mol=r.rev+r.other-r.cv-r.cf;
+    capexCumM+=S.capex.mat[i]; capexCumI+=S.capex.imm[i];
+    r.amm=b.amm+capexCumM*S.ammMat/100+capexCumI*S.ammImm/100;
+    r.ro=r.mol-r.amm;
+    // debiti finanziari
+    let cint=0;
+    const run=(list,prev,resK,repK)=>{r[resK]=[];r[repK]=[];list.forEach((l,k)=>{const open=prev[k]??l.res;const rp=Math.min(open,l.rep[i]||0);cint+=open*l.rate/100;r[resK][k]=open-rp;r[repK][k]=rp;});};
+    run(S.loans,p.lres,"lres","lrep"); run(S.others,p.ores,"ores","orep");
+    r.loanRes=r.lres.reduce((a,x)=>a+x,0); r.loanRep=r.lrep.reduce((a,x)=>a+x,0);
+    r.othRes=r.ores.reduce((a,x)=>a+x,0); r.othRep=r.orep.reduce((a,x)=>a+x,0);
+    let nfInt=0; r.nfres=[]; r.nfDisb=0; r.nfRep=0;
+    S.nf.forEach((f,k)=>{const open=p.nfres[k]??0, disb=y===f.year?f.amt:0;
+      const amort=Math.max(1,f.dur-f.pre), rp=y>f.year+f.pre?Math.min(open,f.amt/amort):0;
+      r.nfres[k]=open+disb-rp; r.nfDisb+=disb; r.nfRep+=rp; nfInt+=open*f.rate/100+disb*f.rate/200;});
+    r.nfRes=r.nfres.reduce((a,x)=>a+x,0);
+    // pregresso a breve e oltre
+    const fidiOpen=p.fidi??S.fidi.amt;
+    r.fidi=S.fidi.rule==="ricavi"?fidiOpen*r.rev/p.rev:fidiOpen;
+    const ovdInt=p.ovd*S.fidi.rate/100;
+    r.of=cint+nfInt+ovdInt+fidiOpen*S.fidi.rate/100;
+    r.tribRateRep=Math.min(p.tribRate,S.sched.tribRate[i]); r.tribRate=p.tribRate-r.tribRateRep;
+    r.altriDebOltreRep=Math.min(p.altriDebOltre,S.sched.altriDebOltre[i]); r.altriDebOltre=p.altriDebOltre-r.altriDebOltreRep;
+    r.credOltreInc=S.credOltreFuori?0:Math.min(p.credOltre,S.sched.credOltre[i]); r.credOltre=p.credOltre-r.credOltreInc;
+    r.ebt=r.ro-r.of;
+    r.rate=S.taxRate==null?27.9:S.taxRate;
+    r.tax=Math.max(0,r.ebt*r.rate/100);
+    r.net=r.ebt-r.tax;
+    r.acconto=S.taxAdv>0?S.taxAdv:p.tax;
+    r.tribBreve=Math.max(0,r.tax-r.acconto); r.credTrib=Math.max(0,r.acconto-r.tax);
+    // circolante generato
+    r.dso=S.wc.dso[i]??bd.dso; r.dio=S.wc.dio[i]??bd.dio; r.dpo=S.wc.dpo[i]??bd.dpo;
+    r.clienti=r.rev*r.dso/360; r.rim=r.mat*r.dio/360; r.forn=(r.mat+r.serv+r.god)*r.dpo/360;
+    r.ccn=r.clienti+r.rim-r.forn;
+    r.minor={};
+    Object.entries(S.minor).forEach(([k,m])=>{const pv=p.minor[k];
+      r.minor[k]=m.rule==="costante"?pv:m.rule==="var"?pv*(1+m.pct/100):m.rule==="ricavi"?pv*r.rev/p.rev:pv*r.pers/p.pers;});
+    r.tfrAcc=S.tfr.susp?0:r.pers*0.7/13.5;
+    r.tfrPay=Math.min(p.tfr+r.tfrAcc,S.tfr.pay[i]||0); r.tfrOver=(S.tfr.pay[i]||0)>p.tfr+r.tfrAcc+0.5;
+    r.tfr=p.tfr+r.tfrAcc-r.tfrPay;
+    r.immob=p.immob+S.capex.mat[i]+S.capex.imm[i]-r.amm;
+    r.cn=p.cn+r.net;
+    const assetsNC=r.immob+r.rim+r.clienti+r.credOltre+r.minor.altriCred+r.minor.rateiA+r.credTrib;
+    const liab=r.fidi+r.loanRes+r.othRes+r.nfRes+r.forn+r.tribBreve+r.tribRate+r.minor.previd+r.minor.altriDeb+r.altriDebOltre+r.tfr+r.minor.fondi+r.minor.rateiP+r.cn;
+    let cash=liab-assetsNC;
+    r.sweep=0;
+    if(S.sweep.on&&r.fidi>0&&cash>S.sweep.min){r.sweep=Math.min(r.fidi,cash-S.sweep.min);r.fidi-=r.sweep;cash-=r.sweep;}
+    r.ovd=0; r.gap=0; r.overLimit=false;
+    if(cash<0){ if(S.ovd.on){r.ovd=-cash; if(S.ovd.limit>0&&r.ovd>S.ovd.limit) r.overLimit=true; cash=0;} else r.gap=-cash; }
+    r.cash=cash;
+    r.bankTot=r.fidi+r.loanRes+r.nfRes+r.ovd;
+    r.pfn=r.bankTot+r.othRes-Math.max(0,r.cash);
+    r.cashIn=r.cash;
+    out.push(r);
+    p={...r,matF:r.matF,matV:r.matV,servF:r.servF,servV:r.servV,ovd:r.ovd};
+  });
+  return out;
+}
+
+/* ---------- helpers ---------- */
+const yearHead=(label="")=>`<thead><tr><th>${label}</th><th class="base">${BY}</th>${years().map(y=>`<th>${y}</th>`).join("")}</tr></thead>`;
+const td=(v,cls="")=>`<td class="${cls}${v<-0.5?' neg':''}">${fmt(v)}</td>`;
+const tdp=(v,p,cls="")=>`<td class="${cls}">${fmt(v)}<span class="pc">${pct(p)}</span></td>`;
+function decBtn(n){return `<button class="chip open" data-dec="${n}">Decisione aperta ${n}</button>`}
+const ICON_WARN='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+const ICON_OK='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>';
+
+/* input di una riga per anno: path "g.rev" o "sched.socio" */
+function getPath(path,i){const [a,k]=path.split(".");return S[a][k][i]}
+function inRow(label,path,base,o={}){
+  const step=o.step||0.5;
+  return `<tr><td class="lbl">${label}${o.sub?`<small>${o.sub}</small>`:""}</td><td class="base">${base}</td>${years().map((y,i)=>{
+    const raw=getPath(path,i), v=raw==null&&o.fallback!=null?o.fallback:raw, auto=raw==null&&o.fallback!=null;
+    return `<td class="in"><input type="number" id="in-${path.replace('.','-')}-${i}" step="${step}" data-path="${path}" data-i="${i}" value="${v==null?'':v}" placeholder="${o.ph?o.ph(i):''}" class="${auto?'auto-val':''}" aria-label="${label} ${y}"></td>`}).join("")}${o.end!==undefined?`<td class="end">${o.end}</td>`:""}</tr>`;
+}
+function roRow(label,base,vals,sub){
+  return `<tr><td class="lbl">${label}${sub?`<small>${sub}</small>`:""}</td><td class="base">${base}</td>${vals.map(v=>`<td class="ro"><span>${v}</span></td>`).join("")}</tr>`;
+}
+
+/* ---------- render: struttura ---------- */
+function renderStepper(){
+  const el=document.getElementById("stepper"); const groups=[];
+  STEPS.forEach(s=>{let g=groups.find(x=>x.g===s.g); if(!g){g={g:s.g,items:[]};groups.push(g)} g.items.push(s)});
+  el.innerHTML=groups.map(g=>`<div class="grp"><div class="glab">${g.g}</div><div class="grow">${g.items.map(s=>
+    `<button class="step ${s.n===step?'active':''} ${s.n<step?'done':''} ${s.isNew&&!(legacy&&TODO.has(s.n))?'new':''} ${legacy&&TODO.has(s.n)&&s.n!==step?'todo':''}" data-n="${s.n}" id="rail-${s.n}"><span class="dot">${s.n<step?'✓':s.n}</span><span class="t">${s.t}</span></button>`).join("")}</div></div>`).join("")
+    +`<div class="foot"><b>Orizzonte ${S.horizon} anni</b> · ${BY+1} – ${BY+S.horizon}</div>`;
+  el.querySelectorAll(".step").forEach(b=>b.onclick=()=>go(+b.dataset.n));
+}
+
+function renderInputs(){
+  const b=B(), bd=baseDays(), Y=years();
+  document.querySelectorAll(".y1").forEach(e=>e.textContent=BY+1);
+  document.getElementById("who-name").textContent=CASES[caseKey].name;
+  document.getElementById("hist-days").textContent=`${Math.round(bd.dso)} · ${Math.round(bd.dio)} · ${Math.round(bd.dpo)}`;
+  // 2
+  document.getElementById("rev-tab").innerHTML=yearHead("Voce")+"<tbody>"+
+    inRow("Ricavi delle vendite","g.rev",fmt(b.rev))+inRow("Altri ricavi e proventi","g.other",fmt(b.other))+"</tbody>";
+  // 3 sliders
+  document.getElementById("splits").innerHTML=[["mat","Materie prime, sussidiarie, di consumo e merci",b.mat],["serv","Costi per servizi",b.serv]].map(([k,n,v])=>{
+    const s=S.share[k],f=v*s/100;
+    return `<div class="split"><div class="r1"><span class="nm">${n}</span><span class="amt">${fmt(v)} €</span></div>
+      <div class="r2"><input type="range" min="0" max="100" step="5" id="share-r-${k}" data-share="${k}" value="${s}" aria-label="Quota fissa ${n}"><div class="pct"><input type="number" id="share-n-${k}" data-sharen="${k}" value="${s}" aria-label="Quota fissa % ${n}"><span class="unit">% fissa</span></div></div>
+      <div class="bar"><div class="f" style="flex:${s}">${s>14?`Fissa · ${fmt(f)} €`:''}</div><div class="v" style="flex:${100-s}">${s<86?`Variabile · ${fmt(v-f)} €`:''}</div></div></div>`}).join("");
+  // 3 tabella costi
+  const cols=Y.length+2;
+  document.getElementById("cost-tab").innerHTML=yearHead("Voce")+"<tbody>"+
+    `<tr class="group"><td colspan="${cols}"><span class="sw" style="background:var(--fixed)"></span>Parte fissa<small>precompilata con l'inflazione del passo 1 · correggi se serve, anche a 0</small></td></tr>`+
+    inRow("Materie prime · fissa","g.matF",fmt(b.mat*S.share.mat/100),{fallback:S.infl})+
+    inRow("Servizi · fissa","g.servF",fmt(b.serv*S.share.serv/100),{fallback:S.infl})+
+    `<tr class="group"><td colspan="${cols}">Ipotesi manuali<small>partono da 0 · variazione % sull'anno precedente</small></td></tr>`+
+    inRow("Personale","g.pers",fmt(b.pers))+inRow("Godimento beni di terzi","g.god",fmt(b.god))+inRow("Oneri diversi di gestione","g.od",fmt(b.od),{sub:"spostata qui da «Altre voci CE»"})+"</tbody>";
+  // 4
+  const zero=b.forn===0;
+  document.getElementById("wc-tab").innerHTML=yearHead("Voce")+"<tbody>"+
+    inRow("Giorni di incasso · DSO","wc.dso",Math.round(bd.dso)+" gg",{step:1,ph:()=>"come 2026"})+
+    inRow("Giorni di giacenza · DIO","wc.dio",Math.round(bd.dio)+" gg",{step:1,ph:()=>"come 2026"})+
+    inRow("Giorni di pagamento · DPO","wc.dpo",(zero?"<span style='color:var(--bad)'>n.d.</span>":Math.round(bd.dpo)+" gg"),{step:1,ph:()=>zero?"n.d.":"come 2026"})+"</tbody>";
+  document.getElementById("wc-alert").innerHTML=zero?`<div class="hint bad">${ICON_WARN}<div><b>Non risultano debiti verso fornitori nell'anno di partenza. Controllare le riclassifiche dei debiti!</b><br>I costi di acquisto del ${BY} sono ${fmt(b.mat+b.serv+b.god)} €, i giorni di pagamento non si possono calcolare. Gli altri debiti a breve valgono ${fmt(b.altriDeb)} €.</div></div>`:"";
+  // 5 breve
+  const y1=BY+1;
+  const shortRows=[
+    ["Crediti verso clienti",b.clienti,"in","incassati"],
+    ["Debiti verso fornitori",b.forn,"out","pagati",zero?"non risultano debiti verso fornitori: controllare le riclassifiche dei debiti":""],
+    ["Debiti tributari a breve",b.tribBreve,"out","saldo pagato"],
+    ["Debiti previdenziali",b.previd,"out","pagati"],
+    ["Altri debiti a breve",b.altriDeb,"out","pagati"],
+  ];
+  document.getElementById("short-list").innerHTML=shortRows.map(([n,v,dir,verb,warn])=>
+    `<div class="row ${warn?'alert':''}"><div class="l">${n}<small>${warn||`${verb} nel ${y1}`}</small></div><div class="r"><span class="chip ${dir}">${dir==='in'?'incasso':'pagamento'}</span><span class="amt num">${fmt(v)} €</span></div></div>`).join("")+
+    `<div class="row"><div class="l">Debiti verso banche e altri finanziatori<small>non si chiudono per regola: fidi e anticipi si rinnovano, i finanziamenti li scadenzi qui sotto</small></div><div class="r"><span class="amt num">${fmt(b.bankTot+b.socio)} €</span></div></div>`;
+  // 5 oltre
+  document.getElementById("long-tab").innerHTML=`<thead><tr><th>Voce</th><th class="base">al 31/12/${BY}</th>${Y.map(y=>`<th>${y}</th>`).join("")}<th>resta</th></tr></thead><tbody id="long-body"></tbody>`;
+  // 5 finanziamenti
+  ["loans","others"].forEach(kind=>{
+    document.getElementById(kind+"-tab").innerHTML=`<thead><tr><th>${kind==="loans"?"Finanziamento":"Finanziatore"}</th><th>Residuo al 31/12/${BY} €</th><th>Tasso %</th>${Y.map(y=>`<th>${y}</th>`).join("")}<th>resta</th><th></th></tr></thead><tbody>${S[kind].map((l,k)=>
+      `<tr><td class="nm"><input type="text" id="${kind}-${k}-name" data-loan="${kind}" data-k="${k}" data-f="name" value="${l.name}" aria-label="Nome"></td>
+       <td class="in w"><input type="number" id="${kind}-${k}-res" data-loan="${kind}" data-k="${k}" data-f="res" value="${l.res}" step="1000" aria-label="${l.name} residuo"></td>
+       <td class="in r"><input type="number" id="${kind}-${k}-rate" data-loan="${kind}" data-k="${k}" data-f="rate" value="${l.rate}" step="0.1" aria-label="${l.name} tasso"></td>
+       ${Y.map((y,i)=>`<td class="in"><input type="number" id="${kind}-${k}-rep-${i}" data-loan="${kind}" data-k="${k}" data-f="rep" data-i="${i}" value="${l.rep[i]||''}" placeholder="0" step="1000" aria-label="${l.name} capitale rimborsato ${y}"></td>`).join("")}
+       <td class="end" id="${kind}-${k}-end"></td>
+       <td class="x">${S[kind].length>1?`<button data-del="${kind}" data-k="${k}" aria-label="Elimina ${l.name}" id="${kind}-${k}-del">×</button>`:""}</td></tr>`).join("")}</tbody>`;
+  });
+  // 6 voci minori
+  const RULES=[["costante","Costante"],["var","Variazione % annua"],["ricavi","Segue i ricavi"],["pers","Segue il personale"]];
+  const MINOR=[["altriCred","Altri crediti a breve",b.altriCred],["rateiA","Ratei e risconti attivi",b.rateiA],["fondi","Fondi per rischi e oneri",b.fondi],["previd","Debiti previdenziali",b.previd],["altriDeb","Altri debiti a breve",b.altriDeb],["rateiP","Ratei e risconti passivi",b.rateiP]];
+  document.getElementById("minor-list").innerHTML=MINOR.map(([k,n,v])=>{const m=S.minor[k];
+    return `<div class="row"><div class="l">${n}<small>${fmt(v)} € nel ${BY} · il saldo del ${BY} si chiude al passo 5, qui si genera quello nuovo</small></div><div class="r">
+      <select id="mr-${k}" data-minor="${k}" aria-label="Regola ${n}">${RULES.filter(([r])=>r!=="pers"||k==="previd").map(([r,l])=>`<option value="${r}" ${m.rule===r?'selected':''}>${l}</option>`).join("")}</select>
+      ${m.rule==="var"?`<input type="number" id="mp-${k}" data-minorp="${k}" value="${m.pct}" step="0.5" aria-label="Variazione % ${n}"><span class="unit">%</span>`:""}</div></div>`}).join("")+
+    `<div class="row"><div class="l">Crediti tributari · imposte anticipate<small>governati dalle imposte</small></div><div class="r"><span class="chip auto">passo 7</span></div></div>`;
+  // 6 TFR
+  document.getElementById("tfr-tab").innerHTML=yearHead("€")+"<tbody>"+
+    `<tr><td class="lbl">Accantonamento</td><td class="base">—</td>${Y.map((y,i)=>`<td class="ro"><span id="tfr-acc-${i}"></span></td>`).join("")}</tr>`+
+    inRow("Liquidazioni","tfr.pay","—",{step:5000,sub:"importi da pagare"})+
+    `<tr><td class="lbl"><b>Fondo a fine anno</b></td><td class="base">${fmt(b.tfr)}</td>${Y.map((y,i)=>`<td class="end" id="tfr-end-${i}"></td>`).join("")}</tr></tbody>`;
+  document.getElementById("tfr-susp").checked=S.tfr.susp;
+  // 6 capex + finanziamento
+  document.getElementById("capex-tab").innerHTML=yearHead("€ per anno")+"<tbody>"+
+    inRow("Investimenti materiali","capex.mat","—",{step:10000})+inRow("Investimenti immateriali","capex.imm","—",{step:10000})+"</tbody>";
+  document.getElementById("fidi-amt").value=S.fidi.amt; document.getElementById("fidi-rule").value=S.fidi.rule;
+  document.getElementById("nf-list").innerHTML=S.nf.map((f,k)=>`<div class="nf">
+    <div class="nf-hd"><input type="text" id="nf-${k}-name" data-nf="${k}" data-f="name" value="${f.name}" aria-label="Nome del finanziamento"><span class="sum" id="nf-${k}-sum"></span>${S.nf.length>1?`<button class="del" data-nfdel="${k}" id="nf-${k}-del" aria-label="Elimina ${f.name}">×</button>`:""}</div>
+    <div class="flds">
+      <div><label class="f" for="nf-${k}-amt">Importo €</label><input type="number" id="nf-${k}-amt" data-nf="${k}" data-f="amt" value="${f.amt}" step="10000"></div>
+      <div><label class="f" for="nf-${k}-year">Erogato nel</label><select id="nf-${k}-year" data-nf="${k}" data-f="year">${Y.map(y=>`<option ${y===f.year?'selected':''}>${y}</option>`).join("")}</select></div>
+      <div><label class="f" for="nf-${k}-dur">Durata anni</label><input type="number" id="nf-${k}-dur" data-nf="${k}" data-f="dur" value="${f.dur}"></div>
+      <div><label class="f" for="nf-${k}-pre">Preamm. anni</label><input type="number" id="nf-${k}-pre" data-nf="${k}" data-f="pre" value="${f.pre}"></div>
+      <div><label class="f" for="nf-${k}-rate">Tasso %</label><input type="number" id="nf-${k}-rate" data-nf="${k}" data-f="rate" value="${f.rate}" step="0.1"></div>
+    </div></div>`).join("");
+  document.getElementById("trib-short-note").textContent=`${fmt(b.tribBreve)} € · saldo pagato nel ${y1}`;
+  bindInputs();
+}
+
+function bindInputs(){
+  document.querySelectorAll("input[data-path]").forEach(inp=>inp.oninput=()=>{
+    const [a,k]=inp.dataset.path.split("."), i=+inp.dataset.i, raw=inp.value.trim();
+    const nullable=a==="wc"||k==="matF"||k==="servF";
+    S[a][k][i]=(nullable&&raw==="")?null:num(raw);
+    if(k==="matF"||k==="servF") inp.classList.remove("auto-val");
+    if(a==="g"&&k==="rev") renderCostTabOnly();
+    renderPreview();
+  });
+  document.querySelectorAll("input[data-share]").forEach(r=>r.oninput=()=>{S.share[r.dataset.share]=+r.value;renderInputs();renderPreview();});
+  document.querySelectorAll("input[data-sharen]").forEach(r=>r.onchange=()=>{S.share[r.dataset.sharen]=Math.min(100,Math.max(0,num(r.value)));renderInputs();renderPreview();});
+  document.querySelectorAll("input[data-loan]").forEach(inp=>inp.oninput=()=>{const l=S[inp.dataset.loan][+inp.dataset.k],f=inp.dataset.f;
+    if(f==="name") l.name=inp.value; else if(f==="rep") l.rep[+inp.dataset.i]=num(inp.value); else l[f]=num(inp.value); renderPreview();});
+  document.querySelectorAll("[data-nf]").forEach(el=>{const h=()=>{const f=S.nf[+el.dataset.nf],k=el.dataset.f;
+    f[k]=k==="name"?el.value:k==="year"?+el.value:num(el.value); if(k==="dur")f.dur=Math.max(1,f.dur); if(k==="pre")f.pre=Math.max(0,Math.min(f.dur-1,f.pre)); renderPreview();};
+    el.oninput=h; if(el.tagName==="SELECT") el.onchange=h;});
+  document.querySelectorAll("button[data-nfdel]").forEach(bt=>bt.onclick=()=>{S.nf.splice(+bt.dataset.nfdel,1);renderInputs();renderPreview();});
+  document.querySelectorAll("button[data-del]").forEach(bt=>bt.onclick=()=>{S[bt.dataset.del].splice(+bt.dataset.k,1);renderInputs();renderPreview();});
+  document.querySelectorAll("select[data-minor]").forEach(sel=>sel.onchange=()=>{S.minor[sel.dataset.minor].rule=sel.value;renderInputs();renderPreview();});
+  document.querySelectorAll("input[data-minorp]").forEach(inp=>inp.oninput=()=>{S.minor[inp.dataset.minorp].pct=num(inp.value);renderPreview();});
+  const rf=document.getElementById("reset-fixed"); if(rf) rf.onclick=()=>{S.g.matF=S.g.matF.map(()=>null);S.g.servF=S.g.servF.map(()=>null);renderInputs();renderPreview();};
+  document.querySelectorAll("button[data-dec]").forEach(bt=>bt.onclick=()=>openDecision(+bt.dataset.dec));
+}
+function renderCostTabOnly(){ /* le righe variabili mostrano la crescita dei ricavi: ridisegna senza perdere il fuoco */
+  const act=document.activeElement?.id; renderInputs(); if(act){const el=document.getElementById(act); if(el){el.focus(); const v=el.value; el.value=""; el.value=v;}}
+}
+function openDecision(n){
+  const d=document.getElementById("decisions"); d.open=true;
+  d.querySelectorAll("li").forEach(li=>li.classList.toggle("hl",+li.dataset.d===n));
+  d.scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
+}
+
+/* ---------- render: anteprime ---------- */
+function renderPreview(){
+  const R=compute(), b=B(), Y=years(), last=R[R.length-1], cols=Y.length+2;
+  const bCV=b.mat*(1-S.share.mat/100)+b.serv*(1-S.share.serv/100), bCF=b.mat*S.share.mat/100+b.serv*S.share.serv/100+b.pers+b.god+b.od, bMol=b.rev+b.other-bCV-bCF;
+
+  // 2
+  const vals=[b.rev,...R.map(r=>r.rev)], mx=Math.max(...vals)*1.03, mn=Math.min(...vals)*0.85, w=400/vals.length;
+  document.getElementById("rev-spark").innerHTML=vals.map((v,i)=>{const h=Math.max(2,(v-mn)/(mx-mn)*50);return `<rect x="${i*w+8}" y="${54-h}" width="${w-16}" height="${h}" rx="2" fill="${i===0?'var(--muted-2)':'var(--accent)'}"></rect>`}).join("");
+  document.getElementById("rev-pv").innerHTML=yearHead()+`<tbody>
+    <tr class="kpi"><td>Ricavi delle vendite</td>${td(b.rev,"base")}${R.map((r,i)=>`<td>${fmt(r.rev)}<span class="pc">${sgn(r.gRev)}</span></td>`).join("")}</tr>
+    <tr><td>Altri ricavi e proventi</td>${td(b.other,"base")}${R.map(r=>td(r.other)).join("")}</tr>
+    <tr class="tot"><td>Valore della produzione</td>${td(b.rev+b.other,"base")}${R.map(r=>td(r.rev+r.other)).join("")}</tr>
+    <tr class="sub"><td>crescita cumulata sul ${BY}</td><td class="base">—</td>${R.map(r=>`<td>${sgn((r.rev/b.rev-1)*100)}</td>`).join("")}</tr></tbody>`;
+
+  // 3 costi e margine
+  document.getElementById("cost-pv").innerHTML=yearHead()+`<tbody>
+    <tr class="sub"><td>Ricavi delle vendite</td>${td(b.rev,"base")}${R.map(r=>td(r.rev)).join("")}</tr>
+    <tr><td><span class="chip var">variabili</span> materie prime e servizi</td>${tdp(bCV,bCV/b.rev*100,"base")}${R.map(r=>tdp(r.cv,r.cv/r.rev*100,"var")).join("")}</tr>
+    <tr><td><span class="chip fixed">fissi</span> parti fisse, personale, godimento, oneri diversi</td>${tdp(bCF,bCF/b.rev*100,"base")}${R.map(r=>tdp(r.cf,r.cf/r.rev*100,"fixed")).join("")}</tr>
+    <tr class="sub"><td>di cui personale</td>${td(b.pers,"base")}${R.map(r=>td(r.pers)).join("")}</tr>
+    <tr class="kpi"><td>MOL</td>${tdp(bMol,bMol/b.rev*100,"base")}${R.map(r=>tdp(r.mol,r.mol/r.rev*100)).join("")}</tr></tbody>`;
+
+  // 3 pareggio
+  const bep=r=>{const mdc=(r.rev-r.cv)/r.rev; const cfOp=r.cf-r.other; return {mdc,cfOp,op:cfOp/mdc,full:(cfOp+r.amm+r.of)/mdc}};
+  const f1=bep(R[0]);
+  document.getElementById("bep-formula").innerHTML=`
+    <div class="cap">Come si calcola · ${R[0].y}</div>
+    <div class="ln"><span>Margine di contribuzione % = (ricavi − costi variabili) / ricavi</span><span class="mono">(${fmt(R[0].rev)} − ${fmt(R[0].cv)}) / ${fmt(R[0].rev)} = ${pct(f1.mdc*100)}</span></div>
+    <div class="ln"><span>Costi fissi operativi = costi fissi − altri ricavi</span><span class="mono">${fmt(R[0].cf)} − ${fmt(R[0].other)} = ${fmt(f1.cfOp)}</span></div>
+    <div class="ln res"><span>Fatturato di pareggio sul MOL = costi fissi / margine %</span><span class="mono">${fmt(f1.cfOp)} / ${pct(f1.mdc*100)} = ${fmt(f1.op)}</span></div>
+    <div class="ln"><span>Margine di sicurezza = (ricavi − pareggio) / ricavi</span><span class="mono">(${fmt(R[0].rev)} − ${fmt(f1.op)}) / ${fmt(R[0].rev)} = ${pct((R[0].rev-f1.op)/R[0].rev*100)}</span></div>`;
+  // mini grafico: barra = ricavi, tacca = pareggio, segmento = margine di sicurezza
+  const scale=Math.max(...R.map(r=>Math.max(r.rev,bep(r).op)))*1.04;
+  document.getElementById("bep-chart").innerHTML=R.map(r=>{const e=bep(r).op, m=r.rev-e, mp=m/r.rev*100, x=v=>Math.max(0,Math.min(100,v/scale*100));
+    const lo=Math.min(r.rev,e), hi=Math.max(r.rev,e);
+    return `<div class="row2" title="${r.y}: ricavi ${fmt(r.rev)} € · pareggio ${fmt(e)} € · margine di sicurezza ${fmt(m)} € (${pct(mp)})">
+      <span class="yr">${r.y}</span>
+      <div class="trk"><div class="rev" style="width:${x(r.rev)}%"></div><div class="gap ${m>=0?'ok':'ko'}" style="left:${x(lo)}%;width:${x(hi)-x(lo)}%"></div><div class="bep" style="left:calc(${x(e)}% - 1px)"></div></div>
+      <span class="val">${pct(mp)}<small>${m>=0?'':'sotto il pareggio'}${m>=0?fmt(m)+' €':''}</small></span></div>`}).join("")+
+    `<div class="key"><span><i style="background:var(--border-2)"></i>ricavi</span><span><i style="background:var(--ink);width:2px"></i>fatturato di pareggio</span><span><i style="background:var(--good)"></i>margine di sicurezza</span><span><i style="background:repeating-linear-gradient(135deg,var(--bad) 0 3px,transparent 3px 6px)"></i>ricavi sotto il pareggio</span></div>`;
+  document.getElementById("bep-pv").innerHTML=`<thead><tr><th></th>${Y.map(y=>`<th>${y}</th>`).join("")}</tr></thead><tbody>
+    <tr class="sub"><td>Ricavi del piano</td>${R.map(r=>td(r.rev)).join("")}</tr>
+    <tr class="sub"><td>Margine di contribuzione</td>${R.map(r=>`<td>${pct(bep(r).mdc*100)}</td>`).join("")}</tr>
+    <tr class="kpi"><td>Pareggio sul MOL</td>${R.map(r=>td(bep(r).op)).join("")}</tr>
+    <tr class="sub"><td>margine di sicurezza %</td>${R.map(r=>{const m=(r.rev-bep(r).op)/r.rev*100;return `<td class="${m<0?'neg':''}">${pct(m)}</td>`}).join("")}</tr>
+    <tr class="sub"><td>margine di sicurezza €</td>${R.map(r=>td(r.rev-bep(r).op)).join("")}</tr></tbody>`;
+
+  // 3 CE
+  document.getElementById("ce-pv").innerHTML=yearHead()+`<tbody>
+    <tr><td>Valore della produzione</td>${td(b.rev+b.other,"base")}${R.map(r=>td(r.rev+r.other)).join("")}</tr>
+    <tr class="sub"><td>Costi variabili</td>${td(-bCV,"base")}${R.map(r=>td(-r.cv)).join("")}</tr>
+    <tr class="sub"><td>Costi fissi</td>${td(-bCF,"base")}${R.map(r=>td(-r.cf)).join("")}</tr>
+    <tr class="kpi"><td>MOL</td>${tdp(bMol,bMol/b.rev*100,"base")}${R.map(r=>tdp(r.mol,r.mol/r.rev*100)).join("")}</tr>
+    <tr class="sub"><td>Ammortamenti <span class="chip auto">passo 6</span></td>${td(-b.amm,"base")}${R.map(r=>td(-r.amm)).join("")}</tr>
+    <tr class="kpi"><td>Risultato operativo</td>${td(bMol-b.amm,"base")}${R.map(r=>td(r.ro)).join("")}</tr>
+    <tr class="sub"><td>Oneri finanziari <span class="chip auto">passi 5-6</span></td>${td(-b.of,"base")}${R.map(r=>td(-r.of)).join("")}</tr>
+    <tr class="tot"><td>Risultato ante imposte</td>${td(BASE_EBT,"base")}${R.map(r=>td(r.ebt)).join("")}</tr></tbody>`;
+
+  // 4
+  const bccn=b.clienti+b.rim-b.forn;
+  document.getElementById("wc-pv").innerHTML=yearHead()+`<tbody>
+    <tr><td>Crediti verso clienti</td>${td(b.clienti,"base")}${R.map(r=>`<td>${fmt(r.clienti)}<span class="pc">${Math.round(r.dso)} gg</span></td>`).join("")}</tr>
+    <tr><td>Rimanenze</td>${td(b.rim,"base")}${R.map(r=>`<td>${fmt(r.rim)}<span class="pc">${Math.round(r.dio)} gg</span></td>`).join("")}</tr>
+    <tr><td>Debiti verso fornitori</td>${td(-b.forn,"base")}${R.map(r=>`<td class="${r.forn===0?'neg':''}">${fmt(-r.forn)}<span class="pc">${Math.round(r.dpo)} gg</span></td>`).join("")}</tr>
+    <tr class="tot"><td>Circolante commerciale</td>${td(bccn,"base")}${R.map(r=>td(r.ccn)).join("")}</tr>
+    <tr class="sub"><td>in % dei ricavi</td><td class="base">${pct(bccn/b.rev*100)}</td>${R.map(r=>`<td>${pct(r.ccn/r.rev*100)}</td>`).join("")}</tr>
+    <tr class="sub"><td>cassa assorbita nell'anno</td><td class="base">—</td>${R.map((r,i)=>td(-(r.ccn-(i?R[i-1].ccn:bccn)))).join("")}</tr></tbody>`;
+
+  // 5 oltre 12 mesi
+  const LONG=[["tribRate","Debiti tributari rateizzati",b.tribRate,"out",R.map(r=>r.tribRate)],["altriDebOltre","Altri debiti oltre 12 mesi",b.altriDebOltre,"out",R.map(r=>r.altriDebOltre)],["credOltre","Crediti oltre 12 mesi",b.credOltre,"in",R.map(r=>r.credOltre)]];
+  const lb=document.getElementById("long-body");
+  const act=document.activeElement?.id;
+  if(!lb.dataset.built||lb.dataset.h!=String(S.horizon)||lb.dataset.c!==caseKey){
+    lb.innerHTML=LONG.map(([k,n,v,dir])=>inRow(n,"sched."+k,fmt(v),{step:1000,sub:dir==="in"?`incassi<label class="switch" for="cred-fuori" style="font-size:11.5px;margin-top:3px;gap:5px"><input type="checkbox" id="cred-fuori" ${S.credOltreFuori?'checked':''} style="width:13px;height:13px">non incassati nel piano (es. infragruppo)</label>`:"pagamenti",end:`<span id="end-${k}"></span>`})).join("");
+    if(S.credOltreFuori) lb.querySelectorAll('input[data-path="sched.credOltre"]').forEach(x=>{x.disabled=true;x.value="";x.placeholder="—";});
+    document.getElementById("cred-fuori").onchange=e=>{S.credOltreFuori=e.target.checked;lb.dataset.built="";renderPreview();};
+    lb.dataset.built=1; lb.dataset.h=S.horizon; lb.dataset.c=caseKey; bindInputs();
+    if(act&&document.getElementById(act)) document.getElementById(act).focus();
+  }
+  LONG.forEach(([k,n,v,dir,ends])=>{const rest=ends[ends.length-1];
+    const over=S.sched[k].slice(0,S.horizon).reduce((a,x)=>a+x,0)>v+0.5;
+    document.getElementById("end-"+k).innerHTML=`${fmt(rest)}<small>${k==="credOltre"&&S.credOltreFuori?'<span class="chip">oltre il piano</span>':over?'<span class="chip bad">oltre il saldo</span>':rest<0.5?'<span class="chip good">chiuso</span>':`<span class="chip">${rest>=v-0.5?'nessun movimento nel piano':'resta aperto'}</span>`}</small>`;});
+  // finanziamenti
+  const chip=(ok,okT,koT)=>`<span class="chip ${ok?'good':'warn'}">${ok?okT:koT}</span>`;
+  const endCell=(kind,k,l)=>{const rest=R[R.length-1][kind==="loans"?"lres":"ores"][k];const tot=l.rep.slice(0,S.horizon).reduce((a,x)=>a+(x||0),0);
+    const el=document.getElementById(`${kind}-${k}-end`); if(!el) return;
+    el.innerHTML=`${fmt(rest)}<small>${tot>l.res+0.5?'<span class="chip bad">oltre il residuo</span>':rest<0.5?'<span class="chip good">chiuso</span>':`<span class="chip">${tot<0.5?'nessun rimborso nel piano':'resta aperto'}</span>`}</small>`;};
+  S.loans.forEach((l,k)=>endCell("loans",k,l)); S.others.forEach((l,k)=>endCell("others",k,l));
+  const lTot=S.loans.reduce((a,l)=>a+l.res,0), oTot=S.others.reduce((a,l)=>a+l.res,0), rep1=S.loans.reduce((a,l)=>a+Math.min(l.res,l.rep[0]||0),0);
+  const quota=b.bankBreve-S.fidi.amt;
+  document.getElementById("bank-q").textContent=`${fmt(b.bankTot)} € nel bilancio ${BY} · di cui ${fmt(b.bankBreve)} € a breve`;
+  document.getElementById("quota-mutui").innerHTML=quota<-0.5?`<span style="color:var(--bad)">${fmt(quota)} €</span>`:`${fmt(quota)} €`;
+  const d1=rep1-quota;
+  document.getElementById("loans-check").innerHTML=
+    (quota<-0.5?`<div><span>Fidi e anticipi (${fmt(S.fidi.amt)} €) superano i debiti a breve del bilancio (${fmt(b.bankBreve)} €)</span><span class="chip bad">da correggere</span></div>`:"")+
+    `<div><span>Fidi ${fmt(S.fidi.amt)} € + residui dei finanziamenti ${fmt(lTot)} € · debiti verso banche nel bilancio: ${fmt(b.bankTot)} €</span>${chip(Math.abs(S.fidi.amt+lTot-b.bankTot)<1,"quadra",`differenza ${fmt(b.bankTot-S.fidi.amt-lTot)} €`)}</div>
+     <div><span>Rimborsi ${BY+1} dei finanziamenti: ${fmt(rep1)} € · quota dei mutui entro 12 mesi: ${fmt(Math.max(0,quota))} €</span>${chip(Math.abs(d1)<1,"coerente",d1<0?`nel ${BY+1} ne scadono ${fmt(-d1)} € in più`:`${fmt(d1)} € oltre la quota a breve`)}</div>`;
+  document.getElementById("others-check").innerHTML=
+    `<div><span>Somma dei residui ${fmt(oTot)} € · debiti verso altri finanziatori nel bilancio ${BY}: ${fmt(b.socio)} €</span>${chip(Math.abs(oTot-b.socio)<1,"quadra",`differenza ${fmt(b.socio-oTot)} €`)}</div>`;
+  // flussi del pregresso
+  const flow=(label,arr,dir,cls="")=>`<tr class="${cls}"><td>${label}</td>${arr.map(v=>{const s=dir==="in"?v:-v;return `<td class="${Math.abs(s)<0.5?'muted':s<0?'neg':'pos'}">${Math.abs(s)<0.5?'—':(s>0?'+':'')+fmt(s)}</td>`}).join("")}</tr>`;
+  const first=v=>R.map((r,i)=>i===0?v:0);
+  const rows=[
+    ["Incasso crediti verso clienti",first(b.clienti),"in"],
+    ["Pagamento fornitori",first(b.forn),"out"],
+    ["Saldo debiti tributari",first(b.tribBreve),"out"],
+    ["Debiti previdenziali e altri a breve",first(b.previd+b.altriDeb),"out"],
+    ["Finanziamenti bancari esistenti",R.map(r=>r.loanRep),"out"],
+    ["Fidi e anticipi · variazione",R.map((r,i)=>(i?R[i-1].fidi:S.fidi.amt)-r.fidi),"out"],
+    ["Altri finanziatori",R.map(r=>r.othRep),"out"],
+    ["Tributari rateizzati",R.map(r=>r.tribRateRep),"out"],
+    ["Altri debiti oltre 12 mesi",R.map(r=>r.altriDebOltreRep),"out"],
+    ["Incasso crediti oltre 12 mesi",R.map(r=>r.credOltreInc),"in"],
+  ];
+  const net=R.map((r,i)=>rows.reduce((a,[l,arr,dir])=>a+(dir==="in"?arr[i]:-arr[i]),0));
+  const openDebt=R.map(r=>r.fidi+r.loanRes+r.othRes+r.tribRate+r.altriDebOltre);
+  document.getElementById("preg-pv").innerHTML=`<thead><tr><th></th>${Y.map(y=>`<th>${y}</th>`).join("")}</tr></thead><tbody>
+    <tr class="grp"><td colspan="${Y.length+1}">A breve</td></tr>${rows.slice(0,4).map(x=>flow(...x)).join("")}
+    <tr class="grp"><td colspan="${Y.length+1}">Finanziamenti e oltre 12 mesi</td></tr>${rows.slice(4).map(x=>flow(...x)).join("")}
+    <tr class="tot"><td>Cassa netta del pregresso</td>${net.map(v=>`<td class="${v<0?'neg':'pos'}">${(v>0?'+':'')+fmt(v)}</td>`).join("")}</tr>
+    <tr class="sub"><td>debito pregresso ancora aperto a fine anno</td>${openDebt.map(v=>td(v)).join("")}</tr></tbody>`;
+
+  // 6 debito e cassa
+  document.getElementById("debt-pv").innerHTML=yearHead()+`<tbody>
+    <tr><td>Fidi e anticipi su fatture <span class="chip">passo 5</span></td>${td(S.fidi.amt,"base")}${R.map(r=>td(r.fidi)).join("")}</tr>
+    ${S.sweep.on?`<tr class="sub"><td>ridotti con la cassa in eccesso</td><td class="base">—</td>${R.map(r=>td(-r.sweep)).join("")}</tr>`:""}
+    <tr><td>Finanziamenti bancari esistenti <span class="chip">passo 5</span></td>${td(S.loans.reduce((a,l)=>a+l.res,0),"base")}${R.map(r=>td(r.loanRes)).join("")}</tr>
+    ${S.nf.map((f,k)=>`<tr><td>${f.name||"Nuovo finanziamento"} <span class="chip auto">nuovo</span></td>${td(0,"base")}${R.map(r=>td(r.nfres[k])).join("")}</tr>`).join("")}
+    <tr><td>Scoperto generato dal piano</td>${td(0,"base")}${R.map(r=>`<td class="${r.ovd>0?'neg':''}">${fmt(r.ovd)}</td>`).join("")}</tr>
+    <tr><td>Altri finanziatori <span class="chip">passo 5</span></td>${td(S.others.reduce((a,l)=>a+l.res,0),"base")}${R.map(r=>td(r.othRes)).join("")}</tr>
+    <tr class="sub"><td>Fondo TFR · liquidazioni nell'anno</td><td class="base">—</td>${R.map(r=>td(-r.tfrPay)).join("")}</tr>
+    <tr class="sub"><td>Immobilizzazioni nette</td>${td(b.immob,"base")}${R.map(r=>td(r.immob)).join("")}</tr>
+    <tr class="kpi"><td>Cassa <span class="chip auto">a saldo</span></td>${td(b.cash,"base")}${R.map(r=>td(r.gap>0?-r.gap:r.cash)).join("")}</tr>
+    <tr class="tot"><td>Posizione finanziaria netta</td>${td(b.bankTot+b.socio-b.cash,"base")}${R.map(r=>td(r.gap>0?r.pfn+r.gap:r.pfn)).join("")}</tr>
+    <tr class="sub"><td>PFN / MOL</td><td class="base">${(672000/350000).toFixed(1).replace('.',',')}×</td>${R.map(r=>`<td>${((r.gap>0?r.pfn+r.gap:r.pfn)/r.mol).toFixed(1).replace('.',',')}×</td>`).join("")}</tr></tbody>`;
+  const gap=R.find(r=>r.gap>0), lim=R.find(r=>r.overLimit), ovdY=R.filter(r=>r.ovd>0);
+  document.getElementById("debt-warn").innerHTML=gap?`<div class="hint bad">${ICON_WARN}<div><b>Fabbisogno scoperto nel ${gap.y}: ${fmt(gap.gap)} €.</b> Il previsionale non si genera così. Copri il fabbisogno con un nuovo finanziamento, meno investimenti, uno scadenziamento più lungo del pregresso, o concedi lo scoperto.</div></div>`
+    :lim?`<div class="hint bad">${ICON_WARN}<div><b>Scoperto oltre il tetto nel ${lim.y}:</b> ${fmt(lim.ovd)} € contro ${fmt(S.ovd.limit)} €.</div></div>`
+    :ovdY.length?`<div class="hint warn">${ICON_WARN}<div><b>Scoperto dichiarato:</b> ${ovdY.map(r=>`${r.y} ${fmt(r.ovd)} €`).join(" · ")}. È quanto finanziamento chiedono queste ipotesi.</div></div>`
+    :`<div class="hint">${ICON_OK}<div>La cassa resta positiva in tutti gli anni: nessun fabbisogno da coprire.</div></div>`;
+
+  // 6 voci minori
+  const RL={costante:"costante",var:"variazione %",ricavi:"segue i ricavi",pers:"segue il personale"};
+  const mrow=(k,n)=>`<tr><td>${n}<span class="pc">${RL[S.minor[k].rule]}${S.minor[k].rule==="var"?" "+sgn(S.minor[k].pct):""}</span></td>${td(b[k],"base")}${R.map(r=>td(r.minor[k])).join("")}</tr>`;
+  const A=["altriCred","rateiA"], P=["previd","altriDeb","fondi","rateiP"];
+  const sumA=r=>A.reduce((a,k)=>a+r.minor[k],0)+r.credTrib, sumP=r=>P.reduce((a,k)=>a+r.minor[k],0);
+  const bA=A.reduce((a,k)=>a+b[k],0)+b.credTrib, bP=P.reduce((a,k)=>a+b[k],0);
+  document.getElementById("minor-pv").innerHTML=yearHead()+`<tbody>
+    <tr class="grp"><td colspan="${cols}">Crediti e attività</td></tr>
+    ${mrow("altriCred","Altri crediti a breve")}${mrow("rateiA","Ratei e risconti attivi")}
+    <tr><td>Crediti tributari<span class="pc">dalle imposte, passo 7</span></td>${td(b.credTrib,"base")}${R.map(r=>td(r.credTrib)).join("")}</tr>
+    <tr class="tot"><td>Totale attivo</td>${td(bA,"base")}${R.map(r=>td(sumA(r))).join("")}</tr>
+    <tr class="grp"><td colspan="${cols}">Debiti e fondi</td></tr>
+    ${mrow("previd","Debiti previdenziali")}${mrow("altriDeb","Altri debiti a breve")}${mrow("fondi","Fondi per rischi e oneri")}${mrow("rateiP","Ratei e risconti passivi")}
+    <tr class="tot"><td>Totale passivo</td>${td(bP,"base")}${R.map(r=>td(sumP(r))).join("")}</tr>
+    <tr class="kpi"><td>Effetto sulla cassa nell'anno<span class="pc">+ libera · − assorbe</span></td><td class="base">—</td>${R.map((r,i)=>{const pa=i?sumA(R[i-1]):bA, pp=i?sumP(R[i-1]):bP; const v=(sumP(r)-pp)-(sumA(r)-pa); return td(v);}).join("")}</tr></tbody>`;
+  // 6 nuovi finanziamenti
+  S.nf.forEach((f,k)=>{const el=document.getElementById(`nf-${k}-sum`); if(el) el.innerHTML=`<b>${fmt(f.amt)} €</b> · ${f.year} · rata ${fmt(f.amt/Math.max(1,f.dur-f.pre))} €/anno dal ${f.year+f.pre+1}`;});
+  document.getElementById("nf-q").textContent=S.nf.length?`${S.nf.length} ${S.nf.length===1?'linea':'linee'} · ${fmt(S.nf.reduce((a,f)=>a+f.amt,0))} € in totale`:"";
+  // 6 TFR valori
+  document.getElementById("tfr-q").textContent=`${fmt(b.tfr)} € al 31/12/${BY}`;
+  R.forEach((r,i)=>{const a=document.getElementById("tfr-acc-"+i), e=document.getElementById("tfr-end-"+i); if(!a||!e) return;
+    a.textContent=S.tfr.susp?"sospeso":"+"+fmt(r.tfrAcc);
+    e.innerHTML=`<b>${fmt(r.tfr)}</b>${r.tfrOver?'<small><span class="chip bad">oltre il fondo</span></small>':''}`;});
+  // 7
+  document.getElementById("rate-used").textContent=S.taxRate==null?"usata dal piano":"sostituita dalla forzata";
+  document.getElementById("tax-pv").innerHTML=yearHead()+`<tbody>
+    <tr><td>Risultato ante imposte</td>${td(BASE_EBT,"base")}${R.map(r=>td(r.ebt)).join("")}</tr>
+    <tr class="sub"><td>Imposte · ${pct(last.rate)}</td>${td(-BASE_TAX,"base")}${R.map(r=>td(-r.tax)).join("")}</tr>
+    <tr class="kpi"><td>Utile netto</td>${td(BASE_EBT-BASE_TAX,"base")}${R.map(r=>td(r.net)).join("")}</tr>
+    <tr class="grp"><td colspan="${cols}">Pagamento</td></tr>
+    <tr class="sub"><td>Acconti versati nell'anno</td><td class="base">—</td>${R.map(r=>td(r.acconto)).join("")}</tr>
+    <tr class="sub"><td>Saldo dell'anno prima</td><td class="base">—</td>${R.map((r,i)=>td(i===0?b.tribBreve:R[i-1].tribBreve)).join("")}</tr>
+    <tr><td>Debiti tributari a breve a fine anno</td>${td(b.tribBreve,"base")}${R.map(r=>td(r.tribBreve)).join("")}</tr>
+    <tr><td>Crediti tributari a fine anno</td>${td(b.credTrib,"base")}${R.map(r=>td(r.credTrib)).join("")}</tr>
+    <tr class="sub"><td>Rateizzati residui <span class="chip">passo 5</span></td>${td(b.tribRate,"base")}${R.map(r=>td(r.tribRate)).join("")}</tr></tbody>`;
+}
+
+/* ---------- navigazione ---------- */
+function go(n){
+  step=Math.max(1,Math.min(7,n));
+  document.querySelectorAll(".scr").forEach(s=>s.classList.toggle("on",+s.dataset.step===step));
+  renderStepper();
+  document.getElementById("act-status").innerHTML=step===7?`Passo 7 di 7 · dopo il calcolo si apre <b>CE Prev.</b>`:`Passo ${step} di 7 · ${STEPS[step-1].t}`;
+  document.getElementById("next").textContent=step===7?"Salva e calcola previsionale":"Avanti";
+  document.getElementById("prev").disabled=step===1;
+  window.scrollTo({top:0});
+}
+document.getElementById("next").onclick=()=>{ if(step===7){ document.getElementById("act-status").innerHTML="Prototipo: qui partirebbe <span class='mono'>PUT /assumptions</span> con <span class='mono'>auto_generate=true</span>, poi CE Prev."; return;} go(step+1); };
+document.getElementById("prev").onclick=()=>go(step-1);
+document.querySelectorAll("#horizon button").forEach(bt=>bt.onclick=()=>{S.horizon=+bt.dataset.h;document.querySelectorAll("#horizon button").forEach(x=>x.classList.toggle("on",x===bt));S.nf.forEach(f=>{if(!years().includes(f.year))f.year=BY+1;});renderInputs();renderPreview();renderStepper();});
+document.querySelectorAll("#case button").forEach(bt=>bt.onclick=()=>{caseKey=bt.dataset.case;document.querySelectorAll("#case button").forEach(x=>x.classList.toggle("on",x===bt));renderInputs();renderPreview();});
+const on=(id,ev,fn)=>document.getElementById(id).addEventListener(ev,fn);
+on("infl","input",e=>{S.infl=num(e.target.value);renderCostTabOnly();renderPreview();});
+on("amm-mat","input",e=>{S.ammMat=num(e.target.value);renderPreview();});
+on("amm-imm","input",e=>{S.ammImm=num(e.target.value);renderPreview();});
+on("nf-add","click",()=>{const used=new Set(S.nf.map(f=>f.year)); const y=years().find(y=>!used.has(y))??BY+1;
+  S.nf.push({name:"Nuovo finanziamento",amt:200000,year:y,dur:5,pre:0,rate:4.5});renderInputs();renderPreview();document.getElementById(`nf-${S.nf.length-1}-name`)?.select();});
+on("ovd-on","change",e=>{S.ovd.on=e.target.checked;renderPreview();});
+on("ovd-limit","input",e=>{S.ovd.limit=num(e.target.value);renderPreview();});
+on("tfr-susp","change",e=>{S.tfr.susp=e.target.checked;renderPreview();});
+on("sweep-on","change",e=>{S.sweep.on=e.target.checked;renderPreview();});
+on("sweep-min","input",e=>{S.sweep.min=num(e.target.value);renderPreview();});
+on("fidi-amt","input",e=>{S.fidi.amt=num(e.target.value);renderPreview();});
+on("fidi-rule","change",e=>{S.fidi.rule=e.target.value;renderPreview();});
+on("loans-add","click",()=>{S.loans.push({name:"Finanziamento "+String.fromCharCode(64+S.loans.length+1),res:0,rate:4,rep:[0,0,0,0,0]});renderInputs();renderPreview();});
+on("others-add","click",()=>{S.others.push({name:"Finanziatore "+(S.others.length+1),res:0,rate:0,rep:[0,0,0,0,0]});renderInputs();renderPreview();});
+on("loans-merge","click",()=>{const res=S.loans.reduce((a,l)=>a+l.res,0),w=S.loans.reduce((a,l)=>a+l.res*l.rate,0);
+  S.loans=[{name:"Debiti verso banche",res,rate:res?Math.round(w/res*10)/10:0,rep:[0,1,2,3,4].map(i=>S.loans.reduce((a,l)=>a+(l.rep[i]||0),0))}];renderInputs();renderPreview();});
+on("tax-rate","input",e=>{S.taxRate=e.target.value.trim()===""?null:num(e.target.value);renderPreview();});
+on("tax-adv","input",e=>{S.taxAdv=num(e.target.value);renderPreview();});
+
+on("legacy-on","change",e=>{legacy=e.target.checked;applyLegacy(legacy);renderLegacy();renderInputs();renderPreview();go(1);});
+renderInputs(); renderPreview(); go(1);
+</script>
+
+</body></html>

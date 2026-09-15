@@ -461,10 +461,13 @@ Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
   l'esenzione dallo sweep proprio dove manca, e lo sweep salda il residuo restante in un colpo solo —
   misurato: 35.802,46 di apertura, `existing_debt_repayment_years=3` dichiarato solo nel 2027
   (rimborso a piano 11.934,15), sweep che chiude i restanti 23.868,31 nel 2028, due anni prima della
-  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2). Dal wizard il caso non si produce:
-  il passo 6 «Pregresso e nuovo» scrive il campo su **tutti** gli anni di piano (`updateAll`,
-  `frontend/components/budget/wizard/steps/StepPregressoNuovo.tsx`); resta per chi chiama l'API senza ripeterlo
-  su ogni riga.
+  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2). Dal wizard nuovo il caso non si
+  produce più: dal giro di rilievi del 15/09 il passo 5 «Patrimoniale pregresso» non scrive più questo
+  campo — i finanziamenti pregressi si scadenziano per contratto, anno per anno
+  (`financing_loans[].repayments`, §4-bis e §4-ter sotto); un vecchio «rimborso in N anni» lo converte la
+  migrazione degli scenari salvati (`frontend/lib/budget-migrazione.ts`), che lo azzera dopo la
+  conversione. Il campo resta per chi chiama l'API direttamente senza ripeterlo su ogni riga, o per uno
+  scenario migrato che non ha ancora salvato.
 - I contratti della griglia, il prestito nuovo della legacy `financing_amount` e il pregresso con gli
   anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
   spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).
@@ -1011,9 +1014,10 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   `validate_assumptions_list` — o una riga scritta a mano nel DB.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
-  passo 5 del wizard («Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
+  passo 6 del wizard («Patrimoniale piano», dove vivono dal giro di rilievi del 15/09 — prima
+  stava al passo «Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
   stesso criterio delle altre caselle "uguali per tutto il piano" — si legge la scelta del primo
-  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:205-216`).
+  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:209-215`).
 - **Driver degenere** (denominatore dell'anno base ≤ 0): il motore non indicizza, ricade sul
   comportamento costante/percentuale e dichiara il motivo `"driver degenere"` — mai un fattore
   inventato da un `or 1` di comodo.

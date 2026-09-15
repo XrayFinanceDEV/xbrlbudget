@@ -25,12 +25,12 @@ vecchia scheda «Ipotesi» e non tocca il percorso Startup, che ha il proprio mo
 
 | # | Passo | Sottotitolo a schermo | Gruppo |
 |---|---|---|---|
-| 1 | Scenario | nome, anno base, orizzonte | Impostazione |
+| 1 | Scenario | nome, anno base, orizzonte, inflazione | Impostazione |
 | 2 | Fatturato | ricavi e altri ricavi | Conto economico |
-| 3 | Costi principali | quota fissa e variabile | Conto economico |
-| 4 | Altre voci CE | voci minori e automatiche | Conto economico |
-| 5 | Capitale circolante | giorni medi | Stato patrimoniale |
-| 6 | Pregresso e nuovo | debiti, finanziamenti, investimenti | Stato patrimoniale |
+| 3 | Costi | quota fissa, inflazione, ipotesi manuali | Conto economico |
+| 4 | Capitale circolante | giorni medi | Stato patrimoniale |
+| 5 | Patrimoniale pregresso | come si chiude ciò che c'è già | Stato patrimoniale |
+| 6 | Patrimoniale piano | ciò che il previsionale genera | Stato patrimoniale |
 | 7 | Imposte | aliquota e pagamento | Stato patrimoniale |
 
 Ogni passo (tranne il primo) ha a destra un'**anteprima**: è lo stesso motore del calcolo finale,
@@ -58,18 +58,24 @@ previsionale»**.
   superflua: la generazione fa l'upsert dei soli anni che hanno un'ipotesi, quindi passando da 5
   anni a 3 ne resterebbero due fantasma, con i numeri del salvataggio precedente, che analisi,
   rendiconto e report continuano a mostrare.
-- **Punto di partenza**: la casella **Inflazione attesa** (%) e una tabella con una riga per
-  ciascuna voce (**Ricavi**, **Altri ricavi**, **Materie prime**, **Servizi**, **Godimento
-  beni**, **Personale**, **Oneri diversi**), la colonna **Trend storico** e una colonna per ogni
-  anno di piano. Il pulsante **«Riparti dalla tendenza»** sovrascrive le ipotesi correnti su
-  tutto l'orizzonte per quelle voci; con un solo anno storico la schermata avvisa che il trend
-  non è calcolabile e che verranno usati i valori di inflazione.
+- **Punto di partenza**: la casella **Inflazione attesa** (%), che è un'ipotesi vera e propria —
+  si salva (`inflation_pct`) come tutte le altre, sulla riga di ogni anno di piano. Sotto, una
+  tabella di sola lettura con la **tendenza storica** (confronto fra gli ultimi due anni storici)
+  di ciascuna voce — Ricavi, Altri ricavi, Materie prime, Servizi, Godimento beni, Personale,
+  Oneri diversi — puro riferimento: nessun pulsante la riporta sulle ipotesi. Con un solo anno
+  storico la schermata avvisa che il trend non è calcolabile e che verranno usati i valori di
+  inflazione.
 
 **Che cosa ne fa il motore**
 
-Nulla, a questo passo: le percentuali della tabella sono ipotesi che verranno salvate con le
-altre. È il passo in cui si decide l'orizzonte, cioè quante righe di ipotesi il salvataggio
-porterà con sé.
+Nulla a questo passo: l'inflazione è un'ipotesi che si salva con le altre e verrà letta al passo 3,
+dove precompila la crescita della parte fissa di materie prime e servizi (correggibile lì, anno
+per anno). Non tocca i ricavi, che partono da 0 al passo 2. È anche il passo in cui si decide
+l'orizzonte, cioè quante righe di ipotesi il salvataggio porterà con sé.
+
+Non c'è più un seme dalla tendenza storica: il vecchio pulsante «Riparti dalla tendenza», che
+sovrascriveva le ipotesi correnti con il trend calcolato, è sparito. Il piano parte sempre da 0 al
+passo 2, e la tabella della tendenza resta un riferimento, mai un punto di partenza.
 
 **Che cosa mostra l'anteprima**
 
@@ -105,23 +111,30 @@ fermato a metà, le colonne in cima sono solo gli anni che ha davvero prodotto.
 
 ---
 
-## Passo 3 · Costi principali
+## Passo 3 · Costi
 
 **Che cosa inserisci**
 
-- Due slider, **Materie prime** e **Servizi**, con la casella **「% fissa»** accanto: «Quanto di
-  questi costi è fisso». Sotto ciascuno, la barra *Fissa · …* / *Variabile · …* sull'importo
-  dell'anno base. La guida a schermo: la quota fissa segue l'inflazione, la quota variabile segue
-  i ricavi; lo slider vale per tutti gli anni previsti, e per differenziarli serve la riga
-  «quota fissa» della tabella, che si compila anno per anno. Se gli anni hanno quote diverse,
-  la schermata avvisa che muovendo lo slider — o digitando nella casella — verranno allineati a
-  quello che imposti.
-- La tabella, in tre gruppi: **Quota fissa, anno per anno** (*Materie prime · quota fissa (%)*,
-  *Servizi · quota fissa (%)*), **Costi variabili** (*Materie prime · parte variabile*, *Servizi
-  · parte variabile*), **Costi fissi** (*Materie prime · parte fissa*, *Servizi · parte fissa*),
-  più **Personale** e **Godimento beni di terzi**.
-- **«Allinea le variabili ai ricavi»**: scrive sulle due parti variabili, anno per anno, la
-  crescita dei ricavi di quell'anno.
+- Due slider, **Materie prime** e **Servizi**, con la casella **«% fissa»** accanto: «Al variare
+  del fatturato, quale parte resta costante?». Sotto ciascuno, la barra *Fissa · …* / *Variabile ·
+  …* sull'importo dell'anno base. La legenda: la parte variabile segue il fatturato in proporzione
+  — nessuna ipotesi da inserire —, la parte fissa parte dall'inflazione, correggibile qui sotto.
+  Se gli anni hanno quote diverse, la schermata avvisa che muovendo lo slider — o digitando nella
+  casella — li allinei tutti a quello che imposti.
+- La tabella **«Come si muovono i costi»**, in due gruppi:
+  - **Parte fissa** (*Materie prime · fissa*, *Servizi · fissa*): precompilata con l'inflazione
+    del passo 1. Una casella **azzurra** segue l'inflazione: cambia se la cambi al passo 1. Una
+    casella che hai scritto tu resta tua; svuotarla la riporta automatica. Il pulsante **«Riallinea
+    all'inflazione»** rimette tutte le caselle in automatico.
+  - **Ipotesi manuali** (*Personale*, *Godimento beni di terzi*, *Oneri diversi di gestione*):
+    partono da 0, variazione % sull'anno precedente.
+  - La parte variabile non ha più una riga: segue i ricavi del passo 2 per costruzione, senza
+    alcuna ipotesi da scrivere. Sono sparite anche la vecchia riga «quota fissa anno per anno» (lo
+    slider resta l'unico modo di differenziarla per anno) e le due righe della parte variabile.
+- Card **«Calcolate in altri passi»** (automatico): **Ammortamenti** (quote esistenti più i nuovi
+  investimenti → passo 6), **Oneri finanziari** (mutui esistenti, nuovi finanziamenti, scoperto →
+  passi 5 e 6), **Imposte** (aliquota effettiva o forzata → passo 7); un valore forzato a mano in
+  CE Prev. vince comunque su queste regole, finché non lo azzeri dal dialogo Ricalcola.
 
 **Che cosa ne fa il motore**
 
@@ -130,49 +143,32 @@ default è il **40%** ed è modificabile su ogni riga di ipotesi. Il motore rest
 le voci i due addendi — la parte fissa e la parte variabile — che diventano **nulli** quando quella
 voce è stata forzata in CE Prev. con un importo assoluto: su un importo forzato la scomposizione
 non è definita, e l'anteprima marca la cella invece di mostrare un numero che il motore non ha
-usato. Le caselle di crescita di quegli stessi anni si spengono con la loro spiegazione: «Forzato
-in CE Prev.: in quest'anno la voce è un importo assoluto, quindi questa percentuale non ha
-effetto. Si azzera dal dialogo Ricalcola».
+usato.
+
+**Il pareggio lo dichiara il motore**, `details['pareggio']` per ogni anno: `costi_variabili` =
+parte variabile di materie e servizi; `costi_fissi` = parte fissa di materie e servizi + personale
++ godimento + oneri diversi; `costi_fissi_operativi` = costi fissi − altri ricavi;
+`margine_contribuzione_pct` = (ricavi − costi variabili) / ricavi × 100; `fatturato_pareggio` =
+costi fissi operativi / margine di contribuzione; `margine_sicurezza` = ricavi − fatturato di
+pareggio; `margine_sicurezza_pct`. Con ricavi o margine non positivi i tre ultimi valori sono
+`null`, mai zero; con un override di `ce05`/`ce06` la scomposizione fisso/variabile non è definita
+e tutto il blocco è `null`, sull'anno interessato.
 
 **Che cosa mostra l'anteprima**
 
-«Costi principali e margine»: ricavi, **costi principali** e i loro *di cui fissi* / *di cui
-variabili*, le quattro voci, il **MOL stimato**, tutte le percentuali calcolate sui ricavi
-dell'anno; le barre fissi/variabili anno per anno e il peso dei fissi fra il primo e l'ultimo
-anno. In fondo, una riga sola sui **debiti verso fornitori** calcolati «con i giorni di
-pagamento fermi all'anno base»: qui restano quelli dell'ultimo bilancio per non mescolare le
-ipotesi, i giorni medi si regolano al passo 5.
+- **«Costi e margine»**: ricavi, i **costi principali** con i loro *di cui fissi* / *di cui
+  variabili*, la riga *di cui personale*, il **MOL**, tutto in percentuale sui ricavi dell'anno.
+- **«Punto di pareggio sul MOL»**: un mini-grafico a barre con la tacca del fatturato di pareggio
+  e il margine di sicurezza (verde sopra il pareggio, rosso sotto), la formula dell'anno 1 con i
+  numeri veri sostituiti dentro il testo, e la tabella (ricavi del piano, margine di
+  contribuzione, pareggio sul MOL, margine di sicurezza in % e in €). Un anno non definito (materie
+  prime o servizi forzati in CE Prev.) non ha una tacca da disegnare, e lo dichiara.
+- **«Conto economico fino all'ante imposte»**: valore della produzione, costi variabili, costi
+  fissi, MOL, ammortamenti, risultato operativo, oneri finanziari, ante imposte, in cascata.
 
 ---
 
-## Passo 4 · Altre voci CE
-
-**Che cosa inserisci**
-
-- «Voci minori · variazione %»: una riga, **Altri costi (oneri diversi)**.
-- «Calcolate dal piano», con il contrassegno *automatico*: **Ammortamenti** (quote sull'anno base
-  più la percentuale dei nuovi investimenti impostata al passo 6), **Oneri finanziari** (sul
-  debito del passo 6), **Imposte** (con l'aliquota del passo 7).
-
-**Che cosa ne fa il motore**
-
-Queste tre non hanno una casella: le produce. Sugli oneri finanziari il motore scrive qui gli
-interessi del finanziamento nuovo e quelli dello scoperto, calcolati sul residuo **di apertura**
-dell'anno, mai su quello che l'anno stesso genera. Sulle imposte, l'aliquota che il piano usa
-davvero è quella **effettiva** dell'anno base — imposte su risultato ante imposte, scartata se
-oltre il 60% — e il valore forzato nel passo 7 entra in gioco solo quando quell'aliquota non è
-derivabile. La schermata lo dice con una riga: un valore forzato a mano nel CE previsionale
-vince sempre su queste regole e resta finché non lo azzeri dal dialogo Ricalcola.
-
-**Che cosa mostra l'anteprima**
-
-«Conto economico sintetico»: valore della produzione, costi principali, altre voci dei costi,
-**MOL**, ammortamenti e svalutazioni, **risultato operativo**, l'area finanziaria e straordinaria
-e il **risultato ante imposte**, in cascata, così che la somma torni esattamente sul risultato.
-
----
-
-## Passo 5 · Capitale circolante
+## Passo 4 · Capitale circolante
 
 **Che cosa inserisci**
 
@@ -180,18 +176,16 @@ e il **risultato ante imposte**, in cascata, così che la somma torni esattament
   (DIO)**, **Giorni pagamento fornitori (DPO)**. Il campo è annullabile e il segnaposto mostra
   *auto N*: vuoto significa «usa il valore derivato dall'anno base», mai «zero giorni». La nota
   sotto ricorda che i giorni dell'anno base sono calcolati sui soli crediti e debiti commerciali,
-  su 360 giorni, e che le voci non commerciali non seguono i ricavi.
-- «Voci minori dell'attivo e del passivo · andamento nel piano»: una riga per ciascuna delle
-  quindici voci (crediti oltre 12 mesi, crediti verso soci, immobilizzazioni finanziarie,
-  crediti tributari, imposte anticipate entro e oltre, attività finanziarie, ratei e risconti
-  attivi, fondi per rischi e oneri, debiti previdenziali entro e oltre, debiti fornitori oltre,
-  altri debiti entro e oltre, ratei e risconti passivi) con l'importo base e, dove il motore può
-  agganciarla, un selettore: **Costante (variazione %)** oppure **Cresce con i ricavi / gli
-  acquisti (materie e servizi) / il costo del personale**. Sotto ogni voce, la frase che dice
-  come si muoverà nel piano.
-- **«Variazione % per anno»** (accordion): le stesse voci come percentuali, anno per anno.
-- Due interruttori: **Debiti previdenziali scalano col costo del personale** e **TFR versato a
-  INPS/fondi (accantonamento sospeso)**.
+  su 360 giorni, e che crediti e debiti dell'anno base si chiudono nell'anno successivo (passo 5):
+  questi giorni generano quelli nuovi.
+- Quando i **debiti verso fornitori** dell'anno base (`sp16d`) sono zero e i costi d'acquisto
+  (`ce05 + ce06 + ce07`) sono positivi, un avviso in testa: «**Non risultano debiti verso
+  fornitori nell'anno di partenza. Controllare le riclassifiche dei debiti!** I costi di acquisto
+  del {anno} sono {importo}, i giorni di pagamento non si possono calcolare. Gli altri debiti a
+  breve valgono {importo}.» Lo stesso avviso, in forma breve, compare al passo 5 sulla riga dei
+  fornitori.
+- Le voci minori dello stato patrimoniale e i driver di volume (`sp_indexing`) non stanno più
+  qui: sono al passo 6 «Patrimoniale piano».
 
 **Che cosa ne fa il motore**
 
@@ -204,97 +198,190 @@ e il **risultato ante imposte**, in cascata, così che la somma torni esattament
   un anno di rotazione, o un denominatore non positivo): in quel caso **riporta il saldo
   dell'anno base invece di scalarlo** e lo dichiara, e questo passo te lo mostra con un avviso.
   Un giorno che hai **scritto tu** non passa da quella guardia: è una scelta, non una derivazione.
-- Una voce lasciata su «Costante (variazione %)» senza scrivere una percentuale resta **ferma**
-  per tutto il piano. L'aggancio a un driver di volume ha invece la forma *stock dell'anno base ×
-  fattore del driver*: indicizzare sulla base non accumula deriva, mentre un *prev × (1 + %)*
-  composto per cinque anni sì. Il motore legge l'aggancio riga per riga, la schermata lo scrive su
-  tutti gli anni di piano leggendo la scelta del primo anno.
-- Alcune voci hanno già un padrone e il selettore non le offre nemmeno: i crediti tributari e le
-  imposte anticipate seguono la posizione fiscale, e i crediti oltre l'esercizio seguono la propria
-  percentuale insieme al piano dei crediti commerciali. Nel motore le voci agganciabili sono undici
-  codici, e fra essi non ci sono i debiti bancari, che seguono il piano di rimborso. Se una voce ha
-  un piano di scadenziamento al passo 6, è il piano a governarla: lì l'interfaccia toglie il driver
-  invece di proporglielo e poi buttarlo via.
-- L'interruttore **Debiti previdenziali scalano col costo del personale** quando è acceso è già
-  lui l'indicizzazione di quelle due voci: prevale su qualunque driver scelto per esse.
-- Dove il driver è acceso, la **percentuale di crescita della stessa voce non ha alcun effetto**:
-  il driver vince, e il motore lo dichiara riga per riga.
 
 **Che cosa mostra l'anteprima**
 
 «Circolante proiettato»: crediti commerciali, rimanenze, debiti verso fornitori, il **capitale
 circolante commerciale** con la sua incidenza sui ricavi e l'**assorbimento di cassa
-nell'anno**. Nelle celle compaiono i giorni **effettivamente applicati**, che sono i tuoi se li
-hai scritti, altrimenti quelli derivati — e su un giorno scartato perché degenere, il giorno che
-quel saldo riporta davvero.
+nell'anno**. Nelle celle compaiono i giorni **effettivamente applicati** — i tuoi se li hai
+scritti, altrimenti quelli derivati — e sotto la tabella, un avviso per ogni giorno scartato
+perché degenere, col saldo che quel giorno riporta davvero.
 
 ---
 
-## Passo 6 · Pregresso e nuovo
+## Passo 5 · Patrimoniale pregresso
 
-«A sinistra il bilancio che c'è già e come si scadenzia. A destra quello che il piano genera. Non
-si mescolano.»
+«I saldi al 31/12/{anno base} e come si chiudono. Le voci a breve si liquidano nel primo anno del
+piano; quelle oltre 12 mesi le scadenzi tu, anno per anno.»
+
+**Regola di base**: crediti e debiti a breve si liquidano nel primo anno del piano — non c'è
+un'ipotesi da scrivere. Chi vuole giocare su crediti poco esigibili o debiti rateizzati li
+riclassifica oltre 12 mesi in Rettifiche (o nell'infrannuale) e li scadenzia qui.
 
 **Che cosa inserisci**
 
-- **Scadenziamento del pregresso** (saldi al 31/12 dell'anno base): **Debiti bancari esistenti** e
-  **Altri finanziatori**, ognuno con «rimborso in *n* anni». La nota avvisa che con un piano
-  dettagliato in «Finanziamenti» la durata generica viene ignorata: vale il piano.
-- **Pregresso del circolante**: la tabella dello scadenziamento dei quattro saldi che si
-  scadenziano qui — **Crediti commerciali**, **Debiti verso fornitori**, **Debiti
-  previdenziali**, **Altri debiti** — con l'interruttore **€ / %**, una colonna di apertura e una
-  per anno di piano più il residuo. I **Debiti tributari** sono elencati ma non si scadenziano
-  qui: seguono la posizione fiscale e si regolano al passo Imposte.
-- **Finanziamenti — esistenti e nuovi**, contratto per contratto: *Descrizione*, **Residuo
-  iniziale** (quota di debito già in essere, ammessa solo nel primo anno di piano), **Nuova
-  erogazione**, *Durata*, *Tasso %*, *Preamm. anni*, *Balloon %*, con il riepilogo **Debito
-  bancario {anno base} / Residui inseriti / Ancora da coprire**. Finché la differenza non è zero
-  al centesimo il previsionale viene rifiutato.
-- **Generato dal previsionale**, a destra: *Nuovo finanziamento* (**Importo €**, **Durata
-  (anni)**, **Tasso %**), *Nuovi investimenti* (**Investimenti materiali €**, **Investimenti
-  immateriali €**), **Scoperto di conto corrente** — casella *«Concedi lo scoperto: il fabbisogno
-  scoperto diventa debito bancario a breve»* e, con quella accesa, il **Tetto dello scoperto €**
-  (vuoto = senza tetto) — e l'accordion **«Mostra tutte»** con i due tassi di ammortamento dei
-  nuovi investimenti, le **cessioni** (valore contabile netto e corrispettivo), la **cassa minima
-  del cash sweep** e l'interruttore **Cash sweep**.
+- **A breve · si chiudono nel {anno 1}** (sola lettura, a sinistra): crediti verso clienti
+  (incasso), debiti verso fornitori (pagamento; con l'avviso se l'anno base non ne ha), debiti
+  tributari a breve («saldo pagato nel {anno 1}»), debiti previdenziali, altri debiti a breve; più
+  la riga «Debiti verso banche e altri finanziatori: non si chiudono per regola — fidi e anticipi
+  si rinnovano, i finanziamenti li scadenzi nella card sotto».
+- **Altre voci oltre 12 mesi · scadenziamento a mano** (tutta larghezza): tabella *voce · al
+  31/12 · un importo per anno · resta*. Righe: **crediti oltre 12 mesi** (commerciali, al netto di
+  tributari e imposte anticipate), **altri debiti oltre**, **fornitori oltre** (solo se > 0),
+  **previdenziali oltre** (solo se > 0), **debiti tributari rateizzati** — al 31/12 il rateizzato
+  del piano tributario (non l'intera massa: il saldo a breve non entra in questa riga, si versa
+  per intero nel primo anno di piano), un importo per anno, con la nota «Rate della
+  rateizzazione: escono di cassa nell'anno. Il saldo a breve si paga nel {anno 1}.». Sui crediti,
+  la casella **«non incassati nel piano (es. infragruppo)»**: spegne le caselle e scrive 0 su ogni
+  anno. La colonna «resta» ha tre stati neutri — «chiuso», «resta aperto», «nessun movimento nel
+  piano» — e «oltre il saldo» in rosso quando la somma supera la massa (il motore lo rifiuta).
+- **Debiti verso banche** (tutta larghezza): occhiello «{totale} € nel bilancio {anno} · di cui
+  {sp16a} € a breve».
+  1. *Dividi i debiti a breve*: **Fidi e anticipi su fatture** (importo, con la regola
+     **Costanti** / **Seguono i ricavi** e un tasso) e, calcolata, la **quota dei mutui entro 12
+     mesi** = debiti bancari a breve dell'anno base − fidi. Fidi oltre quel totale: «da
+     correggere», il motore rifiuta. Una nota: «Se la cassa va in negativo il piano riutilizza i
+     fidi; oltre questo importo compare un avviso.»
+  2. *Scadenzia i finanziamenti*: tabella *finanziamento · residuo al 31/12 · tasso · capitale
+     rimborsato per anno · resta · elimina*. «+ Aggiungi finanziamento», «Unisci in un solo
+     finanziamento» (somma i residui, tasso medio ponderato, rimborsi sommati per anno).
+  3. Controlli: «Fidi + residui dei finanziamenti = debiti verso banche nel bilancio» (quadra /
+     differenza — bloccante al salvataggio, oltre 0,01); «Rimborsi {anno 1} dei finanziamenti vs
+     quota dei mutui entro 12 mesi» (coerente / differenza — solo informativo).
+- **Altri finanziatori** (tutta larghezza): stessa tabella (finanziatore · residuo · tasso ·
+  capitale per anno · resta). «Anni vuoti = nessun rimborso nel piano: il debito resta in bilancio
+  oltre la fine del piano.» Controllo: la somma dei residui deve coincidere con i debiti verso
+  altri finanziatori dell'anno base (bloccante, oltre 0,01).
 
 **Che cosa ne fa il motore**
 
-- **Il piano del pregresso sta su una riga sola, il primo anno di piano**: è una fotografia
-  dell'anno base, non un'ipotesi per anno. Il saldo di apertura deve coincidere col bilancio base
-  entro un centesimo, e la somma di quanto scadenzi più l'inesigibile non può superare la massa:
-  superarla è un errore, non un troncamento, perché incassare più di quanto c'è inventa cassa.
-  L'inesigibile esiste solo sui crediti commerciali e va in svalutazione nel conto economico; se
-  un override del CE forza quella svalutazione, l'inesigibile scadenziato non può essere
-  scaricato e resta a bilancio — il motore lo dichiara e la schermata te lo mostra.
+- **Il breve si liquida nel primo anno di piano, per regola** — il saldo di apertura deve
+  coincidere col bilancio base entro un centesimo, e la somma di quanto scadenzi oltre 12 mesi
+  più l'inesigibile non può superare la massa: superarla è un errore, non un troncamento.
 - **Senza un piano, ogni saldo segue la formula di sempre** al centesimo. **Con un piano, il lato
-  oltre l'esercizio è interamente pregresso**: il motore rigenera dalla formula di oggi solo la
-  parte a breve, il resto del residuo resta lì per tutto il piano e la percentuale di crescita di
-  quella voce smette di applicarsi.
-- **Il finanziamento nuovo** segue il proprio calendario: quote capitale costanti dopo
-  l'eventuale preammortamento, maxirata insieme all'ultima rata, interessi in conto economico sul
-  residuo di apertura. La quota che il calendario rimborsa **nell'anno dopo** sta a breve nel
-  passivo, il resto oltre: è una riclassificazione, non un flusso — risultato e, finché non
-  forzi quei campi, cassa e debito bancario totale non cambiano — ma è ciò che rende giusti CCN,
-  current ratio e circolante di Altman.
-- **La cassa è il pareggio e pareggia solo verso l'alto**: un fabbisogno non si converte da sé in
-  debito a breve. È la casella dello scoperto a decidere (sotto).
-- **Il cash sweep** usa la cassa in eccesso per rimborsare il debito che non ha un piano: lo
-  scoperto, e il debito bancario pregresso senza anni di rimborso e senza contratti, prima a breve
-  poi a lungo. I finanziamenti con un piano seguono solo il loro piano, e la cassa in più resta
-  in cassa. Con lo scoperto acceso la cassa libera rimborsa prima lo
-  scoperto, **anche sotto la cassa minima** impostata: tenere liquidità pagando gli interessi sullo
-  scoperto non avrebbe senso, e il motore dichiara quanta cassa è finita sotto quel minimo.
+  oltre l'esercizio è interamente pregresso**: la percentuale di crescita di quella voce smette di
+  applicarsi finché il piano non la esaurisce. Il piano si scrive **sempre** per crediti
+  commerciali e debiti verso fornitori (il motore li rigenera dal driver del passo 4: il pregresso
+  si chiude, il nuovo nasce dai giorni medi); per previdenziali e altri debiti **solo se c'è massa
+  oltre 12 mesi**, perché con un piano il motore li estingue e non li rigenera — senza massa oltre
+  restano governati dalle regole del passo 6.
+- **Debiti tributari rateizzati**: il piano nasce solo se il debito oltre 12 mesi dell'anno base
+  (`sp17e`) è positivo — apertura = debito tributario totale, saldo = la parte a breve (si versa
+  per intero nel primo anno), rateizzato = la parte oltre. Solo il **rateizzato** entra nello
+  scadenziamento, mai il saldo. Senza debito oltre, nessun piano: il tributario si paga tutto come
+  saldo nel primo anno, come sempre.
+- **Fidi e anticipi** sono un regime a parte dai mutui: quando li dividi, il cash sweep del passo
+  6 (se acceso) rimborsa prima loro, e solo dopo il debito bancario pregresso senza piano. **Se la
+  cassa va in negativo, il piano riutilizza i fidi invece di fermarsi o aprire uno scoperto**: il
+  fabbisogno tira sul residuo dei fidi, fino a concorrenza di quanto serve; oltre l'importo di
+  partenza il motore calcola comunque il piano e **dichiara un avviso**, in euro, con l'anno e
+  l'eccedenza. Un override sullo stesso totale (`sp16a`/`sp16`) con un fabbisogno aperto si
+  rifiuta: il totale forzato non lascia posto al tiraggio.
+- I **finanziamenti pregressi** scadenziano il capitale rimborsato **anno per anno**: la quota che
+  cade l'anno dopo sta a breve nel passivo, il resto oltre. **Gli altri finanziatori** seguono lo
+  stesso schema, per proprio conto.
 
 **Che cosa mostra l'anteprima**
 
-«Debito, cassa e PFN»: debiti bancari, altri finanziatori, immobilizzazioni nette, **cassa** e
-**posizione finanziaria netta**, più il pregresso scadenziato saldo per saldo (residuo a breve,
-oltre l'esercizio, chiuso nell'anno, di cui inesigibile). Sotto, gli avvisi che il motore
-dichiara: lo scoperto acceso con il fabbisogno di picco, la cassa che il piano consuma anche dove
-resta positiva, la cassa che chiude sotto il minimo per rimborsare lo scoperto, e — quando non c'è
-niente di tutto questo — la conferma «La cassa resta positiva in tutti gli anni: nessun fabbisogno
-da coprire».
+**«Scadenziamento pregresso · flussi di cassa»**, per anno, in due gruppi:
+- **A breve**: incasso crediti verso clienti, pagamento fornitori, saldo debiti tributari,
+  debiti previdenziali e altri a breve.
+- **Finanziamenti e oltre 12 mesi**: finanziamenti bancari esistenti, fidi e anticipi ·
+  variazione, altri finanziatori, tributari rateizzati, altri debiti oltre 12 mesi, incasso
+  crediti oltre 12 mesi.
+
+In fondo, **«Cassa netta del pregresso»** (la somma di tutte le righe sopra) e **«debito pregresso
+ancora aperto a fine anno»** — quest'ultima non è un flusso, è ciò che di pregresso resta a
+bilancio: i nuovi finanziamenti hanno il loro spazio al passo 6.
+
+---
+
+## Passo 6 · Patrimoniale piano
+
+«Ciò che il previsionale genera: voci minori, investimenti, nuova finanza. La cassa chiude il
+foglio.»
+
+**Che cosa inserisci**
+
+- **Voci minori · regola nel piano**: una riga per ciascuna delle quindici voci minori
+  dell'attivo e del passivo (crediti oltre 12 mesi, crediti verso soci, immobilizzazioni
+  finanziarie, crediti tributari, imposte anticipate entro e oltre, attività finanziarie, ratei e
+  risconti attivi, fondi per rischi e oneri, debiti previdenziali entro e oltre, debiti fornitori
+  oltre, altri debiti entro e oltre, ratei e risconti passivi), con l'importo base e, dove il
+  motore può agganciarla, un selettore: **Costante (variazione %)** oppure **Cresce con i ricavi /
+  gli acquisti (materie e servizi) / il costo del personale**. Nota: «il saldo del {anno base} si
+  chiude al passo 5, qui si genera quello nuovo»; crediti tributari e imposte anticipate portano
+  invece «governati dalle imposte · passo 7». **«Variazione % per anno»** (accordion): le stesse
+  voci come percentuali, anno per anno. Interruttore **Debiti previdenziali scalano col costo del
+  personale**.
+- **Fondo TFR**: occhiello «{sp15} € al 31/12/{anno}». Interruttore «Accantonamento annuo ·
+  retribuzioni / 13,5 — versato a fondi esterni o INPS» (`tfr_accrual_suspended`). Tabella per
+  anno: **Accantonamento** (sola lettura), **Liquidazioni** (`tfr_payments`, un importo per anno:
+  pensionamenti, dimissioni, licenziamenti — escono di cassa nell'anno e riducono il fondo),
+  **Fondo a fine anno** con «oltre il fondo» in rosso quando la liquidazione supera fondo +
+  accantonamento (il motore rifiuta).
+- **Nuovi investimenti**: come oggi, materiali e immateriali, per anno.
+- **Nuovi finanziamenti**: una card per finanziamento — **Nome** (es. «Nuovo finanziamento BPM»),
+  **Importo €**, **Erogato nel** (l'anno di piano), **Durata**, **Preammortamento**, **Tasso %** —
+  con il riepilogo «500.000 € · 2027 · rata 100.000 €/anno dal 2029». «+ Aggiungi finanziamento»
+  propone il primo anno di piano libero. I tre campi legacy (importo unico, durata, tasso di un
+  solo finanziamento) non si mostrano più: la migrazione degli scenari salvati li converte (vedi
+  sotto).
+- **Cassa e scoperto**: se hai diviso i debiti bancari a breve al passo 5 (fidi e anticipi
+  separati), qui non ci sono più la casella «Concedi lo scoperto» né il tetto — al loro posto la
+  nota «Se la cassa va in negativo il piano riutilizza i fidi; oltre l'importo di partenza compare
+  un avviso.». Senza quella divisione, resta l'interruttore **Concedi lo scoperto: il fabbisogno
+  scoperto diventa debito bancario a breve** (spento di default) e, acceso, il **Tetto dello
+  scoperto €** (vuoto = senza tetto). Resta sempre **Usa la cassa in eccesso per ridurre fidi e
+  anticipi** più la **cassa minima** del cash sweep: i mutui e i nuovi finanziamenti seguono solo
+  i loro rimborsi, e lo scoperto si chiude da solo appena la cassa torna positiva. L'accordion
+  **«Mostra tutte»** porta i due tassi di ammortamento dei nuovi investimenti e le **cessioni**
+  (valore contabile netto e corrispettivo).
+
+**Che cosa ne fa il motore**
+
+- Una voce minore lasciata su «Costante (variazione %)» senza percentuale resta **ferma** per
+  tutto il piano. L'aggancio a un driver ha la forma *stock dell'anno base × fattore del driver*:
+  non accumula deriva come un *prev × (1 + %)* composto per cinque anni. Alcune voci hanno già un
+  padrone e il selettore non le offre: i crediti tributari e le imposte anticipate seguono la
+  posizione fiscale, i crediti oltre l'esercizio seguono il piano del passo 5. Dove un piano del
+  passo 5 già governa una voce (fornitori, previdenziali, altri debiti oltre), l'interfaccia toglie
+  il driver invece di proporlo e poi ignorarlo.
+- **TFR**: il fondo a fine anno è il precedente più l'accantonamento (zero se sospeso) meno le
+  liquidazioni; oltre fondo + accantonamento il motore rifiuta, con un messaggio che nomina questo
+  passo. L'uscita di cassa passa dal plug, il rendiconto la legge dal movimento del fondo.
+- **Nuovi finanziamenti**: ciascuno ha il proprio calendario — quote capitale costanti dopo
+  l'eventuale preammortamento, interessi sul residuo di apertura. La quota che cade l'anno dopo sta
+  a breve, il resto oltre.
+- **La cassa è il pareggio e pareggia solo verso l'alto.** Se hai diviso fidi e mutui al passo 5,
+  un fabbisogno tira sui fidi (descritto lì) e il piano non si ferma mai per questo. Senza quella
+  divisione vale la regola di sempre: spento, il motore si ferma sul primo anno che non si
+  finanzia; acceso, il fabbisogno diventa uno scoperto generato dal piano, con gli interessi in
+  conto economico sullo scoperto di apertura, al tasso del nuovo finanziamento.
+- **Il cash sweep** usa la cassa in eccesso per rimborsare il debito che non ha un piano — con
+  fidi separati, prima loro; altrimenti lo scoperto — e poi il debito bancario pregresso senza
+  anni di rimborso e senza contratti, a breve e poi a lungo. I finanziamenti con un piano seguono
+  solo il proprio calendario, e la cassa in più resta in cassa. La cassa libera rimborsa comunque
+  per prima il debito senza piano, anche sotto la cassa minima impostata; il motore dichiara
+  quanta cassa è finita sotto quel minimo.
+
+**Che cosa mostra l'anteprima**
+
+- **«Debito, cassa e PFN»**: fidi e anticipi (con «ridotti con la cassa in eccesso» sotto, se lo
+  sweep li ha rimborsati), finanziamenti bancari esistenti, **una riga per ciascun nuovo
+  finanziamento** col proprio nome, scoperto di conto corrente generato dal piano, altri
+  finanziatori, fondo TFR · liquidazioni nell'anno, immobilizzazioni nette, **cassa**, **posizione
+  finanziaria netta**, **PFN / MOL** (un multiplo, non una percentuale). Sotto, gli avvisi che il
+  motore dichiara: lo scoperto acceso con il fabbisogno di picco, il tetto superato, la cassa che
+  il piano consuma anche dove resta positiva, la cassa che chiude sotto il minimo, i fidi tirati
+  oltre l'importo di partenza — o, quando non c'è niente di tutto questo, la conferma «La cassa
+  resta positiva in tutti gli anni: nessun fabbisogno da coprire».
+- **«Altri crediti e debiti del piano · dalle voci minori»**: **crediti e attività** (altri
+  crediti a breve, ratei attivi, crediti tributari) con il totale; **debiti e fondi**
+  (previdenziali, altri debiti a breve, fondi rischi, ratei passivi) con il totale; **«Effetto
+  sulla cassa nell'anno · + libera · − assorbe»** = variazione del passivo meno variazione
+  dell'attivo sull'anno precedente. Ogni riga porta la propria regola («costante», «segue i
+  ricavi», …).
 
 ---
 
@@ -310,13 +397,12 @@ da coprire».
 - **Acconti versati nell'anno**, anno per anno.
 - **Mastrino imposte anticipate e differite**: righe di *Descrizione*, *Apertura*, *Incrementi*,
   *Riversamenti* e un'aliquota per riga.
-- **Pagamento dei debiti tributari**: il **Saldo dell'anno precedente** (si versa per intero nel
-  primo anno di piano), il **Rateizzato** in sola lettura — è ciò che il saldo non copre —, il
-  **piano delle rate** con il selettore **«N rate uguali»**, e l'**Acconto sull'imposta dell'anno
-  prima** in percentuale, la cui chiosa ricorda che un acconto per anno, **se maggiore di zero**,
-  la scavalca.
 - **«Posizione tributaria manuale»** (accordion): *Debiti tributari entro %* e, solo quando è
   attiva la via manuale, *Debiti tributari oltre %*.
+- In fondo, un rimando: **«Debiti tributari {anno} a breve · saldo pagato nel {anno 1} · passo
+  5»**. Il saldo dell'anno precedente, il rateizzato e il piano delle rate — con la scorciatoia
+  «N rate uguali» — non stanno più qui: si scadenziano al passo 5 **«Patrimoniale pregresso»**,
+  nella card «Altre voci oltre 12 mesi».
 
 **Che cosa ne fa il motore**
 
@@ -325,12 +411,12 @@ esce come saldo nell'anno N+1, al netto del credito tributario di apertura fino 
 l'acconto di N è di default il **100%** dell'imposta N−1 — o l'importo che hai scritto in
 «Acconti versati nell'anno», **a condizione che sia maggiore di zero**: zero in quella casella non
 vuol dire «zero acconti», vuol dire «non dichiarato», e il motore ricade sulla percentuale. Le
-rate del piano scadenziano il solo rateizzato, mai il saldo.
+rate del piano, scadenziate al passo 5, muovono il solo rateizzato, mai il saldo.
 
 La **via manuale** è un'alternativa, non un complemento: valorizzare una percentuale su
-*Debiti tributari entro* (o su *Crediti tributari* al passo 5) fa muovere i debiti tributari per
-crescita e **ignora il piano** di saldo, rate e acconti. Quando succede, il motore lo dichiara e la
-schermata lo dice.
+*Debiti tributari entro* (o su *Crediti tributari* al passo 4) fa muovere i debiti tributari per
+crescita e **ignora il piano** di saldo, rate e acconti scadenziato al passo 5. Quando succede, il
+motore lo dichiara e la schermata lo dice.
 
 Sull'aliquota, quello che scrivi qui è un **ripiego**: il motore usa l'effettiva dell'anno base
 quando è derivabile e legge il campo forzato solo quando non lo è. E se in CE Prev. hai forzato a
@@ -347,6 +433,44 @@ manuale»: il motore dichiara zero invece di inventare importi che non ha pagato
 
 È l'ultimo passo: qui il wizard si chiude, e il previsionale completo si legge e si ritocca nelle
 schede **CE Prev.** e **SP Prev.**
+
+---
+
+## Scenari salvati prima del 15/09/2026
+
+Uno scenario salvato prima di questo giro di rilievi non ha un'inflazione salvata
+(`inflation_pct`): è il segno che lo riconosce. Alla prima apertura, prima ancora che tu tocchi
+qualcosa, il wizard **migra in memoria** le sue ipotesi — non le salva finché non premi tu un
+tasto — e mostra sopra il primo passo una card a due colonne: **«Ricalcolato · All'apertura»** e
+**«Da integrare · Serve il tuo intervento»**, quest'ultima con un rimando al passo giusto per ogni
+voce. Nella barra dei passi, un badge «da integrare» segna i passi 1 e 5 finché non salvi.
+
+**Che cosa il wizard ricalcola da solo**
+
+- La **parte variabile** di materie prime e servizi segue da ora in poi i ricavi: le vecchie
+  percentuali, se diverse, vengono sostituite.
+- La **parte fissa** resta quella che avevi scritto, ma non è più «automatica»: è già un'ipotesi
+  tua, e non segue più l'inflazione del passo 1 finché non la svuoti.
+- Un vecchio **«rimborso in N anni»** sui debiti bancari diventa un finanziamento con nome
+  («Debiti verso banche · da "rimborso in N anni"»), con rate uguali per gli anni di piano; lo
+  stesso per gli altri finanziatori. Un contratto già scadenziato in dettaglio resta com'è.
+- Un vecchio **importo di nuovo finanziamento** (`financing_amount`) diventa un contratto
+  «Nuovo finanziamento {anno}», e i tre campi legacy si azzerano.
+- **Fidi e anticipi** partono da 0 con la regola «Costanti»: la divisione dei debiti a breve resta
+  da fare (sotto).
+- **L'inflazione** si imposta al 2%: il vecchio scenario non la salvava.
+
+**Che cosa resta da fare**
+
+- **Passo 1**: l'inflazione è impostata al 2% per ripiego — controllala.
+- **Passo 5**: dividi i debiti verso banche a breve fra fidi e anticipi e quota dei mutui; il
+  debito bancario pregresso è arrivato come un solo finanziamento da scadenziare (spacchettalo nei
+  contratti veri, o confermalo com'è). Se lo scenario non aveva un piano di pregresso, verifica se
+  tributari rateizzati, altri debiti e crediti hanno movimenti nel piano, o restano aperti.
+
+La mappa migrata è **sporca**: l'anteprima gira già su quella, ma **CE Prev. e SP Prev. mostrano
+ancora il previsionale calcolato prima** finché non premi «Salva e calcola previsionale» — la card
+lo dice esplicitamente. Dopo il primo salvataggio riuscito la card sparisce, e non ricompare.
 
 ---
 

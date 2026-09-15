@@ -393,9 +393,13 @@ export function useScenarioAssumptions({
     // L'inflazione attesa si scrive su ogni anno E riallinea le caselle
     // automatiche della parte fissa (spec 2026-09-15 §4.1, §4.3, Task 10) —
     // la regola sta in `withInflazione` (lib/budget-inflazione.ts), con la
-    // sua prova, non qui.
+    // sua prova, non qui. Il valore passa cosi' com'e' (anche `null`):
+    // `withInflazione` lo riporta a `INFLAZIONE_PREDEFINITA` invece di
+    // scrivere un `inflation_pct` nullo, che `isScenarioPrecedente`
+    // (lib/budget-migrazione.ts) leggerebbe come firma di uno scenario
+    // precedente al lotto (giro di correzione 1).
     if (field === "inflation_pct") {
-      setAssumptions((prev) => withInflazione(prev, forecastYears, value as number));
+      setAssumptions((prev) => withInflazione(prev, forecastYears, value as number | null));
       return;
     }
     setAssumptions((prev) => {

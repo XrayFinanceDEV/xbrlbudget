@@ -19,6 +19,14 @@ describe("budget-inflazione", () => {
     expect(out[2027]).toMatchObject({ inflation_pct: 3.5, fixed_materials_growth_pct: 3.5, fixed_services_growth_pct: 1 });
     expect(out[2028]).toMatchObject({ inflation_pct: 3.5, fixed_materials_growth_pct: 3.5, fixed_services_growth_pct: 3.5 });
   });
+  it("withInflazione(null) torna al valore predefinito, mai un inflation_pct nullo (giro di correzione 1)", () => {
+    const out = withInflazione(m({
+      2027: { fixed_materials_growth_pct: 5, fixed_materials_growth_auto: true, fixed_services_growth_pct: 1, fixed_services_growth_auto: false },
+      2028: { fixed_materials_growth_pct: 5, fixed_materials_growth_auto: true, fixed_services_growth_pct: 5, fixed_services_growth_auto: true },
+    }), anni, null);
+    expect(out[2027]).toMatchObject({ inflation_pct: 2, fixed_materials_growth_pct: 2, fixed_services_growth_pct: 1 });
+    expect(out[2028]).toMatchObject({ inflation_pct: 2, fixed_materials_growth_pct: 2, fixed_services_growth_pct: 2 });
+  });
   it("applicaInflazioneAlleAuto restituisce la mappa ricevuta quando nulla cambia", () => {
     const map = m({ 2027: { inflation_pct: 2, fixed_materials_growth_pct: 2, fixed_materials_growth_auto: true, fixed_services_growth_pct: 2, fixed_services_growth_auto: true } });
     expect(applicaInflazioneAlleAuto(map, [2027])).toBe(map);

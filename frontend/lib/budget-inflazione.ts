@@ -36,9 +36,21 @@ export function applicaInflazioneAlleAuto(map: AssumptionsMap, years: number[]):
   return out ?? map;
 }
 
-export function withInflazione(map: AssumptionsMap, years: number[], v: number): AssumptionsMap {
+/**
+ * Scrive l'inflazione su ogni anno. Un valore `null` o non finito — il campo
+ * svuotato dall'utente, o un input malformato — torna a
+ * `INFLAZIONE_PREDEFINITA`: nella mappa non finisce mai un `inflation_pct`
+ * nullo (giro di correzione 1). Un `inflation_pct` nullo sul primo anno è la
+ * FIRMA di uno scenario salvato prima del lotto (`isScenarioPrecedente`,
+ * `budget-migrazione.ts`): svuotare la casella lo farebbe scambiare per
+ * precedente al primo salvataggio/riapertura, e `migraScenario` sovrascrive
+ * `bank_lines_amount` a 0 sopra i fidi che l'utente aveva già inserito —
+ * perdita silenziosa di dati.
+ */
+export function withInflazione(map: AssumptionsMap, years: number[], v: number | null): AssumptionsMap {
+  const value = v === null || !Number.isFinite(v) ? INFLAZIONE_PREDEFINITA : v;
   const out: AssumptionsMap = { ...map };
-  for (const y of years) if (out[y]) out[y] = { ...out[y], inflation_pct: v };
+  for (const y of years) if (out[y]) out[y] = { ...out[y], inflation_pct: value };
   return applicaInflazioneAlleAuto(out, years);
 }
 

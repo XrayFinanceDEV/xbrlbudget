@@ -415,5 +415,10 @@ verifica di fine lotto (suite, vitest, tsc, banco, collaudo a schermo, `/riallin
 1. ~~I debiti tributari rateizzati: restano al passo 7 o passano al passo 5?~~ **Decisa il
    2026-09-15:** passano al passo 5, scadenziati dall'utente anno per anno (§3, Task 13b e 16).
 2. Il riutilizzo dei fidi quando la cassa manca (§3): resta fuori?
+   **Indicazione del proprietario (2026-09-15):** «L'utente deve scomporre debito a breve in fido e
+   quota mutuo a breve. La quota dei fidi può essere rimborsata con eccedenze di cassa. Quota mutui a
+   breve si rimborsa l'anno successivo». Conferma il regime esplicito (§5.2, Task 3 e 14): lo sweep
+   rimborsa solo i fidi, la quota dei mutui a breve esce con le rate del primo anno. Sul riutilizzo
+   dei fidi quando la cassa manca non dice nulla: resta fuori finché non lo chiede.
 3. Il tasso dello scoperto passa da `financing_interest_rate` a `bank_lines_rate` (§5.2): va bene
    che sia un tasso solo per fidi e scoperto?

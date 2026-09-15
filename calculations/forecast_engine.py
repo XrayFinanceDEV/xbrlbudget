@@ -1002,7 +1002,7 @@ class ForecastEngine:
     def _rifiuto_override_governati(cls, pregresso, assumptions) -> None:
         """Ogni `sp_overrides` che il piano, o il kernel fiscale, cancellerebbe.
 
-        Tre famiglie di rifiuto, con una ragione sola: la riga viene salvata, ma
+        Quattro famiglie di rifiuto, con una ragione sola: la riga viene salvata, ma
         l'anno dopo il motore la rigenera da un'altra fonte, la cassa assorbe la
         differenza senza alcun flusso, il foglio quadra e nessuno se ne accorge.
         E' il difetto I1 nella sua forma generale, non un caso del tributario.
@@ -1021,6 +1021,11 @@ class ForecastEngine:
            sotto, la quota sottratta ricompare l'anno dopo e viene pagata due
            volte (`P1`: +1.333,34 di scarto, con la rata dichiarata su una rata
            che l'override aveva gia' tolto).
+        4. (rilievo del coordinatore sul Task 4) `sp16b`/`sp17b` con la lista
+           `other_lenders` sulla prima riga, in QUALUNQUE anno del piano: la
+           riga non cresce da `prev`, la rigenera ogni anno il calendario della
+           lista (`_residuo_contratto`) — l'override varrebbe un anno solo, e
+           la differenza la assorbirebbe la cassa senza alcun flusso.
 
         I messaggi (rilievo M-2) nominano il saldo con l'articolo giusto
         (`_PREGRESSO_ARTICOLI`, rilievo m-A) e non con la chiave tecnica,
@@ -1033,10 +1038,31 @@ class ForecastEngine:
         if not assumptions:
             return
         horizon = len(assumptions)
+        # (4) La lista `other_lenders` governa `sp16b`/`sp17b` come un piano
+        # governa il lato oltre: si rifiuta l'override in qualunque anno, ma
+        # SOLO con la lista presente — senza, le due righe crescono da `prev`
+        # (o dalla rata fissa sul base) e l'override si porta avanti come
+        # sempre.
+        altri_in_lista = bool(getattr(assumptions[0], 'other_lenders', None))
+        ALTRI_CAMPI = ("sp16b_debiti_altri_finanz_breve",
+                       "sp17b_debiti_altri_finanz_lungo")
         for year_index, a in enumerate(assumptions):
             ov = getattr(a, 'sp_overrides', None)
             if not isinstance(ov, dict):
                 continue
+            if altri_in_lista:
+                for campo in ALTRI_CAMPI:
+                    if ov.get(campo) is not None:
+                        raise ValueError(
+                            f"L'override di {campo} nell'anno {a.forecast_year} non è "
+                            "ammesso: gli altri finanziatori hanno la lista dei rimborsi "
+                            "per anno, e il suo calendario rigenera quella riga ogni "
+                            "anno. Il valore forzato verrebbe salvato e cancellato in "
+                            "silenzio l'anno dopo, con la cassa ad assorbire la "
+                            "differenza senza alcun flusso. Modifica la lista al passo "
+                            "«Patrimoniale pregresso», oppure svuota la cella (value: "
+                            "null) e lascia che la riga segua il piano."
+                        )
             manuale = cls._via_manuale_fiscale(a)
             for saldo, campi in cls._LATO_OLTRE_GOVERNATO_DA_PIANO.items():
                 if not (pregresso or {}).get(saldo):
@@ -2095,9 +2121,19 @@ class ForecastEngine:
             )
         return result
 
-    def assemble_financing(self, assumptions, base_bs) -> Tuple[List[dict], bool]:
-        """(financing_loans, use_detailed_existing_schedule) — alza ValueError
-        su opening_residual fuori dal primo anno o residui != debito base.
+    def assemble_financing(self, assumptions, base_bs) -> Tuple[List[dict], bool, List[dict]]:
+        """(financing_loans, use_detailed_existing_schedule, contratti_altri) — alza
+        ValueError su opening_residual fuori dal primo anno o residui != debito base.
+
+        `contratti_altri` (spec 2026-09-15 §5.3) e' la lista `other_lenders` della
+        prima riga ridotta a contratti del kernel `new_financing_schedule` (solo
+        residuo iniziale e rimborsi per anno): `[]` quando la lista non c'e',
+        come oggi. Nel JSON persistito gli importi sono float
+        (`build_assumption_row` via `jsonable_encoder`): ogni voce si legge con
+        `Decimal(str(...))` e i controlli dello schema `OtherLenderInput` sono
+        ripetuti qui a mano — `calculations/` NON importa backend (il modulo lo
+        usano anche legacy e gli script), e chi chiama il motore fuori dalle
+        route tipizzate deve ricevere gli stessi rifiuti in italiano.
 
         NEW financing raised during the plan: each assumption's financing_amount
         is a loan taken THAT year, amortised over its durata with interest on the
@@ -2155,6 +2191,72 @@ class ForecastEngine:
                         "Fidi e anticipi (bank_lines_amount) valgono solo sulla riga del "
                         "primo anno di previsione"
                     )
+        # ── ALTRI FINANZIATORI PER ANNO (spec 2026-09-15 §5.3) ──
+        # La lista sta solo sulla prima riga, come il pregresso dei contratti:
+        # e' una fotografia di `sp16b + sp17b` dell'anno base, non un'ipotesi
+        # dell'anno N. Vive SOLO nel regime esplicito dei fidi (§5.2): fuori,
+        # il passo «Patrimoniale pregresso» non e' stato compilato e la lista
+        # direbbe una cosa che il bilancio di partenza non conferma.
+        # Niente import di backend: gli unici controlli che girebbero sono
+        # quelli di `OtherLenderInput`, e sono ripetuti qui in Decimal con
+        # messaggi in italiano (il motore deve sapersi difendere anche da chi
+        # lo chiama senza passare dalle route tipizzate: script, legacy).
+        altri_raw = list(getattr(first, 'other_lenders', None) or [])
+        for extra in assumptions[1:]:
+            if getattr(extra, 'other_lenders', None):
+                raise ValueError(
+                    "Gli altri finanziatori per anno (other_lenders) valgono solo sulla riga del "
+                    "primo anno di previsione"
+                )
+        if altri_raw and not regime_esplicito:
+            raise ValueError(
+                "Gli altri finanziatori per anno richiedono la divisione dei debiti bancari a breve "
+                "del passo «Patrimoniale pregresso» (fidi e anticipi)"
+            )
+        contratti_altri: List[dict] = []
+        if altri_raw:
+            getter = lambda f: getattr(base_bs, f, None) or Decimal('0')
+            base_altri = (getter('sp16b_debiti_altri_finanz_breve')
+                          + getter('sp17b_debiti_altri_finanz_lungo'))
+            totale = Decimal('0')
+            for indice, item in enumerate(altri_raw):
+                voce = item if isinstance(item, dict) else {}
+                nome = voce.get('name') or f"Finanziatore {indice + 1}"
+                residuo = Decimal(str(voce.get('opening_residual') or 0))
+                if residuo <= Decimal('0'):
+                    raise ValueError(
+                        f"Il residuo iniziale dell'altro finanziatore {nome} deve essere "
+                        f"maggiore di zero ({eur_it(residuo)})"
+                    )
+                rimborsi = [Decimal(str(r or 0)) for r in (voce.get('repayments') or [])]
+                if any(r < Decimal('0') for r in rimborsi):
+                    raise ValueError(
+                        f"Un rimborso per anno dell'altro finanziatore {nome} è negativo"
+                    )
+                if sum(rimborsi, Decimal('0')) - residuo > Decimal('0.01'):
+                    raise ValueError(
+                        f"La somma dei rimborsi per anno dell'altro finanziatore {nome} supera "
+                        f"il suo residuo iniziale ({eur_it(sum(rimborsi, Decimal('0')))} contro "
+                        f"{eur_it(residuo)})"
+                    )
+                totale += residuo
+                # Forma da contratto per il kernel: mai erogato (`amount` a
+                # zero), mai a durata (`duration` a zero: la lista `repayments`
+                # governa da sola), anno di partenza = primo anno di piano.
+                contratti_altri.append({
+                    'indice': indice, 'nome': nome,
+                    'year': first_forecast_year, 'amount': Decimal('0'),
+                    'opening_residual': residuo,
+                    'rate': Decimal(str(voce.get('interest_rate') or 0)) / Decimal('100'),
+                    'duration': Decimal('0'), 'grace_years': Decimal('0'),
+                    'balloon_pct': Decimal('0'),
+                    'repayments': rimborsi,
+                })
+            if abs(totale - base_altri) > Decimal('0.01'):
+                raise ValueError(
+                    f"La somma dei residui degli altri finanziatori ({eur_it(totale)}) deve coincidere "
+                    f"con i debiti verso altri finanziatori dell'anno base ({eur_it(base_altri)})"
+                )
         use_detailed_existing_schedule = detailed_opening_total > 0 or regime_esplicito
         if use_detailed_existing_schedule:
             getter = lambda field_name: getattr(base_bs, field_name, None) or Decimal('0')
@@ -2172,7 +2274,7 @@ class ForecastEngine:
                     f"({eur_it(detailed_opening_total)}) deve coincidere con il debito "
                     f"bancario dell'anno base ({eur_it(base_bank_total)})"
                 )
-        return financing_loans, use_detailed_existing_schedule
+        return financing_loans, use_detailed_existing_schedule, contratti_altri
 
     def compute_forecast(
         self,
@@ -2198,7 +2300,9 @@ class ForecastEngine:
             raise ValueError(f"Nessuna ipotesi trovata per lo scenario {source.scenario.id}")
 
         try:
-            financing_loans, use_detailed = self.assemble_financing(assumptions, source.base_bs)
+            financing_loans, use_detailed, contratti_altri = self.assemble_financing(
+                assumptions, source.base_bs
+            )
             # Lo scadenziamento del pregresso vive SOLO sulla riga del primo anno
             # di piano, come `financing_loans[].opening_residual`: e' una
             # fotografia dell'anno base, non un'ipotesi dell'anno N. Trovarlo
@@ -2278,16 +2382,27 @@ class ForecastEngine:
                                   ('sp17a_debiti_banche_lungo', 'sp17_debiti_lungo')),
             )
             debito = _DebitoBancarioAnno()
-            if fidi_prima_riga is not None:
-                if year_index == 0:
-                    fidi_apertura = Decimal(str(fidi_prima_riga))
-                else:
-                    fidi_riga = ((prev_details or {}).get('debito_bancario') or {}).get('fidi')
-                    fidi_apertura = (Decimal(str(fidi_riga['residuo']))
-                                     if fidi_riga else Decimal(str(fidi_prima_riga)))
-            else:
-                fidi_apertura = None
             try:
+                # ── FIDI: L'APERTURA VIAGGIA DAI DETAILS DELL'ANNO PRIMA ──
+                # Nessun ripiego su `bank_lines_amount` per gli anni > 0: se il
+                # blocco `fidi` manca nei `details` dell'anno precedente il
+                # ciclo e' gia' rotto a monte, e ricadere sulla prima riga
+                # sarebbe inventarsi un'apertura (diagnose, never fabricate).
+                # Si rifiuta l'anno, nominandolo.
+                if fidi_prima_riga is not None:
+                    if year_index == 0:
+                        fidi_apertura = Decimal(str(fidi_prima_riga))
+                    else:
+                        fidi_riga = ((prev_details or {}).get('debito_bancario') or {}).get('fidi')
+                        if not fidi_riga:
+                            raise ValueError(
+                                f"Fidi e anticipi: l'anno {assumptions[year_index - 1].forecast_year} "
+                                f"non dichiara il residuo dei fidi nei propri dettagli; impossibile "
+                                f"aprire l'anno {assumption.forecast_year}"
+                            )
+                        fidi_apertura = Decimal(str(fidi_riga['residuo']))
+                else:
+                    fidi_apertura = None
                 forecast_inc = self._calculate_income_statement(
                     base_inc=source.base_inc,
                     assumption=assumption,
@@ -2300,6 +2415,7 @@ class ForecastEngine:
                     prev_details=prev_details,
                     fidi_apertura=fidi_apertura,
                     fidi_tasso=fidi_tasso,
+                    altri_finanziatori=contratti_altri,
                 )
                 forecast_inc = self._normalize_income_statement_cents(
                     forecast_inc,
@@ -2335,6 +2451,7 @@ class ForecastEngine:
                     debito_bancario=debito,
                     fidi_apertura=fidi_apertura,
                     fidi_regola=fidi_regola,
+                    altri_finanziatori=contratti_altri,
                     prev_revenue=(getattr(prev_inc, 'ce01_ricavi_vendite', None)
                                   if fidi_apertura is not None else None),
                 )
@@ -2657,6 +2774,7 @@ class ForecastEngine:
         prev_details=None,
         fidi_apertura=None,
         fidi_tasso=Decimal('0'),
+        altri_finanziatori=None,
     ) -> Dict:
         """
         Calculate forecasted income statement based on assumptions
@@ -2675,6 +2793,12 @@ class ForecastEngine:
         `fidi_apertura`/`fidi_tasso` (regime esplicito, spec 2026-09-15 §5.2):
         il saldo dei fidi in apertura d'anno e il loro tasso %. `None` = regime
         di sempre, nessun onere di linea.
+
+        `altri_finanziatori` (spec 2026-09-15 §5.3): i contratti della lista
+        `other_lenders`; i loro interessi (tasso × residuo di apertura, kernel)
+        si sommano a ce15 solo nel ramo senza override, e si dichiarano sempre
+        in `details['oneri_altri_finanziatori']`. `None`/`[]` = niente lista,
+        nessun centesimo in piu' sul prospetto.
         """
         # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
         # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
@@ -2910,6 +3034,13 @@ class ForecastEngine:
         # erogazione. Interest is 0 automatically once the loan is fully repaid or
         # when the rate is 0.
         _, _, financing_interest = new_financing_schedule(financing_loans, assumption.forecast_year)
+        # ── INTERESSI DEGLI ALTRI FINANZIATORI (spec §5.3) ── Tasso × residuo di
+        # APERTURA di ciascun contratto, dal kernel: la lista vive solo nel
+        # regime esplicito, e senza lista la somma e' zero (nessun centesimo in
+        # piu' sul prospetto, parita' con oggi).
+        interessi_altri = sum(
+            (_q2(new_financing_schedule([c], assumption.forecast_year)[2])
+             for c in (altri_finanziatori or [])), Decimal('0'))
         has_detailed_opening = (any(_ha_residuo_pregresso(loan) for loan in (financing_loans or []))
                                 or fidi_apertura is not None)
         # A detailed opening schedule replaces the historical aggregate interest
@@ -2944,18 +3075,19 @@ class ForecastEngine:
             )
         if assumption.ce15_override is None:
             ce15 = financing_interest if has_detailed_opening else ce15 + financing_interest
-            ce15 = ce15 + oneri_scoperto + oneri_fidi
+            ce15 = ce15 + oneri_scoperto + oneri_fidi + interessi_altri
         else:
             # Un override della riga vince su tutto, oneri dello scoperto e dei
             # fidi compresi: si dichiara quello che e' stato DAVVERO addebitato,
             # cioe' zero, perche' a valle il dichiarato deve coincidere col
             # persistito.
-            oneri_scoperto = oneri_fidi = Decimal('0')
+            oneri_scoperto = oneri_fidi = interessi_altri = Decimal('0')
         if details is not None:
             details['oneri_scoperto'] = oneri_scoperto
             # Dichiarato SEMPRE, anche a zero: a valle una chiave assente vale
             # zero, quindi tacere equivale a dichiararsi puliti.
             details['oneri_fidi'] = oneri_fidi
+            details['oneri_altri_finanziatori'] = interessi_altri
 
         # Taxes - use override if set, otherwise use tax rate
         ce_for_tax = {
@@ -3034,6 +3166,7 @@ class ForecastEngine:
         fidi_apertura=None,
         fidi_regola: Optional[str] = None,
         prev_revenue=None,
+        altri_finanziatori=None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -3071,6 +3204,13 @@ class ForecastEngine:
         2026-09-15 §5.2): il saldo dei fidi in apertura d'anno, la regola
         (`costante` | `ricavi`) e i ricavi dell'anno precedente, necessari per
         applicarla. `fidi_apertura = None` = regime di sempre, nessun cambio.
+
+        `altri_finanziatori` (spec 2026-09-15 §5.3): i contratti della lista
+        `other_lenders` assemblati da `assemble_financing`. Con la lista,
+        `altri_finanz_repayment_years` e' IGNORATO e `sp16b`/`sp17b` seguono il
+        scadenziamento: residuo di fine anno sul totale, quota a breve = rata
+        dell'anno dopo (mai sopra il residuo). Senza, il blocco esce coi numeri
+        di sempre e la sola dichiarazione in piu'.
         """
         D = Decimal
         ZERO = D('0')
@@ -3874,13 +4014,55 @@ class ForecastEngine:
             long_repayment = annual_repayment - short_repayment
             sp17a_pregresso = max(ZERO, sp17a_pregresso - long_repayment)
 
-        # Altri finanziatori (sp17b) — e.g. an intra-group loan — repaid on its OWN fixed
-        # schedule, independent of the bank debt (shared kernel: fixed instalment on the
-        # base-year amount, amortises fully to zero after `altri_finanz_repayment_years`).
-        altri_repay_years = getattr(assumption, 'altri_finanz_repayment_years', None)
-        if altri_repay_years is not None and D(str(altri_repay_years)) > 0:
-            annual_altri = altri_finanz_repayment_instalment(_base, altri_repay_years)
-            sp17b = max(ZERO, sp17b - annual_altri)
+        # Altri finanziatori (sp16b/sp17b) — e.g. an intra-group loan. Con la lista
+        # `other_lenders` (spec 2026-09-15 §5.3) seguono IL LORO scadenziamento:
+        # `altri_finanz_repayment_years` e' ignorato, il residuo di fine anno
+        # divide il totale e la quota a breve e' la rata dell'anno dopo. Senza
+        # lista, la rata fissa sul base di sempre e la stessa di prima, e la
+        # dichiarazione (`details['altri_finanziatori']`, SEMPRE) dice solo come
+        # l'anno e' stato governato: `contratti` | `anni` | `legacy`.
+        altri_det = {
+            'apertura': _q2(_prev('sp16b_debiti_altri_finanz_breve')
+                            + _prev('sp17b_debiti_altri_finanz_lungo')),
+            'rimborso': _q2(ZERO), 'interessi': _q2(ZERO), 'breve': _q2(ZERO),
+            'lungo': _q2(ZERO), 'mode': 'legacy', 'contratti': [],
+        }
+        if altri_finanziatori:
+            anno = assumption.forecast_year
+            righe, tot_res, tot_breve, tot_rimb, tot_int = [], ZERO, ZERO, ZERO, ZERO
+            for c in altri_finanziatori:
+                _, rimborso, interessi = new_financing_schedule([c], anno)
+                residuo = _residuo_contratto(c, anno)
+                _, rata_dopo, _ = new_financing_schedule([c], anno + 1)
+                breve = min(residuo, rata_dopo)
+                righe.append({
+                    'indice': c['indice'], 'nome': c['nome'],
+                    'residuo_iniziale': _q2(c['opening_residual']),
+                    'rimborso': _q2(rimborso), 'interessi': _q2(interessi),
+                    'residuo': _q2(residuo), 'breve': _q2(breve),
+                    'lungo': _q2(residuo - breve),
+                })
+                tot_res += _q2(residuo)
+                tot_breve += _q2(breve)
+                tot_rimb += _q2(rimborso)
+                tot_int += _q2(interessi)
+            sp16b, sp17b = tot_breve, tot_res - tot_breve
+            altri_det.update({'rimborso': tot_rimb, 'interessi': tot_int,
+                              'breve': sp16b, 'lungo': sp17b,
+                              'mode': 'contratti', 'contratti': righe})
+        else:
+            # Altri finanziatori (sp17b) — e.g. an intra-group loan — repaid on its OWN fixed
+            # schedule, independent of the bank debt (shared kernel: fixed instalment on the
+            # base-year amount, amortises fully to zero after `altri_finanz_repayment_years`).
+            altri_repay_years = getattr(assumption, 'altri_finanz_repayment_years', None)
+            if altri_repay_years is not None and D(str(altri_repay_years)) > 0:
+                annual_altri = altri_finanz_repayment_instalment(_base, altri_repay_years)
+                rimborsato = min(sp17b, annual_altri)
+                sp17b = max(ZERO, sp17b - annual_altri)
+                altri_det.update({'rimborso': _q2(rimborsato), 'mode': 'anni'})
+            altri_det.update({'breve': _q2(sp16b), 'lungo': _q2(sp17b)})
+        if details is not None:
+            details['altri_finanziatori'] = altri_det
 
         # Il pregresso descritto per CONTRATTO (`opening_residual`): la sua rata
         # riduce il debito bancario dell'anno base, prima dal breve e poi dal lungo —

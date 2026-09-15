@@ -71,10 +71,10 @@ Criteri di successo:
 
 ## 3. Non obiettivi
 
-- Il passo 7 «Imposte» e il kernel a saldo + acconto: **fermi**. Anche i debiti tributari
-  rateizzati restano scadenziati al passo 7, dove sono oggi; il passo 5 li elenca in sola lettura
-  con il rimando. Il prototipo li mostrava al passo 5: decisione **presa qui** per non spostarli due
-  volte, prima e dopo il commercialista (assunzione da confermare col proprietario).
+- Il kernel a saldo + acconto: **fermo**. I debiti tributari rateizzati invece **passano al passo 5**,
+  come nel prototipo, e l'utente li scadenzia **a mano, anno per anno** (decisione del proprietario,
+  2026-09-15, domanda §9.1): la tabella delle rate e il saldo lasciano il passo 7, che tiene aliquota,
+  differenze temporanee, via manuale e acconto. Sparisce la scorciatoia «N rate uguali».
 - Il riutilizzo dei fidi quando la cassa **manca** (tirare di nuovo sulla linea invece di aprire lo
   scoperto): non modellato, non chiesto. Il fabbisogno resta governato dallo scoperto di c/c.
 - La riclassifica dell'infrannuale che azzera i fornitori (PROVA AMBIENTA): fuori lotto. Qui solo
@@ -176,7 +176,8 @@ nella nota di destino della riga, non un obiettivo di questo lotto.
 **Altre voci oltre 12 mesi.** Tabella: voce · al 31/12 · un importo per anno · «resta». Righe:
 crediti oltre 12 mesi (commerciali: `sp07` meno tributari e imposte anticipate), altri debiti oltre
 (`sp17g`), fornitori oltre (`sp17d`, solo se > 0), previdenziali oltre (`sp17f`, solo se > 0), e
-la riga **in sola lettura** «Debiti tributari rateizzati · si scadenziano al passo 7». Sui crediti
+la riga «Debiti tributari rateizzati» (al 31/12 = il rateizzato del piano tributario; un importo per anno
+in `pregresso.debiti_tributari.amounts`; decisione del 2026-09-15, Task 13b). Sui crediti
 la casella «**non incassati nel piano** (es. infragruppo)» (decisione 6): spegne le caselle e scrive
 0 su ogni anno; persistita in `pregresso.crediti_commerciali.non_incassato`. La colonna «resta» ha
 tre stati neutri: «chiuso», «resta aperto», «nessun movimento nel piano» (decisione 7: nessun
@@ -360,7 +361,9 @@ il motore non lo usa (un piano a zero sulla parte oltre lascia il residuo aperto
 
 ### 5.6 I nomi dei passi nei messaggi
 
-`_PREGRESSO_PASSO_DEFAULT = "Patrimoniale pregresso"`; i tributari restano «Imposte». Il client
+`_PREGRESSO_PASSO_DEFAULT = "Patrimoniale pregresso"`; dal 2026-09-15 anche i tributari (saldo e rate
+stanno al passo 5): la voce «Imposte» sparisce da `_PREGRESSO_PASSO` (Task 16); resta «Imposte» solo
+dove il messaggio parla di acconto o di via manuale. Il client
 (`stepForErrorMessage`) manda a `patrimoniale-pregresso` i messaggi che lo nominano e a
 `patrimoniale-piano` quelli sullo scoperto, sul tetto e sul TFR.
 
@@ -409,8 +412,8 @@ verifica di fine lotto (suite, vitest, tsc, banco, collaudo a schermo, `/riallin
 
 ## 9. Domande aperte per il proprietario
 
-1. I debiti tributari rateizzati: restano al passo 7 fino ai dettagli del commercialista (§3), o
-   passano subito al passo 5 come nel prototipo?
+1. ~~I debiti tributari rateizzati: restano al passo 7 o passano al passo 5?~~ **Decisa il
+   2026-09-15:** passano al passo 5, scadenziati dall'utente anno per anno (§3, Task 13b e 16).
 2. Il riutilizzo dei fidi quando la cassa manca (§3): resta fuori?
 3. Il tasso dello scoperto passa da `financing_interest_rate` a `bank_lines_rate` (§5.2): va bene
    che sia un tasso solo per fidi e scoperto?

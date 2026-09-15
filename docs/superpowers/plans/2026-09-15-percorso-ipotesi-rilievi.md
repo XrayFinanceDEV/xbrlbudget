@@ -22,7 +22,7 @@ Copiati dalla spec (§2, §5) e dalle regole del repo:
 - **Additivita':** senza i campi nuovi (`inflation_pct`, `bank_lines_amount`, `other_lenders`, `tfr_payments`, `repayments`, `non_incassato`) il motore produce numeri identici a prima. Il banco di parita' e' lo strumento di misura: ogni task del motore chiude con 0 divergenze sui profili esistenti; il caso nuovo lo esercita un profilo aggiunto nello stesso task (o nel Task 7).
 - **Un solo motore di proiezione, e sta in Python:** nessun numero derivato dell'anteprima (pareggio compreso) si calcola in TypeScript; si legge dai `details`.
 - **Messaggi in italiano alla fonte**, con le migliaia all'europea (`eur_it`), che nominano il passo con il nome nuovo: «Patrimoniale pregresso», «Patrimoniale piano», «Imposte».
-- **Il passo 7 «Imposte» non cambia** (ne' schermata ne' kernel a saldo + acconto). I debiti tributari rateizzati restano scadenziati al passo 7 (spec §3, assunzione da confermare).
+- **Il kernel a saldo + acconto non cambia.** I debiti tributari rateizzati **passano al passo 5** e l'utente li scadenzia a mano anno per anno (decisione del proprietario, 2026-09-15; Task 13b per il passo 5, Task 16 per il passo 7 e i messaggi del motore). Il passo 7 tiene aliquota, differenze temporanee, via manuale e acconto.
 - Una prova rossa vale solo se fallisce sulle **asserzioni**, non su un simbolo mancante.
 - `CLAUDE.md`, `docs/budget/API-PREVISIONALE.md` e `docs/budget/FORECASTING_GUIDE.md` si aggiornano **nello stesso commit** del comportamento che descrivono; ogni `file:riga` scritto si apre e si controlla.
 - **Terminatori:** file interamente CRLF da preservare: `database/models.py`, `docs/budget/FORECASTING_GUIDE.md`; file misti (si tocca solo con un editor che non normalizza, e si controlla `git diff --stat`): `backend/app/schemas/budget.py`, `frontend/types/api.ts`. Prima di toccare un file: `file <percorso>`; dopo: `git diff --stat` non deve mostrare un file intero riscritto.
@@ -2245,7 +2245,7 @@ git commit -m "feat(ipotesi): passo Capitale circolante con l'avviso sui fornito
 - Create: `frontend/components/budget/wizard/steps/StepPatrimonialePregresso.tsx` (in questo task: testata, colonna «A breve», anteprima «Scadenziamento pregresso», card «Altre voci oltre 12 mesi»; le due card delle banche e degli altri finanziatori arrivano col Task 14)
 - Modify: `frontend/lib/budget-pregresso-circolante.ts` (accoglie `TabellaPregressoKey`, `TABELLA_KEYS` da `budget-pregresso-tabella.ts`), `frontend/lib/budget-preview-rows.ts` (import di `TabellaPregressoKey`), `frontend/lib/budget-pregresso-step.ts` (import)
 - Modify: `frontend/components/budget/wizard/BudgetWizard.tsx` (il ramo `"patrimoniale-pregresso"` rende il componente nuovo)
-- Delete: `frontend/components/budget/wizard/PregressoTable.tsx`, `frontend/lib/budget-pregresso-tabella.ts`, `frontend/lib/budget-pregresso-tabella.test.ts`, `frontend/components/budget/wizard/steps/StepPregressoNuovo.tsx` (quando anche il Task 15 e' chiuso: fino ad allora resta il ramo temporaneo del passo 6)
+- Delete: **nessuno in questo task.** `PregressoTable.tsx` e `budget-pregresso-tabella.ts` (+ test) li usano ancora `StepPregressoNuovo.tsx` (fino al Task 15) e `StepImposte.tsx` (fino al Task 16): li cancella il Task 16, l'ultimo che li libera. `StepPregressoNuovo.tsx` lo cancella il Task 15.
 
 **Interfaces:**
 - Consumes: `openingMasses`, `openingMassLong`, `validatePregresso` (`lib/budget-pregresso-circolante.ts`), `fornitoriZeroAvviso` (Task 12), `p.updatePregresso`, `details.pregresso[*].non_incassato` (Task 6), `details.altri_finanziatori`, `details.debito_bancario.fidi` (Task 3-4)
@@ -2396,7 +2396,7 @@ Spostare `TabellaPregressoKey` e `TABELLA_KEYS` in `budget-pregresso-circolante.
 
 - [ ] **Step 5: Componente**
 
-`StepPatrimonialePregresso.tsx` (presentazionale): `const baseBs`, `baseInc`, `masse`, `pregresso = useMemo(() => pianoBase(baseBs, years, salvato ?? {}))`; un effetto **una tantum** per scenario che, se `pianoBase(...) !== salvato`, chiama `p.updatePregresso(pianoBase(...))` (cosi' il piano dei saldi a breve e' persistito alla prima visita; e' l'unica scrittura non innescata dall'utente, e la nota della card lo dice: «nessun piano da impostare»). Layout: `grid gap-5 lg:grid-cols-[1.4fr_1fr] items-start` con a sinistra la card «A breve · si chiudono nel {y1}» (`breveRows` rese come `ScheduleRow` con chip `incasso`/`pagamento` verde/rosso e l'importo; la riga con `alert` in rosso) e sotto il suggerimento sulle Rettifiche (prototipo); a destra `PreviewPanel` «Scadenziamento pregresso · flussi di cassa» con `flussiPregresso(previewYears, breve)`. Sotto, a tutta larghezza (`mt-4 space-y-4`): la card «Altre voci oltre 12 mesi · scadenziamento a mano» con una tabella (voce · al 31/12/{anno} · un `Input type="number"` per anno · «resta» con il chip dello stato; sui crediti la `Checkbox` «non incassati nel piano (es. infragruppo)»), la riga in sola lettura «Debiti tributari rateizzati · {sp17e} € · si scadenziano al passo 7», e — dal Task 14 — le card delle banche e degli altri finanziatori. Gli errori di `validatePregresso` si mostrano sotto la tabella come oggi. `BudgetWizard.tsx`: `"patrimoniale-pregresso"` → `<StepPatrimonialePregresso {...stepProps} />`.
+`StepPatrimonialePregresso.tsx` (presentazionale): `const baseBs`, `baseInc`, `masse`, `pregresso = useMemo(() => pianoBase(baseBs, years, salvato ?? {}))`; un effetto **una tantum** per scenario che, se `pianoBase(...) !== salvato`, chiama `p.updatePregresso(pianoBase(...))` (cosi' il piano dei saldi a breve e' persistito alla prima visita; e' l'unica scrittura non innescata dall'utente, e la nota della card lo dice: «nessun piano da impostare»). Layout: `grid gap-5 lg:grid-cols-[1.4fr_1fr] items-start` con a sinistra la card «A breve · si chiudono nel {y1}» (`breveRows` rese come `ScheduleRow` con chip `incasso`/`pagamento` verde/rosso e l'importo; la riga con `alert` in rosso) e sotto il suggerimento sulle Rettifiche (prototipo); a destra `PreviewPanel` «Scadenziamento pregresso · flussi di cassa» con `flussiPregresso(previewYears, breve)`. Sotto, a tutta larghezza (`mt-4 space-y-4`): la card «Altre voci oltre 12 mesi · scadenziamento a mano» con una tabella (voce · al 31/12/{anno} · un `Input type="number"` per anno · «resta» con il chip dello stato; sui crediti la `Checkbox` «non incassati nel piano (es. infragruppo)»), la riga in sola lettura «Debiti tributari rateizzati · {sp17e} € · si scadenziano al passo 7» (segnaposto: la rende modificabile il Task 13b), e — dal Task 14 — le card delle banche e degli altri finanziatori. Gli errori di `validatePregresso` si mostrano sotto la tabella come oggi. `BudgetWizard.tsx`: `"patrimoniale-pregresso"` → `<StepPatrimonialePregresso {...stepProps} />`.
 
 - [ ] **Step 6: Verde, tsc, commit**
 
@@ -2405,6 +2405,77 @@ cd frontend && npx vitest run lib/budget-pregresso-oltre.test.ts lib/budget-preg
 git add -u frontend/components/budget/wizard/PregressoTable.tsx frontend/lib/budget-pregresso-tabella.ts frontend/lib/budget-pregresso-tabella.test.ts
 git add frontend/lib/budget-pregresso-oltre.ts frontend/lib/budget-pregresso-oltre.test.ts frontend/lib/budget-pregresso-flussi.ts frontend/lib/budget-pregresso-flussi.test.ts frontend/lib/budget-pregresso-circolante.ts frontend/lib/budget-preview-rows.ts frontend/lib/budget-pregresso-step.ts frontend/components/budget/wizard/steps/StepPatrimonialePregresso.tsx frontend/components/budget/wizard/BudgetWizard.tsx
 git commit -m "feat(ipotesi): passo Patrimoniale pregresso, prima parte: a breve, oltre 12 mesi, flussi del pregresso"
+```
+
+---
+
+### Task 13b: Passo 5: debiti tributari rateizzati scadenziati a mano
+
+Decisione del proprietario (2026-09-15, spec §3 e §9.1): i rateizzati lasciano il passo 7 e l'utente li scadenzia anno per anno nella card «Altre voci oltre 12 mesi». Parte dopo il merge del Task 13; puo' correre in parallelo al Task 14 (tocca solo la riga dei tributari e la riga a breve «Debiti tributari a breve»; le card del Task 14 si aggiungono in fondo, il coordinatore risolve l'eventuale conflitto).
+
+**Files:**
+- Modify: `frontend/lib/budget-pregresso-oltre.ts`, `frontend/lib/budget-pregresso-oltre.test.ts`
+- Modify: `frontend/components/budget/wizard/steps/StepPatrimonialePregresso.tsx` (la riga segnaposto dei tributari diventa modificabile; gli errori di `validatePregresso` includono il piano tributario)
+- Non si tocca: `StepImposte.tsx`, `budget-imposte-step.ts` (Task 16), il motore (Task 16)
+
+**Interfaces:**
+- Consumes: `tributariPlan`, `tributariPlanOrDefault`, `withRate` (`lib/budget-imposte-step.ts`, invariati); `openingMasses`, `validatePregresso` (`lib/budget-pregresso-circolante.ts`); `OltreRow`, `oltreRows`, `pianoBase`, `withOltreAmount`, `breveRows` (Task 13)
+- Produces:
+  ```ts
+  // budget-pregresso-oltre.ts
+  export interface TributariOltreRow { key: "debiti_tributari"; label: "Debiti tributari rateizzati"; dir: "out"; opening: number; amounts: (number | null)[]; resta: number; stato: OltreRow["stato"] }
+  export function tributariOltreRow(baseBs, pregresso: Pregresso, years: number[]): TributariOltreRow | null   // null se sp17e = 0 e nessun piano salvato
+  export function withTributariAmount(baseBs, pregresso: Pregresso, years: number[], i: number, value: number | null): Pregresso
+  ```
+
+**Regole.**
+- **Piano di partenza:** `pianoBase` crea `debiti_tributari` **solo se** manca e `sp17e > 0`: `{ opening: sp16e + sp17e, saldo: sp16e, rateizzato: sp17e, amounts: [0, …] (lunghezza = anni), acconto_pct: 100 }`. Il saldo e' il debito a breve (cio' che scade entro l'esercizio si paga nel primo anno), il rateizzato il debito oltre: e' la stessa lettura del bilancio che fanno le altre voci, e chi vuole un'altra ripartizione la corregge in Rettifiche fra `sp16e` e `sp17e`. Con `sp17e = 0` nessun piano: il motore paga tutto il tributario come saldo nel primo anno, come oggi. Un piano gia' salvato (anche con un saldo diverso da `sp16e`, scritto dal vecchio passo 7) si rispetta cosi' com'e': identita'.
+- **Riga:** `opening` = `plan.rateizzato`; `amounts[i]` = `plan.amounts[i]` (nessuno scarto di breve: il saldo non entra nel runoff, `forecast_engine.py` scadenzia il solo `rateizzato`); `resta = rateizzato − Σ amounts`; stati come `oltreRows` (senza «oltre il piano»). Resa **dopo** le quattro voci di `oltreRows`, con la stessa tabella.
+- **Scrittura:** `withTributariAmount` parte da `pianoBase`, completa `amounts` alla lunghezza degli anni con zeri, scrive `amounts[i] = value ?? 0` e passa per `withRate` (saldo, rateizzato e acconto non si toccano).
+- **Riga a breve:** `breveRows` riceve il `pregresso`; «Debiti tributari a breve · saldo pagato nel {y1}» mostra `plan.saldo` quando il piano c'e', altrimenti `sp16e + sp17e` se `sp17e = 0` (tutto saldo) — mai un importo diverso da quello che il motore paga.
+- **Errori:** `validatePregresso` si chiama sul pregresso intero, tributari compresi (oggi il passo 7 validava il solo piano tributario): gli errori «le rate superano il rateizzato» compaiono sotto la tabella del passo 5.
+
+- [ ] **Step 1: Base del task** — `git rev-parse HEAD > /tmp/rilievi-task13b-base`
+- [ ] **Step 2: Test rosso** in `budget-pregresso-oltre.test.ts`, sul `bs` del Task 13 (`sp16e` 61000, `sp17e` 35000):
+
+```ts
+describe("tributari rateizzati al passo 5", () => {
+  it("pianoBase: saldo = debito a breve, rateizzato = debito oltre, rate a zero", () => {
+    const p = pianoBase(bs, anni, {});
+    expect(p.debiti_tributari).toEqual({ opening: 96000, saldo: 61000, rateizzato: 35000, amounts: [0, 0, 0], acconto_pct: 100 });
+  });
+  it("senza debito oltre nessun piano tributario", () => {
+    const bs0 = { ...bs, sp17e_debiti_tributari_lungo: "0" } as unknown as BalanceSheet;
+    expect(pianoBase(bs0, anni, {}).debiti_tributari).toBeUndefined();
+    expect(tributariOltreRow(bs0, pianoBase(bs0, anni, {}), anni)).toBeNull();
+  });
+  it("un piano salvato dal vecchio passo 7 si rispetta", () => {
+    const salvato = { debiti_tributari: { opening: 96000, saldo: 50000, rateizzato: 46000, amounts: [23000, 23000], acconto_pct: 80 } } as Pregresso;
+    const p = pianoBase(bs, anni, salvato);
+    expect(p.debiti_tributari).toEqual(salvato.debiti_tributari);
+    expect(tributariOltreRow(bs, p, anni)).toMatchObject({ opening: 46000, amounts: [23000, 23000, null], resta: 0, stato: "chiuso" });
+    expect(breveRows(bs, 2026, null, p)[2]).toMatchObject({ importo: 50000, small: "saldo pagato nel 2027" });
+  });
+  it("withTributariAmount scrive la rata dell'anno e lascia saldo e acconto", () => {
+    let p = pianoBase(bs, anni, {});
+    p = withTributariAmount(bs, p, anni, 1, 20000);
+    expect(p.debiti_tributari).toMatchObject({ saldo: 61000, rateizzato: 35000, amounts: [0, 20000, 0], acconto_pct: 100 });
+    expect(tributariOltreRow(bs, p, anni)).toMatchObject({ resta: 15000, stato: "resta aperto" });
+    p = withTributariAmount(bs, p, anni, 2, 20000);
+    expect(tributariOltreRow(bs, p, anni)?.stato).toBe("oltre il saldo");
+  });
+});
+```
+(Il test del Task 13 su `pianoBase(bs, anni, p)` identita' resta; quello su `breveRows(bs, 2026, avviso)` passa con il quarto argomento opzionale.)
+
+- [ ] **Step 3: Rosso** — `cd frontend && npx vitest run lib/budget-pregresso-oltre.test.ts` (atteso: fallisce sulle asserzioni dopo aver aggiunto gli export vuoti)
+- [ ] **Step 4: Modulo e componente** secondo le regole sopra; nel componente la riga usa lo stesso `Input type="number"` per anno e il chip dello stato, con la nota «Rate della rateizzazione: escono di cassa nell'anno. Il saldo a breve si paga nel {y1}.»
+- [ ] **Step 5: Verde, tsc, commit**
+
+```bash
+cd frontend && npx vitest run lib/budget-pregresso-oltre.test.ts lib/budget-pregresso-flussi.test.ts lib/budget-pregresso-circolante.test.ts lib/budget-imposte-step.test.ts && npx tsc --noEmit
+git add frontend/lib/budget-pregresso-oltre.ts frontend/lib/budget-pregresso-oltre.test.ts frontend/components/budget/wizard/steps/StepPatrimonialePregresso.tsx
+git commit -m "feat(ipotesi): tributari rateizzati scadenziati a mano al passo Patrimoniale pregresso"
 ```
 
 ---
@@ -2667,10 +2738,12 @@ git commit -m "feat(ipotesi): passo Patrimoniale piano: voci minori, TFR con liq
 ### Task 16: Passo 7, wizard, rail, documentazione utente
 
 **Files:**
-- Modify: `frontend/components/budget/wizard/steps/StepImposte.tsx` (i due rimandi in fondo: «Debiti tributari {anno} a breve · saldo pagato nel {anno+1} · passo 5», «Debiti tributari rateizzati · oltre 12 mesi, scadenziati qui sotto»; la tabella dei rateizzati resta)
+- Modify: `frontend/components/budget/wizard/steps/StepImposte.tsx` e `frontend/lib/budget-imposte-step.ts` (+ test): la card «Pagamento dei debiti tributari» perde saldo, rateizzato, «N rate uguali» e la `PregressoTable` (decisione del 2026-09-15: stanno al passo 5, Task 13b); resta l'acconto. Un rimando in fondo: «Debiti tributari al 31/12/{anno}: saldo e rate si scadenziano al passo 5 · Patrimoniale pregresso». Via gli export rimasti senza chiamanti (`withSaldo`, `withRateUguali`, `rateOptions`, `rateSelectValue`, `tributariMasses`, `tributariTabella`, `TRIBUTARI_KEYS`, `TRIBUTARI_TABELLA_NOTA`: `grep -rn` prima di togliere)
+- Delete: `frontend/components/budget/wizard/PregressoTable.tsx`, `frontend/lib/budget-pregresso-tabella.ts`, `frontend/lib/budget-pregresso-tabella.test.ts` (dopo il Task 15 e la modifica sopra non li usa piu' nessuno: `grep -rn "pregresso-tabella\|PregressoTable" frontend/` vuoto; `TabellaPregressoKey`/`TABELLA_KEYS` gia' spostati dal Task 13)
+- Modify: `calculations/forecast_engine.py` — `_PREGRESSO_PASSO` perde `"debiti_tributari": "Imposte"` (saldo e rate si scadenziano al passo «Patrimoniale pregresso»); il commento sopra si riscrive; i messaggi che nominano «Imposte» per il **piano** tributario (`grep -n "Imposte" calculations/forecast_engine.py`) passano a `_passo_pregresso("debiti_tributari")`; restano «Imposte» solo quelli su acconto e via manuale. Test: `tests/test_forecast_override_tributario.py` (le attese a `:525` e `:981`) e `frontend/lib/budget-wizard-steps*` / `stepForErrorMessage` se instrada i messaggi tributari a `imposte`. Parte dopo il merge del Task 4 (stesso file del motore).
 - Modify: `frontend/components/budget/wizard/BudgetWizard.tsx` (gli import residui, `railBadges`, `MigrazioneCard`; `grep -n "inflation\|StepAltreVociCE\|StepPregressoNuovo" frontend/components/budget/wizard/BudgetWizard.tsx` vuoto)
 - Modify: `docs/budget/FORECASTING_GUIDE.md` (CRLF: preservare) — le sezioni «Passo 3 · Costi principali», «Passo 4 · Altre voci CE», «Passo 5 · Capitale circolante», «Passo 6 · Pregresso e nuovo» riscritte come «Passo 3 · Costi», «Passo 4 · Capitale circolante», «Passo 5 · Patrimoniale pregresso», «Passo 6 · Patrimoniale piano» (che cosa inserisci / che cosa ne fa il motore / che cosa mostra l'anteprima, con i testi della spec §4.3-§4.6); «Passo 1» con l'inflazione salvata e senza seme; una sezione «Scenari salvati prima del 15/09/2026» (spec §4.8)
-- Modify: `docs/frontend/PRATICA-PERCORSO.md` e `CLAUDE.md` (ogni «Pregresso e nuovo» / «Altre voci CE» / «Costi principali»: `grep -rn "Pregresso e nuovo\|Altre voci CE\|Costi principali" CLAUDE.md docs/frontend docs/budget`), in particolare la frase di CLAUDE.md «il passo del wizard che lo scadenzia (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari)» → «(5 «Patrimoniale pregresso», 7 «Imposte» per i tributari)»
+- Modify: `docs/frontend/PRATICA-PERCORSO.md` e `CLAUDE.md` (ogni «Pregresso e nuovo» / «Altre voci CE» / «Costi principali»: `grep -rn "Pregresso e nuovo\|Altre voci CE\|Costi principali" CLAUDE.md docs/frontend docs/budget`), in particolare la frase di CLAUDE.md «il passo del wizard che lo scadenzia (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari)» → «(5 «Patrimoniale pregresso», tributari compresi)», e la via d'uscita «modificare il piano nel passo «Imposte»» del bullet «Un anno manuale non scarica il piano tributario» → «nel passo «Patrimoniale pregresso»»
 - Modify: `docs/budget/API-PREVISIONALE.md` §7 (i passi che chiamano l'anteprima) dove nomina i passi
 
 - [ ] **Step 1: Base del task**
@@ -2682,7 +2755,7 @@ file docs/budget/FORECASTING_GUIDE.md
 
 - [ ] **Step 2: Componenti**
 
-`StepImposte.tsx`: i due rimandi; nessun'altra modifica (il passo e' fermo per decisione del proprietario). `BudgetWizard.tsx`: i sette rami del `switch` sui componenti definitivi (`StepScenario`, `StepFatturato`, `StepCosti`, `StepCircolante`, `StepPatrimonialePregresso`, `StepPatrimonialePiano`, `StepImposte`), `badges={railBadges(s.migrazione?.daIntegrare.map((d) => d.step) ?? [])}` sul `WizardRail`, `MigrazioneCard` sotto il rail.
+`StepImposte.tsx`: la card dei tributari ridotta all'acconto e il rimando al passo 5 (sopra); motore e test dei messaggi come nell'elenco dei file. `BudgetWizard.tsx`: i sette rami del `switch` sui componenti definitivi (`StepScenario`, `StepFatturato`, `StepCosti`, `StepCircolante`, `StepPatrimonialePregresso`, `StepPatrimonialePiano`, `StepImposte`), `badges={railBadges(s.migrazione?.daIntegrare.map((d) => d.step) ?? [])}` sul `WizardRail`, `MigrazioneCard` sotto il rail.
 
 ```bash
 cd frontend && npx tsc --noEmit && npx vitest run
@@ -2696,7 +2769,8 @@ Riscrivere le sezioni della guida elencate sopra preservando i CRLF (aprire con 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/components/budget/wizard/steps/StepImposte.tsx frontend/components/budget/wizard/BudgetWizard.tsx docs/budget/FORECASTING_GUIDE.md docs/frontend/PRATICA-PERCORSO.md CLAUDE.md docs/budget/API-PREVISIONALE.md
+git add -u frontend/components/budget/wizard/PregressoTable.tsx frontend/lib/budget-pregresso-tabella.ts frontend/lib/budget-pregresso-tabella.test.ts
+git add frontend/components/budget/wizard/steps/StepImposte.tsx frontend/lib/budget-imposte-step.ts frontend/lib/budget-imposte-step.test.ts calculations/forecast_engine.py tests/test_forecast_override_tributario.py frontend/components/budget/wizard/BudgetWizard.tsx docs/budget/FORECASTING_GUIDE.md docs/frontend/PRATICA-PERCORSO.md CLAUDE.md docs/budget/API-PREVISIONALE.md
 git commit -m "docs(ipotesi): guida e invarianti sui sette passi nuovi; passo Imposte con i rimandi"
 ```
 
@@ -2742,7 +2816,7 @@ Eseguire `/riallinea` (skill `.claude/skills/riallinea/`) senza `--registra` sul
 
 - [ ] **Step 4: Chiusura**
 
-Aggiornare la memoria del progetto (`percorso-ipotesi-budget-lotti.md`: stato del lotto, branch, cosa resta al proprietario: merge in `main`, `migrate_db.py` al rilascio, le tre domande aperte della spec §9). Riferire al proprietario: suite, banco, collaudo, i rilievi corretti e quelli lasciati fuori con il perche'.
+Aggiornare la memoria del progetto (`percorso-ipotesi-budget-lotti.md`: stato del lotto, branch, cosa resta al proprietario: merge in `main`, `migrate_db.py` al rilascio, le due domande ancora aperte della spec §9). Riferire al proprietario: suite, banco, collaudo, i rilievi corretti e quelli lasciati fuori con il perche'.
 
 ---
 

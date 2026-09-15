@@ -4,7 +4,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
   ceAggregates, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
-  rowsImposte, rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
+  rowsImposte, rowsImposteSaldoAcconto, unfundedFromError,
 } from "./budget-preview-rows";
 import { confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
 import { euro } from "@/lib/budget-format";
@@ -235,12 +235,7 @@ describe("rowsCircolante", () => {
   });
 });
 
-describe("rowsPregressoNuovo / unfundedFromError", () => {
-  it("PFN = debiti finanziari - cassa", () => {
-    const rows = rowsPregressoNuovo({ sp09_disponibilita_liquide: "50", sp16a_debiti_banche_breve: "30",
-      sp17a_debiti_banche_lungo: "120" } as unknown as BalanceSheet, [year(2027)]);
-    expect(rows.find((r) => r.key === "pfn")!.years[0].value).toBe(20 + 100 - 80);
-  });
+describe("unfundedFromError", () => {
   it("estrae anno e importo dal messaggio del motore", () => {
     expect(unfundedFromError({ year: 2028, message: "Fabbisogno finanziario scoperto di 84.120,50: aggiungi ..." }))
       .toEqual({ year: 2028, amount: 84120.5 });
@@ -347,89 +342,6 @@ describe("rowsAnnoBase", () => {
     // diversi passando dal passo 1 al passo 3.
     const molRowsCosti = rowsCosti(incConVociMinori, { materials: 40, services: 40 }, []).find((r) => r.key === "mol")!.base.value;
     expect(molAnnoBase).toBe(molRowsCosti);
-  });
-});
-
-// ── rowsPregressoRunoff (Task 7) ────────────────────────────────────────────
-// Il pregresso che il motore ha davvero scadenziato: si legge da
-// `details.pregresso`, non si ricalcola.
-describe("rowsPregressoRunoff", () => {
-  const withPregresso = (y: number, over: Record<string, Record<string, unknown>>): ForecastPreviewYear => {
-    const base = year(y);
-    const pregresso = { ...base.details.pregresso } as unknown as Record<string, Record<string, unknown>>;
-    for (const [k, v] of Object.entries(over)) pregresso[k] = { ...pregresso[k], ...v };
-    return { ...base, details: { ...base.details, pregresso } } as unknown as ForecastPreviewYear;
-  };
-
-  it("la riga del residuo a breve porta il numero del motore, e l'apertura in colonna base", () => {
-    const rows = rowsPregressoRunoff(
-      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 200, residual_long: 0, closed: 800, writeoff: 0, mode: "runoff" } })],
-      ["crediti_commerciali"],
-    );
-    const residuo = rows.find((r) => r.label === "Crediti commerciali · residuo a breve")!;
-    expect(residuo.years[0].value).toBe(200);
-    expect(residuo.base.value).toBe(1000);
-    expect(residuo.years[0].note).toBeUndefined();
-    expect(rows.find((r) => r.label === "chiuso nell'anno")!.years[0].value).toBe(800);
-  });
-
-  it("`mode: legacy` e' un saldo SENZA piano, e lo dice: non e' un residuo di zero", () => {
-    // Altri debiti non ha un driver dietro: senza piano NON si chiude, cresce
-    // per percentuale (rilievo 4 del giro di correzione 1) — dire "tutto nel
-    // primo anno" qui sarebbe falso, non solo generico.
-    const rows = rowsPregressoRunoff(
-      [withPregresso(2025, { altri_debiti: { opening: 58, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
-      ["altri_debiti"],
-    );
-    const residuo = rows.find((r) => r.label === "Altri debiti · residuo a breve")!;
-    expect(residuo.years[0].note).toBe("nessun piano: non si chiude — cresce ogni anno della percentuale impostata");
-  });
-
-  it("la nota `legacy` non e' la stessa frase per ogni saldo (rilievo 4 + rilievo 5)", () => {
-    // Ogni frase fissata alla lettera: scambiarla con quella di un altro
-    // destino deve far fallire la suite.
-    const senzaPiano = (key: string) =>
-      rowsPregressoRunoff(
-        [withPregresso(2025, { [key]: { opening: 1, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
-        [key as never],
-      ).find((r) => r.label.endsWith("· residuo a breve"))!.years[0].note;
-
-    // Fornitori e crediti: un driver di volume li rigenera comunque, la
-    // chiusura nel primo anno resta vera.
-    expect(senzaPiano("debiti_fornitori")).toBe("nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari");
-    expect(senzaPiano("crediti_commerciali")).toBe(senzaPiano("debiti_fornitori"));
-
-    // Previdenziali e altri debiti: nessun driver, crescono per percentuale.
-    expect(senzaPiano("debiti_previdenziali")).toBe("nessun piano: non si chiude — cresce ogni anno della percentuale impostata");
-    expect(senzaPiano("altri_debiti")).toBe(senzaPiano("debiti_previdenziali"));
-
-    // Le due famiglie NON coincidono.
-    expect(senzaPiano("debiti_fornitori")).not.toBe(senzaPiano("altri_debiti"));
-  });
-
-  it("l'inesigibile compare solo quando il motore ne dichiara uno diverso da zero", () => {
-    const senza = rowsPregressoRunoff(
-      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 200, residual_long: 0, closed: 800, writeoff: 0, mode: "runoff" } })],
-      ["crediti_commerciali"],
-    );
-    expect(senza.some((r) => r.label === "di cui inesigibile")).toBe(false);
-    const con = rowsPregressoRunoff(
-      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 150, residual_long: 0, closed: 800, writeoff: 50, mode: "runoff" } })],
-      ["crediti_commerciali"],
-    );
-    expect(con.find((r) => r.label === "di cui inesigibile")!.years[0].value).toBe(50);
-  });
-
-  it("un'intestazione sola, poi i saldi nell'ordine chiesto; senza anni nessuna riga", () => {
-    const rows = rowsPregressoRunoff(
-      [withPregresso(2025, {}), withPregresso(2026, {})],
-      ["debiti_fornitori", "crediti_commerciali"],
-    );
-    expect(rows[0].label).toBe("Pregresso: residuo a breve · oltre");
-    expect(rows.filter((r) => r.label.endsWith("· residuo a breve")).map((r) => r.label))
-      .toEqual(["Debiti verso fornitori · residuo a breve", "Crediti commerciali · residuo a breve"]);
-    expect(rows[0].years).toHaveLength(2);
-    expect(rowsPregressoRunoff([], ["crediti_commerciali"])).toEqual([]);
   });
 });
 

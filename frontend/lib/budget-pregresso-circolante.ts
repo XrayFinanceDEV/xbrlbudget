@@ -88,47 +88,6 @@ export function residualAfter(plan: PregressoPlan, yearIndex: number): number {
   return cents(Math.max(0, plan.opening - sum(plan.amounts) - sum(plan.writeoff)));
 }
 
-/** L'incidenza di un importo sulla massa di apertura, in percentuale
- *  assoluta (25,5 = 25,5%). Apertura nulla o assente ⇒ nessuna incidenza. */
-export function amountToPct(amount: number, opening: number): number | null {
-  return opening ? (amount / opening) * 100 : null;
-}
-
-/** L'importo corrispondente a una percentuale assoluta della massa di
- *  apertura, arrotondato al centesimo. */
-export function pctToAmount(pct: number, opening: number): number {
-  return cents((opening * pct) / 100);
-}
-
-/** `n` rate uguali che sommano esattamente `total`: i centesimi residui
- *  dell'arrotondamento vanno tutti sull'ultima rata, mai distribuiti. */
-export function equalInstalments(total: number, n: number): number[] {
-  if (n <= 0) return [];
-  const base = Math.floor((total / n) * 100) / 100;
-  const out = Array<number>(n).fill(base);
-  out[n - 1] = cents(total - base * (n - 1));
-  return out;
-}
-
-/** Nuovo piano con l'importo dell'anno `yearIndex` sostituito. Immutabile:
- *  non muta `plan`, e allunga l'array con zeri se `yearIndex` cade oltre la
- *  lunghezza attuale.
- *
- * `field` sceglie la lista: `"amounts"` (il default, gli incassi/pagamenti) o
- * `"writeoff"` (l'inesigibile, il solo campo dei crediti). Prima del giro di
- * correzione 1 `withWriteoff` (`lib/budget-pregresso-tabella.ts`) ripeteva
- * questa stessa funzione a mano sulla lista `writeoff`: due copie
- * dell'arrotondamento che potevano divergere cambiandone solo una
- * (rilievo 7). */
-export function withAmount(
-  plan: PregressoPlan, yearIndex: number, amount: number, field: "amounts" | "writeoff" = "amounts",
-): PregressoPlan {
-  const list = [...((field === "amounts" ? plan.amounts : plan.writeoff) ?? [])];
-  while (list.length <= yearIndex) list.push(0);
-  list[yearIndex] = cents(amount);
-  return field === "amounts" ? { ...plan, amounts: list } : { ...plan, writeoff: list };
-}
-
 /** Coerce un piano non-tributario ai numeri veri (vedi `normalizePregresso`
  *  per il perche'). `writeoff` resta `null`/`undefined` quando tale: un piano
  *  senza inesigibile e uno con inesigibile zero non sono la stessa cosa. */
@@ -249,71 +208,4 @@ export function validatePregresso(p: Pregresso, masses: Record<PregressoKey, num
     }
   }
   return errs;
-}
-
-// ── Le quattro voci che la card «Altre voci oltre 12 mesi» del passo 5
-// scadenzia (Task 16, spostate qui da `lib/budget-pregresso-tabella.ts`
-// prima della sua cancellazione — decisione del proprietario 2026-09-15: i
-// tributari si scadenziano a mano nello stesso passo, `lib/budget-pregresso-
-// oltre.ts`, non da questa tabella). `TabellaPregressoKey` resta usato da
-// `rowsPregressoRunoff` (`lib/budget-preview-rows.ts`). ─────────────────────
-
-/** Mai `debiti_tributari`: quella voce non entra piu' in nessuna tabella
- *  generica, la scadenzia `lib/budget-pregresso-oltre.ts` per conto proprio.
- *  Il tipo lo rende un errore di compilazione, non solo una nota. */
-export type TabellaPregressoKey = Exclude<PregressoKey, "debiti_tributari">;
-
-export const TABELLA_KEYS: readonly TabellaPregressoKey[] = [
-  "crediti_commerciali", "debiti_fornitori", "debiti_previdenziali", "altri_debiti",
-];
-
-/**
- * Che cosa fa il PREVISIONALE con la voce, una volta scadenziato il pregresso.
- *
- * - `rigenera`: il piano la fa nascere da un driver di volume, quindi
- *   scadenziare il pregresso ne cambia la composizione, non la fa sparire.
- * - `estingue`: il piano non la genera affatto — la porta a zero e ce la
- *   lascia, per tutti gli anni.
- *
- * Non c'e' un terzo destino "imposte" (i tributari lo erano, nella tabella
- * ormai cancellata): `TabellaPregressoKey` esclude `debiti_tributari` per
- * costruzione, quindi qui non serve rappresentarlo.
- */
-export type PregressoDestino = "rigenera" | "estingue";
-
-/**
- * Misurato su `calculations/forecast_engine.py`: il piano genera da un
- * driver **solo** crediti commerciali (`ricavi × DSO / 360`) e debiti
- * fornitori (`acquisti × DPO / 360`); previdenziali e altri debiti passano
- * invece da `_net_of_pregresso`, che scorpora dall'ancora l'intera massa
- * dichiarata — il generato vale allora zero, e il saldo resta il solo
- * residuo del piano.
- */
-const DESTINI: Record<TabellaPregressoKey, PregressoDestino> = {
-  crediti_commerciali: "rigenera",
-  debiti_fornitori: "rigenera",
-  debiti_previdenziali: "estingue",
-  altri_debiti: "estingue",
-};
-
-export function destinoOf(key: TabellaPregressoKey): PregressoDestino {
-  return DESTINI[key];
-}
-
-const LEGACY_NOTE_BY_DESTINO: Record<PregressoDestino, string> = {
-  rigenera: "nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari",
-  estingue: "nessun piano: non si chiude — cresce ogni anno della percentuale impostata",
-};
-
-/**
- * La nota `mode: "legacy"` dell'anteprima (`rowsPregressoRunoff`,
- * `lib/budget-preview-rows.ts`): il saldo per cui NESSUN piano e' stato
- * dichiarato, quindi il motore usa le formule di sempre. Non e' la stessa
- * frase per tutti i saldi — fornitori e crediti si chiudono davvero nel
- * primo anno perche' un driver di volume li rigenera comunque, ma
- * previdenziali e altri debiti — senza un driver dietro — crescono per
- * percentuale e non si chiudono in alcun senso visibile.
- */
-export function legacyNoteFor(key: TabellaPregressoKey): string {
-  return LEGACY_NOTE_BY_DESTINO[destinoOf(key)];
 }

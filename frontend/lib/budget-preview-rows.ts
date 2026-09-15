@@ -8,7 +8,6 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import { euro, num, numOrNull, pctOf } from "@/lib/budget-format";
 import type { ForecastPreviewResponse } from "@/types/api";
-import { PREGRESSO_LABELS, legacyNoteFor, type TabellaPregressoKey } from "@/lib/budget-pregresso-circolante";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -285,71 +284,6 @@ export function rowsCircolante(baseBs: BalanceSheet, baseInc: IncomeStatement, y
   ];
 }
 
-const finDebt = (bs: Record<string, unknown>) =>
-  num(bs.sp16a_debiti_banche_breve) + num(bs.sp17a_debiti_banche_lungo) + num(bs.sp16b_debiti_altri_finanz_breve)
-  + num(bs.sp17b_debiti_altri_finanz_lungo) + num(bs.sp16c_debiti_obbligazioni_breve) + num(bs.sp17c_debiti_obbligazioni_lungo);
-
-export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewYear[]): PreviewRow[] {
-  const bb = baseBs as unknown as Record<string, unknown>;
-  const mk = (bs: Record<string, unknown>) => {
-    const bank = num(bs.sp16a_debiti_banche_breve) + num(bs.sp17a_debiti_banche_lungo);
-    const altri = num(bs.sp16b_debiti_altri_finanz_breve) + num(bs.sp17b_debiti_altri_finanz_lungo);
-    const cash = num(bs.sp09_disponibilita_liquide);
-    const immob = num(bs.sp02_immob_immateriali) + num(bs.sp03_immob_materiali);
-    return { bank, altri, immob, cash, pfn: finDebt(bs) - cash };
-  };
-  const b = mk(bb), ys = years.map((y) => mk(y.balance_sheet));
-  const r = (key: keyof typeof b, label: string, kind: PreviewRowKind): PreviewRow =>
-    row(key, label, kind, { value: b[key] }, ys.map((c) => ({ value: c[key] })));
-  return [
-    r("bank", "Debiti bancari", "value"), r("altri", "Altri finanziatori", "value"),
-    r("immob", "Immobilizzazioni nette", "value"), r("cash", "Cassa", "kpi"),
-    r("pfn", "Posizione finanziaria netta", "total"),
-  ];
-}
-
-/**
- * Il pregresso di circolante che il motore ha davvero scadenziato, saldo per
- * saldo (Task 7): apertura in colonna base, poi per ogni anno il residuo a
- * breve, quello oltre l'esercizio, il chiuso e — dove c'e' — l'inesigibile.
- * Lettura pura di `details.pregresso`: qui non si scadenzia nulla, il piano lo
- * svolge `runoff_schedule` in Python.
- *
- * `mode: "legacy"` non e' un residuo di zero: e' un saldo per cui NESSUN piano
- * e' stato dichiarato, e che quindi segue le formule di sempre. La nota che lo
- * dice NON e' la stessa frase su tutti e cinque i saldi (`legacyNoteFor`,
- * `lib/budget-pregresso-circolante.ts`, rilievo 4 del giro di correzione 1):
- * fornitori e crediti si chiudono davvero nel primo anno perche' un driver di
- * volume li rigenera comunque, ma previdenziali e altri debiti — senza un
- * driver dietro — crescono per percentuale e non si chiudono in alcun senso
- * visibile. Confondere «nessun piano» con «residuo pagato» sarebbe un difetto
- * a se'; dire "chiude" di un saldo che invece cresce sarebbe l'altro.
- */
-export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly TabellaPregressoKey[]): PreviewRow[] {
-  if (years.length === 0) return [];
-  const empty = (): PreviewCell[] => years.map(() => ({ value: null }));
-  const out: PreviewRow[] = [
-    row("pregresso-head", "Pregresso: residuo a breve · oltre", "total", { value: null }, empty()),
-  ];
-  for (const key of keys) {
-    const det = years.map((y) => y.details.pregresso?.[key] ?? null);
-    const pick = (f: "residual_short" | "residual_long" | "closed" | "writeoff"): PreviewCell[] =>
-      det.map((d) => ({ value: d ? num(d[f]) : null }));
-    const residuo = pick("residual_short").map((c, i) =>
-      det[i]?.mode === "legacy" ? { ...c, note: legacyNoteFor(key) } : c);
-    out.push(row(`pregresso-${key}`, `${PREGRESSO_LABELS[key]} · residuo a breve`, "value",
-      { value: det[0] ? num(det[0].opening) : null }, residuo));
-    out.push(row(`pregresso-${key}-long`, "oltre l'esercizio", "sub", { value: null }, pick("residual_long")));
-    out.push(row(`pregresso-${key}-closed`, "chiuso nell'anno", "sub", { value: null }, pick("closed")));
-    // L'inesigibile esiste sul solo piano dei crediti: si mostra quando il
-    // motore ne dichiara uno, invece di aggiungere quattro righe a zero.
-    const writeoff = pick("writeoff");
-    if (writeoff.some((c) => c.value !== null && c.value !== 0)) {
-      out.push(row(`pregresso-${key}-writeoff`, "di cui inesigibile", "sub", { value: null }, writeoff));
-    }
-  }
-  return out;
-}
 
 export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {
   const g = (i: Record<string, unknown>, k: string) => num(i[k]);

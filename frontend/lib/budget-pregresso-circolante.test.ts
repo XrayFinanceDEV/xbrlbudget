@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { BalanceSheet, PregressoKey } from "@/types/api";
+import type { BalanceSheet } from "@/types/api";
 import {
-  amountToPct, equalInstalments, isPlanEmpty, openingMassLong, openingMasses, pctToAmount, residualAfter,
-  TABELLA_KEYS, destinoOf, legacyNoteFor, validatePregresso, withAmount,
+  isPlanEmpty, openingMassLong, openingMasses, residualAfter, validatePregresso,
 } from "./budget-pregresso-circolante";
 
 const bs = { sp06_crediti_breve: "500", sp06e_crediti_tributari_breve: "20", sp06f_imposte_anticipate_breve: "10",
@@ -16,11 +15,8 @@ describe("budget-pregresso-circolante", () => {
     expect(openingMasses(bs)).toEqual({ crediti_commerciali: 510, debiti_fornitori: 300, debiti_tributari: 96,
       debiti_previdenziali: 41, altri_debiti: 58 });
   });
-  it("rate uguali con i centesimi sull'ultima, residuo, percentuali", () => {
-    expect(equalInstalments(100, 3)).toEqual([33.33, 33.33, 33.34]);
+  it("residuo dopo importi e inesigibile", () => {
     expect(residualAfter({ opening: 1000, amounts: [800], writeoff: [50] }, 0)).toBe(150);
-    expect(pctToAmount(33.333, 1000)).toBe(333.33);
-    expect(withAmount({ opening: 100, amounts: [10] }, 2, 5)).toEqual({ opening: 100, amounts: [10, 0, 5] });
   });
   it("validazione: massa, orizzonte, tributari", () => {
     const masses = openingMasses(bs);
@@ -29,11 +25,6 @@ describe("budget-pregresso-circolante", () => {
     expect(validatePregresso({ altri_debiti: { opening: 58, amounts: [1, 1, 1, 1] } }, masses, 3)[0]).toMatch(/orizzonte/);
     expect(validatePregresso({ debiti_tributari: { opening: 96, saldo: 50, rateizzato: 40, amounts: [], acconto_pct: 100 } }, masses, 3)[0]).toMatch(/saldo \+ rateizzato/);
     expect(validatePregresso({ debiti_tributari: { opening: 96, saldo: 61, rateizzato: 35, amounts: [12, 12, 11], acconto_pct: 100 } }, masses, 3)).toEqual([]);
-  });
-
-  it("amountToPct: incidenza, e apertura nulla non e' un'incidenza di zero", () => {
-    expect(amountToPct(50, 200)).toBe(25);
-    expect(amountToPct(50, 0)).toBeNull();
   });
 
   it("validatePregresso esercita crediti_commerciali e debiti_previdenziali, non solo le altre tre chiavi", () => {
@@ -61,12 +52,6 @@ describe("budget-pregresso-circolante", () => {
 
   it("residualAfter clampa a zero quando gli importi sforano l'apertura", () => {
     expect(residualAfter({ opening: 100, amounts: [80, 80] }, 1)).toBe(0);
-  });
-
-  it("equalInstalments con orizzonte nullo, negativo, o a una sola rata", () => {
-    expect(equalInstalments(100, 0)).toEqual([]);
-    expect(equalInstalments(100, -1)).toEqual([]);
-    expect(equalInstalments(100, 1)).toEqual([100]);
   });
 
   // ── fix1 R3: stessi limiti del server (`PregressoTributariInput.acconto_pct`,
@@ -124,35 +109,4 @@ describe("budget-pregresso-circolante", () => {
     expect(isPlanEmpty({ opening: 100, amounts: [5] })).toBe(false);
   });
 
-  it("withAmount con field='writeoff' scrive l'inesigibile, stesso arrotondamento del default 'amounts' (rilievo 7)", () => {
-    expect(withAmount({ opening: 100, amounts: [10] }, 0, 33.336, "writeoff"))
-      .toEqual({ opening: 100, amounts: [10], writeoff: [33.34] });
-    // Il default resta "amounts": la firma allargata non cambia le chiamate esistenti.
-    expect(withAmount({ opening: 100, amounts: [10] }, 1, 5)).toEqual({ opening: 100, amounts: [10, 5] });
-  });
-});
-
-// ── TABELLA_KEYS / destinoOf / legacyNoteFor (Task 16: spostati qui da
-// `lib/budget-pregresso-tabella.ts` prima della sua cancellazione) ─────────
-describe("TABELLA_KEYS esclude i tributari, che si scadenziano per conto proprio", () => {
-  it("le quattro voci, mai debiti_tributari", () => {
-    expect(TABELLA_KEYS).toEqual(["crediti_commerciali", "debiti_fornitori", "debiti_previdenziali", "altri_debiti"]);
-    expect(TABELLA_KEYS).not.toContain("debiti_tributari" as PregressoKey);
-  });
-});
-
-describe("legacyNoteFor (rilievo 4, giro di correzione 1)", () => {
-  it("fornitori e crediti condividono la stessa nota (\"rigenera\")", () => {
-    expect(legacyNoteFor("debiti_fornitori")).toBe("nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari");
-    expect(legacyNoteFor("crediti_commerciali")).toBe(legacyNoteFor("debiti_fornitori"));
-    expect(destinoOf("crediti_commerciali")).toBe("rigenera");
-  });
-  it("previdenziali e altri debiti condividono l'altra nota (\"estingue\"), diversa dalla prima", () => {
-    expect(legacyNoteFor("debiti_previdenziali")).toBe(
-      "nessun piano: non si chiude — cresce ogni anno della percentuale impostata",
-    );
-    expect(legacyNoteFor("altri_debiti")).toBe(legacyNoteFor("debiti_previdenziali"));
-    expect(legacyNoteFor("altri_debiti")).not.toBe(legacyNoteFor("debiti_fornitori"));
-    expect(destinoOf("altri_debiti")).toBe("estingue");
-  });
 });

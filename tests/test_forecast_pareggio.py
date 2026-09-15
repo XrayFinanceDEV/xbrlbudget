@@ -26,9 +26,10 @@ def _preview(user, rows):
 def test_pareggio_dichiarato():
     out = _preview("bep", [{"forecast_year": 2027, "tax_rate": 27.9}])
     p = out["forecast_years"][0]["details"]["pareggio"]
-    assert p == {"costi_variabili": 210000.0, "costi_fissi": 275000.0, "costi_fissi_operativi": 275000.0,
-                 "margine_contribuzione_pct": 65.0, "fatturato_pareggio": 423076.92,
-                 "margine_sicurezza": 176923.08, "margine_sicurezza_pct": 29.49}
+    assert p == {"costi_variabili": D("210000.00"), "costi_fissi": D("275000.00"),
+                 "costi_fissi_operativi": D("275000.00"), "margine_contribuzione_pct": D("65.00"),
+                 "fatturato_pareggio": D("423076.92"), "margine_sicurezza": D("176923.08"),
+                 "margine_sicurezza_pct": D("29.49")}
 
 
 def test_pareggio_nullo_con_override_di_ce05():

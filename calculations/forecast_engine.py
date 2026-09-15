@@ -2769,26 +2769,19 @@ class ForecastEngine:
                 cf = details['ce05_fixed'] + details['ce06_fixed'] + ce07 + ce08 + ce12
                 cf_op = cf - ce04
                 pareggio.update({
-                    'costi_variabili': float(_q2(cv)),
-                    'costi_fissi': float(_q2(cf)),
-                    'costi_fissi_operativi': float(_q2(cf_op)),
+                    'costi_variabili': _q2(cv),
+                    'costi_fissi': _q2(cf),
+                    'costi_fissi_operativi': _q2(cf_op),
                 })
                 if ce01 > Decimal('0') and ce01 - cv > Decimal('0'):
                     mdc = (ce01 - cv) / ce01
                     bep = cf_op / mdc
                     pareggio.update({
-                        'margine_contribuzione_pct': float(_q2(mdc * Decimal('100'))),
-                        'fatturato_pareggio': float(_q2(bep)),
-                        'margine_sicurezza': float(_q2(ce01 - bep)),
-                        'margine_sicurezza_pct': float(_q2((ce01 - bep) / ce01 * Decimal('100'))),
+                        'margine_contribuzione_pct': _q2(mdc * Decimal('100')),
+                        'fatturato_pareggio': _q2(bep),
+                        'margine_sicurezza': _q2(ce01 - bep),
+                        'margine_sicurezza_pct': _q2((ce01 - bep) / ce01 * Decimal('100')),
                     })
-            # Nativi (non Decimal): a differenza degli altri sotto-dizionari di
-            # `details`, questo e' solo declarativo — nessun calcolo a valle lo
-            # rilegge — e l'anteprima (`forecast_preview_service._floats`)
-            # converte solo il primo livello del dizionario: un Decimal qui
-            # sopravviverebbe crudo, e il confronto con un float letterale
-            # fallisce sui centesimi non esatti in binario (423076.92) pur
-            # essendo lo stesso numero.
             details['pareggio'] = pareggio
 
         # CE line items: use override if set, otherwise fall back to base year

@@ -2,9 +2,12 @@
 
 // Passo 5 del wizard ipotesi (spec 2026-09-15 §4.5), PRIMA parte: come si
 // chiude cio' che era gia' in bilancio al 31/12 dell'anno base. Le voci OLTRE
-// 12 mesi si scadenziano a mano qui; le due card dei finanziamenti (banche,
-// altri finanziatori) arrivano col Task 14 e il loro posto in questa griglia
-// e' gia' deciso: sotto, a tutta larghezza.
+// 12 mesi si scadenziano a mano qui — i tributari rateizzati compresi, da
+// decisione del proprietario del 2026-09-15 (§3, §9.1, Task 13b): saldo,
+// rateizzato e acconto restano al passo 7, solo le rate si scrivono qui. Le
+// due card dei finanziamenti (banche, altri finanziatori) arrivano col Task
+// 14 e il loro posto in questa griglia e' gia' deciso: sotto, a tutta
+// larghezza.
 //
 // Presentazionale: le masse, il piano di base, gli stati della colonna
 // «resta» e i flussi del pannello stanno in `lib/budget-pregresso-oltre.ts` e
@@ -13,22 +16,23 @@
 // /preview, e il previsionale lo fa il motore in Python (un solo motore).
 //
 // L'unica scrittura che l'utente NON ha innescato e' il piano di base dei
-// saldi a breve, in un effetto una tantum: `pianoBase` restituisce l'oggetto
-// ricevuto quando il piano c'e' gia', quindi l'effetto si posa da solo invece
-// di ri-innescarsi (CLAUDE.md, «un effetto non dipende mai da cio' che lui
-// stesso scrive»). La card lo dice: «nessun piano da impostare».
+// saldi a breve (i tributari compresi, quando c'e' massa da rateizzare), in
+// un effetto una tantum: `pianoBase` restituisce l'oggetto ricevuto quando il
+// piano c'e' gia', quindi l'effetto si posa da solo invece di ri-innescarsi
+// (CLAUDE.md, «un effetto non dipende mai da cio' che lui stesso scrive»). La
+// card lo dice: «nessun piano da impostare».
 import type { JSX, ReactNode } from "react";
 import { useEffect, useMemo } from "react";
 import { AlertTriangle, Info } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { euro, num, numOrNull } from "@/lib/budget-format";
-import { PREGRESSO_LABELS, openingMasses, validatePregresso } from "@/lib/budget-pregresso-circolante";
+import { euro, numOrNull } from "@/lib/budget-format";
+import { openingMasses, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import {
   FORNITORI_AVVISO_RIGA, OLTRE_KEYS, OLTRE_NOTA, OLTRE_STATI, PREGRESSO_VUOTO,
-  breveRows, massaBreve, oltreRows, pianoBase, withNonIncassato, withOltreAmount,
-  type OltreKey, type OltreRow,
+  breveRows, massaBreve, oltreRows, pianoBase, tributariOltreRow, withNonIncassato, withOltreAmount,
+  withTributariAmount, type OltreKey, type OltreRow,
 } from "@/lib/budget-pregresso-oltre";
 import { flussiPregresso } from "@/lib/budget-pregresso-flussi";
 import { fornitoriZeroAvviso } from "@/lib/budget-fornitori-zero";
@@ -110,10 +114,6 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
     () => fornitoriZeroAvviso(p.baseYear, baseBs, baseInc),
     [p.baseYear, baseBs, baseInc],
   );
-  const righeBreve = useMemo(
-    () => breveRows(baseBs, p.baseYear, avviso ? FORNITORI_AVVISO_RIGA : null),
-    [baseBs, p.baseYear, avviso],
-  );
 
   // Il piano e' UNO per scenario e vive nella riga del primo anno di piano
   // (spec §3.5): da qui in poi lo si legge e lo si scrive sempre li'. Il
@@ -130,17 +130,36 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
     // arrivata piu' tardi (che sostituisce la mappa delle ipotesi) lo fa
     // ripartire una volta sola. Un ref messo qui sopra come cancello
     // fermerebbe la composizione al primo render, cioe' PRIMA che le ipotesi
-    // salvate arrivino: il piano resterebbe senza i saldi a breve.
+    // salvate arrivino: il piano resterebbe senza i saldi a breve, tributari
+    // rateizzati compresi.
     if (!baseBs || firstYear === undefined) return;
     if (pregresso !== pregressoSalvato) updatePregresso(pregresso);
   }, [baseBs, firstYear, pregresso, pregressoSalvato, updatePregresso]);
+
+  // Il saldo tributario a breve mostrato qui e' quello del piano (Task 13b):
+  // un piano salvato dal vecchio passo 7 puo' avere un saldo diverso da
+  // `sp16e`, e questa riga deve mostrare cio' che il motore paga davvero, non
+  // ricalcolarlo dal bilancio.
+  const righeBreve = useMemo(
+    () => breveRows(baseBs, p.baseYear, avviso ? FORNITORI_AVVISO_RIGA : null, pregresso),
+    [baseBs, p.baseYear, avviso, pregresso],
+  );
 
   const righeOltre = useMemo(
     () => oltreRows(baseBs, pregresso, p.forecastYears),
     [baseBs, pregresso, p.forecastYears],
   );
+  // La quinta riga della tabella «oltre 12 mesi»: `null` quando non c'e' nulla
+  // da rateizzare (nessun piano salvato e `sp17e = 0`), e in quel caso la riga
+  // non compare affatto — niente scadenza dichiarata che nessuno ha
+  // dichiarato.
+  const rigaTributari = useMemo(
+    () => tributariOltreRow(baseBs, pregresso, p.forecastYears),
+    [baseBs, pregresso, p.forecastYears],
+  );
   // Diagnostica, non correzione: il messaggio e' lo stesso che il salvataggio
-  // opporrebbe, ma qui arriva mentre si digita.
+  // opporrebbe, ma qui arriva mentre si digita. `pregresso` porta anche il
+  // piano tributario quando c'e', quindi la validazione lo copre gia'.
   const errori = useMemo(
     () => (baseBs ? validatePregresso(pregresso, openingMasses(baseBs), p.forecastYears.length) : []),
     [pregresso, baseBs, p.forecastYears.length],
@@ -160,10 +179,6 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
     // dalla risposta, non dall'array derivato.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [p.preview.data, breve],
-  );
-
-  const tributariRateizzati = num(
-    (baseBs as unknown as Record<string, unknown> | undefined)?.sp17e_debiti_tributari_lungo,
   );
 
   // `items-start`: senza, la colonna si stira a tutta l'altezza della riga e
@@ -291,26 +306,50 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
                       </td>
                     </tr>
                   ))}
-                  {/* Segnaposto in sola lettura: la decisione del proprietario
-                      (§9.1) porta i rateizzati QUI, ma la riga modificabile e'
-                      il Task 13b — fino ad allora il posto dove il piano
-                      tributario si regola resta il passo 7, e dirlo qui e' la
-                      verita' di oggi. */}
-                  <tr>
-                    <td className="px-2 py-1.5 align-top">
-                      <div className="font-medium text-foreground">{PREGRESSO_LABELS.debiti_tributari}</div>
-                      <div className="text-[11px] text-muted-foreground">oltre 12 mesi</div>
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right align-top tabular-nums">
-                      {euro(tributariRateizzati)}
-                    </td>
-                    <td
-                      colSpan={p.forecastYears.length + 1}
-                      className="px-2 py-1.5 text-left align-top text-[11px] text-muted-foreground"
-                    >
-                      si scadenziano al passo 7
-                    </td>
-                  </tr>
+                  {/* I tributari rateizzati (Task 13b, decisione del
+                      proprietario del 2026-09-15, §3/§9.1): saldo, rateizzato
+                      e acconto restano al passo 7 (`tributariPlanOrDefault`,
+                      `withRate`, invariati), qui si scrive solo la rata
+                      dell'anno. Niente riga se non c'e' nulla da rateizzare:
+                      `rigaTributari` e' `null` senza piano salvato e con
+                      `sp17e = 0`. */}
+                  {rigaTributari && (
+                    <tr key={rigaTributari.key} className="border-b border-border/50">
+                      <td className="px-2 py-1.5 align-top">
+                        <div className="font-medium text-foreground">{rigaTributari.label}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          Rate della rateizzazione: escono di cassa nell&apos;anno. Il saldo a breve si paga nel{" "}
+                          {annoSuccessivo}.
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-xs tabular-nums">
+                        {euro(rigaTributari.opening)}
+                      </td>
+                      {p.forecastYears.map((y, i) => (
+                        <td key={y} className="px-2 py-1.5 align-top">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="1000"
+                            min={0}
+                            aria-label={`${rigaTributari.label} — ${y}`}
+                            placeholder="0"
+                            value={rigaTributari.amounts[i] ? String(rigaTributari.amounts[i]) : ""}
+                            onChange={(e) =>
+                              updatePregresso(
+                                withTributariAmount(baseBs, pregresso, p.forecastYears, i, numOrNull(e.target.value)),
+                              )
+                            }
+                            className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs tabular-nums text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                        </td>
+                      ))}
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-xs tabular-nums">
+                        {euro(rigaTributari.resta)}
+                        <Chip tono={TONO[rigaTributari.stato]} className="ml-1.5">{OLTRE_STATI[rigaTributari.stato]}</Chip>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

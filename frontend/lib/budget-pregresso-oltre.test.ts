@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { BalanceSheet } from "@/types/api";
-import { breveRows, massaBreve, massaOltre, oltreRows, pianoBase, withNonIncassato, withOltreAmount } from "./budget-pregresso-oltre";
+import type { BalanceSheet, Pregresso } from "@/types/api";
+import {
+  breveRows, massaBreve, massaOltre, oltreRows, pianoBase, tributariOltreRow, withNonIncassato, withOltreAmount,
+  withTributariAmount,
+} from "./budget-pregresso-oltre";
 import { openingMasses, validatePregresso } from "./budget-pregresso-circolante";
 
 const bs = {
@@ -80,5 +83,32 @@ describe("budget-pregresso-oltre", () => {
     expect(rows[0]).toMatchObject({ importo: 422000, dir: "in", small: "incassati nel 2027" });
     expect(rows[1].alert).toBe("non risultano debiti verso fornitori");
     expect(rows[2].small).toBe("saldo pagato nel 2027");
+  });
+});
+
+describe("tributari rateizzati al passo 5", () => {
+  it("pianoBase: saldo = debito a breve, rateizzato = debito oltre, rate a zero", () => {
+    const p = pianoBase(bs, anni, {});
+    expect(p.debiti_tributari).toEqual({ opening: 96000, saldo: 61000, rateizzato: 35000, amounts: [0, 0, 0], acconto_pct: 100 });
+  });
+  it("senza debito oltre nessun piano tributario", () => {
+    const bs0 = { ...bs, sp17e_debiti_tributari_lungo: "0" } as unknown as BalanceSheet;
+    expect(pianoBase(bs0, anni, {}).debiti_tributari).toBeUndefined();
+    expect(tributariOltreRow(bs0, pianoBase(bs0, anni, {}), anni)).toBeNull();
+  });
+  it("un piano salvato dal vecchio passo 7 si rispetta", () => {
+    const salvato = { debiti_tributari: { opening: 96000, saldo: 50000, rateizzato: 46000, amounts: [23000, 23000], acconto_pct: 80 } } as Pregresso;
+    const p = pianoBase(bs, anni, salvato);
+    expect(p.debiti_tributari).toEqual(salvato.debiti_tributari);
+    expect(tributariOltreRow(bs, p, anni)).toMatchObject({ opening: 46000, amounts: [23000, 23000, null], resta: 0, stato: "chiuso" });
+    expect(breveRows(bs, 2026, null, p)[2]).toMatchObject({ importo: 50000, small: "saldo pagato nel 2027" });
+  });
+  it("withTributariAmount scrive la rata dell'anno e lascia saldo e acconto", () => {
+    let p = pianoBase(bs, anni, {});
+    p = withTributariAmount(bs, p, anni, 1, 20000);
+    expect(p.debiti_tributari).toMatchObject({ saldo: 61000, rateizzato: 35000, amounts: [0, 20000, 0], acconto_pct: 100 });
+    expect(tributariOltreRow(bs, p, anni)).toMatchObject({ resta: 15000, stato: "resta aperto" });
+    p = withTributariAmount(bs, p, anni, 2, 20000);
+    expect(tributariOltreRow(bs, p, anni)?.stato).toBe("oltre il saldo");
   });
 });

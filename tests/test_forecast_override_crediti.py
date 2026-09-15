@@ -85,7 +85,7 @@ def test_override_sotto_il_residuo_si_rifiuta_col_messaggio_giusto(monkeypatch):
             res, _cid, sid = _esito(db, "m3-rifiuto", rows)
             assert res["forecast_generated"] is False, res["message"]
             msg = res["message"]
-            assert "Pregresso e nuovo" in msg, msg
+            assert "Patrimoniale pregresso" in msg, msg
             assert "30.000,00" in msg, msg
             assert "crediti commerciali" in msg, msg
             # Nessun importo grezzo col punto decimale: solo la forma italiana.

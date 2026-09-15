@@ -967,7 +967,7 @@ def test_il_messaggio_del_rifiuto_indica_passo_ed_etichetta(monkeypatch):
             msg = res["message"]
             assert "debiti verso fornitori" in msg, msg          # l'etichetta, non la chiave tecnica
             assert "'debiti_fornitori'" not in msg, msg
-            assert "Pregresso e nuovo" in msg, msg               # il passo che lo scadenzia
+            assert "Patrimoniale pregresso" in msg, msg          # il passo che lo scadenzia
             assert "value: null" in msg, msg                     # la via d'uscita
             assert "non è ammesso" in msg, msg                   # e l'accento, come `validate_pregresso`
 

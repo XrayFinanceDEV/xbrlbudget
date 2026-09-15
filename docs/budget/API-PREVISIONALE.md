@@ -661,6 +661,27 @@ un arrotondamento ma la massa dell'override, e un campo tecnicamente libero per 
 NON basta a farlo vincere. Mai `sp16a/b/c`, `sp17a/b/c`, `sp04b`, `sp04e`, `sp06e`,
 `sp06f`, `sp07e`, `sp07f`, `sp12h`, `sp14b`, `sp14c`. Sempre presente, anche vuota.
 
+### `details['pareggio']` — il punto di pareggio sul MOL (spec 2026-09-15 §4.3, §5.5)
+
+Dichiarato dal motore, mai ricalcolato dal client: sette chiavi, sempre presenti.
+
+| Chiave | Valore |
+|---|---|
+| `costi_variabili` | la sola parte variabile di materie prime e servizi (`ce05_variable + ce06_variable`) |
+| `costi_fissi` | la parte fissa di materie e servizi più godimento beni, personale e oneri diversi (`ce05_fixed + ce06_fixed + ce07 + ce08 + ce12`) |
+| `costi_fissi_operativi` | `costi_fissi` meno gli altri ricavi (`ce04`, comprensivo dell'eventuale plusvalenza da dismissione cespite) |
+| `margine_contribuzione_pct` | `(ce01 − costi_variabili) / ce01 × 100` |
+| `fatturato_pareggio` | `costi_fissi_operativi / margine_contribuzione` (frazione, non percentuale) |
+| `margine_sicurezza` | `ce01 − fatturato_pareggio` |
+| `margine_sicurezza_pct` | `margine_sicurezza / ce01 × 100` |
+
+Con **ricavi o margine di contribuzione non positivi** i quattro valori dal margine di
+contribuzione in poi sono `null`, mai zero: `costi_variabili`/`costi_fissi`/`costi_fissi_operativi`
+restano comunque dichiarati. Con un override di `ce05_override` o `ce06_override` la scomposizione
+fisso/variabile di quella riga non esiste più (`ce05_fixed`/`ce05_variable` tornano `null` in
+`details`, §7 sopra): in quel caso **l'intero blocco `pareggio` è `null`** su tutte e sette le
+chiavi, perché il pareggio non si può ricostruire da un importo forzato.
+
 ## 8. Lo scadenziamento del pregresso
 
 Il motore proietta il circolante con formule di **stock**: ogni formula sostituisce l'intero
@@ -737,6 +758,7 @@ fornitori/previdenziali/altri debiti). Nell'ultimo anno di piano tutto il residu
 | `residual_long` | il resto del residuo, oltre l'esercizio |
 | `generated` | il lato a breve **generato dalla formula di oggi**, prima di sommare `residual_short` |
 | `mode` | `"runoff"` con un piano dichiarato, `"legacy"` senza (formula di oggi, intera) |
+| `non_incassato` | solo sui `crediti_commerciali` (`false` sulle altre quattro voci): il piano ha dichiarato `non_incassato: true` sul JSON in ingresso (spec 2026-09-15 §5.5). È **solo dichiarativo** — accettato dallo schema, persistito e riportato tale e quale, ma il motore non lo usa: un piano a zero sulla parte oltre l'esercizio lascia già il residuo aperto per costruzione, quindi «non incassare» è il comportamento che un piano così scritto produce da sé |
 
 `pregresso_ignored` è una **lista**, sempre presente anche vuota: i saldi il cui piano è stato
 scavalcato dalla via manuale (oggi il solo caso possibile è `debiti_tributari`, quando

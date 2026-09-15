@@ -60,6 +60,7 @@ def test_fidi_costanti_e_rata_dell_anno_dopo_a_breve():
     fidi = det[2027]["debito_bancario"]["fidi"]
     assert {k: (v if k == "regola" else D(str(v))) for k, v in fidi.items()} == {
         "apertura": D("90000.00"), "variazione_ricavi": D("0.00"), "rimborso_sweep": D("0.00"),
+        "tiraggio": D("0.00"), "affidamento": D("90000.00"), "oltre_affidamento": D("0.00"),
         "residuo": D("90000.00"), "regola": "costante"}
     assert det[2027]["oneri_fidi"] == 4500.0 and det[2027]["regime_debito_bancario"] == "esplicito"
     assert D(str(det[2027]["debito_bancario"]["contratti"][0]["breve"])) == D("82500.00")

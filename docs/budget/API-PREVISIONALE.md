@@ -491,7 +491,7 @@ vecchia chiave unica della quota a breve dei prestiti nuovi.
 | `pregresso_senza_piano` | `{apertura, rimborso_sweep, breve, lungo}` quando nell'anno non ci sono contratti con `opening_residual` né `existing_debt_repayment_years` > 0; altrimenti `null` |
 | `pregresso_piano_anni` | `{apertura, rimborso, breve, lungo}` con `existing_debt_repayment_years` > 0 e nessun contratto col residuo; altrimenti `null` |
 | `contratti` | una riga per contratto (misti gia' divisi, anche non ancora erogati), nell'ordine di `financing_amount` e poi della griglia: `{indice, anno, tasso, erogato, residuo_iniziale, rimborso, interessi, breve, lungo}` |
-| `fidi` | nel regime esplicito (`bank_lines_amount` sulla prima riga, più sotto): `{apertura, variazione_ricavi, rimborso_sweep, residuo, regola}`; altrimenti `null` |
+| `fidi` | nel regime esplicito (`bank_lines_amount` sulla prima riga, più sotto): `{apertura, variazione_ricavi, rimborso_sweep, tiraggio, affidamento, oltre_affidamento, residuo, regola}`; altrimenti `null` |
 
 **Invariante:** somma dei `breve` + `scoperto_residuo` = `sp16a`, somma dei `lungo` = `sp17a`, al
 centesimo, ogni anno. La scrive `_dichiara_debito_bancario` DOPO la normalizzazione, dai valori
@@ -539,6 +539,27 @@ decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costant
   dice COME il debito bancario è descritto quest'anno (fidi a stato, contratti col residuo, anni di
   rimborso, nessuno di questi). Nel regime esplicito la «casa» degli aumenti della riconciliazione è
   la riga `fidi`, e in riduzione i fidi si tolgono prima di ogni altra componente.
+- **Il fabbisogno tira sui fidi (§5.2-bis, decisione del proprietario 2026-09-15).** Nel regime
+  esplicito il cancello unico di `_Overdraft.copri` — sempre uno solo, sulla cassa netta finale dopo
+  lo sweep — al posto di aprire scoperto o sollevare calcola `tiraggio = max(0, −cassa netta)`: lo
+  somma a `sp16a`/`sp16`, posa la cassa a zero, e `scoperto_generato`/`scoperto_residuo` restano
+  zero; `overdraft_allowed` e `overdraft_limit` non si leggono. Il `residuo` dichiarato dei fidi
+  include il tiraggio (è la formula Task 3: residuo − rimborso dello sweep + tiraggio), quindi
+  l'anno dopo apre da lì e gli oneri — che restano `fidi_apertura × bank_lines_rate`, mai
+  circolarmente sul tiraggio dell'anno — lo colpiscono dall'anno dopo. L'invariante Σ`breve` +
+  `scoperto_residuo` = `sp16a` tiene anche col tiraggio.
+- **Il tetto è l'importo di partenza, e si dichiara.** `affidamento` = `bank_lines_amount` della
+  prima riga, costante per tutto il piano anche con regola `ricavi` (la crescita per regola conta
+  verso il tetto quanto un tiraggio); `oltre_affidamento` = `max(0, residuo − affidamento)`. Oltre
+  zero il piano si fa comunque e `details['avviso_fidi']` (chiave presente **sempre** nel regime
+  esplicito, `null` a zero) dichiara: «Nel {anno} il piano usa {residuo} € di fidi e anticipi,
+  {oltre} € oltre i {affidamento} € del bilancio di partenza: servono affidamenti in più.»
+  `fabbisogno_picco`/`fabbisogno_picco_anno` leggono `oltre_affidamento` al posto di
+  `scoperto_residuo`, nel regime.
+- **Un `sp_overrides` su `sp16a`/`sp16` con un fabbisogno si rifiuta** come fuori regime (il totale
+  forzato non lascia posto al tiraggio), ma col messaggio che nomina i fidi: «Fidi e anticipi
+  incompatibili con {campo} forzato: servono {importo} di fidi, ma il totale della voce è fissato
+  dall'override. Togli l'override o copri il fabbisogno con un finanziamento.»
 
 ### Altri finanziatori per anno (`other_lenders`)
 
@@ -930,6 +951,10 @@ bancario pregresso e dal nuovo finanziamento — anche nell'aritmetica, non solo
 tetto: oltre, il motore solleva di nuovo. Il cancello unico è `_Overdraft.copri`, chiamato una
 volta sola dopo ogni rettifica compresi gli `sp_overrides`, su una cassa netta già arrotondata al
 centesimo.
+
+> **Nel regime esplicito dei fidi questa scelta non si legge più**: il fabbisogno tira sui fidi
+> (`tiraggio`, §4-ter) e il piano si calcola comunque, con l'avviso oltre l'importo di partenza.
+> `overdraft_allowed`/`overdraft_limit` restano il cancello solo fuori dal regime.
 
 ```jsonc
 { "forecast_year": 2027, "revenue_growth_pct": 5.0,

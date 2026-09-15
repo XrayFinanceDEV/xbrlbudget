@@ -1,27 +1,43 @@
 /**
- * Le decisioni del passo 3 «Costi principali» (spec 2026-09-08 §4.3).
+ * Le decisioni del passo 3 «Costi» (spec 2026-09-15 §4.3, giro di rilievi del 14/09).
  *
  * Sta in `lib/` e non dentro il componente perche' qui i componenti non sono
  * collaudabili (nessun jsdom, e non va aggiunto): tutto cio' che *decide*
  * qualcosa — quale quota fissa mostrare quando gli anni non concordano, quali
- * righe si spengono, che cosa vale il peso dei fissi — vive qui con la sua
- * suite in `environment: node`, e `StepCosti.tsx` si limita a renderlo.
+ * righe si spengono, quali anni seguono ancora l'inflazione — vive qui con la
+ * sua suite in `environment: node`, e `StepCosti.tsx` si limita a renderlo.
  *
- * Un solo motore di proiezione, e sta in Python: la ripartizione fisso/
- * variabile degli anni previsti NON viene ricalcolata qui dallo slider, si
- * legge dalle righe che `rowsCosti` ha ricavato dai `details` del motore.
- * L'unica colonna in cui lo slider entra nell'aritmetica e' quella dell'anno
- * base, che il motore non calcola affatto: e' l'illustrazione di come la
- * quota digitata taglia l'ultimo bilancio.
+ * Un solo motore di proiezione, e sta in Python: il pareggio (`lib/budget-pareggio.ts`)
+ * e il CE fino all'ante imposte (`rowsCeAnteImposte`, `lib/budget-preview-rows.ts`)
+ * leggono solo cio' che il motore ha gia' dichiarato in `details`. La parte VARIABILE
+ * di materie prime e servizi non ha piu' una riga qui: segue i ricavi del passo 2 per
+ * costruzione (Task 10, `withRevenueGrowth`) — non e' un'ipotesi che si scrive in questo
+ * passo, quindi qui non c'e' piu' ne' una riga ne' un pulsante che la scriva.
  */
-import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
+import type { IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { YearCellOff } from "@/lib/budget-year-cell";
-import { rowsCosti, type PreviewRow } from "@/lib/budget-preview-rows";
-import { euro, num, numOrNull, pctOf } from "@/lib/budget-format";
+import { euro, num, numOrNull } from "@/lib/budget-format";
 
 /** Il default del motore per `fixed_*_percentage` (backend/app/schemas/budget.py). */
 export const FIXED_SHARE_DEFAULT = 40;
+
+/**
+ * L'inflazione predefinita di schema, e la lettura dell'inflazione attuale del passo 1.
+ *
+ * Il Task 10 di questo lotto introduce `inflazioneOf` in `lib/budget-inflazione.ts`, con
+ * la stessa identica formula — ma quel modulo non esiste ancora in questo worktree (il
+ * coordinatore ha stabilito che il Task 10 corre DOPO il Task 11), e `StepCosti.tsx` non
+ * e' fra i file che il Task 10 tocca: resta quindi questa lettura locale, non solo per
+ * ora ma anche dopo che il Task 10 sara' unito. Vedi il rapporto del Task 11 per il
+ * dettaglio della deviazione.
+ */
+export const INFLAZIONE_PREDEFINITA = 2;
+
+export function inflazioneAttuale(assumptions: AssumptionsMap, years: number[]): number {
+  const raw = years[0] !== undefined ? assumptions[years[0]]?.inflation_pct : null;
+  return raw === null || raw === undefined ? INFLAZIONE_PREDEFINITA : num(raw);
+}
 
 export type FixedShareField = "fixed_materials_percentage" | "fixed_services_percentage";
 export type SplitOverrideField = "ce05_override" | "ce06_override";
@@ -57,16 +73,8 @@ export function fixedShareOf(
  * intera: la ripartizione fisso/variabile che il motore dichiarava non c'e'
  * piu' e ne' lo slider ne' le percentuali di crescita mordono su quegli anni.
  *
- * La granularita' e' l'ANNO e non la riga. Prima questa funzione rispondeva
- * `true`/`false` con un `some(...)`: un `ce05_override` sul solo 2025
- * accendeva il badge «forzato in CE Prev.» su tutte le righe collegate e su
- * tutti gli anni, mentre l'anteprima — che marca cella per cella — mostrava
- * il valore forzato sul solo 2025. L'utente leggeva un avviso acceso anche
- * dove la casella funziona, e digitava senza alcun segnale in quella dove
- * non serve a niente.
- *
- * Un override a zero e' un override vero (voce azzerata); `null` e assente
- * non forzano nulla.
+ * La granularita' e' l'ANNO e non la riga. Un override a zero e' un override
+ * vero (voce azzerata); `null` e assente non forzano nulla.
  */
 export function forcedSplitYears(
   assumptions: AssumptionsMap,
@@ -100,34 +108,42 @@ export function forcedNote(forcedYears: number[], allYears: number[]): string | 
   return `${FORCED_NOTE} nel ${listaAnni(forcedYears)}`;
 }
 
-/** Il `title` della casella inerte: sta sull'anno, quindi non lo ripete. */
+/** Il `title` della casella inerte per un override di CE Prev.: sta sull'anno,
+ *  quindi non lo ripete. */
 const FORCED_CELL_NOTE =
   "Forzato in CE Prev.: in quest'anno la voce è un importo assoluto, quindi questa " +
   "percentuale non ha effetto. Si azzera dal dialogo Ricalcola.";
 
-/** Il `title` della riga che la quota all'estremo ha annullato: una casella
- *  spenta senza il suo perche' e' lo stesso difetto un gradino piu' in la'. */
-const OFF_NOTE = {
-  variabile: "Con la quota fissa al 100% non resta parte variabile: questa percentuale non ha effetto.",
-  fissa: "Con la quota fissa a 0% non resta parte fissa: questa percentuale non ha effetto.",
-};
+/** Il `title` della riga «… · fissa» quando la quota fissa e' a 0%: non resta parte
+ *  fissa su cui la percentuale possa mordere. */
+const OFF_NOTE_FISSA = "Con la quota fissa a 0% non resta parte fissa: questa percentuale non ha effetto.";
+
+/** Il `title` della cella «azzurra»: segue l'inflazione del passo 1 finche' non la si
+ *  scrive a mano (spec §4.3, decisione 2). */
+export const AUTO_NOTE =
+  "Segue l'inflazione del passo 1: cambia se la cambi lì. Scrivi un valore per fissarlo; " +
+  "svuota la casella per tornare all'inflazione.";
 
 export interface CostiBase {
   mat: number | null;
   serv: number | null;
   pers: number | null;
   god: number | null;
+  /** Oneri diversi di gestione (ce12): entra qui perche' la riga «Oneri diversi di
+   *  gestione» si e' spostata in questo passo — prima viveva in «Altre voci CE». */
+  od: number | null;
 }
 
-/** Le quattro voci dell'anno base. Anno base assente ⇒ `null`, mai zero. */
+/** Le cinque voci dell'anno base. Anno base assente ⇒ `null`, mai zero. */
 export function costiBase(baseInc: IncomeStatement | undefined | null): CostiBase {
-  if (!baseInc) return { mat: null, serv: null, pers: null, god: null };
+  if (!baseInc) return { mat: null, serv: null, pers: null, god: null, od: null };
   const i = baseInc as unknown as Record<string, unknown>;
   return {
     mat: numOrNull(i.ce05_materie_prime) ?? 0,
     serv: numOrNull(i.ce06_servizi) ?? 0,
     pers: numOrNull(i.ce08_costi_personale) ?? 0,
     god: numOrNull(i.ce07_godimento_beni) ?? 0,
+    od: numOrNull(i.ce12_oneri_diversi) ?? 0,
   };
 }
 
@@ -142,13 +158,43 @@ export function splitBaseAmount(
 }
 
 /**
+ * Se un valore scritto in una casella della «Parte fissa» torna
+ * all'inflazione o resta un numero suo.
+ *
+ * Vuoto (`null`) ⇒ automatico: la casella segue l'inflazione del passo 1
+ * finche' l'utente non ci scrive sopra. Un valore esplicito, ANCHE UNO ZERO,
+ * e' una scelta dell'utente e smette di seguire l'inflazione — uno zero
+ * scritto a mano non e' la stessa cosa di una casella vuota.
+ */
+export function fixedGrowthChange(raw: number | null, inflazione: number): { value: number; auto: boolean } {
+  return raw === null ? { value: inflazione, auto: true } : { value: raw, auto: false };
+}
+
+/** Gli anni in cui la casella «Parte fissa» e' ancora in automatico
+ *  (`fixed_*_growth_auto === true`), nell'ordine del piano. */
+export function autoYearsOf(
+  map: AssumptionsMap,
+  years: number[],
+  field: "fixed_materials_growth_auto" | "fixed_services_growth_auto"
+): number[] {
+  return years.filter((y) => map[y]?.[field] === true);
+}
+
+/**
  * Le righe della tabella. Forma strutturalmente compatibile con
  * `YearInputRow | YearInputGroup` di `components/budget/wizard/YearInputTable`
  * — dichiarata qui perche' `lib/` non importa da `components/`.
  */
 export type CostiTableRow =
-  | { group: string; swatch?: "fixed" | "variable" }
-  | ({ field: string; label: string; sub?: string; baseLabel: string } & YearCellOff);
+  | { group: string; swatch?: "fixed" | "variable"; sub?: string }
+  | ({
+      field: string;
+      label: string;
+      sub?: string;
+      baseLabel: string;
+      autoYears?: number[];
+      autoNote?: string;
+    } & YearCellOff);
 
 /** Gli anni previsti, e quelli in cui CE Prev. forza le due voci. */
 export interface ForcedSplit {
@@ -158,36 +204,34 @@ export interface ForcedSplit {
 }
 
 /**
- * Tre gruppi: la quota fissa, poi le variabili, poi le fisse.
+ * Due gruppi: la parte fissa di materie prime e servizi (precompilata con
+ * l'inflazione del passo 1, correggibile anno per anno), poi le tre ipotesi
+ * manuali che restano — personale, godimento beni di terzi, oneri diversi di
+ * gestione (spostata qui da «Altre voci CE»). La riga «quota fissa, anno per
+ * anno» di prima e le due righe della parte variabile SPARISCONO dalla
+ * tabella: la quota resta modificabile solo dallo slider (non e' mai stata
+ * usata differenziata), e la parte variabile segue i ricavi per costruzione
+ * (Task 10) — non e' piu' un'ipotesi che si scrive in questo passo.
  *
- * Le due righe della quota fissa esistono perche' la quota e' un'ipotesi PER
- * ANNO e il motore la applica riga per riga: lo slider la scrive su tutti gli
- * anni insieme (`updateAll`), queste due righe la correggono anno per anno
- * (`update`). Senza di esse un valore differenziato a mano sarebbe modificabile
- * solo dallo slider, cioe' appiattito da un gesto che l'utente non legge come
- * distruttivo. La colonna dell'anno base resta «—»: una quota e' un'ipotesi sul
- * futuro, l'anno base non ne ha una.
+ * `auto` (calcolato dal chiamante con `autoYearsOf`, uno per voce) marca le
+ * celle ancora automatiche: l'anteprima le rende azzurre con la loro nota,
+ * indipendentemente da `offYears` — le due cose rispondono a domande diverse
+ * (automatica vs. inerte per un override di CE Prev.) e possono capitare
+ * insieme sulla stessa cella.
  *
- * Una riga si spegne quando la quota la annulla — a quota 100 la parte variabile
- * non esiste, a quota 0 la parte fissa — perche' la sua percentuale di crescita
- * non avrebbe niente su cui mordere. Ma **mai quando gli anni discordano**:
+ * Una riga «… · fissa» si spegne quando la quota della slider la annulla — a
+ * quota 0 non resta parte fissa — ma **mai quando gli anni discordano**:
  * `off` e' un flag di RIGA e `YearInputTable` lo traduce in `disabled` su OGNI
- * colonna, quindi con quota 100 sul primo anno e 40 sul secondo si renderebbe
- * indigitabile un campo che sul secondo anno il motore usa eccome. Qui la quota
- * che si conosce e' solo quella del primo anno: un controllo che non sa non
- * blocca.
- *
- * L'override di CE Prev. invece si sa per anno, e si spegne per anno
- * (`offYears`): la casella dell'anno forzato diventa inerte con il suo
- * perche', quelle degli altri anni restano vive. Prima non si spegneva nulla
- * e l'unico segnale — il badge — era acceso su tutti gli anni: si digitava un
- * numero senza effetto mentre l'anteprima non si muoveva.
+ * colonna, quindi con quota 0 sul primo anno e 40 sul secondo si renderebbe
+ * indigitabile un campo che sul secondo anno il motore usa eccome (stessa
+ * regola del passo prima del giro di rilievi).
  */
 export function costiTableRows(
   base: CostiBase,
   mat: FixedShare,
   serv: FixedShare,
-  forced: ForcedSplit
+  forced: ForcedSplit,
+  auto: { materials: number[]; services: number[] }
 ): CostiTableRow[] {
   const matSplit = splitBaseAmount(base.mat, mat.value);
   const servSplit = splitBaseAmount(base.serv, serv.value);
@@ -196,164 +240,52 @@ export function costiTableRows(
   const matForced = { offYears: forced.materials, offYearsNote: FORCED_CELL_NOTE };
   const servForced = { offYears: forced.services, offYearsNote: FORCED_CELL_NOTE };
   return [
-    { group: "Quota fissa, anno per anno" },
-    {
-      field: "fixed_materials_percentage",
-      label: "Materie prime · quota fissa (%)",
-      sub: matNote,
-      baseLabel: "—",
-      ...matForced,
-    },
-    {
-      field: "fixed_services_percentage",
-      label: "Servizi · quota fissa (%)",
-      sub: servNote,
-      baseLabel: "—",
-      ...servForced,
-    },
-    { group: "Costi variabili", swatch: "variable" },
-    {
-      field: "variable_materials_growth_pct",
-      label: "Materie prime · parte variabile",
-      sub: matNote,
-      baseLabel: euro(matSplit.variable),
-      off: mat.value >= 100 && !mat.uneven,
-      offNote: OFF_NOTE.variabile,
-      ...matForced,
-    },
-    {
-      field: "variable_services_growth_pct",
-      label: "Servizi · parte variabile",
-      sub: servNote,
-      baseLabel: euro(servSplit.variable),
-      off: serv.value >= 100 && !serv.uneven,
-      offNote: OFF_NOTE.variabile,
-      ...servForced,
-    },
-    { group: "Costi fissi", swatch: "fixed" },
+    { group: "Parte fissa", swatch: "fixed", sub: "precompilata con l'inflazione del passo 1 · correggi se serve, anche a 0" },
     {
       field: "fixed_materials_growth_pct",
-      label: "Materie prime · parte fissa",
+      label: "Materie prime · fissa",
       sub: matNote,
       baseLabel: euro(matSplit.fixed),
+      autoYears: auto.materials,
+      autoNote: AUTO_NOTE,
       off: mat.value <= 0 && !mat.uneven,
-      offNote: OFF_NOTE.fissa,
+      offNote: OFF_NOTE_FISSA,
       ...matForced,
     },
     {
       field: "fixed_services_growth_pct",
-      label: "Servizi · parte fissa",
+      label: "Servizi · fissa",
       sub: servNote,
       baseLabel: euro(servSplit.fixed),
+      autoYears: auto.services,
+      autoNote: AUTO_NOTE,
       off: serv.value <= 0 && !serv.uneven,
-      offNote: OFF_NOTE.fissa,
+      offNote: OFF_NOTE_FISSA,
       ...servForced,
     },
+    { group: "Ipotesi manuali", sub: "partono da 0 · variazione % sull'anno precedente" },
     { field: "personnel_growth_pct", label: "Personale", baseLabel: euro(base.pers) },
     { field: "rent_growth_pct", label: "Godimento beni di terzi", baseLabel: euro(base.god) },
+    {
+      field: "other_costs_growth_pct",
+      label: "Oneri diversi di gestione",
+      sub: "spostata qui da «Altre voci CE»",
+      baseLabel: euro(base.od),
+    },
   ];
 }
 
-export interface AssumptionWrite {
-  year: number;
-  field: "variable_materials_growth_pct" | "variable_services_growth_pct";
-  value: number;
-}
-
-/**
- * «Allinea le variabili ai ricavi»: le due parti variabili prendono, anno per
- * anno, la crescita dei ricavi di QUELL'anno — non una sola cifra per tutti,
- * perche' la crescita dei ricavi puo' cambiare lungo il piano. Un anno senza
- * crescita dichiarata vale 0: qui lo zero e' il valore che il motore userebbe.
- */
-export function alignVariablesToRevenue(
-  assumptions: AssumptionsMap,
-  years: number[]
-): AssumptionWrite[] {
-  const out: AssumptionWrite[] = [];
-  for (const year of years) {
-    const value = num(assumptions[year]?.revenue_growth_pct ?? 0);
-    out.push({ year, field: "variable_materials_growth_pct", value });
-    out.push({ year, field: "variable_services_growth_pct", value });
-  }
-  return out;
-}
-
-export interface CostiSplitBar {
-  year: number;
-  fixed: number | null;
-  variable: number | null;
-  /** Larghezze per la barra impilata: mai negative, cosi' `flex` resta sensato. */
-  fixedFlex: number;
-  variableFlex: number;
-}
-
-export interface CostiPreview {
-  /** Gli anni che il motore ha davvero prodotto, non quelli richiesti. */
-  years: number[];
-  /** Le righe della tabella dell'anteprima: senza «Debiti verso fornitori». */
-  tableRows: PreviewRow[];
-  /** La riga dei fornitori, resa da sola sotto l'occhiello dei giorni. */
-  fornitori: PreviewRow | null;
-  /** `details.dpo_applied` del primo anno previsto. */
-  dpo: number | null;
-  bars: CostiSplitBar[];
-  /** Peso dei fissi sui costi principali: anno base e ultimo anno previsto. */
-  weight: { base: number | null; last: number | null };
-}
-
-const EMPTY_PREVIEW: CostiPreview = {
-  years: [],
-  tableRows: [],
-  fornitori: null,
-  dpo: null,
-  bars: [],
-  weight: { base: null, last: null },
-};
-
-/**
- * Dalla risposta del motore a tutto cio' che l'anteprima del passo rende.
- *
- * Senza anno base o senza risposta non c'e' anteprima: nessuna riga, non righe
- * a zero. Gli anni sono quelli che il motore ha prodotto — se si e' fermato a
- * meta' (fabbisogno scoperto) la 200 porta gli anni validi e sono quelli che si
- * mostrano, mai le colonne richieste riempite di vuoto.
- */
-export function costiPreview(
-  baseInc: IncomeStatement | undefined | null,
-  fixedShare: { materials: number; services: number },
-  data: ForecastPreviewResponse | null
-): CostiPreview {
-  if (!baseInc || !data) return EMPTY_PREVIEW;
-
-  const previewYears = data.forecast_years ?? [];
-  const years = previewYears.map((y) => y.year);
-  const rows = rowsCosti(baseInc, fixedShare, previewYears);
-  const byKey = (key: string) => rows.find((r) => r.key === key) ?? null;
-  const fissi = byKey("fissi"), variabili = byKey("variabili"), principali = byKey("principali");
-
-  const bars: CostiSplitBar[] = years.map((year, i) => {
-    const fixed = fissi?.years[i]?.value ?? null;
-    const variable = variabili?.years[i]?.value ?? null;
-    return {
-      year,
-      fixed,
-      variable,
-      fixedFlex: Math.max(0, fixed ?? 0),
-      variableFlex: Math.max(0, variable ?? 0),
-    };
-  });
-
-  const last = years.length - 1;
-  return {
-    years,
-    tableRows: rows.filter((r) => r.key !== "fornitori"),
-    fornitori: byKey("fornitori"),
-    dpo: previewYears[0]?.details?.dpo_applied ?? null,
-    bars,
-    weight: {
-      base: pctOf(fissi?.base.value ?? null, principali?.base.value ?? null),
-      last: last >= 0 ? pctOf(fissi?.years[last]?.value ?? null, principali?.years[last]?.value ?? null) : null,
-    },
-  };
+/** Le tre righe della card «Calcolate in altri passi»: nessun valore, solo dove
+ *  trovarle — i numeri veri sono nel «Conto economico fino all'ante imposte» qui
+ *  sotto e nei passi citati. Un valore forzato a mano in CE Prev. vince su queste
+ *  regole finche' non lo si azzera dal dialogo Ricalcola: e' la stessa nota che il
+ *  prototipo mette sotto la card (`baseYear` non entra nel testo: le tre righe non
+ *  dipendono dall'anno, solo dal fatto che il passo 6/7 le calcolano). */
+export function calcolateAltrove(baseYear: number): { label: string; small: string; passo: string }[] {
+  void baseYear;
+  return [
+    { label: "Ammortamenti", small: "quote esistenti più i nuovi investimenti", passo: "passo 6" },
+    { label: "Oneri finanziari", small: "mutui esistenti, nuovi finanziamenti, scoperto", passo: "passi 5 e 6" },
+    { label: "Imposte", small: "aliquota effettiva o forzata", passo: "passo 7" },
+  ];
 }

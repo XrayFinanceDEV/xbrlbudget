@@ -3,8 +3,8 @@ import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
-  ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
-  rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
+  ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
+  rowsImposte, rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
 } from "./budget-preview-rows";
 import { confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
 import { euro } from "@/lib/budget-format";
@@ -95,22 +95,85 @@ describe("rowsFatturato", () => {
 });
 
 describe("rowsCosti", () => {
-  it("totale = somma delle quattro voci, fissi + variabili = materie + servizi, % sui ricavi", () => {
-    const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [year(2027)]);
-    const tot = rows.find((r) => r.key === "principali")!;
-    expect(tot.years[0].value).toBe(430 + 210 + 30 + 155);
-    expect(tot.years[0].pct).toBeCloseTo((825 / 1100) * 100, 6);
-    expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(130 + 120 + 155 + 30);
-    expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300 + 90);
-    // base: quote dallo slider
-    expect(rows.find((r) => r.key === "fissi")!.base.value).toBe(400 * 0.325 + 200 * 0.6 + 150 + 30);
-    expect(rows.find((r) => r.key === "mol")!.years[0].value).toBe(1100 + 50 - 825 - 20);
+  it("variabili e fissi vengono da details.pareggio, non piu' sommati qui — personale e MOL restano canonici", () => {
+    const y = year(2027);
+    y.details.pareggio = {
+      costi_variabili: 300, costi_fissi: 385, costi_fissi_operativi: 385,
+      margine_contribuzione_pct: 60, fatturato_pareggio: 641666.67,
+      margine_sicurezza: 458333.33, margine_sicurezza_pct: 41.67,
+    };
+    const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [y]);
+    expect(rows.map((r) => r.key)).toEqual(["ricavi", "variabili", "fissi", "personale", "mol"]);
+    expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300);
+    expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(385);
+    expect(rows.find((r) => r.key === "personale")!.years[0].value).toBe(155);
+    // Il MOL della riga e' quello canonico di ceAggregates sull'anno previsto (1150 - 825 - 20 = 305),
+    // NON vdp - variabili - fissi del pareggio (che qui darebbe 1150 - 300 - 385 = 465): le due voci
+    // "fissi"/"variabili" della tabella coprono solo materie, servizi, personale, godimento e oneri
+    // diversi, mentre il MOL canonico tiene conto anche di ce02/ce03/ce10/ce11/ce11b.
+    expect(rows.find((r) => r.key === "mol")!.years[0].value).toBe(305);
+    // base: quote dallo slider, oneri diversi (ce12) compresi nei fissi da questo giro di rilievi
+    expect(rows.find((r) => r.key === "fissi")!.base.value).toBe(400 * 0.325 + 200 * 0.6 + 150 + 30 + 20);
+    expect(rows.find((r) => r.key === "variabili")!.base.value).toBeCloseTo(600 - (400 * 0.325 + 200 * 0.6), 6);
   });
-  it("con override i componenti sono null e la riga lo dice", () => {
-    const y = year(2027); y.details.ce05_fixed = null; y.details.ce05_variable = null;
+  it("senza pareggio definito (override di CE Prev.) le celle sono null con la nota, il MOL canonico resta calcolabile", () => {
+    const y = year(2027);
+    y.details.pareggio = {
+      costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
     const rows = rowsCosti(baseInc, { materials: 40, services: 40 }, [y]);
     expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBeNull();
     expect(rows.find((r) => r.key === "fissi")!.years[0].note).toBe("forzato in CE Prev.");
+    expect(rows.find((r) => r.key === "variabili")!.years[0].note).toBe("forzato in CE Prev.");
+    expect(rows.find((r) => r.key === "mol")!.years[0].value).toBe(305);
+  });
+  it("i valori del pareggio come stringa (Decimal serializzato) danno lo stesso risultato dei numeri", () => {
+    const y = year(2027);
+    y.details.pareggio = { costi_variabili: "300", costi_fissi: "385" } as never;
+    const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [y]);
+    expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300);
+    expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(385);
+  });
+});
+
+describe("rowsCeAnteImposte", () => {
+  it("dal valore della produzione all'ante imposte, dal motore", () => {
+    // `year(y, over)` di QUESTO file spande `over` dentro `income_statement`, non al primo
+    // livello dell'anno: il pareggio si scrive a parte, come fa gia' il test sopra
+    // («con override i componenti sono null»).
+    const y = year(2027, {
+      ce01_ricavi_vendite: 1000, ce04_altri_ricavi: 10, ce05_materie_prime: 300, ce06_servizi: 100,
+      ce07_godimento_beni: 20, ce08_costi_personale: 200, ce09_ammortamenti: 50, ce12_oneri_diversi: 5,
+      ce15_oneri_finanziari: 15,
+    });
+    y.details.pareggio = {
+      costi_variabili: 240, costi_fissi: 385, costi_fissi_operativi: 385,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
+    const rows = rowsCeAnteImposte(baseInc, [y]);
+    expect(rows.map((r) => r.key)).toEqual(["vdp", "variabili", "fissi", "mol", "amm", "ro", "of", "ebt"]);
+    expect(rows.find((r) => r.key === "ebt")?.years[0].value).toBe(1010 - 240 - 385 - 50 - 15);
+  });
+
+  it("senza pareggio definito, mol/ro/ebt sono null con la nota; vdp/ammortamenti/oneri restano", () => {
+    const y = year(2027);
+    y.details.pareggio = {
+      costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
+    const rows = rowsCeAnteImposte(baseInc, [y]);
+    const ebt = rows.find((r) => r.key === "ebt")!;
+    expect(ebt.years[0].value).toBeNull();
+    expect(ebt.years[0].note).toBe("forzato in CE Prev.");
+    expect(rows.find((r) => r.key === "vdp")!.years[0].value).toBe(1100 + 50);
+    expect(rows.find((r) => r.key === "amm")!.years[0].value).toBe(-40);
+  });
+
+  it("years: [] non lancia e non produce righe d'anno", () => {
+    const rows = rowsCeAnteImposte(baseInc, []);
+    expect(rows.every((r) => r.years.length === 0)).toBe(true);
+    expect(rows.find((r) => r.key === "vdp")!.base.value).toBe(1000 + 50);
   });
 });
 

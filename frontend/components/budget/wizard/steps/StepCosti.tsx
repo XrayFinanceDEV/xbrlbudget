@@ -1,40 +1,43 @@
 "use client";
 
-// Passo 3 del percorso ipotesi: i costi principali (spec 2026-09-08 §4.3).
-// Due slider dividono materie prime e servizi fra quota fissa e quota
-// variabile, la tabella raccoglie le percentuali di crescita in due gruppi, e
-// l'anteprima mostra il totale, di cui fisso e di cui variabile, in % dei
-// ricavi — la domanda con cui questo lavoro e' stato chiesto.
+// Passo 3 del percorso ipotesi: Costi (spec 2026-09-15 §4.3, giro di rilievi del 14/09).
+// Due slider dividono materie prime e servizi fra quota fissa e quota variabile (invariati);
+// la tabella raccoglie solo le percentuali di crescita che restano da scrivere a mano — la
+// parte fissa (precompilata con l'inflazione del passo 1) e tre ipotesi manuali (personale,
+// godimento beni di terzi, oneri diversi di gestione, spostata qui da «Altre voci CE»). La
+// parte variabile non ha piu' una riga: segue i ricavi del passo 2 per costruzione (Task 10).
 //
-// Presentazionale: ogni decisione (quale quota mostrare, quali righe si
-// spengono, quanto pesano i fissi) sta in lib/budget-costi-step.ts, provata in
-// environment: node. E i numeri degli anni previsti vengono dal motore, mai
-// ricalcolati qui dallo slider — un solo motore di proiezione, e sta in Python.
-import type { JSX } from "react";
-import { AlignLeft } from "lucide-react";
+// Presentazionale: ogni decisione (quale quota mostrare, quali righe si spengono, quali anni
+// sono ancora automatici) sta in lib/budget-costi-step.ts, provata in environment: node. Il
+// pareggio sul MOL (lib/budget-pareggio.ts) e il CE fino all'ante imposte
+// (lib/budget-preview-rows.ts) leggono solo cio' che il motore ha gia' dichiarato in
+// `details` — un solo motore di proiezione, e sta in Python.
+import { useMemo, type JSX } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { parseFieldValue } from "@/lib/budget-field-rules";
-import { describeCell } from "@/lib/budget-preview-cell";
-import type { PreviewCell, PreviewRow } from "@/lib/budget-preview-rows";
+import { euro, pct1 } from "@/lib/budget-format";
 import { previewNotice } from "@/lib/budget-preview-notice";
-import { days1, euro, pct1 } from "@/lib/budget-format";
+import { rowsCeAnteImposte, rowsCosti } from "@/lib/budget-preview-rows";
+import { pareggioBarre, pareggioFormula, rowsPareggio } from "@/lib/budget-pareggio";
 import {
-  alignVariablesToRevenue,
+  autoYearsOf,
+  calcolateAltrove,
   costiBase,
-  costiPreview,
   costiTableRows,
+  fixedGrowthChange,
   fixedShareOf,
   forcedNote,
   forcedSplitYears,
+  inflazioneAttuale,
   splitBaseAmount,
   type FixedShare,
   type FixedShareField,
   type ForcedSplit,
 } from "@/lib/budget-costi-step";
+import { cn } from "@/lib/utils";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputGroup, type YearInputRow } from "../YearInputTable";
 import type { StepProps } from "../types";
@@ -106,8 +109,7 @@ function SplitSlider(props: {
       {uneven && (
         <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
           Valori diversi per anno: muovendo lo slider — o digitando nella casella qui accanto — li
-          allinei tutti a quello che imposti. Per differenziarli, usa la riga «quota fissa» della
-          tabella.
+          allinei tutti a quello che imposti.
         </p>
       )}
     </div>
@@ -116,44 +118,46 @@ function SplitSlider(props: {
 
 function LegendSwatch({ tone, children }: { tone: "fixed" | "variable"; children: string }): JSX.Element {
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-start gap-1.5">
       <span
-        className={
-          tone === "fixed"
-            ? "h-2 w-2 rounded-sm bg-blue-500 dark:bg-blue-400"
-            : "h-2 w-2 rounded-sm bg-amber-500 dark:bg-amber-400"
-        }
+        className={cn(
+          "mt-1 h-2 w-2 shrink-0 rounded-sm",
+          tone === "fixed" ? "bg-blue-500 dark:bg-blue-400" : "bg-amber-500 dark:bg-amber-400"
+        )}
       />
       {children}
     </span>
   );
 }
 
-function PreviewCellTd({ cell }: { cell: PreviewCell }): JSX.Element {
-  const { main, sub, note } = describeCell(cell);
+/** Una riga del mini grafico del pareggio: la traccia dei ricavi, la tacca del pareggio e il
+ *  segmento del margine di sicurezza — verde sopra il pareggio, rosso sotto. Un anno `nd`
+ *  (parte fissa/variabile non definita) non ha barra: solo il trattino a destra. */
+function BepRow({ b }: { b: ReturnType<typeof pareggioBarre>[number] }): JSX.Element {
+  const lo = Math.min(b.margineDaPct, b.margineAPct);
+  const hi = Math.max(b.margineDaPct, b.margineAPct);
+  const titolo = b.nd
+    ? "Non definito: materie prime o servizi forzati in CE Prev."
+    : `${b.year}: ricavi ${pct1(b.ricaviPct)} della scala · pareggio a ${pct1(b.pareggioPct)} · margine di sicurezza ${euro(b.margine)} (${pct1(b.marginePct)})`;
   return (
-    <td className="whitespace-nowrap px-2 py-1 text-right align-top" title={note ?? undefined}>
-      <div className={cell.value === null ? "text-muted-foreground" : undefined}>{main}</div>
-      {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
-    </td>
-  );
-}
-
-/** La sola riga dei fornitori, resa sotto l'occhiello dei giorni di pagamento. */
-function FornitoriRow({ row, years }: { row: PreviewRow; years: number[] }): JSX.Element {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <tbody>
-          <tr>
-            <td className="px-2 py-1 align-top">{row.label}</td>
-            <PreviewCellTd cell={row.base} />
-            {years.map((y, i) => (
-              <PreviewCellTd key={y} cell={row.years[i]} />
-            ))}
-          </tr>
-        </tbody>
-      </table>
+    <div className="grid grid-cols-[38px_1fr_60px] items-center gap-2.5 text-[11px]" title={titolo}>
+      <span className="text-muted-foreground">{b.year}</span>
+      <div className="relative h-[18px] overflow-hidden rounded-r bg-muted">
+        <div className="absolute inset-y-0 left-0 rounded-r bg-border" style={{ width: `${b.ricaviPct}%` }} />
+        {!b.nd && (
+          <>
+            <div
+              className={cn(
+                "absolute top-[3px] bottom-[3px] rounded-sm",
+                b.ok ? "bg-green-500 dark:bg-green-400" : "bg-red-400/70 dark:bg-red-500/60"
+              )}
+              style={{ left: `${lo}%`, width: `${Math.max(0, hi - lo)}%` }}
+            />
+            <div className="absolute -top-[3px] -bottom-[3px] w-[2px] bg-foreground" style={{ left: `${b.pareggioPct}%` }} />
+          </>
+        )}
+      </div>
+      <span className="text-right font-semibold tabular-nums">{b.nd ? "—" : pct1(b.marginePct)}</span>
     </div>
   );
 }
@@ -172,32 +176,73 @@ export function StepCosti(p: StepProps): JSX.Element {
     materials: forcedNote(forced.materials, forced.years),
     services: forcedNote(forced.services, forced.years),
   };
+  const auto = {
+    materials: autoYearsOf(p.assumptions, p.forecastYears, "fixed_materials_growth_auto"),
+    services: autoYearsOf(p.assumptions, p.forecastYears, "fixed_services_growth_auto"),
+  };
+  const inflazione = inflazioneAttuale(p.assumptions, p.forecastYears);
 
-  const base = costiBase(p.historical[p.baseYear]?.income);
-  const rows: (YearInputRow | YearInputGroup)[] = costiTableRows(base, mat, serv, forced);
+  const baseInc = p.historical[p.baseYear]?.income;
+  const base = costiBase(baseInc);
 
-  const preview = costiPreview(
-    p.historical[p.baseYear]?.income,
-    { materials: mat.value, services: serv.value },
-    p.preview.data
+  // Una casella «Parte fissa» vuota torna all'inflazione (auto=true); un numero — anche
+  // uno zero — resta suo (auto=false). `YearInputTable` chiama questo handler con la
+  // stringa grezza al posto del parsing standard, perche' `fixed_*_growth_pct` non e'
+  // `nullable` in `lib/budget-field-rules.ts` (Task 1, non fra i file di questo task) e
+  // «vuoto» deve restare distinto da «zero scritto a mano».
+  const onFixedRawChange = (field: "fixed_materials_growth_pct" | "fixed_services_growth_pct") =>
+    (year: number, raw: string) => {
+      const t = raw.trim();
+      const parsed = t === "" ? null : parseFieldValue(field, raw);
+      const { value, auto: isAuto } = fixedGrowthChange(parsed, inflazione);
+      p.update(year, field, value);
+      p.update(year, field === "fixed_materials_growth_pct" ? "fixed_materials_growth_auto" : "fixed_services_growth_auto", isAuto);
+    };
+
+  const rows: (YearInputRow | YearInputGroup)[] = useMemo(
+    () =>
+      costiTableRows(base, mat, serv, forced, auto).map((r): YearInputRow | YearInputGroup => {
+        if (!("field" in r)) return r;
+        if (r.field === "fixed_materials_growth_pct" || r.field === "fixed_services_growth_pct") {
+          return { ...r, onRawChange: onFixedRawChange(r.field) };
+        }
+        return r;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, mat.value, mat.uneven, serv.value, serv.uneven, forced.materials, forced.services, auto.materials, auto.services, inflazione]
   );
 
-  const alignToRevenue = () => {
-    for (const w of alignVariablesToRevenue(p.assumptions, p.forecastYears)) {
-      p.update(w.year, w.field, w.value);
+  const riallineaAllInflazione = () => {
+    for (const y of p.forecastYears) {
+      p.update(y, "fixed_materials_growth_pct", inflazione);
+      p.update(y, "fixed_materials_growth_auto", true);
+      p.update(y, "fixed_services_growth_pct", inflazione);
+      p.update(y, "fixed_services_growth_auto", true);
     }
   };
+
+  // Gli anni delle colonne sono quelli che il motore ha davvero prodotto, non quelli
+  // richiesti: se si e' fermato a meta' (fabbisogno scoperto) le intestazioni non
+  // restano senza celle sotto (stessa convenzione degli altri passi).
+  const previewYears = useMemo(() => p.preview.data?.forecast_years ?? [], [p.preview.data]);
+  const costiRows = useMemo(
+    () => (baseInc ? rowsCosti(baseInc, { materials: mat.value, services: serv.value }, previewYears) : []),
+    [baseInc, mat.value, serv.value, previewYears]
+  );
+  const pareggioRows = useMemo(() => rowsPareggio(previewYears), [previewYears]);
+  const barre = useMemo(() => pareggioBarre(previewYears), [previewYears]);
+  const formula = useMemo(() => pareggioFormula(previewYears[0]), [previewYears]);
+  const ceRows = useMemo(() => (baseInc ? rowsCeAnteImposte(baseInc, previewYears) : []), [baseInc, previewYears]);
+  const calcolate = calcolateAltrove(p.baseYear);
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
       <div className="space-y-4">
         <Card className="border-border/80">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Quanto di questi costi è fisso</CardTitle>
+            <CardTitle className="text-sm">Quanto è fisso</CardTitle>
             <p className="text-xs text-muted-foreground">
-              La quota fissa segue l&apos;inflazione, la quota variabile segue i ricavi. Lo slider vale
-              per tutti gli anni previsti; per differenziarli, la riga «quota fissa» della tabella qui
-              sotto si compila anno per anno.
+              Al variare del fatturato, quale parte resta costante?
             </p>
           </CardHeader>
           <CardContent className="pt-0">
@@ -219,19 +264,20 @@ export function StepCosti(p: StepProps): JSX.Element {
               forced={forcedBadge.services}
               onChange={(v) => p.updateAll("fixed_services_percentage", v)}
             />
+            <div className="mt-2.5 flex flex-col gap-1.5">
+              <LegendSwatch tone="variable">
+                la parte variabile segue il fatturato in proporzione: nessuna ipotesi da inserire
+              </LegendSwatch>
+              <LegendSwatch tone="fixed">
+                la parte fissa parte dall&apos;inflazione, correggibile qui sotto
+              </LegendSwatch>
+            </div>
           </CardContent>
         </Card>
 
         <Card className="border-border/80">
-          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-2">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-              <LegendSwatch tone="fixed">quota fissa · segue l&apos;inflazione</LegendSwatch>
-              <LegendSwatch tone="variable">quota variabile · segue i ricavi</LegendSwatch>
-            </div>
-            <Button variant="ghost" size="sm" onClick={alignToRevenue} className="shrink-0">
-              <AlignLeft className="mr-1.5 h-3.5 w-3.5" />
-              Allinea le variabili ai ricavi
-            </Button>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Come si muovono i costi</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <YearInputTable
@@ -241,60 +287,97 @@ export function StepCosti(p: StepProps): JSX.Element {
               assumptions={p.assumptions}
               update={p.update}
             />
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                Le caselle azzurre seguono ancora l&apos;inflazione: cambiano se la cambi al passo 1.
+                Una casella che hai scritto resta tua; svuotala per tornare all&apos;inflazione.
+              </span>
+              <Button variant="outline" size="sm" onClick={riallineaAllInflazione} className="shrink-0">
+                Riallinea all&apos;inflazione
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/80 bg-muted/20">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-2">
+            <CardTitle className="text-sm">Calcolate in altri passi</CardTitle>
+            <Badge variant="outline" className="font-normal">automatico</Badge>
+          </CardHeader>
+          <CardContent className="space-y-2 pt-0">
+            {calcolate.map((c) => (
+              <div key={c.label} className="flex items-center justify-between gap-3 border-b py-1.5 last:border-b-0">
+                <div>
+                  <div className="text-xs font-medium text-foreground">{c.label}</div>
+                  <div className="text-[11px] text-muted-foreground">{c.small}</div>
+                </div>
+                <Badge variant="outline" className="shrink-0 font-normal">{c.passo}</Badge>
+              </div>
+            ))}
+            <p className="pt-1 text-[11px] text-muted-foreground">
+              Un valore forzato a mano in CE Prev. vince su queste regole finché non lo azzeri dal
+              dialogo Ricalcola.
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="lg:sticky lg:top-4">
+      <div className="lg:sticky lg:top-4 space-y-4">
         <PreviewPanel
-          title="Costi principali e margine"
+          title="Costi e margine"
           baseYear={p.baseYear}
-          years={preview.years}
-          rows={preview.tableRows}
+          years={previewYears.map((y) => y.year)}
+          rows={costiRows}
           loading={p.preview.loading}
           error={previewNotice(p.preview)}
         >
           <p className="mt-1 text-[11px] text-muted-foreground">
             Le percentuali in tabella sono sui ricavi dell&apos;anno.
           </p>
-          {preview.bars.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              {preview.bars.map((b) => (
-                <div key={b.year}>
-                  <div className="flex items-baseline justify-between text-[11px] text-muted-foreground">
-                    <span>{b.year}</span>
-                    <span className="tabular-nums">
-                      {euro(b.fixed)} fissi · {euro(b.variable)} variabili
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex h-2 overflow-hidden rounded-full bg-muted">
-                    <div className="bg-blue-500 dark:bg-blue-400" style={{ flex: b.fixedFlex }} />
-                    <div className="bg-amber-500 dark:bg-amber-400" style={{ flex: b.variableFlex }} />
-                  </div>
+        </PreviewPanel>
+
+        <PreviewPanel
+          title="Punto di pareggio sul MOL"
+          baseYear={p.baseYear}
+          years={previewYears.map((y) => y.year)}
+          rows={pareggioRows}
+          loading={p.preview.loading}
+          error={null}
+        >
+          <div className="space-y-1.5">
+            {barre.map((b) => (
+              <BepRow key={b.year} b={b} />
+            ))}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-border" />ricavi</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-[2px] bg-foreground" />fatturato di pareggio</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-green-500 dark:bg-green-400" />margine di sicurezza</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-red-400/70 dark:bg-red-500/60" />ricavi sotto il pareggio</span>
+          </div>
+          {formula && (
+            <div className="mt-3 space-y-1 rounded-md bg-muted/40 p-2.5 text-[11px]">
+              <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                Come si calcola · {formula.anno}
+              </p>
+              {formula.righe.map((r) => (
+                <div key={r.testo} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                  <span className="text-muted-foreground">{r.testo}</span>
+                  <span className="font-mono tabular-nums">{r.calcolo}</span>
                 </div>
               ))}
-              <p className="pt-0.5 text-[11px] text-muted-foreground">
-                peso dei fissi sui costi principali: {pct1(preview.weight.base)} → {pct1(preview.weight.last)}
-              </p>
             </div>
           )}
-
-          {preview.fornitori && (
-            <>
-              <Separator className="my-3" />
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                {preview.dpo === null
-                  ? `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear}`
-                  : `CON I GIORNI DI PAGAMENTO FERMI AL ${p.baseYear} (${days1(preview.dpo)} GG)`}
-              </p>
-              <FornitoriRow row={preview.fornitori} years={preview.years} />
-              <p className="mt-1 px-2 text-[11px] text-muted-foreground">
-                I giorni medi si regolano al passo 5, Capitale circolante. Qui restano quelli dell&apos;ultimo
-                bilancio per non mescolare le ipotesi.
-              </p>
-            </>
-          )}
         </PreviewPanel>
+
+        <PreviewPanel
+          title="Conto economico fino all'ante imposte"
+          baseYear={p.baseYear}
+          years={previewYears.map((y) => y.year)}
+          rows={ceRows}
+          loading={p.preview.loading}
+          error={null}
+        />
       </div>
     </div>
   );

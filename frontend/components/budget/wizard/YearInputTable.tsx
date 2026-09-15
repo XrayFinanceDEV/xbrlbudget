@@ -18,6 +18,14 @@ import type { StepProps } from "./types";
  * tutto il piano. Quale delle due valga su una data casella, e con quale
  * spiegazione, lo decide `yearCellState` (`lib/budget-year-cell.ts`) con la
  * sua suite: qui non si decide nulla.
+ *
+ * `autoYears`/`autoNote` (Task 11, passo Costi) sono un'annotazione diversa da
+ * `off`/`offYears`: rispondono a «questa cella segue ancora l'inflazione del
+ * passo 1?», non a «e' modificabile?». Una cella puo' essere automatica E
+ * disabilitata insieme (un anno forzato in CE Prev. che non e' mai stato
+ * scritto a mano): le due si combinano, non si escludono — resta azzurra, ma
+ * il titolo del disabilitato vince, perche' spiega perche' non si scrive lì,
+ * non perche' si segue l'inflazione.
  */
 export interface YearInputRow extends YearCellOff {
   field: string;
@@ -25,12 +33,28 @@ export interface YearInputRow extends YearCellOff {
   sub?: string;
   baseLabel: string;
   placeholder?: (year: number) => string;
+  /** Gli anni ancora «automatici»: la cella prende lo sfondo azzurro, e
+   *  `autoNote` come `title` quando l'anno non e' gia' disabilitato. */
+  autoYears?: number[];
+  autoNote?: string;
+  /**
+   * Se presente, sostituisce il parsing standard (`parseFieldValue`) per
+   * QUESTA riga: riceve la stringa grezza dell'input e decide da se' come
+   * interpretarla. Serve alle righe che trattano «vuoto» diversamente da uno
+   * zero (`fixed_*_growth_pct` del passo Costi: vuoto torna all'inflazione,
+   * zero e' uno zero vero) senza cambiare la regola di campo condivisa
+   * (`lib/budget-field-rules.ts`, Task 1 — non e' fra i file di questo
+   * task), che per questi due campi non e' `nullable`.
+   */
+  onRawChange?: (year: number, raw: string) => void;
   group?: never;
 }
 
 export interface YearInputGroup {
   group: string;
   swatch?: "fixed" | "variable";
+  /** Sottotitolo del gruppo, reso in piccolo accanto al titolo. */
+  sub?: string;
 }
 
 function isGroup(row: YearInputRow | YearInputGroup): row is YearInputGroup {
@@ -79,6 +103,7 @@ export function YearInputTable(props: {
                   <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     {row.swatch && <span className={cn("h-2 w-2 rounded-sm", SWATCH_CLS[row.swatch])} />}
                     {row.group}
+                    {row.sub && <span className="normal-case tracking-normal text-muted-foreground/80">· {row.sub}</span>}
                   </div>
                 </td>
               </tr>
@@ -97,8 +122,13 @@ export function YearInputTable(props: {
                   // riceve eventi del mouse in tutti i browser, e il tooltip
                   // e' l'unica cosa che spiega perche' la casella e' inerte.
                   const cell = yearCellState(row, year);
+                  // L'automatico e' indipendente da `disabled`: una cella puo'
+                  // essere entrambe (Task 11). Il titolo del disabilitato,
+                  // quando c'e', vince — spiega perche' non si scrive lì.
+                  const auto = row.autoYears?.includes(year) ?? false;
+                  const title = cell.title ?? (auto ? row.autoNote : undefined);
                   return (
-                    <td key={year} className="px-2 py-1.5 align-top" title={cell.title}>
+                    <td key={year} className="px-2 py-1.5 align-top" title={title}>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -106,11 +136,18 @@ export function YearInputTable(props: {
                         min={rule?.min}
                         max={rule?.max}
                         disabled={cell.disabled}
-                        title={cell.title}
+                        title={title}
                         placeholder={row.placeholder?.(year)}
                         value={valueOf(assumptions, year, row.field)}
-                        onChange={(e) => update(year, row.field, parseFieldValue(row.field, e.target.value))}
-                        className="w-full rounded border border-input bg-transparent px-2 py-1 text-right text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:border-dashed disabled:bg-muted/50 disabled:text-muted-foreground"
+                        onChange={(e) =>
+                          row.onRawChange
+                            ? row.onRawChange(year, e.target.value)
+                            : update(year, row.field, parseFieldValue(row.field, e.target.value))
+                        }
+                        className={cn(
+                          "w-full rounded border border-input bg-transparent px-2 py-1 text-right text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:border-dashed disabled:bg-muted/50 disabled:text-muted-foreground",
+                          auto && "bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100"
+                        )}
                       />
                     </td>
                   );

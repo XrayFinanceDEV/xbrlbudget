@@ -40,7 +40,7 @@ describe("budget-piano-step", () => {
     const map = asMap({ 2027: { financing_loans: [{ name: "Nuovo finanziamento BPM", amount: 500000, opening_residual: 0, duration_years: 6, grace_years: 1, interest_rate: 4.5, balloon_pct: 0 }, { name: "Mutuo", amount: 0, opening_residual: 330000, interest_rate: 3.8, repayments: [] }] }, 2028: {}, 2029: {} });
     const nf = nuoviFinanziamenti(map, anni);
     expect(nf.map((n) => [n.year, n.index, n.loan.name])).toEqual([[2027, 0, "Nuovo finanziamento BPM"]]);
-    expect(riepilogoNuovo(nf[0].loan, 2027)).toBe("500.000 € · 2027 · rata 100.000 €/anno dal 2029");
+    expect(riepilogoNuovo(nf[0].loan, 2027)).toBe("500.000 € · 2027 · rata 100.000 €/anno dal 2028");
     expect(annoLibero(anni, nf)).toBe(2028);
     expect(nuovoPrestito(2028)).toEqual({ name: "Nuovo finanziamento", amount: 200000, opening_residual: 0, duration_years: 5, grace_years: 0, interest_rate: 4.5, balloon_pct: 0 });
   });

@@ -93,14 +93,16 @@ export function nuoviFinanziamenti(assumptions: AssumptionsMap, years: number[])
  *  da un carattere invisibile. */
 const eur0 = (v: number): string => `${formatNumber(v, 0)} €`;
 
-/** «500.000 € · 2027 · rata 100.000 €/anno dal 2029»: la rata capitale
+/** «500.000 € · 2027 · rata 100.000 €/anno dal 2028»: la rata capitale
  *  ordinaria (`amount / (durata − preammortamento)`, minimo un anno) e
- *  l'anno in cui comincia (`year + preammortamento + 1`). */
+ *  l'anno in cui comincia, `year + preammortamento` — misurato sul kernel
+ *  (`new_financing_schedule`): senza preammortamento si rimborsa gia' l'anno
+ *  dell'erogazione. Il `+ 1` di prima anticipava di un anno ogni piano (collaudo R16). */
 export function riepilogoNuovo(loan: FinancingLoanInput, year: number): string {
   const durata = num(loan.duration_years) || 1;
   const grazia = num(loan.grace_years);
   const rata = num(loan.amount) / Math.max(1, durata - grazia);
-  const dal = year + grazia + 1;
+  const dal = year + grazia;
   return `${eur0(num(loan.amount))} · ${year} · rata ${eur0(rata)}/anno dal ${dal}`;
 }
 

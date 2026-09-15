@@ -456,7 +456,11 @@ export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
       + "La liquidità si riduce anche dove resta positiva.";
 
   const generato = anni.filter((a) => a.scopertoGenerato > 0);
-  const scoperto = generato.length === 0 && picco === null ? null
+  // Nel regime esplicito dei fidi lo scoperto non nasce (spec §5.2-bis) e il picco dichiarato e'
+  // quanto i fidi superano l'importo di partenza: lo dicono gli avvisi dei fidi, anno per anno.
+  // Qui la frase «scoperto ... nessuno nuovo · fabbisogno di picco» si contraddiceva (collaudo R8).
+  const esplicito = years.some((y) => y.details?.debito_bancario?.fidi);
+  const scoperto = generato.length === 0 && (picco === null || esplicito) ? null
     : `Scoperto di conto corrente generato dal piano: ${
       generato.map((a) => `${euro(a.scopertoGenerato)} nel ${a.year}`).join(", ") || "nessuno nuovo"}. `
       + (picco ? `Fabbisogno di picco ${euro(picco.amount)} nel ${picco.year}: è la finanza che queste ipotesi richiedono.` : "");
@@ -483,5 +487,7 @@ export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
 export function confermaCassaPositiva(data: ForecastPreviewResponse | null, avvisi: ScopertoAvvisi): boolean {
   if (!data || data.error) return false;
   if ((data.forecast_years ?? []).length === 0) return false;
-  return avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
+  // Un anno che ha tirato sui fidi ha avuto un fabbisogno, anche dentro l'importo di partenza.
+  const tirato = (data.forecast_years ?? []).some((y) => num(y.details?.debito_bancario?.fidi?.tiraggio) > 0);
+  return !tirato && avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
 }

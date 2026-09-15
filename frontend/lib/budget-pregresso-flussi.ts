@@ -84,7 +84,9 @@ export function flussiPregresso(years: ForecastPreviewYear[], breve: Record<Oltr
   const flussi: PreviewRow[] = [
     riga("crediti", "Incasso crediti verso clienti", cred),
     riga("fornitori", "Pagamento fornitori", years.map((y) => -chiuso(y, "debiti_fornitori"))),
-    riga("trib-saldo", "Saldo debiti tributari", years.map((y) => -num(y.details?.imposte?.saldo_paid))),
+    // Solo il primo anno: dal secondo `saldo_paid` e' il saldo delle imposte GENERATE dal piano,
+    // non debito pregresso, e finiva nella «cassa netta del pregresso» (collaudo R4).
+    riga("trib-saldo", "Saldo debiti tributari", years.map((y, i) => (i === 0 ? -num(y.details?.imposte?.saldo_paid) : 0))),
     riga(
       "previd-altri",
       "Debiti previdenziali e altri a breve",

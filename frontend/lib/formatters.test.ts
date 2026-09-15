@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { parseItalianAmount } from "./formatters";
+import { formatCurrency, parseItalianAmount } from "./formatters";
 
 // Un solo parser per CE e SP Previsionale: se questi casi divergessero fra le
 // due pagine, si scriverebbe un importo diverso da quello digitato senza che
 // nulla dia errore.
+describe("formatCurrency", () => {
+  it("uno zero negativo, o un negativo sotto il mezzo euro, si scrive senza segno (collaudo R5)", () => {
+    expect(formatCurrency(-0)).toBe(formatCurrency(0));
+    expect(formatCurrency(-0.3)).toBe(formatCurrency(0));
+    expect(formatCurrency(-1)).not.toBe(formatCurrency(0));
+  });
+});
+
 describe("parseItalianAmount", () => {
   it("legge i separatori delle migliaia nel formato italiano", () => {
     expect(parseItalianAmount("1.247.893")).toBe(1247893);

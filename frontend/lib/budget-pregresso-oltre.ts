@@ -415,6 +415,8 @@ export interface BreveRow {
 
 /** La forma breve, per la riga: il testo lungo (con gli importi dei costi di
  *  acquisto) resta nel riquadro del passo 4. */
+export const SENZA_PIANO_BREVE = "nessun piano: seguono la regola del passo 6 · Patrimoniale piano";
+
 export const FORNITORI_AVVISO_RIGA = "Non risultano debiti verso fornitori: controllare le riclassifiche dei debiti.";
 
 /**
@@ -447,8 +449,11 @@ export function breveRows(
       ...(fornitoriAvviso ? { alert: fornitoriAvviso } : {}),
     },
     { label: "Debiti tributari a breve", importo: tributariBreve, dir: "out", small: `saldo pagato nel ${y1}` },
-    { label: "Debiti previdenziali", importo: b("debiti_previdenziali"), dir: "out", small: `pagati nel ${y1}` },
-    { label: "Altri debiti a breve", importo: b("altri_debiti"), dir: "out", small: `pagati nel ${y1}` },
+    // Previdenziali e altri debiti hanno un piano solo con massa oltre 12 mesi (`pianoBase`):
+    // senza, il motore li governa con la regola del passo 6 e NON li paga nel primo anno —
+    // dirlo «pagati» contraddiceva l'anteprima dei flussi accanto (collaudo R7).
+    { label: "Debiti previdenziali", importo: b("debiti_previdenziali"), dir: "out", small: pregresso?.debiti_previdenziali ? `pagati nel ${y1}` : SENZA_PIANO_BREVE },
+    { label: "Altri debiti a breve", importo: b("altri_debiti"), dir: "out", small: pregresso?.altri_debiti ? `pagati nel ${y1}` : SENZA_PIANO_BREVE },
     {
       label: "Debiti verso banche e altri finanziatori",
       importo: cents(baseBankDebt(bs) + num(bs.sp16b_debiti_altri_finanz_breve) + num(bs.sp17b_debiti_altri_finanz_lungo)),

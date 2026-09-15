@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, Pregresso } from "@/types/api";
 import {
-  breveRows, massaBreve, massaOltre, oltreRows, pianoBase, tributariOltreRow, withNonIncassato, withOltreAmount,
+  SENZA_PIANO_BREVE, breveRows, massaBreve, massaOltre, oltreRows, pianoBase, tributariOltreRow, withNonIncassato, withOltreAmount,
   withTributariAmount,
 } from "./budget-pregresso-oltre";
 import { openingMasses, validatePregresso } from "./budget-pregresso-circolante";
@@ -110,5 +110,15 @@ describe("tributari rateizzati al passo 5", () => {
     expect(tributariOltreRow(bs, p, anni)).toMatchObject({ resta: 15000, stato: "resta aperto" });
     p = withTributariAmount(bs, p, anni, 2, 20000);
     expect(tributariOltreRow(bs, p, anni)?.stato).toBe("oltre il saldo");
+  });
+});
+
+describe("breveRows · previdenziali e altri debiti senza piano (collaudo R7)", () => {
+  it("senza piano non si dicono pagati nel primo anno; col piano si'", () => {
+    const senza = breveRows(bs, 2026, null, {});
+    expect(senza[3].small).toBe(SENZA_PIANO_BREVE);
+    expect(senza[4].small).toBe(SENZA_PIANO_BREVE);
+    const con = breveRows(bs, 2026, null, pianoBase(bs, anni, {}));
+    expect(con[4].small).toBe("pagati nel 2027");
   });
 });

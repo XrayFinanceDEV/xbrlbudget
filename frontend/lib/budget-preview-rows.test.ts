@@ -350,6 +350,24 @@ describe("rowsAnnoBase", () => {
   });
 });
 
+describe("scopertoAvvisi e conferma nel regime esplicito dei fidi (collaudo R8)", () => {
+  const conFidi = (y: number, fidi: Record<string, number>, d: Record<string, number | null> = {}): ForecastPreviewYear => {
+    const base = year(y);
+    const debito = { ...(base.details as unknown as { debito_bancario?: object }).debito_bancario, fidi };
+    return { ...base, details: { ...base.details, ...d, debito_bancario: debito } } as unknown as ForecastPreviewYear;
+  };
+  it("il picco oltre l'affidamento non diventa una frase sullo scoperto", () => {
+    const a = scopertoAvvisi([conFidi(2027, { residuo: 191795.31, tiraggio: 101795.31, oltre_affidamento: 101795.31 },
+      { scoperto_generato: 0, fabbisogno_picco: 101795.31, fabbisogno_picco_anno: 2027 })]);
+    expect(a.scoperto).toBeNull();
+  });
+  it("un tiraggio dentro l'importo di partenza toglie la conferma della cassa positiva", () => {
+    const anni = [conFidi(2027, { residuo: 90000, tiraggio: 20000, oltre_affidamento: 0 })];
+    const risposta = { scenario_id: 1, base_year: 2026, forecast_years: anni, error: null };
+    expect(confermaCassaPositiva(risposta as never, scopertoAvvisi(anni))).toBe(false);
+  });
+});
+
 describe("scopertoAvvisi — cassa assorbita e scoperto di c/c (Task 12)", () => {
   // Importi non tondi: un avviso che si accende solo su numeri tondi non prova nulla.
   const conDettagli = (y: number, d: Record<string, number | null>): ForecastPreviewYear => {

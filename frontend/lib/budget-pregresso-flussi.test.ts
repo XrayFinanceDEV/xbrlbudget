@@ -35,3 +35,12 @@ describe("flussiPregresso", () => {
     expect(by("aperto").years[0].value).toBe(90000 + 247500 + 100000 + 23000 + 40000);
   });
 });
+
+describe("flussiPregresso · saldo tributario (collaudo R4)", () => {
+  it("dal secondo anno il saldo e' delle imposte del piano, non del pregresso", () => {
+    const due = y(2028);
+    (due.details as unknown as { imposte: { saldo_paid: number } }).imposte.saldo_paid = 16289;
+    const rows = flussiPregresso([y(2027), due], breve);
+    expect(rows.find((r) => r.key === "trib-saldo")!.years.map((c) => c.value)).toEqual([-61000, 0]);
+  });
+});

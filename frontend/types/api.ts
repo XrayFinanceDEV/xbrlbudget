@@ -1172,7 +1172,7 @@ export interface AltriFinanziatoriDetail {
   apertura: number; rimborso: number; interessi: number; breve: number; lungo: number;
   mode: "contratti" | "anni" | "legacy"; contratti: AltriFinanziatoriContratto[];
 }
-export interface DebitoBancarioFidi { apertura: number; variazione_ricavi: number; rimborso_sweep: number; residuo: number; regola: "costante" | "ricavi" }
+export interface DebitoBancarioFidi { apertura: number; variazione_ricavi: number; rimborso_sweep: number; residuo: number; regola: "costante" | "ricavi"; tiraggio?: number; affidamento?: number; oltre_affidamento?: number }
 
 /** Una riga per contratto (misti gia' divisi in pregresso/nuovo, anche non
  *  ancora erogati), nell'ordine di `financing_amount` e poi della griglia. */

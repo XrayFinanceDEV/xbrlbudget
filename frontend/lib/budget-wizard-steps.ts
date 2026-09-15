@@ -21,13 +21,14 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
 ];
 
 export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
-  scenario: [],
+  scenario: ["inflation_pct"],
   fatturato: ["revenue_growth_pct", "other_revenue_growth_pct"],
   costi: [
     "fixed_materials_percentage", "fixed_services_percentage",
     "variable_materials_growth_pct", "variable_services_growth_pct",
     "fixed_materials_growth_pct", "fixed_services_growth_pct",
     "personnel_growth_pct", "rent_growth_pct",
+    "fixed_materials_growth_auto", "fixed_services_growth_auto",
   ],
   "altre-voci-ce": ["other_costs_growth_pct"],
   circolante: [
@@ -44,6 +45,7 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "depreciation_rate", "depreciation_rate_intangible",
     "asset_disposal_nbv", "asset_disposal_proceeds", "cash_sweep_enabled", "cash_sweep_min_cash",
     "overdraft_allowed", "overdraft_limit",
+    "bank_lines_amount", "bank_lines_rule", "bank_lines_rate", "tfr_payments",
   ],
   imposte: ["tax_rate", "tax_advances_paid", "tax_temporary_differences", "sp16e_growth_pct", "sp17e_growth_pct"],
 };

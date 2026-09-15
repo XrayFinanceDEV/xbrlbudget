@@ -40,7 +40,11 @@ def _plain_decimal(value: object) -> Decimal:
 
 
 PlainDecimal = Annotated[Decimal, BeforeValidator(_plain_decimal)]
-AssumptionScalar = Union[PlainDecimal, StrictBool, None]
+#: `str` compare solo per `bank_lines_rule` (un VARCHAR a due valori: «costante» /
+#: «ricavi»): non e' un importo e non ha una forma numerica. Il validatore di
+#: `AssumptionValue` lo ammette su quel campo e su nessun altro, cosi' una
+#: stringa scritta per errore su un campo monetario resta un errore.
+AssumptionScalar = Union[PlainDecimal, StrictBool, str, None]
 
 
 def _iso_date(value: object) -> date:
@@ -84,7 +88,10 @@ _CATALOG_FIELDS = {
 _BOOLEAN_ASSUMPTION_FIELDS = frozenset({
     "cash_sweep_enabled", "overdraft_allowed",
     "previdenza_scales_with_personnel", "tfr_accrual_suspended",
+    "fixed_materials_growth_auto", "fixed_services_growth_auto",
 })
+#: I campi del catalogo la cui scalarita' e' una stringa, non un importo.
+_STRING_ASSUMPTION_FIELDS = frozenset({"bank_lines_rule"})
 
 
 class ContractModel(BaseModel):
@@ -323,6 +330,10 @@ class RunoffPlan(ContractModel):
     opening: PlainDecimal
     amounts: list[PlainDecimal]
     writeoff: Optional[list[PlainDecimal]] = None
+    # Solo `crediti_commerciali`: dichiarati non incassati nel piano (spec §4.5,
+    # decisione 6). Il motore non la usa: un piano a zero lascia il residuo
+    # aperto per costruzione, qui serve a dire che era una scelta.
+    non_incassato: Optional[bool] = None
 
 
 class TaxRunoffPlan(RunoffPlan):
@@ -337,6 +348,14 @@ class Pregresso(ContractModel):
     debiti_tributari: Optional[TaxRunoffPlan] = None
     debiti_previdenziali: Optional[RunoffPlan] = None
     altri_debiti: Optional[RunoffPlan] = None
+
+
+class OtherLender(ContractModel):
+    """Un altro finanziatore (sp16b/sp17b) scadenziato per anno (spec §5.3)."""
+    name: Optional[str] = None
+    opening_residual: PlainDecimal
+    interest_rate: PlainDecimal
+    repayments: list[PlainDecimal]
 
 
 class TemporaryDifference(ContractModel):
@@ -391,6 +410,7 @@ class AssumptionValue(ContractModel):
     ce_overrides: Optional[list[CEOverride]] = None
     sp_indexing: Optional[list[SPIndexing]] = None
     sp_overrides: Optional[list[SPOverride]] = None
+    other_lenders: Optional[list[OtherLender]] = None
 
     @model_validator(mode="after")
     def nested_value_has_a_known_field(self):
@@ -399,10 +419,13 @@ class AssumptionValue(ContractModel):
                 raise ValueError(f"{self.field} accepts only boolean or null scalar values")
         elif any(isinstance(value, bool) for value in self.values):
             raise ValueError("non-boolean assumptions accept only Decimal strings or null scalar values")
+        if any(isinstance(value, str) for value in self.values) and self.field not in _STRING_ASSUMPTION_FIELDS:
+            raise ValueError(f"{self.field} accepts only decimal strings, booleans or null scalar values")
         nested = sum((
             self.financing_loans is not None, self.pregresso is not None,
             self.temporary_differences is not None, self.ce_overrides is not None,
             self.sp_indexing is not None, self.sp_overrides is not None,
+            self.other_lenders is not None,
         ))
         if nested > 1:
             raise ValueError("an assumption value has at most one nested table")
@@ -418,6 +441,8 @@ class AssumptionValue(ContractModel):
             raise ValueError("sp_indexing data is only valid for the sp_indexing field")
         if self.sp_overrides is not None and self.field != "sp_overrides":
             raise ValueError("sp_overrides data is only valid for the sp_overrides field")
+        if self.other_lenders is not None and self.field != "other_lenders":
+            raise ValueError("other_lenders data is only valid for the other_lenders field")
         return self
 
 

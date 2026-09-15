@@ -179,6 +179,15 @@ MIGRATIONS = {
         ("ce17b_override",                     "NUMERIC(15,2)"),
         ("ce20_override",                      "NUMERIC(15,2)"),
         ("explicitly_supplied_fields",         "TEXT"),
+        # Giro di rilievi del 14/09 (spec 2026-09-15 §6): additive, NULL/0 = comportamento di prima.
+        ("inflation_pct",                      "NUMERIC(10,6)"),
+        ("fixed_materials_growth_auto",        "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("fixed_services_growth_auto",         "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("bank_lines_amount",                  "NUMERIC(15,2)"),
+        ("bank_lines_rule",                    "VARCHAR(16)"),
+        ("bank_lines_rate",                    "NUMERIC(10,6)"),
+        ("other_lenders",                      "TEXT"),
+        ("tfr_payments",                       "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
     ],
     "uploaded_files": [
         ("user_email",                         "VARCHAR(255)"),

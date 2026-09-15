@@ -32,6 +32,11 @@ const days = (over: Partial<FieldRule> = {}): FieldRule =>
 const bool: FieldRule = { kind: "bool" };
 
 const RULES = {
+  // Scenario
+  // L'inflazione attesa del passo 1: precompila la parte fissa, non e' una
+  // crescita di ricavi. Vuoto = non dichiarata (scenario precedente al lotto).
+  inflation_pct: pct({ min: -50, max: 100, nullable: true }),
+
   // Ricavi e costi
   revenue_growth_pct: pct(),
   other_revenue_growth_pct: pct(),
@@ -41,6 +46,10 @@ const RULES = {
   fixed_services_growth_pct: pct(),
   fixed_materials_percentage: pct({ min: 0, max: 100, step: "1" }),
   fixed_services_percentage: pct({ min: 0, max: 100, step: "1" }),
+  // La casella azzurra del passo 3: `true` = segue l'inflazione del passo 1,
+  // `false` = il valore accanto e' scritto dall'utente.
+  fixed_materials_growth_auto: bool,
+  fixed_services_growth_auto: bool,
   personnel_growth_pct: pct(),
   rent_growth_pct: pct(),
   other_costs_growth_pct: pct(),
@@ -87,6 +96,12 @@ const RULES = {
   overdraft_limit: eur({ nullable: true }),
   tfr_accrual_suspended: bool,
   previdenza_scales_with_personnel: bool,
+  // Fidi e anticipi su fatture (passo «Patrimoniale pregresso»): l'importo
+  // vuoto = regime di prima, nessuna divisione dichiarata.
+  bank_lines_amount: eur({ nullable: true }),
+  bank_lines_rate: pct({ min: 0, max: 30, nullable: true }),
+  // Liquidazioni TFR dell'anno (passo «Patrimoniale piano»).
+  tfr_payments: eur(),
 
   // Imposte
   tax_rate: pct({ min: 0, max: 100 }),

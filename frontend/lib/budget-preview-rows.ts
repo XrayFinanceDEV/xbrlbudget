@@ -8,8 +8,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import { euro, num, numOrNull, pctOf } from "@/lib/budget-format";
 import type { ForecastPreviewResponse } from "@/types/api";
-import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
-import { legacyNoteFor, type TabellaPregressoKey } from "@/lib/budget-pregresso-tabella";
+import { PREGRESSO_LABELS, legacyNoteFor, type TabellaPregressoKey } from "@/lib/budget-pregresso-circolante";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -319,7 +318,7 @@ export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewY
  * `mode: "legacy"` non e' un residuo di zero: e' un saldo per cui NESSUN piano
  * e' stato dichiarato, e che quindi segue le formule di sempre. La nota che lo
  * dice NON e' la stessa frase su tutti e cinque i saldi (`legacyNoteFor`,
- * `lib/budget-pregresso-tabella.ts`, rilievo 4 del giro di correzione 1):
+ * `lib/budget-pregresso-circolante.ts`, rilievo 4 del giro di correzione 1):
  * fornitori e crediti si chiudono davvero nel primo anno perche' un driver di
  * volume li rigenera comunque, ma previdenziali e altri debiti — senza un
  * driver dietro — crescono per percentuale e non si chiudono in alcun senso

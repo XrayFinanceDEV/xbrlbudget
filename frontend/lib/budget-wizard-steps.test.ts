@@ -233,12 +233,6 @@ describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
       "Modifica il piano nel passo «Patrimoniale pregresso», oppure svuota la cella (value: null).",
     )).toBe("patrimoniale-pregresso");
   });
-  it("un rifiuto tributario che nomina «Imposte» resta sul passo 7", () => {
-    // Messaggio reale del ramo `sp17e` senza piano (rilievo I-b).
-    expect(stepForErrorMessage(
-      "L'override di sp17e_debiti_tributari_lungo non è ammesso: la posizione tributaria è a saldo + acconto e l'anno dopo non legge questa riga, legge la scomposizione dichiarata nei `details`. Il valore forzato sparirebbe senza alcun versamento, con la cassa ad assorbire la differenza. La via lecita è il piano di scadenziamento al passo Imposte, oppure svuotare la cella (value: null).",
-    )).toBe("imposte");
-  });
   it("il fabbisogno non coperto continua ad atterrare sul passo 6", () => {
     expect(stepForErrorMessage(
       "Fabbisogno finanziario scoperto di 44.885,64: aggiungi un'ipotesi di finanziamento esplicita",
@@ -246,6 +240,59 @@ describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
   });
   it("un errore generico atterra su Imposte come prima", () => {
     expect(stepForErrorMessage("Revenue must be positive in the base year")).toBe("imposte");
+  });
+});
+
+describe("stepForErrorMessage · piano dei tributari al passo 5, non al passo 7 (Task 16)", () => {
+  // Decisione del proprietario (2026-09-15): saldo, rateizzato e rate dei
+  // debiti tributari si scadenziano al passo 5 «Patrimoniale pregresso», non
+  // al passo 7 «Imposte» (che tiene solo aliquota, differenze temporanee, via
+  // manuale e acconto). Il motore Python (`_PREGRESSO_PASSO`,
+  // `calculations/forecast_engine.py`) è corretto da un altro task del lotto
+  // e OGGI nomina ancora «Imposte» in questi tre messaggi — le stringhe qui
+  // sotto sono il testo POST-correzione: `stepForErrorMessage` instrada già
+  // per contenuto («patrimoniale pregresso» in qualunque punto del testo), e
+  // non ha bisogno di modifiche per riconoscerlo; questi test lo mettono agli
+  // atti prima che il motore cambi.
+  it("`_messaggio_override_oltre('sp17e_debiti_tributari_lungo', 'debiti_tributari')` atterra sul passo 5", () => {
+    expect(stepForErrorMessage(
+      "L'override di sp17e_debiti_tributari_lungo non è ammesso: i debiti tributari hanno un piano " +
+      "di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo compreso. Il valore " +
+      "forzato verrebbe salvato e cancellato in silenzio l'anno dopo, con la cassa ad assorbire la differenza " +
+      "senza alcun flusso. Modifica il piano al passo «Patrimoniale pregresso», oppure svuota la cella " +
+      "(value: null) e lascia che la riga segua il piano.",
+    )).toBe("patrimoniale-pregresso");
+  });
+  it("il ramo Ruling 63 (`sp17e` senza piano ancora da impostare) atterra sul passo 5", () => {
+    expect(stepForErrorMessage(
+      "L'override di sp17e_debiti_tributari_lungo non è ammesso: la posizione tributaria è a saldo + acconto, " +
+      "e l'anno dopo riparte dal saldo e dalle rate che questa posizione dichiara, non da questa riga. Il valore " +
+      "forzato sparirebbe senza alcun versamento, con la cassa ad assorbire la differenza. Imposta un piano di " +
+      "scadenziamento dei debiti tributari al passo «Patrimoniale pregresso», oppure svuota la cella (value: null).",
+    )).toBe("patrimoniale-pregresso");
+  });
+  it("il rifiuto N-I1 (transizione via manuale → automatico) atterra sul passo 5", () => {
+    expect(stepForErrorMessage(
+      "Il piano dei debiti tributari non può ripartire da meno di ciò che resta da rateizzare: l'anno 2027 " +
+      "esce dalla via manuale lasciando 12.000,00, ma all'anno 2028 ne restano da rateizzare 14.666,66. Tieni " +
+      "in via manuale anche l'anno 2028, oppure lascia nell'anno 2027 un debito tributario (sp16e + sp17e, per " +
+      "percentuale o per override) non inferiore a 14.666,66, o modifica il piano al passo «Patrimoniale pregresso».",
+    )).toBe("patrimoniale-pregresso");
+  });
+  it("un rifiuto che parla di acconto senza nominare un piano resta sul passo 7", () => {
+    // L'acconto e la via manuale non hanno un calendario da scadenziare al
+    // passo 5: restano decisioni del passo 7, e un messaggio che le riguarda
+    // non nomina «Patrimoniale pregresso» — cade sul ramo di default.
+    expect(stepForErrorMessage(
+      "L'acconto versato nel 2027 supera l'imposta di competenza: la differenza resta credito verso l'erario " +
+      "e non genera alcun rimborso automatico.",
+    )).toBe("imposte");
+  });
+  it("un rifiuto sulla via manuale (sp06e/sp16e) resta sul passo 7", () => {
+    expect(stepForErrorMessage(
+      "La via manuale governa sp06e e sp16e per percentuale di crescita: il piano di saldo, rate e acconti " +
+      "dichiarato altrove viene ignorato per l'intera durata della via manuale.",
+    )).toBe("imposte");
   });
 });
 

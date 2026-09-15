@@ -478,6 +478,7 @@ def contratti_da_riga_finanziamento(loan: Mapping[str, Any], anno: int) -> List[
         'grace_years': Decimal(str(loan.get('grace_years') or 0)),
         'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
     }
+    condizioni['name'] = loan.get('name')
     if repayments is not None:
         condizioni['repayments'] = [Decimal(str(r or 0)) for r in repayments]
     contratti = []

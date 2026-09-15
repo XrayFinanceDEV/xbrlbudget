@@ -352,6 +352,7 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
         righe.append({
             'indice': indice,
             'anno': int(loan['year']),
+            'nome': loan.get('name'),
             'tasso': Decimal(str(loan.get('rate') or 0)) * Decimal('100'),
             'erogato': erogato,
             'residuo_iniziale': Decimal(str(loan.get('opening_residual') or 0)),

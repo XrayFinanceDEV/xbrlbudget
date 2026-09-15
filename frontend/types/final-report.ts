@@ -9,7 +9,7 @@ export type Provenance = "user" | "automatic" | "default" | "override" | "ignore
 export type DiagnosticSeverity = "info" | "warning" | "error";
 export type ChartId = "income_results" | "margins" | "cashflows" | "liquidity_debt" | "working_capital_days" | "coverage";
 export type NarrativeId = "executive_summary" | "adjustments_and_closing" | "budget_assumptions" | "economic_outlook" | "financial_outlook" | "risks_and_actions";
-export type AssumptionSectionKey = "scenario" | "fatturato" | "costi" | "altre-voci-ce" | "circolante" | "pregresso-nuovo" | "imposte";
+export type AssumptionSectionKey = "scenario" | "fatturato" | "costi" | "circolante" | "patrimoniale-pregresso" | "patrimoniale-piano" | "imposte";
 
 export interface AssumptionSectionCatalogEntry { key: AssumptionSectionKey; title: string; fields: readonly string[]; nested_fields?: readonly string[] }
 export interface CompanyIdentity { id: number; name: string; tax_id?: string | null }

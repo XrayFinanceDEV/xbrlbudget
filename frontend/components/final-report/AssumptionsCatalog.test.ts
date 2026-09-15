@@ -29,9 +29,9 @@ describe("ordine canonico delle sezioni", () => {
       "scenario",
       "fatturato",
       "costi",
-      "altre-voci-ce",
       "circolante",
-      "pregresso-nuovo",
+      "patrimoniale-pregresso",
+      "patrimoniale-piano",
       "imposte",
     ]);
   });
@@ -69,8 +69,8 @@ describe("ordine canonico delle sezioni", () => {
   });
 
   it("il titolo del payload vince, quello del catalogo è il ripiego", () => {
-    expect(sectionTitle("pregresso-nuovo", "Pregresso e nuovo")).toBe("Pregresso e nuovo");
-    expect(sectionTitle("pregresso-nuovo", "  ")).toBe("Pregresso e nuovo");
+    expect(sectionTitle("patrimoniale-pregresso", "Patrimoniale pregresso")).toBe("Patrimoniale pregresso");
+    expect(sectionTitle("patrimoniale-pregresso", "  ")).toBe("Patrimoniale pregresso");
     expect(sectionTitle("circolante")).toBe("Capitale circolante");
   });
 });

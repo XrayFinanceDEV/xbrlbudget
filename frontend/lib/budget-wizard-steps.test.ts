@@ -7,11 +7,17 @@ import {
 } from "./budget-wizard-steps";
 
 describe("budget-wizard-steps", () => {
-  it("ha sette passi numerati in ordine, in tre gruppi", () => {
-    expect(WIZARD_STEPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it("ha sette passi numerati in ordine, in tre gruppi, con i due passi nuovi marcati", () => {
+    expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
+      "scenario", "fatturato", "costi", "circolante", "patrimoniale-pregresso", "patrimoniale-piano", "imposte",
+    ]);
     expect(WIZARD_STEPS.map((s) => s.group)).toEqual([
-      "Impostazione", "Conto economico", "Conto economico", "Conto economico",
-      "Stato patrimoniale", "Stato patrimoniale", "Stato patrimoniale",
+      "Impostazione", "Conto economico", "Conto economico",
+      "Stato patrimoniale", "Stato patrimoniale", "Stato patrimoniale", "Stato patrimoniale",
+    ]);
+    expect(WIZARD_STEPS.filter((s) => s.badge === "nuovo").map((s) => s.n)).toEqual([5, 6]);
+    expect(WIZARD_STEPS.map((s) => s.title)).toEqual([
+      "Scenario", "Fatturato", "Costi", "Capitale circolante", "Patrimoniale pregresso", "Patrimoniale piano", "Imposte",
     ]);
   });
   it("ogni campo esposto appartiene a un solo passo e i campi morti a nessuno", () => {
@@ -26,7 +32,12 @@ describe("budget-wizard-steps", () => {
     expect(seen.get("revenue_growth_pct")).toBe("fatturato");
     expect(seen.get("fixed_materials_percentage")).toBe("costi");
     expect(seen.get("sp16e_growth_pct")).toBe("imposte");
-    expect(seen.get("existing_debt_repayment_years")).toBe("pregresso-nuovo");
+    expect(seen.get("existing_debt_repayment_years")).toBe("patrimoniale-pregresso");
+    expect(seen.get("other_costs_growth_pct")).toBe("costi");
+    expect(seen.get("bank_lines_amount")).toBe("patrimoniale-pregresso");
+    expect(seen.get("tfr_payments")).toBe("patrimoniale-piano");
+    expect(seen.get("sp16g_growth_pct")).toBe("patrimoniale-piano");
+    expect(seen.get("inflation_pct")).toBe("scenario");
   });
   it("etichetta del primario e navigazione", () => {
     expect(primaryLabel("costi")).toBe("Avanti");
@@ -34,7 +45,10 @@ describe("budget-wizard-steps", () => {
     expect(nextStep("scenario")).toBe("fatturato");
     expect(nextStep("imposte")).toBeNull();
     expect(prevStep("scenario")).toBeNull();
-    expect(stepForErrorMessage("Fabbisogno finanziario scoperto di 84.120,00: aggiungi ...")).toBe("pregresso-nuovo");
+    expect(stepForErrorMessage("Fabbisogno finanziario scoperto di 84.120,00: aggiungi ...")).toBe("patrimoniale-piano");
+    expect(stepForErrorMessage("Modifica il piano nel passo «Patrimoniale pregresso», oppure svuota la cella.")).toBe("patrimoniale-pregresso");
+    expect(stepForErrorMessage("Liquidazioni TFR 2027: superano il fondo. Correggi al passo Patrimoniale piano.")).toBe("patrimoniale-piano");
+    expect(stepForErrorMessage("Il debito tributario si scadenzia al passo «Imposte».")).toBe("imposte");
     expect(stepForErrorMessage("altro")).toBe("imposte");
     expect(stepStorageKey(12)).toBe("budget-wizard-step:12");
   });
@@ -73,7 +87,7 @@ describe("stepLead", () => {
 describe("stepFooterHint", () => {
   it("porta la posizione nel percorso", () => {
     expect(stepFooterHint("scenario")).toBe("Passo 1 di 7 · Scenario");
-    expect(stepFooterHint("circolante")).toBe("Passo 5 di 7 · Capitale circolante");
+    expect(stepFooterHint("circolante")).toBe("Passo 4 di 7 · Capitale circolante");
   });
   it("l'ultimo passo dice dove si atterra dopo il calcolo", () => {
     const hint = stepFooterHint("imposte");
@@ -153,7 +167,7 @@ describe("saveOutcome", () => {
     // dal riconoscimento del fabbisogno; il PASSO si decide sul messaggio
     // grezzo, gia' italiano alla fonte.
     expect(out.message).toContain("Fabbisogno finanziario scoperto");
-    expect(out.step).toBe("pregresso-nuovo");
+    expect(out.step).toBe("patrimoniale-piano");
   });
   it("un rifiuto non naviga MAI: niente toast verde su una Proiezione vuota", () => {
     // E' il difetto piu' costoso documentato in CLAUDE.md, e prima era
@@ -201,22 +215,23 @@ describe("stepForErrorMessage · scoperto di c/c (Task 12)", () => {
   it("il tetto dello scoperto superato riporta al passo in cui lo scoperto si concede", () => {
     expect(stepForErrorMessage(
       "Scoperto di conto corrente oltre il tetto concesso: servono 5.014.777,78, il tetto concesso e' 100.000,00",
-    )).toBe("pregresso-nuovo");
+    )).toBe("patrimoniale-piano");
   });
 });
 
 describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
-  it("un rifiuto fornitori che dice «passo Pregresso e nuovo» atterra sul passo 6", () => {
+  it("un rifiuto fornitori che dice «passo Patrimoniale pregresso» atterra sul passo 5", () => {
     // Messaggio reale di `_rifiuto_override_governati` (via
-    // `_messaggio_override_oltre`), generato da `c8317ca`.
+    // `_messaggio_override_oltre`), generato da `c8317ca`, aggiornato al nome
+    // di passo del giro di rilievi (Task 6: `_PREGRESSO_PASSO_DEFAULT`).
     expect(stepForErrorMessage(
-      "L'override di sp17d_debiti_fornitori_lungo non è ammesso: i debiti verso fornitori hanno un piano di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo compreso. Il valore forzato verrebbe salvato e cancellato in silenzio l'anno dopo, con la cassa ad assorbire la differenza senza alcun flusso. La via lecita è modificare il piano al passo Pregresso e nuovo, oppure svuotare la cella (value: null) e lasciare che la riga segua il piano.",
-    )).toBe("pregresso-nuovo");
+      "L'override di sp17d_debiti_fornitori_lungo non è ammesso: i debiti verso fornitori hanno un piano di scadenziamento, e il suo calendario rigenera quella riga ogni anno, l'ultimo compreso. Il valore forzato verrebbe salvato e cancellato in silenzio l'anno dopo, con la cassa ad assorbire la differenza senza alcun flusso. La via lecita è modificare il piano al passo Patrimoniale pregresso, oppure svuotare la cella (value: null) e lasciare che la riga segua il piano.",
+    )).toBe("patrimoniale-pregresso");
   });
   it("vale anche con il nome del passo virgolettato", () => {
     expect(stepForErrorMessage(
-      "Modifica il piano nel passo «Pregresso e nuovo», oppure svuota la cella (value: null).",
-    )).toBe("pregresso-nuovo");
+      "Modifica il piano nel passo «Patrimoniale pregresso», oppure svuota la cella (value: null).",
+    )).toBe("patrimoniale-pregresso");
   });
   it("un rifiuto tributario che nomina «Imposte» resta sul passo 7", () => {
     // Messaggio reale del ramo `sp17e` senza piano (rilievo I-b).
@@ -227,7 +242,7 @@ describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
   it("il fabbisogno non coperto continua ad atterrare sul passo 6", () => {
     expect(stepForErrorMessage(
       "Fabbisogno finanziario scoperto di 44.885,64: aggiungi un'ipotesi di finanziamento esplicita",
-    )).toBe("pregresso-nuovo");
+    )).toBe("patrimoniale-piano");
   });
   it("un errore generico atterra su Imposte come prima", () => {
     expect(stepForErrorMessage("Revenue must be positive in the base year")).toBe("imposte");

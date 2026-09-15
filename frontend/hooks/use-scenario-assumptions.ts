@@ -19,6 +19,7 @@ import {
   forecastYearsFor,
   withDefaultsForYears,
   withPregresso,
+  withOtherLenders,
   withPregressoTrimmedToHorizon,
   hydrateAssumptions,
   horizonFromSavedRows,
@@ -28,6 +29,7 @@ import type { HistoricalData } from "@/lib/budget-trend";
 import type {
   BudgetScenario,
   FinancingLoanInput,
+  OtherLenderInput,
   Pregresso,
   SpIndexingDriver,
   TemporaryDifferenceInput,
@@ -58,6 +60,9 @@ export interface ScenarioAssumptionsState {
    *  `lib/budget-horizon.ts`), mai su un anno scelto dal chiamante — `update`
    *  e' tornato scalare apposta, e non accetta piu' un oggetto. */
   updatePregresso: (next: Pregresso | null) => void;
+  /** Gli altri finanziatori per anno (Task 8): scrive SEMPRE nel primo anno
+   *  di piano, come `updatePregresso` — stessa regola, stessa forma. */
+  updateOtherLenders: (next: OtherLenderInput[] | null) => void;
 }
 
 export function useScenarioAssumptions({
@@ -221,6 +226,13 @@ export function useScenarioAssumptions({
     setAssumptions((prev) => withPregresso(prev, forecastYears, next));
   }, [forecastYears]);
 
+  /** Gli altri finanziatori (Task 8): scrive SEMPRE nel PRIMO anno di piano
+   *  — la regola sta in `withOtherLenders` (`lib/budget-horizon.ts`), con la
+   *  sua prova, non qui, sullo stesso precedente di `updatePregresso`. */
+  const updateOtherLenders = useCallback((next: OtherLenderInput[] | null) => {
+    setAssumptions((prev) => withOtherLenders(prev, forecastYears, next));
+  }, [forecastYears]);
+
   const updateFinancingLoans = useCallback((year: number, loans: FinancingLoanInput[]) => {
     setAssumptions((prev) => ({
       ...prev,
@@ -294,5 +306,6 @@ export function useScenarioAssumptions({
     updateTemporaryDifferences,
     updateSpIndexing,
     updatePregresso,
+    updateOtherLenders,
   };
 }

@@ -4,6 +4,7 @@ import {
   defaultAssumption,
   withDefaultsForYears,
   withPregresso,
+  withOtherLenders,
   trimPregressoToHorizon,
   withPregressoTrimmedToHorizon,
   baseYearNote,
@@ -117,6 +118,14 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     ce19_override: null,
     ce20_override: null,
     pregresso: null,
+    inflation_pct: null,
+    fixed_materials_growth_auto: false,
+    fixed_services_growth_auto: false,
+    bank_lines_amount: null,
+    bank_lines_rule: null,
+    bank_lines_rate: null,
+    other_lenders: null,
+    tfr_payments: 0,
     created_at: "",
     updated_at: "",
     ...overrides,
@@ -231,6 +240,7 @@ describe("hydrateAssumptions", () => {
   // silenzio, perche' il bulk e' delete-all + reinsert.
   const CHIAVI_ATTESE = [
     "altri_finanz_repayment_years", "asset_disposal_nbv", "asset_disposal_proceeds",
+    "bank_lines_amount", "bank_lines_rate", "bank_lines_rule",
     "cash_sweep_enabled", "cash_sweep_min_cash", "ce01_override", "ce02_override",
     "ce03_override", "ce03a_override", "ce04_override", "ce05_override", "ce06_override",
     "ce07_override", "ce08_override", "ce08a_override", "ce08b_override", "ce08c_override",
@@ -241,9 +251,11 @@ describe("hydrateAssumptions", () => {
     "depreciation_rate", "depreciation_rate_intangible", "dio_days", "dpo_days", "dso_days",
     "existing_debt_repayment_years", "financing_amount", "financing_duration_years",
     "financing_interest_rate", "financing_loans", "fixed_materials_growth_pct",
-    "fixed_materials_percentage", "fixed_services_growth_pct", "fixed_services_percentage",
-    "forecast_year", "intangible_investments", "investments", "other_costs_growth_pct",
-    "other_revenue_growth_pct", "overdraft_allowed", "overdraft_limit", "payables_short_growth_pct", "personnel_growth_pct",
+    "fixed_materials_growth_auto", "fixed_materials_percentage",
+    "fixed_services_growth_pct", "fixed_services_growth_auto", "fixed_services_percentage",
+    "forecast_year", "inflation_pct", "intangible_investments", "investments", "other_costs_growth_pct",
+    "other_lenders", "other_revenue_growth_pct", "overdraft_allowed", "overdraft_limit",
+    "payables_short_growth_pct", "personnel_growth_pct",
     "pregresso", "previdenza_scales_with_personnel", "receivables_long_growth_pct",
     "receivables_short_growth_pct", "rent_growth_pct", "revenue_growth_pct", "scenario_id",
     "sp01_growth_pct", "sp04_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
@@ -251,11 +263,11 @@ describe("hydrateAssumptions", () => {
     "sp16f_growth_pct", "sp16g_growth_pct", "sp17d_growth_pct", "sp17e_growth_pct",
     "sp17f_growth_pct", "sp17g_growth_pct", "sp18_growth_pct", "sp_indexing", "sp_overrides",
     "tangible_investments", "tax_advances_paid", "tax_rate", "tax_temporary_differences",
-    "tfr_accrual_suspended", "variable_materials_growth_pct", "variable_services_growth_pct",
+    "tfr_accrual_suspended", "tfr_payments", "variable_materials_growth_pct", "variable_services_growth_pct",
   ];
 
-  it("scrive esattamente le 91 chiavi congelate, ordinate", () => {
-    expect(CHIAVI_ATTESE.length).toBe(91);
+  it("scrive esattamente le 99 chiavi congelate, ordinate", () => {
+    expect(CHIAVI_ATTESE.length).toBe(99);
     const out = hydrateAssumptions([fixtureRow({ forecast_year: 2026 })], 1);
     expect(Object.keys(out[2026]).sort()).toEqual([...CHIAVI_ATTESE].sort());
   });
@@ -394,7 +406,7 @@ describe("assumptionRowsForSave", () => {
     const attese = Object.keys(map[2026]).sort();
     // Ancorato all'elenco congelato di `hydrateAssumptions`: se il numero si
     // muove, il difetto e' li' e questo test non si aggiorna per zittirlo.
-    expect(attese.length).toBe(91);
+    expect(attese.length).toBe(99);
     const rows = assumptionRowsForSave(map, [2026, 2027], 7);
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(Object.keys(row).sort()).toEqual(attese);
@@ -451,6 +463,18 @@ describe("withPregresso (conflitto A + B)", () => {
     const map = withPregresso({}, [2026], { altri_debiti: { opening: 1, amounts: [1] } });
     const out = withPregresso(map, [2026], null);
     expect(out[2026].pregresso).toBeNull();
+  });
+});
+
+describe("withOtherLenders (Task 8)", () => {
+  const asMap = (m: Record<number, Record<string, unknown>>) => m as unknown as AssumptionsMap;
+
+  it("withOtherLenders scrive SEMPRE sul primo anno di piano e null svuota", () => {
+    const map = asMap({ 2027: {}, 2028: {} });
+    const out = withOtherLenders(map, [2027, 2028], [{ name: "Soci", opening_residual: 100, interest_rate: 0, repayments: [0, 50] }]);
+    expect(out[2027].other_lenders).toEqual([{ name: "Soci", opening_residual: 100, interest_rate: 0, repayments: [0, 50] }]);
+    expect(out[2028].other_lenders).toBeUndefined();
+    expect(withOtherLenders(out, [2027, 2028], null)[2027].other_lenders).toBeNull();
   });
 });
 

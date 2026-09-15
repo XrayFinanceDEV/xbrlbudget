@@ -1,25 +1,31 @@
-/** I sette passi del percorso ipotesi (spec 2026-09-08 §4). Modulo puro. */
+/** I sette passi del percorso ipotesi (spec 2026-09-15 §4). Modulo puro. */
 import { saveNotice } from "@/lib/budget-preview-notice";
 
 export type WizardStepKey =
-  | "scenario" | "fatturato" | "costi" | "altre-voci-ce"
-  | "circolante" | "pregresso-nuovo" | "imposte";
+  | "scenario" | "fatturato" | "costi"
+  | "circolante" | "patrimoniale-pregresso" | "patrimoniale-piano" | "imposte";
 
 export interface WizardStep {
   n: number; key: WizardStepKey; title: string; subtitle: string;
   group: "Impostazione" | "Conto economico" | "Stato patrimoniale";
+  /** «nuovo» sui due passi nati dal giro di rilievi del 14/09. */
+  badge?: "nuovo";
 }
 
 export const WIZARD_STEPS: readonly WizardStep[] = [
-  { n: 1, key: "scenario", title: "Scenario", subtitle: "nome, anno base, orizzonte", group: "Impostazione" },
+  { n: 1, key: "scenario", title: "Scenario", subtitle: "nome, anno base, orizzonte, inflazione", group: "Impostazione" },
   { n: 2, key: "fatturato", title: "Fatturato", subtitle: "ricavi e altri ricavi", group: "Conto economico" },
-  { n: 3, key: "costi", title: "Costi principali", subtitle: "quota fissa e variabile", group: "Conto economico" },
-  { n: 4, key: "altre-voci-ce", title: "Altre voci CE", subtitle: "voci minori e automatiche", group: "Conto economico" },
-  { n: 5, key: "circolante", title: "Capitale circolante", subtitle: "giorni medi", group: "Stato patrimoniale" },
-  { n: 6, key: "pregresso-nuovo", title: "Pregresso e nuovo", subtitle: "debiti, finanziamenti, investimenti", group: "Stato patrimoniale" },
+  { n: 3, key: "costi", title: "Costi", subtitle: "quota fissa, inflazione, ipotesi manuali", group: "Conto economico" },
+  { n: 4, key: "circolante", title: "Capitale circolante", subtitle: "giorni medi", group: "Stato patrimoniale" },
+  { n: 5, key: "patrimoniale-pregresso", title: "Patrimoniale pregresso", subtitle: "come si chiude ciò che c'è già", group: "Stato patrimoniale", badge: "nuovo" },
+  { n: 6, key: "patrimoniale-piano", title: "Patrimoniale piano", subtitle: "ciò che il previsionale genera", group: "Stato patrimoniale", badge: "nuovo" },
   { n: 7, key: "imposte", title: "Imposte", subtitle: "aliquota e pagamento", group: "Stato patrimoniale" },
 ];
 
+// `other_lenders` NON entra qui: e' nidificato (una lista, non uno scalare) e
+// vive nei `nested_fields` del catalogo del report (Task 1), non nei `fields`
+// — la parita' col catalogo (`test_assumption_catalog_is_exactly_the_current_wizard_without_dead_fields`)
+// confronta SOLO i `fields`, sullo stesso precedente di `pregresso`.
 export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
   scenario: ["inflation_pct"],
   fatturato: ["revenue_growth_pct", "other_revenue_growth_pct"],
@@ -27,25 +33,23 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "fixed_materials_percentage", "fixed_services_percentage",
     "variable_materials_growth_pct", "variable_services_growth_pct",
     "fixed_materials_growth_pct", "fixed_services_growth_pct",
-    "personnel_growth_pct", "rent_growth_pct",
     "fixed_materials_growth_auto", "fixed_services_growth_auto",
+    "personnel_growth_pct", "rent_growth_pct", "other_costs_growth_pct",
   ],
-  "altre-voci-ce": ["other_costs_growth_pct"],
-  circolante: [
-    "dso_days", "dio_days", "dpo_days", "receivables_long_growth_pct",
+  circolante: ["dso_days", "dio_days", "dpo_days", "receivables_long_growth_pct"],
+  "patrimoniale-pregresso": [
+    "bank_lines_amount", "bank_lines_rule", "bank_lines_rate", "financing_loans",
+    "existing_debt_repayment_years", "altri_finanz_repayment_years",
+  ],
+  "patrimoniale-piano": [
     "sp01_growth_pct", "sp04_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
     "sp08_growth_pct", "sp10_growth_pct", "sp14_growth_pct", "sp16f_growth_pct",
     "sp16g_growth_pct", "sp17d_growth_pct", "sp17f_growth_pct", "sp17g_growth_pct",
-    "sp18_growth_pct", "previdenza_scales_with_personnel", "tfr_accrual_suspended",
-  ],
-  "pregresso-nuovo": [
-    "existing_debt_repayment_years", "altri_finanz_repayment_years", "financing_loans",
+    "sp18_growth_pct", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "tfr_payments",
     "financing_amount", "financing_duration_years", "financing_interest_rate",
-    "tangible_investments", "intangible_investments",
-    "depreciation_rate", "depreciation_rate_intangible",
+    "tangible_investments", "intangible_investments", "depreciation_rate", "depreciation_rate_intangible",
     "asset_disposal_nbv", "asset_disposal_proceeds", "cash_sweep_enabled", "cash_sweep_min_cash",
     "overdraft_allowed", "overdraft_limit",
-    "bank_lines_amount", "bank_lines_rule", "bank_lines_rate", "tfr_payments",
   ],
   imposte: ["tax_rate", "tax_advances_paid", "tax_temporary_differences", "sp16e_growth_pct", "sp17e_growth_pct"],
 };
@@ -107,16 +111,18 @@ export function primaryLabel(step: WizardStepKey): string {
 
 export function stepForErrorMessage(message: string): WizardStepKey {
   // Un rifiuto che nomina il passo dove il piano sta deve atterrare lì: i
-  // messaggi del motore citano «Pregresso e nuovo» (la virgolettatura non fa
-  // testo) per i saldi scadenziabili e "Imposte" per i tributari. Prima ogni
-  // rifiuto che non parlasse di scoperto finiva al passo 7 anche quando
-  // l'errore diceva «passo Pregresso e nuovo» (rilievo m-B della revisione).
-  if (/pregresso e nuovo/i.test(message)) return "pregresso-nuovo";
-  // Anche il tetto dello scoperto superato si corregge al passo 6, dove lo
-  // scoperto si concede: rimandare a Imposte manderebbe l'utente nel posto
-  // sbagliato con un messaggio che parla d'altro.
-  if (/fabbisogno finanziario scoperto di|scoperto di conto corrente oltre il tetto/i.test(message))
-    return "pregresso-nuovo";
+  // messaggi del motore citano «Patrimoniale pregresso» (la virgolettatura
+  // non fa testo) per i saldi scadenziabili col pregresso (giro di rilievi
+  // del 14/09, `_PREGRESSO_PASSO_DEFAULT` — prima era «Pregresso e nuovo»,
+  // rilievo m-B della revisione precedente).
+  if (/patrimoniale pregresso/i.test(message)) return "patrimoniale-pregresso";
+  // Tutto ciò che il passo 6 genera — fabbisogno scoperto, tetto dello
+  // scoperto superato, liquidazioni TFR oltre il fondo — atterra su
+  // «Patrimoniale piano», dove si concede lo scoperto e si scadenzia il TFR:
+  // rimandare a Imposte manderebbe l'utente nel posto sbagliato con un
+  // messaggio che parla d'altro.
+  if (/patrimoniale piano|fabbisogno finanziario scoperto di|scoperto di conto corrente oltre il tetto|liquidazioni tfr/i.test(message))
+    return "patrimoniale-piano";
   // «Imposte» come nome di passo è la meta anche qui — oggi coincide col
   // default, ma la regola è voluta: se un passo si aggiunge, questo ramo dice
   // dove va ciò che nomina il passo 7.
@@ -140,15 +146,15 @@ export function stepLead(step: WizardStepKey, baseYear: number): string {
     case "scenario":
       return `Da dove parte il piano e quanto lontano guarda. Tutto il resto si misura rispetto al bilancio ${baseYear}.`;
     case "fatturato":
-      return "Quanto crescono i ricavi, anno per anno. Tutti i costi variabili del passo successivo seguono questa curva.";
+      return "Quanto crescono i ricavi, anno per anno. È l'ipotesi principale del piano: tutto parte da 0 e lo decidi tu. La parte variabile dei costi segue questa curva senza altre ipotesi.";
     case "costi":
-      return "Materie prime, servizi, personale e godimento beni di terzi: l'87% dei costi operativi. Prima quanto è fisso, poi come si muove.";
-    case "altre-voci-ce":
-      return "Le voci minori e quelle che il piano calcola da solo. Modifica solo ciò che ti serve.";
+      return "Quanto è fisso, e il resto segue da solo: la parte variabile cresce con i ricavi, la parte fissa con l'inflazione. A mano restano solo personale, godimento beni di terzi e oneri diversi.";
     case "circolante":
       return `Giorni medi di incasso, giacenza e pagamento. Vuoto significa «come nel ${baseYear}».`;
-    case "pregresso-nuovo":
-      return "A sinistra il bilancio che c'è già e come si scadenzia. A destra quello che il piano genera. Non si mescolano.";
+    case "patrimoniale-pregresso":
+      return `I saldi al 31/12/${baseYear} e come si chiudono. Le voci a breve si liquidano nel primo anno del piano; quelle oltre 12 mesi le scadenzi tu, anno per anno.`;
+    case "patrimoniale-piano":
+      return "Ciò che il previsionale genera: voci minori, investimenti, nuova finanza. La cassa chiude il foglio.";
     case "imposte":
       return "Calcolate dal piano sull'utile ante imposte. Correggi l'aliquota o il modo in cui i debiti tributari vengono pagati.";
   }

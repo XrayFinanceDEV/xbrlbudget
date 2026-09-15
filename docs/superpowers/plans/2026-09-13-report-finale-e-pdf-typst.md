@@ -1228,3 +1228,23 @@ regressione reale e riproduzione indipendente passate. Dettaglio in
 docs/testing/M2-02A-dossier-base.md.
 La fase successiva è M2-03, dimensioni/componenti grafici. Segue completamento
 del planner/reflow M2-02A con inventario completo, prima di M2-00C note.
+
+### Esecuzione M2-03, grafici canonici — 2026-09-15
+
+Implementazione diretta e review indipendente Terra high, su autorizzazione
+dell’utente senza Pi. Integrati componenti vettoriali per sei grafici M1 e dieci
+approfondimenti v2 materializzati; barre divergenti, linee interrotte sui null,
+quattro stili colore/grigio, valori tabellari formattati da stringhe Decimal.
+Soglie soltanto dai riferimenti canonici, nessuna formula finanziaria nel renderer.
+Geometria `native-charts-1` congelata a 178×94 mm (plot 62 + legenda 32),
+verificata anche attraverso le misure reali Typst. Review approvata dopo una
+regressione che impedisce altre dimensioni anche in una revisione firmata.
+Collaudo: 53 test grafici, 205 test mirati complessivi passati in 76.14s.
+Ricevuta e inventario in `docs/testing/M2-03-typst-charts.md`.
+
+La preview BOZZA ha 17 pagine e dati sintetici; il piano finale resta da comporre.
+L’audit del catalogo rileva che confronto infrannuale collegato, composizioni
+complete, pareggio e scoring non sono ancora serie canoniche del dossier v2.
+Prima del freeze completo M2-02A, verificare ed estendere assembler/contratto
+per i dati disponibili nei servizi autorevoli; non ricavarli nel template.
+Seguono inventario e reflow del piano completo, poi M2-00C per i commenti.

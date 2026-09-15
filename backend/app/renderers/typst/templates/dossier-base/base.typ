@@ -1,9 +1,10 @@
 // M2-02A base composition. No financial formulas or executable report text.
-#let navy = rgb("#003049")
-#let blue = rgb("#669BBC")
-#let ink = rgb("#1B1F24")
-#let muted = rgb("#5E6B78")
-#let rule = rgb("#D5DDE4")
+#let gray-mode = json("options.json").grayscale
+#let navy = if gray-mode { rgb("#262626") } else { rgb("#003049") }
+#let blue = if gray-mode { rgb("#777777") } else { rgb("#669BBC") }
+#let ink = if gray-mode { rgb("#222222") } else { rgb("#1B1F24") }
+#let muted = if gray-mode { rgb("#666666") } else { rgb("#5E6B78") }
+#let rule = if gray-mode { rgb("#DDDDDD") } else { rgb("#D5DDE4") }
 #let page-width = 210mm
 #let body-width = 178mm
 #let note-width = body-width
@@ -115,7 +116,9 @@
   let cells = ()
   for row in statement.rows {
     let strong = row.kind in ("section", "group", "subtotal", "total")
-    let background = if row.kind in ("section", "total") { rgb("#EEF3F6") } else { none }
+    let background = if row.kind in ("section", "total") {
+      if gray-mode { rgb("#F2F2F2") } else { rgb("#EEF3F6") }
+    } else { none }
     let parents = parent-labels(statement, row)
     cells.push(table.cell(breakable: false, fill: background)[
       #marker((kind: "row", content_id: "row:" + statement.id + ":" + row.id,

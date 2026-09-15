@@ -1,0 +1,11 @@
+{
+  "version": "native-charts-1",
+  "width_mm": "178",
+  "height_mm": "94",
+  "plot_height_mm": "62",
+  "legend_height_mm": "32",
+  "table_font_pt": "8",
+  "axis_font_pt": "7",
+  "max_series": 4,
+  "bars": ["income_results", "cashflows", "structural_balance", "practice_net_debt", "economic_incidence", "financial_charges"]
+}

@@ -55,6 +55,7 @@ import { StepFatturato } from "./steps/StepFatturato";
 import { StepCosti } from "./steps/StepCosti";
 import { StepCircolante } from "./steps/StepCircolante";
 import { StepPregressoNuovo } from "./steps/StepPregressoNuovo";
+import { StepPatrimonialePiano } from "./steps/StepPatrimonialePiano";
 import { StepImposte } from "./steps/StepImposte";
 
 /** Lettura/scrittura di `localStorage` che non fa cadere il wizard quando lo
@@ -338,14 +339,15 @@ export function BudgetWizard({
       {step === "fatturato" && <StepFatturato {...stepProps} />}
       {step === "costi" && <StepCosti {...stepProps} />}
       {step === "circolante" && <StepCircolante {...stepProps} />}
-      {/* Placeholder temporaneo (Task 8): il passo 5 e il passo 6 rendono
-          ancora lo stesso componente di prima, `StepPregressoNuovo`. I passi
-          15/16 lo sostituiscono ciascuno col proprio, coerente col nome
-          nuovo. Il passo «Altre voci CE» non esiste piu' (Task 11): la sua
-          unica riga rimasta, gli oneri diversi di gestione, e' entrata nel
-          passo Costi. */}
+      {/* Placeholder temporaneo (Task 8): il passo 5 rende ancora lo stesso
+          componente di prima, `StepPregressoNuovo`. Il Task 13 lo sostituisce
+          col proprio, coerente col nome nuovo — in parallelo a questo task,
+          che ha gia' sostituito il passo 6 col proprio `StepPatrimonialePiano`
+          (Task 15). Il passo «Altre voci CE» non esiste piu' (Task 11): la
+          sua unica riga rimasta, gli oneri diversi di gestione, e' entrata
+          nel passo Costi. */}
       {step === "patrimoniale-pregresso" && <StepPregressoNuovo {...stepProps} />}
-      {step === "patrimoniale-piano" && <StepPregressoNuovo {...stepProps} />}
+      {step === "patrimoniale-piano" && <StepPatrimonialePiano {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}
 
       {chrome.bottomBar && (

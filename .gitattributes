@@ -1,0 +1,2 @@
+# Preserve the checksummed upstream license verbatim, including its CRLF/space.
+backend/app/renderers/typst/templates/dossier-base/OFL-1.1.txt -text whitespace=-blank-at-eol

@@ -3297,16 +3297,31 @@ class ForecastEngine:
             else:
                 sp14a = sp14b = sp14c = ZERO
                 sp14d = sp14
-        # TFR fund: previous fund + accrual. When the accrual is suspended (companies
-        # with >60 employees pay the maturing TFR to the INPS treasury fund from a given
-        # year rather than accruing it internally), the fund stops growing. The ce08a
-        # cost stays in the P&L (it is paid out, not retained), so the outflow is reflected
-        # through equity/cash — no internal liability is created.
+        # TFR fund: previous fund + accrual - payments. When the accrual is suspended
+        # (companies with >60 employees pay the maturing TFR to the INPS treasury fund
+        # from a given year rather than accruing it internally), the fund stops growing.
+        # The ce08a cost stays in the P&L (it is paid out, not retained), so the outflow
+        # is reflected through equity/cash — no internal liability is created. The
+        # annual `tfr_payments` assumption (spec 2026-09-15 §5.4) drains the fund: the
+        # cash plug then carries the settlement out of `sp09`, so the rendiconto sees it
+        # as the fund's movement (`cashflow_detailed.py`, `tfr_paid`). A settlement
+        # beyond fondo + accrual is REFUSED, not clamped: clamping would leave in cash
+        # an outflow that never happened.
         tfr_suspended = bool(getattr(assumption, 'tfr_accrual_suspended', False))
-        if tfr_suspended:
-            sp15 = _prev('sp15_tfr')
-        else:
-            sp15 = _prev('sp15_tfr') + forecast_inc.get('ce08a_tfr_accrual', ZERO)
+        tfr_apertura = _prev('sp15_tfr')
+        tfr_accantonamento = ZERO if tfr_suspended else forecast_inc.get('ce08a_tfr_accrual', ZERO)
+        tfr_liquidazioni = Decimal(str(getattr(assumption, 'tfr_payments', None) or 0))
+        disponibile = tfr_apertura + tfr_accantonamento
+        if tfr_liquidazioni - disponibile > Decimal('0.01'):
+            raise ValueError(
+                f"Liquidazioni TFR {assumption.forecast_year}: {eur_it(tfr_liquidazioni)} superano il fondo "
+                f"disponibile ({eur_it(disponibile)}); correggi al passo «Patrimoniale piano»"
+            )
+        sp15 = disponibile - tfr_liquidazioni
+        if details is not None:
+            details['tfr'] = {'apertura': _q2(tfr_apertura), 'accantonamento': _q2(tfr_accantonamento),
+                              'liquidazioni': _q2(tfr_liquidazioni), 'chiusura': _q2(sp15),
+                              'sospeso': tfr_suspended}
         sp18_anchor, sp18_factor = _sp_scale('sp18', 'sp18_growth_pct')
         sp18 = _declare_indexed('sp18', sp18_anchor('sp18_ratei_risconti_passivi') * sp18_factor)
 

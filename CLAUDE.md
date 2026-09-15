@@ -380,6 +380,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   centesimo senza che nessun controllo lo veda. Se ogni campo neutro è già scritto da un piano, il
   centesimo si posa sul primo e `details['residuo_quadratura']` lo dichiara con
   `campo_dichiarato: true`.
+- **Una liquidazione TFR oltre il fondo disponibile si rifiuta** (`tfr_payments`,
+  `details['tfr']`): clamparla lascerebbe in cassa un'uscita mai avvenuta.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere

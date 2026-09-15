@@ -362,6 +362,17 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
         if not forzato(SP_INDEXABLE_FIELDS[code]):
             confronta(SP_INDEXABLE_FIELDS[code], voce["valore"], f"details['indicizzazione']['{code}']")
 
+    # ── Task 5 (lotto rilievi): la chiusura del fondo TFR coincide con `sp15` ──
+    # La chiave si dichiara sempre (a valle una chiave assente vale zero). Sotto
+    # un `sp_overrides` su `sp15_tfr` vince l'override, e il primo ciclo di
+    # `confronta` qui sopra risponde di quella cella: il confronto con `chiusura`
+    # si ferma, come per le altre famiglie dichiarate.
+    tfr = det.get("tfr")
+    if tfr is None:
+        fuori.append(("tfr", "details['tfr']: chiave non dichiarata"))
+    elif not forzato("sp15_tfr"):
+        confronta("sp15_tfr", D(str(tfr["chiusura"])), "details['tfr'].chiusura")
+
     # ── caso 1: un override vince, e vince fino in fondo ──
     for attr, riga in CE_OVERRIDES.items():
         if row.get(attr) is not None:

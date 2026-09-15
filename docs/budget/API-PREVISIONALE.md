@@ -1011,3 +1011,32 @@ italiana è responsabilità della visualizzazione, non del contratto.
 
 La stampa browser è soltanto un'anteprima del renderer; non è il PDF ufficiale e non cambia il
 modello.
+
+## 13. Fondo TFR e liquidazioni (`tfr_payments`)
+
+Il fondo `sp15_tfr` accanta ogni anno la quota di legge — salari / 13,5, o in fallback il 70% del
+costo del personale quando i salari non sono dettagliati (`tfr_accrual_quota`,
+`calculations/projection_common.py`) — e con il lotto «percorso ipotesi rilievi» (spec
+`2026-09-15-percorso-ipotesi-rilievi-design.md` §5.4) può anche **svuotarsi**: `tfr_payments`
+(`BudgetAssumptions.tfr_payments`, `NUMERIC(15,2) NOT NULL DEFAULT 0`, schema con `ge=0`) è la
+liquidazione annua deliberata dall'utente, inserita nel passo 6 «Patrimoniale piano» del wizard.
+
+- **La formula**: `sp15 = prev + accantonamento − tfr_payments`, dove l'accantonamento è zero se
+  `tfr_accrual_suspended` è acceso (azienda che versa la quota a fondi esterni o INPS invece di
+  accantonarla internamente; l'interruttore esiste già e non cambia). Il blocco sta
+  in `ForecastEngine._calculate_balance_sheet`, subito dopo i fondi rischi `sp14`.
+- **Oltre il fondo si rifiuta, non si clampa**: se `tfr_payments` supera `prev + accantonamento`
+  (con la tolleranza del centesimo, `> 0.01`), il motore solleva in italiano —
+  «Liquidazioni TFR {anno}: {X} superano il fondo disponibile ({Y}); correggi al passo
+  «Patrimoniale piano»». Clamparlo a zero lascerebbe in cassa un'uscita mai avvenuta: il
+  fabbisogno si misurerebbe due volte, una sul fondo e una sulla cassa. Sul bulk delle ipotesi
+  l'errore arriva come sempre in `message` con `forecast_generated: false` e HTTP 200 (§1).
+- **L'uscita di cassa passa dal plug**: il passivo scende, e `sp09` (il plug) la assorbe; il
+  rendiconto non ha bisogno di nessuna nuova riga, perché legge le liquidazioni **dal movimento
+  del fondo** (`tfr_paid`, `backend/app/calculations/cashflow_detailed.py`:
+  `−(sp15_prev + accantonamento − sp15_attuale)`).
+- **`details['tfr']`, dichiarato sempre** (a valle una chiave assente varrebbe zero):
+  `{apertura, accantonamento, liquidazioni, chiusura, sospeso}` — importi `Decimal` al centesimo,
+  `sospeso` booleano. `chiusura` coincide con l'`sp15_tfr` persistito (verificato in
+  `tests/test_forecast_dichiarato_vs_persistito.py`); sotto un `sp_overrides` su `sp15_tfr` vince
+  l'override, come per le altre famiglie dichiarate (§3).

@@ -6,20 +6,23 @@
 // `p.preview` — perche' non c'e' nulla che il motore debba proiettare: la
 // scheda a destra ricapitola il bilancio storico gia' caricato
 // (`rowsAnnoBase`, lib/budget-preview-rows.ts).
-import { useEffect, useMemo, useRef, useState } from "react";
-import { RotateCcw } from "lucide-react";
-import { toast } from "sonner";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+//
+// L'inflazione attesa si SALVA (`inflation_pct`, Task 10, spec 2026-09-15
+// §4.1): niente piu' stato locale, si legge da `assumptions` con
+// `inflazioneOf` e si scrive con `updateAll("inflation_pct", v)`, intercettato
+// nell'hook (`use-scenario-assumptions.ts`) per riallineare anche le caselle
+// automatiche della parte fissa del passo 3. Il seed dalla tendenza storica
+// e' sparito (decisione 3): la tabella resta come riferimento in sola
+// lettura, senza pulsante di ripristino.
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { blendedRate, calculateTrend, shouldSeedTrend, TREND_ITEMS, trendAssumptions } from "@/lib/budget-trend";
+import { calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
+import { inflazioneOf } from "@/lib/budget-inflazione";
 import { rowsAnnoBase } from "@/lib/budget-preview-rows";
 import { PreviewPanel } from "../PreviewPanel";
 import type { StepProps } from "../types";
@@ -35,31 +38,13 @@ export interface StepScenarioProps extends StepProps {
   setNumYears: (v: number) => void;
   notaAnnoBase: string | null;
   isNew: boolean;
-  inflation: number;
-  setInflation: (v: number) => void;
-}
-
-/** Applica la tendenza storica su tutto l'orizzonte: TREND_ITEMS x forecastYears,
- *  ogni campo scritto con blendedRate (spec 2026-09-08 §4.1). Chiamata sia
- *  dal seed automatico (una tantum, scenario nuovo) sia dal pulsante
- *  "Riparti dalla tendenza". */
-function applyTrendToAssumptions(
-  historicalYears: number[],
-  forecastYears: number[],
-  historical: StepProps["historical"],
-  inflation: number,
-  update: StepProps["update"],
-) {
-  const t = trendAssumptions(historicalYears, forecastYears, historical, inflation);
-  for (const [year, fields] of Object.entries(t))
-    for (const [f, v] of Object.entries(fields)) update(Number(year), f, v);
 }
 
 export function StepScenario(props: StepScenarioProps) {
   const {
-    baseYear, forecastYears, historical, historicalYears, update,
+    baseYear, forecastYears, historical, historicalYears, assumptions, updateAll,
     name, setName, description, setDescription, isActive, setIsActive,
-    numYears, setNumYears, notaAnnoBase, isNew, inflation, setInflation,
+    numYears, setNumYears, notaAnnoBase,
   } = props;
 
   // Il campo tiene il testo battuto finche' ha il fuoco (stessa logica
@@ -67,37 +52,21 @@ export function StepScenario(props: StepScenarioProps) {
   // faceva rimbalzare il valore, vedi lib/budget-horizon.ts).
   const [testoAnni, setTestoAnni] = useState<string | null>(null);
 
-  // Scenario nuovo: precompila UNA volta, appena idratato — e «idratato» vuol
-  // dire che i dati storici sono ARRIVATI, non che l'elenco degli anni e' lungo
-  // due. La decisione sta in `shouldSeedTrend` (lib/budget-trend.ts), col suo
-  // test; qui resta il solo one-shot, che scatta quando il seed avviene davvero.
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (seeded.current || !shouldSeedTrend(isNew, historicalYears, historical)) return;
-    seeded.current = true;
-    applyTrendToAssumptions(historicalYears, forecastYears, historical, inflation, update);
-  }, [isNew, historicalYears, forecastYears, historical, inflation, update]);
+  const inflazione = inflazioneOf(assumptions, forecastYears);
 
   const hasTwoYears = historicalYears.length >= 2;
   const year1 = hasTwoYears ? historicalYears[historicalYears.length - 2] : 0;
   const year2 = hasTwoYears ? historicalYears[historicalYears.length - 1] : 0;
-  const n = forecastYears.length;
   const trendRows = useMemo(
-    () => TREND_ITEMS.map((item) => {
-      const trend = hasTwoYears ? calculateTrend(historical, year1, year2, item.getValue) : null;
-      const rates = forecastYears.map((_, i) => blendedRate(trend, inflation, i, n));
-      return { ...item, trend, rates };
-    }),
-    [hasTwoYears, historical, year1, year2, forecastYears, inflation, n],
+    () => TREND_ITEMS.map((item) => ({
+      ...item,
+      trend: hasTwoYears ? calculateTrend(historical, year1, year2, item.getValue) : null,
+    })),
+    [hasTwoYears, historical, year1, year2],
   );
 
   const annoBaseRows = useMemo(() => rowsAnnoBase(baseYear, historicalYears, historical), [baseYear, historicalYears, historical]);
   const anniPrecedenti = useMemo(() => historicalYears.filter((y) => y !== baseYear), [historicalYears, baseYear]);
-
-  const riapplicaTendenza = () => {
-    applyTrendToAssumptions(historicalYears, forecastYears, historical, inflation, update);
-    toast.success("Ipotesi applicate con successo");
-  };
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
@@ -179,34 +148,7 @@ export function StepScenario(props: StepScenarioProps) {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Punto di partenza</CardTitle>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button type="button" variant="outline" size="sm">
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Riparti dalla tendenza
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Riapplicare la tendenza storica?</AlertDialogTitle>
-                  <AlertDialogDescription asChild>
-                    <div>
-                      Sovrascrive le ipotesi correnti su tutto l&apos;orizzonte per queste voci:
-                      <ul className="mt-2 list-disc pl-5">
-                        {TREND_ITEMS.map((item) => <li key={item.label}>{item.label}</li>)}
-                      </ul>
-                    </div>
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Annulla</AlertDialogCancel>
-                  <AlertDialogAction onClick={riapplicaTendenza}>Applica</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">Punto di partenza</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3">
               <Label htmlFor="wiz-inflation" className="text-xs font-medium whitespace-nowrap">Inflazione attesa</Label>
@@ -216,12 +158,17 @@ export function StepScenario(props: StepScenarioProps) {
                 step="0.1"
                 min="-10"
                 max="50"
-                value={inflation}
-                onChange={(e) => setInflation(parseFloat(e.target.value) || 0)}
+                value={inflazione}
+                onChange={(e) => updateAll("inflation_pct", parseFloat(e.target.value) || 0)}
                 className="w-24"
               />
               <span className="text-xs text-muted-foreground">%</span>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Precompila la crescita della parte fissa di materie prime e servizi (passo 3), dove puoi
+              correggerla anno per anno. L&apos;inflazione non tocca i ricavi: le ipotesi sul fatturato le
+              scrivi al passo 2, partendo da 0.
+            </p>
             {!hasTwoYears && (
               <p className="text-xs text-muted-foreground">
                 Serve almeno 2 anni storici per calcolare il trend. Verranno usati i valori di inflazione.
@@ -232,10 +179,9 @@ export function StepScenario(props: StepScenarioProps) {
                 <thead>
                   <tr className="border-b border-border">
                     <th className="px-2 py-1.5 text-left font-semibold text-foreground">Voce</th>
-                    <th className="px-2 py-1.5 text-center font-semibold text-muted-foreground">Trend storico</th>
-                    {forecastYears.map((year) => (
-                      <th key={year} className="px-2 py-1.5 text-center font-semibold text-primary">{year}</th>
-                    ))}
+                    <th className="px-2 py-1.5 text-center font-semibold text-muted-foreground">
+                      {hasTwoYears ? `Tendenza ${year1}-${year2}` : "Tendenza storica"}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -245,14 +191,14 @@ export function StepScenario(props: StepScenarioProps) {
                       <td className="px-2 py-1.5 text-center text-muted-foreground">
                         {r.trend !== null ? `${r.trend >= 0 ? "+" : ""}${r.trend.toFixed(1)}%` : "—"}
                       </td>
-                      {r.rates.map((rate, i) => (
-                        <td key={i} className="px-2 py-1.5 text-center font-medium text-primary">{rate.toFixed(1)}%</td>
-                      ))}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Solo per riferimento: il piano parte da 0 al passo 2.
+            </p>
           </CardContent>
         </Card>
       </div>

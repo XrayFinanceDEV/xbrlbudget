@@ -5,6 +5,7 @@ import {
   withDefaultsForYears,
   withPregresso,
   withOtherLenders,
+  withRevenueGrowth,
   trimPregressoToHorizon,
   withPregressoTrimmedToHorizon,
   baseYearNote,
@@ -475,6 +476,17 @@ describe("withOtherLenders (Task 8)", () => {
     expect(out[2027].other_lenders).toEqual([{ name: "Soci", opening_residual: 100, interest_rate: 0, repayments: [0, 50] }]);
     expect(out[2028].other_lenders).toBeUndefined();
     expect(withOtherLenders(out, [2027, 2028], null)[2027].other_lenders).toBeNull();
+  });
+});
+
+describe("withRevenueGrowth (Task 10)", () => {
+  const asMap = (m: Record<number, Record<string, unknown>>) => m as unknown as AssumptionsMap;
+
+  it("withRevenueGrowth scrive i ricavi e le due parti variabili dello stesso anno", () => {
+    const out = withRevenueGrowth(asMap({ 2027: {}, 2028: { revenue_growth_pct: 1 } }), 2027, 4);
+    expect(out[2027]).toMatchObject({ revenue_growth_pct: 4, variable_materials_growth_pct: 4, variable_services_growth_pct: 4 });
+    expect(out[2028].revenue_growth_pct).toBe(1);
+    expect(withRevenueGrowth(out, 2027, null)[2027]).toMatchObject({ revenue_growth_pct: null, variable_materials_growth_pct: 0, variable_services_growth_pct: 0 });
   });
 });
 

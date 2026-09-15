@@ -413,6 +413,25 @@ export function withPregresso(
 }
 
 /**
+ * I ricavi trascinano la parte variabile di materie e servizi (spec 2026-09-15 §4.2): il
+ * motore non cambia, le due percentuali seguono i ricavi per costruzione.
+ *
+ * `revenue_growth_pct` non e' nullable in `BudgetAssumptionsCreate` (nessuna schermata lo
+ * svuota oggi), ma il tipo di `value` resta `number | null` per coerenza con la firma
+ * generica di `StepProps.update`: il cast sotto e' quello, non un allargamento del modello.
+ */
+export function withRevenueGrowth(map: AssumptionsMap, year: number, value: number | null): AssumptionsMap {
+  const v = value === null ? 0 : value;
+  const row: Record<string, unknown> = {
+    ...map[year],
+    revenue_growth_pct: value,
+    variable_materials_growth_pct: v,
+    variable_services_growth_pct: v,
+  };
+  return { ...map, [year]: row as Partial<BudgetAssumptionsCreate> };
+}
+
+/**
  * Gli altri finanziatori per anno vivono sulla riga del PRIMO anno di piano,
  * come `pregresso` (spec 2026-09-15 §5.3): stesso motivo, stessa forma —
  * il motore legge la lista una volta sola, sul primo anno di piano, e ogni

@@ -96,7 +96,6 @@ export function BudgetWizard({
   const [name, setName] = useState(scenario.name);
   const [description, setDescription] = useState(scenario.description ?? "");
   const [isActive, setIsActive] = useState(scenario.is_active === 1);
-  const [inflation, setInflation] = useState(2);
   const [step, setStep] = useState<WizardStepKey>("scenario");
   const [visited, setVisited] = useState<Set<WizardStepKey>>(new Set(["scenario"]));
   const [saving, setSaving] = useState(false);
@@ -335,8 +334,6 @@ export function BudgetWizard({
           setNumYears={s.setNumYears}
           notaAnnoBase={s.notaAnnoBase}
           isNew={s.isNew}
-          inflation={inflation}
-          setInflation={setInflation}
         />
       )}
       {step === "fatturato" && <StepFatturato {...stepProps} />}

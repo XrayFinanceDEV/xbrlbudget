@@ -265,7 +265,14 @@ def test_debito_bancario_quadra_con_sp16a_e_sp17a_su_tutta_la_griglia_del_banco(
                 fuori.append(f"{dove} pregresso senza piano e con anni di rimborso insieme")
             componenti = [c for c in (debito.get("pregresso_senza_piano"), debito.get("pregresso_piano_anni")) if c]
             componenti += list(debito.get("contratti") or [])
-            breve = sum((D(str(c["breve"])) for c in componenti), D("0")) + D(str(det.get("scoperto_residuo") or 0))
+            # Nel regime esplicito dei fidi (Task 3) l'intero `residuo` del blocco
+            # `fidi` STA in `sp16a` (i fidi sono a breve per definizione), e
+            # `test_forecast_fidi.py`/`test_forecast_fidi_tiraggio.py` asseriscono
+            # la somma con quel termine: la formula di qui, scritta prima del
+            # regime, era cieca. Portato dal profilo `fidi_tiraggio` del Task 7
+            # (40 violazioni -> 0, tutte su `__fidi_tiraggio`).
+            fidi = debito.get("fidi") or {}
+            breve = sum((D(str(c["breve"])) for c in componenti), D("0")) + D(str(det.get("scoperto_residuo") or 0)) + D(str(fidi.get("residuo") or 0))
             lungo = sum((D(str(c["lungo"])) for c in componenti), D("0"))
             if breve != D(sp[SP16A]):
                 fuori.append(f"{dove} breve {breve} != sp16a {sp[SP16A]}")

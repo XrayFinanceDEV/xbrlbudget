@@ -614,6 +614,13 @@ def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Dict[str, 
         else:
             validate_runoff(opening, amounts, writeoff, horizon, label)
             out[key] = {"opening": opening, "amounts": amounts, "writeoff": writeoff}
+            # Dichiarato e persistito, mai usato dal motore (spec §5.5): un
+            # piano a zero sulla parte oltre lascia il residuo aperto per
+            # costruzione, quindi non incassare e' gia' il comportamento di
+            # un piano che non incassa nulla. Solo sui crediti: su un debito
+            # non significa nulla.
+            if key == "crediti_commerciali":
+                out[key]["non_incassato"] = bool(plan.get("non_incassato"))
     return out
 
 
@@ -919,12 +926,13 @@ class ForecastEngine:
     }
 
     # Il passo del wizard che scadenzia ciascun saldo. `debiti_tributari` non sta
-    # nel passo "Pregresso e nuovo" (che lo mostra in sola lettura con scritto
-    # «si regolano al passo Imposte», `StepPregressoNuovo.tsx:233`), ma nel passo
-    # "Imposte": il rilievo M-2 della revisione, mandare l'utente al passo 6 per
-    # una voce che al passo 6 non e' modificabile vuol dire mandarlo a vuoto.
+    # nel passo "Patrimoniale pregresso" (che lo mostra in sola lettura con
+    # scritto «si regolano al passo Imposte», `StepPregressoNuovo.tsx:233`), ma
+    # nel passo "Imposte": il rilievo M-2 della revisione, mandare l'utente al
+    # passo 6 per una voce che al passo 6 non e' modificabile vuol dire
+    # mandarlo a vuoto.
     _PREGRESSO_PASSO: Dict[str, str] = {"debiti_tributari": "Imposte"}
-    _PREGRESSO_PASSO_DEFAULT = "Pregresso e nuovo"
+    _PREGRESSO_PASSO_DEFAULT = "Patrimoniale pregresso"
 
     # Le forme con l'articolo giusto per i messaggi di rifiuto (rilievo
     # m-A della revisione di `c8317ca`): `PREGRESSO_LABELS` e' senza articolo
@@ -2737,6 +2745,45 @@ class ForecastEngine:
             else:
                 ce12 = ce12 + (-disposal_gain)
 
+        # ── PUNTO DI PAREGGIO SUL MOL (spec 2026-09-15 §4.3, §5.5) ──
+        # Dichiarato, mai calcolato dal client: costi_variabili/costi_fissi
+        # leggono la scomposizione fisso/variabile appena scritta in `details`
+        # (None su entrambe le quote quando ce05/ce06 sono sotto override, nel
+        # qual caso l'intero blocco resta None — la scomposizione non esiste
+        # piu'). costi_fissi_operativi sottrae gli altri ricavi (ce04, gia'
+        # comprensivo dell'eventuale plusvalenza da dismissione); il margine
+        # di contribuzione e il margine di sicurezza restano None con ricavi o
+        # margine non positivi, mai zero.
+        if details is not None:
+            fissi_def = all(
+                details.get(k) is not None
+                for k in ('ce05_fixed', 'ce05_variable', 'ce06_fixed', 'ce06_variable')
+            )
+            pareggio = {k: None for k in (
+                'costi_variabili', 'costi_fissi', 'costi_fissi_operativi',
+                'margine_contribuzione_pct', 'fatturato_pareggio',
+                'margine_sicurezza', 'margine_sicurezza_pct',
+            )}
+            if fissi_def:
+                cv = details['ce05_variable'] + details['ce06_variable']
+                cf = details['ce05_fixed'] + details['ce06_fixed'] + ce07 + ce08 + ce12
+                cf_op = cf - ce04
+                pareggio.update({
+                    'costi_variabili': _q2(cv),
+                    'costi_fissi': _q2(cf),
+                    'costi_fissi_operativi': _q2(cf_op),
+                })
+                if ce01 > Decimal('0') and ce01 - cv > Decimal('0'):
+                    mdc = (ce01 - cv) / ce01
+                    bep = cf_op / mdc
+                    pareggio.update({
+                        'margine_contribuzione_pct': _q2(mdc * Decimal('100')),
+                        'fatturato_pareggio': _q2(bep),
+                        'margine_sicurezza': _q2(ce01 - bep),
+                        'margine_sicurezza_pct': _q2((ce01 - bep) / ce01 * Decimal('100')),
+                    })
+            details['pareggio'] = pareggio
+
         # CE line items: use override if set, otherwise fall back to base year
         ce02 = assumption.ce02_override if assumption.ce02_override is not None else base_inc.ce02_variazioni_rimanenze
         ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
@@ -3912,6 +3959,13 @@ class ForecastEngine:
                     'residual_long': r.residual_long if r else ZERO,
                     'generated': generated.get(key, ZERO),
                     'mode': 'runoff' if r else 'legacy',
+                    # Accettato dallo schema, persistito, dichiarato: il motore
+                    # non lo usa (spec §5.5) — solo sui crediti commerciali, su
+                    # un debito non significa nulla.
+                    'non_incassato': (
+                        bool((pregresso or {}).get(key, {}).get('non_incassato'))
+                        if key == 'crediti_commerciali' else False
+                    ),
                 }
             details.setdefault('pregresso_ignored', [])
             # L'inesigibile che un override di CE ha impedito di rilevare, e che

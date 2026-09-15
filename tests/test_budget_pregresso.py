@@ -93,7 +93,7 @@ def test_details_declare_the_three_keys_without_any_plan(monkeypatch):
                     saldo = details["pregresso"][key]
                     assert saldo["mode"] == "legacy"
                     assert set(saldo) == {"opening", "closed", "writeoff", "residual_short",
-                                          "residual_long", "generated", "mode"}
+                                          "residual_long", "generated", "mode", "non_incassato"}
                     assert saldo["closed"] == D("0") and saldo["writeoff"] == D("0")
                     assert saldo["residual_short"] == D("0") and saldo["residual_long"] == D("0")
                 assert details["pregresso"]["crediti_commerciali"]["opening"] == D("120000.00")

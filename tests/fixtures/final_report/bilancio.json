@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-14T11:00:00Z",
-  "model_hash": "ee732beb3166f97ab55b026953bba5692b53fb2ec8d256b7a2e109d39dad81ff",
-  "source_hash": "3f52b8a7dd6c2b35fd66d31a7699e7c4b31870336cbb183b10513a2fa6361a5a",
+  "model_hash": "157288e4b24e6edd10d219c07af4a84286d1a72418bf71c91dfc8d6d94b3a63e",
+  "source_hash": "64c2ce95de84a819bc60260abe3c7ed82f18eb2d3acd6c60542cb62eb54c2532",
   "company": {
     "id": 2,
     "name": "Bilancio Spa",
@@ -59,12 +59,7 @@
     },
     {
       "key": "costi",
-      "title": "Costi principali",
-      "assumptions": []
-    },
-    {
-      "key": "altre-voci-ce",
-      "title": "Altre voci CE",
+      "title": "Costi",
       "assumptions": []
     },
     {
@@ -73,8 +68,13 @@
       "assumptions": []
     },
     {
-      "key": "pregresso-nuovo",
-      "title": "Pregresso e nuovo",
+      "key": "patrimoniale-pregresso",
+      "title": "Patrimoniale pregresso",
+      "assumptions": []
+    },
+    {
+      "key": "patrimoniale-piano",
+      "title": "Patrimoniale piano",
       "assumptions": []
     },
     {

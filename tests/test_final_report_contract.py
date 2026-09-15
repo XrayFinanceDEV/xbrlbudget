@@ -95,7 +95,10 @@ def test_canonical_decimal_normalizes_only_for_hashing_and_rejects_non_finite_va
 
 def test_legacy_unknown_is_an_explicit_read_model_value_not_a_writer_inference():
     report = FinalReportModel.model_validate(load_fixture("infrannuale.json"))
-    provenance = report.assumption_sections[4].assumptions[0].provenance
+    # index 3 = "circolante" (Task 8 giro di rilievi: scenario, fatturato,
+    # costi, circolante, patrimoniale-pregresso, patrimoniale-piano, imposte
+    # — prima "circolante" era in quarta posizione con "altre-voci-ce").
+    provenance = report.assumption_sections[3].assumptions[0].provenance
     assert provenance == "legacy_unknown"
 
 
@@ -250,7 +253,7 @@ def test_assumption_scalars_reject_mixed_object_values(invalid):
 
 def test_assumption_catalog_is_exactly_the_current_wizard_without_dead_fields():
     catalog_keys = [item["key"] for item in ASSUMPTION_SECTION_CATALOG]
-    assert catalog_keys == ["scenario", "fatturato", "costi", "altre-voci-ce", "circolante", "pregresso-nuovo", "imposte"]
+    assert catalog_keys == ["scenario", "fatturato", "costi", "circolante", "patrimoniale-pregresso", "patrimoniale-piano", "imposte"]
     fields = [field for item in ASSUMPTION_SECTION_CATALOG for field in item["fields"]]
     nested_fields = [field for item in ASSUMPTION_SECTION_CATALOG for field in item.get("nested_fields", [])]
     assert len(fields) == len(set(fields))

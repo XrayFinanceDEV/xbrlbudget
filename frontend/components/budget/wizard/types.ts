@@ -2,7 +2,7 @@
 // (spec 2026-09-08 §4). Types only, no runtime code: the steps (task 11-14)
 // and the shared components in this directory (task 8) both import from here
 // so the shape of a step's props exists in exactly one place.
-import type { FinancingLoanInput, Pregresso, SpIndexingDriver, TemporaryDifferenceInput } from "@/types/api";
+import type { FinancingLoanInput, OtherLenderInput, Pregresso, SpIndexingDriver, TemporaryDifferenceInput } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { HistoricalData } from "@/lib/budget-trend";
 // Dichiarazione unica in lib/ (lib/ non puo' importare da components/): qui
@@ -34,4 +34,7 @@ export interface StepProps {
    *  chi ha bisogno di scrivere un oggetto ha un setter dedicato, non un
    *  terzo tipo unito a quello di tutti gli altri campi). */
   updatePregresso: (next: Pregresso | null) => void;
+  /** Il setter tipizzato degli altri finanziatori (Task 8): scrive SEMPRE
+   *  nella riga del PRIMO anno di piano, come `updatePregresso`. */
+  updateOtherLenders: (next: OtherLenderInput[] | null) => void;
 }

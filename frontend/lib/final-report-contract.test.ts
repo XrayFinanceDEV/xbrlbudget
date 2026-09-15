@@ -38,7 +38,10 @@ describe("FinalReportModel v1 runtime contract", () => {
 
   it("accepts typed nested CE/SP structures and a tax runoff plan", () => {
     const report = structuredClone(infrannuale) as FinalReportModel;
-    report.assumption_sections[5].assumptions.push({
+    // index 4 = "patrimoniale-pregresso" (Task 8: scenario, fatturato, costi,
+    // circolante, patrimoniale-pregresso, patrimoniale-piano, imposte) — dove
+    // vive il campo `pregresso`.
+    report.assumption_sections[4].assumptions.push({
       field: "pregresso", label: "Pregresso", values: [null, null, null], provenance: "user", active: true,
       pregresso: {
         crediti_commerciali: null, debiti_fornitori: null,
@@ -68,7 +71,9 @@ describe("FinalReportModel v1 runtime contract", () => {
 
   it("rejects malformed nested SP and CE entries", () => {
     const malformed = structuredClone(infrannuale) as FinalReportModel;
-    const ce = malformed.assumption_sections[3].assumptions[0];
+    // index 2 = "costi" (Task 8: `altre-voci-ce` si e' fusa in `costi`, che
+    // porta ancora `ce_overrides`).
+    const ce = malformed.assumption_sections[2].assumptions[0];
     if (!ce.ce_overrides) throw new Error("fixture must exercise ce_overrides");
     ce.ce_overrides[0].field = "ce99_override" as never;
     expect(isFinalReportModel(malformed)).toBe(false);

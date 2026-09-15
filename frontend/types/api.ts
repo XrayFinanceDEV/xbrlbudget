@@ -427,10 +427,20 @@ export interface FinancingLoanInput {
   name?: string | null;
   amount: number;
   opening_residual: number;
-  duration_years: number;
+  duration_years?: number | null;
+  repayments?: number[] | null;
   interest_rate: number;
   grace_years: number;
   balloon_pct: number;
+}
+
+/** Un altro finanziatore (sp16b/sp17b) scadenziato per anno (spec 2026-09-15 §5.3). */
+export interface OtherLenderInput {
+  name?: string | null;
+  opening_residual: number;
+  interest_rate: number;
+  /** Capitale rimborsato in ciascun anno di piano, indice 0 = primo anno. */
+  repayments: number[];
 }
 
 export interface TemporaryDifferenceInput {
@@ -449,6 +459,9 @@ export interface PregressoPlan {
   opening: number;
   amounts: number[];
   writeoff?: number[] | null;
+  /** Crediti commerciali non incassati nel piano (es. infragruppo): spegne le
+   *  caselle di scadenziamento e scrive 0 su ogni anno (spec 2026-09-15 §4.5). */
+  non_incassato?: boolean | null;
 }
 
 export interface PregressoTributari extends PregressoPlan {
@@ -521,6 +534,14 @@ export interface BudgetAssumptions {
   overdraft_limit: number | null;
   tfr_accrual_suspended: boolean;
   previdenza_scales_with_personnel: boolean;
+  inflation_pct: number | null;
+  fixed_materials_growth_auto: boolean;
+  fixed_services_growth_auto: boolean;
+  bank_lines_amount: number | null;
+  bank_lines_rule: "costante" | "ricavi" | null;
+  bank_lines_rate: number | null;
+  other_lenders: OtherLenderInput[] | null;
+  tfr_payments: number;
   interest_rate_receivables: number;
   interest_rate_payables: number;
   tax_rate: number;
@@ -619,6 +640,14 @@ export interface BudgetAssumptionsCreate {
   overdraft_limit?: number | null;
   tfr_accrual_suspended?: boolean;
   previdenza_scales_with_personnel?: boolean;
+  inflation_pct?: number | null;
+  fixed_materials_growth_auto?: boolean;
+  fixed_services_growth_auto?: boolean;
+  bank_lines_amount?: number | null;
+  bank_lines_rule?: "costante" | "ricavi" | null;
+  bank_lines_rate?: number | null;
+  other_lenders?: OtherLenderInput[] | null;
+  tfr_payments?: number;
   interest_rate_receivables?: number;
   interest_rate_payables?: number;
   tax_rate?: number;
@@ -1130,6 +1159,21 @@ export interface DebitoBancarioPianoAnni {
   lungo: number;
 }
 
+export interface PareggioDetail {
+  costi_variabili: number | null; costi_fissi: number | null; costi_fissi_operativi: number | null;
+  margine_contribuzione_pct: number | null; fatturato_pareggio: number | null;
+  margine_sicurezza: number | null; margine_sicurezza_pct: number | null;
+}
+export interface TfrDetail { apertura: number; accantonamento: number; liquidazioni: number; chiusura: number; sospeso: boolean }
+export interface AltriFinanziatoriContratto {
+  indice: number; nome: string; residuo_iniziale: number; rimborso: number; interessi: number; residuo: number; breve: number; lungo: number;
+}
+export interface AltriFinanziatoriDetail {
+  apertura: number; rimborso: number; interessi: number; breve: number; lungo: number;
+  mode: "contratti" | "anni" | "legacy"; contratti: AltriFinanziatoriContratto[];
+}
+export interface DebitoBancarioFidi { apertura: number; variazione_ricavi: number; rimborso_sweep: number; residuo: number; regola: "costante" | "ricavi" }
+
 /** Una riga per contratto (misti gia' divisi in pregresso/nuovo, anche non
  *  ancora erogati), nell'ordine di `financing_amount` e poi della griglia. */
 export interface DebitoBancarioContratto {
@@ -1142,6 +1186,8 @@ export interface DebitoBancarioContratto {
   interessi: number;
   breve: number;
   lungo: number;
+  /** Il nome del contratto, quando presente (`_contratti_dell_anno`). */
+  nome?: string | null;
 }
 
 /** Il debito bancario per componenti, riconciliato con cio' che `sp16a`/`sp17a`
@@ -1155,6 +1201,9 @@ export interface DebitoBancarioAnno {
   pregresso_senza_piano: DebitoBancarioSenzaPiano | null;
   pregresso_piano_anni: DebitoBancarioPianoAnni | null;
   contratti: DebitoBancarioContratto[];
+  /** Fidi e anticipi su fatture, separati dai mutui (spec 2026-09-15 §5.2):
+   *  `null` quando il regime non e' attivo (`bank_lines_amount` non impostato). */
+  fidi: DebitoBancarioFidi | null;
 }
 
 export interface ForecastYearDetails {
@@ -1214,6 +1263,13 @@ export interface ForecastYearDetails {
    *  `details['override_conflicts']`): lista sempre presente su ogni anno di uno
    *  scenario budget, vuota quando nessun override crea conflitto. */
   override_conflicts: { aggregate: string; declared: number; details_sum: number }[];
+  /** Il pareggio sul MOL, dichiarato dal motore (spec 2026-09-15 §4.3): tutto `null`
+   *  quando la parte fissa/variabile non e' definita (override di ce05/ce06). */
+  pareggio: PareggioDetail;
+  tfr: TfrDetail;
+  altri_finanziatori: AltriFinanziatoriDetail;
+  oneri_fidi?: number;
+  regime_debito_bancario?: "esplicito" | "contratti" | "anni" | "legacy";
 }
 
 export interface ForecastPreviewYear {

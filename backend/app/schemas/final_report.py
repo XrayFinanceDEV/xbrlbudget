@@ -447,7 +447,7 @@ class AssumptionValue(ContractModel):
 
 
 class AssumptionSection(ContractModel):
-    key: Literal["scenario", "fatturato", "costi", "altre-voci-ce", "circolante", "pregresso-nuovo", "imposte"]
+    key: Literal["scenario", "fatturato", "costi", "circolante", "patrimoniale-pregresso", "patrimoniale-piano", "imposte"]
     title: str
     assumptions: list[AssumptionValue] = Field(default_factory=list)
 

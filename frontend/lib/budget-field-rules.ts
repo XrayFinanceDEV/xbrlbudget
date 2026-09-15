@@ -77,7 +77,7 @@ const RULES = {
   sp17g_growth_pct: pct({ nullable: true }),
   sp18_growth_pct: pct({ nullable: true }),
 
-  // Pregresso e nuovo: debiti, finanziamenti, investimenti
+  // Patrimoniale pregresso / piano: debiti, finanziamenti, investimenti
   existing_debt_repayment_years: years(),
   altri_finanz_repayment_years: years(),
   financing_amount: eur(),

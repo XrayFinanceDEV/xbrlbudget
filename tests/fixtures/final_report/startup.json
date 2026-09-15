@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-14T12:00:00Z",
-  "model_hash": "85a836cca606d8258ca6d48c6b9da1d07b7eb103193f7fa78fbe508d0b0f6d0d",
-  "source_hash": "f813e9357fe656ad6abe2cb44f99b40a5cd97fcf630616037f2ea632c79112f8",
+  "model_hash": "cac23b80c13cab9d077741fc10b37f764a010712364b803bf23232ebffda8382",
+  "source_hash": "d73d7982b1f42a1a9d9d495dbdf10b8df37dd7cb1237b0b377055357a329918b",
   "company": {
     "id": 3,
     "name": "Startup Srl",
@@ -70,12 +70,7 @@
     },
     {
       "key": "costi",
-      "title": "Costi principali",
-      "assumptions": []
-    },
-    {
-      "key": "altre-voci-ce",
-      "title": "Altre voci CE",
+      "title": "Costi",
       "assumptions": []
     },
     {
@@ -84,8 +79,13 @@
       "assumptions": []
     },
     {
-      "key": "pregresso-nuovo",
-      "title": "Pregresso e nuovo",
+      "key": "patrimoniale-pregresso",
+      "title": "Patrimoniale pregresso",
+      "assumptions": []
+    },
+    {
+      "key": "patrimoniale-piano",
+      "title": "Patrimoniale piano",
       "assumptions": []
     },
     {

@@ -36,7 +36,7 @@ Copiati dalla spec (§2, §5) e dalle regole del repo:
 - **Frontend.** Una volta per worktree: `test -e frontend/node_modules || ln -s /home/peter/DEV/budget/frontend/node_modules frontend/node_modules`. Poi `cd frontend && npx vitest run lib/<nome>.test.ts`, `cd frontend && npx vitest run` (suite intera, ~720 test) e `cd frontend && npx tsc --noEmit`.
 - **Base del task.** Primo passo di ogni task: `git rev-parse HEAD > /tmp/rilievi-taskN-base` (N = numero del task).
 - **Banco di parita'.** `/home/peter/DEV/budget/backend/venv/bin/python scripts/parita_motore.py "$(cat /tmp/rilievi-taskN-base)" --anni 4 --controllo-negativo --json /tmp/rilievi-taskN-parita.json --log /tmp/rilievi-taskN-parita.log` (seconda versione omessa = albero di lavoro). Codici d'uscita: 0 nessuna divergenza, 1 divergenze, 3 controllo negativo fallito (banco da riparare: fermarsi e riferire). Nei task del motore l'atteso e' **0**: i profili esistenti non usano i campi nuovi.
-- **Migrazione del DB di sviluppo.** Dopo il Task 1, chi avvia il backend su un DB esistente esegue `/home/peter/DEV/budget/backend/venv/bin/python migrate_db.py` dalla radice (altrimenti ogni `/analysis` risponde 500 per colonna mancante).
+- **Migrazione del DB di sviluppo.** Dopo il Task 1, chi avvia il backend su un DB esistente esegue `/home/peter/DEV/budget/backend/venv/bin/python migrate_db.py <percorso del db>` (il percorso e' il primo argomento: lo script ignora `DATABASE_PATH`) (altrimenti ogni `/analysis` risponde 500 per colonna mancante).
 
 ## Ordine e parallelismo
 
@@ -266,7 +266,7 @@ In `migrate_db.py`, in coda alla lista `"budget_assumptions"`:
         ("other_lenders",                      "TEXT"),
         ("tfr_payments",                       "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
 ```
-Prova su una copia: `cp financial_analysis.db /tmp/rilievi-task1.db && DATABASE_PATH=/tmp/rilievi-task1.db /home/peter/DEV/budget/backend/venv/bin/python migrate_db.py` → otto righe `ADD budget_assumptions.<colonna>`; una seconda esecuzione le salta tutte.
+Prova su una copia: `cp /home/peter/DEV/budget/financial_analysis.db /tmp/rilievi-task1.db && /home/peter/DEV/budget/backend/venv/bin/python migrate_db.py /tmp/rilievi-task1.db` → otto righe `ADD budget_assumptions.<colonna>`; una seconda esecuzione le salta tutte.
 
 - [ ] **Step 8: Catalogo del report (parita' dei campi morti)**
 
@@ -776,6 +776,7 @@ git commit -m "feat(ipotesi): fidi e anticipi separati dai contratti, sweep solo
 
 **Interfaces:**
 - Consumes: `assumption.other_lenders` (Task 1), kernel `repayments` (Task 2), regime esplicito (Task 3: `fidi_apertura is not None`)
+- **Attenzione (dubbio del Task 1):** `build_assumption_row` persiste `other_lenders` con `jsonable_encoder`, quindi nel sacco JSON gli importi sono `float`. In `assemble_financing` ogni voce si rilegge con `OtherLenderInput.model_validate(item)` e si usano i `Decimal` del modello validato, mai i float nudi.
 - Produces: `details['altri_finanziatori'] = {apertura, rimborso, interessi, breve, lungo, mode, contratti: [{indice, nome, residuo_iniziale, rimborso, interessi, residuo}]}`, sempre presente (`mode` = `'contratti' | 'anni' | 'legacy'`, `contratti` vuoto fuori dal regime).
 
 - [ ] **Step 1: Base del task**
@@ -2725,8 +2726,8 @@ Atteso: pytest tutto verde (i due test vision intermittenti passano al rilancio)
 Server di collaudo su una copia del DB, migrata (le porte 3000 e 8001 sono di Formula Finance; 8011/3002 sono quelle dei collaudi precedenti):
 
 ```bash
-cp financial_analysis.db /tmp/rilievi-collaudo.db
-DATABASE_PATH=/tmp/rilievi-collaudo.db /home/peter/DEV/budget/backend/venv/bin/python migrate_db.py
+cp /home/peter/DEV/budget/financial_analysis.db /tmp/rilievi-collaudo.db
+/home/peter/DEV/budget/backend/venv/bin/python migrate_db.py /tmp/rilievi-collaudo.db   # migrate_db.py legge il percorso da argv[1], NON da DATABASE_PATH
 cd backend && DATABASE_PATH=/tmp/rilievi-collaudo.db DEV_USER_ID=dev-user-001 /home/peter/DEV/budget/backend/venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 &
 cd frontend && NEXT_PUBLIC_API_URL=http://127.0.0.1:8011/api/v1 npx next dev -p 3002 &
 ```

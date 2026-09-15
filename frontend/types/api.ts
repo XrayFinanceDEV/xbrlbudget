@@ -1270,6 +1270,11 @@ export interface ForecastYearDetails {
   altri_finanziatori: AltriFinanziatoriDetail;
   oneri_fidi?: number;
   regime_debito_bancario?: "esplicito" | "contratti" | "anni" | "legacy";
+  /** L'avviso dei fidi e degli anticipi nel regime esplicito (spec 2026-09-15 §5.2-bis):
+   *  il piano ha tirato oltre l'affidamento di partenza (`bank_lines_amount`). Il motore lo
+   *  dichiara in italiano, gia' pronto per lo schermo; `null`/assente quando non scatta o
+   *  fuori dal regime esplicito. */
+  avviso_fidi?: string | null;
 }
 
 export interface ForecastPreviewYear {

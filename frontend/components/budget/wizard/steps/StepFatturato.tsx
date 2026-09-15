@@ -8,6 +8,7 @@
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { euro, num, numOrNull } from "@/lib/budget-format";
+import { trendRicaviNota } from "@/lib/budget-inflazione";
 import { rowsFatturato } from "@/lib/budget-preview-rows";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import { revenueBarGeometry } from "@/lib/budget-revenue-bars";
@@ -53,6 +54,10 @@ export function StepFatturato(p: StepProps) {
   const previewYears = useMemo(() => p.preview.data?.forecast_years ?? [], [p.preview.data]);
   const rows = useMemo(() => (baseInc ? rowsFatturato(baseInc, previewYears) : []),
     [baseInc, previewYears]);
+  // Per riferimento: la tendenza storica dei ricavi (spec 2026-09-15 §4.2,
+  // Task 10) — non si applica, solo si dichiara. `null` sotto i due anni
+  // storici richiesti.
+  const nota = useMemo(() => trendRicaviNota(p.historicalYears, p.historical), [p.historicalYears, p.historical]);
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
       <Card>
@@ -67,6 +72,7 @@ export function StepFatturato(p: StepProps) {
               { field: "other_revenue_growth_pct", label: "Altri ricavi e proventi", baseLabel: euro(numOrNull(baseInc?.ce04_altri_ricavi)) },
             ]} />
           <p className="mt-2 text-xs text-muted-foreground">Le percentuali si applicano all&apos;anno precedente, non al {p.baseYear}.</p>
+          {nota && <p className="mt-1 text-xs text-muted-foreground">{nota}</p>}
         </CardContent>
       </Card>
       <div className="lg:sticky lg:top-4">

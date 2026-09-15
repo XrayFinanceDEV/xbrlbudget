@@ -21,10 +21,12 @@ import {
   withPregresso,
   withOtherLenders,
   withPregressoTrimmedToHorizon,
+  withRevenueGrowth,
   hydrateAssumptions,
   horizonFromSavedRows,
   type AssumptionsMap,
 } from "@/lib/budget-horizon";
+import { applicaInflazioneAlleAuto, withInflazione } from "@/lib/budget-inflazione";
 import { isScenarioPrecedente, migraScenario, type EsitoMigrazione } from "@/lib/budget-migrazione";
 import type { HistoricalData } from "@/lib/budget-trend";
 import type {
@@ -262,8 +264,11 @@ export function useScenarioAssumptions({
   useEffect(() => {
     if (!idratato) return;
     setAssumptions((prev) =>
-      withPregressoTrimmedToHorizon(
-        withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined),
+      applicaInflazioneAlleAuto(
+        withPregressoTrimmedToHorizon(
+          withDefaultsForYears(prev, forecastYears, scenarioId ?? undefined),
+          forecastYears
+        ),
         forecastYears
       )
     );
@@ -307,6 +312,14 @@ export function useScenarioAssumptions({
   const chiudiMigrazione = useCallback(() => setMigrazione(null), []);
 
   const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
+    // I ricavi trascinano la parte variabile di materie e servizi (spec
+    // 2026-09-15 §4.2, Task 10): il motore non cambia, le due percentuali
+    // seguono i ricavi per costruzione — la regola sta in `withRevenueGrowth`
+    // (lib/budget-horizon.ts), con la sua prova, non qui.
+    if (field === "revenue_growth_pct") {
+      setAssumptions((prev) => withRevenueGrowth(prev, year, value as number | null));
+      return;
+    }
     setAssumptions((prev) => ({
       ...prev,
       [year]: {
@@ -377,6 +390,18 @@ export function useScenarioAssumptions({
 
   const isNew = idratato && existingAssumptionYears.size === 0;
   const updateAll = useCallback((field: string, value: number | boolean | null) => {
+    // L'inflazione attesa si scrive su ogni anno E riallinea le caselle
+    // automatiche della parte fissa (spec 2026-09-15 §4.1, §4.3, Task 10) —
+    // la regola sta in `withInflazione` (lib/budget-inflazione.ts), con la
+    // sua prova, non qui. Il valore passa cosi' com'e' (anche `null`):
+    // `withInflazione` lo riporta a `INFLAZIONE_PREDEFINITA` invece di
+    // scrivere un `inflation_pct` nullo, che `isScenarioPrecedente`
+    // (lib/budget-migrazione.ts) leggerebbe come firma di uno scenario
+    // precedente al lotto (giro di correzione 1).
+    if (field === "inflation_pct") {
+      setAssumptions((prev) => withInflazione(prev, forecastYears, value as number | null));
+      return;
+    }
     setAssumptions((prev) => {
       const next = { ...prev };
       for (const y of forecastYears) next[y] = { ...(next[y] ?? {}), [field]: value };

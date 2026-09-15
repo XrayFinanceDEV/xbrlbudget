@@ -34,8 +34,15 @@ const bool: FieldRule = { kind: "bool" };
 const RULES = {
   // Scenario
   // L'inflazione attesa del passo 1: precompila la parte fissa, non e' una
-  // crescita di ricavi. Vuoto = non dichiarata (scenario precedente al lotto).
-  inflation_pct: pct({ min: -50, max: 100, nullable: true }),
+  // crescita di ricavi. NON nullable (giro di correzione 1): un
+  // `inflation_pct` nullo sul primo anno e' la FIRMA di uno scenario salvato
+  // prima del lotto (`isScenarioPrecedente`, budget-migrazione.ts) — svuotare
+  // la casella lo farebbe scambiare per precedente al primo
+  // salvataggio/riapertura, e `migraScenario` sovrascriverebbe in silenzio
+  // `bank_lines_amount` e altri campi già scritti dall'utente. La casella
+  // vuota torna a `INFLAZIONE_PREDEFINITA` in `withInflazione`
+  // (lib/budget-inflazione.ts), non a `null`.
+  inflation_pct: pct({ min: -50, max: 100 }),
 
   // Ricavi e costi
   revenue_growth_pct: pct(),

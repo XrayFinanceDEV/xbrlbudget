@@ -11,9 +11,12 @@ import { withOtherLenders } from "@/lib/budget-horizon";
 import type { WizardStepKey } from "@/lib/budget-wizard-steps";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { num } from "@/lib/budget-format";
+// La costante vive in `budget-inflazione.ts` (Task 10): un solo valore, non
+// due definizioni che potrebbero divergere (dispatch del Task 10).
+import { INFLAZIONE_PREDEFINITA } from "@/lib/budget-inflazione";
 import type { FinancingLoanInput, OtherLenderInput } from "@/types/api";
 
-export const INFLAZIONE_PREDEFINITA = 2;
+export { INFLAZIONE_PREDEFINITA };
 
 export interface EsitoMigrazione {
   map: AssumptionsMap;

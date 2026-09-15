@@ -394,6 +394,28 @@ describe("horizonFromSavedRows", () => {
   });
 });
 
+describe("assumptionRowsForSave · righe vuote del passo 5 (collaudo R6)", () => {
+  it("toglie i finanziamenti e i finanziatori ancora vuoti, lascia il resto", () => {
+    const map = {
+      2027: {
+        financing_loans: [
+          { name: "Mutuo", amount: 0, opening_residual: 1000, interest_rate: 3 },
+          { name: "Finanziamento B", amount: 0, opening_residual: 0, interest_rate: 4 },
+          { name: "Nuovo", amount: 500, opening_residual: 0, interest_rate: 4 },
+        ],
+        other_lenders: [
+          { name: "Soci", opening_residual: 200, interest_rate: 0 },
+          { name: "Finanziatore 2", opening_residual: 0, interest_rate: 0 },
+        ],
+      },
+    } as unknown as AssumptionsMap;
+    const [riga] = assumptionRowsForSave(map, [2027], 7);
+    expect((riga.financing_loans as { name: string }[]).map((l) => l.name)).toEqual(["Mutuo", "Nuovo"]);
+    expect((riga.other_lenders as { name: string }[]).map((l) => l.name)).toEqual(["Soci"]);
+    expect(map[2027].financing_loans).toHaveLength(3);
+  });
+});
+
 describe("assumptionRowsForSave", () => {
   // Il bulk e' delete-all + reinsert: una chiave che non parte NON resta sul
   // server, viene cancellata. Questo test e' la rete che mancava — una

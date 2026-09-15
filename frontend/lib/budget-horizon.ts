@@ -349,7 +349,23 @@ export function assumptionRowsForSave(
 ): Record<string, unknown>[] {
   return forecastYears
     .filter((year) => assumptions[year])
-    .map((year) => ({ ...assumptions[year], scenario_id: scenarioId, forecast_year: year }));
+    .map((year) => {
+      const riga = { ...assumptions[year], scenario_id: scenarioId, forecast_year: year } as Record<string, unknown>;
+      // Una riga appena aggiunta al passo 5 («+ Aggiungi finanziamento», «+ Aggiungi
+      // finanziatore») nasce vuota e resta a schermo finche' l'utente la compila; non e' un
+      // dato, e lo schema del server la rifiuta (importo e residuo entrambi a zero; residuo
+      // di un altro finanziatore non positivo) con un 422 che fermerebbe anteprima e
+      // salvataggio. Si toglie qui, all'uscita, non dallo stato: sparirebbe sotto le dita.
+      if (Array.isArray(riga.financing_loans)) {
+        riga.financing_loans = (riga.financing_loans as Record<string, unknown>[]).filter(
+          (l) => (Number(l.amount) || 0) > 0 || (Number(l.opening_residual) || 0) > 0);
+      }
+      if (Array.isArray(riga.other_lenders)) {
+        riga.other_lenders = (riga.other_lenders as Record<string, unknown>[]).filter(
+          (l) => (Number(l.opening_residual) || 0) > 0);
+      }
+      return riga;
+    });
 }
 
 /**

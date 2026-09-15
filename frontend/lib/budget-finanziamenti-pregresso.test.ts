@@ -22,6 +22,11 @@ describe("budget-finanziamenti-pregresso", () => {
     expect(contrattiPregressi([mutuo, nuovo, mcc]).map((l) => l.name)).toEqual(["Mutuo Intesa 2022", "Chirografario MCC 2024"]);
     expect(prestitiNuovi([mutuo, nuovo]).map((l) => l.name)).toEqual(["Nuovo finanziamento BPM"]);
   });
+  it("una riga appena aggiunta, a residuo zero, resta fra i pregressi (collaudo R6)", () => {
+    const vuota = nuovoContratto(2, 3);
+    expect(contrattiPregressi([mutuo, vuota]).map((l) => l.name)).toEqual(["Mutuo Intesa 2022", "Finanziamento B"]);
+    expect(contrattoRows(contrattiPregressi([mutuo, vuota]), 3)).toHaveLength(2);
+  });
   it("righe: rimborsi riempiti all'orizzonte, resta e stato", () => {
     const [r] = contrattoRows([mutuo], 5);
     expect(r).toMatchObject({ name: "Mutuo Intesa 2022", residuo: 330000, tasso: 3.8, rimborsi: [82500, 82500, 82500, 0, 0], resta: 82500, stato: "resta aperto" });

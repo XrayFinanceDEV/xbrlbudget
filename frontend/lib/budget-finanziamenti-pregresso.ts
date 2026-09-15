@@ -68,10 +68,13 @@ function padTrunc(repayments: number[] | null | undefined, horizon: number): num
 const residuoDi = (item: Pick<Scadenziabile, "opening_residual">): number => Number(item.opening_residual) || 0;
 const sommaResidui = (items: readonly Pick<Scadenziabile, "opening_residual">[]): number => sum(items.map(residuoDi));
 
-/** I contratti bancari già in bilancio: `opening_residual > 0` (il pregresso descrive un
- *  residuo già iscritto, mai un importo da erogare — spec §5.1). */
+/** I contratti bancari già in bilancio: ogni riga che non eroga nulla (`amount` = 0; il
+ *  pregresso descrive un residuo già iscritto, mai un importo da erogare — spec §5.1).
+ *  Anche una riga ancora a residuo zero: è quella che «+ Aggiungi finanziamento» ha appena
+ *  creato, e filtrarla sul residuo la faceva sparire al clic (collaudo di fine lotto, R6).
+ *  Le righe vuote non partono verso il server: le toglie `assumptionRowsForSave`. */
 export function contrattiPregressi(loans: FinancingLoanInput[] | null | undefined): FinancingLoanInput[] {
-  return (loans ?? []).filter((l) => (Number(l.opening_residual) || 0) > 0);
+  return (loans ?? []).filter((l) => !((Number(l.amount) || 0) > 0));
 }
 
 /** I prestiti nuovi (da erogare): `amount > 0`, con durata/preammortamento come oggi. */

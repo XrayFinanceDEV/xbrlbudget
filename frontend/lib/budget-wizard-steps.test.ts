@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEAD_FIELDS, ROUTE_DOPO_CALCOLO, STEP_FIELDS, WIZARD_STEPS, groupWizardSteps, horizonLabel, nextStep,
-  parseStoredStep, prevStep,
+  parseStoredStep, prevStep, railBadges,
   primaryLabel, saveOutcome, stepFooterHint, stepForErrorMessage, stepLead, stepStorageKey,
   stepsUpTo, wizardChrome, type WizardStep,
 } from "./budget-wizard-steps";
@@ -246,5 +246,14 @@ describe("stepForErrorMessage · rifiuti che nominano il passo (m-B)", () => {
   });
   it("un errore generico atterra su Imposte come prima", () => {
     expect(stepForErrorMessage("Revenue must be positive in the base year")).toBe("imposte");
+  });
+});
+
+describe("railBadges (Task 9)", () => {
+  it("«da integrare» sovrascrive «nuovo» del catalogo, gli altri passi «nuovo» restano", () => {
+    expect(railBadges(["scenario"])).toEqual({ scenario: "da integrare", "patrimoniale-pregresso": "nuovo", "patrimoniale-piano": "nuovo" });
+  });
+  it("senza migrazione restano solo i badge «nuovo» del catalogo", () => {
+    expect(railBadges([])).toEqual({ "patrimoniale-pregresso": "nuovo", "patrimoniale-piano": "nuovo" });
   });
 });

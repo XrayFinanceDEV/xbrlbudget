@@ -298,3 +298,17 @@ export function stepsUpTo(step: WizardStepKey): WizardStepKey[] {
   const i = ORDER.indexOf(step);
   return i < 0 ? [ORDER[0]] : ORDER.slice(0, i + 1);
 }
+
+/**
+ * I badge della barra dei passi (Task 9): «nuovo» dal catalogo (`WIZARD_STEPS[].badge`,
+ * i due passi nati dal giro di rilievi) SOVRASCRITTO da «da integrare» per ogni passo
+ * che `EsitoMigrazione.daIntegrare` cita — uno scenario migrato ha bisogno di
+ * intervento lì, ed e' un segnale piu' forte di «e' nuovo». Funzione pura in `lib/`,
+ * cosi' `WizardRail` (che non e' collaudabile) resta un semplice rendering.
+ */
+export function railBadges(daIntegrare: readonly WizardStepKey[]): Partial<Record<WizardStepKey, "nuovo" | "da integrare">> {
+  const out: Partial<Record<WizardStepKey, "nuovo" | "da integrare">> = {};
+  for (const s of WIZARD_STEPS) if (s.badge) out[s.key] = s.badge;
+  for (const k of daIntegrare) out[k] = "da integrare";
+  return out;
+}

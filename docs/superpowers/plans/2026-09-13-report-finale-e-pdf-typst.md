@@ -857,6 +857,15 @@ nessuna sovrascrittura manuale o troncamento, conflitti di revisioni espliciti,
 fixture dei tre workflow e compatibilità v1. Un piano modificato non riutilizza
 silenziosamente note riferite a una diversa parte di prospetto.
 
+**Stato 2026-09-15:** implementato in M2-00C con coordinatore e agenti Terra.
+Piano persistito con CAS, note automatiche per ogni pagina fisica, override
+utente/AI, archivio e riassociazione esplicita. Fit Typst nativo con stessi
+font/lingua/spazio del footer. Client `/report` v2 con Allegati completi e bozze
+separate per azienda/pratica/piano. Compatibilità v1 conservata; AI soltanto su
+richiesta e da contesti canonici strutturati. Dettagli e verifiche in
+`docs/testing/M2-00C-editorial-notes.md`. Segue M2-02 per il template definitivo;
+packaging/container ed export ufficiale restano nei moduli successivi.
+
 ### M2-01 — Runtime e sandbox del compilatore
 
 **Owner coding:** Pi-A/Qwen

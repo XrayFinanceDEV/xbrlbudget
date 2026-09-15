@@ -1151,3 +1151,10 @@ class UploadedFile(Base):
 
     def __repr__(self):
         return f"<UploadedFile(id={self.id}, user_id={self.user_id}, type={self.file_type}, status={self.status})>"
+
+
+# Additive editorial persistence; scenario deletion also removes its note history.
+from database.report_editorial import ReportEditorialState, ReportEditorialNote
+BudgetScenario.editorial_state = relationship(
+    ReportEditorialState, uselist=False, back_populates="scenario", cascade="all, delete-orphan"
+)

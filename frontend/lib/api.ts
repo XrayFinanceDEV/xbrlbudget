@@ -17,6 +17,7 @@ import {
   type NarrativeBlock,
 } from '@/types/final-report';
 import { parseFinalReportModelV2, type FinalReportModelV2 } from '@/types/final-report-v2';
+import { parseEditorialSession, type EditorialNoteUpdate, type EditorialSession } from '@/types/editorial-session';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:8000/api/v1');
 
@@ -814,6 +815,24 @@ export const getFinalReportV2 = async (
     { params: { schema_version: 2 } },
   );
   return parseFinalReportModelV2(data);
+};
+
+const editorialPath = (companyId: number, scenarioId: number) => `/companies/${companyId}/scenarios/${scenarioId}/final-report/editorial`;
+export const getEditorialSession = async (companyId: number, scenarioId: number): Promise<EditorialSession> => {
+  const { data } = await api.get<unknown>(editorialPath(companyId, scenarioId));
+  return parseEditorialSession(data);
+};
+export const prepareEditorialSession = async (companyId: number, scenarioId: number, body: { source_hash: string; expected_revision: number }): Promise<EditorialSession> => {
+  const { data } = await api.post<unknown>(`${editorialPath(companyId, scenarioId)}/prepare`, body);
+  return parseEditorialSession(data);
+};
+export const saveEditorialNotes = async (companyId: number, scenarioId: number, body: { source_hash: string; plan_hash: string; expected_revision: number; notes: EditorialNoteUpdate[] }): Promise<EditorialSession> => {
+  const { data } = await api.put<unknown>(`${editorialPath(companyId, scenarioId)}/notes`, body);
+  return parseEditorialSession(data);
+};
+export const generateEditorialNotes = async (companyId: number, scenarioId: number, body: { source_hash: string; plan_hash: string; expected_revision: number; notes: Array<{ id: string; revision: number }> }): Promise<EditorialSession> => {
+  const { data } = await api.post<unknown>(`${editorialPath(companyId, scenarioId)}/generate`, body);
+  return parseEditorialSession(data);
 };
 
 export const generateFinalReportNarrative = async (

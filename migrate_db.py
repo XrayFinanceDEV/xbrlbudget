@@ -213,8 +213,16 @@ NEW_INDEXES = {
     ],
 }
 
+from tools.migrate_report_editorial import DDL as EDITORIAL_DDL
+
 conn = sqlite3.connect(DB_PATH)
 cur = conn.cursor()
+
+if not cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='budget_scenarios'").fetchone():
+    conn.close()
+    raise ValueError("Il database deve contenere budget_scenarios prima della migrazione.")
+for editorial_ddl in EDITORIAL_DDL:
+    cur.execute(editorial_ddl)
 
 tables_created = 0
 for table, ddl in NEW_TABLES.items():

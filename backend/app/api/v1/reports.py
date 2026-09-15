@@ -169,3 +169,7 @@ def save_ai_comments(
     validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
     save_comments(db, scenario_id, comments)
     return get_stored_comments(db, scenario_id)
+
+
+from app.api.v1.editorial_notes import router as editorial_router
+router.include_router(editorial_router)

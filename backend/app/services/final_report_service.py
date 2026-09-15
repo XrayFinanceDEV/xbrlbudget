@@ -538,4 +538,5 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                 f'{scenario.base_year} base')
         for year in wanted:
             add_source(f'forecast:{year}', year, 'forecast', by_forecast_year.get(year), f'{year} previsionale')
-        return extend_dossier(report, sources)
+        from app.services.editorial_notes_service import project_editorial_report
+        return project_editorial_report(db, extend_dossier(report, sources), scenario.id)

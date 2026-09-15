@@ -2,7 +2,7 @@
 // (spec 2026-09-08 §4). Types only, no runtime code: the steps (task 11-14)
 // and the shared components in this directory (task 8) both import from here
 // so the shape of a step's props exists in exactly one place.
-import type { FinancingLoanInput, Pregresso, SpIndexingDriver, TemporaryDifferenceInput } from "@/types/api";
+import type { FinancingLoanInput, OtherLenderInput, Pregresso, SpIndexingDriver, TemporaryDifferenceInput } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { HistoricalData } from "@/lib/budget-trend";
 // Dichiarazione unica in lib/ (lib/ non puo' importare da components/): qui
@@ -20,7 +20,11 @@ export interface StepProps {
   historical: HistoricalData;
   historicalYears: number[];
   preview: PreviewState;
-  update: (year: number, field: string, value: number | boolean | null) => void;
+  // `string` (Task 14, revisione): `bank_lines_rule` ("costante" | "ricavi")
+  // e' la prima voce del wizard che scrive un enum testuale — allargato in
+  // coppia con `updateAssumption` (hooks/use-scenario-assumptions.ts), la
+  // sola implementazione che questa firma descrive.
+  update: (year: number, field: string, value: number | boolean | string | null) => void;
   updateAll: (field: string, value: number | boolean | null) => void;
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
@@ -34,4 +38,7 @@ export interface StepProps {
    *  chi ha bisogno di scrivere un oggetto ha un setter dedicato, non un
    *  terzo tipo unito a quello di tutti gli altri campi). */
   updatePregresso: (next: Pregresso | null) => void;
+  /** Il setter tipizzato degli altri finanziatori (Task 8): scrive SEMPRE
+   *  nella riga del PRIMO anno di piano, come `updatePregresso`. */
+  updateOtherLenders: (next: OtherLenderInput[] | null) => void;
 }

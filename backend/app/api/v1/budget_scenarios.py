@@ -32,11 +32,19 @@ router = APIRouter()
 _ASSUMPTION_JSON_FIELDS = {
     "financing_loans", "tax_temporary_differences", "sp_overrides",
 }
+_SCENARIO_JSON_FIELDS = {"extra_accounting_alerts", "narrative_blocks"}
 
 
 def _json_safe_assumption_fields(values: Dict[str, Any]) -> Dict[str, Any]:
     """Convert nested Decimal-bearing assumption structures for JSON columns."""
     for field in _ASSUMPTION_JSON_FIELDS.intersection(values):
+        values[field] = jsonable_encoder(values[field])
+    return values
+
+
+def _json_safe_scenario_fields(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Encode only the scenario JSON columns before SQLAlchemy persists them."""
+    for field in _SCENARIO_JSON_FIELDS.intersection(values):
         values[field] = jsonable_encoder(values[field])
     return values
 
@@ -242,6 +250,64 @@ def get_budget_scenario(
     return scenario
 
 
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/extra-accounting-alerts",
+    response_model=budget_schemas.ExtraAccountingAlertsResponse,
+)
+def get_extra_accounting_alerts(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return the normalized, scenario-owned infrannuale alert map."""
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Gli alert extracontabili sono disponibili solo per scenari infrannuali",
+        )
+
+    from app.services.extra_accounting_alerts_service import (
+        normalize_extra_accounting_alerts,
+        utc_aware,
+    )
+    return {
+        "alerts": normalize_extra_accounting_alerts(scenario.extra_accounting_alerts),
+        "updated_at": utc_aware(scenario.extra_accounting_alerts_updated_at),
+    }
+
+
+@router.put(
+    "/companies/{company_id}/scenarios/{scenario_id}/extra-accounting-alerts",
+    response_model=budget_schemas.ExtraAccountingAlertsResponse,
+)
+def put_extra_accounting_alerts(
+    company_id: int,
+    scenario_id: int,
+    alerts: budget_schemas.ExtraAccountingAlertsUpdate,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Atomically replace every alert flag and set its server-owned UTC time."""
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Gli alert extracontabili sono disponibili solo per scenari infrannuali",
+        )
+
+    from app.services.extra_accounting_alerts_service import (
+        normalize_extra_accounting_alerts,
+        save_extra_accounting_alerts,
+    )
+    updated_at = save_extra_accounting_alerts(db, scenario, alerts)
+    return {
+        "alerts": normalize_extra_accounting_alerts(scenario.extra_accounting_alerts),
+        "updated_at": updated_at,
+    }
+
+
 @router.post(
     "/companies/{company_id}/scenarios",
     response_model=budget_schemas.BudgetScenario,
@@ -263,6 +329,18 @@ def create_budget_scenario(
     # Validate company exists and belongs to user
     validate_company_exists(company_id, user_id, db)
 
+    # Lineage is server-owned.  Keep these fields in the shared schema for
+    # response compatibility, while treating any create-time value as forged.
+    supplied = scenario_create.model_fields_set
+    if supplied.intersection({
+        "source_scenario_id", "workflow_type", "extra_accounting_alerts",
+        "extra_accounting_alerts_updated_at",
+    }):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="lineage e alert extracontabili sono derivati dal server",
+        )
+
     # Validate the data this scenario needs (base year, or partial year for infrannuale)
     validate_scenario_input_data(
         company_id,
@@ -279,8 +357,42 @@ def create_budget_scenario(
             detail="Company ID in URL must match company_id in request body"
         )
 
+    from app.services.scenario_provenance import (
+        derive_scenario_provenance,
+        find_active_reusable_scenario,
+    )
+    provenance = derive_scenario_provenance(
+        db,
+        company_id=company_id,
+        base_year=scenario_create.base_year,
+        scenario_type=scenario_create.scenario_type,
+        period_months=scenario_create.period_months,
+        workflow_intent=scenario_create.workflow_intent,
+    )
+    if scenario_create.reuse_existing:
+        reusable = find_active_reusable_scenario(
+            db,
+            company_id=company_id,
+            base_year=scenario_create.base_year,
+            name=scenario_create.name,
+            scenario_type=scenario_create.scenario_type,
+            period_months=scenario_create.period_months,
+            provenance=provenance,
+        )
+        if reusable:
+            return reusable
+
     # Create scenario
-    db_scenario = models.BudgetScenario(**scenario_create.model_dump())
+    scenario_values = scenario_create.model_dump()
+    scenario_values.pop("workflow_intent", None)
+    scenario_values.pop("reuse_existing", None)
+    scenario_values.pop("source_scenario_id", None)
+    scenario_values.pop("workflow_type", None)
+    scenario_values.pop("extra_accounting_alerts", None)
+    scenario_values.pop("extra_accounting_alerts_updated_at", None)
+    scenario_values["workflow_type"] = provenance.workflow_type
+    scenario_values["source_scenario_id"] = provenance.source_scenario_id
+    db_scenario = models.BudgetScenario(**_json_safe_scenario_fields(scenario_values))
     db.add(db_scenario)
     db.commit()
     db.refresh(db_scenario)
@@ -307,33 +419,10 @@ def update_budget_scenario(
     # Validate scenario belongs to company
     db_scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
 
-    # Validate the resolved scenario, not only a changed base year: changing the
-    # period or switching to infrannuale changes which FinancialYear is required.
-    supplied = scenario_update.model_fields_set
-    resolved_base_year = (
-        scenario_update.base_year if "base_year" in supplied else db_scenario.base_year
-    )
-    resolved_type = (
-        scenario_update.scenario_type
-        if "scenario_type" in supplied
-        else db_scenario.scenario_type
-    )
-    resolved_period = (
-        scenario_update.period_months
-        if "period_months" in supplied
-        else db_scenario.period_months
-    )
-    if supplied.intersection({"base_year", "scenario_type", "period_months"}):
-        validate_scenario_input_data(
-            company_id,
-            resolved_base_year,
-            resolved_type,
-            db,
-            resolved_period,
-        )
-
     # Update only provided fields
-    update_data = scenario_update.model_dump(exclude_unset=True)
+    update_data = _json_safe_scenario_fields(
+        scenario_update.model_dump(exclude_unset=True)
+    )
     for field, value in update_data.items():
         setattr(db_scenario, field, value)
 

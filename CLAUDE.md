@@ -310,7 +310,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   l'override sopravvive), e tutta la famiglia `sp07`+`sp07a/b/c/d/g` col piano
   dei crediti. Non `sp07e`/`sp07f`, che il calendario non tocca. Il messaggio
   nomina il saldo con l'articolo giusto (`_PREGRESSO_ARTICOLI`), il passo del wizard che lo scadenzia
-  (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari) e la via d'uscita
+  (5 «Patrimoniale pregresso», tributari compresi) e la via d'uscita
   (`value: null`), perché un override proibito avvelena ogni `PATCH` successivo
   sullo stesso scenario anche su un'altra cella. Il bulk risponde comunque **200** con
   `forecast_generated: false` e l'override lo salva lo stesso; `PATCH /sp-override` risponde 400
@@ -350,7 +350,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   l'anno manuale e l'anno che riparte dal piano. Tre vie d'uscita: tenere in via manuale anche
   l'anno che riparte; lasciare nell'anno manuale un debito tributario (`sp16e + sp17e`, per
   percentuale o per override) non inferiore al rateizzato aperto; modificare il piano nel passo
-  «Imposte». In un anno manuale l'override del lato breve tributario resta comunque libero,
+  «Patrimoniale pregresso». In un anno manuale l'override del lato breve tributario resta comunque libero,
   come prima: il rifiuto guarda il totale che l'anno dopo legge davvero, non il lato singolo.
 - **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
@@ -380,6 +380,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   centesimo senza che nessun controllo lo veda. Se ogni campo neutro è già scritto da un piano, il
   centesimo si posa sul primo e `details['residuo_quadratura']` lo dichiara con
   `campo_dichiarato: true`.
+- **Una liquidazione TFR oltre il fondo disponibile si rifiuta** (`tfr_payments`,
+  `details['tfr']`): clamparla lascerebbe in cassa un'uscita mai avvenuta.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
@@ -581,7 +583,14 @@ compared with the overdraft **outstanding at year end** (the credit line as maxi
 engine raises again. An `sp_overrides` on `sp16a` (or `sp16`) fixes the total: it wins, and the overdraft
 follows from it — zero when net cash is not negative; with a requirement no split of the forced total
 can be coherent (the liabilities are fixed whatever the split), so the engine refuses the combination
-with an explicit Italian error instead of exceeding the total. **Why it exists:** a stressed plan is
+with an explicit Italian error instead of exceeding the total. **In the explicit credit-lines regime
+(`bank_lines_amount` set, spec §5.2-bis, owner's decision 2026-09-15) the requirement does not raise
+and does not open an overdraft at all — it draws on the fidi instead** (`tiraggio`, which joins the
+declared `fidi.residuo` and therefore repays/opens the next year like any other state, interest
+included), `overdraft_allowed`/`overdraft_limit` are never read, and everything beyond the starting
+`affidamento` is declared — `details['avviso_fidi']`, with `fabbisogno_picco` reading
+`oltre_affidamento` in that regime; the single gate stays one, on final net cash after the sweep.
+**Why it exists:** a stressed plan is
 something one wants to be able to run, to measure **how much funding those assumptions require** —
 the answer is `scoperto_generato` year by year, with the peak in `fabbisogno_picco` /
 `fabbisogno_picco_anno`; `cassa_assorbita` is declared every year, even while cash stays positive.
@@ -599,6 +608,7 @@ The sweep decides on the cash **after** `sp_overrides`, in `_normalize_balance_s
 overdraft to pay an optional early repayment. `details['debito_bancario']`, declared every year, splits bank debt
 into `pregresso_senza_piano`, `pregresso_piano_anni` and one row per contract, and adds up exactly: Σ`breve` +
 `scoperto_residuo` = `sp16a`, Σ`lungo` = `sp17a`.
+**With `bank_lines_amount` set (explicit regime, lotto rilievi 14/09) the sweep repays only the credit lines (`details['debito_bancario']['fidi']`), never a contract; bank contracts reclassify next year's instalment into `sp16a`.**
 **The share of a new loan that falls due next year sits in `sp16a`, the rest in `sp17a`**: the capital
 the kernel calendar repays the following year (zero while that year is still grace, the balloon the
 year before it falls due, and not zeroed in the last plan year), declared per contract in
@@ -891,8 +901,9 @@ rifiutato** (vedi «Invarianti e trappole › Previsionale»).
 and `/aziende` redirect here) · `/budget` (scenario assumptions, and the Startup workflow) ·
 `/forecast/income` (**editable** P&L: cells → batch save → BS adapts) · `/forecast/balance`
 (**editable**: cells write `sp_overrides`, not `*_override` columns) · `/forecast/reclassified`
-(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (11 sections, mirrors the
-PDF) · `/import` (works, but unlinked from the nav — the pratica Import step is the normal way in).
+(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (12 sezioni canoniche,
+modellate dal read model server; la stampa browser è solo anteprima, il PDF server è M2) · `/import`
+(works, but unlinked from the nav — the pratica Import step is the normal way in).
 
 ---
 
@@ -910,7 +921,7 @@ giusto è il codice, non `/docs`.
 | Come si costruisce un budget e che cosa fa il motore di previsione? | [docs/budget/FORECASTING_GUIDE.md](docs/budget/FORECASTING_GUIDE.md) |
 | Salvi le ipotesi e il previsionale non si muove, o non sai che cosa azzera un override? | [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md) |
 | Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
-| Che cosa manca al `/report` rispetto al PDF di riferimento? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
+| Quali differenze storiche restano per il PDF server M2, non per il `/report` corrente? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
 | Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
 | Lo stepper della pratica blocca un passaggio, o il wizard si perde dopo un refresh? | [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) |
 | Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre? | [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md) |

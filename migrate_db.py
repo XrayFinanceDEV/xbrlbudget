@@ -70,6 +70,8 @@ MIGRATIONS = {
         ("source_sha256",                      "VARCHAR(64)"),
         ("parser_version",                     "VARCHAR(50)"),
         ("forecastable",                       "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("promoted_from_scenario_id",          "INTEGER"),
+        ("workflow_origin",                    "VARCHAR(30)"),
     ],
     "budget_scenarios": [
         ("scenario_type",                      "VARCHAR(20) DEFAULT 'budget' NOT NULL"),
@@ -89,6 +91,11 @@ MIGRATIONS = {
         ("ai_comment_cashflow",                "TEXT"),
         ("ai_comments_infrannuale",            "TEXT"),
         ("ai_comments_infrannuale_updated_at", "DATETIME"),
+        ("extra_accounting_alerts",            "TEXT"),
+        ("extra_accounting_alerts_updated_at", "DATETIME"),
+        ("narrative_blocks",                   "TEXT"),
+        ("narrative_blocks_updated_at",        "DATETIME"),
+        ("narrative_source_hash",              "VARCHAR(64)"),
     ],
     "budget_assumptions": [
         ("intangible_investments",             "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
@@ -171,6 +178,16 @@ MIGRATIONS = {
         ("ce17a_override",                     "NUMERIC(15,2)"),
         ("ce17b_override",                     "NUMERIC(15,2)"),
         ("ce20_override",                      "NUMERIC(15,2)"),
+        ("explicitly_supplied_fields",         "TEXT"),
+        # Giro di rilievi del 14/09 (spec 2026-09-15 §6): additive, NULL/0 = comportamento di prima.
+        ("inflation_pct",                      "NUMERIC(10,6)"),
+        ("fixed_materials_growth_auto",        "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("fixed_services_growth_auto",         "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("bank_lines_amount",                  "NUMERIC(15,2)"),
+        ("bank_lines_rule",                    "VARCHAR(16)"),
+        ("bank_lines_rate",                    "NUMERIC(10,6)"),
+        ("other_lenders",                      "TEXT"),
+        ("tfr_payments",                       "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
     ],
     "uploaded_files": [
         ("user_email",                         "VARCHAR(255)"),
@@ -232,6 +249,13 @@ for table, columns in MIGRATIONS.items():
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
             print(f"  ADD   {table}.{col}")
             added += 1
+
+# NEW_INDEXES only runs while creating its corresponding table. This index must
+# also be created when adding the column to an existing database.
+cur.execute(
+    "CREATE INDEX IF NOT EXISTS ix_financial_years_promoted_from_scenario_id "
+    "ON financial_years(promoted_from_scenario_id)"
+)
 
 conn.commit()
 conn.close()

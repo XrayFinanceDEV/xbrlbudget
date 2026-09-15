@@ -20,7 +20,14 @@
  * `environment: node`.
  */
 
-import type { BudgetAssumptions, BudgetAssumptionsCreate, Pregresso, PregressoKey, PregressoPlan } from "@/types/api";
+import type {
+  BudgetAssumptions,
+  BudgetAssumptionsCreate,
+  OtherLenderInput,
+  Pregresso,
+  PregressoKey,
+  PregressoPlan,
+} from "@/types/api";
 import { isPlanEmpty, normalizePregresso } from "@/lib/budget-pregresso-circolante";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
@@ -110,6 +117,14 @@ export function hydrateAssumptions(
       overdraft_limit: a.overdraft_limit ?? null,
       tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
       previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
+      inflation_pct: a.inflation_pct ?? null,
+      fixed_materials_growth_auto: a.fixed_materials_growth_auto ?? false,
+      fixed_services_growth_auto: a.fixed_services_growth_auto ?? false,
+      bank_lines_amount: a.bank_lines_amount ?? null,
+      bank_lines_rule: a.bank_lines_rule ?? null,
+      bank_lines_rate: a.bank_lines_rate ?? null,
+      other_lenders: a.other_lenders ?? null,
+      tfr_payments: a.tfr_payments ?? 0,
       receivables_short_growth_pct: a.receivables_short_growth_pct,
       receivables_long_growth_pct: a.receivables_long_growth_pct,
       payables_short_growth_pct: a.payables_short_growth_pct,
@@ -224,9 +239,12 @@ export function defaultAssumption(
     revenue_growth_pct: 0,
     other_revenue_growth_pct: 0,
     variable_materials_growth_pct: 0,
-    fixed_materials_growth_pct: 0,
+    // 2, non 0: uno scenario nuovo parte dall'inflazione attesa (spec
+    // 2026-09-15 §4.3), e `*_growth_auto = true` la tiene agganciata finche'
+    // l'utente non scrive un valore proprio.
+    fixed_materials_growth_pct: 2,
     variable_services_growth_pct: 0,
-    fixed_services_growth_pct: 0,
+    fixed_services_growth_pct: 2,
     rent_growth_pct: 0,
     personnel_growth_pct: 0,
     other_costs_growth_pct: 0,
@@ -262,6 +280,18 @@ export function defaultAssumption(
     financing_interest_rate: 3,
     financing_loans: null,
     pregresso: null,
+    // L'inflazione attesa parte da 2 (non 0): precompila la parte fissa dei
+    // costi (spec 2026-09-15 §4.3), ed e' la firma di uno scenario nato dopo
+    // questo lotto — `null` resta la firma di uno scenario precedente
+    // (`migraScenario`, Task 9).
+    inflation_pct: 2,
+    fixed_materials_growth_auto: true,
+    fixed_services_growth_auto: true,
+    bank_lines_amount: null,
+    bank_lines_rule: null,
+    bank_lines_rate: null,
+    other_lenders: null,
+    tfr_payments: 0,
   };
 }
 
@@ -319,7 +349,23 @@ export function assumptionRowsForSave(
 ): Record<string, unknown>[] {
   return forecastYears
     .filter((year) => assumptions[year])
-    .map((year) => ({ ...assumptions[year], scenario_id: scenarioId, forecast_year: year }));
+    .map((year) => {
+      const riga = { ...assumptions[year], scenario_id: scenarioId, forecast_year: year } as Record<string, unknown>;
+      // Una riga appena aggiunta al passo 5 («+ Aggiungi finanziamento», «+ Aggiungi
+      // finanziatore») nasce vuota e resta a schermo finche' l'utente la compila; non e' un
+      // dato, e lo schema del server la rifiuta (importo e residuo entrambi a zero; residuo
+      // di un altro finanziatore non positivo) con un 422 che fermerebbe anteprima e
+      // salvataggio. Si toglie qui, all'uscita, non dallo stato: sparirebbe sotto le dita.
+      if (Array.isArray(riga.financing_loans)) {
+        riga.financing_loans = (riga.financing_loans as Record<string, unknown>[]).filter(
+          (l) => (Number(l.amount) || 0) > 0 || (Number(l.opening_residual) || 0) > 0);
+      }
+      if (Array.isArray(riga.other_lenders)) {
+        riga.other_lenders = (riga.other_lenders as Record<string, unknown>[]).filter(
+          (l) => (Number(l.opening_residual) || 0) > 0);
+      }
+      return riga;
+    });
 }
 
 /**
@@ -380,6 +426,43 @@ export function withPregresso(
   const firstYear = forecastYears[0];
   if (firstYear === undefined) return assumptions;
   return { ...assumptions, [firstYear]: { ...assumptions[firstYear], pregresso: next } };
+}
+
+/**
+ * I ricavi trascinano la parte variabile di materie e servizi (spec 2026-09-15 §4.2): il
+ * motore non cambia, le due percentuali seguono i ricavi per costruzione.
+ *
+ * `revenue_growth_pct` non e' nullable in `BudgetAssumptionsCreate` (nessuna schermata lo
+ * svuota oggi), ma il tipo di `value` resta `number | null` per coerenza con la firma
+ * generica di `StepProps.update`: il cast sotto e' quello, non un allargamento del modello.
+ */
+export function withRevenueGrowth(map: AssumptionsMap, year: number, value: number | null): AssumptionsMap {
+  const v = value === null ? 0 : value;
+  const row: Record<string, unknown> = {
+    ...map[year],
+    revenue_growth_pct: value,
+    variable_materials_growth_pct: v,
+    variable_services_growth_pct: v,
+  };
+  return { ...map, [year]: row as Partial<BudgetAssumptionsCreate> };
+}
+
+/**
+ * Gli altri finanziatori per anno vivono sulla riga del PRIMO anno di piano,
+ * come `pregresso` (spec 2026-09-15 §5.3): stesso motivo, stessa forma —
+ * il motore legge la lista una volta sola, sul primo anno di piano, e ogni
+ * altro anno resta pulito. Un orizzonte vuoto non scrive nulla.
+ */
+export function withOtherLenders(
+  current: AssumptionsMap,
+  forecastYears: number[],
+  next: OtherLenderInput[] | null,
+): AssumptionsMap {
+  const first = forecastYears[0];
+  if (first === undefined) return current;
+  const out: AssumptionsMap = { ...current, [first]: { ...current[first], other_lenders: next && next.length > 0 ? next : null } };
+  for (const y of forecastYears.slice(1)) if (out[y]?.other_lenders != null) out[y] = { ...out[y], other_lenders: null };
+  return out;
 }
 
 /**

@@ -208,7 +208,11 @@ export function FinancingLoansGrid({
                         min={1}
                         max={50}
                         step={1}
-                        value={loan.duration_years}
+                        // `duration_years` e' ora `number | null` (Task 8: un
+                        // contratto con `repayments` non ha una durata) —
+                        // stesso ripiego di `loan.name` qui sopra, non un
+                        // valore inventato: la cella nasce vuota.
+                        value={loan.duration_years ?? ""}
                         aria-label={`Durata finanziamento ${year}`}
                         placeholder="Durata"
                         onChange={(event) => updateLoan(year, index, "duration_years", Number(event.target.value))}

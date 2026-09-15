@@ -361,10 +361,27 @@ export interface BudgetScenario {
   period_months: number | null;
   source_scenario_id?: number | null;
   workflow_type?: "infrannuale" | "bilancio" | "startup" | null;
+  extra_accounting_alerts?: ExtraAccountingAlerts | null;
+  extra_accounting_alerts_updated_at?: string | null;
   description: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ExtraAccountingAlerts {
+  retribuzioni: boolean;
+  fornitori: boolean;
+  banche: boolean;
+  inps: boolean;
+  inail: boolean;
+  riscossione: boolean;
+  iva: boolean;
+}
+
+export interface ExtraAccountingAlertsResponse {
+  alerts: ExtraAccountingAlerts;
+  updated_at: string | null;
 }
 
 export interface BudgetScenarioCreate {
@@ -373,15 +390,14 @@ export interface BudgetScenarioCreate {
   base_year: number;
   scenario_type?: "budget" | "infrannuale";
   period_months?: number;
+  workflow_intent?: "startup";
+  reuse_existing?: boolean;
   description?: string;
   is_active?: number;
 }
 
 export interface BudgetScenarioUpdate {
   name?: string;
-  base_year?: number;
-  scenario_type?: string;
-  period_months?: number;
   description?: string;
   is_active?: number;
 }
@@ -411,10 +427,20 @@ export interface FinancingLoanInput {
   name?: string | null;
   amount: number;
   opening_residual: number;
-  duration_years: number;
+  duration_years?: number | null;
+  repayments?: number[] | null;
   interest_rate: number;
   grace_years: number;
   balloon_pct: number;
+}
+
+/** Un altro finanziatore (sp16b/sp17b) scadenziato per anno (spec 2026-09-15 §5.3). */
+export interface OtherLenderInput {
+  name?: string | null;
+  opening_residual: number;
+  interest_rate: number;
+  /** Capitale rimborsato in ciascun anno di piano, indice 0 = primo anno. */
+  repayments: number[];
 }
 
 export interface TemporaryDifferenceInput {
@@ -433,6 +459,9 @@ export interface PregressoPlan {
   opening: number;
   amounts: number[];
   writeoff?: number[] | null;
+  /** Crediti commerciali non incassati nel piano (es. infragruppo): spegne le
+   *  caselle di scadenziamento e scrive 0 su ogni anno (spec 2026-09-15 §4.5). */
+  non_incassato?: boolean | null;
 }
 
 export interface PregressoTributari extends PregressoPlan {
@@ -505,6 +534,14 @@ export interface BudgetAssumptions {
   overdraft_limit: number | null;
   tfr_accrual_suspended: boolean;
   previdenza_scales_with_personnel: boolean;
+  inflation_pct: number | null;
+  fixed_materials_growth_auto: boolean;
+  fixed_services_growth_auto: boolean;
+  bank_lines_amount: number | null;
+  bank_lines_rule: "costante" | "ricavi" | null;
+  bank_lines_rate: number | null;
+  other_lenders: OtherLenderInput[] | null;
+  tfr_payments: number;
   interest_rate_receivables: number;
   interest_rate_payables: number;
   tax_rate: number;
@@ -603,6 +640,14 @@ export interface BudgetAssumptionsCreate {
   overdraft_limit?: number | null;
   tfr_accrual_suspended?: boolean;
   previdenza_scales_with_personnel?: boolean;
+  inflation_pct?: number | null;
+  fixed_materials_growth_auto?: boolean;
+  fixed_services_growth_auto?: boolean;
+  bank_lines_amount?: number | null;
+  bank_lines_rule?: "costante" | "ricavi" | null;
+  bank_lines_rate?: number | null;
+  other_lenders?: OtherLenderInput[] | null;
+  tfr_payments?: number;
   interest_rate_receivables?: number;
   interest_rate_payables?: number;
   tax_rate?: number;
@@ -1114,6 +1159,21 @@ export interface DebitoBancarioPianoAnni {
   lungo: number;
 }
 
+export interface PareggioDetail {
+  costi_variabili: number | null; costi_fissi: number | null; costi_fissi_operativi: number | null;
+  margine_contribuzione_pct: number | null; fatturato_pareggio: number | null;
+  margine_sicurezza: number | null; margine_sicurezza_pct: number | null;
+}
+export interface TfrDetail { apertura: number; accantonamento: number; liquidazioni: number; chiusura: number; sospeso: boolean }
+export interface AltriFinanziatoriContratto {
+  indice: number; nome: string; residuo_iniziale: number; rimborso: number; interessi: number; residuo: number; breve: number; lungo: number;
+}
+export interface AltriFinanziatoriDetail {
+  apertura: number; rimborso: number; interessi: number; breve: number; lungo: number;
+  mode: "contratti" | "anni" | "legacy"; contratti: AltriFinanziatoriContratto[];
+}
+export interface DebitoBancarioFidi { apertura: number; variazione_ricavi: number; rimborso_sweep: number; residuo: number; regola: "costante" | "ricavi"; tiraggio?: number; affidamento?: number; oltre_affidamento?: number }
+
 /** Una riga per contratto (misti gia' divisi in pregresso/nuovo, anche non
  *  ancora erogati), nell'ordine di `financing_amount` e poi della griglia. */
 export interface DebitoBancarioContratto {
@@ -1126,6 +1186,8 @@ export interface DebitoBancarioContratto {
   interessi: number;
   breve: number;
   lungo: number;
+  /** Il nome del contratto, quando presente (`_contratti_dell_anno`). */
+  nome?: string | null;
 }
 
 /** Il debito bancario per componenti, riconciliato con cio' che `sp16a`/`sp17a`
@@ -1139,6 +1201,9 @@ export interface DebitoBancarioAnno {
   pregresso_senza_piano: DebitoBancarioSenzaPiano | null;
   pregresso_piano_anni: DebitoBancarioPianoAnni | null;
   contratti: DebitoBancarioContratto[];
+  /** Fidi e anticipi su fatture, separati dai mutui (spec 2026-09-15 §5.2):
+   *  `null` quando il regime non e' attivo (`bank_lines_amount` non impostato). */
+  fidi: DebitoBancarioFidi | null;
 }
 
 export interface ForecastYearDetails {
@@ -1198,6 +1263,18 @@ export interface ForecastYearDetails {
    *  `details['override_conflicts']`): lista sempre presente su ogni anno di uno
    *  scenario budget, vuota quando nessun override crea conflitto. */
   override_conflicts: { aggregate: string; declared: number; details_sum: number }[];
+  /** Il pareggio sul MOL, dichiarato dal motore (spec 2026-09-15 §4.3): tutto `null`
+   *  quando la parte fissa/variabile non e' definita (override di ce05/ce06). */
+  pareggio: PareggioDetail;
+  tfr: TfrDetail;
+  altri_finanziatori: AltriFinanziatoriDetail;
+  oneri_fidi?: number;
+  regime_debito_bancario?: "esplicito" | "contratti" | "anni" | "legacy";
+  /** L'avviso dei fidi e degli anticipi nel regime esplicito (spec 2026-09-15 §5.2-bis):
+   *  il piano ha tirato oltre l'affidamento di partenza (`bank_lines_amount`). Il motore lo
+   *  dichiara in italiano, gia' pronto per lo schermo; `null`/assente quando non scatta o
+   *  fuori dal regime esplicito. */
+  avviso_fidi?: string | null;
 }
 
 export interface ForecastPreviewYear {

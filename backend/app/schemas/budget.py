@@ -1,10 +1,101 @@
 """
 Pydantic schemas for Budget and Forecast models
 """
-from pydantic import BaseModel, Field, ConfigDict, model_validator
-from datetime import datetime
+from pydantic import BaseModel, Field, ConfigDict, StrictBool, field_serializer, field_validator, model_validator
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Literal
 from decimal import Decimal
+
+
+WorkflowType = Literal["infrannuale", "bilancio", "startup"]
+WorkflowIntent = Literal["startup"]
+WorkflowOrigin = Literal["imported", "manual", "startup_opening", "promoted_projection"]
+ExtraAccountingAlertCode = Literal[
+    "retribuzioni", "fornitori", "banche", "inps", "inail", "riscossione", "iva",
+]
+NarrativeBlockOrigin = Literal["ai", "user", "migrated"]
+NarrativeBlockId = Literal[
+    "executive_summary",
+    "adjustments_and_closing",
+    "budget_assumptions",
+    "economic_outlook",
+    "financial_outlook",
+    "risks_and_actions",
+]
+
+
+class ExtraAccountingAlerts(BaseModel):
+    """The seven frontend alert flags, persisted as a sparse JSON object."""
+    model_config = ConfigDict(extra="forbid")
+
+    retribuzioni: StrictBool = False
+    fornitori: StrictBool = False
+    banche: StrictBool = False
+    inps: StrictBool = False
+    inail: StrictBool = False
+    riscossione: StrictBool = False
+    iva: StrictBool = False
+
+
+class ExtraAccountingAlertsUpdate(BaseModel):
+    """Complete client payload accepted only by the dedicated alerts endpoint."""
+    model_config = ConfigDict(extra="forbid")
+
+    retribuzioni: StrictBool
+    fornitori: StrictBool
+    banche: StrictBool
+    inps: StrictBool
+    inail: StrictBool
+    riscossione: StrictBool
+    iva: StrictBool
+
+
+class ExtraAccountingAlertsResponse(BaseModel):
+    """Normalized alert flags plus their server-owned modification time."""
+    alerts: ExtraAccountingAlerts
+    updated_at: Optional[datetime] = None
+
+
+class NarrativeBlock(BaseModel):
+    """One stable report narrative block and the data revision it describes."""
+    id: NarrativeBlockId
+    text: str = Field(..., min_length=1)
+    origin: NarrativeBlockOrigin
+    updated_at: datetime
+    source_hash: str = Field(..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+class NarrativeBlocks(BaseModel):
+    """Versioned JSON container persisted on a budget scenario."""
+    schema_version: Literal[1] = 1
+    blocks: List[NarrativeBlock] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_block_ids(self):
+        ids = [block.id for block in self.blocks]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Narrative block IDs must be unique")
+        return self
+
+
+def _validate_explicitly_supplied_fields(value: Optional[List[str]]) -> Optional[List[str]]:
+    """Keep the JSON list unambiguous; NULL remains the legacy-unknown marker."""
+    if value is None:
+        return value
+    if any(not field or field != field.strip() for field in value):
+        raise ValueError("Explicitly supplied field names must not be blank or padded")
+    if len(value) != len(set(value)):
+        raise ValueError("Explicitly supplied field names must be unique")
+    allowed_fields = set(BudgetAssumptionsBase.model_fields).difference({
+        "scenario_id", "forecast_year", "explicitly_supplied_fields",
+    })
+    unknown = set(value).difference(allowed_fields)
+    if unknown:
+        raise ValueError(
+            "Explicitly supplied fields must be BudgetAssumptions schema fields: "
+            + ", ".join(sorted(unknown))
+        )
+    return value
 
 
 # BudgetScenario Schemas
@@ -17,9 +108,28 @@ class BudgetScenarioBase(BaseModel):
     period_months: Optional[int] = Field(default=None, ge=1, le=12)
     # Pratica chain / workflow (2026-07-06). Additive, nullable.
     source_scenario_id: Optional[int] = None
-    workflow_type: Optional[str] = None  # "infrannuale" | "bilancio" | "startup"
+    workflow_type: Optional[WorkflowType] = None
+    extra_accounting_alerts: Optional[ExtraAccountingAlerts] = None
+    extra_accounting_alerts_updated_at: Optional[datetime] = None
+    narrative_blocks: Optional[NarrativeBlocks] = None
+    narrative_blocks_updated_at: Optional[datetime] = None
+    narrative_source_hash: Optional[str] = Field(
+        None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     description: Optional[str] = None
     is_active: int = Field(default=1, ge=0, le=1)
+
+    @field_serializer("extra_accounting_alerts_updated_at")
+    def serialize_extra_accounting_alerts_updated_at(
+        self, value: Optional[datetime], _info,
+    ) -> Optional[datetime]:
+        if value is None:
+            return None
+        return (
+            value.replace(tzinfo=timezone.utc)
+            if value.tzinfo is None
+            else value.astimezone(timezone.utc)
+        )
 
     @model_validator(mode="after")
     def validate_infrannuale_period(self):
@@ -33,17 +143,25 @@ class BudgetScenarioBase(BaseModel):
 
 class BudgetScenarioCreate(BudgetScenarioBase):
     """Schema for creating a new BudgetScenario"""
-    pass
+    # This is the sole client-provided workflow hint.  `source_scenario_id` and
+    # `workflow_type` remain on the shared base model for responses/legacy
+    # callers, but the endpoint rejects either if supplied and derives them.
+    workflow_intent: Optional[WorkflowIntent] = None
+    # Creation is intentionally non-idempotent by default.  Callers that are
+    # retrying a known creation may opt into exact active-scenario reuse.
+    reuse_existing: bool = False
 
 
 class BudgetScenarioUpdate(BaseModel):
     """Schema for updating a BudgetScenario"""
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    base_year: Optional[int] = Field(None, ge=2000, le=2100)
-    scenario_type: Optional[str] = None
-    period_months: Optional[int] = Field(None, ge=1, le=12)
-    source_scenario_id: Optional[int] = None
-    workflow_type: Optional[str] = None
+    narrative_blocks: Optional[NarrativeBlocks] = None
+    narrative_blocks_updated_at: Optional[datetime] = None
+    narrative_source_hash: Optional[str] = Field(
+        None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     description: Optional[str] = None
     is_active: Optional[int] = Field(None, ge=0, le=1)
 
@@ -64,21 +182,40 @@ class BudgetScenario(BudgetScenarioInDB):
 
 # BudgetAssumptions Schemas
 class FinancingLoanInput(BaseModel):
-    """Financing contract raised or already outstanding in the parent year."""
+    """Financing contract raised or already outstanding in the parent year.
+
+    Due modi di descrivere il rimborso: `duration_years` (+ `grace_years`, `balloon_pct`) per un
+    prestito nuovo, oppure `repayments` — il capitale rimborsato in ciascun anno di piano, indice
+    0 = primo anno — per un contratto PREGRESSO (`opening_residual` > 0, `amount` = 0). Oltre la
+    lista il residuo resta aperto (spec 2026-09-15 §5.1, decisione 7).
+    """
     name: Optional[str] = Field(default=None, max_length=100)
     amount: Decimal = Field(default=Decimal("0"), ge=0)
     opening_residual: Decimal = Field(default=Decimal("0"), ge=0)
-    duration_years: int = Field(..., gt=0, le=50)
+    duration_years: Optional[int] = Field(default=None, gt=0, le=50)
     interest_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     grace_years: int = Field(default=0, ge=0, le=49)
     balloon_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    repayments: Optional[List[Decimal]] = None
 
     @model_validator(mode="after")
     def validate_contract(self):
         if self.amount == 0 and self.opening_residual == 0:
             raise ValueError("l'importo o il residuo iniziale devono essere maggiori di zero")
-        if self.grace_years >= self.duration_years:
-            raise ValueError("gli anni di preammortamento devono essere meno della durata")
+        if self.repayments is None:
+            if self.duration_years is None:
+                raise ValueError("la durata in anni è obbligatoria senza i rimborsi per anno")
+            if self.grace_years >= self.duration_years:
+                raise ValueError("gli anni di preammortamento devono essere meno della durata")
+            return self
+        if self.amount > 0:
+            raise ValueError("i rimborsi per anno valgono solo sul residuo pregresso, non su un prestito nuovo")
+        if self.grace_years or self.balloon_pct:
+            raise ValueError("con i rimborsi per anno non si usano preammortamento e maxirata")
+        if any(r < 0 for r in self.repayments):
+            raise ValueError("un rimborso per anno è negativo")
+        if sum(self.repayments, Decimal("0")) - self.opening_residual > Decimal("0.01"):
+            raise ValueError("la somma dei rimborsi per anno supera il residuo iniziale")
         return self
 
 
@@ -91,6 +228,22 @@ class TemporaryDifferenceInput(BaseModel):
     additions: Decimal = Field(default=Decimal("0"), ge=0)
     reversals: Decimal = Field(default=Decimal("0"), ge=0)
     tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+
+
+class OtherLenderInput(BaseModel):
+    """Un altro finanziatore (sp16b/sp17b) scadenziato per anno: spesso un finanziamento soci."""
+    name: Optional[str] = Field(default=None, max_length=100)
+    opening_residual: Decimal = Field(..., gt=0)
+    interest_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    repayments: List[Decimal] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_lender(self):
+        if any(r < 0 for r in self.repayments):
+            raise ValueError("un rimborso per anno è negativo")
+        if sum(self.repayments, Decimal("0")) - self.opening_residual > Decimal("0.01"):
+            raise ValueError("la somma dei rimborsi per anno supera il residuo iniziale")
+        return self
 
 
 SpIndexingDriver = Literal["ricavi", "acquisti", "personale"]
@@ -109,6 +262,7 @@ class PregressoPlanInput(BaseModel):
     opening: Decimal = Field(..., ge=0)
     amounts: List[Decimal] = Field(default_factory=list)
     writeoff: Optional[List[Decimal]] = None  # solo crediti_commerciali
+    non_incassato: bool = False  # solo crediti_commerciali: dichiarati non incassati nel piano
 
 
 class PregressoTributariInput(PregressoPlanInput):
@@ -131,6 +285,12 @@ class BudgetAssumptionsBase(BaseModel):
     """Base BudgetAssumptions schema"""
     scenario_id: int
     forecast_year: int = Field(..., ge=2000, le=2100)
+    explicitly_supplied_fields: Optional[List[str]] = None
+
+    @field_validator("explicitly_supplied_fields")
+    @classmethod
+    def validate_explicitly_supplied_fields(cls, value):
+        return _validate_explicitly_supplied_fields(value)
 
     # Revenue assumptions
     revenue_growth_pct: Decimal = Field(default=Decimal("0"))
@@ -179,6 +339,16 @@ class BudgetAssumptionsBase(BaseModel):
 
     # Previdenza scales with personnel cost (opt-in): sp16f/sp17f move with ce08
     previdenza_scales_with_personnel: bool = False
+
+    # ── Giro di rilievi del 14/09 (spec 2026-09-15 §6) ──
+    inflation_pct: Optional[Decimal] = Field(default=None, ge=-50, le=100)
+    fixed_materials_growth_auto: bool = False
+    fixed_services_growth_auto: bool = False
+    bank_lines_amount: Optional[Decimal] = Field(default=None, ge=0)
+    bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
+    bank_lines_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    other_lenders: Optional[List[OtherLenderInput]] = None
+    tfr_payments: Decimal = Field(default=Decimal("0"), ge=0)
 
     # Financial parameters
     interest_rate_receivables: Decimal = Field(default=Decimal("0"))
@@ -282,6 +452,7 @@ class BudgetAssumptionsBulkRow(BudgetAssumptionsBase):
 class BudgetAssumptionsUpdate(BaseModel):
     """Schema for updating BudgetAssumptions"""
     forecast_year: Optional[int] = Field(None, ge=2000, le=2100)
+    explicitly_supplied_fields: Optional[List[str]] = None
     revenue_growth_pct: Optional[Decimal] = None
     other_revenue_growth_pct: Optional[Decimal] = None
     variable_materials_growth_pct: Optional[Decimal] = None
@@ -310,6 +481,14 @@ class BudgetAssumptionsUpdate(BaseModel):
     overdraft_limit: Optional[Decimal] = Field(None, ge=0)
     tfr_accrual_suspended: Optional[bool] = None
     previdenza_scales_with_personnel: Optional[bool] = None
+    inflation_pct: Optional[Decimal] = None
+    fixed_materials_growth_auto: Optional[bool] = None
+    fixed_services_growth_auto: Optional[bool] = None
+    bank_lines_amount: Optional[Decimal] = None
+    bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
+    bank_lines_rate: Optional[Decimal] = None
+    other_lenders: Optional[List[OtherLenderInput]] = None
+    tfr_payments: Optional[Decimal] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None
@@ -384,6 +563,11 @@ class BudgetAssumptionsUpdate(BaseModel):
     ce17a_override: Optional[Decimal] = None
     ce17b_override: Optional[Decimal] = None
     ce20_override: Optional[Decimal] = None
+
+    @field_validator("explicitly_supplied_fields")
+    @classmethod
+    def validate_explicitly_supplied_fields(cls, value):
+        return _validate_explicitly_supplied_fields(value)
 
 
 class BudgetAssumptionsInDB(BudgetAssumptionsBase):

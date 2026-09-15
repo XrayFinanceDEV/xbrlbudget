@@ -6,10 +6,8 @@
 import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
-import { euro, num, pctOf } from "@/lib/budget-format";
+import { euro, num, numOrNull, pctOf } from "@/lib/budget-format";
 import type { ForecastPreviewResponse } from "@/types/api";
-import { PREGRESSO_LABELS } from "@/lib/budget-pregresso-circolante";
-import { legacyNoteFor, type TabellaPregressoKey } from "@/lib/budget-pregresso-tabella";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
@@ -89,8 +87,8 @@ export function rowsAnnoBase(baseYear: number, historicalYears: number[], histor
   };
 
   // MOL da ceAggregates, l'unico aggregatore canonico del modulo: e' la
-  // stessa "MOL" che rowsCosti e rowsAltreVociCe calcolano sullo stesso anno
-  // base. Una formula locale piu' semplice (quella letterale del brief,
+  // stessa "MOL" che rowsCosti calcola sullo stesso anno base. Una formula
+  // locale piu' semplice (quella letterale del brief,
   // ce01+ce04-ce05-ce06-ce07-ce08-ce12) diverge da quella canonica per
   // (ce02+ce03+ce03a)-(ce10+ce11) — variazione rimanenze, lavori interni o
   // accantonamenti non nulli danno due "MOL" diversi passando dal passo 1 al
@@ -140,67 +138,119 @@ export function rowsFatturato(baseInc: IncomeStatement, years: ForecastPreviewYe
   ];
 }
 
+/**
+ * «Costi e margine» del passo 3 (spec 2026-09-15 §4.3): ricavi, variabili, fissi con «di
+ * cui personale», MOL — le percentuali sono sui ricavi dell'anno.
+ *
+ * `fissi`/`variabili` non si sommano piu' qui dai `ce05_fixed`/`ce06_fixed` per anno: li
+ * dichiara il motore in `details.pareggio.costi_fissi`/`costi_variabili` (Task 6), letti
+ * con `numOrNull` perche' un valore nidificato in `details` puo' arrivare come stringa
+ * (`Decimal` serializzato, regole comuni del lotto). Senza un pareggio definito — un
+ * override di CE Prev. su materie prime o servizi azzera la ripartizione — le due celle
+ * sono `null` con la loro nota, mai una somma inventata.
+ *
+ * Il MOL resta quello canonico di `ceAggregates` (invariato): e' l'aggregatore unico del
+ * modulo, e la riga deve continuare a coincidere col MOL di `rowsAnnoBase`
+ * sullo stesso anno base (test «fix round 1, rilievo 1» qui sotto) anche quando ce02/ce03/
+ * ce10/ce11/ce11b non sono nulli — voci che il pareggio del motore non considera, perche'
+ * la sua "fissi + variabili" copre solo materie prime, servizi, personale, godimento e
+ * oneri diversi.
+ */
 export function rowsCosti(
   baseInc: IncomeStatement, fixedShare: { materials: number; services: number }, years: ForecastPreviewYear[],
 ): PreviewRow[] {
   const b = {
-    rev: num(baseInc.ce01_ricavi_vendite), other: num(baseInc.ce04_altri_ricavi),
+    rev: num(baseInc.ce01_ricavi_vendite),
     mat: num(baseInc.ce05_materie_prime), serv: num(baseInc.ce06_servizi),
     god: num(baseInc.ce07_godimento_beni), pers: num(baseInc.ce08_costi_personale), alt: num(baseInc.ce12_oneri_diversi),
   };
-  const bFixed = b.mat * fixedShare.materials / 100 + b.serv * fixedShare.services / 100 + b.pers + b.god;
+  const bFixed = b.mat * fixedShare.materials / 100 + b.serv * fixedShare.services / 100 + b.pers + b.god + b.alt;
   const bVar = b.mat + b.serv - (b.mat * fixedShare.materials / 100 + b.serv * fixedShare.services / 100);
-  const bMain = b.mat + b.serv + b.god + b.pers;
+  const bMol = ceAggregates(baseInc as unknown as Record<string, unknown>).mol;
   const cell = (v: number | null, rev: number, note?: string): PreviewCell => ({ value: v, pct: pctOf(v, rev), ...(note ? { note } : {}) });
   const cols = years.map((y) => {
     const i = y.income_statement, d = y.details;
-    const rev = num(i.ce01_ricavi_vendite);
-    const mat = num(i.ce05_materie_prime), serv = num(i.ce06_servizi), god = num(i.ce07_godimento_beni), pers = num(i.ce08_costi_personale);
-    const main = mat + serv + god + pers;
-    const split = d.ce05_fixed !== null && d.ce06_fixed !== null && d.ce05_variable !== null && d.ce06_variable !== null;
-    const fixed = split ? d.ce05_fixed! + d.ce06_fixed! + pers + god : null;
-    const variable = split ? d.ce05_variable! + d.ce06_variable! : null;
-    const note = split ? undefined : "forzato in CE Prev.";
+    const rev = num(i.ce01_ricavi_vendite), pers = num(i.ce08_costi_personale);
+    const p = d?.pareggio;
+    const fissi = p ? numOrNull(p.costi_fissi) : null;
+    const variabili = p ? numOrNull(p.costi_variabili) : null;
+    const note = fissi === null || variabili === null ? "forzato in CE Prev." : undefined;
     return {
       rev: { value: rev } as PreviewCell,
-      main: cell(main, rev), fixed: cell(fixed, rev, note), variable: cell(variable, rev, note),
-      mat: cell(mat, rev), serv: cell(serv, rev), pers: cell(pers, rev), god: cell(god, rev),
+      variabili: cell(variabili, rev, note), fissi: cell(fissi, rev, note),
+      pers: cell(pers, rev),
       mol: cell(ceAggregates(i).mol, rev),
-      forn: { value: num(y.balance_sheet.sp16d_debiti_fornitori_breve), days: d.dpo_applied } as PreviewCell,
     };
   });
   const pick = (k: keyof (typeof cols)[number]) => cols.map((c) => c[k]);
   return [
     row("ricavi", "Ricavi delle vendite", "sub", { value: b.rev }, pick("rev")),
-    row("principali", "Costi principali", "total", cell(bMain, b.rev), pick("main")),
-    row("fissi", "di cui fissi", "sub", cell(bFixed, b.rev), pick("fixed")),
-    row("variabili", "di cui variabili", "sub", cell(bVar, b.rev), pick("variable")),
-    row("ce05", "Materie prime", "value", cell(b.mat, b.rev), pick("mat")),
-    row("ce06", "Servizi", "value", cell(b.serv, b.rev), pick("serv")),
-    row("ce08", "Personale", "value", cell(b.pers, b.rev), pick("pers")),
-    row("ce07", "Godimento beni di terzi", "value", cell(b.god, b.rev), pick("god")),
-    row("mol", "MOL stimato", "kpi", cell(ceAggregates(baseInc as unknown as Record<string, unknown>).mol, b.rev), pick("mol")),
-    row("fornitori", "Debiti verso fornitori stimati", "value", { value: null }, pick("forn")),
+    row("variabili", "variabili · materie prime e servizi", "value", cell(bVar, b.rev), pick("variabili")),
+    row("fissi", "fissi · parti fisse, personale, godimento, oneri diversi", "value", cell(bFixed, b.rev), pick("fissi")),
+    row("personale", "di cui personale", "sub", cell(b.pers, b.rev), pick("pers")),
+    row("mol", "MOL", "kpi", cell(bMol, b.rev), pick("mol")),
   ];
 }
 
-export function rowsAltreVociCe(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {
-  // Cascata vp -> main -> alt -> MOL -> amm -> RO -> fin -> ebt: ogni riga (tranne i
-  // subtotali kpi) porta gia' il segno con cui va sommata, cosi' vp + main + alt + amm
-  // + fin torna esattamente ebt (stessa formula canonica di ceAggregates).
-  const bRev = num(baseInc.ce01_ricavi_vendite);
-  const b = ceAggregates(baseInc as unknown as Record<string, unknown>);
-  const ys = years.map((y) => ({ agg: ceAggregates(y.income_statement), rev: num(y.income_statement.ce01_ricavi_vendite) }));
-  const r = (
-    key: keyof ReturnType<typeof ceAggregates>, label: string, kind: PreviewRowKind, sign: 1 | -1 = 1, withPct = false,
-  ): PreviewRow =>
-    row(key, label, kind, { value: sign * b[key], ...(withPct ? { pct: pctOf(sign * b[key], bRev) } : {}) },
-      ys.map(({ agg, rev }) => ({ value: sign * agg[key], ...(withPct ? { pct: pctOf(sign * agg[key], rev) } : {}) })));
+/**
+ * «Conto economico fino all'ante imposte» del passo 3 (spec 2026-09-15 §4.3): valore
+ * della produzione, costi variabili e fissi (dal pareggio del motore, come `rowsCosti`),
+ * altri costi operativi, MOL, ammortamenti, risultato operativo, gestione finanziaria,
+ * ante imposte.
+ *
+ * Valore della produzione, MOL, risultato operativo e ante imposte sono quelli canonici di
+ * `ceAggregates`, cioe' del CE che il motore ha scritto: la versione precedente li
+ * ricalcolava come ricavi + altri ricavi, senza variazioni di rimanenze, lavori interni,
+ * accantonamenti e proventi finanziari, e sullo stesso schermo mostrava un MOL diverso di
+ * 150.000 € da quello di «Costi e margine» (collaudo di fine lotto, R1). Solo la
+ * scomposizione variabili/fissi viene dal pareggio; «altri costi operativi» e' cio' che il
+ * pareggio non scompone (ce10 + ce11 + ce11b), cosi' le righe sommano sempre al MOL.
+ *
+ * La colonna base non ha un `details.pareggio`: la parte fissa di materie prime e servizi
+ * si ripartisce con la quota dello scenario (`fixed`), la stessa di `rowsCosti`.
+ */
+export function rowsCeAnteImposte(
+  baseInc: IncomeStatement, fixed: { materials: number; services: number }, years: ForecastPreviewYear[],
+): PreviewRow[] {
+  const bi = baseInc as unknown as Record<string, unknown>;
+  const altriOperativi = (i: Record<string, unknown>) =>
+    num(i.ce10_var_rimanenze_mat_prime) + num(i.ce11_accantonamenti) + num(i.ce11b_altri_accantonamenti);
+  const bAgg = ceAggregates(bi);
+  const mat = num(bi.ce05_materie_prime), serv = num(bi.ce06_servizi);
+  const bFissiMs = mat * fixed.materials / 100 + serv * fixed.services / 100;
+  const bVariabili = mat + serv - bFissiMs;
+  const bFissi = bFissiMs + num(bi.ce07_godimento_beni) + num(bi.ce08_costi_personale) + num(bi.ce12_oneri_diversi);
+
+  const cols = years.map((y) => {
+    const i = y.income_statement as unknown as Record<string, unknown>;
+    const agg = ceAggregates(i);
+    const p = y.details?.pareggio;
+    const variabili = p ? numOrNull(p.costi_variabili) : null;
+    const fissi = p ? numOrNull(p.costi_fissi) : null;
+    const note = variabili === null || fissi === null ? "forzato in CE Prev." : undefined;
+    return {
+      vdp: { value: agg.vp } as PreviewCell,
+      variabili: { value: variabili === null ? null : -variabili, ...(note ? { note } : {}) } as PreviewCell,
+      fissi: { value: fissi === null ? null : -fissi, ...(note ? { note } : {}) } as PreviewCell,
+      altri: { value: -altriOperativi(i) } as PreviewCell,
+      mol: { value: agg.mol } as PreviewCell,
+      amm: { value: -agg.amm } as PreviewCell,
+      ro: { value: agg.ro } as PreviewCell,
+      fin: { value: agg.fin } as PreviewCell,
+      ebt: { value: agg.ebt } as PreviewCell,
+    };
+  });
+  const pick = (k: keyof (typeof cols)[number]) => cols.map((c) => c[k]);
   return [
-    r("vp", "Valore della produzione", "value"), r("main", "Costi principali", "sub", -1),
-    r("alt", "Altre voci dei costi della produzione", "sub", -1), r("mol", "MOL", "kpi", 1, true),
-    r("amm", "Ammortamenti e svalutazioni", "sub", -1), r("ro", "Risultato operativo", "kpi"),
-    r("fin", "Proventi e oneri finanziari e straordinari", "value"), r("ebt", "Risultato ante imposte", "total"),
+    row("vdp", "Valore della produzione", "value", { value: bAgg.vp }, pick("vdp")),
+    row("variabili", "Costi variabili", "sub", { value: -bVariabili }, pick("variabili")),
+    row("fissi", "Costi fissi", "sub", { value: -bFissi }, pick("fissi")),
+    row("altri", "Altri costi operativi · rimanenze e accantonamenti", "sub", { value: -altriOperativi(bi) }, pick("altri")),
+    row("mol", "MOL", "kpi", { value: bAgg.mol }, pick("mol")),
+    row("amm", "Ammortamenti", "sub", { value: -bAgg.amm }, pick("amm")),
+    row("ro", "Risultato operativo", "kpi", { value: bAgg.ro }, pick("ro")),
+    row("fin", "Gestione finanziaria", "sub", { value: bAgg.fin }, pick("fin")),
+    row("ebt", "Risultato ante imposte", "total", { value: bAgg.ebt }, pick("ebt")),
   ];
 }
 
@@ -231,71 +281,6 @@ export function rowsCircolante(baseBs: BalanceSheet, baseInc: IncomeStatement, y
   ];
 }
 
-const finDebt = (bs: Record<string, unknown>) =>
-  num(bs.sp16a_debiti_banche_breve) + num(bs.sp17a_debiti_banche_lungo) + num(bs.sp16b_debiti_altri_finanz_breve)
-  + num(bs.sp17b_debiti_altri_finanz_lungo) + num(bs.sp16c_debiti_obbligazioni_breve) + num(bs.sp17c_debiti_obbligazioni_lungo);
-
-export function rowsPregressoNuovo(baseBs: BalanceSheet, years: ForecastPreviewYear[]): PreviewRow[] {
-  const bb = baseBs as unknown as Record<string, unknown>;
-  const mk = (bs: Record<string, unknown>) => {
-    const bank = num(bs.sp16a_debiti_banche_breve) + num(bs.sp17a_debiti_banche_lungo);
-    const altri = num(bs.sp16b_debiti_altri_finanz_breve) + num(bs.sp17b_debiti_altri_finanz_lungo);
-    const cash = num(bs.sp09_disponibilita_liquide);
-    const immob = num(bs.sp02_immob_immateriali) + num(bs.sp03_immob_materiali);
-    return { bank, altri, immob, cash, pfn: finDebt(bs) - cash };
-  };
-  const b = mk(bb), ys = years.map((y) => mk(y.balance_sheet));
-  const r = (key: keyof typeof b, label: string, kind: PreviewRowKind): PreviewRow =>
-    row(key, label, kind, { value: b[key] }, ys.map((c) => ({ value: c[key] })));
-  return [
-    r("bank", "Debiti bancari", "value"), r("altri", "Altri finanziatori", "value"),
-    r("immob", "Immobilizzazioni nette", "value"), r("cash", "Cassa", "kpi"),
-    r("pfn", "Posizione finanziaria netta", "total"),
-  ];
-}
-
-/**
- * Il pregresso di circolante che il motore ha davvero scadenziato, saldo per
- * saldo (Task 7): apertura in colonna base, poi per ogni anno il residuo a
- * breve, quello oltre l'esercizio, il chiuso e — dove c'e' — l'inesigibile.
- * Lettura pura di `details.pregresso`: qui non si scadenzia nulla, il piano lo
- * svolge `runoff_schedule` in Python.
- *
- * `mode: "legacy"` non e' un residuo di zero: e' un saldo per cui NESSUN piano
- * e' stato dichiarato, e che quindi segue le formule di sempre. La nota che lo
- * dice NON e' la stessa frase su tutti e cinque i saldi (`legacyNoteFor`,
- * `lib/budget-pregresso-tabella.ts`, rilievo 4 del giro di correzione 1):
- * fornitori e crediti si chiudono davvero nel primo anno perche' un driver di
- * volume li rigenera comunque, ma previdenziali e altri debiti — senza un
- * driver dietro — crescono per percentuale e non si chiudono in alcun senso
- * visibile. Confondere «nessun piano» con «residuo pagato» sarebbe un difetto
- * a se'; dire "chiude" di un saldo che invece cresce sarebbe l'altro.
- */
-export function rowsPregressoRunoff(years: ForecastPreviewYear[], keys: readonly TabellaPregressoKey[]): PreviewRow[] {
-  if (years.length === 0) return [];
-  const empty = (): PreviewCell[] => years.map(() => ({ value: null }));
-  const out: PreviewRow[] = [
-    row("pregresso-head", "Pregresso: residuo a breve · oltre", "total", { value: null }, empty()),
-  ];
-  for (const key of keys) {
-    const det = years.map((y) => y.details.pregresso?.[key] ?? null);
-    const pick = (f: "residual_short" | "residual_long" | "closed" | "writeoff"): PreviewCell[] =>
-      det.map((d) => ({ value: d ? num(d[f]) : null }));
-    const residuo = pick("residual_short").map((c, i) =>
-      det[i]?.mode === "legacy" ? { ...c, note: legacyNoteFor(key) } : c);
-    out.push(row(`pregresso-${key}`, `${PREGRESSO_LABELS[key]} · residuo a breve`, "value",
-      { value: det[0] ? num(det[0].opening) : null }, residuo));
-    out.push(row(`pregresso-${key}-long`, "oltre l'esercizio", "sub", { value: null }, pick("residual_long")));
-    out.push(row(`pregresso-${key}-closed`, "chiuso nell'anno", "sub", { value: null }, pick("closed")));
-    // L'inesigibile esiste sul solo piano dei crediti: si mostra quando il
-    // motore ne dichiara uno, invece di aggiungere quattro righe a zero.
-    const writeoff = pick("writeoff");
-    if (writeoff.some((c) => c.value !== null && c.value !== 0)) {
-      out.push(row(`pregresso-${key}-writeoff`, "di cui inesigibile", "sub", { value: null }, writeoff));
-    }
-  }
-  return out;
-}
 
 export function rowsImposte(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {
   const g = (i: Record<string, unknown>, k: string) => num(i[k]);
@@ -471,7 +456,11 @@ export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
       + "La liquidità si riduce anche dove resta positiva.";
 
   const generato = anni.filter((a) => a.scopertoGenerato > 0);
-  const scoperto = generato.length === 0 && picco === null ? null
+  // Nel regime esplicito dei fidi lo scoperto non nasce (spec §5.2-bis) e il picco dichiarato e'
+  // quanto i fidi superano l'importo di partenza: lo dicono gli avvisi dei fidi, anno per anno.
+  // Qui la frase «scoperto ... nessuno nuovo · fabbisogno di picco» si contraddiceva (collaudo R8).
+  const esplicito = years.some((y) => y.details?.debito_bancario?.fidi);
+  const scoperto = generato.length === 0 && (picco === null || esplicito) ? null
     : `Scoperto di conto corrente generato dal piano: ${
       generato.map((a) => `${euro(a.scopertoGenerato)} nel ${a.year}`).join(", ") || "nessuno nuovo"}. `
       + (picco ? `Fabbisogno di picco ${euro(picco.amount)} nel ${picco.year}: è la finanza che queste ipotesi richiedono.` : "");
@@ -498,5 +487,7 @@ export function scopertoAvvisi(years: ForecastPreviewYear[]): ScopertoAvvisi {
 export function confermaCassaPositiva(data: ForecastPreviewResponse | null, avvisi: ScopertoAvvisi): boolean {
   if (!data || data.error) return false;
   if ((data.forecast_years ?? []).length === 0) return false;
-  return avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
+  // Un anno che ha tirato sui fidi ha avuto un fabbisogno, anche dentro l'importo di partenza.
+  const tirato = (data.forecast_years ?? []).some((y) => num(y.details?.debito_bancario?.fidi?.tiraggio) > 0);
+  return !tirato && avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
 }

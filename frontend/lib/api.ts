@@ -11,6 +11,11 @@ import type {
   FGPMIResult,
   FinancialAnalysis,
 } from '@/types/api';
+import {
+  parseFinalReportModel,
+  type FinalReportModel,
+  type NarrativeBlock,
+} from '@/types/final-report';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:8000/api/v1');
 
@@ -483,6 +488,28 @@ export const updateBudgetScenario = async (
   return data;
 };
 
+export const getExtraAccountingAlerts = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<import('@/types/api').ExtraAccountingAlertsResponse> => {
+  const { data } = await api.get<import('@/types/api').ExtraAccountingAlertsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/extra-accounting-alerts`,
+  );
+  return data;
+};
+
+export const putExtraAccountingAlerts = async (
+  companyId: number,
+  scenarioId: number,
+  alerts: import('@/types/api').ExtraAccountingAlerts,
+): Promise<import('@/types/api').ExtraAccountingAlertsResponse> => {
+  const { data } = await api.put<import('@/types/api').ExtraAccountingAlertsResponse>(
+    `/companies/${companyId}/scenarios/${scenarioId}/extra-accounting-alerts`,
+    alerts,
+  );
+  return data;
+};
+
 export const deleteBudgetScenario = async (
   companyId: number,
   scenarioId: number
@@ -763,6 +790,40 @@ export const getScenarioAnalysis = async (
     `/companies/${companyId}/scenarios/${scenarioId}/analysis`
   );
   return data;
+};
+
+// Final report (M1).  This is deliberately a single, validated read model: a
+// consumer must not join it with /analysis, assumptions, or legacy comments.
+export const getFinalReport = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<FinalReportModel> => {
+  const { data } = await api.get<unknown>(
+    `/companies/${companyId}/scenarios/${scenarioId}/final-report`,
+  );
+  return parseFinalReportModel(data);
+};
+
+export const generateFinalReportNarrative = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<FinalReportModel> => {
+  const { data } = await api.post<unknown>(
+    `/companies/${companyId}/scenarios/${scenarioId}/final-report/narrative/generate`,
+  );
+  return parseFinalReportModel(data);
+};
+
+export const saveFinalReportNarrative = async (
+  companyId: number,
+  scenarioId: number,
+  blocks: Array<Pick<NarrativeBlock, "id" | "text">>,
+): Promise<FinalReportModel> => {
+  const { data } = await api.put<unknown>(
+    `/companies/${companyId}/scenarios/${scenarioId}/final-report/narrative`,
+    { blocks },
+  );
+  return parseFinalReportModel(data);
 };
 
 // AI Report Comments

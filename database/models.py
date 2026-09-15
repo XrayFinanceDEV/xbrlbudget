@@ -58,6 +58,11 @@ class FinancialYear(Base):
     source_sha256 = Column(String(64), nullable=True, default=None, index=True)
     parser_version = Column(String(50), nullable=True, default=None)
     forecastable = Column(Boolean, nullable=False, default=False)
+    # Promotion provenance is intentionally not a foreign key until the deletion
+    # semantics for a source scenario have been decided.
+    promoted_from_scenario_id = Column(Integer, nullable=True, index=True)
+    # NULL is a legacy record whose origin cannot be established reliably.
+    workflow_origin = Column(String(30), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -562,6 +567,14 @@ class BudgetScenario(Base):
     ai_comments_infrannuale = Column(Text, nullable=True)
     ai_comments_infrannuale_updated_at = Column(DateTime, nullable=True)
 
+    # Additive report-final persistence. NULL distinguishes records created
+    # before this provenance was available from an explicitly empty payload.
+    extra_accounting_alerts = Column(JSON, nullable=True)
+    extra_accounting_alerts_updated_at = Column(DateTime, nullable=True)
+    narrative_blocks = Column(JSON, nullable=True)
+    narrative_blocks_updated_at = Column(DateTime, nullable=True)
+    narrative_source_hash = Column(String(64), nullable=True)
+
     # Relationships
     company = relationship("Company", back_populates="budget_scenarios")
     assumptions = relationship("BudgetAssumptions", back_populates="scenario", cascade="all, delete-orphan")
@@ -581,6 +594,9 @@ class BudgetAssumptions(Base):
     id = Column(Integer, primary_key=True, index=True)
     scenario_id = Column(Integer, ForeignKey("budget_scenarios.id"), nullable=False)
     forecast_year = Column(Integer, nullable=False)  # e.g., 2025, 2026, 2027
+    # JSON list; NULL means legacy provenance is unknown, while [] means no
+    # assumption value was explicitly supplied for this forecast year.
+    explicitly_supplied_fields = Column(JSON, nullable=True)
 
     # Revenue assumptions (% vs base year)
     revenue_growth_pct = Column(Numeric(10, 6), default=0, nullable=False)  # % change in revenue
@@ -646,6 +662,16 @@ class BudgetAssumptions(Base):
     # year — e.g. personnel 100k→200k ⇒ previdenza 20k→40k. Default OFF (carry forward
     # / manual sp16f_growth_pct), so existing scenarios are unaffected.
     previdenza_scales_with_personnel = Column(Boolean, default=False, nullable=False)
+
+    # ── Giro di rilievi del 14/09 (spec 2026-09-15 §6): tutto additivo ──
+    inflation_pct = Column(Numeric(10, 6), nullable=True)  # inflazione attesa del passo 1; NULL = scenario precedente
+    fixed_materials_growth_auto = Column(Boolean, default=False, nullable=False)  # la parte fissa segue l'inflazione
+    fixed_services_growth_auto = Column(Boolean, default=False, nullable=False)
+    bank_lines_amount = Column(Numeric(15, 2), nullable=True)  # fidi e anticipi su fatture (prima riga); NULL = regime di prima
+    bank_lines_rule = Column(String(16), nullable=True)        # 'costante' | 'ricavi'
+    bank_lines_rate = Column(Numeric(10, 6), nullable=True)    # tasso % su fidi e scoperto
+    other_lenders = Column(JSON, nullable=True)                 # altri finanziatori per anno (prima riga)
+    tfr_payments = Column(Numeric(15, 2), default=0, nullable=False)  # liquidazioni TFR dell'anno
 
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables

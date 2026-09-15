@@ -13,6 +13,8 @@ import {
   getCompanyYears,
   createBudgetScenario,
   getBudgetScenario,
+  getExtraAccountingAlerts,
+  putExtraAccountingAlerts,
   bulkUpsertAssumptions,
   getIntraYearComparison,
   getScenarioAnalysis,
@@ -113,6 +115,14 @@ import {
   buildIncomeItemsWithEbitda,
 } from "@/lib/pratica-statement-rows";
 import { buildConfrontoHighlights } from "@/lib/pratica-highlights";
+import {
+  createEmptyExtraAlerts,
+  canSaveExtraAlerts,
+  extraAlertsDirty,
+  normalizeExtraAlerts,
+  serializeExtraAlerts,
+  type ExtraAccountingAlerts as ExtraAccountingAlertsState,
+} from "@/lib/pratica-extra-alerts";
 
 export default function InfraannualePage() {
   const router = useRouter();
@@ -346,7 +356,22 @@ export default function InfraannualePage() {
   const [analysisError, setAnalysisError] = useState<unknown>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [projectionDiagnostics, setProjectionDiagnostics] = useState<ForecastDiagnostic[]>([]);
-  const [extraAlerts, setExtraAlerts] = useState<Record<string, boolean>>({});
+  const [extraAlerts, setExtraAlerts] = useState<ExtraAccountingAlertsState>(
+    createEmptyExtraAlerts,
+  );
+  const [loadedExtraAlerts, setLoadedExtraAlerts] = useState<ExtraAccountingAlertsState>(
+    createEmptyExtraAlerts,
+  );
+  const [savingExtraAlerts, setSavingExtraAlerts] = useState(false);
+  const [loadingExtraAlerts, setLoadingExtraAlerts] = useState(false);
+  const [extraAlertsError, setExtraAlertsError] = useState<string | null>(null);
+  const [extraAlertsLoadedFor, setExtraAlertsLoadedFor] = useState<string | null>(null);
+  const extraAlertsRequest = useRef(0);
+  const extraAlertsEditVersion = useRef(0);
+  const extraAlertsScenarioKey =
+    importResult?.companyId && scenario?.scenario_type === "infrannuale"
+      ? `${importResult.companyId}:${scenario.id}`
+      : null;
   const [ratingVisible, setRatingVisible] = useState(false);
   const [showNoAlertsConfirm, setShowNoAlertsConfirm] = useState(false);
 
@@ -984,6 +1009,112 @@ export default function InfraannualePage() {
       loadAnalysis();
     }
   }, [activeTab, analysis, scenario, loadAnalysis]);
+
+  // A load generation is shared by automatic loads and explicit retries. It
+  // prevents a stale scenario response from becoming saveable, while the edit
+  // version prevents a pre-edit response from replacing newer checkbox input.
+  const loadExtraAlerts = useCallback((clearForScenario = false) => {
+    const requestId = ++extraAlertsRequest.current;
+    const companyId = importResult?.companyId;
+    if (!companyId || !scenario || scenario.scenario_type !== "infrannuale") {
+      const empty = createEmptyExtraAlerts();
+      setExtraAlerts(empty);
+      setLoadedExtraAlerts(empty);
+      setExtraAlertsLoadedFor(null);
+      setExtraAlertsError(null);
+      setSavingExtraAlerts(false);
+      setLoadingExtraAlerts(false);
+      return;
+    }
+
+    const editVersion = extraAlertsEditVersion.current;
+    if (clearForScenario) {
+      // Clear the previous scenario immediately: it must never be displayed
+      // or become a save payload while this scenario's GET is still in flight.
+      const empty = createEmptyExtraAlerts();
+      setExtraAlerts(empty);
+      setLoadedExtraAlerts(empty);
+      setSavingExtraAlerts(false);
+    }
+    setExtraAlertsLoadedFor(null);
+    setLoadingExtraAlerts(true);
+    setExtraAlertsError(null);
+    void getExtraAccountingAlerts(companyId, scenario.id)
+      .then((response) => {
+        if (extraAlertsRequest.current !== requestId) return;
+        const normalized = normalizeExtraAlerts(response.alerts);
+        setLoadedExtraAlerts(normalized);
+        setExtraAlertsLoadedFor(extraAlertsScenarioKey);
+        // A user may toggle a checkbox while this GET is outstanding. The
+        // response is still the authoritative loaded snapshot, but it must
+        // not replace their newer local edit.
+        if (extraAlertsEditVersion.current === editVersion) {
+          setExtraAlerts(normalized);
+        }
+      })
+      .catch((error: unknown) => {
+        if (extraAlertsRequest.current !== requestId) return;
+        setExtraAlertsError(getErrorMessage(error));
+      })
+      .finally(() => {
+        if (extraAlertsRequest.current === requestId) setLoadingExtraAlerts(false);
+      });
+  }, [extraAlertsScenarioKey, importResult?.companyId, scenario]);
+
+  useEffect(() => {
+    loadExtraAlerts(true);
+  }, [loadExtraAlerts]);
+
+  const extraAlertsDirtyState = extraAlertsDirty(extraAlerts, loadedExtraAlerts);
+  const extraAlertsLoaded = extraAlertsScenarioKey !== null && extraAlertsLoadedFor === extraAlertsScenarioKey;
+  const extraAlertsSaveEnabled = canSaveExtraAlerts({
+    dirty: extraAlertsDirtyState,
+    loaded: extraAlertsLoaded,
+    loading: loadingExtraAlerts,
+    saving: savingExtraAlerts,
+  });
+  const saveExtraAlerts = useCallback(async () => {
+    const companyId = importResult?.companyId;
+    if (
+      !companyId || !scenario || scenario.scenario_type !== "infrannuale" ||
+      !extraAlertsLoaded || loadingExtraAlerts || savingExtraAlerts
+    ) return;
+
+    const requestId = extraAlertsRequest.current;
+    const editVersion = extraAlertsEditVersion.current;
+    setSavingExtraAlerts(true);
+    setExtraAlertsError(null);
+    try {
+      const response = await putExtraAccountingAlerts(
+        companyId,
+        scenario.id,
+        serializeExtraAlerts(extraAlerts),
+      );
+      if (extraAlertsRequest.current !== requestId) return;
+      const normalized = normalizeExtraAlerts(response.alerts);
+      setLoadedExtraAlerts(normalized);
+      // PUT can finish after a new toggle; retain that local value and leave
+      // it dirty against the just-saved server snapshot for a subsequent save.
+      if (extraAlertsEditVersion.current === editVersion) {
+        setExtraAlerts(normalized);
+      }
+      toast.success("Segnali extracontabili salvati");
+    } catch (error: unknown) {
+      if (extraAlertsRequest.current !== requestId) return;
+      const message = getErrorMessage(error);
+      setExtraAlertsError(message);
+      toast.error(`Salvataggio segnali non riuscito: ${message}`);
+    } finally {
+      if (extraAlertsRequest.current === requestId) setSavingExtraAlerts(false);
+    }
+  }, [
+    extraAlerts,
+    extraAlertsLoaded,
+    importResult?.companyId,
+    loadingExtraAlerts,
+    savingExtraAlerts,
+    scenario,
+  ]);
 
   const goFromComparison = useCallback(async () => {
     if (periodMonths === 12) {
@@ -1970,7 +2101,22 @@ export default function InfraannualePage() {
 
             return (
               <>
-                <ExtraAccountingAlerts alerts={extraAlerts} onChange={(a) => { setExtraAlerts(a); setRatingVisible(false); }} />
+                <ExtraAccountingAlerts
+                  alerts={extraAlerts}
+                  onChange={(alerts) => {
+                    extraAlertsEditVersion.current += 1;
+                    setExtraAlerts(alerts);
+                    setRatingVisible(false);
+                  }}
+                  dirty={extraAlertsDirtyState}
+                  loaded={extraAlertsLoaded}
+                  loading={loadingExtraAlerts}
+                  saving={savingExtraAlerts}
+                  error={extraAlertsError}
+                  saveEnabled={extraAlertsSaveEnabled}
+                  onSave={() => void saveExtraAlerts()}
+                  onRetry={() => loadExtraAlerts()}
+                />
 
                 <Card>
                   <CardHeader>

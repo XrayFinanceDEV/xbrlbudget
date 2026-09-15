@@ -4,7 +4,9 @@ import { STEP_FIELDS } from "./budget-wizard-steps";
 
 describe("budget-field-rules", () => {
   it("ogni campo scalare dei passi ha una regola", () => {
-    const json = new Set(["financing_loans", "tax_temporary_differences"]);
+    // Non sono scalari: sono tabelle nidificate (JSON) o un selettore a due
+    // valori, e non hanno quindi un `kind`/`min`/`max` da validare a schermo.
+    const json = new Set(["financing_loans", "tax_temporary_differences", "other_lenders", "bank_lines_rule"]);
     for (const fields of Object.values(STEP_FIELDS))
       for (const f of fields) if (!json.has(f)) expect(fieldRule(f), f).toBeDefined();
   });

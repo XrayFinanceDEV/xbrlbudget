@@ -3,6 +3,9 @@
  */
 
 export function formatCurrency(value: number): string {
+  // Un importo che si arrotonda a zero si scrive «0 €», mai «-0 €»: `Intl` conserva il segno
+  // di -0 e di ogni negativo sotto il mezzo euro (collaudo di fine lotto, R5).
+  if (Math.abs(value) < 0.5) value = 0;
   return new Intl.NumberFormat('it-IT', {
     style: 'currency',
     currency: 'EUR',

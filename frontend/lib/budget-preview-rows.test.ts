@@ -3,8 +3,8 @@ import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
-  ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCircolante, rowsCosti, rowsFatturato, rowsImposte,
-  rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
+  ceAggregates, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
+  rowsImposte, rowsImposteSaldoAcconto, unfundedFromError,
 } from "./budget-preview-rows";
 import { confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
 import { euro } from "@/lib/budget-format";
@@ -27,7 +27,7 @@ const year = (y: number, over: Partial<Record<string, number>> = {}): ForecastPr
     sp16b_debiti_altri_finanz_breve: 0, sp16c_debiti_obbligazioni_breve: 0, sp17c_debiti_obbligazioni_lungo: 0,
     sp16e_debiti_tributari_breve: 33 },
   details: { ce05_fixed: 130, ce05_variable: 300, ce06_fixed: 120, ce06_variable: 90,
-    dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [] }, override_conflicts: [] },
+    dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [], fidi: null }, pareggio: { costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null, margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null }, tfr: { apertura: 0, accantonamento: 0, liquidazioni: 0, chiusura: 0, sospeso: false }, altri_finanziatori: { apertura: 0, rimborso: 0, interessi: 0, breve: 0, lungo: 0, mode: "legacy", contratti: [] }, override_conflicts: [] },
 });
 
 // I valori attesi sono quelli che `calculate_ce_result` (calculations/ce_result.py)
@@ -95,27 +95,95 @@ describe("rowsFatturato", () => {
 });
 
 describe("rowsCosti", () => {
-  it("totale = somma delle quattro voci, fissi + variabili = materie + servizi, % sui ricavi", () => {
-    const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [year(2027)]);
-    const tot = rows.find((r) => r.key === "principali")!;
-    expect(tot.years[0].value).toBe(430 + 210 + 30 + 155);
-    expect(tot.years[0].pct).toBeCloseTo((825 / 1100) * 100, 6);
-    expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(130 + 120 + 155 + 30);
-    expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300 + 90);
-    // base: quote dallo slider
-    expect(rows.find((r) => r.key === "fissi")!.base.value).toBe(400 * 0.325 + 200 * 0.6 + 150 + 30);
-    expect(rows.find((r) => r.key === "mol")!.years[0].value).toBe(1100 + 50 - 825 - 20);
+  it("variabili e fissi vengono da details.pareggio, non piu' sommati qui — personale e MOL restano canonici", () => {
+    const y = year(2027);
+    y.details.pareggio = {
+      costi_variabili: 300, costi_fissi: 385, costi_fissi_operativi: 385,
+      margine_contribuzione_pct: 60, fatturato_pareggio: 641666.67,
+      margine_sicurezza: 458333.33, margine_sicurezza_pct: 41.67,
+    };
+    const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [y]);
+    expect(rows.map((r) => r.key)).toEqual(["ricavi", "variabili", "fissi", "personale", "mol"]);
+    expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300);
+    expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(385);
+    expect(rows.find((r) => r.key === "personale")!.years[0].value).toBe(155);
+    // Il MOL della riga e' quello canonico di ceAggregates sull'anno previsto (1150 - 825 - 20 = 305),
+    // NON vdp - variabili - fissi del pareggio (che qui darebbe 1150 - 300 - 385 = 465): le due voci
+    // "fissi"/"variabili" della tabella coprono solo materie, servizi, personale, godimento e oneri
+    // diversi, mentre il MOL canonico tiene conto anche di ce02/ce03/ce10/ce11/ce11b.
+    expect(rows.find((r) => r.key === "mol")!.years[0].value).toBe(305);
+    // base: quote dallo slider, oneri diversi (ce12) compresi nei fissi da questo giro di rilievi
+    expect(rows.find((r) => r.key === "fissi")!.base.value).toBe(400 * 0.325 + 200 * 0.6 + 150 + 30 + 20);
+    expect(rows.find((r) => r.key === "variabili")!.base.value).toBeCloseTo(600 - (400 * 0.325 + 200 * 0.6), 6);
   });
-  it("con override i componenti sono null e la riga lo dice", () => {
-    const y = year(2027); y.details.ce05_fixed = null; y.details.ce05_variable = null;
+  it("senza pareggio definito (override di CE Prev.) le celle sono null con la nota, il MOL canonico resta calcolabile", () => {
+    const y = year(2027);
+    y.details.pareggio = {
+      costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
     const rows = rowsCosti(baseInc, { materials: 40, services: 40 }, [y]);
     expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBeNull();
     expect(rows.find((r) => r.key === "fissi")!.years[0].note).toBe("forzato in CE Prev.");
+    expect(rows.find((r) => r.key === "variabili")!.years[0].note).toBe("forzato in CE Prev.");
+    expect(rows.find((r) => r.key === "mol")!.years[0].value).toBe(305);
+  });
+  it("i valori del pareggio come stringa (Decimal serializzato) danno lo stesso risultato dei numeri", () => {
+    const y = year(2027);
+    y.details.pareggio = { costi_variabili: "300", costi_fissi: "385" } as never;
+    const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [y]);
+    expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300);
+    expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(385);
+  });
+});
+
+describe("rowsCeAnteImposte", () => {
+  const quote = { materials: 40, services: 40 };
+  it("dal valore della produzione all'ante imposte: MOL ed ebt canonici, le righe sommano", () => {
+    const y = year(2027, {
+      ce01_ricavi_vendite: 1000, ce03_lavori_interni: 150, ce04_altri_ricavi: 10, ce05_materie_prime: 300,
+      ce06_servizi: 100, ce07_godimento_beni: 20, ce08_costi_personale: 200, ce09_ammortamenti: 50,
+      ce11_accantonamenti: 7, ce12_oneri_diversi: 5, ce14_altri_proventi_finanziari: 4, ce15_oneri_finanziari: 15,
+    });
+    y.details.pareggio = {
+      costi_variabili: 240, costi_fissi: 385, costi_fissi_operativi: 232,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
+    const rows = rowsCeAnteImposte(baseInc, quote, [y]);
+    const v = (k: string) => rows.find((r) => r.key === k)!.years[0].value as number;
+    expect(rows.map((r) => r.key)).toEqual(["vdp", "variabili", "fissi", "altri", "mol", "amm", "ro", "fin", "ebt"]);
+    // Collaudo R1: i lavori interni (ce03) entrano nel valore della produzione e nel MOL.
+    expect(v("vdp")).toBe(1160);
+    expect(v("mol")).toBe(ceAggregates(y.income_statement as unknown as Record<string, unknown>).mol);
+    expect(v("vdp") + v("variabili") + v("fissi") + v("altri")).toBe(v("mol"));
+    expect(v("ebt")).toBe(1160 - 240 - 385 - 7 - 50 + 4 - 15);
+  });
+
+  it("senza pareggio definito solo variabili e fissi portano la nota; MOL ed ebt restano", () => {
+    const y = year(2027);
+    y.details.pareggio = {
+      costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
+    const rows = rowsCeAnteImposte(baseInc, quote, [y]);
+    expect(rows.find((r) => r.key === "fissi")!.years[0].note).toBe("forzato in CE Prev.");
+    const ebt = rows.find((r) => r.key === "ebt")!;
+    expect(ebt.years[0].value).toBe(ceAggregates(y.income_statement as unknown as Record<string, unknown>).ebt);
+    expect(ebt.years[0].note).toBeUndefined();
+  });
+
+  it("colonna base con la quota fissa dello scenario, e MOL canonico", () => {
+    const rows = rowsCeAnteImposte(baseInc, { materials: 20, services: 50 }, []);
+    expect(rows.every((r) => r.years.length === 0)).toBe(true);
+    const b = (k: string) => rows.find((r) => r.key === k)!.base.value as number;
+    const agg = ceAggregates(baseInc as unknown as Record<string, unknown>);
+    expect(b("mol")).toBe(agg.mol);
+    expect(b("vdp") + b("variabili") + b("fissi") + b("altri")).toBeCloseTo(agg.mol, 6);
   });
 });
 
 // Fixture con tre delle undici voci minori non nulle e di segno diverso, cosi' la
-// formula canonica (usata da ceAggregates/rowsImposte/rowsAltreVociCe) e quella
+// formula canonica (usata da ceAggregates/rowsImposte) e quella
 // semplificata che c'era prima del fix danno numeri diversi:
 //   canonica:     vp=1180 (1100+30+50), costs=900 (430+210+30+155+40+0+15+20), fin=-20 (-10-10)
 //                 ebt = 1180 - 900 - 20 = 260
@@ -146,27 +214,6 @@ describe("rowsImposte — formula canonica, non quella semplificata", () => {
   });
 });
 
-describe("rowsAltreVociCe", () => {
-  it("ebt e' quello canonico, diverso dal semplificato, con le voci minori non nulle", () => {
-    const rows = rowsAltreVociCe(baseInc, [year(2027, minoriOver)]);
-    expect(rows.find((r) => r.key === "ebt")!.years[0].value).toBe(EBT_CANONICO);
-    expect(rows.find((r) => r.key === "ebt")!.years[0].value).not.toBe(EBT_SEMPLIFICATO);
-  });
-  it("la cascata vp + main + alt + amm + fin somma esattamente a ebt (segni delle righe)", () => {
-    const rows = rowsAltreVociCe(baseInc, [year(2027, minoriOver)]);
-    const val = (key: string) => rows.find((r) => r.key === key)!.years[0].value!;
-    expect(val("vp") + val("main") + val("alt") + val("amm") + val("fin")).toBeCloseTo(val("ebt"), 6);
-    // e vale anche sulla colonna base
-    const valBase = (key: string) => rows.find((r) => r.key === key)!.base.value!;
-    expect(valBase("vp") + valBase("main") + valBase("alt") + valBase("amm") + valBase("fin"))
-      .toBeCloseTo(valBase("ebt"), 6);
-  });
-  it("years: [] non lancia e non produce righe d'anno", () => {
-    const rows = rowsAltreVociCe(baseInc, []);
-    expect(rows.every((r) => r.years.length === 0)).toBe(true);
-  });
-});
-
 describe("rowsCircolante", () => {
   it("CCN, quota sui ricavi, assorbimento di cassa — letterali verificabili a mano", () => {
     const baseBs = {
@@ -193,12 +240,7 @@ describe("rowsCircolante", () => {
   });
 });
 
-describe("rowsPregressoNuovo / unfundedFromError", () => {
-  it("PFN = debiti finanziari - cassa", () => {
-    const rows = rowsPregressoNuovo({ sp09_disponibilita_liquide: "50", sp16a_debiti_banche_breve: "30",
-      sp17a_debiti_banche_lungo: "120" } as unknown as BalanceSheet, [year(2027)]);
-    expect(rows.find((r) => r.key === "pfn")!.years[0].value).toBe(20 + 100 - 80);
-  });
+describe("unfundedFromError", () => {
   it("estrae anno e importo dal messaggio del motore", () => {
     expect(unfundedFromError({ year: 2028, message: "Fabbisogno finanziario scoperto di 84.120,50: aggiungi ..." }))
       .toEqual({ year: 2028, amount: 84120.5 });
@@ -277,7 +319,7 @@ describe("rowsAnnoBase", () => {
     expect(dso.years[0]).toEqual({ value: null, days: null });
   });
 
-  it("MOL = ceAggregates(...).mol, coincide con quello di rowsCosti/rowsAltreVociCe sullo stesso anno base — fix round 1, rilievo 1", () => {
+  it("MOL = ceAggregates(...).mol, coincide con quello di rowsCosti sullo stesso anno base — fix round 1, rilievo 1", () => {
     // ce02 e ce11 entrambi diversi da zero: la vecchia formula locale
     // (ce01+ce04-ce05-ce06-ce07-ce08-ce12) e quella canonica di ceAggregates
     // divergono per (ce02+ce03+ce03a)-(ce10+ce11) = 30-15 = 15, quindi il
@@ -300,96 +342,29 @@ describe("rowsAnnoBase", () => {
     expect(molCanonico).not.toBe(molVecchiaFormulaDelBrief); // le due formule divergono davvero
     expect(molAnnoBase).toBe(molCanonico);
 
-    // La stessa "MOL" che rowsCosti e rowsAltreVociCe calcolano sullo stesso
-    // anno base, sullo stesso CE: un'azienda con queste voci non deve vedere
-    // due numeri diversi passando dal passo 1 al passo 3/4.
+    // La stessa "MOL" che rowsCosti calcola sullo stesso anno base, sullo
+    // stesso CE: un'azienda con queste voci non deve vedere due numeri
+    // diversi passando dal passo 1 al passo 3.
     const molRowsCosti = rowsCosti(incConVociMinori, { materials: 40, services: 40 }, []).find((r) => r.key === "mol")!.base.value;
-    const molRowsAltreVoci = rowsAltreVociCe(incConVociMinori, []).find((r) => r.key === "mol")!.base.value;
     expect(molAnnoBase).toBe(molRowsCosti);
-    expect(molAnnoBase).toBe(molRowsAltreVoci);
   });
 });
 
-// ── rowsPregressoRunoff (Task 7) ────────────────────────────────────────────
-// Il pregresso che il motore ha davvero scadenziato: si legge da
-// `details.pregresso`, non si ricalcola.
-describe("rowsPregressoRunoff", () => {
-  const withPregresso = (y: number, over: Record<string, Record<string, unknown>>): ForecastPreviewYear => {
+describe("scopertoAvvisi e conferma nel regime esplicito dei fidi (collaudo R8)", () => {
+  const conFidi = (y: number, fidi: Record<string, number>, d: Record<string, number | null> = {}): ForecastPreviewYear => {
     const base = year(y);
-    const pregresso = { ...base.details.pregresso } as unknown as Record<string, Record<string, unknown>>;
-    for (const [k, v] of Object.entries(over)) pregresso[k] = { ...pregresso[k], ...v };
-    return { ...base, details: { ...base.details, pregresso } } as unknown as ForecastPreviewYear;
+    const debito = { ...(base.details as unknown as { debito_bancario?: object }).debito_bancario, fidi };
+    return { ...base, details: { ...base.details, ...d, debito_bancario: debito } } as unknown as ForecastPreviewYear;
   };
-
-  it("la riga del residuo a breve porta il numero del motore, e l'apertura in colonna base", () => {
-    const rows = rowsPregressoRunoff(
-      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 200, residual_long: 0, closed: 800, writeoff: 0, mode: "runoff" } })],
-      ["crediti_commerciali"],
-    );
-    const residuo = rows.find((r) => r.label === "Crediti commerciali · residuo a breve")!;
-    expect(residuo.years[0].value).toBe(200);
-    expect(residuo.base.value).toBe(1000);
-    expect(residuo.years[0].note).toBeUndefined();
-    expect(rows.find((r) => r.label === "chiuso nell'anno")!.years[0].value).toBe(800);
+  it("il picco oltre l'affidamento non diventa una frase sullo scoperto", () => {
+    const a = scopertoAvvisi([conFidi(2027, { residuo: 191795.31, tiraggio: 101795.31, oltre_affidamento: 101795.31 },
+      { scoperto_generato: 0, fabbisogno_picco: 101795.31, fabbisogno_picco_anno: 2027 })]);
+    expect(a.scoperto).toBeNull();
   });
-
-  it("`mode: legacy` e' un saldo SENZA piano, e lo dice: non e' un residuo di zero", () => {
-    // Altri debiti non ha un driver dietro: senza piano NON si chiude, cresce
-    // per percentuale (rilievo 4 del giro di correzione 1) — dire "tutto nel
-    // primo anno" qui sarebbe falso, non solo generico.
-    const rows = rowsPregressoRunoff(
-      [withPregresso(2025, { altri_debiti: { opening: 58, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
-      ["altri_debiti"],
-    );
-    const residuo = rows.find((r) => r.label === "Altri debiti · residuo a breve")!;
-    expect(residuo.years[0].note).toBe("nessun piano: non si chiude — cresce ogni anno della percentuale impostata");
-  });
-
-  it("la nota `legacy` non e' la stessa frase per ogni saldo (rilievo 4 + rilievo 5)", () => {
-    // Ogni frase fissata alla lettera: scambiarla con quella di un altro
-    // destino deve far fallire la suite.
-    const senzaPiano = (key: string) =>
-      rowsPregressoRunoff(
-        [withPregresso(2025, { [key]: { opening: 1, residual_short: 0, residual_long: 0, closed: 0, writeoff: 0, mode: "legacy" } })],
-        [key as never],
-      ).find((r) => r.label.endsWith("· residuo a breve"))!.years[0].note;
-
-    // Fornitori e crediti: un driver di volume li rigenera comunque, la
-    // chiusura nel primo anno resta vera.
-    expect(senzaPiano("debiti_fornitori")).toBe("nessun piano: tutto nel primo anno, poi si rigenera dal volume d'affari");
-    expect(senzaPiano("crediti_commerciali")).toBe(senzaPiano("debiti_fornitori"));
-
-    // Previdenziali e altri debiti: nessun driver, crescono per percentuale.
-    expect(senzaPiano("debiti_previdenziali")).toBe("nessun piano: non si chiude — cresce ogni anno della percentuale impostata");
-    expect(senzaPiano("altri_debiti")).toBe(senzaPiano("debiti_previdenziali"));
-
-    // Le due famiglie NON coincidono.
-    expect(senzaPiano("debiti_fornitori")).not.toBe(senzaPiano("altri_debiti"));
-  });
-
-  it("l'inesigibile compare solo quando il motore ne dichiara uno diverso da zero", () => {
-    const senza = rowsPregressoRunoff(
-      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 200, residual_long: 0, closed: 800, writeoff: 0, mode: "runoff" } })],
-      ["crediti_commerciali"],
-    );
-    expect(senza.some((r) => r.label === "di cui inesigibile")).toBe(false);
-    const con = rowsPregressoRunoff(
-      [withPregresso(2025, { crediti_commerciali: { opening: 1000, residual_short: 150, residual_long: 0, closed: 800, writeoff: 50, mode: "runoff" } })],
-      ["crediti_commerciali"],
-    );
-    expect(con.find((r) => r.label === "di cui inesigibile")!.years[0].value).toBe(50);
-  });
-
-  it("un'intestazione sola, poi i saldi nell'ordine chiesto; senza anni nessuna riga", () => {
-    const rows = rowsPregressoRunoff(
-      [withPregresso(2025, {}), withPregresso(2026, {})],
-      ["debiti_fornitori", "crediti_commerciali"],
-    );
-    expect(rows[0].label).toBe("Pregresso: residuo a breve · oltre");
-    expect(rows.filter((r) => r.label.endsWith("· residuo a breve")).map((r) => r.label))
-      .toEqual(["Debiti verso fornitori · residuo a breve", "Crediti commerciali · residuo a breve"]);
-    expect(rows[0].years).toHaveLength(2);
-    expect(rowsPregressoRunoff([], ["crediti_commerciali"])).toEqual([]);
+  it("un tiraggio dentro l'importo di partenza toglie la conferma della cassa positiva", () => {
+    const anni = [conFidi(2027, { residuo: 90000, tiraggio: 20000, oltre_affidamento: 0 })];
+    const risposta = { scenario_id: 1, base_year: 2026, forecast_years: anni, error: null };
+    expect(confermaCassaPositiva(risposta as never, scopertoAvvisi(anni))).toBe(false);
   });
 });
 

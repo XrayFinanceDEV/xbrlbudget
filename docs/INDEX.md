@@ -59,10 +59,10 @@ sono elencati nel §5 dell'indice).
 
 | Doc | Cosa copre |
 |-----|------------|
-| [API-PREVISIONALE.md](budget/API-PREVISIONALE.md) | Le superfici che scrivono su uno scenario, `forecast_stale`, override CE/SP, `clear_overrides` e promote con precondizione di freschezza |
-| [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) | Guida utente al modulo Budget & Forecasting (workflow UI) |
+| [API-PREVISIONALE.md](budget/API-PREVISIONALE.md) | API previsionale e contratto del report finale: GET canonica, workflow, `DecimalString`, narrazioni, freschezza e retry |
+| [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) | Guida Budget & Forecasting, inclusi report finale, readiness, grafici accessibili, narrazioni e anteprima stampa |
 | [TEST_BUDGET_API.md](budget/TEST_BUDGET_API.md) | Riferimento/test degli endpoint REST degli scenari budget |
-| [FINAL-REPORT-PDF.md](budget/FINAL-REPORT-PDF.md) | Specifica del report PDF (gap analysis vs report di riferimento) |
+| [FINAL-REPORT-PDF.md](budget/FINAL-REPORT-PDF.md) | Storico/backlog M2: gap analysis del PDF server, non comportamento corrente di `/report` |
 
 ## Frontend — [`frontend/`](frontend/)
 

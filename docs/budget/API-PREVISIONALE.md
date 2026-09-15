@@ -396,6 +396,14 @@ contratti con le stesse condizioni (`contratti_da_riga_finanziamento` in
 `calculations/projection_common.py`, chiamata da `assemble_financing`): la parte nuova segue questa
 sezione, quella pregressa no.
 
+**Capitale per anno.** Una riga di `financing_loans[]` con `opening_residual` puo' portare
+`repayments` — un importo per anno di piano, indice 0 = primo anno — al posto della durata: e' il
+capitale rimborsato in quell'anno, mai oltre il residuo; oltre la lista non si rimborsa nulla e il
+residuo resta in bilancio a fine piano. Interessi sul residuo di apertura, come per ogni contratto.
+`repayments` vale solo sul pregresso (`amount` = 0), senza preammortamento ne' maxirata; la somma
+non puo' superare il residuo (422 dal bulk). Nel contratto del kernel `repayments` arriva con
+`year` = primo anno di piano; `duration_years` e' allora facoltativa (spec 2026-09-15 §5.1).
+
 Il residuo del prestito **non** sta tutto in `sp17a_debiti_banche_lungo`: la parte che il
 calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il resto in `sp17a`
 (`quota_breve_prestiti_nuovi` in `calculations/projection_common.py`; la separazione pregresso /
@@ -453,14 +461,20 @@ Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
   l'esenzione dallo sweep proprio dove manca, e lo sweep salda il residuo restante in un colpo solo —
   misurato: 35.802,46 di apertura, `existing_debt_repayment_years=3` dichiarato solo nel 2027
   (rimborso a piano 11.934,15), sweep che chiude i restanti 23.868,31 nel 2028, due anni prima della
-  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2). Dal wizard il caso non si produce:
-  il passo 6 «Pregresso e nuovo» scrive il campo su **tutti** gli anni di piano (`updateAll`,
-  `frontend/components/budget/wizard/steps/StepPregressoNuovo.tsx`); resta per chi chiama l'API senza ripeterlo
-  su ogni riga.
+  scadenza del piano (rilievo I1 della revisione del lotto 3A Task 2). Dal wizard nuovo il caso non si
+  produce più: dal giro di rilievi del 15/09 il passo 5 «Patrimoniale pregresso» non scrive più questo
+  campo — i finanziamenti pregressi si scadenziano per contratto, anno per anno
+  (`financing_loans[].repayments`, §4-bis e §4-ter sotto); un vecchio «rimborso in N anni» lo converte la
+  migrazione degli scenari salvati (`frontend/lib/budget-migrazione.ts`), che lo azzera dopo la
+  conversione. Il campo resta per chi chiama l'API direttamente senza ripeterlo su ogni riga, o per uno
+  scenario migrato che non ha ancora salvato.
 - I contratti della griglia, il prestito nuovo della legacy `financing_amount` e il pregresso con gli
   anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
   spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).
 - La cassa eccedente oltre `cash_sweep_min_cash` resta in `sp09`.
+- **Con i fidi separati (regime esplicito, sotto) lo sweep rimborsa solo loro**, mai un
+  contratto: la presenza di contratti o di anni di rimborso non spegne più il perimetro, e il
+  disponibile a lungo è zero.
 
 **Lo sweep decide una volta sola, sulla cassa di dopo gli `sp_overrides`** (rilievo I2 della revisione
 finale del lotto 2): gira in `_normalize_balance_sheet_cents`, sulla cassa gia' al centesimo, subito
@@ -480,6 +494,7 @@ vecchia chiave unica della quota a breve dei prestiti nuovi.
 | `pregresso_senza_piano` | `{apertura, rimborso_sweep, breve, lungo}` quando nell'anno non ci sono contratti con `opening_residual` né `existing_debt_repayment_years` > 0; altrimenti `null` |
 | `pregresso_piano_anni` | `{apertura, rimborso, breve, lungo}` con `existing_debt_repayment_years` > 0 e nessun contratto col residuo; altrimenti `null` |
 | `contratti` | una riga per contratto (misti gia' divisi, anche non ancora erogati), nell'ordine di `financing_amount` e poi della griglia: `{indice, anno, tasso, erogato, residuo_iniziale, rimborso, interessi, breve, lungo}` |
+| `fidi` | nel regime esplicito (`bank_lines_amount` sulla prima riga, più sotto): `{apertura, variazione_ricavi, rimborso_sweep, tiraggio, affidamento, oltre_affidamento, residuo, regola}`; altrimenti `null` |
 
 **Invariante:** somma dei `breve` + `scoperto_residuo` = `sp16a`, somma dei `lungo` = `sp17a`, al
 centesimo, ogni anno. La scrive `_dichiara_debito_bancario` DOPO la normalizzazione, dai valori
@@ -490,6 +505,105 @@ contratto col residuo iniziale, altrimenti l'ultimo contratto nuovo; in riduzion
 pregresso (le due componenti, poi i contratti col residuo dall'ultimo), poi ai contratti nuovi
 dall'ultimo, mai sotto zero. Sono spostamenti di centesimi fra componenti, non debito creato: la
 somma resta `sp16a`/`sp17a`.
+
+### Fidi e anticipi (regime esplicito)
+
+`bank_lines_amount` sta **solo sulla riga del primo anno** di previsione: è l'apertura di fidi e
+anticipi su fatture. Assente = tutto come sempre (la linea di credito è debito bancario a breve
+scandagliato col piano, senza distinzione); presente = **regime esplicito** (spec 2026-09-15 §5.2,
+decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costante`) e
+`bank_lines_rate` (%, tasso della linea in apertura d'anno).
+
+- **Controlli, al salvataggio.** I fidi non possono superare la `sp16a` dell'anno base (tolleranza
+  0,01): «Fidi e anticipi (X) superano i debiti verso banche a breve dell'anno base (Y): correggi al
+  passo «Patrimoniale pregresso»»; e insieme ai residui dei contratti devono chiudere il debito
+  bancario base: «Fidi e anticipi (X) più i residui dei finanziamenti (Y) devono coincidere con il
+  debito bancario dell'anno base (Z)». Un `bank_lines_amount` su una riga che non è la prima è
+  rifiutato. Il regime rende `use_detailed_existing_schedule` attivo anche senza contratti.
+- **Uno stato per anno.** Apertura = l'importo della prima riga, poi il `residuo` dichiarato
+  l'anno prima (dopo sweep e riconciliazione, come lo scoperto). Con la regola `ricavi` segue il
+  rapporto dei ricavi anno su anno e si dichiara in `variazione_ricavi`; nessun rimborso proprio
+  oltre allo sweep.
+- **Lo sweep paga solo i fidi** (`cash_sweep_enabled`): il perimetro a breve è il `fidi_residuo`
+  dell'anno, `lungo_disponibile` è zero, e i contratti restano sul proprio piano intatti — misura
+  in `tests/test_forecast_fidi.py`: riga `contratti` identica con e senza sweep.
+- **Riclassifica di fine anno.** `sp16a` = fidi residui + Σ della rata dell'anno dopo dei contratti
+  pregressi (mai oltre il residuo), il resto torna nel lungo. È una riclassifica, non un flusso:
+  cassa e interessi non cambiano, e il breve dichiarato dei contratti è la quota — per questo sulla
+  riga `contratti` va `quota_dopo`, non il totale che ora contiene anche i fidi. Vale SOLO nel
+  regime esplicito: fuori, i numeri di prima restano al centesimo (banco di parità: 1432 divergenze
+  sole chiavi dichiarate, 0 fuori dalle attese).
+- **Oneri.** `fidi_apertura × bank_lines_rate` su `ce15` (`details['oneri_fidi']`, dichiarato
+  sempre, 0 fuori dal regime) — sull'apertura, la stessa guardia anti-circolarità dello scoperto.
+  E nel regime il **tasso dello scoperto** diventa `bank_lines_rate` (oggi `financing_interest_rate`,
+  che il wizard non scrive più).
+- **Due chiavi nuove di `details`.** `debito_bancario.fidi` (nella tabella sopra) e
+  `regime_debito_bancario` = `'esplicito' | 'contratti' | 'anni' | 'legacy'`, dichiarata sempre:
+  dice COME il debito bancario è descritto quest'anno (fidi a stato, contratti col residuo, anni di
+  rimborso, nessuno di questi). Nel regime esplicito la «casa» degli aumenti della riconciliazione è
+  la riga `fidi`, e in riduzione i fidi si tolgono prima di ogni altra componente.
+- **Il fabbisogno tira sui fidi (§5.2-bis, decisione del proprietario 2026-09-15).** Nel regime
+  esplicito il cancello unico di `_Overdraft.copri` — sempre uno solo, sulla cassa netta finale dopo
+  lo sweep — al posto di aprire scoperto o sollevare calcola `tiraggio = max(0, −cassa netta)`: lo
+  somma a `sp16a`/`sp16`, posa la cassa a zero, e `scoperto_generato`/`scoperto_residuo` restano
+  zero; `overdraft_allowed` e `overdraft_limit` non si leggono. Il `residuo` dichiarato dei fidi
+  include il tiraggio (è la formula Task 3: residuo − rimborso dello sweep + tiraggio), quindi
+  l'anno dopo apre da lì e gli oneri — che restano `fidi_apertura × bank_lines_rate`, mai
+  circolarmente sul tiraggio dell'anno — lo colpiscono dall'anno dopo. L'invariante Σ`breve` +
+  `scoperto_residuo` = `sp16a` tiene anche col tiraggio.
+- **Il tetto è l'importo di partenza, e si dichiara.** `affidamento` = `bank_lines_amount` della
+  prima riga, costante per tutto il piano anche con regola `ricavi` (la crescita per regola conta
+  verso il tetto quanto un tiraggio); `oltre_affidamento` = `max(0, residuo − affidamento)`. Oltre
+  zero il piano si fa comunque e `details['avviso_fidi']` (chiave presente **sempre** nel regime
+  esplicito, `null` a zero) dichiara: «Nel {anno} il piano usa {residuo} € di fidi e anticipi,
+  {oltre} € oltre i {affidamento} € del bilancio di partenza: servono affidamenti in più.»
+  `fabbisogno_picco`/`fabbisogno_picco_anno` leggono `oltre_affidamento` al posto di
+  `scoperto_residuo`, nel regime.
+- **Un `sp_overrides` su `sp16a`/`sp16` con un fabbisogno si rifiuta** come fuori regime (il totale
+  forzato non lascia posto al tiraggio), ma col messaggio che nomina i fidi: «Fidi e anticipi
+  incompatibili con {campo} forzato: servono {importo} di fidi, ma il totale della voce è fissato
+  dall'override. Togli l'override o copri il fabbisogno con un finanziamento.»
+
+### Altri finanziatori per anno (`other_lenders`)
+
+`other_lenders` sta **solo sulla riga del primo anno di previsione**: è la fotografia di
+`sp16b + sp17b` dell'anno base (spesso un finanziamento soci) scomposta in contratti
+`{name, opening_residual, interest_rate, repayments}`, e vive **solo nel regime esplicito dei
+fidi** — senza `bank_lines_amount` è rifiutata: «Gli altri finanziatori per anno richiedono la
+divisione dei debiti bancari a breve del passo «Patrimoniale pregresso» (fidi e anticipi)». Il
+kernel è quello dei contratti pregressi con `repayments` (`new_financing_schedule`): la rata
+dell'anno è la voce della lista (oltre la lista nulla è rimborsato e il residuo resta aperto in
+bilancio), gli interessi sono tasso × residuo di apertura.
+
+- **Controlli, al salvataggio.** La somma dei `opening_residual` della lista deve coincidere con
+  `sp16b + sp17b` dell'anno base (tolleranza 0,01): «La somma dei residui degli altri finanziatori
+  (X) deve coincidere con i debiti verso altri finanziatori dell'anno base (Y)». Gli importi
+  arrivano dal sacco JSON **in float** (`build_assumption_row` via `jsonable_encoder`): il motore
+  legge ogni voce con `Decimal(str(...))` e lavora solo in Decimal — `calculations/` non importa
+  backend — e ripete a mano i controlli dello schema `OtherLenderInput`, in italiano: residuo
+  iniziale > 0 («Il residuo iniziale dell'altro finanziatore X deve essere maggiore di zero»),
+  nessun rimborso negativo, somma dei rimborsi entro il residuo iniziale (+0,01). Chi chiama il
+  motore fuori dalle route tipizzate (script, legacy) riceve gli stessi rifiuti.
+- **Ripartizione per anno.** `sp16b` = Σ della rata dell'anno dopo di ciascun contratto (mai sopra
+  il suo residuo), `sp17b` = Σ residui − `sp16b`. Con la lista, `altri_finanz_repayment_years` è
+  **ignorato** e le due righe non crescono per percentuale: le rigenera il calendario ogni anno,
+  come un piano rigenera il lato oltre — e **un `sp_overrides` su `sp16b`/`sp17b` in qualunque
+  anno del piano si rifiuta** («L'override di sp17b_debiti_altri_finanz_lungo nell'anno 2028 non è
+  ammesso: … Modifica la lista al passo «Patrimoniale pregresso», oppure svuota la cella
+  (value: null)» — `_rifiuto_override_governati`, famiglia 4). Senza lista, le due righe crescono
+  da `prev` come sempre e l'override resta lecito.
+- **Interessi.** Σ tasso × residuo di apertura dei contratti, sommati a `ce15` nel ramo senza
+  override — la stessa guardia anti-circolarità di scoperto e fidi — e dichiarati in
+  `details['oneri_altri_finanziatori']`: sempre, 0 senza lista, 0 dove `ce15_override` vince sulla
+  riga.
+- **`details['altri_finanziatori']`, dichiarato ogni anno** anche senza lista:
+  `{apertura, rimborso, interessi, breve, lungo, mode, contratti}`. `mode` = `'contratti'` (lista
+  presente; `contratti` è una riga per voce: `{indice, nome, residuo_iniziale, rimborso,
+  interessi, residuo, breve, lungo}`), `'anni'` (`altri_finanz_repayment_years` > 0, `contratti`
+  vuoto), `'legacy'` (nulla di ciò). `apertura` è la somma delle due righe dell'anno prima.
+  A differenza del debito bancario, la dichiarazione **non è riconciliata col persistito**: vale
+  però solo senza lista — con la lista un override su quelle righe è rifiutato, quindi il
+  dichiarato e il persistito non possono divergere.
 
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 
@@ -661,6 +775,27 @@ un arrotondamento ma la massa dell'override, e un campo tecnicamente libero per 
 NON basta a farlo vincere. Mai `sp16a/b/c`, `sp17a/b/c`, `sp04b`, `sp04e`, `sp06e`,
 `sp06f`, `sp07e`, `sp07f`, `sp12h`, `sp14b`, `sp14c`. Sempre presente, anche vuota.
 
+### `details['pareggio']` — il punto di pareggio sul MOL (spec 2026-09-15 §4.3, §5.5)
+
+Dichiarato dal motore, mai ricalcolato dal client: sette chiavi, sempre presenti.
+
+| Chiave | Valore |
+|---|---|
+| `costi_variabili` | la sola parte variabile di materie prime e servizi (`ce05_variable + ce06_variable`) |
+| `costi_fissi` | la parte fissa di materie e servizi più godimento beni, personale e oneri diversi (`ce05_fixed + ce06_fixed + ce07 + ce08 + ce12`) |
+| `costi_fissi_operativi` | `costi_fissi` + `ce10` + `ce11` + `ce11b` − `ce04` (comprensivo dell'eventuale plusvalenza da dismissione cespite) − `ce02` − `ce03` − `ce03a`: per costruzione `(ce01 − fatturato_pareggio) × margine_contribuzione` = MOL del CE |
+| `margine_contribuzione_pct` | `(ce01 − costi_variabili) / ce01 × 100` |
+| `fatturato_pareggio` | `costi_fissi_operativi / margine_contribuzione` (frazione, non percentuale) |
+| `margine_sicurezza` | `ce01 − fatturato_pareggio` |
+| `margine_sicurezza_pct` | `margine_sicurezza / ce01 × 100` |
+
+Con **ricavi o margine di contribuzione non positivi** i quattro valori dal margine di
+contribuzione in poi sono `null`, mai zero: `costi_variabili`/`costi_fissi`/`costi_fissi_operativi`
+restano comunque dichiarati. Con un override di `ce05_override` o `ce06_override` la scomposizione
+fisso/variabile di quella riga non esiste più (`ce05_fixed`/`ce05_variable` tornano `null` in
+`details`, §7 sopra): in quel caso **l'intero blocco `pareggio` è `null`** su tutte e sette le
+chiavi, perché il pareggio non si può ricostruire da un importo forzato.
+
 ## 8. Lo scadenziamento del pregresso
 
 Il motore proietta il circolante con formule di **stock**: ogni formula sostituisce l'intero
@@ -737,6 +872,7 @@ fornitori/previdenziali/altri debiti). Nell'ultimo anno di piano tutto il residu
 | `residual_long` | il resto del residuo, oltre l'esercizio |
 | `generated` | il lato a breve **generato dalla formula di oggi**, prima di sommare `residual_short` |
 | `mode` | `"runoff"` con un piano dichiarato, `"legacy"` senza (formula di oggi, intera) |
+| `non_incassato` | solo sui `crediti_commerciali` (`false` sulle altre quattro voci): il piano ha dichiarato `non_incassato: true` sul JSON in ingresso (spec 2026-09-15 §5.5). È **solo dichiarativo** — accettato dallo schema, persistito e riportato tale e quale, ma il motore non lo usa: un piano a zero sulla parte oltre l'esercizio lascia già il residuo aperto per costruzione, quindi «non incassare» è il comportamento che un piano così scritto produce da sé |
 
 `pregresso_ignored` è una **lista**, sempre presente anche vuota: i saldi il cui piano è stato
 scavalcato dalla via manuale (oggi il solo caso possibile è `debiti_tributari`, quando
@@ -819,6 +955,10 @@ tetto: oltre, il motore solleva di nuovo. Il cancello unico è `_Overdraft.copri
 volta sola dopo ogni rettifica compresi gli `sp_overrides`, su una cassa netta già arrotondata al
 centesimo.
 
+> **Nel regime esplicito dei fidi questa scelta non si legge più**: il fabbisogno tira sui fidi
+> (`tiraggio`, §4-ter) e il piano si calcola comunque, con l'avviso oltre l'importo di partenza.
+> `overdraft_allowed`/`overdraft_limit` restano il cancello solo fuori dal regime.
+
 ```jsonc
 { "forecast_year": 2027, "revenue_growth_pct": 5.0,
   "overdraft_allowed": true, "overdraft_limit": 100000.00 }
@@ -899,9 +1039,10 @@ Undici voci minori dello stato patrimoniale seguono, per default, la formula di 
   `validate_assumptions_list` — o una riga scritta a mano nel DB.
 - **Per anno al motore, per scenario al wizard.** Il motore legge `sp_indexing` riga per riga
   come ogni altra ipotesi (nessun vincolo "solo primo anno", a differenza di `pregresso`); il
-  passo 5 del wizard («Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
+  passo 6 del wizard («Patrimoniale piano», dove vivono dal giro di rilievi del 15/09 — prima
+  stava al passo «Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
   stesso criterio delle altre caselle "uguali per tutto il piano" — si legge la scelta del primo
-  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:205-216`).
+  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:209-215`).
 - **Driver degenere** (denominatore dell'anno base ≤ 0): il motore non indicizza, ricade sul
   comportamento costante/percentuale e dichiara il motivo `"driver degenere"` — mai un fattore
   inventato da un `or 1` di comodo.
@@ -936,3 +1077,77 @@ del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate, `sp14` con differenze temporanee somma la quota del deferred) |
 | `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |
+
+## 12. Report finale — contratto di lettura canonico
+
+Il report finale è un modello versionato, assemblato lato server: il caricamento della pagina usa
+esclusivamente la lettura `GET /companies/{company_id}/scenarios/{scenario_id}/final-report`.
+La GET non rigenera forecast, non genera prosa AI e non salva modifiche; restituisce il modello
+canonico o `404` se risorsa/catena non esistono e `409` se la catena della pratica è incoerente.
+Il contratto supporta esattamente `workflow_type: "bilancio"`, `"infrannuale"` e `"startup"`.
+Nel caso infrannuale porta inoltre `source_scenario` e `infrannual_closing`; negli altri due non
+inventa un blocco di chiusura.
+
+`schema_version` è attualmente `1`. Il renderer deve rifiutare, dichiarare come non supportato e
+non interpretare un payload che non rispetta tale schema; può invece mostrare loading, errore con
+retry, oppure un modello valido con readiness `ready`, `draft` o `blocked` e diagnostica. Il
+modello porta le revisioni delle fonti, qualità dei dati, rettifiche, chiusura, ipotesi e stato di
+freschezza, affinché il client non deduca questi fatti da dati incompleti.
+
+### Ordine e contenuto del renderer
+
+Le dodici sezioni stabili sono: `scope`, `executive-summary`, `sources`, `adjustments`, `closing`,
+`assumptions`, `income-forecast`, `balance-forecast`, `cashflow-sustainability`,
+`indicators-risks`, `diagnostics`, `appendices`. Il modello porta sei `chart_series` canoniche:
+`income_results`, `margins`, `cashflows`, `liquidity_debt`, `working_capital_days` e `coverage`;
+il renderer deve offrire per ciascuna una tabella accessibile delle categorie e serie, non una
+serie calcolata localmente. Le sei narrazioni hanno gli id `executive_summary`,
+`adjustments_and_closing`, `budget_assumptions`, `economic_outlook`, `financial_outlook` e
+`risks_and_actions`, con provenienza e freschezza dichiarate dal server.
+
+Ogni valore monetario o quantitativo del report è `DecimalString`, quindi una stringa JSON che
+corrisponde esattamente a `^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$`. Non inviare né aspettarsi un numero
+JSON, notazione esponenziale, separatori locali/migliaia, `NaN` o infinito; la formattazione
+italiana è responsabilità della visualizzazione, non del contratto.
+
+### Azioni esplicite, separate dalla GET
+
+- `POST /companies/{company_id}/scenarios/{scenario_id}/final-report/narrative/generate` genera
+  esplicitamente le sei narrazioni dal modello canonico e restituisce il report aggiornato.
+- `PUT /companies/{company_id}/scenarios/{scenario_id}/final-report/narrative` salva blocchi
+  narrativi scritti dall'utente e restituisce il report aggiornato; non invoca il generatore.
+- Quando `forecast_stale` rende il previsionale obsoleto, la UI deve eseguire la generazione del
+  forecast prevista per lo scenario e poi **refetch** della GET finale. Non mascherare la
+  rigenerazione come un semplice reload e non usarla per rigenerare la prosa.
+
+La stampa browser è soltanto un'anteprima del renderer; non è il PDF ufficiale e non cambia il
+modello.
+
+## 13. Fondo TFR e liquidazioni (`tfr_payments`)
+
+Il fondo `sp15_tfr` accanta ogni anno la quota di legge — salari / 13,5, o in fallback il 70% del
+costo del personale quando i salari non sono dettagliati (`tfr_accrual_quota`,
+`calculations/projection_common.py`) — e con il lotto «percorso ipotesi rilievi» (spec
+`2026-09-15-percorso-ipotesi-rilievi-design.md` §5.4) può anche **svuotarsi**: `tfr_payments`
+(`BudgetAssumptions.tfr_payments`, `NUMERIC(15,2) NOT NULL DEFAULT 0`, schema con `ge=0`) è la
+liquidazione annua deliberata dall'utente, inserita nel passo 6 «Patrimoniale piano» del wizard.
+
+- **La formula**: `sp15 = prev + accantonamento − tfr_payments`, dove l'accantonamento è zero se
+  `tfr_accrual_suspended` è acceso (azienda che versa la quota a fondi esterni o INPS invece di
+  accantonarla internamente; l'interruttore esiste già e non cambia). Il blocco sta
+  in `ForecastEngine._calculate_balance_sheet`, subito dopo i fondi rischi `sp14`.
+- **Oltre il fondo si rifiuta, non si clampa**: se `tfr_payments` supera `prev + accantonamento`
+  (con la tolleranza del centesimo, `> 0.01`), il motore solleva in italiano —
+  «Liquidazioni TFR {anno}: {X} superano il fondo disponibile ({Y}); correggi al passo
+  «Patrimoniale piano»». Clamparlo a zero lascerebbe in cassa un'uscita mai avvenuta: il
+  fabbisogno si misurerebbe due volte, una sul fondo e una sulla cassa. Sul bulk delle ipotesi
+  l'errore arriva come sempre in `message` con `forecast_generated: false` e HTTP 200 (§1).
+- **L'uscita di cassa passa dal plug**: il passivo scende, e `sp09` (il plug) la assorbe; il
+  rendiconto non ha bisogno di nessuna nuova riga, perché legge le liquidazioni **dal movimento
+  del fondo** (`tfr_paid`, `backend/app/calculations/cashflow_detailed.py`:
+  `−(sp15_prev + accantonamento − sp15_attuale)`).
+- **`details['tfr']`, dichiarato sempre** (a valle una chiave assente varrebbe zero):
+  `{apertura, accantonamento, liquidazioni, chiusura, sospeso}` — importi `Decimal` al centesimo,
+  `sospeso` booleano. `chiusura` coincide con l'`sp15_tfr` persistito (verificato in
+  `tests/test_forecast_dichiarato_vs_persistito.py`); sotto un `sp_overrides` su `sp15_tfr` vince
+  l'override, come per le altre famiglie dichiarate (§3).

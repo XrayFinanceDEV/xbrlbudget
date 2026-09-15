@@ -32,6 +32,11 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
     if scenario.scenario_type != "infrannuale":
         raise ValueError("Solo gli scenari infrannuali si possono promuovere")
 
+    # A full-year (12M) scenario can still use the legacy copy path, but it
+    # must never become a lineage source for a later budget.
+    period_months = getattr(scenario, "period_months", None)
+    is_lineage_source = period_months is not None and 1 <= period_months <= 11
+
     # 2. Find the ForecastYear
     forecast_year = db.query(ForecastYear).filter(
         ForecastYear.scenario_id == scenario_id
@@ -73,6 +78,25 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
     ).first()
     if existing:
+        # A replacement changes the accounting source used by every active
+        # budget for this company/year.  Retain only budgets tied to the exact
+        # new lineage (or to the ordinary full-year lineage for a 12M source).
+        expected_workflow_type = "infrannuale" if is_lineage_source else "bilancio"
+        expected_source_scenario_id = scenario.id if is_lineage_source else None
+        active_budgets = db.query(BudgetScenario).filter(
+            BudgetScenario.company_id == company_id,
+            BudgetScenario.base_year == target_year,
+            BudgetScenario.scenario_type != "infrannuale",
+            BudgetScenario.is_active == 1,
+        ).all()
+        for budget in active_budgets:
+            if not (
+                budget.workflow_type == expected_workflow_type
+                and budget.source_scenario_id == expected_source_scenario_id
+            ):
+                budget.is_active = 0
+
+    if existing:
         db.delete(existing)  # cascade removes BS + IS
         db.flush()
 
@@ -94,6 +118,8 @@ def promote_projection_to_financial_year(db: Session, scenario_id: int) -> dict:
         }, ensure_ascii=False),
         parser_version="promoted-projection-v3-verified-copy",
         forecastable=True,
+        promoted_from_scenario_id=scenario.id if is_lineage_source else None,
+        workflow_origin="promoted_projection" if is_lineage_source else None,
     )
     db.add(new_fy)
     db.flush()  # get new_fy.id

@@ -7,32 +7,22 @@ export interface ReportSection {
 }
 
 /**
- * L'ordine del report, e unica fonte del sommario: `report-toc.tsx` itera
- * questo elenco, quindi spostare un blocco nella pagina senza spostarlo qui
- * fa puntare il sommario a pagine sbagliate.
- *
- * I prospetti completi e il rendiconto stanno SUBITO DOPO la copertina, non
- * in fondo: «è scomodo leggerli ora che sono in fondo».
- *
- * Le appendici sono DUE voci, non una. La pagina rende due blocchi
- * (`section="bs"` e `section="is"`), i cui ancoraggi sono `appendices-bs` e
- * `appendices-is`: finché qui c'era il solo id `appendices`, quella voce del
- * sommario cercava un elemento che non esiste — non scorreva da nessuna parte
- * e l'IntersectionObserver non la evidenziava mai.
+ * Stable editorial order for the final report. The TOC and page render these
+ * same IDs, so titles may evolve without breaking anchors or the future PDF.
  */
 export const REPORT_SECTIONS: ReportSection[] = [
-  { id: "cover", title: "Dati Aziendali", shortTitle: "Copertina" },
-  { id: "appendices-bs", title: "Stato Patrimoniale - Dati Completi", shortTitle: "SP completo" },
-  { id: "appendices-is", title: "Conto Economico - Dati Completi", shortTitle: "CE completo" },
-  { id: "cashflow", title: "Rendiconto Finanziario", shortTitle: "Cashflow" },
-  { id: "dashboard", title: "Dashboard Sintetica", shortTitle: "Dashboard" },
-  { id: "composition", title: "Composizione Patrimoniale", shortTitle: "Composizione" },
-  { id: "income-margins", title: "Conto Economico e Margini", shortTitle: "Margini" },
-  { id: "structural", title: "Analisi Strutturale", shortTitle: "Struttura" },
-  { id: "ratios", title: "Indici Finanziari", shortTitle: "Indici" },
-  { id: "scoring", title: "Scoring e Rating", shortTitle: "Scoring" },
-  { id: "break-even", title: "Break Even Point", shortTitle: "BEP" },
-  { id: "notes", title: "Note Metodologiche", shortTitle: "Note" },
+  { id: "scope", title: "Copertina e perimetro", shortTitle: "Perimetro" },
+  { id: "executive-summary", title: "Sintesi esecutiva", shortTitle: "Sintesi" },
+  { id: "sources", title: "Origine e qualità dei dati", shortTitle: "Fonti" },
+  { id: "adjustments", title: "Rettifiche apportate", shortTitle: "Rettifiche" },
+  { id: "closing", title: "Dall'infrannuale alla chiusura", shortTitle: "Chiusura" },
+  { id: "assumptions", title: "Ipotesi del budget", shortTitle: "Ipotesi" },
+  { id: "income-forecast", title: "Conto economico previsionale", shortTitle: "CE" },
+  { id: "balance-forecast", title: "Stato patrimoniale previsionale", shortTitle: "SP" },
+  { id: "cashflow-sustainability", title: "Flussi di cassa e sostenibilità finanziaria", shortTitle: "Cassa" },
+  { id: "indicators-risks", title: "Indicatori e rischi", shortTitle: "Indicatori" },
+  { id: "diagnostics", title: "Diagnostica e punti da verificare", shortTitle: "Diagnostica" },
+  { id: "appendices", title: "Appendici e metodologia", shortTitle: "Appendici" },
 ];
 
 // EM-Score lookup table (mirrored from pdf_service/em_score.py)

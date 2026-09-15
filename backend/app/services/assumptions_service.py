@@ -124,7 +124,7 @@ def messaggio_errore_campo(err) -> str:
 def _senza_null(riga):
     """`null` dal client vale «campo omesso» (`build_assumption_row` lo coalizza sul default): lo si toglie prima dello schema."""
     pulita = {k: v for k, v in riga.items() if v is not None}
-    for chiave in ("financing_loans", "tax_temporary_differences"):
+    for chiave in ("financing_loans", "tax_temporary_differences", "other_lenders"):
         if isinstance(pulita.get(chiave), list):
             pulita[chiave] = [{k: v for k, v in voce.items() if v is not None} if isinstance(voce, dict) else voce
                               for voce in pulita[chiave]]
@@ -244,6 +244,14 @@ def build_assumption_row(
         overdraft_limit=data.get("overdraft_limit", None),
         tfr_accrual_suspended=data.get("tfr_accrual_suspended", False) or False,
         previdenza_scales_with_personnel=data.get("previdenza_scales_with_personnel", False) or False,
+        inflation_pct=data.get("inflation_pct", None),
+        fixed_materials_growth_auto=data.get("fixed_materials_growth_auto", False) or False,
+        fixed_services_growth_auto=data.get("fixed_services_growth_auto", False) or False,
+        bank_lines_amount=data.get("bank_lines_amount", None),
+        bank_lines_rule=data.get("bank_lines_rule", None),
+        bank_lines_rate=data.get("bank_lines_rate", None),
+        other_lenders=jsonable_encoder(data.get("other_lenders", None)),
+        tfr_payments=data.get("tfr_payments", 0.0) or 0.0,
         interest_rate_receivables=data.get("interest_rate_receivables", 0.0),
         interest_rate_payables=data.get("interest_rate_payables", 0.0),
         tax_rate=data.get("tax_rate", 27.9),

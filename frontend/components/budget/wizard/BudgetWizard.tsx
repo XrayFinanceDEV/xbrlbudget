@@ -35,6 +35,7 @@ import {
   parseStoredStep,
   prevStep,
   primaryLabel,
+  railBadges,
   saveOutcome,
   stepFooterHint,
   stepLead,
@@ -47,13 +48,14 @@ import { getErrorMessage } from "@/lib/utils";
 import { righeErroriIpotesi } from "@/lib/budget-bulk-errors";
 import type { BudgetScenario } from "@/types/api";
 import { WizardRail } from "./WizardRail";
+import { MigrazioneCard } from "./MigrazioneCard";
 import type { StepProps } from "./types";
 import { StepScenario } from "./steps/StepScenario";
 import { StepFatturato } from "./steps/StepFatturato";
 import { StepCosti } from "./steps/StepCosti";
-import { StepAltreVociCE } from "./steps/StepAltreVociCE";
 import { StepCircolante } from "./steps/StepCircolante";
-import { StepPregressoNuovo } from "./steps/StepPregressoNuovo";
+import { StepPatrimonialePregresso } from "./steps/StepPatrimonialePregresso";
+import { StepPatrimonialePiano } from "./steps/StepPatrimonialePiano";
 import { StepImposte } from "./steps/StepImposte";
 
 /** Lettura/scrittura di `localStorage` che non fa cadere il wizard quando lo
@@ -94,7 +96,6 @@ export function BudgetWizard({
   const [name, setName] = useState(scenario.name);
   const [description, setDescription] = useState(scenario.description ?? "");
   const [isActive, setIsActive] = useState(scenario.is_active === 1);
-  const [inflation, setInflation] = useState(2);
   const [step, setStep] = useState<WizardStepKey>("scenario");
   const [visited, setVisited] = useState<Set<WizardStepKey>>(new Set(["scenario"]));
   const [saving, setSaving] = useState(false);
@@ -180,8 +181,14 @@ export function BudgetWizard({
       // non puo' piu' produrre una navigazione dopo un rifiuto — la
       // condizione sta in `saveOutcome`, con la sua prova.
       const esito = saveOutcome(result);
-      if (esito.ok) toast.success(esito.message);
-      else toast.error(esito.message);
+      if (esito.ok) {
+        toast.success(esito.message);
+        // La mappa migrata (sporca) e' ormai persistita: la card e i badge
+        // «da integrare» non hanno piu' nulla da segnalare (Task 9).
+        s.chiudiMigrazione();
+      } else {
+        toast.error(esito.message);
+      }
       if (esito.step) setStep(esito.step);
       if (esito.route) {
         invalidateScenarios(companyId);
@@ -206,6 +213,7 @@ export function BudgetWizard({
     }
   }, [
     s.idratato,
+    s.chiudiMigrazione,
     rows,
     name,
     description,
@@ -252,10 +260,15 @@ export function BudgetWizard({
     updateTemporaryDifferences: s.updateTemporaryDifferences,
     updateSpIndexing: s.updateSpIndexing,
     updatePregresso: s.updatePregresso,
+    updateOtherLenders: s.updateOtherLenders,
   };
 
   const active = WIZARD_STEPS.find((w) => w.key === step) ?? WIZARD_STEPS[0];
   const indietro = prevStep(step);
+  // I badge della barra dei passi (Task 9): «nuovo» dal catalogo, sovrascritto
+  // da «da integrare» per i passi che la migrazione cita. Funzione pura in
+  // `lib/budget-wizard-steps.ts`, con la sua prova — qui si compone soltanto.
+  const badges = railBadges(s.migrazione?.daIntegrare.map((d) => d.step) ?? []);
   // Quali comandi rende il wizard e dove: dentro la pratica la sua barra in
   // fondo sarebbe COPERTA da quella del percorso, e il click su «Indietro»
   // finirebbe sull'«Avanti» del percorso. La decisione, misurata nel
@@ -288,7 +301,9 @@ export function BudgetWizard({
         horizon={s.numYears}
         baseYear={s.baseYear}
         onGo={setStep}
+        badges={badges}
       />
+      {s.migrazione && <MigrazioneCard esito={s.migrazione} onGo={setStep} />}
 
       <div className="mb-4 mt-4 flex items-start justify-between gap-4">
         <div>
@@ -319,15 +334,17 @@ export function BudgetWizard({
           setNumYears={s.setNumYears}
           notaAnnoBase={s.notaAnnoBase}
           isNew={s.isNew}
-          inflation={inflation}
-          setInflation={setInflation}
         />
       )}
       {step === "fatturato" && <StepFatturato {...stepProps} />}
       {step === "costi" && <StepCosti {...stepProps} />}
-      {step === "altre-voci-ce" && <StepAltreVociCE {...stepProps} />}
       {step === "circolante" && <StepCircolante {...stepProps} />}
-      {step === "pregresso-nuovo" && <StepPregressoNuovo {...stepProps} />}
+      {/* I passi 5 e 6 hanno ciascuno il proprio componente (Task 13 e 15).
+          Il passo «Altre voci CE» non esiste piu' (Task 11): la sua unica
+          riga rimasta, gli oneri diversi di gestione, e' entrata nel passo
+          Costi. */}
+      {step === "patrimoniale-pregresso" && <StepPatrimonialePregresso {...stepProps} />}
+      {step === "patrimoniale-piano" && <StepPatrimonialePiano {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}
 
       {chrome.bottomBar && (

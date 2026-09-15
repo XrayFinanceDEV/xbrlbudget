@@ -1,7 +1,15 @@
 // Historical-trend helpers for the budget assumptions Auto-Generator.
 // calculateTrend / TREND_ITEMS moved verbatim from app/budget/page.tsx;
-// blendedRate is the blend formula from the same file, extracted so both
-// AutoGeneratorCard (interactive) and trendAssumptions (batch) share it.
+// blendedRate is the blend formula from the same file, extracted so
+// AutoGeneratorCard (interactive) can use it.
+//
+// `shouldSeedTrend` e `trendAssumptions` (il seed automatico dalla tendenza
+// storica sul passo Scenario) sono spariti col Task 10 (spec 2026-09-15
+// §4.1, decisione 3): il wizard a sette passi non precompila piu' nulla
+// dalla tendenza, resta solo come riferimento in sola lettura
+// (`trendRicaviNota`, lib/budget-inflazione.ts, per il passo Fatturato;
+// `calculateTrend`/`TREND_ITEMS` qui sotto, per la tabella del passo
+// Scenario).
 import type { BalanceSheet, IncomeStatement } from "@/types/api";
 
 export type HistoricalData = Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
@@ -43,58 +51,4 @@ export function blendedRate(trend: number | null, inflation: number, index: numb
   if (n === 1) return Math.round(blended * 100) / 100;
   const weight = index / (n - 1);
   return Math.round((blended * (1 - weight) + inflation * weight) * 100) / 100;
-}
-
-/**
- * Si puo' precompilare uno scenario nuovo dalla tendenza storica?
- *
- * Il cancello guarda la PRESENZA DEI DATI, non l'ampiezza dell'elenco degli
- * anni. `historicalYears` deriva dal prop `years` (`GET /companies/{id}/years`)
- * ed e' gia' pieno al primo render, mentre `historical` arriva da 2xN richieste
- * in serie che chiamano `setHistoricalData` una volta sola alla fine: chi
- * guardava `historicalYears.length >= 2` faceva partire il seed con
- * `historical` ancora vuoto — `trendAssumptions` senza dati scrive l'inflazione
- * su ogni campo — e il flag one-shot impediva per sempre la ripetizione. Lo
- * scenario nasceva cosi' con tutte le voci al 2%, e il percorso reale (la
- * Stampa crea lo scenario senza ipotesi e apre il wizard su `isNew`) passa
- * esattamente di li'.
- *
- * Servono i DUE anni che `trendAssumptions` legge davvero: gli ultimi due
- * dell'elenco. Uno solo — o nessuno — non e' una tendenza.
- */
-export function shouldSeedTrend(
-  isNew: boolean,
-  historicalYears: number[],
-  historical: HistoricalData,
-): boolean {
-  if (!isNew || historicalYears.length < 2) return false;
-  const year1 = historicalYears[historicalYears.length - 2];
-  const year2 = historicalYears[historicalYears.length - 1];
-  return Boolean(historical[year1]?.income && historical[year2]?.income);
-}
-
-/** trendAssumptions: TREND_ITEMS x forecastYears, ogni campo scritto con blendedRate. */
-export function trendAssumptions(
-  historicalYears: number[],
-  forecastYears: number[],
-  historicalData: HistoricalData,
-  inflation: number
-): Record<number, Record<string, number>> {
-  const hasTwoYears = historicalYears.length >= 2;
-  const year1 = hasTwoYears ? historicalYears[historicalYears.length - 2] : 0;
-  const year2 = hasTwoYears ? historicalYears[historicalYears.length - 1] : 0;
-  const n = forecastYears.length;
-
-  const out: Record<number, Record<string, number>> = {};
-  for (const year of forecastYears) out[year] = {};
-
-  for (const item of TREND_ITEMS) {
-    const trend = hasTwoYears ? calculateTrend(historicalData, year1, year2, item.getValue) : null;
-    forecastYears.forEach((year, i) => {
-      const rate = blendedRate(trend, inflation, i, n);
-      for (const field of item.fields) out[year][field] = rate;
-    });
-  }
-
-  return out;
 }

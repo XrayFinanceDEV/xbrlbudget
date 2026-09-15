@@ -53,6 +53,13 @@ describe("giorniMediAuto + giorniMediRows", () => {
   });
 });
 
+// ── Voci minori, driver di volume, piani di scadenziamento e gli
+// interruttori che le governano (Task 12, decisione del proprietario
+// 2026-09-15 §4.4/§4.6): non le rende piu' questo passo — StepCircolante
+// mostra solo i giorni medi e l'avviso fornitori — ma restano qui perche' le
+// consuma il passo 6 «Patrimoniale piano» (Task 15), che riusa lo stesso
+// modulo invece di duplicarlo.
+describe("Task 15 — voci minori, driver e piani (passo 6, non piu' passo 4)", () => {
 describe("minorFieldsRows", () => {
   it("le 15 righe, ciascuna col proprio importo base", () => {
     const rows = minorFieldsRows(balance());
@@ -193,6 +200,7 @@ describe("boolAssumption", () => {
     expect(boolAssumption({}, [2025], "tfr_accrual_suspended")).toBe(false);
   });
 });
+}); // fine "Task 15 — voci minori, driver e piani"
 
 describe("circolantePreview", () => {
   it("senza SP o CE base, o senza risposta, non c'e' anteprima", () => {

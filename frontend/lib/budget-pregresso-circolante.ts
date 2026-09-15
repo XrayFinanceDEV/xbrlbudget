@@ -7,9 +7,9 @@
  * dichiarato e offre le conversioni importo/percentuale e rata-uguale che i
  * due passi del wizard useranno.
  *
- * Meta' dello stesso passo 6 del wizard di `lib/budget-pregresso-step.ts`,
- * che governa l'altra meta' — il pregresso del debito BANCARIO. I due nomi
- * ora si distinguono: questo e' il circolante, quello e' il debito.
+ * Questo modulo copre il circolante; il debito BANCARIO e i debiti tributari
+ * oltre l'esercizio hanno i loro moduli propri (`lib/budget-pregresso-oltre.ts`,
+ * `lib/budget-pregresso-flussi.ts`, passo 5 «Patrimoniale pregresso»).
  *
  * Modulo puro: nessun import da `app/` o da `components/`.
  */
@@ -88,47 +88,6 @@ export function residualAfter(plan: PregressoPlan, yearIndex: number): number {
   return cents(Math.max(0, plan.opening - sum(plan.amounts) - sum(plan.writeoff)));
 }
 
-/** L'incidenza di un importo sulla massa di apertura, in percentuale
- *  assoluta (25,5 = 25,5%). Apertura nulla o assente ⇒ nessuna incidenza. */
-export function amountToPct(amount: number, opening: number): number | null {
-  return opening ? (amount / opening) * 100 : null;
-}
-
-/** L'importo corrispondente a una percentuale assoluta della massa di
- *  apertura, arrotondato al centesimo. */
-export function pctToAmount(pct: number, opening: number): number {
-  return cents((opening * pct) / 100);
-}
-
-/** `n` rate uguali che sommano esattamente `total`: i centesimi residui
- *  dell'arrotondamento vanno tutti sull'ultima rata, mai distribuiti. */
-export function equalInstalments(total: number, n: number): number[] {
-  if (n <= 0) return [];
-  const base = Math.floor((total / n) * 100) / 100;
-  const out = Array<number>(n).fill(base);
-  out[n - 1] = cents(total - base * (n - 1));
-  return out;
-}
-
-/** Nuovo piano con l'importo dell'anno `yearIndex` sostituito. Immutabile:
- *  non muta `plan`, e allunga l'array con zeri se `yearIndex` cade oltre la
- *  lunghezza attuale.
- *
- * `field` sceglie la lista: `"amounts"` (il default, gli incassi/pagamenti) o
- * `"writeoff"` (l'inesigibile, il solo campo dei crediti). Prima del giro di
- * correzione 1 `withWriteoff` (`lib/budget-pregresso-tabella.ts`) ripeteva
- * questa stessa funzione a mano sulla lista `writeoff`: due copie
- * dell'arrotondamento che potevano divergere cambiandone solo una
- * (rilievo 7). */
-export function withAmount(
-  plan: PregressoPlan, yearIndex: number, amount: number, field: "amounts" | "writeoff" = "amounts",
-): PregressoPlan {
-  const list = [...((field === "amounts" ? plan.amounts : plan.writeoff) ?? [])];
-  while (list.length <= yearIndex) list.push(0);
-  list[yearIndex] = cents(amount);
-  return field === "amounts" ? { ...plan, amounts: list } : { ...plan, writeoff: list };
-}
-
 /** Coerce un piano non-tributario ai numeri veri (vedi `normalizePregresso`
  *  per il perche'). `writeoff` resta `null`/`undefined` quando tale: un piano
  *  senza inesigibile e uno con inesigibile zero non sono la stessa cosa. */
@@ -137,6 +96,12 @@ function normalizePlan(plan: PregressoPlan): PregressoPlan {
     opening: num(plan.opening),
     amounts: (plan.amounts ?? []).map(num),
     writeoff: plan.writeoff ? plan.writeoff.map(num) : plan.writeoff,
+    // Il flag del passo 5 (spec §4.5) NON e' un numero, e questa e' l'unica
+    // porta da cui passa la coercizione: non aggiungerlo qui vorrebbe dire
+    // perderlo in silenzio a ogni idratazione, con la casella «non incassati
+    // nel piano» che si riaccenderebbe spenta mentre gli importi che aveva
+    // azzerato restano a zero. Assente = non scritto, non `false`.
+    ...(plan.non_incassato === undefined ? {} : { non_incassato: plan.non_incassato }),
   };
 }
 

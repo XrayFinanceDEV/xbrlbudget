@@ -32,6 +32,18 @@ const days = (over: Partial<FieldRule> = {}): FieldRule =>
 const bool: FieldRule = { kind: "bool" };
 
 const RULES = {
+  // Scenario
+  // L'inflazione attesa del passo 1: precompila la parte fissa, non e' una
+  // crescita di ricavi. NON nullable (giro di correzione 1): un
+  // `inflation_pct` nullo sul primo anno e' la FIRMA di uno scenario salvato
+  // prima del lotto (`isScenarioPrecedente`, budget-migrazione.ts) — svuotare
+  // la casella lo farebbe scambiare per precedente al primo
+  // salvataggio/riapertura, e `migraScenario` sovrascriverebbe in silenzio
+  // `bank_lines_amount` e altri campi già scritti dall'utente. La casella
+  // vuota torna a `INFLAZIONE_PREDEFINITA` in `withInflazione`
+  // (lib/budget-inflazione.ts), non a `null`.
+  inflation_pct: pct({ min: -50, max: 100 }),
+
   // Ricavi e costi
   revenue_growth_pct: pct(),
   other_revenue_growth_pct: pct(),
@@ -41,6 +53,10 @@ const RULES = {
   fixed_services_growth_pct: pct(),
   fixed_materials_percentage: pct({ min: 0, max: 100, step: "1" }),
   fixed_services_percentage: pct({ min: 0, max: 100, step: "1" }),
+  // La casella azzurra del passo 3: `true` = segue l'inflazione del passo 1,
+  // `false` = il valore accanto e' scritto dall'utente.
+  fixed_materials_growth_auto: bool,
+  fixed_services_growth_auto: bool,
   personnel_growth_pct: pct(),
   rent_growth_pct: pct(),
   other_costs_growth_pct: pct(),
@@ -68,7 +84,7 @@ const RULES = {
   sp17g_growth_pct: pct({ nullable: true }),
   sp18_growth_pct: pct({ nullable: true }),
 
-  // Pregresso e nuovo: debiti, finanziamenti, investimenti
+  // Patrimoniale pregresso / piano: debiti, finanziamenti, investimenti
   existing_debt_repayment_years: years(),
   altri_finanz_repayment_years: years(),
   financing_amount: eur(),
@@ -87,6 +103,12 @@ const RULES = {
   overdraft_limit: eur({ nullable: true }),
   tfr_accrual_suspended: bool,
   previdenza_scales_with_personnel: bool,
+  // Fidi e anticipi su fatture (passo «Patrimoniale pregresso»): l'importo
+  // vuoto = regime di prima, nessuna divisione dichiarata.
+  bank_lines_amount: eur({ nullable: true }),
+  bank_lines_rate: pct({ min: 0, max: 30, nullable: true }),
+  // Liquidazioni TFR dell'anno (passo «Patrimoniale piano»).
+  tfr_payments: eur(),
 
   // Imposte
   tax_rate: pct({ min: 0, max: 100 }),

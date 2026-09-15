@@ -10,7 +10,7 @@
 // Presentazionale: le decisioni stanno in lib/budget-finanziamenti-pregresso.ts
 // (stesso modulo della card banche), provate in environment: node.
 //
-// Il coordinatore inserisce questa card in StepPatrimonialePregresso.tsx
+// Resa da StepPatrimonialePregresso.tsx
 // (Task 13): riceve le stesse props di ogni altro passo (StepProps), che
 // gia' porta updateOtherLenders.
 import type { JSX } from "react";

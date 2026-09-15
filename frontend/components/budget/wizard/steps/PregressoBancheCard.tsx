@@ -5,7 +5,7 @@
 // in fidi/anticipi (`bank_lines_*`) e mutui, e scadenzia il capitale
 // rimborsato anno per anno sui contratti pregressi (`financing_loans` con
 // `opening_residual > 0`); i prestiti NUOVI (`amount > 0`) restano intatti,
-// li scrive la card «Generato dal previsionale» di StepPatrimonialePregresso.
+// li scrive la card «Nuovi finanziamenti» del passo 6 (StepPatrimonialePiano).
 //
 // Presentazionale: ogni decisione — separare pregresso da nuovo, riempire i
 // rimborsi all'orizzonte, i tre controlli — sta in
@@ -13,7 +13,7 @@
 // solo la resa e la ricomposizione di `financing_loans` = [...contratti
 // pregressi aggiornati, ...prestiti nuovi] a ogni scrittura.
 //
-// Il coordinatore inserisce questa card in StepPatrimonialePregresso.tsx
+// Resa da StepPatrimonialePregresso.tsx
 // (Task 13), sotto la card «oltre 12 mesi»: riceve le stesse props di ogni
 // altro passo (StepProps), che gia' porta updateFinancingLoans.
 import type { JSX } from "react";

@@ -54,7 +54,7 @@ import { StepScenario } from "./steps/StepScenario";
 import { StepFatturato } from "./steps/StepFatturato";
 import { StepCosti } from "./steps/StepCosti";
 import { StepCircolante } from "./steps/StepCircolante";
-import { StepPregressoNuovo } from "./steps/StepPregressoNuovo";
+import { StepPatrimonialePregresso } from "./steps/StepPatrimonialePregresso";
 import { StepPatrimonialePiano } from "./steps/StepPatrimonialePiano";
 import { StepImposte } from "./steps/StepImposte";
 
@@ -339,14 +339,12 @@ export function BudgetWizard({
       {step === "fatturato" && <StepFatturato {...stepProps} />}
       {step === "costi" && <StepCosti {...stepProps} />}
       {step === "circolante" && <StepCircolante {...stepProps} />}
-      {/* Placeholder temporaneo (Task 8): il passo 5 rende ancora lo stesso
-          componente di prima, `StepPregressoNuovo`. Il Task 13 lo sostituisce
-          col proprio, coerente col nome nuovo — in parallelo a questo task,
-          che ha gia' sostituito il passo 6 col proprio `StepPatrimonialePiano`
-          (Task 15). Il passo «Altre voci CE» non esiste piu' (Task 11): la
+      {/* I passi 5 e 6 hanno ciascuno il proprio componente (Task 13 e 15);
+          `StepPregressoNuovo` non e' piu' reso da nessun passo e lo cancella
+          il Task 16. Il passo «Altre voci CE» non esiste piu' (Task 11): la
           sua unica riga rimasta, gli oneri diversi di gestione, e' entrata
           nel passo Costi. */}
-      {step === "patrimoniale-pregresso" && <StepPregressoNuovo {...stepProps} />}
+      {step === "patrimoniale-pregresso" && <StepPatrimonialePregresso {...stepProps} />}
       {step === "patrimoniale-piano" && <StepPatrimonialePiano {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}
 

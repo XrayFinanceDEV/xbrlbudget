@@ -561,9 +561,13 @@ piano» legge `scopertoAvvisi` (`lib/budget-preview-rows.ts`) e mostra, quando r
 almeno un anno — arriva PRIMA che diventi scoperto, non dopo); un avviso **rosso**, forte, quando
 il piano genera davvero scoperto (`scoperto_generato > 0`, col fabbisogno di picco e l'anno in cui
 cade). Un terzo avviso, ambra come il primo, dichiara quando la cassa chiude sotto il minimo del
-cash sweep perché lo scoperto (o, nel regime esplicito dei fidi separati, il debito senza piano)
-si rimborsa per primo anche lì (`cassa_sotto_minimo > 0`) — la conferma opposta, «la cassa resta
-positiva in tutti gli anni», compare solo senza errore, con anni prodotti e senza alcuno scoperto.
+cash sweep perché lo scoperto si rimborsa per primo anche lì (`cassa_sotto_minimo > 0`; il motore
+lo calcola solo in un anno con scoperto aperto o chiuso, quindi mai nel regime esplicito dei fidi
+separati, dove lo scoperto non nasce) — la conferma opposta, «la cassa resta positiva in tutti gli
+anni», compare solo senza errore, con anni prodotti, senza alcuno scoperto e senza alcun tiraggio
+sui fidi (`confermaCassaPositiva`). Nel regime esplicito l'avviso rosso tace anche quando il motore
+dichiara un fabbisogno di picco: lì il picco è quanto i fidi superano l'importo di partenza, e lo
+dicono gli avvisi dei fidi.
 Con i fidi separati al passo 5 questi tre avvisi non bastano più da soli: `avvisiFidi`
 (`lib/budget-piano-step.ts`) legge `details['avviso_fidi']` e mostra, anno per anno, quando il
 piano ha tirato sui fidi oltre l'importo di partenza — un avviso che non ferma mai il piano, a

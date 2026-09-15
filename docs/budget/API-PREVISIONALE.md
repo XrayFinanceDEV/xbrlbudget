@@ -540,6 +540,40 @@ decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costant
   rimborso, nessuno di questi). Nel regime esplicito la «casa» degli aumenti della riconciliazione è
   la riga `fidi`, e in riduzione i fidi si tolgono prima di ogni altra componente.
 
+### Altri finanziatori per anno (`other_lenders`)
+
+`other_lenders` sta **solo sulla riga del primo anno di previsione**: è la fotografia di
+`sp16b + sp17b` dell'anno base (spesso un finanziamento soci) scomposta in contratti
+`{name, opening_residual, interest_rate, repayments}`, e vive **solo nel regime esplicito dei
+fidi** — senza `bank_lines_amount` è rifiutata: «Gli altri finanziatori per anno richiedono la
+divisione dei debiti bancari a breve del passo «Patrimoniale pregresso» (fidi e anticipi)». Il
+kernel è quello dei contratti pregressi con `repayments` (`new_financing_schedule`): la rata
+dell'anno è la voce della lista (oltre la lista nulla è rimborsato e il residuo resta aperto in
+bilancio), gli interessi sono tasso × residuo di apertura.
+
+- **Controlli, al salvataggio.** La somma dei `opening_residual` della lista deve coincidere con
+  `sp16b + sp17b` dell'anno base (tolleranza 0,01): «La somma dei residui degli altri finanziatori
+  (X) deve coincidere con i debiti verso altri finanziatori dell'anno base (Y)». Gli importi
+  arrivano dal sacco JSON **in float** (`build_assumption_row` via `jsonable_encoder`): il motore
+  rilegge ogni voce con `OtherLenderInput.model_validate` e lavora solo in Decimal.
+- **Ripartizione per anno.** `sp16b` = Σ della rata dell'anno dopo di ciascun contratto (mai sopra
+  il suo residuo), `sp17b` = Σ residui − `sp16b`. Con la lista, `altri_finanz_repayment_years` è
+  **ignorato** e le due righe non crescono per percentuale: sono rigovernate dal calendario ogni
+  anno, come le righe a giorni — un `sp_overrides` sulla riga vale solo per l'anno in cui è
+  scritto, l'anno dopo torna quello del calendario (misurato: override `sp17b` 120.000 nel 2027,
+  100.000 dal 2028; la cassa assorbe, il foglio quadra).
+- **Interessi.** Σ tasso × residuo di apertura dei contratti, sommati a `ce15` nel ramo senza
+  override — la stessa guardia anti-circolarità di scoperto e fidi — e dichiarati in
+  `details['oneri_altri_finanziatori']`: sempre, 0 senza lista, 0 dove `ce15_override` vince sulla
+  riga.
+- **`details['altri_finanziatori']`, dichiarato ogni anno** anche senza lista:
+  `{apertura, rimborso, interessi, breve, lungo, mode, contratti}`. `mode` = `'contratti'` (lista
+  presente; `contratti` è una riga per voce: `{indice, nome, residuo_iniziale, rimborso,
+  interessi, residuo, breve, lungo}`), `'anni'` (`altri_finanz_repayment_years` > 0, `contratti`
+  vuoto), `'legacy'` (nulla di ciò). `apertura` è la somma delle due righe dell'anno prima.
+  A differenza del debito bancario, la dichiarazione **non è riconciliata col persistito**: sotto
+  un `sp_overrides` su `sp16b`/`sp17b` diverge dal bilancio di quell'anno.
+
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 
 ```

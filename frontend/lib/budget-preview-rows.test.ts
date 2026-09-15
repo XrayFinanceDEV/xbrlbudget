@@ -138,42 +138,47 @@ describe("rowsCosti", () => {
 });
 
 describe("rowsCeAnteImposte", () => {
-  it("dal valore della produzione all'ante imposte, dal motore", () => {
-    // `year(y, over)` di QUESTO file spande `over` dentro `income_statement`, non al primo
-    // livello dell'anno: il pareggio si scrive a parte, come fa gia' il test sopra
-    // («con override i componenti sono null»).
+  const quote = { materials: 40, services: 40 };
+  it("dal valore della produzione all'ante imposte: MOL ed ebt canonici, le righe sommano", () => {
     const y = year(2027, {
-      ce01_ricavi_vendite: 1000, ce04_altri_ricavi: 10, ce05_materie_prime: 300, ce06_servizi: 100,
-      ce07_godimento_beni: 20, ce08_costi_personale: 200, ce09_ammortamenti: 50, ce12_oneri_diversi: 5,
-      ce15_oneri_finanziari: 15,
+      ce01_ricavi_vendite: 1000, ce03_lavori_interni: 150, ce04_altri_ricavi: 10, ce05_materie_prime: 300,
+      ce06_servizi: 100, ce07_godimento_beni: 20, ce08_costi_personale: 200, ce09_ammortamenti: 50,
+      ce11_accantonamenti: 7, ce12_oneri_diversi: 5, ce14_altri_proventi_finanziari: 4, ce15_oneri_finanziari: 15,
     });
     y.details.pareggio = {
-      costi_variabili: 240, costi_fissi: 385, costi_fissi_operativi: 385,
+      costi_variabili: 240, costi_fissi: 385, costi_fissi_operativi: 232,
       margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
     };
-    const rows = rowsCeAnteImposte(baseInc, [y]);
-    expect(rows.map((r) => r.key)).toEqual(["vdp", "variabili", "fissi", "mol", "amm", "ro", "of", "ebt"]);
-    expect(rows.find((r) => r.key === "ebt")?.years[0].value).toBe(1010 - 240 - 385 - 50 - 15);
+    const rows = rowsCeAnteImposte(baseInc, quote, [y]);
+    const v = (k: string) => rows.find((r) => r.key === k)!.years[0].value as number;
+    expect(rows.map((r) => r.key)).toEqual(["vdp", "variabili", "fissi", "altri", "mol", "amm", "ro", "fin", "ebt"]);
+    // Collaudo R1: i lavori interni (ce03) entrano nel valore della produzione e nel MOL.
+    expect(v("vdp")).toBe(1160);
+    expect(v("mol")).toBe(ceAggregates(y.income_statement as unknown as Record<string, unknown>).mol);
+    expect(v("vdp") + v("variabili") + v("fissi") + v("altri")).toBe(v("mol"));
+    expect(v("ebt")).toBe(1160 - 240 - 385 - 7 - 50 + 4 - 15);
   });
 
-  it("senza pareggio definito, mol/ro/ebt sono null con la nota; vdp/ammortamenti/oneri restano", () => {
+  it("senza pareggio definito solo variabili e fissi portano la nota; MOL ed ebt restano", () => {
     const y = year(2027);
     y.details.pareggio = {
       costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null,
       margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
     };
-    const rows = rowsCeAnteImposte(baseInc, [y]);
+    const rows = rowsCeAnteImposte(baseInc, quote, [y]);
+    expect(rows.find((r) => r.key === "fissi")!.years[0].note).toBe("forzato in CE Prev.");
     const ebt = rows.find((r) => r.key === "ebt")!;
-    expect(ebt.years[0].value).toBeNull();
-    expect(ebt.years[0].note).toBe("forzato in CE Prev.");
-    expect(rows.find((r) => r.key === "vdp")!.years[0].value).toBe(1100 + 50);
-    expect(rows.find((r) => r.key === "amm")!.years[0].value).toBe(-40);
+    expect(ebt.years[0].value).toBe(ceAggregates(y.income_statement as unknown as Record<string, unknown>).ebt);
+    expect(ebt.years[0].note).toBeUndefined();
   });
 
-  it("years: [] non lancia e non produce righe d'anno", () => {
-    const rows = rowsCeAnteImposte(baseInc, []);
+  it("colonna base con la quota fissa dello scenario, e MOL canonico", () => {
+    const rows = rowsCeAnteImposte(baseInc, { materials: 20, services: 50 }, []);
     expect(rows.every((r) => r.years.length === 0)).toBe(true);
-    expect(rows.find((r) => r.key === "vdp")!.base.value).toBe(1000 + 50);
+    const b = (k: string) => rows.find((r) => r.key === k)!.base.value as number;
+    const agg = ceAggregates(baseInc as unknown as Record<string, unknown>);
+    expect(b("mol")).toBe(agg.mol);
+    expect(b("vdp") + b("variabili") + b("fissi") + b("altri")).toBeCloseTo(agg.mol, 6);
   });
 });
 

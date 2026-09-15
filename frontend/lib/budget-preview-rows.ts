@@ -195,65 +195,62 @@ export function rowsCosti(
 /**
  * «Conto economico fino all'ante imposte» del passo 3 (spec 2026-09-15 §4.3): valore
  * della produzione, costi variabili e fissi (dal pareggio del motore, come `rowsCosti`),
- * MOL, ammortamenti, risultato operativo, oneri finanziari, ante imposte.
+ * altri costi operativi, MOL, ammortamenti, risultato operativo, gestione finanziaria,
+ * ante imposte.
  *
- * La colonna base non ha un `details.pareggio` (il motore non lo calcola sull'anno
- * storico): si ripartisce fisso/variabile con la stessa aritmetica di `rowsCosti`, alla
- * quota di default del motore (`fixed_*_percentage` = 40, `backend/app/schemas/budget.py`)
- * — la sola quota che questa funzione conosce, dato che non riceve lo slider dell'utente
- * (interfaccia del piano: due soli argomenti). E' un'illustrazione, non un dato del motore:
- * le colonne degli anni previsti sono le uniche che vengono davvero da li'.
+ * Valore della produzione, MOL, risultato operativo e ante imposte sono quelli canonici di
+ * `ceAggregates`, cioe' del CE che il motore ha scritto: la versione precedente li
+ * ricalcolava come ricavi + altri ricavi, senza variazioni di rimanenze, lavori interni,
+ * accantonamenti e proventi finanziari, e sullo stesso schermo mostrava un MOL diverso di
+ * 150.000 € da quello di «Costi e margine» (collaudo di fine lotto, R1). Solo la
+ * scomposizione variabili/fissi viene dal pareggio; «altri costi operativi» e' cio' che il
+ * pareggio non scompone (ce10 + ce11 + ce11b), cosi' le righe sommano sempre al MOL.
+ *
+ * La colonna base non ha un `details.pareggio`: la parte fissa di materie prime e servizi
+ * si ripartisce con la quota dello scenario (`fixed`), la stessa di `rowsCosti`.
  */
-export function rowsCeAnteImposte(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {
-  const BASE_FIXED_SHARE_PCT = 40;
-  const b = {
-    rev: num(baseInc.ce01_ricavi_vendite), other: num(baseInc.ce04_altri_ricavi),
-    mat: num(baseInc.ce05_materie_prime), serv: num(baseInc.ce06_servizi),
-    god: num(baseInc.ce07_godimento_beni), pers: num(baseInc.ce08_costi_personale), alt: num(baseInc.ce12_oneri_diversi),
-    amm: num(baseInc.ce09_ammortamenti), of: num(baseInc.ce15_oneri_finanziari),
-  };
-  const s = BASE_FIXED_SHARE_PCT / 100;
-  const bFissi = b.mat * s + b.serv * s + b.pers + b.god + b.alt;
-  const bVariabili = (b.mat + b.serv) - (b.mat * s + b.serv * s);
-  const bVdp = b.rev + b.other;
-  const bMol = bVdp - bVariabili - bFissi;
-  const bRo = bMol - b.amm;
-  const bEbt = bRo - b.of;
+export function rowsCeAnteImposte(
+  baseInc: IncomeStatement, fixed: { materials: number; services: number }, years: ForecastPreviewYear[],
+): PreviewRow[] {
+  const bi = baseInc as unknown as Record<string, unknown>;
+  const altriOperativi = (i: Record<string, unknown>) =>
+    num(i.ce10_var_rimanenze_mat_prime) + num(i.ce11_accantonamenti) + num(i.ce11b_altri_accantonamenti);
+  const bAgg = ceAggregates(bi);
+  const mat = num(bi.ce05_materie_prime), serv = num(bi.ce06_servizi);
+  const bFissiMs = mat * fixed.materials / 100 + serv * fixed.services / 100;
+  const bVariabili = mat + serv - bFissiMs;
+  const bFissi = bFissiMs + num(bi.ce07_godimento_beni) + num(bi.ce08_costi_personale) + num(bi.ce12_oneri_diversi);
 
   const cols = years.map((y) => {
     const i = y.income_statement as unknown as Record<string, unknown>;
-    const rev = num(i.ce01_ricavi_vendite), other = num(i.ce04_altri_ricavi);
-    const amm = num(i.ce09_ammortamenti), of = num(i.ce15_oneri_finanziari);
+    const agg = ceAggregates(i);
     const p = y.details?.pareggio;
     const variabili = p ? numOrNull(p.costi_variabili) : null;
     const fissi = p ? numOrNull(p.costi_fissi) : null;
-    const vdp = rev + other;
-    const nd = variabili === null || fissi === null;
-    const note = nd ? "forzato in CE Prev." : undefined;
-    const mol = nd ? null : vdp - (variabili as number) - (fissi as number);
-    const ro = mol === null ? null : mol - amm;
-    const ebt = ro === null ? null : ro - of;
+    const note = variabili === null || fissi === null ? "forzato in CE Prev." : undefined;
     return {
-      vdp: { value: vdp } as PreviewCell,
+      vdp: { value: agg.vp } as PreviewCell,
       variabili: { value: variabili === null ? null : -variabili, ...(note ? { note } : {}) } as PreviewCell,
       fissi: { value: fissi === null ? null : -fissi, ...(note ? { note } : {}) } as PreviewCell,
-      mol: { value: mol, ...(note ? { note } : {}) } as PreviewCell,
-      amm: { value: -amm } as PreviewCell,
-      ro: { value: ro, ...(note ? { note } : {}) } as PreviewCell,
-      of: { value: -of } as PreviewCell,
-      ebt: { value: ebt, ...(note ? { note } : {}) } as PreviewCell,
+      altri: { value: -altriOperativi(i) } as PreviewCell,
+      mol: { value: agg.mol } as PreviewCell,
+      amm: { value: -agg.amm } as PreviewCell,
+      ro: { value: agg.ro } as PreviewCell,
+      fin: { value: agg.fin } as PreviewCell,
+      ebt: { value: agg.ebt } as PreviewCell,
     };
   });
   const pick = (k: keyof (typeof cols)[number]) => cols.map((c) => c[k]);
   return [
-    row("vdp", "Valore della produzione", "value", { value: bVdp }, pick("vdp")),
+    row("vdp", "Valore della produzione", "value", { value: bAgg.vp }, pick("vdp")),
     row("variabili", "Costi variabili", "sub", { value: -bVariabili }, pick("variabili")),
     row("fissi", "Costi fissi", "sub", { value: -bFissi }, pick("fissi")),
-    row("mol", "MOL", "kpi", { value: bMol }, pick("mol")),
-    row("amm", "Ammortamenti", "sub", { value: -b.amm }, pick("amm")),
-    row("ro", "Risultato operativo", "kpi", { value: bRo }, pick("ro")),
-    row("of", "Oneri finanziari", "sub", { value: -b.of }, pick("of")),
-    row("ebt", "Risultato ante imposte", "total", { value: bEbt }, pick("ebt")),
+    row("altri", "Altri costi operativi · rimanenze e accantonamenti", "sub", { value: -altriOperativi(bi) }, pick("altri")),
+    row("mol", "MOL", "kpi", { value: bAgg.mol }, pick("mol")),
+    row("amm", "Ammortamenti", "sub", { value: -bAgg.amm }, pick("amm")),
+    row("ro", "Risultato operativo", "kpi", { value: bAgg.ro }, pick("ro")),
+    row("fin", "Gestione finanziaria", "sub", { value: bAgg.fin }, pick("fin")),
+    row("ebt", "Risultato ante imposte", "total", { value: bAgg.ebt }, pick("ebt")),
   ];
 }
 

@@ -147,7 +147,7 @@ usato.
 
 **Il pareggio lo dichiara il motore**, `details['pareggio']` per ogni anno: `costi_variabili` =
 parte variabile di materie e servizi; `costi_fissi` = parte fissa di materie e servizi + personale
-+ godimento + oneri diversi; `costi_fissi_operativi` = costi fissi − altri ricavi;
++ godimento + oneri diversi; `costi_fissi_operativi` = costi fissi − altri ricavi, lavori interni e variazioni di rimanenze di prodotti + variazioni di rimanenze di materie e accantonamenti (cosi' il pareggio si calcola sul MOL del CE);
 `margine_contribuzione_pct` = (ricavi − costi variabili) / ricavi × 100; `fatturato_pareggio` =
 costi fissi operativi / margine di contribuzione; `margine_sicurezza` = ricavi − fatturato di
 pareggio; `margine_sicurezza_pct`. Con ricavi o margine non positivi i tre ultimi valori sono

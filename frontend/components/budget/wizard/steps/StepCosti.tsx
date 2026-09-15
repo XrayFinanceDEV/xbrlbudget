@@ -232,7 +232,10 @@ export function StepCosti(p: StepProps): JSX.Element {
   const pareggioRows = useMemo(() => rowsPareggio(previewYears), [previewYears]);
   const barre = useMemo(() => pareggioBarre(previewYears), [previewYears]);
   const formula = useMemo(() => pareggioFormula(previewYears[0]), [previewYears]);
-  const ceRows = useMemo(() => (baseInc ? rowsCeAnteImposte(baseInc, previewYears) : []), [baseInc, previewYears]);
+  const ceRows = useMemo(
+    () => (baseInc ? rowsCeAnteImposte(baseInc, { materials: mat.value, services: serv.value }, previewYears) : []),
+    [baseInc, mat.value, serv.value, previewYears]
+  );
   const calcolate = calcolateAltrove(p.baseYear);
 
   return (

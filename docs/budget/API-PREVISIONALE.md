@@ -783,7 +783,7 @@ Dichiarato dal motore, mai ricalcolato dal client: sette chiavi, sempre presenti
 |---|---|
 | `costi_variabili` | la sola parte variabile di materie prime e servizi (`ce05_variable + ce06_variable`) |
 | `costi_fissi` | la parte fissa di materie e servizi più godimento beni, personale e oneri diversi (`ce05_fixed + ce06_fixed + ce07 + ce08 + ce12`) |
-| `costi_fissi_operativi` | `costi_fissi` meno gli altri ricavi (`ce04`, comprensivo dell'eventuale plusvalenza da dismissione cespite) |
+| `costi_fissi_operativi` | `costi_fissi` + `ce10` + `ce11` + `ce11b` − `ce04` (comprensivo dell'eventuale plusvalenza da dismissione cespite) − `ce02` − `ce03` − `ce03a`: per costruzione `(ce01 − fatturato_pareggio) × margine_contribuzione` = MOL del CE |
 | `margine_contribuzione_pct` | `(ce01 − costi_variabili) / ce01 × 100` |
 | `fatturato_pareggio` | `costi_fissi_operativi / margine_contribuzione` (frazione, non percentuale) |
 | `margine_sicurezza` | `ce01 − fatturato_pareggio` |

@@ -106,7 +106,7 @@ export function pareggioFormula(
     return null;
   }
   const inc = first.income_statement as Record<string, unknown>;
-  const rev = num(inc.ce01_ricavi_vendite), altri = num(inc.ce04_altri_ricavi);
+  const rev = num(inc.ce01_ricavi_vendite);
   const mdc = p.margineContribuzionePct ?? 0, bep = p.fatturatoPareggio;
   const margSicPct = p.margineSicurezzaPct ?? 0;
   return {
@@ -117,8 +117,12 @@ export function pareggioFormula(
         calcolo: `(${eur0(rev)} − ${eur0(p.costiVariabili)}) / ${eur0(rev)} = ${pct1(mdc)}`,
       },
       {
-        testo: "Costi fissi operativi = costi fissi − altri ricavi",
-        calcolo: `${eur0(p.costiFissi)} − ${eur0(altri)} = ${eur0(p.costiFissiOperativi)}`,
+        // Il motore sottrae ai fissi TUTTO cio' che separa ricavi, variabili e fissi dal MOL
+        // del CE (altri ricavi, lavori interni, variazioni di rimanenze, accantonamenti):
+        // qui si legge la differenza dichiarata, non la si ricompone da ce04 soltanto
+        // (collaudo di fine lotto, R1).
+        testo: "Costi fissi operativi = costi fissi − altri ricavi e proventi della produzione (al netto di rimanenze e accantonamenti)",
+        calcolo: `${eur0(p.costiFissi)} − ${eur0(p.costiFissi - p.costiFissiOperativi)} = ${eur0(p.costiFissiOperativi)}`,
       },
       {
         testo: "Fatturato di pareggio sul MOL = costi fissi / margine %",

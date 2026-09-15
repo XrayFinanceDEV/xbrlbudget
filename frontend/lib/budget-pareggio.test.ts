@@ -39,6 +39,7 @@ describe("budget-pareggio", () => {
     expect(f?.anno).toBe(2027);
     expect(f?.righe[0]).toEqual({ testo: "Margine di contribuzione % = (ricavi − costi variabili) / ricavi", calcolo: "(600.000 − 210.000) / 600.000 = 65,0%" });
     expect(f?.righe[2].calcolo).toBe("275.000 / 65,0% = 423.077");
+    expect(f?.righe[1].calcolo).toBe("275.000 − 0 = 275.000");
     expect(pareggioFormula(anno(2027, nd))).toBeNull();
   });
   it("le righe della tabella", () => {

@@ -182,21 +182,40 @@ class BudgetScenario(BudgetScenarioInDB):
 
 # BudgetAssumptions Schemas
 class FinancingLoanInput(BaseModel):
-    """Financing contract raised or already outstanding in the parent year."""
+    """Financing contract raised or already outstanding in the parent year.
+
+    Due modi di descrivere il rimborso: `duration_years` (+ `grace_years`, `balloon_pct`) per un
+    prestito nuovo, oppure `repayments` — il capitale rimborsato in ciascun anno di piano, indice
+    0 = primo anno — per un contratto PREGRESSO (`opening_residual` > 0, `amount` = 0). Oltre la
+    lista il residuo resta aperto (spec 2026-09-15 §5.1, decisione 7).
+    """
     name: Optional[str] = Field(default=None, max_length=100)
     amount: Decimal = Field(default=Decimal("0"), ge=0)
     opening_residual: Decimal = Field(default=Decimal("0"), ge=0)
-    duration_years: int = Field(..., gt=0, le=50)
+    duration_years: Optional[int] = Field(default=None, gt=0, le=50)
     interest_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     grace_years: int = Field(default=0, ge=0, le=49)
     balloon_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    repayments: Optional[List[Decimal]] = None
 
     @model_validator(mode="after")
     def validate_contract(self):
         if self.amount == 0 and self.opening_residual == 0:
             raise ValueError("l'importo o il residuo iniziale devono essere maggiori di zero")
-        if self.grace_years >= self.duration_years:
-            raise ValueError("gli anni di preammortamento devono essere meno della durata")
+        if self.repayments is None:
+            if self.duration_years is None:
+                raise ValueError("la durata in anni è obbligatoria senza i rimborsi per anno")
+            if self.grace_years >= self.duration_years:
+                raise ValueError("gli anni di preammortamento devono essere meno della durata")
+            return self
+        if self.amount > 0:
+            raise ValueError("i rimborsi per anno valgono solo sul residuo pregresso, non su un prestito nuovo")
+        if self.grace_years or self.balloon_pct:
+            raise ValueError("con i rimborsi per anno non si usano preammortamento e maxirata")
+        if any(r < 0 for r in self.repayments):
+            raise ValueError("un rimborso per anno è negativo")
+        if sum(self.repayments, Decimal("0")) - self.opening_residual > Decimal("0.01"):
+            raise ValueError("la somma dei rimborsi per anno supera il residuo iniziale")
         return self
 
 

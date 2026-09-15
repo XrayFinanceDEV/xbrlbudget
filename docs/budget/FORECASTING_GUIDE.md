@@ -534,6 +534,12 @@ assoluto in euro. Sono **due meccanismi distinti**, e la differenza si vede quan
 
 ## Scoperto di conto corrente
 
+> **Con i fidi separati al passo 5 questa sezione non si applica.** Il wizard separa sempre fidi e
+> anticipi dai mutui, e in quel caso un fabbisogno non apre scoperto e non ferma il piano: il motore
+> riutilizza i fidi, e oltre l'importo del bilancio di partenza mostra un avviso (vedi «Passo 5 ·
+> Patrimoniale pregresso» e «Passo 6 · Patrimoniale piano»). Quanto segue vale per gli scenari che non
+> dichiarano i fidi, cioè quelli scritti via API senza `bank_lines_amount`.
+
 La cassa del previsionale pareggia solo verso l'alto: quando le ipotesi non si finanziano da sé,
 il residuo negativo è un **fabbisogno scoperto**. Che cosa ne è di quel numero è una tua scelta,
 una casella al passo 6, **spenta di default**.

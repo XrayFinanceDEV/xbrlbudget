@@ -263,6 +263,10 @@ Colonna destra, letta dai `details`:
 
 ### 4.7 Imposte
 
+**Aggiornato il 2026-09-15 (§3, §9.1):** saldo, rateizzato e piano delle rate passano al passo 5; qui
+restano aliquota, differenze temporanee, via manuale e acconto, con un solo rimando «saldo e rate si
+scadenziano al passo 5 · Patrimoniale pregresso». Il testo che segue descrive la prima stesura.
+
 Invariato. I due rimandi in fondo dicono «Debiti tributari {anno} a breve · saldo pagato nel {anno
 1} · passo 5» e tengono la tabella dei rateizzati dov'è.
 

@@ -91,3 +91,4 @@ def test_il_previsionale_persiste_i_residui_della_lista():
     # si confronta in Decimal, mai in float.
     assert D(str(contratti[0]["rimborso"])) == D("82500.00")
     assert D(str(contratti[0]["interessi"])) == D("12540.00")
+    assert contratti[0]["nome"] == "Mutuo"

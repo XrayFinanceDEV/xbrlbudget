@@ -9,13 +9,20 @@
  * queste funzioni, e scrivono con `p.updateFinancingLoans`/`updateOtherLenders`.
  *
  * **Il formato dei controlli.** `quadra` (banche) e il controllo degli altri finanziatori
- * misurano lo STESSO scostamento: `differenza = massa_del_bilancio − massa_dichiarata`. Un
- * `differenza` negativo (l'utente ha dichiarato PIÙ di quanto il bilancio registra: qui
- * `differenza < 1`) resta «quadra» — il motore rifiuta solo un residuo dei contratti che non
- * copre il debito bancario dell'anno base (`base-bank-debt.ts:statoResidui`), mai il contrario;
- * questo file segue la stessa asimmetria, misurata sul banco di test del task (fidi 90.000 € +
- * residui 640.000 € contro un debito bancario di 640.000 € risulta «quadra» anche se la somma
- * dichiarata eccede il bilancio di 90.000 €). Solo una CARENZA (`differenza ≥ 1`) è segnalata.
+ * misurano lo STESSO scostamento: `differenza = massa_del_bilancio − massa_dichiarata`, e sono
+ * SIMMETRICI — `|differenza| < 1` → «quadra», altrimenti `esito = "differenza {differenza} €"`.
+ * Il segno di `differenza` non si tocca a mano: `eur0` lo mostra così com'è (positivo = carenza,
+ * negativo = sforamento), con lo stesso `Intl.NumberFormat` di `formatNumber`
+ * (`lib/formatters.ts`) — sullo stesso runtime producono lo stesso carattere per il segno meno
+ * (misurato: trattino ASCII U+002D, non il meno tipografico U+2212). Un motivo, non solo un
+ * capriccio simmetrico: `assemble_financing` (`calculations/projection_common.py`) rifiuta un
+ * piano dove `fidi + Σ residui` si scosta dal debito bancario dell'anno base di oltre 0,01, IN
+ * ENTRAMBE LE DIREZIONI — un client che chiama «quadra» uno sforamento mostrerebbe verde su un
+ * piano che il server rifiuta comunque. Una prima versione di questo file (revisione del
+ * coordinatore su 5dceddb) trattava lo sforamento come innocuo, seguendo alla lettera un banco di
+ * test con un `bs` internamente incoerente (fidi 90.000 € + residui 640.000 € contro un debito
+ * bancario dichiarato di 640.000 €, che già di per sé non tornava): l'oracolo era sbagliato, non
+ * la regola — corretto qui e nel test.
  */
 import type { BalanceSheet, FinancingLoanInput, OtherLenderInput } from "@/types/api";
 import { baseBankDebt } from "@/lib/base-bank-debt";
@@ -183,7 +190,7 @@ export function quotaMutui(baseBs: FonteBilancio, fidi: number): number {
 
 function quadraCheck(target: number, dichiarato: number, testo: string): Controllo {
   const differenza = target - dichiarato;
-  const ok = differenza < 1;
+  const ok = Math.abs(differenza) < 1;
   return { ok, testo, esito: ok ? "quadra" : `differenza ${eur0(differenza)} €` };
 }
 
@@ -241,4 +248,21 @@ export function controlloAltri(baseBs: FonteBilancio, items: readonly Scadenziab
     residui,
     `Residui degli altri finanziatori: ${eur0(residui)} € · altri finanziatori nel bilancio: ${eur0(target)} €`,
   );
+}
+
+/**
+ * Vero quando la riga del primo anno di piano ESISTE ma non ha ancora un valore per i fidi: è il
+ * segnale per la scrittura una tantum (`bank_lines_amount = 0`, `bank_lines_rule = "costante"`)
+ * alla prima visita del passo. Prima che la riga arrivi (ipotesi non ancora idratate) non è MAI
+ * vero — `riga === undefined` torna `false` senza guardare altro — perché scrivere su una mappa
+ * vuota scriverebbe 0 e "costante" PRIMA che i valori salvati (se lo scenario ne aveva già uno)
+ * abbiano la possibilità di arrivare, azzerando in silenzio un fido reale (rilievo del
+ * coordinatore su 5dceddb: `PregressoBancheCard` marcava l'inizializzazione come «fatta» anche a
+ * riga assente).
+ */
+export function serveInizializzareFidi(
+  riga: { bank_lines_amount?: number | null; bank_lines_rule?: string | null } | null | undefined,
+): boolean {
+  if (riga == null) return false;
+  return riga.bank_lines_amount == null && riga.bank_lines_rule == null;
 }

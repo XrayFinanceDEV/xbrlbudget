@@ -20,7 +20,11 @@ export interface StepProps {
   historical: HistoricalData;
   historicalYears: number[];
   preview: PreviewState;
-  update: (year: number, field: string, value: number | boolean | null) => void;
+  // `string` (Task 14, revisione): `bank_lines_rule` ("costante" | "ricavi")
+  // e' la prima voce del wizard che scrive un enum testuale — allargato in
+  // coppia con `updateAssumption` (hooks/use-scenario-assumptions.ts), la
+  // sola implementazione che questa firma descrive.
+  update: (year: number, field: string, value: number | boolean | string | null) => void;
   updateAll: (field: string, value: number | boolean | null) => void;
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;

@@ -51,7 +51,13 @@ export interface ScenarioAssumptionsState {
   setAssumptions: React.Dispatch<React.SetStateAction<AssumptionsMap>>;
   idratato: boolean;
   isNew: boolean; // isNew = nessuna ipotesi salvata
-  updateAssumption: (year: number, field: string, value: number | boolean | null) => void;
+  // `string` (Task 14, revisione: `bank_lines_rule` e' la prima voce del
+  // wizard che scrive un enum testuale — le altre sono tutte scalari
+  // numeriche o booleane) e' allargato solo qui e nella firma gemella di
+  // `StepProps.update` (components/budget/wizard/types.ts): a runtime la
+  // funzione sotto scrive `[field]: value` senza controllare il tipo, quindi
+  // nessun comportamento cambia per i chiamanti esistenti.
+  updateAssumption: (year: number, field: string, value: number | boolean | string | null) => void;
   updateAll: (field: string, value: number | boolean | null) => void; // tutti i forecastYears
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
@@ -311,7 +317,7 @@ export function useScenarioAssumptions({
    *  per questo scenario, non deve ripartire riaprendo la card da sola. */
   const chiudiMigrazione = useCallback(() => setMigrazione(null), []);
 
-  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
+  const updateAssumption = useCallback((year: number, field: string, value: number | boolean | string | null) => {
     // I ricavi trascinano la parte variabile di materie e servizi (spec
     // 2026-09-15 §4.2, Task 10): il motore non cambia, le due percentuali
     // seguono i ricavi per costruzione — la regola sta in `withRevenueGrowth`

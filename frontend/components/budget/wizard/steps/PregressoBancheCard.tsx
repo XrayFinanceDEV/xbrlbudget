@@ -32,6 +32,7 @@ import {
   nuovoContratto,
   prestitiNuovi,
   quotaMutui,
+  serveInizializzareFidi,
   unisciContratti,
   withCampo,
   withRimborso,
@@ -41,19 +42,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { FinancingLoanInput } from "@/types/api";
 import type { StepProps } from "../types";
-
-/**
- * `p.update` e' tipizzato su `number | boolean | null` (ogni altra voce del
- * wizard e' scalare numerica o booleana): `bank_lines_rule` e' la prima
- * stringa. Il widening resta LOCALE a questo file — `hooks/use-scenario-
- * assumptions.ts` e `components/budget/wizard/types.ts` non sono fra i file
- * di questo task, e a runtime `updateAssumption` scrive `[field]: value`
- * senza controllare il tipo, quindi il valore arriva intatto. Il coordinatore
- * puo' spostare il widening nella firma condivisa quando integra questa card.
- */
-function updateAny(p: StepProps, year: number, field: string, value: number | string | boolean | null): void {
-  (p.update as unknown as (y: number, f: string, v: number | string | boolean | null) => void)(year, field, value);
-}
 
 type Tono = "ok" | "avviso" | "errore" | "neutro";
 
@@ -92,23 +80,31 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
 
   const bankLinesAmount = riga?.bank_lines_amount;
   const bankLinesRule = riga?.bank_lines_rule;
+  // La riga del primo anno arriva SOLO dopo l'idratazione delle ipotesi
+  // salvate: prima che esista, `riga` e' `undefined`, non "senza fidi". Un
+  // booleano scalare nelle dipendenze, mai l'oggetto `riga` intero (regola
+  // CLAUDE.md sugli effetti e gli oggetti letterali).
+  const rigaPronta = riga !== undefined;
 
   // Scrittura una tantum alla prima visita di questo scenario (stessa
   // convenzione del piano base, Task 13): se lo scenario non ha ancora un
   // valore per i fidi, si scrivono `bank_lines_amount = 0` e la regola
-  // «costante» UNA VOLTA sola per scenario — mai a ogni render, altrimenti un
-  // valore salvato che arriva dopo l'idratazione verrebbe riscritto.
+  // «costante» UNA VOLTA sola per scenario — mai a ogni render. Il ref si
+  // marca SOLO quando la riga esiste davvero: marcarlo a riga assente (come
+  // faceva la prima versione, rilievo del coordinatore su 5dceddb)
+  // scriverebbe 0/"costante" su una mappa vuota PRIMA che un fido gia'
+  // salvato abbia la possibilita' di arrivare, azzerandolo in silenzio.
   const inizializzatoPer = useRef<number | null | undefined>(undefined);
   useEffect(() => {
-    if (p.scenarioId === null || firstYear === undefined) return;
+    if (p.scenarioId === null || firstYear === undefined || !rigaPronta) return;
     if (inizializzatoPer.current === p.scenarioId) return;
     inizializzatoPer.current = p.scenarioId;
-    if (bankLinesAmount == null && bankLinesRule == null) {
-      updateAny(p, firstYear, "bank_lines_amount", 0);
-      updateAny(p, firstYear, "bank_lines_rule", "costante");
+    if (serveInizializzareFidi(riga)) {
+      p.update(firstYear, "bank_lines_amount", 0);
+      p.update(firstYear, "bank_lines_rule", "costante");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.scenarioId, firstYear, bankLinesAmount, bankLinesRule]);
+  }, [p.scenarioId, firstYear, rigaPronta, bankLinesAmount, bankLinesRule]);
 
   if (!baseBs || firstYear === undefined) {
     return (
@@ -162,7 +158,7 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div>
               <label className="text-xs text-muted-foreground" htmlFor="bank-lines-rule">Regola</label>
-              <Select value={regola} onValueChange={(v) => updateAny(p, firstYear, "bank_lines_rule", v)}>
+              <Select value={regola} onValueChange={(v) => p.update(firstYear, "bank_lines_rule", v)}>
                 <SelectTrigger id="bank-lines-rule" className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="costante">Costanti</SelectItem>
@@ -181,7 +177,7 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
                 step={1000}
                 className="h-8"
                 value={fidi}
-                onChange={(e) => updateAny(p, firstYear, "bank_lines_amount", e.target.value === "" ? 0 : Number(e.target.value))}
+                onChange={(e) => p.update(firstYear, "bank_lines_amount", e.target.value === "" ? 0 : Number(e.target.value))}
               />
             </div>
             <div>
@@ -194,7 +190,7 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
                 step={0.1}
                 className="h-8"
                 value={tasso ?? ""}
-                onChange={(e) => updateAny(p, firstYear, "bank_lines_rate", e.target.value === "" ? null : Number(e.target.value))}
+                onChange={(e) => p.update(firstYear, "bank_lines_rate", e.target.value === "" ? null : Number(e.target.value))}
               />
             </div>
           </div>

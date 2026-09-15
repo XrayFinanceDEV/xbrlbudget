@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { BalanceSheet, FinancingLoanInput } from "@/types/api";
 import {
   contrattiPregressi, contrattoRows, controlliBanche, controlloAltri, nuovoContratto, prestitiNuovi,
-  quotaMutui, restaStato, unisciContratti, withRimborso,
+  quotaMutui, restaStato, serveInizializzareFidi, unisciContratti, withRimborso,
 } from "./budget-finanziamenti-pregresso";
 
+// sp17a 557.500 + sp17b 150.000 = sp17 707.500 (quadra sull'aggregato): il debito bancario base
+// vale 730.000 (sp16a 172.500 + sp17a 557.500) — coerente col resto del bilancio, a differenza
+// della prima versione del banco (rilievo del coordinatore su 5dceddb: 172.500+467.500=640.000
+// non tornava con nessuna combinazione sensata di fidi/residui usata sotto).
 const bs = {
-  sp16_debiti_breve: "172500", sp16a_debiti_banche_breve: "172500", sp17_debiti_lungo: "617500",
-  sp17a_debiti_banche_lungo: "467500", sp17b_debiti_altri_finanz_lungo: "150000", sp16b_debiti_altri_finanz_breve: "0",
+  sp16_debiti_breve: "172500", sp16a_debiti_banche_breve: "172500", sp17_debiti_lungo: "707500",
+  sp17a_debiti_banche_lungo: "557500", sp17b_debiti_altri_finanz_lungo: "150000", sp16b_debiti_altri_finanz_breve: "0",
 } as unknown as BalanceSheet;
 const mutuo: FinancingLoanInput = { name: "Mutuo Intesa 2022", amount: 0, opening_residual: 330000, interest_rate: 3.8, grace_years: 0, balloon_pct: 0, duration_years: null, repayments: [82500, 82500, 82500] };
 const mcc: FinancingLoanInput = { name: "Chirografario MCC 2024", amount: 0, opening_residual: 310000, interest_rate: 4.6, grace_years: 0, balloon_pct: 0, duration_years: null, repayments: [0, 55000, 55000] };
@@ -41,16 +45,32 @@ describe("budget-finanziamenti-pregresso", () => {
     expect(quotaMutui(bs, 90000)).toBe(82500);
     const c = controlliBanche(bs, 90000, [mutuo, mcc], 3, 2026);
     expect(c.fidiOltre).toBeNull();
-    expect(c.quadra).toEqual({ ok: true, testo: "Fidi 90.000 € + residui dei finanziamenti 640.000 € · debiti verso banche nel bilancio: 640.000 €", esito: "quadra" });
+    expect(c.quadra).toEqual({ ok: true, testo: "Fidi 90.000 € + residui dei finanziamenti 640.000 € · debiti verso banche nel bilancio: 730.000 €", esito: "quadra" });
     expect(c.rata).toEqual({ ok: true, testo: "Rimborsi 2027 dei finanziamenti: 82.500 € · quota dei mutui entro 12 mesi: 82.500 €", esito: "coerente" });
     const k = controlliBanche(bs, 200000, [mutuo], 3, 2026);
     expect(k.fidiOltre?.esito).toBe("da correggere");
-    expect(k.quadra).toMatchObject({ ok: false, esito: "differenza 110.000 €" });
+    expect(k.quadra).toMatchObject({ ok: false, esito: "differenza 200.000 €" });
+    // Sforamento: fidi + residui superano il debito bancario del bilancio — il motore lo
+    // rifiuta esattamente come la carenza (§5.2: |scarto| oltre 0,01), quindi il controllo
+    // simmetrico segnala anche questo caso, col segno meno.
+    const sforo = controlliBanche(
+      bs, 90000, [mutuo, mcc, { opening_residual: 10000, interest_rate: 0, repayments: [] }], 3, 2026,
+    );
+    expect(sforo.quadra).toMatchObject({ ok: false, esito: "differenza -10.000 €" });
     expect(controlliBanche(bs, 90000, [{ ...mutuo, repayments: [100000, 0, 0] }, mcc], 3, 2026).rata.esito).toBe("17.500 € oltre la quota a breve");
     expect(controlliBanche(bs, 90000, [{ ...mutuo, repayments: [60000, 0, 0] }, mcc], 3, 2026).rata.esito).toBe("nel 2027 ne scadono 22.500 € in più");
   });
   it("controllo sugli altri finanziatori", () => {
     expect(controlloAltri(bs, [{ opening_residual: 150000, interest_rate: 0, repayments: [] }])).toMatchObject({ ok: true, esito: "quadra" });
     expect(controlloAltri(bs, [{ opening_residual: 100000, interest_rate: 0, repayments: [] }]).esito).toBe("differenza 50.000 €");
+    // Sforamento simmetrico: 200.000 dichiarati contro 150.000 nel bilancio.
+    expect(controlloAltri(bs, [{ opening_residual: 200000, interest_rate: 0, repayments: [] }]).esito).toBe("differenza -50.000 €");
+  });
+  it("serveInizializzareFidi: solo a riga presente e senza valore", () => {
+    expect(serveInizializzareFidi(undefined)).toBe(false);
+    expect(serveInizializzareFidi(null)).toBe(false);
+    expect(serveInizializzareFidi({ bank_lines_amount: null, bank_lines_rule: null })).toBe(true);
+    expect(serveInizializzareFidi({ bank_lines_amount: 0, bank_lines_rule: null })).toBe(false);
+    expect(serveInizializzareFidi({ bank_lines_amount: null, bank_lines_rule: "costante" })).toBe(false);
   });
 });

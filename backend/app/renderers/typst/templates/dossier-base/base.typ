@@ -30,7 +30,7 @@
   #plex(note-font, fill: muted)[Spazio riservato al commento del dossier.]
 ]
 
-#let dossier(report, options, body) = {
+#let dossier(report, options, body, note-footer: none) = {
   let accent = if options.grayscale { gray.darken(50%) } else { navy }
   set document(title: report.document.title, author: "Formula Finance",
     description: "Base editoriale del report budget")
@@ -42,7 +42,7 @@
       fill: if counter(page).get().first() == 1 { white } else { muted }, report.document.title)),
     footer: context [
       #marker((kind: "page", content_id: "page-shell"))
-      #note-slot()
+      #if note-footer == none { note-slot() } else { note-footer() }
       #v(2mm)
       #line(length: 100%, stroke: 0.5pt + rule)
       #v(1mm)

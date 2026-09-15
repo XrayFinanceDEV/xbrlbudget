@@ -1248,3 +1248,32 @@ complete, pareggio e scoring non sono ancora serie canoniche del dossier v2.
 Prima del freeze completo M2-02A, verificare ed estendere assembler/contratto
 per i dati disponibili nei servizi autorevoli; non ricavarli nel template.
 Seguono inventario e reflow del piano completo, poi M2-00C per i commenti.
+
+### Esecuzione M2-02A, piano canonico completo — 2026-09-15
+
+Completata la composizione misurata del dossier v2 corrente, con implementazione
+del coordinatore, inventario/audit Terra e review indipendente Terra high.
+Dodici sezioni logiche, undici per bilancio/startup; tutte le ipotesi anche
+annidate, rettifiche, valori di chiusura, sedici grafici e catalogo indicatori.
+Allegati CE/SP/CF completi con contesto padre e indice su pagine reali.
+Confronti infrannuali consumano i periodi canonici già esistenti, con durate
+esplicite e nessuna annualizzazione nel template. La fixture a sette periodi
+verifica storico/osservato/rettificato/chiusura e tre anni di budget.
+
+Il nuovo planner assegna `editorial_plan` dopo misura nel runtime isolato,
+con inventory esatto e un riquadro commento per ogni pagina/continuazione.
+ID semantici e hash font/layout/asset/fonti includono la definizione Python
+dell’inventario; la sua modifica richiede worker ricaricato e nuovo piano.
+Note manuali conservate su piano identico, riassociazione esplicita sul drift,
+testi/importi troppo grandi rifiutati senza tagli. Nessuna scrittura o AI.
+Il planner base rimane disponibile come risultato provvisorio separato.
+
+Review Terra high approvata, incluso hardening dei tipi dei metadata grafici,
+fingerprint inventario e limiti prima dello staging. Verifica: 235 test nella
+prima suite combinata e 34 mirati finali sul codice aggiornato, 239 test distinti
+complessivi. Ricevuta dei test in
+`docs/testing/M2-02A-editorial-plan.md`. La composizione non è ancora il template
+editoriale definitivo: segue M2-00C per copertura automatica dei commenti,
+persistenza protetta e client v2, quindi M2-02 e gate di export.
+Scoring/pareggio/composizioni complete restano una estensione canonica
+dedicata prima del collaudo definitivo; ogni aggiunta richiede nuovo piano.

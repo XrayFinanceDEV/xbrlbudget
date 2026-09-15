@@ -4,7 +4,7 @@
   "files": {
     "OFL-1.1.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
     "PROVENANCE.md": "fa78908331dc236b98e4f43cbcfed42189e86943413f8398f57c30afc6d0c155",
-    "base.typ": "c110ced1e406956a2cefcd514deead67effde2cb01898e92677fe50843e2d15c",
+    "base.typ": "2bb0a558f2769126534f918579c937007f489d6828cf37e54a44017909aef481",
     "fonts/IBMPlexSans-Italic.ttf": "a9c6ef9942c49e49d11e11a6dacc0b3a087978757e9b22a06b8ac22a6400fb15",
     "fonts/IBMPlexSans-Medium.ttf": "331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907",
     "fonts/IBMPlexSans-Regular.ttf": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5",
@@ -13,6 +13,7 @@
     "charts.typ": "471805530686c2bc8a7831a8951f814fa495ed1824a682d3dc968da597aec920",
     "chart-format.typ": "dbd37f43787d04c9817239ff56cf7f81336df7a67fe5f53644acc48b6d05c90c",
     "chart-layout.json": "9a861a3cf2bad34fd5ab9d47162b72574324cfee3037b56f7605d092e400af7e",
-    "charts-preview.typ": "499daa5a1ed190c848e80b0b58ea483dc1978d70750eafa6efed70dca08a59c5"
+    "charts-preview.typ": "499daa5a1ed190c848e80b0b58ea483dc1978d70750eafa6efed70dca08a59c5",
+    "editorial.typ": "b021601340a7f267374b0120f30f966c9ebf811b588b46f05b7d68ca497ac7e5"
   }
 }

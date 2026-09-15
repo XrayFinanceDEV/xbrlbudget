@@ -6,6 +6,7 @@
 // runs inside a Formula Finance iframe.
 import type { JSX } from "react";
 import { Check } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { WIZARD_STEPS, groupWizardSteps, horizonLabel, type WizardStepKey } from "@/lib/budget-wizard-steps";
@@ -18,8 +19,12 @@ export function WizardRail(props: {
   horizon: number;
   baseYear: number;
   onGo: (k: WizardStepKey) => void;
+  /** «nuovo» dai due passi nati dal giro di rilievi, «da integrare» sovrascritto
+   *  per i passi che una migrazione (Task 9) cita — composto da `railBadges`,
+   *  puro, in `lib/budget-wizard-steps.ts`. */
+  badges?: Partial<Record<WizardStepKey, "nuovo" | "da integrare">>;
 }): JSX.Element {
-  const { active, visited, horizon, baseYear, onGo } = props;
+  const { active, visited, horizon, baseYear, onGo, badges = {} } = props;
 
   return (
     <nav aria-label="Passi delle ipotesi" className="overflow-x-auto">
@@ -31,6 +36,7 @@ export function WizardRail(props: {
               {g.steps.map((step) => {
                 const isActive = step.key === active;
                 const isVisited = visited.has(step.key);
+                const badge = badges[step.key];
                 return (
                   <button
                     key={step.key}
@@ -51,7 +57,22 @@ export function WizardRail(props: {
                     >
                       {!isActive && isVisited ? <Check className="h-3 w-3" /> : step.n}
                     </span>
-                    <span className="whitespace-nowrap text-[10px] text-muted-foreground">{step.title}</span>
+                    <span className="flex items-center whitespace-nowrap text-[10px] text-muted-foreground">
+                      {step.title}
+                      {badge && (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "ml-1 px-1 py-0 text-[9px]",
+                            badge === "da integrare"
+                              ? "text-amber-700 dark:text-amber-300 border-amber-400"
+                              : "text-violet-700 dark:text-violet-300 border-violet-400"
+                          )}
+                        >
+                          {badge}
+                        </Badge>
+                      )}
+                    </span>
                     {isActive && <span className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-primary" />}
                   </button>
                 );

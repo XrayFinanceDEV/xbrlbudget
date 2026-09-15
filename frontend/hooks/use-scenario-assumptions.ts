@@ -12,7 +12,7 @@
  * che si ri-inneschi da solo, e perché l'orizzonte segue l'ULTIMO anno
  * salvato e non il numero di righe.
  */
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { getBudgetAssumptions, getIncomeStatement, getBalanceSheet } from "@/lib/api";
 import {
   baseYearNote,
@@ -25,6 +25,7 @@ import {
   horizonFromSavedRows,
   type AssumptionsMap,
 } from "@/lib/budget-horizon";
+import { isScenarioPrecedente, migraScenario, type EsitoMigrazione } from "@/lib/budget-migrazione";
 import type { HistoricalData } from "@/lib/budget-trend";
 import type {
   BudgetScenario,
@@ -63,6 +64,17 @@ export interface ScenarioAssumptionsState {
   /** Gli altri finanziatori per anno (Task 8): scrive SEMPRE nel primo anno
    *  di piano, come `updatePregresso` — stessa regola, stessa forma. */
   updateOtherLenders: (next: OtherLenderInput[] | null) => void;
+  /**
+   * L'esito della migrazione in memoria di uno scenario salvato PRIMA del
+   * giro di rilievi del 14/09 (Task 9, `lib/budget-migrazione.ts`), o `null`
+   * se lo scenario non è precedente o la card è già stata chiusa. La mappa
+   * migrata (sporca) è già quella idratata in `assumptions`: questo campo
+   * serve solo a mostrare la card e i badge.
+   */
+  migrazione: EsitoMigrazione | null;
+  /** Chiude la card di migrazione — chiamato dopo un salvataggio riuscito:
+   *  la mappa migrata è ormai persistita, non più «sporca». */
+  chiudiMigrazione: () => void;
 }
 
 export function useScenarioAssumptions({
@@ -122,6 +134,29 @@ export function useScenarioAssumptions({
   // resta chiuso, e resta chiuso anche se la lettura fallisce.
   const [idratato, setIdratato] = useState(false);
 
+  // Migrazione degli scenari salvati PRIMA del giro di rilievi del 14/09
+  // (Task 9, spec §4.8). `migrazione` e' lo stato mostrato (card + badge);
+  // i due ref sotto sono la parte che NON deve entrare in un array di
+  // dipendenze — un oggetto letterale come `migrazione` ci rientrerebbe a
+  // ogni render, e un ref coi dati grezzi da migrare evita di dover
+  // ricalcolare `isScenarioPrecedente` nell'effetto che aspetta il bilancio
+  // base.
+  const [migrazione, setMigrazione] = useState<EsitoMigrazione | null>(null);
+  // I dati grezzi di UNA migrazione in attesa del bilancio base, che arriva
+  // da `historicalData` — un effetto separato, non ancora atterrato quando
+  // l'idratazione stessa finisce. `null` quando non c'e' nulla in attesa.
+  const pendingMigrazione = useRef<{
+    scenarioId: number;
+    map: AssumptionsMap;
+    forecastYears: number[];
+    baseYear: number;
+  } | null>(null);
+  // L'id dello scenario per cui la migrazione (o la sua assenza) e' gia'
+  // stata decisa: impedisce all'effetto sotto di ripartire da solo quando
+  // `historicalData` si aggiorna per un motivo che non c'entra (es. un altro
+  // anno storico che finisce di caricare).
+  const migratoPer = useRef<number | null>(null);
+
   // Idratazione: legge le ipotesi salvate e fissa l'orizzonte UNA volta sola.
   // NON dipende da `forecastYears`: dipenderci significa che scrivere
   // `numYears` fa ripartire l'effetto che riscrive `numYears`, ed e' la ragione
@@ -130,6 +165,11 @@ export function useScenarioAssumptions({
   useEffect(() => {
     if (scenarioId === null) {
       // Scenario nuovo: la mappa la riempie di default l'effetto qui sotto.
+      // Non c'e' nulla da migrare — `defaultAssumption` scrive gia'
+      // `inflation_pct: 2`, la firma di uno scenario nato dopo questo lotto.
+      pendingMigrazione.current = null;
+      migratoPer.current = null;
+      setMigrazione(null);
       setExistingAssumptionYears(new Set());
       setAssumptions({});
       setIdratato(true);
@@ -151,10 +191,31 @@ export function useScenarioAssumptions({
       // mount, e senza riunirli il salvataggio manderebbe zero righe.
       const nextNumYears = horizonFromSavedRows(data, baseYear);
       const nextForecastYears = forecastYearsFor(baseYear, nextNumYears);
+      // Uno scenario salvato PRIMA del giro di rilievi del 14/09 (Task 9,
+      // spec §4.8): la firma e' l'inflazione assente sul primo anno. La
+      // migrazione vera (`migraScenario`) ha bisogno del bilancio base, che
+      // arriva da `historicalData` — un effetto separato, quasi certamente
+      // non ancora atterrato in questo istante. Si registra qui SOLO
+      // l'intenzione (dati grezzi in un ref); l'effetto sotto la esegue
+      // appena il bilancio c'e', una volta sola per scenario.
+      if (isScenarioPrecedente(assumptionsMap, nextForecastYears)) {
+        pendingMigrazione.current = { scenarioId, map: assumptionsMap, forecastYears: nextForecastYears, baseYear };
+        migratoPer.current = null;
+        // Provvisorio: la card resta chiusa finche' l'effetto sotto non
+        // produce l'esito vero, cosi' non si mostra la migrazione di uno
+        // scenario diverso mentre se ne apre uno nuovo.
+        setMigrazione(null);
+      } else {
+        pendingMigrazione.current = null;
+        migratoPer.current = scenarioId;
+        setMigrazione(null);
+      }
       // Il bulk salva le ipotesi anche a generazione fallita: un piano di
       // pregresso piu' lungo dell'orizzonte puo' arrivare gia' cosi' dal
       // server. Si accorcia qui, PRIMA del primo render, o la tabella nasce
-      // gia' bloccata (rilievo 3 della revisione del task 7).
+      // gia' bloccata (rilievo 3 della revisione del task 7). Se lo scenario
+      // e' precedente, questa e' solo la mappa PROVVISORIA (non migrata):
+      // l'effetto sotto la sostituisce con `esito.map` appena puo' girare.
       setAssumptions(
         withPregressoTrimmedToHorizon(
           withDefaultsForYears(assumptionsMap, nextForecastYears, scenarioId),
@@ -207,6 +268,43 @@ export function useScenarioAssumptions({
       )
     );
   }, [idratato, forecastYears, scenarioId]);
+
+  // Esegue la migrazione VERA (Task 9, spec §4.8) appena il bilancio base e'
+  // arrivato in `historicalData` — un effetto separato da quello di
+  // idratazione, che puo' atterrare dopo. Il cancello e' `migratoPer.current`
+  // (l'id dello scenario gia' deciso), non `historicalData` in se': quello
+  // si aggiorna anche per anni storici che non c'entrano nulla con la
+  // migrazione, e ripartire ogni volta rifarebbe il lavoro (innocuo, ma
+  // inutile) o — se l'utente avesse gia' chiuso la card — la riaprirebbe da
+  // sola. Non dipende da `migrazione`, ne' dai due ref: sono lo stato che
+  // questo stesso effetto scrive, e un ref non fa comunque ripartire nulla.
+  useEffect(() => {
+    if (!idratato) return;
+    const pending = pendingMigrazione.current;
+    if (!pending) return;
+    if (migratoPer.current === pending.scenarioId) return;
+    const baseBs = historicalData[pending.baseYear]?.balance as unknown as Record<string, unknown> | undefined;
+    // Il bilancio base non e' ancora atterrato: si riprova al prossimo
+    // aggiornamento di `historicalData` (`loadHistoricalData` lo scrive una
+    // volta sola, a fine giro, ma finche' non lo fa questo resta `undefined`).
+    if (!baseBs) return;
+    const esito = migraScenario(pending.map, pending.forecastYears, baseBs, pending.baseYear);
+    setAssumptions(
+      withPregressoTrimmedToHorizon(
+        withDefaultsForYears(esito.map, pending.forecastYears, pending.scenarioId),
+        pending.forecastYears
+      )
+    );
+    setMigrazione(esito);
+    migratoPer.current = pending.scenarioId;
+    pendingMigrazione.current = null;
+  }, [idratato, historicalData]);
+
+  /** Chiude la card di migrazione — la mappa migrata (sporca) diventa
+   *  persistita al primo salvataggio riuscito, e non c'e' piu' nulla da
+   *  segnalare. Non tocca `migratoPer`: la migrazione resta «gia' fatta»
+   *  per questo scenario, non deve ripartire riaprendo la card da sola. */
+  const chiudiMigrazione = useCallback(() => setMigrazione(null), []);
 
   const updateAssumption = useCallback((year: number, field: string, value: number | boolean | null) => {
     setAssumptions((prev) => ({
@@ -307,5 +405,7 @@ export function useScenarioAssumptions({
     updateSpIndexing,
     updatePregresso,
     updateOtherLenders,
+    migrazione,
+    chiudiMigrazione,
   };
 }

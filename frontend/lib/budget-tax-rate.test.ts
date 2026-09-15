@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planTaxRate } from "./budget-tax-rate";
-import { altreVociCalculated } from "./budget-altre-voci-step";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import type { ForecastPreviewResponse, IncomeStatement } from "@/types/api";
 
 /** `tax_rate` e' NOT NULL: un'ipotesi non forzata porta comunque il 27,9. */
 const nonForzata: AssumptionsMap = { 2025: { tax_rate: 27.9 }, 2026: { tax_rate: 27.9 } };
@@ -138,23 +136,11 @@ describe("planTaxRate · addsInformation", () => {
   });
 });
 
-describe("passo 4 e passo 7 non possono discordare", () => {
-  const income = (): IncomeStatement =>
-    ({ ce12_oneri_diversi: "50", ce09_ammortamenti: "80", ce15_oneri_finanziari: "20" } as unknown as IncomeStatement);
-  const response = (): ForecastPreviewResponse =>
-    ({ scenario_id: 1, base_year: 2024, forecast_years: [], error: null });
-
-  // Falsificabile: cade se il passo 4 torna a formattare per conto proprio,
-  // o se rende `value` invece di `label` — cioe' se ricompare un'aliquota
-  // senza provenienza li' dove il passo 7 ne mostra una.
-  it.each([
-    ["effettiva", 25 as number | null, nonForzata],
-    ["forzata", null, forzata],
-    ["predefinita", null, nonForzata],
-    ["sostituita", 25, overrideTutti],
-  ])("il passo 4 rende la label di planTaxRate — caso %s", (_caso, effettiva, assumptions) => {
-    const plan = planTaxRate(effettiva, assumptions, YEARS);
-    const c = altreVociCalculated(2024, income(), plan, assumptions, YEARS, response());
-    expect(c.imposte.value).toBe(plan.label);
-  });
-});
+// La suite «passo 4 e passo 7 non possono discordare» e' stata rimossa in questo giro di
+// rilievi: il passo «Altre voci CE» (passo 4) non esiste piu' (Task 11, 2026-09-15) — la
+// riga «Imposte» della card «Calcolate in altri passi» del nuovo passo 3 (Costi) non rende
+// piu' un valore, solo dove trovarlo (`lib/budget-costi-step.ts:calcolateAltrove`), quindi
+// non c'e' piu' un secondo posto in cui l'etichetta di `planTaxRate` potrebbe discordare da
+// se stessa. Deviazione collaterale dichiarata nel rapporto del Task 11: questo file non e'
+// fra quelli assegnati a quel task, ma importava `altreVociCalculated` dal modulo che il
+// task doveva eliminare.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear } from "@/types/api";
+import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import {
   annoLibero, avvisiFidi, nuoviFinanziamenti, nuovoPrestito, regimeEsplicito, regoleVociMinori, riepilogoNuovo,
   rowsAltriCreditiDebiti, rowsDebitoCassaPfn, tfrRighe, withNuovoCampo,
@@ -52,6 +52,24 @@ describe("budget-piano-step", () => {
     expect(rows.find((r) => r.key === "contratti")?.years[0].value).toBe(247500);
     expect(rows.find((r) => r.key === "pfn")?.years[0].value).toBe(262500 + 565000 + 50000 + 100000 - 130000);
     expect(rows.find((r) => r.key === "fidi")?.base.value).toBe(90000);
+    // PFN/MOL e' un multiplo («2,4×»), mai una percentuale: `value`/`pct`
+    // restano vuoti e il testo sta in `note` — altrimenti il renderer
+    // condiviso (pct1) leggerebbe 2,4 come "2,4%". Senza il CE dell'anno
+    // base (nessun quarto argomento) la colonna base non ha nota: nessun
+    // multiplo inventato quando il motore non l'ha calcolato.
+    const pfnMol = rows.find((r) => r.key === "pfn-mol");
+    expect(pfnMol?.years[0]).toEqual({ value: null, note: "2,4×" });
+    expect(pfnMol?.base).toEqual({ value: null, note: undefined });
+
+    // Con il CE dell'anno base la colonna base porta il proprio multiplo:
+    // PFN base 672.000 (172.500+467.500+150.000−118.000) / MOL base 358.000
+    // (stessa formula di ceAggregates sul CE di `bs`) = 1,9×.
+    const baseInc = {
+      ce01_ricavi_vendite: 2500000, ce04_altri_ricavi: 35000, ce05_materie_prime: 1000000, ce06_servizi: 430000,
+      ce07_godimento_beni: 86000, ce08_costi_personale: 620000, ce12_oneri_diversi: 41000,
+    } as unknown as IncomeStatement;
+    const rowsConBase = rowsDebitoCassaPfn(bs, 90000, [y(2027)], baseInc);
+    expect(rowsConBase.find((r) => r.key === "pfn-mol")?.base).toEqual({ value: null, note: "1,9×" });
   });
   it("regole delle voci minori e tabella altri crediti e debiti", () => {
     // sp_indexing usa il codice corto della voce (spIndexingOf/MINOR_FIELDS,

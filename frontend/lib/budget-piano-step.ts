@@ -19,7 +19,7 @@ import { ceAggregates, type PreviewCell, type PreviewRow, type PreviewRowKind } 
 import { spIndexingOf } from "@/lib/budget-circolante-step";
 import { num } from "@/lib/budget-format";
 import type {
-  BalanceSheet, FinancingLoanInput, ForecastPreviewResponse, ForecastPreviewYear, SpIndexingDriver,
+  BalanceSheet, FinancingLoanInput, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, SpIndexingDriver,
 } from "@/types/api";
 
 const mkRow = (key: string, label: string, kind: PreviewRowKind, base: PreviewCell, years: PreviewCell[]): PreviewRow =>
@@ -174,9 +174,14 @@ const cassaDi = (bs: Record<string, unknown>): number => num(bs.sp09_disponibili
  * finanziamento con il proprio nome — la card «Debito, cassa e PFN» del
  * passo 6. `fidiBase` arriva da fuori (`assumptions[firstYear].bank_lines_amount`)
  * perché non è un saldo di bilancio: è la parte del debito bancario base che
- * il passo 5 ha dichiarato «fidi», non uno SP.
+ * il passo 5 ha dichiarato «fidi», non uno SP. `baseInc` è opzionale — serve
+ * solo al rapporto PFN/MOL della colonna base, e senza il CE dell'anno base
+ * (il componente non lo passa sempre) quella colonna resta senza nota,
+ * mai un multiplo inventato.
  */
-export function rowsDebitoCassaPfn(baseBs: BalanceSheet, fidiBase: number | null, years: ForecastPreviewYear[]): PreviewRow[] {
+export function rowsDebitoCassaPfn(
+  baseBs: BalanceSheet, fidiBase: number | null, years: ForecastPreviewYear[], baseInc?: IncomeStatement | null,
+): PreviewRow[] {
   const bb = baseBs as unknown as Record<string, unknown>;
   const bankBase = baseBankDebt(bb);
   const contrattiBase = bankBase - (fidiBase ?? 0);
@@ -240,12 +245,22 @@ export function rowsDebitoCassaPfn(baseBs: BalanceSheet, fidiBase: number | null
       return { value: finDebt(bs) - cassaDi(bs) };
     })));
 
-  rows.push(mkRow("pfn-mol", "PFN / MOL", "sub", { value: null },
+  // Un multiplo («2,4×»), non una percentuale: `PreviewCell.pct` passa da
+  // `pct1`, che assume la convenzione «percentuale assoluta» del resto del
+  // progetto (25,5 = 25,5%) e avrebbe mostrato un rapporto di 2,4 come
+  // «2,4%». Il testo va quindi in `note`, con `value` e `pct` entrambi
+  // assenti — un MOL a zero (o un anno base senza CE) non produce un
+  // rapporto, non uno zero inventato.
+  const multiplo = (pfn: number, mol: number | null): string | undefined =>
+    mol !== null && mol !== 0 ? `${formatNumber(pfn / mol, 1)}×` : undefined;
+  const molBase = baseInc ? ceAggregates(baseInc as unknown as Record<string, unknown>).mol : null;
+  rows.push(mkRow("pfn-mol", "PFN / MOL", "sub",
+    { value: null, note: multiplo(finDebt(bb) - cassaDi(bb), molBase) },
     years.map((y) => {
       const bs = y.balance_sheet as unknown as Record<string, unknown>;
       const pfn = finDebt(bs) - cassaDi(bs);
       const mol = ceAggregates(y.income_statement as unknown as Record<string, unknown>).mol;
-      return { value: null, pct: mol !== 0 ? pfn / mol : null };
+      return { value: null, note: multiplo(pfn, mol) };
     })));
 
   return rows;

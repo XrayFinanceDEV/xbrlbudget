@@ -61,6 +61,7 @@ const ADVANCED_ROWS: YearInputRow[] = [
 
 export function StepPatrimonialePiano(p: StepProps): JSX.Element {
   const baseBs = p.historical[p.baseYear]?.balance;
+  const baseInc = p.historical[p.baseYear]?.income;
   const firstYear = p.forecastYears[0];
   const previewYears = p.preview.data?.forecast_years ?? [];
 
@@ -115,8 +116,8 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
   // ── Anteprima: debito, cassa, PFN ──
   const fidiBase = firstYear !== undefined ? numOrNull(p.assumptions[firstYear]?.bank_lines_amount) : null;
   const previewRows = useMemo(
-    () => (baseBs ? rowsDebitoCassaPfn(baseBs, fidiBase, previewYears) : []),
-    [baseBs, fidiBase, previewYears],
+    () => (baseBs ? rowsDebitoCassaPfn(baseBs, fidiBase, previewYears, baseInc) : []),
+    [baseBs, fidiBase, previewYears, baseInc],
   );
 
   // ── Anteprima: altri crediti e debiti del piano ──

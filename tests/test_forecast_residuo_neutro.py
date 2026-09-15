@@ -72,7 +72,12 @@ def test_sulla_griglia_ogni_residuo_sta_su_un_campo_neutro_e_i_debiti_finanziari
             prima = sum((_q(values[f]) for f in FINANZIARI), D("0"))
             dopo = sum((risultato[f] for f in FINANZIARI), D("0"))
             chiamate.append(1)
-            if dopo != prima + scoperto.outstanding - rimborsato:
+            # Nel regime esplicito dei fidi (Task 3/3b) il fabbisogno non passa
+            # da `outstanding` (resta 0): entra in `sp16a` come `tiraggio`, che
+            # e' debito finanziario a tutti gli effetti. La spia, scritta prima
+            # del regime, non lo contava: 16 violazioni -> 0 (tutte e solo
+            # `__fidi_tiraggio` del Task 7, profilo `fidi_tiraggio`).
+            if dopo != prima + scoperto.outstanding + scoperto.tiraggio - rimborsato:
                 violazioni.append(f"debiti finanziari: prima {prima}, dopo {dopo}, scoperto {scoperto.outstanding}, sweep {rimborsato}")
         return risultato
 

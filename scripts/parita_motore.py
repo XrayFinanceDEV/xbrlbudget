@@ -671,6 +671,133 @@ def profilo_sweep_override(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
     return valori
 
 
+# --------------------------------------------------------------------------- #
+# I quattro profili del lotto «percorso ipotesi rilievi» (Task 7). Righe e basi
+# rispecchiano i test dei Task 3/3b/5/6 (`test_forecast_fidi*.py`,
+# `test_forecast_altri_finanziatori.py`, `test_forecast_tfr_liquidazioni.py`):
+# le importi che devono coincidere col bilancio (fidi, residui dei contratti,
+# il soci in `sp17b`, le liquidazioni sul fondo `sp15`) sono FRAZIONI o
+# segnaposto "0", e `costruisci_griglia` li converte sugli importi REALI del
+# fixture che consuma il profilo — stessa tecnica di `finanziamento_misto` e
+# dei `pregresso*`. Un profilo nuovo si aggiunge in fondo a `PROFILI`, sempre.
+# --------------------------------------------------------------------------- #
+
+def profilo_fidi_contratti_anno(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Regime esplicito dei fidi + contratto pregresso scadenziato a mano + sweep
+    (spec 2026-09-15 §5.1-§5.2; `tests/test_forecast_fidi.py`, Task 3).
+
+    E' `test_lo_sweep_riduce_solo_i_fidi` reso a griglia: `bank_lines_amount` +
+    un contratto con `repayments` (mai `duration_years`), cassa sweep acceso
+    ogni anno — nel regime lo sweep riduce SOLO i fidi, il contratto segue il
+    suo calendario. La riga 0 porta `bank_lines_rate` e `bank_lines_rule`
+    («costante»); l'importo dei fidi e il residuo del contratto sono i
+    segnaposto che `costruisci_griglia` riempie col debito bancario reale del
+    fixture (`base_bank_debt`) e il suo breve: fidi = la parte a breve (il
+    controllo del motore è `fidi <= sp16a`), contratto = il resto.
+    """
+    valori: Dict[str, Any] = {
+        "cash_sweep_enabled": True,
+        "cash_sweep_min_cash": _eur(rng, 5000, 40000),
+    }
+    if anno_idx == 0:
+        valori["_fidi_regime"] = {"rimborsi": [round(rng.uniform(0.15, 0.3), 4),
+                                               round(rng.uniform(0.15, 0.3), 4)]}
+        valori["bank_lines_rule"] = "costante"
+        valori["bank_lines_rate"] = _pct(rng, 3, 6)
+        valori["financing_loans"] = [{
+            "name": "Pregresso scadenziato", "amount": 0, "opening_residual": "0",
+            "interest_rate": _pct(rng, 2, 5), "repayments": ["0"],
+        }]
+    return valori
+
+
+def profilo_fidi_tiraggio(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Nel regime esplicito il fabbisogno TIRA SUI FIDI e l'eccedenza
+    sull'importo di partenza si dichiara (`details['avviso_fidi']`, spec
+    §5.2-bis; `tests/test_forecast_fidi_tiraggio.py`, Task 3b).
+
+    Il test produce il fabbisogno con un override su `sp06a` calcolato sulla
+    cassa esatta del kit (371.682,22 + 40.000): qui il numero non è
+    riproducibile su 10 fixture in scala diversa, e la leva è quella di
+    `profilo_sweep_override` — `sp08` (zero su OGNI fixture) forzato ben sopra
+    qualunque cassa naturale: dopo l'override il cancello sulla cassa finale
+    misura un fabbisogno, e nel regime non solleva e non apre scoperto, diventa
+    `tiraggio` (fuori regime, sulla base vecchia, è l'errore «Fabbisogno
+    finanziario scoperto» — la divergenza che il controllo negativo cerca qui).
+    Nessun `overdraft_allowed`: nel regime non si legge. Il contratto (senza
+    rimborsi: il residuo resta aperto) copre il debito non fidi.
+    """
+    if anno_idx == 0:
+        return {
+            "_fidi_regime": {},
+            "bank_lines_rule": "costante",
+            "bank_lines_rate": _pct(rng, 4, 6),
+            "financing_loans": [{
+                "name": "Pregresso non scadenzato", "amount": 0, "opening_residual": "0",
+                "interest_rate": _pct(rng, 2, 4), "repayments": [],
+            }],
+            "sp_overrides": {"sp08_attivita_finanziarie": _eur(rng, 600000, 650000)},
+        }
+    return {}
+
+
+def profilo_altri_finanziatori_anno(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Altri finanziatori scadenziati per anno nel regime esplicito (spec §5.3;
+    `tests/test_forecast_altri_finanziatori.py`, Task 5): è la forma
+    «`bank_lines_amount`: 0 + `other_lenders`» di `_rows`.
+
+    La lista è UNA fotografia di `sp16b + sp17b` della prima riga, e il totale
+    dei residui deve coincidere col bilancio: `costruisci_griglia` aggiunge
+    prima un finanziamento soci NON tondo al fixture (la stessa modifica che
+    il `_genera` del test fa a mano: `sp17b` di una frazione degli immobili
+    materiali, aggregato e cassa a pareggio — `base_bank_debt` non si muove,
+    `sp17b` è un campo NON bancario per la stessa funzione), e poi riempie
+    `opening_residual` e i rimborsi (Σ ben sotto il residuo, rata all'anno 2
+    come nel test). Su un fixture senza immobili (holding) il soci è zero e
+    la lista NON va emessa affatto: `assemble_financing` la rifiuterebbe con
+    «maggiore di zero», e un piano su zero euro non eserciterebbe nulla.
+    """
+    if anno_idx != 0:
+        return {}
+    return {
+        "_fidi_regime": {"zero": True},
+        "bank_lines_rule": "costante",
+        "bank_lines_rate": "0",
+        "financing_loans": [{
+            "name": "Pregresso bancario", "amount": 0, "opening_residual": "0",
+            "interest_rate": _pct(rng, 1, 3), "repayments": [],
+        }],
+        "other_lenders": [{
+            "name": "Finanziamento soci", "opening_residual": "0",
+            "interest_rate": _pct(rng, 1, 3), "repayments": [],
+        }],
+        "_altri_soci": {"frazione": round(rng.uniform(0.05, 0.15), 4),
+                        "rimborsi": [0.0, round(rng.uniform(0.3, 0.5), 4)]},
+    }
+
+
+def profilo_tfr_liquidazioni(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
+    """Liquidazioni TFR che scaricano il fondo (spec §5.4;
+    `tests/test_forecast_tfr_liquidazioni.py`, Task 6): due importi NON tondi
+    nei primi due anni (il secondo con accredito SOSPESO, come
+    `test_sospeso_con_liquidazione`) e poi zero.
+
+    Gli importi sono FRAZIONI di `sp15` del fixture (0,3-0,5 il primo anno,
+    0,1-0,2 il secondo) ben sotto il fondo disponibile: il motore rifiuta una
+    liquidazione oltre fondo+accrediti, e con personale in crescita debole
+    (0,5-2%) gli accrediti restano >= 0 — fondo anno 2 >= 0,5 x `sp15` anche
+    da sospeso. Su un fixture senza fondo (holding) le frazioni diventano
+    zero: il profilo degenera nel neutro, nessun errore.
+    """
+    valori: Dict[str, Any] = {"personnel_growth_pct": _pct(rng, 0.5, 2.0)}
+    if anno_idx == 0:
+        valori["_tfr_frazioni"] = {
+            "frazioni": [round(rng.uniform(0.3, 0.5), 4), round(rng.uniform(0.1, 0.2), 4)],
+            "sospeso_anno": 1,
+        }
+    return valori
+
+
 # I profili nuovi vanno IN CODA: il generatore di un fixture e' consumato profilo
 # dopo profilo, quindi un profilo inserito in mezzo cambierebbe le estrazioni di
 # tutti quelli che lo seguono.
@@ -698,6 +825,14 @@ PROFILI: Dict[str, Callable[[random.Random, int], Dict[str, Any]]] = {
     "sweep_anni_rimborso": profilo_sweep_anni_rimborso,
     "sweep_contratti": profilo_sweep_contratti,
     "sweep_override": profilo_sweep_override,
+    # In CODA, i quattro profili del lotto «percorso ipotesi rilievi» (Task 7):
+    # fidi a regime con contratti + sweep, tiraggio sui fidi con avviso,
+    # altri finanziatori per anno, liquidazioni TFR. Da qui in poi il banco
+    # esercita i campi nuovi (spec 2026-09-15 §5) su tutta la griglia.
+    "fidi_contratti_anno": profilo_fidi_contratti_anno,
+    "fidi_tiraggio": profilo_fidi_tiraggio,
+    "altri_finanziatori_anno": profilo_altri_finanziatori_anno,
+    "tfr_liquidazioni": profilo_tfr_liquidazioni,
 }
 
 
@@ -764,8 +899,14 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
         ce = _scala(ce_base, scala)
         for profilo_nome, profilo in PROFILI.items():
             anni_def = []
+            # Direttive nascoste dei quattro profili nuovi (Task 7): arrivano
+            # dalla riga 0, gli importi veri si costruiscono dopo il ciclo.
+            fidi_dir = soci_dir = tfr_dir = None
             for i in range(num_anni):
                 valori = profilo(rng, i)
+                fidi_dir = valori.pop("_fidi_regime", fidi_dir)
+                soci_dir = valori.pop("_altri_soci", soci_dir)
+                tfr_dir = valori.pop("_tfr_frazioni", tfr_dir)
                 if profilo_nome in ("finanziamento_misto", "sweep_contratti") and i == 0:
                     # `assemble_financing` alza un ValueError se la somma dei
                     # `opening_residual` dichiarati non coincide col debito
@@ -815,6 +956,76 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
                         bool(valori.pop("_pregresso_mezzo_cent", False)),
                     )
                 anni_def.append({"anno": 2026 + 1 + i, "valori": valori})
+            bs_sc = bs
+
+            def _b_saldo(campo: str) -> Decimal:
+                return D(str(bs_sc.get(campo, "0")))
+
+            if soci_dir is not None:
+                # Il soci in `sp17b`: frazione NON tonda degli immobilizzazioni
+                # materiali, aggiunta al fixture come fa il `_genera` di
+                # `tests/test_forecast_altri_finanziatori.py` (voce,
+                # aggregato e cassa a pareggio). `base_bank_debt` non si
+                # muove: `sp17b` e' fra i campi NON bancari. Senza immobili
+                # (holding) il soci viene zero e la lista NON va emessa:
+                # `assemble_financing` la rifiuterebbe con «maggiore di
+                # zero», e un piano su zero euro non esercita nulla.
+                soci = (_b_saldo("sp03_immob_materiali")
+                        * D(str(soci_dir["frazione"]))).quantize(CENT)
+                riga0 = anni_def[0]["valori"]
+                if soci > 0:
+                    bs_sc = dict(bs)
+                    bs_sc["sp17b_debiti_altri_finanz_lungo"] = str(
+                        _b_saldo("sp17b_debiti_altri_finanz_lungo") + soci)
+                    bs_sc["sp17_debiti_lungo"] = str(_b_saldo("sp17_debiti_lungo") + soci)
+                    bs_sc["sp09_disponibilita_liquide"] = str(
+                        _b_saldo("sp09_disponibilita_liquide") + soci)
+                    riga0["other_lenders"][0]["opening_residual"] = str(soci)
+                    riga0["other_lenders"][0]["repayments"] = [
+                        str((soci * D(str(f))).quantize(CENT))
+                        for f in soci_dir["rimborsi"][:num_anni]]
+                else:
+                    riga0.pop("other_lenders")
+            if fidi_dir is not None:
+                # I due regimi dei fidi (Task 3/3b): `bank_lines_amount` + i
+                # residui dei contratti devono coincidere AL CENTESIMO col
+                # debito bancario del fixture (`assemble_financing` alza
+                # «devono coincidere con il debito bancario»), e i fidi non
+                # possono superare il suo breve. Il profilo non conosce il
+                # fixture: i segnaposto "0" si riempiono QUI, col debito
+                # bancario reale misurato con la stessa funzione del motore
+                # (`base_bank_debt`) — stessa tecnica di `finanziamento_misto`.
+                # «zero»: il regime del test `altri_finanziatori` (fidi a
+                # zero, contratto che copre tutto); altrimenti fidi = il
+                # breve della banca, contratto = il resto.
+                debito_base = _debito_bancario_base(_b_saldo)
+                fidi = (D("0") if fidi_dir.get("zero")
+                        else min(_b_saldo("sp16a_debiti_banche_breve"), debito_base))
+                residuo = (debito_base - fidi).quantize(CENT)
+                riga0 = anni_def[0]["valori"]
+                riga0["bank_lines_amount"] = str(fidi.quantize(CENT))
+                righe = riga0.get("financing_loans") or []
+                if righe:
+                    righe[0]["opening_residual"] = str(residuo)
+                    if fidi_dir.get("rimborsi") is not None:
+                        # Rate franche: sigma << residuo (il kernel oltre la
+                        # lista non rimborsa nulla; il residuo resta aperto).
+                        righe[0]["repayments"] = [
+                            str((residuo * D(str(f))).quantize(CENT))
+                            for f in fidi_dir["rimborsi"][:num_anni]]
+            if tfr_dir is not None:
+                # Le liquidazioni TFR (Task 6) sono frazioni di `sp15` del
+                # fixture: il motore rifiuta cio' che supera fondo +
+                # accrediti, e con il personale in crescita debole del
+                # profilo il fondo non scende sotto meta' dell'apertura
+                # nemmeno nell'anno sospeso. Fixture senza fondo (holding):
+                # importi a zero, il profilo degenera nel neutro.
+                fondo = _b_saldo("sp15_tfr")
+                for i, frac in enumerate(tfr_dir["frazioni"][:num_anni]):
+                    anni_def[i]["valori"]["tfr_payments"] = str((fondo * D(str(frac))).quantize(CENT))
+                if (tfr_dir.get("sospeso_anno") is not None
+                        and tfr_dir["sospeso_anno"] < num_anni):
+                    anni_def[tfr_dir["sospeso_anno"]]["valori"]["tfr_accrual_suspended"] = True
             if profilo_nome == "override_aggregato":
                 # Il segnaposto "0" del profilo diventa il totale FORZATO del
                 # fixture: un `sp16` imposto lontano dal suo valore naturale
@@ -829,7 +1040,7 @@ def costruisci_griglia(seed: int, num_anni: int) -> List[Dict[str, Any]]:
                 "id": f"{fixture_nome}__{profilo_nome}",
                 "base_year": 2026,
                 "settore": SETTORE_FIXTURE.get(fixture_nome, 1),
-                "bs": bs,
+                "bs": bs_sc,
                 "ce": ce,
                 "anni": anni_def,
             })
@@ -888,6 +1099,7 @@ DRIVER = textwrap.dedent('''\
     import json
     import sys
     from decimal import Decimal
+    from sqlalchemy import types as sqltypes
 
     D = Decimal
     NON_IPOTESI = {"id", "scenario_id", "forecast_year", "created_at", "updated_at"}
@@ -914,7 +1126,12 @@ DRIVER = textwrap.dedent('''\
             return bool(valore)
         if tipo.startswith("JSON"):
             return valore
-        return D(str(valore))
+        # Colonne a testo (es. `bank_lines_rule`, Task 3): `D("costante")`
+        # alzerebbe ConversionSyntax e lo scenario sparirebbe come errore
+        # del driver. Solo le colonne numeriche passano da `Decimal`.
+        if isinstance(colonna.type, (sqltypes.Numeric, sqltypes.Integer, sqltypes.Float)):
+            return D(str(valore))
+        return valore
 
 
     def _serializza(valore):

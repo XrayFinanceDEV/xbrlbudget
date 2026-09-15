@@ -2,13 +2,13 @@
 
 **Data:** 2026-09-13
 
-**Stato:** proposta pronta per revisione
+**Stato:** M1 integrato; requisiti del dossier consolidati il 2026-09-15 per M2
 
 **Area:** report, pratica infrannuale, budget, commenti AI
 
 **Milestone:** M1 — report finale web e contratto dati
 
-**Spec collegata:** [Report PDF con Typst](2026-09-13-report-pdf-typst-design.md)
+**Spec collegate:** [Report PDF con Typst](2026-09-13-report-pdf-typst-design.md) · [Dossier Report Budget](2026-09-15-report-budget-dossier-design.md)
 
 ## 1. Obiettivo
 
@@ -29,7 +29,7 @@ Il risultato di questo milestone è una pagina web leggibile e commentabile e,
 soprattutto, un modello dati canonico e versionato. Lo stesso modello sarà l'unica
 fonte ammessa per il successivo PDF Typst.
 
-## 2. Problema attuale
+## 2. Problema iniziale (prima dell’integrazione M1)
 
 La pagina `/report` oggi è un buon report analitico del budget: mostra bilanci,
 cash flow, indicatori, composizioni, margini, scoring, break-even e commenti AI.
@@ -156,8 +156,12 @@ L'endpoint:
 
 ### 5.2 Versionamento
 
-Il payload contiene `schema_version`, inizialmente `1`. Le modifiche additive
-mantengono la versione; rimozioni o cambi semantici richiedono una nuova versione.
+Il payload M1 implementato contiene `schema_version == 1`. Il dossier richiede
+`schema_version == 2`: amplia grafici, prospetti dettagliati, metadati degli
+indicatori e note editoriali. I client v1 attuali richiedono esattamente sei serie
+e non possono leggere il dossier come una semplice aggiunta di serie v1. La
+transizione e i campi v2 sono definiti nella spec Dossier Report Budget.
+Le fixture v1 restano il riferimento di regressione del milestone già integrato.
 
 Il frontend deve rifiutare esplicitamente una versione maggiore di quella
 supportata, invece di renderizzare parzialmente un documento sconosciuto.
@@ -196,6 +200,14 @@ FinalReportModel
 dei campi volatili come `generated_at`. Serve per freschezza, audit e futura
 generazione del PDF.
 
+### 5.3.1 Estensione v2 per il dossier
+
+Il modello v2 conserva il percorso della pratica e aggiunge identità neutrale
+del documento, prospetti completi con gerarchia delle righe, indicatori con
+unità/basi/metodologia, grafici aggiuntivi e piano editoriale con note brevi.
+Valori e subtotali sono assemblati dal backend, non ricostruiti nei renderer.
+Il contratto è definito nella [spec del dossier](2026-09-15-report-budget-dossier-design.md).
+
 ### 5.4 Revisioni delle fonti
 
 `source_revisions` rende osservabile da cosa deriva il documento. Include almeno:
@@ -218,8 +230,9 @@ campo è `null` e viene emesso un warning diagnostico.
 
 Il report usa questo indice stabile:
 
-1. **Copertina e perimetro** — azienda, scenario, periodo storico, orizzonte di
-   previsione, data e stato del documento.
+1. **Copertina e perimetro** — titolo neutrale `Report Budget {inizio} - {fine}`,
+   azienda, scenario, periodo storico, orizzonte, data e stato. Per un solo anno
+   il titolo è `Report Budget {anno}`. Gli anni provengono dai periodi del piano.
 2. **Sintesi esecutiva** — risultati principali, messaggi chiave, rischi e punti
    che richiedono decisione.
 3. **Origine e qualità dei dati** — percorso della pratica, fonti, completezza,
@@ -235,7 +248,7 @@ Il report usa questo indice stabile:
 10. **Indicatori e rischi** — indicatori economici, finanziari e di crisi.
 11. **Diagnostica e punti da verificare** — errori bloccanti, warning e segnali
     extra-contabili.
-12. **Appendici e metodologia** — prospetti completi, matrice completa delle
+12. **Allegati e metodologia** — prospetti completi, matrice completa delle
     ipotesi, definizioni e note.
 
 Le sezioni hanno identificatori tecnici stabili, separati dalle etichette italiane,
@@ -310,7 +323,7 @@ split e deve quindi comparire in diagnostica.
 
 ### 6.5 Grafici
 
-Il corpo usa pochi grafici orientati alle decisioni. La prima versione comprende:
+Il corpo usa pochi grafici orientati alle decisioni. La versione M1 comprende:
 
 1. ricavi, EBITDA e risultato netto;
 2. EBITDA margin ed EBIT margin;
@@ -329,6 +342,29 @@ Ogni grafico ha:
 
 `chart_series` contiene valori, categorie, unità e formattazione semantica. React e
 Typst possono avere una resa visiva diversa, ma devono consumare le stesse serie.
+La versione v2 amplia il catalogo per gli approfondimenti del dossier, secondo
+la spec collegata; i sei grafici M1 non vengono rimossi o reinterpretati.
+
+### 6.6 Direzione editoriale concordata — 2026-09-15
+
+La versione stampata deve essere molto simile al dossier CR fornito dall'utente,
+con contenuti di bilancio infrannuale, rettifiche, ipotesi del piano e dati di
+proiezione, accompagnati da commenti nelle rispettive sezioni. Il riferimento e
+le regole di composizione sono definiti nella
+[sezione 8.5 della spec PDF](2026-09-13-report-pdf-typst-design.md#85-riferimento-estetico-concordato--2026-09-15).
+
+La presentazione deve rendere leggibile il percorso dai dati di partenza ai
+risultati del piano, distinguendo dati osservati e previsionali. I commenti
+esistenti sono collocati vicino ai dati pertinenti, mantenendo i sei blocchi
+narrativi e le loro regole di freschezza. L'indice e il contratto dati M1 restano
+la fonte delle sezioni e dei contenuti per tutti i workflow.
+
+La successiva richiesta dell'utente approfondisce gli indicatori dei report
+infrannuale e analitico e richiede una sezione **Allegati** con i prospetti
+completi, oltre alle sintesi nel corpo. La sezione 12 comprende gli allegati
+contabili e finanziari, il dettaglio di rettifiche/ipotesi e la metodologia.
+La copertura è specificata nella sezione 8.6 della spec PDF; le dodici sezioni
+logiche possono occupare più pagine.
 
 ## 7. Narrazione e commenti
 
@@ -346,6 +382,13 @@ blocchi narrativi con identificatori stabili:
 
 Ogni blocco contiene testo, provenienza (`ai`, `user`, `migrated`), data di
 aggiornamento, hash delle fonti e stato di freschezza.
+
+**Estensione richiesta il 2026-09-15:** il PDF deve avere un commento pertinente,
+anche breve, per ogni pagina, inclusi copertina e Allegati. I sei blocchi
+implementati coprono i temi principali ma non tutte le pagine; prima del template
+va esteso il contratto con note per contenuto/parte di prospetto, con le stesse
+regole di provenienza, modifica e freschezza. Si applica la sezione 8.7 della spec
+PDF. Nell'artifact v4 le note sono esempi editoriali statici, non output dell'API.
 
 La generazione AI:
 
@@ -377,7 +420,8 @@ Bloccano il documento finale almeno:
 
 Rimangono warning non bloccanti, salvo diversa regola già presente nel dominio:
 
-- commenti AI obsoleti o mancanti;
+- blocchi narrativi principali AI obsoleti o mancanti; le note brevi obbligatorie
+  del dossier seguono il controllo di copertura editoriale della spec v2;
 - ipotesi rimaste ai default;
 - segnali extra-contabili;
 - indicatori fuori soglia;
@@ -489,6 +533,14 @@ forecast e ritorno a `ready`.
 - generare il contesto AI dal modello canonico;
 - mostrare provenienza e freschezza.
 
+### Lotto D2 — estensione del dossier prima del PDF
+
+- introdurre il contratto v2 preservando fixture e lettura v1;
+- verificare e conservare prospetti completi e metadati degli indicatori;
+- esporre piano editoriale e note brevi con identificatori stabili;
+- estendere generazione/salvataggio dei commenti, provenienza e freschezza;
+- adattare `/report` al v2 e rendere gli Allegati completi visibili in stampa.
+
 ### Lotto E — collaudo e documentazione
 
 - completare test automatici e collaudo browser;
@@ -522,9 +574,10 @@ Il milestone è completato quando:
 - analisi di sensitività o simulazioni non già presenti nei dati;
 - certificazione legale o contabile del documento.
 
-## 15. Decisioni da confermare prima dell'implementazione
+## 15. Decisioni consolidate per il dossier — 2026-09-15
 
-La spec propone come default:
+I requisiti aggiornati sono definiti dalla spec Dossier Report Budget. Rimangono
+valide queste decisioni iniziali, con l’estensione delle note brevi v2:
 
 - sei blocchi narrativi unificati invece dei commenti frammentati attuali;
 - blocco del PDF finale con forecast obsoleto o controlli contabili falliti;

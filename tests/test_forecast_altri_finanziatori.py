@@ -175,8 +175,8 @@ def test_guardia_su_prev_details_senza_blocco_fidi(monkeypatch):
     from calculations import forecast_engine as fe
     reale = fe._dichiara_debito_bancario
 
-    def senza_fidi(debito, sweep, sp16a, sp17a, scoperto):
-        d = reale(debito, sweep, sp16a, sp17a, scoperto)
+    def senza_fidi(debito, sweep, sp16a, sp17a, scoperto, **kw):
+        d = reale(debito, sweep, sp16a, sp17a, scoperto, **kw)
         d.pop("fidi", None)
         return d
 

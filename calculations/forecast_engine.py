@@ -194,12 +194,25 @@ class _Overdraft:
     ripartizione e' coerente — il passivo e' fissato dall'override qualunque sia
     la divisione fra banca e scoperto, quindi la cassa resterebbe negativa — e il
     motore lo rifiuta con un errore esplicito invece di superare il totale.
+
+    **Nel regime esplicito dei fidi (spec 2026-09-15 §5.2-bis) lo scoperto non
+    nasce dal fabbisogno**: `lines_affidamento` valorizzato (= `bank_lines_amount`
+    della prima riga) e il fabbisogno TIRA SUI FIDI (`tiraggio`), mai solleva e mai
+    apre scoperto — `overdraft_allowed` e `overdraft_limit` non si leggono. La
+    seconda cifra di `copri` e' allora il tiraggio, non lo scoperto; l'eccedenza
+    sull'affidamento di partenza si DICHIARA (`details['avviso_fidi']`), il piano
+    si calcola comunque.
     """
     allowed: bool = False
     limit: Optional[Decimal] = None      # None = concesso senza tetto
     opening: Decimal = Decimal("0")
     forced_total: Optional[str] = None
     outstanding: Decimal = Decimal("0")  # lo scoperto in essere a fine anno, scritto da `copri`
+    # Regime esplicito (§5.2-bis): l'affidamento di partenza, costante per tutto
+    # il piano anche con regola `ricavi`. `None` = regime di sempre, lo scoperto
+    # resta la sola via al fabbisogno.
+    lines_affidamento: Optional[Decimal] = None
+    tiraggio: Decimal = Decimal("0")     # i fidi USATI nell'anno, scritto da `copri`
 
     @property
     def raised(self) -> Decimal:
@@ -220,10 +233,31 @@ class _Overdraft:
         e' quello di sempre (`Fabbisogno finanziario scoperto`), con l'importo
         dello scoperto NUOVO; il tetto si confronta con lo scoperto IN ESSERE a
         fine anno, cioe' il fido come utilizzo massimo.
+
+        La seconda cifra restituita e' la quota che il chiamante somma a
+        `sp16a`/`sp16`: lo scoperto in essere fuori dal regime esplicito, il
+        tiraggio sui fidi DENTRO (§5.2-bis). Il cancello resta uno solo in
+        entrambi i regimi, sulla cassa netta finale dopo lo sweep.
         """
         zero = Decimal("0")
         cassa_netta = Decimal(str(cassa_netta)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         fabbisogno = max(zero, -cassa_netta)
+        if self.lines_affidamento is not None:
+            # Regime esplicito (spec 2026-09-15 §5.2-bis, decisione del
+            # proprietario): il fabbisogno tira sui fidi. Non solleva MAI
+            # «Fabbisogno finanziario scoperto» e non apre scoperto:
+            # `overdraft_allowed`/`overdraft_limit` non si leggono qui; il tetto
+            # dell'avviso e' l'importo di partenza, anche con regola `ricavi`.
+            if fabbisogno > zero and self.forced_total is not None:
+                raise ValueError(
+                    f"Fidi e anticipi incompatibili con {self.forced_total} forzato: "
+                    f"servono {_eur_it(fabbisogno)} di fidi, ma il totale della voce e' "
+                    "fissato dall'override. Togli l'override o copri il fabbisogno con "
+                    "un finanziamento."
+                )
+            self.tiraggio = fabbisogno
+            self.outstanding = zero
+            return max(zero, cassa_netta), fabbisogno
         nuovo = fabbisogno - self.opening
         if nuovo > zero and not self.allowed:
             raise ValueError(
@@ -387,7 +421,9 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
 
 
 def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_Sweep]",
-                              sp16a: Decimal, sp17a: Decimal, scoperto: Decimal) -> Dict[str, Any]:
+                              sp16a: Decimal, sp17a: Decimal, scoperto: Decimal,
+                              tiraggio: Optional[Decimal] = None,
+                              affidamento: Optional[Decimal] = None) -> Dict[str, Any]:
     """`details['debito_bancario']` al centesimo, riconciliato con cio' che `sp16a`/`sp17a` persistono.
 
     Somma dei `breve` + `scoperto` = `sp16a`, somma dei `lungo` = `sp17a`, per costruzione. La
@@ -432,6 +468,11 @@ def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_S
             'apertura': _q2(debito.fidi['apertura']),
             'variazione_ricavi': _q2(debito.fidi['variazione_ricavi']),
             'rimborso_sweep': _q2(pagato_fidi),
+            # Il tiraggio dell'anno (spec §5.2-bis): il fabbisogno non apre
+            # scoperto, aumenta i fidi. Dichiarato sempre nel regime, anche a
+            # zero: a valle una chiave assente vale zero, ma tacerlo su un anno
+            # INTERROTTO direbbe «qui i fidi non hanno mai finanziato nulla».
+            'tiraggio': _q2(tiraggio if tiraggio is not None else zero),
             'residuo': _q2(debito.fidi['residuo']) - _q2(pagato_fidi),
             'regola': debito.fidi.get('regola') or 'costante',
         }
@@ -463,6 +504,14 @@ def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_S
                     break
     if fidi_riga is not None:
         fidi['residuo'] = fidi_riga['breve']
+        # Il tetto dell'avviso è l'importo di PARTENZA (`bank_lines_amount`
+        # della prima riga), costante per tutto il piano anche con regola
+        # `ricavi` (spec §5.2-bis): la crescita per regola conta verso il
+        # tetto quanto un tiraggio. `oltre_affidamento` si calcola sul
+        # residuo RICONCILIATO col persistito, non sulla grezza.
+        if affidamento is not None:
+            fidi['affidamento'] = _q2(affidamento)
+            fidi['oltre_affidamento'] = max(zero, fidi['residuo'] - _q2(affidamento))
     return {'pregresso_senza_piano': senza_piano, 'pregresso_piano_anni': piano_anni,
             'contratti': contratti, 'fidi': fidi}
 
@@ -1976,6 +2025,11 @@ class ForecastEngine:
                 result["sp17a_debiti_banche_lungo"] -= pagato_lungo
                 result["sp17_debiti_lungo"] -= pagato_lungo
             if overdraft is not None:
+                # La seconda cifra di `copri` e' la QUOTA DA SOMMARE a `sp16a`:
+                # lo scoperto in essere fuori dal regime esplicito, il tiraggio
+                # sui fidi dentro (spec §5.2-bis). Il cancello resta UNO SOLO,
+                # qui, sulla cassa netta finale dopo lo sweep, in entrambi i
+                # regimi.
                 cassa, scoperto = overdraft.copri(cassa)
                 result["sp16a_debiti_banche_breve"] += scoperto
                 result["sp16_debiti_breve"] += scoperto
@@ -2369,6 +2423,11 @@ class ForecastEngine:
                      if sp_ov.get(campo) is not None),
                     None,
                 ),
+                # Regime esplicito (§5.2-bis): il fabbisogno tira sui fidi, non
+                # sullo scoperto. `lines_affidamento` = l'importo della prima
+                # riga, costante per tutto il piano anche con regola `ricavi`.
+                lines_affidamento=(Decimal(str(fidi_prima_riga))
+                                   if fidi_prima_riga is not None else None),
             )
             cassa_apertura = self._read_bs(prev_bs, 'sp09_disponibilita_liquide')
             # Lo sweep e le componenti del debito bancario sono di QUESTO anno, come
@@ -2528,7 +2587,23 @@ class ForecastEngine:
                 forecast_bs['sp16a_debiti_banche_breve'],
                 forecast_bs['sp17a_debiti_banche_lungo'],
                 overdraft.outstanding,
+                tiraggio=overdraft.tiraggio,
+                affidamento=overdraft.lines_affidamento,
             )
+            # ── FIDI OLTRE L'AFFIDAMENTO: AVVISO SEMPRE DICHIARATO (regime
+            # esplicito, spec §5.2-bis) ── Il piano si fa comunque; l'eccedenza
+            # sull'importo del bilancio di partenza si dichiara, non si tapa.
+            # Fuori dal regime la chiave NON nasce affatto (banco di parita').
+            if fidi_apertura is not None:
+                _fidi_det = details['debito_bancario'].get('fidi') or {}
+                _oltre = Decimal(str(_fidi_det.get('oltre_affidamento') or 0))
+                details['avviso_fidi'] = (
+                    f"Nel {assumption.forecast_year} il piano usa "
+                    f"{eur_it(Decimal(str(_fidi_det.get('residuo') or 0)))} € di fidi "
+                    f"e anticipi, {eur_it(_oltre)} € oltre i "
+                    f"{eur_it(Decimal(str(_fidi_det.get('affidamento') or 0)))} € del "
+                    "bilancio di partenza: servono affidamenti in più."
+                ) if _oltre > Decimal('0') else None
             # COME il debito bancario e' descritto quest'anno: fidi a stato
             # (`esplicito`), contratti col residuo (`contratti`), anni di
             # rimborso (`anni`), niente di che (`legacy`). Dichiarato sempre.
@@ -2609,7 +2684,17 @@ class ForecastEngine:
         il picco copre gli anni CALCOLATI, che sono quelli che l'anteprima rende.
         """
         zero = Decimal('0')
-        saldi = [(r, r.details.get('scoperto_residuo') or zero) for r in results]
+
+        def _saldo_anno(r: "ForecastYearResult") -> Decimal:
+            # Nel regime esplicito (§5.2-bis) lo scoperto non nasce mai: la
+            # domanda da portare in banca e' quanto i fidi superano l'affidamento
+            # di partenza. Fuori dal regime, il valore di sempre.
+            fidi = (r.details.get('debito_bancario') or {}).get('fidi')
+            if fidi is not None:
+                return Decimal(str(fidi.get('oltre_affidamento') or 0))
+            return r.details.get('scoperto_residuo') or zero
+
+        saldi = [(r, _saldo_anno(r)) for r in results]
         picco = max((s for _, s in saldi), default=zero)
         anno = next((r.year for r, s in saldi if s == picco), None) if picco > zero else None
         for result in results:

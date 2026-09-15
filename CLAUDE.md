@@ -583,7 +583,14 @@ compared with the overdraft **outstanding at year end** (the credit line as maxi
 engine raises again. An `sp_overrides` on `sp16a` (or `sp16`) fixes the total: it wins, and the overdraft
 follows from it — zero when net cash is not negative; with a requirement no split of the forced total
 can be coherent (the liabilities are fixed whatever the split), so the engine refuses the combination
-with an explicit Italian error instead of exceeding the total. **Why it exists:** a stressed plan is
+with an explicit Italian error instead of exceeding the total. **In the explicit credit-lines regime
+(`bank_lines_amount` set, spec §5.2-bis, owner's decision 2026-09-15) the requirement does not raise
+and does not open an overdraft at all — it draws on the fidi instead** (`tiraggio`, which joins the
+declared `fidi.residuo` and therefore repays/opens the next year like any other state, interest
+included), `overdraft_allowed`/`overdraft_limit` are never read, and everything beyond the starting
+`affidamento` is declared — `details['avviso_fidi']`, with `fabbisogno_picco` reading
+`oltre_affidamento` in that regime; the single gate stays one, on final net cash after the sweep.
+**Why it exists:** a stressed plan is
 something one wants to be able to run, to measure **how much funding those assumptions require** —
 the answer is `scoperto_generato` year by year, with the peak in `fabbisogno_picco` /
 `fabbisogno_picco_anno`; `cassa_assorbita` is declared every year, even while cash stays positive.

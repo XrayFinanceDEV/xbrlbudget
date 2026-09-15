@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -236,18 +237,49 @@ class TypstRenderer:
                 '--cap-drop', 'ALL', '--clearenv', '--ro-bind', str(job), '/report',
                 '--bind', str(job / 'output'), '/report/output', '--chdir', '/report', '--', *command]
 
-    def _run(self, command: list[str], job: Path, *, unavailable=False, deadline: float | None = None):
+    @contextmanager
+    def _private_job(self, serialized: bytes, files: dict[str, bytes], binary: bytes, options: bytes):
+        """Stage only verified bundle data in the private tree mounted by Bubblewrap."""
+        with tempfile.TemporaryDirectory(prefix='budget-typst-', dir=self.temp_root) as folder:
+            job = Path(folder)
+            for name, data in files.items():
+                destination = job / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
+            (job / 'model.json').write_bytes(serialized)
+            (job / 'options.json').write_bytes(options)
+            (job / 'compiler').write_bytes(binary)
+            (job / 'compiler').chmod(0o500)
+            for directory in ('output', 'packages', 'cache', 'fonts'):
+                (job / directory).mkdir(exist_ok=True)
+            yield job
+
+    def _run(self, command: list[str], job: Path, *, unavailable=False, deadline: float | None = None,
+             stdout_path: Path | None = None):
         remaining = self.limits.timeout_seconds if deadline is None else deadline - time.monotonic()
         if remaining <= 0:
             raise RendererTimeout()
         worker = Path(__file__).with_name('worker.py')
         wrapped = [sys.executable, '-I', str(worker), str(self.limits.memory_bytes),
                    str(self.limits.cpu_seconds), str(self.limits.max_output_bytes), '128', *command]
+        output = None
+        if stdout_path is not None:
+            if stdout_path.parent != job / 'output' or stdout_path.name != 'layout.json':
+                raise RendererUnavailable()
+            try:
+                fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                output = os.fdopen(fd, 'wb')
+            except OSError:
+                raise RendererUnavailable() from None
         try:
             process = subprocess.Popen(wrapped, cwd=job, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={}, start_new_session=True)
+                stdout=output if output is not None else subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, env={}, start_new_session=True)
         except OSError:
             raise RendererUnavailable() from None
+        finally:
+            if output is not None:
+                output.close()
         try:
             code = process.wait(timeout=remaining)
         except subprocess.TimeoutExpired:
@@ -291,18 +323,8 @@ class TypstRenderer:
             if not self.sandbox.is_file() or self.sandbox.is_symlink() or not os.access(self.sandbox, os.X_OK):
                 raise RendererUnavailable()
             try:
-                with tempfile.TemporaryDirectory(prefix='budget-typst-', dir=self.temp_root) as folder:
-                    job = Path(folder)
-                    for name, data in files.items():
-                        destination = job / name
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        destination.write_bytes(data)
-                    (job / 'model.json').write_bytes(serialized)
-                    (job / 'options.json').write_text(json.dumps({'document_state': document_state, 'grayscale': grayscale}), encoding='utf-8')
-                    (job / 'compiler').write_bytes(binary)
-                    (job / 'compiler').chmod(0o500)
-                    for directory in ('output', 'packages', 'cache', 'fonts'):
-                        (job / directory).mkdir(exist_ok=True)
+                options = json.dumps({'document_state': document_state, 'grayscale': grayscale}).encode('utf-8')
+                with self._private_job(serialized, files, binary, options) as job:
                     # A real sandbox probe distinguishes unavailable namespaces
                     # from a compiler error, without capturing any diagnostics.
                     deadline = started + self.limits.timeout_seconds

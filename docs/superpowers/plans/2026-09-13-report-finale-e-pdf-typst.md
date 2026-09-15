@@ -1213,3 +1213,18 @@ completato, due review indipendenti Terra high approvate: 42 test di runtime;
 Nessun push/merge su main, nessun endpoint di export anticipato.
 Prossimo task M2-02A: base, IBM Plex Sans e planner misurato; piano completo
 congelato dopo dimensioni dei grafici M2-03 e prima delle note M2-00C.
+
+### Esecuzione M2-02A, base e piano provvisorio — 2026-09-15
+
+Base A4 verticale implementata con copertina neutra, Plex Sans statici identici
+al riferimento (OFL/provenance/checksum), tre prospetti completi e spazio commento
+su ogni pagina. TypstLayoutProbe misura la composizione reale in sandbox;
+MeasuredBasePlan raggruppa righe/pagine con ID semantici e hash font/layout/asset.
+Il risultato ha scope=base, finalized=False: non viene assegnato al contratto
+editorial_plan e non dichiara readiness o copertura del dossier definitivo.
+Collaudo finale: 152 test mirati; due review Terra high approvate.
+Collisione valida di ID locali fra prospetti corretta con namespace di prospetto;
+regressione reale e riproduzione indipendente passate. Dettaglio in
+docs/testing/M2-02A-dossier-base.md.
+La fase successiva è M2-03, dimensioni/componenti grafici. Segue completamento
+del planner/reflow M2-02A con inventario completo, prima di M2-00C note.

@@ -1,0 +1,10 @@
+{
+  "registry": "https://packages.typst.org/preview",
+  "digest_source": "SHA-256 measured on official registry archives on 2026-09-15; review pins before updating",
+  "packages": [
+    {"name": "cetz-plot", "version": "0.1.4", "sha256": "13170258be0761701e57141081e1f6f029bc8967988f549a3b089289a1347936", "license": "LGPL-3.0-or-later"},
+    {"name": "cetz", "version": "0.5.2", "sha256": "77cf8490114ae04c6e665a11efa691d284a0cadb9719771b5708c1197292f23f", "license": "LGPL-3.0-or-later"},
+    {"name": "oxifmt", "version": "1.0.0", "sha256": "7d17a1fc8ad01740ec3cb2b03c7360a4225ff9318e5710765fa98ea6fd59594f", "license": "MIT OR Apache-2.0"},
+    {"name": "primaviz", "version": "0.10.0", "sha256": "6f60b6d7b3803f5ec9e2c6ee000c2d7d2395ee79fa405adef4aa5612066e425a", "license": "MIT"}
+  ]
+}

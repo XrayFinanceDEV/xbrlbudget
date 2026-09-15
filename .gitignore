@@ -150,3 +150,5 @@ docs/examples/
 # never commit anything under them.
 /tools/typst/bin/
 /tools/typst/download/
+/tools/typst/spike/.packages/
+/tools/typst/spike/output/

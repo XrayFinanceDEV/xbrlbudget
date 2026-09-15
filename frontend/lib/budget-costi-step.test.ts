@@ -4,7 +4,6 @@ import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { CostiTableRow, ForcedSplit } from "./budget-costi-step";
 import {
   FIXED_SHARE_DEFAULT,
-  INFLAZIONE_PREDEFINITA,
   autoYearsOf,
   calcolateAltrove,
   costiBase,
@@ -13,7 +12,6 @@ import {
   fixedShareOf,
   forcedNote,
   forcedSplitYears,
-  inflazioneAttuale,
   splitBaseAmount,
 } from "./budget-costi-step";
 import { euro } from "@/lib/budget-format";
@@ -140,16 +138,6 @@ describe("splitBaseAmount", () => {
 
   it("un importo assente non diventa uno zero", () => {
     expect(splitBaseAmount(null, 40)).toEqual({ fixed: null, variable: null });
-  });
-});
-
-describe("inflazioneAttuale", () => {
-  it("legge l'inflazione dal primo anno di piano", () => {
-    expect(inflazioneAttuale(asMap({ 2027: { inflation_pct: 3.5 } }), [2027])).toBe(3.5);
-  });
-  it("senza valore, o senza anni, resta il predefinito", () => {
-    expect(inflazioneAttuale(asMap({ 2027: {} }), [2027])).toBe(INFLAZIONE_PREDEFINITA);
-    expect(inflazioneAttuale(asMap({}), [])).toBe(INFLAZIONE_PREDEFINITA);
   });
 });
 

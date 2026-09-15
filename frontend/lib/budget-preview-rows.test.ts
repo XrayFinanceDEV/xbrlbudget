@@ -3,7 +3,7 @@ import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
-  ceAggregates, rowsAltreVociCe, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
+  ceAggregates, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
   rowsImposte, rowsImposteSaldoAcconto, rowsPregressoNuovo, rowsPregressoRunoff, unfundedFromError,
 } from "./budget-preview-rows";
 import { confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
@@ -178,7 +178,7 @@ describe("rowsCeAnteImposte", () => {
 });
 
 // Fixture con tre delle undici voci minori non nulle e di segno diverso, cosi' la
-// formula canonica (usata da ceAggregates/rowsImposte/rowsAltreVociCe) e quella
+// formula canonica (usata da ceAggregates/rowsImposte) e quella
 // semplificata che c'era prima del fix danno numeri diversi:
 //   canonica:     vp=1180 (1100+30+50), costs=900 (430+210+30+155+40+0+15+20), fin=-20 (-10-10)
 //                 ebt = 1180 - 900 - 20 = 260
@@ -205,27 +205,6 @@ describe("rowsImposte — formula canonica, non quella semplificata", () => {
   });
   it("years: [] non lancia e non produce righe d'anno", () => {
     const rows = rowsImposte(baseInc, []);
-    expect(rows.every((r) => r.years.length === 0)).toBe(true);
-  });
-});
-
-describe("rowsAltreVociCe", () => {
-  it("ebt e' quello canonico, diverso dal semplificato, con le voci minori non nulle", () => {
-    const rows = rowsAltreVociCe(baseInc, [year(2027, minoriOver)]);
-    expect(rows.find((r) => r.key === "ebt")!.years[0].value).toBe(EBT_CANONICO);
-    expect(rows.find((r) => r.key === "ebt")!.years[0].value).not.toBe(EBT_SEMPLIFICATO);
-  });
-  it("la cascata vp + main + alt + amm + fin somma esattamente a ebt (segni delle righe)", () => {
-    const rows = rowsAltreVociCe(baseInc, [year(2027, minoriOver)]);
-    const val = (key: string) => rows.find((r) => r.key === key)!.years[0].value!;
-    expect(val("vp") + val("main") + val("alt") + val("amm") + val("fin")).toBeCloseTo(val("ebt"), 6);
-    // e vale anche sulla colonna base
-    const valBase = (key: string) => rows.find((r) => r.key === key)!.base.value!;
-    expect(valBase("vp") + valBase("main") + valBase("alt") + valBase("amm") + valBase("fin"))
-      .toBeCloseTo(valBase("ebt"), 6);
-  });
-  it("years: [] non lancia e non produce righe d'anno", () => {
-    const rows = rowsAltreVociCe(baseInc, []);
     expect(rows.every((r) => r.years.length === 0)).toBe(true);
   });
 });
@@ -340,7 +319,7 @@ describe("rowsAnnoBase", () => {
     expect(dso.years[0]).toEqual({ value: null, days: null });
   });
 
-  it("MOL = ceAggregates(...).mol, coincide con quello di rowsCosti/rowsAltreVociCe sullo stesso anno base — fix round 1, rilievo 1", () => {
+  it("MOL = ceAggregates(...).mol, coincide con quello di rowsCosti sullo stesso anno base — fix round 1, rilievo 1", () => {
     // ce02 e ce11 entrambi diversi da zero: la vecchia formula locale
     // (ce01+ce04-ce05-ce06-ce07-ce08-ce12) e quella canonica di ceAggregates
     // divergono per (ce02+ce03+ce03a)-(ce10+ce11) = 30-15 = 15, quindi il
@@ -363,13 +342,11 @@ describe("rowsAnnoBase", () => {
     expect(molCanonico).not.toBe(molVecchiaFormulaDelBrief); // le due formule divergono davvero
     expect(molAnnoBase).toBe(molCanonico);
 
-    // La stessa "MOL" che rowsCosti e rowsAltreVociCe calcolano sullo stesso
-    // anno base, sullo stesso CE: un'azienda con queste voci non deve vedere
-    // due numeri diversi passando dal passo 1 al passo 3/4.
+    // La stessa "MOL" che rowsCosti calcola sullo stesso anno base, sullo
+    // stesso CE: un'azienda con queste voci non deve vedere due numeri
+    // diversi passando dal passo 1 al passo 3.
     const molRowsCosti = rowsCosti(incConVociMinori, { materials: 40, services: 40 }, []).find((r) => r.key === "mol")!.base.value;
-    const molRowsAltreVoci = rowsAltreVociCe(incConVociMinori, []).find((r) => r.key === "mol")!.base.value;
     expect(molAnnoBase).toBe(molRowsCosti);
-    expect(molAnnoBase).toBe(molRowsAltreVoci);
   });
 });
 

@@ -22,23 +22,6 @@ import { euro, num, numOrNull } from "@/lib/budget-format";
 /** Il default del motore per `fixed_*_percentage` (backend/app/schemas/budget.py). */
 export const FIXED_SHARE_DEFAULT = 40;
 
-/**
- * L'inflazione predefinita di schema, e la lettura dell'inflazione attuale del passo 1.
- *
- * Il Task 10 di questo lotto introduce `inflazioneOf` in `lib/budget-inflazione.ts`, con
- * la stessa identica formula — ma quel modulo non esiste ancora in questo worktree (il
- * coordinatore ha stabilito che il Task 10 corre DOPO il Task 11), e `StepCosti.tsx` non
- * e' fra i file che il Task 10 tocca: resta quindi questa lettura locale, non solo per
- * ora ma anche dopo che il Task 10 sara' unito. Vedi il rapporto del Task 11 per il
- * dettaglio della deviazione.
- */
-export const INFLAZIONE_PREDEFINITA = 2;
-
-export function inflazioneAttuale(assumptions: AssumptionsMap, years: number[]): number {
-  const raw = years[0] !== undefined ? assumptions[years[0]]?.inflation_pct : null;
-  return raw === null || raw === undefined ? INFLAZIONE_PREDEFINITA : num(raw);
-}
-
 export type FixedShareField = "fixed_materials_percentage" | "fixed_services_percentage";
 export type SplitOverrideField = "ce05_override" | "ce06_override";
 

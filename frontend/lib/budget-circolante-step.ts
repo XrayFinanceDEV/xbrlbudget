@@ -2,9 +2,8 @@
  * Le decisioni del passo 5 «Capitale circolante» (spec 2026-09-08 §4.5,
  * task-13-brief.md).
  *
- * Sta in `lib/` per lo stesso motivo di `budget-costi-step.ts` (Task 12) e
- * `budget-altre-voci-step.ts` (Task 13): nessun jsdom in questo repo, quindi
- * ogni decisione — quale giorno "auto" mostrare, quale importo base ha una
+ * Sta in `lib/` per lo stesso motivo di `budget-costi-step.ts` (Task 12): nessun jsdom
+ * in questo repo, quindi ogni decisione — quale giorno "auto" mostrare, quale importo base ha una
  * voce minore, con quale anno leggere gli interruttori — vive qui con la
  * sua suite `environment: node`, e `StepCircolante.tsx` si limita a
  * renderlo.

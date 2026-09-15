@@ -53,7 +53,6 @@ import type { StepProps } from "./types";
 import { StepScenario } from "./steps/StepScenario";
 import { StepFatturato } from "./steps/StepFatturato";
 import { StepCosti } from "./steps/StepCosti";
-import { StepAltreVociCE } from "./steps/StepAltreVociCE";
 import { StepCircolante } from "./steps/StepCircolante";
 import { StepPregressoNuovo } from "./steps/StepPregressoNuovo";
 import { StepImposte } from "./steps/StepImposte";
@@ -342,8 +341,9 @@ export function BudgetWizard({
       {/* Placeholder temporaneo (Task 8): il passo 5 e il passo 6 rendono
           ancora lo stesso componente di prima, `StepPregressoNuovo`. I passi
           15/16 lo sostituiscono ciascuno col proprio, coerente col nome
-          nuovo. `StepAltreVociCE` resta nel file (Task 11 la rimuove), ma il
-          suo ramo qui sparisce: "altre-voci-ce" non e' piu' una chiave. */}
+          nuovo. Il passo «Altre voci CE» non esiste piu' (Task 11): la sua
+          unica riga rimasta, gli oneri diversi di gestione, e' entrata nel
+          passo Costi. */}
       {step === "patrimoniale-pregresso" && <StepPregressoNuovo {...stepProps} />}
       {step === "patrimoniale-piano" && <StepPregressoNuovo {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}

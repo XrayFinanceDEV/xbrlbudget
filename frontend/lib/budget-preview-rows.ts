@@ -89,8 +89,8 @@ export function rowsAnnoBase(baseYear: number, historicalYears: number[], histor
   };
 
   // MOL da ceAggregates, l'unico aggregatore canonico del modulo: e' la
-  // stessa "MOL" che rowsCosti e rowsAltreVociCe calcolano sullo stesso anno
-  // base. Una formula locale piu' semplice (quella letterale del brief,
+  // stessa "MOL" che rowsCosti calcola sullo stesso anno base. Una formula
+  // locale piu' semplice (quella letterale del brief,
   // ce01+ce04-ce05-ce06-ce07-ce08-ce12) diverge da quella canonica per
   // (ce02+ce03+ce03a)-(ce10+ce11) — variazione rimanenze, lavori interni o
   // accantonamenti non nulli danno due "MOL" diversi passando dal passo 1 al
@@ -152,7 +152,7 @@ export function rowsFatturato(baseInc: IncomeStatement, years: ForecastPreviewYe
  * sono `null` con la loro nota, mai una somma inventata.
  *
  * Il MOL resta quello canonico di `ceAggregates` (invariato): e' l'aggregatore unico del
- * modulo, e la riga deve continuare a coincidere col MOL di `rowsAnnoBase`/`rowsAltreVociCe`
+ * modulo, e la riga deve continuare a coincidere col MOL di `rowsAnnoBase`
  * sullo stesso anno base (test «fix round 1, rilievo 1» qui sotto) anche quando ce02/ce03/
  * ce10/ce11/ce11b non sono nulli — voci che il pareggio del motore non considera, perche'
  * la sua "fissi + variabili" copre solo materie prime, servizi, personale, godimento e
@@ -256,26 +256,6 @@ export function rowsCeAnteImposte(baseInc: IncomeStatement, years: ForecastPrevi
     row("ro", "Risultato operativo", "kpi", { value: bRo }, pick("ro")),
     row("of", "Oneri finanziari", "sub", { value: -b.of }, pick("of")),
     row("ebt", "Risultato ante imposte", "total", { value: bEbt }, pick("ebt")),
-  ];
-}
-
-export function rowsAltreVociCe(baseInc: IncomeStatement, years: ForecastPreviewYear[]): PreviewRow[] {
-  // Cascata vp -> main -> alt -> MOL -> amm -> RO -> fin -> ebt: ogni riga (tranne i
-  // subtotali kpi) porta gia' il segno con cui va sommata, cosi' vp + main + alt + amm
-  // + fin torna esattamente ebt (stessa formula canonica di ceAggregates).
-  const bRev = num(baseInc.ce01_ricavi_vendite);
-  const b = ceAggregates(baseInc as unknown as Record<string, unknown>);
-  const ys = years.map((y) => ({ agg: ceAggregates(y.income_statement), rev: num(y.income_statement.ce01_ricavi_vendite) }));
-  const r = (
-    key: keyof ReturnType<typeof ceAggregates>, label: string, kind: PreviewRowKind, sign: 1 | -1 = 1, withPct = false,
-  ): PreviewRow =>
-    row(key, label, kind, { value: sign * b[key], ...(withPct ? { pct: pctOf(sign * b[key], bRev) } : {}) },
-      ys.map(({ agg, rev }) => ({ value: sign * agg[key], ...(withPct ? { pct: pctOf(sign * agg[key], rev) } : {}) })));
-  return [
-    r("vp", "Valore della produzione", "value"), r("main", "Costi principali", "sub", -1),
-    r("alt", "Altre voci dei costi della produzione", "sub", -1), r("mol", "MOL", "kpi", 1, true),
-    r("amm", "Ammortamenti e svalutazioni", "sub", -1), r("ro", "Risultato operativo", "kpi"),
-    r("fin", "Proventi e oneri finanziari e straordinari", "value"), r("ebt", "Risultato ante imposte", "total"),
   ];
 }
 

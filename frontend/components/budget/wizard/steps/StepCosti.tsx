@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { euro, pct1 } from "@/lib/budget-format";
+import { inflazioneOf } from "@/lib/budget-inflazione";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import { rowsCeAnteImposte, rowsCosti } from "@/lib/budget-preview-rows";
 import { pareggioBarre, pareggioFormula, rowsPareggio } from "@/lib/budget-pareggio";
@@ -31,7 +32,6 @@ import {
   fixedShareOf,
   forcedNote,
   forcedSplitYears,
-  inflazioneAttuale,
   splitBaseAmount,
   type FixedShare,
   type FixedShareField,
@@ -180,7 +180,7 @@ export function StepCosti(p: StepProps): JSX.Element {
     materials: autoYearsOf(p.assumptions, p.forecastYears, "fixed_materials_growth_auto"),
     services: autoYearsOf(p.assumptions, p.forecastYears, "fixed_services_growth_auto"),
   };
-  const inflazione = inflazioneAttuale(p.assumptions, p.forecastYears);
+  const inflazione = inflazioneOf(p.assumptions, p.forecastYears);
 
   const baseInc = p.historical[p.baseYear]?.income;
   const base = costiBase(baseInc);

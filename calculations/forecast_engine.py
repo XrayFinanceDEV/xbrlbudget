@@ -1006,13 +1006,16 @@ class ForecastEngine:
         ),
     }
 
-    # Il passo del wizard che scadenzia ciascun saldo. `debiti_tributari` non sta
-    # nel passo "Patrimoniale pregresso" (che lo mostra in sola lettura con
-    # scritto «si regolano al passo Imposte», `StepPregressoNuovo.tsx:233`), ma
-    # nel passo "Imposte": il rilievo M-2 della revisione, mandare l'utente al
-    # passo 6 per una voce che al passo 6 non e' modificabile vuol dire
-    # mandarlo a vuoto.
-    _PREGRESSO_PASSO: Dict[str, str] = {"debiti_tributari": "Imposte"}
+    # Il passo del wizard che scadenzia ciascun saldo. Dal 2026-09-15 (decisione
+    # del proprietario, Task 13b/16) anche i tributari stanno qui: saldo e rate
+    # si impostano al passo 5 come le altre voci, e «Imposte» resta il passo di
+    # acconto, aliquota e via manuale — nessun saldo nomina piu' quel passo per
+    # una voce di scadenziamento. La tabella resta vuota perche' e' l'unico
+    # punto in cui un saldo che vivesse altrove nominerebbe il passo diverso:
+    # i messaggi continuano a leggere il nome da `_passo_pregresso`, e il
+    # rilievo M-2 (mandare l'utente dove la voce si modifica, non a vuoto) e'
+    # ora servito dal default.
+    _PREGRESSO_PASSO: Dict[str, str] = {}
     _PREGRESSO_PASSO_DEFAULT = "Patrimoniale pregresso"
 
     # Le forme con l'articolo giusto per i messaggi di rifiuto (rilievo
@@ -1135,8 +1138,9 @@ class ForecastEngine:
                 # piano tributario (`not (pregresso or {}).get(...)`), e da
                 # `2b3024f` il messaggio diceva «riparte dai numeri del piano»
                 # e «Modifica il piano ... al passo»: qui un piano non c'e'.
-                # La strada resta «Imposte» perche' e' LI' che si imposta il
-                # piano che questo messaggio ora chiede di mettere.
+                # La strada ora e' «Patrimoniale pregresso» perche' dal Task 13b
+                # il piano tributario si crea e si scadenzia li', al passo 5 —
+                # al passo «Imposte» saldo e rate non stanno piu'.
                 raise ValueError(
                     f"L'override di {campo_tax} non è ammesso: la posizione "
                     "tributaria è a saldo + acconto, e l'anno dopo riparte dal "
@@ -3893,9 +3897,9 @@ class ForecastEngine:
                     rate_aperto = r.residual + r.closed
                     # `plan_tax`: senza un piano tributario non c'e' nessun
                     # rateizzato da riaprire (`rate_aperto` vale 0) e il rifiuto
-                    # nominerebbe un «passo Imposte» che l'utente non ha mai
-                    # compilato — e per di piu' su un totale negativo che il
-                    # `max` qui sotto clampa comunque a zero, come prima del
+                    # nominerebbe il passo dove nessun scadenziamento e' mai
+                    # stato compilato — e per di piu' su un totale negativo che
+                    # il `max` qui sotto clampa comunque a zero, come prima del
                     # lotto (rilievo m-1).
                     if (plan_tax and year_index > 0
                             and self._q(opening_tax_debt) < self._q(rate_aperto)):
@@ -3923,7 +3927,7 @@ class ForecastEngine:
                             f"esce dalla via manuale lasciando {_importo_it(opening_tax_debt)}, "
                             f"ma all'anno {assumption.forecast_year} ne restano da rateizzare "
                             f"{_importo_it(rate_aperto)}. Tieni in via manuale anche l'anno "
-                            f"{assumption.forecast_year}, oppure lascia nell'anno "
+                            f"{assumption.forecast_year} (passo «Imposte»), oppure lascia nell'anno "
                             f"{anno_prima} un debito tributario (sp16e + "
                             f"sp17e, per percentuale o per override) non inferiore a "
                             f"{_importo_it(rate_aperto)}, o modifica il piano al passo "

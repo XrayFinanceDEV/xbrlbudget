@@ -522,7 +522,10 @@ def test_sp17e_senza_piano_si_rifiuta_quando_l_anno_dopo_lo_legge(monkeypatch):
             # nulla che l'utente avrebbe cercato al passo 6 senza trovarlo.
             assert "Imposta un piano" in res["message"], res["message"]
             assert "Modifica il piano" not in res["message"], res["message"]
-            assert "«Imposte»" in res["message"], res["message"]
+            # Task 13b/16 (2026-09-15): il piano tributario si crea e si
+            # scadenzia al passo 5, non piu' al passo «Imposte».
+            assert "«Patrimoniale pregresso»" in res["message"], res["message"]
+            assert "«Imposte»" not in res["message"], res["message"]
             assert read_forecast_maps(db, sid) == []
             # E l'ultimo anno NO: nessuno lo legge dopo, quindi la stessa cifra
             # e' una forzatura legittima (il confine del rifiuto e' "l'anno che
@@ -977,8 +980,11 @@ def test_il_messaggio_del_rifiuto_indica_passo_ed_etichetta(monkeypatch):
                                             "rateizzato": 4000.00,
                                             "amounts": [1333.34, 1333.33, 1333.33]}},
                 overrides={2027: {"sp17e_debiti_tributari_lungo": 250.25}}))
-            # I tributari NON stanno al passo 6: li scadenzia il passo Imposte.
-            assert "Imposte" in res2["message"], res2["message"]
+            # Dal 2026-09-15 i tributari si scadenziano al passo 5 come le
+            # altre voci: un messaggio del piano non deve piu' nominare
+            # «Imposte» (spec §5.6, Task 13b/16).
+            assert "Patrimoniale pregresso" in res2["message"], res2["message"]
+            assert "«Imposte»" not in res2["message"], res2["message"]
             assert "debiti tributari" in res2["message"], res2["message"]
     finally:
         engine.dispose()
@@ -1438,5 +1444,65 @@ def test_m4_ib_esenta_l_anno_dopo_manuale(monkeypatch):
             lette = _dettagli(db, "m4-ib-2", cid, sid, rows)
             for y in ANNI_3:
                 assert _letto(lette, y, "sp17e_debiti_tributari_lungo") == D("777.77"), y
+    finally:
+        engine.dispose()
+
+
+# ══ Task 16 (2026-09-15): i nomi dei passi nei messaggi seguono il piano ══
+#
+# La decisione del proprietario porta saldo e rate dei tributari al passo 5
+# (Task 13b): `_PREGRESSO_PASSO` perde la voce `debiti_tributari` e ogni
+# messaggio del PIANO tributario nomina «Patrimoniale pregresso». «Imposte»
+# resta solo dove il messaggio parla di acconto, aliquota o via manuale
+# (spec §5.6). I due test sotto fissano i due versi.
+
+def test_trib16_piano_tributario_nomina_patrimoniale_pregresso(monkeypatch):
+    """Il rifiuto sull'override del lato oltre di un piano tributario nomina
+    il passo 5, mai il passo 7.
+
+    E' `_messaggio_override_oltre` per `debiti_tributari`: la tabella
+    `_PREGRESSO_PASSO` non contiene piu' quel saldo e `_passo_pregresso`
+    ricade sul default. Se qui ricompare «Imposte» significa che il nome e'
+    tornato su una voce di scadenziamento — la meta che l'utente cercherebbe
+    al passo 7 senza piu' trovarla (rilievo M-2, versione 2026-09-15).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _cid, _sid, _rows = _esito(db, "t16-piano", _righe_base(
+                piano={"debiti_tributari": {"opening": 10000.00, "saldo": 6000.00,
+                                            "rateizzato": 4000.00,
+                                            "amounts": [1333.34, 1333.33, 1333.33]}},
+                overrides={2027: {"sp17e_debiti_tributari_lungo": 250.25}}))
+            msg = res["message"]
+            assert res["forecast_generated"] is False, msg
+            assert "debiti tributari" in msg, msg
+            assert "«Patrimoniale pregresso»" in msg, msg
+            assert "«Imposte»" not in msg, msg
+    finally:
+        engine.dispose()
+
+
+def test_trib16_via_manuale_nomina_imposte(monkeypatch):
+    """La via d'uscita del kernel N-I1 che parla di via manuale nomina «Imposte».
+
+    Il rifiuto della transizione manuale→automatico ha tre vie d'uscita: la
+    prima e' al passo «Imposte» (e' li' che la posizione si imposta a mano),
+    l'ultima e' al passo dove le rate sono scadenziate, «Patrimoniale
+    pregresso». I due nomi convivono nello stesso messaggio perche'
+    corrispondono a due modifiche diverse; toglierne uno lascerebbe una delle
+    strade che il rilievo M-2 vuole segnalate senza cartello.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            res, _cid, _sid, _rows = _esito(db, "t16-manuale", _righe_trans({2027}))
+            msg = res["message"]
+            assert res["forecast_generated"] is False, msg
+            assert "non può ripartire" in msg, msg
+            assert "via manuale anche l'anno 2028 (passo «Imposte»)" in msg, msg
+            assert "«Patrimoniale pregresso»" in msg, msg
     finally:
         engine.dispose()

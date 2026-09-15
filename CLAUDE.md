@@ -310,7 +310,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   l'override sopravvive), e tutta la famiglia `sp07`+`sp07a/b/c/d/g` col piano
   dei crediti. Non `sp07e`/`sp07f`, che il calendario non tocca. Il messaggio
   nomina il saldo con l'articolo giusto (`_PREGRESSO_ARTICOLI`), il passo del wizard che lo scadenzia
-  (6 `Pregresso e nuovo`, 7 `Imposte` per i tributari) e la via d'uscita
+  (5 «Patrimoniale pregresso», tributari compresi) e la via d'uscita
   (`value: null`), perché un override proibito avvelena ogni `PATCH` successivo
   sullo stesso scenario anche su un'altra cella. Il bulk risponde comunque **200** con
   `forecast_generated: false` e l'override lo salva lo stesso; `PATCH /sp-override` risponde 400
@@ -350,7 +350,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   l'anno manuale e l'anno che riparte dal piano. Tre vie d'uscita: tenere in via manuale anche
   l'anno che riparte; lasciare nell'anno manuale un debito tributario (`sp16e + sp17e`, per
   percentuale o per override) non inferiore al rateizzato aperto; modificare il piano nel passo
-  «Imposte». In un anno manuale l'override del lato breve tributario resta comunque libero,
+  «Patrimoniale pregresso». In un anno manuale l'override del lato breve tributario resta comunque libero,
   come prima: il rifiuto guarda il totale che l'anno dopo legge davvero, non il lato singolo.
 - **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del

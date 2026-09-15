@@ -137,6 +137,12 @@ function normalizePlan(plan: PregressoPlan): PregressoPlan {
     opening: num(plan.opening),
     amounts: (plan.amounts ?? []).map(num),
     writeoff: plan.writeoff ? plan.writeoff.map(num) : plan.writeoff,
+    // Il flag del passo 5 (spec §4.5) NON e' un numero, e questa e' l'unica
+    // porta da cui passa la coercizione: non aggiungerlo qui vorrebbe dire
+    // perderlo in silenzio a ogni idratazione, con la casella «non incassati
+    // nel piano» che si riaccenderebbe spenta mentre gli importi che aveva
+    // azzerato restano a zero. Assente = non scritto, non `false`.
+    ...(plan.non_incassato === undefined ? {} : { non_incassato: plan.non_incassato }),
   };
 }
 

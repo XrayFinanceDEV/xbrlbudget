@@ -54,6 +54,7 @@ import { StepCosti } from "./steps/StepCosti";
 import { StepAltreVociCE } from "./steps/StepAltreVociCE";
 import { StepCircolante } from "./steps/StepCircolante";
 import { StepPregressoNuovo } from "./steps/StepPregressoNuovo";
+import { StepPatrimonialePregresso } from "./steps/StepPatrimonialePregresso";
 import { StepImposte } from "./steps/StepImposte";
 
 /** Lettura/scrittura di `localStorage` che non fa cadere il wizard quando lo
@@ -327,12 +328,14 @@ export function BudgetWizard({
       {step === "fatturato" && <StepFatturato {...stepProps} />}
       {step === "costi" && <StepCosti {...stepProps} />}
       {step === "circolante" && <StepCircolante {...stepProps} />}
-      {/* Placeholder temporaneo (Task 8): il passo 5 e il passo 6 rendono
-          ancora lo stesso componente di prima, `StepPregressoNuovo`. I passi
-          15/16 lo sostituiscono ciascuno col proprio, coerente col nome
-          nuovo. `StepAltreVociCE` resta nel file (Task 11 la rimuove), ma il
-          suo ramo qui sparisce: "altre-voci-ce" non e' piu' una chiave. */}
-      {step === "patrimoniale-pregresso" && <StepPregressoNuovo {...stepProps} />}
+      {/* Placeholder temporaneo (Task 8): il passo 6 rende ancora lo stesso
+          componente di prima, `StepPregressoNuovo`. Il Task 15 lo sostituisce
+          col proprio, coerente col nome nuovo. Il passo 5 ha invece il suo dal
+          Task 13 (a breve, oltre 12 mesi, flussi del pregresso; le due card
+          dei finanziamenti arrivano col Task 14). `StepAltreVociCE` resta nel
+          file (Task 11 la rimuove), ma il suo ramo qui sparisce:
+          "altre-voci-ce" non e' piu' una chiave. */}
+      {step === "patrimoniale-pregresso" && <StepPatrimonialePregresso {...stepProps} />}
       {step === "patrimoniale-piano" && <StepPregressoNuovo {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}
 

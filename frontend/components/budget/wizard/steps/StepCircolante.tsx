@@ -1,38 +1,25 @@
 "use client";
 
-// Passo 5 del wizard ipotesi (spec 2026-09-08 §4.5): i giorni medi di
+// Passo 4 del wizard ipotesi (spec 2026-09-15 §4.4): i giorni medi di
 // incasso/magazzino/pagamento — dove il proprietario vuole che si aggiusti
-// il circolante "verso la fine del workflow" — e le voci minori
-// dell'attivo/passivo che seguono una propria variazione % invece dei
-// giorni (task-13-brief.md).
+// il circolante "verso la fine del workflow" — e l'avviso quando i debiti
+// verso fornitori dell'anno base sono zero (decisione 8: i giorni di
+// pagamento non si possono calcolare, quasi sempre una riclassifica). Le
+// voci minori dello SP e i driver di volume (`sp_indexing`) sono passate al
+// passo 6 «Patrimoniale piano» (Task 15): `lib/budget-circolante-step.ts`
+// resta il posto dove vivono, non tocca a questo passo renderle piu'.
 //
-// Presentazionale: ogni decisione (quale giorno "auto" mostrare, l'importo
-// base di ciascuna voce minore, con quale anno leggere gli interruttori,
-// quali anni ha davvero prodotto il motore) sta in
-// lib/budget-circolante-step.ts, provata in environment: node. I tre campi
-// giorni sono annullabili: vuoto significa "usa il valore derivato
-// dall'anno base", mai zero giorni — la distinzione la fa il segnaposto
-// `auto N`, mai un placeholder statico.
+// Presentazionale: ogni decisione (quale giorno "auto" mostrare, quali anni
+// ha davvero prodotto il motore, l'avviso fornitori) sta in lib/, provata in
+// environment: node. I tre campi giorni sono annullabili: vuoto significa
+// "usa il valore derivato dall'anno base", mai zero giorni — la distinzione
+// la fa il segnaposto `auto N`, mai un placeholder statico.
 import type { JSX } from "react";
 import { useMemo } from "react";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  boolAssumption,
-  circolantePreview,
-  giorniMediAuto,
-  giorniMediRows,
-  minorFieldsRows,
-  pianiPregressoOf,
-  spIndexingOf,
-  DRIVERS,
-  DRIVER_LABELS,
-} from "@/lib/budget-circolante-step";
-import { AlertTriangle, Link2, Minus } from "lucide-react";
-import type { SpIndexingDriver } from "@/types/api";
+import { circolantePreview, giorniMediAuto, giorniMediRows } from "@/lib/budget-circolante-step";
+import { fornitoriZeroAvviso } from "@/lib/budget-fornitori-zero";
+import { AlertTriangle } from "lucide-react";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
@@ -44,27 +31,21 @@ export function StepCircolante(p: StepProps): JSX.Element {
 
   const auto = useMemo(() => giorniMediAuto(baseInc, baseBs), [baseInc, baseBs]);
   const giorniRows = useMemo(() => giorniMediRows(auto), [auto]);
-  const previdenzaChecked0 = boolAssumption(p.assumptions, p.forecastYears, "previdenza_scales_with_personnel");
-  const indexing = useMemo(
-    () => spIndexingOf(p.assumptions, p.forecastYears),
-    [p.assumptions, p.forecastYears],
-  );
-  // Ruling 17: una voce che un piano sta estinguendo non offre alcun driver.
-  const piani = useMemo(
-    () => pianiPregressoOf(p.assumptions, p.forecastYears),
-    [p.assumptions, p.forecastYears],
-  );
-  const minorRows = useMemo(
-    () => minorFieldsRows(baseBs, indexing, previdenzaChecked0, piani),
-    [baseBs, indexing, previdenzaChecked0, piani],
-  );
+  const avviso = useMemo(() => fornitoriZeroAvviso(p.baseYear, baseBs, baseInc), [p.baseYear, baseBs, baseInc]);
   const preview = useMemo(() => circolantePreview(baseBs, baseInc, p.preview.data), [baseBs, baseInc, p.preview.data]);
-
-  const tfrChecked = boolAssumption(p.assumptions, p.forecastYears, "tfr_accrual_suspended");
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
       <div className="space-y-5">
+        {avviso && (
+          <div className="flex gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <b>{avviso.titolo}</b>
+              <div className="text-xs">{avviso.dettaglio}</div>
+            </div>
+          </div>
+        )}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Giorni medi</CardTitle>
@@ -78,8 +59,9 @@ export function StepCircolante(p: StepProps): JSX.Element {
               rows={giorniRows}
             />
             <p className="mt-2 text-xs text-muted-foreground">
-              I giorni del {p.baseYear} sono calcolati sui soli crediti e debiti commerciali, su 360 giorni. Le
-              voci non commerciali (tributari, imposte anticipate) non seguono i ricavi.
+              I giorni del {p.baseYear} sono calcolati sui soli crediti verso clienti e debiti verso fornitori, su
+              360 giorni. Crediti e debiti del {p.baseYear} si chiudono nel {p.baseYear + 1} (passo 5): questi
+              giorni generano quelli nuovi.
             </p>
             {/* Un giorno medio dedotto e poi SCARTATO dal motore va detto qui,
                 dove i giorni si leggono: altrimenti si guarda un numero che il
@@ -94,91 +76,6 @@ export function StepCircolante(p: StepProps): JSX.Element {
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Voci minori dell&apos;attivo e del passivo · andamento nel piano</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/* Che cosa fa ciascuna voce nel piano: la sorpresa vera non e'
-                l'assenza dell'aggancio, e' che una voce lasciata vuota resti
-                FERMA per tutto il piano senza che nulla lo dica. */}
-            <div className="divide-y divide-border/50">
-              {minorRows.map((row) => (
-                <div key={row.field} className="flex items-center justify-between gap-3 py-1.5">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-foreground">{row.label}</div>
-                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      {row.agganciata
-                        ? <Link2 className="h-3 w-3 shrink-0" />
-                        : <Minus className="h-3 w-3 shrink-0" />}
-                      <span className="truncate">{row.andamento}</span>
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <div className="text-[11px] text-muted-foreground">{row.baseLabel}</div>
-                    {row.code !== null && (
-                      <Select
-                        value={row.driver ?? "costante"}
-                        onValueChange={(v) =>
-                          p.updateSpIndexing(row.code as string, v === "costante" ? null : (v as SpIndexingDriver))
-                        }
-                      >
-                        <SelectTrigger className="mt-1 h-7 w-[190px] text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="costante">Costante (variazione %)</SelectItem>
-                          {DRIVERS.map((d) => (
-                            <SelectItem key={d} value={d}>{`Cresce con ${DRIVER_LABELS[d]}`}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <Accordion type="single" collapsible className="mt-3 border-t border-border/50 pt-1">
-              <AccordionItem value="voci-minori" className="border-b-0">
-                <AccordionTrigger className="text-sm font-medium">Variazione % per anno</AccordionTrigger>
-                <AccordionContent>
-                  <YearInputTable
-                    forecastYears={p.forecastYears}
-                    baseYear={p.baseYear}
-                    assumptions={p.assumptions}
-                    update={p.update}
-                    rows={minorRows}
-                  />
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-
-            <div className="mt-3 space-y-2 border-t border-border/50 pt-3">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="previdenza-scales"
-                  checked={previdenzaChecked0}
-                  onCheckedChange={(checked) => p.updateAll("previdenza_scales_with_personnel", checked === true)}
-                />
-                <Label htmlFor="previdenza-scales" className="text-sm font-normal">
-                  Debiti previdenziali scalano col costo del personale
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="tfr-suspended"
-                  checked={tfrChecked}
-                  onCheckedChange={(checked) => p.updateAll("tfr_accrual_suspended", checked === true)}
-                />
-                <Label htmlFor="tfr-suspended" className="text-sm font-normal">
-                  TFR versato a INPS/fondi (accantonamento sospeso)
-                </Label>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>

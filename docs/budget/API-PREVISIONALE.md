@@ -469,6 +469,9 @@ Il perimetro dello sweep, dal lotto 3A (decisione 3 del proprietario):
   anni di rimborso **seguono solo il proprio piano**, capitale e interessi: uno sweep che li
   spegnesse lascerebbe maturare `ce15` su un debito a zero (misurato: 7.200,00 di oneri in tre anni).
 - La cassa eccedente oltre `cash_sweep_min_cash` resta in `sp09`.
+- **Con i fidi separati (regime esplicito, sotto) lo sweep rimborsa solo loro**, mai un
+  contratto: la presenza di contratti o di anni di rimborso non spegne più il perimetro, e il
+  disponibile a lungo è zero.
 
 **Lo sweep decide una volta sola, sulla cassa di dopo gli `sp_overrides`** (rilievo I2 della revisione
 finale del lotto 2): gira in `_normalize_balance_sheet_cents`, sulla cassa gia' al centesimo, subito
@@ -488,6 +491,7 @@ vecchia chiave unica della quota a breve dei prestiti nuovi.
 | `pregresso_senza_piano` | `{apertura, rimborso_sweep, breve, lungo}` quando nell'anno non ci sono contratti con `opening_residual` né `existing_debt_repayment_years` > 0; altrimenti `null` |
 | `pregresso_piano_anni` | `{apertura, rimborso, breve, lungo}` con `existing_debt_repayment_years` > 0 e nessun contratto col residuo; altrimenti `null` |
 | `contratti` | una riga per contratto (misti gia' divisi, anche non ancora erogati), nell'ordine di `financing_amount` e poi della griglia: `{indice, anno, tasso, erogato, residuo_iniziale, rimborso, interessi, breve, lungo}` |
+| `fidi` | nel regime esplicito (`bank_lines_amount` sulla prima riga, più sotto): `{apertura, variazione_ricavi, rimborso_sweep, residuo, regola}`; altrimenti `null` |
 
 **Invariante:** somma dei `breve` + `scoperto_residuo` = `sp16a`, somma dei `lungo` = `sp17a`, al
 centesimo, ogni anno. La scrive `_dichiara_debito_bancario` DOPO la normalizzazione, dai valori
@@ -498,6 +502,43 @@ contratto col residuo iniziale, altrimenti l'ultimo contratto nuovo; in riduzion
 pregresso (le due componenti, poi i contratti col residuo dall'ultimo), poi ai contratti nuovi
 dall'ultimo, mai sotto zero. Sono spostamenti di centesimi fra componenti, non debito creato: la
 somma resta `sp16a`/`sp17a`.
+
+### Fidi e anticipi (regime esplicito)
+
+`bank_lines_amount` sta **solo sulla riga del primo anno** di previsione: è l'apertura di fidi e
+anticipi su fatture. Assente = tutto come sempre (la linea di credito è debito bancario a breve
+scandagliato col piano, senza distinzione); presente = **regime esplicito** (spec 2026-09-15 §5.2,
+decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costante`) e
+`bank_lines_rate` (%, tasso della linea in apertura d'anno).
+
+- **Controlli, al salvataggio.** I fidi non possono superare la `sp16a` dell'anno base (tolleranza
+  0,01): «Fidi e anticipi (X) superano i debiti verso banche a breve dell'anno base (Y): correggi al
+  passo «Patrimoniale pregresso»»; e insieme ai residui dei contratti devono chiudere il debito
+  bancario base: «Fidi e anticipi (X) più i residui dei finanziamenti (Y) devono coincidere con il
+  debito bancario dell'anno base (Z)». Un `bank_lines_amount` su una riga che non è la prima è
+  rifiutato. Il regime rende `use_detailed_existing_schedule` attivo anche senza contratti.
+- **Uno stato per anno.** Apertura = l'importo della prima riga, poi il `residuo` dichiarato
+  l'anno prima (dopo sweep e riconciliazione, come lo scoperto). Con la regola `ricavi` segue il
+  rapporto dei ricavi anno su anno e si dichiara in `variazione_ricavi`; nessun rimborso proprio
+  oltre allo sweep.
+- **Lo sweep paga solo i fidi** (`cash_sweep_enabled`): il perimetro a breve è il `fidi_residuo`
+  dell'anno, `lungo_disponibile` è zero, e i contratti restano sul proprio piano intatti — misura
+  in `tests/test_forecast_fidi.py`: riga `contratti` identica con e senza sweep.
+- **Riclassifica di fine anno.** `sp16a` = fidi residui + Σ della rata dell'anno dopo dei contratti
+  pregressi (mai oltre il residuo), il resto torna nel lungo. È una riclassifica, non un flusso:
+  cassa e interessi non cambiano, e il breve dichiarato dei contratti è la quota — per questo sulla
+  riga `contratti` va `quota_dopo`, non il totale che ora contiene anche i fidi. Vale SOLO nel
+  regime esplicito: fuori, i numeri di prima restano al centesimo (banco di parità: 1432 divergenze
+  sole chiavi dichiarate, 0 fuori dalle attese).
+- **Oneri.** `fidi_apertura × bank_lines_rate` su `ce15` (`details['oneri_fidi']`, dichiarato
+  sempre, 0 fuori dal regime) — sull'apertura, la stessa guardia anti-circolarità dello scoperto.
+  E nel regime il **tasso dello scoperto** diventa `bank_lines_rate` (oggi `financing_interest_rate`,
+  che il wizard non scrive più).
+- **Due chiavi nuove di `details`.** `debito_bancario.fidi` (nella tabella sopra) e
+  `regime_debito_bancario` = `'esplicito' | 'contratti' | 'anni' | 'legacy'`, dichiarata sempre:
+  dice COME il debito bancario è descritto quest'anno (fidi a stato, contratti col residuo, anni di
+  rimborso, nessuno di questi). Nel regime esplicito la «casa» degli aumenti della riconciliazione è
+  la riga `fidi`, e in riduzione i fidi si tolgono prima di ogni altra componente.
 
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 

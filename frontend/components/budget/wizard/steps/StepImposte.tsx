@@ -1,9 +1,12 @@
 "use client";
 
-// Passo 7 del wizard ipotesi: imposte (spec 2026-09-08 §4.7, task-14-brief.md).
-// È l'ULTIMO passo — non c'è un ottavo passo di riepilogo: il wizard si
-// chiude qui e il previsionale completo si legge e si ritocca nelle tab CE
-// Prev. e SP Prev. esistenti.
+// Passo 7 del wizard ipotesi: imposte (spec 2026-09-08 §4.7, ridotto il
+// 2026-09-15 all'aliquota e al pagamento dell'anno in corso — decisione del
+// proprietario, Task 13b/16: saldo, rateizzato e rate dei debiti tributari
+// si scadenziano al passo 5 «Patrimoniale pregresso»). È l'ULTIMO passo —
+// non c'è un ottavo passo di riepilogo: il wizard si chiude qui e il
+// previsionale completo si legge e si ritocca nelle tab CE Prev. e SP Prev.
+// esistenti.
 //
 // Presentazionale: ogni decisione — che cosa mostrare/scrivere per
 // l'aliquota forzata, quali anni ha davvero prodotto il motore — sta in
@@ -17,13 +20,10 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
 import { computeEffectiveTaxRate } from "@/components/budget/assumption-rows";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { euro, numOrNull, pct1 } from "@/lib/budget-format";
-import { validatePregresso } from "@/lib/budget-pregresso-circolante";
-import { massesOf } from "@/lib/budget-pregresso-tabella";
 import {
   ACCONTO_CHIOSA,
   DEFAULT_ACCONTO_PCT,
@@ -32,38 +32,26 @@ import {
   PREGRESSO_IGNORED_AVVISO,
   SP17E_NOTA_AUTOMATICA,
   TAX_RATE_PLACEHOLDER,
-  TRIBUTARI_KEYS,
-  TRIBUTARI_TABELLA_NOTA,
   accontoPctValue,
   draftDisplay,
   impostePreview,
   manualTaxYears,
-  rateOptions,
-  rateSelectValue,
   spTributariRows,
   taxRateInputDisplay,
   taxRateValue,
-  tributariMasses,
   tributariOpening,
-  tributariPlan,
-  tributariTabella,
   withAccontoPct,
-  withRate,
-  withRateUguali,
-  withSaldo,
 } from "@/lib/budget-imposte-step";
 import { planTaxRate } from "@/lib/budget-tax-rate";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { Pregresso } from "@/types/api";
 import type { StepProps } from "../types";
-import { PregressoTable } from "../PregressoTable";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
 
 const ADVANCES_ROWS: YearInputRow[] = [{ field: "tax_advances_paid", label: "Acconti versati nell'anno", baseLabel: "—" }];
 
-/** Riga «etichetta / nota piccola» a sinistra, controllo a destra — lo stesso
- *  schema del passo 6 (`ScheduleRow` in StepPregressoNuovo). */
+/** Riga «etichetta / nota piccola» a sinistra, controllo a destra. */
 function TribRow({ label, small, children }: { label: string; small: string; children: React.ReactNode }): JSX.Element {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-border/50 pb-2.5">
@@ -114,38 +102,26 @@ export function StepImposte(p: StepProps): JSX.Element {
     [baseBs, manual, automaticYears],
   );
 
-  // Il piano e' UNO per scenario e vive nelle ipotesi del PRIMO anno di piano,
-  // come quello del passo 6: il motore lo legge da li', e scriverlo su ogni
-  // anno lo farebbe applicare piu' volte.
+  // Il piano e' UNO per scenario e vive nelle ipotesi del PRIMO anno di piano
+  // (spec §4.5): il motore lo legge da li', e scriverlo su ogni anno lo
+  // farebbe applicare piu' volte. Saldo, rateizzato e rate si scadenziano al
+  // passo 5 «Patrimoniale pregresso» — qui resta solo l'acconto, che governa
+  // l'anno in corso, non il pregresso.
   const firstYear = p.forecastYears[0];
   const opening = useMemo(() => tributariOpening(baseBs), [baseBs]);
   const pregressoSalvato = p.assumptions[firstYear]?.pregresso;
   const pregresso = useMemo(() => (pregressoSalvato ?? {}) as Pregresso, [pregressoSalvato]);
-  const tribPlan = tributariPlan(pregresso);
   const setPregresso = (next: Pregresso) => {
     p.updatePregresso(next);
   };
-  const masses = useMemo(() => massesOf(baseBs), [baseBs]);
-  // Diagnostica, non correzione: si valida il SOLO piano tributario, cosi' gli
-  // errori delle altre quattro voci restano al passo che le scadenzia.
-  const errors = useMemo(
-    () => validatePregresso(tribPlan ? { debiti_tributari: tribPlan } : {}, masses, p.forecastYears.length),
-    [tribPlan, masses, p.forecastYears.length],
-  );
-  const opzioniRate = rateOptions(p.forecastYears.length);
 
-  // Bozze locali delle due caselle controllate (saldo, acconto): senza
-  // questo stato, svuotare la casella col backspace la fa ricadere subito sul
-  // valore di ripiego del piano SALVATO (0 per il saldo, 100 per l'acconto) e
-  // la digitazione successiva riparte da li' invece che da vuoto (fix1 R6).
-  // `draftDisplay` (lib, con test) decide che cosa mostrare; qui c'e' solo lo
-  // stato grezzo del testo digitato.
-  const [saldoDraft, setSaldoDraft] = useState<string | null>(null);
+  // Bozza locale della casella controllata (acconto): senza questo stato,
+  // svuotare la casella col backspace la fa ricadere subito sul valore di
+  // ripiego del piano SALVATO (100 per l'acconto) e la digitazione
+  // successiva riparte da li' invece che da vuoto (fix1 R6). `draftDisplay`
+  // (lib, con test) decide che cosa mostrare; qui c'e' solo lo stato grezzo
+  // del testo digitato.
   const [accontoDraft, setAccontoDraft] = useState<string | null>(null);
-  // Lo stato del `Select` «N rate uguali»: l'opzione che il piano ATTUALE
-  // rispecchia davvero, o "" (stato neutro) dopo un ritocco a mano di una
-  // singola rata (fix1 R6).
-  const rateSelected = rateSelectValue(tribPlan?.amounts ?? [], tribPlan?.rateizzato ?? 0, opzioniRate);
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] items-start">
@@ -241,112 +217,40 @@ export function StepImposte(p: StepProps): JSX.Element {
           </CardHeader>
           <CardContent className="space-y-3">
             {baseBs && firstYear !== undefined ? (
-              <>
-                <TribRow
-                  label="Saldo dell'anno precedente"
-                  small="si versa per intero nel primo anno di piano"
-                >
-                  <div className="flex items-center gap-1">
-                    <Input
-                      type="number"
-                      min={0}
-                      step={100}
-                      className="w-36 text-right"
-                      aria-label="Saldo dell'anno precedente"
-                      placeholder="0"
-                      value={draftDisplay(saldoDraft, tribPlan ? tribPlan.saldo : opening)}
-                      onChange={(e) => {
-                        setSaldoDraft(e.target.value);
-                        setPregresso(withSaldo(pregresso, opening, numOrNull(e.target.value)));
-                      }}
-                      onBlur={() => setSaldoDraft(null)}
-                    />
-                    <span className="text-xs text-muted-foreground">€</span>
-                  </div>
-                </TribRow>
-
-                <TribRow
-                  label="Rateizzato"
-                  small="ciò che il saldo non copre: si scadenzia nel piano qui sotto"
-                >
-                  {/* In sola lettura per costruzione: saldo e rateizzato devono
-                      sommare l'apertura, e due caselle indipendenti farebbero
-                      salvare piani che il server rifiuta. */}
-                  <span className="text-sm tabular-nums text-foreground">
-                    {euro(tribPlan ? tribPlan.rateizzato : 0)}
-                  </span>
-                </TribRow>
-
-                <div className="flex items-center justify-between gap-3 pt-1">
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    Piano delle rate
-                  </p>
-                  {opzioniRate.length > 0 && (
-                    <Select
-                      // Controllato: dopo un ritocco a mano su una singola
-                      // rata (`PregressoTable` -> `withRate`) `rateSelected`
-                      // torna "" e il Select mostra di nuovo il segnaposto
-                      // neutro invece dell'ultima scelta, che non e' piu'
-                      // quella vera (fix1 R6).
-                      value={rateSelected}
-                      onValueChange={(v) => setPregresso(withRateUguali(pregresso, opening, Number(v)))}
-                    >
-                      <SelectTrigger className="h-8 w-36 text-xs" aria-label="Rate uguali">
-                        <SelectValue placeholder="Rate uguali" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {opzioniRate.map((n) => (
-                          <SelectItem key={n} value={String(n)}>{n} rate uguali</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
+              <TribRow label="Acconto sull'imposta dell'anno prima" small={ACCONTO_CHIOSA}>
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={200}
+                    step={5}
+                    className="w-24 text-right"
+                    aria-label="Acconto sull'imposta dell'anno prima"
+                    placeholder={String(DEFAULT_ACCONTO_PCT)}
+                    value={draftDisplay(accontoDraft, accontoPctValue(pregresso))}
+                    onChange={(e) => {
+                      setAccontoDraft(e.target.value);
+                      setPregresso(withAccontoPct(pregresso, opening, numOrNull(e.target.value)));
+                    }}
+                    onBlur={() => setAccontoDraft(null)}
+                  />
+                  <span className="text-xs text-muted-foreground">%</span>
                 </div>
-
-                {/* La stessa tabella del passo 6, su una riga sola: la massa
-                    che scadenzia e' il RATEIZZATO, non l'apertura — il saldo
-                    non entra nel runoff nemmeno nel motore. */}
-                <PregressoTable
-                  keys={TRIBUTARI_KEYS}
-                  masses={tributariMasses(pregresso, opening)}
-                  pregresso={tributariTabella(pregresso, opening)}
-                  forecastYears={p.forecastYears}
-                  baseYear={p.baseYear}
-                  mode="eur"
-                  massLabel="Rateizzato"
-                  nota={TRIBUTARI_TABELLA_NOTA}
-                  errors={errors}
-                  onChange={(next) =>
-                    setPregresso(withRate(pregresso, opening, next.debiti_tributari?.amounts ?? []))}
-                />
-
-                <TribRow label="Acconto sull'imposta dell'anno prima" small={ACCONTO_CHIOSA}>
-                  <div className="flex items-center gap-1">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={200}
-                      step={5}
-                      className="w-24 text-right"
-                      aria-label="Acconto sull'imposta dell'anno prima"
-                      placeholder={String(DEFAULT_ACCONTO_PCT)}
-                      value={draftDisplay(accontoDraft, accontoPctValue(pregresso))}
-                      onChange={(e) => {
-                        setAccontoDraft(e.target.value);
-                        setPregresso(withAccontoPct(pregresso, opening, numOrNull(e.target.value)));
-                      }}
-                      onBlur={() => setAccontoDraft(null)}
-                    />
-                    <span className="text-xs text-muted-foreground">%</span>
-                  </div>
-                </TribRow>
-              </>
+              </TribRow>
             ) : (
               <p className="text-xs text-muted-foreground">
                 Il bilancio dell&apos;anno base non è ancora disponibile: senza quel saldo non c&apos;è nulla da
                 scadenziare.
               </p>
             )}
+
+            {/* Saldo, rateizzato e rate si scadenziano al passo 5, non qui
+                (decisione del proprietario, 2026-09-15, Task 13b/16): questo
+                rimando sostituisce i tre controlli che c'erano prima. */}
+            <p className="text-xs text-muted-foreground">
+              Debiti tributari al 31/12/{p.baseYear}: saldo e rate si scadenziano al passo 5 · Patrimoniale
+              pregresso.
+            </p>
 
             {preview.pregressoIgnored && (
               <div className="flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">

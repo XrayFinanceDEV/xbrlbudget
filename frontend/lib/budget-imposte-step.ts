@@ -1,9 +1,11 @@
 /**
- * Le decisioni del passo 7 «Imposte» (spec 2026-09-08 §4.7), l'ultimo del
- * percorso: la lettura/scrittura dell'aliquota forzata (un solo input,
- * scritto su tutti gli anni con `updateAll`) e la composizione
- * dell'anteprima. Stesso schema di `lib/budget-pregresso-step.ts` (Task 12):
- * niente di questo si decide dentro `StepImposte.tsx`.
+ * Le decisioni del passo 7 «Imposte» (spec 2026-09-08 §4.7, ridotto il
+ * 2026-09-15 all'aliquota e al pagamento dell'anno in corso — saldo,
+ * rateizzato e rate dei debiti tributari si scadenziano al passo 5
+ * «Patrimoniale pregresso», Task 13b/16): la lettura/scrittura dell'aliquota
+ * forzata (un solo input, scritto su tutti gli anni con `updateAll`) e la
+ * composizione dell'anteprima. Niente di questo si decide dentro
+ * `StepImposte.tsx`.
  *
  * Le imposte NON si ricalcolano qui: le produce il motore
  * (`calculations/forecast_engine.py`), `rowsImposte` le legge dal CE che il
@@ -11,12 +13,11 @@
  */
 import type {
   BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement,
-  Pregresso, PregressoKey, PregressoTributari,
+  Pregresso, PregressoTributari,
 } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
-import { euro, numOrNull } from "@/lib/budget-format";
-import { equalInstalments, openingMasses } from "@/lib/budget-pregresso-circolante";
-import { singleYearValue, type SingleYearValue } from "@/lib/budget-pregresso-step";
+import { euro, num, numOrNull } from "@/lib/budget-format";
+import { openingMasses } from "@/lib/budget-pregresso-circolante";
 import { rowsImposte, rowsImposteSaldoAcconto, type PreviewRow } from "@/lib/budget-preview-rows";
 import type { YearCellOff } from "@/lib/budget-year-cell";
 
@@ -28,6 +29,32 @@ import type { YearCellOff } from "@/lib/budget-year-cell";
  * percentuali nullable, scrive questo valore esplicitamente.
  */
 export const DEFAULT_TAX_RATE = 27.9;
+
+export interface SingleYearValue {
+  /** Il valore da mostrare: quello del primo anno previsto (`null` = non impostato). */
+  value: number | null;
+  /** Almeno un anno ne ha uno diverso: scrivere di nuovo li allinea tutti. */
+  uneven: boolean;
+}
+
+/**
+ * Legge un campo scritto con `updateAll` (stesso valore su ogni anno di
+ * piano): si mostra quello del primo anno previsto, e si dichiara se gli
+ * altri non concordano piu' — puo' succedere se un valore e' stato cambiato
+ * altrove, anno per anno.
+ *
+ * Spostata qui da `lib/budget-pregresso-step.ts` (Task 16, cancellato con
+ * `StepPregressoNuovo.tsx`): questo modulo ne resta l'unico chiamante di
+ * produzione (`taxRateValue`, sotto).
+ */
+export function singleYearValue(assumptions: AssumptionsMap, years: number[], field: string): SingleYearValue {
+  const vals = years.map((y) => {
+    const raw = (assumptions[y] as Record<string, unknown> | undefined)?.[field];
+    return raw === null || raw === undefined ? null : num(raw);
+  });
+  const value = vals.length > 0 ? vals[0] : null;
+  return { value, uneven: vals.some((v) => v !== value) };
+}
 
 /** Il valore del campo `tax_rate`, con lo stesso schema "primo anno previsto
  *  + disallineamento" di `singleYearValue`. */
@@ -175,13 +202,17 @@ export function spTributariRows(
   return rows;
 }
 
-// ── Il piano di pagamento: saldo, rateizzato, rate, acconto ─────────────────
-// Il modello e la validazione stanno in `lib/budget-pregresso-circolante.ts`
-// (`openingMasses`, `equalInstalments`, `validatePregresso`): qui non se ne
-// riscrive nulla, si compone. Tutto immutabile — nessuna funzione muta cio'
-// che riceve.
-
-const cents = (v: number) => Math.round(v * 100) / 100;
+// ── Il piano di pagamento tributario: saldo, rateizzato, rate, acconto ──────
+// Saldo, rateizzato e rate si scadenziano al passo 5 «Patrimoniale
+// pregresso» (`lib/budget-pregresso-oltre.ts`, Task 13b/16): qui resta solo
+// l'acconto, che il passo 7 tiene perche' governa l'anno in corso, non il
+// pregresso. `tributariPlan`, `tributariPlanOrDefault`, `withRate` e
+// `tributariOpening` restano esportati da qui perche' e' `budget-pregresso-
+// oltre.ts` a consumarli — spostarli avrebbe rotto quel modulo, o
+// duplicato la stessa lettura del piano in due posti. Il modello e la
+// validazione stanno in `lib/budget-pregresso-circolante.ts`
+// (`openingMasses`, `validatePregresso`): qui non se ne riscrive nulla, si
+// compone. Tutto immutabile — nessuna funzione muta cio' che riceve.
 
 /** Il default del kernel (`tax_settlement_saldo_acconto`): senza dichiarazione
  *  l'acconto vale il 100% dell'imposta dell'anno prima. */
@@ -215,35 +246,12 @@ export function tributariPlanOrDefault(pregresso: Pregresso, opening: number): P
 const conPiano = (pregresso: Pregresso, plan: PregressoTributari): Pregresso =>
   ({ ...pregresso, debiti_tributari: plan });
 
-/**
- * Scrive il saldo dell'anno precedente e ne DEDUCE il rateizzato: le due cifre
- * devono sommare l'apertura, e `validatePregresso` rifiuta un piano in cui non
- * lo fanno.
- *
- * Un saldo oltre l'apertura NON viene troncato — superare la massa dichiarata
- * e' un errore, mai un troncamento: si scrive, il rateizzato diventa negativo e
- * la validazione lo dichiara (il server lo rifiuterebbe comunque, con un 422
- * molto meno leggibile). Una casella svuotata scrive uno ZERO, cioe' mette
- * tutto a rate: non lascia il saldo di prima.
- */
-export function withSaldo(pregresso: Pregresso, opening: number, saldo: number | null): Pregresso {
-  const plan = tributariPlanOrDefault(pregresso, opening);
-  const s = cents(saldo ?? 0);
-  return conPiano(pregresso, { ...plan, opening, saldo: s, rateizzato: cents(opening - s) });
-}
-
-/** Le rate dichiarate, senza toccare saldo, rateizzato e acconto. E' la porta
- *  di ritorno della `PregressoTable`, che di un piano tributario conosce le
- *  sole `amounts`. */
+/** Le rate dichiarate, scritte dalla card «Altre voci oltre 12 mesi» del
+ *  passo 5 (`lib/budget-pregresso-oltre.ts`), senza toccare saldo, rateizzato
+ *  e acconto — quei due campi restano di competenza di quella card, questo
+ *  scrive solo `amounts`. */
 export function withRate(pregresso: Pregresso, opening: number, amounts: number[]): Pregresso {
   return conPiano(pregresso, { ...tributariPlanOrDefault(pregresso, opening), amounts });
-}
-
-/** `n` rate uguali sul RATEIZZATO — non sull'apertura: il saldo si versa per
- *  intero nel primo anno di piano e non entra nel runoff. */
-export function withRateUguali(pregresso: Pregresso, opening: number, n: number): Pregresso {
-  const plan = tributariPlanOrDefault(pregresso, opening);
-  return conPiano(pregresso, { ...plan, amounts: equalInstalments(plan.rateizzato, n) });
 }
 
 /** La percentuale di acconto. Lo zero e' un valore vero — zero acconti — e non
@@ -267,12 +275,12 @@ export function accontoPctValue(pregresso: Pregresso): number {
  * che il piano ha davvero salvato.
  *
  * Una casella appena svuotata dal backspace resta VUOTA, mai il valore di
- * ripiego (0 per il saldo, 100 per l'acconto): quel ripiego lo scrivono
- * `withSaldo`/`withAccontoPct` nel piano SALVATO, ma se anche la casella lo
- * mostrasse subito la digitazione si romperebbe a meta' — misurato: "10" ->
- * backspace -> "1" non arriva mai alla casella vuota, perche' il valore
- * tornava a 100 (o 0) a ogni tocco e la cifra successiva si sommava a quel
- * ripiego invece che ripartire da vuoto (fix1 R6).
+ * ripiego (100 per l'acconto): quel ripiego lo scrive `withAccontoPct` nel
+ * piano SALVATO, ma se anche la casella lo mostrasse subito la digitazione si
+ * romperebbe a meta' — misurato: "10" -> backspace -> "1" non arriva mai
+ * alla casella vuota, perche' il valore tornava a 100 a ogni tocco e la
+ * cifra successiva si sommava a quel ripiego invece che ripartire da vuoto
+ * (fix1 R6).
  */
 export function draftDisplay(draft: string | null, saved: number): number | "" {
   if (draft === null) return saved;
@@ -280,69 +288,6 @@ export function draftDisplay(draft: string | null, saved: number): number | "" {
   const n = Number(draft);
   return Number.isFinite(n) ? n : "";
 }
-
-/** Il numero di rate uguali che si possono offrire: mai piu' degli anni di
- *  piano, o si creerebbe un piano che `validatePregresso` rifiuta subito. */
-export function rateOptions(horizon: number): number[] {
-  return [2, 3, 4, 5].filter((n) => n <= horizon);
-}
-
-/**
- * L'opzione del `Select` «N rate uguali» che rispecchia DAVVERO il piano
- * attuale: l'opzione `n` solo se `amounts` coincide, al centesimo, con
- * `equalInstalments(rateizzato, n)` per un `n` fra quelli offerti; altrimenti
- * stringa vuota — lo stato neutro che il `Select` senza `value` mostrerebbe
- * comunque come segnaposto.
- *
- * Serve perche' un ritocco a mano su una singola rata (dentro `PregressoTable`,
- * via `withRate`) non deve lasciare il `Select` fermo sull'ultima scelta: senza
- * questa funzione un piano toccato a mano continuerebbe a mostrare «3 rate
- * uguali» come se il piano fosse ancora quello — un'etichetta che mente sullo
- * stato vero (fix1 R6).
- */
-export function rateSelectValue(amounts: number[], rateizzato: number, options: number[]): string {
-  for (const n of options) {
-    const eq = equalInstalments(rateizzato, n);
-    if (amounts.length === eq.length && amounts.every((v, i) => Math.abs(v - eq[i]) < 0.005)) {
-      return String(n);
-    }
-  }
-  return "";
-}
-
-/**
- * Le masse per la `PregressoTable`: quella dei tributari e' il RATEIZZATO, non
- * l'apertura — il piano delle rate scadenzia il solo rateizzato, e il motore
- * fa lo stesso (`runoff_schedule(plan_tax['rateizzato'], …)`). Le altre quattro
- * voci non entrano in questa tabella e restano a zero.
- */
-export function tributariMasses(pregresso: Pregresso, opening: number): Record<PregressoKey, number> {
-  return {
-    crediti_commerciali: 0, debiti_fornitori: 0, debiti_previdenziali: 0, altri_debiti: 0,
-    debiti_tributari: tributariPlan(pregresso)?.rateizzato ?? 0,
-  };
-}
-
-/**
- * Il piano come lo LEGGE la tabella: stessa lista di rate, ma l'apertura e' il
- * rateizzato, cosi' residuo e percentuali si leggono su cio' che si sta
- * davvero scadenziando. E' una vista — il piano vero conserva la sua apertura,
- * ed e' quello che si salva.
- */
-export function tributariTabella(pregresso: Pregresso, opening: number): Pregresso {
-  const plan = tributariPlan(pregresso);
-  return plan ? { debiti_tributari: { ...plan, opening: plan.rateizzato } } : {};
-}
-
-/** La sola chiave che la tabella del passo 7 scadenzia. Le altre quattro
- *  stanno al passo 6 (`TABELLA_KEYS`). */
-export const TRIBUTARI_KEYS: readonly PregressoKey[] = ["debiti_tributari"];
-
-/** La riga in coda alla tabella delle rate: al passo 7 non c'e' nessuna voce
- *  che si estingue, quindi la via d'uscita del passo 6 non c'entra. */
-export const TRIBUTARI_TABELLA_NOTA =
-  "Le rate scadenziano il solo rateizzato: il saldo esce per intero nel primo anno di piano, insieme " +
-  "all'acconto. Ciò che resta dopo l'ultimo anno resta a bilancio come debito oltre l'esercizio.";
 
 /**
  * La chiosa della casella dell'acconto: la percentuale e' il ripiego, un

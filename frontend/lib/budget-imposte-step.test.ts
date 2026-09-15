@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, PregressoKey } from "@/types/api";
+import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, Pregresso } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { euro } from "@/lib/budget-format";
-import { equalInstalments, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import {
   ACCONTO_CHIOSA,
   DEFAULT_ACCONTO_PCT,
@@ -15,27 +14,15 @@ import {
   manualTaxPosition,
   manualTaxYears,
   pregressoIgnoredTributari,
-  rateOptions,
-  rateSelectValue,
+  singleYearValue,
   spTributariRows,
   taxRateInputDisplay,
   taxRateValue,
-  tributariMasses,
   tributariOpening,
   tributariPlanOrDefault,
-  tributariTabella,
   withAccontoPct,
   withRate,
-  withRateUguali,
-  withSaldo,
 } from "./budget-imposte-step";
-
-/** Le masse degli altri quattro saldi non entrano in questi casi: si passano a
- *  zero perche' `validatePregresso` vuole il record intero. */
-const ZERO_MASSES: Record<PregressoKey, number> = {
-  crediti_commerciali: 0, debiti_fornitori: 0, debiti_tributari: 0,
-  debiti_previdenziali: 0, altri_debiti: 0,
-};
 
 const baseInc = {
   ce01_ricavi_vendite: "1000", ce04_altri_ricavi: "0", ce05_materie_prime: "400", ce06_servizi: "200",
@@ -59,6 +46,36 @@ const response = (years: ForecastPreviewYear[]): ForecastPreviewResponse =>
   ({ scenario_id: 1, base_year: 2026, forecast_years: years, error: null });
 
 const asMap = (m: Record<number, Record<string, unknown>>): AssumptionsMap => m as unknown as AssumptionsMap;
+
+// ── singleYearValue (Task 16: spostata qui da `lib/budget-pregresso-step.ts`
+// prima della sua cancellazione — questo modulo ne resta l'unico chiamante
+// di produzione, via `taxRateValue` sotto) ──────────────────────────────────
+describe("singleYearValue", () => {
+  it("nessun anno => value null, non uneven", () => {
+    expect(singleYearValue(asMap({}), [], "existing_debt_repayment_years")).toEqual({ value: null, uneven: false });
+  });
+
+  it("campo non impostato => null", () => {
+    const v = singleYearValue(asMap({ 2027: {}, 2028: {} }), [2027, 2028], "existing_debt_repayment_years");
+    expect(v).toEqual({ value: null, uneven: false });
+  });
+
+  it("mostra il valore del primo anno previsto", () => {
+    const v = singleYearValue(
+      asMap({ 2027: { existing_debt_repayment_years: 5 }, 2028: { existing_debt_repayment_years: 5 } }),
+      [2027, 2028], "existing_debt_repayment_years",
+    );
+    expect(v).toEqual({ value: 5, uneven: false });
+  });
+
+  it("anni non concordi => uneven true, mostra comunque il primo", () => {
+    const v = singleYearValue(
+      asMap({ 2027: { existing_debt_repayment_years: 5 }, 2028: { existing_debt_repayment_years: 7 } }),
+      [2027, 2028], "existing_debt_repayment_years",
+    );
+    expect(v).toEqual({ value: 5, uneven: true });
+  });
+});
 
 describe("taxRateValue", () => {
   it("nessun anno => value null, non uneven", () => {
@@ -181,72 +198,6 @@ describe("tributariPlanOrDefault — il piano nasce al primo tocco", () => {
   });
 });
 
-describe("withSaldo — il rateizzato e' cio' che il saldo non copre", () => {
-  it("scrive il saldo e ne deduce il rateizzato", () => {
-    const next = withSaldo({}, 91713.37, 34500.12);
-    expect(next.debiti_tributari).toEqual({
-      opening: 91713.37, saldo: 34500.12, rateizzato: 57213.25, amounts: [], acconto_pct: 100,
-    });
-  });
-
-  it("una casella svuotata mette tutto a rate, non lascia il saldo di prima", () => {
-    const con = withSaldo({}, 91713.37, 34500.12);
-    const dopo = withSaldo(con, 91713.37, null);
-    expect(dopo.debiti_tributari!.saldo).toBe(0);
-    expect(dopo.debiti_tributari!.rateizzato).toBe(91713.37);
-  });
-
-  it("un saldo oltre l'apertura NON viene troncato: si scrive, e la validazione lo dichiara", () => {
-    const next = withSaldo({}, 91713.37, 120000);
-    expect(next.debiti_tributari!.saldo).toBe(120000);
-    expect(next.debiti_tributari!.rateizzato).toBe(-28286.63);
-    expect(validatePregresso(next, { ...ZERO_MASSES, debiti_tributari: 91713.37 }, 3).join(" "))
-      .toMatch(/negativ/i);
-  });
-
-  it("non muta cio' che riceve", () => {
-    const prima = {
-      debiti_tributari: { opening: 91713.37, saldo: 0, rateizzato: 91713.37, amounts: [10], acconto_pct: 100 },
-    };
-    const copia = JSON.parse(JSON.stringify(prima));
-    withSaldo(prima, 91713.37, 34500.12);
-    expect(prima).toEqual(copia);
-  });
-});
-
-describe("withRateUguali — n rate che sommano esattamente il rateizzato", () => {
-  it("i centesimi residui vanno sull'ultima rata, e la somma torna al centesimo", () => {
-    const con = withSaldo({}, 91713.37, 34500.12);          // rateizzato 57.213,25
-    const next = withRateUguali(con, 91713.37, 4);
-    expect(next.debiti_tributari!.amounts).toEqual([14303.31, 14303.31, 14303.31, 14303.32]);
-    const somma = next.debiti_tributari!.amounts.reduce((a, b) => a + b, 0);
-    expect(Math.round(somma * 100) / 100).toBe(57213.25);
-  });
-
-  it("le rate uguali si calcolano sul RATEIZZATO, non sull'apertura", () => {
-    const con = withSaldo({}, 91713.37, 34500.12);
-    const next = withRateUguali(con, 91713.37, 4);
-    expect(next.debiti_tributari!.amounts[0]).not.toBeCloseTo(91713.37 / 4, 2);
-  });
-
-  it("saldo e acconto non si muovono", () => {
-    const con = withAccontoPct(withSaldo({}, 91713.37, 34500.12), 91713.37, 40);
-    const next = withRateUguali(con, 91713.37, 3);
-    expect(next.debiti_tributari!.saldo).toBe(34500.12);
-    expect(next.debiti_tributari!.acconto_pct).toBe(40);
-  });
-});
-
-describe("rateOptions — non si offre un piano che l'orizzonte rifiuterebbe", () => {
-  it("fino a cinque rate, mai piu' degli anni di piano", () => {
-    expect(rateOptions(5)).toEqual([2, 3, 4, 5]);
-    expect(rateOptions(7)).toEqual([2, 3, 4, 5]);
-    expect(rateOptions(3)).toEqual([2, 3]);
-    expect(rateOptions(1)).toEqual([]);
-    expect(rateOptions(0)).toEqual([]);
-  });
-});
-
 describe("withAccontoPct", () => {
   it("scrive la percentuale e crea il piano se non c'era", () => {
     expect(withAccontoPct({}, 91713.37, 40).debiti_tributari).toEqual({
@@ -274,32 +225,26 @@ describe("accontoPctValue — che cosa mostra la casella", () => {
   });
 });
 
-describe("la tabella delle rate scadenzia il RATEIZZATO, non l'apertura", () => {
-  it("la massa che la tabella mostra e' il rateizzato", () => {
-    const con = withSaldo({}, 91713.37, 34500.12);
-    expect(tributariMasses(con, 91713.37).debiti_tributari).toBe(57213.25);
-  });
-
-  it("senza piano non c'e' nulla da scadenziare: massa zero, tabella vuota", () => {
-    expect(tributariMasses({}, 91713.37).debiti_tributari).toBe(0);
-    expect(tributariTabella({}, 91713.37)).toEqual({});
-  });
-
-  it("il piano passato alla tabella porta il RATEIZZATO come apertura: il residuo torna", () => {
-    const con = withSaldo({}, 91713.37, 34500.12);
-    expect(tributariTabella(con, 91713.37).debiti_tributari!.opening).toBe(57213.25);
-    // e il piano VERO resta con la sua apertura: quella della tabella e' una vista
-    expect(con.debiti_tributari!.opening).toBe(91713.37);
-  });
-});
-
-describe("withRate — dal ritorno della tabella al piano vero", () => {
-  it("prende le sole rate e conserva apertura, saldo, rateizzato e acconto", () => {
-    const con = withAccontoPct(withSaldo({}, 91713.37, 34500.12), 91713.37, 40);
+// ── withRate (Task 16: il saldo e il rateizzato ora si scrivono al passo 5
+// "Patrimoniale pregresso", `lib/budget-pregresso-oltre.ts`; qui resta solo
+// la scrittura delle rate su un piano gia' esistente, con saldo/acconto
+// dichiarati altrove) ────────────────────────────────────────────────────
+describe("withRate — scrive le sole rate, conserva apertura, saldo, rateizzato e acconto", () => {
+  it("prende le sole rate e non tocca il resto del piano", () => {
+    const con: Pregresso = {
+      debiti_tributari: { opening: 91713.37, saldo: 34500.12, rateizzato: 57213.25, amounts: [], acconto_pct: 40 },
+    };
     const next = withRate(con, 91713.37, [20000.5, 37212.75]);
     expect(next.debiti_tributari).toEqual({
       opening: 91713.37, saldo: 34500.12, rateizzato: 57213.25,
       amounts: [20000.5, 37212.75], acconto_pct: 40,
+    });
+  });
+
+  it("senza piano ne crea uno di partenza (tutto saldo, nulla rateizzato) e scrive le rate sopra", () => {
+    const next = withRate({}, 91713.37, [1000]);
+    expect(next.debiti_tributari).toEqual({
+      opening: 91713.37, saldo: 91713.37, rateizzato: 0, amounts: [1000], acconto_pct: 100,
     });
   });
 });
@@ -451,28 +396,6 @@ describe("draftDisplay", () => {
     expect(draftDisplay("1", DEFAULT_ACCONTO_PCT)).toBe(1);
     expect(draftDisplay("", DEFAULT_ACCONTO_PCT)).toBe(""); // qui una mutazione "pct || 100" romperebbe: darebbe 100
     expect(draftDisplay("5", DEFAULT_ACCONTO_PCT)).toBe(5); // la cifra successiva riparte da vuoto, non da 105/1005
-  });
-});
-
-// ── rateSelectValue (fix1 R6) ────────────────────────────────────────────────
-describe("rateSelectValue — lo stato del Select rispecchia il piano vero, o e' neutro", () => {
-  it("il piano coincide con N rate uguali => quell'opzione", () => {
-    const amounts = equalInstalments(60000, 3);
-    expect(rateSelectValue(amounts, 60000, [2, 3, 4, 5])).toBe("3");
-  });
-
-  it("un ritocco a mano su una rata (non piu' uguali) => stato neutro, non l'ultima scelta", () => {
-    const amounts = [20000, 25000, 15000]; // sommano 60.000 ma non sono uguali
-    expect(rateSelectValue(amounts, 60000, [2, 3, 4, 5])).toBe("");
-  });
-
-  it("nessuna rata dichiarata => stato neutro", () => {
-    expect(rateSelectValue([], 60000, [2, 3, 4, 5])).toBe("");
-  });
-
-  it("un'opzione non offerta (es. 6 rate, orizzonte a 5) non viene mai scelta", () => {
-    const amounts = equalInstalments(60000, 6);
-    expect(rateSelectValue(amounts, 60000, [2, 3, 4, 5])).toBe("");
   });
 });
 

@@ -339,11 +339,10 @@ export function BudgetWizard({
       {step === "fatturato" && <StepFatturato {...stepProps} />}
       {step === "costi" && <StepCosti {...stepProps} />}
       {step === "circolante" && <StepCircolante {...stepProps} />}
-      {/* I passi 5 e 6 hanno ciascuno il proprio componente (Task 13 e 15);
-          `StepPregressoNuovo` non e' piu' reso da nessun passo e lo cancella
-          il Task 16. Il passo «Altre voci CE» non esiste piu' (Task 11): la
-          sua unica riga rimasta, gli oneri diversi di gestione, e' entrata
-          nel passo Costi. */}
+      {/* I passi 5 e 6 hanno ciascuno il proprio componente (Task 13 e 15).
+          Il passo «Altre voci CE» non esiste piu' (Task 11): la sua unica
+          riga rimasta, gli oneri diversi di gestione, e' entrata nel passo
+          Costi. */}
       {step === "patrimoniale-pregresso" && <StepPatrimonialePregresso {...stepProps} />}
       {step === "patrimoniale-piano" && <StepPatrimonialePiano {...stepProps} />}
       {step === "imposte" && <StepImposte {...stepProps} />}

@@ -1201,3 +1201,15 @@ Prima del primo task di coding il coordinatore deve mostrare:
 
 Si procede quindi un'ondata alla volta. M2 non entra in produzione finché M1-10
 non è approvato, anche se lo spike e il template sono già pronti.
+
+### Esecuzione M2-00 / M2-01 — 2026-09-15
+
+Su istruzione dell’utente, implementazione diretta e reviewer Terra high, senza Pi.
+M2-00A e spike integrati dopo gate indipendente: native Typst scelto, 24/24 PDF
+riusciti identici byte per byte, 42 test toolchain/spike. M2-01 runtime isolato
+completato, due review indipendenti Terra high approvate: 42 test di runtime;
+117 test mirati complessivi. Ricevute e limiti in
+`docs/testing/M2-00-TYPST-SPIKE.md` e `docs/testing/M2-01-typst-runtime.md`.
+Nessun push/merge su main, nessun endpoint di export anticipato.
+Prossimo task M2-02A: base, IBM Plex Sans e planner misurato; piano completo
+congelato dopo dimensioni dei grafici M2-03 e prima delle note M2-00C.

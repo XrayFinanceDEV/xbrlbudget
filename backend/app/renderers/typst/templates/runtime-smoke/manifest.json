@@ -1,0 +1,7 @@
+{
+  "version": "runtime-smoke-1",
+  "entrypoint": "template.typ",
+  "files": {
+    "template.typ": "41755eca1f0aedf8f79e368671fc3bebef3c0f69b4a189e882c5c4fbc7fb4c0e"
+  }
+}

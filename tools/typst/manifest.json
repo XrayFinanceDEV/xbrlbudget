@@ -13,5 +13,6 @@
     "kernel": "Linux",
     "arch": "x86_64",
     "libc": "musl (statically linked official release asset)"
-  }
+  },
+  "binary_sha256": "29273eaa04f6d00edd0c2bec578f565fc9c65be856bfbffc894567c68ed0b237"
 }

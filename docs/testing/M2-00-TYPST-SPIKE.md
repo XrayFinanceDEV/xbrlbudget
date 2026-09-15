@@ -2,12 +2,12 @@
 
 Data: 2026-09-15. Base: M2-00A `db8c97b`.
 Spike implementato in directory dedicata; nessuna route o servizio PDF di
-produzione modificato. La riproduzione locale è completata, la review
-indipendente Pi-B prevista dal piano resta da svolgere.
+produzione modificato. La riproduzione locale e la review indipendente Terra high sono completate.
+Terra sostituisce Pi su istruzione dell’utente: gate approvato per M2-01.
 
 ## Scelta
 
-Proposta tecnica: **primitive native Typst** per i sei grafici del report.
+Scelta approvata: **primitive native Typst** per i sei grafici del report.
 CeTZ-Plot è compatibile con tutti i casi provati, ma aggiunge tre pacchetti e
 un asset WASM e richiede più tempo e memoria. Primaviz 0.10.0 non viene scelto:
 le sue linee multi-serie non accettano null e il dominio delle barre negative
@@ -80,7 +80,7 @@ Controllo negativo: un import non disponibile in entrambe le cache non può
 essere scaricato nel namespace senza rete e la compilazione termina con errore
 DNS. Nessun download viene effettuato durante le compilazioni riuscite.
 
-Gate pytest mirato: **80 passed**, un warning preesistente `python_multipart`.
+Gate pytest mirato riprodotto nella review: **42 passed**, un warning preesistente `python_multipart`.
 Il test semantico fallisce realmente quando viene rimosso il titolo di una
 sezione dal corpo, anche se resta nell'indice, o quando viene richiesto un
 valore assente. Test aggiuntivo: archivio pacchetto alterato rifiutato prima
@@ -118,7 +118,7 @@ veraPDF non è installato e non è stata effettuata validazione formale.
 Riferimento: [profili PDF supportati da Typst](https://typst.app/docs/reference/pdf/).
 
 Lo spike fornisce evidenza favorevole all'adozione di Typst con primitive native.
-Prima dell'integrazione di produzione servono review indipendente dello spike,
+La review indipendente dello spike è approvata; prima della produzione servono
 runtime/sandbox M2-01, template definitivo M2-02 e successivi gate. I controlli
 del processo in questo harness non sostituiscono timeout, cleanup, concorrenza
 e limiti input/output del renderer di produzione.
@@ -127,3 +127,16 @@ Riproduzione e generazione dei due HTML:
 [`tools/typst/spike/README.md`](../../tools/typst/spike/README.md).
 La pubblicazione Orca del link pubblico è stata rifiutata con
 `artifact_sharing_disabled`; i due HTML autosufficienti sono consegnati localmente.
+
+## Review indipendente del gate
+
+Terra high, 2026-09-15: toolchain e dati copiati in una directory temporanea
+nuova, output e cache estratta nuovi. Native 12/12 (0,169–0,240 s; 44,09 MiB),
+CeTZ 12/12 (1,062–1,353 s; 104,59 MiB), Primaviz 0/12. I 24 PDF riusciti
+coincidono byte per byte con i digest versionati. Probe native/CeTZ 8/8,
+Primaviz 4/8; controllo negativo offline fallito con errore DNS previsto.
+Verificati testo, vettori, A4, font e header ripetuti nelle tabelle multipagina.
+Comando: `PYTHONPATH=.:backend python -m pytest tests/test_typst_toolchain.py
+tests/test_m2_00_spike.py tests/test_m2_00_spike_fixtures.py -q` (42 passed).
+Il totale precedente di 80 test era una registrazione inesatta: corretto.
+Non provate cold boot del container né conformità formale PDF/A.

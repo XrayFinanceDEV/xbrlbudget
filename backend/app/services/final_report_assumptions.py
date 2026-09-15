@@ -52,6 +52,7 @@ from pydantic import ValidationError
 
 from app.schemas.budget import (
     FinancingLoanInput,
+    OtherLenderInput,
     PregressoInput,
     TemporaryDifferenceInput,
 )
@@ -63,12 +64,14 @@ from app.schemas.final_report import (
     CEOverride,
     Diagnostic,
     FinancingLoan,
+    OtherLender,
     Pregresso as PregressoContract,
     RunoffPlan,
     SPIndexing,
     SPOverride,
     TaxRunoffPlan,
     TemporaryDifference,
+    _STRING_ASSUMPTION_FIELDS,
 )
 from database.models import BudgetAssumptions
 
@@ -108,7 +111,7 @@ def dead_assumption_fields() -> frozenset[str]:
 #: Nested-table fields, keyed by the catalog name they are emitted under.
 #: ``financing_loans`` and ``tax_temporary_differences`` are catalog *fields*
 #: but carry JSON tables, so they render through the nested path too.
-_PRESENCE_NESTED_FIELDS = frozenset({"financing_loans", "sp_indexing", "tax_temporary_differences"})
+_PRESENCE_NESTED_FIELDS = frozenset({"financing_loans", "sp_indexing", "tax_temporary_differences", "other_lenders"})
 _OVERRIDE_NESTED_FIELDS = frozenset({"ce_overrides", "sp_overrides"})
 _NESTED_FIELDS = _PRESENCE_NESTED_FIELDS | _OVERRIDE_NESTED_FIELDS | {"pregresso"}
 
@@ -128,6 +131,9 @@ FIELD_LABELS: Mapping[str, str] = {
     "fixed_services_growth_pct": "Crescita servizi fissa %",
     "personnel_growth_pct": "Crescita personale %",
     "rent_growth_pct": "Crescita godimento beni di terzi %",
+    "inflation_pct": "Inflazione attesa %",
+    "fixed_materials_growth_auto": "Materie fissa: segue l'inflazione",
+    "fixed_services_growth_auto": "Servizi fissa: segue l'inflazione",
     # altre voci CE
     "other_costs_growth_pct": "Crescita oneri diversi %",
     "ce_overrides": "Override CE",
@@ -170,6 +176,11 @@ FIELD_LABELS: Mapping[str, str] = {
     "cash_sweep_min_cash": "Cassa minima del cash sweep",
     "overdraft_allowed": "Scoperto di conto consentito",
     "overdraft_limit": "Tetto dello scoperto",
+    "bank_lines_amount": "Fidi e anticipi su fatture",
+    "bank_lines_rule": "Fidi: regola nel piano",
+    "bank_lines_rate": "Tasso fidi e scoperto %",
+    "other_lenders": "Altri finanziatori",
+    "tfr_payments": "Liquidazioni TFR",
     "pregresso": "Pregresso",
     # imposte
     "tax_rate": "Aliquota fiscale %",
@@ -218,6 +229,11 @@ def _decimal(value: Any) -> Optional[Decimal]:
 def _scalar(row: Any, field: str) -> Any:
     value = getattr(row, field, None)
     if isinstance(value, bool) or value is None:
+        return value
+    if field in _STRING_ASSUMPTION_FIELDS:
+        # `bank_lines_rule` e' un VARCHAR a due valori: un'etichetta di regola,
+        # non un importo. `_decimal` la rifiuterebbe e farebbe cadere l'intero
+        # read model del report su una riga di catalogo.
         return value
     return _decimal(value)
 
@@ -334,6 +350,7 @@ def _nested_assumption(
         "financing_loans": _financing_loans,
         "pregresso": _pregresso,
         "tax_temporary_differences": _temporary_differences,
+        "other_lenders": _other_lenders,
     }[field]
     data, invalid = builder(rows, field)
     diagnostics.extend(invalid)
@@ -460,6 +477,28 @@ def _temporary_differences(rows: Sequence[Any], field: str) -> tuple[Optional[li
     return (lines or None), diagnostics
 
 
+def _other_lenders(rows: Sequence[Any], field: str) -> tuple[Optional[list[OtherLender]], list[Diagnostic]]:
+    lenders: list[OtherLender] = []
+    diagnostics: list[Diagnostic] = []
+    for row in rows:
+        raw = getattr(row, field, None)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            try:
+                parsed = OtherLenderInput.model_validate(item)
+            except (ValueError, ValidationError) as error:
+                diagnostics.append(_invalid_diagnostic(field, row, error))
+                continue
+            lenders.append(OtherLender(
+                name=parsed.name,
+                opening_residual=parsed.opening_residual,
+                interest_rate=parsed.interest_rate,
+                repayments=list(parsed.repayments),
+            ))
+    return (lenders or None), diagnostics
+
+
 def _pregresso(rows: Sequence[Any], field: str) -> tuple[Optional[PregressoContract], list[Diagnostic]]:
     """The runoff plan is a snapshot of the base year, so only row 1 may carry it.
 
@@ -488,6 +527,7 @@ def _pregresso(rows: Sequence[Any], field: str) -> tuple[Optional[PregressoContr
             opening=item.opening,
             amounts=list(item.amounts),
             writeoff=None if item.writeoff is None else list(item.writeoff),
+            non_incassato=item.non_incassato,
         )
 
     tributari = None

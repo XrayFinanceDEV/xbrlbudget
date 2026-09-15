@@ -211,6 +211,22 @@ class TemporaryDifferenceInput(BaseModel):
     tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
 
 
+class OtherLenderInput(BaseModel):
+    """Un altro finanziatore (sp16b/sp17b) scadenziato per anno: spesso un finanziamento soci."""
+    name: Optional[str] = Field(default=None, max_length=100)
+    opening_residual: Decimal = Field(..., gt=0)
+    interest_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    repayments: List[Decimal] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_lender(self):
+        if any(r < 0 for r in self.repayments):
+            raise ValueError("un rimborso per anno è negativo")
+        if sum(self.repayments, Decimal("0")) - self.opening_residual > Decimal("0.01"):
+            raise ValueError("la somma dei rimborsi per anno supera il residuo iniziale")
+        return self
+
+
 SpIndexingDriver = Literal["ricavi", "acquisti", "personale"]
 """I tre driver di volume, e solo tre (Task 15 §2).
 
@@ -227,6 +243,7 @@ class PregressoPlanInput(BaseModel):
     opening: Decimal = Field(..., ge=0)
     amounts: List[Decimal] = Field(default_factory=list)
     writeoff: Optional[List[Decimal]] = None  # solo crediti_commerciali
+    non_incassato: bool = False  # solo crediti_commerciali: dichiarati non incassati nel piano
 
 
 class PregressoTributariInput(PregressoPlanInput):
@@ -303,6 +320,16 @@ class BudgetAssumptionsBase(BaseModel):
 
     # Previdenza scales with personnel cost (opt-in): sp16f/sp17f move with ce08
     previdenza_scales_with_personnel: bool = False
+
+    # ── Giro di rilievi del 14/09 (spec 2026-09-15 §6) ──
+    inflation_pct: Optional[Decimal] = Field(default=None, ge=-50, le=100)
+    fixed_materials_growth_auto: bool = False
+    fixed_services_growth_auto: bool = False
+    bank_lines_amount: Optional[Decimal] = Field(default=None, ge=0)
+    bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
+    bank_lines_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    other_lenders: Optional[List[OtherLenderInput]] = None
+    tfr_payments: Decimal = Field(default=Decimal("0"), ge=0)
 
     # Financial parameters
     interest_rate_receivables: Decimal = Field(default=Decimal("0"))
@@ -435,6 +462,14 @@ class BudgetAssumptionsUpdate(BaseModel):
     overdraft_limit: Optional[Decimal] = Field(None, ge=0)
     tfr_accrual_suspended: Optional[bool] = None
     previdenza_scales_with_personnel: Optional[bool] = None
+    inflation_pct: Optional[Decimal] = None
+    fixed_materials_growth_auto: Optional[bool] = None
+    fixed_services_growth_auto: Optional[bool] = None
+    bank_lines_amount: Optional[Decimal] = None
+    bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
+    bank_lines_rate: Optional[Decimal] = None
+    other_lenders: Optional[List[OtherLenderInput]] = None
+    tfr_payments: Optional[Decimal] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None

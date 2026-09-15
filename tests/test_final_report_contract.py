@@ -254,7 +254,7 @@ def test_assumption_catalog_is_exactly_the_current_wizard_without_dead_fields():
     fields = [field for item in ASSUMPTION_SECTION_CATALOG for field in item["fields"]]
     nested_fields = [field for item in ASSUMPTION_SECTION_CATALOG for field in item.get("nested_fields", [])]
     assert len(fields) == len(set(fields))
-    assert set(nested_fields) == {"ce_overrides", "sp_indexing", "sp_overrides", "pregresso"}
+    assert set(nested_fields) == {"ce_overrides", "sp_indexing", "sp_overrides", "pregresso", "other_lenders"}
     # These are structured component inputs, deliberately represented as nested
     # tables/envelopes instead of pretending they are scalar wizard STEP_FIELDS.
     assert "investments" not in fields + nested_fields

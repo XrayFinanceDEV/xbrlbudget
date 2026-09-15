@@ -663,6 +663,16 @@ class BudgetAssumptions(Base):
     # / manual sp16f_growth_pct), so existing scenarios are unaffected.
     previdenza_scales_with_personnel = Column(Boolean, default=False, nullable=False)
 
+    # ── Giro di rilievi del 14/09 (spec 2026-09-15 §6): tutto additivo ──
+    inflation_pct = Column(Numeric(10, 6), nullable=True)  # inflazione attesa del passo 1; NULL = scenario precedente
+    fixed_materials_growth_auto = Column(Boolean, default=False, nullable=False)  # la parte fissa segue l'inflazione
+    fixed_services_growth_auto = Column(Boolean, default=False, nullable=False)
+    bank_lines_amount = Column(Numeric(15, 2), nullable=True)  # fidi e anticipi su fatture (prima riga); NULL = regime di prima
+    bank_lines_rule = Column(String(16), nullable=True)        # 'costante' | 'ricavi'
+    bank_lines_rate = Column(Numeric(10, 6), nullable=True)    # tasso % su fidi e scoperto
+    other_lenders = Column(JSON, nullable=True)                 # altri finanziatori per anno (prima riga)
+    tfr_payments = Column(Numeric(15, 2), default=0, nullable=False)  # liquidazioni TFR dell'anno
+
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables
     interest_rate_payables = Column(Numeric(10, 6), default=0, nullable=False)  # % on payables

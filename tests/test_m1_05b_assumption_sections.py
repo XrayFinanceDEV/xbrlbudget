@@ -78,10 +78,16 @@ def test_sections_pass_the_contract_section_validators():
         AssumptionSection.model_validate(section.model_dump())
 
 
-def test_scenario_section_carries_no_assumption_rows():
+def test_scenario_section_carries_only_the_saved_inflation():
+    # Il giro di rilievi del 14/09 (spec 2026-09-15 §6) salva `inflation_pct` su
+    # ogni riga di ipotesi: la sezione 1 non e' piu' vuota, ma non porta altro.
+    # NULL ovunque e' la firma di uno scenario precedente al lotto, e la
+    # provenanza letta e' quindi «automatic», mai «default confermato».
     read_model = _build(_row(2027, supplied=[]))
     scenario = next(section for section in read_model.sections if section.key == "scenario")
-    assert scenario.assumptions == []
+    assert [a.field for a in scenario.assumptions] == ["inflation_pct"]
+    assert scenario.assumptions[0].values == [None]
+    assert scenario.assumptions[0].provenance == "automatic"
 
 
 def test_requires_at_least_one_row():

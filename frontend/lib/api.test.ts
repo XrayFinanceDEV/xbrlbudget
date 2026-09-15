@@ -4,10 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // il finto deve rispondere PRIMA dell'import, altrimenti `api.ts` esplode
 // su `api.interceptors.request.use is not a function`.
 const postMock = vi.fn();
+const getMock = vi.fn();
 vi.mock("axios", () => {
   const instance = {
     post: (...args: unknown[]) => postMock(...args),
-    get: vi.fn(),
+    get: (...args: unknown[]) => getMock(...args),
     put: vi.fn(),
     patch: vi.fn(),
     interceptors: {
@@ -23,7 +24,9 @@ vi.mock("axios", () => {
   };
 });
 
-import { previewForecast } from "./api";
+import { getFinalReport, getFinalReportV2, previewForecast } from "./api";
+import v1 from "../../tests/fixtures/final_report/bilancio.json";
+import v2 from "../../tests/fixtures/final_report/v2/bilancio.json";
 
 describe("previewForecast", () => {
   beforeEach(() => {
@@ -59,5 +62,20 @@ describe("previewForecast", () => {
       { assumptions: [] },
       { signal: undefined }
     );
+  });
+});
+
+describe("versioned final report getters", () => {
+  beforeEach(() => getMock.mockReset());
+  it("requests v2 explicitly through the authenticated API instance", async () => {
+    getMock.mockResolvedValue({data: v2});
+    expect(await getFinalReportV2(1, 2)).toEqual(v2);
+    expect(getMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report", {params: {schema_version: 2}});
+  });
+  it("retains the v1 getter and rejects a response with the wrong version", async () => {
+    getMock.mockResolvedValue({data: v1});
+    expect(await getFinalReport(1, 2)).toEqual(v1);
+    expect(getMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report");
+    await expect(getFinalReportV2(1, 2)).rejects.toThrow(/v2/);
   });
 });

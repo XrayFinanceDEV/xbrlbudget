@@ -41,6 +41,10 @@ class FinalReportChainConflict(ValueError):
     """The model cannot name one source because the legacy chain is ambiguous."""
 
 
+class FinalReportPeriodUnavailable(ValueError):
+    """A v2 dossier cannot invent document years without a declared horizon."""
+
+
 NARRATIVE_IDS = (
     "executive_summary", "adjustments_and_closing", "budget_assumptions",
     "economic_outlook", "financial_outlook", "risks_and_actions",
@@ -288,8 +292,10 @@ def _source_revisions(
     return revisions
 
 
-def assemble_final_report(db: Session, company_id: int, scenario_id: int) -> FinalReportModel:
+def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, schema_version: int = 1) -> FinalReportModel:
     """Build one deterministic read model without flushing, writing, or calling AI."""
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ValueError("Unsupported final report schema version")
     with db.no_autoflush:
         scenario = db.query(BudgetScenario).options(
             joinedload(BudgetScenario.company), joinedload(BudgetScenario.assumptions),
@@ -355,9 +361,11 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int) -> Fin
         if adjustments.entries and not adjustments.confirmed:
             diagnostics.append(_diagnostic("adjustments_unconfirmed", "error", "adjustments", "Le rettifiche economiche non sono state confermate."))
 
-        analysis = get_complete_analysis(db, company_id, scenario_id)
+        analysis = get_complete_analysis(db, company_id, scenario_id, exact_decimals=True) if schema_version == 2 else get_complete_analysis(db, company_id, scenario_id)
         wanted = sorted({row.forecast_year for row in scenario.assumptions} | {row.year for row in scenario.forecast_years})
         if not wanted:
+            if schema_version == 2:
+                raise FinalReportPeriodUnavailable("Orizzonte budget non disponibile: salvare gli anni del piano prima di preparare il dossier.")
             wanted = [scenario.base_year + 1]
             diagnostics.append(_diagnostic("forecast_missing", "error", "forecast", "Forecast persistito non disponibile."))
         actual_years = {row.year for row in scenario.forecast_years}
@@ -477,4 +485,57 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int) -> Fin
         payload["narrative"] = _narrative(scenario, generated_at, diagnostics, narrative_source_hash(report))
         report = FinalReportModel.model_validate(payload, context={"skip_hash_validation": True})
         payload["model_hash"] = report.calculate_model_hash()
-        return FinalReportModel.model_validate(payload)
+        report = FinalReportModel.model_validate(payload)
+        if schema_version == 1:
+            return report
+
+        from app.schemas.final_report_v2 import StatementPeriod
+        from app.services.final_report_dossier import DossierSource, extend_dossier
+        sources = []
+        calculations = analysis.get('calculations', {}).get('by_year', {})
+        cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
+
+        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True):
+            bs = _statement_map(getattr(record, 'balance_sheet', None)) if record and record.balance_sheet else None
+            inc = _statement_map(getattr(record, 'income_statement', None)) if record and record.income_statement else None
+            if snapshot is not None:
+                bs = {key: value for key, value in snapshot.items() if key.startswith('sp')}
+                inc = {key: value for key, value in snapshot.items() if key.startswith('ce')}
+            annual_calculation = basis in ('historical', 'closing', 'forecast') and calculation_available
+            source_id = f"{basis}:{getattr(record, 'id', 'unavailable')}"
+            sources.append(DossierSource(
+                period=StatementPeriod(id=identifier, year=year, label=label, basis=basis,
+                    period_months=months, period_end=date(year, months, monthrange(year, months)[1]), source=source_id),
+                balance_sheet=bs, income_statement=inc,
+                calculations=calculations.get(str(year), calculations.get(year)) if annual_calculation else None,
+                cashflow=cashflows.get(year) if annual_calculation else None,
+            ))
+
+        historical_years = sorted({row['year'] for row in analysis.get('historical_years', []) if isinstance(row, dict) and 'year' in row})
+        for year in historical_years:
+            if workflow == 'infrannuale' and year == scenario.base_year:
+                continue  # This promoted record is the estimated closing, with its own basis.
+            add_source(f'historical:{year}', year, 'historical', _full_year(db, company_id, year), f'{year} storico')
+        if workflow == 'infrannuale':
+            months = source.period_months if source and source.period_months else 12
+            observed_record = adjustment_year if before is not None or not entries else None
+            add_source(f'observed:{scenario.base_year}', scenario.base_year, 'observed', observed_record,
+                f'{months}M {scenario.base_year} osservato', months, before)
+            add_source(f'adjusted:{scenario.base_year}', scenario.base_year, 'adjusted', adjustment_year,
+                f'{months}M {scenario.base_year} rettificato', months)
+            closing_record = automatic_row or financial_year
+            # Year-keyed /analysis metrics refer to the promoted annual record.
+            # Never attach them to a newer/different source closing projection.
+            closing_metrics_match = closing_record is financial_year or (
+                financial_year is not None and closing_record is not None
+                and _statement_map(closing_record.balance_sheet) == _statement_map(financial_year.balance_sheet)
+                and _statement_map(closing_record.income_statement) == _statement_map(financial_year.income_statement)
+            )
+            add_source(f'closing:{scenario.base_year}', scenario.base_year, 'closing', closing_record,
+                f'{scenario.base_year} chiusura stimata', calculation_available=closing_metrics_match)
+        elif scenario.base_year not in historical_years:
+            add_source(f'historical:{scenario.base_year}', scenario.base_year, 'historical', financial_year,
+                f'{scenario.base_year} base')
+        for year in wanted:
+            add_source(f'forecast:{year}', year, 'forecast', by_forecast_year.get(year), f'{year} previsionale')
+        return extend_dossier(report, sources)

@@ -16,6 +16,7 @@ import {
   type FinalReportModel,
   type NarrativeBlock,
 } from '@/types/final-report';
+import { parseFinalReportModelV2, type FinalReportModelV2 } from '@/types/final-report-v2';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:8000/api/v1');
 
@@ -802,6 +803,17 @@ export const getFinalReport = async (
     `/companies/${companyId}/scenarios/${scenarioId}/final-report`,
   );
   return parseFinalReportModel(data);
+};
+
+export const getFinalReportV2 = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<FinalReportModelV2> => {
+  const { data } = await api.get<unknown>(
+    `/companies/${companyId}/scenarios/${scenarioId}/final-report`,
+    { params: { schema_version: 2 } },
+  );
+  return parseFinalReportModelV2(data);
 };
 
 export const generateFinalReportNarrative = async (

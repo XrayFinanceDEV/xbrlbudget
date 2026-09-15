@@ -794,6 +794,13 @@ Se il gate fallisce, M2 si ferma. Playwright non diventa un fallback implicito.
 
 **Owner:** coordinatore; review del contratto prima dell'integrazione.
 
+**Esecuzione 2026-09-15:** sviluppo del coordinatore, supporto e review Terra;
+nessun agente Pi. Contratto/assembler, getter v2 e fixture dedicati implementati.
+Review circoscritta del contratto superata; evidenze e limiti in
+[M2-00B](../../testing/M2-00B-dossier-contract.md). Impaginazione, metriche e
+commenti per pagina restano nei task successivi. Il gate tecnico Typst rimane
+separato e non è approvato da questa consegna.
+
 **Depends on:** M1-10 integrato. Non richiede di riaprire i task M1 conclusi.
 
 **Ownership:** schemi report, assembler, contratti/fixture, negoziazione della

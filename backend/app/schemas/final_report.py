@@ -97,6 +97,10 @@ class ContractModel(BaseModel):
             # ``format(..., "f")`` never emits Decimal exponent notation and
             # preserves accounting precision, including trailing zeroes.
             return format(value, "f")
+        if isinstance(value, list):
+            return [self._serialize_decimal(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self._serialize_decimal(item) for key, item in value.items()}
         return value
 
     @model_validator(mode="before")
@@ -518,7 +522,10 @@ class FinalReportModel(ContractModel):
         expected_sections = [item["key"] for item in ASSUMPTION_SECTION_CATALOG]
         if [section.key for section in self.assumption_sections] != expected_sections:
             raise ValueError("assumption_sections must use the seven canonical wizard groups in order")
-        if len({series.id for series in self.chart_series}) != 6:
+        canonical_chart_ids = {"income_results", "margins", "cashflows", "liquidity_debt", "working_capital_days", "coverage"}
+        chart_ids = [series.id for series in self.chart_series]
+        if (len(set(chart_ids)) != len(chart_ids) or not canonical_chart_ids.issubset(chart_ids)
+                or (self.schema_version == 1 and len(chart_ids) != 6)):
             raise ValueError("chart_series must contain each of the six canonical series exactly once")
         if len({block.id for block in self.narrative}) != 6:
             raise ValueError("narrative must contain each of the six canonical blocks exactly once")

@@ -312,6 +312,9 @@ class _DebitoBancarioAnno:
     senza_piano: Optional[Dict[str, Decimal]] = None
     piano_anni: Optional[Dict[str, Decimal]] = None
     contratti: List[Dict[str, Any]] = field(default_factory=list)
+    # Fidi e anticipi (regime esplicito, spec 2026-09-15 §5.2): uno stato, non un
+    # piano. `None` fuori dal regime.
+    fidi: Optional[Dict[str, Any]] = None
 
 
 def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
@@ -414,15 +417,40 @@ def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_S
         {**c, **{k: _q2(c[k]) for k in ('erogato', 'residuo_iniziale', 'rimborso', 'interessi', 'breve', 'lungo')}}
         for c in debito.contratti
     ]
+    # ── FIDI: UNA RIGA SUL LATO BREVE (regime esplicito, spec 2026-09-15 §5.2) ──
+    # Lo sweep di questo anno ha colpito loro e solo loro: il rimborso si posa
+    # qui, non sui contratti. La riga di riconciliazione li vede sul `breve`
+    # col residuo, e sono la «casa» degli aumenti: in regime esplicito le
+    # componenti pregresse non esistono e il residuo del piano lo decidono i
+    # contratti, che restano invariati.
+    fidi = None
+    fidi_riga = None
+    if debito.fidi is not None:
+        pagato_fidi = (sweep.rimborso_breve if sweep is not None else zero)
+        fidi = {
+            'apertura': _q2(debito.fidi['apertura']),
+            'variazione_ricavi': _q2(debito.fidi['variazione_ricavi']),
+            'rimborso_sweep': _q2(pagato_fidi),
+            'residuo': _q2(debito.fidi['residuo']) - _q2(pagato_fidi),
+            'regola': debito.fidi.get('regola') or 'costante',
+        }
+        fidi_riga = {'breve': fidi['residuo'], 'lungo': zero}
     pregressi = [c for c in contratti if c['residuo_iniziale'] > zero]
     nuovi = [c for c in contratti if c['residuo_iniziale'] == zero]
     componenti_pregresso = [c for c in (senza_piano, piano_anni) if c is not None]
-    tutte = componenti_pregresso + contratti
-    casa = (componenti_pregresso[0] if componenti_pregresso
-            else pregressi[-1] if pregressi else nuovi[-1] if nuovi else None)
-    ordine_riduzione = componenti_pregresso + list(reversed(pregressi)) + list(reversed(nuovi))
+    tutte = componenti_pregresso + contratti + ([fidi_riga] if fidi_riga is not None else [])
+    casa_pregresso = (componenti_pregresso[0] if componenti_pregresso
+                      else pregressi[-1] if pregressi else nuovi[-1] if nuovi else None)
+    # La «casa» degli aumenti e' per lato: a breve i fidi (nel regime esplicito
+    # sono loro la riga libera: una linea di credito puo' crescere), a lungo
+    # SEMPRE un contratto/una componente — i fidi non stanno nel lungo.
+    casa_lato = {'breve': fidi_riga if fidi_riga is not None else casa_pregresso,
+                 'lungo': casa_pregresso}
+    ordine_riduzione = ([fidi_riga] if fidi_riga is not None else []) + componenti_pregresso \
+        + list(reversed(pregressi)) + list(reversed(nuovi))
     for lato, bersaglio in (('breve', sp16a - scoperto), ('lungo', sp17a)):
         delta = bersaglio - sum((c[lato] for c in tutte), zero)
+        casa = casa_lato[lato]
         if delta > zero and casa is not None:
             casa[lato] += delta
         elif delta < zero:
@@ -432,7 +460,10 @@ def _dichiara_debito_bancario(debito: "_DebitoBancarioAnno", sweep: "Optional[_S
                 delta += tolto
                 if delta == zero:
                     break
-    return {'pregresso_senza_piano': senza_piano, 'pregresso_piano_anni': piano_anni, 'contratti': contratti}
+    if fidi_riga is not None:
+        fidi['residuo'] = fidi_riga['breve']
+    return {'pregresso_senza_piano': senza_piano, 'pregresso_piano_anni': piano_anni,
+            'contratti': contratti, 'fidi': fidi}
 
 
 def _quota_breve_dichiarata(prev_details) -> Decimal:
@@ -2103,11 +2134,39 @@ class ForecastEngine:
                 # `projection_common.contratti_da_riga_finanziamento`.
                 financing_loans.extend(contratti_da_riga_finanziamento(loan, a.forecast_year))
 
-        use_detailed_existing_schedule = detailed_opening_total > 0
+        # ── FIDI E ANTICIPI: L'APERTURA DEL REGIME ESPLICITO (spec 2026-09-15 §5.2) ──
+        # `bank_lines_amount` non presente = regime di sempre, nessun comportamento
+        # cambia. Presente sulla prima riga = i fidi sono uno STATO separato dai
+        # contratti: validati qui, portati anno per anno da `compute_forecast`.
+        first = assumptions[0]
+        fidi = getattr(first, 'bank_lines_amount', None)
+        regime_esplicito = fidi is not None
+        if regime_esplicito:
+            fidi = Decimal(str(fidi))
+            base_sp16a = Decimal(str(getattr(base_bs, 'sp16a_debiti_banche_breve', None) or 0))
+            if fidi - base_sp16a > Decimal('0.01'):
+                raise ValueError(
+                    f"Fidi e anticipi ({eur_it(fidi)}) superano i debiti verso banche a breve "
+                    f"dell'anno base ({eur_it(base_sp16a)}): correggi al passo «Patrimoniale pregresso»"
+                )
+            for extra in assumptions[1:]:
+                if getattr(extra, 'bank_lines_amount', None) is not None:
+                    raise ValueError(
+                        "Fidi e anticipi (bank_lines_amount) valgono solo sulla riga del "
+                        "primo anno di previsione"
+                    )
+        use_detailed_existing_schedule = detailed_opening_total > 0 or regime_esplicito
         if use_detailed_existing_schedule:
             getter = lambda field_name: getattr(base_bs, field_name, None) or Decimal('0')
             base_bank_total = base_bank_debt(getter)
-            if abs(base_bank_total - detailed_opening_total) > Decimal('0.01'):
+            coperto = detailed_opening_total + (fidi if regime_esplicito else Decimal('0'))
+            if abs(base_bank_total - coperto) > Decimal('0.01'):
+                if regime_esplicito:
+                    raise ValueError(
+                        f"Fidi e anticipi ({eur_it(fidi)}) più i residui dei finanziamenti "
+                        f"({eur_it(detailed_opening_total)}) devono coincidere con il debito "
+                        f"bancario dell'anno base ({eur_it(base_bank_total)})"
+                    )
                 raise ValueError(
                     f"La somma dei residui iniziali dei finanziamenti "
                     f"({eur_it(detailed_opening_total)}) deve coincidere con il debito "
@@ -2172,6 +2231,12 @@ class ForecastEngine:
         # base year, every later one reads the year just computed.
         prev_inc = source.base_inc
         prev_bs = source.base_bs
+        # ── FIDI: LO STATO VIAGGIA DI ANNO IN ANNO COME LO SCOPERTO ──
+        # L'apertura della prima riga (validata in `assemble_financing`) e poi il
+        # residuo dichiarato l'anno prima: mai una ri-derivazione dal saldo.
+        fidi_prima_riga = getattr(assumptions[0], 'bank_lines_amount', None)
+        fidi_regola = getattr(assumptions[0], 'bank_lines_rule', None) or 'costante'
+        fidi_tasso = Decimal(str(getattr(assumptions[0], 'bank_lines_rate', None) or 0))
         # Il settore comanda SOLO la soglia dei giorni di magazzino dedotti
         # (Task 10): nessun altro punto del motore budget legge il settore.
         settore = getattr(getattr(source.scenario, 'company', None), 'sector', None)
@@ -2213,6 +2278,15 @@ class ForecastEngine:
                                   ('sp17a_debiti_banche_lungo', 'sp17_debiti_lungo')),
             )
             debito = _DebitoBancarioAnno()
+            if fidi_prima_riga is not None:
+                if year_index == 0:
+                    fidi_apertura = Decimal(str(fidi_prima_riga))
+                else:
+                    fidi_riga = ((prev_details or {}).get('debito_bancario') or {}).get('fidi')
+                    fidi_apertura = (Decimal(str(fidi_riga['residuo']))
+                                     if fidi_riga else Decimal(str(fidi_prima_riga)))
+            else:
+                fidi_apertura = None
             try:
                 forecast_inc = self._calculate_income_statement(
                     base_inc=source.base_inc,
@@ -2224,6 +2298,8 @@ class ForecastEngine:
                     year_index=year_index,
                     details=details,
                     prev_details=prev_details,
+                    fidi_apertura=fidi_apertura,
+                    fidi_tasso=fidi_tasso,
                 )
                 forecast_inc = self._normalize_income_statement_cents(
                     forecast_inc,
@@ -2257,6 +2333,10 @@ class ForecastEngine:
                                    if year_index else source.scenario.base_year),
                     sweep=sweep,
                     debito_bancario=debito,
+                    fidi_apertura=fidi_apertura,
+                    fidi_regola=fidi_regola,
+                    prev_revenue=(getattr(prev_inc, 'ce01_ricavi_vendite', None)
+                                  if fidi_apertura is not None else None),
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
@@ -2330,6 +2410,16 @@ class ForecastEngine:
                 forecast_bs['sp16a_debiti_banche_breve'],
                 forecast_bs['sp17a_debiti_banche_lungo'],
                 overdraft.outstanding,
+            )
+            # COME il debito bancario e' descritto quest'anno: fidi a stato
+            # (`esplicito`), contratti col residuo (`contratti`), anni di
+            # rimborso (`anni`), niente di che (`legacy`). Dichiarato sempre.
+            _es_anni = getattr(assumption, 'existing_debt_repayment_years', None)
+            details['regime_debito_bancario'] = (
+                'esplicito' if fidi_apertura is not None
+                else 'contratti' if use_detailed
+                else 'anni' if (_es_anni is not None and Decimal(str(_es_anni)) > 0)
+                else 'legacy'
             )
             # ── POSIZIONE TRIBUTARIA: LE DICHIARAZIONI SEGUONO IL PERSISTITO ──
             # In modo `saldo_acconto` l'anno dopo legge `saldo_due` e il credito
@@ -2565,6 +2655,8 @@ class ForecastEngine:
         year_index: int = 0,
         details=None,
         prev_details=None,
+        fidi_apertura=None,
+        fidi_tasso=Decimal('0'),
     ) -> Dict:
         """
         Calculate forecasted income statement based on assumptions
@@ -2579,6 +2671,10 @@ class ForecastEngine:
         `prev_details` sono i `details` dell'anno precedente (`None` sul primo):
         di questo prospetto riguarda solo `scoperto_residuo`, il saldo su cui
         maturano gli oneri dello scoperto di c/c.
+
+        `fidi_apertura`/`fidi_tasso` (regime esplicito, spec 2026-09-15 §5.2):
+        il saldo dei fidi in apertura d'anno e il loro tasso %. `None` = regime
+        di sempre, nessun onere di linea.
         """
         # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
         # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
@@ -2814,7 +2910,8 @@ class ForecastEngine:
         # erogazione. Interest is 0 automatically once the loan is fully repaid or
         # when the rate is 0.
         _, _, financing_interest = new_financing_schedule(financing_loans, assumption.forecast_year)
-        has_detailed_opening = any(_ha_residuo_pregresso(loan) for loan in (financing_loans or []))
+        has_detailed_opening = (any(_ha_residuo_pregresso(loan) for loan in (financing_loans or []))
+                                or fidi_apertura is not None)
         # A detailed opening schedule replaces the historical aggregate interest
         # carry-forward; otherwise it would be charged twice.  CE15 override stays
         # the explicit escape hatch for ancillary bank charges.
@@ -2832,16 +2929,33 @@ class ForecastEngine:
         oneri_scoperto = (scoperto_apertura * tasso_scoperto / Decimal('100')).quantize(
             Decimal('0.01'), rounding=ROUND_HALF_UP
         )
+        # ── ONERI DEI FIDI (regime esplicito) ── Sul saldo di APERTURA, la stessa
+        # regola anti-circolarita' dello scoperto. E nel regime il tasso dello
+        # scoperto diventa `bank_lines_rate`: il wizard non scrive piu'
+        # `financing_interest_rate` (spec §5.2).
+        oneri_fidi = Decimal('0')
+        if fidi_apertura is not None:
+            oneri_fidi = (Decimal(str(fidi_apertura)) * fidi_tasso / Decimal('100')).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            tasso_scoperto = fidi_tasso
+            oneri_scoperto = (scoperto_apertura * tasso_scoperto / Decimal('100')).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
         if assumption.ce15_override is None:
             ce15 = financing_interest if has_detailed_opening else ce15 + financing_interest
-            ce15 = ce15 + oneri_scoperto
+            ce15 = ce15 + oneri_scoperto + oneri_fidi
         else:
-            # Un override della riga vince su tutto, oneri dello scoperto
-            # compresi: si dichiara quello che e' stato DAVVERO addebitato, cioe'
-            # zero, perche' a valle il dichiarato deve coincidere col persistito.
-            oneri_scoperto = Decimal('0')
+            # Un override della riga vince su tutto, oneri dello scoperto e dei
+            # fidi compresi: si dichiara quello che e' stato DAVVERO addebitato,
+            # cioe' zero, perche' a valle il dichiarato deve coincidere col
+            # persistito.
+            oneri_scoperto = oneri_fidi = Decimal('0')
         if details is not None:
             details['oneri_scoperto'] = oneri_scoperto
+            # Dichiarato SEMPRE, anche a zero: a valle una chiave assente vale
+            # zero, quindi tacere equivale a dichiararsi puliti.
+            details['oneri_fidi'] = oneri_fidi
 
         # Taxes - use override if set, otherwise use tax rate
         ce_for_tax = {
@@ -2917,6 +3031,9 @@ class ForecastEngine:
         sweep: "Optional[_Sweep]" = None,
         debito_bancario: "Optional[_DebitoBancarioAnno]" = None,
         settore: Optional[int] = None,
+        fidi_apertura=None,
+        fidi_regola: Optional[str] = None,
+        prev_revenue=None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -2949,6 +3066,11 @@ class ForecastEngine:
         la cassa, che e' la quadratura finale a farlo, dopo gli `sp_overrides`.
         Assenti (`None`), come li passano i chiamanti diretti e l'infrannuale,
         non cambia nulla: nessun perimetro dichiarato, nessuna componente.
+
+        `fidi_apertura`/`fidi_regola`/`prev_revenue` (regime esplicito, spec
+        2026-09-15 §5.2): il saldo dei fidi in apertura d'anno, la regola
+        (`costante` | `ricavi`) e i ricavi dell'anno precedente, necessari per
+        applicarla. `fidi_apertura = None` = regime di sempre, nessun cambio.
         """
         D = Decimal
         ZERO = D('0')
@@ -3371,6 +3493,22 @@ class ForecastEngine:
         # capisce quale parte del debito NON ha un piano da seguire.
         apertura_pregresso = sp16a + sp17a_pregresso
 
+        # ── FIDI E ANTICIPI (spec 2026-09-15 §5.2): uno stato, separato dai contratti ──
+        # La regola `ricavi` li fa seguire il giro d'affari; la regola
+        # `costante` li lascia fermi. Il rimborso loro proprio e' SOLO lo sweep
+        # (sotto): nessun piano di ammortamento, nessuna rata.
+        fidi_residuo = None
+        fidi_prev = ZERO
+        fidi_variazione = ZERO
+        if fidi_apertura is not None:
+            fidi_prev = Decimal(str(fidi_apertura))
+            fidi_residuo = fidi_prev
+            if fidi_regola == 'ricavi' and prev_revenue is not None and prev_revenue > ZERO:
+                fidi_residuo = fidi_prev * forecast_revenue / prev_revenue
+                fidi_variazione = fidi_residuo - fidi_prev
+            # I fidi stanno dentro `sp16a` pregresso: la rata dei contratti non li tocca.
+            sp16a = max(ZERO, sp16a - fidi_prev)
+
         # Handle abbreviato gap: if previous year has aggregate but no sub-field
         # detail, allocate the unaccounted portion to banche (bank debt).
         prev_sp16_agg = _prev('sp16_debiti_breve')
@@ -3739,6 +3877,23 @@ class ForecastEngine:
         sp16a = max(ZERO, sp16a - short_es_repayment)
         sp17a_pregresso = max(ZERO, sp17a_pregresso - (es_repayment - short_es_repayment))
 
+        # ── RICOMPOSIZIONE DEL PREGRESSO (solo regime esplicito, spec §5.2) ──
+        # A fine anno il breve bancario deve dire di nuovo «fidi + rata
+        # dell'anno dopo dei contratti»: e' una riclassifica fra `sp16a` e
+        # `sp17a_pregresso`, non un flusso — cassa e interessi non cambiano.
+        # Vale SOLO col regime esplicito: fuori, i numeri di oggi restano al
+        # centesimo (lo sweep non c'entra: quello sta nella normalizzazione).
+        quota_dopo_contratti = None
+        if fidi_apertura is not None:
+            residuo_pregresso = sp16a + sp17a_pregresso
+            quota_dopo_contratti = min(
+                sum((new_financing_schedule([c], assumption.forecast_year + 1)[1]
+                     for c in contratti_pregresso), ZERO),
+                max(ZERO, residuo_pregresso),
+            )
+            sp16a = fidi_residuo + quota_dopo_contratti
+            sp17a_pregresso = residuo_pregresso - quota_dopo_contratti
+
         # New financing raised during the plan: add what is raised THIS year to
         # long-term bank debt, then subtract this year's straight-line instalment
         # so the loan amortises over its durata (shared kernel). Because sp17a is
@@ -3777,12 +3932,20 @@ class ForecastEngine:
             # Con un piano addosso — anni di rimborso o contratti col residuo — lo
             # sweep non ha nulla da rimborsare: quel debito segue solo il proprio
             # piano, capitale e interessi (decisione 3 del proprietario, lotto 3A).
-            sweep.attivo = (bool(getattr(assumption, 'cash_sweep_enabled', False))
-                            and not use_detailed_existing_schedule and not piano_anni_attivo)
+            # Nel regime esplicito il perimetro cambia natura (decisione 9): la
+            # cassa in eccesso chiude i fidi, MAI un contratto, che ha gia' il
+            # proprio calendario e viene solo riclassificato a fine anno.
+            if fidi_apertura is not None:
+                sweep.attivo = bool(getattr(assumption, 'cash_sweep_enabled', False))
+                sweep.breve_disponibile = fidi_residuo
+                sweep.lungo_disponibile = ZERO
+            else:
+                sweep.attivo = (bool(getattr(assumption, 'cash_sweep_enabled', False))
+                                and not use_detailed_existing_schedule and not piano_anni_attivo)
+                sweep.breve_disponibile = sp16a
+                sweep.lungo_disponibile = sp17a_pregresso
             floor = getattr(assumption, 'cash_sweep_min_cash', None)
             sweep.minimo = D(str(floor)) if floor is not None else ZERO
-            sweep.breve_disponibile = sp16a
-            sweep.lungo_disponibile = sp17a_pregresso
 
         fin_raised, fin_repayment, _ = new_financing_schedule(
             prestiti_nuovi, assumption.forecast_year)
@@ -3843,12 +4006,26 @@ class ForecastEngine:
             # Le componenti per contratto, grezze: il pregresso scandagliato per
             # contratto (`opening_residual`) ha la sua ripartizione qui dentro,
             # altrove e' tutto in `senza_piano`/`piano_anni` e ai contratti non ne
-            # va niente (`ZERO`).
+            # va niente (`ZERO`). Nel regime esplicito il breve pregresso da
+            # assegnare e' `quota_dopo` (la sola rata dell'anno dopo), non
+            # `breve_pregresso_fine` che ora contiene anche i fidi, i quali
+            # stanno sulla riga `fidi`.
             debito_bancario.contratti = _contratti_dell_anno(
                 financing_loans, assumption.forecast_year, quota_breve, nuovo_residuo,
-                breve_pregresso_fine if use_detailed_existing_schedule else ZERO,
+                (quota_dopo_contratti if fidi_apertura is not None else breve_pregresso_fine)
+                if use_detailed_existing_schedule else ZERO,
                 sp17a_pregresso if use_detailed_existing_schedule else ZERO,
             )
+            if fidi_apertura is not None:
+                # `rimborso_sweep` a zero qui: lo scrive `_dichiara_debito_bancario`
+                # quando lo sweep ha gia' pagato, sulla cassa al centesimo.
+                debito_bancario.fidi = {
+                    'apertura': fidi_prev,
+                    'variazione_ricavi': fidi_variazione,
+                    'rimborso_sweep': ZERO,
+                    'residuo': fidi_residuo,
+                    'regola': fidi_regola or 'costante',
+                }
 
         # ── DETAIL BREAKDOWNS ──
 

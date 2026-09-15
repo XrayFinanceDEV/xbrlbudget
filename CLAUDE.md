@@ -599,6 +599,7 @@ The sweep decides on the cash **after** `sp_overrides`, in `_normalize_balance_s
 overdraft to pay an optional early repayment. `details['debito_bancario']`, declared every year, splits bank debt
 into `pregresso_senza_piano`, `pregresso_piano_anni` and one row per contract, and adds up exactly: Σ`breve` +
 `scoperto_residuo` = `sp16a`, Σ`lungo` = `sp17a`.
+**With `bank_lines_amount` set (explicit regime, lotto rilievi 14/09) the sweep repays only the credit lines (`details['debito_bancario']['fidi']`), never a contract; bank contracts reclassify next year's instalment into `sp16a`.**
 **The share of a new loan that falls due next year sits in `sp16a`, the rest in `sp17a`**: the capital
 the kernel calendar repays the following year (zero while that year is still grace, the balloon the
 year before it falls due, and not zeroed in the last plan year), declared per contract in

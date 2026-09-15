@@ -10,22 +10,33 @@
  * ricalcolate una seconda volta (due formule che divergono su `sp07` al netto
  * delle quote fiscali sono il rilievo 1 del giro di correzione del task 7).
  *
+ * I debiti tributari rateizzati sono qui da decisione del proprietario del
+ * 2026-09-15 (spec §3, §9.1, Task 13b): il piano — saldo, rateizzato, rate,
+ * acconto — resta il modello di `lib/budget-imposte-step.ts` (`tributariPlan`,
+ * `tributariPlanOrDefault`, `withRate`, invariati), qui si compone solo la
+ * riga «oltre 12 mesi» che scadenzia il rateizzato, come le altre quattro. Il
+ * passo 7 «Imposte» tiene aliquota, differenze temporanee, via manuale e
+ * acconto — non tocca `amounts`.
+ *
  * Sta in `lib/` per il motivo solito di questo repo: nessun jsdom, quindi
  * ogni decisione vive qui con la sua suite `environment: node` e
  * `steps/StepPatrimonialePregresso.tsx` rende soltanto.
  *
  * Modulo puro: nessun import da `app/` o da `components/`.
  */
-import type { BalanceSheet, Pregresso, PregressoPlan } from "@/types/api";
+import type { BalanceSheet, Pregresso, PregressoPlan, PregressoTributari } from "@/types/api";
 import { openingMassLong, openingMasses } from "@/lib/budget-pregresso-circolante";
+import { tributariOpening, tributariPlan, tributariPlanOrDefault, withRate } from "@/lib/budget-imposte-step";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { num } from "@/lib/budget-format";
 
 const cents = (v: number) => Math.round(v * 100) / 100;
 
-/** I saldi che questo passo scadenzia OLTRE l'esercizio. `debiti_tributari`
- *  non c'e': il rateizzato si scadenzia al passo 7 («Imposte»), dove vive
- *  accanto a saldo e acconti (`impostePreview`). */
+/** I saldi che questo passo scadenzia OLTRE l'esercizio con la stessa forma
+ *  di riga (`OltreRow`). `debiti_tributari` non c'e': ha il suo tipo
+ *  (`TributariOltreRow`) perche' l'apertura della riga e' il rateizzato del
+ *  piano tributario, non una massa letta dal bilancio — vedi
+ *  `tributariOltreRow` piu' sotto. */
 export type OltreKey = "crediti_commerciali" | "altri_debiti" | "debiti_fornitori" | "debiti_previdenziali";
 
 /** L'ordine delle righe della card (spec §4.5): i due saldi che hanno SEMPRE
@@ -108,6 +119,28 @@ function pianoDiPartenza(baseBs: BalanceSheet, years: number[], key: OltreKey): 
   };
 }
 
+/** Il piano tributario di partenza (spec §4.5, decisione del proprietario del
+ *  2026-09-15, Task 13b): saldo = debito a breve (`sp16e`, cio' che scade
+ *  entro l'esercizio si paga nel primo anno di piano, come le altre voci di
+ *  questo passo), rateizzato = debito oltre (`sp17e`), rate tutte a zero
+ *  finche' l'utente non le scadenzia, acconto al 100% (il default del
+ *  kernel). E' la STESSA lettura del bilancio che fa `pianoDiPartenza` per le
+ *  altre voci: chi vuole un'altra ripartizione fra saldo e rateizzato la
+ *  corregge in Rettifiche fra `sp16e` e `sp17e`, non qui. */
+function tributariDiPartenza(baseBs: BalanceSheet, years: number[]): PregressoTributari {
+  const b = baseBs as unknown as Record<string, unknown>;
+  const saldo = cents(num(b.sp16e_debiti_tributari_breve));
+  const rateizzato = cents(num(b.sp17e_debiti_tributari_lungo));
+  const n = Math.max(1, years.length);
+  return {
+    opening: cents(saldo + rateizzato),
+    saldo,
+    rateizzato,
+    amounts: new Array<number>(n).fill(0),
+    acconto_pct: 100,
+  };
+}
+
 /**
  * Il piano di base che il wizard compone all'apertura del passo: `amounts[0]`
  * = la massa a breve dell'anno base (regola del proprietario: i saldi a breve
@@ -119,6 +152,12 @@ function pianoDiPartenza(baseBs: BalanceSheet, years: number[], key: OltreKey): 
  * debiti SOLO se c'e' massa oltre, perche' con un piano il motore li ESTINGUE
  * (`_net_of_pregresso`, Ruling 17): senza una parte oltre da scadenziare,
  * restare in via automatica e' cio' che l'utente vede al passo 6.
+ *
+ * Per i tributari (Task 13b): SOLO se manca e `sp17e > 0` — con `sp17e = 0`
+ * non c'e' nulla da rateizzare e il motore paga tutto il tributario come
+ * saldo nel primo anno, come oggi, senza bisogno di un piano. Un piano gia'
+ * salvato (anche dal vecchio passo 7, anche con un saldo diverso da `sp16e`)
+ * si rispetta cosi' com'e': identita', mai ricreato.
  *
  * **Identita' quando non c'e' nulla da aggiungere**: se ogni saldo che vuole
  * un piano ce l'ha gia', restituisce l'oggetto ricevuto com'e'. E' cio' che
@@ -132,10 +171,16 @@ export function pianoBase(baseBs: BalanceSheet | undefined | null, years: number
     const vuolePiano = key === "crediti_commerciali" || key === "debiti_fornitori" || massaOltre(baseBs, key) > 0;
     return vuolePiano && (pregresso[key] as PregressoPlan | null | undefined) == null;
   });
-  if (missing.length === 0) return pregresso;
+  const vuoleTributari =
+    tributariPlan(pregresso) == null && cents(num((baseBs as unknown as Record<string, unknown>).sp17e_debiti_tributari_lungo)) > 0;
+  if (missing.length === 0 && !vuoleTributari) return pregresso;
   const piani: Record<string, PregressoPlan> = {};
   for (const key of missing) piani[key] = pianoDiPartenza(baseBs, years, key);
-  return { ...pregresso, ...piani };
+  return {
+    ...pregresso,
+    ...piani,
+    ...(vuoleTributari ? { debiti_tributari: tributariDiPartenza(baseBs, years) } : {}),
+  };
 }
 
 /** Che cosa il previsonale fara' della parte oltre di questo saldo: la nota
@@ -267,6 +312,87 @@ export function withNonIncassato(
 }
 
 /**
+ * La riga «Debiti tributari rateizzati» in coda alla tabella «Altre voci
+ * oltre 12 mesi» (spec §4.5, decisione del proprietario del 2026-09-15, Task
+ * 13b). Ha il suo tipo, non `OltreRow`, perche' l'apertura di QUESTA riga e'
+ * il rateizzato del piano tributario (`plan.rateizzato`), mai la massa
+ * `sp17e` letta dal bilancio: un piano salvato dal vecchio passo 7 puo' avere
+ * un saldo diverso da `sp16e` (l'utente lo ha corretto li'), e la riga deve
+ * riflettere QUEL piano, non ricalcolarne uno nuovo dal bilancio.
+ */
+export interface TributariOltreRow {
+  key: "debiti_tributari";
+  label: "Debiti tributari rateizzati";
+  dir: "out";
+  /** Il rateizzato del piano (`plan.rateizzato`), non l'apertura intera
+   *  (saldo + rateizzato): e' cio' che questa riga scadenzia. */
+  opening: number;
+  /** `plan.amounts[i]` cosi' com'e', nessuno scarto di breve: il saldo non
+   *  entra mai nel runoff (`forecast_engine.py` scadenzia il solo
+   *  `rateizzato`), quindi non c'e' nulla da sottrarre come per le altre
+   *  righe. `null` = anno mai scritto nel piano (l'array e' piu' corto
+   *  dell'orizzonte), non zero. */
+  amounts: (number | null)[];
+  resta: number;
+  /** Gli stessi cinque stati di `OltreRow`, mai «oltre il piano»: quello
+   *  stato esiste solo per la casella «non incassati» dei crediti, che sui
+   *  tributari non ha senso. */
+  stato: OltreRow["stato"];
+}
+
+/**
+ * La riga dei tributari rateizzati, letta dal piano dello stesso `Pregresso`
+ * che governa le altre quattro voci di questo passo — `tributariPlan` di
+ * `lib/budget-imposte-step.ts`, non riscritto qui.
+ *
+ * `null` quando non c'e' nulla da scadenziare: senza un piano salvato E senza
+ * debito oltre l'esercizio (`sp17e = 0`) la riga non ha ragione di esistere —
+ * `pianoBase` non ne crea uno in quel caso, e mostrare una riga a zero
+ * sarebbe una scadenza dichiarata che nessuno ha dichiarato.
+ */
+export function tributariOltreRow(
+  baseBs: BalanceSheet | undefined | null, pregresso: Pregresso, years: number[],
+): TributariOltreRow | null {
+  const plan = tributariPlan(pregresso);
+  if (!plan) return null;
+  const amounts = years.map((_, i) => (plan.amounts[i] === undefined ? null : cents(num(plan.amounts[i]))));
+  const somma = amounts.reduce<number>((a, v) => a + (v ?? 0), 0);
+  return {
+    key: "debiti_tributari",
+    label: "Debiti tributari rateizzati",
+    dir: "out",
+    opening: cents(plan.rateizzato),
+    amounts,
+    resta: cents(Math.max(0, plan.rateizzato - somma)),
+    // `nonIncassato` non esiste per i tributari: sempre `false`, quindi mai
+    // «oltre il piano» — lo stesso `statoOltre` delle altre quattro righe.
+    stato: statoOltre(plan.rateizzato, somma, false),
+  };
+}
+
+/**
+ * Nuovo piano tributario con la rata dell'anno `i` portata a `value` (Task
+ * 13b): parte da `pianoBase` (crea il piano se manca e c'e' massa da
+ * rateizzare), completa `amounts` alla lunghezza degli anni di piano con
+ * zeri, scrive `amounts[i]` e passa per `withRate` — che tocca le sole rate:
+ * saldo, rateizzato e acconto restano quelli del piano (dichiarati al passo 7
+ * finche' il Task 16 non li porta anche loro qui).
+ *
+ * `null` scrive uno zero, come `withOltreAmount`: cancellare una cella toglie
+ * quella rata dal piano, non lascia il vecchio importo.
+ */
+export function withTributariAmount(
+  baseBs: BalanceSheet | undefined | null, pregresso: Pregresso, years: number[], i: number, value: number | null,
+): Pregresso {
+  const p = pianoBase(baseBs, years, pregresso);
+  const plan = tributariPlanOrDefault(p, tributariOpening(baseBs));
+  const amounts = [...plan.amounts];
+  while (amounts.length <= Math.max(i, years.length - 1)) amounts.push(0);
+  amounts[i] = cents(value ?? 0);
+  return withRate(p, plan.opening, amounts);
+}
+
+/**
  * La card «A breve · si chiudono nel {anno 1}»: in sola lettura, perche' qui
  * non c'e' nessun piano da impostare — il breve lo chiude il primo anno di
  * piano per regola, e chi non vuole farlo rientrare riclassifica la voce
@@ -291,19 +417,36 @@ export interface BreveRow {
  *  acquisto) resta nel riquadro del passo 4. */
 export const FORNITORI_AVVISO_RIGA = "Non risultano debiti verso fornitori: controllare le riclassifiche dei debiti.";
 
+/**
+ * `pregresso` e' il quarto parametro (Task 13b): quando il piano tributario
+ * c'e' gia' (il caso normale una volta che `pianoBase` lo ha composto), la
+ * riga mostra il suo `saldo` — che puo' differire da `sp16e` su un piano
+ * salvato dal vecchio passo 7 con un'altra ripartizione — mai un importo
+ * diverso da quello che il motore paga davvero. Senza piano (nessuna
+ * scrittura ancora avvenuta, o `sp17e = 0`) il ripiego e' `sp16e + sp17e`:
+ * la lettura di `lib/budget-imposte-step.ts` («senza piano il motore paga
+ * tutto il tributario di apertura come saldo nel primo anno»), non solo
+ * `sp16e` — coincidono quando `sp17e = 0`, ma la formula resta corretta anche
+ * se non lo fosse.
+ */
 export function breveRows(
   baseBs: BalanceSheet | undefined | null, baseYear: number, fornitoriAvviso: string | null,
+  pregresso?: Pregresso | null,
 ): BreveRow[] {
   const b = (key: OltreKey) => massaBreve(baseBs, key);
   const bs = (baseBs ?? {}) as unknown as Record<string, unknown>;
   const y1 = baseYear + 1;
+  const pianoTributari = pregresso ? tributariPlan(pregresso) : null;
+  const tributariBreve = pianoTributari
+    ? pianoTributari.saldo
+    : cents(num(bs.sp16e_debiti_tributari_breve) + num(bs.sp17e_debiti_tributari_lungo));
   return [
     { label: "Crediti verso clienti", importo: b("crediti_commerciali"), dir: "in", small: `incassati nel ${y1}` },
     {
       label: "Debiti verso fornitori", importo: b("debiti_fornitori"), dir: "out", small: `pagati nel ${y1}`,
       ...(fornitoriAvviso ? { alert: fornitoriAvviso } : {}),
     },
-    { label: "Debiti tributari a breve", importo: cents(num(bs.sp16e_debiti_tributari_breve)), dir: "out", small: `saldo pagato nel ${y1}` },
+    { label: "Debiti tributari a breve", importo: tributariBreve, dir: "out", small: `saldo pagato nel ${y1}` },
     { label: "Debiti previdenziali", importo: b("debiti_previdenziali"), dir: "out", small: `pagati nel ${y1}` },
     { label: "Altri debiti a breve", importo: b("altri_debiti"), dir: "out", small: `pagati nel ${y1}` },
     {

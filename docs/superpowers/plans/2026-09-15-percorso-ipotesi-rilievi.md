@@ -17,6 +17,7 @@
 Copiati dalla spec (§2, §5) e dalle regole del repo:
 
 - **Soldi in `Decimal`, mai `float`; percentuali assolute** (27,9 = 27,9%). Un divario si misura e si dichiara, mai si tappa.
+- **I blocchi annidati dei `details` restano `Decimal`** (`debito_bancario`, `imposte`, `pareggio`, `tfr`, `altri_finanziatori`): l'anteprima converte in float solo il primo livello. Nei test si confronta con `D(str(valore)) == D("...")`. Un atteso scritto come float su un valore annidato e' un errore dell'oracolo, **mai** una ragione per convertire il motore in float (correzione del giro del Task 6).
 - **Dichiarato = persistito:** ogni valore che il motore usa lo scrive nei `details`, al centesimo, e il persistito coincide.
 - **Additivita':** senza i campi nuovi (`inflation_pct`, `bank_lines_amount`, `other_lenders`, `tfr_payments`, `repayments`, `non_incassato`) il motore produce numeri identici a prima. Il banco di parita' e' lo strumento di misura: ogni task del motore chiude con 0 divergenze sui profili esistenti; il caso nuovo lo esercita un profilo aggiunto nello stesso task (o nel Task 7).
 - **Un solo motore di proiezione, e sta in Python:** nessun numero derivato dell'anteprima (pareggio compreso) si calcola in TypeScript; si legge dai `details`.
@@ -410,7 +411,8 @@ def test_il_previsionale_persiste_i_residui_della_lista():
     assert [anni[a][0][SP16A] + anni[a][0][SP17A] for a in (2027, 2028, 2029)] == [D("247500.00"), D("165000.00"), D("165000.00")]
     assert [anni[a][1][CE15] for a in (2027, 2028, 2029)] == [D("12540.00"), D("9405.00"), D("6270.00")]
     contratti = prev["forecast_years"][0]["details"]["debito_bancario"]["contratti"]
-    assert contratti[0]["rimborso"] == 82500.0 and contratti[0]["interessi"] == 12540.0
+    # i blocchi annidati dei details restano Decimal: si confronta con D (regola del lotto)
+    assert D(str(contratti[0]["rimborso"])) == D("82500.00") and D(str(contratti[0]["interessi"])) == D("12540.00")
 ```
 
 - [ ] **Step 3: Rosso sulle asserzioni**
@@ -608,16 +610,17 @@ def test_fidi_costanti_e_rata_dell_anno_dopo_a_breve():
     assert (anni[2028][0][SP16A], anni[2028][0][SP17A]) == (D("172500.00"), D("82500.00"))
     assert anni[2027][1][CE15] == D("17040.00") and anni[2028][1][CE15] == D("13905.00")
     fidi = det[2027]["debito_bancario"]["fidi"]
-    assert fidi == {"apertura": 90000.0, "variazione_ricavi": 0.0, "rimborso_sweep": 0.0, "residuo": 90000.0, "regola": "costante"}
+    assert {k: (v if k == "regola" else D(str(v))) for k, v in fidi.items()} == {
+        "apertura": D("90000.00"), "variazione_ricavi": D("0.00"), "rimborso_sweep": D("0.00"), "residuo": D("90000.00"), "regola": "costante"}
     assert det[2027]["oneri_fidi"] == 4500.0 and det[2027]["regime_debito_bancario"] == "esplicito"
-    assert det[2027]["debito_bancario"]["contratti"][0]["breve"] == 82500.0
+    assert D(str(det[2027]["debito_bancario"]["contratti"][0]["breve"])) == D("82500.00")
 
 
 def test_fidi_seguono_i_ricavi():
     res, anni, det, _ = _genera("fidi-ricavi", _rows(bank_lines_rule="ricavi", revenue_growth_pct=10))
     assert res["forecast_generated"] is True, res["message"]
-    assert det[2027]["debito_bancario"]["fidi"]["residuo"] == 99000.0
-    assert det[2027]["debito_bancario"]["fidi"]["variazione_ricavi"] == 9000.0
+    assert D(str(det[2027]["debito_bancario"]["fidi"]["residuo"])) == D("99000.00")
+    assert D(str(det[2027]["debito_bancario"]["fidi"]["variazione_ricavi"])) == D("9000.00")
 
 
 def test_lo_sweep_riduce_solo_i_fidi():
@@ -625,7 +628,7 @@ def test_lo_sweep_riduce_solo_i_fidi():
     con = _genera("sweep-si", _rows(cash_sweep_enabled=True, cash_sweep_min_cash=0))
     assert con[0]["forecast_generated"] is True, con[0]["message"]
     fidi = con[2][2027]["debito_bancario"]["fidi"]
-    assert fidi["rimborso_sweep"] > 0 and fidi["rimborso_sweep"] <= 90000.0
+    assert D("0") < D(str(fidi["rimborso_sweep"])) <= D("90000.00")
     # il mutuo e' identico con e senza sweep: lo sweep non lo tocca
     assert con[2][2027]["debito_bancario"]["contratti"][0] == senza[2][2027]["debito_bancario"]["contratti"][0]
     assert con[1][2027][0][SP16A] == senza[1][2027][0][SP16A] - D(str(fidi["rimborso_sweep"]))
@@ -840,17 +843,16 @@ def test_rimborsi_per_anno_e_quota_a_breve():
     assert [(anni[a][0][SP16B], anni[a][0][SP17B]) for a in (2027, 2028, 2029)] == [
         (D("50000.00"), D("100000.00")), (D("0.00"), D("100000.00")), (D("0.00"), D("100000.00"))]
     a = det[2027]["altri_finanziatori"]
-    assert a["mode"] == "contratti" and a["apertura"] == 150000.0 and a["rimborso"] == 0.0 and a["breve"] == 50000.0
-    assert det[2028]["altri_finanziatori"]["rimborso"] == 50000.0
-    assert det[2028]["altri_finanziatori"]["breve"] == 0.0 and det[2028]["altri_finanziatori"]["lungo"] == 100000.0
+    assert a["mode"] == "contratti" and [D(str(a[k])) for k in ("apertura", "rimborso", "breve")] == [D("150000.00"), D("0.00"), D("50000.00")]
+    b = det[2028]["altri_finanziatori"]
+    assert [D(str(b[k])) for k in ("rimborso", "breve", "lungo")] == [D("50000.00"), D("0.00"), D("100000.00")]
 
 
 def test_interessi_sul_residuo_di_apertura():
     res, anni, det = _genera("soci-2pct", _rows(soci={**SOCI, "interest_rate": 2}))
     assert res["forecast_generated"] is True, res["message"]
-    assert det[2027]["altri_finanziatori"]["interessi"] == 3000.0
-    assert det[2028]["altri_finanziatori"]["interessi"] == 3000.0   # apertura 2028 ancora 150.000
-    assert det[2029]["altri_finanziatori"]["interessi"] == 2000.0
+    # apertura 2028 ancora 150.000; 2029 100.000
+    assert [D(str(det[y]["altri_finanziatori"]["interessi"])) for y in (2027, 2028, 2029)] == [D("3000.00"), D("3000.00"), D("2000.00")]
 
 
 def test_rifiuti_in_italiano():
@@ -1027,8 +1029,10 @@ def test_liquidazione_scarica_il_fondo_e_la_cassa():
     assert con[0]["forecast_generated"] is True, con[0]["message"]
     assert senza[1][2027][0][SP15] == D("36222.22") and con[1][2027][0][SP15] == D("16222.22")
     assert con[1][2027][0][SP09] == senza[1][2027][0][SP09] - D("20000.00")
-    assert con[2][2027]["tfr"] == {"apertura": 30000.0, "accantonamento": 6222.22, "liquidazioni": 20000.0, "chiusura": 16222.22, "sospeso": False}
-    assert senza[2][2027]["tfr"]["liquidazioni"] == 0.0
+    tfr = con[2][2027]["tfr"]
+    assert {k: (v if k == "sospeso" else D(str(v))) for k, v in tfr.items()} == {
+        "apertura": D("30000.00"), "accantonamento": D("6222.22"), "liquidazioni": D("20000.00"), "chiusura": D("16222.22"), "sospeso": False}
+    assert D(str(senza[2][2027]["tfr"]["liquidazioni"])) == D("0.00")
 
 
 def test_liquidazione_oltre_il_fondo_si_rifiuta():
@@ -1139,9 +1143,9 @@ def _preview(user, rows):
 def test_pareggio_dichiarato():
     out = _preview("bep", [{"forecast_year": 2027, "tax_rate": 27.9}])
     p = out["forecast_years"][0]["details"]["pareggio"]
-    assert p == {"costi_variabili": 210000.0, "costi_fissi": 275000.0, "costi_fissi_operativi": 275000.0,
-                 "margine_contribuzione_pct": 65.0, "fatturato_pareggio": 423076.92,
-                 "margine_sicurezza": 176923.08, "margine_sicurezza_pct": 29.49}
+    assert p == {"costi_variabili": D("210000.00"), "costi_fissi": D("275000.00"), "costi_fissi_operativi": D("275000.00"),
+                 "margine_contribuzione_pct": D("65.00"), "fatturato_pareggio": D("423076.92"),
+                 "margine_sicurezza": D("176923.08"), "margine_sicurezza_pct": D("29.49")}
 
 
 def test_pareggio_nullo_con_override_di_ce05():

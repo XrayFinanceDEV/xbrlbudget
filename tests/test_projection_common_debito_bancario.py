@@ -23,14 +23,16 @@ def test_un_contratto_misto_diventa_due_contratti_con_le_stesse_condizioni():
     dividi = _funzione("contratti_da_riga_finanziamento")
     riga = {"name": "Misto", "amount": 120000, "opening_residual": 12345.67, "duration_years": 4,
             "interest_rate": 5, "grace_years": 1, "balloon_pct": 10}
-    condizioni = {"year": 2027, "duration": D("4"), "rate": D("0.05"), "grace_years": D("1"), "balloon_pct": D("10")}
+    # `name` viaggia con le condizioni (Task 14 del lotto rilievi): i details lo dichiarano per contratto.
+    condizioni = {"year": 2027, "duration": D("4"), "rate": D("0.05"), "grace_years": D("1"), "balloon_pct": D("10"),
+                  "name": "Misto"}
     assert dividi(riga, 2027) == [
         {**condizioni, "amount": D("120000"), "opening_residual": D("0")},
         {**condizioni, "amount": D("0"), "opening_residual": D("12345.67")},
     ]
     assert dividi({"amount": 5000, "duration_years": 2}, 2028) == [
         {"year": 2028, "duration": D("2"), "rate": D("0"), "grace_years": D("0"), "balloon_pct": D("0"),
-         "amount": D("5000"), "opening_residual": D("0")}]
+         "name": None, "amount": D("5000"), "opening_residual": D("0")}]
     assert dividi({"amount": 5000, "opening_residual": 100, "duration_years": 0}, 2028) == []
 
 

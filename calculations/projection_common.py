@@ -195,7 +195,14 @@ def new_financing_schedule(loans, target_year):
     In addition to the legacy keys, a loan may contain ``opening_residual``
     (already present in the base-year bank debt), ``grace_years`` and
     ``balloon_pct``. Grace years are interest-only; the balloon is paid with the
-    final instalment. Returns ``(0, 0, 0)`` for an empty list (no-op)."""
+    final instalment. Returns ``(0, 0, 0)`` for an empty list (no-op).
+
+    A loan may also carry ``repayments`` — the capital repaid in each plan year
+    (index 0 = first plan year), the hand-scheduled way of describing a PRE-
+    EXISTING contract (spec 2026-09-15 §5.1): beyond the list nothing is repaid
+    and the residual stays open on the balance sheet, a year's quota is never
+    capped below the opening residual, and interest stays rate × opening
+    residual, exactly as for a duration-driven contract."""
     raised = ZERO
     repayment = ZERO
     interest = ZERO
@@ -208,6 +215,22 @@ def new_financing_schedule(loans, target_year):
         rate = Decimal(str(loan.get('rate') or ZERO))
         grace_years = int(Decimal(str(loan.get('grace_years') or ZERO)))
         balloon_pct = Decimal(str(loan.get('balloon_pct') or ZERO)) / Decimal('100')
+        repayments = loan.get('repayments')
+        if repayments is not None:
+            # Contratto pregresso scadenziato a mano (spec 2026-09-15 §5.1): il capitale
+            # dell'anno e' la voce della lista (zero oltre la lista: il residuo resta
+            # aperto), mai oltre il residuo di apertura; interessi sul residuo di apertura.
+            if principal <= ZERO:
+                continue
+            elapsed = target_year - raise_year
+            if elapsed < 0:
+                continue
+            piano = [Decimal(str(r or 0)) for r in repayments]
+            opening = max(ZERO, principal - sum(piano[:elapsed], ZERO))
+            quota = piano[elapsed] if elapsed < len(piano) else ZERO
+            repayment += min(opening, quota)
+            interest += opening * rate
+            continue
         if principal <= ZERO or duration <= 0 or grace_years >= duration:
             continue
         if target_year == raise_year:
@@ -445,7 +468,8 @@ def contratti_da_riga_finanziamento(loan: Mapping[str, Any], anno: int) -> List[
     importo = Decimal(str(loan.get('amount') or 0))
     residuo = Decimal(str(loan.get('opening_residual') or 0))
     durata = Decimal(str(loan.get('duration_years') or 0))
-    if durata <= ZERO:
+    repayments = loan.get('repayments')
+    if repayments is None and durata <= ZERO:
         return []
     condizioni = {
         'year': anno,
@@ -454,6 +478,8 @@ def contratti_da_riga_finanziamento(loan: Mapping[str, Any], anno: int) -> List[
         'grace_years': Decimal(str(loan.get('grace_years') or 0)),
         'balloon_pct': Decimal(str(loan.get('balloon_pct') or 0)),
     }
+    if repayments is not None:
+        condizioni['repayments'] = [Decimal(str(r or 0)) for r in repayments]
     contratti = []
     if importo > ZERO:
         contratti.append({**condizioni, 'amount': importo, 'opening_residual': ZERO})

@@ -396,6 +396,14 @@ contratti con le stesse condizioni (`contratti_da_riga_finanziamento` in
 `calculations/projection_common.py`, chiamata da `assemble_financing`): la parte nuova segue questa
 sezione, quella pregressa no.
 
+**Capitale per anno.** Una riga di `financing_loans[]` con `opening_residual` puo' portare
+`repayments` — un importo per anno di piano, indice 0 = primo anno — al posto della durata: e' il
+capitale rimborsato in quell'anno, mai oltre il residuo; oltre la lista non si rimborsa nulla e il
+residuo resta in bilancio a fine piano. Interessi sul residuo di apertura, come per ogni contratto.
+`repayments` vale solo sul pregresso (`amount` = 0), senza preammortamento ne' maxirata; la somma
+non puo' superare il residuo (422 dal bulk). Nel contratto del kernel `repayments` arriva con
+`year` = primo anno di piano; `duration_years` e' allora facoltativa (spec 2026-09-15 §5.1).
+
 Il residuo del prestito **non** sta tutto in `sp17a_debiti_banche_lungo`: la parte che il
 calendario rimborsa **nell'anno dopo** sta in `sp16a_debiti_banche_breve`, il resto in `sp17a`
 (`quota_breve_prestiti_nuovi` in `calculations/projection_common.py`; la separazione pregresso /

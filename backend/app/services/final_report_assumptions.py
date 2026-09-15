@@ -431,6 +431,7 @@ def _financing_loans(rows: Sequence[Any], field: str) -> tuple[Optional[list[Fin
                 interest_rate=parsed.interest_rate,
                 grace_years=parsed.grace_years,
                 balloon_pct=parsed.balloon_pct,
+                repayments=parsed.repayments,
             ))
     return (loans or None), diagnostics
 

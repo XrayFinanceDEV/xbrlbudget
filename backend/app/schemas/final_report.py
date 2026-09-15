@@ -301,10 +301,22 @@ class FinancingLoan(ContractModel):
     name: Optional[str] = None
     amount: PlainDecimal
     opening_residual: PlainDecimal
-    duration_years: StrictInt = Field(gt=0)
+    duration_years: Optional[StrictInt] = Field(default=None, gt=0)
     interest_rate: PlainDecimal
     grace_years: StrictInt = Field(ge=0)
     balloon_pct: PlainDecimal
+    repayments: Optional[list[PlainDecimal]] = None
+
+    @model_serializer(mode="wrap")
+    def serialize_v1_loan_shape(self, handler):
+        """Il wire v1 non guadagna chiavi nuove per i contratti a durata: `repayments` esce solo
+        quando c'e', e `duration_years` solo quando vale (regime 5.1: `repayments` senza durata)."""
+        serialized = handler(self)
+        if self.duration_years is None:
+            serialized.pop("duration_years", None)
+        if self.repayments is None:
+            serialized.pop("repayments", None)
+        return serialized
 
 
 class RunoffPlan(ContractModel):

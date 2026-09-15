@@ -1219,6 +1219,49 @@ git commit -m "feat(ipotesi): pareggio sul MOL nei details, crediti non incassat
 
 ---
 
+### Task 3b: Riutilizzo dei fidi quando la cassa va in negativo (spec §5.2-bis)
+
+Decisione del proprietario del 2026-09-15. Parte **dopo il merge del Task 4** (stesso file del motore). pi ammesso.
+
+**Files:**
+- Modify: `calculations/forecast_engine.py` (`_Overdraft` o una classe gemella, `_normalize_balance_sheet_cents`, `_dichiara_debito_bancario`, la costruzione dell'`_Overdraft` in `compute_forecast` ~`:2258`, il calcolo di `fabbisogno_picco` ~`:2494`)
+- Test: `tests/test_forecast_fidi_tiraggio.py` (nuovo); `tests/test_forecast_fidi.py` (solo le attese dei casi in regime esplicito che oggi aprono scoperto o sollevano)
+- Docs: `docs/budget/API-PREVISIONALE.md` §4-ter (fidi), `CLAUDE.md` «Forecasting Engine» (una frase in fondo al paragrafo dello scoperto: nel regime esplicito il fabbisogno tira sui fidi e non solleva)
+
+**Interfaces:**
+- Consumes: regime esplicito del Task 3 (`fidi_apertura`, `_Sweep`, `details['debito_bancario']['fidi']`)
+- Produces: `details['debito_bancario']['fidi']` con in piu' `tiraggio`, `affidamento`, `oltre_affidamento` (Decimal al centesimo); `details['avviso_fidi']: str | None` (dichiarato sempre nel regime esplicito); fuori dal regime nessuna chiave nuova
+
+**Regole.** Quelle della spec §5.2-bis, in particolare:
+- il cancello resta UNO, sulla cassa netta finale in `_normalize_balance_sheet_cents`, dopo lo sweep: nel regime esplicito, al posto di `copri`, `tiraggio = max(0, −cassa_netta quantizzata)`; `sp16a`/`sp16` += tiraggio; cassa = max(0, cassa_netta); nessun `ValueError` per fabbisogno, nessun tetto letto; `overdraft.outstanding` resta 0;
+- il `forced_total` (override su `sp16a`/`sp16`) con tiraggio > 0 solleva come oggi, messaggio: «Fidi e anticipi incompatibili con {campo} forzato: servono {importo} di fidi, ma il totale della voce e' fissato dall'override. Togli l'override o copri il fabbisogno con un finanziamento.»;
+- `fidi.residuo` dichiarato = residuo del Task 3 − rimborso_sweep + tiraggio, cosi' l'anno dopo apre da li' (oneri compresi) e l'invariante Σ`breve` + `scoperto_residuo` = `sp16a` tiene;
+- `affidamento` = `bank_lines_amount` della prima riga (costante per tutto il piano, anche con regola `ricavi`); `oltre_affidamento = max(0, residuo − affidamento)`; `avviso_fidi` col testo della spec e `eur_it`, `None` a zero;
+- `fabbisogno_picco`/`fabbisogno_picco_anno` nel regime esplicito leggono `oltre_affidamento` al posto di `scoperto_residuo`.
+
+- [ ] **Step 1: Base del task** — `git rev-parse HEAD > /tmp/rilievi-task3b-base`
+- [ ] **Step 2: Test rosso** `tests/test_forecast_fidi_tiraggio.py`, sulla stessa base e con lo stesso `_genera` di `tests/test_forecast_fidi.py` (fidi 90.000, un contratto col residuo), con costi che mandano la cassa in negativo:
+  1. fabbisogno 40.000 nell'anno 1 con fidi 90.000 e `overdraft_allowed` **false**: `forecast_generated` vero; `fidi.tiraggio == 40000.00`, `fidi.residuo == 130000.00`, `oltre_affidamento == 40000.00`, `avviso_fidi` contiene «40.000» e «90.000»; `scoperto_residuo == 0`; `sp09 == 0`; `sp16a` = residuo fidi + quota dei contratti; attivo = passivo;
+  2. anno 2 con cassa positiva e sweep acceso: il tiraggio si rimborsa (`rimborso_sweep` > 0), `oltre_affidamento` torna 0 e `avviso_fidi is None`; `oneri_fidi` dell'anno 2 = 130.000 × tasso;
+  3. regola `ricavi` con ricavi +20% e nessun fabbisogno: `oltre_affidamento == 18000.00` (90.000 → 108.000) e l'avviso c'e';
+  4. override `sp16a` con fabbisogno: `forecast_generated` falso, messaggio «Fidi e anticipi incompatibili»;
+  5. fuori dal regime esplicito (senza `bank_lines_amount`), stesso fabbisogno, scoperto non concesso: solleva «Fabbisogno finanziario scoperto» come prima; nessuna chiave `avviso_fidi`.
+  Confronti annidati con `D(str(v)) == D("...")`.
+- [ ] **Step 3: Rosso** — `env -u ANTHROPIC_API_KEY /home/peter/DEV/budget/backend/venv/bin/python -m pytest tests/test_forecast_fidi_tiraggio.py -q -p no:cacheprovider` (falliscono sulle asserzioni)
+- [ ] **Step 4: Implementazione** secondo le regole; aggiornare in `tests/test_forecast_fidi.py` solo le attese dei casi del regime esplicito che oggi aprono scoperto o sollevano, citando nel rapporto quali e perche'.
+- [ ] **Step 5: Verde, banco, commit**
+
+```bash
+env -u ANTHROPIC_API_KEY /home/peter/DEV/budget/backend/venv/bin/python -m pytest tests/test_forecast_fidi_tiraggio.py tests/test_forecast_fidi.py tests/test_forecast_scoperto*.py tests/test_forecast_sweep_piani.py tests/test_forecast_altri_finanziatori.py tests/test_forecast_dichiarato_vs_persistito.py -q -p no:cacheprovider
+/home/peter/DEV/budget/backend/venv/bin/python scripts/parita_motore.py "$(cat /tmp/rilievi-task3b-base)" --anni 4 --controllo-negativo --json /tmp/rilievi-task3b-parita.json --log /tmp/rilievi-task3b-parita.log
+/home/peter/DEV/budget/backend/venv/bin/python scripts/parita_riepilogo.py /tmp/rilievi-task3b-parita.json
+git add calculations/forecast_engine.py tests/test_forecast_fidi_tiraggio.py tests/test_forecast_fidi.py docs/budget/API-PREVISIONALE.md CLAUDE.md
+git commit -m "feat(ipotesi): nel regime esplicito il fabbisogno tira sui fidi, con avviso oltre l'importo di partenza"
+```
+Atteso dal banco: **0 divergenze** (nessun profilo esistente usa il regime esplicito).
+
+---
+
 ### Task 7: Profili nuovi del banco di parita' e giro completo
 
 **Files:**
@@ -1227,7 +1270,7 @@ git commit -m "feat(ipotesi): pareggio sul MOL nei details, crediti non incassat
 
 **Interfaces:**
 - Consumes: tutti i campi dei Task 1-6
-- Produces: tre profili nuovi — `fidi_contratti_anno` (fidi + un contratto con `repayments` + sweep), `altri_finanziatori_anno` (fidi 0 + `other_lenders`), `tfr_liquidazioni` — che il banco esercita da qui in poi.
+- Produces: quattro profili nuovi — `fidi_contratti_anno` (fidi + un contratto con `repayments` + sweep), `fidi_tiraggio` (fidi con un fabbisogno che supera l'importo di partenza, Task 3b), `altri_finanziatori_anno` (fidi 0 + `other_lenders`), `tfr_liquidazioni` — che il banco esercita da qui in poi. Parte dopo il Task 3b.
 
 - [ ] **Step 1: Base e lettura del banco**
 
@@ -2722,7 +2765,7 @@ Portare qui `boolAssumption` (ri-esportata da `budget-horizon`), `singleYearValu
 
 - [ ] **Step 5: Componente**
 
-`StepPatrimonialePiano.tsx`, `grid gap-5 lg:grid-cols-2 items-start`. Sinistra: card **Voci minori · regola nel piano** (le righe di `minorFieldsRows` con il `Select` del driver e la percentuale, spostate da `StepCircolante` cosi' com'erano, piu' la riga in sola lettura «Crediti tributari · imposte anticipate · governati dalle imposte · passo 7»); card **Fondo TFR** (occhiello `{sp15} € al 31/12/{anno}`; riga «Accantonamento annuo · retribuzioni / 13,5» con la `Checkbox` `tfr_accrual_suspended` via `p.updateAll`; tabella `tfrRighe`: accantonamento in sola lettura («sospeso» se sospeso), `Input` liquidazioni per anno via `p.update(y, "tfr_payments", v)`, «Fondo a fine anno» con il chip rosso «oltre il fondo»; nota «Liquidazioni: pensionamenti, dimissioni, licenziamenti. Escono di cassa nell'anno e riducono il fondo.»); card **Nuovi investimenti** (`INVESTMENT_ROWS` e i due tassi, come oggi); card **Nuovi finanziamenti** (una card `border-l-2 border-l-primary` per `nuoviFinanziamenti`: `Input` nome in testa, riepilogo `riepilogoNuovo`, ×; cinque campi importo / erogato nel (`Select` sugli anni: cambiare anno = togliere dalla lista dell'anno vecchio e aggiungere a quella del nuovo, con `p.updateFinancingLoans` due volte) / durata / preammortamento / tasso; «+ Aggiungi finanziamento» → `p.updateFinancingLoans(annoLibero, [...loansDiQuellAnno, nuovoPrestito(anno)])`; note del prototipo); card **Cassa e scoperto** (le due `Checkbox` con i testi del prototipo, tetto e cassa minima accanto; accordion «Mostra tutte» con le cessioni). Destra: `PreviewPanel` «Debito, cassa e PFN» (`rowsDebitoCassaPfn(baseBs, fidiBase, previewYears)` con `fidiBase = p.assumptions[firstYear]?.bank_lines_amount ?? null`; sotto, gli avvisi di oggi da `StepPregressoNuovo`: `previewNotice`, `scopertoAvvisi`, `confermaCassaPositiva`) e `PreviewPanel` «Altri crediti e debiti del piano · dalle voci minori» (`rowsAltriCreditiDebiti`). `BudgetWizard.tsx`: `"patrimoniale-piano"` → `<StepPatrimonialePiano {...stepProps} />`.
+`StepPatrimonialePiano.tsx`, `grid gap-5 lg:grid-cols-2 items-start`. Sinistra: card **Voci minori · regola nel piano** (le righe di `minorFieldsRows` con il `Select` del driver e la percentuale, spostate da `StepCircolante` cosi' com'erano, piu' la riga in sola lettura «Crediti tributari · imposte anticipate · governati dalle imposte · passo 7»); card **Fondo TFR** (occhiello `{sp15} € al 31/12/{anno}`; riga «Accantonamento annuo · retribuzioni / 13,5» con la `Checkbox` `tfr_accrual_suspended` via `p.updateAll`; tabella `tfrRighe`: accantonamento in sola lettura («sospeso» se sospeso), `Input` liquidazioni per anno via `p.update(y, "tfr_payments", v)`, «Fondo a fine anno» con il chip rosso «oltre il fondo»; nota «Liquidazioni: pensionamenti, dimissioni, licenziamenti. Escono di cassa nell'anno e riducono il fondo.»); card **Nuovi investimenti** (`INVESTMENT_ROWS` e i due tassi, come oggi); card **Nuovi finanziamenti** (una card `border-l-2 border-l-primary` per `nuoviFinanziamenti`: `Input` nome in testa, riepilogo `riepilogoNuovo`, ×; cinque campi importo / erogato nel (`Select` sugli anni: cambiare anno = togliere dalla lista dell'anno vecchio e aggiungere a quella del nuovo, con `p.updateFinancingLoans` due volte) / durata / preammortamento / tasso; «+ Aggiungi finanziamento» → `p.updateFinancingLoans(annoLibero, [...loansDiQuellAnno, nuovoPrestito(anno)])`; note del prototipo); card **Cassa e scoperto** (spec §4.6 aggiornata il 2026-09-15: nel regime esplicito — `bank_lines_amount` non nullo sulla prima riga, sempre vero dopo il passo 5 — la `Checkbox` dello scoperto e il tetto **non si rendono**, al loro posto la nota «Se la cassa va in negativo il piano riutilizza i fidi; oltre l'importo di partenza compare un avviso»; resta la `Checkbox` dello sweep con la cassa minima; accordion «Mostra tutte» con le cessioni). Destra: `PreviewPanel` «Debito, cassa e PFN» (`rowsDebitoCassaPfn(baseBs, fidiBase, previewYears)` con `fidiBase = p.assumptions[firstYear]?.bank_lines_amount ?? null`; sotto, gli avvisi di oggi da `StepPregressoNuovo`: `previewNotice`, `scopertoAvvisi`, `confermaCassaPositiva`, **piu' `details.avviso_fidi` di ogni anno che ce l'ha** (Task 3b), in ambra, uno per riga) e `PreviewPanel` «Altri crediti e debiti del piano · dalle voci minori» (`rowsAltriCreditiDebiti`). `BudgetWizard.tsx`: `"patrimoniale-piano"` → `<StepPatrimonialePiano {...stepProps} />`.
 
 - [ ] **Step 6: Verde, tsc, commit**
 

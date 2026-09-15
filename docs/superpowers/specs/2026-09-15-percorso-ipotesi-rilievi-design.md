@@ -75,8 +75,8 @@ Criteri di successo:
   come nel prototipo, e l'utente li scadenzia **a mano, anno per anno** (decisione del proprietario,
   2026-09-15, domanda §9.1): la tabella delle rate e il saldo lasciano il passo 7, che tiene aliquota,
   differenze temporanee, via manuale e acconto. Sparisce la scorciatoia «N rate uguali».
-- Il riutilizzo dei fidi quando la cassa **manca** (tirare di nuovo sulla linea invece di aprire lo
-  scoperto): non modellato, non chiesto. Il fabbisogno resta governato dallo scoperto di c/c.
+- ~~Il riutilizzo dei fidi quando la cassa manca~~: **entrato nel lotto** il 2026-09-15 per decisione
+  del proprietario, §5.2-bis e Task 3b.
 - La riclassifica dell'infrannuale che azzera i fornitori (PROVA AMBIENTA): fuori lotto. Qui solo
   l'avviso.
 - Il percorso Startup, gli scenari infrannuali, il Report finale: come prima. Il catalogo delle
@@ -240,7 +240,10 @@ Colonna sinistra:
   finanziamento» propone il primo anno di piano libero. I tre campi legacy `financing_amount`,
   `financing_duration_years`, `financing_interest_rate` **non si mostrano più**: la migrazione li
   converte (§6).
-- **Cassa e scoperto**: «Concedi lo scoperto di conto corrente» + tetto (come oggi); «Usa la cassa
+- **Cassa e scoperto** (dal 2026-09-15, §5.2-bis): la casella «Concedi lo scoperto» e il tetto **non si
+  mostrano** nel regime esplicito (il wizard lo accende sempre al passo 5): al loro posto la nota «Se
+  la cassa va in negativo il piano riutilizza i fidi; oltre l'importo di partenza compare un avviso».
+  Resta «Usa la cassa
   in eccesso per ridurre fidi e anticipi» + cassa minima (decisione 9: «i mutui e i nuovi
   finanziamenti seguono solo i loro rimborsi. Lo scoperto si chiude comunque da solo appena la
   cassa torna positiva»). Le cessioni di cespiti restano nell'accordion «Mostra tutte».
@@ -331,6 +334,34 @@ nullo. In quel regime:
   regola}` e i contratti pregressi dichiarano `breve` = rata dell'anno dopo; l'invariante Σ`breve`
   + `scoperto_residuo` = `sp16a`, Σ`lungo` = `sp17a` resta.
 
+### 5.2-bis Riutilizzo dei fidi quando la cassa va in negativo (decisione del 2026-09-15)
+
+Il proprietario: «possiamo riutilizzare i fidi se la cassa va in negativo fino all'importo che c'era
+nel bilancio di partenza, se il piano necessita più fidi deve uscire messaggio ma il piano si può
+fare comunque». Scelte confermate: l'eccedenza resta **sui fidi** (non sullo scoperto), e il tetto
+dell'avviso è **l'importo di partenza** (`bank_lines_amount`) anche con la regola `ricavi`.
+
+Nel regime esplicito:
+- dopo lo sweep, un fabbisogno (cassa netta negativa al centesimo) si copre **tirando sui fidi**:
+  `tiraggio` = fabbisogno, `fidi.residuo` += tiraggio, `sp16a`/`sp16` += tiraggio, cassa a zero. Il
+  motore **non solleva mai** «Fabbisogno finanziario scoperto» in questo regime, e non apre scoperto
+  (`scoperto_generato` = `scoperto_residuo` = 0): `overdraft_allowed` e `overdraft_limit` non si
+  leggono;
+- `affidamento` = `bank_lines_amount` della prima riga; `oltre_affidamento` = max(0, `fidi.residuo`
+  − `affidamento`). Oltre zero il piano si calcola lo stesso e si **dichiara** l'avviso
+  (`details['avviso_fidi']`, in italiano, `None` altrimenti): «Nel {anno} il piano usa {residuo} €
+  di fidi e anticipi, {oltre} € oltre i {affidamento} € del bilancio di partenza: servono
+  affidamenti in più.» La crescita dei fidi per regola `ricavi` conta anch'essa verso il tetto;
+- gli oneri restano `fidi_apertura × bank_lines_rate`: il tiraggio di un anno paga interessi
+  dall'anno dopo (mai circolare, come lo scoperto);
+- un `sp_overrides` su `sp16a`/`sp16` con un fabbisogno si rifiuta come oggi (il totale forzato non
+  lascia posto al tiraggio), col messaggio che nomina i fidi;
+- `details['debito_bancario']['fidi']` aggiunge `tiraggio`, `affidamento`, `oltre_affidamento`;
+  `fabbisogno_picco`/`_anno` leggono il tiraggio cumulato (`fidi.residuo` oltre l'affidamento) nel
+  regime esplicito; l'invariante Σ`breve` + `scoperto_residuo` = `sp16a` resta.
+
+Fuori dal regime esplicito nulla cambia: lo scoperto e i suoi due controlli restano quelli di oggi.
+
 ### 5.3 Altri finanziatori per anno (`other_lenders`)
 
 Lista sul primo anno: `{name, opening_residual, interest_rate, repayments}` (stesse validazioni di
@@ -414,11 +445,12 @@ verifica di fine lotto (suite, vitest, tsc, banco, collaudo a schermo, `/riallin
 
 1. ~~I debiti tributari rateizzati: restano al passo 7 o passano al passo 5?~~ **Decisa il
    2026-09-15:** passano al passo 5, scadenziati dall'utente anno per anno (§3, Task 13b e 16).
-2. Il riutilizzo dei fidi quando la cassa manca (§3): resta fuori?
+2. ~~Il riutilizzo dei fidi quando la cassa manca (§3): resta fuori?~~ **Deciso il 2026-09-15:** entra,
+   §5.2-bis.
    **Indicazione del proprietario (2026-09-15):** «L'utente deve scomporre debito a breve in fido e
    quota mutuo a breve. La quota dei fidi può essere rimborsata con eccedenze di cassa. Quota mutui a
    breve si rimborsa l'anno successivo». Conferma il regime esplicito (§5.2, Task 3 e 14): lo sweep
    rimborsa solo i fidi, la quota dei mutui a breve esce con le rate del primo anno. Sul riutilizzo
    dei fidi quando la cassa manca non dice nulla: resta fuori finché non lo chiede.
-3. Il tasso dello scoperto passa da `financing_interest_rate` a `bank_lines_rate` (§5.2): va bene
-   che sia un tasso solo per fidi e scoperto?
+3. ~~Il tasso dello scoperto~~: superata da §5.2-bis — nel regime esplicito non nasce più scoperto, e il
+   tiraggio sui fidi paga `bank_lines_rate`.

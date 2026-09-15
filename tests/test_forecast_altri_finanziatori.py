@@ -6,6 +6,8 @@ lungo 100.000; 2029 uguale (resta aperto). Al 2% gli interessi 2027 sono 3.000.
 """
 from decimal import Decimal as D
 
+import pytest
+
 from backend.app.services import assumptions_service, forecast_preview_service
 from database.models import BalanceSheet, BudgetScenario, FinancialYear
 from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
@@ -78,6 +80,87 @@ def test_senza_lista_il_comportamento_di_prima():
     assert res["forecast_generated"] is True, res["message"]
     assert anni[2027][0][SP17B] == D("100000.00") and det[2027]["altri_finanziatori"]["mode"] == "anni"
     assert det[2027]["altri_finanziatori"]["contratti"] == []
+
+
+def test_assemble_financing_rifiuta_dict_non_validati():
+    """(rilievo del coordinatore) `calculations/` non importa backend: i controlli
+    di `OtherLenderInput` sono ripetuti in `assemble_financing`, quindi chi chiama
+    il motore fuori dalle route tipizzate (script, legacy) riceve gli STESSI
+    rifiuti in italiano — qui con dict che nessuno schema ha mai visto — e gli
+    importi float del sacco JSON entrano al motore in Decimal.
+    """
+    from types import SimpleNamespace
+    from calculations.forecast_engine import ForecastEngine
+
+    base = SimpleNamespace(sp16_debiti_breve=D("0"), sp17_debiti_lungo=D("150000"),
+                           sp16b_debiti_altri_finanz_breve=D("0"),
+                           sp17b_debiti_altri_finanz_lungo=D("150000"))
+
+    def _riga(altro):
+        return SimpleNamespace(
+            forecast_year=2027, financing_amount=None, financing_duration_years=None,
+            financing_interest_rate=None, financing_loans=[],
+            bank_lines_amount=D("0"), other_lenders=[altro],
+        )
+
+    eng = ForecastEngine(None)
+    # Il caso richiesto: somma dei rimborsi oltre il residuo iniziale (+0,01).
+    with pytest.raises(ValueError, match="supera il suo residuo iniziale"):
+        eng.assemble_financing([_riga({"name": "Soci", "opening_residual": 150000.0,
+                                       "interest_rate": 0, "repayments": [100000, 100000]})], base)
+    with pytest.raises(ValueError, match="negativo"):
+        eng.assemble_financing([_riga({"name": "Soci", "opening_residual": 150000.0,
+                                       "interest_rate": 0, "repayments": [-1, 150000]})], base)
+    with pytest.raises(ValueError, match="maggiore di zero"):
+        eng.assemble_financing([_riga({"name": "Soci", "opening_residual": 0.0,
+                                       "interest_rate": 0, "repayments": []})], base)
+    # Una voce valida esce in Decimal, non in float: gli importi marciano in
+    # float dal JSON persistito e il kernel non deve vederne uno.
+    _, _, contratti = eng.assemble_financing(
+        [_riga({"name": "Soci", "opening_residual": 150000.0, "interest_rate": 2.5,
+                "repayments": [0, 50000.0, 0]})], base)
+    c = contratti[0]
+    assert isinstance(c["opening_residual"], D) and isinstance(c["rate"], D)
+    assert all(isinstance(r, D) for r in c["repayments"])
+    assert c["opening_residual"] == D("150000.0") and c["rate"] == D("0.025")
+
+
+def test_override_su_altri_finanziatori_con_lista_e_rifiutato():
+    """Invariante CLAUDE.md: un override su una riga che un piano rigenera si
+    rifiuta, in qualunque anno del piano. Con `other_lenders` la riga la
+    riscrive il calendario ogni anno (`_residuo_contratto`): l'override varrebbe
+    un anno solo e la cassa assorbirebbe la differenza senza alcun flusso.
+    """
+    for anno_riga, anno_citato in ((0, "2027"), (1, "2028")):
+        rows = _rows()
+        rows[anno_riga]["sp_overrides"] = {"sp17b_debiti_altri_finanz_lungo": 120000}
+        res, *_ = _genera(f"soci-override-{anno_citato}", rows)
+        assert res["forecast_generated"] is False
+        assert "sp17b_debiti_altri_finanz_lungo" in res["message"]
+        assert anno_citato in res["message"]
+        assert "Patrimoniale pregresso" in res["message"] and "value: null" in res["message"]
+    # Anche sul lato breve.
+    rows = _rows()
+    rows[1]["sp_overrides"] = {"sp16b_debiti_altri_finanz_breve": 0}
+    res, *_ = _genera("soci-override-breve", rows)
+    assert res["forecast_generated"] is False and "sp16b_debiti_altri_finanz_breve" in res["message"]
+    # `value: null` e' la via d'uscita dichiarata nel messaggio: deve passare.
+    rows = _rows()
+    rows[1]["sp_overrides"] = {"sp17b_debiti_altri_finanz_lungo": None}
+    res, *_ = _genera("soci-override-null", rows)
+    assert res["forecast_generated"] is True, res["message"]
+
+
+def test_senza_lista_override_su_sp17b_passa():
+    """Senza `other_lenders` le due righe crescono da `prev` (o dalla rata fissa
+    sul base): il rifiuto non gira, l'override funziona come prima."""
+    rows = [{"forecast_year": 2027, "tax_rate": 27.9,
+             "sp_overrides": {"sp17b_debiti_altri_finanz_lungo": 120000}},
+            {"forecast_year": 2028, "tax_rate": 27.9}]
+    res, anni, det, err = _genera("soci-override-senza-lista", rows)
+    assert res["forecast_generated"] is True, res["message"]
+    assert anni[2027][0][SP17B] == D("120000.00")
+    assert err is None
 
 
 def test_guardia_su_prev_details_senza_blocco_fidi(monkeypatch):

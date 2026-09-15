@@ -555,13 +555,19 @@ bilancio), gli interessi sono tasso × residuo di apertura.
   `sp16b + sp17b` dell'anno base (tolleranza 0,01): «La somma dei residui degli altri finanziatori
   (X) deve coincidere con i debiti verso altri finanziatori dell'anno base (Y)». Gli importi
   arrivano dal sacco JSON **in float** (`build_assumption_row` via `jsonable_encoder`): il motore
-  rilegge ogni voce con `OtherLenderInput.model_validate` e lavora solo in Decimal.
+  legge ogni voce con `Decimal(str(...))` e lavora solo in Decimal — `calculations/` non importa
+  backend — e ripete a mano i controlli dello schema `OtherLenderInput`, in italiano: residuo
+  iniziale > 0 («Il residuo iniziale dell'altro finanziatore X deve essere maggiore di zero»),
+  nessun rimborso negativo, somma dei rimborsi entro il residuo iniziale (+0,01). Chi chiama il
+  motore fuori dalle route tipizzate (script, legacy) riceve gli stessi rifiuti.
 - **Ripartizione per anno.** `sp16b` = Σ della rata dell'anno dopo di ciascun contratto (mai sopra
   il suo residuo), `sp17b` = Σ residui − `sp16b`. Con la lista, `altri_finanz_repayment_years` è
-  **ignorato** e le due righe non crescono per percentuale: sono rigovernate dal calendario ogni
-  anno, come le righe a giorni — un `sp_overrides` sulla riga vale solo per l'anno in cui è
-  scritto, l'anno dopo torna quello del calendario (misurato: override `sp17b` 120.000 nel 2027,
-  100.000 dal 2028; la cassa assorbe, il foglio quadra).
+  **ignorato** e le due righe non crescono per percentuale: le rigenera il calendario ogni anno,
+  come un piano rigenera il lato oltre — e **un `sp_overrides` su `sp16b`/`sp17b` in qualunque
+  anno del piano si rifiuta** («L'override di sp17b_debiti_altri_finanz_lungo nell'anno 2028 non è
+  ammesso: … Modifica la lista al passo «Patrimoniale pregresso», oppure svuota la cella
+  (value: null)» — `_rifiuto_override_governati`, famiglia 4). Senza lista, le due righe crescono
+  da `prev` come sempre e l'override resta lecito.
 - **Interessi.** Σ tasso × residuo di apertura dei contratti, sommati a `ce15` nel ramo senza
   override — la stessa guardia anti-circolarità di scoperto e fidi — e dichiarati in
   `details['oneri_altri_finanziatori']`: sempre, 0 senza lista, 0 dove `ce15_override` vince sulla
@@ -571,8 +577,9 @@ bilancio), gli interessi sono tasso × residuo di apertura.
   presente; `contratti` è una riga per voce: `{indice, nome, residuo_iniziale, rimborso,
   interessi, residuo, breve, lungo}`), `'anni'` (`altri_finanz_repayment_years` > 0, `contratti`
   vuoto), `'legacy'` (nulla di ciò). `apertura` è la somma delle due righe dell'anno prima.
-  A differenza del debito bancario, la dichiarazione **non è riconciliata col persistito**: sotto
-  un `sp_overrides` su `sp16b`/`sp17b` diverge dal bilancio di quell'anno.
+  A differenza del debito bancario, la dichiarazione **non è riconciliata col persistito**: vale
+  però solo senza lista — con la lista un override su quelle righe è rifiutato, quindi il
+  dichiarato e il persistito non possono divergere.
 
 ## 5. Promote — dalla proiezione infrannuale a un anno di bilancio
 

@@ -114,12 +114,63 @@ export function financingLoansViewModel(
       label(loan.name && loan.name.trim() !== "" ? loan.name : `Prestito ${index + 1} (senza nome)`),
       cell(loan.amount),
       cell(loan.opening_residual),
-      { text: yearsText(loan.duration_years) },
+      { text: loan.duration_years == null ? "durata non dichiarata" : yearsText(loan.duration_years) },
       cell(loan.interest_rate, "pct"),
       { text: loan.grace_years === 0 ? "nessun preammortamento" : yearsText(loan.grace_years) },
       cell(loan.balloon_pct, "pct"),
     ]),
     note: loans.length === 0 ? "Nessun prestito nel piano: nessun finanziamento nuovo previsto." : undefined,
+  };
+}
+
+export function financingRepaymentsViewModel(
+  loans: NonNullable<AssumptionValue["financing_loans"]>,
+  years: readonly number[],
+): NestedTableViewModel {
+  return {
+    id: "financing_repayments",
+    title: "Rimborsi dei finanziamenti",
+    caption: "Rimborsi dichiarati per anno dei finanziamenti",
+    columns: ["Prestito", "Anno", "Rimborso"],
+    rows: loans.flatMap((loan, loanIndex) => (loan.repayments ?? []).map((amount, index) => [
+      label(loan.name && loan.name.trim() !== "" ? loan.name : `Prestito ${loanIndex + 1} (senza nome)`),
+      { text: years[index] == null ? `Quota ${index + 1} (anno non dichiarato)` : String(years[index]) },
+      cell(amount),
+    ])),
+  };
+}
+
+export function otherLendersViewModel(
+  lenders: NonNullable<AssumptionValue["other_lenders"]>,
+): NestedTableViewModel {
+  return {
+    id: "other_lenders",
+    title: "Altri finanziatori",
+    caption: `Altri finanziatori del piano: ${lenders.length}`,
+    columns: ["Finanziatore", "Residuo ad apertura", "Tasso"],
+    rows: lenders.map((lender, index) => [
+      label(lender.name && lender.name.trim() !== "" ? lender.name : `Finanziatore ${index + 1} (senza nome)`),
+      cell(lender.opening_residual),
+      cell(lender.interest_rate, "pct"),
+    ]),
+    note: lenders.length === 0 ? "Nessun altro finanziatore dichiarato." : undefined,
+  };
+}
+
+export function otherLenderRepaymentsViewModel(
+  lenders: NonNullable<AssumptionValue["other_lenders"]>,
+  years: readonly number[],
+): NestedTableViewModel {
+  return {
+    id: "other_lender_repayments",
+    title: "Rimborsi agli altri finanziatori",
+    caption: "Rimborsi dichiarati per anno agli altri finanziatori",
+    columns: ["Finanziatore", "Anno", "Rimborso"],
+    rows: lenders.flatMap((lender, lenderIndex) => lender.repayments.map((amount, index) => [
+      label(lender.name && lender.name.trim() !== "" ? lender.name : `Finanziatore ${lenderIndex + 1} (senza nome)`),
+      { text: years[index] == null ? `Quota ${index + 1} (anno non dichiarato)` : String(years[index]) },
+      cell(amount),
+    ])),
   };
 }
 
@@ -150,6 +201,13 @@ export function pregressoViewModel(
       continue;
     }
     rows.push([label(balance.label), cell(plan.opening), ...alignAmounts(plan.amounts, columns)]);
+    if (plan.non_incassato != null) {
+      rows.push([
+        label(`${balance.label} — non incassato`),
+        { text: plan.non_incassato ? "sì" : "no" },
+        ...Array.from({ length: columns }, () => cell(null)),
+      ]);
+    }
     if (plan.writeoff !== null && plan.writeoff !== undefined) {
       rows.push([
         label(`${balance.label} — stralcio`),
@@ -251,6 +309,8 @@ export function nestedTableViewModel(table: NestedTable, years: readonly number[
   switch (table.kind) {
     case "financing_loans":
       return financingLoansViewModel(table.rows);
+    case "financing_repayments":
+      return financingRepaymentsViewModel(table.rows, years);
     case "pregresso":
       return pregressoViewModel(table.plan, years);
     case "temporary_differences":
@@ -261,6 +321,10 @@ export function nestedTableViewModel(table: NestedTable, years: readonly number[
       return spOverridesViewModel(table.rows);
     case "sp_indexing":
       return spIndexingViewModel(table.rows);
+    case "other_lenders":
+      return otherLendersViewModel(table.rows);
+    case "other_lender_repayments":
+      return otherLenderRepaymentsViewModel(table.rows, years);
   }
 }
 

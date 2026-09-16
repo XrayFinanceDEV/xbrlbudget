@@ -128,7 +128,7 @@ describe("stato dichiarativo di una riga", () => {
 });
 
 describe("tabelle nidificate", () => {
-  it("le sei chiavi note, in ordine canonico", () => {
+  it("le tabelle note, in ordine canonico", () => {
     const assumption = row("financing_loans", [null], {
       financing_loans: [],
       sp_overrides: [{ field: "sp09_disponibilita_liquide", value: "10" }],
@@ -136,6 +136,18 @@ describe("tabelle nidificate", () => {
     expect(nestedTablesOf(assumption).map((table) => table.kind)).toEqual(["financing_loans", "sp_overrides"]);
     expect(hasNestedTable(assumption)).toBe(true);
     expect(hasNestedTable(row("tax_rate", ["27.9"]))).toBe(false);
+  });
+
+  it("include i nuovi finanziatori e i rimborsi dichiarati", () => {
+    const loan = row("financing_loans", [null], {
+      financing_loans: [{ amount: "100", opening_residual: "100", interest_rate: "3", grace_years: 0, balloon_pct: "0", repayments: ["25"] }],
+    });
+    const lender = row("other_lenders", [null], {
+      other_lenders: [{ opening_residual: "90", interest_rate: "2", repayments: ["30"] }],
+    });
+    expect(nestedTablesOf(loan).map((table) => table.kind)).toEqual(["financing_loans", "financing_repayments"]);
+    expect(nestedTablesOf(lender).map((table) => table.kind)).toEqual(["other_lenders", "other_lender_repayments"]);
+    expect(hasNestedTable(lender)).toBe(true);
   });
 
   it("una chiave a null non è una tabella", () => {

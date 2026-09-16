@@ -1,0 +1,18 @@
+{
+  "name": "typst",
+  "version": "0.15.1",
+  "channel": "stable",
+  "license": "Apache-2.0",
+  "license_url": "https://github.com/typst/typst/blob/v0.15.1/LICENSE",
+  "asset": "typst-x86_64-unknown-linux-musl.tar.xz",
+  "url": "https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz",
+  "sha256": "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c",
+  "digest_source": "official GitHub release page for typst/typst v0.15.1",
+  "binary_in_archive": "typst",
+  "platform": {
+    "kernel": "Linux",
+    "arch": "x86_64",
+    "libc": "musl (statically linked official release asset)"
+  },
+  "binary_sha256": "29273eaa04f6d00edd0c2bec578f565fc9c65be856bfbffc894567c68ed0b237"
+}

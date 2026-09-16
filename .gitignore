@@ -142,3 +142,13 @@ docs/examples/
 
 # Rapporti del collaudatore (rigenerabili)
 .collaudo/
+
+# Typst dev toolchain (M2-00A): bin/ holds the installed binary plus its
+# provenance record (.install-state) and the asset's LICENSE/NOTICE; download/
+# is installer scratch only (the fetched archive lives there inside a run.*
+# temp dir and is deleted on exit). Both are regenerable from manifest.json —
+# never commit anything under them.
+/tools/typst/bin/
+/tools/typst/download/
+/tools/typst/spike/.packages/
+/tools/typst/spike/output/

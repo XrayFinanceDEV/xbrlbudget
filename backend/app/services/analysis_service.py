@@ -5,6 +5,7 @@ Provides complete analysis including historical data, forecasts, and all calcula
 in a single response. This simplifies the API by consolidating multiple endpoints.
 """
 from typing import Dict, List, Optional, Any
+from contextvars import ContextVar
 from sqlalchemy.orm import Session, joinedload
 from decimal import Decimal
 import sys
@@ -27,13 +28,29 @@ from pdf_service.em_score import calculate_em_score, get_em_score_description
 from app.services.forecast_freshness import forecast_staleness
 
 
+# The established /analysis contract emits JSON-ready floats.  The dossier V2
+# assembler instead needs the calculator's Decimal results verbatim so that it
+# can apply its own string representation without losing cents (or larger
+# integer precision).  The context is scoped by ``get_complete_analysis`` and
+# reset in a finally block, which also keeps direct calls to helpers compatible.
+_exact_decimals: ContextVar[bool] = ContextVar("analysis_exact_decimals", default=False)
+
+
+def _output_number(value):
+    """Keep Decimal values only for the opt-in dossier serialization mode."""
+    if _exact_decimals.get() and isinstance(value, Decimal):
+        return value
+    return float(value)
+
+
 def get_complete_analysis(
     db: Session,
     company_id: int,
     scenario_id: int,
     include_historical: bool = True,
     include_forecast: bool = True,
-    include_calculations: bool = True
+    include_calculations: bool = True,
+    exact_decimals: bool = False,
 ) -> Dict[str, Any]:
     """
     Get complete financial analysis for a scenario.
@@ -48,6 +65,7 @@ def get_complete_analysis(
         include_historical: Include historical years (base_year - 1 and base_year)
         include_forecast: Include forecast years
         include_calculations: Include all calculations (Altman, FGPMI, ratios, cashflow)
+        exact_decimals: Preserve Decimal values for the dossier assembler.
 
     Returns:
         Dictionary with complete analysis data
@@ -55,6 +73,24 @@ def get_complete_analysis(
     Raises:
         ValueError: If scenario not found or data missing
     """
+    token = _exact_decimals.set(exact_decimals)
+    try:
+        return _get_complete_analysis(
+            db, company_id, scenario_id, include_historical,
+            include_forecast, include_calculations,
+        )
+    finally:
+        _exact_decimals.reset(token)
+
+
+def _get_complete_analysis(
+    db: Session,
+    company_id: int,
+    scenario_id: int,
+    include_historical: bool,
+    include_forecast: bool,
+    include_calculations: bool,
+) -> Dict[str, Any]:
     # 1. Load scenario with all related data (eager loading for performance)
     scenario = db.query(models.BudgetScenario)\
         .options(
@@ -296,7 +332,7 @@ def _calculate_year_metrics(
         "fgpmi": _serialize_fgpmi(fgpmi),
         "em_score": {
             "rating": em_rating,
-            "z_score_used": float(em_z_used),
+            "z_score_used": _output_number(em_z_used),
             "description": em_description,
         },
         "ratios": {
@@ -357,15 +393,29 @@ def _namedtuple_to_dict(nt) -> Dict[str, Any]:
         elif isinstance(value, (int, str, bool)):
             result[key] = value
         elif isinstance(value, Decimal):
-            result[key] = float(value)
+            result[key] = _output_number(value)
         elif value is not None:
             try:
-                result[key] = float(value)
+                result[key] = _output_number(value)
             except (ValueError, TypeError):
                 result[key] = value
         else:
             result[key] = None
     return result
+
+
+def _cashflow_model_to_dict(model) -> Dict[str, Any]:
+    """Serialize the Pydantic cashflow sections without coercing Decimal first."""
+    def convert(value):
+        if isinstance(value, Decimal):
+            return _output_number(value)
+        if isinstance(value, dict):
+            return {key: convert(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [convert(item) for item in value]
+        return value
+
+    return convert(model.model_dump())
 
 
 def _serialize_balance_sheet(bs) -> Dict[str, Any]:
@@ -377,16 +427,16 @@ def _serialize_balance_sheet(bs) -> Dict[str, Any]:
     for attr in dir(bs):
         if attr.startswith('sp') and not attr.startswith('_'):
             value = getattr(bs, attr, Decimal("0"))
-            data[attr] = float(value) if isinstance(value, Decimal) else float(value or 0)
+            data[attr] = _output_number(value) if isinstance(value, Decimal) else _output_number(value or 0)
 
     # Add calculated properties
-    data["total_assets"] = float(bs.total_assets)
-    data["total_equity"] = float(bs.total_equity)
-    data["total_debt"] = float(bs.total_debt)
-    data["fixed_assets"] = float(bs.fixed_assets)
-    data["current_assets"] = float(bs.current_assets)
-    data["current_liabilities"] = float(bs.current_liabilities)
-    data["working_capital_net"] = float(bs.working_capital_net)
+    data["total_assets"] = _output_number(bs.total_assets)
+    data["total_equity"] = _output_number(bs.total_equity)
+    data["total_debt"] = _output_number(bs.total_debt)
+    data["fixed_assets"] = _output_number(bs.fixed_assets)
+    data["current_assets"] = _output_number(bs.current_assets)
+    data["current_liabilities"] = _output_number(bs.current_liabilities)
+    data["working_capital_net"] = _output_number(bs.working_capital_net)
 
     return data
 
@@ -400,18 +450,18 @@ def _serialize_income_statement(inc) -> Dict[str, Any]:
     for attr in dir(inc):
         if attr.startswith('ce') and not attr.startswith('_'):
             value = getattr(inc, attr, Decimal("0"))
-            data[attr] = float(value) if isinstance(value, Decimal) else float(value or 0)
+            data[attr] = _output_number(value) if isinstance(value, Decimal) else _output_number(value or 0)
 
     # Add calculated properties
-    data["revenue"] = float(inc.revenue)
-    data["production_value"] = float(inc.production_value)
-    data["production_cost"] = float(inc.production_cost)
-    data["ebitda"] = float(inc.ebitda)
-    data["ebit"] = float(inc.ebit)
-    data["financial_result"] = float(inc.financial_result)
-    data["extraordinary_result"] = float(inc.extraordinary_result)
-    data["profit_before_tax"] = float(inc.profit_before_tax)
-    data["net_profit"] = float(inc.net_profit)
+    data["revenue"] = _output_number(inc.revenue)
+    data["production_value"] = _output_number(inc.production_value)
+    data["production_cost"] = _output_number(inc.production_cost)
+    data["ebitda"] = _output_number(inc.ebitda)
+    data["ebit"] = _output_number(inc.ebit)
+    data["financial_result"] = _output_number(inc.financial_result)
+    data["extraordinary_result"] = _output_number(inc.extraordinary_result)
+    data["profit_before_tax"] = _output_number(inc.profit_before_tax)
+    data["net_profit"] = _output_number(inc.net_profit)
 
     return data
 
@@ -428,7 +478,7 @@ def _serialize_assumptions(assumptions) -> Dict[str, Any]:
     # Convert all Decimal to float
     for key, value in data.items():
         if isinstance(value, Decimal):
-            data[key] = float(value)
+            data[key] = _output_number(value)
 
     return data
 
@@ -436,17 +486,17 @@ def _serialize_assumptions(assumptions) -> Dict[str, Any]:
 def _serialize_altman(altman) -> Dict[str, Any]:
     """Serialize Altman Z-Score result to dictionary"""
     return {
-        "z_score": float(altman.z_score),
+        "z_score": _output_number(altman.z_score),
         "classification": altman.classification,
         "interpretation_it": altman.interpretation_it,
         "sector": altman.sector,
         "model_type": altman.model_type,
         "components": {
-            "A": float(altman.components.A),
-            "B": float(altman.components.B),
-            "C": float(altman.components.C),
-            "D": float(altman.components.D),
-            "E": float(altman.components.E) if altman.components.E is not None else None
+            "A": _output_number(altman.components.A),
+            "B": _output_number(altman.components.B),
+            "C": _output_number(altman.components.C),
+            "D": _output_number(altman.components.D),
+            "E": _output_number(altman.components.E) if altman.components.E is not None else None
         }
     }
 
@@ -498,90 +548,19 @@ def _serialize_activity(activity) -> Dict[str, Any]:
 
 def _serialize_operating_activities(operating) -> Dict[str, Any]:
     """Serialize operating activities section of cashflow"""
-    return {
-        "start": {
-            "net_profit": float(operating.start.net_profit),
-            "income_taxes": float(operating.start.income_taxes),
-            "interest_expense_income": float(operating.start.interest_expense_income),
-            "dividends": float(operating.start.dividends),
-            "capital_gains_losses": float(operating.start.capital_gains_losses),
-            "profit_before_adjustments": float(operating.start.profit_before_adjustments)
-        },
-        "non_cash_adjustments": {
-            "provisions": float(operating.non_cash_adjustments.provisions),
-            "depreciation_amortization": float(operating.non_cash_adjustments.depreciation_amortization),
-            "write_downs": float(operating.non_cash_adjustments.write_downs),
-            "total": float(operating.non_cash_adjustments.total)
-        },
-        "cashflow_before_wc": float(operating.cashflow_before_wc),
-        "working_capital_changes": {
-            "delta_inventory": float(operating.working_capital_changes.delta_inventory),
-            "delta_receivables": float(operating.working_capital_changes.delta_receivables),
-            "delta_payables": float(operating.working_capital_changes.delta_payables),
-            "delta_accruals_deferrals_active": float(operating.working_capital_changes.delta_accruals_deferrals_active),
-            "delta_accruals_deferrals_passive": float(operating.working_capital_changes.delta_accruals_deferrals_passive),
-            "other_wc_changes": float(operating.working_capital_changes.other_wc_changes),
-            "total": float(operating.working_capital_changes.total)
-        },
-        "cashflow_after_wc": float(operating.cashflow_after_wc),
-        "cash_adjustments": {
-            "interest_paid_received": float(operating.cash_adjustments.interest_paid_received),
-            "taxes_paid": float(operating.cash_adjustments.taxes_paid),
-            "dividends_received": float(operating.cash_adjustments.dividends_received),
-            "use_of_provisions": float(operating.cash_adjustments.use_of_provisions),
-            "other_cash_changes": float(operating.cash_adjustments.other_cash_changes),
-            "total": float(operating.cash_adjustments.total)
-        },
-        "total_operating_cashflow": float(operating.total_operating_cashflow)
-    }
+    return _cashflow_model_to_dict(operating)
 
 
 def _serialize_investing_activities(investing) -> Dict[str, Any]:
     """Serialize investing activities section of cashflow"""
-    return {
-        "tangible_assets": {
-            "investments": float(investing.tangible_assets.investments),
-            "disinvestments": float(investing.tangible_assets.disinvestments),
-            "net": float(investing.tangible_assets.net)
-        },
-        "intangible_assets": {
-            "investments": float(investing.intangible_assets.investments),
-            "disinvestments": float(investing.intangible_assets.disinvestments),
-            "net": float(investing.intangible_assets.net)
-        },
-        "financial_assets": {
-            "investments": float(investing.financial_assets.investments),
-            "disinvestments": float(investing.financial_assets.disinvestments),
-            "net": float(investing.financial_assets.net)
-        },
-        "total_investing_cashflow": float(investing.total_investing_cashflow)
-    }
+    return _cashflow_model_to_dict(investing)
 
 
 def _serialize_financing_activities(financing) -> Dict[str, Any]:
     """Serialize financing activities section of cashflow"""
-    return {
-        "third_party_funds": {
-            "increases": float(financing.third_party_funds.increases),
-            "decreases": float(financing.third_party_funds.decreases),
-            "net": float(financing.third_party_funds.net)
-        },
-        "own_funds": {
-            "increases": float(financing.own_funds.increases),
-            "decreases": float(financing.own_funds.decreases),
-            "net": float(financing.own_funds.net)
-        },
-        "total_financing_cashflow": float(financing.total_financing_cashflow)
-    }
+    return _cashflow_model_to_dict(financing)
 
 
 def _serialize_cash_reconciliation(reconciliation) -> Dict[str, Any]:
     """Serialize cash reconciliation section of cashflow"""
-    return {
-        "total_cashflow": float(reconciliation.total_cashflow),
-        "cash_beginning": float(reconciliation.cash_beginning),
-        "cash_ending": float(reconciliation.cash_ending),
-        "difference": float(reconciliation.difference),
-        "verification_ok": reconciliation.verification_ok,
-        "third_party_funds_gap": float(reconciliation.third_party_funds_gap)
-    }
+    return _cashflow_model_to_dict(reconciliation)

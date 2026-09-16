@@ -6,7 +6,8 @@
 
 **Data:** 2026-09-13
 
-**Stato:** pronto per approvazione; nessun task di coding ancora avviato
+**Stato:** M1 integrato; spike M2 prodotto in worktree dedicati; requisiti del
+dossier consolidati il 2026-09-15. Gate tecnico/riproduzione indipendente da chiudere.
 
 **Goal:** completare prima il report finale web dell'intera pratica e il suo
 contratto dati canonico, poi generare dallo stesso snapshot un PDF server-side
@@ -16,6 +17,7 @@ con Typst, senza Playwright o Chromium.
 
 - `docs/superpowers/specs/2026-09-13-report-finale-pratica-design.md`
 - `docs/superpowers/specs/2026-09-13-report-pdf-typst-design.md`
+- `docs/superpowers/specs/2026-09-15-report-budget-dossier-design.md`
 
 **Base verificata durante la pianificazione:** `main` a `e09449b`.
 
@@ -29,8 +31,11 @@ Il lavoro produce due milestone separatamente collaudabili:
 - **M2 — PDF Typst:** il backend congela quel modello e genera un PDF bozza o
   finale, riproducibile e validato, senza eseguire calcoli nel template.
 
-M2 dipende dal contratto di M1. Soltanto lo spike Typst può iniziare prima della
-chiusura grafica di M1, usando le fixture congelate del contratto.
+M2 estende il contratto M1 al v2 per produrre il dossier concordato. Il titolo
+è neutrale (`Report Budget 2027 - 2029` nell’esempio); gli Allegati sono completi
+e ogni pagina ha un commento. La precedente sospensione estetica è superata
+dalla richiesta di consolidare le specifiche. Restano i gate tecnici e i nuovi
+prerequisiti di contratto/layout descritti sotto.
 
 ## 2. Decisioni fissate dal piano
 
@@ -212,25 +217,31 @@ M1-01 persistenza condivisa
                                 ▼
                        M1 APPROVATO
 
-M1-04 ──► M2-00A toolchain fissata ──► M2-00 spike Typst ──► GATE TYPST
-                                    │
-                      ┌─────────────┴─────────────┐
-                      ▼                           ▼
-              M2-01 runtime              M2-02 template base
-                      └─────────────┬─────────────┘
-                                    ▼
-                      ┌─────────────┴─────────────┐
-                      ▼                           ▼
-               M2-03 grafici             M2-04 test semantici
-                      └─────────────┬─────────────┘
-                                    ▼
-                  M1-10 ───────► M2-05 API snapshot/PDF
-                                    │
-                                    ▼
-                         M2-06 UI e packaging
-                                    │
-                                    ▼
-                         M2-07 collaudo finale
+M1-04 ──► M2-00A toolchain ──► M2-00 spike ──► GATE TYPST
+M1-10 ──► M2-00B contratto/assembler v2 ─────────────┐
+                                                  │
+GATE TYPST ──► M2-01 runtime ──► M2-02A base/font/piano
+                                      │
+                                      ▼
+                               M2-03 grafici dossier
+                                      │
+                                      ▼
+                         M2-00C note + client v2
+                                      │
+                                      ▼
+                         M2-02 template definitivo
+                                      │
+                                      ▼
+                           M2-04 harness semantico
+                                      │
+                                      ▼
+                           M2-05 API snapshot/PDF
+                                      │
+                                      ▼
+                        M2-06 UI PDF e packaging
+                                      │
+                                      ▼
+                           M2-07 collaudo finale
 ```
 
 `M1-02` e `M1-03` sono mostrati come rami logici, ma non si implementano nello
@@ -779,6 +790,82 @@ offline, licenze e fattibilità PDF/A.
 
 Se il gate fallisce, M2 si ferma. Playwright non diventa un fallback implicito.
 
+### M2-00B — Contratto e assembler del dossier v2
+
+**Owner:** coordinatore; review del contratto prima dell'integrazione.
+
+**Esecuzione 2026-09-15:** sviluppo del coordinatore, supporto e review Terra;
+nessun agente Pi. Contratto/assembler, getter v2 e fixture dedicati implementati.
+Review circoscritta del contratto superata; evidenze e limiti in
+[M2-00B](../../testing/M2-00B-dossier-contract.md). Impaginazione, metriche e
+commenti per pagina restano nei task successivi. Il gate tecnico Typst rimane
+separato e non è approvato da questa consegna.
+
+**Depends on:** M1-10 integrato. Non richiede di riaprire i task M1 conclusi.
+
+**Ownership:** schemi report, assembler, contratti/fixture, negoziazione della
+versione API e tipi dedicati; non modifica runtime o componenti Typst.
+
+**Change:** introdurre `FinalReportModel v2` secondo la spec del dossier:
+identità neutrale del documento, prospetti completi, gerarchie/subtotali già
+calcolati, catalogo indicatori con unità/metodologie e serie aggiuntive. Definire
+anche i tipi del piano editoriale e delle note per il successivo planner.
+Mantenere lettura e fixture v1; il nuovo client richiederà esplicitamente v2.
+
+**Acceptance:** tre workflow, titolo su anni effettivi di budget, tutte le righe
+applicabili dei prospetti preservate, parità con analisi e fonti persistite,
+null/zero distinti, nessuna formula finanziaria trasferita al renderer, test di
+versione/auth/ownership. Il catalogo non è fissato ai conteggi dell'anteprima.
+
+### M2-02A — Base del dossier, font e piano editoriale
+
+**Owner:** implementatore template; review della composizione prima delle note.
+
+**Depends on:** M2-00B e M2-01 con gate tecnico superato.
+
+**Ownership:** bundle base Typst, font, stili, metriche e planner; non modifica
+servizi finanziari, API AI o generatore dei dati.
+
+**Change:** copertina neutrale, stili del dossier, IBM Plex Sans distribuito con
+licenza/checksum, tabelle estese e metriche dello spazio dei commenti. Definire
+pagine/parti con ID di contenuto, hash layout e riferimenti a righe e note. I
+componenti grafici di M2-03 hanno dimensioni dichiarate e precedono il
+congelamento del piano completo usato da M2-00C.
+
+**Acceptance:** pianificazione deterministica, testi/nomi lunghi, font offline,
+spazio per note su copertina e continuazioni, nessuna riga persa, contesto della
+voce padre e header ripetuti. Cambi di font/layout invalidano l'hash del piano.
+
+### M2-00C — Note per pagina e integrazione web v2
+
+**Owner:** implementatore narrazione/client; review di persistenza e freschezza.
+
+**Depends on:** M2-00B, M2-02A e M2-03.
+
+**Ownership:** persistenza note, contesto AI, operazioni di preparazione/
+generazione/salvataggio e client `/report` v2; non modifica formule o grafici Typst.
+
+**Change:** aggiungere note brevi per i contenuti del piano, oltre ai sei blocchi
+principali. Note di lettura neutrale dal backend con provenienza `automatic`;
+AI soltanto su richiesta e da contesti canonici. Proteggere testi manuali,
+controllare revisione/fonti e validare i limiti di impaginazione. Adattare titolo,
+indicatori e Allegati della pagina web al v2, con stampa dei prospetti per intero.
+
+**Acceptance:** copertura di ogni pagina prevista anche senza provider AI,
+provenienza/freschezza verificabili, nessuna generazione AI su GET/export,
+nessuna sovrascrittura manuale o troncamento, conflitti di revisioni espliciti,
+fixture dei tre workflow e compatibilità v1. Un piano modificato non riutilizza
+silenziosamente note riferite a una diversa parte di prospetto.
+
+**Stato 2026-09-15:** implementato in M2-00C con coordinatore e agenti Terra.
+Piano persistito con CAS, note automatiche per ogni pagina fisica, override
+utente/AI, archivio e riassociazione esplicita. Fit Typst nativo con stessi
+font/lingua/spazio del footer. Client `/report` v2 con Allegati completi e bozze
+separate per azienda/pratica/piano. Compatibilità v1 conservata; AI soltanto su
+richiesta e da contesti canonici strutturati. Dettagli e verifiche in
+`docs/testing/M2-00C-editorial-notes.md`. Segue M2-02 per il template definitivo;
+packaging/container ed export ufficiale restano nei moduli successivi.
+
 ### M2-01 — Runtime e sandbox del compilatore
 
 **Owner coding:** Pi-A/Qwen
@@ -811,22 +898,26 @@ nessun dato sensibile nei log, processo terminato sul timeout e test di concorre
 
 **Size:** L
 
-**Depends on:** gate M2-00 superato
+**Depends on:** M2-00B, M2-02A, M2-03 e M2-00C, oltre al gate tecnico.
 
-**Ownership:** bundle/template Typst, font e fixture di rendering; non modifica il
-runtime di M2-01.
+**Ownership:** template definitivo e fixture di rendering. Consuma modello v2,
+piano e note; non modifica runtime, dati finanziari o generazione AI.
 
-**Change:** copertina, stato, TOC, header/footer, numeri pagina, dodici sezioni,
-tabelle e appendici. Legge soltanto il JSON fixture M1.
+**Change:** completare il dossier di produzione: titolo neutrale, dodici sezioni
+logiche, indicatori approfonditi, Allegati completi e commento pertinente su ogni
+pagina. Font, tabelle e grafici seguono il riferimento concordato. Il numero di
+pagine è determinato dai contenuti, non dalle 33 pagine del campione.
 
-**Acceptance:** tre workflow, header tabella ripetuti, niente titoli orfani o
-pagine vuote inattese, font incorporati, testo estraibile e bozza con watermark.
+**Acceptance:** tre workflow e orizzonti 1/3/5 anni, titolo corretto, parità dei
+prospetti con lo snapshot, ogni pagina del piano con la propria nota, nessun
+ritaglio/duplicazione involontaria, header e contesto ripetuti nelle continuazioni,
+font incorporati, scala di grigi leggibile e watermark su ogni pagina di bozza.
 
-### Review wave M2-01/02
+### Review della base e del template
 
-Pi-A e Pi-B si revisionano reciprocamente dopo la conclusione dei due task. Terra
-approva prima il runtime/sandbox e poi il template. I due commit vengono integrati
-nello stesso ordine.
+Runtime e base/font/planner sono revisionati prima di grafici e note. La review
+del template definitivo avviene dopo l’integrazione di modello v2, grafici e note.
+Le modifiche ai file condivisi del contratto e dell’API rimangono serializzate.
 
 ### M2-03 — Grafici Typst
 
@@ -836,12 +927,14 @@ nello stesso ordine.
 
 **Size:** M
 
-**Depends on:** M2-01, M2-02
+**Depends on:** M2-00B, M2-01 e M2-02A.
 
-**Ownership:** componenti grafici Typst dedicati.
+**Ownership:** componenti grafici Typst dedicati e dimensioni dichiarate al planner.
 
-**Change:** implementare i sei grafici dal solo `chart_series`, inclusi null,
-negativi, soglie, legenda, unità, scala di grigi ed equivalenti testuali.
+**Change:** conservare i sei grafici M1 e implementare gli approfondimenti v2
+di liquidità, margini, redditività, coperture, circolante, composizioni e pareggio/
+scoring disponibili. Consumare soltanto serie e metadati canonici. Dichiarare
+dimensioni e metriche usate dal piano editoriale prima della generazione delle note.
 
 **Acceptance:** nessuna formula finanziaria, grafica vettoriale, fixture 1/3/5
 anni, dati estratti coerenti e resa A4 leggibile.
@@ -858,9 +951,11 @@ anni, dati estratti coerenti e resa A4 leggibile.
 
 **Ownership:** nuovi test/harness; non modifica i componenti grafici M2-03.
 
-**Change:** validazione `%PDF`, metadata, page count, `pdftotext`, sezioni
-condizionali, watermark e pochi golden raster stabili. Il test semantico è
-autorevole; lo screenshot non è l'unico oracolo.
+**Change:** validazione `%PDF`, metadata, titolo neutrale, page count, `pdftotext`,
+sezioni condizionali, watermark e pochi golden raster stabili. Confrontare tutte
+le righe applicabili degli Allegati con il modello e verificare il testo della
+nota assegnata a ogni pagina fisica. Il test semantico è autorevole; lo screenshot
+non è l’unico oracolo.
 
 **Acceptance:** esecuzione locale e containerizzata, errori leggibili, fixture dei
 tre workflow e test che fallisce davvero quando manca una sezione o un valore.
@@ -878,7 +973,7 @@ correggono nel template differenze originate dall'assembler: il bug torna a M1.
 
 **Size:** L
 
-**Depends on:** M1-10, M2-03, M2-04
+**Depends on:** M1-10, M2-00B, M2-00C, M2-02, M2-03 e M2-04
 
 **Files principali:** servizio PDF, `backend/app/api/v1/reports.py`, persistenza
 metadati, schemi request/error e test auth/API.
@@ -956,7 +1051,8 @@ M1, test renderer/PDF, build container offline e collaudo dei tre workflow.
 
 - nessun Playwright/Chromium nel percorso di produzione;
 - PDF valido, ricercabile, stampabile e semanticamente allineato al web;
-- draft/final e readiness corretti;
+- draft/final, readiness economica e copertura editoriale corretti;
+- titolo neutrale, Allegati completi e commento su ogni pagina;
 - timeout, concorrenza, cleanup e ownership coperti;
 - versioni e hash presenti;
 - cold container verde;
@@ -979,10 +1075,11 @@ Il limite di due agenti Pi è applicato così:
 | P5 | implementa M1-08A | implementa M1-08B | 2 coding |
 | P6 | revisiona M1-08B | revisiona M1-08A | 2 review |
 | P7 | M2-00A e spike M2-00 | riproduce/revisiona dopo output | massimo 2 |
-| P8 | implementa M2-01 | implementa M2-02 | 2 coding |
-| P9 | revisiona M2-02 | revisiona M2-01 | 2 review |
-| P10 | implementa M2-03 | implementa M2-04 | 2 coding |
-| P11 | revisiona M2-04 | revisiona M2-03 | 2 review |
+| P7b | revisiona contratto v2 M2-00B | supporta fixture/coverage | un owner del contratto |
+| P8 | implementa M2-01 | attende runtime, poi M2-02A | dipendenze seriali |
+| P9 | revisiona base/planner | implementa M2-03 dopo la review | un owner del bundle |
+| P10 | implementa/revisiona M2-00C | integra template M2-02 dopo note e grafici | dipendenze seriali |
+| P11 | revisiona dossier | implementa M2-04 dopo il template | 1 review + 1 harness |
 | P12 | implementa M2-06A | implementa M2-06B | 2 coding |
 | P13 | revisiona M2-06B | revisiona M2-06A | 2 review |
 
@@ -1000,14 +1097,14 @@ I seguenti file sono punti di integrazione e hanno un solo owner attivo per volt
 | `migrate_db.py` | M1-01; poi metadati M2 in un task Terra dedicato |
 | `backend/app/api/v1/budget_scenarios.py` | M1-02 → M1-03 se usato |
 | `backend/app/api/v1/financial_years.py` | solo M1-02 per l'origine dell'anno |
-| `backend/app/api/v1/reports.py` | M1-06 → M1-07 → M2-05 |
-| `backend/app/services/ai_comments_service.py` | solo M1-07 |
-| `frontend/lib/api.ts` | M1-03 → M1-09 → M2-06A |
+| `backend/app/api/v1/reports.py` | M1-06 → M1-07 → M2-00B → M2-00C → M2-05 |
+| `backend/app/services/ai_comments_service.py` | M1-07 → M2-00C |
+| `frontend/lib/api.ts` | M1-03 → M1-09 → M2-00C → M2-06A |
 | `frontend/types/api.ts` | M1-03; il modello report vive preferibilmente in un file dedicato |
 | `frontend/components/pratica/StampaContent.tsx` | solo M1-02 |
 | `frontend/app/budget/page.tsx` | solo M1-02 per i call site startup/bilancio |
 | `frontend/app/pratica/page.tsx` | M1-02 call site → M1-03 alert |
-| `frontend/app/report/page.tsx` | M1-09 → M2-06A |
+| `frontend/app/report/page.tsx` | M1-09 → M2-00C → M2-06A |
 | `Dockerfile.backend` | solo M2-06B dopo approvazione runtime |
 
 Il contratto M1-04 non viene modificato in parallelo all'assembler o ai renderer.
@@ -1113,3 +1210,97 @@ Prima del primo task di coding il coordinatore deve mostrare:
 
 Si procede quindi un'ondata alla volta. M2 non entra in produzione finché M1-10
 non è approvato, anche se lo spike e il template sono già pronti.
+
+### Esecuzione M2-00 / M2-01 — 2026-09-15
+
+Su istruzione dell’utente, implementazione diretta e reviewer Terra high, senza Pi.
+M2-00A e spike integrati dopo gate indipendente: native Typst scelto, 24/24 PDF
+riusciti identici byte per byte, 42 test toolchain/spike. M2-01 runtime isolato
+completato, due review indipendenti Terra high approvate: 42 test di runtime;
+117 test mirati complessivi. Ricevute e limiti in
+`docs/testing/M2-00-TYPST-SPIKE.md` e `docs/testing/M2-01-typst-runtime.md`.
+Nessun push/merge su main, nessun endpoint di export anticipato.
+Prossimo task M2-02A: base, IBM Plex Sans e planner misurato; piano completo
+congelato dopo dimensioni dei grafici M2-03 e prima delle note M2-00C.
+
+### Esecuzione M2-02A, base e piano provvisorio — 2026-09-15
+
+Base A4 verticale implementata con copertina neutra, Plex Sans statici identici
+al riferimento (OFL/provenance/checksum), tre prospetti completi e spazio commento
+su ogni pagina. TypstLayoutProbe misura la composizione reale in sandbox;
+MeasuredBasePlan raggruppa righe/pagine con ID semantici e hash font/layout/asset.
+Il risultato ha scope=base, finalized=False: non viene assegnato al contratto
+editorial_plan e non dichiara readiness o copertura del dossier definitivo.
+Collaudo finale: 152 test mirati; due review Terra high approvate.
+Collisione valida di ID locali fra prospetti corretta con namespace di prospetto;
+regressione reale e riproduzione indipendente passate. Dettaglio in
+docs/testing/M2-02A-dossier-base.md.
+La fase successiva è M2-03, dimensioni/componenti grafici. Segue completamento
+del planner/reflow M2-02A con inventario completo, prima di M2-00C note.
+
+### Esecuzione M2-03, grafici canonici — 2026-09-15
+
+Implementazione diretta e review indipendente Terra high, su autorizzazione
+dell’utente senza Pi. Integrati componenti vettoriali per sei grafici M1 e dieci
+approfondimenti v2 materializzati; barre divergenti, linee interrotte sui null,
+quattro stili colore/grigio, valori tabellari formattati da stringhe Decimal.
+Soglie soltanto dai riferimenti canonici, nessuna formula finanziaria nel renderer.
+Geometria `native-charts-1` congelata a 178×94 mm (plot 62 + legenda 32),
+verificata anche attraverso le misure reali Typst. Review approvata dopo una
+regressione che impedisce altre dimensioni anche in una revisione firmata.
+Collaudo: 53 test grafici, 205 test mirati complessivi passati in 76.14s.
+Ricevuta e inventario in `docs/testing/M2-03-typst-charts.md`.
+
+La preview BOZZA ha 17 pagine e dati sintetici; il piano finale resta da comporre.
+L’audit del catalogo rileva che confronto infrannuale collegato, composizioni
+complete, pareggio e scoring non sono ancora serie canoniche del dossier v2.
+Prima del freeze completo M2-02A, verificare ed estendere assembler/contratto
+per i dati disponibili nei servizi autorevoli; non ricavarli nel template.
+Seguono inventario e reflow del piano completo, poi M2-00C per i commenti.
+
+### Esecuzione M2-02A, piano canonico completo — 2026-09-15
+
+Completata la composizione misurata del dossier v2 corrente, con implementazione
+del coordinatore, inventario/audit Terra e review indipendente Terra high.
+Dodici sezioni logiche, undici per bilancio/startup; tutte le ipotesi anche
+annidate, rettifiche, valori di chiusura, sedici grafici e catalogo indicatori.
+Allegati CE/SP/CF completi con contesto padre e indice su pagine reali.
+Confronti infrannuali consumano i periodi canonici già esistenti, con durate
+esplicite e nessuna annualizzazione nel template. La fixture a sette periodi
+verifica storico/osservato/rettificato/chiusura e tre anni di budget.
+
+Il nuovo planner assegna `editorial_plan` dopo misura nel runtime isolato,
+con inventory esatto e un riquadro commento per ogni pagina/continuazione.
+ID semantici e hash font/layout/asset/fonti includono la definizione Python
+dell’inventario; la sua modifica richiede worker ricaricato e nuovo piano.
+Note manuali conservate su piano identico, riassociazione esplicita sul drift,
+testi/importi troppo grandi rifiutati senza tagli. Nessuna scrittura o AI.
+Il planner base rimane disponibile come risultato provvisorio separato.
+
+Review Terra high approvata, incluso hardening dei tipi dei metadata grafici,
+fingerprint inventario e limiti prima dello staging. Verifica: 235 test nella
+prima suite combinata e 34 mirati finali sul codice aggiornato, 239 test distinti
+complessivi. Ricevuta dei test in
+`docs/testing/M2-02A-editorial-plan.md`. La composizione non è ancora il template
+editoriale definitivo: segue M2-00C per copertura automatica dei commenti,
+persistenza protetta e client v2, quindi M2-02 e gate di export.
+Scoring/pareggio/composizioni complete restano una estensione canonica
+dedicata prima del collaudo definitivo; ogni aggiunta richiede nuovo piano.
+
+### Esecuzione M2-02, impaginazione definitiva — 2026-09-16
+
+Completato il template editoriale di produzione `dossier-final-1`, versione
+`editorial-2`, consumando senza modificarli modello v2, piano misurato, grafici e
+note. Copertina neutrale con perimetro e indice, testatina azienda/report, footer
+riservato con pagina corrente/totale e riquadro `Lettura del consulente` su ogni
+pagina. Tabelle finanziarie a matrice, valori allineati e metadati a corpo ridotto;
+sezione, titolo e periodi vengono ripetuti in tutte le continuazioni. Allegati
+CE/SP/CF completi, sedici grafici vettoriali e catalogo indicatori conservati.
+Nessun KPI scelto arbitrariamente e nessuna formula nel template.
+
+La modifica di versione invalida intenzionalmente i piani precedenti. La matrice
+di collaudo copre i tre workflow e gli orizzonti 1/3/5, con una nota distinta per
+pagina, watermark di bozza, font incorporati, grigio, bounding box, titoli e
+continuazioni. Dettagli e comando riproducibile in
+`docs/testing/M2-02-final-layout.md`. Fixture PDF sintetica in
+`inbox/artifacts/2026-09-16-m2-02-final-layout/report-budget-2027-2029.pdf`.

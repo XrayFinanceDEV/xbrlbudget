@@ -77,6 +77,16 @@ describe("finanziamenti e prestiti", () => {
     expect(model.rows).toEqual([]);
     expect(model.note).toContain("Nessun prestito");
   });
+
+  it("mostra durata assente e rimborsi senza perdere la quota oltre l'orizzonte", () => {
+    const loan = { name: "Mutuo", amount: "100", opening_residual: "100", interest_rate: "3", grace_years: 0, balloon_pct: "0", repayments: ["25", "25"] };
+    expect(financingLoansViewModel([loan]).rows[0][3].text).toBe("durata non dichiarata");
+    const repayments = nestedTableViewModel({ kind: "financing_repayments", rows: [loan] }, [2027]);
+    expect(repayments.rows.map((cells) => cells.map((cell) => cell.text))).toEqual([
+      ["Mutuo", "2027", "25 €"],
+      ["Mutuo", "Quota 2 (anno non dichiarato)", "25 €"],
+    ]);
+  });
 });
 
 describe("piano del pregresso", () => {
@@ -106,6 +116,11 @@ describe("piano del pregresso", () => {
     expect(model.rows.map((cells) => cells[0].text)).toContain("Debiti fornitori — stralcio");
     const stralcio = model.rows.find((cells) => cells[0].text.includes("stralcio"))!;
     expect(stralcio.map((cell) => cell.text)).toEqual(["Debiti fornitori — stralcio", "—", "0 €", "10 €"]);
+  });
+
+  it("la scelta di non incassare resta visibile nel pregresso", () => {
+    const model = pregressoViewModel({ crediti_commerciali: { opening: "100", amounts: ["0"], non_incassato: true } }, YEARS);
+    expect(model.rows.find((cells) => cells[0].text.includes("non incassato"))?.[1].text).toBe("sì");
   });
 
   it("più quote che anni: colonne aggiuntive, nessuna quota persa", () => {
@@ -189,14 +204,17 @@ describe("override e indicizzazione", () => {
 });
 
 describe("dispatch per tipo di tabella", () => {
-  it("le sei nidificate del contratto hanno tutte una resa", () => {
+  it("tutte le tabelle nidificate del contratto hanno una resa", () => {
     const cases: Array<Parameters<typeof nestedTableViewModel>[0]> = [
       { kind: "financing_loans", rows: [] },
+      { kind: "financing_repayments", rows: [] },
       { kind: "pregresso", plan: {} },
       { kind: "temporary_differences", rows: [] },
       { kind: "ce_overrides", rows: [] },
       { kind: "sp_overrides", rows: [] },
       { kind: "sp_indexing", rows: [] },
+      { kind: "other_lenders", rows: [] },
+      { kind: "other_lender_repayments", rows: [] },
     ];
     for (const item of cases) {
       const model = nestedTableViewModel(item, YEARS);
@@ -204,6 +222,14 @@ describe("dispatch per tipo di tabella", () => {
       expect(model.caption.length).toBeGreaterThan(0);
       expect(model.columns.length).toBeGreaterThan(0);
     }
+  });
+
+  it("gli altri finanziatori espongono residuo, tasso e quote per anno", () => {
+    const lender = { name: "Socio", opening_residual: "90.125", interest_rate: "2.5", repayments: ["30.25"] };
+    const summary = nestedTableViewModel({ kind: "other_lenders", rows: [lender] }, YEARS);
+    const repayments = nestedTableViewModel({ kind: "other_lender_repayments", rows: [lender] }, YEARS);
+    expect(summary.rows[0].map((cell) => cell.text)).toEqual(["Socio", "90,125 €", "2,5%"]);
+    expect(repayments.rows[0].map((cell) => cell.text)).toEqual(["Socio", "2027", "30,25 €"]);
   });
 });
 

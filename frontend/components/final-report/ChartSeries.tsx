@@ -8,9 +8,11 @@
 import { Bar, BarChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
 
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
-import { chartRows } from "@/components/report/final-report-adapters";
 import { formatEuro, formatNumber } from "./final-report-format";
 import type { ChartSeries, DecimalString } from "@/types/final-report";
+import type { DossierChartSeries } from "@/types/final-report-v2";
+
+type AnyChartSeries = ChartSeries | DossierChartSeries;
 
 const SERIES_COLORS = ["#2563eb", "#d97706", "#059669", "#7c3aed"];
 
@@ -28,14 +30,15 @@ const CHART_KINDS: Record<ChartSeries["id"], ChartKind> = {
   coverage: "line",
 };
 
-const UNIT_LABELS: Record<ChartSeries["unit"], string> = {
+const UNIT_LABELS: Record<AnyChartSeries["unit"], string> = {
   eur: "Euro",
   percent: "Percentuale",
   days: "Giorni",
   ratio: "Indice",
+  score: "Punteggio",
 };
 
-export function formatChartValue(value: DecimalString | null, unit: ChartSeries["unit"]): string {
+export function formatChartValue(value: DecimalString | null, unit: AnyChartSeries["unit"]): string {
   if (value === null) return formatNumber(value);
   if (unit === "eur") return formatEuro(value);
   if (unit === "percent") return `${formatNumber(value)}%`;
@@ -46,7 +49,7 @@ export function formatChartValue(value: DecimalString | null, unit: ChartSeries[
 type GeometryRow = { category: number; raw: Record<string, DecimalString | null> } & Record<string, number | null | Record<string, DecimalString | null>>;
 
 /** Number conversion is intentionally limited to Recharts geometry. */
-function chartGeometry(series: ChartSeries): GeometryRow[] {
+function chartGeometry(series: AnyChartSeries): GeometryRow[] {
   return series.categories.map((category, index) => {
     const raw = Object.fromEntries(series.series.map((metric) => [metric.key, metric.values[index] ?? null]));
     const geometry: GeometryRow = { category, raw };
@@ -59,7 +62,7 @@ function chartGeometry(series: ChartSeries): GeometryRow[] {
   });
 }
 
-export function ChartValueTooltip({ active, payload, unit }: { active?: boolean; payload?: Array<{ dataKey?: string | number; name?: string; payload?: GeometryRow }>; unit: ChartSeries["unit"] }) {
+export function ChartValueTooltip({ active, payload, unit }: { active?: boolean; payload?: Array<{ dataKey?: string | number; name?: string; payload?: GeometryRow }>; unit: AnyChartSeries["unit"] }) {
   if (!active || !payload?.length) return null;
   const year = payload[0]?.payload?.category;
   return <div className="rounded-md border bg-background px-3 py-2 text-xs shadow-md">
@@ -71,7 +74,7 @@ export function ChartValueTooltip({ active, payload, unit }: { active?: boolean;
   </div>;
 }
 
-function TextLegend({ series }: { series: ChartSeries }) {
+function TextLegend({ series }: { series: AnyChartSeries }) {
   return <ul aria-label={`Legenda ${series.title}`} className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
     {series.series.map((metric, index) => <li key={metric.key} className="flex items-center gap-1.5">
       <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }} />
@@ -80,20 +83,20 @@ function TextLegend({ series }: { series: ChartSeries }) {
   </ul>;
 }
 
-function ChartDataTable({ series }: { series: ChartSeries }) {
+function ChartDataTable({ series }: { series: AnyChartSeries }) {
   return <div className="overflow-x-auto">
     <table className="w-full text-sm print:text-xs">
       <caption className="sr-only">Dati accessibili del grafico {series.title}, unità {UNIT_LABELS[series.unit]}</caption>
       <thead><tr><th scope="col" className="border-b px-3 py-1.5 text-left font-medium print:px-1">Serie</th>{series.categories.map((year) => <th key={year} scope="col" className="border-b px-3 py-1.5 text-right font-medium print:px-1">{year}</th>)}</tr></thead>
-      <tbody>{chartRows(series).map((row) => <tr key={row.key}><th scope="row" className="border-b px-3 py-1.5 text-left font-medium print:px-1">{row.label}</th>{row.values.map((value, index) => <td key={index} className="border-b px-3 py-1.5 text-right tabular-nums print:px-1">{formatChartValue(value, series.unit)}</td>)}</tr>)}</tbody>
+      <tbody>{series.series.map((row) => <tr key={row.key}><th scope="row" className="border-b px-3 py-1.5 text-left font-medium print:px-1">{row.label}</th>{row.values.map((value, index) => <td key={index} className="border-b px-3 py-1.5 text-right tabular-nums print:px-1">{formatChartValue(value, series.unit)}</td>)}</tr>)}</tbody>
     </table>
   </div>;
 }
 
 /** A complete chart: visual geometry, text legend, and its adjacent data table. */
-export function FinalReportChart({ series }: { series: ChartSeries }) {
+export function FinalReportChart({ series }: { series: AnyChartSeries }) {
   const config = Object.fromEntries(series.series.map((metric, index) => [metric.key, { label: metric.label, color: SERIES_COLORS[index % SERIES_COLORS.length] }])) as ChartConfig;
-  const kind = CHART_KINDS[series.id];
+  const kind = series.id in CHART_KINDS ? CHART_KINDS[series.id as ChartSeries["id"]] : "line";
   const data = chartGeometry(series);
   const chartElements = series.series.map((metric, index) => kind === "bar"
     ? <Bar key={metric.key} dataKey={metric.key} name={metric.label} fill={`var(--color-${metric.key})`} radius={[3, 3, 0, 0]} />

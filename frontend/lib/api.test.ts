@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // il finto deve rispondere PRIMA dell'import, altrimenti `api.ts` esplode
 // su `api.interceptors.request.use is not a function`.
 const postMock = vi.fn();
+const getMock = vi.fn();
+const putMock = vi.fn();
 vi.mock("axios", () => {
   const instance = {
     post: (...args: unknown[]) => postMock(...args),
-    get: vi.fn(),
-    put: vi.fn(),
+    get: (...args: unknown[]) => getMock(...args),
+    put: (...args: unknown[]) => putMock(...args),
     patch: vi.fn(),
     interceptors: {
       request: { use: vi.fn() },
@@ -23,7 +25,11 @@ vi.mock("axios", () => {
   };
 });
 
-import { previewForecast } from "./api";
+import { generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes } from "./api";
+import v1 from "../../tests/fixtures/final_report/bilancio.json";
+import v2 from "../../tests/fixtures/final_report/v2/bilancio.json";
+
+const editorialSession = { report: v2, revision: 3, archived_notes: [], generation_warnings: [] };
 
 describe("previewForecast", () => {
   beforeEach(() => {
@@ -59,5 +65,37 @@ describe("previewForecast", () => {
       { assumptions: [] },
       { signal: undefined }
     );
+  });
+});
+
+describe("versioned final report getters", () => {
+  beforeEach(() => getMock.mockReset());
+  it("requests v2 explicitly through the authenticated API instance", async () => {
+    getMock.mockResolvedValue({data: v2});
+    expect(await getFinalReportV2(1, 2)).toEqual(v2);
+    expect(getMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report", {params: {schema_version: 2}});
+  });
+  it("retains the v1 getter and rejects a response with the wrong version", async () => {
+    getMock.mockResolvedValue({data: v1});
+    expect(await getFinalReport(1, 2)).toEqual(v1);
+    expect(getMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report");
+    await expect(getFinalReportV2(1, 2)).rejects.toThrow(/v2/);
+  });
+});
+
+describe("editorial session API", () => {
+  beforeEach(() => { getMock.mockReset(); postMock.mockReset(); putMock.mockReset(); });
+  it("uses the dedicated session boundary and sends only hashes, revisions and note IDs", async () => {
+    getMock.mockResolvedValue({ data: editorialSession });
+    postMock.mockResolvedValue({ data: editorialSession });
+    putMock.mockResolvedValue({ data: editorialSession });
+    expect(await getEditorialSession(1, 2)).toEqual(editorialSession);
+    await prepareEditorialSession(1, 2, { source_hash: v2.source_hash, expected_revision: 3 });
+    await saveEditorialNotes(1, 2, { source_hash: v2.source_hash, plan_hash: "a".repeat(64), expected_revision: 3, notes: [{ id: "page-1", text: "Testo", revision: 2, from_note: { id: "old", plan_hash: "b".repeat(64), revision: 1 } }] });
+    await generateEditorialNotes(1, 2, { source_hash: v2.source_hash, plan_hash: "a".repeat(64), expected_revision: 3, notes: [{ id: "page-1", revision: 2 }] });
+    expect(getMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report/editorial");
+    expect(postMock).toHaveBeenNthCalledWith(1, "/companies/1/scenarios/2/final-report/editorial/prepare", { source_hash: v2.source_hash, expected_revision: 3 });
+    expect(putMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report/editorial/notes", expect.objectContaining({ expected_revision: 3, notes: [{ id: "page-1", text: "Testo", revision: 2, from_note: { id: "old", plan_hash: "b".repeat(64), revision: 1 } }] }));
+    expect(postMock).toHaveBeenNthCalledWith(2, "/companies/1/scenarios/2/final-report/editorial/generate", expect.objectContaining({ notes: [{ id: "page-1", revision: 2 }] }));
   });
 });

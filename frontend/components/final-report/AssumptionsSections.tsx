@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { AssumptionSection } from "@/types/final-report";
+import { isFinalReportModelV2 } from "@/types/final-report-v2";
+import type { FinalReportModel } from "@/types/final-report";
 import {
   CANONICAL_SECTION_KEYS,
   assumptionRowState,
@@ -184,7 +186,12 @@ export function AssumptionsSections({
   headingLevel = 2,
   showLegend = true,
 }: AssumptionsSectionsProps) {
-  const verdict = readFinalReport(model, "Ipotesi del budget");
+  // V2 retains the original assumptions contract but intentionally has a
+  // distinct schema version. Reuse the complete M1 renderer without letting a
+  // v1 endpoint response cross the v2 API boundary.
+  const verdict = isFinalReportModelV2(model)
+    ? { ok: true as const, model: model as unknown as FinalReportModel }
+    : readFinalReport(model, "Ipotesi del budget");
   if (!verdict.ok) return <AssumptionsSchemaNotice verdict={verdict} />;
 
   const { sections, unknown, missing, duplicates } = layoutSections(verdict.model.assumption_sections);

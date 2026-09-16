@@ -130,14 +130,17 @@ export function isDeadField(field: string): boolean {
   return (DEAD_FIELDS as readonly string[]).includes(field);
 }
 
-/** Una delle sei tabelle nidificate del contratto v1, valorizzata. */
+/** Le tabelle nidificate del contratto v1, valorizzate. */
 export type NestedTable =
   | { kind: "financing_loans"; rows: NonNullable<AssumptionValue["financing_loans"]> }
+  | { kind: "financing_repayments"; rows: NonNullable<AssumptionValue["financing_loans"]> }
   | { kind: "pregresso"; plan: NonNullable<AssumptionValue["pregresso"]> }
   | { kind: "temporary_differences"; rows: NonNullable<AssumptionValue["temporary_differences"]> }
   | { kind: "ce_overrides"; rows: NonNullable<AssumptionValue["ce_overrides"]> }
   | { kind: "sp_overrides"; rows: NonNullable<AssumptionValue["sp_overrides"]> }
-  | { kind: "sp_indexing"; rows: NonNullable<AssumptionValue["sp_indexing"]> };
+  | { kind: "sp_indexing"; rows: NonNullable<AssumptionValue["sp_indexing"]> }
+  | { kind: "other_lenders"; rows: NonNullable<AssumptionValue["other_lenders"]> }
+  | { kind: "other_lender_repayments"; rows: NonNullable<AssumptionValue["other_lenders"]> };
 
 /**
  * Le tabelle nidificate di una riga, in ordine canonico.
@@ -148,7 +151,12 @@ export type NestedTable =
  */
 export function nestedTablesOf(assumption: AssumptionValue): NestedTable[] {
   const tables: NestedTable[] = [];
-  if (assumption.financing_loans != null) tables.push({ kind: "financing_loans", rows: assumption.financing_loans });
+  if (assumption.financing_loans != null) {
+    tables.push({ kind: "financing_loans", rows: assumption.financing_loans });
+    if (assumption.financing_loans.some((loan) => loan.repayments != null)) {
+      tables.push({ kind: "financing_repayments", rows: assumption.financing_loans });
+    }
+  }
   if (assumption.pregresso != null) tables.push({ kind: "pregresso", plan: assumption.pregresso });
   if (assumption.temporary_differences != null) {
     tables.push({ kind: "temporary_differences", rows: assumption.temporary_differences });
@@ -156,10 +164,14 @@ export function nestedTablesOf(assumption: AssumptionValue): NestedTable[] {
   if (assumption.ce_overrides != null) tables.push({ kind: "ce_overrides", rows: assumption.ce_overrides });
   if (assumption.sp_overrides != null) tables.push({ kind: "sp_overrides", rows: assumption.sp_overrides });
   if (assumption.sp_indexing != null) tables.push({ kind: "sp_indexing", rows: assumption.sp_indexing });
+  if (assumption.other_lenders != null) {
+    tables.push({ kind: "other_lenders", rows: assumption.other_lenders });
+    tables.push({ kind: "other_lender_repayments", rows: assumption.other_lenders });
+  }
   return tables;
 }
 
-/** Una delle sei tabelle nidificate del contratto v1 è valorizzata. */
+/** Una tabella nidificata del contratto v1 è valorizzata. */
 export function hasNestedTable(assumption: AssumptionValue): boolean {
   return (
     assumption.financing_loans != null ||
@@ -167,7 +179,8 @@ export function hasNestedTable(assumption: AssumptionValue): boolean {
     assumption.temporary_differences != null ||
     assumption.ce_overrides != null ||
     assumption.sp_indexing != null ||
-    assumption.sp_overrides != null
+    assumption.sp_overrides != null ||
+    assumption.other_lenders != null
   );
 }
 

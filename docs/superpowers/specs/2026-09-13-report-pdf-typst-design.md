@@ -2,13 +2,13 @@
 
 **Data:** 2026-09-13
 
-**Stato:** proposta con spike tecnico obbligatorio
+**Stato:** requisiti editoriali consolidati il 2026-09-15; gate tecnico Typst invariato
 
 **Area:** report, export, infrastruttura backend
 
 **Milestone:** M2 — PDF ufficiale stampabile
 
-**Dipendenza:** [Report finale della pratica](2026-09-13-report-finale-pratica-design.md)
+**Dipendenze:** [Report finale della pratica](2026-09-13-report-finale-pratica-design.md) · [Dossier Report Budget](2026-09-15-report-budget-dossier-design.md)
 
 ## 1. Obiettivo
 
@@ -23,13 +23,15 @@ l'architettura da realizzare se il gate viene superato.
 ## 2. Relazione con il milestone M1
 
 M2 non ricostruisce la pratica e non introduce un secondo modello di report.
-Consuma esattamente il `FinalReportModel` versionato definito da M1.
+Consuma il `FinalReportModel` versionato definito da M1, esteso al v2 per il
+dossier prima del template di produzione. Le fixture v1 dello spike restano
+valide come regressione tecnica, ma non esauriscono i requisiti editoriali v2.
 
 ```text
 fonti della pratica
         │
         ▼
-FinalReportAssembler ───────► FinalReportModel v1
+FinalReportAssembler ───────► FinalReportModel v2
                                   │            │
                                   ▼            ▼
                             React /report   Typst → PDF
@@ -75,7 +77,7 @@ ma ripetibile. Lo spike confronta:
 2. [CeTZ-Plot](https://typst.app/universe/package/cetz-plot/);
 3. [Primaviz](https://typst.app/universe/package/primaviz).
 
-La preferenza iniziale è mantenere in casa soltanto i cinque o sei grafici necessari
+La preferenza iniziale dello spike è mantenere in casa i sei grafici M1 necessari
 e usare CeTZ-Plot se riduce davvero il codice. Primaviz va adottato solo se la prova
 ne conferma stabilità, compatibilità e facilità di distribuzione offline; la sua
 maggiore ampiezza funzionale non è di per sé un requisito.
@@ -255,7 +257,7 @@ distinguono hash dello snapshot, hash del PDF e equivalenza del contenuto estrat
 
 Il template segue esattamente l'indice definito in M1 e include:
 
-- copertina;
+- copertina con titolo neutrale `Report Budget {inizio} - {fine}`;
 - stato `BOZZA` o `FINALE`;
 - indice;
 - titoli numerati;
@@ -264,7 +266,8 @@ Il template segue esattamente l'indice definito in M1 e include:
 - corpo narrativo;
 - grafici vettoriali;
 - tabelle sintetiche;
-- appendici con prospetti completi e metodologia.
+- sezione Allegati con prospetti completi e metodologia;
+- una nota breve pertinente su ogni pagina, anche sulle continuazioni.
 
 Le sezioni opzionali sono decise dal modello, non da query o logica finanziaria nel
 template.
@@ -305,6 +308,149 @@ e significato.
 Il template stampa soltanto i blocchi narrativi già presenti nello snapshot. Non
 chiama modelli AI e non genera testi. Provenienza e stato di freschezza sono
 riportati nelle note del documento quando rilevanti.
+
+### 8.5 Riferimento estetico concordato — 2026-09-15
+
+Il riferimento fornito dall'utente è il dossier CR in
+`/home/peter/DEV/formulafinance/back_sideprojects/Redesign/cr-print/report/out/report_screen.html`
+e nel PDF associato `Report-CR-Dossier.pdf`. È un riferimento visivo di sviluppo,
+non una dipendenza di compilazione. La versione stampata del report finale deve
+essere molto simile a questo dossier per composizione, gerarchia e trattamento
+dei dati, adattandone il contenuto all'intera pratica di bilancio e piano.
+
+Elementi da riprendere:
+
+- copertina con fascia blu petrolio, titolo neutrale, identità aziendale,
+  quattro KPI pertinenti, metadati e indice;
+- IBM Plex Sans con pesi regolari, medi e semibold, incorporati nel bundle;
+- palette di riferimento: blu petrolio `#003049`, azzurro `#669BBC`, testo
+  `#1B1F24`, grigio `#5E6B78`, divisori `#D5DDE4` e `#E4E9EE`;
+- pagine A4 con intestazione discreta, numerazione e piè di pagina coerenti;
+- titolo della sezione, breve introduzione, colonna KPI laterale e area principale
+  per grafici e confronti, seguite da tabelle e commenti pertinenti;
+- tabelle con righe sottili, importi allineati, totali evidenziati e poche cornici;
+- sintesi nel corpo e prospetti completi nelle appendici, secondo l'indice M1.
+
+Il layout deve conservare questa impostazione anche quando commenti e tabelle
+richiedono più pagine. La somiglianza non impone diciotto pagine né la riduzione
+dei caratteri per far rientrare dati variabili in una pagina fissa. La leggibilità
+in stampa e in scala di grigi rimane un criterio di accettazione.
+
+La catena editoriale da rendere evidente è:
+
+| Sezione | Evidenza da rappresentare | Commento nello snapshot |
+|---|---|---|
+| Sintesi esecutiva | principali risultati, rischi e decisioni del piano | `executive_summary` |
+| Dati di partenza | bilancio infrannuale alla data di riferimento, fonti e qualità | note e diagnostica delle fonti disponibili |
+| Rettifiche | valori prima, delta, valori dopo e motivazioni | `adjustments_and_closing` e motivazioni delle rettifiche |
+| Chiusura infrannuale | progressivo, proiezione automatica, override e chiusura attesa | `adjustments_and_closing` |
+| Ipotesi del piano | driver per anno, origine e ipotesi operative e finanziarie | `budget_assumptions` |
+| Conto economico proiettato | ricavi, margini e risultato nei periodi del piano | `economic_outlook` |
+| Patrimonio e flussi di cassa proiettati | impieghi, fonti, circolante, cassa, debito e coperture | `financial_outlook` |
+| Rischi e verifiche | indicatori, diagnostica e punti aperti | `risks_and_actions` |
+
+I commenti sono collocati vicino alle evidenze della rispettiva sezione, non
+raccolti soltanto in un capitolo finale. La tabella indica la pertinenza dei
+blocchi esistenti; non introduce nuovi campi narrativi né autorizza a duplicare o
+riscrivere automaticamente un blocco condiviso. Un commento assente non viene
+sostituito con testo inventato. Si applicano le regole di freschezza e readiness
+già definite.
+
+Dati osservati, rettificati, stimati a fine esercizio e previsionali devono essere
+distinti da etichette, periodi e legende esplicite. Gli altri workflow continuano
+a omettere le sezioni non applicabili secondo il modello M1.
+
+Il titolo di copertina è sempre neutrale e deterministico: `Report Budget 2027 -
+2029` nell’esempio, con gli anni derivati dal piano. Non è generato dall’AI e non
+contiene conclusioni su margini o debito. Le osservazioni restano nella sintesi
+e nei commenti. I titoli delle sezioni possono essere descrittivi; eventuali
+titoli interpretativi provengono soltanto da testo presente nello snapshot.
+Lo scoring C3, gli indicatori e le conclusioni del dossier CR non sono contenuti
+da trasferire al report di bilancio. Grafici, KPI e confronti provengono dal
+`FinalReportModel`; il template non calcola o deduce valutazioni finanziarie.
+
+Il dossier e l’anteprima aggiornati sono il riferimento editoriale concordato.
+La richiesta del 2026-09-15 autorizza a consolidare le specifiche per arrivare al
+report di produzione: la precedente sospensione estetica è superata. Rimangono
+i prerequisiti tecnici e di contratto del piano; non occorre una nuova conferma
+estetica. Il PDF Chromium dell’anteprima non sostituisce il renderer Typst.
+
+### 8.6 Indicatori approfonditi e Allegati — 2026-09-15
+
+L'utente richiede un dossier meno stringato, con grafici degli indicatori già
+presenti nella stampa infrannuale e nel report analitico. Le dodici sezioni
+logiche M1 possono svilupparsi su più pagine e sottosezioni.
+
+Il corpo approfondisce liquidità, margini strutturali, redditività, autonomia,
+copertura, giorni del circolante, composizioni e pareggio quando disponibili.
+Le fonti di copertura sono `pratica-indicators.ts` (`INDICATOR_DEFS`),
+`report-ratios.tsx`, `report-structural`, `report-composition`, `report-break-even`
+e `report-scoring`. Sono ammessi confronti a punti collegati, barre divergenti,
+piccoli grafici affiancati e composizioni al 100%, con commenti pertinenti.
+Unità e periodi rimangono espliciti; le convenzioni del DSCR della pratica e la
+diversa durata dei periodi infrannuali/annuali non vengono nascoste.
+
+La sezione **Allegati** deve contenere i prospetti completi già rappresentati
+nel report, con indice e rinvii, tutti visibili in stampa:
+
+- conto economico e stato patrimoniale, con sottovoci e subtotali disponibili;
+- rendiconto completo e riconciliazione della cassa;
+- registro rettifiche, contropartite e motivazioni;
+- matrice ipotesi, finanziamenti, pregresso e differenze temporanee;
+- tabella completa degli indicatori e componenti di scoring/pareggio disponibili;
+- metodologia, definizioni e note sulle fonti.
+
+Il dettaglio segue `INCOME_STATEMENT_ROWS` e `BALANCE_STATEMENT_ROWS` del catalogo
+IV-CEE e la struttura di `report-cashflow`. Non basta rinviare alle tabelle
+sintetiche nel corpo. Le continuazioni mantengono il contesto della voce padre.
+Prima del template si verifica la copertura del modello M1, incluse unità e
+metodologie: le lacune si risolvono nell'assembler/contratto. Valori e subtotali
+arrivano dallo stesso snapshot; il renderer non li ricostruisce con formule.
+Dati assenti non diventano zero e dettagli indisponibili sono dichiarati.
+
+L'artifact v3 illustra i requisiti con dati dimostrativi; il suo numero di pagine
+non vincola i report effettivi.
+
+### 8.7 Un commento per ogni pagina — 2026-09-15
+
+L'utente richiede un commento, anche breve, su ogni pagina del documento, inclusi
+copertina, pagine di continuazione dei prospetti, Allegati e metodologia. Il
+commento deve riguardare i dati o lo scopo della pagina, senza ripetere un lungo
+testo di sezione su tutte le sue pagine. Indicativamente contiene due o tre frasi;
+il corpo analitico può mantenere commenti più articolati.
+
+Il prodotto attuale genera sei blocchi tematici su richiesta e non garantisce
+questa copertura. La direttiva successiva richiede quindi di estendere il
+contratto narrativo con note brevi per i contenuti e le parti dei prospetti,
+con identificatori stabili, provenienza, revisione e stato di freschezza. I sei
+blocchi principali rimangono la relazione di sintesi; le nuove note non devono
+essere una duplicazione automatica di questi testi.
+
+La generazione usa il modello canonico e il contesto pertinente al contenuto;
+le note vengono salvate e sono modificabili dall'utente con protezione dei testi
+manuali, come i blocchi principali. Il numero fisico di pagina non è l'identità
+persistita del commento: il piano editoriale associa le note ai contenuti che
+verranno impaginati. Il renderer riserva spazio al commento su ogni pagina,
+incluse le continuazioni delle tabelle, e non chiama l'AI durante l'export.
+
+Per copertina, metodologia e Allegati il commento può essere una nota di lettura
+fondata sul perimetro e sul prospetto, senza formulare valutazioni finanziarie
+non supportate. I testi mancanti non autorizzano il renderer a inventare una
+conclusione. La copertura dei commenti è verificata nel PDF effettivamente
+impaginato, insieme alla presenza delle righe dei prospetti e all'assenza di
+sovrapposizioni o ritagli.
+
+L'anteprima v4 applica questa disposizione a tutte le sue 33 pagine con commenti
+dimostrativi scritti nel generatore. Non usa l'AI e non rappresenta ancora
+l'estensione dell'API di produzione.
+
+### 8.8 Titolo neutrale e contratto operativo del dossier
+
+La [spec Dossier Report Budget](2026-09-15-report-budget-dossier-design.md)
+consolida titolo, modello v2, Allegati, indicatori, paginazione e commenti.
+È il riferimento operativo per le sezioni 8.5–8.7: la copertina non usa più una
+conclusione finanziaria come titolo. Gli anni sono i periodi del budget; azienda,
+scenario, periodo infrannuale e stato restano metadati separati.
 
 ## 9. Profilo PDF e accessibilità
 
@@ -441,11 +587,18 @@ identificativi possono comparire nei log autorizzati secondo la policy applicati
 - introdurre timeout, cleanup, limiti e health check;
 - aggiungere test isolati del processo.
 
+### Lotto A2 — contratto e piano editoriale
+
+- completare modello v2, prospetti estesi, indicatori e compatibilità v1;
+- fissare font/componenti e pianificare pagine e parti dei prospetti;
+- estendere note brevi e commenti senza chiamare l’AI durante l’export.
+
 ### Lotto B — template
 
-- creare copertina, indice, header/footer e stili;
+- creare copertina con titolo neutrale, indice, header/footer e stili;
 - implementare sezioni narrative e tabelle;
-- gestire sezioni condizionali e appendici;
+- gestire sezioni condizionali e Allegati completi;
+- rispettare il piano editoriale e riservare spazio a un commento per pagina;
 - aggiungere metadati e watermark.
 
 ### Lotto C — grafici
@@ -486,7 +639,11 @@ Il milestone è completato quando:
    automatica concordata;
 9. la pipeline containerizzata supera lo smoke test a freddo;
 10. metriche e log permettono di diagnosticare i fallimenti senza esporre il
-    contenuto finanziario.
+    contenuto finanziario;
+11. la copertina mostra il titolo neutrale corretto per uno, tre e cinque anni;
+12. indicatori e Allegati conservano tutte le righe disponibili del modello;
+13. ogni pagina contiene il proprio commento, senza duplicazioni automatiche,
+    testi ritagliati o righe dei prospetti perdute.
 
 ## 16. Fuori perimetro
 

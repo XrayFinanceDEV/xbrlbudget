@@ -1,0 +1,4685 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-09-14T11:00:00Z",
+  "model_hash": "e3682fbbc825824e53a24eb7ec265228e89eb60cbb31a30f9d8ff112b8a7b11d",
+  "source_hash": "c63cb4e43c1b4b23533dd5ce8d8b9f9bb39e5baf7222f9813481cbb610db8a1f",
+  "company": {
+    "id": 2,
+    "name": "Bilancio Spa",
+    "tax_id": null
+  },
+  "practice": {
+    "workflow_type": "bilancio",
+    "budget_scenario": {
+      "id": 31,
+      "name": "Budget 2027",
+      "base_year": 2026,
+      "period_months": null
+    },
+    "source_scenario": null,
+    "periods": {
+      "historical_year": 2026,
+      "closing_year": null,
+      "forecast_years": [
+        2027
+      ]
+    }
+  },
+  "source_revisions": [
+    {
+      "source": "forecast",
+      "identifier": "forecast-31",
+      "revision": null,
+      "revision_at": null,
+      "available": true
+    }
+  ],
+  "readiness": {
+    "status": "ready",
+    "reasons": []
+  },
+  "source_data_quality": {
+    "status": "complete",
+    "diagnostics": []
+  },
+  "adjustments": {
+    "confirmed": true,
+    "entries": [],
+    "net_effect": "0"
+  },
+  "assumption_sections": [
+    {
+      "key": "scenario",
+      "title": "Scenario",
+      "assumptions": []
+    },
+    {
+      "key": "fatturato",
+      "title": "Fatturato",
+      "assumptions": []
+    },
+    {
+      "key": "costi",
+      "title": "Costi",
+      "assumptions": []
+    },
+    {
+      "key": "circolante",
+      "title": "Capitale circolante",
+      "assumptions": []
+    },
+    {
+      "key": "patrimoniale-pregresso",
+      "title": "Patrimoniale pregresso",
+      "assumptions": []
+    },
+    {
+      "key": "patrimoniale-piano",
+      "title": "Patrimoniale piano",
+      "assumptions": []
+    },
+    {
+      "key": "imposte",
+      "title": "Imposte",
+      "assumptions": []
+    }
+  ],
+  "forecast": {
+    "years": [
+      {
+        "year": 2027,
+        "income_statement": [
+          {
+            "code": "revenue",
+            "label": "Ricavi",
+            "value": "1000.00"
+          }
+        ],
+        "balance_sheet": [
+          {
+            "code": "cash",
+            "label": "Cassa",
+            "value": "-5.00"
+          }
+        ],
+        "cashflow": [
+          {
+            "code": "operating",
+            "label": "Operativo",
+            "value": "-15.00"
+          }
+        ],
+        "calculations": [
+          {
+            "code": "dscr",
+            "label": "DSCR",
+            "value": "0.90"
+          }
+        ]
+      }
+    ]
+  },
+  "diagnostics": [],
+  "chart_series": [
+    {
+      "id": "income_results",
+      "title": "Risultati",
+      "unit": "eur",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "revenue",
+          "label": "Ricavi",
+          "values": [
+            "1000.00"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "margins",
+      "title": "Margini",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "ebitda",
+          "label": "EBITDA",
+          "values": [
+            "-1.5"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cashflows",
+      "title": "Flussi",
+      "unit": "eur",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "operating",
+          "label": "Operativo",
+          "values": [
+            "-15.00"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "liquidity_debt",
+      "title": "Liquidità",
+      "unit": "eur",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "cash",
+          "label": "Cassa",
+          "values": [
+            "-5.00"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "working_capital_days",
+      "title": "Circolante",
+      "unit": "days",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "dso",
+          "label": "DSO",
+          "values": [
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coverage",
+      "title": "Copertura",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "dscr",
+          "label": "DSCR",
+          "values": [
+            "0.90"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "structural_balance",
+      "title": "Equilibrio finanziario e strutturale",
+      "unit": "eur",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.ccn",
+          "label": "CCN",
+          "values": [
+            "-5.00"
+          ]
+        },
+        {
+          "key": "practice.mt",
+          "label": "Margine di Tesoreria",
+          "values": [
+            "-5.00"
+          ]
+        },
+        {
+          "key": "practice.ms",
+          "label": "Margine di Struttura",
+          "values": [
+            "0"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.ccn",
+        "practice.mt",
+        "practice.ms"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_liquidity",
+      "title": "Liquidità corrente della pratica",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.current_ratio",
+          "label": "Liquidità Corrente",
+          "values": [
+            null
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.current_ratio"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_profitability",
+      "title": "Redditività operativa della pratica",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.roi",
+          "label": "ROI",
+          "values": [
+            "-20000"
+          ]
+        },
+        {
+          "key": "practice.roe",
+          "label": "ROE",
+          "values": [
+            null
+          ]
+        },
+        {
+          "key": "practice.ros",
+          "label": "ROS",
+          "values": [
+            "100"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.roi",
+        "practice.roe",
+        "practice.ros"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_asset_coverage",
+      "title": "Autonomia e copertura immobilizzazioni",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.indipendenza",
+          "label": "Indipendenza Finanziaria",
+          "values": [
+            "-0"
+          ]
+        },
+        {
+          "key": "practice.copertura_immob",
+          "label": "Copertura Immobilizzazioni",
+          "values": [
+            null
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.indipendenza",
+        "practice.copertura_immob"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_net_debt",
+      "title": "Posizione finanziaria netta della pratica",
+      "unit": "eur",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.pfn",
+          "label": "PFN",
+          "values": [
+            "5.00"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.pfn"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_net_debt_ebitda",
+      "title": "PFN / EBITDA della pratica",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.pfn_ebitda",
+          "label": "PFN / EBITDA",
+          "values": [
+            "0.005"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.pfn_ebitda"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_dscr_proxy",
+      "title": "Copertura degli oneri finanziari — proxy DSCR",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.dscr",
+          "label": "DSCR — proxy della pratica",
+          "values": [
+            null
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.dscr"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "economic_incidence",
+      "title": "Incidenze economiche sui ricavi",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.ebitda_margin",
+          "label": "EBITDA %",
+          "values": [
+            "100"
+          ]
+        },
+        {
+          "key": "practice.materials_revenue",
+          "label": "Materie prime / Ricavi",
+          "values": [
+            "0"
+          ]
+        },
+        {
+          "key": "practice.services_revenue",
+          "label": "Servizi / Ricavi",
+          "values": [
+            "0"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.ebitda_margin",
+        "practice.materials_revenue",
+        "practice.services_revenue"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "financial_charges",
+      "title": "Incidenza degli oneri finanziari",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.of_revenue",
+          "label": "Oneri Finanziari / Fatturato",
+          "values": [
+            "0"
+          ]
+        },
+        {
+          "key": "practice.of_mol",
+          "label": "Oneri Finanziari / MOL",
+          "values": [
+            "0"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.of_revenue",
+        "practice.of_mol"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "analytical_liquidity",
+      "title": "Liquidità — convenzione analitica",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "analytical.liquidity.current_ratio",
+          "label": "Current Ratio (ILC)",
+          "values": [
+            null
+          ]
+        },
+        {
+          "key": "analytical.liquidity.quick_ratio",
+          "label": "Quick Ratio (ISL)",
+          "values": [
+            null
+          ]
+        },
+        {
+          "key": "analytical.liquidity.acid_test",
+          "label": "Acid Test",
+          "values": [
+            null
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "analytical.liquidity.current_ratio",
+        "analytical.liquidity.quick_ratio",
+        "analytical.liquidity.acid_test"
+      ],
+      "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    }
+  ],
+  "narrative": [
+    {
+      "id": "executive_summary",
+      "text": "Sintesi",
+      "provenance": "user",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "freshness": "fresh"
+    },
+    {
+      "id": "adjustments_and_closing",
+      "text": "Rettifiche",
+      "provenance": "migrated",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "freshness": "fresh"
+    },
+    {
+      "id": "budget_assumptions",
+      "text": "Ipotesi",
+      "provenance": "ai",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "freshness": "fresh"
+    },
+    {
+      "id": "economic_outlook",
+      "text": "Economia",
+      "provenance": "ai",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "freshness": "fresh"
+    },
+    {
+      "id": "financial_outlook",
+      "text": "Finanza",
+      "provenance": "ai",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "freshness": "fresh"
+    },
+    {
+      "id": "risks_and_actions",
+      "text": "Rischi",
+      "provenance": "user",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "freshness": "fresh"
+    }
+  ],
+  "document": {
+    "title": "Report Budget 2027",
+    "budget_years": [
+      2027
+    ],
+    "language": "it-IT",
+    "presentation_unit": "eur_thousands"
+  },
+  "detailed_statements": [
+    {
+      "id": "income_statement",
+      "title": "Conto economico completo",
+      "unit": "eur",
+      "catalog_version": "1",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "rows": [
+        {
+          "id": "income_statement:a_valore_della_produzione",
+          "code": "a_valore_della_produzione",
+          "label": "A) VALORE DELLA PRODUZIONE",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce01_ricavi_vendite",
+          "code": "ce01_ricavi_vendite",
+          "label": "1) Ricavi delle vendite e delle prestazioni",
+          "parent_id": "income_statement:a_valore_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce02_variazioni_rimanenze",
+          "code": "ce02_variazioni_rimanenze",
+          "label": "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti",
+          "parent_id": "income_statement:a_valore_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce03_lavori_interni",
+          "code": "ce03_lavori_interni",
+          "label": "3) Variazioni dei lavori in corso su ordinazione",
+          "parent_id": "income_statement:a_valore_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce03a_incrementi_immobilizzazioni",
+          "code": "ce03a_incrementi_immobilizzazioni",
+          "label": "4) Incrementi di immobilizzazioni per lavori interni",
+          "parent_id": "income_statement:a_valore_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce04_altri_ricavi",
+          "code": "ce04_altri_ricavi",
+          "label": "5) Altri ricavi e proventi",
+          "parent_id": "income_statement:a_valore_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:production_value",
+          "code": "production_value",
+          "label": "Totale Valore della Produzione",
+          "parent_id": "income_statement:a_valore_della_produzione",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:b_costi_della_produzione",
+          "code": "b_costi_della_produzione",
+          "label": "B) COSTI DELLA PRODUZIONE",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce05_materie_prime",
+          "code": "ce05_materie_prime",
+          "label": "6) Materie prime, sussidiarie, di consumo e di merci",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce06_servizi",
+          "code": "ce06_servizi",
+          "label": "7) Servizi",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce07_godimento_beni",
+          "code": "ce07_godimento_beni",
+          "label": "8) Godimento di beni di terzi",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce08_costi_personale",
+          "code": "ce08_costi_personale",
+          "label": "9) Personale",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce08b_salari_stipendi",
+          "code": "ce08b_salari_stipendi",
+          "label": "a) Salari e stipendi",
+          "parent_id": "income_statement:ce08_costi_personale",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce08c_oneri_sociali",
+          "code": "ce08c_oneri_sociali",
+          "label": "b) Oneri sociali",
+          "parent_id": "income_statement:ce08_costi_personale",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce08a_tfr_accrual",
+          "code": "ce08a_tfr_accrual",
+          "label": "c) Trattamento di fine rapporto",
+          "parent_id": "income_statement:ce08_costi_personale",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:d_trattamento_di_quiescenza_e_simili",
+          "code": "d_trattamento_di_quiescenza_e_simili",
+          "label": "d) Trattamento di quiescenza e simili",
+          "parent_id": "income_statement:ce08_costi_personale",
+          "level": 2,
+          "kind": "detail",
+          "applicable": false,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "model_field_unavailable"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce08d_altri_costi_personale",
+          "code": "ce08d_altri_costi_personale",
+          "label": "e) Altri costi del personale",
+          "parent_id": "income_statement:ce08_costi_personale",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:10_ammortamenti_e_svalutazioni",
+          "code": "10_ammortamenti_e_svalutazioni",
+          "label": "10) Ammortamenti e svalutazioni:",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "group",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce09a_ammort_immateriali",
+          "code": "ce09a_ammort_immateriali",
+          "label": "a) Ammortamento delle immobilizzazioni immateriali",
+          "parent_id": "income_statement:10_ammortamenti_e_svalutazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce09b_ammort_materiali",
+          "code": "ce09b_ammort_materiali",
+          "label": "b) Ammortamento delle immobilizzazioni materiali",
+          "parent_id": "income_statement:10_ammortamenti_e_svalutazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce09c_svalutazioni",
+          "code": "ce09c_svalutazioni",
+          "label": "c) Altre svalutazioni delle immobilizzazioni",
+          "parent_id": "income_statement:10_ammortamenti_e_svalutazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce09d_svalutazione_crediti",
+          "code": "ce09d_svalutazione_crediti",
+          "label": "d) Sval. dei crediti compresi nell'attivo circ. e delle disp. liquide",
+          "parent_id": "income_statement:10_ammortamenti_e_svalutazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce09_ammortamenti",
+          "code": "ce09_ammortamenti",
+          "label": "Totale ammortamenti e svalutazioni",
+          "parent_id": "income_statement:10_ammortamenti_e_svalutazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce10_var_rimanenze_mat_prime",
+          "code": "ce10_var_rimanenze_mat_prime",
+          "label": "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce11_accantonamenti",
+          "code": "ce11_accantonamenti",
+          "label": "12) Accantonamenti per rischi",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce11b_altri_accantonamenti",
+          "code": "ce11b_altri_accantonamenti",
+          "label": "13) Altri accantonamenti",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce12_oneri_diversi",
+          "code": "ce12_oneri_diversi",
+          "label": "14) Oneri diversi di gestione",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:production_cost",
+          "code": "production_cost",
+          "label": "Totale Costi della Produzione",
+          "parent_id": "income_statement:b_costi_della_produzione",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ebitda",
+          "code": "ebitda",
+          "label": "EBITDA (MOL)",
+          "parent_id": null,
+          "level": 0,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ebit",
+          "code": "ebit",
+          "label": "EBIT (Risultato Operativo)",
+          "parent_id": null,
+          "level": 0,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:c_proventi_e_oneri_finanziari",
+          "code": "c_proventi_e_oneri_finanziari",
+          "label": "C) PROVENTI E ONERI FINANZIARI",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce13_proventi_partecipazioni",
+          "code": "ce13_proventi_partecipazioni",
+          "label": "15) Proventi da partecipazioni",
+          "parent_id": "income_statement:c_proventi_e_oneri_finanziari",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce14_altri_proventi_finanziari",
+          "code": "ce14_altri_proventi_finanziari",
+          "label": "16) Altri proventi finanziari",
+          "parent_id": "income_statement:c_proventi_e_oneri_finanziari",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce15_oneri_finanziari",
+          "code": "ce15_oneri_finanziari",
+          "label": "17) Interessi e altri oneri finanziari",
+          "parent_id": "income_statement:c_proventi_e_oneri_finanziari",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce16_utili_perdite_cambi",
+          "code": "ce16_utili_perdite_cambi",
+          "label": "17-bis) Utili e perdite su cambi",
+          "parent_id": "income_statement:c_proventi_e_oneri_finanziari",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:financial_result",
+          "code": "financial_result",
+          "label": "Totale Proventi/Oneri Finanziari",
+          "parent_id": "income_statement:c_proventi_e_oneri_finanziari",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:d_rettifiche_di_valore_attivita_finanziarie",
+          "code": "d_rettifiche_di_valore_attivita_finanziarie",
+          "label": "D) RETTIFICHE DI VALORE ATTIVITA' FINANZIARIE",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce17a_rivalutazioni",
+          "code": "ce17a_rivalutazioni",
+          "label": "18) Rivalutazioni",
+          "parent_id": "income_statement:d_rettifiche_di_valore_attivita_finanziarie",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce17b_svalutazioni",
+          "code": "ce17b_svalutazioni",
+          "label": "19) Svalutazioni",
+          "parent_id": "income_statement:d_rettifiche_di_valore_attivita_finanziarie",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce17_rettifiche_attivita_fin",
+          "code": "ce17_rettifiche_attivita_fin",
+          "label": "Totale rettifiche di valore",
+          "parent_id": "income_statement:d_rettifiche_di_valore_attivita_finanziarie",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:e_proventi_e_oneri_straordinari",
+          "code": "e_proventi_e_oneri_straordinari",
+          "label": "E) PROVENTI E ONERI STRAORDINARI",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce18_proventi_straordinari",
+          "code": "ce18_proventi_straordinari",
+          "label": "20) Proventi straordinari",
+          "parent_id": "income_statement:e_proventi_e_oneri_straordinari",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce19_oneri_straordinari",
+          "code": "ce19_oneri_straordinari",
+          "label": "21) Oneri straordinari",
+          "parent_id": "income_statement:e_proventi_e_oneri_straordinari",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:extraordinary_result",
+          "code": "extraordinary_result",
+          "label": "Totale Proventi/Oneri Straordinari",
+          "parent_id": "income_statement:e_proventi_e_oneri_straordinari",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:profit_before_tax",
+          "code": "profit_before_tax",
+          "label": "Risultato prima delle imposte",
+          "parent_id": null,
+          "level": 0,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:ce20_imposte",
+          "code": "ce20_imposte",
+          "label": "22) Imposte sul reddito",
+          "parent_id": null,
+          "level": 0,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        },
+        {
+          "id": "income_statement:net_profit",
+          "code": "net_profit",
+          "label": "23) UTILE (PERDITA) DELL'ESERCIZIO",
+          "parent_id": null,
+          "level": 0,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; calculate_ce_result"
+        }
+      ]
+    },
+    {
+      "id": "balance_sheet",
+      "title": "Stato patrimoniale completo",
+      "unit": "eur",
+      "catalog_version": "1",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "rows": [
+        {
+          "id": "balance_sheet:attivo",
+          "code": "attivo",
+          "label": "ATTIVO",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp01_crediti_soci",
+          "code": "sp01_crediti_soci",
+          "label": "A) Crediti verso soci per versamenti ancora dovuti",
+          "parent_id": "balance_sheet:attivo",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:b_immobilizzazioni",
+          "code": "b_immobilizzazioni",
+          "label": "B) IMMOBILIZZAZIONI",
+          "parent_id": "balance_sheet:attivo",
+          "level": 1,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp02_immob_immateriali",
+          "code": "sp02_immob_immateriali",
+          "label": "I - Immobilizzazioni immateriali",
+          "parent_id": "balance_sheet:b_immobilizzazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp03_immob_materiali",
+          "code": "sp03_immob_materiali",
+          "label": "II - Immobilizzazioni materiali",
+          "parent_id": "balance_sheet:b_immobilizzazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04_immob_finanziarie",
+          "code": "sp04_immob_finanziarie",
+          "label": "III - Immobilizzazioni finanziarie",
+          "parent_id": "balance_sheet:b_immobilizzazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04a_partecipazioni",
+          "code": "sp04a_partecipazioni",
+          "label": "1) Partecipazioni",
+          "parent_id": "balance_sheet:sp04_immob_finanziarie",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04b_crediti_immob_breve",
+          "code": "sp04b_crediti_immob_breve",
+          "label": "2) Crediti entro 12 mesi",
+          "parent_id": "balance_sheet:sp04_immob_finanziarie",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04c_crediti_immob_lungo",
+          "code": "sp04c_crediti_immob_lungo",
+          "label": "2) Crediti oltre 12 mesi",
+          "parent_id": "balance_sheet:sp04_immob_finanziarie",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04b_crediti_immob_breve+sp04c_crediti_immob_lungo",
+          "code": "sp04b_crediti_immob_breve+sp04c_crediti_immob_lungo",
+          "label": "Totale crediti immobilizzati",
+          "parent_id": "balance_sheet:b_immobilizzazioni",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04d_altri_titoli",
+          "code": "sp04d_altri_titoli",
+          "label": "3) Altri titoli",
+          "parent_id": "balance_sheet:sp04_immob_finanziarie",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp04e_strumenti_derivati_attivi",
+          "code": "sp04e_strumenti_derivati_attivi",
+          "label": "4) Strumenti finanziari derivati attivi",
+          "parent_id": "balance_sheet:sp04_immob_finanziarie",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:fixed_assets",
+          "code": "fixed_assets",
+          "label": "Totale immobilizzazioni",
+          "parent_id": "balance_sheet:b_immobilizzazioni",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:c_attivo_circolante",
+          "code": "c_attivo_circolante",
+          "label": "C) ATTIVO CIRCOLANTE",
+          "parent_id": "balance_sheet:attivo",
+          "level": 1,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp05_rimanenze",
+          "code": "sp05_rimanenze",
+          "label": "I - Rimanenze",
+          "parent_id": "balance_sheet:c_attivo_circolante",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp05a_materie_prime",
+          "code": "sp05a_materie_prime",
+          "label": "  materie prime",
+          "parent_id": "balance_sheet:sp05_rimanenze",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp05b_prodotti_in_corso",
+          "code": "sp05b_prodotti_in_corso",
+          "label": "  prodotti in corso",
+          "parent_id": "balance_sheet:sp05_rimanenze",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp05c_lavori_in_corso",
+          "code": "sp05c_lavori_in_corso",
+          "label": "  lavori in corso",
+          "parent_id": "balance_sheet:sp05_rimanenze",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp05d_prodotti_finiti",
+          "code": "sp05d_prodotti_finiti",
+          "label": "  prodotti finiti",
+          "parent_id": "balance_sheet:sp05_rimanenze",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp05e_acconti",
+          "code": "sp05e_acconti",
+          "label": "  acconti",
+          "parent_id": "balance_sheet:sp05_rimanenze",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06_crediti_breve",
+          "code": "sp06_crediti_breve",
+          "label": "II - Crediti entro 12 mesi",
+          "parent_id": "balance_sheet:c_attivo_circolante",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06a_crediti_clienti_breve",
+          "code": "sp06a_crediti_clienti_breve",
+          "label": "  Clienti",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06b_crediti_controllate_breve",
+          "code": "sp06b_crediti_controllate_breve",
+          "label": "  Controllate",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06c_crediti_collegate_breve",
+          "code": "sp06c_crediti_collegate_breve",
+          "label": "  Collegate",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06d_crediti_controllanti_breve",
+          "code": "sp06d_crediti_controllanti_breve",
+          "label": "  Controllanti",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06e_crediti_tributari_breve",
+          "code": "sp06e_crediti_tributari_breve",
+          "label": "  Crediti tributari",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06f_imposte_anticipate_breve",
+          "code": "sp06f_imposte_anticipate_breve",
+          "label": "  Imposte anticipate",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp06g_crediti_altri_breve",
+          "code": "sp06g_crediti_altri_breve",
+          "label": "  Altri",
+          "parent_id": "balance_sheet:sp06_crediti_breve",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07_crediti_lungo",
+          "code": "sp07_crediti_lungo",
+          "label": "II - Crediti oltre 12 mesi",
+          "parent_id": "balance_sheet:c_attivo_circolante",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07a_crediti_clienti_lungo",
+          "code": "sp07a_crediti_clienti_lungo",
+          "label": "  Clienti",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07b_crediti_controllate_lungo",
+          "code": "sp07b_crediti_controllate_lungo",
+          "label": "  Controllate",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07c_crediti_collegate_lungo",
+          "code": "sp07c_crediti_collegate_lungo",
+          "label": "  Collegate",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07d_crediti_controllanti_lungo",
+          "code": "sp07d_crediti_controllanti_lungo",
+          "label": "  Controllanti",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07e_crediti_tributari_lungo",
+          "code": "sp07e_crediti_tributari_lungo",
+          "label": "  Crediti tributari",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07f_imposte_anticipate_lungo",
+          "code": "sp07f_imposte_anticipate_lungo",
+          "label": "  Imposte anticipate",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp07g_crediti_altri_lungo",
+          "code": "sp07g_crediti_altri_lungo",
+          "label": "  Altri",
+          "parent_id": "balance_sheet:sp07_crediti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp08_attivita_finanziarie",
+          "code": "sp08_attivita_finanziarie",
+          "label": "III - Attività finanziarie non immobilizzate",
+          "parent_id": "balance_sheet:c_attivo_circolante",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp09_disponibilita_liquide",
+          "code": "sp09_disponibilita_liquide",
+          "label": "IV - Disponibilità liquide",
+          "parent_id": "balance_sheet:c_attivo_circolante",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "-5.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:current_assets",
+          "code": "current_assets",
+          "label": "Totale attivo circolante",
+          "parent_id": "balance_sheet:c_attivo_circolante",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "-5.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp10_ratei_risconti_attivi",
+          "code": "sp10_ratei_risconti_attivi",
+          "label": "D) Ratei e risconti attivi",
+          "parent_id": "balance_sheet:attivo",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:total_assets",
+          "code": "total_assets",
+          "label": "TOTALE ATTIVO",
+          "parent_id": "balance_sheet:attivo",
+          "level": 1,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            "-5.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:passivo_e_patrimonio_netto",
+          "code": "passivo_e_patrimonio_netto",
+          "label": "PASSIVO E PATRIMONIO NETTO",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:a_patrimonio_netto",
+          "code": "a_patrimonio_netto",
+          "label": "A) PATRIMONIO NETTO",
+          "parent_id": "balance_sheet:passivo_e_patrimonio_netto",
+          "level": 1,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp11_capitale",
+          "code": "sp11_capitale",
+          "label": "I - Capitale",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12a_riserva_sovrapprezzo",
+          "code": "sp12a_riserva_sovrapprezzo",
+          "label": "Sovrapprezzo azioni",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12b_riserve_rivalutazione",
+          "code": "sp12b_riserve_rivalutazione",
+          "label": "Rivalutazione",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12c_riserva_legale",
+          "code": "sp12c_riserva_legale",
+          "label": "Riserva legale",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12d_riserve_statutarie",
+          "code": "sp12d_riserve_statutarie",
+          "label": "Riserve statutarie",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12e_altre_riserve",
+          "code": "sp12e_altre_riserve",
+          "label": "Altre riserve",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12f_riserva_copertura_flussi",
+          "code": "sp12f_riserva_copertura_flussi",
+          "label": "Copertura flussi",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12g_utili_perdite_portati",
+          "code": "sp12g_utili_perdite_portati",
+          "label": "Utili/perdite portati",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp12h_riserva_neg_azioni_proprie",
+          "code": "sp12h_riserva_neg_azioni_proprie",
+          "label": "Riserva negativa azioni proprie",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp13_utile_perdita",
+          "code": "sp13_utile_perdita",
+          "label": "IX - Utile (perdita) dell'esercizio",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp11_capitale+sp12_riserve+sp13_utile_perdita",
+          "code": "sp11_capitale+sp12_riserve+sp13_utile_perdita",
+          "label": "Totale patrimonio netto",
+          "parent_id": "balance_sheet:a_patrimonio_netto",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp14_fondi_rischi",
+          "code": "sp14_fondi_rischi",
+          "label": "B) Fondi per rischi e oneri",
+          "parent_id": "balance_sheet:passivo_e_patrimonio_netto",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp14a_fondi_trattamento_quiescenza",
+          "code": "sp14a_fondi_trattamento_quiescenza",
+          "label": "  Quiescenza",
+          "parent_id": "balance_sheet:sp14_fondi_rischi",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp14b_fondi_imposte",
+          "code": "sp14b_fondi_imposte",
+          "label": "  Imposte, anche differite",
+          "parent_id": "balance_sheet:sp14_fondi_rischi",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp14c_strumenti_derivati_passivi",
+          "code": "sp14c_strumenti_derivati_passivi",
+          "label": "  Derivati passivi",
+          "parent_id": "balance_sheet:sp14_fondi_rischi",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp14d_altri_fondi",
+          "code": "sp14d_altri_fondi",
+          "label": "  Altri fondi",
+          "parent_id": "balance_sheet:sp14_fondi_rischi",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp15_tfr",
+          "code": "sp15_tfr",
+          "label": "C) Trattamento di fine rapporto",
+          "parent_id": "balance_sheet:passivo_e_patrimonio_netto",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:d_debiti",
+          "code": "d_debiti",
+          "label": "D) DEBITI",
+          "parent_id": "balance_sheet:passivo_e_patrimonio_netto",
+          "level": 1,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16a_debiti_banche_breve+sp17a_debiti_banche_lungo",
+          "code": "sp16a_debiti_banche_breve+sp17a_debiti_banche_lungo",
+          "label": "Banche",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16a_debiti_banche_breve",
+          "code": "sp16a_debiti_banche_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16a_debiti_banche_breve+sp17a_debiti_banche_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17a_debiti_banche_lungo",
+          "code": "sp17a_debiti_banche_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16a_debiti_banche_breve+sp17a_debiti_banche_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16b_debiti_altri_finanz_breve+sp17b_debiti_altri_finanz_lungo",
+          "code": "sp16b_debiti_altri_finanz_breve+sp17b_debiti_altri_finanz_lungo",
+          "label": "Altri finanziatori",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16b_debiti_altri_finanz_breve",
+          "code": "sp16b_debiti_altri_finanz_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16b_debiti_altri_finanz_breve+sp17b_debiti_altri_finanz_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17b_debiti_altri_finanz_lungo",
+          "code": "sp17b_debiti_altri_finanz_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16b_debiti_altri_finanz_breve+sp17b_debiti_altri_finanz_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16c_debiti_obbligazioni_breve+sp17c_debiti_obbligazioni_lungo",
+          "code": "sp16c_debiti_obbligazioni_breve+sp17c_debiti_obbligazioni_lungo",
+          "label": "Obbligazioni",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16c_debiti_obbligazioni_breve",
+          "code": "sp16c_debiti_obbligazioni_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16c_debiti_obbligazioni_breve+sp17c_debiti_obbligazioni_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17c_debiti_obbligazioni_lungo",
+          "code": "sp17c_debiti_obbligazioni_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16c_debiti_obbligazioni_breve+sp17c_debiti_obbligazioni_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16d_debiti_fornitori_breve+sp17d_debiti_fornitori_lungo",
+          "code": "sp16d_debiti_fornitori_breve+sp17d_debiti_fornitori_lungo",
+          "label": "Fornitori",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16d_debiti_fornitori_breve",
+          "code": "sp16d_debiti_fornitori_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16d_debiti_fornitori_breve+sp17d_debiti_fornitori_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17d_debiti_fornitori_lungo",
+          "code": "sp17d_debiti_fornitori_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16d_debiti_fornitori_breve+sp17d_debiti_fornitori_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16e_debiti_tributari_breve+sp17e_debiti_tributari_lungo",
+          "code": "sp16e_debiti_tributari_breve+sp17e_debiti_tributari_lungo",
+          "label": "Debiti tributari",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16e_debiti_tributari_breve",
+          "code": "sp16e_debiti_tributari_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16e_debiti_tributari_breve+sp17e_debiti_tributari_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17e_debiti_tributari_lungo",
+          "code": "sp17e_debiti_tributari_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16e_debiti_tributari_breve+sp17e_debiti_tributari_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16f_debiti_previdenza_breve+sp17f_debiti_previdenza_lungo",
+          "code": "sp16f_debiti_previdenza_breve+sp17f_debiti_previdenza_lungo",
+          "label": "Debiti previdenziali",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16f_debiti_previdenza_breve",
+          "code": "sp16f_debiti_previdenza_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16f_debiti_previdenza_breve+sp17f_debiti_previdenza_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17f_debiti_previdenza_lungo",
+          "code": "sp17f_debiti_previdenza_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16f_debiti_previdenza_breve+sp17f_debiti_previdenza_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16g_altri_debiti_breve+sp17g_altri_debiti_lungo",
+          "code": "sp16g_altri_debiti_breve+sp17g_altri_debiti_lungo",
+          "label": "Altri debiti",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16g_altri_debiti_breve",
+          "code": "sp16g_altri_debiti_breve",
+          "label": "  entro 12 mesi",
+          "parent_id": "balance_sheet:sp16g_altri_debiti_breve+sp17g_altri_debiti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp17g_altri_debiti_lungo",
+          "code": "sp17g_altri_debiti_lungo",
+          "label": "  oltre 12 mesi",
+          "parent_id": "balance_sheet:sp16g_altri_debiti_breve+sp17g_altri_debiti_lungo",
+          "level": 3,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp16_debiti_breve+sp17_debiti_lungo",
+          "code": "sp16_debiti_breve+sp17_debiti_lungo",
+          "label": "Totale debiti",
+          "parent_id": "balance_sheet:d_debiti",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp18_ratei_risconti_passivi",
+          "code": "sp18_ratei_risconti_passivi",
+          "label": "E) Ratei e risconti passivi",
+          "parent_id": "balance_sheet:passivo_e_patrimonio_netto",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi",
+          "code": "sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi",
+          "label": "TOTALE PASSIVO E PATRIMONIO NETTO",
+          "parent_id": "balance_sheet:passivo_e_patrimonio_netto",
+          "level": 1,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        },
+        {
+          "id": "balance_sheet:total_assets+sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi",
+          "code": "total_assets+sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi",
+          "label": "DIFFERENZA (Attivo - Passivo)",
+          "parent_id": null,
+          "level": 0,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            "-5.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ],
+          "source": "persisted_statement; balance_aggregates"
+        }
+      ]
+    },
+    {
+      "id": "cashflow",
+      "title": "Rendiconto finanziario completo — metodo indiretto",
+      "unit": "eur",
+      "catalog_version": "1",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "rows": [
+        {
+          "id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "code": "a_flussi_finanziari_dell_attivita_operativa",
+          "label": "A) Flussi finanziari dell'attività operativa",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.start.net_profit",
+          "code": "operating.start.net_profit",
+          "label": "Utile (perdita) dell'esercizio",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.start.income_taxes",
+          "code": "operating.start.income_taxes",
+          "label": "Imposte sul reddito",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.start.interest_expense_income",
+          "code": "operating.start.interest_expense_income",
+          "label": "Interessi passivi/(interessi attivi)",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.start.dividends",
+          "code": "operating.start.dividends",
+          "label": "(Dividendi)",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.start.capital_gains_losses",
+          "code": "operating.start.capital_gains_losses",
+          "label": "(Plusvalenze)/minusvalenze da cessione",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.start.profit_before_adjustments",
+          "code": "operating.start.profit_before_adjustments",
+          "label": "1. Utile prima di imposte, interessi, dividendi e plus/minusvalenze",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:rettifiche_per_elementi_non_monetari",
+          "code": "rettifiche_per_elementi_non_monetari",
+          "label": "Rettifiche per elementi non monetari:",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "group",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.non_cash_adjustments.provisions",
+          "code": "operating.non_cash_adjustments.provisions",
+          "label": "Accantonamenti ai fondi",
+          "parent_id": "cashflow:rettifiche_per_elementi_non_monetari",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.non_cash_adjustments.depreciation_amortization",
+          "code": "operating.non_cash_adjustments.depreciation_amortization",
+          "label": "Ammortamenti delle immobilizzazioni",
+          "parent_id": "cashflow:rettifiche_per_elementi_non_monetari",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.non_cash_adjustments.write_downs",
+          "code": "operating.non_cash_adjustments.write_downs",
+          "label": "Svalutazioni per perdite durevoli di valore",
+          "parent_id": "cashflow:rettifiche_per_elementi_non_monetari",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.non_cash_adjustments.total",
+          "code": "operating.non_cash_adjustments.total",
+          "label": "Totale rettifiche per elementi non monetari",
+          "parent_id": "cashflow:rettifiche_per_elementi_non_monetari",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cashflow_before_wc",
+          "code": "operating.cashflow_before_wc",
+          "label": "2. Flusso finanziario prima delle variazioni del ccn",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "code": "variazioni_del_capitale_circolante_netto",
+          "label": "Variazioni del capitale circolante netto:",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "group",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.delta_inventory",
+          "code": "operating.working_capital_changes.delta_inventory",
+          "label": "Decremento/(incremento) delle rimanenze",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.delta_receivables",
+          "code": "operating.working_capital_changes.delta_receivables",
+          "label": "Decremento/(incremento) dei crediti",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.delta_payables",
+          "code": "operating.working_capital_changes.delta_payables",
+          "label": "Incremento/(decremento) dei debiti",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.delta_accruals_deferrals_active",
+          "code": "operating.working_capital_changes.delta_accruals_deferrals_active",
+          "label": "Decremento/(incremento) ratei e risconti attivi",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.delta_accruals_deferrals_passive",
+          "code": "operating.working_capital_changes.delta_accruals_deferrals_passive",
+          "label": "Incremento/(decremento) ratei e risconti passivi",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.other_wc_changes",
+          "code": "operating.working_capital_changes.other_wc_changes",
+          "label": "Altri incrementi/(decrementi) del ccn",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.working_capital_changes.total",
+          "code": "operating.working_capital_changes.total",
+          "label": "Totale variazioni del capitale circolante netto",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cashflow_after_wc",
+          "code": "operating.cashflow_after_wc",
+          "label": "3. Flusso finanziario dopo le variazioni del ccn",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:altre_rettifiche",
+          "code": "altre_rettifiche",
+          "label": "Altre rettifiche:",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "group",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cash_adjustments.interest_paid_received",
+          "code": "operating.cash_adjustments.interest_paid_received",
+          "label": "Interessi incassati/(pagati)",
+          "parent_id": "cashflow:altre_rettifiche",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cash_adjustments.taxes_paid",
+          "code": "operating.cash_adjustments.taxes_paid",
+          "label": "(Imposte sul reddito pagate)",
+          "parent_id": "cashflow:altre_rettifiche",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cash_adjustments.dividends_received",
+          "code": "operating.cash_adjustments.dividends_received",
+          "label": "Dividendi incassati",
+          "parent_id": "cashflow:altre_rettifiche",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cash_adjustments.use_of_provisions",
+          "code": "operating.cash_adjustments.use_of_provisions",
+          "label": "(Utilizzo dei fondi)",
+          "parent_id": "cashflow:altre_rettifiche",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cash_adjustments.other_cash_changes",
+          "code": "operating.cash_adjustments.other_cash_changes",
+          "label": "Altri incassi/(pagamenti)",
+          "parent_id": "cashflow:altre_rettifiche",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.cash_adjustments.total",
+          "code": "operating.cash_adjustments.total",
+          "label": "Totale altre rettifiche",
+          "parent_id": "cashflow:altre_rettifiche",
+          "level": 2,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:operating.total_operating_cashflow",
+          "code": "operating.total_operating_cashflow",
+          "label": "Flusso finanziario dell'attività operativa (A)",
+          "parent_id": "cashflow:a_flussi_finanziari_dell_attivita_operativa",
+          "level": 1,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "code": "b_flussi_finanziari_dell_attivita_d_investimento",
+          "label": "B) Flussi finanziari dell'attività d'investimento",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.tangible_assets.investments",
+          "code": "investing.tangible_assets.investments",
+          "label": "Immobilizzazioni materiali — (Investimenti)",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.tangible_assets.disinvestments",
+          "code": "investing.tangible_assets.disinvestments",
+          "label": "Immobilizzazioni materiali — Disinvestimenti",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.intangible_assets.investments",
+          "code": "investing.intangible_assets.investments",
+          "label": "Immobilizzazioni immateriali — (Investimenti)",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.intangible_assets.disinvestments",
+          "code": "investing.intangible_assets.disinvestments",
+          "label": "Immobilizzazioni immateriali — Disinvestimenti",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.financial_assets.investments",
+          "code": "investing.financial_assets.investments",
+          "label": "Immobilizzazioni finanziarie — (Investimenti)",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.financial_assets.disinvestments",
+          "code": "investing.financial_assets.disinvestments",
+          "label": "Immobilizzazioni finanziarie — Disinvestimenti",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:investing.total_investing_cashflow",
+          "code": "investing.total_investing_cashflow",
+          "label": "Flusso finanziario dell'attività di investimento (B)",
+          "parent_id": "cashflow:b_flussi_finanziari_dell_attivita_d_investimento",
+          "level": 1,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "code": "c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "label": "C) Flussi finanziari dell'attività di finanziamento",
+          "parent_id": null,
+          "level": 0,
+          "kind": "section",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "presentation_header"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:financing.third_party_funds.increases",
+          "code": "financing.third_party_funds.increases",
+          "label": "Mezzi di terzi — Incremento",
+          "parent_id": "cashflow:c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:financing.third_party_funds.decreases",
+          "code": "financing.third_party_funds.decreases",
+          "label": "Mezzi di terzi — (Decremento)",
+          "parent_id": "cashflow:c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:financing.own_funds.increases",
+          "code": "financing.own_funds.increases",
+          "label": "Mezzi propri — Incremento",
+          "parent_id": "cashflow:c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:financing.own_funds.decreases",
+          "code": "financing.own_funds.decreases",
+          "label": "Mezzi propri — (Decremento)",
+          "parent_id": "cashflow:c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "level": 1,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:financing.total_financing_cashflow",
+          "code": "financing.total_financing_cashflow",
+          "label": "Flusso finanziario dell'attività di finanziamento (C)",
+          "parent_id": "cashflow:c_flussi_finanziari_dell_attivita_di_finanziamento",
+          "level": 1,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:cash_reconciliation.total_cashflow",
+          "code": "cash_reconciliation.total_cashflow",
+          "label": "Incremento (decremento) delle disponibilità liquide (A±B±C)",
+          "parent_id": null,
+          "level": 0,
+          "kind": "total",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:cash_reconciliation.cash_beginning",
+          "code": "cash_reconciliation.cash_beginning",
+          "label": "Disponibilità liquide all'inizio dell'esercizio",
+          "parent_id": null,
+          "level": 0,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
+          "id": "cashflow:cash_reconciliation.cash_ending",
+          "code": "cash_reconciliation.cash_ending",
+          "label": "Disponibilità liquide alla fine dell'esercizio",
+          "parent_id": null,
+          "level": 0,
+          "kind": "subtotal",
+          "applicable": true,
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        }
+      ]
+    }
+  ],
+  "indicator_catalog": [
+    {
+      "id": "practice.dscr",
+      "label": "DSCR — proxy della pratica",
+      "family": "pratica",
+      "unit": "ratio",
+      "methodology": "(EBITDA - imposte) / oneri finanziari: proxy della pratica, non servizio completo del debito.",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ebitda_margin",
+      "label": "EBITDA %",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "EBITDA / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "100"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.mt",
+      "label": "Margine di Tesoreria",
+      "family": "pratica",
+      "unit": "eur",
+      "methodology": "Attivo corrente pratica - rimanenze - debiti entro 12 mesi",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "-5.00"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ccn",
+      "label": "CCN",
+      "family": "pratica",
+      "unit": "eur",
+      "methodology": "Attivo corrente pratica - debiti entro 12 mesi",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "-5.00"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.current_ratio",
+      "label": "Liquidità Corrente",
+      "family": "pratica",
+      "unit": "ratio",
+      "methodology": "Attivo corrente pratica / debiti entro 12 mesi",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ms",
+      "label": "Margine di Struttura",
+      "family": "pratica",
+      "unit": "eur",
+      "methodology": "Patrimonio netto - immobilizzazioni",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.copertura_immob",
+      "label": "Copertura Immobilizzazioni",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.indipendenza",
+      "label": "Indipendenza Finanziaria",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "Patrimonio netto / totale attivo × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "-0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.pfn",
+      "label": "PFN",
+      "family": "pratica",
+      "unit": "eur",
+      "methodology": "Banche e obbligazioni se dettaglio positivo; altrimenti debito al netto dei dettagli non bancari noti; altrimenti debito totale; meno cassa e attività finanziarie.",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "5.00"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.pfn_ebitda",
+      "label": "PFN / EBITDA",
+      "family": "pratica",
+      "unit": "ratio",
+      "methodology": "PFN pratica / EBITDA del periodo",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0.005"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.roi",
+      "label": "ROI",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "EBIT / totale attivo × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "-20000"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.roe",
+      "label": "ROE",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "Utile netto CE canonico / patrimonio netto × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ros",
+      "label": "ROS",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "EBIT / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "100"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.of_mol",
+      "label": "Oneri Finanziari / MOL",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "Oneri finanziari / EBITDA × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.of_revenue",
+      "label": "Oneri Finanziari / Fatturato",
+      "family": "pratica",
+      "unit": "percent",
+      "methodology": "Oneri finanziari / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.materials_revenue",
+      "label": "Materie prime / Ricavi",
+      "family": "incidenze",
+      "unit": "percent",
+      "methodology": "Materie prime / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.services_revenue",
+      "label": "Servizi / Ricavi",
+      "family": "incidenze",
+      "unit": "percent",
+      "methodology": "Servizi / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.liquidity.current_ratio",
+      "label": "Current Ratio (ILC)",
+      "family": "liquidity",
+      "unit": "ratio",
+      "methodology": "Attivo corrente del modello / debiti entro 12 mesi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.liquidity.quick_ratio",
+      "label": "Quick Ratio (ISL)",
+      "family": "liquidity",
+      "unit": "ratio",
+      "methodology": "(Crediti entro e oltre 12 mesi + cassa) / debiti entro 12 mesi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.liquidity.acid_test",
+      "label": "Acid Test",
+      "family": "liquidity",
+      "unit": "ratio",
+      "methodology": "(Crediti entro e oltre 12 mesi + attività finanziarie + cassa) / debiti entro 12 mesi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.solvency.autonomy_index",
+      "label": "Autonomia Finanziaria",
+      "family": "solvency",
+      "unit": "percent",
+      "methodology": "Patrimonio netto / totale attivo",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.solvency.leverage_ratio",
+      "label": "Indice di Indebitamento",
+      "family": "solvency",
+      "unit": "ratio",
+      "methodology": "Immobilizzazioni / patrimonio netto",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.solvency.debt_to_equity",
+      "label": "Debiti/Patrimonio Netto",
+      "family": "solvency",
+      "unit": "ratio",
+      "methodology": "Debiti totali / patrimonio netto",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.solvency.debt_to_production",
+      "label": "Debiti/Valore Produzione",
+      "family": "solvency",
+      "unit": "ratio",
+      "methodology": "Debiti totali / valore della produzione",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.profitability.roe",
+      "label": "ROE",
+      "family": "profitability",
+      "unit": "percent",
+      "methodology": "Utile netto / patrimonio netto",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.profitability.roi",
+      "label": "ROI",
+      "family": "profitability",
+      "unit": "percent",
+      "methodology": "EBIT / totale attivo",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.profitability.ros",
+      "label": "ROS",
+      "family": "profitability",
+      "unit": "percent",
+      "methodology": "Utile netto / ricavi: convenzione analitica distinta dal ROS operativo della pratica",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.profitability.rod",
+      "label": "ROD (Costo Denaro)",
+      "family": "profitability",
+      "unit": "percent",
+      "methodology": "Oneri finanziari / debiti totali",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.profitability.ebitda_margin",
+      "label": "EBITDA Margin",
+      "family": "profitability",
+      "unit": "percent",
+      "methodology": "EBITDA / ricavi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.coverage.fixed_assets_coverage_with_equity_and_ltdebt",
+      "label": "(CN+PF)/AF",
+      "family": "coverage",
+      "unit": "ratio",
+      "methodology": "(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.coverage.fixed_assets_coverage_with_equity",
+      "label": "CN/AF",
+      "family": "coverage",
+      "unit": "ratio",
+      "methodology": "Patrimonio netto / immobilizzazioni",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.coverage.independence_from_third_parties",
+      "label": "CN/(PC+PF)",
+      "family": "coverage",
+      "unit": "ratio",
+      "methodology": "Patrimonio netto / debiti totali",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.activity.inventory_turnover_days",
+      "label": "Giorni Magazzino (DMAG)",
+      "family": "activity",
+      "unit": "days",
+      "methodology": "360 × rimanenze / ricavi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.activity.receivables_turnover_days",
+      "label": "Giorni Credito (DCRED)",
+      "family": "activity",
+      "unit": "days",
+      "methodology": "360 × crediti entro e oltre 12 mesi / ricavi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.activity.payables_turnover_days",
+      "label": "Giorni Debito (DDEB)",
+      "family": "activity",
+      "unit": "days",
+      "methodology": "360 × debiti verso fornitori entro e oltre 12 mesi / (materie + servizi); base ricavi se acquisti non positivi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.activity.cash_conversion_cycle",
+      "label": "Ciclo Conv. Denaro",
+      "family": "activity",
+      "unit": "days",
+      "methodology": "Giorni magazzino + giorni credito - giorni debito, prima degli arrotondamenti individuali",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.activity.asset_turnover",
+      "label": "Rotazione Attivo",
+      "family": "activity",
+      "unit": "ratio",
+      "methodology": "Ricavi / totale attivo",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.extended_profitability.spread",
+      "label": "Spread (ROI-ROD)",
+      "family": "extended_profitability",
+      "unit": "percent",
+      "methodology": "ROI - ROD, già arrotondati dal motore",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.extended_profitability.financial_leverage_effect",
+      "label": "Leva Finanziaria",
+      "family": "extended_profitability",
+      "unit": "ratio",
+      "methodology": "Debiti totali / patrimonio netto",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.extended_profitability.ebitda_on_sales",
+      "label": "MOL/Ricavi",
+      "family": "extended_profitability",
+      "unit": "percent",
+      "methodology": "EBITDA / ricavi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.extended_profitability.financial_charges_on_revenue",
+      "label": "OF/Ricavi",
+      "family": "extended_profitability",
+      "unit": "percent",
+      "methodology": "Oneri finanziari / ricavi",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.efficiency.revenue_per_employee_cost",
+      "label": "Ricavi/Costo Personale",
+      "family": "efficiency",
+      "unit": "ratio",
+      "methodology": "Ricavi / costo del personale",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    },
+    {
+      "id": "analytical.efficiency.revenue_per_materials_cost",
+      "label": "Ricavi/Costo Materie",
+      "family": "efficiency",
+      "unit": "ratio",
+      "methodology": "Ricavi / materie prime",
+      "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "source_calculation_unavailable"
+      ],
+      "source": "FinancialRatiosCalculator",
+      "thresholds": []
+    }
+  ],
+  "editorial_plan": null,
+  "editorial_notes": [],
+  "editorial_readiness": {
+    "status": "pending",
+    "reasons": [
+      "Piano di impaginazione e commenti per pagina da preparare in M2-02A/M2-00C."
+    ]
+  }
+}

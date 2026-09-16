@@ -1,0 +1,254 @@
+[
+  {
+    "candidate": "native",
+    "chart": "income_results",
+    "exit_code": 0,
+    "seconds": 0.034,
+    "peak_rss_kib": 26368,
+    "stderr": "",
+    "bytes": 21400,
+    "raster_images": 0,
+    "vector_paths": 28
+  },
+  {
+    "candidate": "native",
+    "chart": "margins",
+    "exit_code": 0,
+    "seconds": 0.0343,
+    "peak_rss_kib": 26356,
+    "stderr": "",
+    "bytes": 20774,
+    "raster_images": 0,
+    "vector_paths": 25
+  },
+  {
+    "candidate": "native",
+    "chart": "cashflows",
+    "exit_code": 0,
+    "seconds": 0.0396,
+    "peak_rss_kib": 26372,
+    "stderr": "",
+    "bytes": 21210,
+    "raster_images": 0,
+    "vector_paths": 28
+  },
+  {
+    "candidate": "native",
+    "chart": "liquidity_debt",
+    "exit_code": 0,
+    "seconds": 0.048,
+    "peak_rss_kib": 26484,
+    "stderr": "",
+    "bytes": 21302,
+    "raster_images": 0,
+    "vector_paths": 40
+  },
+  {
+    "candidate": "native",
+    "chart": "working_capital_days",
+    "exit_code": 0,
+    "seconds": 0.0355,
+    "peak_rss_kib": 26340,
+    "stderr": "",
+    "bytes": 20089,
+    "raster_images": 0,
+    "vector_paths": 23
+  },
+  {
+    "candidate": "native",
+    "chart": "coverage",
+    "exit_code": 0,
+    "seconds": 0.0339,
+    "peak_rss_kib": 26288,
+    "stderr": "",
+    "bytes": 20256,
+    "raster_images": 0,
+    "vector_paths": 22
+  },
+  {
+    "candidate": "native",
+    "chart": "negative_bars",
+    "exit_code": 0,
+    "seconds": 0.0305,
+    "peak_rss_kib": 25924,
+    "stderr": "",
+    "bytes": 17217,
+    "raster_images": 0,
+    "vector_paths": 16
+  },
+  {
+    "candidate": "native",
+    "chart": "all_null",
+    "exit_code": 0,
+    "seconds": 0.0291,
+    "peak_rss_kib": 26040,
+    "stderr": "",
+    "bytes": 19385,
+    "raster_images": 0,
+    "vector_paths": 11
+  },
+  {
+    "candidate": "cetz",
+    "chart": "income_results",
+    "exit_code": 0,
+    "seconds": 0.4436,
+    "peak_rss_kib": 57404,
+    "stderr": "",
+    "bytes": 24345,
+    "raster_images": 0,
+    "vector_paths": 65
+  },
+  {
+    "candidate": "cetz",
+    "chart": "margins",
+    "exit_code": 0,
+    "seconds": 0.377,
+    "peak_rss_kib": 55596,
+    "stderr": "",
+    "bytes": 23597,
+    "raster_images": 0,
+    "vector_paths": 43
+  },
+  {
+    "candidate": "cetz",
+    "chart": "cashflows",
+    "exit_code": 0,
+    "seconds": 0.4445,
+    "peak_rss_kib": 57328,
+    "stderr": "",
+    "bytes": 24172,
+    "raster_images": 0,
+    "vector_paths": 65
+  },
+  {
+    "candidate": "cetz",
+    "chart": "liquidity_debt",
+    "exit_code": 0,
+    "seconds": 0.3916,
+    "peak_rss_kib": 56248,
+    "stderr": "",
+    "bytes": 24026,
+    "raster_images": 0,
+    "vector_paths": 51
+  },
+  {
+    "candidate": "cetz",
+    "chart": "working_capital_days",
+    "exit_code": 0,
+    "seconds": 0.3943,
+    "peak_rss_kib": 55004,
+    "stderr": "",
+    "bytes": 22798,
+    "raster_images": 0,
+    "vector_paths": 38
+  },
+  {
+    "candidate": "cetz",
+    "chart": "coverage",
+    "exit_code": 0,
+    "seconds": 0.3648,
+    "peak_rss_kib": 55592,
+    "stderr": "",
+    "bytes": 23173,
+    "raster_images": 0,
+    "vector_paths": 42
+  },
+  {
+    "candidate": "cetz",
+    "chart": "negative_bars",
+    "exit_code": 0,
+    "seconds": 0.3131,
+    "peak_rss_kib": 54476,
+    "stderr": "",
+    "bytes": 20160,
+    "raster_images": 0,
+    "vector_paths": 39
+  },
+  {
+    "candidate": "cetz",
+    "chart": "all_null",
+    "exit_code": 0,
+    "seconds": 0.2963,
+    "peak_rss_kib": 54508,
+    "stderr": "",
+    "bytes": 22213,
+    "raster_images": 0,
+    "vector_paths": 35
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "income_results",
+    "exit_code": 0,
+    "seconds": 0.0697,
+    "peak_rss_kib": 36096,
+    "stderr": "",
+    "bytes": 21659,
+    "raster_images": 0,
+    "vector_paths": 33
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "margins",
+    "exit_code": 1,
+    "seconds": 0.0655,
+    "peak_rss_kib": 32244,
+    "stderr": "error: cannot compare float and none\n    ┌─ @preview/primaviz:0.10.0/src/charts/line.typ:312:31\n    │\n312 │   let nt = nice-ticks(calc.min(..all-values), calc.max(..all-values), count: t.tick-count)\n    │                                ^^^^^^^^^^^^"
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "cashflows",
+    "exit_code": 0,
+    "seconds": 0.0719,
+    "peak_rss_kib": 35968,
+    "stderr": "",
+    "bytes": 21490,
+    "raster_images": 0,
+    "vector_paths": 37
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "liquidity_debt",
+    "exit_code": 0,
+    "seconds": 0.0702,
+    "peak_rss_kib": 36224,
+    "stderr": "",
+    "bytes": 21530,
+    "raster_images": 0,
+    "vector_paths": 41
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "working_capital_days",
+    "exit_code": 1,
+    "seconds": 0.0616,
+    "peak_rss_kib": 32384,
+    "stderr": "error: cannot compare none and none\n    ┌─ @preview/primaviz:0.10.0/src/charts/line.typ:312:31\n    │\n312 │   let nt = nice-ticks(calc.min(..all-values), calc.max(..all-values), count: t.tick-count)\n    │                                ^^^^^^^^^^^^"
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "coverage",
+    "exit_code": 1,
+    "seconds": 0.0652,
+    "peak_rss_kib": 32384,
+    "stderr": "error: cannot compare none and none\n    ┌─ @preview/primaviz:0.10.0/src/charts/line.typ:312:31\n    │\n312 │   let nt = nice-ticks(calc.min(..all-values), calc.max(..all-values), count: t.tick-count)\n    │                                ^^^^^^^^^^^^"
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "negative_bars",
+    "exit_code": 0,
+    "seconds": 0.0658,
+    "peak_rss_kib": 35648,
+    "stderr": "",
+    "bytes": 17156,
+    "raster_images": 0,
+    "vector_paths": 28
+  },
+  {
+    "candidate": "primaviz",
+    "chart": "all_null",
+    "exit_code": 1,
+    "seconds": 0.0554,
+    "peak_rss_kib": 32256,
+    "stderr": "error: cannot compare none and none\n    ┌─ @preview/primaviz:0.10.0/src/charts/line.typ:312:31\n    │\n312 │   let nt = nice-ticks(calc.min(..all-values), calc.max(..all-values), count: t.tick-count)\n    │                                ^^^^^^^^^^^^"
+  }
+]

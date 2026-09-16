@@ -20,6 +20,7 @@ COPY pdf_service/ pdf_service/
 COPY contracts/ contracts/
 COPY backend/ backend/
 COPY migrate_db.py migrate_db.py
+COPY tools/migrate_report_editorial.py tools/migrate_report_editorial.py
 
 # Stage data files (taxonomy, rating tables) outside volume mount path
 # The entrypoint will sync these to /app/data on every startup

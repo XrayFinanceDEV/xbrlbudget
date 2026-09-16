@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { REPORT_SECTIONS } from "@/components/report/report-types";
 
 const page = readFileSync(join(__dirname, "..", "app", "report", "page.tsx"), "utf-8");
+const dossier = readFileSync(join(__dirname, "..", "components", "final-report", "Dossier.tsx"), "utf-8");
 const CANONICAL_IDS = [
   "scope", "executive-summary", "sources", "adjustments", "closing", "assumptions",
   "income-forecast", "balance-forecast", "cashflow-sustainability", "indicators-risks",
@@ -17,18 +18,21 @@ describe("ordine del report finale", () => {
 
   it("renders every stable anchor in exactly the TOC order", () => {
     const positions = REPORT_SECTIONS.map((section) => {
-      const position = page.indexOf(`<section id=\"${section.id}\"`);
+      const marker = section.id === "appendices" ? "<DossierContent report={model}" : `<section id=\"${section.id}\"`;
+      const position = page.indexOf(marker);
       expect(position, `missing anchor ${section.id}`).toBeGreaterThan(-1);
       return position;
     });
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(dossier).toContain('<section id="appendices"');
   });
 
-  it("loads only the final-report model and has explicit stale regeneration", () => {
-    expect(page).toContain("getFinalReport(selectedCompanyId!, scenarioId!)");
+  it("loads the versioned editorial session and has explicit stale regeneration", () => {
+    expect(page).toContain("getEditorialSession(selectedCompanyId!, scenarioId!)");
     expect(page).not.toContain("useAnalysis(");
     expect(page).not.toContain("useScenarios(");
+    expect(page).toContain('reason.code === "forecast_stale"');
     expect(page).toContain("generateForecast(selectedCompanyId, scenarioId)");
-    expect(page).toContain("regenerateFinalReport(() => generateForecast(selectedCompanyId, scenarioId), report.refetch)");
+    expect(page).toContain("await completeAction(actionScope)");
   });
 });

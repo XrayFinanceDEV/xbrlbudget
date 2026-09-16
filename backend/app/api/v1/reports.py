@@ -1,8 +1,8 @@
 """
 Reports API endpoint - AI comments for report sections
 """
-from typing import Dict, Optional
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from typing import Annotated, Dict, Optional
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -14,8 +14,9 @@ from app.services.ai_comments_service import (
     save_comments, save_generated_narrative_blocks, save_user_narrative_blocks,
 )
 from app.schemas.final_report import FinalReportModel, NarrativeSaveRequest
+from app.schemas.final_report_v2 import FinalReportModelV2
 from app.services.final_report_service import (
-    FinalReportChainConflict, FinalReportNotFound, assemble_final_report,
+    FinalReportChainConflict, FinalReportNotFound, FinalReportPeriodUnavailable, assemble_final_report,
     narrative_source_hash,
 )
 from app.api.v1.budget_scenarios import validate_scenario_belongs_to_company
@@ -25,7 +26,7 @@ router = APIRouter()
 
 @router.get(
     "/companies/{company_id}/scenarios/{scenario_id}/final-report",
-    response_model=FinalReportModel,
+    response_model=FinalReportModelV2 | FinalReportModel,
     summary="Get the assembled final report",
 )
 def get_final_report(
@@ -33,13 +34,14 @@ def get_final_report(
     scenario_id: int,
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
-) -> FinalReportModel:
+    schema_version: Annotated[int, Query(ge=1, le=2)] = 1,
+) -> FinalReportModelV2 | FinalReportModel:
     validate_company_owned_by_user(db, company_id, user_id)
     try:
-        return assemble_final_report(db, company_id, scenario_id)
+        return assemble_final_report(db, company_id, scenario_id, schema_version=schema_version)
     except FinalReportNotFound as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
-    except FinalReportChainConflict as error:
+    except (FinalReportChainConflict, FinalReportPeriodUnavailable) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
 
 
@@ -167,3 +169,7 @@ def save_ai_comments(
     validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
     save_comments(db, scenario_id, comments)
     return get_stored_comments(db, scenario_id)
+
+
+from app.api.v1.editorial_notes import router as editorial_router
+router.include_router(editorial_router)

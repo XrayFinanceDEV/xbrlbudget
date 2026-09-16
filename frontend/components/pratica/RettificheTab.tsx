@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   ArrowRight,
   Check,
   Loader2,
@@ -65,6 +66,7 @@ import {
   NON_POSTABLE_FIELDS,
   allowedCounterpartCategories,
   computeCpDelta,
+  spiegazioneRiclassifica,
   COUNTERPART_GROUPS,
   RETTIFICHE_BS_ATTIVO,
   RETTIFICHE_BS_PN,
@@ -1221,12 +1223,19 @@ export function RettificheTab({
                   ) : p.mode === "riclassifica" ? (
                     /* Riclassifica: simple same-side move, always opposite delta, no split */
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      {/* Il verso è quello della massa: con un delta positivo la riga
+                          modificata RICEVE dalla contropartita, quindi la freccia punta
+                          verso di lei. */}
+                      {p.delta >= 0 ? (
+                        <ArrowLeft className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
                       {counterpartPicker((newField) => update({
                         counterpartField: newField,
                         counterpartLabel: labelOf(newField),
                         proposedDelta: -p.delta,
-                        explanation: `Riclassifica: ${p.editedLabel} → ${labelOf(newField)}`,
+                        explanation: spiegazioneRiclassifica(p.editedLabel, labelOf(newField), p.delta),
                       }))}
                       <span className={cn(
                         "text-sm font-mono tabular-nums font-semibold w-36 text-right",

@@ -328,3 +328,26 @@ export interface DoubleEntryProposal {
 
 export const RETTIFICHE_MAX = 20;
 
+
+/**
+ * La didascalia di una riclassifica, col verso giusto.
+ *
+ * In «riclassifica» la contropartita prende sempre il delta OPPOSTO: se la riga
+ * modificata sale, la massa arriva DALLA contropartita; se scende, va VERSO la
+ * contropartita. La frase invece diceva sempre «riga modificata → contropartita»,
+ * quindi con un valore in aumento raccontava l'esatto contrario di quel che i
+ * numeri facevano — e chi legge il giornale non ha altro modo di sapere che cosa
+ * si e' mosso. E' successo davvero: «Riclassifica: Acconti → Rimanenze materie
+ * prime» con +287.312,00 sugli acconti e -287.312,00 sulle materie, cioe' tutto il
+ * magazzino finito negli acconti a fornitori mentre la riga diceva il contrario.
+ */
+export function spiegazioneRiclassifica(
+  etichettaModificata: string,
+  etichettaContropartita: string,
+  delta: number,
+): string {
+  const [da, a] = delta >= 0
+    ? [etichettaContropartita, etichettaModificata]
+    : [etichettaModificata, etichettaContropartita];
+  return `Riclassifica: ${da} → ${a}`;
+}

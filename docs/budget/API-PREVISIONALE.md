@@ -660,7 +660,7 @@ porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo v
 | `backend/app/services/assumptions_service.py` | il bulk, e il `try/except` che produce il 200 con `forecast_generated: false` |
 | `backend/app/services/forecast_freshness.py` | unica misura condivisa di freschezza — `forecast_stale`, `assumptions_updated_at`, `forecast_updated_at` (§1.1) |
 | `backend/app/services/analysis_service.py` | compone `/analysis` e vi aggiunge lo stato di freschezza condiviso |
-| `backend/app/api/v1/budget_scenarios.py` | `PATCH /ce-override` + `_CE_OVERRIDE_FIELDS`, `POST /generate?clear_overrides`, i 3 endpoint dei commenti AI, `POST /promote` |
+| `backend/app/api/v1/budget_scenarios.py` | `PATCH /ce-override` (l'allowlist `CE_OVERRIDE_FIELDS` è definita in `backend/app/services/assumptions_service.py`), `POST /generate?clear_overrides`, i 3 endpoint dei commenti AI, `POST /promote` |
 | `backend/app/services/promote_service.py` | precondizione di freschezza, due cancelli semantici, sostituzione e copia verificata |
 | `calculations/forecast_engine.py` | override nel CE, `_apply_sp_overrides`, DSO/DIO/DPO derivati, `validate_pregresso`, la classe `_Overdraft` |
 | `calculations/projection_common.py` | i kernel puri condivisi: `runoff_schedule`, `tax_settlement_saldo_acconto`, `pregresso_opening_masses`, e le regole del debito bancario (`e_contratto_pregresso`, `contratti_da_riga_finanziamento`, `residuo_prestiti_nuovi`, `quota_breve_prestiti_nuovi`, `separa_prestiti_nuovi`) |

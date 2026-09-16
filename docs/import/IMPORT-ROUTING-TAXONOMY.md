@@ -17,7 +17,7 @@
 > fallback) senza rompere gli altri rami.
 >
 > **STATO: implementato.** Il router descritto in §4 è realtà nel modulo
-> [`importers/bilancio_classifier.py`](../importers/bilancio_classifier.py) e gira
+> [`importers/bilancio_classifier.py`](../../importers/bilancio_classifier.py) e gira
 > per primo in `pdf_importer.import_pdf_balance_sheet`. Questo documento copre il
 > **routing** (quale estrattore prende il file); i due documenti complementari coprono:
 > - [`IMPORT-BALANCING-SCHEME.md`](IMPORT-BALANCING-SCHEME.md) — lo **schema di quadratura L0→L5** applicato a valle di ogni rotta.

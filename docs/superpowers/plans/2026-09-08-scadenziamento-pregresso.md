@@ -1533,3 +1533,18 @@ CCN, current ratio e circolante di Altman.
 > nella stessa famiglia di `tax_settlement_saldo_acconto`). Stato attuale: `CLAUDE.md` ›
 > «Intra-Year Engine», `docs/budget/API-PREVISIONALE.md` §9. (Nota aggiunta dal riallineamento
 > del 2026-09-11.)
+> in `docs/frontend/PRATICA-PERCORSO.md` §passi e in `docs/budget/FORECASTING_GUIDE.md` passi 5 e 6.
+
+> **SUPERATO DAL LOTTO «RILIEVI» DEL 2026-09-15** (riallineamento 2026-09-16). Alcuni nomi che
+> questo piano introduceva non esistono più: `PregressoTable` e `equalInstalments` sono stati
+> ritirati senza sostituto (via la tabella con le celle €/%, ora ogni voce ha la propria griglia
+> per anno), e il modulo `lib/budget-pregresso-tabella.ts` non c'è più: la sua parte viva
+> (`PREGRESSO_LABELS`, `openingMasses`, `openingMassLong`, `isPlanEmpty`, `residualAfter`,
+> `normalizePregresso`, `validatePregresso`) è passata a `lib/budget-pregresso-circolante.ts`, e
+> quella «oltre 12 mesi» a `lib/budget-pregresso-oltre.ts` (`OLTRE_KEYS`, `pianoBase`, `oltreRows`,
+> `withOltreAmount`, `OLTRE_NOTA`, `OLTRE_STATI`), con i flussi in `lib/budget-pregresso-flussi.ts`
+> (`flussiPregresso`). Il passo 6 «Pregresso e nuovo» di questo piano non esiste più: il percorso
+> ipotesi è a sette passi e gli scadenziamenti del pregresso stanno al passo 5 «Patrimoniale
+> pregresso» (`components/budget/wizard/steps/StepPatrimonialePregresso.tsx`). Stato attuale:
+> `CLAUDE.md` › «Il percorso unico "Pratica"», `docs/frontend/PRATICA-PERCORSO.md` §passi 5-7,
+> `docs/budget/FORECASTING_GUIDE.md` passi 5 e 6.

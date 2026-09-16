@@ -2115,3 +2115,14 @@ git commit -m "docs(budget): anteprima del previsionale e percorso a sette passi
 - [ ] **Step 1:** Dev server accesi (backend da `backend/` con `DEV_USER_ID=dev-user-001`, riavviato dopo le modifiche a `calculations/`; frontend `npm run dev`). Dispacciare il collaudatore con il perimetro della spec §8 «A mano»: scenario esistente riaperto → stessi valori; salva senza modifiche → `ForecastYear` identico (confronto via `/analysis` prima/dopo); slider 0/100; fabbisogno scoperto al passo 6 e ritorno al passo 6 dal salvataggio; override su CE Prev. sopravvive; passo ricordato al refresh; layout a 1100px.
 - [ ] **Step 2:** Per ogni rilievo riproducibile: correggere, test se il difetto è in un modulo puro, commit `fix(budget): …`.
 - [ ] **Step 3:** Merge del branch su `main` (finishing-a-development-branch).
+---
+
+> **SUPERATO DAL LOTTO «RILIEVI» DEL 2026-09-15** (riallineamento 2026-09-16). Due nomi di questo
+> piano non esistono più: `components/budget/wizard/steps/StepAltreVociCE.tsx` e
+> `lib/budget-altre-voci-step.ts` (con `rowsAltreVociCe`) sono stati cancellati dal Task 11 dei
+> rilievi, e `rowsPregressoNuovo` è stato sostituito da `rowsDebitoCassaPfn` in
+> `lib/budget-piano-step.ts`. Il percorso ipotesi è ora a
+> **sette** passi (`scenario`, `fatturato`, `costi`, `circolante`, `patrimoniale-pregresso`,
+> `patrimoniale-piano`, `imposte`): `lib/budget-wizard-steps.ts` è l'unica fonte, e lo stato
+> attuale è descritto in `docs/frontend/PRATICA-PERCORSO.md` §passi e
+> `docs/budget/FORECASTING_GUIDE.md` passi 5 e 6.

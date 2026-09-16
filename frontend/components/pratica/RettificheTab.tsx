@@ -45,7 +45,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { formatEuro, formatInputNumber, parseInputNumber } from "@/lib/pratica-format";
+import { formatEuro, formatEuroPreciso, formatInputNumber, parseInputNumber } from "@/lib/pratica-format";
+import {
+  SOGLIA_CHIUSURA_AUTOMATICA,
+  chiusuraAutomatica,
+  chiusuraSbilancio,
+  quadra,
+  scartoQuadratura,
+} from "@/lib/pratica-quadratura";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { ATTIVO_CODES, PASSIVO_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
 import { COUNTERPART_OPTIONS, isDettaglio, labelOf } from "@/lib/ivcee-catalog";
@@ -315,20 +322,14 @@ export function RettificheTab({
     return u;
   };
 
-  // Confirm the active proposal: write the entry to the log, apply deltas to corrections, persist.
-  // Le due destinazioni di default per la correzione di quadratura a partita
-  // singola: una sul lato attivo, una sul lato passivo (YAGNI: nessun target
-  // picker in questo task, quindi solo i due default usati da
-  // openSbilancioCorrection). Le etichette vengono da labelOf() — la stessa
-  // fonte che il pannello journal e la tabella sopra usano per rendere la
-  // voce — cosi' la spiegazione della rettifica non contraddice la
-  // didascalia mostrata nella tabella. `side` guida il SEGNO del delta (vedi
-  // sotto), non l'indice nell'array: dedurlo dal prefisso del codice
-  // funzionerebbe oggi ma si romperebbe al primo campo aggiunto fuori schema.
-  const SBILANCIO_TARGETS: { field: string; label: string; side: "attivo" | "passivo" }[] = [
-    { field: "sp09_disponibilita_liquide", label: labelOf("sp09_disponibilita_liquide"), side: "attivo" },
-    { field: "sp16g_altri_debiti_breve", label: labelOf("sp16g_altri_debiti_breve"), side: "passivo" },
-  ];
+  // Lo scarto di quadratura che resterebbe DOPO la conferma, cioe' sullo stato
+  // passato per recalcAggregates (vedi la nota sul segno in openSbilancioCorrection).
+  // Una funzione sola per il riquadro in testa, per il riepilogo e per la
+  // chiusura: le destinazioni, le soglie e il segno stanno in lib/pratica-quadratura.ts.
+  const scartoProiettato = (): number => {
+    const projected = recalcAggregates({ ...corrections });
+    return scartoQuadratura({ ...original, ...projected });
+  };
 
   // Apre la modalita' "Correggi Import" (partita singola) pre-compilata con lo
   // scarto esatto. L'importo e' un dato, non una scelta: il dialog lo mostra
@@ -353,32 +354,19 @@ export function RettificheTab({
   // In entrambi i casi: delta = -gap su un campo dell'attivo, delta = +gap su un
   // campo del passivo.
   const openSbilancioCorrection = () => {
-    // Copia: recalcAggregates non deve mutare lo stato "corrections" del render.
-    const projected = recalcAggregates({ ...corrections });
-    const pv = (k: string) => projected[k] ?? original[k] ?? 0;
-    const projAttivo = ATTIVO_CODES.reduce((s, k) => s + pv(k), 0);
-    const projPN = pnFields.reduce((s, k) => s + pv(k), 0);
-    const projPassivo = projPN + pv("sp14_fondi_rischi") + pv("sp15_tfr")
-      + pv("sp16_debiti_breve") + pv("sp17_debiti_lungo") + pv("sp18_ratei_risconti_passivi");
-    const gap = Math.round((projAttivo - projPassivo) * 100) / 100;
-    if (Math.abs(gap) < 0.01) return;
-    // Default: l'attivo eccede -> si toglie dalla cassa; il passivo eccede ->
-    // si tolgono altri debiti.
-    const target = gap > 0 ? SBILANCIO_TARGETS[0] : SBILANCIO_TARGETS[1];
-    const delta = target.side === "attivo" ? -gap : gap;
+    const chiusura = chiusuraSbilancio(scartoProiettato());
+    if (!chiusura) return;
     setActiveProposal({
       id: Date.now(),
       mode: "correggi_import",
-      editedField: target.field,
-      editedLabel: target.label,
-      delta,
+      editedField: chiusura.field,
+      editedLabel: chiusura.label,
+      delta: chiusura.delta,
       counterpartField: "",
       counterpartLabel: "",
       proposedDelta: 0,
       accepted: true,
-      explanation:
-        `Correzione di quadratura: scarto di importazione ${formatEuro(Math.abs(gap))} ` +
-        `imputato a ${target.label}`,
+      explanation: chiusura.explanation,
     });
   };
 
@@ -496,6 +484,54 @@ export function RettificheTab({
     setLog(newLog);
   };
 
+  // La conferma chiude da sola lo scarto di arrotondamento dell'importazione
+  // (fino a 2 €, decisione del proprietario del 2026-09-16): la correzione
+  // finisce in giornale come ogni altra — visibile, spiegata e cancellabile —
+  // e il foglio che la proiezione legge quadra davvero. Sopra i 2 € non si
+  // tocca nulla: quell'importo non è rumore, e chiuderlo resta un gesto
+  // dell'utente dal pulsante «Chiudi sbilancio».
+  //
+  // Stessa disciplina di confirmActiveEdit: lo stato locale si muove SOLO se
+  // il server ha accettato. Un salvataggio rifiutato non deve far proseguire
+  // con un foglio che a schermo sembra chiuso e sul server non lo è.
+  const confermaEProsegui = async () => {
+    const chiusura = chiusuraAutomatica(scartoProiettato());
+    if (chiusura) {
+      const updated = { ...corrections };
+      updated[chiusura.field] =
+        (updated[chiusura.field] ?? original[chiusura.field] ?? 0) + chiusura.delta;
+      const newEntry: RettificaEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        edited_field: chiusura.field,
+        edited_label: chiusura.label,
+        edit_delta: chiusura.delta,
+        counterpart_field: "_correzione_import",
+        counterpart_label: "Correzione importazione",
+        counterpart_delta: 0,
+        explanation: chiusura.explanation,
+        created_at: new Date().toISOString(),
+      };
+      const final = recalcAggregates(updated);
+      const newLog = [...log, newEntry];
+      if (newLog.filter((e) => e.entry_type !== "confirm").length > RETTIFICHE_MAX) {
+        toast.error(
+          `Massimo ${RETTIFICHE_MAX} rettifiche: cancellane una per chiudere lo scarto ` +
+          `di ${formatEuroPreciso(Math.abs(chiusura.delta))}`,
+        );
+        return;
+      }
+      const ok = await onSave(final, newLog);
+      if (!ok) return;
+      setCorrections(final);
+      setLog(newLog);
+      toast.success(
+        `Scarto di quadratura ${formatEuroPreciso(Math.abs(chiusura.delta))} chiuso su ${chiusura.label}`,
+      );
+    }
+    setShowSummaryDialog(false);
+    onNext();
+  };
+
   // Compute totals
   const val = (k: string) => corrections[k] ?? original[k] ?? 0;
   const refVal = (k: string) => referenceYearData?.[k] ?? 0;
@@ -508,8 +544,12 @@ export function RettificheTab({
   const totalPN = pnFields.reduce((s, k) => s + val(k), 0);
   const totalPassivo = totalPN + val("sp14_fondi_rischi") + val("sp15_tfr")
     + val("sp16_debiti_breve") + val("sp17_debiti_lungo") + val("sp18_ratei_risconti_passivi");
-  const balanceDiff = Math.abs(totalAttivo - totalPassivo);
-  const isBalanced = balanceDiff < 1;
+  // Lo scarto si misura al centesimo e con la soglia del motore: sotto 1 € il
+  // riquadro dava per quadrato un foglio che la proiezione poi rifiutava —
+  // e nascondeva il pulsante che lo avrebbe chiuso (lib/pratica-quadratura.ts).
+  const scartoCorrente = scartoQuadratura({ ...original, ...corrections });
+  const balanceDiff = Math.abs(scartoCorrente);
+  const isBalanced = quadra(scartoCorrente);
 
   const colCount = hasRef ? 5 : 4;
 
@@ -666,7 +706,12 @@ export function RettificheTab({
             <div>
               <span className="font-medium">Verifica quadratura: </span>
               Totale Attivo {formatEuro(totalAttivo)} | Totale Passivo {formatEuro(totalPassivo)}
-              {!isBalanced && <span className="ml-2">(diff: {formatEuro(balanceDiff)})</span>}
+              {!isBalanced && <span className="ml-2">(diff: {formatEuroPreciso(balanceDiff)})</span>}
+              {!isBalanced && balanceDiff <= SOGLIA_CHIUSURA_AUTOMATICA && (
+                <span className="ml-2 text-xs">
+                  — scarto di arrotondamento: viene chiuso alla conferma
+                </span>
+              )}
             </div>
             {isBalanced ? (
               <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
@@ -1367,7 +1412,7 @@ export function RettificheTab({
             const fv = (k: string) => corrections[k] ?? original[k] ?? 0;
             const tA = ATTIVO_CODES.reduce((s, k) => s + fv(k), 0);
             const tP = PASSIVO_CODES.reduce((s, k) => s + fv(k), 0);
-            const balanced = Math.abs(tA - tP) < 1;
+            const balanced = quadra(scartoQuadratura({ ...original, ...corrections }));
 
             const renderSection = (title: string, changes: ChangedField[]) => {
               if (changes.length === 0) return null;
@@ -1458,7 +1503,7 @@ export function RettificheTab({
                       </span>
                     ) : (
                       <span className="text-yellow-600 dark:text-yellow-400 font-medium text-xs">
-                        Sbilancio: {formatEuro(tA - tP)}
+                        Sbilancio: {formatEuroPreciso(tA - tP)}
                       </span>
                     )}
                   </div>
@@ -1471,7 +1516,7 @@ export function RettificheTab({
             <Button variant="outline" onClick={() => setShowSummaryDialog(false)}>
               Torna alle Rettifiche
             </Button>
-            <Button onClick={() => { setShowSummaryDialog(false); onNext(); }}>
+            <Button onClick={confermaEProsegui} disabled={saving}>
               <Check className="h-4 w-4 mr-1.5" />
               Conferma e Prosegui
             </Button>

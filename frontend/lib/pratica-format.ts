@@ -31,6 +31,21 @@ export function formatEuro(value: number): string {
   }).format(value);
 }
 
+/**
+ * Come `formatEuro`, ma coi centesimi. Serve dove il centesimo È il dato: lo
+ * scarto di quadratura vale 0,23 € e arrotondato all'euro si legge «0 €»,
+ * cioè esattamente il numero che blocca la proiezione scritto come se non
+ * esistesse.
+ */
+export function formatEuroPreciso(value: number): string {
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 export function formatPct(value: number): string {
   if (!Number.isFinite(value)) return "-";
   return `${value.toFixed(1)}%`;

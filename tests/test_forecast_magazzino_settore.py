@@ -125,8 +125,13 @@ def test_nell_infrannuale_l_edilizia_scala_il_magazzino_e_l_industria_lo_riporta
     # nella tab Indicatori.
     messaggio = diagnostici[0]["message"]
     assert "140.000,00" in messaggio
-    # E dice quanti giorni vale la giacenza, non solo che il rapporto «non è
-    # calcolabile»: 150.000 su 100.000 di acquisti sono 540 giorni. Il vecchio
-    # testo mandava in Rettifiche anche quando non c'era nulla da correggere.
+    # Il messaggio parte dalla conclusione, non dalla spiegazione tecnica: il
+    # proprietario non aveva capito che gli si stava dicendo «magazzino fermo»
+    # («inizialmente io non avevo capito», 2026-09-16). Prima diceva «Rapporto di
+    # rotazione non calcolabile» e mandava in Rettifiche anche quando non c'era
+    # nulla da correggere.
+    assert messaggio.startswith("Magazzino a lenta rotazione:")
+    # 150.000 su 100.000 di consumi: 540 giorni, cioè più di un anno di scorta.
     assert "540 giorni" in messaggio
-    assert "Rimanenze:" in messaggio
+    assert "di scorta" in messaggio
+    assert "residuo mai inventariato" in messaggio

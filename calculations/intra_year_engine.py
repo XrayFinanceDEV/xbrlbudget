@@ -211,6 +211,58 @@ _NOMI_VOCE = {
 }
 
 
+_TITOLI_LENTA_ROTAZIONE = {
+    'sp05_rimanenze': 'Magazzino a lenta rotazione',
+    'sp06_crediti_breve': 'Crediti a lento incasso',
+    'sp16_debiti_breve_operativo': 'Debiti operativi a lento pagamento',
+}
+
+_FLUSSI = {
+    'sp05_rimanenze': 'di consumi',
+    'sp06_crediti_breve': 'di ricavi',
+    'sp16_debiti_breve_operativo': 'di costi',
+}
+
+_DA_VERIFICARE = {
+    'sp05_rimanenze': (
+        'Un magazzino che non si muove è spesso un residuo mai inventariato, o una voce '
+        'che magazzino non è: lavori su commessa, merci in conto deposito, materiale già '
+        'consumato e mai scaricato. Se invece è normale per questa attività il risultato è '
+        'giusto e non c\'è nulla da correggere.'
+    ),
+}
+
+_DA_VERIFICARE_GENERICO = (
+    'Se è normale per questa attività il risultato è giusto e non c\'è nulla da correggere; '
+    'altrimenti controlla in Rettifiche la classificazione delle due grandezze.'
+)
+
+
+def _titolo_lenta_rotazione(field: str) -> str:
+    return _TITOLI_LENTA_ROTAZIONE.get(field, 'Rotazione non misurabile')
+
+
+def _flusso_di(field: str) -> str:
+    return _FLUSSI.get(field, 'della base')
+
+
+def _da_verificare(field: str) -> str:
+    return _DA_VERIFICARE.get(field, _DA_VERIFICARE_GENERICO)
+
+
+def _anni(stock, base) -> str:
+    """«quasi due anni», perché 701 giorni non si leggono da soli."""
+    stock, base = Decimal(str(stock or 0)), Decimal(str(base or 0))
+    if base <= 0:
+        return 'un tempo non calcolabile'
+    anni = stock / base
+    if anni >= Decimal('1.75'):
+        return f"quasi {(anni + Decimal('0.25')).quantize(Decimal('1'))} anni di scorta"
+    if anni >= Decimal('1'):
+        return 'più di un anno di scorta'
+    return f"{(anni * Decimal('12')).quantize(Decimal('1'))} mesi di scorta"
+
+
 def _nome_voce(field: str) -> str:
     """Il nome della voce come lo legge l'utente: «Rimanenze», non «sp05_rimanenze»."""
     return _NOMI_VOCE.get(field, field)
@@ -1351,14 +1403,12 @@ class IntraYearEngine:
             # li scriveva grezzi — «146931.36» — cioè l'unica riga del programma
             # in cui un euro si legge come lo scrive Python.
             'message': (
-                f"{_nome_voce(field)}: la giacenza vale {_giorni(stock_di_riferimento, base_usata)} "
-                f"della base {origine_base}, cioè {eur_it(stock_di_riferimento)} contro "
-                f"{eur_it(base_usata)}. Oltre {soglia_testo} il rapporto di rotazione descrive il "
-                f"proprio denominatore invece dell'azienda, quindi la giacenza osservata "
-                f"({eur_it(carried)}) viene riportata invece di essere proiettata. Se questa voce "
-                f"davvero non ruota su quella base — lavori su commessa, merci a lenta rotazione, "
-                f"un'azienda di servizi — è il risultato giusto e non c'è nulla da correggere; "
-                f"altrimenti controlla in Rettifiche la classificazione delle due grandezze."
+                f"{_titolo_lenta_rotazione(field)}: {_nome_voce(field).lower()} per "
+                f"{eur_it(stock_di_riferimento)} contro {eur_it(base_usata)} {_flusso_di(field)} "
+                f"{origine_base}, cioè {_giorni(stock_di_riferimento, base_usata)} "
+                f"({_anni(stock_di_riferimento, base_usata)}). Oltre {soglia_testo} la rotazione "
+                f"non misura più l'azienda, quindi la proiezione tiene il valore osservato "
+                f"({eur_it(carried)}) invece di proiettarlo. {_da_verificare(field)}"
             ),
         })
         return carried

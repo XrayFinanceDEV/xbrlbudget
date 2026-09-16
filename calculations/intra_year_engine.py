@@ -197,11 +197,6 @@ _MIN_OBSERVED_TO_PROJECTED_RATIO = Decimal('0.50')
 _MIN_TURNOVER_OBSERVATION_MONTHS = 3
 
 
-def _giorni(rapporto: Decimal) -> str:
-    """Un rapporto giacenza/flusso scritto come lo legge l'utente: «71 giorni»."""
-    return f"{(Decimal(str(rapporto)) * Decimal('360')).quantize(Decimal('1'))} giorni"
-
-
 def _turnover_ratio(stock, base, max_ratio=_MAX_TURNOVER_RATIO):
     """
     Rapporto giacenza/base dell'anno di riferimento, oppure ``None`` quando è

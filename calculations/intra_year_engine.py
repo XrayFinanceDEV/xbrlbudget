@@ -1071,11 +1071,15 @@ class IntraYearEngine:
             'field': field,
             'amount': str(carried),
             'soglia_giorni': None if soglia is None else str(soglia),
+            # Importi in formato italiano, come ogni altro messaggio rivolto
+            # all'utente (`turnover_projection_below_observed` qui sopra): questo
+            # li scriveva grezzi — «146931.36» — cioè l'unica riga del programma
+            # in cui un euro si legge come lo scrive Python.
             'message': (
                 f"Rapporto di rotazione non calcolabile per {field}: la base "
-                f"dell'anno di riferimento ({ref_base}) non spiega la giacenza "
-                f"({ref_stock}). Riportata la giacenza infrannuale osservata "
-                f"({carried}) invece di proiettarla; da verificare in Rettifiche."
+                f"dell'anno di riferimento ({eur_it(ref_base)}) non spiega la giacenza "
+                f"({eur_it(ref_stock)}). Riportata la giacenza infrannuale osservata "
+                f"({eur_it(carried)}) invece di proiettarla; da verificare in Rettifiche."
             ),
         })
         return carried

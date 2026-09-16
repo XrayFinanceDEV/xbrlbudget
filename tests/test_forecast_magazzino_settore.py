@@ -115,3 +115,7 @@ def test_nell_infrannuale_l_edilizia_scala_il_magazzino_e_l_industria_lo_riporta
     rimanenze, cassa, diagnostici = _infrannuale(1)
     assert (rimanenze, cassa) == (D("140000.00"), D("11000.00"))
     assert [d.get("soglia_giorni") for d in diagnostici] == ["365"]
+    # Gli importi del messaggio si leggono in italiano, come in ogni altra
+    # diagnostica: li scriveva grezzi (140000.00), e quel messaggio va a schermo
+    # nella tab Indicatori.
+    assert "140.000,00" in diagnostici[0]["message"]

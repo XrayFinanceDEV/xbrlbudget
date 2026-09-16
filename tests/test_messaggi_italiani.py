@@ -94,9 +94,14 @@ def test_il_diagnostico_dell_infrannuale_e_italiano_e_il_codice_resta():
         SimpleNamespace(sp02_immob_immateriali=D("1000"), sp16_debiti_breve=D("0")),
         SimpleNamespace(), _zero_projection(), _assumption(), 9)
     diagnostico = next(d for d in motore._diagnostics if d["code"] == "unfunded_financing_requirement")
+    # Il messaggio nomina l'importo e le vie d'uscita reali dell'infrannuale
+    # (2026-09-16): prima diceva «aggiungi un'ipotesi di finanziamento esplicita»,
+    # che dalla tab Proiezione non si puo' fare. L'importo si scrive all'italiana.
     assert diagnostico["message"] == (
-        "L'attivo proiettato supera le fonti di finanziamento esplicite: aggiungi un'ipotesi di finanziamento "
-        "esplicita; nessun debito è stato creato automaticamente.")
+        "L'attivo proiettato supera le fonti di finanziamento esplicite di 1.000,00: la cassa non può "
+        "andare sotto zero, quindi il buco resta in vista come differenza fra attivo e passivo e nessun "
+        "debito è stato creato automaticamente. Il piano richiede quella finanza: ricalcola con il "
+        "circolante storico, correggi i dati nelle Rettifiche, oppure dichiara un finanziamento.")
 
 
 def test_check_quadratura_dice_lo_sbilancio_all_europea():

@@ -1593,7 +1593,7 @@ class IntraYearEngine:
             ('sp16e_debiti_tributari_breve',) if sp16e_governed is not None else ()
         )
         sp16d, sp16e, sp16f, sp16g = self._distribute_sp16_operativo(
-            ref_bs, sp16_operativo, sp16_escludi
+            ref_bs, sp16_operativo, sp16_escludi, partial_bs=partial_bs
         )
         if sp16e_governed is not None:
             sp16e = sp16e_governed
@@ -2455,25 +2455,37 @@ class IntraYearEngine:
             )
         return (Decimal('0'),) * 7
 
-    def _distribute_sp16_operativo(self, ref_bs, sp16_operativo_total, escludi=()):
+    def _distribute_sp16_operativo(self, ref_bs, sp16_operativo_total, escludi=(), partial_bs=None):
         """Distribute only the OPERATING residual of sp16 (fornitori/
-        tributari/previdenziali/altri) using the reference year's
-        proportions. Financial debt (banche/altri finanziatori/obbligazioni,
-        sp16a-c) is never part of this residual: it is carried forward from
-        the partial year as its own block (decisione B,
-        indagine-1-debito-bancario.md) and is not touched here."""
+        tributari/previdenziali/altri). Financial debt (banche/altri
+        finanziatori/obbligazioni, sp16a-c) is never part of this residual: it is
+        carried forward from the partial year as its own block (decisione B,
+        indagine-1-debito-bancario.md) and is not touched here.
+
+        La COMPOSIZIONE viene dal parziale, con ripiego sul riferimento: e' la
+        stessa scelta gia' fatta per i crediti (indagine-2) e per il debito
+        bancario (indagine-1). Presa dal riferimento, il totale proiettato veniva
+        ridistribuito con le proporzioni di un anno fa e le singole righe
+        saltavano — su AMBIENTA 2026/6M i debiti previdenziali passavano da
+        194.632,00 a 84.779,00, cioe' la proiezione dava per pagati 110.000 EUR di
+        contributi che nessuno aveva deciso di pagare. Il livello lo decidono i
+        giorni (storici o infrannuali, scelta dell'utente); la composizione e' un
+        fatto di oggi."""
         fields = (
             'sp16d_debiti_fornitori_breve', 'sp16e_debiti_tributari_breve',
             'sp16f_debiti_previdenza_breve', 'sp16g_altri_debiti_breve',
         )
         pool = tuple(f for f in fields if f not in escludi)
-        total = sum((_get_field(ref_bs, f) for f in pool), Decimal('0'))
-        if total > 0:
-            r = sp16_operativo_total / total
-            return tuple(
-                _get_field(ref_bs, f) * r if f in pool else Decimal('0')
-                for f in fields
-            )
+        for origine in (partial_bs, ref_bs):
+            if origine is None:
+                continue
+            total = sum((_get_field(origine, f) for f in pool), Decimal('0'))
+            if total > 0:
+                r = sp16_operativo_total / total
+                return tuple(
+                    _get_field(origine, f) * r if f in pool else Decimal('0')
+                    for f in fields
+                )
         if sp16_operativo_total != 0:
             self._diagnostics.append({
                 'code': 'missing_short_debt_breakdown',

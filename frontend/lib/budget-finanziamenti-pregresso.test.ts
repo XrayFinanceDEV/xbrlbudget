@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, FinancingLoanInput } from "@/types/api";
 import {
-  contrattiPregressi, contrattoRows, controlliBanche, controlloAltri, nuovoContratto, prestitiNuovi,
-  quotaMutui, restaStato, serveInizializzareFidi, unisciContratti, withRimborso,
+  chiusuraResidui, contrattiPregressi, contrattoRows, controlliBanche, controlloAltri, nuovoContratto,
+  prestitiNuovi, quotaMutui, restaStato, serveInizializzareFidi, unisciContratti, withRimborso,
 } from "./budget-finanziamenti-pregresso";
 
 // sp17a 557.500 + sp17b 150.000 = sp17 707.500 (quadra sull'aggregato): il debito bancario base
@@ -50,8 +50,8 @@ describe("budget-finanziamenti-pregresso", () => {
     expect(quotaMutui(bs, 90000)).toBe(82500);
     const c = controlliBanche(bs, 90000, [mutuo, mcc], 3, 2026);
     expect(c.fidiOltre).toBeNull();
-    expect(c.quadra).toEqual({ ok: true, testo: "Fidi 90.000 € + residui dei finanziamenti 640.000 € · debiti verso banche nel bilancio: 730.000 €", esito: "quadra" });
-    expect(c.rata).toEqual({ ok: true, testo: "Rimborsi 2027 dei finanziamenti: 82.500 € · quota dei mutui entro 12 mesi: 82.500 €", esito: "coerente" });
+    expect(c.quadra).toEqual({ ok: true, testo: "Fidi 90.000 € + residui dei finanziamenti 640.000 € · debiti verso banche nel bilancio: 730.000 €", esito: "quadra", differenza: 0 });
+    expect(c.rata).toEqual({ ok: true, testo: "Rimborsi 2027 dei finanziamenti: 82.500 € · quota dei mutui entro 12 mesi: 82.500 €", esito: "coerente", differenza: 0 });
     const k = controlliBanche(bs, 200000, [mutuo], 3, 2026);
     expect(k.fidiOltre?.esito).toBe("da correggere");
     expect(k.quadra).toMatchObject({ ok: false, esito: "differenza 200.000 €" });
@@ -64,6 +64,43 @@ describe("budget-finanziamenti-pregresso", () => {
     expect(sforo.quadra).toMatchObject({ ok: false, esito: "differenza -10.000 €" });
     expect(controlliBanche(bs, 90000, [{ ...mutuo, repayments: [100000, 0, 0] }, mcc], 3, 2026).rata.esito).toBe("17.500 € oltre la quota a breve");
     expect(controlliBanche(bs, 90000, [{ ...mutuo, repayments: [60000, 0, 0] }, mcc], 3, 2026).rata.esito).toBe("nel 2027 ne scadono 22.500 € in più");
+  });
+  // Il caso segnalato dal proprietario il 2026-09-16: debito bancario 960.937,42 nel bilancio,
+  // fidi 450.000 e residuo dichiarato 510.937. Il client diceva «quadra» (misurava all'euro) e il
+  // motore rifiutava il piano (misura al centesimo): verde a sinistra, rifiuto a destra, e i 42
+  // centesimi non comparivano da nessuna parte perché ogni importo era reso all'euro.
+  it("42 centesimi non sono «quadra»: la soglia e la resa sono quelle del motore", () => {
+    const bs42 = {
+      sp16_debiti_breve: "450000", sp16a_debiti_banche_breve: "450000",
+      sp17_debiti_lungo: "510937.42", sp17a_debiti_banche_lungo: "510937.42",
+    } as unknown as BalanceSheet;
+    const uno: FinancingLoanInput = { ...mutuo, name: "Finanziamento A", opening_residual: 510937, repayments: [43409, 45000, 48000] };
+    const c = controlliBanche(bs42, 450000, [uno], 3, 2026);
+    expect(c.quadra.ok).toBe(false);
+    expect(c.quadra.esito).toBe("differenza 0,42 €");
+    // Il bersaglio si legge al centesimo: è la cifra che l'utente deve raggiungere.
+    expect(c.quadra.testo).toContain("960.937,42 €");
+    // Gli importi tondi restano tondi: nessun «,00» sparso ovunque.
+    expect(c.quadra.testo).toContain("Fidi 450.000 €");
+    // Un clic chiude lo scarto, sul contratto più grosso e dicendo quale.
+    const fix = chiusuraResidui([uno], c.quadra.differenza);
+    expect(fix).toEqual({ indice: 0, nome: "Finanziamento A", importo: 0.42 });
+    const dopo = controlliBanche(bs42, 450000, [{ ...uno, opening_residual: 510937.42 }], 3, 2026);
+    expect(dopo.quadra).toMatchObject({ ok: true, esito: "quadra" });
+  });
+  it("la chiusura si offre solo per uno scarto da arrotondamento", () => {
+    const a: FinancingLoanInput = { ...mutuo, name: "Piccolo", opening_residual: 1000 };
+    const b: FinancingLoanInput = { ...mutuo, name: "Grosso", opening_residual: 9000 };
+    // Il bersaglio è il residuo più alto, non il primo della lista.
+    expect(chiusuraResidui([a, b], 1.5)).toMatchObject({ indice: 1, nome: "Grosso" });
+    // Sopra i due euro è una scelta di piano: la fa l'utente.
+    expect(chiusuraResidui([a, b], 2.5)).toBeNull();
+    // Dentro la tolleranza del motore non c'è nulla da chiudere.
+    expect(chiusuraResidui([a, b], 0.01)).toBeNull();
+    // Senza contratti non c'è dove posarlo.
+    expect(chiusuraResidui([], 0.42)).toBeNull();
+    // Mai un residuo negativo.
+    expect(chiusuraResidui([{ opening_residual: 0.1, interest_rate: 0, repayments: [] }], -1)).toBeNull();
   });
   it("controllo sugli altri finanziatori", () => {
     expect(controlloAltri(bs, [{ opening_residual: 150000, interest_rate: 0, repayments: [] }])).toMatchObject({ ok: true, esito: "quadra" });

@@ -52,6 +52,20 @@ def eur_it(amount: Decimal) -> str:
     return f"{q:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
 
+def scarto_it(mancante: Decimal) -> str:
+    """«mancano 0,42» / «ce ne sono 0,42 di troppo»: lo scarto detto, non da dedurre.
+
+    I messaggi dei cancelli sul debito pregresso nominavano tre importi e lasciavano la
+    sottrazione a chi legge. Su uno scarto di 42 centesimi contro un debito di 960.937,42 la
+    somma «torna» a occhio — il proprietario l'ha segnalato esattamente così («a me la somma
+    torna corretta», 2026-09-16) — e la schermata non dava altro modo di scoprire che cosa
+    correggere.
+    """
+    if mancante > ZERO:
+        return f"mancano {eur_it(mancante)}"
+    return f"ce ne sono {eur_it(-mancante)} di troppo"
+
+
 def base_bank_debt(getter: Callable[[str], Decimal]) -> Decimal:
     """Base-year bank debt across both maturity buckets.
 

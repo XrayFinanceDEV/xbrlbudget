@@ -20,7 +20,7 @@ from calculations.projection_common import (
     tax_settlement_saldo_acconto, soglia_giorni_magazzino,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
     quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
-    eur_it,
+    eur_it, scarto_it,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -2314,7 +2314,8 @@ class ForecastEngine:
             if abs(totale - base_altri) > Decimal('0.01'):
                 raise ValueError(
                     f"La somma dei residui degli altri finanziatori ({eur_it(totale)}) deve coincidere "
-                    f"con i debiti verso altri finanziatori dell'anno base ({eur_it(base_altri)})"
+                    f"con i debiti verso altri finanziatori dell'anno base ({eur_it(base_altri)}): "
+                    f"{scarto_it(base_altri - totale)}"
                 )
         use_detailed_existing_schedule = detailed_opening_total > 0 or regime_esplicito
         if use_detailed_existing_schedule:
@@ -2322,16 +2323,19 @@ class ForecastEngine:
             base_bank_total = base_bank_debt(getter)
             coperto = detailed_opening_total + (fidi if regime_esplicito else Decimal('0'))
             if abs(base_bank_total - coperto) > Decimal('0.01'):
+                # Lo scarto si dice, non si lascia dedurre da tre importi: al centesimo la
+                # somma «torna» a occhio e nessuna schermata mostra la cifra da correggere.
+                scarto = scarto_it(base_bank_total - coperto)
                 if regime_esplicito:
                     raise ValueError(
                         f"Fidi e anticipi ({eur_it(fidi)}) più i residui dei finanziamenti "
                         f"({eur_it(detailed_opening_total)}) devono coincidere con il debito "
-                        f"bancario dell'anno base ({eur_it(base_bank_total)})"
+                        f"bancario dell'anno base ({eur_it(base_bank_total)}): {scarto}"
                     )
                 raise ValueError(
                     f"La somma dei residui iniziali dei finanziamenti "
                     f"({eur_it(detailed_opening_total)}) deve coincidere con il debito "
-                    f"bancario dell'anno base ({eur_it(base_bank_total)})"
+                    f"bancario dell'anno base ({eur_it(base_bank_total)}): {scarto}"
                 )
         return financing_loans, use_detailed_existing_schedule, contratti_altri
 

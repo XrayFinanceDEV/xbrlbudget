@@ -90,6 +90,12 @@ def test_rifiuti_in_italiano():
     assert res["forecast_generated"] is False and "superano i debiti verso banche a breve" in res["message"]
     res, *_ = _genera("fidi-non-quadra", _rows(bank_lines_amount=80000))
     assert res["forecast_generated"] is False and "devono coincidere con il debito bancario" in res["message"]
+    # Lo SCARTO si dice, non si lascia dedurre da tre importi: su 42 centesimi la somma «torna»
+    # a occhio, e il proprietario ha segnalato proprio questo («a me la somma torna corretta»,
+    # 2026-09-16) davanti a un messaggio che nominava 450.000,00 + 510.937,00 e 960.937,42.
+    assert "mancano 10.000,00" in res["message"], res["message"]
+    res, *_ = _genera("fidi-sforati", _rows(bank_lines_amount=95000))
+    assert res["forecast_generated"] is False and "ce ne sono 5.000,00 di troppo" in res["message"], res["message"]
 
 
 def test_senza_fidi_nulla_cambia():

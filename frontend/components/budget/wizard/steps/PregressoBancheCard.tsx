@@ -25,7 +25,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { euro, num } from "@/lib/budget-format";
+// Al centesimo: `euro` arrotonda all'euro e scriverebbe «0 €» proprio sullo scarto da chiudere.
+import { formatCurrencyDetailed } from "@/lib/formatters";
 import {
+  chiusuraResidui,
   contrattiPregressi,
   contrattoRows,
   controlliBanche,
@@ -142,6 +145,13 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
     scriviContratti(withRimborso(pregressi, k, i, value, horizon));
   const onAggiungi = () => scriviContratti([...pregressi, nuovoContratto(pregressi.length + 1, horizon)]);
   const onUnisci = () => scriviContratti(unisciContratti(pregressi, horizon));
+  const chiusura = chiusuraResidui(pregressi, controlli.quadra.differenza);
+  const onChiudiDifferenza = () => {
+    if (!chiusura) return;
+    const residuo = num(pregressi[chiusura.indice]?.opening_residual);
+    scriviContratti(withCampo(pregressi, chiusura.indice, "opening_residual",
+      Math.round((residuo + chiusura.importo) * 100) / 100));
+  };
   const onElimina = (k: number) => scriviContratti(pregressi.filter((_, idx) => idx !== k));
 
   return (
@@ -298,6 +308,16 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
         <div className="space-y-2">
           {controlli.fidiOltre && <ControlRow c={controlli.fidiOltre} tono="errore" />}
           <ControlRow c={controlli.quadra} tono={controlli.quadra.ok ? "ok" : "errore"} />
+          {/* Uno scarto da arrotondamento si chiude qui, con un clic e dicendo dove finisce.
+              Senza, l'utente doveva indovinare i centesimi: il motore rifiuta oltre 0,01 € e
+              tutti gli importi del passo si leggevano all'euro. */}
+          {chiusura && (
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" size="sm" onClick={onChiudiDifferenza}>
+                {chiusura.importo >= 0 ? "Aggiungi" : "Togli"} {formatCurrencyDetailed(Math.abs(chiusura.importo))} {chiusura.importo >= 0 ? "a" : "da"} {chiusura.nome}
+              </Button>
+            </div>
+          )}
           <ControlRow c={controlli.rata} tono={controlli.rata.esito === "coerente" ? "ok" : "avviso"} />
         </div>
       </CardContent>

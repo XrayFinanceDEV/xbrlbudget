@@ -10,7 +10,8 @@
  *
  * **Il formato dei controlli.** `quadra` (banche) e il controllo degli altri finanziatori
  * misurano lo STESSO scostamento: `differenza = massa_del_bilancio − massa_dichiarata`, e sono
- * SIMMETRICI — `|differenza| < 1` → «quadra», altrimenti `esito = "differenza {differenza} €"`.
+ * SIMMETRICI — `|differenza| <= 0,01` (la soglia del motore, vedi `TOLLERANZA_MOTORE`) → «quadra»,
+ * altrimenti `esito = "differenza {differenza} €"`, al centesimo quando l'importo non è tondo.
  * Il segno di `differenza` non si tocca a mano: `eur0` lo mostra così com'è (positivo = carenza,
  * negativo = sforamento), con lo stesso `Intl.NumberFormat` di `formatNumber`
  * (`lib/formatters.ts`) — sullo stesso runtime producono lo stesso carattere per il segno meno
@@ -50,13 +51,42 @@ export interface Controllo {
   ok: boolean;
   testo: string;
   esito: string;
+  /** `massa_del_bilancio − massa_dichiarata`, il numero su cui `ok` decide: serve al passo per
+   *  offrire la chiusura di uno scarto da arrotondamento (`chiusuraResidui`). */
+  differenza: number;
 }
+
+/** La soglia del MOTORE: `assemble_financing` (`calculations/forecast_engine.py`) rifiuta il
+ *  piano quando `fidi + Σ residui` si scosta dal debito bancario dell'anno base di più di 0,01 €.
+ *  Il client misurava a meno di 1 € e diceva «quadra» su uno scarto di 42 centesimi che il motore
+ *  rifiutava: il passo mostrava verde a sinistra e il rifiuto del motore a destra, sulla stessa
+ *  schermata, e non c'era modo di uscirne perché tutti gli importi erano resi all'euro — i
+ *  centesimi che il cancello misura non si vedevano da nessuna parte (segnalato dal proprietario
+ *  il 2026-09-16, su un bilancio da 960.937,42 €). Stessa classe della tolleranza doppia delle
+ *  Rettifiche: due soglie che si contraddicono bloccano l'utente senza dirgli perché. */
+export const TOLLERANZA_MOTORE = 0.01;
+
+/** Fino a due euro uno scarto è arrotondamento, non una scelta di piano: la card offre di
+ *  chiuderlo con un clic, dichiarando su quale contratto lo posa. È la stessa scala che il
+ *  proprietario ha scelto per la chiusura automatica delle Rettifiche. */
+export const SOGLIA_CHIUSURA_RESIDUI = 2;
 
 type FonteBilancio = Partial<BalanceSheet> | Record<string, unknown> | null | undefined;
 
 const v = (bs: FonteBilancio, field: string): number => num((bs as Record<string, unknown> | null | undefined)?.[field]);
 const sum = (arr: readonly number[]): number => arr.reduce((acc, x) => acc + x, 0);
 const eur0 = (x: number): string => new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 }).format(Math.round(x));
+
+/** All'euro quando l'importo è tondo, al centesimo quando non lo è. I controlli di questa card
+ *  si giocano sul centesimo (vedi `TOLLERANZA_MOTORE`): renderli sempre all'euro nascondeva
+ *  proprio la cifra da correggere — «450.000 + 510.937 = 960.937» tornava a occhio mentre il
+ *  bilancio diceva 960.937,42. Gli importi tondi restano tondi: nessun «,00» ovunque. */
+const eurAuto = (x: number): string => {
+  const cents = Math.round(x * 100);
+  const decimali = cents % 100 === 0 ? 0 : 2;
+  return new Intl.NumberFormat("it-IT", { minimumFractionDigits: decimali, maximumFractionDigits: decimali })
+    .format(cents / 100);
+};
 
 /** Riempie `repayments` di zeri fino a `horizon` e tronca oltre — mai muta l'array d'origine. */
 function padTrunc(repayments: number[] | null | undefined, horizon: number): number[] {
@@ -193,8 +223,37 @@ export function quotaMutui(baseBs: FonteBilancio, fidi: number): number {
 
 function quadraCheck(target: number, dichiarato: number, testo: string): Controllo {
   const differenza = target - dichiarato;
-  const ok = Math.abs(differenza) < 1;
-  return { ok, testo, esito: ok ? "quadra" : `differenza ${eur0(differenza)} €` };
+  const ok = Math.abs(differenza) <= TOLLERANZA_MOTORE;
+  return { ok, testo, esito: ok ? "quadra" : `differenza ${eurAuto(differenza)} €`, differenza };
+}
+
+/**
+ * Su quale contratto posare uno scarto da arrotondamento, e quanto — `null` quando non si
+ * applica: scarto già dentro la tolleranza del motore, oltre i due euro (lì è una scelta di
+ * piano, la fa l'utente), nessun contratto su cui posarlo, o un residuo che diventerebbe
+ * negativo.
+ *
+ * Il bersaglio è il contratto con il residuo più alto: è quello su cui un centesimo si perde,
+ * e sceglierlo a caso renderebbe il pulsante imprevedibile. Il nome torna insieme all'importo
+ * perché la card lo dice prima di scrivere — una chiusura silenziosa qui riscriverebbe un dato
+ * che l'utente ha dichiarato.
+ */
+export function chiusuraResidui(
+  items: readonly Scadenziabile[],
+  differenza: number,
+): { indice: number; nome: string; importo: number } | null {
+  if (Math.abs(differenza) <= TOLLERANZA_MOTORE) return null;
+  if (Math.abs(differenza) > SOGLIA_CHIUSURA_RESIDUI) return null;
+  if (items.length === 0) return null;
+  let indice = 0;
+  items.forEach((item, i) => {
+    if (residuoDi(item) > residuoDi(items[indice])) indice = i;
+  });
+  // Al centesimo: è l'importo che finisce dentro un campo, non una misura descrittiva, e
+  // `differenza` arriva da una sottrazione in virgola mobile (0,4200000000419095 sul caso reale).
+  const importo = Math.round(differenza * 100) / 100;
+  if (residuoDi(items[indice]) + importo < 0) return null;
+  return { indice, nome: items[indice].name || `Finanziamento ${indice + 1}`, importo };
 }
 
 /** I tre controlli della card «Debiti verso banche»: fidi entro `sp16a`, fidi + residui dei
@@ -215,29 +274,29 @@ export function controlliBanche(
   const fidiOltre: Controllo | null = fidi > sp16a + 0.5
     ? {
       ok: false,
-      testo: `Fidi e anticipi (${eur0(fidi)} €) superano i debiti a breve del bilancio (${eur0(sp16a)} €)`,
+      testo: `Fidi e anticipi (${eurAuto(fidi)} €) superano i debiti a breve del bilancio (${eurAuto(sp16a)} €)`,
       esito: "da correggere",
+      differenza: sp16a - fidi,
     }
     : null;
 
   const quadra = quadraCheck(
     debitoBancario,
     fidi + residui,
-    `Fidi ${eur0(fidi)} € + residui dei finanziamenti ${eur0(residui)} € · debiti verso banche nel bilancio: ${eur0(debitoBancario)} €`,
+    `Fidi ${eurAuto(fidi)} € + residui dei finanziamenti ${eurAuto(residui)} € · debiti verso banche nel bilancio: ${eurAuto(debitoBancario)} €`,
   );
 
   const rep1 = sum(items.map((item) => Math.min(residuoDi(item), Number(item.repayments?.[0]) || 0)));
   const quota = Math.max(0, quotaMutui(baseBs, fidi));
   const dRata = rep1 - quota;
+  // La riga della rata resta all'euro e con la sua tolleranza larga: non è un cancello del
+  // motore, è un raffronto informativo fra due grandezze che non devono coincidere al centesimo.
+  const testoRata = `Rimborsi ${baseYear + 1} dei finanziamenti: ${eur0(rep1)} € · quota dei mutui entro 12 mesi: ${eur0(quota)} €`;
   const rata: Controllo = Math.abs(dRata) < 1
-    ? {
-      ok: true,
-      testo: `Rimborsi ${baseYear + 1} dei finanziamenti: ${eur0(rep1)} € · quota dei mutui entro 12 mesi: ${eur0(quota)} €`,
-      esito: "coerente",
-    }
+    ? { ok: true, testo: testoRata, esito: "coerente", differenza: dRata }
     : dRata < 0
-      ? { ok: true, testo: `Rimborsi ${baseYear + 1} dei finanziamenti: ${eur0(rep1)} € · quota dei mutui entro 12 mesi: ${eur0(quota)} €`, esito: `nel ${baseYear + 1} ne scadono ${eur0(-dRata)} € in più` }
-      : { ok: true, testo: `Rimborsi ${baseYear + 1} dei finanziamenti: ${eur0(rep1)} € · quota dei mutui entro 12 mesi: ${eur0(quota)} €`, esito: `${eur0(dRata)} € oltre la quota a breve` };
+      ? { ok: true, testo: testoRata, esito: `nel ${baseYear + 1} ne scadono ${eur0(-dRata)} € in più`, differenza: dRata }
+      : { ok: true, testo: testoRata, esito: `${eur0(dRata)} € oltre la quota a breve`, differenza: dRata };
 
   return { fidiOltre, quadra, rata };
 }
@@ -249,7 +308,7 @@ export function controlloAltri(baseBs: FonteBilancio, items: readonly Scadenziab
   return quadraCheck(
     target,
     residui,
-    `Residui degli altri finanziatori: ${eur0(residui)} € · altri finanziatori nel bilancio: ${eur0(target)} €`,
+    `Residui degli altri finanziatori: ${eurAuto(residui)} € · altri finanziatori nel bilancio: ${eurAuto(target)} €`,
   );
 }
 

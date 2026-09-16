@@ -21,7 +21,7 @@ from calculations.projection_common import (
     tfr_accrual_quota, posizione_tributaria_fine_anno, deferred_tax_position,
     new_financing_schedule, soglia_giorni_magazzino,
     e_contratto_pregresso, contratti_da_riga_finanziamento, separa_prestiti_nuovi,
-    quota_breve_prestiti_nuovi, eur_it,
+    quota_breve_prestiti_nuovi, eur_it, scarto_it,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -2261,7 +2261,7 @@ class IntraYearEngine:
                 raise ValueError(
                     f"La somma dei residui iniziali dei finanziamenti "
                     f"({eur_it(detailed_opening)}) deve coincidere con il debito "
-                    f"bancario della fonte ({eur_it(bank_debt)})"
+                    f"bancario della fonte ({eur_it(bank_debt)}): {scarto_it(bank_debt - detailed_opening)}"
                 )
             _, rata, _ = new_financing_schedule(pregressi, anno)
             breve = min(sp16_bank, rata)

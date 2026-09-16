@@ -361,6 +361,13 @@ export default function InfraannualePage() {
   const [analysisError, setAnalysisError] = useState<unknown>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [projectionDiagnostics, setProjectionDiagnostics] = useState<ForecastDiagnostic[]>([]);
+  // L'importo del fabbisogno scoperto, se il motore l'ha dichiarato: e' esattamente
+  // la differenza che la tabella dello SP proiettato mostra in fondo.
+  const fabbisognoScoperto = (() => {
+    const d = projectionDiagnostics.find((x) => x.code === "unfunded_financing_requirement");
+    const importo = d?.amount === undefined || d?.amount === null ? NaN : Number(d.amount);
+    return Number.isFinite(importo) ? importo : null;
+  })();
   const [extraAlerts, setExtraAlerts] = useState<ExtraAccountingAlertsState>(
     createEmptyExtraAlerts,
   );
@@ -2073,6 +2080,22 @@ export default function InfraannualePage() {
                 priorYear={comparison.prior_year}
                 showAnnualized
               />
+              )}
+              {/* La riga «DIFFERENZA» non e' un errore di calcolo: la cassa non puo'
+                  andare sotto zero, quindi il motore ferma il plug a zero e lascia il
+                  buco in vista invece di tapparlo con debito che nessuno ha deciso.
+                  Senza questa spiegazione la tabella sembra rotta. */}
+              {fabbisognoScoperto !== null && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/20">
+                  <span className="font-medium">
+                    La differenza fra attivo e passivo è il fabbisogno finanziario non coperto:{" "}
+                    {formatEuro(fabbisognoScoperto)}.
+                  </span>{" "}
+                  Il piano, così com'è, richiede questa finanza nel periodo residuo: la cassa
+                  non può andare sotto zero e il motore non crea debito da solo. Puoi
+                  ricalcolare con il circolante storico, correggere i dati nelle Rettifiche,
+                  oppure prendere atto che serve credito per quell'importo.
+                </div>
               )}
             </CardContent>
           </Card>

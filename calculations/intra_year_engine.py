@@ -649,9 +649,12 @@ class IntraYearEngine:
                 'severity': 'error',
                 'amount': str(-cassa),
                 'message': (
-                    "L'attivo proiettato supera le fonti di finanziamento esplicite: "
-                    "aggiungi un'ipotesi di finanziamento esplicita; nessun debito è "
-                    "stato creato automaticamente."
+                    "L'attivo proiettato supera le fonti di finanziamento esplicite di "
+                    f"{eur_it(-cassa)}: la cassa non può andare sotto zero, quindi "
+                    "il buco resta in vista come differenza fra attivo e passivo e "
+                    "nessun debito è stato creato automaticamente. Il piano richiede "
+                    "quella finanza: ricalcola con il circolante storico, correggi i "
+                    "dati nelle Rettifiche, oppure dichiara un finanziamento."
                 ),
             })
             projected_bs['sp09_disponibilita_liquide'] = Decimal('0.00')
@@ -1636,9 +1639,12 @@ class IntraYearEngine:
                 'severity': 'error',
                 'amount': str(funding_gap),
                 'message': (
-                    "L'attivo proiettato supera le fonti di finanziamento esplicite: "
-                    "aggiungi un'ipotesi di finanziamento esplicita; nessun debito è "
-                    "stato creato automaticamente."
+                    "L'attivo proiettato supera le fonti di finanziamento esplicite di "
+                    f"{eur_it(funding_gap)}: la cassa non può andare sotto zero, quindi "
+                    "il buco resta in vista come differenza fra attivo e passivo e "
+                    "nessun debito è stato creato automaticamente. Il piano richiede "
+                    "quella finanza: ricalcola con il circolante storico, correggi i "
+                    "dati nelle Rettifiche, oppure dichiara un finanziamento."
                 ),
             })
 
@@ -1894,9 +1900,12 @@ class IntraYearEngine:
                 'severity': 'error',
                 'amount': str(funding_gap),
                 'message': (
-                    "L'attivo proiettato supera le fonti di finanziamento esplicite: "
-                    "aggiungi un'ipotesi di finanziamento esplicita; nessun debito è "
-                    "stato creato automaticamente."
+                    "L'attivo proiettato supera le fonti di finanziamento esplicite di "
+                    f"{eur_it(funding_gap)}: la cassa non può andare sotto zero, quindi "
+                    "il buco resta in vista come differenza fra attivo e passivo e "
+                    "nessun debito è stato creato automaticamente. Il piano richiede "
+                    "quella finanza: ricalcola con il circolante storico, correggi i "
+                    "dati nelle Rettifiche, oppure dichiara un finanziamento."
                 ),
             })
 

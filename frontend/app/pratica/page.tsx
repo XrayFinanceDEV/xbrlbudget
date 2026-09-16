@@ -2273,8 +2273,11 @@ export default function InfraannualePage() {
         {/* Le verifiche sulla proiezione stanno IN FONDO, sotto i numeri a cui
             si riferiscono: in testa allontanavano il contenuto della scheda a
             ogni proiezione con una diagnostica. Sono richiamabili dopo essere
-            state chiuse, e la chiusura non sopravvive a una nuova proiezione. */}
-        {(activeTab === "projection" || activeTab === "results" || activeTab === "stampa") && (
+            state chiuse, e la chiusura non sopravvive a una nuova proiezione.
+            Sulla Stampa no: quella scheda e' il report che va al cliente, e le
+            verifiche sono appunti di lavoro per chi la proiezione la costruisce
+            (decisione del proprietario, 2026-09-16). */}
+        {(activeTab === "projection" || activeTab === "results") && (
           <div className="mt-6">
             <ForecastDiagnostics diagnostics={projectionDiagnostics} />
           </div>

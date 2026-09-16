@@ -293,3 +293,48 @@ def test_senza_riferimento_il_cash_out_deriva_dalla_posizione_e_dal_ce():
     assert sp.total_assets == sp.total_liabilities
     assert not [d for d in result['diagnostics']
                 if d['code'] == 'tax_settlement_reclass_below_zero']
+
+
+def test_l_assorbimento_della_posizione_di_apertura_si_dichiara():
+    """Il credito tributario che sparisce al 31/12 non è un azzeramento: è la
+    posizione di apertura che il calcolo a saldo e acconto considera chiusa
+    entro l'anno. Vale più di un sesto della cassa proiettata su un caso reale
+    (AMBIENTA 2026/6M) e finora non lo diceva nulla — il credito spariva dalla
+    colonna e la cassa cresceva senza una riga che lo spiegasse.
+    """
+    db = _sessione()
+    _, scenario = _infrannuale_grezzo(
+        db,
+        rif=dict(sp16a_debiti_banche_breve=D("600000"), sp16e_debiti_tributari_breve=D("200000"),
+                 sp16g_altri_debiti_breve=D("200000"),
+                 sp06a_crediti_clienti_breve=D("1000000")),
+        parziale=dict(sp11_capitale=D("2000000"),
+                      sp16a_debiti_banche_breve=D("600000"),
+                      sp16e_debiti_tributari_breve=D("200000"),
+                      sp06a_crediti_clienti_breve=D("400000"),
+                      sp06e_crediti_tributari_breve=D("300000"),
+                      sp06g_crediti_altri_breve=D("200000")))
+    sp, result = _proietta(db, scenario)
+    assert sp.sp06e_crediti_tributari_breve == D("0.00")
+    dichiarazioni = [d for d in result['diagnostics']
+                     if d['code'] == 'posizione_tributaria_apertura_assorbita']
+    assert len(dichiarazioni) == 1
+    dichiarazione = dichiarazioni[0]
+    # 300.000 di crediti meno 200.000 di debiti: 100.000 netti a credito.
+    assert dichiarazione['amount'] == "100000.00"
+    assert "100.000,00" in dichiarazione['message']
+    assert "a credito" in dichiarazione['message']
+
+
+def test_senza_posizione_aperta_non_si_dichiara_nulla():
+    """Un controllo che non scatta tace: un «nessun problema» ad ogni proiezione
+    non è una diagnostica."""
+    db = _sessione()
+    _, scenario = _infrannuale_grezzo(
+        db,
+        rif=dict(sp16a_debiti_banche_breve=D("600000"), sp06a_crediti_clienti_breve=D("1000000")),
+        parziale=dict(sp11_capitale=D("2000000"), sp16a_debiti_banche_breve=D("600000"),
+                      sp06a_crediti_clienti_breve=D("400000")))
+    _sp, result = _proietta(db, scenario)
+    assert not [d for d in result['diagnostics']
+                if d['code'] == 'posizione_tributaria_apertura_assorbita']

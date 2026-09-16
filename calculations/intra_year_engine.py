@@ -1084,6 +1084,55 @@ class IntraYearEngine:
         })
         return carried
 
+    def _declare_posizione_tributaria(self, posizione, opening_credit, opening_debt):
+        """Dichiara che la posizione tributaria aperta al mese del parziale è
+        considerata CHIUSA entro il 31/12.
+
+        Non è un ripiego né un errore: è la regola dell'infrannuale (spec lotto
+        3A §4.3, decisione del proprietario) — al 31/12 resta solo il saldo
+        dell'anno in corso, imposta meno acconti. Ma l'effetto sulla cassa
+        proiettata può valere più di un sesto della cassa stessa (misurato:
+        157.961,46 € di credito netto su 871.285,37 € di cassa), e finora non lo
+        diceva nulla: il credito spariva dalla colonna e la cassa cresceva senza
+        una riga che lo spiegasse. Chi guarda la proiezione deve poter verificare
+        che quell'incasso avvenga davvero entro l'anno — e se non avverrà, o se
+        quei crediti non sono imposte sui redditi, la via d'uscita è la
+        percentuale su `sp06e`/`sp16e`, che spegne il calcolo automatico.
+
+        Si dichiara solo quando una posizione aperta c'è davvero: una chiave
+        assente vale zero, e un "nessun problema" ad ogni proiezione non è una
+        diagnostica.
+        """
+        netto_apertura = Decimal(str(opening_debt or 0)) - Decimal(str(opening_credit or 0))
+        if netto_apertura == 0:
+            return
+        verso = "a credito" if netto_apertura < 0 else "a debito"
+        cassa = -posizione.cash_out
+        segno = "entrano in cassa" if cassa > 0 else "escono di cassa"
+        self._diagnostics.append({
+            'code': 'posizione_tributaria_apertura_assorbita',
+            'severity': 'warning',
+            'field': 'sp06e_crediti_tributari_breve',
+            'amount': str(abs(netto_apertura)),
+            'closing_credit': str(posizione.closing_credit),
+            'closing_debt': str(posizione.closing_debt),
+            'acconti': str(posizione.acconti),
+            'cash_effect': str(cassa),
+            'message': (
+                f"La posizione tributaria aperta alla data del parziale "
+                f"({eur_it(abs(netto_apertura))} {verso}: crediti "
+                f"{eur_it(opening_credit)} meno debiti {eur_it(opening_debt)}) è "
+                f"considerata chiusa entro il 31/12, come vuole il calcolo a saldo "
+                f"e acconto: al 31/12 resta solo il saldo dell'anno (credito "
+                f"{eur_it(posizione.closing_credit)}, debito "
+                f"{eur_it(posizione.closing_debt)}, acconti "
+                f"{eur_it(posizione.acconti)}). Netto, {eur_it(abs(cassa))} "
+                f"{segno} entro fine anno: verifica che accada davvero, o imposta "
+                f"una percentuale su «Crediti tributari» nelle ipotesi per tenere "
+                f"la posizione in bilancio."
+            ),
+        })
+
     def _declare_reference_financial_debt_undetailed(self, aggregate, ref_bs, partial_fields):
         """Dichiara quando il bilancio di riferimento non ha ALCUN dettaglio
         finanziario (banche/altri finanziatori/obbligazioni) su ``aggregate``
@@ -1369,6 +1418,11 @@ class IntraYearEngine:
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
             sp06e_governed, sp16e_governed = posizione.closing_credit, posizione.closing_debt
+            self._declare_posizione_tributaria(
+                posizione,
+                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+            )
         sp06f_governed = None
         sp07f_governed = None
         sp14b_governed = None
@@ -1701,6 +1755,11 @@ class IntraYearEngine:
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
             sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
+            self._declare_posizione_tributaria(
+                posizione,
+                _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
+                _get_field(partial_bs, 'sp16e_debiti_tributari_breve'),
+            )
         sp06 = sp06a + sp06b + sp06c + sp06d + sp06e + sp06f + sp06g
         sp07 = sp07a + sp07b + sp07c + sp07d + sp07e + sp07f + sp07g
         sp16a, sp17a, sp17b = self._apply_debt_repayment(

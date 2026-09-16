@@ -112,6 +112,14 @@ import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { projectedItemsFromForecast } from "@/lib/pratica-projected-bs";
 import { ceDerivatiDaForecast } from "@/lib/pratica-ce-proiettato";
 import {
+  MODI_CIRCOLANTE,
+  MODO_CIRCOLANTE_PREDEFINITO,
+  etichettaModoCircolante,
+  isModoCircolante,
+  spiegazioneModoCircolante,
+  type ModoCircolante,
+} from "@/lib/pratica-circolante";
+import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
 } from "@/lib/pratica-statement-rows";
@@ -350,8 +358,7 @@ export default function InfraannualePage() {
   // L'ultima modalita' di circolante scelta, così il pulsante della barra in fondo
   // («Calcola e vai agli Indicatori») non torna in silenzio allo storico dopo che
   // l'utente ha chiesto il circolante infrannuale.
-  const [modoCircolante, setModoCircolante] =
-    useState<"storico" | "infrannuale" | "equilibrio">("storico");
+  const [modoCircolante, setModoCircolante] = useState<ModoCircolante>(MODO_CIRCOLANTE_PREDEFINITO);
   const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
   useEffect(() => {
     projectedBSRef.current = projectedBS;
@@ -821,9 +828,7 @@ export default function InfraannualePage() {
   // rimanenze: 'storico' dall'anno intero precedente (assestato), 'infrannuale'
   // da quelli osservati nel periodo. Sono due pulsanti, non un'opzione nascosta:
   // la differenza vale centinaia di migliaia di euro di cassa proiettata.
-  const calculateProjectedBS = async (
-    modoCircolante: "storico" | "infrannuale" | "equilibrio" = "storico",
-  ) => {
+  const calculateProjectedBS = async (modoCircolante: ModoCircolante = MODO_CIRCOLANTE_PREDEFINITO) => {
     if (!comparison || !importResult || !scenario) return;
 
     // Lo SP proiettato NON si calcola qui: lo produce `IntraYearEngine` e lo si
@@ -2030,53 +2035,38 @@ export default function InfraannualePage() {
                   Stato Patrimoniale - Proiezione {fiscalYear}
                 </CardTitle>
                 <CardDescription>
-                  Crediti, debiti e rimanenze calcolati sui giorni di rotazione; scegli se
-                  prenderli dall&apos;anno intero precedente o dal periodo osservato.
-                  Liquidità come differenza.
+                  {spiegazioneModoCircolante(modoCircolante)} Liquidità come differenza.
                 </CardDescription>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setModoCircolante("storico"); calculateProjectedBS("storico"); }}
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={modoCircolante}
+                  onValueChange={(v) => { if (isModoCircolante(v)) setModoCircolante(v); }}
                   disabled={calculatingBS}
-                  title="Giorni di incasso, pagamento e giacenza dell'anno intero precedente: è assestato, ma può assumere un rientro che il periodo non mostra"
                 >
-                  {calculatingBS ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                  )}
-                  Calcola SP (circolante storico)
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setModoCircolante("infrannuale"); calculateProjectedBS("infrannuale"); }}
-                  disabled={calculatingBS}
-                  title="Giorni osservati nel periodo, portati avanti: è il circolante che l'azienda ha adesso"
-                >
-                  {calculatingBS ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                  )}
-                  Calcola SP (circolante infrannuale)
-                </Button>
+                  <SelectTrigger className="h-9 w-[220px] text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODI_CIRCOLANTE.map((modo) => (
+                      <SelectItem key={modo} value={modo}>
+                        {etichettaModoCircolante(modo)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   variant="default"
                   size="sm"
-                  onClick={() => { setModoCircolante("equilibrio"); calculateProjectedBS("equilibrio"); }}
+                  onClick={() => calculateProjectedBS(modoCircolante)}
                   disabled={calculatingBS}
-                  title="Cerca i giorni che fanno chiudere la cassa a zero, senza uscire dal corridoio fra quelli osservati e quelli dell'anno consolidato"
                 >
                   {calculatingBS ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
                     <BarChart3 className="h-4 w-4 mr-2" />
                   )}
-                  Calcola SP (circolante di equilibrio)
+                  {calculatingBS ? "Calcolo in corso…" : "Calcola Proiezione SP"}
                 </Button>
               </div>
             </CardHeader>

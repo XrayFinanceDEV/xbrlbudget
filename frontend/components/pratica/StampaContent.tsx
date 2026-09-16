@@ -16,7 +16,7 @@ import {
 } from "@/lib/api";
 import type { IntraYearComparison, IntraYearComparisonItem } from "@/types/api";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Printer, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2, Printer, Sparkles, X } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -83,6 +83,11 @@ export function StampaContent({
   const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
   const [aiCommentsStale, setAiCommentsStale] = useState(false);
   const [aiCommentsDirty, setAiCommentsDirty] = useState(false);
+  // L'avviso sui commenti stantii si chiude: chi ha fatto una modifica
+  // piccola può decidere che i commenti vanno ancora bene e stampare senza
+  // portarsi dietro il riquadro giallo (decisione del proprietario,
+  // 2026-09-16). Chiuso sparisce anche dal PDF, ed è richiamabile.
+  const [avvisoCommentiChiuso, setAvvisoCommentiChiuso] = useState(false);
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
   const refYear = comparison.reference_year;
   const partialYear = comparison.partial_year;
@@ -98,6 +103,7 @@ export function StampaContent({
           setAiComments(data.comments);
           setAiCommentsStale(data.comments_stale);
           setAiCommentsDirty(false);
+          setAvvisoCommentiChiuso(false);
         }
       })
       .catch(() => {
@@ -419,16 +425,38 @@ export function StampaContent({
         </Button>
       </div>
 
-      {aiCommentsStale && (
-        <Alert className="border-amber-500/50 bg-amber-50 text-amber-900 [&>svg]:text-amber-600 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100 dark:[&>svg]:text-amber-400">
+      {aiCommentsStale && !avvisoCommentiChiuso && (
+        <Alert className="relative border-amber-500/50 bg-amber-50 text-amber-900 [&>svg]:text-amber-600 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100 dark:[&>svg]:text-amber-400">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Commenti non aggiornati</AlertTitle>
+          <AlertTitle className="pr-8">Commenti non aggiornati</AlertTitle>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute right-2 top-2 h-7 w-7 print:hidden"
+            aria-label="Chiudi l'avviso sui commenti"
+            onClick={() => setAvvisoCommentiChiuso(true)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
           <AlertDescription>
             Questi commenti precedono l&apos;ultima proiezione e potrebbero non
             descrivere i numeri riportati nel documento. Rigenera i commenti AI
             oppure aggiornali manualmente prima di consegnare la stampa.
           </AlertDescription>
         </Alert>
+      )}
+      {aiCommentsStale && avvisoCommentiChiuso && (
+        <div className="print:hidden">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => setAvvisoCommentiChiuso(false)}
+          >
+            <AlertTriangle className="h-4 w-4 mr-1.5" />
+            Commenti non aggiornati
+          </Button>
+        </div>
       )}
 
       {/* Header */}

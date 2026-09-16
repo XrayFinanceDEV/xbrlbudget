@@ -468,7 +468,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   commento aggiunto lato client si salva «con successo» e sparisce al ricaricamento.
   La loro data vive in `ai_comments_infrannuale_updated_at`: il GET restituisce anche
   `comments_stale`, confrontato con l'ultimo `ForecastYear`. I commenti legacy senza data sono
-  stantii per prudenza. La Stampa conserva il testo editabile ma mostra l'avviso anche nel PDF.
+  stantii per prudenza. La Stampa conserva il testo editabile e mostra l'avviso anche nel PDF,
+  ma l'avviso si chiude: chiuso sparisce anche dalla stampa e resta richiamabile, perche' una
+  modifica piccola non deve costringere a rigenerare i commenti per consegnare il documento.
 - **Gli elenchi di codici congelati in `ivcee-catalog-parity.test.ts` non si aggiornano per far
   tornare verde la suite.** Se cambiano, una vista ha perso o riordinato una riga: è quello il
   difetto. L'unica eccezione è una riga aggiunta di proposito, che si aggiorna nello stesso commit.

@@ -17,6 +17,7 @@ import {
   bulkUpsertAssumptions,
   generateForecast,
   getCompanyYears,
+  promoteProjection,
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/formatters";
 import { blendedRate, calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
@@ -24,6 +25,12 @@ import { getErrorMessage } from "@/lib/utils";
 import { righeErroriIpotesi } from "@/lib/budget-bulk-errors";
 import { saveNotice } from "@/lib/budget-preview-notice";
 import { patchPraticaPerScenarioAperto } from "@/lib/pratica-ingresso";
+import {
+  budgetRecovery,
+  budgetRecoveryFromInfrannuale,
+  deletedBudgetPraticaPatch,
+  type BudgetRecovery,
+} from "@/lib/budget-recovery";
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
 import { BudgetWizard } from "@/components/budget/wizard/BudgetWizard";
 import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
@@ -100,7 +107,18 @@ const fmtPct = (v: number | string | null | undefined, fallback = 0): number =>
 
 export default function BudgetPage() {
   const router = useRouter();
-  const { selectedCompanyId, selectedCompany, years, yearsLoaded, startupMode, setSelectedCompanyId } = useApp();
+  const {
+    selectedCompanyId,
+    selectedCompany,
+    companies,
+    companiesError,
+    years,
+    yearsLoaded,
+    startupMode,
+    setSelectedCompanyId,
+    refreshCompanies,
+    refreshYears,
+  } = useApp();
   const { pratica, updatePratica } = usePratica();
   const { data: scenarios = [], isLoading: loading, error: scenariosError, refetch: refetchScenarios } = useScenarios(selectedCompanyId);
   const invalidateScenarios = useInvalidateScenarios();
@@ -108,17 +126,66 @@ export default function BudgetPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("list");
   const [editingScenario, setEditingScenario] = useState<BudgetScenario | null>(null);
+  const [recoveringBudget, setRecoveringBudget] = useState(false);
 
   const handleDeleteScenario = async (scenarioId: number) => {
     if (!selectedCompanyId) return;
 
     try {
       await deleteBudgetScenario(selectedCompanyId, scenarioId);
+      const praticaPatch = deletedBudgetPraticaPatch(pratica, selectedCompanyId, scenarioId);
+      if (praticaPatch) updatePratica(praticaPatch);
       invalidateScenarios(selectedCompanyId);
       toast.success("Scenario eliminato con successo");
     } catch (err) {
       console.error("Error deleting scenario:", err);
       toast.error("Errore durante l'eliminazione dello scenario");
+    }
+  };
+
+  // A failed list request is "unknown", not "zero scenarios": never offer a
+  // create action that could duplicate an existing budget we simply failed to
+  // read.
+  const practiceRecovery = scenariosError
+    ? null
+    : budgetRecovery(pratica, selectedCompanyId, scenarios.length);
+  const companyRecoveries = scenariosError || companiesError
+    ? []
+    : (companies.find((company) => company.id === selectedCompanyId)?.scenarios ?? [])
+        .map((source) =>
+          budgetRecoveryFromInfrannuale(source, selectedCompanyId, scenarios.length),
+        )
+        .filter((candidate): candidate is BudgetRecovery => candidate !== null);
+  // Prefer the exact active-practice source.  Without a practice (for example
+  // after reopening /budget from normal navigation), expose every generated
+  // infrannuale so the user can choose without starting a new practice.
+  const recoveries = practiceRecovery ? [practiceRecovery] : companyRecoveries;
+
+  const handleRecoverBudget = async (recovery: BudgetRecovery) => {
+    setRecoveringBudget(true);
+    setError(null);
+    try {
+      if (recovery.promoteProjection) {
+        await promoteProjection(recovery.companyId, recovery.infrannualeScenarioId);
+      }
+      const scenario = await createBudgetScenario(recovery.companyId, recovery.scenario);
+      if (pratica?.companyId === recovery.companyId) {
+        updatePratica({ companyId: recovery.companyId, budgetScenarioId: scenario.id });
+      }
+      await Promise.all([
+        refreshCompanies(),
+        refreshYears(recovery.companyId),
+      ]);
+      invalidateScenarios(recovery.companyId);
+      setEditingScenario(scenario);
+      setActiveTab("info");
+      toast.success("Nuovo scenario budget creato: inserisci le ipotesi");
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Impossibile ricreare lo scenario budget");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setRecoveringBudget(false);
     }
   };
 
@@ -291,9 +358,9 @@ export default function BudgetPage() {
               startupMode (spec 2026-08-08-percorso-unico-pratica-design.md:239-240):
               base_year here would default to Math.max(...years), which is not tied
               to the pratica's corrected FinancialYear and can create a budget
-              scenario on data that never passed Rettifiche. Scenarios are created
-              only via the pratica bridge; editing/deleting existing scenarios
-              below is unaffected. */}
+              scenario on data that never passed Rettifiche. The only creation
+              offered here is the recovery of that exact pratica bridge after its
+              budget was deleted. */}
           <ScenariosList
             scenarios={scenarios}
             loading={loading}
@@ -301,6 +368,9 @@ export default function BudgetPage() {
             onEdit={handleEditScenario}
             onDelete={handleDeleteScenario}
             onRegenerate={setRegenScenarioId}
+            recoveries={recoveries}
+            onRecover={handleRecoverBudget}
+            recovering={recoveringBudget}
           />
         </>
       ) : startupMode ? (
@@ -767,6 +837,9 @@ function ScenariosList({
   onEdit,
   onDelete,
   onRegenerate,
+  recoveries,
+  onRecover,
+  recovering,
 }: {
   scenarios: BudgetScenario[];
   loading: boolean;
@@ -774,6 +847,9 @@ function ScenariosList({
   onEdit: (scenario: BudgetScenario) => void;
   onDelete: (id: number) => void;
   onRegenerate: (id: number) => void;
+  recoveries: BudgetRecovery[];
+  onRecover: (recovery: BudgetRecovery) => void;
+  recovering: boolean;
 }) {
   if (loading) {
     return (
@@ -787,10 +863,30 @@ function ScenariosList({
   if (scenarios.length === 0) {
     return (
       <Card>
-        <CardContent className="py-6 text-center">
+        <CardContent className="py-8 text-center space-y-4">
           <p className="text-muted-foreground">
-            Nessuno scenario presente. Gli scenari si creano dalla pratica guidata, avviabile dalla home.
+            {recoveries.length > 0
+              ? "È disponibile un infrannuale pronto: puoi creare un nuovo scenario budget e inserire nuove ipotesi."
+              : "Nessuno scenario presente. Gli scenari si creano dalla pratica guidata, avviabile dalla home."}
           </p>
+          {recoveries.map((recovery) => (
+            <Button
+              key={recovery.infrannualeScenarioId}
+              onClick={() => onRecover(recovery)}
+              disabled={recovering}
+            >
+              {recovering ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Creazione...</>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4" />
+                  {recoveries.length === 1
+                    ? "Crea nuovo budget"
+                    : `Crea da ${recovery.sourceName}`}
+                </>
+              )}
+            </Button>
+          ))}
         </CardContent>
       </Card>
     );

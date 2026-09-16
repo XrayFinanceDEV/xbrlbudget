@@ -50,8 +50,8 @@ def test_real_base_has_complete_appendices_notes_fonts_and_no_overflow(renderer,
         assert pdf.page_count > 4
         for page in pdf:
             text = page.get_text()
-            assert 'Commento di pagina' in text and 'Spazio riservato' in text
-            assert 'BOZZA' in text and 'Bilancio · rettifiche · ipotesi · proiezioni' in text
+            assert 'Lettura del consulente' in text and 'Spazio riservato' in text
+            assert 'BOZZA' in text and 'Riservato e confidenziale' in text
             if page.number:
                 assert any(title in text for title in titles), 'Continuation lacks statement header'
             assert not page.get_images()

@@ -1,4 +1,4 @@
-// M2-02A base composition. No financial formulas or executable report text.
+// M2-02 definitive editorial composition. No financial formulas or executable report text.
 #let gray-mode = json("options.json").grayscale
 #let navy = if gray-mode { rgb("#262626") } else { rgb("#003049") }
 #let blue = if gray-mode { rgb("#777777") } else { rgb("#669BBC") }
@@ -10,7 +10,7 @@
 #let note-width = body-width
 #let note-height = 26mm
 #let note-font = 9pt
-#let layout-version = "dossier-base-1"
+#let layout-version = "dossier-final-1"
 
 // Typst exposes these static files under their legacy family names.
 #let plex(..arguments) = {
@@ -25,7 +25,7 @@
 #let note-slot() = block(width: note-width, height: note-height)[
   #line(length: 100%, stroke: 0.7pt + rule)
   #v(2pt)
-  #plex(8pt, weight: 600, fill: navy)[Commento di pagina]
+  #plex(8pt, weight: 600, fill: navy)[Lettura del consulente]
   #v(3pt)
   #plex(note-font, fill: muted)[Spazio riservato al commento del dossier.]
 ]
@@ -33,13 +33,18 @@
 #let dossier(report, options, body, note-footer: none) = {
   let accent = if options.grayscale { gray.darken(50%) } else { navy }
   set document(title: report.document.title, author: "Formula Finance",
-    description: "Base editoriale del report budget")
-  set text(font: "IBM Plex Sans", lang: "it", size: 9pt, fill: ink)
-  set par(leading: 3pt, justify: false)
+    description: "Dossier editoriale del report budget")
+  set text(font: "IBM Plex Sans", lang: "it", size: 8.8pt, fill: ink)
+  set par(leading: 3.5pt, justify: false)
   set page(paper: "a4", margin: (left: 16mm, right: 16mm, top: 20mm, bottom: 46mm),
     footer-descent: 4mm,
-    header: context align(right, plex(7pt,
-      fill: if counter(page).get().first() == 1 { white } else { muted }, report.document.title)),
+    header: context {
+      if counter(page).get().first() > 1 {
+        grid(columns: (1fr, auto), column-gutter: 8mm,
+          plex(7pt, weight: 500, fill: muted, report.company.name),
+          align(right, plex(7pt, fill: muted, report.document.title)))
+      }
+    },
     footer: context [
       #marker((kind: "page", content_id: "page-shell"))
       #if note-footer == none { note-slot() } else { note-footer() }
@@ -47,8 +52,8 @@
       #line(length: 100%, stroke: 0.5pt + rule)
       #v(1mm)
       #grid(columns: (1fr, auto),
-        plex(6.8pt, fill: muted)[Bilancio · rettifiche · ipotesi · proiezioni],
-        plex(6.8pt, fill: muted, counter(page).display("1")))
+        plex(6.8pt, fill: muted)[Riservato e confidenziale · Formula Finance],
+        plex(6.8pt, fill: muted, counter(page).display("1 / 1", both: true)))
     ],
     background: context {
       if counter(page).get().first() == 1 {
@@ -66,7 +71,7 @@
 #let cover-heading(report, company-size) = [
     #plex(8pt, fill: white)[REPORT BUDGET]
     #v(7mm)
-    #plex(24pt, weight: 600, fill: white, report.document.title)
+    #plex(27pt, weight: 600, fill: white, report.document.title)
     #v(7mm)
     #plex(company-size, weight: 500, fill: white, report.company.name)
 ]
@@ -85,17 +90,43 @@
     block(height: 88mm, chosen)
   }
   v(9mm)
-  plex(8pt, fill: muted)[PERIMETRO DEL DOCUMENTO]
+  plex(7.4pt, fill: blue, weight: 600, tracking: 0.6pt)[PERIMETRO DEL DOCUMENTO]
   v(3mm)
   plex(16pt, weight: 600, fill: navy)[Dati di partenza, ipotesi e risultati del piano]
-  v(3mm)
-  report.practice.budget_scenario.name
-  v(6mm)
-  plex(9pt)[Il dossier distingue i dati di partenza dalle proiezioni. I prospetti
-    completi sono raccolti nella sezione Allegati.]
   v(5mm)
-  plex(8pt, fill: muted)[Base editoriale in sviluppo. Grafici e commenti per pagina
-    saranno inseriti nei successivi componenti del dossier.]
+  context {
+    let years = report.document.budget_years
+    let budget-period = if years.len() == 1 { str(years.first()) }
+      else { str(years.first()) + " – " + str(years.last()) }
+    let workflow = if report.practice.workflow_type == "infrannuale" { "Bilancio infrannuale" }
+      else if report.practice.workflow_type == "startup" { "Piano startup" }
+      else { "Bilancio annuale" }
+    let source = if report.practice.source_scenario != none {
+      let months = report.practice.source_scenario.period_months
+      report.practice.source_scenario.name + if months == none { "" } else { " · " + str(months) + " mesi" }
+    } else { report.practice.budget_scenario.name }
+    grid(columns: (1fr, 1fr, 1fr), column-gutter: 8mm,
+      [#line(length: 100%, stroke: 0.6pt + rule)
+       #v(2mm)#plex(7pt, fill: muted)[PERCORSO]#v(1mm)#plex(9pt, weight: 500, workflow)],
+      [#line(length: 100%, stroke: 0.6pt + rule)
+       #v(2mm)#plex(7pt, fill: muted)[PERIODO DI PIANO]#v(1mm)#plex(9pt, weight: 500, budget-period)],
+      [#line(length: 100%, stroke: 0.6pt + rule)
+       #v(2mm)#plex(7pt, fill: muted)[ANNO BASE]#v(1mm)#plex(9pt, weight: 500, str(report.practice.budget_scenario.base_year))])
+    v(5mm)
+    plex(7pt, fill: muted)[SCENARIO DI ORIGINE]
+    v(1mm)
+    plex(9pt, weight: 500, source)
+  }
+  v(6mm)
+  plex(7.4pt, fill: blue, weight: 600, tracking: 0.6pt)[CONTENUTI DEL DOSSIER]
+  v(3mm)
+  grid(columns: (1fr, 1fr), column-gutter: 10mm, row-gutter: 2mm,
+    [#plex(8.8pt, weight: 500)[01 · Sintesi e qualità dei dati]],
+    [#plex(8.8pt, weight: 500)[02 · Bilancio e rettifiche]],
+    [#plex(8.8pt, weight: 500)[03 · Ipotesi del piano]],
+    [#plex(8.8pt, weight: 500)[04 · Proiezioni e indicatori]],
+    [#plex(8.8pt, weight: 500)[05 · Lettura per pagina]],
+    [#plex(8.8pt, weight: 500)[06 · Allegati completi]])
 }
 
 #let parent-labels(statement, row) = {

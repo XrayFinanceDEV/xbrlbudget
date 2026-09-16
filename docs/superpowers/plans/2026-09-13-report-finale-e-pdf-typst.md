@@ -1286,3 +1286,21 @@ editoriale definitivo: segue M2-00C per copertura automatica dei commenti,
 persistenza protetta e client v2, quindi M2-02 e gate di export.
 Scoring/pareggio/composizioni complete restano una estensione canonica
 dedicata prima del collaudo definitivo; ogni aggiunta richiede nuovo piano.
+
+### Esecuzione M2-02, impaginazione definitiva — 2026-09-16
+
+Completato il template editoriale di produzione `dossier-final-1`, versione
+`editorial-2`, consumando senza modificarli modello v2, piano misurato, grafici e
+note. Copertina neutrale con perimetro e indice, testatina azienda/report, footer
+riservato con pagina corrente/totale e riquadro `Lettura del consulente` su ogni
+pagina. Tabelle finanziarie a matrice, valori allineati e metadati a corpo ridotto;
+sezione, titolo e periodi vengono ripetuti in tutte le continuazioni. Allegati
+CE/SP/CF completi, sedici grafici vettoriali e catalogo indicatori conservati.
+Nessun KPI scelto arbitrariamente e nessuna formula nel template.
+
+La modifica di versione invalida intenzionalmente i piani precedenti. La matrice
+di collaudo copre i tre workflow e gli orizzonti 1/3/5, con una nota distinta per
+pagina, watermark di bozza, font incorporati, grigio, bounding box, titoli e
+continuazioni. Dettagli e comando riproducibile in
+`docs/testing/M2-02-final-layout.md`. Fixture PDF sintetica in
+`inbox/artifacts/2026-09-16-m2-02-final-layout/report-budget-2027-2029.pdf`.

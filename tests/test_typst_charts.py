@@ -76,7 +76,7 @@ def test_real_graph_matrix_extracts_canonical_values_without_overflow(renderer, 
             text = ' '.join(page.get_text().split())
             assert chart.title in text
             assert ('BOZZA' in text) == draft
-            assert 'Commento di pagina' in text
+            assert 'Lettura del consulente' in text
             assert not page.get_images()
             for metric in chart.series:
                 assert metric.label in text

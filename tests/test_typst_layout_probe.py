@@ -83,7 +83,7 @@ def test_real_base_measurement_matches_pdf_pages_and_exact_source_binding(probe)
     pdf = TypstRenderer(renderer.compiler, renderer.bundle).render(report)
     assert measured.page_count == pdf.page_count
     assert measured.source_hash == report.source_hash and measured.model_hash == report.model_hash
-    assert measured.layout_version == 'dossier-base-1'
+    assert measured.layout_version == 'dossier-final-1'
     assert len(measured.font_hash) == len(measured.layout_hash) == len(measured.asset_hash) == 64
     assert renderer.measure_layout(report) == measured
     assert len([r for r in measured.records if r.kind == 'page']) == pdf.page_count

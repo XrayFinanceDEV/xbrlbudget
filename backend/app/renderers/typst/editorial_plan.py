@@ -31,7 +31,7 @@ class DossierTemplateBundle(ChartTemplateBundle):
         version, _, files = super().read(limits)
         if 'editorial.typ' not in files or _INVENTORY in files:
             raise RendererUnavailable()
-        return version + '+editorial-1', 'editorial.typ', files
+        return version + '+editorial-2', 'editorial.typ', files
 
 
 @dataclass(frozen=True)
@@ -154,7 +154,7 @@ def build_editorial_plan(report: FinalReportModelV2, measurement: LayoutMeasurem
             or type(measurement.records) is not tuple
             or any(type(record) is not DossierRecord for record in measurement.records)
             or not isinstance(measurement.layout_version, str)
-            or not measurement.layout_version.endswith('+native-charts-1+editorial-1')):
+            or not measurement.layout_version.endswith('+native-charts-1+editorial-2')):
         raise ValueError('measurement does not bind to the complete dossier')
     for digest in (measurement.font_hash, measurement.layout_hash, measurement.asset_hash):
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in '0123456789abcdef' for char in digest):

@@ -82,6 +82,7 @@ def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe,
     assert original.model_dump_json() == before
     assert report.source_hash == original.source_hash
     assert report.editorial_readiness.status == 'pending' and not report.editorial_notes
+    report = with_notes(report)
     measurement = verify_editorial_layout(report, probe)
     plan = report.editorial_plan
     assert plan.plan_hash == plan.calculate_plan_hash()
@@ -98,7 +99,13 @@ def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe,
     with fitz.open(stream=artifact.data, filetype='pdf') as pdf:
         assert pdf.page_count == measurement.page_count
         assert pdf.metadata['title'] == report.document.title
-        full_text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+        page_texts = [' '.join(page.get_text().split()) for page in pdf]
+        full_text = ' '.join(page_texts)
+        assert report.document.title in page_texts[0]
+        assert report.company.name in page_texts[0]
+        assert 'PERIMETRO DEL DOCUMENTO' in page_texts[0]
+        assert 'CONTENUTI DEL DOSSIER' in page_texts[0]
+        assert 'Base editoriale in sviluppo' not in full_text
         for statement in report.detailed_statements:
             numbers = [number for number, page in enumerate(plan.pages, 1)
                        if any(part.statement_id == statement.id for part in page.table_parts)]
@@ -106,10 +113,18 @@ def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe,
             if numbers[0] != numbers[-1]:
                 expected_reference += f'–{numbers[-1]}'
             assert expected_reference in full_text
-        for page in pdf:
+            assert all(statement.title in page_texts[number - 1] for number in numbers)
+        for page, note in zip(pdf, report.editorial_notes):
+            text = page_texts[page.number]
             assert page.rect.width < page.rect.height
-            assert 'BOZZA' in page.get_text() and 'Commento di pagina' in page.get_text()
+            assert 'BOZZA' in text and 'Lettura del consulente' in text
+            assert 'Riservato e confidenziale' in text
+            assert f'{page.number + 1} / {pdf.page_count}' in text
+            if page.number:
+                assert report.company.name in text and report.document.title in text
+            assert note.text in text
             assert not page.get_images()
+            assert all(pdf.extract_font(font[0])[3] for font in page.get_fonts())
             for block in page.get_text('dict')['blocks']:
                 for line in block.get('lines', []):
                     for span in line['spans']:

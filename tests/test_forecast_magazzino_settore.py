@@ -123,4 +123,10 @@ def test_nell_infrannuale_l_edilizia_scala_il_magazzino_e_l_industria_lo_riporta
     # Gli importi del messaggio si leggono in italiano, come in ogni altra
     # diagnostica: li scriveva grezzi (140000.00), e quel messaggio va a schermo
     # nella tab Indicatori.
-    assert "140.000,00" in diagnostici[0]["message"]
+    messaggio = diagnostici[0]["message"]
+    assert "140.000,00" in messaggio
+    # E dice quanti giorni vale la giacenza, non solo che il rapporto «non è
+    # calcolabile»: 150.000 su 100.000 di acquisti sono 540 giorni. Il vecchio
+    # testo mandava in Rettifiche anche quando non c'era nulla da correggere.
+    assert "540 giorni" in messaggio
+    assert "Rimanenze:" in messaggio

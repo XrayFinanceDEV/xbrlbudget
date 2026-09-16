@@ -204,6 +204,26 @@ _ETICHETTE_CORRIDOIO = {
 }
 
 
+_NOMI_VOCE = {
+    'sp05_rimanenze': 'Rimanenze',
+    'sp06_crediti_breve': 'Crediti a breve',
+    'sp16_debiti_breve_operativo': 'Debiti operativi a breve',
+}
+
+
+def _nome_voce(field: str) -> str:
+    """Il nome della voce come lo legge l'utente: «Rimanenze», non «sp05_rimanenze»."""
+    return _NOMI_VOCE.get(field, field)
+
+
+def _giorni(stock, base) -> str:
+    """Quanti giorni di quella base sta fermo lo stock: «701 giorni»."""
+    stock, base = Decimal(str(stock or 0)), Decimal(str(base or 0))
+    if base <= 0:
+        return 'un numero di giorni non calcolabile'
+    return f"{(stock / base * Decimal('360')).quantize(Decimal('1'))} giorni"
+
+
 def _percento(quota: Decimal) -> str:
     return f"{(Decimal(str(quota)) * Decimal('100')).quantize(Decimal('1'))}%"
 
@@ -1266,7 +1286,7 @@ class IntraYearEngine:
         )
         if self._modo_circolante == 'infrannuale' and osservato_disponibile:
             ratio = ratio_osservato
-            origine_base = f"del periodo osservato ({eur_it(base_osservata)} annualizzati)"
+            origine_base = "del periodo osservato, annualizzata"
             stock_di_riferimento = observed
         elif (
             self._modo_circolante == 'equilibrio'
@@ -1282,7 +1302,7 @@ class IntraYearEngine:
             self._giorni_corridoio[field] = (ratio_osservato, ratio, ratio_storico)
         else:
             ratio = ratio_storico
-            origine_base = f"dell'anno di riferimento ({eur_it(ref_base)})"
+            origine_base = "dell'anno di riferimento"
             stock_di_riferimento = ref_stock
         if ratio is not None:
             projected = projected_base * ratio
@@ -1315,6 +1335,11 @@ class IntraYearEngine:
             return projected
 
         carried = _get_field(partial_bs, field) if carried_value is None else carried_value
+        base_usata = base_osservata if (usa_osservato_per_base := (
+            self._modo_circolante == 'infrannuale' and osservato_disponibile
+        )) else ref_base
+        stock_di_riferimento = observed if usa_osservato_per_base else ref_stock
+        soglia_testo = 'un anno' if soglia is None or soglia == Decimal('365') else f'{soglia} giorni'
         self._diagnostics.append({
             'code': 'degenerate_turnover_ratio',
             'severity': 'warning',
@@ -1326,10 +1351,14 @@ class IntraYearEngine:
             # li scriveva grezzi — «146931.36» — cioè l'unica riga del programma
             # in cui un euro si legge come lo scrive Python.
             'message': (
-                f"Rapporto di rotazione non calcolabile per {field}: la base "
-                f"{origine_base} non spiega la giacenza "
-                f"({eur_it(stock_di_riferimento)}). Riportata la giacenza infrannuale osservata "
-                f"({eur_it(carried)}) invece di proiettarla; da verificare in Rettifiche."
+                f"{_nome_voce(field)}: la giacenza vale {_giorni(stock_di_riferimento, base_usata)} "
+                f"della base {origine_base}, cioè {eur_it(stock_di_riferimento)} contro "
+                f"{eur_it(base_usata)}. Oltre {soglia_testo} il rapporto di rotazione descrive il "
+                f"proprio denominatore invece dell'azienda, quindi la giacenza osservata "
+                f"({eur_it(carried)}) viene riportata invece di essere proiettata. Se questa voce "
+                f"davvero non ruota su quella base — lavori su commessa, merci a lenta rotazione, "
+                f"un'azienda di servizi — è il risultato giusto e non c'è nulla da correggere; "
+                f"altrimenti controlla in Rettifiche la classificazione delle due grandezze."
             ),
         })
         return carried

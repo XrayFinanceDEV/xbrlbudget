@@ -1299,12 +1299,6 @@ export default function InfraannualePage() {
 
         {!blocked && (<>
 
-        {(activeTab === "projection" || activeTab === "results" || activeTab === "stampa") && (
-          <div className="mb-6">
-            <ForecastDiagnostics diagnostics={projectionDiagnostics} />
-          </div>
-        )}
-
         {/* STEP 0: ANAGRAFICHE */}
         {activeTab === "anagrafiche" && (
           <AnagraficheStep
@@ -2213,6 +2207,17 @@ export default function InfraannualePage() {
             </Card>
           )}
         </div>}
+
+        {/* Le verifiche sulla proiezione stanno IN FONDO, sotto i numeri a cui
+            si riferiscono: in testa allontanavano il contenuto della scheda a
+            ogni proiezione con una diagnostica. Sono richiamabili dopo essere
+            state chiuse, e la chiusura non sopravvive a una nuova proiezione. */}
+        {(activeTab === "projection" || activeTab === "results" || activeTab === "stampa") && (
+          <div className="mt-6">
+            <ForecastDiagnostics diagnostics={projectionDiagnostics} />
+          </div>
+        )}
+
 
         </>)}
 

@@ -30,7 +30,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatEuro, formatPct, deltaPct } from "@/lib/pratica-format";
-import { EDITABLE_CE_CODES, ALWAYS_SHOW_CODES, VP_CODES, EXTRA_ALERT_DEFS } from "@/lib/pratica-codes";
+import { ALWAYS_SHOW_CODES, VP_CODES, EXTRA_ALERT_DEFS } from "@/lib/pratica-codes";
+import { ceDerivatiDaForecast, valoreCeProiettato } from "@/lib/pratica-ce-proiettato";
 import {
   computeIndicators,
   scoreIndicator,
@@ -127,11 +128,17 @@ export function StampaContent({
   const incomeItems = buildIncomeItemsWithEbitda(comparison.income_items, periodMonths);
   const projCEVal = (code: string) => parseFloat(overrides[code] || "0");
 
-  // Helper: get projected value for a CE code
+  // Stessa regola della tab Proiezione, da un modulo solo: override se la riga
+  // è modificabile, valore dedotto dal motore per le variazioni di magazzino,
+  // annualizzazione per il resto. Le due grafie separate di prima erano due modi
+  // di far dire alla Stampa un numero diverso dalla Proiezione.
+  const ceDerivati = ceDerivatiDaForecast(forecastIs);
   const spv = (code: string): number =>
-    EDITABLE_CE_CODES.includes(code)
-      ? projCEVal(code)
-      : (comparison.income_items.find(i => i.code === code)?.annualized_value ?? 0);
+    valoreCeProiettato(code, {
+      overrides,
+      derivati: ceDerivati,
+      annualizzato: (c) => comparison.income_items.find(i => i.code === c)?.annualized_value ?? 0,
+    });
 
   const projVP = VP_CODES.reduce((acc, c) => acc + spv(c), 0);
   const STAMPA_COST_CODES = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
@@ -158,8 +165,7 @@ export function StampaContent({
     if (item.code === "_totale_straord") return projStraord;
     if (item.code === "_profit_before_tax") return projPBT;
     if (item.code === "_net_profit") return projNetProfit;
-    if (EDITABLE_CE_CODES.includes(item.code)) return projCEVal(item.code);
-    return item.annualized_value;
+    return spv(item.code);
   };
 
   // --- BS data ---

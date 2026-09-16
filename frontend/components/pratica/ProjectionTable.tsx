@@ -17,7 +17,8 @@ import {
   parseInputNumber,
   deltaPct,
 } from "@/lib/pratica-format";
-import { ALWAYS_SHOW_CODES, DETAIL_PARENTS, EDITABLE_CE_CODES, VP_CODES } from "@/lib/pratica-codes";
+import { ALWAYS_SHOW_CODES, DERIVED_CE_CODES, DETAIL_PARENTS, EDITABLE_CE_CODES, VP_CODES } from "@/lib/pratica-codes";
+import { valoreCeProiettato } from "@/lib/pratica-ce-proiettato";
 import type { IntraYearComparisonItem } from "@/types/api";
 
 // Projection Table Component (same layout as ComparisonTable but with editable Proiezione)
@@ -28,6 +29,7 @@ export function ProjectionTable({
   partialYear,
   showRevenuePct = false,
   overrides,
+  derivati,
   onOverrideChange,
 }: {
   items: IntraYearComparisonItem[];
@@ -36,6 +38,8 @@ export function ProjectionTable({
   partialYear: number;
   showRevenuePct?: boolean;
   overrides: Record<string, string>;
+  /** Le righe che il motore deduce (variazioni di magazzino), dall'ultimo previsionale persistito. */
+  derivati?: Record<string, number> | null;
   onOverrideChange: (code: string, value: string) => void;
 }) {
   const refDate = `31/12/${referenceYear}`;
@@ -54,24 +58,20 @@ export function ProjectionTable({
   const pctOnRevenue = (value: number, revenue: number) =>
     revenue !== 0 ? (value / revenue) * 100 : 0;
 
-  // Get projected value: override if editable, annualized otherwise
-  const getProjectedValue = (item: IntraYearComparisonItem): number => {
-    if (EDITABLE_CE_CODES.includes(item.code)) {
-      return parseFloat(overrides[item.code] || "0");
-    }
-    return item.annualized_value;
-  };
+  // Override se modificabile, valore dedotto dal motore per le variazioni di
+  // magazzino, annualizzazione per tutto il resto (lib/pratica-ce-proiettato).
+  const annualizzato = (code: string): number =>
+    items.find((i) => i.code === code)?.annualized_value ?? 0;
+  const fonte = { overrides, derivati, annualizzato };
+  const getProjectedValue = (item: IntraYearComparisonItem): number =>
+    valoreCeProiettato(item.code, { ...fonte, annualizzato: () => item.annualized_value });
 
   // Compute projected revenue for % column
   const projRevenue = showRevenuePct
     ? parseFloat(overrides["ce01_ricavi_vendite"] || "0")
     : 0;
 
-  // Helper: get projected value for a CE code (override if editable, annualized otherwise)
-  const pv = (code: string): number =>
-    EDITABLE_CE_CODES.includes(code)
-      ? parseFloat(overrides[code] || "0")
-      : (items.find((i) => i.code === code)?.annualized_value ?? 0);
+  const pv = (code: string): number => valoreCeProiettato(code, fonte);
 
   // Compute projected subtotals from overrides
   const projVP = VP_CODES.reduce((acc, c) => acc + pv(c), 0);
@@ -210,6 +210,13 @@ export function ProjectionTable({
                     />
                   ) : isPctRow ? (
                     formatPct(projValue)
+                  ) : DERIVED_CE_CODES.includes(item.code) ? (
+                    <span
+                      className="font-medium"
+                      title="Calcolata dal motore: discende dal movimento del magazzino"
+                    >
+                      {formatEuro(projValue)}
+                    </span>
                   ) : (
                     <span className="font-medium">{formatEuro(projValue)}</span>
                   )}

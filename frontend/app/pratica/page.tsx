@@ -110,6 +110,7 @@ import {
 } from "@/lib/pratica-codes";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { projectedItemsFromForecast } from "@/lib/pratica-projected-bs";
+import { ceDerivatiDaForecast } from "@/lib/pratica-ce-proiettato";
 import {
   buildBalanceItemsWithTotals,
   buildIncomeItemsWithEbitda,
@@ -1989,6 +1990,9 @@ export default function InfraannualePage() {
                 partialYear={comparison.partial_year}
                 showRevenuePct
                 overrides={overrides}
+                derivati={ceDerivatiDaForecast(
+                  analysis?.forecast_years?.[0]?.income_statement as Record<string, number> | undefined,
+                )}
                 onOverrideChange={(code, value) => {
                   setOverrides((prev) => ({ ...prev, [code]: value }));
                   setProjectedBS(null); // Recalculate needed

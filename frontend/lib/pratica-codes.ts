@@ -1,7 +1,17 @@
+// Le due variazioni di magazzino NON sono modificabili: dal 2026-09-16 il
+// motore le deduce dal movimento dello stato patrimoniale, perche' finche' il
+// client le mandava come override (lo faceva per tutte e 22 le righe, anche
+// quelle mai toccate) il calcolo veniva scavalcato e conto economico e
+// patrimoniale raccontavano due magazzini diversi. Decisione del proprietario:
+// «devono essere calcolate automaticamente dal motore».
+export const DERIVED_CE_CODES = [
+  "ce02_variazioni_rimanenze",
+  "ce10_var_rimanenze_mat_prime",
+];
+
 // Key P&L items the user can override
 export const EDITABLE_CE_CODES = [
   "ce01_ricavi_vendite",
-  "ce02_variazioni_rimanenze",
   "ce03_lavori_interni",
   "ce04_altri_ricavi",
   "ce05_materie_prime",
@@ -9,7 +19,6 @@ export const EDITABLE_CE_CODES = [
   "ce07_godimento_beni",
   "ce08_costi_personale",
   "ce09_ammortamenti",
-  "ce10_var_rimanenze_mat_prime",
   "ce11_accantonamenti",
   "ce11b_altri_accantonamenti",
   "ce12_oneri_diversi",

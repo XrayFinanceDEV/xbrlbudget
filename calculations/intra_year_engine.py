@@ -197,6 +197,33 @@ _MIN_OBSERVED_TO_PROJECTED_RATIO = Decimal('0.50')
 _MIN_TURNOVER_OBSERVATION_MONTHS = 3
 
 
+_ETICHETTE_CORRIDOIO = {
+    'sp06_crediti_breve': 'incasso',
+    'sp16_debiti_breve_operativo': 'pagamento dei debiti operativi',
+    'sp05_rimanenze': 'giacenza',
+}
+
+
+def _percento(quota: Decimal) -> str:
+    return f"{(Decimal(str(quota)) * Decimal('100')).quantize(Decimal('1'))}%"
+
+
+def _descrizione_corridoio(giorni) -> str:
+    """«94 giorni di incasso (osservati 103, consolidati 71)», per ogni voce mossa."""
+    pezzi = []
+    for campo, etichetta in _ETICHETTE_CORRIDOIO.items():
+        valori = giorni.get(campo)
+        if not valori:
+            continue
+        osservato, usato, storico = (
+            (Decimal(str(v)) * Decimal('360')).quantize(Decimal('1')) for v in valori
+        )
+        pezzi.append(
+            f"{usato} giorni di {etichetta} (osservati {osservato}, consolidati {storico})"
+        )
+    return "; ".join(pezzi) if pezzi else "nessuna voce mossa"
+
+
 def _turnover_ratio(stock, base, max_ratio=_MAX_TURNOVER_RATIO):
     """
     Rapporto giacenza/base dell'anno di riferimento, oppure ``None`` quando è
@@ -318,6 +345,10 @@ class IntraYearEngine:
         # osservati nel periodo). Lo sceglie l'utente con due pulsanti; qui il
         # valore di prima, cosi' chi chiama i metodi interni non cambia comportamento.
         self._modo_circolante = 'storico'
+        # Quota di giorni «storici» nel circolante di equilibrio: 0 = quelli
+        # osservati nel periodo, 1 = quelli dell'anno consolidato.
+        self._quota_storico = Decimal('0')
+        self._giorni_corridoio = {}
 
     @staticmethod
     def _period_months_from_record(financial_year: FinancialYear) -> int:
@@ -549,6 +580,129 @@ class IntraYearEngine:
         ref_inc = ref_fy.income_statement if ref_fy else None
         ref_bs = ref_fy.balance_sheet if ref_fy else None
 
+        # Il giro di calcolo sta in `_calcola_proiezione` perche' il circolante di
+        # equilibrio deve poterlo RIPETERE con giorni diversi senza scrivere nulla:
+        # una proiezione e' una funzione pura delle ipotesi, la persistenza viene dopo.
+        if self._modo_circolante == 'equilibrio':
+            projected_inc, projected_bs = self._cerca_equilibrio(
+                partial_fy, ref_bs, ref_inc, assumption, period_months,
+            )
+        else:
+            projected_inc, projected_bs = self._calcola_proiezione(
+                partial_fy, ref_bs, ref_inc, assumption, period_months,
+            )
+
+        # Store as ForecastYear
+        self._save_forecast(scenario_id, projection_year, projected_bs, projected_inc)
+        self.db.commit()
+
+        return {
+            'success': True,
+            'scenario_id': scenario_id,
+            'scenario_name': scenario.name,
+            'base_year': scenario.base_year,
+            'forecast_years': [projection_year],
+            'years_generated': 1,
+            'diagnostics': list(self._diagnostics),
+        }
+
+
+    #: Quanti dimezzamenti per trovare il punto di equilibrio. 12 portano il
+    #: corridoio a un quarto di millesimo: sotto quella soglia i giorni non si
+    #: distinguono più, e ogni tentativo è una proiezione intera.
+    _PASSI_EQUILIBRIO = 12
+
+    def _cerca_equilibrio(self, partial_fy, ref_bs, ref_inc, assumption, period_months):
+        """Il circolante che fa chiudere la cassa a zero, cercato DENTRO il
+        corridoio fra i giorni osservati nel periodo e quelli dell'anno consolidato
+        (decisione del proprietario, 2026-09-16).
+
+        Perché un corridoio e non una soluzione libera: muovere i giorni finché la
+        cassa torna a zero, senza limiti, vuol dire che NESSUNA azienda mostra più
+        un fabbisogno — si inventerebbe un miglioramento del circolante che nessuno
+        ha deciso, cioè il difetto che questo lotto sta togliendo. Gli estremi del
+        corridoio sono invece due comportamenti misurati: quello che l'azienda ha
+        adesso e quello che ha avuto nell'ultimo bilancio intero.
+
+        Tre esiti, tutti dichiarati:
+          - i giorni osservati bastano già: si tengono quelli, nessuno si muove;
+          - serve spostarsi: si dichiara di quanto e a quali giorni si è arrivati;
+          - non bastano nemmeno i giorni consolidati: resta il fabbisogno, e vuol
+            dire che quel piano non sta in piedi neanche tornando a com'era.
+        """
+        def prova(quota):
+            self._quota_storico = quota
+            self._diagnostics = []
+            self._giorni_corridoio = {}
+            inc, bs = self._calcola_proiezione(
+                partial_fy, ref_bs, ref_inc, assumption, period_months,
+            )
+            scoperto = next(
+                (Decimal(str(x['amount'])) for x in self._diagnostics
+                 if x['code'] == 'unfunded_financing_requirement'),
+                Decimal('0'),
+            )
+            return inc, bs, scoperto, list(self._diagnostics), dict(self._giorni_corridoio)
+
+        _inc, _bs, scoperto_osservato, _diag, _giorni = prova(Decimal('0'))
+        if scoperto_osservato <= 0:
+            # Il circolante di oggi si regge da solo: non c'è niente da spostare.
+            return _inc, _bs
+
+        inc_storico, bs_storico, scoperto_storico, diag_storico, giorni_storico = prova(Decimal('1'))
+        if scoperto_storico > 0:
+            self._diagnostics = diag_storico
+            self._diagnostics.append({
+                'code': 'equilibrio_non_raggiungibile',
+                'severity': 'warning',
+                'amount': str(scoperto_storico),
+                'message': (
+                    f"Nemmeno tornando ai giorni di incasso e pagamento dell'anno "
+                    f"consolidato la cassa chiude: resterebbe un fabbisogno di "
+                    f"{eur_it(scoperto_storico)} (con i giorni osservati oggi sarebbe "
+                    f"{eur_it(scoperto_osservato)}). Il piano non si finanzia dentro il "
+                    f"comportamento che questa azienda ha già avuto: serve finanza, o "
+                    f"vanno riviste le ipotesi di conto economico."
+                ),
+            })
+            return inc_storico, bs_storico
+
+        basso, alto = Decimal('0'), Decimal('1')
+        migliore = (inc_storico, bs_storico, diag_storico, giorni_storico)
+        for _ in range(self._PASSI_EQUILIBRIO):
+            mezzo = (basso + alto) / Decimal('2')
+            inc, bs, scoperto, diag, giorni = prova(mezzo)
+            if scoperto > 0:
+                basso = mezzo
+            else:
+                alto = mezzo
+                migliore = (inc, bs, diag, giorni)
+        inc, bs, diag, giorni = migliore
+        self._diagnostics = diag
+        self._diagnostics.append({
+            'code': 'circolante_di_equilibrio',
+            'severity': 'warning',
+            'amount': str(scoperto_osservato),
+            'quota_storico': str(alto.quantize(Decimal('0.0001'))),
+            'message': (
+                "Coi giorni osservati nel periodo il piano avrebbe un fabbisogno di "
+                f"{eur_it(scoperto_osservato)}. Per chiudere con la cassa a zero senza "
+                "assorbirla il circolante è stato riportato verso i giorni dell'anno "
+                f"consolidato per il {_percento(alto)} della distanza: "
+                f"{_descrizione_corridoio(giorni)}. Nessun giorno fuori da quelli che "
+                "l'azienda ha già avuto: gli estremi sono il periodo osservato e "
+                "l'ultimo bilancio intero."
+            ),
+        })
+        return inc, bs
+
+    def _calcola_proiezione(self, partial_fy, ref_bs, ref_inc, assumption, period_months):
+        """Conto economico e stato patrimoniale proiettati, senza persistere nulla.
+
+        Estratto da `generate_projection` perche' la ricerca del circolante di
+        equilibrio lo richiama piu' volte con giorni diversi: il risultato dipende
+        solo dagli argomenti e da `self._modo_circolante`/`self._quota_storico`.
+        """
         # Project income statement
         projected_inc = self._project_income_statement(
             partial_inc=partial_fy.income_statement,
@@ -658,20 +812,7 @@ class IntraYearEngine:
                 ),
             })
             projected_bs['sp09_disponibilita_liquide'] = Decimal('0.00')
-
-        # Store as ForecastYear
-        self._save_forecast(scenario_id, projection_year, projected_bs, projected_inc)
-        self.db.commit()
-
-        return {
-            'success': True,
-            'scenario_id': scenario_id,
-            'scenario_name': scenario.name,
-            'base_year': scenario.base_year,
-            'forecast_years': [projection_year],
-            'years_generated': 1,
-            'diagnostics': list(self._diagnostics),
-        }
+        return projected_inc, projected_bs
 
     def _load_scenario(self, scenario_id: int) -> BudgetScenario:
         scenario = self.db.query(BudgetScenario).filter(
@@ -1117,24 +1258,42 @@ class IntraYearEngine:
         base_osservata = None
         if base_parziale is not None and enough_observation:
             base_osservata = Decimal(str(base_parziale)) * Decimal('12') / Decimal(str(period_months))
-        usa_osservato = (
-            self._modo_circolante == 'infrannuale'
-            and base_osservata is not None
-            and base_osservata > 0
+        osservato_disponibile = base_osservata is not None and base_osservata > 0
+        ratio_storico = _turnover_ratio(ref_stock, ref_base, max_ratio=max_ratio)
+        ratio_osservato = (
+            _turnover_ratio(observed, base_osservata, max_ratio=max_ratio)
+            if osservato_disponibile else None
         )
-        if usa_osservato:
-            ratio = _turnover_ratio(observed, base_osservata, max_ratio=max_ratio)
+        if self._modo_circolante == 'infrannuale' and osservato_disponibile:
+            ratio = ratio_osservato
             origine_base = f"del periodo osservato ({eur_it(base_osservata)} annualizzati)"
             stock_di_riferimento = observed
+        elif (
+            self._modo_circolante == 'equilibrio'
+            and ratio_osservato is not None
+            and ratio_storico is not None
+        ):
+            # Il corridoio: da 0 (giorni osservati nel periodo) a 1 (giorni
+            # dell'anno consolidato). Fuori non si va — sono i due soli
+            # comportamenti che questa azienda ha davvero avuto.
+            ratio = ratio_osservato + (ratio_storico - ratio_osservato) * self._quota_storico
+            origine_base = "del circolante di equilibrio"
+            stock_di_riferimento = observed
+            self._giorni_corridoio[field] = (ratio_osservato, ratio, ratio_storico)
         else:
-            ratio = _turnover_ratio(ref_stock, ref_base, max_ratio=max_ratio)
+            ratio = ratio_storico
             origine_base = f"dell'anno di riferimento ({eur_it(ref_base)})"
             stock_di_riferimento = ref_stock
         if ratio is not None:
             projected = projected_base * ratio
+            # La rete del lotto 3A — non cancellare piu' di meta' dello stock
+            # osservato — resta dov'era, ma NON nel circolante di equilibrio: li'
+            # gli estremi del corridoio li ha scelti l'utente, e una rete che
+            # riporta l'osservato chiuderebbe il corridoio su se stesso.
             if (
                 enough_observation
                 and observed > 0
+                and self._modo_circolante != 'equilibrio'
                 and projected < observed * _MIN_OBSERVED_TO_PROJECTED_RATIO
             ):
                 self._diagnostics.append({

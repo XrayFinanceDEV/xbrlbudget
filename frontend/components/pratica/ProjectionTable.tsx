@@ -129,7 +129,13 @@ export function ProjectionTable({
               ALWAYS_SHOW_CODES.has(item.code) ||
               item.partial_value !== 0 ||
               item.reference_value !== 0 ||
-              item.prior_value !== 0
+              item.prior_value !== 0 ||
+              // Anche la sola colonna proiettata basta a mostrare la riga: le
+              // variazioni di magazzino nascono lì (le deduce il motore dal
+              // movimento dello SP), quindi una riga a zero nello storico e nel
+              // periodo spariva proprio quando aveva un valore. NaN è il
+              // segnaposto di «non ancora calcolata», non uno zero.
+              (Number.isFinite(item.annualized_value) && item.annualized_value !== 0)
           )
           .map((item) => {
             const isHeader = item.code.startsWith("_hdr_");

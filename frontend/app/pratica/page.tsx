@@ -350,7 +350,8 @@ export default function InfraannualePage() {
   // L'ultima modalita' di circolante scelta, così il pulsante della barra in fondo
   // («Calcola e vai agli Indicatori») non torna in silenzio allo storico dopo che
   // l'utente ha chiesto il circolante infrannuale.
-  const [modoCircolante, setModoCircolante] = useState<"storico" | "infrannuale">("storico");
+  const [modoCircolante, setModoCircolante] =
+    useState<"storico" | "infrannuale" | "equilibrio">("storico");
   const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
   useEffect(() => {
     projectedBSRef.current = projectedBS;
@@ -820,7 +821,9 @@ export default function InfraannualePage() {
   // rimanenze: 'storico' dall'anno intero precedente (assestato), 'infrannuale'
   // da quelli osservati nel periodo. Sono due pulsanti, non un'opzione nascosta:
   // la differenza vale centinaia di migliaia di euro di cassa proiettata.
-  const calculateProjectedBS = async (modoCircolante: "storico" | "infrannuale" = "storico") => {
+  const calculateProjectedBS = async (
+    modoCircolante: "storico" | "infrannuale" | "equilibrio" = "storico",
+  ) => {
     if (!comparison || !importResult || !scenario) return;
 
     // Lo SP proiettato NON si calcola qui: lo produce `IntraYearEngine` e lo si
@@ -2060,6 +2063,20 @@ export default function InfraannualePage() {
                     <BarChart3 className="h-4 w-4 mr-2" />
                   )}
                   Calcola SP (circolante infrannuale)
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => { setModoCircolante("equilibrio"); calculateProjectedBS("equilibrio"); }}
+                  disabled={calculatingBS}
+                  title="Cerca i giorni che fanno chiudere la cassa a zero, senza uscire dal corridoio fra quelli osservati e quelli dell'anno consolidato"
+                >
+                  {calculatingBS ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                  )}
+                  Calcola SP (circolante di equilibrio)
                 </Button>
               </div>
             </CardHeader>

@@ -351,7 +351,7 @@ class BudgetAssumptionsBase(BaseModel):
     tfr_payments: Decimal = Field(default=Decimal("0"), ge=0)
     # Infrannuale: da dove vengono i giorni del circolante. None vale "storico",
     # il comportamento di prima.
-    working_capital_mode: Optional[Literal["storico", "infrannuale"]] = None
+    working_capital_mode: Optional[Literal["storico", "infrannuale", "equilibrio"]] = None
 
     # Financial parameters
     interest_rate_receivables: Decimal = Field(default=Decimal("0"))
@@ -492,7 +492,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     bank_lines_rate: Optional[Decimal] = None
     other_lenders: Optional[List[OtherLenderInput]] = None
     tfr_payments: Optional[Decimal] = None
-    working_capital_mode: Optional[Literal["storico", "infrannuale"]] = None
+    working_capital_mode: Optional[Literal["storico", "infrannuale", "equilibrio"]] = None
     interest_rate_receivables: Optional[Decimal] = None
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None

@@ -69,6 +69,9 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
 export const DEAD_FIELDS = [
   "investments", "receivables_short_growth_pct", "payables_short_growth_pct",
   "interest_rate_receivables", "interest_rate_payables",
+  // Scelta dell'INFRANNUALE (quali giorni di circolante proiettare), non del
+  // percorso budget: nessun passo del wizard la scrive.
+  "working_capital_mode",
 ] as const;
 
 export interface WizardStepGroup { group: WizardStep["group"]; steps: WizardStep[] }

@@ -113,8 +113,11 @@ def test_i_crediti_verso_clienti_si_portano_avanti_dal_parziale_quando_il_riferi
     # Il riferimento non porta crediti fiscali: tutti i 200.000 sono il pool
     # operativo da proiettare. Il credito tributario del parziale si chiude nel
     # proprio campo governato, senza consumare il secchio `g`.
-    assert bs.sp06_crediti_breve == D("200000.00")
-    assert bs.sp09_disponibilita_liquide == D("420000.00")
+    # 200.000 di pool operativo piu' i 5.000 di credito tributario aperto nel
+    # parziale, che dal 2026-09-16 resta in bilancio invece di trasformarsi in
+    # cassa: la cassa infatti e' inferiore dello stesso importo.
+    assert bs.sp06_crediti_breve == D("205000.00")
+    assert bs.sp09_disponibilita_liquide == D("415000.00")
     assert bs.sp06a_crediti_clienti_breve == D("156521.74")  # non piu' zero
     codici = [d['code'] for d in diagnostics]
     assert 'reference_receivables_undetailed' in codici
@@ -149,5 +152,7 @@ def test_il_credito_tributario_non_riceve_una_quota_dalla_ripartizione_poi_scart
     ref = _stato_sp06(sp06_crediti_breve=_RIF_TOTALE, sp06e_crediti_tributari_breve=D("40000"),
                        sp06g_crediti_altri_breve=D("160000"), sp11_capitale=D("700000"))
     bs, _diagnostics = _proietta_crediti(ref, D("1000000"), _PARZIALE)
-    assert bs.sp06_crediti_breve == D("160000.00")
-    assert bs.sp09_disponibilita_liquide == D("460000.00")
+    # Come sopra: 160.000 di pool operativo piu' i 5.000 di credito tributario
+    # aperto, che non si assume incassato entro l'anno.
+    assert bs.sp06_crediti_breve == D("165000.00")
+    assert bs.sp09_disponibilita_liquide == D("455000.00")

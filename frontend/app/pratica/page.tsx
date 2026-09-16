@@ -347,6 +347,10 @@ export default function InfraannualePage() {
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [projectedBS, setProjectedBS] = useState<IntraYearComparisonItem[] | null>(null);
   const [calculatingBS, setCalculatingBS] = useState(false);
+  // L'ultima modalita' di circolante scelta, così il pulsante della barra in fondo
+  // («Calcola e vai agli Indicatori») non torna in silenzio allo storico dopo che
+  // l'utente ha chiesto il circolante infrannuale.
+  const [modoCircolante, setModoCircolante] = useState<"storico" | "infrannuale">("storico");
   const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
   useEffect(() => {
     projectedBSRef.current = projectedBS;
@@ -805,7 +809,11 @@ export default function InfraannualePage() {
   // Salva le ipotesi, fa girare il motore e rende CIO' CHE IL MOTORE HA
   // PRODOTTO. Nessuna proiezione si calcola qui: rotazioni, quote residue,
   // imposte e plug di cassa vivono solo in `calculations/intra_year_engine.py`.
-  const calculateProjectedBS = async () => {
+  // `modoCircolante` sceglie da dove vengono i giorni di crediti, fornitori e
+  // rimanenze: 'storico' dall'anno intero precedente (assestato), 'infrannuale'
+  // da quelli osservati nel periodo. Sono due pulsanti, non un'opzione nascosta:
+  // la differenza vale centinaia di migliaia di euro di cassa proiettata.
+  const calculateProjectedBS = async (modoCircolante: "storico" | "infrannuale" = "storico") => {
     if (!comparison || !importResult || !scenario) return;
 
     // Lo SP proiettato NON si calcola qui: lo produce `IntraYearEngine` e lo si
@@ -842,6 +850,7 @@ export default function InfraannualePage() {
           personnel_growth_pct: calcGrowth("ce08_costi_personale"),
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
           ...buildCeOverridePayload(overrides),
+          working_capital_mode: modoCircolante,
           tax_rate: 27.9,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
@@ -1174,7 +1183,7 @@ export default function InfraannualePage() {
         return {
           label: "Calcola e vai agli Indicatori",
           onClick: async () => {
-            if (!projectedBS) await calculateProjectedBS();
+            if (!projectedBS) await calculateProjectedBS(modoCircolante);
             setActiveTab("results");
           },
           disabled: !comparison,
@@ -1208,6 +1217,7 @@ export default function InfraannualePage() {
     projectedBS,
     goFromComparison,
     calculateProjectedBS,
+    modoCircolante,
   ]);
 
   // Difesa in profondità: i rami `activeTab === …` qui sotto non consultano i
@@ -2010,23 +2020,41 @@ export default function InfraannualePage() {
                   Stato Patrimoniale - Proiezione {fiscalYear}
                 </CardTitle>
                 <CardDescription>
-                  Crediti, debiti e rimanenze calcolati con stessi giorni di rotazione dello storico.
+                  Crediti, debiti e rimanenze calcolati sui giorni di rotazione; scegli se
+                  prenderli dall&apos;anno intero precedente o dal periodo osservato.
                   Liquidità come differenza.
                 </CardDescription>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={calculateProjectedBS}
-                disabled={calculatingBS}
-              >
-                {calculatingBS ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                )}
-                {calculatingBS ? "Calcolo in corso…" : "Calcola Proiezione SP"}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setModoCircolante("storico"); calculateProjectedBS("storico"); }}
+                  disabled={calculatingBS}
+                  title="Giorni di incasso, pagamento e giacenza dell'anno intero precedente: è assestato, ma può assumere un rientro che il periodo non mostra"
+                >
+                  {calculatingBS ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                  )}
+                  Calcola SP (circolante storico)
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setModoCircolante("infrannuale"); calculateProjectedBS("infrannuale"); }}
+                  disabled={calculatingBS}
+                  title="Giorni osservati nel periodo, portati avanti: è il circolante che l'azienda ha adesso"
+                >
+                  {calculatingBS ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                  )}
+                  Calcola SP (circolante infrannuale)
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {calculatingBS ? (

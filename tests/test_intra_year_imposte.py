@@ -1,4 +1,7 @@
-"""Al 31/12 l'infrannuale lascia solo il saldo d'imposta dell'anno (lotto 3A, Task 5, decisione 4 del proprietario)."""
+"""Al 31/12 l'infrannuale lascia il saldo d'imposta dell'anno (lotto 3A, Task 5, decisione 4 del
+proprietario) PIÙ il credito tributario aperto alla data del parziale, che dal 2026-09-16 non si
+assume più incassato entro l'anno: gonfiava la cassa proiettata di un importo che nessuno aveva
+deciso. Il debito aperto continua invece a uscire di cassa."""
 from decimal import Decimal as D
 
 import pytest
@@ -244,9 +247,13 @@ def test_la_posizione_tributaria_non_partecipa_alla_rotazione_dei_debiti_operati
                 if d['code'] == 'tax_settlement_reclass_below_zero']
 
 
-def test_il_credito_tributario_si_incassa_senza_consumare_altri_crediti():
-    """L'incasso del credito fiscale è dato dal passaggio apertura→chiusura della
-    posizione governata. Non deve essere limitato dalla quota casuale di sp06g.
+def test_il_credito_tributario_aperto_resta_in_bilancio():
+    """Il credito fiscale aperto alla data del parziale NON si assume incassato
+    entro l'anno (decisione del proprietario, 2026-09-16, che rivede quella del
+    lotto 3A: «l'incasso dei tributari a breve è meglio toglierlo, complica
+    troppo»). Prima quei 300.000 diventavano cassa; ora restano dove sono, e la
+    cassa proiettata è inferiore dello stesso importo. Il debito aperto invece
+    continua a pagarsi: è il lato prudente dei due.
     """
     db = _sessione()
     _, scenario = _infrannuale_grezzo(
@@ -261,11 +268,10 @@ def test_il_credito_tributario_si_incassa_senza_consumare_altri_crediti():
                       sp06e_crediti_tributari_breve=D("300000"),
                       sp06g_crediti_altri_breve=D("200000")))
     sp, result = _proietta(db, scenario)
-    assert sp.sp09_disponibilita_liquide == D("1800000.00")
+    assert sp.sp09_disponibilita_liquide == D("1500000.00")
     assert sp.sp16g_altri_debiti_breve == D("200000.00")
     assert sp.sp06g_crediti_altri_breve == D("333333.33")
-    assert sp.sp06_crediti_breve == D("1000000.00")
-    assert sp.sp06e_crediti_tributari_breve == D("0.00")
+    assert sp.sp06e_crediti_tributari_breve == D("300000.00")
     assert sp.total_assets == sp.total_liabilities
     assert not [d for d in result['diagnostics']
                 if d['code'] == 'tax_settlement_reclass_below_zero']
@@ -295,13 +301,10 @@ def test_senza_riferimento_il_cash_out_deriva_dalla_posizione_e_dal_ce():
                 if d['code'] == 'tax_settlement_reclass_below_zero']
 
 
-def test_l_assorbimento_della_posizione_di_apertura_si_dichiara():
-    """Il credito tributario che sparisce al 31/12 non è un azzeramento: è la
-    posizione di apertura che il calcolo a saldo e acconto considera chiusa
-    entro l'anno. Vale più di un sesto della cassa proiettata su un caso reale
-    (AMBIENTA 2026/6M) e finora non lo diceva nulla — il credito spariva dalla
-    colonna e la cassa cresceva senza una riga che lo spiegasse.
-    """
+def test_la_posizione_di_apertura_si_dichiara():
+    """Che fine fa la posizione tributaria aperta alla data del parziale — il
+    debito pagato, il credito riportato — si dichiara, invece di lasciarlo
+    dedurre dal confronto fra due colonne."""
     db = _sessione()
     _, scenario = _infrannuale_grezzo(
         db,
@@ -315,15 +318,15 @@ def test_l_assorbimento_della_posizione_di_apertura_si_dichiara():
                       sp06e_crediti_tributari_breve=D("300000"),
                       sp06g_crediti_altri_breve=D("200000")))
     sp, result = _proietta(db, scenario)
-    assert sp.sp06e_crediti_tributari_breve == D("0.00")
+    assert sp.sp06e_crediti_tributari_breve == D("300000.00")
     dichiarazioni = [d for d in result['diagnostics']
-                     if d['code'] == 'posizione_tributaria_apertura_assorbita']
+                     if d['code'] == 'posizione_tributaria_apertura']
     assert len(dichiarazioni) == 1
     dichiarazione = dichiarazioni[0]
-    # 300.000 di crediti meno 200.000 di debiti: 100.000 netti a credito.
-    assert dichiarazione['amount'] == "100000.00"
-    assert "100.000,00" in dichiarazione['message']
-    assert "a credito" in dichiarazione['message']
+    assert dichiarazione['amount'] == "300000.00"
+    assert "300.000,00" in dichiarazione['message']
+    assert "resta in bilancio" in dichiarazione['message']
+    assert "200.000,00" in dichiarazione['message']
 
 
 def test_senza_posizione_aperta_non_si_dichiara_nulla():
@@ -337,4 +340,4 @@ def test_senza_posizione_aperta_non_si_dichiara_nulla():
                       sp06a_crediti_clienti_breve=D("400000")))
     _sp, result = _proietta(db, scenario)
     assert not [d for d in result['diagnostics']
-                if d['code'] == 'posizione_tributaria_apertura_assorbita']
+                if d['code'] == 'posizione_tributaria_apertura']

@@ -252,6 +252,7 @@ def build_assumption_row(
         bank_lines_rate=data.get("bank_lines_rate", None),
         other_lenders=jsonable_encoder(data.get("other_lenders", None)),
         tfr_payments=data.get("tfr_payments", 0.0) or 0.0,
+        working_capital_mode=data.get("working_capital_mode", None),
         interest_rate_receivables=data.get("interest_rate_receivables", 0.0),
         interest_rate_payables=data.get("interest_rate_payables", 0.0),
         tax_rate=data.get("tax_rate", 27.9),

@@ -672,6 +672,11 @@ class BudgetAssumptions(Base):
     bank_lines_rate = Column(Numeric(10, 6), nullable=True)    # tasso % su fidi e scoperto
     other_lenders = Column(JSON, nullable=True)                 # altri finanziatori per anno (prima riga)
     tfr_payments = Column(Numeric(15, 2), default=0, nullable=False)  # liquidazioni TFR dell'anno
+    # Infrannuale: da dove vengono i giorni del circolante. 'storico' = rotazioni
+    # dell'anno intero precedente (assestato), 'infrannuale' = giorni osservati nel
+    # periodo parziale, portati avanti. NULL vale 'storico': e' il comportamento di
+    # prima, e nessuno scenario gia' salvato cambia numeri finche' l'utente non sceglie.
+    working_capital_mode = Column(String(16), nullable=True)   # 'storico' | 'infrannuale'
 
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables

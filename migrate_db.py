@@ -188,6 +188,7 @@ MIGRATIONS = {
         ("bank_lines_rate",                    "NUMERIC(10,6)"),
         ("other_lenders",                      "TEXT"),
         ("tfr_payments",                       "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
+        ("working_capital_mode",               "VARCHAR(16)"),
     ],
     "uploaded_files": [
         ("user_email",                         "VARCHAR(255)"),

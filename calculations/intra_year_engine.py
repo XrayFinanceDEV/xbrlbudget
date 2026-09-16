@@ -197,6 +197,11 @@ _MIN_OBSERVED_TO_PROJECTED_RATIO = Decimal('0.50')
 _MIN_TURNOVER_OBSERVATION_MONTHS = 3
 
 
+def _giorni(rapporto: Decimal) -> str:
+    """Un rapporto giacenza/flusso scritto come lo legge l'utente: «71 giorni»."""
+    return f"{(Decimal(str(rapporto)) * Decimal('360')).quantize(Decimal('1'))} giorni"
+
+
 def _turnover_ratio(stock, base, max_ratio=_MAX_TURNOVER_RATIO):
     """
     Rapporto giacenza/base dell'anno di riferimento, oppure ``None`` quando è
@@ -314,6 +319,10 @@ class IntraYearEngine:
         self._diagnostics: List[Dict[str, object]] = []
         # Letto solo da `_scaled_or_carried`, per la soglia dei giorni di magazzino (Task 10).
         self._settore = None
+        # 'storico' (rotazioni dell'anno intero precedente) o 'infrannuale' (giorni
+        # osservati nel periodo). Lo sceglie l'utente con due pulsanti; qui il
+        # valore di prima, cosi' chi chiama i metodi interni non cambia comportamento.
+        self._modo_circolante = 'storico'
 
     @staticmethod
     def _period_months_from_record(financial_year: FinancialYear) -> int:
@@ -538,6 +547,7 @@ class IntraYearEngine:
             raise ValueError(f"Nessuna ipotesi trovata per lo scenario {scenario_id}")
 
         period_months = self._period_months_from_record(partial_fy)
+        self._modo_circolante = (getattr(assumption, 'working_capital_mode', None) or 'storico')
         projection_year = assumption.forecast_year
 
         # Reference year may be absent (user chose to proceed without it).
@@ -569,7 +579,8 @@ class IntraYearEngine:
         magazzino = None
         if ref_bs is not None and ref_inc is not None:
             magazzino = self._magazzino_proiettato(
-                partial_fy.balance_sheet, ref_bs, ref_inc, projected_inc, period_months,
+                partial_fy.balance_sheet, partial_fy.income_statement, ref_bs, ref_inc,
+                projected_inc, period_months,
             )
             ce02_atteso, ce10_atteso = self._variazioni_magazzino(
                 magazzino[0], magazzino[1], ref_bs,
@@ -796,7 +807,23 @@ class IntraYearEngine:
             ce08c = Decimal('0')
         # Cap the derived TFR quota at the remainder left by salari+oneri so the four
         # sub-items never sum to more than the personnel total.
-        ce08a = min(tfr_accrual_quota(ce08b, ce08), max(Decimal('0'), ce08 - ce08b - ce08c))
+        # Il TFR che matura nei mesi restanti si misura sull'ANNO CONSOLIDATO, non
+        # sul personale proiettato (decisione del proprietario, 2026-09-16): il
+        # bilancio annuale precedente e' assestato, una situazione infrannuale no.
+        # Si somma a quello gia' contabilizzato nel periodo, cosi' il fondo di fine
+        # anno cresce della sola quota dei mesi che mancano — su AMBIENTA 2026/6M:
+        # 33.673,36 gia' maturati piu' meta' dei 94.682,97 del 2025, cioe' un fondo
+        # di 170.193,73 invece di 209.564,77. Senza il dato consolidato resta la
+        # quota di legge sul proiettato, come prima.
+        ce08a_consolidato = _get_field(ref_inc, 'ce08a_tfr_accrual')
+        if ce08a_consolidato > 0:
+            ce08a_atteso = (
+                _get_field(partial_inc, 'ce08a_tfr_accrual')
+                + ce08a_consolidato * (Decimal('12') - Decimal(str(period_months))) / Decimal('12')
+            )
+        else:
+            ce08a_atteso = tfr_accrual_quota(ce08b, ce08)
+        ce08a = min(ce08a_atteso, max(Decimal('0'), ce08 - ce08b - ce08c))
         ce08d = max(Decimal('0'), ce08 - ce08a - ce08b - ce08c)
 
         # Depreciation - annualize (linear accrual) + new investments
@@ -1051,7 +1078,7 @@ class IntraYearEngine:
         return result
     def _scaled_or_carried(
         self, field, ref_stock, ref_base, projected_base, partial_bs,
-        carried_value=None, period_months=None,
+        carried_value=None, period_months=None, base_parziale=None,
     ):
         """
         Scala una giacenza col rapporto di rotazione dell'anno di riferimento;
@@ -1072,16 +1099,41 @@ class IntraYearEngine:
         else:
             soglia = Decimal('365')
         max_ratio = None if soglia is None else soglia / Decimal('365')
-        ratio = _turnover_ratio(ref_stock, ref_base, max_ratio=max_ratio)
+        observed = _get_field(partial_bs, field) if carried_value is None else carried_value
+        enough_observation = (
+            isinstance(period_months, int)
+            and not isinstance(period_months, bool)
+            and period_months >= _MIN_TURNOVER_OBSERVATION_MONTHS
+            and period_months < 12
+        )
+        # Da dove vengono i giorni del circolante: scelta dell'utente, non una
+        # regola nascosta (decisione del proprietario, 2026-09-16, due pulsanti
+        # nella tab Proiezione).
+        #   'storico'     — rotazioni dell'anno intero precedente: e' assestato,
+        #                   mentre una situazione infrannuale non lo e'.
+        #   'infrannuale' — i giorni osservati nel periodo, portati avanti: e' il
+        #                   circolante che l'azienda ha davvero adesso.
+        # La differenza non e' un dettaglio: su AMBIENTA 2026/6M sono 71 giorni di
+        # incasso contro 103, cioe' 357.561,87 EUR di cassa proiettata in piu' o in
+        # meno. NULL vale 'storico', cosi' nessuno scenario gia' salvato si muove.
+        base_osservata = None
+        if base_parziale is not None and enough_observation:
+            base_osservata = Decimal(str(base_parziale)) * Decimal('12') / Decimal(str(period_months))
+        usa_osservato = (
+            self._modo_circolante == 'infrannuale'
+            and base_osservata is not None
+            and base_osservata > 0
+        )
+        if usa_osservato:
+            ratio = _turnover_ratio(observed, base_osservata, max_ratio=max_ratio)
+            origine_base = f"del periodo osservato ({eur_it(base_osservata)} annualizzati)"
+            stock_di_riferimento = observed
+        else:
+            ratio = _turnover_ratio(ref_stock, ref_base, max_ratio=max_ratio)
+            origine_base = f"dell'anno di riferimento ({eur_it(ref_base)})"
+            stock_di_riferimento = ref_stock
         if ratio is not None:
             projected = projected_base * ratio
-            observed = _get_field(partial_bs, field) if carried_value is None else carried_value
-            enough_observation = (
-                isinstance(period_months, int)
-                and not isinstance(period_months, bool)
-                and period_months >= _MIN_TURNOVER_OBSERVATION_MONTHS
-                and period_months < 12
-            )
             if (
                 enough_observation
                 and observed > 0
@@ -1118,59 +1170,56 @@ class IntraYearEngine:
             # in cui un euro si legge come lo scrive Python.
             'message': (
                 f"Rapporto di rotazione non calcolabile per {field}: la base "
-                f"dell'anno di riferimento ({eur_it(ref_base)}) non spiega la giacenza "
-                f"({eur_it(ref_stock)}). Riportata la giacenza infrannuale osservata "
+                f"{origine_base} non spiega la giacenza "
+                f"({eur_it(stock_di_riferimento)}). Riportata la giacenza infrannuale osservata "
                 f"({eur_it(carried)}) invece di proiettarla; da verificare in Rettifiche."
             ),
         })
         return carried
 
     def _declare_posizione_tributaria(self, posizione, opening_credit, opening_debt):
-        """Dichiara che la posizione tributaria aperta al mese del parziale è
-        considerata CHIUSA entro il 31/12.
+        """Dichiara che cosa succede alla posizione tributaria aperta al mese del
+        parziale.
 
-        Non è un ripiego né un errore: è la regola dell'infrannuale (spec lotto
-        3A §4.3, decisione del proprietario) — al 31/12 resta solo il saldo
-        dell'anno in corso, imposta meno acconti. Ma l'effetto sulla cassa
-        proiettata può valere più di un sesto della cassa stessa (misurato:
-        157.961,46 € di credito netto su 871.285,37 € di cassa), e finora non lo
-        diceva nulla: il credito spariva dalla colonna e la cassa cresceva senza
-        una riga che lo spiegasse. Chi guarda la proiezione deve poter verificare
-        che quell'incasso avvenga davvero entro l'anno — e se non avverrà, o se
-        quei crediti non sono imposte sui redditi, la via d'uscita è la
-        percentuale su `sp06e`/`sp16e`, che spegne il calcolo automatico.
+        Il DEBITO aperto è considerato pagato entro il 31/12: al 31/12 resta solo
+        il saldo dell'anno in corso, imposta meno acconti (spec lotto 3A §4.3). Il
+        CREDITO invece resta in bilancio: incassarlo entro l'anno era
+        un'assunzione che gonfiava la cassa proiettata di un importo che nessuno
+        aveva deciso — 184.140,58 € su AMBIENTA 2026/6M, con 18.131 € di utile —
+        e il proprietario l'ha tolta il 2026-09-16.
 
-        Si dichiara solo quando una posizione aperta c'è davvero: una chiave
-        assente vale zero, e un "nessun problema" ad ogni proiezione non è una
-        diagnostica.
+        Si dichiara solo quando c'è qualcosa da dichiarare: un debito aperto che
+        esce di cassa, o un credito aperto che resta. Un «nessun problema» ad ogni
+        proiezione non è una diagnostica.
         """
-        netto_apertura = Decimal(str(opening_debt or 0)) - Decimal(str(opening_credit or 0))
-        if netto_apertura == 0:
+        opening_credit = Decimal(str(opening_credit or 0))
+        opening_debt = Decimal(str(opening_debt or 0))
+        if opening_credit == 0 and opening_debt == 0:
             return
-        verso = "a credito" if netto_apertura < 0 else "a debito"
-        cassa = -posizione.cash_out
-        segno = "entrano in cassa" if cassa > 0 else "escono di cassa"
+        pezzi = []
+        if opening_debt > 0:
+            pezzi.append(
+                f"il debito tributario aperto ({eur_it(opening_debt)}) esce di cassa "
+                f"entro il 31/12"
+            )
+        if opening_credit > 0:
+            pezzi.append(
+                f"il credito ({eur_it(opening_credit)}) resta in bilancio, non si "
+                f"assume incassato"
+            )
         self._diagnostics.append({
-            'code': 'posizione_tributaria_apertura_assorbita',
+            'code': 'posizione_tributaria_apertura',
             'severity': 'warning',
             'field': 'sp06e_crediti_tributari_breve',
-            'amount': str(abs(netto_apertura)),
-            'closing_credit': str(posizione.closing_credit),
+            'amount': str(opening_credit),
+            'closing_credit': str(posizione.closing_credit + opening_credit),
             'closing_debt': str(posizione.closing_debt),
             'acconti': str(posizione.acconti),
-            'cash_effect': str(cassa),
             'message': (
-                f"La posizione tributaria aperta alla data del parziale "
-                f"({eur_it(abs(netto_apertura))} {verso}: crediti "
-                f"{eur_it(opening_credit)} meno debiti {eur_it(opening_debt)}) è "
-                f"considerata chiusa entro il 31/12, come vuole il calcolo a saldo "
-                f"e acconto: al 31/12 resta solo il saldo dell'anno (credito "
-                f"{eur_it(posizione.closing_credit)}, debito "
+                f"Posizione tributaria alla data del parziale: {'; '.join(pezzi)}. "
+                f"Al 31/12 resta il saldo dell'anno (debito "
                 f"{eur_it(posizione.closing_debt)}, acconti "
-                f"{eur_it(posizione.acconti)}). Netto, {eur_it(abs(cassa))} "
-                f"{segno} entro fine anno: verifica che accada davvero, o imposta "
-                f"una percentuale su «Crediti tributari» nelle ipotesi per tenere "
-                f"la posizione in bilancio."
+                f"{eur_it(posizione.acconti)}), più il credito riportato."
             ),
         })
 
@@ -1335,7 +1384,7 @@ class IntraYearEngine:
         # economico ne ha bisogno prima.
         if magazzino is None:
             magazzino = self._magazzino_proiettato(
-                partial_bs, ref_bs, ref_inc, projected_inc, period_months,
+                partial_bs, partial_inc, ref_bs, ref_inc, projected_inc, period_months,
             )
         sp05, sp05_split = magazzino
 
@@ -1344,6 +1393,11 @@ class IntraYearEngine:
             'sp06_crediti_breve', ref_sp06, ref_revenue,
             projected_revenue, partial_bs, carried_value=partial_sp06,
             period_months=period_months,
+            # I ricavi del parziale sono il metro dei giorni osservati: solo i
+            # crediti hanno il pavimento prudenziale, non il magazzino (che ha
+            # la sua soglia per settore) né i debiti (dove pagare più tardi non
+            # è prudenza, è il contrario).
+            base_parziale=_get_field(partial_inc, 'ce01_ricavi_vendite'),
         )
         remaining_credit_write_down = max(
             Decimal('0'),
@@ -1421,6 +1475,11 @@ class IntraYearEngine:
             'sp16_debiti_breve_operativo', ref_sp16_operativo, ref_costs,
             projected_costs, partial_bs, carried_value=partial_sp16_operativo,
             period_months=period_months,
+            base_parziale=(
+                _get_field(partial_inc, 'ce05_materie_prime')
+                + _get_field(partial_inc, 'ce06_servizi')
+                + _get_field(partial_inc, 'ce07_godimento_beni')
+            ),
         )
         sp16 = partial_sp16_fin + sp16_operativo
 
@@ -1467,7 +1526,14 @@ class IntraYearEngine:
                 reference_tax=_get_field(ref_inc, 'ce20_imposte'),
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
-            sp06e_governed, sp16e_governed = posizione.closing_credit, posizione.closing_debt
+            # Il credito tributario aperto NON si incassa entro l'anno: resta in
+            # bilancio e si somma a quello che l'anno stesso genera (decisione del
+            # proprietario, 2026-09-16, che rivede quella del lotto 3A: «l'incasso
+            # dei tributari a breve è meglio toglierlo, complica troppo»). Il
+            # DEBITO aperto continua a pagarsi: è il lato prudente dei due.
+            sp06e_governed = posizione.closing_credit + _get_field(
+                partial_bs, 'sp06e_crediti_tributari_breve')
+            sp16e_governed = posizione.closing_debt
             self._declare_posizione_tributaria(
                 posizione,
                 _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
@@ -1804,7 +1870,10 @@ class IntraYearEngine:
                 reference_tax=Decimal('0'),
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
             )
-            sp06e, sp16e = posizione.closing_credit, posizione.closing_debt
+            # Come sopra: il credito aperto resta, il debito aperto si paga.
+            sp06e = posizione.closing_credit + _get_field(
+                partial_bs, 'sp06e_crediti_tributari_breve')
+            sp16e = posizione.closing_debt
             self._declare_posizione_tributaria(
                 posizione,
                 _get_field(partial_bs, 'sp06e_crediti_tributari_breve'),
@@ -2054,7 +2123,7 @@ class IntraYearEngine:
                 return tuple(_get_field(origine, f) * ratio for f in self._SP05_FIELDS)
         return (Decimal('0'),) * 5
 
-    def _magazzino_proiettato(self, partial_bs, ref_bs, ref_inc, projected_inc, period_months):
+    def _magazzino_proiettato(self, partial_bs, partial_inc, ref_bs, ref_inc, projected_inc, period_months):
         """Il magazzino di fine anno e la sua composizione, calcolati UNA volta.
 
         La stima è quella di sempre — proporzionale al costo delle materie, con
@@ -2068,6 +2137,7 @@ class IntraYearEngine:
             _get_field(ref_inc, 'ce05_materie_prime'),
             projected_inc['ce05_materie_prime'], partial_bs,
             period_months=period_months,
+            base_parziale=_get_field(partial_inc, 'ce05_materie_prime'),
         )
         return sp05, self._distribute_sp05(partial_bs, sp05, fallback_bs=ref_bs)
 

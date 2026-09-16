@@ -558,6 +558,35 @@ class IntraYearEngine:
             projected_inc
         )
 
+        # Il magazzino di fine anno si calcola PRIMA del conto economico
+        # definitivo: la variazione delle rimanenze discende dal suo movimento,
+        # non dall'annualizzazione del parziale (decisione del proprietario,
+        # 2026-09-16). Non è circolare — la stima dipende dal costo delle
+        # materie (`ce05`), che le due righe della variazione non toccano —
+        # quindi basta ricostruire il conto economico una volta sola.
+        # Senza anno di riferimento l'apertura del magazzino non esiste: lì
+        # nessuna variazione è deducibile, e resta l'annualizzazione.
+        magazzino = None
+        if ref_bs is not None and ref_inc is not None:
+            magazzino = self._magazzino_proiettato(
+                partial_fy.balance_sheet, ref_bs, ref_inc, projected_inc, period_months,
+            )
+            ce02_atteso, ce10_atteso = self._variazioni_magazzino(
+                magazzino[0], magazzino[1], ref_bs,
+            )
+            projected_inc = ForecastEngine._normalize_income_statement_cents(
+                self._project_income_statement(
+                    partial_inc=partial_fy.income_statement,
+                    ref_inc=ref_inc,
+                    assumption=assumption,
+                    period_months=period_months,
+                    variazioni_magazzino=(ce02_atteso, ce10_atteso),
+                )
+            )
+            self._declara_variazione_magazzino_forzata(
+                projected_inc, ce02_atteso, ce10_atteso,
+            )
+
         # Project balance sheet
         projected_bs = self._project_balance_sheet(
             partial_bs=partial_fy.balance_sheet,
@@ -566,7 +595,8 @@ class IntraYearEngine:
             projected_inc=projected_inc,
             ref_inc=ref_inc,
             assumption=assumption,
-            period_months=period_months
+            period_months=period_months,
+            magazzino=magazzino,
         )
         # Use the same absolute-SP override semantics as the multi-year engine.
         # This is especially important for a 12M consuntivo: its persisted
@@ -692,10 +722,17 @@ class IntraYearEngine:
         partial_inc: IncomeStatement,
         ref_inc: IncomeStatement,
         assumption: BudgetAssumptions,
-        period_months: int
+        period_months: int,
+        variazioni_magazzino=None,
     ) -> Dict:
         """
         Project P&L to full 12 months.
+
+        `variazioni_magazzino` è la coppia (ce02, ce10) dedotta dal movimento
+        del magazzino proiettato: quando c'è prende il posto dell'annualizzazione
+        del parziale, così le due righe non possono più raccontare un magazzino
+        diverso da quello dello stato patrimoniale. Arriva PRIMA degli override
+        di CE, che quindi continuano a vincere (`apply_ce_overrides`).
 
         Uses growth rates from assumptions applied to reference year.
         The frontend pre-calculates these rates:
@@ -791,12 +828,16 @@ class IntraYearEngine:
 
         # Items kept from annualization of partial year (less subject to user control)
         ce02 = _get_field(partial_inc, 'ce02_variazioni_rimanenze') * factor
+        if variazioni_magazzino is not None:
+            ce02 = variazioni_magazzino[0]
         ce03 = _get_field(partial_inc, 'ce03_lavori_interni') * factor
         # Incrementi di immobilizzazioni per lavori interni (A.4) — part of the value of
         # production; must be included so the projected CE utile reconciles with the SP
         # (which carries the booked profit including this item), avoiding a false sbilancio.
         ce03a = _get_field(partial_inc, 'ce03a_incrementi_immobilizzazioni') * factor
         ce10 = _get_field(partial_inc, 'ce10_var_rimanenze_mat_prime') * factor
+        if variazioni_magazzino is not None:
+            ce10 = variazioni_magazzino[1]
         ce11 = _get_field(partial_inc, 'ce11_accantonamenti') * factor
         ce11b = _get_field(partial_inc, 'ce11b_altri_accantonamenti') * factor
         ce13 = _get_field(partial_inc, 'ce13_proventi_partecipazioni') * factor
@@ -1185,10 +1226,16 @@ class IntraYearEngine:
         projected_inc: Dict,
         ref_inc: IncomeStatement,
         assumption: BudgetAssumptions,
-        period_months: int
+        period_months: int,
+        magazzino=None,
     ) -> Dict:
         """
         Project balance sheet to year-end.
+
+        `magazzino` è la coppia (totale, composizione) già calcolata da
+        `_magazzino_proiettato`: il conto economico ne ha bisogno PRIMA (la
+        variazione discende dal movimento), e ricalcolarlo qui lo dichiarerebbe
+        due volte fra le diagnostiche.
 
         Fixed assets: partial year values adjusted for remaining depreciation.
         Working capital: turnover ratios from reference year applied to projected P&L.
@@ -1281,13 +1328,16 @@ class IntraYearEngine:
             _get_field(ref_inc, 'ce07_godimento_beni')
         )
 
-        # Inventory: proportional to cost of materials
-        ref_ce05 = _get_field(ref_inc, 'ce05_materie_prime')
-        sp05 = self._scaled_or_carried(
-            'sp05_rimanenze', ref_sp05, ref_ce05,
-            projected_inc['ce05_materie_prime'], partial_bs,
-            period_months=period_months,
-        )
+        # Inventory: proportional to cost of materials (già calcolato, vedi
+        # `_magazzino_proiettato`). Chi chiama questo metodo direttamente — i
+        # test della rotazione degenere — lo lascia a None e se lo fa calcolare
+        # qui: sul percorso vero arriva sempre da fuori, perché il conto
+        # economico ne ha bisogno prima.
+        if magazzino is None:
+            magazzino = self._magazzino_proiettato(
+                partial_bs, ref_bs, ref_inc, projected_inc, period_months,
+            )
+        sp05, sp05_split = magazzino
 
         # Short-term receivables: proportional to revenue
         sp06 = self._scaled_or_carried(
@@ -1439,7 +1489,7 @@ class IntraYearEngine:
         )
         sp03a, sp03b, sp03c, sp03d, sp03e = self._distribute_sp03(partial_bs, sp03)
         sp04a, sp04b, sp04c, sp04d, sp04e = self._distribute_sp04(ref_bs, sp04)
-        sp05a, sp05b, sp05c, sp05d, sp05e = self._distribute_sp05(ref_bs, sp05)
+        sp05a, sp05b, sp05c, sp05d, sp05e = sp05_split
         # Receivables: composition of the OPERATING residual (never sp06e/
         # sp06f/sp07f when they are governed above) comes from the PARTIAL
         # year's own mix -- never a different year's, exactly like the
@@ -1978,17 +2028,140 @@ class IntraYearEngine:
             return tuple(_get_field(source_bs, field) * ratio for field in fields)
         return Decimal('0'), Decimal('0'), Decimal('0'), sp14_total
 
-    def _distribute_sp05(self, source_bs, sp05_total):
-        """Distribute inventory across the statutory IV-CEE categories."""
-        fields = (
-            'sp05a_materie_prime', 'sp05b_prodotti_in_corso',
-            'sp05c_lavori_in_corso', 'sp05d_prodotti_finiti', 'sp05e_acconti',
-        )
-        total = sum((_get_field(source_bs, field) for field in fields), Decimal('0'))
-        if total > 0:
-            ratio = sp05_total / total
-            return tuple(_get_field(source_bs, field) * ratio for field in fields)
+    _SP05_FIELDS = (
+        'sp05a_materie_prime', 'sp05b_prodotti_in_corso',
+        'sp05c_lavori_in_corso', 'sp05d_prodotti_finiti', 'sp05e_acconti',
+    )
+
+    def _distribute_sp05(self, source_bs, sp05_total, fallback_bs=None):
+        """Distribute inventory across the statutory IV-CEE categories.
+
+        `source_bs` è il bilancio da cui si prende la COMPOSIZIONE (non gli
+        importi): il parziale, perché è l'anno che l'utente sta guardando e
+        l'unico che possa avere il dettaglio quando il riferimento porta solo
+        l'aggregato — 286.094,89 € senza una sola sotto-voce, mentre il parziale
+        distingue materie e lavori in corso. Prendendola dal riferimento, come
+        si faceva, quelle due righe uscivano a ZERO dalla proiezione. È la
+        stessa scelta già fatta per i crediti (indagine-2) e per il debito
+        bancario (indagine-1); qui era rimasta indietro.
+        """
+        for origine in (source_bs, fallback_bs):
+            if origine is None:
+                continue
+            total = sum((_get_field(origine, f) for f in self._SP05_FIELDS), Decimal('0'))
+            if total > 0:
+                ratio = sp05_total / total
+                return tuple(_get_field(origine, f) * ratio for f in self._SP05_FIELDS)
         return (Decimal('0'),) * 5
+
+    def _magazzino_proiettato(self, partial_bs, ref_bs, ref_inc, projected_inc, period_months):
+        """Il magazzino di fine anno e la sua composizione, calcolati UNA volta.
+
+        La stima è quella di sempre — proporzionale al costo delle materie, con
+        la giacenza osservata riportata quando il rapporto è degenere: il
+        proprietario l'ha confermata. Quel che cambia è che ora la si calcola
+        prima del conto economico, perché la variazione discende da qui.
+        """
+        sp05 = self._scaled_or_carried(
+            'sp05_rimanenze',
+            _get_field(ref_bs, 'sp05_rimanenze'),
+            _get_field(ref_inc, 'ce05_materie_prime'),
+            projected_inc['ce05_materie_prime'], partial_bs,
+            period_months=period_months,
+        )
+        return sp05, self._distribute_sp05(partial_bs, sp05, fallback_bs=ref_bs)
+
+    def _variazioni_magazzino(self, chiusura_totale, chiusura_split, apertura_bs):
+        """Le due variazioni di magazzino a conto economico, DEDOTTE dal
+        movimento dello stato patrimoniale (decisione del proprietario,
+        2026-09-16: «l'algoritmo della stima mi piace, ma deve quadrare col
+        conto economico in automatico»).
+
+        Prima le due grandezze non si parlavano: lo stato patrimoniale portava
+        il magazzino da 286.094,89 € a 332.312,00 € (+46.217,11) mentre il conto
+        economico annualizzava la variazione del parziale (−2.864 €), e i 43.353 €
+        di differenza finivano assorbiti dal tappo di cassa senza che nulla lo
+        dicesse.
+
+        Segni, secondo lo schema di legge: `ce02` (A2, prodotti) è un ricavo —
+        positivo quando la giacenza cresce; `ce10` (B11, materie) è un costo —
+        NEGATIVO quando la giacenza cresce.
+
+        La ripartizione del movimento fra le due righe segue la composizione
+        quando c'è (regola del proprietario), altrimenti metà materie e metà
+        prodotti finiti — e in quel caso si dichiara, perché è una ripartizione
+        decisa da noi, non letta da un bilancio. Gli acconti a fornitori
+        (`sp05e`) non sono una variazione di magazzino: restano fuori da
+        entrambe le righe.
+        """
+        apertura_totale = _get_field(apertura_bs, 'sp05_rimanenze')
+        apertura = [_get_field(apertura_bs, f) for f in self._SP05_FIELDS]
+        delta_totale = chiusura_totale - apertura_totale
+        if delta_totale == 0:
+            return Decimal('0'), Decimal('0')
+
+        def _materie_prodotti(valori):
+            return valori[0], valori[1] + valori[2] + valori[3]
+
+        ap_materie, ap_prodotti = _materie_prodotti(apertura)
+        ch_materie, ch_prodotti = _materie_prodotti(list(chiusura_split))
+        if ap_materie + ap_prodotti > 0 and ch_materie + ch_prodotti > 0:
+            # Suddivisione su entrambi i lati: ogni riga segue il proprio movimento.
+            delta_materie = ch_materie - ap_materie
+            delta_prodotti = ch_prodotti - ap_prodotti
+        elif ch_materie + ch_prodotti > 0:
+            # Solo la chiusura ha il dettaglio: il movimento si ripartisce sulla
+            # sua composizione.
+            quota = ch_materie / (ch_materie + ch_prodotti)
+            delta_materie = delta_totale * quota
+            delta_prodotti = delta_totale - delta_materie
+        else:
+            delta_materie = delta_totale / Decimal('2')
+            delta_prodotti = delta_totale - delta_materie
+            self._diagnostics.append({
+                'code': 'variazione_magazzino_ripartita_a_meta',
+                'severity': 'warning',
+                'field': 'sp05_rimanenze',
+                'amount': str(delta_totale),
+                'message': (
+                    f"Il magazzino si muove di {eur_it(delta_totale)} ma né il "
+                    f"bilancio di riferimento né quello di verifica ne dichiarano "
+                    f"la composizione: la variazione è stata divisa a metà fra "
+                    f"materie prime ({eur_it(-delta_materie)} a conto economico) e "
+                    f"prodotti ({eur_it(delta_prodotti)}). Compila le sotto-voci "
+                    f"delle rimanenze in Rettifiche per una ripartizione letta dal "
+                    f"bilancio invece che decisa dal motore."
+                ),
+            })
+        return delta_prodotti, -delta_materie
+
+    def _declara_variazione_magazzino_forzata(self, projected_inc, ce02_atteso, ce10_atteso):
+        """Un override dell'utente su una delle due righe vince, come ogni altro
+        override di CE — ma allora il conto economico torna a non spiegare il
+        movimento del magazzino, ed è il caso in cui l'anomalia va detta invece
+        che corretta di nascosto."""
+        scarto = (
+            (projected_inc['ce02_variazioni_rimanenze'] - ce02_atteso)
+            + (projected_inc['ce10_var_rimanenze_mat_prime'] - ce10_atteso)
+        )
+        # Il conto economico è già quantizzato al centesimo, il valore atteso no:
+        # sotto il centesimo non c'è nessun override, c'è un arrotondamento.
+        if abs(scarto) <= Decimal('0.01'):
+            return
+        self._diagnostics.append({
+            'code': 'variazione_magazzino_forzata',
+            'severity': 'warning',
+            'field': 'sp05_rimanenze',
+            'amount': str(abs(scarto)),
+            'message': (
+                f"La variazione di magazzino forzata a mano non spiega il "
+                f"movimento dello stato patrimoniale: restano "
+                f"{eur_it(abs(scarto))} senza contropartita a conto economico, "
+                f"assorbiti dalla cassa. Il valore dedotto dal magazzino sarebbe "
+                f"{eur_it(ce02_atteso)} sui prodotti e {eur_it(ce10_atteso)} sulle "
+                f"materie."
+            ),
+        })
 
     def _distribute_sp06(self, ref_bs, sp06_total):
         """Distribute sp06 (current receivables) into sub-categories proportionally

@@ -113,7 +113,12 @@ def test_nell_infrannuale_l_edilizia_scala_il_magazzino_e_l_industria_lo_riporta
     rimanenze, cassa, diagnostici = _infrannuale(6)
     assert (rimanenze, cassa, diagnostici) == (D("150000.00"), D("1000.00"), [])
     rimanenze, cassa, diagnostici = _infrannuale(1)
-    assert (rimanenze, cassa) == (D("140000.00"), D("11000.00"))
+    # La cassa era 11.000: il magazzino scendeva da 150.000 a 140.000 e quei
+    # 10.000 diventavano cassa senza passare dal conto economico. Ora la
+    # variazione discende dal movimento (ce10 +10.000, un costo), quindi
+    # l'utile cala di 10.000 e la cassa resta quella di partenza: è lo stesso
+    # consumo di magazzino, raccontato una volta sola invece che due.
+    assert (rimanenze, cassa) == (D("140000.00"), D("1000.00"))
     assert [d.get("soglia_giorni") for d in diagnostici] == ["365"]
     # Gli importi del messaggio si leggono in italiano, come in ogni altra
     # diagnostica: li scriveva grezzi (140000.00), e quel messaggio va a schermo

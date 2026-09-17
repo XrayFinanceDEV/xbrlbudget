@@ -57,9 +57,13 @@
     values.push(0)
     let lo = calc.min(..values); let hi = calc.max(..values)
     let magnitude = calc.max(calc.abs(lo), calc.abs(hi))
-    // Si scala solo verso l'alto: sotto l'unità di misura i tick restano a
-    // tre decimali, l'etichetta «×10^-n» della v2 era illeggibile.
-    let exponent = if magnitude >= 1000 { int(calc.floor(calc.log(magnitude, base: 10))) } else { 0 }
+    // Rilievo 5: un asse di importi (eur) resta in euro interi sotto i
+    // 10.000 €; solo oltre passa a € migliaia. Le altre unità (ratio,
+    // percent, giorni) restano sulla soglia precedente: non sono importi,
+    // e non è la loro scala a essere in questione qui.
+    let is-amount = chart.unit == "eur"
+    let exponent = if is-amount { if magnitude >= 10000 { 3 } else { 0 } }
+      else if magnitude >= 1000 { int(calc.floor(calc.log(magnitude, base: 10))) } else { 0 }
     let scale = calc.pow(10, exponent)
     if scale == 0 or scale == calc.inf { panic("chart-scale-out-of-range") }
     // Normalize before subtracting: avoid overflow of opposite large values.
@@ -70,7 +74,24 @@
     let pw = width - ox - 8pt; let ph = height - oy - 25pt
     let xp(index) = ox + (index + 0.5) / chart.categories.len() * pw
     let yp(value) = oy + (hi - value / scale) / (hi - lo) * ph
-    let tick-label(tick) = str(calc.round(tick, digits: if calc.abs(tick) < 1 { 3 } else { 2 })).replace(".", ",")
+    // Un asse di importi non mostra mai decimali («0,997» invece di «997»
+    // euro): l'unità di tick è sempre intera, in euro o in migliaia di euro.
+    let group-thousands(digits) = {
+      let groups = (); let integer = digits
+      while integer.len() > 3 {
+        groups.insert(0, integer.slice(integer.len() - 3))
+        integer = integer.slice(0, integer.len() - 3)
+      }
+      groups.insert(0, integer)
+      groups.join(".")
+    }
+    let tick-label(tick) = if is-amount {
+      let rounded = calc.round(tick, digits: 0)
+      let sign = if rounded < 0 { "−" } else { "" }
+      sign + group-thousands(str(calc.abs(rounded)))
+    } else {
+      str(calc.round(tick, digits: if calc.abs(tick) < 1 { 3 } else { 2 })).replace(".", ",")
+    }
     let bars = chart.id in geometry.bars
     let scale-word = if exponent == 3 { " · valori in migliaia" } else if exponent == 6 { " · valori in milioni" }
       else if exponent == 9 { " · valori in miliardi" } else { "" }

@@ -154,6 +154,36 @@ def test_decimal_rounding_never_uses_float_in_text_and_handles_carry(renderer):
     assert metadata(renderer, report)[0]['series'][0]['values'] == [format(v, 'f') for v in values]
 
 
+def test_amount_axis_under_10000_stays_euro_interi_with_integer_ticks(renderer):
+    """Rilievo 5: un asse di importi resta in euro interi sotto i 10.000 €,
+    e i tick sono sempre interi (mai un tick come «0,997»)."""
+    report = fixture_report(years=[2027, 2028, 2029])
+    report.chart_series[0].series[0].values = [Decimal('1200'), Decimal('600'), Decimal('0')]
+    report = signed(report)
+    artifact = renderer.render(report, document_state='final')
+    with fitz.open(stream=artifact.data, filetype='pdf') as pdf:
+        text = pdf[1].get_text()
+        assert 'euro' in text and 'migliaia' not in text
+        for tick in ('−96', '252', '600', '948', '1.296'):
+            assert tick in text
+        assert '0,997' not in text and '1,36' not in text
+
+
+def test_amount_axis_over_10000_switches_to_migliaia_with_integer_ticks(renderer):
+    """Rilievo 5: oltre i 10.000 € l'asse passa a € migliaia, e i tick
+    restano interi — mai una frazione tipo «0,997» al posto di «997»."""
+    report = fixture_report(years=[2027, 2028, 2029])
+    report.chart_series[0].series[0].values = [Decimal('12000'), Decimal('6000'), Decimal('0')]
+    report = signed(report)
+    artifact = renderer.render(report, document_state='final')
+    with fitz.open(stream=artifact.data, filetype='pdf') as pdf:
+        text = pdf[1].get_text()
+        assert 'euro · valori in migliaia' in text
+        for tick in ('−1', '3', '6', '9', '13'):
+            assert tick in text
+        assert '0,997' not in text and '2,52' not in text and '9,48' not in text
+
+
 def test_supplied_authoritative_thresholds_only(renderer):
     report = fixture_report(years=[2027, 2028, 2029])
     chart = next(c for c in report.chart_series if c.id == 'practice_liquidity')

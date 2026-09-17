@@ -5,12 +5,17 @@ import { toast } from "sonner";
 import { downloadFinalReportPdf } from "@/lib/api";
 import {
   FinalReportDownloadError,
+  PREVIEW_BLOCKED_MESSAGE,
+  closePreviewTabOnError,
   createDownloadGuardState,
   isRetryableDownloadStatus,
   saveBlobAsFile,
+  showPdfPreview,
   withDownloadGuard,
   type FinalReportDocumentState,
   type FinalReportDownloadSink,
+  type FinalReportPreviewSink,
+  type FinalReportPreviewTab,
 } from "@/lib/final-report-download";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -28,6 +33,18 @@ const browserSink: FinalReportDownloadSink = {
   },
 };
 
+/**
+ * `scheduleRevoke` è una funzione libera che chiama `setTimeout` come
+ * identificatore globale al suo interno — mai `obj.setTimeout(...)`, che
+ * lancerebbe «Illegal invocation» nel browser (trappola nota del progetto).
+ */
+const previewSink: FinalReportPreviewSink = {
+  ...browserSink,
+  scheduleRevoke: (callback, delayMs) => {
+    setTimeout(callback, delayMs);
+  },
+};
+
 type DownloadOutcome = { ok: true } | { ok: false; error: unknown; status: number | null };
 
 /**
@@ -39,6 +56,9 @@ type DownloadOutcome = { ok: true } | { ok: false; error: unknown; status: numbe
  */
 export function useFinalReportDownload() {
   const [downloading, setDownloading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  // Stesso guard per download e anteprima: le due richieste PDF non devono
+  // poter partire insieme (regola del brief M2-06A/anteprima-pdf).
   const guardRef = useRef(createDownloadGuardState());
 
   const download = useCallback(
@@ -71,5 +91,60 @@ export function useFinalReportDownload() {
     []
   );
 
-  return { download, downloading };
+  /**
+   * Apre il PDF in una nuova scheda invece di scaricarlo («Anteprima PDF»).
+   * La scheda va aperta in modo **sincrono nel click**, prima del `fetch`
+   * asincrono, o il popup blocker la intercetta.
+   */
+  const preview = useCallback(
+    async (companyId: number, scenarioId: number, documentState: FinalReportDocumentState) => {
+      const rawTab = typeof window !== "undefined" ? window.open("", "_blank") : null;
+      const tab: FinalReportPreviewTab | null = rawTab
+        ? {
+            navigate: (url) => {
+              rawTab.location.href = url;
+            },
+            close: () => rawTab.close(),
+          }
+        : null;
+
+      const outcome = await withDownloadGuard<DownloadOutcome>(guardRef.current, async () => {
+        setPreviewing(true);
+        try {
+          const { blob, filename } = await downloadFinalReportPdf(companyId, scenarioId, { documentState });
+          const result = showPdfPreview(tab, blob, filename, previewSink);
+          if (!result.opened) {
+            toast.info(PREVIEW_BLOCKED_MESSAGE);
+          }
+          return { ok: true };
+        } catch (error) {
+          closePreviewTabOnError(tab);
+          const status = error instanceof FinalReportDownloadError ? error.status : null;
+          return { ok: false, error, status };
+        } finally {
+          setPreviewing(false);
+        }
+      });
+
+      if (outcome === null) {
+        // Guard occupato (download/anteprima già in volo): la scheda
+        // preaperta non serve, va chiusa per non restare vuota.
+        closePreviewTabOnError(tab);
+        return;
+      }
+      if (outcome.ok) return;
+
+      const message = getErrorMessage(outcome.error, "Impossibile preparare l'anteprima del PDF");
+      const retryable = outcome.status !== null && isRetryableDownloadStatus(outcome.status);
+      toast.error(
+        message,
+        retryable
+          ? { action: { label: "Riprova", onClick: () => preview(companyId, scenarioId, documentState) } }
+          : undefined
+      );
+    },
+    []
+  );
+
+  return { download, downloading, preview, previewing };
 }

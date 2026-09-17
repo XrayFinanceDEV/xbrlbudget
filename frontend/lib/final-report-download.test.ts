@@ -1,13 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FinalReportDownloadError,
+  PREVIEW_BLOCKED_MESSAGE,
+  PREVIEW_REVOKE_DELAY_MS,
+  closePreviewTabOnError,
   createDownloadGuardState,
   isRetryableDownloadStatus,
   resolveDownloadErrorMessage,
   resolveDownloadFilename,
   saveBlobAsFile,
+  showPdfPreview,
   withDownloadGuard,
   type FinalReportDownloadSink,
+  type FinalReportPreviewSink,
+  type FinalReportPreviewTab,
 } from "./final-report-download";
 
 describe("resolveDownloadFilename", () => {
@@ -179,5 +185,134 @@ describe("withDownloadGuard", () => {
     await withDownloadGuard(guard, task);
 
     expect(task).toHaveBeenCalledTimes(2);
+  });
+
+  it("download e anteprima condividono lo stesso guard: non partono insieme", async () => {
+    const guard = createDownloadGuardState();
+    let resolveDownload: (value: string) => void = () => {};
+    const downloadTask = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveDownload = resolve;
+        })
+    );
+    const previewTask = vi.fn(async () => "anteprima");
+
+    const download = withDownloadGuard(guard, downloadTask);
+    // Click su "Anteprima PDF" mentre il download è ancora in volo.
+    const preview = withDownloadGuard(guard, previewTask);
+
+    expect(previewTask).not.toHaveBeenCalled();
+
+    resolveDownload("scaricato");
+    const [downloadResult, previewResult] = await Promise.all([download, preview]);
+
+    expect(downloadResult).toBe("scaricato");
+    expect(previewResult).toBeNull();
+  });
+});
+
+function createPreviewSink(): FinalReportPreviewSink & {
+  calls: string[];
+  revokeCallbacks: Array<() => void>;
+} {
+  const calls: string[] = [];
+  const revokeCallbacks: Array<() => void> = [];
+  return {
+    calls,
+    revokeCallbacks,
+    createObjectURL: vi.fn(() => {
+      calls.push("create");
+      return "blob:preview-url";
+    }),
+    revokeObjectURL: vi.fn((url) => {
+      expect(url).toBe("blob:preview-url");
+      calls.push("revoke");
+    }),
+    triggerAnchorDownload: vi.fn((url, filename) => {
+      expect(url).toBe("blob:preview-url");
+      expect(filename).toBe("Report Budget.pdf");
+      calls.push("trigger-download");
+    }),
+    scheduleRevoke: vi.fn((callback, delayMs) => {
+      expect(delayMs).toBe(PREVIEW_REVOKE_DELAY_MS);
+      calls.push("schedule-revoke");
+      revokeCallbacks.push(callback);
+    }),
+  };
+}
+
+function createPreviewTab(): FinalReportPreviewTab & { navigatedTo: string[]; closed: boolean } {
+  const navigatedTo: string[] = [];
+  return {
+    navigatedTo,
+    closed: false,
+    navigate(url: string) {
+      navigatedTo.push(url);
+    },
+    close() {
+      this.closed = true;
+    },
+  };
+}
+
+describe("showPdfPreview", () => {
+  it("naviga la scheda preaperta sull'object URL e pianifica la revoca ritardata, senza revocare subito", () => {
+    const sink = createPreviewSink();
+    const tab = createPreviewTab();
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+
+    const outcome = showPdfPreview(tab, blob, "Report Budget.pdf", sink);
+
+    expect(outcome).toEqual({ opened: true });
+    expect(tab.navigatedTo).toEqual(["blob:preview-url"]);
+    expect(sink.calls).toEqual(["create", "schedule-revoke"]);
+    expect(sink.revokeObjectURL).not.toHaveBeenCalled();
+
+    // Solo quando il timer iniettato scatta la revoca avviene davvero.
+    sink.revokeCallbacks[0]();
+    expect(sink.calls).toEqual(["create", "schedule-revoke", "revoke"]);
+  });
+
+  it("ripiega sul download quando la scheda è null (popup bloccato)", () => {
+    const sink = createPreviewSink();
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+
+    const outcome = showPdfPreview(null, blob, "Report Budget.pdf", sink);
+
+    expect(outcome).toEqual({ opened: false, fallbackToDownload: true });
+    expect(sink.calls).toEqual(["create", "trigger-download", "revoke"]);
+  });
+
+  it("accetta un ritardo di revoca esplicito, per i test dell'hook", () => {
+    const sink = createPreviewSink();
+    sink.scheduleRevoke = vi.fn((callback, delayMs) => {
+      expect(delayMs).toBe(5000);
+      callback();
+    });
+    const tab = createPreviewTab();
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+
+    showPdfPreview(tab, blob, "Report Budget.pdf", sink, 5000);
+
+    expect(sink.revokeObjectURL).toHaveBeenCalledWith("blob:preview-url");
+  });
+});
+
+describe("closePreviewTabOnError", () => {
+  it("chiude la scheda preaperta quando esiste", () => {
+    const tab = createPreviewTab();
+    closePreviewTabOnError(tab);
+    expect(tab.closed).toBe(true);
+  });
+
+  it("non lancia quando la scheda è null (popup già bloccato)", () => {
+    expect(() => closePreviewTabOnError(null)).not.toThrow();
+  });
+});
+
+describe("PREVIEW_BLOCKED_MESSAGE", () => {
+  it("è un messaggio informativo non vuoto", () => {
+    expect(PREVIEW_BLOCKED_MESSAGE.length).toBeGreaterThan(0);
   });
 });

@@ -129,3 +129,67 @@ export async function withDownloadGuard<T>(
     guard.pending = false;
   }
 }
+
+/**
+ * Anteprima PDF (sostituisce «Anteprima stampa» / `window.print()` su
+ * `/report`): il PDF si apre in una nuova scheda invece di scaricarsi.
+ */
+
+/** Scheda del browser preaperta, astratta per restare testabile senza DOM reale. */
+export interface FinalReportPreviewTab {
+  navigate: (url: string) => void;
+  close: () => void;
+}
+
+/**
+ * Il sink del download più `scheduleRevoke`, iniettato per pianificare la
+ * revoca ritardata dell'object URL. **Non** avvolgere `setTimeout` come
+ * metodo di un oggetto e chiamarlo così (`sink.setTimeout(...)`): nel
+ * browser lancia «Illegal invocation» perché perde il ricevitore atteso, ed
+ * `environment: node` non lo vede (trappola nota del progetto). Il valore
+ * iniettato qui deve essere una funzione libera che al suo interno chiama
+ * `setTimeout` come identificatore globale, non come proprietà di un
+ * oggetto.
+ */
+export interface FinalReportPreviewSink extends FinalReportDownloadSink {
+  scheduleRevoke: (callback: () => void, delayMs: number) => void;
+}
+
+/** Ritardo, in ms, prima di revocare l'object URL della scheda di anteprima. */
+export const PREVIEW_REVOKE_DELAY_MS = 60_000;
+
+/** Toast informativo mostrato quando il popup blocker impedisce l'apertura della scheda. */
+export const PREVIEW_BLOCKED_MESSAGE =
+  "Il browser ha bloccato l'apertura della scheda: il PDF è stato scaricato.";
+
+export type PreviewOutcome = { opened: true } | { opened: false; fallbackToDownload: true };
+
+/**
+ * Mostra il PDF nella scheda preaperta (`tab`, creata in modo sincrono nel
+ * click con `window.open("", "_blank")` prima del `fetch`, per non farsi
+ * bloccare dal popup blocker). Se `tab` è `null` — popup bloccato — ripiega
+ * sul download dello stesso blob. L'object URL viene revocato dopo
+ * `revokeDelayMs`, mai subito, o la scheda resta vuota.
+ */
+export function showPdfPreview(
+  tab: FinalReportPreviewTab | null,
+  blob: Blob,
+  filename: string,
+  sink: FinalReportPreviewSink,
+  revokeDelayMs: number = PREVIEW_REVOKE_DELAY_MS
+): PreviewOutcome {
+  if (!tab) {
+    saveBlobAsFile(blob, filename, sink);
+    return { opened: false, fallbackToDownload: true };
+  }
+
+  const url = sink.createObjectURL(blob);
+  tab.navigate(url);
+  sink.scheduleRevoke(() => sink.revokeObjectURL(url), revokeDelayMs);
+  return { opened: true };
+}
+
+/** Chiude la scheda preaperta su errore: non deve restarne una vuota aperta. */
+export function closePreviewTabOnError(tab: FinalReportPreviewTab | null): void {
+  tab?.close();
+}

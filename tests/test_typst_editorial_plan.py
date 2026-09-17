@@ -10,7 +10,7 @@ import fitz
 import pytest
 
 from app.renderers.typst import Compiler, RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable
-from app.renderers.typst.editorial_inventory import build_inventory, expected_content_inventory
+from app.renderers.typst.editorial_inventory import build_inventory, chart_view, expected_content_inventory
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, build_editorial_plan,
     prepare_editorial_report, verify_editorial_layout,
@@ -176,15 +176,14 @@ def test_single_unbreakable_manual_note_cannot_escape_its_width(probe):
 def test_chart_measurements_reject_numeric_json_geometry(probe, geometry):
     report = fixture_report()
     measured = probe.measure_layout(report)
-    charts = {'chart:' + chart.id: chart for chart in report.chart_series}
     values = []
     for record in measured.records:
         value = {key: item for key, item in asdict(record).items() if item is not None}
-        if record.content_id in charts:
-            chart = charts[record.content_id]
+        if record.content_id.startswith('chart:'):
+            view = chart_view(report, record.content_id[len('chart:'):])
             value.update(kind='chart', width_mm='178', height_mm='94', measured_width_mm='178',
-                         measured_height_mm='94', unit=chart.unit, categories=chart.categories,
-                         series=chart.model_dump(mode='json')['series'], thresholds=[])
+                         measured_height_mm='94', unit=view['unit'], categories=view['categories'],
+                         series=view['series'], thresholds=view['thresholds'])
         values.append(value)
     assert probe._validate_records(json.dumps(values).encode(), report) == measured.records
     chart_value = next(value for value in values if value['kind'] == 'chart')
@@ -375,3 +374,21 @@ def test_colonna_kpi_letta_al_centesimo_dal_modello_col_periodo_giusto(probe, wo
         for item in section['items']:
             for kpi in item.get('kpis') or ():
                 assert kpi['value'] is not None or kpi['series'] or kpi['to'] is not None, kpi
+
+
+@pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
+def test_grafici_multi_serie_senza_mille_punte_e_senza_pagine_nd(probe, workflow):
+    """M2-02B difetti 5 e 6: via «×10^3» dagli assi (parola italiana o nessuna
+    scala), grafici multi-serie sul timeline storico → chiusura → piano, e
+    nessun grafico vuoto sprecato su una pagina intera."""
+    report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    assert '×10' not in text
+    chart_items = [item for section in build_inventory(report) for item in section['items'] if item['kind'] == 'chart']
+    assert any(len(item['chart']['series']) > 1 for item in chart_items), 'nessun grafico multi-serie'
+    for item in chart_items:
+        assert any(value is not None for series in item['chart']['series'] for value in series['values']), item['chart_id']
+    # La pagina «n.d.» intera non esiste piu: la didascalia vuota è ammessa
+    # solo sulla rara pagina orfana, che in questi tre percorsi non si crea.
+    assert 'Nessun valore nei periodi rappresentati' not in text

@@ -6,6 +6,7 @@ import pytest
 from app.renderers.typst.editorial_inventory import (
     SECTION_IDS,
     build_inventory,
+    chart_view,
     expected_content_inventory,
 )
 from app.schemas.final_report import AssumptionValue, OtherLender
@@ -20,6 +21,14 @@ def _rows(inventory):
     return [row for item in _items(inventory) if item["kind"] == "table" for row in item["rows"]]
 
 
+def _charts_with_values(report):
+    # M2-02B: un grafico senza alcun valore nel timeline non occupa una pagina
+    # «n.d.»; resta in pagina solo come «pagina orfana», cioè quando la sezione
+    # non avrebbe altrimenti alcun marcatore.
+    return {chart.id for chart in report.chart_series
+            if any(value is not None for series in chart_view(report, chart.id)["series"] for value in series["values"])}
+
+
 @pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
 def test_workflows_have_the_complete_ordered_and_marked_inventory(workflow):
     report = fixture_report(workflow, [2027])
@@ -32,8 +41,15 @@ def test_workflows_have_the_complete_ordered_and_marked_inventory(workflow):
     assert all(section["items"] for section in inventory)
     assert all(len(row["cells"]) == len(item["columns"]) == len(row["units"])
                for item in items if item["kind"] == "table" for row in item["rows"])
-    assert {item["chart_id"] for item in items if item["kind"] == "chart"} == {chart.id for chart in report.chart_series}
-    assert len([item for item in items if item["kind"] == "chart"]) == 16
+    rendered = {item["chart_id"] for item in items if item["kind"] == "chart"}
+    with_values = _charts_with_values(report)
+    assert with_values <= rendered
+    # Ogni grafico senza valori che resta in pagina è una pagina orfana: la sua
+    # sezione non contiene cioè altri maricatori.
+    for chart_id in rendered - with_values:
+        section = next(section for section in inventory
+                       if any(item.get("chart_id") == chart_id for item in section["items"]))
+        assert all(item["kind"] == "chart" for item in section["items"])
     assert ("infrannual-closing-values" in {item["id"] for item in items}) == (workflow == "infrannuale")
     # The one-year fixture intentionally retains source assumptions over three
     # periods.  The renderer must expose the exact extras, never discard them.
@@ -103,8 +119,9 @@ def test_expected_markers_cover_every_chart_indicator_and_appendix_source_row_on
     assert list(expected)[0] == "cover"
     assert expected["appendix-index"] == "appendices_methodology"
     assert len(expected) == len(set(expected))
+    rendered = {item["chart_id"] for item in _items(inventory) if item["kind"] == "chart"}
     for chart in report.chart_series:
-        assert list(expected).count(f"chart:{chart.id}") == 1
+        assert list(expected).count(f"chart:{chart.id}") == (1 if chart.id in rendered else 0)
     for indicator in report.indicator_catalog:
         assert list(expected).count(f"indicator:{indicator.id}") == 1
 

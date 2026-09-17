@@ -363,6 +363,115 @@ def _section_kpis(report: FinalReportModelV2, section_id: str) -> list[dict[str,
     return [kpi for kpi in builders.get(section_id, []) if kpi is not None]
 
 
+# ── Vista grafico della pagina tipo (M2-02B passo 4) ────────────────────────────
+# Il grafico canónico della v4 non è solo «ultimi tre anni di piano»: mostra la
+# serie completa storico → osservato → chiusura → piano, e piúú serie quando il
+# modello le offre. Ogni valore è letto dal modello (indicatori o righe di
+# prospetto): nessuna somma, nessuna proiezione inventata.
+
+_BASIS_ORDER = {"historical": 0, "observed": 1, "adjusted": 2, "closing": 3, "forecast": 4}
+_BASIS_INITIAL = {"observed": "O", "adjusted": "R", "closing": "C", "forecast": "P"}
+
+
+def _period_key(period: Any) -> tuple:
+    return (period.year, period.basis, period.period_months)
+
+
+def _axis_label(period: Any) -> str:
+    initial = _BASIS_INITIAL.get(period.basis)
+    return str(period.year) if initial is None else f"{period.year} {initial}"
+
+
+def _timeline(report: FinalReportModelV2) -> list:
+    keys: dict[tuple, Any] = {}
+    for statement in report.detailed_statements:
+        for period in statement.periods:
+            keys.setdefault(_period_key(period), period)
+    for indicator in report.indicator_catalog:
+        for period in indicator.periods:
+            keys.setdefault(_period_key(period), period)
+    return sorted(keys.values(), key=lambda period: (period.year, _BASIS_ORDER[period.basis]))
+
+
+# Serie dei grafici canónici v1: nessuna referenzazione di indici nel modello,
+# la timeline viene letta dalle righe di prospetto e dagli indicatori omonimi.
+_CANONICAL_CHART_SERIES = {
+    "income_results": [("statement", "income_statement", ("ce01_ricavi_vendite", "revenue", "production_value"), "Ricavi"),
+                       ("statement", "income_statement", ("ebitda",), None)],
+    "margins": [("indicator", "practice.ebitda_margin")],
+    "coverage": [("indicator", "practice.dscr")],
+    "working_capital_days": [("indicator", "analytical.activity.receivables_turnover_days"),
+                             ("indicator", "analytical.activity.inventory_turnover_days"),
+                             ("indicator", "analytical.activity.payables_turnover_days")],
+    "cashflows": [("statement", "cashflow", ("operating.total_operating_cashflow", "operating"), None),
+                  ("statement", "cashflow", ("investing.total_investing_cashflow", "investing"), None),
+                  ("statement", "cashflow", ("financing.total_financing_cashflow", "financing"), None)],
+    "liquidity_debt": [("statement", "balance_sheet", ("sp09_disponibilita_liquide", "cash"), "Cassa"),
+                       ("indicator", "practice.pfn"),
+                       ("statement", "balance_sheet", ("sp16_debiti_breve+sp17_debiti_lungo",), None)],
+}
+
+
+def chart_view(report: FinalReportModelV2, chart_id: str) -> dict[str, Any] | None:
+    """La vista che il template disegna e che `editorial_plan` rivailida.
+
+    Python e Typst devono vedere la stessa identica serie: il marcatore del
+    grafico riporta `categories`/`series` di questa funzione, non quelle del
+    modello v1 (che fermo agli anni di piano darebbe un grafico monco).
+    """
+    chart = next((item for item in report.chart_series if item.id == chart_id), None)
+    if chart is None:
+        return None
+    timeline = _timeline(report)
+    if not timeline:
+        timeline = [period for period in report.detailed_statements[0].periods]
+    axis = [_axis_label(period) for period in timeline]
+
+    def indicator_series(identifier: str):
+        indicator = _indicator_by_id(report, identifier)
+        if indicator is None or not any(value is not None for value in indicator.values):
+            return None
+        by_key = {_period_key(period): value for period, value in zip(indicator.periods, indicator.values)}
+        return {"label": indicator.label, "values": [_exact(by_key.get(_period_key(period))) for period in timeline]}
+
+    def statement_series(statement_id: str, codes: tuple, label: str | None):
+        for statement in report.detailed_statements:
+            if statement.id != statement_id:
+                continue
+            for row in statement.rows:
+                if row.code in codes and any(value is not None for value in row.values):
+                    by_key = {_period_key(period): value
+                              for period, value in zip(statement.periods, row.values)}
+                    return {"label": label or row.label,
+                            "values": [_exact(by_key.get(_period_key(period))) for period in timeline]}
+        return None
+
+    references = list(getattr(chart, "indicator_ids", []) or [])
+    series: list[dict[str, Any]] = []
+    if references:
+        series = [built for built in (indicator_series(ref) for ref in references) if built is not None]
+    elif chart_id in _CANONICAL_CHART_SERIES:
+        for spec in _CANONICAL_CHART_SERIES[chart_id]:
+            built = (indicator_series(spec[1]) if spec[0] == "indicator"
+                     else statement_series(spec[1], spec[2], spec[3]))
+            if built is not None:
+                series.append(built)
+                if spec[0] == "indicator":
+                    references.append(spec[1])
+    if not series:
+        # Ripiego onesto: le serie del modello, collocate sugli anni di piano.
+        for metric in chart.series:
+            by_year = {year: value for year, value in zip(chart.categories, metric.values)}
+            series.append({"label": metric.label, "values": [
+                _exact(by_year.get(period.year)) if period.basis == "forecast" and period.year in by_year else None
+                for period in timeline]})
+    return {"id": chart.id, "title": chart.title, "unit": str(chart.unit), "categories": axis,
+            "series": series, "indicator_ids": references,
+            "thresholds": [{"label": _indicator_by_id(report, ref).label + " · " + threshold.label,
+                            "value": format(threshold.value, "f"), "source": threshold.source}
+                           for ref in references for threshold in _indicator_by_id(report, ref).thresholds]}
+
+
 def _chart_kpis(report: FinalReportModelV2, chart_id: str) -> list[dict[str, Any]]:
     """KPI della pagina tipo per grafico canónico (tabella del piano, §M2-02B).
 
@@ -710,10 +819,25 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # tecnico come etichetta, senza unità e senza arrotondamento (73.33333333333333333333333333). Gli
     # stessi indicatori stanno nel catalogo, con etichetta, unità e metodologia (proprietario, 2026-09-17).
 
+    dropped: dict[str, dict[str, Any]] = {}
     for chart in report.chart_series:
         destination = _CHART_SECTION.get(chart.id, "indicators")
-        section[destination]["items"].append({"id": f"chart:{chart.id}", "kind": "chart", "title": chart.title,
-                                              "chart_id": chart.id, "kpis": _chart_kpis(report, chart.id)})
+        view = chart_view(report, chart.id)
+        item = {"id": f"chart:{chart.id}", "kind": "chart", "title": chart.title,
+                "chart_id": chart.id, "chart": view, "kpis": _chart_kpis(report, chart.id)}
+        if not any(value is not None for series in view["series"] for value in series["values"]):
+            # Difetto v4: la pagina «n.d.» per intera. Un grafico senza alcun
+            # valore nel timeline non si stampa; la pagina resta occupata dal
+            # resto della sezione. Se la sezione restasse senza maricatori,
+            # il primo grafico vuoto tiene la pagina con la sola griglia.
+            dropped.setdefault(destination, item)
+            continue
+        section[destination]["items"].append(item)
+    for destination, orphan in dropped.items():
+        if not section[destination]["items"]:
+            # Sezione rimasta senza alcun marcatore: il grafico vuoto tiene la
+            # pagina (con la sola griglia), altrimenti la pagina sarebbe vuota.
+            section[destination]["items"].append(orphan)
     for value in sections:
         value["kpis"] = [] if any(item["kind"] == "chart" for item in value["items"]) else _section_kpis(report, value["id"])
 

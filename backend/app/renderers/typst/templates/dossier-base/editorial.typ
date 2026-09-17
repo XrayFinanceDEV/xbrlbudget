@@ -263,7 +263,7 @@
       data-table(section, item)
       v(5mm)
     } else if item.kind == "chart" {
-      let chart = report.chart_series.find(c => c.id == item.chart_id)
+      let chart = item.chart
       // Il grafico apre una pagina propria solo se non è già in testa alla
       // sezione (la interruzione di sezione c'è già stata): una weak rotture
       // dopo l'intestazione lascerebbe una pagina sola intestazione, senza
@@ -278,7 +278,7 @@
         #v(3mm)
         #chart-component(chart, gray: options.grayscale, indicators: report.indicator_catalog)
         #v(2mm)
-        #value-table(chart)
+        #value-table(chart, places: if chart.unit == "eur" { 0 })
       ]
       context {
         if measure(block(width: body-width, content)).height > 220mm {

@@ -57,9 +57,9 @@
     values.push(0)
     let lo = calc.min(..values); let hi = calc.max(..values)
     let magnitude = calc.max(calc.abs(lo), calc.abs(hi))
-    let exponent = if magnitude >= 1000 or (magnitude > 0 and magnitude < 0.01) {
-      int(calc.floor(calc.log(magnitude, base: 10)))
-    } else { 0 }
+    // Si scala solo verso l'alto: sotto l'unità di misura i tick restano a
+    // tre decimali, l'etichetta «×10^-n» della v2 era illeggibile.
+    let exponent = if magnitude >= 1000 { int(calc.floor(calc.log(magnitude, base: 10))) } else { 0 }
     let scale = calc.pow(10, exponent)
     if scale == 0 or scale == calc.inf { panic("chart-scale-out-of-range") }
     // Normalize before subtracting: avoid overflow of opposite large values.
@@ -70,16 +70,18 @@
     let pw = width - ox - 8pt; let ph = height - oy - 25pt
     let xp(index) = ox + (index + 0.5) / chart.categories.len() * pw
     let yp(value) = oy + (hi - value / scale) / (hi - lo) * ph
+    let tick-label(tick) = str(calc.round(tick, digits: if calc.abs(tick) < 1 { 3 } else { 2 })).replace(".", ",")
     let bars = chart.id in geometry.bars
+    let scale-word = if exponent == 3 { " · valori in migliaia" } else if exponent == 6 { " · valori in milioni" }
+      else if exponent == 9 { " · valori in miliardi" } else { "" }
     box(width: width, height: height)[
-      #place(top + left, dx: ox, dy: 0pt, plex(7pt, fill: muted,
-        unit-label(chart.unit) + if exponent != 0 { " · ×10^" + str(exponent) } else { "" }))
+      #place(top + left, dx: ox, dy: 0pt, plex(7pt, fill: muted, unit-label(chart.unit) + scale-word))
       #for k in range(5) {
         let tick = lo + k / 4 * (hi - lo)
         let y = oy + (hi - tick) / (hi - lo) * ph
         place(top + left, dx: ox, dy: y, line(length: pw, stroke: 0.4pt + rule))
         place(top + left, dy: y - 4pt, box(width: ox - 5pt,
-          align(right, plex(7pt, fill: muted, str(calc.round(tick, digits: 2)).replace(".", ",")))))
+          align(right, plex(7pt, fill: muted, tick-label(tick)))))
       }
       #place(top + left, dx: ox, dy: yp(0), line(length: pw, stroke: 0.8pt + muted))
       #for threshold in thresholds {
@@ -151,18 +153,21 @@
     unit: chart.unit, categories: chart.categories, series: chart.series, thresholds: thresholds))
   block(width: width, height: height, breakable: false, body)
 }
-#let value-table(chart) = context {
+// `places` è la precisione della tipografia del dossier: gli euro si impaginano
+// in euro interi (M2-02), le altre unità restano alla precisione di default.
+#let value-table(chart, places: none) = context {
   let width = float(geometry.width_mm) * 1mm
   let label-width = 135pt
   let column-width = (width - label-width) / chart.categories.len()
+  let shown(value) = display-value(value, chart.unit, places: places)
   let fits = chart.series.all(s => s.values.all(v =>
-    measure(plex(8pt, display-value(v, chart.unit))).width <= column-width - 6pt))
+    measure(plex(8pt, shown(v))).width <= column-width - 6pt))
   let cells = ()
   if fits {
     for series in chart.series {
       cells.push(table.cell(breakable: false, plex(8pt, series.label)))
       for value in series.values {
-        cells.push(table.cell(breakable: false, align(right, plex(8pt, display-value(value, chart.unit)))))
+        cells.push(table.cell(breakable: false, align(right, plex(8pt, shown(value)))))
       }
     }
     table(columns: (label-width, ..((column-width,) * chart.categories.len())), inset: 3pt,
@@ -174,11 +179,11 @@
     for series in chart.series {
       cells.push(table.cell(colspan: 2, plex(8pt, weight: 600, series.label)))
       for (year, value) in chart.categories.zip(series.values) {
-        if measure(plex(8pt, display-value(value, chart.unit))).width > width / 2 - 6pt {
+        if measure(plex(8pt, shown(value))).width > width / 2 - 6pt {
           panic("chart-value-does-not-fit")
         }
         cells.push(table.cell(breakable: false, plex(8pt, str(year))))
-        cells.push(table.cell(breakable: false, align(right, plex(8pt, display-value(value, chart.unit)))))
+        cells.push(table.cell(breakable: false, align(right, plex(8pt, shown(value)))))
       }
     }
     table(columns: (1fr, 1fr), inset: 3pt,

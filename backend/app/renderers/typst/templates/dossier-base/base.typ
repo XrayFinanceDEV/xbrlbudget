@@ -39,6 +39,20 @@
   #line(length: 100%, stroke: 0.4pt + rule)
 ]
 
+// Rilievo 1: in pagina tipo la colonna KPI è VERTICALE a sinistra del grafico
+// (v4: ~55 mm), non una striscia orizzontale in cima alla pagina dopo.
+#let kpi-column(kpis) = box(width: 55mm, inset: 0pt)[
+  #line(length: 100%, stroke: 0.6pt + rule)
+  #for kpi in kpis {
+    v(3.4mm)
+    plex(13pt, weight: 600, fill: navy, kpi-text(kpi))
+    v(0.8mm)
+    text(7pt, fill: muted, kpi.label)
+  }
+  #v(3mm)
+  #line(length: 100%, stroke: 0.4pt + rule)
+]
+
 #let note-slot() = block(width: note-width, height: note-height)[
   #line(length: 100%, stroke: 0.7pt + rule)
   #v(2pt)

@@ -472,6 +472,13 @@ def chart_view(report: FinalReportModelV2, chart_id: str) -> dict[str, Any] | No
                            for ref in references for threshold in _indicator_by_id(report, ref).thresholds]}
 
 
+def chart_marker_width_mm(report: FinalReportModelV2, chart_id: str) -> str:
+    """Rilievo 1: sulla pagina tipo il grafico con colonna KPI occupa 118 mm
+    (55 mm di colonna + 5 di gutter); senza KPI resta a 178. Il piano editoriale
+    valida la geometria dichiarata dalla stessa fonte."""
+    return '118' if _chart_kpis(report, chart_id) else '178'
+
+
 def _chart_kpis(report: FinalReportModelV2, chart_id: str) -> list[dict[str, Any]]:
     """KPI della pagina tipo per grafico canónico (tabella del piano, §M2-02B).
 
@@ -776,8 +783,14 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     section["cover"]["items"].append({"id": "cover", "kind": "cover", "title": report.document.title})
 
     for narrative in report.narrative:
-        section[_NARRATIVE_SECTION[narrative.id]]["items"].append(
-            _text(narrative.id, _NARRATIVE_TITLES[narrative.id], narrative.text))
+        text = (narrative.text or "").strip()
+        # Rilievo 2: un blocco narrativo senza testo vero (vuoto o una sola
+        # parola, come «Sintesi»/«Finanza») non si stampa: titolo+segnaposto
+        # erano pagine bianche con cornice. Il commento vive nel riquadro
+        # «Lettura del consulente».
+        if len(text.split()) >= 2:
+            section[_NARRATIVE_SECTION[narrative.id]]["items"].append(
+                _text(narrative.id, _NARRATIVE_TITLES[narrative.id], text))
 
     periods = []
     for statement in report.detailed_statements:

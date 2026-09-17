@@ -44,8 +44,8 @@
   }
   result
 }
-#let plot(chart, gray: false, thresholds: ()) = {
-  let width = float(geometry.width_mm) * 1mm
+#let plot(chart, gray: false, thresholds: (), width-mm: none) = {
+  let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
   let height = float(geometry.plot_height_mm) * 1mm
   let values = chart.series.map(s => s.values.filter(v => v != none).map(coordinate)).flatten()
   if values.len() == 0 {
@@ -121,7 +121,9 @@
     ]
   }
 }
-#let legend(chart, gray: false, thresholds: ()) = [
+#let legend(chart, gray: false, thresholds: (), width-mm: none) = {
+  let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
+  block(width: width, [
   #for (index, series) in chart.series.enumerate() {
     let color = colors(gray).at(calc.rem(index, 4))
     grid(columns: (14pt, 1fr), gutter: 5pt,
@@ -134,21 +136,22 @@
     plex(7pt, fill: muted, "Riferimento: " + threshold.label + " = " + display-value(threshold.value, chart.unit))
     v(2pt)
   }
-]
-#let chart-component(chart, gray: false, indicators: ()) = context {
-  let width = float(geometry.width_mm) * 1mm
+  ])
+}
+#let chart-component(chart, gray: false, indicators: (), width-mm: none) = context {
+  let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
   let height = float(geometry.height_mm) * 1mm
   let legend-height = float(geometry.legend_height_mm) * 1mm
   if chart.series.len() > geometry.max_series { panic("chart-series-exceed-distinct-styles") }
   let thresholds = references(chart, indicators)
-  let key = legend(chart, gray: gray, thresholds: thresholds)
+  let key = legend(chart, gray: gray, thresholds: thresholds, width-mm: width-mm)
   if measure(block(width: width, key)).height > legend-height { panic("chart-legend-does-not-fit") }
-  let body = stack(dir: ttb, spacing: 0pt, plot(chart, gray: gray, thresholds: thresholds),
+  let body = stack(dir: ttb, spacing: 0pt, plot(chart, gray: gray, thresholds: thresholds, width-mm: width-mm),
       block(width: width, height: legend-height, key))
   let measured = measure(body)
   if measured.height > height { panic("chart-component-does-not-fit") }
   metadata((kind: "chart", content_id: "chart:" + chart.id, page: here().page(),
-    width_mm: geometry.width_mm, height_mm: geometry.height_mm,
+    width_mm: if width-mm == none { geometry.width_mm } else { str(width-mm) }, height_mm: geometry.height_mm,
     measured_width_mm: str(measured.width / 1mm), measured_height_mm: str(measured.height / 1mm),
     unit: chart.unit, categories: chart.categories, series: chart.series, thresholds: thresholds))
   block(width: width, height: height, breakable: false, body)

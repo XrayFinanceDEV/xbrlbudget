@@ -4,17 +4,17 @@
   "files": {
     "OFL-1.1.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
     "PROVENANCE.md": "fa78908331dc236b98e4f43cbcfed42189e86943413f8398f57c30afc6d0c155",
-    "base.typ": "226770226b556f15ce208c9e5ae4597984a76db9a0b7f3a1cbc90e29c8b19c7c",
+    "base.typ": "7cb8c51f4b48d9544f5a2b5cca70cdd13309545f0d303031dbe4d2de6dd149f0",
     "fonts/IBMPlexSans-Italic.ttf": "a9c6ef9942c49e49d11e11a6dacc0b3a087978757e9b22a06b8ac22a6400fb15",
     "fonts/IBMPlexSans-Medium.ttf": "331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907",
     "fonts/IBMPlexSans-Regular.ttf": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5",
     "fonts/IBMPlexSans-SemiBold.ttf": "a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1",
     "template.typ": "dfe845910ea86090dccc4f5e02f7789d2c1bbf16620e17d20c637efa42c3ae0f",
-    "charts.typ": "cae704c21e32f3b58a56b3670e156e663f9e966f87c526deea4e9e3cb642d657",
+    "charts.typ": "f273a62e33fc4a435ad180374aa52ed5138675d76f575cc66e33f8e2a31c0088",
     "chart-format.typ": "bfee9284b4c33dcb861331d351ce120cead761b839562666b03ada03c8a85d09",
     "chart-layout.json": "9a861a3cf2bad34fd5ab9d47162b72574324cfee3037b56f7605d092e400af7e",
     "charts-preview.typ": "499daa5a1ed190c848e80b0b58ea483dc1978d70750eafa6efed70dca08a59c5",
-    "editorial.typ": "ee1100e47e0b2dca8042ccf543f4c29c32033476b38a514bd17a08e93538fb14",
+    "editorial.typ": "5a32b28e96e4a7f2013368a34abf2bbd91c4b815412fa4cbce2bed7cd28619db",
     "note-fit.typ": "f392a522260c7e1b206e38477918fbcf82bac7c5c5385bd49d53e28e12b567c9"
   }
 }

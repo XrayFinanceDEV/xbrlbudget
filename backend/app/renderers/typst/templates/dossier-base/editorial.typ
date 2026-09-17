@@ -1,5 +1,5 @@
 // Resolved composition used to freeze the canonical dossier's physical pages.
-#import "base.typ": dossier, cover, plex, marker, body-width, navy, blue, ink, muted, rule, gray-mode, kpi-strip
+#import "base.typ": dossier, cover, plex, marker, body-width, navy, blue, ink, muted, rule, gray-mode, kpi-strip, kpi-column
 #import "charts.typ": chart-component, value-table
 #import "chart-format.typ": display-value, unit-label
 #let report = json("model.json")
@@ -264,27 +264,30 @@
       v(5mm)
     } else if item.kind == "chart" {
       let chart = item.chart
-      // Il grafico apre una pagina propria solo se non è già in testa alla
-      // sezione (la interruzione di sezione c'è già stata): una weak rotture
-      // dopo l'intestazione lascerebbe una pagina sola intestazione, senza
-      // alcun marcatore — e il piano editoriale non ammette pagine scoperte.
+      // Rilievo 1: la pagina tipo è UNA pagina. Nessun interblocco fra
+      // intestazione di sezione e primo grafico; da lì in poi ogni grafico
+      // occupa una fascia propria: colonna KPI verticale a sinistra (55 mm),
+      // grafico a destra (118 mm), come la v4. I valori esatti restano nelle
+      // tabelle di prospetto e nelle appendici: sotto il grafico niente
+      // doppia tabella, che nella v4 non c'è.
+      let has-kpi = "kpis" in item and item.kpis.len() > 0
       if index > 0 { pagebreak(weak: true) }
-      let content = [
-        #if "kpis" in item and item.kpis.len() > 0 {
-          kpi-strip(item.kpis)
-          v(4mm)
-        }
+      let figure = [
         #safe-prose(14pt, weight: 600, fill: navy, item.title)
         #v(3mm)
-        #chart-component(chart, gray: options.grayscale, indicators: report.indicator_catalog)
-        #v(2mm)
-        #value-table(chart, places: if chart.unit == "eur" { 0 })
+        #if has-kpi {
+          grid(columns: (55mm, 118mm), column-gutter: 5mm,
+            kpi-column(item.kpis),
+            chart-component(chart, gray: options.grayscale, indicators: report.indicator_catalog, width-mm: 118))
+        } else {
+          chart-component(chart, gray: options.grayscale, indicators: report.indicator_catalog)
+        }
       ]
       context {
-        if measure(block(width: body-width, content)).height > 220mm {
+        if measure(block(width: body-width, figure)).height > 220mm {
           panic("editorial-chart-with-values-does-not-fit")
         }
-        block(width: body-width, breakable: false, content)
+        block(width: body-width, breakable: false, figure)
       }
       v(5mm)
     } else {

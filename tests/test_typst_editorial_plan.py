@@ -10,7 +10,7 @@ import fitz
 import pytest
 
 from app.renderers.typst import Compiler, RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable
-from app.renderers.typst.editorial_inventory import build_inventory, chart_view, expected_content_inventory
+from app.renderers.typst.editorial_inventory import (build_inventory, chart_marker_width_mm, chart_view, expected_content_inventory)
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, build_editorial_plan,
     prepare_editorial_report, verify_editorial_layout,
@@ -181,7 +181,8 @@ def test_chart_measurements_reject_numeric_json_geometry(probe, geometry):
         value = {key: item for key, item in asdict(record).items() if item is not None}
         if record.content_id.startswith('chart:'):
             view = chart_view(report, record.content_id[len('chart:'):])
-            value.update(kind='chart', width_mm='178', height_mm='94', measured_width_mm='178',
+            width = chart_marker_width_mm(report, record.content_id[len('chart:'):])
+            value.update(kind='chart', width_mm=width, height_mm='94', measured_width_mm=width,
                          measured_height_mm='94', unit=view['unit'], categories=view['categories'],
                          series=view['series'], thresholds=view['thresholds'])
         values.append(value)

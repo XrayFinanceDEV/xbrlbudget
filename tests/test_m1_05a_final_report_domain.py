@@ -392,10 +392,12 @@ def test_reconciliation_holds_for_negative_movements_and_rejects_mismatches():
     assert result.balanced and result.diagnostics == ()
     assert result.adjustments["sp09_disponibilita_liquide"] == Decimal("-400.0")
 
-    drifted = dict(after, sp09_disponibilita_liquide=Decimal("601.00"))
+    # 100 € e non 1 €: fino a 2 € uno scarto è arrotondamento e si dichiara senza bloccare
+    # (vedi test_ambienta_i_riallineamenti_si_dichiarano_e_non_bloccano).
+    drifted = dict(after, sp09_disponibilita_liquide=Decimal("700.00"))
     broken = reconcile_adjustments(before, drifted, entries)
     assert not broken.balanced
-    assert broken.differences["sp09_disponibilita_liquide"] == Decimal("1.00")
+    assert broken.differences["sp09_disponibilita_liquide"] == Decimal("100.00")
     assert [d.severity for d in broken.diagnostics] == ["error"]
     assert "sp09_disponibilita_liquide" in broken.diagnostics[0].message
 
@@ -416,7 +418,7 @@ def test_reconciliation_covers_snapshot_union_and_aggregates_duplicate_split_row
         "sp09_disponibilita_liquide": Decimal("0"),
         "ce01_ricavi_vendite": Decimal("0"),
         "sp16g_altri_debiti_breve": Decimal("0"),
-        "sp99_only_before": Decimal("2"),
+        "sp99_only_before": Decimal("20"),
     }
     after = {
         "sp09_disponibilita_liquide": Decimal("125"),
@@ -435,7 +437,7 @@ def test_reconciliation_covers_snapshot_union_and_aggregates_duplicate_split_row
     assert not result.balanced
     assert result.differences == {
         "ce99_only_after": Decimal("7"),
-        "sp99_only_before": Decimal("-2"),
+        "sp99_only_before": Decimal("-20"),
     }
     assert [diagnostic.code for diagnostic in result.diagnostics] == ["adjustments_unreconciled"]
 
@@ -565,3 +567,78 @@ def test_real_correggi_import_writer_shape_declares_its_edit_mass():
     )
     assert result.balanced and result.unposted == Decimal("75")
     assert [diagnostic.code for diagnostic in result.diagnostics] == ["adjustments_unposted_mass"]
+
+
+# ---------------------------------------------------------------------------
+# AMBIENTA, 2026-09-17: «Documento bloccato — La riconciliazione rettifiche non quadra: ce08 100000.22,
+# ce08b 0.03000000003, sp05 -214.55, sp06 63000.00, sp06g 41.00, sp07 45000.00, sp07g -3825.00,
+# sp13 -6998.54, sp16 255000.24». Nove «differenze», nessuna delle quali era un movimento non spiegato.
+# ---------------------------------------------------------------------------
+def _ambienta_in_piccolo():
+    """La stessa forma del giornale reale del 6M 2026, in scala.
+
+    - una rettifica su un dettaglio (`ce08b`), registrata in virgola mobile dal client;
+    - l'import aveva i dettagli di `sp07` incoerenti col totale di 30, e il salvataggio li ha riallineati;
+    - l'import aveva `sp13` a 1,68 dall'utile del CE, e il salvataggio lo ha ricalcolato;
+    - `ce08b` si è mosso di 3 centesimi più di quanto dice il giornale.
+    """
+    entries = [_rettifica(1, edited_field="ce08b_salari_stipendi", edit_delta=100.21999999997,
+                          counterpart_field="sp16f_debiti_previdenza_breve", counterpart_delta=100.21999999997)]
+    before = {
+        "ce01_ricavi_vendite": Decimal("2000.00"), "ce08_costi_personale": Decimal("1000.00"),
+        "ce08b_salari_stipendi": Decimal("1000.00"),
+        "sp16_debiti_breve": Decimal("500.00"), "sp16f_debiti_previdenza_breve": Decimal("500.00"),
+        "sp07_crediti_lungo": Decimal("100.00"), "sp07e_crediti_tributari_lungo": Decimal("100.00"),
+        "sp07g_crediti_altri_lungo": Decimal("30.00"),
+        "sp13_utile_perdita": Decimal("998.32"),
+    }
+    after = dict(before, **{
+        "ce08_costi_personale": Decimal("1100.25"), "ce08b_salari_stipendi": Decimal("1100.25"),
+        "sp16_debiti_breve": Decimal("600.22"), "sp16f_debiti_previdenza_breve": Decimal("600.22"),
+        "sp07g_crediti_altri_lungo": Decimal("0.00"),
+        "sp13_utile_perdita": Decimal("899.75"),
+    })
+    return entries, before, after
+
+
+def test_ambienta_i_riallineamenti_si_dichiarano_e_non_bloccano():
+    entries, before, after = _ambienta_in_piccolo()
+    result = reconcile_adjustments(before, after, entries)
+
+    # Nessun blocco: un totale si ricava dai suoi dettagli, non si confronta con un giornale che
+    # per costruzione non lo nomina mai.
+    assert result.balanced, result.differences
+    codici = [d.code for d in result.diagnostics]
+    assert "adjustments_unreconciled" not in codici
+    assert all(d.severity == "warning" for d in result.diagnostics)
+
+    per_codice = {d.code: d.message for d in result.diagnostics}
+    # I dettagli riallineati al totale: dichiarati, con l'importo in italiano.
+    assert "sp07g_crediti_altri_lungo" in per_codice["adjustments_details_realigned"]
+    assert "-30,00" in per_codice["adjustments_details_realigned"]
+    # L'utile ricalcolato dal CE: lo scarto che l'import portava.
+    assert "1,68" in per_codice["adjustments_profit_realigned"]
+    # I 3 centesimi: dichiarati come arrotondamento, sul dettaglio e non anche sul suo totale.
+    assert "ce08b_salari_stipendi" in per_codice["adjustments_rounding"]
+    assert "0,03" in per_codice["adjustments_rounding"]
+    assert "ce08_costi_personale" not in per_codice["adjustments_rounding"]
+
+
+def test_un_totale_che_si_muove_senza_rettifica_blocca_ancora():
+    entries, before, after = _ambienta_in_piccolo()
+    # 100 € di debiti comparsi su un dettaglio senza alcuna riga di giornale.
+    drifted = dict(after, sp16_debiti_breve=Decimal("700.22"), sp16g_altri_debiti_breve=Decimal("100.00"))
+    result = reconcile_adjustments(before, drifted, entries)
+    assert not result.balanced
+    assert [d.severity for d in result.diagnostics if d.code == "adjustments_unreconciled"] == ["error"]
+    assert "sp16g_altri_debiti_breve" in result.differences
+
+
+def test_la_massa_non_registrata_si_legge_in_euro():
+    """«-214.77999999998836 movimentati…»: la virgola mobile del client non arriva a schermo."""
+    entries = [_rettifica(1, edited_field="sp05a_materie_prime", edit_delta=-215.54999999998836,
+                          counterpart_field="_correzione_import", counterpart_delta=0.0)]
+    result = reconcile_adjustments({"sp05a_materie_prime": Decimal("500")},
+                                   {"sp05a_materie_prime": Decimal("284.45")}, entries)
+    messaggio = [d.message for d in result.diagnostics if d.code == "adjustments_unposted_mass"][0]
+    assert messaggio.startswith("-215,55 movimentati"), messaggio

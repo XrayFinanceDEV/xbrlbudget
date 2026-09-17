@@ -546,6 +546,11 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
                       semantic_valid=semantic_valid, warnings=warnings)
 
 
+def aggregates_with_details() -> Tuple[str, ...]:
+    """Every aggregate that has IV-CEE detail sub-fields, SP and CE: the keys of ``detail_fields``."""
+    return (*_DETAIL_GROUPS, *_CE_DETAIL_GROUPS)
+
+
 def _net_profit_from_ce(ce: Dict[str, Decimal]) -> Decimal:
     """Compatibility wrapper around the single canonical CE formula."""
     return calculate_ce_result(ce).net_profit

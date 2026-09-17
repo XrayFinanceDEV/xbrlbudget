@@ -40,6 +40,7 @@ from app.schemas.final_report import (
     InfrannualClosing,
 )
 from app.services.extra_accounting_alerts_service import normalize_extra_accounting_alerts
+from calculations.projection_common import eur_it
 from database.models import BudgetScenario, FinancialYear
 
 
@@ -469,6 +470,16 @@ class AdjustmentReconciliation:
         return not self.differences
 
 
+#: Fino a qui uno scarto fra giornale e bilancio è arrotondamento: si dichiara, non blocca. È la scala
+#: che il proprietario ha scelto per la chiusura automatica delle Rettifiche (2026-09-16).
+ROUNDING_DECLARED = Decimal("2.00")
+_CENT = Decimal("0.01")
+
+
+def _cents(value: Decimal) -> Decimal:
+    return value.quantize(_CENT)
+
+
 def reconcile_adjustments(
     before: Mapping[str, Any],
     after: Mapping[str, Any],
@@ -483,37 +494,127 @@ def reconcile_adjustments(
     ``GET .../adjustable`` already returns).  Every key visible in either
     snapshot or in the aggregated journal is checked, so a persisted drift that
     has no journal row cannot hide behind an otherwise balanced correction.
+
+    What the journal is compared WITH is derived the way the Rettifiche tab
+    derives the statement, because the journal never names what the tab
+    recomputes (AMBIENTA, 2026-09-17: nine «differences», none of them an
+    unexplained movement, and the dossier blocked):
+
+    - an aggregate moves by the sum of its details' adjustments
+      (``importers.iv_cee_hierarchy.detail_fields``); a leaf row that already
+      explains its parent's difference is reported once, on the leaf;
+    - ``sp13_utile_perdita`` moves with the P&L result
+      (``calculations.ce_result``), because the tab recomputes it from the CE.
+
+    Three movements are then *declared*, never absorbed, and do not block:
+
+    - ``adjustments_details_realigned`` — details that moved while their
+      aggregate did exactly what the journal says: the save realigned a detail
+      breakdown that the import left inconsistent with its total;
+    - ``adjustments_profit_realigned`` — ``sp13`` recomputed from the CE when
+      the import had them apart (verifiable: after the save the gap is zero);
+    - ``adjustments_rounding`` — anything else within ``ROUNDING_DECLARED``.
+
+    Everything beyond that stays a blocking ``adjustments_unreconciled``.
     """
+    from importers.iv_cee_hierarchy import aggregates_with_details, detail_fields
+    from calculations.ce_result import calculate_ce_result
+
     entries = list(entries)
     adjustments = signed_deltas(entries)
-    differences: dict[str, Decimal] = {}
     unposted = unposted_mass(entries)
-    # ``signed_deltas`` aggregates repeated and split rows.  Sorting the full
-    # union gives both a deterministic diagnostic and a stable mapping shape.
+    # The client writes the journal in floating point (100000.21999999997): a
+    # statement is kept to the cent, so is the comparison.
+    expected = {code: _cents(value) for code, value in adjustments.items()}
     all_codes = (set(before) | set(after) | set(adjustments)) - UNPOSTED_SENTINEL_FIELDS
-    for code in sorted(all_codes):
-        delta = adjustments.get(code, ZERO)
-        actual = _decimal(after.get(code)) - _decimal(before.get(code))
-        if abs(actual - delta) > tolerance:
-            differences[code] = actual - delta
+    actual = {code: _cents(_decimal(after.get(code)) - _decimal(before.get(code))) for code in all_codes}
+
+    for aggregate in aggregates_with_details():
+        if aggregate in all_codes and aggregate not in expected:
+            expected[aggregate] = sum((expected.get(d, ZERO) for d in detail_fields(aggregate)), ZERO)
+    profit = "sp13_utile_perdita"
+    profit_gap_before = profit_gap_after = ZERO
+    if profit in all_codes and profit not in expected:
+        result_before = _cents(calculate_ce_result(dict(before)).net_profit)
+        result_after = _cents(calculate_ce_result(dict(after)).net_profit)
+        expected[profit] = result_after - result_before
+        profit_gap_before = result_before - _cents(_decimal(before.get(profit)))
+        profit_gap_after = result_after - _cents(_decimal(after.get(profit)))
+
+    raw = {code: actual[code] - expected.get(code, ZERO) for code in sorted(all_codes)}
+    raw = {code: diff for code, diff in raw.items() if abs(diff) > tolerance}
+
+    realigned: dict[str, Decimal] = {}
+    for aggregate in aggregates_with_details():
+        details = [d for d in detail_fields(aggregate) if d in raw]
+        if not details:
+            continue
+        parent = raw.get(aggregate, ZERO)
+        children = sum((raw[d] for d in details), ZERO)
+        if abs(parent) <= tolerance:
+            # The total did what the journal says; only its breakdown moved.
+            for d in details:
+                realigned[d] = raw.pop(d)
+        elif abs(parent - children) <= tolerance:
+            # The leaves carry the whole difference: say it once, where it is.
+            raw.pop(aggregate)
+
+    profit_realigned = ZERO
+    if profit in raw and abs(profit_gap_after) <= tolerance and abs(raw[profit] - profit_gap_before) <= tolerance:
+        profit_realigned = raw.pop(profit)
+
+    rounding = {code: diff for code, diff in raw.items() if abs(diff) <= ROUNDING_DECLARED}
+    differences = {code: diff for code, diff in raw.items() if code not in rounding}
+
+    def _elenco(items: Mapping[str, Decimal]) -> str:
+        return ", ".join(f"{code} {eur_it(value)}" for code, value in sorted(items.items()))
+
     diagnostics: tuple[Diagnostic, ...] = ()
     if differences:
-        details = ", ".join(f"{code} {value}" for code, value in sorted(differences.items()))
-        diagnostics = (
+        diagnostics += (
             _diagnostic(
                 "adjustments_unreconciled",
                 "error",
                 "adjustments",
-                f"La riconciliazione rettifiche non quadra: {details}",
+                f"La riconciliazione rettifiche non quadra: {_elenco(differences)}",
+            ),
+        )
+    if realigned:
+        diagnostics += (
+            _diagnostic(
+                "adjustments_details_realigned",
+                "warning",
+                "adjustments",
+                f"Dettagli riallineati al proprio totale, che non cambia: {_elenco(realigned)}. "
+                "L'import li aveva incoerenti con il totale e il salvataggio delle rettifiche li ha corretti.",
+            ),
+        )
+    if profit_realigned:
+        diagnostics += (
+            _diagnostic(
+                "adjustments_profit_realigned",
+                "warning",
+                "adjustments",
+                f"Utile dello stato patrimoniale riallineato al conto economico: {eur_it(profit_realigned)}. "
+                "L'import li aveva distanti di questo importo.",
+            ),
+        )
+    if rounding:
+        diagnostics += (
+            _diagnostic(
+                "adjustments_rounding",
+                "warning",
+                "adjustments",
+                f"Scarti di arrotondamento fra giornale e bilancio: {_elenco(rounding)}.",
             ),
         )
     if unposted:
-        diagnostics = diagnostics + (
+        diagnostics += (
             _diagnostic(
                 "adjustments_unposted_mass",
                 "warning",
                 "adjustments",
-                f"{unposted} movimentati su un'intestazione non di bilancio: "
+                f"{eur_it(unposted)} movimentati su un'intestazione non di bilancio: "
                 "la rettifica non è stata registrata in partita doppia.",
             ),
         )

@@ -88,6 +88,44 @@ const eurAuto = (x: number): string => {
     .format(cents / 100);
 };
 
+/**
+ * Finanziamenti e altri finanziatori tornati dal server, con numeri veri al posto delle stringhe.
+ *
+ * Stessa causa di `normalizePregresso` (`lib/budget-pregresso-circolante.ts`, dove è spiegata
+ * per esteso): Pydantic v2 serializza i `Decimal` come STRINGA, e `GET /assumptions` restituisce
+ * `opening_residual: "510937.42"` e `repayments: ["45000", …]` benché il tipo prometta `number`.
+ * Quella correzione copriva il solo `pregresso`. Qui `sum` concatenava le rate — la colonna
+ * «Resta» di AMBIENTA mostrava -450.004.499.534.063 € — e `fidi + residui` dava NaN. Il guasto si
+ * vede solo dopo un ricaricamento: i valori digitati nella sessione sono già numeri.
+ *
+ * Va chiamata in `hydrateAssumptions`, una volta sola. `null` resta `null` (un prestito nuovo
+ * senza scadenziario non diventa una lista di zeri), e così `duration_years` assente.
+ */
+export function normalizeFinancingLoans(loans: FinancingLoanInput[] | null | undefined): FinancingLoanInput[] | null {
+  if (!loans) return null;
+  return loans.map((l) => ({
+    ...l,
+    amount: num(l.amount),
+    opening_residual: num(l.opening_residual),
+    interest_rate: num(l.interest_rate),
+    grace_years: num(l.grace_years),
+    balloon_pct: num(l.balloon_pct),
+    duration_years: l.duration_years == null ? l.duration_years : num(l.duration_years),
+    repayments: l.repayments == null ? l.repayments : l.repayments.map(num),
+  }));
+}
+
+/** Come `normalizeFinancingLoans`, per gli altri finanziatori. */
+export function normalizeOtherLenders(lenders: OtherLenderInput[] | null | undefined): OtherLenderInput[] | null {
+  if (!lenders) return null;
+  return lenders.map((l) => ({
+    ...l,
+    opening_residual: num(l.opening_residual),
+    interest_rate: num(l.interest_rate),
+    repayments: (l.repayments ?? []).map(num),
+  }));
+}
+
 /** Riempie `repayments` di zeri fino a `horizon` e tronca oltre — mai muta l'array d'origine. */
 function padTrunc(repayments: number[] | null | undefined, horizon: number): number[] {
   const out = repayments ? [...repayments] : [];
@@ -242,6 +280,8 @@ export function chiusuraResidui(
   items: readonly Scadenziabile[],
   differenza: number,
 ): { indice: number; nome: string; importo: number } | null {
+  // Uno scarto non misurabile non si «chiude»: il pulsante diceva «Togli NaN €».
+  if (!Number.isFinite(differenza)) return null;
   if (Math.abs(differenza) <= TOLLERANZA_MOTORE) return null;
   if (Math.abs(differenza) > SOGLIA_CHIUSURA_RESIDUI) return null;
   if (items.length === 0) return null;

@@ -29,6 +29,8 @@ import type {
   PregressoPlan,
 } from "@/types/api";
 import { isPlanEmpty, normalizePregresso } from "@/lib/budget-pregresso-circolante";
+import { normalizeFinancingLoans, normalizeOtherLenders } from "@/lib/budget-finanziamenti-pregresso";
+import { numOrNull } from "@/lib/budget-format";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
 
@@ -120,10 +122,13 @@ export function hydrateAssumptions(
       inflation_pct: a.inflation_pct ?? null,
       fixed_materials_growth_auto: a.fixed_materials_growth_auto ?? false,
       fixed_services_growth_auto: a.fixed_services_growth_auto ?? false,
-      bank_lines_amount: a.bank_lines_amount ?? null,
+      // Numeri veri, non le stringhe dei `Decimal` di Pydantic: stessa ragione di `pregresso`
+      // più sotto. Fidi e finanziamenti entrano in somme (`fidi + residui`, le rate per anno),
+      // e da stringhe davano NaN e una concatenazione (AMBIENTA, 2026-09-17).
+      bank_lines_amount: numOrNull(a.bank_lines_amount),
       bank_lines_rule: a.bank_lines_rule ?? null,
-      bank_lines_rate: a.bank_lines_rate ?? null,
-      other_lenders: a.other_lenders ?? null,
+      bank_lines_rate: numOrNull(a.bank_lines_rate),
+      other_lenders: normalizeOtherLenders(a.other_lenders),
       tfr_payments: a.tfr_payments ?? 0,
       receivables_short_growth_pct: a.receivables_short_growth_pct,
       receivables_long_growth_pct: a.receivables_long_growth_pct,
@@ -138,7 +143,7 @@ export function hydrateAssumptions(
       financing_amount: a.financing_amount,
       financing_duration_years: a.financing_duration_years,
       financing_interest_rate: a.financing_interest_rate,
-      financing_loans: a.financing_loans ?? null,
+      financing_loans: normalizeFinancingLoans(a.financing_loans),
       // `normalizePregresso`, non `a.pregresso ?? null`: la colonna torna dal
       // server con i `Decimal` serializzati come stringa (rilievo 5, giro di
       // correzione 1 — vedi il commento su `normalizePregresso`), e un

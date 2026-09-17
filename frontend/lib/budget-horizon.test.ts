@@ -15,6 +15,7 @@ import {
   type AssumptionsMap,
 } from "@/lib/budget-horizon";
 import { residualAfter, validatePregresso } from "@/lib/budget-pregresso-circolante";
+import { contrattiPregressi, contrattoRows, controlliBanche } from "@/lib/budget-finanziamenti-pregresso";
 import type { BudgetAssumptions, Pregresso, PregressoKey } from "@/types/api";
 
 /**
@@ -367,6 +368,43 @@ describe("hydrateAssumptions", () => {
       expect(residualAfter(tabellaPlan, 2)).toBe(26441);
     },
   );
+
+  it("coerce finanziamenti, altri finanziatori e fidi tornati come STRINGA (AMBIENTA, 2026-09-17)", () => {
+    // JSON reale di GET /scenarios/18/assumptions: stessa causa del pregresso qui sopra (Decimal
+    // serializzato come stringa da Pydantic v2), mai estesa a questi campi. A schermo la colonna
+    // «Resta» mostrava -450.004.499.534.063 € — 510.937,42 meno «0450004500045000», le tre rate
+    // concatenate — e il controllo dei fidi «differenza NaN €».
+    const row = {
+      ...fixtureRow({ forecast_year: 2027 }),
+      bank_lines_amount: "450000.00",
+      bank_lines_rate: "6.000000",
+      financing_loans: [
+        { name: "Finanziamento A", amount: "0", opening_residual: "510937.42", duration_years: null,
+          interest_rate: "4", grace_years: 0, balloon_pct: "0", repayments: ["45000", "45000", "45000"] },
+        { name: "Nuova Finanza", amount: "250000", opening_residual: "0", duration_years: 5,
+          interest_rate: "4.5", grace_years: 0, balloon_pct: "0", repayments: null },
+      ],
+      other_lenders: [{ name: "Finanziatore 1", opening_residual: "36503.74", interest_rate: "0", repayments: ["0", "1000"] }],
+    } as unknown as BudgetAssumptions;
+    const out = hydrateAssumptions([row], 1)[2027];
+
+    expect(out.bank_lines_amount).toBe(450000);
+    expect(out.bank_lines_rate).toBe(6);
+    const [a, nuova] = out.financing_loans!;
+    expect(a).toEqual({ name: "Finanziamento A", amount: 0, opening_residual: 510937.42, duration_years: null,
+      interest_rate: 4, grace_years: 0, balloon_pct: 0, repayments: [45000, 45000, 45000] });
+    // Un prestito nuovo senza scadenziario resta senza: `null` non diventa una lista di zeri.
+    expect(nuova).toMatchObject({ amount: 250000, duration_years: 5, interest_rate: 4.5, repayments: null });
+    expect(out.other_lenders).toEqual([{ name: "Finanziatore 1", opening_residual: 36503.74, interest_rate: 0, repayments: [0, 1000] }]);
+
+    // Il sintomo, non solo la causa: la colonna «Resta» e il controllo dei fidi tornano numeri.
+    const [riga] = contrattoRows(contrattiPregressi(out.financing_loans), 3);
+    expect(riga.resta).toBeCloseTo(375937.42, 2);
+    const baseBs = { sp16_debiti_breve: "493409", sp16a_debiti_banche_breve: "493409",
+      sp17_debiti_lungo: "467528.42", sp17a_debiti_banche_lungo: "467528.42" };
+    const c = controlliBanche(baseBs, out.bank_lines_amount!, contrattiPregressi(out.financing_loans), 3, 2026);
+    expect(c.quadra).toMatchObject({ ok: true, esito: "quadra" });
+  });
 });
 
 describe("horizonFromSavedRows", () => {

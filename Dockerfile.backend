@@ -2,14 +2,31 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for lxml, reportlab, matplotlib, and curl for healthcheck
+# System deps for lxml, reportlab, matplotlib; curl for healthcheck; xz-utils to
+# unpack the pinned Typst release asset (tools/typst/install.sh below); ca-certificates
+# for the HTTPS fetch of that asset; bubblewrap for the Typst renderer's mandatory
+# sandbox (backend/app/renderers/typst/runtime.py — no unsandboxed fallback exists).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libxml2-dev libxslt1-dev libffi-dev curl \
+    gcc g++ libxml2-dev libxslt1-dev libffi-dev curl ca-certificates xz-utils bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps (cached layer)
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Typst compiler: fetched from GitHub and verified against tools/typst/manifest.json
+# HERE, at BUILD TIME, never at container startup (entrypoint.sh does no network
+# calls). install.sh checks the SHA-256 of the downloaded archive against the pinned
+# manifest digest BEFORE extracting anything, and refuses (exit 3) on a mismatch —
+# see tools/typst/install.sh and tools/typst/verify.sh. This layer is cached
+# independently of application code, so ordinary app changes never re-trigger the
+# download; only a manifest.json version/checksum bump does.
+# The font bundle Typst compiles against (backend/app/renderers/typst/templates/
+# dossier-base/fonts/*.ttf) is already committed in the repo and arrives with the
+# COPY backend/ backend/ step below — nothing to fetch for it here.
+COPY tools/typst/manifest.json tools/typst/install.sh tools/typst/verify.sh \
+     tools/typst/healthcheck.py tools/typst/healthcheck-fixture.json tools/typst/
+RUN bash tools/typst/install.sh && bash tools/typst/verify.sh
 
 # Copy shared modules + backend (preserves project root structure)
 COPY config.py config.py
@@ -34,4 +51,20 @@ COPY backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8000
+
+# API liveness AND Typst compile smoke in one gate: `docker inspect
+# Health.Status` (what Jenkinsfile's «Health check» stage polls) only reports
+# `healthy` once both the FastAPI app answers /health and a real, sandboxed
+# Typst compilation succeeds offline (tools/typst/healthcheck.py — no
+# network, the pinned compiler + the `runtime-smoke` bundle only). This is
+# deliberate, not incidental: it is the one place that actually exercises
+# `--unshare-user` on the real deployment host, so a container whose
+# seccomp/AppArmor profile blocks the sandbox fails the deploy loudly (and
+# Jenkins' post-failure rollback runs) instead of shipping a backend that
+# answers every route except the PDF ones. See
+# docs/deployment/TYPST-RENDERER.md for what to do if this is what turns the
+# container unhealthy.
+HEALTHCHECK --interval=30s --timeout=20s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health && python /app/tools/typst/healthcheck.py || exit 1
+
 ENTRYPOINT ["/entrypoint.sh"]

@@ -151,6 +151,17 @@ _CLOSING_STATE_LABELS = {"observed": "osservato", "comparable": "comparabile", "
 
 _READINESS_LABELS = {"ready": "pronto", "draft": "bozza", "blocked": "bloccato"}
 
+# Chiavi Python (nomi di campo `BudgetAssumptions.pregresso`) che finivano
+# nell'etichetta di riga così come sono, con l'underscore al posto dello
+# spazio (M2-02B integrazione, stesso rilievo del coordinatore su AMBIENTA:
+# "Pregresso crediti_commerciali" invece di "Pregresso crediti commerciali").
+_PREGRESSO_PLAN_LABELS = {
+    "crediti_commerciali": "crediti commerciali", "debiti_fornitori": "debiti fornitori",
+    "debiti_tributari": "debiti tributari", "debiti_previdenziali": "debiti previdenziali",
+    "altri_debiti": "altri debiti",
+}
+_PREGRESSO_FIELD_LABELS = {"saldo": "saldo", "rateizzato": "rateizzato", "acconto_pct": "acconto"}
+
 
 def _label(mapping: dict[str, str], value: Any) -> Any:
     if value is None:
@@ -194,21 +205,80 @@ def _missing(reason: str | None) -> str | None:
     return None if not reason else f"n.d.: {reason}"
 
 
-def _unavailability_text(entries: list[tuple[str, str]]) -> str | None:
-    """Group and deduplicate what used to be one motivation line per row (or
-    per row-period): reason text → the item labels it applies to, in
-    first-seen order on both axes. Replaces a repeated «Indisponibilità»
-    column with a single note after the table (M2-02B rilievi 3 e 6): the
+def _period_ranges(indices: list[int], labels: list[str]) -> str:
+    """Collapse a sorted run of positional indices into dash ranges over the
+    matching period labels: a contiguous run becomes «first–last», an
+    isolated period stays on its own, several runs join with commas."""
+    ordered = sorted(indices)
+    parts: list[str] = []
+    start = previous = ordered[0]
+    for index in ordered[1:]:
+        if index == previous + 1:
+            previous = index
+            continue
+        parts.append(labels[start] if start == previous else f"{labels[start]}–{labels[previous]}")
+        start = previous = index
+    parts.append(labels[start] if start == previous else f"{labels[start]}–{labels[previous]}")
+    return ", ".join(parts)
+
+
+def _unavailability_text(entries: list[tuple[str, str, str]]) -> str | None:
+    """Group what used to be one motivation line per row-period into one
+    compact sentence per (reason, identical item set, contiguous period run)
+    — «Non dichiarati: Finanziamenti, Pregresso (2027–2029).» — instead of a
+    sentence repeated for every period (M2-02B integrazione, rilievo 3). The
     reason is never invented here, only the identical phrases the table
-    already carried are grouped once."""
+    already carried are grouped once; items are read in first-seen order,
+    periods in the order the table already lists them (`entries`), so
+    «contiguous» is positional, not a parsed calendar year."""
+    if not entries:
+        return None
+    period_order: list[str] = []
+    for _, _, period in entries:
+        if period not in period_order:
+            period_order.append(period)
+    period_index = {period: index for index, period in enumerate(period_order)}
+
+    by_reason: "OrderedDict[str, OrderedDict[str, list[int]]]" = OrderedDict()
+    for reason, item_label, period in entries:
+        items = by_reason.setdefault(reason, OrderedDict())
+        indices = items.setdefault(item_label, [])
+        index = period_index[period]
+        if index not in indices:
+            indices.append(index)
+
+    sentences: list[str] = []
+    for reason, items in by_reason.items():
+        groups: "OrderedDict[tuple[int, ...], list[str]]" = OrderedDict()
+        for item_label, indices in items.items():
+            groups.setdefault(tuple(sorted(indices)), []).append(item_label)
+        heading = reason[:1].upper() + reason[1:] if reason else reason
+        for indices, labels in groups.items():
+            period_text = _period_ranges(list(indices), period_order)
+            sentences.append(f"{heading}: {', '.join(labels)} ({period_text}).")
+    return " ".join(sentences)
+
+
+def _grouped_reasons_text(entries: list[tuple[str, str]]) -> str | None:
+    """Same grouping as `_unavailability_text`, for a table with no period
+    axis to compact — «Valori di chiusura» is one closing date, not a
+    timeline: `observed`/`comparable`/`automatic`/`override` are states, not
+    periods. Groups the rows sharing an identical missing state into one
+    sentence, first-seen order, instead of repeating «n.d.: valore automatico
+    non dichiarato» under every row (M2-02B integrazione, rilievo del
+    coordinatore su AMBIENTA)."""
+    if not entries:
+        return None
     grouped: "OrderedDict[str, list[str]]" = OrderedDict()
-    for item_label, reason in entries:
+    for reason, item_label in entries:
         bucket = grouped.setdefault(reason, [])
         if item_label not in bucket:
             bucket.append(item_label)
-    if not grouped:
-        return None
-    return " ".join(f"{reason}: {', '.join(labels)}." for reason, labels in grouped.items())
+    sentences = []
+    for reason, labels in grouped.items():
+        heading = reason[:1].upper() + reason[1:] if reason else reason
+        sentences.append(f"{heading}: {', '.join(labels)}.")
+    return " ".join(sentences)
 
 
 def _row(identifier: str, cells: list[Any], units: list[str | None] | None = None) -> dict[str, Any]:
@@ -244,6 +314,12 @@ def _periodic_table(item: dict[str, Any], *, value_start: int, part_size: int) -
 
 def _text(identifier: str, title: str, text: str) -> dict[str, Any]:
     return {"id": identifier, "kind": "text", "title": title, "text": text or "n.d.: testo non disponibile"}
+
+
+def _note(identifier: str, text: str) -> dict[str, Any]:
+    """A grouped unavailability note: small body text under the table it
+    explains, no section-style heading (M2-02B integrazione, rilievo 3)."""
+    return {"id": identifier, "kind": "note", "text": text or "n.d.: nota non disponibile"}
 
 
 def _period_label(period: Any) -> str:
@@ -586,17 +662,19 @@ def _assumption_unit(field: str) -> str | None:
     return None
 
 
-def _assumption_rows(section: Any, period_labels: list[str], unavailable_entries: list[tuple[str, str]]) -> list[dict[str, Any]]:
+def _assumption_rows(section: Any, period_labels: list[str], unavailable_entries: list[tuple[str, str, str]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for assumption in section.assumptions:
         unit = _assumption_unit(assumption.field)
         values = [*assumption.values, *([None] * (len(period_labels) - len(assumption.values)))]
         # Rilievo 6: la colonna «Indisponibilità» coi periodi mancanti elencati
         # riga per riga sparisce; ogni periodo mancante diventa una voce da
-        # raggruppare in nota dopo la tabella (`_unavailability_text`).
+        # raggruppare in nota dopo la tabella (`_unavailability_text`), che
+        # compatta gli anni contigui per voce invece di ripetere una frase
+        # per anno (M2-02B integrazione, rilievo 3).
         for label, value in zip(period_labels, values):
             if value is None:
-                unavailable_entries.append((assumption.label, f"valore non dichiarato per {label}"))
+                unavailable_entries.append(("Non dichiarati", assumption.label, label))
         rows.append(_row(
             f"assumption:{section.key}:{assumption.field}:value",
             [assumption.label, *values, _label(_PROVENANCE_LABELS, assumption.provenance), assumption.active],
@@ -621,27 +699,28 @@ def _assumption_rows(section: Any, period_labels: list[str], unavailable_entries
         if assumption.pregresso is not None:
             for plan_name in ("crediti_commerciali", "debiti_fornitori", "debiti_tributari", "debiti_previdenziali", "altri_debiti"):
                 plan = getattr(assumption.pregresso, plan_name)
+                plan_label = _label(_PREGRESSO_PLAN_LABELS, plan_name)
                 if plan is None:
                     rows.append(_row(f"assumption:{section.key}:{assumption.field}:{plan_name}:unavailable",
-                                     [f"Pregresso {plan_name}", None, "n.d.: piano non dichiarato"],
+                                     [f"Pregresso {plan_label}", None, "n.d.: piano non dichiarato"],
                                      [None, "eur", None]))
                     continue
                 rows.append(_row(f"assumption:{section.key}:{assumption.field}:{plan_name}:opening",
-                                 [f"Pregresso {plan_name} — apertura", plan.opening, None], [None, "eur", None]))
+                                 [f"Pregresso {plan_label} — apertura", plan.opening, None], [None, "eur", None]))
                 for index, value in enumerate(plan.amounts):
                     rows.append(_row(f"assumption:{section.key}:{assumption.field}:{plan_name}:amount:{index}",
-                                     [f"Pregresso {plan_name} — quota {index + 1}", value, None], [None, "eur", None]))
+                                     [f"Pregresso {plan_label} — quota {index + 1}", value, None], [None, "eur", None]))
                 if plan.writeoff is not None:
                     for index, value in enumerate(plan.writeoff):
                         rows.append(_row(f"assumption:{section.key}:{assumption.field}:{plan_name}:writeoff:{index}",
-                                         [f"Pregresso {plan_name} — stralcio {index + 1}", value, None], [None, "eur", None]))
+                                         [f"Pregresso {plan_label} — stralcio {index + 1}", value, None], [None, "eur", None]))
                 if plan.non_incassato is not None:
                     rows.append(_row(f"assumption:{section.key}:{assumption.field}:{plan_name}:non_incassato",
-                                     [f"Pregresso {plan_name} — non incassato", plan.non_incassato], [None, None]))
+                                     [f"Pregresso {plan_label} — non incassato", plan.non_incassato], [None, None]))
                 if plan_name == "debiti_tributari":
                     for field in ("saldo", "rateizzato", "acconto_pct"):
                         rows.append(_row(f"assumption:{section.key}:{assumption.field}:{plan_name}:{field}",
-                                         [f"Pregresso {plan_name} — {field}", getattr(plan, field), None],
+                                         [f"Pregresso {plan_label} — {_label(_PREGRESSO_FIELD_LABELS, field)}", getattr(plan, field), None],
                                          [None, "percent" if field == "acconto_pct" else "eur", None]))
         if assumption.temporary_differences is not None:
             for index, difference in enumerate(assumption.temporary_differences):
@@ -702,7 +781,7 @@ def _assumption_items(report: FinalReportModelV2) -> tuple[list[dict[str, Any]],
     for section in report.assumption_sections:
         base_rows: list[dict[str, Any]] = []
         detail_rows: list[dict[str, Any]] = []
-        unavailable_entries: list[tuple[str, str]] = []
+        unavailable_entries: list[tuple[str, str, str]] = []
         for row in _assumption_rows(section, period_labels, unavailable_entries):
             # Scalar rows have one label + all year values + provenance/active.
             if row["id"].endswith(":value"):
@@ -713,8 +792,7 @@ def _assumption_items(report: FinalReportModelV2) -> tuple[list[dict[str, Any]],
         base_items.append(_table(f"assumptions:{section.key}", section.title, base_columns, base_rows))
         unavailable_note = _unavailability_text(unavailable_entries)
         if unavailable_note:
-            base_items.append(_text(f"assumptions:{section.key}:unavailable",
-                                    f"Indisponibilità — {section.title}", unavailable_note))
+            base_items.append(_note(f"assumptions:{section.key}:unavailable", unavailable_note))
         # Detail records remain atomic: a field never becomes a compound string
         # carrying an ambiguous numeric unit.  This also leaves every nested
         # source field independently addressable by the page planner.
@@ -748,8 +826,15 @@ def _statement_table(identifier: str, title: str, statement: Any, prefix: str, *
 
     rows = []
     for row in statement.rows:
-        reasons = [_label(_UNAVAILABLE_REASON_LABELS, reason) for reason in row.unavailable_reasons
-                   if reason and reason != "presentation_header"]
+        # Una riga «n.d.» sugli stessi motivi per più periodi (es. tutte e 7 le
+        # colonne per «campo non previsto dal modello») cita quella frase una
+        # volta sola: l'elenco resta per periodo solo quando i motivi
+        # differiscono (M2-02B integrazione, stessa correzione del rilievo 3
+        # applicata qui perché la colonna di coda ripeteva la frase per ogni
+        # periodo, misurato su AMBIENTA).
+        reasons = list(dict.fromkeys(
+            _label(_UNAVAILABLE_REASON_LABELS, reason) for reason in row.unavailable_reasons
+            if reason and reason != "presentation_header"))
         header = row.kind in ("section", "group")
         values = [""] * len(row.values) if header else row.values
         value_units = [None] * len(values) if header else ["eur"] * len(values)
@@ -761,15 +846,97 @@ def _statement_table(identifier: str, title: str, statement: Any, prefix: str, *
     return _periodic_table(_table(identifier, title, columns, rows), value_start=1, part_size=PERIOD_PART_SIZE)
 
 
-def _forecast_table(identifier: str, title: str, years: list[Any], attribute: str) -> dict[str, Any]:
+# `report.forecast.years[].{income_statement,balance_sheet,cashflow}` porta il
+# campo DB come `label` quando il servizio a monte non gliene assegna uno vero
+# — capita su dati reali per righe che gli Allegati non spacchettano da sole
+# (M2-02B integrazione, misurato su AMBIENTA: "sp06c_crediti_collegate_breve",
+# "ce01_ricavi_vendite" stampati come etichetta su tutto «Conto economico
+# previsto»/«Stato patrimoniale previsto»/«Rendiconto finanziario previsto»).
+# L'etichetta vera viene prima da `report.detailed_statements` (nome e
+# gerarchia veri, stessa fonte degli Allegati A/B/C); per le voci che gli
+# Allegati aggregano invece di spacchettare — i sette sotto-conti di sp02, i
+# cinque di sp03, i due di sp01 (`docs/taxonomy/SCHEMA_ENHANCEMENTS.md`), le
+# tre aggregate sp12/sp16/sp17 (`database/models.py`) e i saldi netti del
+# rendiconto mai persistiti come colonna — questa mappa esplicita, con la
+# stessa convenzione «Voce — Sotto-voce» già usata dalle righe sorelle. Un
+# codice che non risolve né qui né lì interrompe la generazione: mai un
+# codice tecnico a schermo.
+_FORECAST_LABEL_OVERRIDES: dict[str, str] = {
+    "sp01a_parte_richiamata": "Crediti verso soci — parte già richiamata",
+    "sp01b_parte_da_richiamare": "Crediti verso soci — parte da richiamare",
+    "sp02a_costi_impianto": "Costi di impianto e di ampliamento",
+    "sp02b_costi_sviluppo": "Costi di sviluppo",
+    "sp02c_brevetti": "Diritti di brevetto industriale",
+    "sp02d_concessioni": "Concessioni, licenze, marchi",
+    "sp02e_avviamento": "Avviamento",
+    "sp02f_immob_in_corso": "Immobilizzazioni immateriali in corso e acconti",
+    "sp02g_altre_immob_imm": "Altre immobilizzazioni immateriali",
+    "sp03a_terreni_fabbricati": "Terreni e fabbricati",
+    "sp03b_impianti_macchinari": "Impianti e macchinario",
+    "sp03c_attrezzature": "Attrezzature industriali e commerciali",
+    "sp03d_altri_beni": "Altri beni materiali",
+    "sp03e_immob_in_corso": "Immobilizzazioni materiali in corso e acconti",
+    "sp12_riserve": "Riserve",
+    "sp16_debiti_breve": "Debiti — entro l'esercizio successivo",
+    "sp17_debiti_lungo": "Debiti — oltre l'esercizio successivo",
+    "cashflow.financing.own_funds.net": "Mezzi propri — totale",
+    "cashflow.financing.third_party_funds.net": "Mezzi di terzi — totale",
+    "cashflow.investing.tangible_assets.net": "Immobilizzazioni materiali — totale",
+    "cashflow.investing.intangible_assets.net": "Immobilizzazioni immateriali — totale",
+    "cashflow.investing.financial_assets.net": "Immobilizzazioni finanziarie — totale",
+    "cashflow.cash_reconciliation.difference": "Differenza di riconciliazione della cassa",
+    "cashflow.cash_reconciliation.third_party_funds_gap": "Mezzi di terzi — scostamento di riconciliazione",
+}
+
+# Campi anagrafici del previsionale, non righe di importo (l'anno di base e
+# l'anno del piano stampati come se fossero un euro): non compaiono nel
+# prospetto (M2-02B integrazione, rilievo del coordinatore — «cashflow.year»
+# stampava «2.027» in colonna importo).
+_FORECAST_LABEL_EXCLUDED = frozenset({"cashflow.base_year", "cashflow.year"})
+
+
+def _detailed_labels(report: FinalReportModelV2, *statement_ids: str) -> dict[str, str]:
+    """Code → label from `detailed_statements`, the one place a v2 report always
+    carries a real Italian label. `ce`/`sp` codes never collide across
+    statements, so merging income_statement and balance_sheet is safe."""
+    labels: dict[str, str] = {}
+    for statement in report.detailed_statements:
+        if statement.id in statement_ids:
+            labels.update({row.code: row.label for row in statement.rows})
+    return labels
+
+
+def _resolve_field_label(code: str, given_label: str | None, labels: dict[str, str], *, prefix: str = "") -> str:
+    lookup = code[len(prefix):] if prefix and code.startswith(prefix) else code
+    if lookup in labels:
+        return labels[lookup]
+    if code in _FORECAST_LABEL_OVERRIDES:
+        return _FORECAST_LABEL_OVERRIDES[code]
+    # The model's own label wins when it is a real one: some callers (older
+    # fixtures, v1-derived reports) already carry a proper Italian label the
+    # assembler assigned. Only a label indistinguishable from the code itself
+    # — the AMBIENTA defect this map exists for — falls through to the error.
+    if given_label and given_label != code:
+        return given_label
+    raise ValueError(
+        f"field {code!r} has no Italian label in detailed_statements, in _FORECAST_LABEL_OVERRIDES, "
+        "nor on the model itself: add one instead of printing the field code"
+    )
+
+
+def _forecast_table(report: FinalReportModelV2, identifier: str, title: str, years: list[Any], attribute: str) -> dict[str, Any]:
+    detailed_labels = _detailed_labels(report, attribute)
+    prefix = attribute + "."
     codes: OrderedDict[str, Any] = OrderedDict()
     for year in years:
         seen: set[str] = set()
         for line in getattr(year, attribute):
+            if line.code in _FORECAST_LABEL_EXCLUDED:
+                continue
             if line.code in seen:
                 raise ValueError(f"duplicate canonical forecast line {line.code!r} for {attribute} {year.year}")
             seen.add(line.code)
-            codes.setdefault(line.code, line.label)
+            codes.setdefault(line.code, _resolve_field_label(line.code, line.label, detailed_labels, prefix=prefix))
     columns = ["Voce", *[str(year.year) for year in years], "Indisponibilità"]
     rows = []
     for code, label in codes.items():
@@ -842,18 +1009,41 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     section["adjustments"]["items"].extend(_comparison_items(report))
 
     if report.infrannual_closing is not None:
+        closing_labels = _detailed_labels(report, "income_statement", "balance_sheet")
         closing_rows = []
+        closing_unavailable_entries: list[tuple[str, str]] = []
         for value in report.infrannual_closing.values:
-            absent = [_label(_CLOSING_STATE_LABELS, name) for name in ("observed", "comparable", "automatic", "override") if getattr(value, name) is None]
-            closing_rows.append(_row(f"infrannual-closing:{value.code}", [value.label, value.observed, value.comparable, value.automatic, value.override, value.closing_used, _missing("valore " + "; ".join(absent) + " non dichiarato") if absent else None], [None, "eur", "eur", "eur", "eur", "eur", None]))
-        section["infrannual_closing"]["items"].append(_periodic_table(_table("infrannual-closing-values", f"Valori di chiusura al {report.infrannual_closing.period_end}", ["Voce", "Osservato", "Comparabile", "Automatico", "Override", "Chiusura utilizzata", "Indisponibilità"], closing_rows), value_start=1, part_size=PERIOD_PART_SIZE))
+            # Stesso difetto del previsionale, stessa correzione: il campo
+            # DB come etichetta (M2-02B integrazione, misurato su AMBIENTA).
+            label = _resolve_field_label(value.code, value.label, closing_labels)
+            # Rilievo del coordinatore (M2-02B integrazione, su AMBIENTA): la
+            # colonna di coda ripeteva «n.d.: valore automatico non
+            # dichiarato» sotto quasi ogni riga. Stesso trattamento delle
+            # ipotesi e delle tabelle F/G: niente colonna, una nota raggruppata
+            # per stato mancante dopo la tabella.
+            for name in ("observed", "comparable", "automatic", "override"):
+                if getattr(value, name) is None:
+                    closing_unavailable_entries.append(
+                        (f"{_label(_CLOSING_STATE_LABELS, name)} non dichiarato", label))
+            closing_rows.append(_row(f"infrannual-closing:{value.code}",
+                [label, value.observed, value.comparable, value.automatic, value.override, value.closing_used],
+                [None, "eur", "eur", "eur", "eur", "eur"]))
+        # Non più `_periodic_table`: quel wrapper riserva l'ultima colonna a una
+        # nota per riga (`compact-period-table` la appende sotto l'etichetta),
+        # e qui non ce n'è più una — la nota raggruppata sta fuori dalla
+        # tabella. Sei colonne di valore restano leggibili con il ramo
+        # generico di `data-table`.
+        section["infrannual_closing"]["items"].append(_table("infrannual-closing-values", f"Valori di chiusura al {report.infrannual_closing.period_end}", ["Voce", "Osservato", "Comparabile", "Automatico", "Override", "Chiusura utilizzata"], closing_rows))
+        closing_note = _grouped_reasons_text(closing_unavailable_entries)
+        if closing_note:
+            section["infrannual_closing"]["items"].append(_note("infrannual-closing-values:unavailable", closing_note))
         alerts = report.infrannual_closing.extra_accounting_alerts
         section["infrannual_closing"]["items"].append(_table("infrannual-closing-alerts", "Alert contabili extra", ["Alert", "Attivo"], [_row(f"infrannual-alert:{name}", [_label(_ALERT_LABELS, name), getattr(alerts, name)], [None, None]) for name in alerts.model_fields]))
     assumption_base, assumption_details = _assumption_items(report)
     section["budget_assumptions"]["items"].extend(assumption_base)
-    section["income_statement_forecast"]["items"].append(_forecast_table("forecast-income-statement", "Conto economico previsto", report.forecast.years, "income_statement"))
-    section["balance_sheet_forecast"]["items"].append(_forecast_table("forecast-balance-sheet", "Stato patrimoniale previsto", report.forecast.years, "balance_sheet"))
-    section["cashflow_sustainability"]["items"].append(_forecast_table("forecast-cashflow", "Rendiconto finanziario previsto", report.forecast.years, "cashflow"))
+    section["income_statement_forecast"]["items"].append(_forecast_table(report, "forecast-income-statement", "Conto economico previsto", report.forecast.years, "income_statement"))
+    section["balance_sheet_forecast"]["items"].append(_forecast_table(report, "forecast-balance-sheet", "Stato patrimoniale previsto", report.forecast.years, "balance_sheet"))
+    section["cashflow_sustainability"]["items"].append(_forecast_table(report, "forecast-cashflow", "Rendiconto finanziario previsto", report.forecast.years, "cashflow"))
     # Niente «Calcoli previsionali canonici»: riversava gli output interni dei calcolatori col codice
     # tecnico come etichetta, senza unità e senza arrotondamento (73.33333333333333333333333333). Gli
     # stessi indicatori stanno nel catalogo, con etichetta, unità e metodologia (proprietario, 2026-09-17).
@@ -904,19 +1094,19 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # `compact-period-table`), e qui nessun template si tocca.
     indicator_columns = ["Indicatore", *[_period_label(period) for period in indicator_periods.values()], "Indisponibilità"]
 
-    def _indicator_row(indicator: Any, entries: list[tuple[str, str]]) -> dict[str, Any]:
+    def _indicator_row(indicator: Any, entries: list[tuple[str, str, str]]) -> dict[str, Any]:
         values_by_period = dict(zip((period.id for period in indicator.periods), indicator.values))
         values = [values_by_period.get(identifier) for identifier in indicator_periods]
         unit_suffix = _label(_UNIT_LABELS, indicator.unit)
         label = f"{indicator.label} ({unit_suffix})" if unit_suffix else indicator.label
         for period, reason in zip(indicator.periods, indicator.unavailable_reasons):
             if reason:
-                entries.append((indicator.label, f"{_period_label(period)} — {_label(_UNAVAILABLE_REASON_LABELS, reason)}"))
+                entries.append((_label(_UNAVAILABLE_REASON_LABELS, reason), indicator.label, _period_label(period)))
         return _row(f"indicator:{indicator.id}", [label, *values, None],
                      [None, *([indicator.unit] * len(values)), None])
 
-    practice_entries: list[tuple[str, str]] = []
-    analytical_entries: list[tuple[str, str]] = []
+    practice_entries: list[tuple[str, str, str]] = []
+    analytical_entries: list[tuple[str, str, str]] = []
     practice_rows = [_indicator_row(indicator, practice_entries) for indicator in report.indicator_catalog if indicator.id.startswith("practice.")]
     analytical_rows = [_indicator_row(indicator, analytical_entries) for indicator in report.indicator_catalog if not indicator.id.startswith("practice.")]
     indicator_tables: list[dict[str, Any]] = []
@@ -924,12 +1114,12 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
         indicator_tables.append(_periodic_table(_table("indicator-practice-table", "Tabella F — Indicatori della pratica", indicator_columns, practice_rows), value_start=1, part_size=INDICATOR_PART_SIZE))
         practice_note = _unavailability_text(practice_entries)
         if practice_note:
-            indicator_tables.append(_text("indicator-practice-table:unavailable", "Indisponibilità — Tabella F", practice_note))
+            indicator_tables.append(_note("indicator-practice-table:unavailable", practice_note))
     if analytical_rows:
         indicator_tables.append(_periodic_table(_table("indicator-analytical-table", "Tabella G — Indici del report analitico", indicator_columns, analytical_rows), value_start=1, part_size=INDICATOR_PART_SIZE))
         analytical_note = _unavailability_text(analytical_entries)
         if analytical_note:
-            indicator_tables.append(_text("indicator-analytical-table:unavailable", "Indisponibilità — Tabella G", analytical_note))
+            indicator_tables.append(_note("indicator-analytical-table:unavailable", analytical_note))
 
     diagnostics = list(report.diagnostics) + list(report.readiness.reasons)
     diagnostic_rows = [_row(f"diagnostic:{index}:{item.code}", [item.code, _label(_SEVERITY_LABELS, item.severity), _label(_SECTION_TITLES, item.section), item.message], [None] * 4) for index, item in enumerate(diagnostics)]
@@ -979,7 +1169,7 @@ def expected_content_inventory(report: FinalReportModelV2) -> OrderedDict[str, s
                 content_ids = ["cover"]
             elif item["kind"] == "chart":
                 content_ids = [item["id"]]
-            elif item["kind"] == "text":
+            elif item["kind"] in ("text", "note"):
                 content_ids = [item["id"]]
             else:
                 content_ids = [f"heading:{item['id']}", *(row["id"] for row in item["rows"])]

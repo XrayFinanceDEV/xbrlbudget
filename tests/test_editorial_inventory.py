@@ -147,6 +147,36 @@ def test_ambiguous_canonical_periods_or_forecast_lines_are_rejected():
         build_inventory(report)
 
 
+def test_forecast_line_without_a_resolvable_label_raises_instead_of_leaking_the_code():
+    """Rilievo del coordinatore su AMBIENTA (M2-02B integrazione): un previsionale
+    reale con `line.label == line.code` stampava il codice DB come etichetta
+    di riga («ce01_ricavi_vendite», «sp06c_crediti_collegate_breve») su tutto
+    «Conto economico previsto»/«Stato patrimoniale previsto». Un fixture non lo
+    esercita mai (il suo `label` è già un'etichetta vera): questo test lo
+    riproduce mutando una riga, e dimostra che senza un'etichetta risolvibile —
+    né da `detailed_statements`, né da `_FORECAST_LABEL_OVERRIDES`, né dal
+    modello stesso — la generazione si interrompe, mai stampa il codice."""
+    report = fixture_report("bilancio")
+    mutated = report.forecast.years[0].income_statement[0].model_copy(
+        update={"code": "ce99_campo_mai_esistito", "label": "ce99_campo_mai_esistito"})
+    report.forecast.years[0].income_statement[0] = mutated
+    with pytest.raises(ValueError, match="ce99_campo_mai_esistito"):
+        build_inventory(report)
+
+
+def test_infrannual_closing_value_without_a_resolvable_label_raises_instead_of_leaking_the_code():
+    """Stesso difetto, stessa correzione, sulla tabella «Valori di chiusura»
+    (M2-02B integrazione): anche `infrannual_closing.values[].label` era il
+    codice DB su AMBIENTA, non solo `forecast.years[].*`."""
+    report = fixture_report("infrannuale")
+    assert report.infrannual_closing is not None
+    mutated = report.infrannual_closing.values[0].model_copy(
+        update={"code": "ce99_campo_mai_esistito", "label": "ce99_campo_mai_esistito"})
+    report.infrannual_closing.values[0] = mutated
+    with pytest.raises(ValueError, match="ce99_campo_mai_esistito"):
+        build_inventory(report)
+
+
 @pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
 def test_il_dossier_non_riversa_i_calcoli_grezzi(workflow):
     """«Calcoli previsionali canonici» portava nel documento gli output interni dei calcolatori:

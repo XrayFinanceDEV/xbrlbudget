@@ -21,6 +21,13 @@ def _texts(inventory):
     return {item["id"]: item for item in _items(inventory) if item["kind"] == "text"}
 
 
+def _notes(inventory):
+    # Le note di indisponibilità raggruppate sono un kind a parte («note»),
+    # senza titolo di sezione: distinte dai blocchi narrativi/di convenzione,
+    # che restano «text» (M2-02B integrazione, rilievo 3).
+    return {item["id"]: item for item in _items(inventory) if item["kind"] == "note"}
+
+
 # ── Rilievo 3 — Tabelle F e G ────────────────────────────────────────────────
 
 def test_tabelle_f_g_hanno_indicatore_come_prima_colonna_senza_unita_separata():
@@ -56,7 +63,7 @@ def test_tabelle_f_g_non_hanno_motivazione_per_riga_ma_nota_raggruppata_dopo():
     report = fixture_report("infrannuale", [2027, 2028, 2029])
     inventory = build_inventory(report)
     tables = _tables(inventory)
-    texts = _texts(inventory)
+    notes = _notes(inventory)
 
     for table_id, note_id in (
         ("indicator-practice-table", "indicator-practice-table:unavailable"),
@@ -69,23 +76,31 @@ def test_tabelle_f_g_non_hanno_motivazione_per_riga_ma_nota_raggruppata_dopo():
         assert table["columns"][-1] == "Indisponibilità"
         assert all(row["cells"][-1] is None for row in table["rows"])
         # Il fixture ha indicatori non disponibili: la nota raggruppata esiste,
-        # cita la ragione una volta sola e non un'unica riga per indicatore.
+        # è un item «note» senza titolo (M2-02B integrazione, rilievo 3, non più
+        # «Indisponibilità — Tabella F» come sezione), e cita la ragione una
+        # volta sola per intervallo di periodi contigui, non una riga per
+        # indicatore né una frase per periodo.
         if any(row["cells"][-2] is None for row in table["rows"] if len(row["cells"]) > 1):
-            assert note_id in texts
-            note_text = texts[note_id]["text"]
-            assert note_text.count("calcolo sorgente non disponibile") <= 3  # una volta per periodo, non per indicatore
-            assert texts[note_id]["title"].startswith("Indisponibilità")
+            assert note_id in notes
+            note = notes[note_id]
+            assert "title" not in note
+            # Il vecchio formato «periodo — motivazione» (una frase per riga
+            # per periodo, es. «2027 (12 mesi) — calcolo sorgente non
+            # disponibile: ...») non compare più: la nota raggruppa per voce
+            # e intervallo di periodi contigui, il periodo sta fra parentesi
+            # in coda alla frase, non subito dopo l'etichetta del periodo.
+            assert "mesi) — " not in note["text"]
 
 
 def test_content_ids_includono_le_note_raggruppate_una_sola_volta():
     report = fixture_report("infrannuale", [2027])
     from app.renderers.typst.editorial_inventory import expected_content_inventory
     inventory = build_inventory(report)
-    texts = _texts(inventory)
+    notes = _notes(inventory)
     expected = expected_content_inventory(report)
-    for text_id in texts:
-        if text_id.endswith(":unavailable"):
-            assert list(expected).count(text_id) == 1
+    for note_id in notes:
+        if note_id.endswith(":unavailable"):
+            assert list(expected).count(note_id) == 1
 
 
 # ── Rilievo 4 — Metodologia e convenzioni ────────────────────────────────────
@@ -143,27 +158,29 @@ def test_tabelle_ipotesi_con_valori_mancanti_hanno_nota_raggruppata_dopo():
     report = fixture_report("infrannuale", [2027, 2028, 2029])
     inventory = build_inventory(report)
     items = _items(inventory)
-    texts = _texts(inventory)
+    notes = _notes(inventory)
 
     costi_index = next(i for i, item in enumerate(items) if item["id"] == "assumptions:costi")
     note_id = "assumptions:costi:unavailable"
-    assert note_id in texts
-    assert items.index(texts[note_id]) == costi_index + 1  # subito dopo la tabella
-    assert "valore non dichiarato" in texts[note_id]["text"]
-    # Raggruppata: un'unica frase per periodo mancante, non una per riga.
-    assert texts[note_id]["text"].count("valore non dichiarato per 2027") <= 1
+    assert note_id in notes
+    assert items.index(notes[note_id]) == costi_index + 1  # subito dopo la tabella
+    assert "title" not in notes[note_id]  # nessun titolo di sezione (M2-02B integrazione, rilievo 3)
+    # Compattata per voce e per intervallo di anni contigui, non una frase per
+    # anno: «Non dichiarati: <voce> (<primo>–<ultimo>).», non «valore non
+    # dichiarato per 2027: ... valore non dichiarato per 2028: ...».
+    assert notes[note_id]["text"] == "Non dichiarati: Override CE (2027–2029)."
 
 
 def test_tabelle_ipotesi_senza_valori_mancanti_non_hanno_nota():
     report = fixture_report("bilancio", [2027])
     inventory = build_inventory(report)
     items = _items(inventory)
-    texts = _texts(inventory)
+    notes = _notes(inventory)
     fatturato_index = next(i for i, item in enumerate(items) if item["id"] == "assumptions:fatturato")
     # Nel fixture "bilancio" a un anno la crescita ricavi è dichiarata: nessuna
-    # nota da aggiungere, la tabella non è seguita da un blocco di testo.
-    assert "assumptions:fatturato:unavailable" not in texts
-    assert items[fatturato_index + 1]["kind"] != "text" or not items[fatturato_index + 1]["id"].startswith("assumptions:fatturato:unavailable")
+    # nota da aggiungere, la tabella non è seguita da un blocco di note.
+    assert "assumptions:fatturato:unavailable" not in notes
+    assert items[fatturato_index + 1]["kind"] != "note" or not items[fatturato_index + 1]["id"].startswith("assumptions:fatturato:unavailable")
 
 
 # ── Rilievo 2 — Blocchi narrativi senza testo vero ───────────────────────────

@@ -1,11 +1,13 @@
 """M2-04: semantic, pagination-independent verification of the compiled dossier PDF.
 
-The template (M2-02B) is being rebuilt in parallel on a different worktree; this
-harness targets the *contract* the finished template must meet, checked with a
+This harness targets the *contract* the template must meet, checked with a
 tool the renderer itself does not use (poppler-utils, not PyMuPDF — see
-`tests/pdf_semantic/__init__.py`). One test is expected to fail on the current
-template and is marked `xfail(strict=True)` for that reason; every other test
-must be green against the fixtures of all three workflows today.
+`tests/pdf_semantic/__init__.py`). Every test is green against the fixtures of
+all three workflows, including the forbidden-technical-strings check: it was
+marked `xfail(strict=True)` while M2-02B was rebuilding the template in
+parallel (the ID/unit/source leaks it caught are listed in
+`docs/testing/M2-04-pdf-semantic.md`); M2-02B's integration removed the xfail
+once the template stopped printing them.
 
 Reuses `tests.test_typst_editorial_plan`'s own fixture/plan/note construction
 (`fixture_report`, `prepare_editorial_report`, `verify_editorial_layout`,
@@ -27,9 +29,9 @@ from app.renderers.typst.editorial_plan import (
 from app.schemas.final_report_v2 import FinalReportModelV2
 from tests.pdf_semantic import (
     assert_all_fonts_embedded, assert_appendix_row_count_matches_plan, assert_draft_watermark,
-    assert_metadata_title, assert_no_forbidden_technical_strings, assert_not_encrypted, assert_page_count,
-    assert_pdf_signature, assert_text_absent, assert_text_present, format_euro_integer,
-    page_text_range, pdf_fonts, pdf_info, poppler_available, raw_page_texts,
+    assert_metadata_title, assert_no_field_code_style_labels, assert_no_forbidden_technical_strings,
+    assert_not_encrypted, assert_page_count, assert_pdf_signature, assert_text_absent, assert_text_present,
+    format_euro_integer, page_text_range, pdf_fonts, pdf_info, poppler_available, raw_page_texts,
 )
 from tests.test_final_report_v2 import fixture_report
 from tests.test_typst_editorial_plan import with_notes
@@ -191,15 +193,25 @@ def test_infrannual_sections_appear_only_on_the_infrannuale_workflow(dossier):
 # forbidden technical strings — fails on the current (M2-02) template on purpose
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='M2-02B: il template M2-02 attuale stampa ID tecnici nei blocchi narrativi e nel catalogo '
-           'indicatori (es. "ID: historical:2025", "practice.dscr", "Unità: ratio", "synthetic_fixture"); '
-           'da togliere quando M2-02B pulisce editorial_inventory.py/editorial.typ e il test diventa verde.',
-)
 def test_no_forbidden_technical_strings_leak_into_the_dossier(dossier):
     full_text = ' '.join(raw_page_texts(dossier.draft_path, expected_pages=dossier.page_count))
     assert_no_forbidden_technical_strings(full_text)
+
+
+# --------------------------------------------------------------------------
+# field-code-style labels — M2-02B integrazione, rilievo del coordinatore su AMBIENTA
+# --------------------------------------------------------------------------
+# A curated fixture's forecast lines already carry a real Italian label, so
+# this never turns red against `dossier` — the mutation proof lives beside
+# the fix it exercises, in `tests/test_editorial_inventory.py`
+# (`test_forecast_line_without_a_resolvable_label_raises_instead_of_leaking_the_code`),
+# where a report can be built with a line whose label equals its code without
+# an extra Typst compile. This test is the harness's own, independent check
+# that nothing *else* on the page reads like a field/model code.
+
+def test_no_field_code_style_labels_leak_into_the_dossier(dossier):
+    full_text = ' '.join(raw_page_texts(dossier.draft_path, expected_pages=dossier.page_count))
+    assert_no_field_code_style_labels(full_text)
 
 
 # --------------------------------------------------------------------------

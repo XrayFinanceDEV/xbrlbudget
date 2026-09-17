@@ -293,6 +293,23 @@
         block(width: body-width, breakable: false, figure)
       }
       v(5mm)
+    } else if item.kind == "note" {
+      // Nota di indisponibilità raggruppata (M2-02B integrazione, rilievo 3):
+      // corpo ridotto, senza titolo di sezione, subito sotto la tabella che
+      // spiega — stile metadati già usato per la nota di riga in
+      // `compact-period-table`, mai la resa a pagina intera dei blocchi
+      // narrativi.
+      let content = [
+        #marker((kind: "content", content_id: item.id))
+        #safe-prose(7.2pt, fill: muted, item.text)
+      ]
+      context {
+        if measure(block(width: body-width, content)).height > 220mm {
+          panic("editorial-availability-note-does-not-fit")
+        }
+        block(width: body-width, breakable: false, content)
+      }
+      v(3mm)
     } else {
       let content = [
         #marker((kind: "content", content_id: item.id))

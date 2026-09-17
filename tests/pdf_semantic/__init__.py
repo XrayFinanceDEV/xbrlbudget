@@ -238,6 +238,48 @@ def assert_no_forbidden_technical_strings(full_text: str) -> None:
         raise AssertionError(f"forbidden technical tokens leaked into the dossier text: {found}")
 
 
+#: `key.style` / `key_style` tokens legitimately printed verbatim: a column
+#: literally called "Codice" (diagnostics, source revisions) or
+#: "Identificativo" (source engine) shows a technical code on purpose, for
+#: traceability — a motivated, finite exception, not a pattern weakening.
+#: `n.d` is `pdftotext`'s reading of the report's own "n.d." (non disponibile)
+#: marker, printed on nearly every table with a missing value.
+_KEY_STYLE_LABEL_EXCEPTIONS = frozenset({
+    "n.d",
+    "analysis_service",
+    "adjustments_details_realigned", "adjustments_profit_realigned",
+    "adjustments_unposted_mass", "legacy_assumption_provenance",
+    "forecast_stale", "opening_balance_missing",
+})
+
+#: A manual CE/SP override or SP indexing driver in Allegato E («dettagli
+#: ipotesi») is labelled with the raw `BudgetAssumptions` field the user
+#: overrode («Override CE ce02_override», «Indicizzazione SP sp16g»): unlike
+#: the codes this harness guards elsewhere, that field is user-chosen from 32
+#: CE columns and an open SP set, so no finite allowlist could cover it —
+#: a known, separate, smaller gap (not this lotto's fix), excluded here by
+#: the fixed prefix that always precedes it, not by guessing every value.
+_OVERRIDE_LABEL_PREFIX = re.compile(r"(Override CE|Override SP|Indicizzazione SP) [a-z][a-z0-9_.]*")
+
+_KEY_STYLE_LABEL_PATTERN = re.compile(r"\b[a-z][a-z0-9]*(?:[_.][a-z0-9]+)+\b")
+
+
+def assert_no_field_code_style_labels(full_text: str) -> None:
+    """No row prints a raw field/model code as its label — `sp06c_crediti_collegate_breve`,
+    `cashflow.operating.start.net_profit`, `ce01_ricavi_vendite` all leaked as
+    the "Voce" of a row on real (AMBIENTA) data before `editorial_inventory.py`
+    started resolving every forecast/closing-value line through
+    `detailed_statements` first and `_FORECAST_LABEL_OVERRIDES` second,
+    raising instead of falling back to the code (M2-02B integrazione, rilievo
+    del coordinatore). A curated fixture never exercised this: its forecast
+    lines already carry a real label, so this check is the harness's own
+    defense, independent of that mechanism."""
+    scrubbed = _OVERRIDE_LABEL_PREFIX.sub("", full_text)
+    found = sorted(set(_KEY_STYLE_LABEL_PATTERN.findall(scrubbed)) - _KEY_STYLE_LABEL_EXCEPTIONS)
+    if found:
+        raise AssertionError(f"field/model codes leaked as row labels: {found}")
+
+
 def assert_draft_watermark(raw_text: str, *, draft: bool) -> None:
     present = DRAFT_WATERMARK in raw_text
     if draft and not present:

@@ -67,7 +67,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, incollaNumeroItaliano } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -700,7 +700,7 @@ function StartupSetup({
         <div className="border-t border-border pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="startup-capitale">Capitale sociale di partenza (€) *</Label>
-            <input id="startup-capitale" type="number" step="1000" min="0" className={numCls}
+            <input id="startup-capitale" type="number" step="1000" min="0" className={numCls} onPaste={incollaNumeroItaliano}
               value={capitale} onChange={(e) => setCapitale(parseFloat(e.target.value) || 0)} />
             <p className="text-xs text-muted-foreground">
               Conferito come liquidità: costituisce il patrimonio netto e la cassa
@@ -753,7 +753,7 @@ function StartupSetup({
                   <td className="px-3 py-2 font-medium text-foreground border-r border-border">Ricavi (€)</td>
                   {years.map((year) => (
                     <td key={year} className="px-2 py-1 border-r border-border">
-                      <input type="number" step="1000" min="0" className={cellCls}
+                      <input type="number" step="1000" min="0" className={cellCls} onPaste={incollaNumeroItaliano}
                         value={getVal(year, "ricavi")}
                         onChange={(e) => setVal(year, "ricavi", parseFloat(e.target.value) || 0)} />
                     </td>
@@ -763,7 +763,7 @@ function StartupSetup({
                   <td className="px-3 py-2 font-medium text-foreground border-r border-border">Margine EBITDA (%)</td>
                   {years.map((year) => (
                     <td key={year} className="px-2 py-1 border-r border-border">
-                      <input type="number" step="0.5" className={cellCls}
+                      <input type="number" step="0.5" className={cellCls} onPaste={incollaNumeroItaliano}
                         value={getVal(year, "margine")}
                         onChange={(e) => setVal(year, "margine", parseFloat(e.target.value) || 0)} />
                     </td>
@@ -773,7 +773,7 @@ function StartupSetup({
                   <td className="px-3 py-2 font-medium text-foreground border-r border-border">Costi del personale (€)</td>
                   {years.map((year) => (
                     <td key={year} className="px-2 py-1 border-r border-border">
-                      <input type="number" step="1000" min="0" className={cellCls}
+                      <input type="number" step="1000" min="0" className={cellCls} onPaste={incollaNumeroItaliano}
                         value={getVal(year, "personale")}
                         onChange={(e) => setVal(year, "personale", parseFloat(e.target.value) || 0)} />
                     </td>
@@ -783,7 +783,7 @@ function StartupSetup({
                   <td className="px-3 py-2 font-medium text-foreground border-r border-border">Numero dipendenti</td>
                   {years.map((year) => (
                     <td key={year} className="px-2 py-1 border-r border-border">
-                      <input type="number" step="1" min="0" className={cellCls}
+                      <input type="number" step="1" min="0" className={cellCls} onPaste={incollaNumeroItaliano}
                         value={getVal(year, "dipendenti")}
                         onChange={(e) => setVal(year, "dipendenti", parseInt(e.target.value) || 0)} />
                     </td>

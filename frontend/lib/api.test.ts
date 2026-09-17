@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // `api.ts` costruisce l'istanza axios al load del modulo (`axios.create`):
 // il finto deve rispondere PRIMA dell'import, altrimenti `api.ts` esplode
@@ -25,7 +25,8 @@ vi.mock("axios", () => {
   };
 });
 
-import { generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes } from "./api";
+import { downloadFinalReportPdf, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
+import { FinalReportDownloadError } from "./final-report-download";
 import v1 from "../../tests/fixtures/final_report/bilancio.json";
 import v2 from "../../tests/fixtures/final_report/v2/bilancio.json";
 
@@ -97,5 +98,92 @@ describe("editorial session API", () => {
     expect(postMock).toHaveBeenNthCalledWith(1, "/companies/1/scenarios/2/final-report/editorial/prepare", { source_hash: v2.source_hash, expected_revision: 3 });
     expect(putMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report/editorial/notes", expect.objectContaining({ expected_revision: 3, notes: [{ id: "page-1", text: "Testo", revision: 2, from_note: { id: "old", plan_hash: "b".repeat(64), revision: 1 } }] }));
     expect(postMock).toHaveBeenNthCalledWith(2, "/companies/1/scenarios/2/final-report/editorial/generate", expect.objectContaining({ notes: [{ id: "page-1", revision: 2 }] }));
+  });
+});
+
+describe("downloadFinalReportPdf", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    setAuthToken(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setAuthToken(null);
+  });
+
+  it("posta document_state e grayscale, con Bearer quando il token è impostato, e legge blob e nome file dagli header", async () => {
+    setAuthToken("un-jwt");
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name: string) => (name === "Content-Disposition" ? "attachment; filename=\"Report.pdf\"; filename*=UTF-8''Report%20Budget.pdf" : null) },
+      blob: async () => blob,
+      json: async () => ({}),
+    });
+
+    const result = await downloadFinalReportPdf(1, 2, { documentState: "final", grayscale: true });
+
+    expect(result.blob).toBe(blob);
+    expect(result.filename).toBe("Report Budget.pdf");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/companies/1/scenarios/2/final-report/pdf");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer un-jwt");
+    expect(JSON.parse(init.body)).toEqual({ document_state: "final", grayscale: true });
+  });
+
+  it("non manda Authorization senza token impostato, e grayscale di default è false", async () => {
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      blob: async () => blob,
+      json: async () => ({}),
+    });
+
+    const result = await downloadFinalReportPdf(1, 2, { documentState: "draft" });
+
+    expect(result.filename).toBe("Report Budget.pdf");
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBeUndefined();
+    expect(JSON.parse(init.body)).toEqual({ document_state: "draft", grayscale: false });
+  });
+
+  it("lancia FinalReportDownloadError col detail del server su un errore JSON", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      headers: { get: () => null },
+      json: async () => ({ detail: "Prepara il piano editoriale prima di scaricare il PDF." }),
+    });
+
+    await expect(downloadFinalReportPdf(1, 2, { documentState: "final" })).rejects.toMatchObject({
+      status: 409,
+      message: "Prepara il piano editoriale prima di scaricare il PDF.",
+    });
+  });
+
+  it("ricade sul messaggio per stato quando il corpo dell'errore non è JSON", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: { get: () => null },
+      json: async () => {
+        throw new Error("non è JSON");
+      },
+    });
+
+    const error = await downloadFinalReportPdf(1, 2, { documentState: "draft" }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(FinalReportDownloadError);
+    expect(error.status).toBe(503);
+    expect(error.message).toMatch(/disponibile/);
   });
 });

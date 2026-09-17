@@ -24,10 +24,10 @@ inventario, piano (perimetro M2-02B) né al contratto v2.
   504 `RendererTimeout`; 422 `RendererCompileError` con panic noto; 500
   `RendererInvalidPdf`, panic sconosciuto e resto. Messaggi solo in italiano,
   senza percorsi né dati.
-- **Risposta** `application/pdf` con `Content-Disposition: attachment;
-  filename="Report Budget 2027 - 2029 - <azienda>.pdf"` (sanificato dai
-  caratteri vietati, più `filename*=UTF-8''…`), `ETag` = hash canonical
-  modello+piano, `X-Report-Model-Hash`, `X-Report-Template-Version`,
+- **Risposta** `application/pdf` con `Content-Disposition` il cui `filename=` è
+  puro ASCII (translitterato; era UTF-8 grezzo, corretto nel giro sotto) e il
+  cui `filename*=UTF-8''…` porta il nome completo «Report Budget 2027 - 2029 -
+  <azienda>.pdf», più `ETag` = hash canonical modello+piano+opzioni, `X-Report-Model-Hash`, `X-Report-Template-Version`,
   `X-Report-Compiler-Version`, `Cache-Control: no-store`. Nessuna tabella nuova.
 
 ## Commit
@@ -37,6 +37,8 @@ inventario, piano (perimetro M2-02B) né al contratto v2.
 | `aa89bc3` | refactor(report): M2-05 la mappa dei panic non-entra diventa condivisa |
 | `49f6c3e` | feat(report): M2-05 endpoint PDF del dossier con cancello e mappa errori |
 | `cf8a402` | test(report): M2-05 suite endpoint PDF con cancello, header, errori e flusso nativo |
+| `ec80ada` | docs(report): M2-05 ricevuta endpoint PDF con conteggi e durate |
+| `d7e31c1` | fix(report): M2-05 giro di correzione — ETag per rappresentazione e `filename=` puro ASCII |
 
 File: `backend/app/core/render_panics.py` (nuovo),
 `backend/app/schemas/final_report_pdf.py` (nuovo),
@@ -80,12 +82,41 @@ filename="Report Budget 2027 - 2029 - AMBIENTA.pdf"; filename*=UTF-8''…`,
 `/home/peter/DEV/budget/inbox/artifacts/2026-09-17-m2-05/report-budget-ambienta-{draft,final,final-grayscale}.pdf`
 (sha256 nel report del worker).
 
+## Giro di correzione (coordinatore, 2026-09-17 sera)
+
+Commit `d7e31c1`. Due rilievi accettati e corretti:
+
+1. **ETag = rappresentazione.** `render_pdf` hashava solo modello+piano: bozza
+   e finale, a colori e in grigio, condividevano l'ETag su byte diversi. Ora
+   entrano anche `document_state` e `grayscale`.
+   Test: `test_etag_identifies_the_representation` (quattro combinazioni →
+   quattro ETag distinti, ripetizione stabile) e l'uguaglianza riformulata nel
+   flusso nativo (`etag_of(report, state, gray)`).
+2. **`filename=` in puro ASCII.** Starlette codifica gli header in latin-1: un
+   nome azienda con `’` (U+2019), `€`, `–` o caratteri non latini faceva
+   sollevare `UnicodeEncodeError` a PDF già compilato (500 su errore di nessuno
+   — verificato: `\u2019` fuori dal range latin-1). Il parametro `filename=`
+   ora porta la translitterazione NFKD con scarto dei non-ASCII e fallback
+   «Report Budget» (`artifact_ascii_filename`); il nome UTF-8 completo resta
+   solo in `filename*`, percent-encoded con `quote(..., safe="")`.
+   Test HTTP reale (non unitario):
+   `test_content_disposition_survives_a_non_latin1_company` con azienda
+   «Caffè D’Italia – Srl €»: 200, header `isascii()` e encodabile latin-1,
+   `filename="Report Budget 2027 - 2029 - Caffe DItalia Srl.pdf"`,
+   `filename*` che a `unquote` ridà il nome UTF-8 atteso.
+
+Rilanciata la suite: `tests/test_final_report_pdf_endpoint.py` 32 passati
+(nativa inclusa) e `tests/test_editorial_notes_endpoint.py` 12 passati nella
+stessa esecuzione, 39,4 s totali; nessun cambiamento a renderer, template o
+contratto. Le tre chiamate della prova AMBIENTA qui sopra avevano ETag identico
+fra loro: era il difetto, ed è questo giro a superarlo (la nota in
+«Scostamenti» va letta come storia, non come comportamento corrente).
+
 ## Scostamenti dal piano e rischi residui
 
-- L'`ETag` è, alla lettera del task, hash di modello+piano: **non distingue
-  draft da final né grayscale**. Le tre chiamate sulla stessa copia hanno lo
-  stesso ETag con PDF diversi. È voluto, come da specifica; se il download
-  dovesse mai passare da una cache HTTP, servirebbe estenderlo alle opzioni.
+- L'`ETag` era, alla lettera del task, hash di modello+piano: **non distingueva
+  draft da final né grayscale**. Corretto nel giro di correzione sopra: ora
+  include le opzioni di rappresentazione.
 - `RendererCompileError` con panic sconosciuto → 500 (mappa PDF) mentre la via
   editoriale risponde 503: le due superfici divergono di proposito perché il
   task lo chiede; la mappa dei panic è invece unica.

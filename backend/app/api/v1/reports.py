@@ -10,7 +10,7 @@ from app.core.auth import get_current_user_id
 from app.core.ownership import validate_company_owned_by_user
 from app.services.analysis_service import get_complete_analysis
 from app.services.ai_comments_service import (
-    generate_final_report_narrative, generate_report_comments, get_stored_comments,
+    NarrativeGenerationError, generate_final_report_narrative, generate_report_comments, get_stored_comments,
     save_comments, save_generated_narrative_blocks, save_user_narrative_blocks,
 )
 from app.schemas.final_report import FinalReportModel, NarrativeSaveRequest
@@ -68,7 +68,11 @@ def generate_final_report_narrative_endpoint(
     """Call the LLM only on demand, using the canonical server report model."""
     validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
     report = _assemble_or_http(db, company_id, scenario_id)
-    generated = generate_final_report_narrative(report)
+    try:
+        generated = generate_final_report_narrative(report)
+    except NarrativeGenerationError as error:
+        # Mai un 200 su una relazione che non c'è: la pagina lo leggerebbe come un successo.
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
     if generated:
         # Normalize the canonical report to economic provenance so filling
         # missing prose cannot immediately make its own output stale.

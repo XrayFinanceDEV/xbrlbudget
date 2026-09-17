@@ -248,3 +248,78 @@ def test_route_normalizes_malformed_persisted_narrative_without_losing_user_text
     finally:
         app.dependency_overrides.pop(core_db.get_db, None)
         app.dependency_overrides.pop(get_current_user_id, None)
+
+
+# ---------------------------------------------------------------------------
+# AMBIENTA, 2026-09-17: «Rigenera commenti» rispondeva 200 senza generare nulla, e la pagina diceva
+# «Commenti rigenerati». Misurato su cinque tentativi reali: i sei blocchi chiedono 3.075-3.845 token
+# di risposta contro un tetto di 4.000 condiviso con commenti molto più corti; uno su cinque si è
+# interrotto prima di «rischi e azioni», la validazione ha scartato tutto e l'errore è finito in un
+# log che nessuno legge.
+# ---------------------------------------------------------------------------
+class _FakeMessages:
+    def __init__(self, response=None, error=None):
+        self.response, self.error, self.kwargs = response, error, None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        if self.error:
+            raise self.error
+        return self.response
+
+
+def _fake_client(monkeypatch, messages):
+    from app.services import ai_comments_service as acs
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(acs.anthropic, "Anthropic", lambda api_key: SimpleNamespace(messages=messages))
+
+
+def _response(stop_reason, blocks):
+    return SimpleNamespace(stop_reason=stop_reason,
+                           content=[SimpleNamespace(type="tool_use", input=blocks)])
+
+
+def test_la_relazione_ha_un_tetto_di_risposta_suo_con_margine(narrative, monkeypatch):
+    from app.api.v1 import reports
+    from app.services import ai_comments_service as acs
+    messages = _FakeMessages(_response("tool_use", _generated()))
+    _fake_client(monkeypatch, messages)
+    with narrative.sessions() as db:
+        report = reports._assemble_or_http(db, narrative.ids["company"], narrative.ids["scenario"])
+    assert acs.generate_final_report_narrative(report) == _generated()
+    assert messages.kwargs["max_tokens"] == acs.FINAL_NARRATIVE_MAX_TOKENS
+    # Almeno il doppio del massimo misurato (3.845): il tetto non è più il caso normale.
+    assert acs.FINAL_NARRATIVE_MAX_TOKENS >= 2 * 3845
+
+
+def test_una_risposta_interrotta_non_passa_per_un_successo(narrative, monkeypatch):
+    from app.api.v1 import reports
+    from app.services import ai_comments_service as acs
+    from database.models import BudgetScenario
+    troncati = {k: v for k, v in _generated().items() if k != "risks_and_actions"}
+    _fake_client(monkeypatch, _FakeMessages(_response("max_tokens", troncati)))
+
+    with narrative.sessions() as db, pytest.raises(HTTPException) as error:
+        reports.generate_final_report_narrative_endpoint(narrative.ids["company"], narrative.ids["scenario"], USER, db)
+    assert error.value.status_code == 502
+    assert "interrotta" in error.value.detail and "Riprova" in error.value.detail
+    # Niente di mezzo scritto: cinque blocchi su sei non diventano la relazione.
+    with narrative.sessions() as db:
+        assert db.get(BudgetScenario, narrative.ids["scenario"]).narrative_blocks is None
+
+
+def test_senza_chiave_e_con_errore_dell_api_lo_si_dice(narrative, monkeypatch):
+    from app.api.v1 import reports
+    from app.services import ai_comments_service as acs
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with narrative.sessions() as db, pytest.raises(HTTPException) as error:
+        reports.generate_final_report_narrative_endpoint(narrative.ids["company"], narrative.ids["scenario"], USER, db)
+    assert error.value.status_code == 503
+    assert "chiave" in error.value.detail
+
+    _fake_client(monkeypatch, _FakeMessages(error=RuntimeError("overloaded")))
+    with narrative.sessions() as db, pytest.raises(HTTPException) as error:
+        reports.generate_final_report_narrative_endpoint(narrative.ids["company"], narrative.ids["scenario"], USER, db)
+    assert error.value.status_code == 502
+    assert "Riprova" in error.value.detail

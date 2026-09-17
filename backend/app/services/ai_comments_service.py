@@ -29,6 +29,18 @@ from database.models import BudgetScenario
 logger = logging.getLogger(__name__)
 
 AI_COMMENTS_MAX_TOKENS = 4000
+#: La relazione finale ha un tetto suo. I sei blocchi chiedono 3.075-3.845 token di risposta (cinque
+#: tentativi reali su AMBIENTA, 2026-09-17): col tetto condiviso da 4.000 uno su cinque si interrompeva
+#: prima dell'ultimo blocco, la validazione scartava tutto e la pagina diceva «Commenti rigenerati».
+FINAL_NARRATIVE_MAX_TOKENS = 12000
+
+
+class NarrativeGenerationError(RuntimeError):
+    """La relazione non è stata generata: il perché in italiano, e lo status HTTP che lo racconta."""
+
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ReportComments(pydantic.BaseModel):
@@ -829,26 +841,48 @@ def save_generated_narrative_blocks(db: Session, scenario_id: int, generated: di
 
 
 def generate_final_report_narrative(report: Any) -> dict[str, str]:
-    """Generate from the server-assembled FinalReportModel, never browser data."""
+    """Generate from the server-assembled FinalReportModel, never browser data.
+
+    Solleva ``NarrativeGenerationError`` invece di restituire ``{}``: chi la chiama su richiesta
+    esplicita dell'utente deve poter dire che non è andata, e perché. Un dizionario vuoto finiva in
+    un 200 con la relazione invariata e un «Commenti rigenerati» verde a schermo.
+    """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        logger.debug("No ANTHROPIC_API_KEY set — skipping final-report narrative")
-        return {}
+        raise NarrativeGenerationError(
+            "I commenti non si possono generare: la chiave API di Anthropic non è configurata sul server.",
+            status_code=503,
+        )
+    context = report.model_dump(mode="json")
+    context.pop("narrative", None)
     try:
-        context = report.model_dump(mode="json")
-        context.pop("narrative", None)
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model=PDF_LLM_MODEL,
-            max_tokens=AI_COMMENTS_MAX_TOKENS,
+            max_tokens=FINAL_NARRATIVE_MAX_TOKENS,
             system=_FINAL_NARRATIVE_PROMPT,
             messages=[{"role": "user", "content": "Dati canonici del report finale:\n\n" + _json.dumps(context, ensure_ascii=False, sort_keys=True)}],
             tools=[_build_tool_schema(FinalReportNarrative, "final_report_narrative")],
             tool_choice={"type": "tool", "name": "final_report_narrative"},
         )
-        for block in response.content:
-            if block.type == "tool_use":
-                return FinalReportNarrative.model_validate(block.input).model_dump()
     except Exception as error:
         logger.warning("Final-report narrative generation failed: %s", error)
-    return {}
+        raise NarrativeGenerationError(
+            "Il servizio che scrive i commenti non ha risposto. Riprova tra qualche istante."
+        ) from error
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        logger.warning("Final-report narrative truncated at %s tokens", FINAL_NARRATIVE_MAX_TOKENS)
+        raise NarrativeGenerationError(
+            "La generazione dei commenti si è interrotta prima di scrivere tutti e sei i blocchi: "
+            "nessun commento è stato salvato. Riprova."
+        )
+    for block in response.content:
+        if block.type == "tool_use":
+            try:
+                return FinalReportNarrative.model_validate(block.input).model_dump()
+            except pydantic.ValidationError as error:
+                logger.warning("Final-report narrative rejected: %s", error)
+                raise NarrativeGenerationError(
+                    "I commenti generati erano incompleti e non sono stati salvati. Riprova."
+                ) from error
+    raise NarrativeGenerationError("Il servizio non ha restituito i commenti. Riprova.")

@@ -82,9 +82,22 @@
   inset: (x: 3pt, y: 2.5pt),
 )[
   #grid(columns: (auto, 1fr), column-gutter: 3mm,
-    plex(6.8pt, weight: 600, fill: blue, upper(section.title)),
+    plex(6.8pt, weight: 600, fill: blue, upper(section.family)),
     align(right, plex(7pt, weight: 500, fill: navy, item.title)))
 ]
+#let compact-fits(item, value-start) = {
+  // Stessa geometria di compact-period-table; misura senza panic: se un valore
+  // eccedesse la colonna (es. un rapporto degenero in percentuale) la tabella
+  // cade nel ramo impilato, che ha spazio di wraping, non si ferma.
+  let count = item.columns.len()
+  let value-count = count - value-start - 1
+  let label-width = if value-count >= 6 { 65mm } else { 78mm }
+  let value-width = (body-width - label-width) / value-count
+  item.rows.all(row => range(value-start, count - 1).all(i =>
+    row.cells.at(i) == none or row.units.at(i) == none or
+    measure(plex(8pt, display-value(row.cells.at(i), row.units.at(i),
+      places: if row.units.at(i) == "eur" { 0 } else { none }))).width <= value-width - 6pt))
+}
 #let compact-period-table(section, item, value-start) = context {
   let count = item.columns.len()
   let value-count = count - value-start - 1
@@ -126,15 +139,23 @@
 #let data-table(section, item) = context {
   let count = item.columns.len()
   let periodic-start = if item.id.starts-with("appendix:") { 1 }
-    else if (item.id.starts-with("comparison:") or item.id.starts-with("forecast-")
-      or item.id == "infrannual-closing-values") { 2 }
+    else if item.id in ("comparison:income_statement", "comparison:balance_sheet", "comparison:cashflow",
+      "forecast-income-statement", "forecast-balance-sheet", "forecast-cashflow",
+      "infrannual-closing-values") { 1 }
+    else if item.id in ("indicator-practice-table", "indicator-analytical-table") { 2 }
     else { none }
   let label-width = if count <= 3 { 65mm } else { 60mm }
   let column-width = (body-width - label-width) / calc.max(1, count - 1)
+  let token-ok = (value, width) => value == none or value.split(regex("\\s+")).all(word =>
+    measure(plex(8pt, word)).width <= width)
+  let amount-ok = (value, unit, width) => (value == none or
+    measure(plex(8pt, display-value(value, unit, places: if unit == "eur" { 0 } else { none }))).width <= width)
+  let cell-ok = (value, unit, width) => if unit == none { token-ok(value, width) } else { amount-ok(value, unit, width) }
   let fits = count >= 2 and item.rows.all(r =>
+    token-ok(r.cells.at(0), label-width - 6pt) and
     r.cells.enumerate().all(pair => pair.at(0) == 0 or
-      measure(cell(pair.at(1), r.units.at(pair.at(0)))).width <= column-width - 6pt))
-  if periodic-start != none and count - periodic-start - 1 > 0 {
+      cell-ok(pair.at(1), r.units.at(pair.at(0)), column-width - 6pt)))
+  if periodic-start != none and count - periodic-start - 1 > 0 and compact-fits(item, periodic-start) {
     compact-period-table(section, item, periodic-start)
   } else if fits {
     let cells = ()
@@ -184,8 +205,18 @@
 #for section in inventory {
   if section.id != "cover" {
     pagebreak()
-    plex(7.4pt, weight: 600, fill: blue, tracking: 0.6pt, upper(section.title))
-    v(4mm)
+    context {
+      let number = counter(page).get().first()
+      plex(7.4pt, weight: 600, fill: blue, tracking: 0.6pt,
+        upper(section.family) + " · " + (if number < 10 { "0" } else { "" }) + str(number))
+    }
+    v(3mm)
+    safe-prose(16pt, weight: 600, fill: navy, section.title)
+    v(2mm)
+    if section.subtitle != none {
+      safe-prose(8pt, fill: muted, section.subtitle)
+    }
+    v(5mm)
   }
   for item in section.items {
     if item.kind == "cover" { cover(report) }

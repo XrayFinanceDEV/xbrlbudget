@@ -34,8 +34,9 @@ def infrannual_period_report(amounts=('850', '900', '1020', '1200')):
     sources = []
     for (basis, year, months), amount in zip([('historical', 2025, 12), ('observed', 2026, 9),
                                               ('adjusted', 2026, 9), ('closing', 2026, 12)], amounts):
-        period = StatementPeriod(id=f'{basis}:{year}', year=year, label=f'{year} · {basis}', basis=basis,
-                                 period_months=months, source='synthetic_period_fixture')
+        period = StatementPeriod(id=f'{basis}:{year}', year=year, label={'historical': '2025 storico', 'observed': '2026 osservato',
+                                                                         'adjusted': '2026 rettificato', 'closing': '2026 chiusura'}[basis],
+                                 basis=basis, period_months=months, source='synthetic_period_fixture')
         sources.append(DossierSource(period, {**bs, 'sp09_disponibilita_liquide': Decimal(80)},
                                      {**ce, 'ce01_ricavi_vendite': Decimal(amount)}))
     for forecast in v1.forecast.years:
@@ -198,10 +199,10 @@ def test_actual_infrannual_bases_keep_unannualized_values_and_all_appendix_perio
     comparison = next(item for section in inventory for item in section['items']
                       if item['id'] == 'comparison:income_statement')
     production = next(row for row in comparison['rows'] if row['id'].endswith(':production_value'))
-    assert production['cells'][2:6] == ['850', '900', '1020', '1200']
-    assert '2026 · observed (9 mesi)' in comparison['columns']
-    assert '2026 · adjusted (9 mesi)' in comparison['columns']
-    assert '2026 · closing (12 mesi)' in comparison['columns']
+    assert production['cells'][1:5] == ['850', '900', '1020', '1200']
+    assert '2026 osservato (9 mesi)' in comparison['columns']
+    assert '2026 rettificato (9 mesi)' in comparison['columns']
+    assert '2026 chiusura (12 mesi)' in comparison['columns']
     report = prepare_editorial_report(original, probe)
     verify_editorial_layout(report, probe)
     with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
@@ -317,3 +318,20 @@ def test_importi_milionari_al_centesimo_si_impaginano_in_euro_interi(probe):
     assert '4.006.984,18' not in text
     # Arrotondamento al mezzo euro, non troncamento: 4.146.966,26 → 4.146.966; 3.761.087,73 → 3.761.088.
     assert '3.761.088' in text
+
+@pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
+def test_nessun_metadato_tecnico_e_nessun_titolo_inglese_nel_document(probe, workflow):
+    """M2-02B difetti 2 e 3: il PDF di M2-02 stampava gli ID canonici come contenuto
+    («ID: historical:2025», «Fonte: synthetic_period_fixture», blocchi «practice.pfn»,
+    «Unità: ratio») e sei titoli narrativi in inglese. Nel dossier editoriale nulla di
+    tutto questo compare: le etichette sono italiane, gli ID restano nei marcatori."""
+    report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    for forbidden in ('historical:', 'forecast:', 'practice.', 'synthetic_', 'Unità: ratio',
+                      'Executive summary', 'Adjustments and closing', 'Budget assumptions',
+                      'Economic outlook', 'Financial outlook', 'Risks and actions'):
+        assert forbidden not in text, forbidden
+    # Occhiello e titolo neutro in italiano per ogni sezione resa.
+    assert 'SINTESI · ' in text and 'Sintesi esecutiva' in text
+    assert 'PIANO E RISULTATI · ' in text

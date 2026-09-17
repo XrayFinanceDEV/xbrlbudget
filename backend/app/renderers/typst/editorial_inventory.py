@@ -22,16 +22,50 @@ SECTION_IDS = (
 _SECTION_TITLES = {
     "cover": "Copertina",
     "executive_summary": "Sintesi esecutiva",
-    "source_data_quality": "Qualità e provenienza dei dati",
-    "adjustments": "Rettifiche e raccordo alla chiusura",
-    "infrannual_closing": "Chiusura infrannuale",
-    "budget_assumptions": "Ipotesi di budget",
-    "income_statement_forecast": "Previsione conto economico",
-    "balance_sheet_forecast": "Previsione stato patrimoniale",
-    "cashflow_sustainability": "Flussi finanziari e sostenibilità",
-    "indicators": "Indicatori e convenzioni",
-    "diagnostics_actions": "Diagnostica e azioni",
-    "appendices_methodology": "Appendici e metodologia",
+    "source_data_quality": "Bilancio infrannuale e fonti",
+    "adjustments": "Rettifiche apportate",
+    "infrannual_closing": "Dall'infrannuale alla chiusura",
+    "budget_assumptions": "Ipotesi del piano",
+    "income_statement_forecast": "Conto economico previsionale",
+    "balance_sheet_forecast": "Stato patrimoniale previsionale",
+    "cashflow_sustainability": "Flussi di cassa e sostenibilità",
+    "indicators": "Indicatori del piano",
+    "diagnostics_actions": "Diagnostica e punti da verificare",
+    "appendices_methodology": "Allegati e metodologia",
+}
+
+# Occhiello v4: una famiglia editoriale per pagina, seguita dal numero di pagina
+# fisica (es. «SINTESI · 02», «DATI DI PARTENZA · 04»). M-2-0-2B, 2026-09-17.
+_SECTION_FAMILY = {
+    "cover": None,
+    "executive_summary": "Sintesi",
+    "source_data_quality": "Dati di partenza",
+    "adjustments": "Dati di partenza",
+    "infrannual_closing": "Dati di partenza",
+    "budget_assumptions": "Piano e risultati",
+    "income_statement_forecast": "Piano e risultati",
+    "balance_sheet_forecast": "Piano e risultati",
+    "cashflow_sustainability": "Piano e risultati",
+    "indicators": "Piano e risultati",
+    "diagnostics_actions": "Piano e risultati",
+    "appendices_methodology": "Allegati",
+}
+
+# Sottotitolo di metodo, statico per pagina: descrive la convenzione di lettura,
+# mai un numero (il titolo-messaggio arriva dal commento AI, non da qui).
+_SECTION_SUBTITLES = {
+    "cover": None,
+    "executive_summary": "I dati osservati, la chiusura attesa e gli anni di piano sono tenuti distinti in tutto il dossier.",
+    "source_data_quality": "Il bilancio di verifica e le sue fonti, con durate e stato di ciascun periodo.",
+    "adjustments": "Le rettifiche confermate e il loro effetto sui valori di partenza, con le contropartite.",
+    "infrannual_closing": "Il progressivo rettificato, la stima del periodo mancante e la chiusura attesa.",
+    "budget_assumptions": "Le ipotesi sono presentate per anno e per area, con provenienza ed efficacia.",
+    "income_statement_forecast": "Gli anni di piano sono confrontati sulla medesima base annuale.",
+    "balance_sheet_forecast": "Il prospetto evidenzia impieghi e fonti, mantenendo separati liquidità e debiti finanziari.",
+    "cashflow_sustainability": "I flussi sono rappresentati con segno: entrate positive, uscite negative.",
+    "indicators": "PFN = debiti finanziari meno disponibilità liquide. Percentuali, importi e rapporti non sono mai mescolati nello stesso grafico.",
+    "diagnostics_actions": "Controlli di quadratura e diagnostiche del modello, distinti dalle valutazioni.",
+    "appendices_methodology": "I prospetti completi e le metodologie degli indicatori, con il registro delle fonti.",
 }
 
 _NARRATIVE_SECTION = {
@@ -42,6 +76,86 @@ _NARRATIVE_SECTION = {
     "financial_outlook": "balance_sheet_forecast",
     "risks_and_actions": "diagnostics_actions",
 }
+
+# Il titolo stampato dei blocchi narrativi: l'ID tecnico non compare nel
+# documento e il testo resta quello autoritativo del modello (M2-02B difetto 3).
+_NARRATIVE_TITLES = {
+    "executive_summary": "Sintesi del documento",
+    "adjustments_and_closing": "Rettifiche e raccordo alla chiusura",
+    "budget_assumptions": "Ipotesi del piano",
+    "economic_outlook": "Andamento economico atteso",
+    "financial_outlook": "Andamento patrimoniale e finanziario atteso",
+    "risks_and_actions": "Rischi e azioni",
+}
+
+_BASIS_LABELS = {
+    "historical": "storico",
+    "observed": "osservato",
+    "adjusted": "rettificato",
+    "closing": "chiusura",
+    "forecast": "previsione di piano",
+}
+
+_PROVENANCE_LABELS = {
+    "user": "manuale",
+    "automatic": "automatica",
+    "default": "default",
+    "override": "da override",
+    "ignored": "ignorata",
+    "legacy_unknown": "non dichiarata",
+}
+
+_SEVERITY_LABELS = {"info": "informativo", "warning": "attenzione", "error": "errore"}
+
+_QUALITY_STATUS_LABELS = {"complete": "Completa", "partial": "Parziale", "legacy": "pregressa"}
+
+_SOURCE_LABELS = {
+    "historical_financial_year": "Bilancio storico",
+    "adjustments": "Registro delle rettifiche",
+    "source_scenario": "Scenario di origine",
+    "budget_assumptions": "Ipotesi di budget",
+    "forecast": "Proiezioni di piano",
+    "narrative": "Commenti del dossier",
+    "calculation_engine": "Motore di calcolo",
+}
+
+_ALERT_LABELS = {
+    "retribuzioni": "Fondo retributi",
+    "fornitori": "Fondo fornitori",
+    "banche": "Debiti bancari",
+    "inps": "Debiti INPS",
+    "inail": "Debiti INAIL",
+    "riscossione": "Cartelle di riscossione",
+    "iva": "IVA da versare",
+}
+
+_TEMPORARY_KIND_LABELS = {"deductible": "deducibile", "taxable": "tassabile"}
+_TEMPORARY_MATURITY_LABELS = {"short": "breve", "long": "lunga"}
+
+_UNIT_LABELS = {"eur": "euro", "percent": "%", "days": "giorni", "ratio": "volte", "score": "punti"}
+
+# Le cause di indisponibilità sono codici canonici: qui trovano una frase in
+# italiano, ciò che non è conosciuto resta dichiarato come tale (mai silenzioso).
+_UNAVAILABLE_REASON_LABELS = {
+    "zero_denominator": "denominatore nullo nel periodo",
+    "non_positive_denominator": "denominatore non positivo nel periodo",
+    "source_calculation_unavailable": "calcolo sorgente non disponibile",
+    "model_field_unavailable": "campo non previsto dal modello",
+    "source_period_unavailable": "periodo non presente nella fonte",
+    "detail_not_declared": "dettaglio non dichiarato",
+    "source_field_unavailable": "campo non disponibile nella fonte",
+    "presentation_header": "riga di solo contesto",
+}
+
+_CLOSING_STATE_LABELS = {"observed": "osservato", "comparable": "comparabile", "automatic": "automatico", "override": "override"}
+
+_READINESS_LABELS = {"ready": "pronto", "draft": "bozza", "blocked": "bloccato"}
+
+
+def _label(mapping: dict[str, str], value: Any) -> Any:
+    if value is None:
+        return None
+    return mapping.get(str(value), str(value))
 
 _CHART_SECTION = {
     "income_results": "executive_summary",
@@ -103,6 +217,11 @@ def _period_label(period: Any) -> str:
     return f"{period.label}{suffix}"
 
 
+def _period_role(period: Any) -> str:
+    """Ruolo leggibile di un periodo: l'enumerazione tecnica `basis` non si stampa."""
+    return _label(_BASIS_LABELS, period.basis)
+
+
 def _value_columns(periods: list[Any]) -> list[str]:
     return [_period_label(period) for period in periods]
 
@@ -123,7 +242,7 @@ def _assumption_rows(section: Any, period_labels: list[str]) -> list[dict[str, A
         missing = "; ".join(label for label, value in zip(period_labels, values) if value is None)
         rows.append(_row(
             f"assumption:{section.key}:{assumption.field}:value",
-            [assumption.label, *values, assumption.provenance, assumption.active,
+            [assumption.label, *values, _label(_PROVENANCE_LABELS, assumption.provenance), assumption.active,
              _missing(f"valore non dichiarato per {missing}") if missing else None],
             [None, *([unit] * len(values)), None, None, None],
         ))
@@ -172,7 +291,8 @@ def _assumption_rows(section: Any, period_labels: list[str]) -> list[dict[str, A
             for index, difference in enumerate(assumption.temporary_differences):
                 rows.append(_row(
                     f"assumption:{section.key}:{assumption.field}:temporary_difference:{index}",
-                    [f"Differenza temporanea: {difference.name}", difference.kind, difference.maturity,
+                    [f"Differenza temporanea: {difference.name}", _label(_TEMPORARY_KIND_LABELS, difference.kind),
+                     _label(_TEMPORARY_MATURITY_LABELS, difference.maturity),
                      difference.opening_amount, difference.additions, difference.reversals, difference.tax_rate,
                      _missing("aliquota non dichiarata") if difference.tax_rate is None else None],
                     [None, None, None, "eur", "eur", "eur", "percent", None],
@@ -252,33 +372,21 @@ def _assumption_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
 
 
 def _statement_table(identifier: str, title: str, statement: Any, prefix: str, *, context: bool) -> dict[str, Any]:
-    columns = ["Voce", *_value_columns(statement.periods), "Catalogo / indisponibilità"]
-    by_id = {row.id: row for row in statement.rows}
-
-    def parent_chain(row: Any) -> str:
-        parents = []
-        parent_id = row.parent_id
-        while parent_id is not None:
-            parent = by_id[parent_id]
-            parents.append(parent.label)
-            parent_id = parent.parent_id
-        return " › ".join(reversed(parents))
+    """Allegato: etichette di prospetto e valori. Codici, tipo, fonte e catalogo
+    non si stampano (M2-02B difetto 2): il contesto padre è già nelle righe
+    «sezione/gruppo» del prospetto stesso."""
+    columns = ["Voce", *_value_columns(statement.periods), "Indisponibilità"]
 
     rows = []
     for row in statement.rows:
-        reasons = [reason for reason in row.unavailable_reasons if reason and reason != "presentation_header"]
-        source_note = row.source.split(";", 1)[0]
-        catalog_note = f"codice: {row.code}; tipo: {row.kind}; applicabile: {'sì' if row.applicable else 'no'}; fonte: {source_note}"
-        if context and parent_chain(row):
-            catalog_note = f"contesto: {parent_chain(row)}; {catalog_note}"
-        if reasons:
-            catalog_note += f"; {_missing('; '.join(reasons))}"
+        reasons = [_label(_UNAVAILABLE_REASON_LABELS, reason) for reason in row.unavailable_reasons
+                   if reason and reason != "presentation_header"]
         header = row.kind in ("section", "group")
         values = [""] * len(row.values) if header else row.values
         value_units = [None] * len(values) if header else ["eur"] * len(values)
         rows.append(_row(
             f"{prefix}:{statement.id}:{row.id}",
-            [row.label, *values, catalog_note],
+            [row.label, *values, _missing("; ".join(reasons)) if reasons else None],
             [None, *value_units, None],
         ))
     return _table(identifier, title, columns, rows)
@@ -293,13 +401,13 @@ def _forecast_table(identifier: str, title: str, years: list[Any], attribute: st
                 raise ValueError(f"duplicate canonical forecast line {line.code!r} for {attribute} {year.year}")
             seen.add(line.code)
             codes.setdefault(line.code, line.label)
-    columns = ["Codice", "Voce", *[str(year.year) for year in years], "Indisponibilità"]
+    columns = ["Voce", *[str(year.year) for year in years], "Indisponibilità"]
     rows = []
     for code, label in codes.items():
         values = [next((line.value for line in getattr(year, attribute) if line.code == code), None) for year in years]
         missing = [str(year.year) for year, value in zip(years, values) if value is None]
-        units = [None, None, *(["eur"] * len(values)), None] if attribute != "calculations" else [None] * (3 + len(values))
-        rows.append(_row(f"forecast:{attribute}:{code}", [code, label, *values,
+        units = [None, *("eur" if attribute != "calculations" else None,) * len(values), None]
+        rows.append(_row(f"forecast:{attribute}:{code}", [label, *values,
                          _missing("riga non presente nel forecast canonico per " + ", ".join(missing)) if missing else None], units))
     return _table(identifier, title, columns, rows)
 
@@ -308,14 +416,14 @@ def _comparison_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
     items = []
     for statement in report.detailed_statements:
         rows = [row for row in statement.rows if row.kind in ("subtotal", "total")]
-        columns = ["Codice", "Voce", *_value_columns(statement.periods), "Indisponibilità"]
+        columns = ["Voce", *_value_columns(statement.periods), "Indisponibilità"]
         comparison_rows = []
         for row in rows:
-            reasons = [reason for reason in row.unavailable_reasons if reason]
+            reasons = [_label(_UNAVAILABLE_REASON_LABELS, reason) for reason in row.unavailable_reasons if reason]
             comparison_rows.append(_row(
-                f"comparison:{statement.id}:{row.id}", [row.code, row.label, *row.values,
+                f"comparison:{statement.id}:{row.id}", [row.label, *row.values,
                 _missing("; ".join(reasons)) if reasons else None],
-                [None, None, *(["eur"] * len(row.values)), None],
+                [None, *("eur",) * len(row.values), None],
             ))
         items.append(_table(f"comparison:{statement.id}", f"Confronto dei periodi disponibili — {statement.title}", columns, comparison_rows))
     return items
@@ -326,26 +434,30 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     if not isinstance(report, FinalReportModelV2):
         raise TypeError("build_inventory requires FinalReportModelV2")
     applicable_sections = tuple(identifier for identifier in SECTION_IDS if identifier != "infrannual_closing" or report.infrannual_closing is not None)
-    sections = [{"id": identifier, "title": _SECTION_TITLES[identifier], "items": []} for identifier in applicable_sections]
+    sections = [{"id": identifier, "title": _SECTION_TITLES[identifier], "family": _SECTION_FAMILY[identifier],
+                 "subtitle": _SECTION_SUBTITLES[identifier], "items": []} for identifier in applicable_sections]
     section = {value["id"]: value for value in sections}
     section["cover"]["items"].append({"id": "cover", "kind": "cover", "title": report.document.title})
 
     for narrative in report.narrative:
-        section[_NARRATIVE_SECTION[narrative.id]]["items"].append(_text(narrative.id, narrative.id.replace("_", " ").capitalize(), narrative.text))
+        section[_NARRATIVE_SECTION[narrative.id]]["items"].append(
+            _text(narrative.id, _NARRATIVE_TITLES[narrative.id], narrative.text))
 
     periods = []
     for statement in report.detailed_statements:
         for period in statement.periods:
-            periods.append(_row(f"source-period:{statement.id}:{period.id}", [statement.title, period.id, _period_label(period), period.basis, period.source], [None] * 5))
-    section["source_data_quality"]["items"].append(_table("source-periods", "Periodi delle fonti", ["Prospetto", "ID", "Periodo", "Base", "Fonte"], periods))
-    revisions = [_row(f"source-revision:{index}:{item.source}", [item.source, item.identifier, item.revision, item.revision_at, item.available], [None] * 5) for index, item in enumerate(report.source_revisions)]
+            periods.append(_row(f"source-period:{statement.id}:{period.id}",
+                                [statement.title, _period_label(period), _period_role(period), period.period_end],
+                                [None] * 4))
+    section["source_data_quality"]["items"].append(_table("source-periods", "Periodi delle fonti", ["Prospetto", "Periodo", "Ruolo", "Chiusura"], periods))
+    revisions = [_row(f"source-revision:{index}:{item.source}", [_label(_SOURCE_LABELS, item.source), item.identifier, item.revision, item.revision_at, item.available], [None] * 5) for index, item in enumerate(report.source_revisions)]
     section["source_data_quality"]["items"].append(_table("source-revisions", "Revisioni delle fonti", ["Fonte", "Identificativo", "Revisione", "Data revisione", "Disponibile"], revisions))
-    quality_rows = [_row(f"source-quality:{index}:{item.code}", [report.source_data_quality.status, item.code, item.severity, item.section, item.message], [None] * 5) for index, item in enumerate(report.source_data_quality.diagnostics)]
-    section["source_data_quality"]["items"].append(_table("source-quality", "Qualità dei dati", ["Stato", "Codice", "Severità", "Sezione", "Messaggio"], quality_rows or [_row("source-quality:status", [report.source_data_quality.status, None, None, None, "n.d.: nessuna diagnostica di qualità"], [None] * 5)]))
+    quality_rows = [_row(f"source-quality:{index}:{item.code}", [_label(_QUALITY_STATUS_LABELS, report.source_data_quality.status), item.code, _label(_SEVERITY_LABELS, item.severity), _label(_SECTION_TITLES, item.section), item.message], [None] * 5) for index, item in enumerate(report.source_data_quality.diagnostics)]
+    section["source_data_quality"]["items"].append(_table("source-quality", "Qualità dei dati", ["Stato", "Codice", "Severità", "Sezione", "Messaggio"], quality_rows or [_row("source-quality:status", [_label(_QUALITY_STATUS_LABELS, report.source_data_quality.status), None, None, None, "n.d.: nessuna diagnostica di qualità"], [None] * 5)]))
 
-    adjustment_rows = [_row(f"adjustment:{entry.id}", [entry.edited_field, entry.edited_label, entry.edit_delta, entry.counterpart_field, entry.counterpart_label, entry.counterpart_delta, entry.explanation, entry.created_at, _missing("spiegazione non fornita") if entry.explanation is None else None], [None, None, "eur", None, None, "eur", None, None, None]) for entry in report.adjustments.entries]
-    adjustment_rows.append(_row("adjustment:net-effect", ["Effetto netto", None, report.adjustments.net_effect, None, None, None, f"Confermate: {'sì' if report.adjustments.confirmed else 'no'}", None, None], [None, None, "eur", None, None, "eur", None, None, None]))
-    section["adjustments"]["items"].append(_table("adjustments-register", "Rettifiche, contropartite e motivazioni", ["Campo rettificato", "Voce", "Delta", "Campo contropartita", "Voce contropartita", "Delta contropartita", "Spiegazione", "Creato il", "Indisponibilità"], adjustment_rows))
+    adjustment_rows = [_row(f"adjustment:{entry.id}", [entry.edited_label, entry.edit_delta, entry.counterpart_label, entry.counterpart_delta, entry.explanation, entry.created_at, _missing("spiegazione non fornita") if entry.explanation is None else None], [None, "eur", None, "eur", None, None, None]) for entry in report.adjustments.entries]
+    adjustment_rows.append(_row("adjustment:net-effect", ["Effetto netto sul risultato", report.adjustments.net_effect, f"Rettifiche confermate: {'sì' if report.adjustments.confirmed else 'no'}", None, None, None, None], [None, "eur", None, None, None, None, None]))
+    section["adjustments"]["items"].append(_table("adjustments-register", "Registro delle rettifiche", ["Voce rettificata", "Delta", "Contropartita", "Delta contropartita", "Motivazione", "Data", "Nota"], adjustment_rows))
     if report.practice.workflow_type == "infrannuale":
         section["adjustments"]["items"].append(_text("period-comparability", "Comparabilità dei periodi",
             "Osservato e rettificato mantengono gli importi del periodo infrannuale; "
@@ -357,11 +469,11 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     if report.infrannual_closing is not None:
         closing_rows = []
         for value in report.infrannual_closing.values:
-            absent = [name for name in ("observed", "comparable", "automatic", "override") if getattr(value, name) is None]
-            closing_rows.append(_row(f"infrannual-closing:{value.code}", [value.code, value.label, value.observed, value.comparable, value.automatic, value.override, value.closing_used, _missing("; ".join(absent)) if absent else None], [None, None, "eur", "eur", "eur", "eur", "eur", None]))
-        section["infrannual_closing"]["items"].append(_table("infrannual-closing-values", f"Valori di chiusura al {report.infrannual_closing.period_end}", ["Codice", "Voce", "Osservato", "Comparabile", "Automatico", "Override", "Chiusura utilizzata", "Indisponibilità"], closing_rows))
+            absent = [_label(_CLOSING_STATE_LABELS, name) for name in ("observed", "comparable", "automatic", "override") if getattr(value, name) is None]
+            closing_rows.append(_row(f"infrannual-closing:{value.code}", [value.label, value.observed, value.comparable, value.automatic, value.override, value.closing_used, _missing("valore " + "; ".join(absent) + " non dichiarato") if absent else None], [None, "eur", "eur", "eur", "eur", "eur", None]))
+        section["infrannual_closing"]["items"].append(_table("infrannual-closing-values", f"Valori di chiusura al {report.infrannual_closing.period_end}", ["Voce", "Osservato", "Comparabile", "Automatico", "Override", "Chiusura utilizzata", "Indisponibilità"], closing_rows))
         alerts = report.infrannual_closing.extra_accounting_alerts
-        section["infrannual_closing"]["items"].append(_table("infrannual-closing-alerts", "Alert contabili extra", ["Alert", "Attivo"], [_row(f"infrannual-alert:{name}", [name, getattr(alerts, name)], [None, None]) for name in alerts.model_fields]))
+        section["infrannual_closing"]["items"].append(_table("infrannual-closing-alerts", "Alert contabili extra", ["Alert", "Attivo"], [_row(f"infrannual-alert:{name}", [_label(_ALERT_LABELS, name), getattr(alerts, name)], [None, None]) for name in alerts.model_fields]))
     section["budget_assumptions"]["items"].extend(_assumption_items(report))
     section["income_statement_forecast"]["items"].append(_forecast_table("forecast-income-statement", "Conto economico previsto", report.forecast.years, "income_statement"))
     section["balance_sheet_forecast"]["items"].append(_forecast_table("forecast-balance-sheet", "Stato patrimoniale previsto", report.forecast.years, "balance_sheet"))
@@ -385,26 +497,42 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
             ):
                 raise ValueError(f"conflicting indicator period definition for {period.id!r}")
             indicator_periods.setdefault(period.id, period)
-    indicator_columns = ["ID", "Indicatore", "Famiglia", "Unità", *[
-        f"{_period_label(period)} [{period.id}]" for period in indicator_periods.values()
-    ], "Indisponibilità", "Metodologia", "Convenzione", "Fonte", "Soglie"]
-    indicator_rows = []
-    for indicator in report.indicator_catalog:
+    # Il catalogo per-voce con i blocchi «practice.pfn / Unità: ratio / Convenzione:
+    # pratica-v1…» non si stampa più: gli indicatori diventano due tabelle F/G
+    # (indicatore × periodo, unità in colonna) e una tabella compatta di
+    # metodologia e convenzione in «Allegati e metodologia» (M2-02B difetto 2).
+    indicator_columns = ["Indicatore", "Unità", *[_period_label(period) for period in indicator_periods.values()], "Indisponibilità"]
+
+    def _indicator_row(indicator: Any) -> dict[str, Any]:
         values_by_period = dict(zip((period.id for period in indicator.periods), indicator.values))
-        reasons_by_period = dict(zip((period.id for period in indicator.periods), indicator.unavailable_reasons))
         values = [values_by_period.get(identifier) for identifier in indicator_periods]
-        reasons = "; ".join(f"{identifier}: {reason}" for identifier, reason in reasons_by_period.items() if reason)
-        thresholds = "; ".join(f"{threshold.label}: {_exact(threshold.value)} ({threshold.source})" for threshold in indicator.thresholds)
-        indicator_rows.append(_row(f"indicator:{indicator.id}", [indicator.id, indicator.label, indicator.family, indicator.unit, *values, _missing(reasons) if reasons else None, indicator.methodology, indicator.convention, indicator.source, thresholds or None], [None, None, None, None, *([indicator.unit] * len(values)), None, None, None, None, None]))
-    section["indicators"]["items"].append(_table("indicator-catalog", "Catalogo completo degli indicatori", indicator_columns, indicator_rows))
+        reasons = "; ".join(
+            f"{_period_label(period)} — {_label(_UNAVAILABLE_REASON_LABELS, reason)}"
+            for period, reason in zip(indicator.periods, indicator.unavailable_reasons) if reason)
+        return _row(f"indicator:{indicator.id}", [indicator.label, _label(_UNIT_LABELS, indicator.unit), *values,
+                     _missing(reasons) if reasons else None],
+                     [None, None, *([indicator.unit] * len(values)), None])
+
+    practice_rows = [_indicator_row(indicator) for indicator in report.indicator_catalog if indicator.id.startswith("practice.")]
+    analytical_rows = [_indicator_row(indicator) for indicator in report.indicator_catalog if not indicator.id.startswith("practice.")]
+    if practice_rows:
+        section["indicators"]["items"].append(_table("indicator-practice-table", "Tabella F — Indicatori della pratica", indicator_columns, practice_rows))
+    if analytical_rows:
+        section["indicators"]["items"].append(_table("indicator-analytical-table", "Tabella G — Indici del report analitico", indicator_columns, analytical_rows))
 
     diagnostics = list(report.diagnostics) + list(report.readiness.reasons)
-    diagnostic_rows = [_row(f"diagnostic:{index}:{item.code}", [item.code, item.severity, item.section, item.message], [None] * 4) for index, item in enumerate(diagnostics)]
-    section["diagnostics_actions"]["items"].append(_table("diagnostics", f"Diagnostica (stato: {report.readiness.status})", ["Codice", "Severità", "Sezione", "Messaggio"], diagnostic_rows))
+    diagnostic_rows = [_row(f"diagnostic:{index}:{item.code}", [item.code, _label(_SEVERITY_LABELS, item.severity), _label(_SECTION_TITLES, item.section), item.message], [None] * 4) for index, item in enumerate(diagnostics)]
+    section["diagnostics_actions"]["items"].append(_table("diagnostics", f"Diagnostica (stato: {_label(_READINESS_LABELS, report.readiness.status)})", ["Codice", "Severità", "Sezione", "Messaggio"], diagnostic_rows))
 
     section["appendices_methodology"]["items"].append(_text("appendix-index", "Indice delle appendici", "Indice delle appendici e riferimenti di pagina da compilare dall'impaginazione Typst."))
     for statement in report.detailed_statements:
         section["appendices_methodology"]["items"].append(_statement_table(f"appendix:{statement.id}", statement.title, statement, "row", context=True))
+    methodology_rows = [_row(
+        f"indicator-method:{indicator.id}",
+        [indicator.label, indicator.family, indicator.methodology, indicator.convention,
+         "; ".join(f"{threshold.label}: {_exact(threshold.value)} ({threshold.source})" for threshold in indicator.thresholds) or None],
+        [None, None, None, None, None]) for indicator in report.indicator_catalog]
+    section["appendices_methodology"]["items"].append(_table("indicator-methodology", "Metodologia e convenzioni degli indicatori", ["Indicatore", "Famiglia", "Metodologia", "Convenzione", "Soglie"], methodology_rows))
 
     return sections
 

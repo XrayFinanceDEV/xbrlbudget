@@ -267,7 +267,9 @@ def build_assumption_sections(rows: Iterable[Any]) -> AssumptionReadModel:
     legacy_rows = [row for row, supplied in zip(ordered, supplied_sets) if supplied is None]
     if legacy_rows:
         diagnostics.append(_diagnostic(
-            "legacy_assumption_provenance", "warning", "assumptions",
+            # «info»: nessuna schermata invia `explicitly_supplied_fields`, quindi vale per ogni scenario e
+            # nessuna azione la toglie. Tenerla «warning» lasciava ogni report in bozza per sempre.
+            "legacy_assumption_provenance", "info", "assumptions",
             f"Origine storica non disponibile per gli anni {_years(legacy_rows)}: "
             "input utente e default non distinguibili",
         ))

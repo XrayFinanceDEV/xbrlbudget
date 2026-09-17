@@ -168,7 +168,11 @@ def test_missing_persisted_provenance_is_legacy_unknown_with_one_diagnostic():
     assert all(a.provenance == "legacy_unknown" for a in values.values())
     assert _codes(read_model.diagnostics) == ["legacy_assumption_provenance"]
     diagnostic = read_model.diagnostics[0]
-    assert diagnostic.severity == "warning"
+    # «info», non «warning» (AMBIENTA, 2026-09-17): nessuna schermata invia
+    # `explicitly_supplied_fields`, quindi la diagnostica compariva su OGNI scenario, anche appena
+    # salvato, e teneva ogni report in «Bozza» senza un'azione che potesse toglierla. È «non lo so»,
+    # e «non lo so» non blocca: resta dichiarata nelle Fonti, esce dal banner.
+    assert diagnostic.severity == "info"
     assert diagnostic.section == "assumptions"
     assert "2027, 2028" in diagnostic.message
 

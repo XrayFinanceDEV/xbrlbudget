@@ -506,7 +506,10 @@ def reconcile_adjustments(
     - ``sp13_utile_perdita`` moves with the P&L result
       (``calculations.ce_result``), because the tab recomputes it from the CE.
 
-    Three movements are then *declared*, never absorbed, and do not block:
+    Three movements are then *declared*, never absorbed, and do not block —
+    the first two as ``info``, because they belong to the import's history and
+    no action removes them (a ``warning`` would keep the report in draft for
+    ever):
 
     - ``adjustments_details_realigned`` — details that moved while their
       aggregate did exactly what the journal says: the save realigned a detail
@@ -583,7 +586,7 @@ def reconcile_adjustments(
         diagnostics += (
             _diagnostic(
                 "adjustments_details_realigned",
-                "warning",
+                "info",
                 "adjustments",
                 f"Dettagli riallineati al proprio totale, che non cambia: {_elenco(realigned)}. "
                 "L'import li aveva incoerenti con il totale e il salvataggio delle rettifiche li ha corretti.",
@@ -593,7 +596,7 @@ def reconcile_adjustments(
         diagnostics += (
             _diagnostic(
                 "adjustments_profit_realigned",
-                "warning",
+                "info",
                 "adjustments",
                 f"Utile dello stato patrimoniale riallineato al conto economico: {eur_it(profit_realigned)}. "
                 "L'import li aveva distanti di questo importo.",
@@ -612,7 +615,7 @@ def reconcile_adjustments(
         diagnostics += (
             _diagnostic(
                 "adjustments_unposted_mass",
-                "warning",
+                "info",
                 "adjustments",
                 f"{eur_it(unposted)} movimentati su un'intestazione non di bilancio: "
                 "la rettifica non è stata registrata in partita doppia.",

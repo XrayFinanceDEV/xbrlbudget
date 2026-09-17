@@ -610,7 +610,13 @@ def test_ambienta_i_riallineamenti_si_dichiarano_e_non_bloccano():
     assert result.balanced, result.differences
     codici = [d.code for d in result.diagnostics]
     assert "adjustments_unreconciled" not in codici
-    assert all(d.severity == "warning" for d in result.diagnostics)
+    # I riallineamenti sono verificati e appartengono alla storia dell'import: nessuna azione li toglie,
+    # quindi sono informazioni (restano nelle Fonti) e non tengono il report in «Bozza». Lo scarto di
+    # arrotondamento non spiegato resta un avviso: lì c'è qualcosa da guardare.
+    gravita = {d.code: d.severity for d in result.diagnostics}
+    assert gravita["adjustments_details_realigned"] == "info"
+    assert gravita["adjustments_profit_realigned"] == "info"
+    assert gravita["adjustments_rounding"] == "warning"
 
     per_codice = {d.code: d.message for d in result.diagnostics}
     # I dettagli riallineati al totale: dichiarati, con l'importo in italiano.
@@ -642,3 +648,6 @@ def test_la_massa_non_registrata_si_legge_in_euro():
                                    {"sp05a_materie_prime": Decimal("284.45")}, entries)
     messaggio = [d.message for d in result.diagnostics if d.code == "adjustments_unposted_mass"][0]
     assert messaggio.startswith("-215,55 movimentati"), messaggio
+    # «Correggi Import» in partita singola è uno dei tre modi previsti delle Rettifiche: dichiararlo
+    # sì, tenere il documento in bozza per averlo usato no.
+    assert [d.severity for d in result.diagnostics if d.code == "adjustments_unposted_mass"] == ["info"]

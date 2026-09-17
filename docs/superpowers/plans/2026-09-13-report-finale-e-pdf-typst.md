@@ -913,6 +913,140 @@ prospetti con lo snapshot, ogni pagina del piano con la propria nota, nessun
 ritaglio/duplicazione involontaria, header e contesto ripetuti nelle continuazioni,
 font incorporati, scala di grigi leggibile e watermark su ogni pagina di bozza.
 
+### M2-02B — Composizione editoriale sul riferimento v4
+
+**Decisione del proprietario, 2026-09-17.** Il PDF prodotto da M2-02
+(`inbox/artifacts/2026-09-16-m2-02-final-layout/report-budget-2027-2029.pdf`,
+54 pagine) rispetta griglia, font, testatina, footer e riquadro commento, ma non
+la composizione né i contenuti del riferimento
+`inbox/artifacts/2026-09-15-report-finale/report-finale-anteprima-v4.pdf`
+(33 pagine). Si mantengono l'impostazione grafica e i contenuti della v4. **Prima
+il PDF, poi la pagina `/report`** (M2-08): questo task non tocca il client.
+
+**Owner:** implementatore template; review Terra high sul confronto pagina per
+pagina con la v4.
+
+**Size:** L
+
+**Depends on:** M2-02. Precede M2-04 e M2-05: il test semantico e l'endpoint
+devono fissare questo documento, non quello di M2-02.
+
+**Ownership:** `backend/app/renderers/typst/editorial_inventory.py`,
+`editorial_plan.py`, `templates/dossier-base/*.typ`, `manifest.json` (hash),
+test Typst e fixture di rendering. Non modifica servizi finanziari, contratto v2,
+note persistite o client. Un dato che manca nel modello non si calcola nel
+template: si dichiara in M2-02C.
+
+**Difetti misurati sul PDF di M2-02, da eliminare:**
+
+1. pagine di sezione con un solo grafico a una serie e il resto vuoto, senza
+   colonna KPI né tabella di sintesi;
+2. metadati tecnici stampati come contenuto: `ID: historical:2025`,
+   `Base: forecast`, `Fonte: synthetic_period_fixture`, e circa nove pagine di
+   «Catalogo completo degli indicatori» in blocchi `practice.pfn_ebitda`,
+   `Unità: ratio`, `Convenzione: pratica-v1…`;
+3. titoli in inglese dai blocchi narrativi («Executive summary», «Adjustments
+   and closing», «Budget assumptions», «Economic outlook», «Financial outlook»,
+   «Risks and actions»);
+4. grafici con asse `euro ×10^3`, serie mancanti («Ricavi, EBITDA e utile» mostra
+   solo i ricavi) e riquadri interi «n.d. – Nessun dato disponibile»;
+5. Allegati a sette colonne di periodo, illeggibili in verticale.
+
+**Pagina tipo** (v4 pagine 2–18). Dall'alto: occhiello `SEZIONE · NN`; titolo;
+sottotitolo di metodo; a sinistra colonna KPI (da due a quattro, valore grande +
+etichetta con periodo); a destra il grafico della sezione con unità e legenda;
+sotto, a tutta larghezza, la tabella di sintesi; in fondo il riquadro «Lettura
+del consulente» già misurato da M2-02. Una pagina senza grafico canonico
+allarga la tabella, non lascia un riquadro vuoto.
+
+**Titolo e sottotitolo.** Il titolo di pagina è **neutro e fisso per pagina**
+(«Conto economico previsionale», non «L'EBITDA sale a € 1,27 mln»): il titolo-
+messaggio della v4 dipende dai numeri e verrà dal commento AI, fuori da questo
+task. Il sottotitolo è la nota di metodo della v4, statica per pagina (es.
+«PFN = debiti finanziari meno disponibilità liquide.»). Nessuna etichetta in
+inglese in tutto il documento, blocchi narrativi compresi.
+
+**KPI: regola fissa, non scelta a mano.** Ogni valore viene dal modello v2; il
+template formatta soltanto (`€ 4,80 mln`, `€ 550 mila`, `21%`, `0,83×`,
+`106,88 gg`; frecce `18% → 21%` fra primo e ultimo periodo). Un KPI senza valore
+si omette, mai «n.d.» in colonna.
+
+| Pagina v4 | Sezione | KPI |
+|---|---|---|
+| 1 Copertina | cover | ricavi · chiusura (o ultimo storico); EBITDA margin · ultimo anno; PFN · ultimo anno; orizzonte di piano |
+| 2 Sintesi | executive_summary | ricavi · chiusura; EBITDA margin primo → ultimo; PFN · fine piano; cassa · fine piano |
+| 3 Bilancio infrannuale e fonti | source_data_quality | data del bilancio; mesi osservati; ricavi ed EBITDA prima delle rettifiche |
+| 4 Rettifiche | adjustments | numero di rettifiche; effetto su EBITDA; effetto sul risultato; utile rettificato |
+| 5 Dall'infrannuale alla chiusura | infrannual_closing | ricavi rettificati; ricavi stimati del periodo mancante; ricavi ed EBITDA di chiusura |
+| 6 Indicatori dell'infrannuale | infrannual_closing | indicatori rettificato → chiusura |
+| 7 Ipotesi | budget_assumptions | orizzonte; crescita ricavi per anno; EBITDA margin per anno; investimenti cumulati |
+| 8 CE previsionale | income_statement_forecast | ricavi, EBITDA, margine EBITDA, utile · ultimo anno |
+| 9 SP previsionale | balance_sheet_forecast | totale attivo, patrimonio netto, immobilizzazioni nette, debiti finanziari · ultimo anno |
+| 10 Flussi | cashflow_sustainability | flussi operativi, investimenti, rimborsi, variazione cassa · somma del piano |
+| 11 Indicatori del piano | indicators | PFN primo → ultimo; PFN/EBITDA primo → ultimo; circolante operativo; assorbimento del circolante |
+| 12 Liquidità e margini | indicators | liquidità corrente; margine di tesoreria; margine di struttura · ultimo anno |
+| 13 Redditività | indicators | nessun KPI: due grafici affiancati (ROI/ROE, peso degli oneri) |
+| 14 Solidità e coperture | indicators | indipendenza finanziaria; copertura immobilizzazioni; PFN/EBITDA · ultimo anno |
+| 15 Circolante | indicators | DSO, DIO, DPO; circolante operativo · ultimo anno |
+| 16 Composizioni | indicators | M2-02C |
+| 17 Pareggio | indicators | M2-02C |
+| 18 Diagnostica | diagnostics_actions | controlli di quadratura e diagnostiche del modello, non un elenco di verifiche inventato |
+
+Le pagine 3–6 esistono solo nel workflow infrannuale; bilancio e startup seguono
+la stessa pagina tipo con i periodi che hanno.
+
+**Allegati (v4 pagine 19–33).** Indice dei prospetti; A Conto economico,
+B Stato patrimoniale, C Rendiconto, tutti completi con contesto padre e
+intestazione ripetuta; D Registro delle rettifiche con motivazione; E Matrice
+delle ipotesi; F Indicatori della pratica a tabella (indicatore × periodo);
+G Indici del report analitico a tabella; Metodologia e note. Periodi: rettificato,
+chiusura e anni di piano, come la v4; storico e osservato restano nelle pagine
+3–5, dove servono al confronto. Il catalogo degli indicatori perde i blocchi per
+voce: unità e periodo vanno nell'intestazione di F/G, metodologia e convenzione
+diventano una tabella compatta in «Metodologia e note», gli ID tecnici non si
+stampano. Con cinque anni di piano la tabella deve restare leggibile in verticale;
+se non entra si divide in parti per gruppi di periodi, mai in orizzontale.
+
+**Importi.** Scostamento voluto dalla v4: le tabelle mostrano **euro interi**
+(decisione del proprietario del 2026-09-16), non € migliaia. I KPI usano la forma
+abbreviata della v4. Gli importi che non entrano causano ancora l'errore esplicito
+di M2-02.
+
+**Grafici.** Si usano i componenti di M2-03 con le serie che la v4 affianca
+(ricavi + EBITDA + risultato netto; ROI + ROE; debito + cassa + PFN). Asse in
+unità leggibili (`€ migliaia`, `%`, `gg`, `×`), mai `×10^3`. Un grafico senza
+alcuna serie disponibile non si disegna.
+
+**Acceptance:**
+
+- per ogni pagina 1–15 e 18–33 della v4 la pagina corrispondente del PDF su
+  fixture infrannuale a tre anni ha gli stessi blocchi nello stesso ordine
+  (occhiello, titolo, sottotitolo, KPI, grafico, tabella, commento), verificato con
+  `pdftotext` e bounding box, più un confronto visivo raster di 4 pagine campione
+  in `docs/testing/M2-02B-composizione-v4.md`;
+- `pdftotext` sull'intero documento non contiene `historical:`, `forecast:`,
+  `practice.`, `synthetic_`, `Unità: ratio`, né i sei titoli inglesi;
+- nessun riquadro «n.d.» a pagina intera e nessuna colonna KPI con «n.d.»;
+- tre workflow × orizzonti 1/3/5: tutte le righe CE/SP/rendiconto degli Allegati
+  presenti una volta, nessun ritaglio, commento su ogni pagina, watermark di bozza;
+- i KPI coincidono al centesimo con i valori del modello da cui sono letti (test
+  che fallisce se si scambia il periodo);
+- versione editoriale incrementata, hash del manifest aggiornati: i piani
+  preparati prima si invalidano e l'utente rifà «Prepara piano editoriale»;
+- export di prova sulla pratica AMBIENTA (azienda 575, scenario 18) senza
+  persistere nulla, allegato alla ricevuta.
+
+### M2-02C — Composizioni e pareggio come dati canonici
+
+**Depends on:** M2-02B. **Ownership:** assembler e contratto v2, `calculations/`.
+
+Le pagine 16 (composizione di impieghi, fonti e costi) e 17 (ricavi di pareggio,
+margine di sicurezza) della v4 richiedono serie che il modello v2 non ha. Si
+aggiungono all'assembler dai servizi autorevoli (costi fissi/variabili dalle
+ipotesi `fixed_*_percentage`), con fixture dei tre workflow, poi la pagina tipo di
+M2-02B le rende. Finché mancano le due pagine non compaiono e l'indice non le
+elenca: nessun riquadro vuoto.
+
 ### Review della base e del template
 
 Runtime e base/font/planner sono revisionati prima di grafici e note. La review
@@ -947,7 +1081,7 @@ anni, dati estratti coerenti e resa A4 leggibile.
 
 **Size:** M
 
-**Depends on:** M2-01, M2-02
+**Depends on:** M2-01, M2-02, M2-02B
 
 **Ownership:** nuovi test/harness; non modifica i componenti grafici M2-03.
 
@@ -973,7 +1107,7 @@ correggono nel template differenze originate dall'assembler: il bug torna a M1.
 
 **Size:** L
 
-**Depends on:** M1-10, M2-00B, M2-00C, M2-02, M2-03 e M2-04
+**Depends on:** M1-10, M2-00B, M2-00C, M2-02, M2-02B, M2-03 e M2-04
 
 **Files principali:** servizio PDF, `backend/app/api/v1/reports.py`, persistenza
 metadati, schemi request/error e test auth/API.
@@ -1061,6 +1195,15 @@ M1, test renderer/PDF, build container offline e collaudo dei tre workflow.
 PDF/A-2u viene abilitato soltanto se un validatore formale lo conferma; in caso
 contrario il milestone chiude con il profilo standard e una limitazione dichiarata.
 
+### M2-08 — Pagina `/report` allineata al dossier
+
+**Depends on:** M2-02B, M2-02C e M2-06A. **Ownership:** `frontend/app/report/page.tsx`
+e `frontend/components/final-report/`.
+
+Decisione del proprietario del 2026-09-17: il PDF viene prima. La pagina web
+adotta dopo la stessa composizione di M2-02B (titoli, KPI, grafici, Allegati),
+leggendo gli stessi valori del modello v2; nessun KPI ricalcolato nel client.
+
 ## 9. Sequenza delle ondate Pi
 
 Il limite di due agenti Pi è applicato così:
@@ -1079,7 +1222,8 @@ Il limite di due agenti Pi è applicato così:
 | P8 | implementa M2-01 | attende runtime, poi M2-02A | dipendenze seriali |
 | P9 | revisiona base/planner | implementa M2-03 dopo la review | un owner del bundle |
 | P10 | implementa/revisiona M2-00C | integra template M2-02 dopo note e grafici | dipendenze seriali |
-| P11 | revisiona dossier | implementa M2-04 dopo il template | 1 review + 1 harness |
+| P10b | implementa M2-02B | revisiona M2-02B contro la v4 | 1 coding + 1 review |
+| P11 | revisiona dossier | implementa M2-04 dopo M2-02B | 1 review + 1 harness |
 | P12 | implementa M2-06A | implementa M2-06B | 2 coding |
 | P13 | revisiona M2-06B | revisiona M2-06A | 2 review |
 
@@ -1304,3 +1448,14 @@ pagina, watermark di bozza, font incorporati, grigio, bounding box, titoli e
 continuazioni. Dettagli e comando riproducibile in
 `docs/testing/M2-02-final-layout.md`. Fixture PDF sintetica in
 `inbox/artifacts/2026-09-16-m2-02-final-layout/report-budget-2027-2029.pdf`.
+
+### Decisione 2026-09-17 — il PDF di M2-02 non è ancora il dossier v4
+
+Confronto fra `report-budget-2027-2029.pdf` (M2-02, 54 pagine) e
+`report-finale-anteprima-v4.pdf` (33 pagine): griglia, font e riquadro commento
+coincidono; composizione di pagina, KPI, titoli italiani, grafici a più serie e
+Allegati leggibili no, e circa un terzo del PDF stampa metadati tecnici. Il
+proprietario mantiene impostazione grafica e contenuti della v4 e sceglie il PDF
+prima della pagina `/report`. Aggiunti M2-02B (composizione), M2-02C (composizioni
+e pareggio canonici) e M2-08 (`/report`); M2-04 e M2-05 ora dipendono da M2-02B.
+KPI a regola fissa per pagina; il titolo-messaggio della v4 resta al commento AI.

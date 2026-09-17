@@ -10,7 +10,7 @@ scrive su DB: si misura, si vara il cancello e si mappa l'errore.
 from __future__ import annotations
 
 import re
-
+import unicodedata
 from dataclasses import dataclass
 
 from app.renderers.typst.runtime import RenderedPdf
@@ -40,17 +40,34 @@ class PdfResult:
 _UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
 
 
-def artifact_filename(report: FinalReportModelV2) -> str:
-    """«Report Budget 2027 - 2029 - <azienda>.pdf», ripulito dai caratteri non sicuri.
+def _artifact_base(report: FinalReportModelV2) -> str:
+    """«Report Budget 2027 - 2029 - <azienda>», ripulito dai caratteri vietati.
 
     Il titolo viene dal modello (già neutro e vincolato dal contratto), il nome
-    azienda è testo utente: si appiattiscono gli spazi, si tolgono i caratteri
-    vietati e si limita la lunghezza. L'encoder dell'HTTP mette poi la versione
-    UTF-8 in `filename*`; questa resta il fallback ASCII-safe.
+    azienda è testo utente: si appiattiscono gli spazi e si tolgono i caratteri
+    che nessun filesystem o header tollererebbe.
     """
     raw = f"{report.document.title} - {report.company.name}"
     safe = re.sub(r"\s+", " ", _UNSAFE.sub(" ", raw)).strip().strip(".").rstrip()
-    return (safe[:160].rstrip(" .-") or "Report Budget") + ".pdf"
+    return safe[:160].rstrip(" .-") or "Report Budget"
+
+
+def artifact_filename(report: FinalReportModelV2) -> str:
+    """Il nome completo, in UTF-8: finisce percent-encoded in `filename*`."""
+    return _artifact_base(report) + ".pdf"
+
+
+def artifact_ascii_filename(report: FinalReportModelV2) -> str:
+    """Il nome in puro ASCII, per il parametro `filename=`.
+
+    Starlette codifica gli header in latin-1: un’azienda con `’`, `€`, `–` o
+    caratteri non latini farebbe sollevare `UnicodeEncodeError` sulla risposta,
+    a PDF già compilato. Qui si traslittera con NFKD e si scarta il resto;
+    se non resta nulla, il fallback è «Report Budget».
+    """
+    folded = unicodedata.normalize("NFKD", _artifact_base(report)).encode("ascii", "ignore").decode("ascii")
+    folded = re.sub(r"\s+", " ", folded).strip().strip(".").rstrip(" -")
+    return (folded or "Report Budget") + ".pdf"
 
 
 def render_pdf(db, company_id: int, scenario_id: int, *,
@@ -70,6 +87,9 @@ def render_pdf(db, company_id: int, scenario_id: int, *,
             "Risolvi gli avvisi pubblicati nel dossier, oppure scarica la bozza."
         )
     rendered = get_dossier_probe().render(report, document_state=document_state, grayscale=grayscale)
-    etag = canonical_hash({"model": report.model_hash, "plan": report.editorial_plan.plan_hash},
-                          exclude_volatile=False)
+    # L'ETag identifica la rappresentazione, non solo il contenuto: bozza e
+    # finale, a colori e in grigio, hanno byte diversi e non possono condividere
+    # l'identificatore (fix giro 2, rilievo 1).
+    etag = canonical_hash({"model": report.model_hash, "plan": report.editorial_plan.plan_hash,
+                           "document_state": document_state, "grayscale": grayscale}, exclude_volatile=False)
     return PdfResult(report, rendered, etag)

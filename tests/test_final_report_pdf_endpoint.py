@@ -9,6 +9,7 @@ import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
 
 import pytest
 
@@ -210,7 +211,8 @@ def test_headers_and_filename(client, monkeypatch):
     assert name == "Report Budget 2027 - 2029 - Acme Banca Milano Corso Cosenza.pdf"
     assert not re.search(r'[/\\:<>?*"]', name)
     assert "filename*=UTF-8''" in disposition
-    expected_etag = canonical_hash({"model": "a" * 64, "plan": "b" * 64}, exclude_volatile=False)
+    expected_etag = canonical_hash({"model": "a" * 64, "plan": "b" * 64,
+                                    "document_state": "draft", "grayscale": False}, exclude_volatile=False)
     assert response.headers["etag"] == f'"{expected_etag}"'
     assert response.headers["x-report-model-hash"] == "a" * 64
     assert response.headers["x-report-template-version"] == "dossier-final-1+editorial-2"
@@ -218,15 +220,61 @@ def test_headers_and_filename(client, monkeypatch):
     assert response.headers["cache-control"] == "no-store"
 
 
-@pytest.mark.parametrize("company,expected", [
-    ("Ambienta", "Report Budget 2027 - 2029 - Ambienta.pdf"),
-    ('P & P "Srl"', "Report Budget 2027 - 2029 - P & P Srl.pdf"),
-    ("/// <<< >>> ???", "Report Budget 2027 - 2029.pdf"),
-    ("::", "Report Budget 2027 - 2029.pdf"),
-    ("Ambienta\tNuova\nSrl", "Report Budget 2027 - 2029 - Ambienta Nuova Srl.pdf"),
+@pytest.mark.parametrize("company,expected,expected_ascii", [
+    ("Ambienta", "Report Budget 2027 - 2029 - Ambienta.pdf",
+     "Report Budget 2027 - 2029 - Ambienta.pdf"),
+    ('P & P "Srl"', "Report Budget 2027 - 2029 - P & P Srl.pdf",
+     "Report Budget 2027 - 2029 - P & P Srl.pdf"),
+    ("/// <<< >>> ???", "Report Budget 2027 - 2029.pdf", "Report Budget 2027 - 2029.pdf"),
+    ("::", "Report Budget 2027 - 2029.pdf", "Report Budget 2027 - 2029.pdf"),
+    ("Ambienta\tNuova\nSrl", "Report Budget 2027 - 2029 - Ambienta Nuova Srl.pdf",
+     "Report Budget 2027 - 2029 - Ambienta Nuova Srl.pdf"),
+    # Starlette codifica gli header in latin-1: ’ € – non sono latini e crackerebbero la risposta.
+    ("Caffè D’Italia – Srl €", "Report Budget 2027 - 2029 - Caffè D’Italia – Srl €.pdf",
+     "Report Budget 2027 - 2029 - Caffe DItalia Srl.pdf"),
+    ("☺ ☹", "Report Budget 2027 - 2029 - ☺ ☹.pdf", "Report Budget 2027 - 2029.pdf"),
 ])
-def test_artifact_filename_pure(company, expected):
-    assert pdf_service.artifact_filename(_stub_report(company_name=company)) == expected
+def test_artifact_filename_pure(company, expected, expected_ascii):
+    report = _stub_report(company_name=company)
+    assert pdf_service.artifact_filename(report) == expected
+    ascii_name = pdf_service.artifact_ascii_filename(report)
+    assert ascii_name == expected_ascii
+    assert ascii_name.isascii()
+
+
+def test_etag_identifies_the_representation(client, monkeypatch):
+    """Quattro rappresentazioni diverse, quattro ETag; la ripetizione è stabile."""
+    _patch(monkeypatch, _stub_report(readiness="ready"), lambda *a, **k: _rendered())
+    etags = {}
+    for state in ("draft", "final"):
+        for gray in (False, True):
+            response = client.post(_pdf(client), json={"document_state": state, "grayscale": gray})
+            assert response.status_code == 200, response.text
+            etags[(state, gray)] = response.headers["etag"]
+    assert len(set(etags.values())) == 4, etags
+    repeat = client.post(_pdf(client), json={"document_state": "final", "grayscale": True})
+    assert repeat.headers["etag"] == etags[("final", True)]
+
+
+def test_content_disposition_survives_a_non_latin1_company(client, monkeypatch):
+    """HTTP reale: con l'azienda «Caffè D’Italia – Srl €» la risposta non deve crackare.
+
+    Prima della correzione l'header portava il nome UTF-8 anche in `filename=`:
+    Starlette lo codifica in latin-1 e un’azienda con ’, € o – sollevava
+    `UnicodeEncodeError` a PDF già compilato (500 sull'errore di nessuno).
+    """
+    _patch(monkeypatch, _stub_report(company_name="Caffè D’Italia – Srl €"),
+           lambda *a, **k: _rendered())
+    response = client.post(_pdf(client), json={"document_state": "draft"})
+    assert response.status_code == 200, response.text
+    assert response.content.startswith(b"%PDF-")
+    disposition = response.headers["content-disposition"]
+    disposition.encode("latin-1")  # è così che lo codifica Starlette: dev'essere puro ASCII
+    assert disposition.isascii()
+    fallback = re.search(r'filename="([^"]*)"', disposition).group(1)
+    assert fallback == "Report Budget 2027 - 2029 - Caffe DItalia Srl.pdf"
+    extended = re.search(r"filename\*=UTF-8''([^;]+)", disposition).group(1)
+    assert unquote(extended, encoding="utf-8") == "Report Budget 2027 - 2029 - Caffè D’Italia – Srl €.pdf"
 
 
 @NATIVE
@@ -240,10 +288,10 @@ def test_native_pdf_matches_get_v2_and_watermarks(client):
         assert response.status_code == 200, response.text
         return response.json()
 
-    def etag_of(report):
+    def etag_of(report, state="draft", gray=False):
         return '"{}"'.format(canonical_hash(
-            {"model": report["model_hash"], "plan": report["editorial_plan"]["plan_hash"]},
-            exclude_volatile=False))
+            {"model": report["model_hash"], "plan": report["editorial_plan"]["plan_hash"],
+             "document_state": state, "grayscale": gray}, exclude_volatile=False))
 
     prepare(client.get(_url(client, client.ids["scenario"]) + "/editorial").json())
     v2 = client.get(_url(client, client.ids["scenario"]) + "?schema_version=2").json()
@@ -256,7 +304,7 @@ def test_native_pdf_matches_get_v2_and_watermarks(client):
         assert pdf.metadata["title"] == v2["document"]["title"]
         assert pdf.page_count == len(v2["editorial_plan"]["pages"]) > 0
         assert all("BOZZA" in page.get_text() for page in pdf)
-    assert draft.headers["etag"] == etag_of(v2)
+    assert draft.headers["etag"] == etag_of(v2, "draft", False)
     assert draft.headers["x-report-model-hash"] == v2["model_hash"]
     assert draft.headers["x-report-template-version"].endswith("+editorial-2")
     assert v2["document"]["title"] in draft.headers["content-disposition"]
@@ -281,7 +329,7 @@ def test_native_pdf_matches_get_v2_and_watermarks(client):
     assert ready_v2["editorial_readiness"]["status"] == "ready"
     final = client.post(_pdf(client), json={"document_state": "final"})
     assert final.status_code == 200, final.text
-    assert final.headers["etag"] != draft.headers["etag"]  # il piano nuovo muove anche il modello
+    assert final.headers["etag"] == etag_of(ready_v2, "final", False) != draft.headers["etag"]  # piano nuovo e stato
     with fitz.open(stream=final.content, filetype="pdf") as pdf:
         assert pdf.metadata["title"] == ready_v2["document"]["title"]
         assert all("BOZZA" not in page.get_text() for page in pdf)

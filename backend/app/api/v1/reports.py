@@ -168,9 +168,10 @@ def download_final_report_pdf(
         # RendererInvalidPdf, RendererInputError e qualunque categoria nuova: errore interno, 500.
         db.rollback()
         raise HTTPException(status_code=500, detail=error.message) from None
-    filename = pdf_service.artifact_filename(result.report)
+    filename = pdf_service.artifact_filename(result.report)  # UTF-8 completo, per `filename*`
+    ascii_name = pdf_service.artifact_ascii_filename(result.report)  # puro ASCII, per `filename=`
     headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename, encoding="utf-8")}',
+        "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename, safe="", encoding="utf-8")}',
         "ETag": f'"{result.etag}"',
         "X-Report-Model-Hash": result.rendered.model_hash,
         "X-Report-Template-Version": result.rendered.template_version,

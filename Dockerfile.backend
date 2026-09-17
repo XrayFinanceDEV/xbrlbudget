@@ -51,20 +51,4 @@ COPY backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8000
-
-# API liveness AND Typst compile smoke in one gate: `docker inspect
-# Health.Status` (what Jenkinsfile's «Health check» stage polls) only reports
-# `healthy` once both the FastAPI app answers /health and a real, sandboxed
-# Typst compilation succeeds offline (tools/typst/healthcheck.py — no
-# network, the pinned compiler + the `runtime-smoke` bundle only). This is
-# deliberate, not incidental: it is the one place that actually exercises
-# `--unshare-user` on the real deployment host, so a container whose
-# seccomp/AppArmor profile blocks the sandbox fails the deploy loudly (and
-# Jenkins' post-failure rollback runs) instead of shipping a backend that
-# answers every route except the PDF ones. See
-# docs/deployment/TYPST-RENDERER.md for what to do if this is what turns the
-# container unhealthy.
-HEALTHCHECK --interval=30s --timeout=20s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health && python /app/tools/typst/healthcheck.py || exit 1
-
 ENTRYPOINT ["/entrypoint.sh"]

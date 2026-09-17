@@ -21,9 +21,11 @@ services:
     volumes:
       - db-data:/app/data
     restart: unless-stopped
-    # No healthcheck override here: Dockerfile.backend bakes one in (curl /health
-    # AND an offline Typst compile smoke — see docs/deployment/TYPST-RENDERER.md),
-    # and an override here would replace it entirely rather than extend it.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # MinerU OCR document extractor (pinned to the deployed 3.2.0 image). Not
   # published to the host and not proxied by nginx — only the backend reaches it

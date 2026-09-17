@@ -6,9 +6,9 @@
 > frontend e backend condividono l'origine e l'app usa l'URL relativo `/api/v1`.
 > → **[DEPLOY-JENKINS-DOCKER.md](DEPLOY-JENKINS-DOCKER.md)**
 >
-> Il renderer Typst dei PDF (compilatore pinnato, sandbox Bubblewrap, health check di
-> compilazione) si impacchetta nell'immagine `backend` a build time, mai a runtime:
-> → **[TYPST-RENDERER.md](TYPST-RENDERER.md)**
+> Il renderer Typst dei PDF (compilatore pinnato, sandbox Bubblewrap, collaudo di
+> compilazione post-deploy) si impacchetta nell'immagine `backend` a build time, mai a
+> runtime: → **[TYPST-RENDERER.md](TYPST-RENDERER.md)**
 >
 > Il testo è rimasto intatto (non contiene indirizzi morti: usa segnaposti) come traccia del
 > percorso Netlify, se mai servisse riaprirlo. Una sola correzione di fatto: `netlify.toml`

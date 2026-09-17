@@ -12,13 +12,15 @@
  * trattino e una spiegazione testuale. Lo zero vero si rende come «0».
  */
 import { fieldRule } from "@/lib/budget-field-rules";
+import { ETICHETTE_REGOLA_FIDI } from "@/lib/budget-finanziamenti-pregresso";
 import { labelOf, VOCI } from "@/lib/ivcee-catalog";
-import type { AssumptionScalar, DecimalString } from "@/types/final-report";
+import { STRING_ASSUMPTION_FIELDS, type AssumptionScalar, type DecimalString } from "@/types/final-report";
 
 /** La grammatica ammessa dal contratto v1 sul filo JSON. */
 const PLAIN_DECIMAL = /^(-|\+)?(0|[1-9]\d*)(?:\.(\d+))?$/;
 
-export type ScalarKind = "pct" | "eur" | "years" | "days" | "bool" | "number";
+/** `text`: un'ipotesi che è una scelta e non una misura (la regola dei fidi). */
+export type ScalarKind = "pct" | "eur" | "years" | "days" | "bool" | "number" | "text";
 
 export interface ScalarView {
   /** Che cosa si legge in tabella. */
@@ -66,6 +68,7 @@ const UNIT_SUFFIX: Record<ScalarKind, string> = {
   days: " giorni",
   bool: "",
   number: "",
+  text: "",
 };
 
 const UNIT_WORD: Record<ScalarKind, string> = {
@@ -75,11 +78,13 @@ const UNIT_WORD: Record<ScalarKind, string> = {
   days: "giorni",
   bool: "",
   number: "",
+  text: "",
 };
 
 /** L'unità di un campo: la stessa regola che usa il wizard (`FIELD_RULES`), non
  *  una seconda tabella scritta a mano qui accanto. */
 export function scalarKindOf(field: string): ScalarKind {
+  if (STRING_ASSUMPTION_FIELDS.has(field)) return "text";
   return fieldRule(field)?.kind ?? "number";
 }
 
@@ -99,6 +104,13 @@ export function describeScalar(value: AssumptionScalar, kind: ScalarKind): Scala
   if (typeof value === "boolean") {
     const text = value ? "Sì" : "No";
     return { text, absent: false, negative: false, zero: false, srText: text, malformed: false };
+  }
+  if (kind === "text") {
+    // Una scelta si legge con le parole del wizard; un valore che il wizard non conosce si mostra
+    // com'è e si segnala, come un decimale malformato — mai tradotto in una regola a caso.
+    const etichetta = ETICHETTE_REGOLA_FIDI[value];
+    const text = etichetta ?? value;
+    return { text, absent: false, negative: false, zero: false, srText: text, malformed: etichetta === undefined };
   }
   const malformed = !PLAIN_DECIMAL.test(value.trim());
   const base = formatDecimalString(value);

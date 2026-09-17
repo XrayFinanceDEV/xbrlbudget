@@ -29,6 +29,13 @@ import type { BalanceSheet, FinancingLoanInput, OtherLenderInput } from "@/types
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { num } from "@/lib/budget-format";
 
+/** Le parole della regola dei fidi (`bank_lines_rule`), in un posto solo: le usano la tendina del
+ *  passo e le tabelle del report, che senza questa tabella stampava «costante» grezzo. */
+export const ETICHETTE_REGOLA_FIDI: Readonly<Record<string, string>> = {
+  costante: "Costanti",
+  ricavi: "Seguono i ricavi",
+};
+
 /** Una riga scadenziabile: un contratto bancario pregresso o un altro finanziatore. */
 export interface Scadenziabile {
   name?: string | null;

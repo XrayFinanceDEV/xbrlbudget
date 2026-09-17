@@ -98,6 +98,17 @@ describe("scalarKindOf", () => {
     expect(scalarKindOf("cash_sweep_enabled")).toBe("bool");
     expect(scalarKindOf("tax_advances_paid")).toBe("eur");
     expect(scalarKindOf("financing_loans")).toBe("number");
+    expect(scalarKindOf("fixed_materials_growth_auto")).toBe("bool");
+  });
+
+  it("la regola dei fidi è un testo, e si legge con le parole del wizard", () => {
+    // Senza questo ramo «costante» usciva tale e quale, con accanto «valore non riconosciuto».
+    expect(scalarKindOf("bank_lines_rule")).toBe("text");
+    expect(describeScalar("costante", "text")).toMatchObject({ text: "Costanti", malformed: false, absent: false });
+    expect(describeScalar("ricavi", "text")).toMatchObject({ text: "Seguono i ricavi", malformed: false });
+    // Un valore che il wizard non conosce non si traveste da regola: si mostra com'è e si segnala.
+    expect(describeScalar("altro", "text")).toMatchObject({ text: "altro", malformed: true });
+    expect(describeScalar(null, "text").absent).toBe(true);
   });
 });
 

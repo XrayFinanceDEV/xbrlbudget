@@ -9,6 +9,37 @@ describe("FinalReportModel v1 runtime contract", () => {
     for (const fixture of [infrannuale, bilancio, startup]) expect(isFinalReportModel(fixture)).toBe(true);
   });
 
+  // AMBIENTA, 2026-09-17: «Impossibile caricare il dossier — Unsupported or invalid FinalReportModel v2
+  // payload». Il backend emetteva due ipotesi che questo contratto non conosceva: i due sì/no «segue
+  // l'inflazione» e la regola dei fidi, un testo. Le fixture condivise hanno ZERO ipotesi in ogni
+  // sezione, quindi nessun test aveva mai fatto passare un'ipotesi vera da qui. Le tre righe sono
+  // copiate dal JSON reale di GET /scenarios/18/final-report.
+  const nulls = { financing_loans: null, pregresso: null, temporary_differences: null, ce_overrides: null, sp_indexing: null, sp_overrides: null, other_lenders: null };
+  const conIpotesi = (costi: unknown[], pregresso: unknown[]) => {
+    const report = structuredClone(bilancio) as Record<string, any>;
+    for (const section of report.assumption_sections) {
+      if (section.key === "costi") section.assumptions = costi;
+      if (section.key === "patrimoniale-pregresso") section.assumptions = pregresso;
+    }
+    return report;
+  };
+  const inflazioneMaterie = { field: "fixed_materials_growth_auto", label: "Materie fisse: segue l'inflazione", values: [true, true, true], provenance: "legacy_unknown", active: true, ...nulls };
+  const inflazioneServizi = { field: "fixed_services_growth_auto", label: "Servizi fissi: seguono l'inflazione", values: [false, false, false], provenance: "legacy_unknown", active: true, ...nulls };
+  const regolaFidi = { field: "bank_lines_rule", label: "Fidi: regola nel piano", values: ["costante", null, null], provenance: "legacy_unknown", active: true, ...nulls };
+
+  it("accepts the assumptions the backend really emits: inflation switches and the credit-line rule", () => {
+    expect(isFinalReportModel(conIpotesi([inflazioneMaterie, inflazioneServizi], [regolaFidi]))).toBe(true);
+  });
+
+  it("keeps text confined to the credit-line rule, as Python does", () => {
+    // Una stringa su un campo monetario resta un errore: l'eccezione vale per UN campo.
+    const importoTesto = { ...regolaFidi, field: "bank_lines_amount", values: ["costante", null, null] };
+    expect(isFinalReportModel(conIpotesi([], [importoTesto]))).toBe(false);
+    // E un sì/no resta vietato fuori dai campi booleani dichiarati.
+    const percentualeBooleana = { ...inflazioneMaterie, field: "fixed_materials_percentage" };
+    expect(isFinalReportModel(conIpotesi([percentualeBooleana], []))).toBe(false);
+  });
+
   it("rejects a future schema version", () => {
     expect(() => parseFinalReportModel({ ...bilancio, schema_version: 2 })).toThrow(/Unsupported/);
   });

@@ -32,6 +32,7 @@ import {
   contrattiPregressi,
   contrattoRows,
   controlliBanche,
+  ETICHETTE_REGOLA_FIDI,
   nuovoContratto,
   prestitiNuovi,
   quotaMutui,
@@ -171,8 +172,9 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
               <Select value={regola} onValueChange={(v) => p.update(firstYear, "bank_lines_rule", v)}>
                 <SelectTrigger id="bank-lines-rule" className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="costante">Costanti</SelectItem>
-                  <SelectItem value="ricavi">Seguono i ricavi</SelectItem>
+                  {Object.entries(ETICHETTE_REGOLA_FIDI).map(([valore, etichetta]) => (
+                    <SelectItem key={valore} value={valore}>{etichetta}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

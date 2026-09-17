@@ -38,6 +38,7 @@ export type CEOverrideField = "ce01_override" | "ce02_override" | "ce03_override
 export interface CEOverride { field: CEOverrideField; value: DecimalString }
 export interface SPIndexing { field: string; driver: "ricavi" | "acquisti" | "personale" }
 export interface SPOverride { field: string; value: DecimalString }
+/** `string` (oltre ai decimali) solo per i campi di `STRING_ASSUMPTION_FIELDS`: la regola dei fidi. */
 export type AssumptionScalar = DecimalString | boolean | null;
 export interface AssumptionValue { field: string; label: string; values: AssumptionScalar[]; provenance: Provenance; active: boolean; financing_loans?: FinancingLoan[] | null; pregresso?: Pregresso | null; temporary_differences?: TemporaryDifference[] | null; ce_overrides?: CEOverride[] | null; sp_indexing?: SPIndexing[] | null; sp_overrides?: SPOverride[] | null; other_lenders?: OtherLender[] | null }
 export interface AssumptionSection { key: AssumptionSectionKey; title: string; assumptions: AssumptionValue[] }
@@ -57,8 +58,15 @@ const string = (value: unknown): value is string => typeof value === "string";
 const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const integer = (value: unknown, minimum?: number, maximum?: number): value is number => number(value) && Number.isInteger(value) && (minimum === undefined || value >= minimum) && (maximum === undefined || value <= maximum);
 const decimal = (value: unknown): value is DecimalString | null => value === null || (string(value) && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value));
-const assumptionScalar = (value: unknown): value is AssumptionScalar => decimal(value) || typeof value === "boolean";
-const booleanAssumptionFields = new Set(["cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended"]);
+const assumptionScalar = (value: unknown): value is AssumptionScalar => decimal(value) || typeof value === "boolean" || string(value);
+// Copie di `_BOOLEAN_ASSUMPTION_FIELDS` e `_STRING_ASSUMPTION_FIELDS` (`backend/app/schemas/final_report.py`),
+// tenute in parità da `tests/test_final_report_contract_parity.py`. Erano divergite in silenzio: il backend
+// aveva aggiunto i due «segue l'inflazione» e la regola dei fidi, questo file no, e ogni dossier con
+// quelle ipotesi veniva rifiutato intero («Unsupported or invalid FinalReportModel v2 payload»).
+export const BOOLEAN_ASSUMPTION_FIELDS: ReadonlySet<string> = new Set(["cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "fixed_materials_growth_auto", "fixed_services_growth_auto"]);
+/** Il solo campo testuale: `bank_lines_rule`, «costante» / «ricavi». Una stringa altrove resta un errore. */
+export const STRING_ASSUMPTION_FIELDS: ReadonlySet<string> = new Set(["bank_lines_rule"]);
+const booleanAssumptionFields = BOOLEAN_ASSUMPTION_FIELDS;
 const isHash = (value: unknown): value is string => string(value) && /^[0-9a-f]{64}$/.test(value);
 const isoDate = (value: unknown): boolean => {
   if (!string(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -105,6 +113,7 @@ const spOverride = (value: unknown): boolean => exact(value, ["field", "value"])
 const assumption = (value: unknown): boolean => {
   if (!only(value, ["field", "label", "values", "provenance", "active"], ["field", "label", "values", "provenance", "active", "financing_loans", "pregresso", "temporary_differences", "ce_overrides", "sp_indexing", "sp_overrides", "other_lenders"]) || !string(value.field) || !string(value.label) || !array(value.values) || value.values.length === 0 || !value.values.every(assumptionScalar) || !["user", "automatic", "default", "override", "ignored", "legacy_unknown"].includes(String(value.provenance)) || typeof value.active !== "boolean") return false;
   if (booleanAssumptionFields.has(value.field) ? value.values.some((item) => item !== null && typeof item !== "boolean") : value.values.some((item) => typeof item === "boolean")) return false;
+  if (!STRING_ASSUMPTION_FIELDS.has(value.field) && value.values.some((item) => typeof item === "string" && !decimal(item))) return false;
   const nested = ["financing_loans", "pregresso", "temporary_differences", "ce_overrides", "sp_indexing", "sp_overrides", "other_lenders"].filter((key) => own(value, key) && value[key] !== null).length;
   return nested <= 1 && (!own(value, "financing_loans") || value.financing_loans === null || (value.field === "financing_loans" && array(value.financing_loans) && value.financing_loans.every(financingLoan))) && (!own(value, "pregresso") || value.pregresso === null || (value.field === "pregresso" && pregresso(value.pregresso))) && (!own(value, "temporary_differences") || value.temporary_differences === null || (value.field === "tax_temporary_differences" && array(value.temporary_differences) && value.temporary_differences.every(temporaryDifference))) && (!own(value, "ce_overrides") || value.ce_overrides === null || (value.field === "ce_overrides" && array(value.ce_overrides) && value.ce_overrides.every(ceOverride))) && (!own(value, "sp_indexing") || value.sp_indexing === null || (value.field === "sp_indexing" && array(value.sp_indexing) && value.sp_indexing.every(spIndexing))) && (!own(value, "sp_overrides") || value.sp_overrides === null || (value.field === "sp_overrides" && array(value.sp_overrides) && value.sp_overrides.every(spOverride))) && (!own(value, "other_lenders") || value.other_lenders === null || (value.field === "other_lenders" && array(value.other_lenders) && value.other_lenders.every(otherLender)));
 };

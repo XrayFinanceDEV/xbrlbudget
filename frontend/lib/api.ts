@@ -18,6 +18,12 @@ import {
 } from '@/types/final-report';
 import { parseFinalReportModelV2, type FinalReportModelV2 } from '@/types/final-report-v2';
 import { parseEditorialSession, type EditorialNoteUpdate, type EditorialSession } from '@/types/editorial-session';
+import {
+  FinalReportDownloadError,
+  resolveDownloadErrorMessage,
+  resolveDownloadFilename,
+  type FinalReportDocumentState,
+} from '@/lib/final-report-download';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:8000/api/v1');
 
@@ -833,6 +839,56 @@ export const saveEditorialNotes = async (companyId: number, scenarioId: number, 
 export const generateEditorialNotes = async (companyId: number, scenarioId: number, body: { source_hash: string; plan_hash: string; expected_revision: number; notes: Array<{ id: string; revision: number }> }): Promise<EditorialSession> => {
   const { data } = await api.post<unknown>(`${editorialPath(companyId, scenarioId)}/generate`, body);
   return parseEditorialSession(data);
+};
+
+export interface DownloadFinalReportPdfResult {
+  blob: Blob;
+  filename: string;
+}
+
+/**
+ * Scarica il PDF finale del report (M2-06A, endpoint M2-05). Usa `fetch`
+ * diretto, non l'istanza axios condivisa: la risposta 200 è binaria
+ * (`application/pdf`) e il nome file arriva dagli header
+ * (`Content-Disposition`), non da un corpo JSON — il resto del client si
+ * aspetta sempre JSON. Bearer come tutte le altre chiamate: stesso
+ * `_authToken` impostato da `setAuthToken`.
+ */
+export const downloadFinalReportPdf = async (
+  companyId: number,
+  scenarioId: number,
+  options: { documentState: FinalReportDocumentState; grayscale?: boolean },
+): Promise<DownloadFinalReportPdfResult> => {
+  const response = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/scenarios/${scenarioId}/final-report/pdf`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+      },
+      body: JSON.stringify({
+        document_state: options.documentState,
+        grayscale: options.grayscale ?? false,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    let detail: string | null = null;
+    try {
+      const data = await response.json();
+      if (data && typeof data.detail === 'string') detail = data.detail;
+    } catch {
+      // Corpo non JSON (es. errore di un proxy davanti al backend): si
+      // ricade sulla mappa per stato di `resolveDownloadErrorMessage`.
+    }
+    throw new FinalReportDownloadError(response.status, resolveDownloadErrorMessage(response.status, detail));
+  }
+
+  const blob = await response.blob();
+  const filename = resolveDownloadFilename(response.headers.get('Content-Disposition'));
+  return { blob, filename };
 };
 
 export const generateFinalReportNarrative = async (

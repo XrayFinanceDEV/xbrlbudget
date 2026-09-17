@@ -476,6 +476,17 @@ def _page_context(report: FinalReportModelV2, page) -> dict[str, Any]:
                 inventory["heading:" + item["id"]] = header
                 for row in item["rows"]:
                     inventory[row["id"]] = {"table": item["title"], "columns": item["columns"], "row": row}
+                # A table split across period parts (M2-02B: Allegati verticali,
+                # `expected_content_inventory`) repeats each row under a
+                # `#parte:N` marker starting at part 2 — same canonical row, a
+                # later physical part of the same table. Without this the
+                # continuation pages of a split appendix have no context.
+                if "value_start" in item:
+                    total = len(item["columns"]) - item["value_start"] - 1
+                    for part in range(2, (total + item["part_size"] - 1) // item["part_size"] + 1):
+                        for row in item["rows"]:
+                            inventory[f"{row['id']}#parte:{part}"] = {
+                                "table": item["title"], "columns": item["columns"], "row": row}
             else:
                 inventory[item["id"]] = item
     if any(content_id not in inventory for content_id in page.content_ids):

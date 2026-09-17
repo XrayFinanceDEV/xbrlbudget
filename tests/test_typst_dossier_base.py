@@ -108,6 +108,13 @@ def test_amount_that_cannot_fit_base_is_rejected_without_clipping(renderer):
     report = fixture_report(years=list(range(2027, 2032)))
     row = next(r for r in report.detailed_statements[0].rows if r.code == 'ce01_ricavi_vendite')
     row.values = [Decimal('9007199254740993.01')] * 5
+    # M2-02C tied `structure_series.break_even.contribution_margin` to this
+    # same row (revenue - variable costs): keep it consistent so the huge
+    # amount is rejected for not fitting the page, not for a stale margin.
+    break_even = next(g for g in report.structure_series if g.id == 'break_even')
+    variable_costs = next(s for s in break_even.series if s.id == 'variable_costs')
+    margin = next(s for s in break_even.series if s.id == 'contribution_margin')
+    margin.values = [None if variable is None else (row.values[0] - variable) for variable in variable_costs.values]
     report.source_hash = report.calculate_source_hash()
     report.model_hash = report.calculate_model_hash()
     with pytest.raises(RendererCompileError):

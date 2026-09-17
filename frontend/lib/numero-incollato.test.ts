@@ -8,6 +8,9 @@ describe("numeroIncollato", () => {
     expect(numeroIncollato("960.937,42 €")).toBe("960937.42");
     expect(numeroIncollato("1.247.893")).toBe("1247893");
     expect(numeroIncollato("45.600")).toBe("45600");
+    // Senza virgola, un punto seguito da tre cifre è un separatore delle migliaia: «3.500» è
+    // tremilacinquecento, non tre e mezzo (decisione del proprietario, 2026-09-17).
+    expect(numeroIncollato("3.500")).toBe("3500");
     expect(numeroIncollato("0,42")).toBe("0.42");
     expect(numeroIncollato("-5.000,00")).toBe("-5000");
     expect(numeroIncollato("1 247 893")).toBe("1247893");

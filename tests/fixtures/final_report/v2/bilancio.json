@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T11:00:00Z",
-  "model_hash": "e3682fbbc825824e53a24eb7ec265228e89eb60cbb31a30f9d8ff112b8a7b11d",
-  "source_hash": "c63cb4e43c1b4b23533dd5ce8d8b9f9bb39e5baf7222f9813481cbb610db8a1f",
+  "model_hash": "d81a85959d66f859333439ff29004c51e8d72977c665250b557ed300b74f33ac",
+  "source_hash": "21c3b1632301e4a5fa957712fb69ab40ee96c3c7fe2658628738e343b5d9f1c0",
   "company": {
     "id": 2,
     "name": "Bilancio Spa",
@@ -3972,6 +3972,33 @@
       "thresholds": []
     },
     {
+      "id": "practice.personnel_revenue",
+      "label": "Personale / Ricavi",
+      "family": "incidenze",
+      "unit": "percent",
+      "methodology": "Personale / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
       "id": "analytical.liquidity.current_ratio",
       "label": "Current Ratio (ILC)",
       "family": "liquidity",
@@ -4672,6 +4699,315 @@
       ],
       "source": "FinancialRatiosCalculator",
       "thresholds": []
+    }
+  ],
+  "structure_series": [
+    {
+      "id": "composition_uses",
+      "title": "Composizione degli impieghi",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "series": [
+        {
+          "id": "fixed_assets",
+          "label": "Immobilizzazioni nette",
+          "unit": "eur",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "fixed_assets_share",
+          "label": "Immobilizzazioni nette · quota %",
+          "unit": "percent",
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "non_positive_denominator"
+          ]
+        },
+        {
+          "id": "current_other",
+          "label": "Circolante e altro",
+          "unit": "eur",
+          "values": [
+            "0.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "current_other_share",
+          "label": "Circolante e altro · quota %",
+          "unit": "percent",
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "non_positive_denominator"
+          ]
+        },
+        {
+          "id": "cash",
+          "label": "Disponibilità liquide",
+          "unit": "eur",
+          "values": [
+            "-5.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "cash_share",
+          "label": "Disponibilità liquide · quota %",
+          "unit": "percent",
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "non_positive_denominator"
+          ]
+        }
+      ],
+      "source": "persisted_statement; balance_aggregates",
+      "methodology": "Immobilizzazioni nette e disponibilità liquide dagli aggregati di bilancio; il circolante e altro è il residuo sul totale dell'attivo. Quote percentuali sullo stesso totale."
+    },
+    {
+      "id": "composition_sources",
+      "title": "Composizione delle fonti",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "series": [
+        {
+          "id": "equity",
+          "label": "Patrimonio netto",
+          "unit": "eur",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "equity_share",
+          "label": "Patrimonio netto · quota %",
+          "unit": "percent",
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "zero_denominator"
+          ]
+        },
+        {
+          "id": "financial_debt",
+          "label": "Debiti finanziari",
+          "unit": "eur",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "financial_debt_share",
+          "label": "Debiti finanziari · quota %",
+          "unit": "percent",
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "zero_denominator"
+          ]
+        },
+        {
+          "id": "other_liabilities",
+          "label": "Altre passività",
+          "unit": "eur",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "other_liabilities_share",
+          "label": "Altre passività · quota %",
+          "unit": "percent",
+          "values": [
+            null
+          ],
+          "unavailable_reasons": [
+            "zero_denominator"
+          ]
+        }
+      ],
+      "source": "persisted_statement; balance_aggregates; financial_debt_total",
+      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale); altre passività come residuo sul totale del passivo."
+    },
+    {
+      "id": "cost_incidence",
+      "title": "Incidenza dei costi sui ricavi",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "series": [
+        {
+          "id": "materials",
+          "label": "Materie prime / Ricavi",
+          "unit": "percent",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "services",
+          "label": "Servizi / Ricavi",
+          "unit": "percent",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "personnel",
+          "label": "Personale / Ricavi",
+          "unit": "percent",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "financial_charges",
+          "label": "Oneri finanziari / Ricavi",
+          "unit": "percent",
+          "values": [
+            "0"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        }
+      ],
+      "source": "calculations.report_indicators",
+      "methodology": "Valori del catalogo indicatori (practice.*): rapporto sull'articolo CE 1 × 100, con i flussi del periodo senza annualizzazione."
+    },
+    {
+      "id": "break_even",
+      "title": "Pareggio e margine di sicurezza",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "series": [
+        {
+          "id": "fixed_costs",
+          "label": "Costi fissi",
+          "unit": "eur",
+          "values": [
+            "0.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "variable_costs",
+          "label": "Costi variabili",
+          "unit": "eur",
+          "values": [
+            "0.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "contribution_margin",
+          "label": "Margine di contribuzione",
+          "unit": "eur",
+          "values": [
+            "1000.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "break_even_revenue",
+          "label": "Ricavi di pareggio",
+          "unit": "eur",
+          "values": [
+            "0.00"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        },
+        {
+          "id": "safety_margin_pct",
+          "label": "Margine di sicurezza %",
+          "unit": "percent",
+          "values": [
+            "100.0000"
+          ],
+          "unavailable_reasons": [
+            null
+          ]
+        }
+      ],
+      "source": "FinancialRatiosCalculator.calculate_break_even_analysis; BudgetAssumptions",
+      "methodology": "calculate_break_even_analysis chiamato con la quota fissa desunta dalle ipotesi per categoria (materie e servizi) e con il 40% di default sugli altri costi operativi; i periodi non di piano usano il default. Ricavi di pareggio e margine di sicurezza solo con ricavi e margine di contribuzione positivi."
     }
   ],
   "editorial_plan": null,

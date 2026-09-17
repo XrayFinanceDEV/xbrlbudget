@@ -82,6 +82,17 @@ def _decimal(value: Any) -> Decimal:
     return Decimal(str(value))
 
 
+def _fixed_split(assumption: Any) -> "tuple[Decimal, Decimal] | None":
+    """Le quote fisse per categoria di un'ipotesi, in punti percentuali.
+
+    `None` senza riga di ipotesi: è il modo in cui il dossier dichiara un
+    «anno senza ipotesi» invece di attribuirgli il default.
+    """
+    if assumption is None:
+        return None
+    return (_decimal(assumption.fixed_materials_percentage), _decimal(assumption.fixed_services_percentage))
+
+
 def _identity(scenario: BudgetScenario) -> ScenarioIdentity:
     return ScenarioIdentity(
         id=scenario.id, name=scenario.name, base_year=scenario.base_year,
@@ -495,7 +506,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
         calculations = analysis.get('calculations', {}).get('by_year', {})
         cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
 
-        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True):
+        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None):
             bs = _statement_map(getattr(record, 'balance_sheet', None)) if record and record.balance_sheet else None
             inc = _statement_map(getattr(record, 'income_statement', None)) if record and record.income_statement else None
             if snapshot is not None:
@@ -509,6 +520,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                 balance_sheet=bs, income_statement=inc,
                 calculations=calculations.get(str(year), calculations.get(year)) if annual_calculation else None,
                 cashflow=cashflows.get(year) if annual_calculation else None,
+                fixed_split=fixed_split,
             ))
 
         historical_years = sorted({row['year'] for row in analysis.get('historical_years', []) if isinstance(row, dict) and 'year' in row})
@@ -532,11 +544,13 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                 and _statement_map(closing_record.income_statement) == _statement_map(financial_year.income_statement)
             )
             add_source(f'closing:{scenario.base_year}', scenario.base_year, 'closing', closing_record,
-                f'{scenario.base_year} chiusura stimata', calculation_available=closing_metrics_match)
+                f'{scenario.base_year} chiusura stimata', calculation_available=closing_metrics_match,
+                fixed_split=_fixed_split(source_assumption))
         elif scenario.base_year not in historical_years:
             add_source(f'historical:{scenario.base_year}', scenario.base_year, 'historical', financial_year,
                 f'{scenario.base_year} base')
         for year in wanted:
-            add_source(f'forecast:{year}', year, 'forecast', by_forecast_year.get(year), f'{year} previsionale')
+            add_source(f'forecast:{year}', year, 'forecast', by_forecast_year.get(year), f'{year} previsionale',
+                fixed_split=_fixed_split(next((a for a in scenario.assumptions if a.forecast_year == year), None)))
         from app.services.editorial_notes_service import project_editorial_report
         return project_editorial_report(db, extend_dossier(report, sources), scenario.id)

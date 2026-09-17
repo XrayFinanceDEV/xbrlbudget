@@ -15,7 +15,7 @@ from tests.test_final_report_endpoint import client, _url
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def fixture_report(name='bilancio', years=None):
+def v1_report(name='bilancio', years=None):
     raw = json.loads((ROOT / 'tests/fixtures/final_report' / f'{name}.json').read_text())
     if years:
         raw['practice']['periods']['forecast_years'] = years
@@ -24,7 +24,11 @@ def fixture_report(name='bilancio', years=None):
             chart['categories'] = years
             for metric in chart['series']:
                 metric['values'] = [metric['values'][0]] * len(years)
-    report = FinalReportModel.model_validate(raw, context={'skip_hash_validation': True})
+    return FinalReportModel.model_validate(raw, context={'skip_hash_validation': True})
+
+
+def fixture_report(name='bilancio', years=None):
+    report = v1_report(name, years)
     from database.models import BalanceSheet, IncomeStatement
     sources = []
     for year in report.forecast.years:
@@ -34,7 +38,8 @@ def fixture_report(name='bilancio', years=None):
         # synthetic accounting zeros explicitly and map their known amounts.
         bs.update({('sp09_disponibilita_liquide' if l.code == 'cash' else l.code): l.value for l in year.balance_sheet})
         inc.update({('ce01_ricavi_vendite' if l.code == 'revenue' else l.code): l.value for l in year.income_statement})
-        sources.append(DossierSource(StatementPeriod(id=f'forecast:{year.year}', year=year.year, label=str(year.year), basis='forecast', period_months=12, source='synthetic_fixture'), bs, inc))
+        sources.append(DossierSource(StatementPeriod(id=f'forecast:{year.year}', year=year.year, label=str(year.year), basis='forecast', period_months=12, source='synthetic_fixture'), bs, inc,
+            fixed_split=(Decimal('40'), Decimal('40'))))
     return extend_dossier(report, sources)
 
 
@@ -294,3 +299,133 @@ def test_layout_change_requires_a_new_plan_hash():
     plan['font_version'] = 'different-font'
     with pytest.raises(ValueError, match='plan_hash'):
         EditorialPlan.model_validate(plan)
+
+
+# --- M2-02C: composizioni e pareggio come dati canonici ---------------------
+
+def write_v2_fixtures():
+    """Rigenera le fixture v2 condivise: stesso percorso di `fixture_report`.
+
+    Le fixture non si scrivono a mano: `PYTHONPATH=backend:. python
+    tests/test_final_report_v2.py` le riscrive dai file v1 con l'assemblatore
+    corrente, percé il JSON condiviso con il validatore TS resta un dump del
+    modello, non un documento redatto a mano.
+    """
+    for name in ('bilancio', 'infrannuale', 'startup'):
+        payload = fixture_report(name).model_dump(mode='json')
+        path = ROOT / 'tests/fixtures/final_report/v2' / f'{name}.json'
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+
+
+def group(report, identifier):
+    return next(g for g in report.structure_series if g.id == identifier)
+
+
+def test_structure_series_have_the_canonical_groups_and_ordered_series():
+    from app.schemas.final_report_v2 import STRUCTURE_GROUP_SERIES
+    report = fixture_report('infrannuale')
+    assert [g.id for g in report.structure_series] == list(STRUCTURE_GROUP_SERIES)
+    periods = [p.id for p in report.detailed_statements[0].periods]
+    for group_ in report.structure_series:
+        assert [p.id for p in group_.periods] == periods
+        assert tuple(s.id for s in group_.series) == STRUCTURE_GROUP_SERIES[group_.id]
+        for series in group_.series:
+            assert len(series.values) == len(series.unavailable_reasons) == len(periods)
+            assert all((v is None) == (r is not None) for v, r in zip(series.values, series.unavailable_reasons))
+
+
+def test_composition_values_tie_to_the_statement_and_shares_declare_their_denominator():
+    report = fixture_report('infrannuale')
+    uses = group(report, 'composition_uses')
+    balance = report.detailed_statements[1]
+    cash_row = next(r for r in balance.rows if r.id == 'balance_sheet:sp09_disponibilita_liquide')
+    totals = next(r for r in balance.rows if r.id == 'balance_sheet:total_assets')
+    cash = next(s for s in uses.series if s.id == 'cash')
+    assert cash.values == cash_row.values
+    assert sum(s.values[0] for s in uses.series if s.unit == 'eur') == totals.values[0]
+    shares = {s.id: s for s in uses.series if s.unit == 'percent'}
+    for identifier, series in shares.items():
+        amount = next(s for s in uses.series if s.id == identifier.removesuffix('_share'))
+        for value, share, total in zip(amount.values, series.values, totals.values):
+            if share is None:
+                assert total <= 0
+            else:
+                assert share == value / total * Decimal('100')
+
+
+def test_break_even_reuses_the_analyst_formula_with_the_assumption_fixed_splits():
+    from database.models import BalanceSheet, IncomeStatement
+    from app.schemas.final_report_v2 import StatementPeriod
+    bs = {column.name: Decimal('0') for column in BalanceSheet.__table__.columns if column.name.startswith('sp')}
+    bs.update({'sp02_immob_immateriali': Decimal('2000'), 'sp09_disponibilita_liquide': Decimal('2000'), 'sp11_capitale': Decimal('4000')})
+    inc = {column.name: Decimal('0') for column in IncomeStatement.__table__.columns if column.name.startswith('ce')}
+    inc.update({'ce01_ricavi_vendite': Decimal('4000'), 'ce05_materie_prime': Decimal('1000'), 'ce06_servizi': Decimal('500'),
+                'ce07_godimento_beni': Decimal('100'), 'ce08_costi_personale': Decimal('200'), 'ce12_oneri_diversi': Decimal('200')})
+    report = extend_dossier(v1_report('bilancio', [2027]), [
+        DossierSource(StatementPeriod(id='forecast:2027', year=2027, label='2027', basis='forecast', period_months=12, source='manual-check'),
+                      bs, inc, fixed_split=(Decimal('60'), Decimal('30')))])
+    series = {s.id: s.values[0] for s in group(report, 'break_even').series}
+    # Calcolo a mano: fissi = 1000×0,60 + 500×0,30 + 500×0,40 = 950; variabili = 1050;
+    # MdC = 4000 − 1050 = 2950; %MdC = 0,7375; pareggio = 950/0,7375 = 1288,14;
+    # sicurezza = (1 − 1288,14/4000) arrotondato a 4 ⇒ 0,6780 ⇒ 67,8%.
+    assert series['fixed_costs'] == Decimal('950.00')
+    assert series['variable_costs'] == Decimal('1050.00')
+    assert series['contribution_margin'] == Decimal('2950.00')
+    assert series['break_even_revenue'] == Decimal('1288.14')
+    assert series['safety_margin_pct'] == Decimal('67.8000')
+    assert all((v is None) == (r is not None) for s in group(report, 'break_even').series for v, r in zip(s.values, s.unavailable_reasons))
+
+
+def test_forecast_year_without_assumptions_declares_break_even_as_null_not_zero():
+    report = extend_dossier(v1_report(), [DossierSource(
+        StatementPeriod(id='forecast:2027', year=2027, label='2027', basis='forecast', period_months=12, source='no-assumptions'),
+        {'sp09_disponibilita_liquide': Decimal('10')}, {'ce01_ricavi_vendite': Decimal('100')})])
+    for series in group(report, 'break_even').series:
+        assert series.values == [None]
+        assert series.unavailable_reasons == ['assumptions_missing']
+
+
+@pytest.mark.parametrize('locate, error', [
+    (lambda raw: _swap(raw, 'composition_uses', 'cash'), 'must match the statement rows'),
+    (lambda raw: _bump(raw, 'break_even', 'fixed_costs'), 'must split the operating costs'),
+    (lambda raw: _bump(raw, 'cost_incidence', 'services'), 'must match indicator'),
+    (lambda raw: _reorder_periods(raw, 'composition_sources'), 'canonical statement periods'),
+])
+def test_contract_rejects_a_series_whose_periods_were_swapped(locate, error):
+    raw = fixture_report('infrannuale').model_dump(mode='json')
+    assert raw['detailed_statements'][1]['rows'] and len(set(next(
+        r['values'] for r in raw['detailed_statements'][1]['rows']
+        if r['id'] == 'balance_sheet:sp09_disponibilita_liquide'))) > 1, 'fixture must distinguish its periods'
+    locate(raw)
+    with pytest.raises(ValueError, match=error):
+        FinalReportModelV2.model_validate(raw, context={'skip_hash_validation': True})
+
+
+def _series(raw, group_id, series_id):
+    return next(s for g in raw['structure_series'] if g['id'] == group_id for s in g['series'] if s['id'] == series_id)
+
+
+def _swap(raw, group_id, series_id):
+    series = _series(raw, group_id, series_id)
+    series['values'][0], series['values'][1] = series['values'][1], series['values'][0]
+    series['unavailable_reasons'][0], series['unavailable_reasons'][1] = series['unavailable_reasons'][1], series['unavailable_reasons'][0]
+
+
+def _bump(raw, group_id, series_id):
+    _series(raw, group_id, series_id)['values'][0] = '1'
+
+
+def _reorder_periods(raw, group_id):
+    group_ = next(g for g in raw['structure_series'] if g['id'] == group_id)
+    group_['periods'].reverse()
+
+
+def test_v2_dump_round_trips_the_structure_series():
+    for workflow in ('bilancio', 'infrannuale', 'startup'):
+        encoded = fixture_report(workflow).model_dump(mode='json')
+        assert FinalReportModelV2.model_validate_json(json.dumps(encoded)).model_dump(mode='json') == encoded
+
+
+if __name__ == '__main__':
+    write_v2_fixtures()
+    print('v2 fixtures rewritten from the assembler')

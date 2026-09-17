@@ -7,7 +7,7 @@ availability checked before its legacy safe_divide zero can reach the report.
 """
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Mapping
+from typing import Callable, Mapping
 
 from calculations.ce_result import calculate_ce_result
 from importers.iv_cee_hierarchy import detail_fields
@@ -52,6 +52,28 @@ def balance_aggregates(bs: Mapping[str, Decimal]) -> dict[str, Decimal]:
             'total_equity': equity, 'total_debt': debt, 'total_liabilities': liabilities}
 
 
+BANK_FIELDS = ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo', 'sp16c_debiti_obbligazioni_breve', 'sp17c_debiti_obbligazioni_lungo')
+NONBANK_FINANCIAL_FIELDS = ('sp16b_debiti_altri_finanz_breve', 'sp17b_debiti_altri_finanz_lungo',
+                            'sp16d_debiti_fornitori_breve', 'sp17d_debiti_fornitori_lungo',
+                            'sp16e_debiti_tributari_breve', 'sp17e_debiti_tributari_lungo',
+                            'sp16f_debiti_previdenza_breve', 'sp17f_debiti_previdenza_lungo')
+
+
+def financial_debt_total(field_value: Callable[[str], Decimal]) -> Decimal:
+    """Debito finanziario con un'unica convenzione, quella della PFN.
+
+    Banche e obbligazioni se positive; altrimenti debito totale meno i dettagli
+    non bancari noti; altrimenti il debito totale. Usata dalla PFN e dalla
+    composizione delle fonti: un solo numero, una sola convenzione.
+    """
+    bank = sum((field_value(field) for field in BANK_FIELDS), ZERO)
+    if bank > 0:
+        return bank
+    nonbank = sum((field_value(field) for field in NONBANK_FINANCIAL_FIELDS), ZERO)
+    debt = field_value('sp16_debiti_breve') + field_value('sp17_debiti_lungo')
+    return debt - nonbank if nonbank > 0 else debt
+
+
 def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorResult]:
     """No annualization: flows retain the duration identified by their period."""
     if bs is None or inc is None:
@@ -62,9 +84,7 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     fixed, equity, assets = b['fixed_assets'], b['total_equity'], b['total_assets']
     short, long, debt = v('sp16_debiti_breve'), v('sp17_debiti_lungo'), b['total_debt']
     current = b['current_assets'] - v('sp07_crediti_lungo') + v('sp10_ratei_risconti_attivi')
-    bank = sum((v(f) for f in ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo', 'sp16c_debiti_obbligazioni_breve', 'sp17c_debiti_obbligazioni_lungo')), ZERO)
-    nonbank = sum((v(f) for f in ('sp16b_debiti_altri_finanz_breve', 'sp17b_debiti_altri_finanz_lungo', 'sp16d_debiti_fornitori_breve', 'sp17d_debiti_fornitori_lungo', 'sp16e_debiti_tributari_breve', 'sp17e_debiti_tributari_lungo', 'sp16f_debiti_previdenza_breve', 'sp17f_debiti_previdenza_lungo')), ZERO)
-    financial_debt = bank if bank > 0 else debt - nonbank if nonbank > 0 else debt
+    financial_debt = financial_debt_total(v)
     pfn = financial_debt - v('sp09_disponibilita_liquide') - v('sp08_attivita_finanziarie')
     revenue, interest = v('ce01_ricavi_vendite'), v('ce15_oneri_finanziari')
     result = {}
@@ -92,6 +112,7 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     ratio('of_mol', interest, ce.ebitda, 'Oneri finanziari / EBITDA × 100', percentage=True)
     ratio('of_revenue', interest, revenue, 'Oneri finanziari / ricavi × 100', percentage=True)
     ratio('materials_revenue', v('ce05_materie_prime'), revenue, 'Materie prime / ricavi × 100', percentage=True)
+    ratio('personnel_revenue', v('ce08_costi_personale'), revenue, 'Personale / ricavi × 100', percentage=True)
     ratio('services_revenue', v('ce06_servizi'), revenue, 'Servizi / ricavi × 100', percentage=True)
 
     purchases = v('ce05_materie_prime') + v('ce06_servizi')

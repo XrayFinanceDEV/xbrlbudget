@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_id
 from app.core.database import get_db
+from app.core.render_panics import NON_ENTRA as _NON_ENTRA
 from app.api.v1.budget_scenarios import validate_scenario_belongs_to_company
 from app.schemas.editorial_notes import (
     EditorialSession, GenerateEditorialNotesRequest, PrepareEditorialRequest, SaveEditorialNotesRequest,
@@ -14,13 +15,6 @@ from app.renderers.typst.runtime import RendererCompileError, RendererInputError
 
 router = APIRouter()
 
-#: I controlli con cui il template rifiuta un contenuto che non entra nella pagina, detti in italiano.
-_NON_ENTRA = {
-    "editorial-amount-does-not-fit": "un importo è più largo della sua colonna",
-    "editorial-cell-token-does-not-fit": "il testo di una cella è più largo della sua colonna",
-    "editorial-prose-token-does-not-fit": "una parola del testo è più larga della pagina",
-    "editorial-note-does-not-fit": "un commento di pagina supera lo spazio che ha a disposizione",
-}
 _PATH = "/companies/{company_id}/scenarios/{scenario_id}/final-report/editorial"
 
 

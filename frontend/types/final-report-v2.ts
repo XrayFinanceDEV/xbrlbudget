@@ -14,7 +14,9 @@ export interface EditorialPage { id: string; section_id: string; content_ids: st
 export interface EditorialPlan { layout_version: string; font_version: string; asset_version: string; source_hash: string; plan_hash: string; pages: EditorialPage[] }
 export interface EditorialNote { id: string; content_ids: string[]; text: string; provenance: "ai" | "user" | "automatic"; updated_at: string; source_hash: string; plan_hash: string; revision: number; freshness: "fresh" | "stale" | "missing" }
 export interface EditorialReadiness { status: "pending" | "ready" | "blocked"; reasons: string[] }
-export interface DossierBase extends Omit<FinalReportBase, "schema_version" | "chart_series"> { schema_version: 2; document: DocumentIdentity; detailed_statements: DetailedStatement[]; indicator_catalog: IndicatorDefinition[]; chart_series: (ChartSeries | DossierChartSeries)[]; editorial_plan?: EditorialPlan | null; editorial_notes?: EditorialNote[]; editorial_readiness: EditorialReadiness }
+export interface ReportSeries { id: string; label: string; unit: DossierUnit; values: (DecimalString | null)[]; unavailable_reasons: (string | null)[] }
+export interface ReportSeriesGroup { id: "composition_uses" | "composition_sources" | "cost_incidence" | "break_even"; title: string; periods: StatementPeriod[]; series: ReportSeries[]; source: string; methodology: string }
+export interface DossierBase extends Omit<FinalReportBase, "schema_version" | "chart_series"> { schema_version: 2; document: DocumentIdentity; detailed_statements: DetailedStatement[]; indicator_catalog: IndicatorDefinition[]; structure_series: ReportSeriesGroup[]; chart_series: (ChartSeries | DossierChartSeries)[]; editorial_plan?: EditorialPlan | null; editorial_notes?: EditorialNote[]; editorial_readiness: EditorialReadiness }
 export type FinalReportModelV2 = (DossierBase & {practice: InfrannualPractice; infrannual_closing: InfrannualClosing}) | (DossierBase & {practice: AnnualPractice | StartupPractice; infrannual_closing?: never});
 
 type Obj = Record<string, unknown>;
@@ -53,6 +55,76 @@ function indicator(v: unknown): v is IndicatorDefinition {
   return shape(v, ["id", "label", "family", "unit", "methodology", "convention", "periods", "values", "unavailable_reasons", "source"], ["thresholds"]) && id(v.id) && string(v.label) && string(v.family) && unit(v.unit) && nonempty(v.methodology) && nonempty(v.convention) && string(v.source) && periods(v.periods) && aligned(v, v.periods.length) && (v.thresholds === undefined || (Array.isArray(v.thresholds) && v.thresholds.every(t => shape(t, ["label", "value", "source"]) && string(t.label) && decimal(t.value) && nonempty(t.source))));
 }
 const canonicalIds = new Set(["income_results", "margins", "cashflows", "liquidity_debt", "working_capital_days", "coverage"]);
+// Parità con STRUCTURE_GROUP_SERIES di backend/app/schemas/final_report_v2.py:
+// un test di parity Python blocca la deriva fra i due elenchi.
+export const STRUCTURE_GROUP_SERIES: Readonly<Record<string, readonly string[]>> = {
+  composition_uses: ["fixed_assets", "fixed_assets_share", "current_other", "current_other_share", "cash", "cash_share"],
+  composition_sources: ["equity", "equity_share", "financial_debt", "financial_debt_share", "other_liabilities", "other_liabilities_share"],
+  cost_incidence: ["materials", "services", "personnel", "financial_charges"],
+  break_even: ["fixed_costs", "variable_costs", "contribution_margin", "break_even_revenue", "safety_margin_pct"],
+};
+const STRUCTURE_GROUP_ORDER = ["composition_uses", "composition_sources", "cost_incidence", "break_even"];
+const S = (v: string): bigint => {
+  // Decimale → intero in unità da 1e-30: aritmetica esatta, niente float.
+  const neg = v.startsWith("-");
+  const [w, f = ""] = (neg ? v.slice(1) : v).split(".");
+  const b = BigInt((w || "0") + f.padEnd(30, "0").slice(0, 30));
+  return neg ? -b : b;
+};
+const TOLERANCE = S("0.01");
+const near = (a: bigint, b: bigint): boolean => (a - b < 0n ? b - a : a - b) <= TOLERANCE;
+function structureSeries(v: unknown, periodCount: number): v is ReportSeries {
+  return shape(v, ["id", "label", "unit", "values", "unavailable_reasons"]) && id(v.id) && string(v.label) && unit(v.unit) && aligned(v, periodCount);
+}
+function structureGroup(v: unknown, expectedId: string, statements: DetailedStatement[], indicators: Map<string, IndicatorDefinition>): boolean {
+  if (!shape(v, ["id", "title", "periods", "series", "source", "methodology"]) || v.id !== expectedId || !string(v.title) || !nonempty(v.source) || !nonempty(v.methodology) || !periods(v.periods)) return false;
+  const canonical = statements[0].periods.map(p => p.id);
+  if (v.periods.length !== canonical.length || v.periods.some((p, i) => p.id !== canonical[i])) return false;
+  if (statements.some(st => st.periods.length !== canonical.length || st.periods.some((p, i) => p.id !== canonical[i]))) return false;
+  const expected = STRUCTURE_GROUP_SERIES[expectedId];
+  if (!Array.isArray(v.series) || v.series.length !== expected.length || !v.series.every(s => structureSeries(s, canonical.length)) || v.series.some((s, i) => (s as ReportSeries).id !== expected[i])) return false;
+  const series = Object.fromEntries((v.series as ReportSeries[]).map(s => [s.id, s])) as Record<string, ReportSeries>;
+  const rowsOf = (statementId: string, rowId: string): (string | null)[] | null =>
+    statements.find(s => s.id === statementId)?.rows.find(r => r.id === rowId)?.values ?? null;
+  for (let i = 0; i < canonical.length; i++) {
+    if (expectedId === "composition_uses") {
+      const fixedRow = rowsOf("balance_sheet", "balance_sheet:fixed_assets");
+      const cashRow = rowsOf("balance_sheet", "balance_sheet:sp09_disponibilita_liquide");
+      const totalRow = rowsOf("balance_sheet", "balance_sheet:total_assets");
+      if (!fixedRow || !cashRow || !totalRow) return false;
+      if (fixedRow[i] === null ? series.fixed_assets.values[i] !== null : series.fixed_assets.values[i] === null || !near(S(series.fixed_assets.values[i] as string), S(fixedRow[i] as string))) return false;
+      if (cashRow[i] === null ? series.cash.values[i] !== null : series.cash.values[i] === null || !near(S(series.cash.values[i] as string), S(cashRow[i] as string))) return false;
+      if (totalRow[i] === null || fixedRow[i] === null || cashRow[i] === null) {
+        if (series.current_other.values[i] !== null) return false;
+      } else if (series.current_other.values[i] === null || !near(S(series.current_other.values[i] as string), S(totalRow[i] as string) - S(fixedRow[i] as string) - S(cashRow[i] as string))) return false;
+    } else if (expectedId === "composition_sources") {
+      const equityRow = rowsOf("balance_sheet", "balance_sheet:sp11_capitale+sp12_riserve+sp13_utile_perdita");
+      const passivoRow = rowsOf("balance_sheet", "balance_sheet:sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi");
+      if (!equityRow || !passivoRow) return false;
+      if (equityRow[i] === null ? series.equity.values[i] !== null : series.equity.values[i] === null || !near(S(series.equity.values[i] as string), S(equityRow[i] as string))) return false;
+      if (passivoRow[i] !== null && series.equity.values[i] !== null && series.financial_debt.values[i] !== null && series.other_liabilities.values[i] !== null
+        && !near(S(series.equity.values[i] as string) + S(series.financial_debt.values[i] as string) + S(series.other_liabilities.values[i] as string), S(passivoRow[i] as string))) return false;
+      if (passivoRow[i] === null && series.other_liabilities.values[i] !== null) return false;
+    } else if (expectedId === "break_even") {
+      const ce01 = rowsOf("income_statement", "income_statement:ce01_ricavi_vendite");
+      const costRows = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni", "ce08_costi_personale", "ce12_oneri_diversi"].map(c => rowsOf("income_statement", `income_statement:${c}`));
+      if (!ce01 || costRows.some(r => !r)) return false;
+      const costs = costRows.reduce<bigint | null>((acc, r) => acc === null || r === null || r[i] === null ? null : acc + S(r[i] as string), 0n);
+      if (costs !== null && series.fixed_costs.values[i] !== null && series.variable_costs.values[i] !== null
+        && !near(S(series.fixed_costs.values[i] as string) + S(series.variable_costs.values[i] as string), costs)) return false;
+      if (series.contribution_margin.values[i] !== null && series.variable_costs.values[i] !== null && ce01[i] !== null
+        && !near(S(series.contribution_margin.values[i] as string), S(ce01[i] as string) - S(series.variable_costs.values[i] as string))) return false;
+    } else {
+      const incidence: [string, string][] = [["materials", "practice.materials_revenue"], ["services", "practice.services_revenue"], ["personnel", "practice.personnel_revenue"], ["financial_charges", "practice.of_revenue"]];
+      for (const [seriesId, indicatorId] of incidence) {
+        const indicator = indicators.get(indicatorId);
+        if (!indicator || indicator.periods.map(p => p.id).join("|") !== canonical.join("|")) return false;
+        if (!sameValues(series[seriesId].values, indicator.values)) return false;
+      }
+    }
+  }
+  return true;
+}
 function additionalChart(v: unknown, years: number[], indicators: Map<string, IndicatorDefinition>): v is DossierChartSeries {
   if (!shape(v, ["id", "title", "unit", "categories", "series", "methodology"], ["indicator_ids"]) || !id(v.id) || !string(v.title) || !unit(v.unit) || !string(v.methodology) || !Array.isArray(v.categories) || v.categories.length !== years.length || v.categories.some((y, i) => y !== years[i]) || !Array.isArray(v.series) || !v.series.length) return false;
   if (!v.series.every(s => shape(s, ["key", "label", "values"]) && string(s.key) && string(s.label) && Array.isArray(s.values) && s.values.length === years.length && s.values.every(x => x === null || decimal(x))) || !unique(v.series.map(s => s.key))) return false;
@@ -77,7 +149,7 @@ function note(v: unknown): v is EditorialNote {
 /** Dedicated v2 boundary: existing v1 consumers continue to reject v2. */
 export function isFinalReportModelV2(value: unknown): value is FinalReportModelV2 {
   if (!object(value) || value.schema_version !== 2 || !Array.isArray(value.chart_series)) return false;
-  const {document, detailed_statements, indicator_catalog, editorial_plan, editorial_notes, editorial_readiness, ...core} = value;
+  const {document, detailed_statements, indicator_catalog, structure_series, editorial_plan, editorial_notes, editorial_readiness, ...core} = value;
   const primary = value.chart_series.filter(c => object(c) && canonicalIds.has(String(c.id)));
   if (!isFinalReportModel({...core, schema_version: 1, chart_series: primary})) return false;
   const years = (core.practice as FinalReportBase['practice']).periods.forecast_years;
@@ -85,6 +157,8 @@ export function isFinalReportModelV2(value: unknown): value is FinalReportModelV
   if (document.title !== `Report Budget ${years[0]}${years.length > 1 ? ` - ${years.at(-1)}` : ""}`) return false;
   if (!Array.isArray(detailed_statements) || detailed_statements.length !== 3 || !detailed_statements.every(statement) || detailed_statements.some((s, i) => s.id !== ["income_statement", "balance_sheet", "cashflow"][i]) || !Array.isArray(indicator_catalog) || !indicator_catalog.length || !indicator_catalog.every(indicator) || !unique(indicator_catalog.map(i => i.id))) return false;
   const indicators = new Map(indicator_catalog.map(i => [i.id, i]));
+  if (!Array.isArray(structure_series) || structure_series.length !== STRUCTURE_GROUP_ORDER.length
+    || structure_series.some((g, i) => !structureGroup(g, STRUCTURE_GROUP_ORDER[i], detailed_statements, indicators))) return false;
   if (!unique(value.chart_series.map(c => object(c) ? c.id : null)) || !value.chart_series.every(c => primary.includes(c) || additionalChart(c, years, indicators))) return false;
   if (!shape(editorial_readiness, ["status", "reasons"]) || !["pending", "ready", "blocked"].includes(String(editorial_readiness.status)) || !strings(editorial_readiness.reasons)) return false;
   const notes = editorial_notes === undefined ? [] : editorial_notes;

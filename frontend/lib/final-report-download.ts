@@ -1,0 +1,131 @@
+/**
+ * Modulo puro per il download del PDF finale del report (M2-06A).
+ *
+ * Regola CLAUDE.md «Frontend»: `lib/` non importa mai da `app/` o da
+ * `components/`. Tutto ciò che si può testare in `environment: node` vive
+ * qui — nome file dagli header, mappa dei messaggi d'errore per stato HTTP,
+ * guardia contro il doppio click. Il `fetch` vero e la manipolazione del DOM
+ * (`URL.createObjectURL`, l'`<a download>`) restano nell'hook React
+ * (`hooks/use-final-report-download.ts`), che è solo un innesto sottile e
+ * usa il sink iniettato qui sotto per restare testabile senza DOM.
+ */
+
+export type FinalReportDocumentState = "draft" | "final";
+
+const FALLBACK_FILENAME = "Report Budget.pdf";
+
+/**
+ * Estrae il nome file da `Content-Disposition`, preferendo `filename*`
+ * (RFC 5987/6266, `UTF-8''<percent-encoded>`) su `filename` ASCII. Senza
+ * header, senza nessuno dei due token, o con una codifica percent non
+ * valida, ricade sul nome di default.
+ */
+export function resolveDownloadFilename(contentDisposition?: string | null): string {
+  if (!contentDisposition) return FALLBACK_FILENAME;
+
+  const starMatch = /filename\*\s*=\s*([^;]+)/i.exec(contentDisposition);
+  if (starMatch) {
+    const raw = starMatch[1].trim().replace(/^"+|"+$/g, "");
+    const separatorIndex = raw.indexOf("''");
+    if (separatorIndex !== -1) {
+      const encoded = raw.slice(separatorIndex + 2).trim();
+      if (encoded) {
+        try {
+          const decoded = decodeURIComponent(encoded);
+          if (decoded) return decoded;
+        } catch {
+          // Percent-encoding non valido: si prova col token ASCII sotto.
+        }
+      }
+    }
+  }
+
+  const plainMatch = /filename\s*=\s*"?([^";]+)"?/i.exec(contentDisposition);
+  if (plainMatch) {
+    const value = plainMatch[1].trim();
+    if (value) return value;
+  }
+
+  return FALLBACK_FILENAME;
+}
+
+/** Messaggi di ripiego per stato HTTP, usati solo quando il server non manda un `detail`. */
+export const FINAL_REPORT_DOWNLOAD_ERROR_MESSAGES: Record<number, string> = {
+  404: "Azienda o scenario non trovato.",
+  409: "Il documento non è pronto per il download: prepara il piano editoriale o attendi che il report sia pronto.",
+  422: "Il report non si impagina: correggi i contenuti e riprova.",
+  503: "Il servizio di generazione del PDF non è disponibile in questo momento.",
+  504: "La generazione del PDF ha impiegato troppo tempo.",
+  500: "Errore interno durante la generazione del PDF.",
+};
+
+/**
+ * Il messaggio da mostrare in toast: il `detail` del server quando c'è
+ * (è già in italiano, per contratto — vedi M2-05), altrimenti la mappa per
+ * stato qui sopra, altrimenti il messaggio generico del 500.
+ */
+export function resolveDownloadErrorMessage(status: number, detail?: string | null): string {
+  const trimmed = typeof detail === "string" ? detail.trim() : "";
+  if (trimmed) return trimmed;
+  return FINAL_REPORT_DOWNLOAD_ERROR_MESSAGES[status] ?? FINAL_REPORT_DOWNLOAD_ERROR_MESSAGES[500];
+}
+
+/** 503 (renderer occupato/non disponibile) e 504 (timeout) meritano un «Riprova». */
+export function isRetryableDownloadStatus(status: number): boolean {
+  return status === 503 || status === 504;
+}
+
+/** Errore tipizzato lanciato da `downloadFinalReportPdf` (`lib/api.ts`). */
+export class FinalReportDownloadError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "FinalReportDownloadError";
+    this.status = status;
+  }
+}
+
+/** Operazioni DOM iniettate, per restare testabili in `environment: node`. */
+export interface FinalReportDownloadSink {
+  createObjectURL: (blob: Blob) => string;
+  revokeObjectURL: (url: string) => void;
+  triggerAnchorDownload: (url: string, filename: string) => void;
+}
+
+/** Salva un blob come file scaricato tramite il sink iniettato. */
+export function saveBlobAsFile(blob: Blob, filename: string, sink: FinalReportDownloadSink): void {
+  const url = sink.createObjectURL(blob);
+  try {
+    sink.triggerAnchorDownload(url, filename);
+  } finally {
+    sink.revokeObjectURL(url);
+  }
+}
+
+/** Stato mutabile minimo della guardia anti-doppio-click. */
+export interface DownloadGuardState {
+  pending: boolean;
+}
+
+export function createDownloadGuardState(): DownloadGuardState {
+  return { pending: false };
+}
+
+/**
+ * Esegue `task` solo se nessun'altra chiamata è già in volo su questo
+ * `guard`; una seconda chiamata ravvicinata è un no-op che risolve `null`
+ * invece di partire una seconda richiesta.
+ */
+export async function withDownloadGuard<T>(
+  guard: DownloadGuardState,
+  task: () => Promise<T>
+): Promise<T | null> {
+  if (guard.pending) return null;
+  guard.pending = true;
+  try {
+    return await task();
+  } finally {
+    guard.pending = false;
+  }
+}

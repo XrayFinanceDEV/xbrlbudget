@@ -44,8 +44,8 @@
   }
   result
 }
-#let plot(chart, gray: false, thresholds: ()) = {
-  let width = float(geometry.width_mm) * 1mm
+#let plot(chart, gray: false, thresholds: (), width-mm: none) = {
+  let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
   let height = float(geometry.plot_height_mm) * 1mm
   let values = chart.series.map(s => s.values.filter(v => v != none).map(coordinate)).flatten()
   if values.len() == 0 {
@@ -57,9 +57,13 @@
     values.push(0)
     let lo = calc.min(..values); let hi = calc.max(..values)
     let magnitude = calc.max(calc.abs(lo), calc.abs(hi))
-    let exponent = if magnitude >= 1000 or (magnitude > 0 and magnitude < 0.01) {
-      int(calc.floor(calc.log(magnitude, base: 10)))
-    } else { 0 }
+    // Rilievo 5: un asse di importi (eur) resta in euro interi sotto i
+    // 10.000 €; solo oltre passa a € migliaia. Le altre unità (ratio,
+    // percent, giorni) restano sulla soglia precedente: non sono importi,
+    // e non è la loro scala a essere in questione qui.
+    let is-amount = chart.unit == "eur"
+    let exponent = if is-amount { if magnitude >= 10000 { 3 } else { 0 } }
+      else if magnitude >= 1000 { int(calc.floor(calc.log(magnitude, base: 10))) } else { 0 }
     let scale = calc.pow(10, exponent)
     if scale == 0 or scale == calc.inf { panic("chart-scale-out-of-range") }
     // Normalize before subtracting: avoid overflow of opposite large values.
@@ -70,16 +74,35 @@
     let pw = width - ox - 8pt; let ph = height - oy - 25pt
     let xp(index) = ox + (index + 0.5) / chart.categories.len() * pw
     let yp(value) = oy + (hi - value / scale) / (hi - lo) * ph
+    // Un asse di importi non mostra mai decimali («0,997» invece di «997»
+    // euro): l'unità di tick è sempre intera, in euro o in migliaia di euro.
+    let group-thousands(digits) = {
+      let groups = (); let integer = digits
+      while integer.len() > 3 {
+        groups.insert(0, integer.slice(integer.len() - 3))
+        integer = integer.slice(0, integer.len() - 3)
+      }
+      groups.insert(0, integer)
+      groups.join(".")
+    }
+    let tick-label(tick) = if is-amount {
+      let rounded = calc.round(tick, digits: 0)
+      let sign = if rounded < 0 { "−" } else { "" }
+      sign + group-thousands(str(calc.abs(rounded)))
+    } else {
+      str(calc.round(tick, digits: if calc.abs(tick) < 1 { 3 } else { 2 })).replace(".", ",")
+    }
     let bars = chart.id in geometry.bars
+    let scale-word = if exponent == 3 { " · valori in migliaia" } else if exponent == 6 { " · valori in milioni" }
+      else if exponent == 9 { " · valori in miliardi" } else { "" }
     box(width: width, height: height)[
-      #place(top + left, dx: ox, dy: 0pt, plex(7pt, fill: muted,
-        unit-label(chart.unit) + if exponent != 0 { " · ×10^" + str(exponent) } else { "" }))
+      #place(top + left, dx: ox, dy: 0pt, plex(7pt, fill: muted, unit-label(chart.unit) + scale-word))
       #for k in range(5) {
         let tick = lo + k / 4 * (hi - lo)
         let y = oy + (hi - tick) / (hi - lo) * ph
         place(top + left, dx: ox, dy: y, line(length: pw, stroke: 0.4pt + rule))
         place(top + left, dy: y - 4pt, box(width: ox - 5pt,
-          align(right, plex(7pt, fill: muted, str(calc.round(tick, digits: 2)).replace(".", ",")))))
+          align(right, plex(7pt, fill: muted, tick-label(tick)))))
       }
       #place(top + left, dx: ox, dy: yp(0), line(length: pw, stroke: 0.8pt + muted))
       #for threshold in thresholds {
@@ -119,7 +142,9 @@
     ]
   }
 }
-#let legend(chart, gray: false, thresholds: ()) = [
+#let legend(chart, gray: false, thresholds: (), width-mm: none) = {
+  let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
+  block(width: width, [
   #for (index, series) in chart.series.enumerate() {
     let color = colors(gray).at(calc.rem(index, 4))
     grid(columns: (14pt, 1fr), gutter: 5pt,
@@ -132,37 +157,41 @@
     plex(7pt, fill: muted, "Riferimento: " + threshold.label + " = " + display-value(threshold.value, chart.unit))
     v(2pt)
   }
-]
-#let chart-component(chart, gray: false, indicators: ()) = context {
-  let width = float(geometry.width_mm) * 1mm
+  ])
+}
+#let chart-component(chart, gray: false, indicators: (), width-mm: none) = context {
+  let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
   let height = float(geometry.height_mm) * 1mm
   let legend-height = float(geometry.legend_height_mm) * 1mm
   if chart.series.len() > geometry.max_series { panic("chart-series-exceed-distinct-styles") }
   let thresholds = references(chart, indicators)
-  let key = legend(chart, gray: gray, thresholds: thresholds)
+  let key = legend(chart, gray: gray, thresholds: thresholds, width-mm: width-mm)
   if measure(block(width: width, key)).height > legend-height { panic("chart-legend-does-not-fit") }
-  let body = stack(dir: ttb, spacing: 0pt, plot(chart, gray: gray, thresholds: thresholds),
+  let body = stack(dir: ttb, spacing: 0pt, plot(chart, gray: gray, thresholds: thresholds, width-mm: width-mm),
       block(width: width, height: legend-height, key))
   let measured = measure(body)
   if measured.height > height { panic("chart-component-does-not-fit") }
   metadata((kind: "chart", content_id: "chart:" + chart.id, page: here().page(),
-    width_mm: geometry.width_mm, height_mm: geometry.height_mm,
+    width_mm: if width-mm == none { geometry.width_mm } else { str(width-mm) }, height_mm: geometry.height_mm,
     measured_width_mm: str(measured.width / 1mm), measured_height_mm: str(measured.height / 1mm),
     unit: chart.unit, categories: chart.categories, series: chart.series, thresholds: thresholds))
   block(width: width, height: height, breakable: false, body)
 }
-#let value-table(chart) = context {
+// `places` è la precisione della tipografia del dossier: gli euro si impaginano
+// in euro interi (M2-02), le altre unità restano alla precisione di default.
+#let value-table(chart, places: none) = context {
   let width = float(geometry.width_mm) * 1mm
   let label-width = 135pt
   let column-width = (width - label-width) / chart.categories.len()
+  let shown(value) = display-value(value, chart.unit, places: places)
   let fits = chart.series.all(s => s.values.all(v =>
-    measure(plex(8pt, display-value(v, chart.unit))).width <= column-width - 6pt))
+    measure(plex(8pt, shown(v))).width <= column-width - 6pt))
   let cells = ()
   if fits {
     for series in chart.series {
       cells.push(table.cell(breakable: false, plex(8pt, series.label)))
       for value in series.values {
-        cells.push(table.cell(breakable: false, align(right, plex(8pt, display-value(value, chart.unit)))))
+        cells.push(table.cell(breakable: false, align(right, plex(8pt, shown(value)))))
       }
     }
     table(columns: (label-width, ..((column-width,) * chart.categories.len())), inset: 3pt,
@@ -174,11 +203,11 @@
     for series in chart.series {
       cells.push(table.cell(colspan: 2, plex(8pt, weight: 600, series.label)))
       for (year, value) in chart.categories.zip(series.values) {
-        if measure(plex(8pt, display-value(value, chart.unit))).width > width / 2 - 6pt {
+        if measure(plex(8pt, shown(value))).width > width / 2 - 6pt {
           panic("chart-value-does-not-fit")
         }
         cells.push(table.cell(breakable: false, plex(8pt, str(year))))
-        cells.push(table.cell(breakable: false, align(right, plex(8pt, display-value(value, chart.unit)))))
+        cells.push(table.cell(breakable: false, align(right, plex(8pt, shown(value)))))
       }
     }
     table(columns: (1fr, 1fr), inset: 3pt,

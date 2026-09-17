@@ -10,7 +10,7 @@ import fitz
 import pytest
 
 from app.renderers.typst import Compiler, RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable
-from app.renderers.typst.editorial_inventory import build_inventory, expected_content_inventory
+from app.renderers.typst.editorial_inventory import (build_inventory, chart_marker_width_mm, chart_view, expected_content_inventory)
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, build_editorial_plan,
     prepare_editorial_report, verify_editorial_layout,
@@ -34,8 +34,9 @@ def infrannual_period_report(amounts=('850', '900', '1020', '1200')):
     sources = []
     for (basis, year, months), amount in zip([('historical', 2025, 12), ('observed', 2026, 9),
                                               ('adjusted', 2026, 9), ('closing', 2026, 12)], amounts):
-        period = StatementPeriod(id=f'{basis}:{year}', year=year, label=f'{year} · {basis}', basis=basis,
-                                 period_months=months, source='synthetic_period_fixture')
+        period = StatementPeriod(id=f'{basis}:{year}', year=year, label={'historical': '2025 storico', 'observed': '2026 osservato',
+                                                                         'adjusted': '2026 rettificato', 'closing': '2026 chiusura'}[basis],
+                                 basis=basis, period_months=months, source='synthetic_period_fixture')
         sources.append(DossierSource(period, {**bs, 'sp09_disponibilita_liquide': Decimal(80)},
                                      {**ce, 'ce01_ricavi_vendite': Decimal(amount)}))
     for forecast in v1.forecast.years:
@@ -175,15 +176,15 @@ def test_single_unbreakable_manual_note_cannot_escape_its_width(probe):
 def test_chart_measurements_reject_numeric_json_geometry(probe, geometry):
     report = fixture_report()
     measured = probe.measure_layout(report)
-    charts = {'chart:' + chart.id: chart for chart in report.chart_series}
     values = []
     for record in measured.records:
         value = {key: item for key, item in asdict(record).items() if item is not None}
-        if record.content_id in charts:
-            chart = charts[record.content_id]
-            value.update(kind='chart', width_mm='178', height_mm='94', measured_width_mm='178',
-                         measured_height_mm='94', unit=chart.unit, categories=chart.categories,
-                         series=chart.model_dump(mode='json')['series'], thresholds=[])
+        if record.content_id.startswith('chart:'):
+            view = chart_view(report, record.content_id[len('chart:'):])
+            width = chart_marker_width_mm(report, record.content_id[len('chart:'):])
+            value.update(kind='chart', width_mm=width, height_mm='94', measured_width_mm=width,
+                         measured_height_mm='94', unit=view['unit'], categories=view['categories'],
+                         series=view['series'], thresholds=view['thresholds'])
         values.append(value)
     assert probe._validate_records(json.dumps(values).encode(), report) == measured.records
     chart_value = next(value for value in values if value['kind'] == 'chart')
@@ -198,10 +199,10 @@ def test_actual_infrannual_bases_keep_unannualized_values_and_all_appendix_perio
     comparison = next(item for section in inventory for item in section['items']
                       if item['id'] == 'comparison:income_statement')
     production = next(row for row in comparison['rows'] if row['id'].endswith(':production_value'))
-    assert production['cells'][2:6] == ['850', '900', '1020', '1200']
-    assert '2026 · observed (9 mesi)' in comparison['columns']
-    assert '2026 · adjusted (9 mesi)' in comparison['columns']
-    assert '2026 · closing (12 mesi)' in comparison['columns']
+    assert production['cells'][1:5] == ['850', '900', '1020', '1200']
+    assert '2026 osservato (9 mesi)' in comparison['columns']
+    assert '2026 rettificato (9 mesi)' in comparison['columns']
+    assert '2026 chiusura (12 mesi)' in comparison['columns']
     report = prepare_editorial_report(original, probe)
     verify_editorial_layout(report, probe)
     with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
@@ -217,8 +218,12 @@ def test_actual_infrannual_bases_keep_unannualized_values_and_all_appendix_perio
 def test_changed_narrative_reflow_invalidates_existing_page_bindings(probe):
     report = prepare_editorial_report(fixture_report(), probe)
     changed = report.model_copy(deep=True)
-    # Add enough within-capacity text to move subsequent items across real pages.
-    changed.narrative[0].text = 'Il piano richiede una lettura dei valori e delle ipotesi. ' * 65
+    # I grafici canonici occupano ormai una pagina propria (M2-02B): un testo
+    # entro capacità non sposta più nulla — il piano resta valido, ed è ciò che
+    # si vuole. Il reflow che conta è quello che eccede la pagina fissa: il
+    # template paniccia e la verifica deve rifiutare il drift, non riassociare
+    # le note.
+    changed.narrative[0].text = 'Il piano richiede una lettura dei valori e delle ipotesi. ' * 130
     changed = signed(changed)
     assert changed.source_hash == report.source_hash
     with pytest.raises((ValueError, RendererCompileError)):
@@ -317,3 +322,74 @@ def test_importi_milionari_al_centesimo_si_impaginano_in_euro_interi(probe):
     assert '4.006.984,18' not in text
     # Arrotondamento al mezzo euro, non troncamento: 4.146.966,26 → 4.146.966; 3.761.087,73 → 3.761.088.
     assert '3.761.088' in text
+
+@pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
+def test_nessun_metadato_tecnico_e_nessun_titolo_inglese_nel_document(probe, workflow):
+    """M2-02B difetti 2 e 3: il PDF di M2-02 stampava gli ID canonici come contenuto
+    («ID: historical:2025», «Fonte: synthetic_period_fixture», blocchi «practice.pfn»,
+    «Unità: ratio») e sei titoli narrativi in inglese. Nel dossier editoriale nulla di
+    tutto questo compare: le etichette sono italiane, gli ID restano nei marcatori."""
+    report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    for forbidden in ('historical:', 'forecast:', 'practice.', 'synthetic_', 'Unità: ratio',
+                      'Executive summary', 'Adjustments and closing', 'Budget assumptions',
+                      'Economic outlook', 'Financial outlook', 'Risks and actions'):
+        assert forbidden not in text, forbidden
+    # Occhiello e titolo neutro in italiano per ogni sezione resa.
+    assert 'SINTESI · ' in text and 'Sintesi esecutiva' in text
+    assert 'PIANO E RISULTATI · ' in text
+
+
+@pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
+def test_colonna_kpi_letta_al_centesimo_dal_modello_col_periodo_giusto(probe, workflow):
+    """M2-02B difetto 4: la colonna KPI della pagina tipo legge valori dal
+    modello v2, non reinventa nulla. Ogni KPI è controllato riga per riga
+    contro il Decimal da cui è preso (l'anno sbagliato fa fallire il test), e
+    le etichette dei periodi resa sono quelle dell'ultimo anno di piano."""
+    report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
+    inventory = build_inventory(report)
+    last = report.forecast.years[-1]
+    checks = {'cassa': ('balance_sheet', 'cash'), 'ricavi': ('income_statement', 'revenue')}
+    rows = {line.code for line in last.balance_sheet + last.income_statement if line.value is not None}
+    checked = 0
+    for section in inventory:
+        for item in section['items']:
+            for kpi in item.get('kpis') or ():
+                for prefix, (attribute, code) in checks.items():
+                    if kpi['label'] == f"{prefix} · {last.year}":
+                        value = next(line.value for line in getattr(last, attribute) if line.code == code)
+                        assert kpi['value'] == format(value, 'f'), kpi
+                        checked += 1
+    if not {'cash', 'revenue'} <= rows:
+        pytest.skip("fixture senza righe di previsione: niente KPI da allineare")
+    assert checked >= len(checks)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    for label in ('EBITDA margin ·', 'PFN ·', 'orizzonte di piano', 'cassa · 2029', 'ricavi ·'):
+        assert label in text, label
+    # Un KPI che il modello non fornisce è omesso, mai un «n.d.» in colonna.
+    for section in inventory:
+        for kpi in section.get('kpis') or ():
+            assert kpi['value'] is not None or kpi['series'] or kpi['to'] is not None, kpi
+        for item in section['items']:
+            for kpi in item.get('kpis') or ():
+                assert kpi['value'] is not None or kpi['series'] or kpi['to'] is not None, kpi
+
+
+@pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
+def test_grafici_multi_serie_senza_mille_punte_e_senza_pagine_nd(probe, workflow):
+    """M2-02B difetti 5 e 6: via «×10^3» dagli assi (parola italiana o nessuna
+    scala), grafici multi-serie sul timeline storico → chiusura → piano, e
+    nessun grafico vuoto sprecato su una pagina intera."""
+    report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    assert '×10' not in text
+    chart_items = [item for section in build_inventory(report) for item in section['items'] if item['kind'] == 'chart']
+    assert any(len(item['chart']['series']) > 1 for item in chart_items), 'nessun grafico multi-serie'
+    for item in chart_items:
+        assert any(value is not None for series in item['chart']['series'] for value in series['values']), item['chart_id']
+    # La pagina «n.d.» intera non esiste piu: la didascalia vuota è ammessa
+    # solo sulla rara pagina orfana, che in questi tre percorsi non si crea.
+    assert 'Nessun valore nei periodi rappresentati' not in text

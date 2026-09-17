@@ -15,7 +15,7 @@ from app.schemas.final_report_v2 import (
     EditorialTablePart, FinalReportModelV2,
 )
 from .chart_components import ChartTemplateBundle
-from .editorial_inventory import build_inventory, expected_content_inventory
+from .editorial_inventory import (build_inventory, chart_marker_width_mm, chart_view, expected_content_inventory)
 from .layout_probe import LayoutMeasurement, TypstLayoutProbe
 from .runtime import RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable, _regular
 
@@ -89,24 +89,24 @@ class DossierLayoutProbe(TypstLayoutProbe):
                         raise ValueError()
                     records.append(DossierRecord(kind, page, content_id))
                 elif kind == 'chart':
-                    chart = charts.get(content_id)
-                    if (chart is None or set(value) != {'kind', 'content_id', 'page', 'width_mm', 'height_mm',
+                    # La serie disegnata è la vista dell'inventario (`chart_view`),
+                    # non `chart.series` del modello v1: il modello resta fermo
+                    # agli anni di piano, la vista espone tutto il timeline.
+                    chart_id = content_id[len('chart:'):] if content_id.startswith('chart:') else ''
+                    view = chart_view(report, chart_id) if chart_id else None
+                    # Rilievo 1: il grafico con colonna KPI si dichiara largo 118 mm
+                    # (grid a due colonne in typst), gli altri restano a 178.
+                    declared = Decimal(chart_marker_width_mm(report, chart_id)) if chart_id else Decimal(-1)
+                    if (view is None or set(value) != {'kind', 'content_id', 'page', 'width_mm', 'height_mm',
                             'measured_width_mm', 'measured_height_mm', 'unit', 'categories', 'series', 'thresholds'}
-                            or value['unit'] != chart.unit or value['categories'] != chart.categories
-                            or value['series'] != chart.model_dump(mode='json')['series']
+                            or value['unit'] != view['unit'] or value['categories'] != view['categories']
+                            or value['series'] != view['series'] or value['thresholds'] != view['thresholds']
                             or any(not isinstance(value[k], str) or not Decimal(value[k]).is_finite()
                                    or Decimal(value[k]) != literal for k, literal in (
-                                ('width_mm', Decimal(178)), ('measured_width_mm', Decimal(178)),
+                                ('width_mm', declared), ('measured_width_mm', declared),
                                 ('height_mm', Decimal(94)), ('measured_height_mm', Decimal(94))))):
                         raise ValueError()
-                    refs = getattr(chart, 'indicator_ids', [])
-                    catalog = {indicator.id: indicator for indicator in report.indicator_catalog}
-                    thresholds = [dict(label=catalog[ref].label + ' · ' + threshold.label,
-                                       value=format(threshold.value, 'f'), source=threshold.source)
-                                  for ref in refs for threshold in catalog[ref].thresholds]
-                    if value['thresholds'] != thresholds:
-                        raise ValueError()
-                    # Store the validated marker; chart wire data remain canonical in report.
+                    # Store the validated marker; the inventory view is canonical.
                     records.append(DossierRecord('content', page, content_id))
                 elif kind == 'slot':
                     if (set(value) != {'kind', 'content_id', 'page', 'width_pt', 'height_pt', 'font_size_pt', 'max_lines'}

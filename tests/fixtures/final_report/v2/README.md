@@ -12,3 +12,9 @@ actual persisted values, analytical percentages, complete cashflow parity,
 workflow provenance, authentication, ownership and read-only assembly.
 Editorial readiness is pending: there is no physical pagination or page-note
 generation in M2-00B.
+
+These three files are never hand-written: regenerate them from the assembler
+with `PYTHONPATH=backend:. python tests/test_final_report_v2.py` (same code path
+as `fixture_report`, including the per-year fixed-cost splits of the
+composizioni/pareggio series).
+

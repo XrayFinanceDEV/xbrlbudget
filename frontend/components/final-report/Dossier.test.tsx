@@ -8,7 +8,7 @@ describe("DossierContent", () => {
   it("prints every chart, indicator value and full CE/SP/CF attachments", () => {
     const html = renderToStaticMarkup(<DossierContent report={annual as FinalReportModelV2} />);
     expect((html.match(/data-testid="final-report-chart-/g) ?? []).length).toBe(16);
-    expect((html.match(/Convenzione:/g) ?? []).length).toBe(43);
+    expect((html.match(/Convenzione:/g) ?? []).length).toBe(44); // + practice.personnel_revenue (M2-02C)
     expect(html).toContain("Allegati");
     expect(html).toContain("Conto economico");
     expect(html).toContain("Stato patrimoniale");

@@ -647,7 +647,12 @@ def test_la_massa_non_registrata_si_legge_in_euro():
     result = reconcile_adjustments({"sp05a_materie_prime": Decimal("500")},
                                    {"sp05a_materie_prime": Decimal("284.45")}, entries)
     messaggio = [d.message for d in result.diagnostics if d.code == "adjustments_unposted_mass"][0]
-    assert messaggio.startswith("-215,55 movimentati"), messaggio
+    assert "-215,55" in messaggio, messaggio
+    # La partita singola è il modo previsto per correggere un import (proprietario, 2026-09-17: «la
+    # scrittura è senza contropartita ma è così che è stata pensata»): il testo la nomina, non la
+    # presenta come un errore di registrazione.
+    assert "Correggi Import" in messaggio
+    assert "non è stata registrata" not in messaggio
     # «Correggi Import» in partita singola è uno dei tre modi previsti delle Rettifiche: dichiararlo
     # sì, tenere il documento in bozza per averlo usato no.
     assert [d.severity for d in result.diagnostics if d.code == "adjustments_unposted_mass"] == ["info"]

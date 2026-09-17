@@ -617,8 +617,8 @@ def reconcile_adjustments(
                 "adjustments_unposted_mass",
                 "info",
                 "adjustments",
-                f"{eur_it(unposted)} movimentati su un'intestazione non di bilancio: "
-                "la rettifica non è stata registrata in partita doppia.",
+                f"Correzioni dell'import in partita singola («Correggi Import»): {eur_it(unposted)} "
+                "in tutto, senza contropartita per costruzione.",
             ),
         )
     return AdjustmentReconciliation(

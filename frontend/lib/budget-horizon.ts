@@ -85,6 +85,23 @@ export function forecastYearsFor(baseYear: number, numYears: number): number[] {
  * storici sui singoli campi restano qui, dove ora vive la logica che
  * spiegano.
  */
+/**
+ * Un'ipotesi scalare come la legge un campo: numero vero, al massimo 2 decimali.
+ *
+ * `GET /assumptions` restituisce ogni `Decimal` come stringa con la scala della colonna
+ * (`"2.000000"`, `"150000.00"`): il campo mostrava «2,000000» come variazione %, e qualunque
+ * somma sul valore lo concatenava invece di addizionarlo (stessa causa di `normalizePregresso`
+ * e di `normalizeFinancingLoans`). Due decimali per decisione del proprietario (2026-09-17):
+ * «nessuno userà 8 decimali» — e un valore arrotondato qui è quello che il campo mostra e che
+ * il salvataggio rimanda, quindi quel che si vede e quel che si salva restano la stessa cifra.
+ *
+ * Solo le stringhe che sono numeri: `null` resta assenza, `"costante"` resta testo.
+ */
+function scalareIdratato<T>(valore: T): T | number {
+  if (typeof valore !== "string" || !/^-?\d+(\.\d+)?$/.test(valore)) return valore;
+  return Math.round(Number(valore) * 100) / 100;
+}
+
 export function hydrateAssumptions(
   rows: BudgetAssumptions[],
   scenarioId: number
@@ -203,6 +220,10 @@ export function hydrateAssumptions(
       ce17b_override: a.ce17b_override,
       ce20_override: a.ce20_override,
     };
+    // Dopo, non campo per campo: un'ipotesi scalare aggiunta domani è coperta senza doversene
+    // ricordare. Gli annidati (pregresso, finanziamenti) hanno le loro normalizzazioni sopra.
+    const riga = out[a.forecast_year] as Record<string, unknown>;
+    for (const chiave of Object.keys(riga)) riga[chiave] = scalareIdratato(riga[chiave]);
   });
   return out;
 }

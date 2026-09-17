@@ -369,6 +369,31 @@ describe("hydrateAssumptions", () => {
     },
   );
 
+  it("le ipotesi scalari tornano numeri, al massimo con 2 decimali (AMBIENTA, 2026-09-17)", () => {
+    // JSON reale di GET /scenarios/18/assumptions: ogni Decimal arriva come stringa con la scala
+    // della colonna, e il campo mostrava «2,000000» come variazione degli altri ricavi.
+    // Decisione del proprietario: nei campi non servono più di 2 decimali («4,53%»).
+    const row = {
+      ...fixtureRow({ forecast_year: 2027 }),
+      other_revenue_growth_pct: "2.000000",
+      revenue_growth_pct: "4.533333",
+      tangible_investments: "150000.00",
+      dpo_days: "128.00",
+      tax_rate: "27.900000",
+      overdraft_limit: null,
+      bank_lines_rule: "costante",
+    } as unknown as BudgetAssumptions;
+    const out = hydrateAssumptions([row], 1)[2027];
+    expect(out.other_revenue_growth_pct).toBe(2);
+    expect(out.revenue_growth_pct).toBe(4.53);
+    expect(out.tangible_investments).toBe(150000);
+    expect(out.dpo_days).toBe(128);
+    expect(out.tax_rate).toBe(27.9);
+    // `null` resta assenza, non diventa uno zero; un testo che numero non è resta testo.
+    expect(out.overdraft_limit).toBeNull();
+    expect(out.bank_lines_rule).toBe("costante");
+  });
+
   it("coerce finanziamenti, altri finanziatori e fidi tornati come STRINGA (AMBIENTA, 2026-09-17)", () => {
     // JSON reale di GET /scenarios/18/assumptions: stessa causa del pregresso qui sopra (Decimal
     // serializzato come stringa da Pydantic v2), mai estesa a questi campi. A schermo la colonna

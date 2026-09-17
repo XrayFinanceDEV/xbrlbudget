@@ -194,6 +194,23 @@ def _missing(reason: str | None) -> str | None:
     return None if not reason else f"n.d.: {reason}"
 
 
+def _unavailability_text(entries: list[tuple[str, str]]) -> str | None:
+    """Group and deduplicate what used to be one motivation line per row (or
+    per row-period): reason text → the item labels it applies to, in
+    first-seen order on both axes. Replaces a repeated «Indisponibilità»
+    column with a single note after the table (M2-02B rilievi 3 e 6): the
+    reason is never invented here, only the identical phrases the table
+    already carried are grouped once."""
+    grouped: "OrderedDict[str, list[str]]" = OrderedDict()
+    for item_label, reason in entries:
+        bucket = grouped.setdefault(reason, [])
+        if item_label not in bucket:
+            bucket.append(item_label)
+    if not grouped:
+        return None
+    return " ".join(f"{reason}: {', '.join(labels)}." for reason, labels in grouped.items())
+
+
 def _row(identifier: str, cells: list[Any], units: list[str | None] | None = None) -> dict[str, Any]:
     rendered = [_exact(value) for value in cells]
     unit_values = units if units is not None else [None] * len(rendered)
@@ -569,17 +586,21 @@ def _assumption_unit(field: str) -> str | None:
     return None
 
 
-def _assumption_rows(section: Any, period_labels: list[str]) -> list[dict[str, Any]]:
+def _assumption_rows(section: Any, period_labels: list[str], unavailable_entries: list[tuple[str, str]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for assumption in section.assumptions:
         unit = _assumption_unit(assumption.field)
         values = [*assumption.values, *([None] * (len(period_labels) - len(assumption.values)))]
-        missing = "; ".join(label for label, value in zip(period_labels, values) if value is None)
+        # Rilievo 6: la colonna «Indisponibilità» coi periodi mancanti elencati
+        # riga per riga sparisce; ogni periodo mancante diventa una voce da
+        # raggruppare in nota dopo la tabella (`_unavailability_text`).
+        for label, value in zip(period_labels, values):
+            if value is None:
+                unavailable_entries.append((assumption.label, f"valore non dichiarato per {label}"))
         rows.append(_row(
             f"assumption:{section.key}:{assumption.field}:value",
-            [assumption.label, *values, _label(_PROVENANCE_LABELS, assumption.provenance), assumption.active,
-             _missing(f"valore non dichiarato per {missing}") if missing else None],
-            [None, *([unit] * len(values)), None, None, None],
+            [assumption.label, *values, _label(_PROVENANCE_LABELS, assumption.provenance), assumption.active],
+            [None, *([unit] * len(values)), None, None],
         ))
         if assumption.financing_loans is not None:
             for index, loan in enumerate(assumption.financing_loans):
@@ -681,14 +702,19 @@ def _assumption_items(report: FinalReportModelV2) -> tuple[list[dict[str, Any]],
     for section in report.assumption_sections:
         base_rows: list[dict[str, Any]] = []
         detail_rows: list[dict[str, Any]] = []
-        for row in _assumption_rows(section, period_labels):
-            # Scalar rows have one label + all year values + provenance/active/reason.
+        unavailable_entries: list[tuple[str, str]] = []
+        for row in _assumption_rows(section, period_labels, unavailable_entries):
+            # Scalar rows have one label + all year values + provenance/active.
             if row["id"].endswith(":value"):
                 base_rows.append(row)
             else:
                 detail_rows.append(row)
-        base_columns = ["Parametro", *period_labels, "Provenienza", "Attiva", "Indisponibilità"]
+        base_columns = ["Parametro", *period_labels, "Provenienza", "Attiva"]
         base_items.append(_table(f"assumptions:{section.key}", section.title, base_columns, base_rows))
+        unavailable_note = _unavailability_text(unavailable_entries)
+        if unavailable_note:
+            base_items.append(_text(f"assumptions:{section.key}:unavailable",
+                                    f"Indisponibilità — {section.title}", unavailable_note))
         # Detail records remain atomic: a field never becomes a compound string
         # carrying an ambiguous numeric unit.  This also leaves every nested
         # source field independently addressable by the page planner.
@@ -867,27 +893,43 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
             indicator_periods.setdefault(period.id, period)
     # Il catalogo per-voce con i blocchi «practice.pfn / Unità: ratio / Convenzione:
     # pratica-v1…» non si stampa più: gli indicatori diventano due tabelle F/G
-    # (indicatore × periodo, unità in colonna) e una tabella compatta di
-    # metodologia e convenzione in «Allegati e metodologia» (M2-02B difetto 2).
-    indicator_columns = ["Indicatore", "Unità", *[_period_label(period) for period in indicator_periods.values()], "Indisponibilità"]
+    # (indicatore × periodo) e una tabella compatta di metodologia e
+    # convenzione in «Allegati e metodologia» (M2-02B difetto 2). Rilievo 3:
+    # niente colonna «Unità» separata (l'unità entra fra parentesi
+    # nell'etichetta) e niente riga di motivazione per indicatore — le
+    # motivazioni raggruppate e deduplicate diventano una nota dopo ciascuna
+    # tabella (`_unavailability_text`). La colonna di coda resta riservata
+    # (sempre `None`): il template divide la tabella in parti sull'ipotesi che
+    # l'ultima colonna non sia un valore di periodo (`editorial.typ`,
+    # `compact-period-table`), e qui nessun template si tocca.
+    indicator_columns = ["Indicatore", *[_period_label(period) for period in indicator_periods.values()], "Indisponibilità"]
 
-    def _indicator_row(indicator: Any) -> dict[str, Any]:
+    def _indicator_row(indicator: Any, entries: list[tuple[str, str]]) -> dict[str, Any]:
         values_by_period = dict(zip((period.id for period in indicator.periods), indicator.values))
         values = [values_by_period.get(identifier) for identifier in indicator_periods]
-        reasons = "; ".join(
-            f"{_period_label(period)} — {_label(_UNAVAILABLE_REASON_LABELS, reason)}"
-            for period, reason in zip(indicator.periods, indicator.unavailable_reasons) if reason)
-        return _row(f"indicator:{indicator.id}", [indicator.label, _label(_UNIT_LABELS, indicator.unit), *values,
-                     _missing(reasons) if reasons else None],
-                     [None, None, *([indicator.unit] * len(values)), None])
+        unit_suffix = _label(_UNIT_LABELS, indicator.unit)
+        label = f"{indicator.label} ({unit_suffix})" if unit_suffix else indicator.label
+        for period, reason in zip(indicator.periods, indicator.unavailable_reasons):
+            if reason:
+                entries.append((indicator.label, f"{_period_label(period)} — {_label(_UNAVAILABLE_REASON_LABELS, reason)}"))
+        return _row(f"indicator:{indicator.id}", [label, *values, None],
+                     [None, *([indicator.unit] * len(values)), None])
 
-    practice_rows = [_indicator_row(indicator) for indicator in report.indicator_catalog if indicator.id.startswith("practice.")]
-    analytical_rows = [_indicator_row(indicator) for indicator in report.indicator_catalog if not indicator.id.startswith("practice.")]
+    practice_entries: list[tuple[str, str]] = []
+    analytical_entries: list[tuple[str, str]] = []
+    practice_rows = [_indicator_row(indicator, practice_entries) for indicator in report.indicator_catalog if indicator.id.startswith("practice.")]
+    analytical_rows = [_indicator_row(indicator, analytical_entries) for indicator in report.indicator_catalog if not indicator.id.startswith("practice.")]
     indicator_tables: list[dict[str, Any]] = []
     if practice_rows:
-        indicator_tables.append(_periodic_table(_table("indicator-practice-table", "Tabella F — Indicatori della pratica", indicator_columns, practice_rows), value_start=2, part_size=INDICATOR_PART_SIZE))
+        indicator_tables.append(_periodic_table(_table("indicator-practice-table", "Tabella F — Indicatori della pratica", indicator_columns, practice_rows), value_start=1, part_size=INDICATOR_PART_SIZE))
+        practice_note = _unavailability_text(practice_entries)
+        if practice_note:
+            indicator_tables.append(_text("indicator-practice-table:unavailable", "Indisponibilità — Tabella F", practice_note))
     if analytical_rows:
-        indicator_tables.append(_periodic_table(_table("indicator-analytical-table", "Tabella G — Indici del report analitico", indicator_columns, analytical_rows), value_start=2, part_size=INDICATOR_PART_SIZE))
+        indicator_tables.append(_periodic_table(_table("indicator-analytical-table", "Tabella G — Indici del report analitico", indicator_columns, analytical_rows), value_start=1, part_size=INDICATOR_PART_SIZE))
+        analytical_note = _unavailability_text(analytical_entries)
+        if analytical_note:
+            indicator_tables.append(_text("indicator-analytical-table:unavailable", "Indisponibilità — Tabella G", analytical_note))
 
     diagnostics = list(report.diagnostics) + list(report.readiness.reasons)
     diagnostic_rows = [_row(f"diagnostic:{index}:{item.code}", [item.code, _label(_SEVERITY_LABELS, item.severity), _label(_SECTION_TITLES, item.section), item.message], [None] * 4) for index, item in enumerate(diagnostics)]
@@ -902,12 +944,28 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     section["appendices_methodology"]["items"].append(adjustments_register)
     section["appendices_methodology"]["items"].extend(assumption_details)
     section["appendices_methodology"]["items"].extend(indicator_tables)
+    # Rilievo 4: niente più il catalogo a blocchi (Famiglia/Metodologia/
+    # Convenzione/Soglie ripetuti per indicatore, ~5 pagine): una tabella
+    # compatta Indicatore | Metodologia, una riga ciascuno. «Famiglia» e
+    # «Soglie» (quasi sempre n.d.) non si stampano più. La convenzione è
+    # comune agli indicatori della stessa famiglia di calcolo (pratica vs
+    # analitica — `calculations/report_indicators.py`), non un valore per
+    # indicatore: si scrive una volta per ciascun testo distinto, come nota
+    # prima della tabella, senza scartarne uno se il modello ne dichiarasse
+    # più di uno (mai tappare un divario).
+    conventions: "OrderedDict[str, None]" = OrderedDict()
+    for indicator in report.indicator_catalog:
+        conventions.setdefault(indicator.convention, None)
+    for index, convention in enumerate(conventions):
+        section["appendices_methodology"]["items"].append(_text(
+            f"indicator-methodology:convention:{index}",
+            "Convenzione degli indicatori" if len(conventions) == 1 else f"Convenzione degli indicatori ({index + 1}/{len(conventions)})",
+            convention))
     methodology_rows = [_row(
         f"indicator-method:{indicator.id}",
-        [indicator.label, indicator.family, indicator.methodology, indicator.convention,
-         "; ".join(f"{threshold.label}: {_exact(threshold.value)} ({threshold.source})" for threshold in indicator.thresholds) or None],
-        [None, None, None, None, None]) for indicator in report.indicator_catalog]
-    section["appendices_methodology"]["items"].append(_table("indicator-methodology", "Metodologia e convenzioni degli indicatori", ["Indicatore", "Famiglia", "Metodologia", "Convenzione", "Soglie"], methodology_rows))
+        [indicator.label, indicator.methodology],
+        [None, None]) for indicator in report.indicator_catalog]
+    section["appendices_methodology"]["items"].append(_table("indicator-methodology", "Metodologia e convenzioni degli indicatori", ["Indicatore", "Metodologia"], methodology_rows))
 
     return sections
 

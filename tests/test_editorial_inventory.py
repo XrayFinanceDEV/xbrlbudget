@@ -70,7 +70,9 @@ def test_nested_assumptions_and_large_exact_decimals_are_not_lost():
     forecast = rows["forecast:income_statement:revenue"]
     assert "9007199254740993.123456789012345678" in forecast["cells"]
     scalar = rows["assumption:fatturato:revenue_growth_pct:value"]
-    assert scalar["cells"][-2:] == ["no", None]
+    # M2-02B rilievo 6: la colonna «Indisponibilità» è sparita dalla tabella
+    # base; l'ultima cella è ora «Attiva».
+    assert scalar["cells"][-1] == "no"
 
     # The fixture supplies all six nested structures.  Stable row IDs make the
     # full source data visible to the template and prevent silent omission.

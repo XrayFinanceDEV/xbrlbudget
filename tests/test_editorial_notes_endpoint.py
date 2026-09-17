@@ -116,3 +116,30 @@ def test_real_prepare_save_and_reprepare_preserve_manual_note_and_all_page_cover
     with client.sessions() as db:
         assert db.query(ReportEditorialNote).count() == 1
         assert db.get(BudgetScenario, client.ids["scenario"]).updated_at == timestamp
+
+
+@pytest.mark.parametrize(("panics", "status", "frase"), [
+    (("editorial-amount-does-not-fit",), 422, "importo"),
+    (("editorial-cell-token-does-not-fit", "appendix-index-without-source-rows"), 422, "cella"),
+    (("editorial-note-does-not-fit",), 422, "commento"),
+    ((), 503, "Compilazione del report non riuscita"),
+])
+def test_un_contenuto_che_non_entra_non_si_spaccia_per_un_renderer_guasto(panics, status, frase):
+    """AMBIENTA, 2026-09-17: 503 «Riprovare dopo aver verificato il renderer» mentre il renderer
+    funzionava e a non entrare era un importo da 4.006.984,18 in una colonna da 39,8 pt."""
+    from fastapi import HTTPException
+    from app.api.v1 import editorial_notes
+    from app.renderers.typst.runtime import RendererCompileError
+
+    class _Db:
+        def rollback(self):
+            pass
+
+    def action(db, company_id, scenario_id):
+        raise RendererCompileError(panics=panics)
+
+    with pytest.raises(HTTPException) as error:
+        editorial_notes._run(action, _Db(), 1, 1)
+    assert error.value.status_code == status
+    assert frase in error.value.detail
+    assert "verificato il renderer" not in error.value.detail

@@ -366,7 +366,9 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     section["income_statement_forecast"]["items"].append(_forecast_table("forecast-income-statement", "Conto economico previsto", report.forecast.years, "income_statement"))
     section["balance_sheet_forecast"]["items"].append(_forecast_table("forecast-balance-sheet", "Stato patrimoniale previsto", report.forecast.years, "balance_sheet"))
     section["cashflow_sustainability"]["items"].append(_forecast_table("forecast-cashflow", "Rendiconto finanziario previsto", report.forecast.years, "cashflow"))
-    section["cashflow_sustainability"]["items"].append(_forecast_table("forecast-calculations", "Calcoli previsionali canonici", report.forecast.years, "calculations"))
+    # Niente «Calcoli previsionali canonici»: riversava gli output interni dei calcolatori col codice
+    # tecnico come etichetta, senza unità e senza arrotondamento (73.33333333333333333333333333). Gli
+    # stessi indicatori stanno nel catalogo, con etichetta, unità e metodologia (proprietario, 2026-09-17).
 
     for chart in report.chart_series:
         destination = _CHART_SECTION.get(chart.id, "indicators")

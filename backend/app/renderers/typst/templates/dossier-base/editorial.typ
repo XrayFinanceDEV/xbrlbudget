@@ -51,7 +51,10 @@
   }
   plex(size, fill: fill, display)
 } else {
-  let display = plex(size, fill: fill, display-value(value, unit))
+  // Euro interi nelle tabelle (decisione del proprietario, 2026-09-17): «4.006.984,18» non entra in una
+  // colonna di un periodo su sei (49,7 pt contro 39,8). Si arrotonda al mezzo euro sulla stringa; i
+  // grafici restano al centesimo, i conti restano al centesimo sotto.
+  let display = plex(size, fill: fill, display-value(value, unit, places: if unit == "eur" { 0 } else { none }))
   if measure(display).width > available { panic("editorial-amount-does-not-fit") }
   display
 }

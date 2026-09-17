@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / 'backend/app/renderers/typst/templates/dossier-base'
 
 
-def infrannual_period_report():
+def infrannual_period_report(amounts=('850', '900', '1020', '1200')):
     """Synthetic distinct source bases assembled by the existing canonical service."""
     from app.schemas.final_report import FinalReportModel
     from app.schemas.final_report_v2 import StatementPeriod
@@ -32,8 +32,8 @@ def infrannual_period_report():
     bs = {column.name: Decimal(0) for column in BalanceSheet.__table__.columns if column.name.startswith('sp')}
     ce = {column.name: Decimal(0) for column in IncomeStatement.__table__.columns if column.name.startswith('ce')}
     sources = []
-    for basis, year, months, amount in [('historical', 2025, 12, '850'), ('observed', 2026, 9, '900'),
-                                       ('adjusted', 2026, 9, '1020'), ('closing', 2026, 12, '1200')]:
+    for (basis, year, months), amount in zip([('historical', 2025, 12), ('observed', 2026, 9),
+                                              ('adjusted', 2026, 9), ('closing', 2026, 12)], amounts):
         period = StatementPeriod(id=f'{basis}:{year}', year=year, label=f'{year} · {basis}', basis=basis,
                                  period_months=months, source='synthetic_period_fixture')
         sources.append(DossierSource(period, {**bs, 'sp09_disponibilita_liquide': Decimal(80)},
@@ -162,8 +162,11 @@ def test_overlong_notes_and_overlong_narrative_fail_without_truncation(probe):
 def test_single_unbreakable_manual_note_cannot_escape_its_width(probe):
     prepared = prepare_editorial_report(fixture_report(), probe)
     report = with_notes(prepared, text='W' * 300, provenance='user')
-    with pytest.raises(RendererCompileError):
+    with pytest.raises(RendererCompileError) as error:
         verify_editorial_layout(report, probe)
+    # Il codice del template arriva fino a chi deve spiegarlo: prima finiva in DEVNULL e l'endpoint
+    # diceva «verificare il renderer» anche quando il renderer funzionava (AMBIENTA, 2026-09-17).
+    assert 'editorial-note-does-not-fit' in error.value.panics
     with pytest.raises(RendererCompileError):
         prepare_editorial_report(report, probe)
 
@@ -204,7 +207,10 @@ def test_actual_infrannual_bases_keep_unannualized_values_and_all_appendix_perio
     with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
         text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
         assert 'non annualizza gli importi infrannuali' in text
-        assert '900,00' in text and '1.020,00' in text and '1.200,00' in text
+        # Euro interi nelle tabelle (decisione del proprietario, 2026-09-17): i centesimi non entrano
+        # in una colonna di un periodo su sei o sette, e in un dossier non dicono nulla.
+        assert '900' in text and '1.020' in text and '1.200' in text
+        assert '900,00' not in text and '1.020,00' not in text and '1.200,00' not in text
     assert all(len(statement.periods) == 7 for statement in report.detailed_statements)
 
 
@@ -293,3 +299,21 @@ def test_derived_inventory_obeys_verified_asset_budget_before_staging(probe, lim
                                 probe.compiler.verified_bytes(), b'{"document_state":"draft","grayscale":false}'):
             pytest.fail('oversized derived inventory reached the private job')
     assert not list(tmp_path.iterdir())
+
+
+def test_importi_milionari_al_centesimo_si_impaginano_in_euro_interi(probe):
+    """AMBIENTA, 2026-09-17: «Prepara piano editoriale» rispondeva 503 «verificare il renderer».
+
+    Il renderer funzionava: il template si fermava su ``editorial-amount-does-not-fit``, perché
+    «4.006.984,18» misura 49,7 pt in una colonna di 39,8 pt quando i periodi affiancati sono sei o
+    più. Le fixture usavano importi da tre cifre, un'azienda vera ha milioni al centesimo.
+    """
+    original = infrannual_period_report(('3761087.73', '4006984.18', '4146966.26', '8013968.36'))
+    report = prepare_editorial_report(original, probe)
+    verify_editorial_layout(report, probe)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    assert '4.006.984' in text and '8.013.968' in text
+    assert '4.006.984,18' not in text
+    # Arrotondamento al mezzo euro, non troncamento: 4.146.966,26 → 4.146.966; 3.761.087,73 → 3.761.088.
+    assert '3.761.088' in text

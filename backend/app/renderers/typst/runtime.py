@@ -65,6 +65,26 @@ class RendererCompileError(RendererError):
     category = 'renderer_compile_failed'
     message = 'Compilazione del documento non riuscita.'
 
+    def __init__(self, panics: tuple[str, ...] = ()):
+        super().__init__()
+        #: I codici con cui il template si è fermato di proposito («editorial-amount-does-not-fit»).
+        #: Vuoto quando la compilazione è fallita per altro. Solo i codici, mai il resto dello
+        #: stderr: sono costanti del nostro template e non portano dati del documento.
+        self.panics = tuple(panics)
+
+
+_PANIC_CODE = re.compile(rb'panicked with: "?([a-z0-9][a-z0-9-]{0,80})')
+_STDERR_LIMIT = 64 * 1024
+
+
+def _panic_codes(stderr: bytes) -> tuple[str, ...]:
+    codes: list[str] = []
+    for match in _PANIC_CODE.finditer(stderr[:_STDERR_LIMIT]):
+        code = match.group(1).decode('ascii')
+        if code not in codes:
+            codes.append(code)
+    return tuple(codes)
+
 
 class RendererInvalidPdf(RendererError):
     category = 'renderer_output_invalid'
@@ -271,11 +291,16 @@ class TypstRenderer:
                 output = os.fdopen(fd, 'wb')
             except OSError:
                 raise RendererUnavailable() from None
+        # Un file anonimo, fuori dal job montato nella sandbox: se ne leggono solo i codici dei panic
+        # (`_panic_codes`). Prima andava in DEVNULL, e un importo che non entrava nella colonna
+        # arrivava all'utente come «verificare il renderer» (AMBIENTA, 2026-09-17).
+        errors = tempfile.TemporaryFile()
         try:
             process = subprocess.Popen(wrapped, cwd=job, stdin=subprocess.DEVNULL,
                 stdout=output if output is not None else subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, env={}, start_new_session=True)
+                stderr=errors, env={}, start_new_session=True)
         except OSError:
+            errors.close()
             raise RendererUnavailable() from None
         finally:
             if output is not None:
@@ -288,6 +313,7 @@ class TypstRenderer:
             except ProcessLookupError:
                 pass
             process.wait()
+            errors.close()
             raise RendererTimeout() from None
         except BaseException:
             try:
@@ -295,9 +321,16 @@ class TypstRenderer:
             except ProcessLookupError:
                 pass
             process.wait()
+            errors.close()
             raise
-        if code:
-            raise RendererUnavailable() if unavailable else RendererCompileError()
+        try:
+            if code:
+                if unavailable:
+                    raise RendererUnavailable()
+                errors.seek(0)
+                raise RendererCompileError(_panic_codes(errors.read(_STDERR_LIMIT)))
+        finally:
+            errors.close()
 
     def render(self, report: FinalReportModelV2, *, document_state: Literal['draft', 'final'] = 'draft',
                grayscale: bool = False) -> RenderedPdf:

@@ -13,6 +13,14 @@ from app.services.final_report_service import FinalReportChainConflict, FinalRep
 from app.renderers.typst.runtime import RendererCompileError, RendererInputError, RendererTimeout, RendererUnavailable
 
 router = APIRouter()
+
+#: I controlli con cui il template rifiuta un contenuto che non entra nella pagina, detti in italiano.
+_NON_ENTRA = {
+    "editorial-amount-does-not-fit": "un importo è più largo della sua colonna",
+    "editorial-cell-token-does-not-fit": "il testo di una cella è più largo della sua colonna",
+    "editorial-prose-token-does-not-fit": "una parola del testo è più larga della pagina",
+    "editorial-note-does-not-fit": "un commento di pagina supera lo spazio che ha a disposizione",
+}
 _PATH = "/companies/{company_id}/scenarios/{scenario_id}/final-report/editorial"
 
 
@@ -30,7 +38,15 @@ def _run(action, db, company_id, scenario_id, request=None):
     except RendererInputError:
         db.rollback()
         raise HTTPException(422, "Il contenuto supera i limiti del report.") from None
-    except (RendererUnavailable, RendererCompileError, RendererTimeout):
+    except RendererCompileError as error:
+        db.rollback()
+        # Un contenuto che non entra non è un renderer guasto: lo si dice, con che cosa non entra.
+        contenuti = [_NON_ENTRA[code] for code in error.panics if code in _NON_ENTRA]
+        if contenuti:
+            raise HTTPException(422, "Il report non si impagina: " + "; ".join(dict.fromkeys(contenuti)) + ".") from None
+        dettaglio = f" (codice: {', '.join(error.panics)})" if error.panics else ""
+        raise HTTPException(503, f"Compilazione del report non riuscita{dettaglio}. Riprovare più tardi.") from None
+    except (RendererUnavailable, RendererTimeout):
         db.rollback()
         raise HTTPException(503, "La preparazione del report non è disponibile. Riprovare dopo aver verificato il renderer.") from None
 

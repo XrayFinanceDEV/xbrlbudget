@@ -126,3 +126,14 @@ def test_ambiguous_canonical_periods_or_forecast_lines_are_rejected():
     report.indicator_catalog[1].periods[0] = report.indicator_catalog[1].periods[0].model_copy(update={"label": "Periodo incompatibile"})
     with pytest.raises(ValueError, match="conflicting indicator period"):
         build_inventory(report)
+
+
+@pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
+def test_il_dossier_non_riversa_i_calcoli_grezzi(workflow):
+    """«Calcoli previsionali canonici» portava nel documento gli output interni dei calcolatori:
+    il codice tecnico come etichetta, nessuna unità, 73.33333333333333333333333333. Gli stessi
+    indicatori stanno nel catalogo con etichetta, unità e metodologia (decisione del
+    proprietario, 2026-09-17: toglierla)."""
+    inventory = build_inventory(fixture_report(workflow, [2027]))
+    assert "forecast-calculations" not in {item["id"] for item in _items(inventory)}
+    assert not [row for row in _rows(inventory) if row["id"].startswith("forecast:calculations:")]

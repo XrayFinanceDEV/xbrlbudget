@@ -163,16 +163,18 @@ _CHART_SECTION = {
     "economic_incidence": "income_statement_forecast",
     "financial_charges": "income_statement_forecast",
     "liquidity_debt": "balance_sheet_forecast",
-    "structural_balance": "balance_sheet_forecast",
     "cashflows": "cashflow_sustainability",
-    "working_capital_days": "cashflow_sustainability",
     "coverage": "cashflow_sustainability",
-    "practice_liquidity": "cashflow_sustainability",
-    "practice_net_debt": "cashflow_sustainability",
-    "practice_net_debt_ebitda": "cashflow_sustainability",
-    "practice_dscr_proxy": "cashflow_sustainability",
+    # Le pagine 11-15 della v4 sono tutte «indicatori»: i grafici degli indici
+    # stanno nella sezione indicatori, non distribuiti sulle sezioni di CE/SP/flussi.
+    "structural_balance": "indicators",
+    "working_capital_days": "indicators",
+    "practice_liquidity": "indicators",
     "practice_profitability": "indicators",
     "practice_asset_coverage": "indicators",
+    "practice_net_debt": "indicators",
+    "practice_net_debt_ebitda": "indicators",
+    "practice_dscr_proxy": "indicators",
     "analytical_liquidity": "indicators",
 }
 
@@ -235,6 +237,208 @@ def _period_label(period: Any) -> str:
 def _period_role(period: Any) -> str:
     """Ruolo leggibile di un periodo: l'enumerazione tecnica `basis` non si stampa."""
     return _label(_BASIS_LABELS, period.basis)
+
+
+# ── KPI della pagina tipo (M2-02B) ───────────────────────────────────────────────
+# Ogni valore viene dal modello v2: il template formatta soltanto. Un KPI che il
+# modello non fornisce si omette (mai «n.d.» in colonna), e nessuna somma o
+# scostamento è calcolato qui: conteggi di righe e valori canonici, nulla più.
+
+def _kpi(label: str, value: Any, unit: str | None = None, to: Any = None) -> dict[str, Any] | None:
+    if value is None and to is None:
+        return None
+    return {"label": label, "value": _exact(value), "to": _exact(to), "unit": unit, "series": None}
+
+
+def _kpi_series(label: str, values: list[Any], unit: str | None) -> dict[str, Any] | None:
+    shown = [value for value in values if value is not None]
+    if not shown:
+        return None
+    return {"label": label, "value": None, "to": None, "unit": unit, "series": [_exact(value) for value in shown]}
+
+
+def _indicator_by_id(report: FinalReportModelV2, identifier: str) -> Any:
+    for indicator in report.indicator_catalog:
+        if indicator.id == identifier:
+            return indicator
+    return None
+
+
+def _kpi_indicator(report: FinalReportModelV2, identifier: str, desc: str, mode: str = "last") -> dict[str, Any] | None:
+    indicator = _indicator_by_id(report, identifier)
+    if indicator is None:
+        return None
+    pairs = [(period, value) for period, value in zip(indicator.periods, indicator.values) if value is not None]
+    if not pairs:
+        return None
+    if mode == "series":
+        return _kpi_series(f"{desc} · per periodo", [value for _, value in pairs], indicator.unit)
+    if mode == "first_last" and len(pairs) > 1:
+        (first_period, first), (last_period, last) = pairs[0], pairs[-1]
+        if first == last:
+            return _kpi(f"{desc} · {last_period.year}", last, indicator.unit)
+        return _kpi(f"{desc} · {first_period.year}–{last_period.year}", first, indicator.unit, to=last)
+    period, value = pairs[-1]
+    return _kpi(f"{desc} · {period.year}", value, indicator.unit)
+
+
+def _kpi_forecast(report: FinalReportModelV2, attribute: str, codes: tuple[str, ...], desc: str,
+                  *, which: str = "last") -> dict[str, Any] | None:
+    years = report.forecast.years[-1:] if which == "last" else report.forecast.years[:1]
+    for year in years:
+        for line in getattr(year, attribute):
+            if line.code in codes and line.value is not None:
+                return _kpi(f"{desc} · {year.year}", line.value, "eur")
+    return None
+
+
+def _kpi_closing(report: FinalReportModelV2, codes: tuple[str, ...], desc: str,
+                 attribute: str = "closing_used") -> dict[str, Any] | None:
+    closing = report.infrannual_closing
+    if closing is None:
+        return None
+    for value in closing.values:
+        if value.code in codes and getattr(value, attribute) is not None:
+            return _kpi(f"{desc} · chiusura {closing.period_end.year}", getattr(value, attribute), "eur")
+    return None
+
+
+def _kpi_revenue_now(report: FinalReportModelV2) -> dict[str, Any] | None:
+    """Ricavi di riferimento: la chiusura attesa, altrimenti il primo anno di piano."""
+    return (_kpi_closing(report, ("ce01_ricavi_vendite", "revenue"), "ricavi")
+            or _kpi_forecast(report, "income_statement",
+                             ("revenue", "ce01_ricavi_vendite", "production_value"), "ricavi", which="first"))
+
+
+def _kpi_assumption(report: FinalReportModelV2, field: str, desc: str) -> dict[str, Any] | None:
+    for section in report.assumption_sections:
+        for assumption in section.assumptions:
+            if assumption.field == field:
+                return _kpi_series(f"{desc} · per anno", list(assumption.values), _assumption_unit(field))
+    return None
+
+
+def _kpi_horizon(report: FinalReportModelV2) -> dict[str, Any] | None:
+    years = report.practice.periods.forecast_years
+    if not years:
+        return None
+    if len(years) == 1:
+        return _kpi("orizzonte di piano", "1 anno")
+    return _kpi("orizzonte di piano", f"{len(years)} anni · {years[0]}–{years[-1]}")
+
+
+def _section_kpis(report: FinalReportModelV2, section_id: str) -> list[dict[str, Any]]:
+    builders: dict[str, list[Any]] = {
+        "cover": [
+            _kpi_revenue_now(report),
+            _kpi_indicator(report, "practice.ebitda_margin", "EBITDA margin"),
+            _kpi_indicator(report, "practice.pfn", "PFN"),
+            _kpi_horizon(report),
+        ],
+        "source_data_quality": [
+            _kpi("data del bilancio", report.infrannual_closing.period_end if report.infrannual_closing is not None else None),
+            _kpi("periodo osservato", f"{report.practice.source_scenario.period_months} mesi"
+                 if report.practice.workflow_type == "infrannuale" and report.practice.source_scenario is not None
+                 and report.practice.source_scenario.period_months is not None else None),
+            _kpi_closing(report, ("ce01_ricavi_vendite", "revenue"), "ricavi prima delle rettifiche", attribute="observed"),
+        ],
+        "adjustments": [
+            _kpi("rettifiche economiche", str(len(report.adjustments.entries))),
+            _kpi("effetto netto sul risultato", report.adjustments.net_effect, "eur"),
+        ],
+        "infrannual_closing": [
+            _kpi_closing(report, ("ce01_ricavi_vendite", "revenue"), "ricavi rettificati", attribute="comparable"),
+            _kpi_closing(report, ("ce01_ricavi_vendite", "revenue"), "ricavi di chiusura"),
+        ],
+        "budget_assumptions": [
+            _kpi_horizon(report),
+            _kpi_assumption(report, "revenue_growth_pct", "crescita dei ricavi"),
+            _kpi_indicator(report, "practice.ebitda_margin", "EBITDA margin", mode="series"),
+        ],
+        "diagnostics_actions": [
+            _kpi("stato del documento", _label(_READINESS_LABELS, report.readiness.status)),
+            _kpi("diagnostiche aperte", str(len(report.diagnostics) + len(report.readiness.reasons))),
+        ],
+    }
+    return [kpi for kpi in builders.get(section_id, []) if kpi is not None]
+
+
+def _chart_kpis(report: FinalReportModelV2, chart_id: str) -> list[dict[str, Any]]:
+    """KPI della pagina tipo per grafico canónico (tabella del piano, §M2-02B).
+
+    Ciò che il modello v2 non fornisce (somme di piano, effetti su EBITDA delle
+    rettifiche, incrementi stimati) non è calcolato qui: il KPI si omette e la
+    lacuna è annotata nella ricevuta.
+    """
+    builders: dict[str, list[Any]] = {
+        "income_results": [
+            _kpi_revenue_now(report),
+            _kpi_indicator(report, "practice.ebitda_margin", "EBITDA margin", mode="first_last"),
+            _kpi_indicator(report, "practice.pfn", "PFN"),
+            _kpi_forecast(report, "balance_sheet", ("cash", "sp09_disponibilita_liquide"), "cassa"),
+        ],
+        "margins": [_kpi_indicator(report, "practice.ebitda_margin", "EBITDA margin")],
+        "economic_incidence": [
+            _kpi_forecast(report, "income_statement", ("revenue", "ce01_ricavi_vendite", "production_value"), "ricavi"),
+            _kpi_forecast(report, "income_statement", ("ebitda",), "EBITDA"),
+            _kpi_indicator(report, "practice.ebitda_margin", "margine EBITDA"),
+            _kpi_forecast(report, "income_statement", ("net_profit", "profit_after_tax"), "utile netto"),
+        ],
+        "financial_charges": [
+            _kpi_indicator(report, "practice.of_mol", "Oneri finanziari / MOL"),
+            _kpi_indicator(report, "practice.of_revenue", "Oneri finanziari / ricavi"),
+        ],
+        "liquidity_debt": [
+            _kpi_forecast(report, "balance_sheet", ("total_assets",), "totale attivo"),
+            _kpi_forecast(report, "balance_sheet", ("net_equity", "sp11_capitale+sp12_riserve+sp13_utile_perdita"), "patrimonio netto"),
+            _kpi_forecast(report, "balance_sheet", ("fixed_assets",), "immobilizzazioni nette"),
+            _kpi_forecast(report, "balance_sheet", ("financial_debt",), "debiti finanziari"),
+        ],
+        "cashflows": [
+            _kpi_forecast(report, "cashflow", ("operating", "operating.total_operating_cashflow"), "flussi operativi"),
+            _kpi_forecast(report, "cashflow", ("investing", "investing.total_investing_cashflow"), "investimenti"),
+            _kpi_forecast(report, "cashflow", ("financing", "financing.total_financing_cashflow"), "rimborsi"),
+            _kpi_forecast(report, "cashflow", ("cash_change", "cash_reconciliation.total_cashflow"), "variazione cassa"),
+        ],
+        "coverage": [_kpi_indicator(report, "practice.dscr", "DSCR proxy")],
+        "structural_balance": [
+            _kpi_indicator(report, "practice.ccn", "CCN"),
+            _kpi_indicator(report, "practice.mt", "margine di tesoreria"),
+            _kpi_indicator(report, "practice.ms", "margine di struttura"),
+        ],
+        "practice_liquidity": [
+            _kpi_indicator(report, "practice.current_ratio", "liquidità corrente"),
+            _kpi_indicator(report, "practice.mt", "margine di tesoreria"),
+            _kpi_indicator(report, "practice.ms", "margine di struttura"),
+        ],
+        "practice_profitability": [
+            _kpi_indicator(report, "practice.roi", "ROI"),
+            _kpi_indicator(report, "practice.roe", "ROE"),
+        ],
+        "practice_asset_coverage": [
+            _kpi_indicator(report, "practice.indipendenza", "indipendenza finanziaria"),
+            _kpi_indicator(report, "practice.copertura_immob", "copertura immobilizzazioni"),
+            _kpi_indicator(report, "practice.pfn_ebitda", "PFN / EBITDA"),
+        ],
+        "practice_net_debt": [
+            _kpi_indicator(report, "practice.pfn", "PFN", mode="first_last"),
+            _kpi_indicator(report, "practice.pfn_ebitda", "PFN / EBITDA", mode="first_last"),
+            _kpi_indicator(report, "practice.ccn", "circolante operativo"),
+        ],
+        "practice_net_debt_ebitda": [_kpi_indicator(report, "practice.pfn_ebitda", "PFN / EBITDA")],
+        "practice_dscr_proxy": [_kpi_indicator(report, "practice.dscr", "DSCR proxy")],
+        "working_capital_days": [
+            _kpi_indicator(report, "analytical.activity.receivables_turnover_days", "giorni di credito"),
+            _kpi_indicator(report, "analytical.activity.inventory_turnover_days", "giorni di magazzino"),
+            _kpi_indicator(report, "analytical.activity.payables_turnover_days", "giorni di debito"),
+        ],
+        "analytical_liquidity": [
+            _kpi_indicator(report, "analytical.liquidity.current_ratio", "Current Ratio"),
+            _kpi_indicator(report, "analytical.liquidity.quick_ratio", "Quick Ratio"),
+            _kpi_indicator(report, "analytical.liquidity.acid_test", "Acid Test"),
+        ],
+    }
+    return [kpi for kpi in builders.get(chart_id, []) if kpi is not None]
 
 
 def _value_columns(periods: list[Any]) -> list[str]:
@@ -508,7 +712,10 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
 
     for chart in report.chart_series:
         destination = _CHART_SECTION.get(chart.id, "indicators")
-        section[destination]["items"].append({"id": f"chart:{chart.id}", "kind": "chart", "title": chart.title, "chart_id": chart.id})
+        section[destination]["items"].append({"id": f"chart:{chart.id}", "kind": "chart", "title": chart.title,
+                                              "chart_id": chart.id, "kpis": _chart_kpis(report, chart.id)})
+    for value in sections:
+        value["kpis"] = [] if any(item["kind"] == "chart" for item in value["items"]) else _section_kpis(report, value["id"])
 
     indicator_periods: OrderedDict[str, Any] = OrderedDict()
     for indicator in report.indicator_catalog:

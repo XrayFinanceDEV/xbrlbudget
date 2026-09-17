@@ -12,6 +12,8 @@
 #let note-font = 9pt
 #let layout-version = "dossier-final-1"
 
+#import "chart-format.typ": kpi-text
+
 // Typst exposes these static files under their legacy family names.
 #let plex(..arguments) = {
   let weight = arguments.named().at("weight", default: 400)
@@ -21,6 +23,21 @@
 }
 
 #let marker(value) = context metadata(value + (page: here().page()))
+
+// Colonna KPI della pagina tipo (M2-02B): la usano la copertina e le sezioni.
+// I valori vengono dall'inventario, cioé dal modello v2; qui solo formattazione.
+#let kpi-strip(kpis) = block(width: body-width, breakable: false)[
+  #line(length: 100%, stroke: 0.6pt + rule)
+  #v(3mm)
+  #grid(columns: (1fr,) * kpis.len(), column-gutter: 6mm,
+    ..kpis.map(kpi => block[
+      #plex(15pt, weight: 600, fill: navy, kpi-text(kpi))
+      #v(1.2mm)
+      #text(7.4pt, fill: muted, kpi.label)
+    ]))
+  #v(3mm)
+  #line(length: 100%, stroke: 0.4pt + rule)
+]
 
 #let note-slot() = block(width: note-width, height: note-height)[
   #line(length: 100%, stroke: 0.7pt + rule)
@@ -76,7 +93,7 @@
     #plex(company-size, weight: 500, fill: white, report.company.name)
 ]
 
-#let cover(report) = {
+#let cover(report, kpis: ()) = {
   marker((kind: "content", content_id: "cover"))
   context {
     let chosen = none
@@ -116,6 +133,10 @@
     plex(7pt, fill: muted)[SCENARIO DI ORIGINE]
     v(1mm)
     plex(9pt, weight: 500, source)
+  }
+  if kpis.len() > 0 {
+    v(6mm)
+    kpi-strip(kpis)
   }
   v(6mm)
   plex(7.4pt, fill: blue, weight: 600, tracking: 0.6pt)[CONTENUTI DEL DOSSIER]

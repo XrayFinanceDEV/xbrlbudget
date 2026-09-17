@@ -1,5 +1,5 @@
 // Resolved composition used to freeze the canonical dossier's physical pages.
-#import "base.typ": dossier, cover, plex, marker, body-width, navy, blue, ink, muted, rule, gray-mode
+#import "base.typ": dossier, cover, plex, marker, body-width, navy, blue, ink, muted, rule, gray-mode, kpi-strip
 #import "charts.typ": chart-component, value-table
 #import "chart-format.typ": display-value, unit-label
 #let report = json("model.json")
@@ -251,16 +251,29 @@
       safe-prose(8pt, fill: muted, section.subtitle)
     }
     v(5mm)
+    if "kpis" in section and section.kpis.len() > 0 {
+      kpi-strip(section.kpis)
+      v(5mm)
+    }
   }
-  for item in section.items {
-    if item.kind == "cover" { cover(report) }
+  for (index, item) in section.items.enumerate() {
+    if item.kind == "cover" { cover(report, kpis: if "kpis" in section { section.kpis } else { () }) }
     else if item.kind == "table" {
       block(sticky: true, heading(item))
       data-table(section, item)
       v(5mm)
     } else if item.kind == "chart" {
       let chart = report.chart_series.find(c => c.id == item.chart_id)
+      // Il grafico apre una pagina propria solo se non è già in testa alla
+      // sezione (la interruzione di sezione c'è già stata): una weak rotture
+      // dopo l'intestazione lascerebbe una pagina sola intestazione, senza
+      // alcun marcatore — e il piano editoriale non ammette pagine scoperte.
+      if index > 0 { pagebreak(weak: true) }
       let content = [
+        #if "kpis" in item and item.kpis.len() > 0 {
+          kpi-strip(item.kpis)
+          v(4mm)
+        }
         #safe-prose(14pt, weight: 600, fill: navy, item.title)
         #v(3mm)
         #chart-component(chart, gray: options.grayscale, indicators: report.indicator_catalog)

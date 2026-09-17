@@ -218,8 +218,12 @@ def test_actual_infrannual_bases_keep_unannualized_values_and_all_appendix_perio
 def test_changed_narrative_reflow_invalidates_existing_page_bindings(probe):
     report = prepare_editorial_report(fixture_report(), probe)
     changed = report.model_copy(deep=True)
-    # Add enough within-capacity text to move subsequent items across real pages.
-    changed.narrative[0].text = 'Il piano richiede una lettura dei valori e delle ipotesi. ' * 65
+    # I grafici canonici occupano ormai una pagina propria (M2-02B): un testo
+    # entro capacità non sposta più nulla — il piano resta valido, ed è ciò che
+    # si vuole. Il reflow che conta è quello che eccede la pagina fissa: il
+    # template paniccia e la verifica deve rifiutare il drift, non riassociare
+    # le note.
+    changed.narrative[0].text = 'Il piano richiede una lettura dei valori e delle ipotesi. ' * 130
     changed = signed(changed)
     assert changed.source_hash == report.source_hash
     with pytest.raises((ValueError, RendererCompileError)):
@@ -335,3 +339,39 @@ def test_nessun_metadato_tecnico_e_nessun_titolo_inglese_nel_document(probe, wor
     # Occhiello e titolo neutro in italiano per ogni sezione resa.
     assert 'SINTESI · ' in text and 'Sintesi esecutiva' in text
     assert 'PIANO E RISULTATI · ' in text
+
+
+@pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
+def test_colonna_kpi_letta_al_centesimo_dal_modello_col_periodo_giusto(probe, workflow):
+    """M2-02B difetto 4: la colonna KPI della pagina tipo legge valori dal
+    modello v2, non reinventa nulla. Ogni KPI è controllato riga per riga
+    contro il Decimal da cui è preso (l'anno sbagliato fa fallire il test), e
+    le etichette dei periodi resa sono quelle dell'ultimo anno di piano."""
+    report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
+    inventory = build_inventory(report)
+    last = report.forecast.years[-1]
+    checks = {'cassa': ('balance_sheet', 'cash'), 'ricavi': ('income_statement', 'revenue')}
+    rows = {line.code for line in last.balance_sheet + last.income_statement if line.value is not None}
+    checked = 0
+    for section in inventory:
+        for item in section['items']:
+            for kpi in item.get('kpis') or ():
+                for prefix, (attribute, code) in checks.items():
+                    if kpi['label'] == f"{prefix} · {last.year}":
+                        value = next(line.value for line in getattr(last, attribute) if line.code == code)
+                        assert kpi['value'] == format(value, 'f'), kpi
+                        checked += 1
+    if not {'cash', 'revenue'} <= rows:
+        pytest.skip("fixture senza righe di previsione: niente KPI da allineare")
+    assert checked >= len(checks)
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
+    for label in ('EBITDA margin ·', 'PFN ·', 'orizzonte di piano', 'cassa · 2029', 'ricavi ·'):
+        assert label in text, label
+    # Un KPI che il modello non fornisce è omesso, mai un «n.d.» in colonna.
+    for section in inventory:
+        for kpi in section.get('kpis') or ():
+            assert kpi['value'] is not None or kpi['series'] or kpi['to'] is not None, kpi
+        for item in section['items']:
+            for kpi in item.get('kpis') or ():
+                assert kpi['value'] is not None or kpi['series'] or kpi['to'] is not None, kpi

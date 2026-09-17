@@ -208,6 +208,21 @@ def _table(identifier: str, title: str, columns: list[str], rows: list[dict[str,
     return {"id": identifier, "kind": "table", "title": title, "columns": columns, "rows": rows}
 
 
+# Numero massimo di colonne di periodo affiancate perché la tabella resti
+# leggibile in verticale (M2-02B difetto 5). Oltre, `editorial.typ` divide la
+# tabella in parti per gruppi di periodi e `expected_content_inventory` dichiara
+# i marcatori aggiuntivi «{riga}#parte:N»: ogni parte deve poter dimostrare la
+# propria copertura di pagina, e le parti non sono mai orizzontali.
+PERIOD_PART_SIZE = 6
+INDICATOR_PART_SIZE = 4
+
+
+def _periodic_table(item: dict[str, Any], *, value_start: int, part_size: int) -> dict[str, Any]:
+    item["value_start"] = value_start
+    item["part_size"] = part_size
+    return item
+
+
 def _text(identifier: str, title: str, text: str) -> dict[str, Any]:
     return {"id": identifier, "kind": "text", "title": title, "text": text or "n.d.: testo non disponibile"}
 
@@ -328,13 +343,21 @@ def _assumption_rows(section: Any, period_labels: list[str]) -> list[dict[str, A
     return rows
 
 
-def _assumption_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
+def _assumption_items(report: FinalReportModelV2) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Base (matrice per anni) nel corpo, dettagli annidati in Allegato E.
+
+    La v4 mostra a pagina 7 la griglia compatta dei driver; gli elenchi di
+    finanziamenti, pregressi, override e differenze restano negli Allegati,
+    dove ogni campo è una riga atomica. Nessuna riga è duplicata: i marcatori
+    stanno una sola volta, nella tabella che li espone.
+    """
     years = list(report.practice.periods.forecast_years)
     scalar_width = max((len(assumption.values) for section in report.assumption_sections
                         for assumption in section.assumptions), default=len(years))
     period_labels = [str(year) for year in years]
     period_labels.extend(f"Periodo non associato {index}" for index in range(1, scalar_width - len(period_labels) + 1))
-    items: list[dict[str, Any]] = []
+    base_items: list[dict[str, Any]] = []
+    detail_items: list[dict[str, Any]] = []
     for section in report.assumption_sections:
         base_rows: list[dict[str, Any]] = []
         detail_rows: list[dict[str, Any]] = []
@@ -345,7 +368,7 @@ def _assumption_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
             else:
                 detail_rows.append(row)
         base_columns = ["Parametro", *period_labels, "Provenienza", "Attiva", "Indisponibilità"]
-        items.append(_table(f"assumptions:{section.key}", section.title, base_columns, base_rows))
+        base_items.append(_table(f"assumptions:{section.key}", section.title, base_columns, base_rows))
         # Detail records remain atomic: a field never becomes a compound string
         # carrying an ambiguous numeric unit.  This also leaves every nested
         # source field independently addressable by the page planner.
@@ -367,8 +390,8 @@ def _assumption_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
                                    for index, value in enumerate(cells[1:], start=1))
                 for index, (label, value, unit) in enumerate(zip(labels, cells[1:], units[1:]), start=1):
                     normalized.append(_row(f"{row['id']}:field:{index}", [f"{cells[0]} — {label}", value], [None, unit]))
-            items.append(_table(f"assumptions:{section.key}:details", f"{section.title} — dettagli", ["Voce", "Valore"], normalized))
-    return items
+            detail_items.append(_table(f"assumptions:{section.key}:details", f"{section.title} — dettagli", ["Voce", "Valore"], normalized))
+    return base_items, detail_items
 
 
 def _statement_table(identifier: str, title: str, statement: Any, prefix: str, *, context: bool) -> dict[str, Any]:
@@ -389,7 +412,7 @@ def _statement_table(identifier: str, title: str, statement: Any, prefix: str, *
             [row.label, *values, _missing("; ".join(reasons)) if reasons else None],
             [None, *value_units, None],
         ))
-    return _table(identifier, title, columns, rows)
+    return _periodic_table(_table(identifier, title, columns, rows), value_start=1, part_size=PERIOD_PART_SIZE)
 
 
 def _forecast_table(identifier: str, title: str, years: list[Any], attribute: str) -> dict[str, Any]:
@@ -409,7 +432,7 @@ def _forecast_table(identifier: str, title: str, years: list[Any], attribute: st
         units = [None, *("eur" if attribute != "calculations" else None,) * len(values), None]
         rows.append(_row(f"forecast:{attribute}:{code}", [label, *values,
                          _missing("riga non presente nel forecast canonico per " + ", ".join(missing)) if missing else None], units))
-    return _table(identifier, title, columns, rows)
+    return _periodic_table(_table(identifier, title, columns, rows), value_start=1, part_size=PERIOD_PART_SIZE)
 
 
 def _comparison_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
@@ -425,7 +448,7 @@ def _comparison_items(report: FinalReportModelV2) -> list[dict[str, Any]]:
                 _missing("; ".join(reasons)) if reasons else None],
                 [None, *("eur",) * len(row.values), None],
             ))
-        items.append(_table(f"comparison:{statement.id}", f"Confronto dei periodi disponibili — {statement.title}", columns, comparison_rows))
+        items.append(_periodic_table(_table(f"comparison:{statement.id}", f"Confronto dei periodi disponibili — {statement.title}", columns, comparison_rows), value_start=1, part_size=PERIOD_PART_SIZE))
     return items
 
 
@@ -457,7 +480,7 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
 
     adjustment_rows = [_row(f"adjustment:{entry.id}", [entry.edited_label, entry.edit_delta, entry.counterpart_label, entry.counterpart_delta, entry.explanation, entry.created_at, _missing("spiegazione non fornita") if entry.explanation is None else None], [None, "eur", None, "eur", None, None, None]) for entry in report.adjustments.entries]
     adjustment_rows.append(_row("adjustment:net-effect", ["Effetto netto sul risultato", report.adjustments.net_effect, f"Rettifiche confermate: {'sì' if report.adjustments.confirmed else 'no'}", None, None, None, None], [None, "eur", None, None, None, None, None]))
-    section["adjustments"]["items"].append(_table("adjustments-register", "Registro delle rettifiche", ["Voce rettificata", "Delta", "Contropartita", "Delta contropartita", "Motivazione", "Data", "Nota"], adjustment_rows))
+    adjustments_register = _table("adjustments-register", "Allegato D — Registro delle rettifiche", ["Voce rettificata", "Delta", "Contropartita", "Delta contropartita", "Motivazione", "Data", "Nota"], adjustment_rows)
     if report.practice.workflow_type == "infrannuale":
         section["adjustments"]["items"].append(_text("period-comparability", "Comparabilità dei periodi",
             "Osservato e rettificato mantengono gli importi del periodo infrannuale; "
@@ -471,10 +494,11 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
         for value in report.infrannual_closing.values:
             absent = [_label(_CLOSING_STATE_LABELS, name) for name in ("observed", "comparable", "automatic", "override") if getattr(value, name) is None]
             closing_rows.append(_row(f"infrannual-closing:{value.code}", [value.label, value.observed, value.comparable, value.automatic, value.override, value.closing_used, _missing("valore " + "; ".join(absent) + " non dichiarato") if absent else None], [None, "eur", "eur", "eur", "eur", "eur", None]))
-        section["infrannual_closing"]["items"].append(_table("infrannual-closing-values", f"Valori di chiusura al {report.infrannual_closing.period_end}", ["Voce", "Osservato", "Comparabile", "Automatico", "Override", "Chiusura utilizzata", "Indisponibilità"], closing_rows))
+        section["infrannual_closing"]["items"].append(_periodic_table(_table("infrannual-closing-values", f"Valori di chiusura al {report.infrannual_closing.period_end}", ["Voce", "Osservato", "Comparabile", "Automatico", "Override", "Chiusura utilizzata", "Indisponibilità"], closing_rows), value_start=1, part_size=PERIOD_PART_SIZE))
         alerts = report.infrannual_closing.extra_accounting_alerts
         section["infrannual_closing"]["items"].append(_table("infrannual-closing-alerts", "Alert contabili extra", ["Alert", "Attivo"], [_row(f"infrannual-alert:{name}", [_label(_ALERT_LABELS, name), getattr(alerts, name)], [None, None]) for name in alerts.model_fields]))
-    section["budget_assumptions"]["items"].extend(_assumption_items(report))
+    assumption_base, assumption_details = _assumption_items(report)
+    section["budget_assumptions"]["items"].extend(assumption_base)
     section["income_statement_forecast"]["items"].append(_forecast_table("forecast-income-statement", "Conto economico previsto", report.forecast.years, "income_statement"))
     section["balance_sheet_forecast"]["items"].append(_forecast_table("forecast-balance-sheet", "Stato patrimoniale previsto", report.forecast.years, "balance_sheet"))
     section["cashflow_sustainability"]["items"].append(_forecast_table("forecast-cashflow", "Rendiconto finanziario previsto", report.forecast.years, "cashflow"))
@@ -515,18 +539,25 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
 
     practice_rows = [_indicator_row(indicator) for indicator in report.indicator_catalog if indicator.id.startswith("practice.")]
     analytical_rows = [_indicator_row(indicator) for indicator in report.indicator_catalog if not indicator.id.startswith("practice.")]
+    indicator_tables: list[dict[str, Any]] = []
     if practice_rows:
-        section["indicators"]["items"].append(_table("indicator-practice-table", "Tabella F — Indicatori della pratica", indicator_columns, practice_rows))
+        indicator_tables.append(_periodic_table(_table("indicator-practice-table", "Tabella F — Indicatori della pratica", indicator_columns, practice_rows), value_start=2, part_size=INDICATOR_PART_SIZE))
     if analytical_rows:
-        section["indicators"]["items"].append(_table("indicator-analytical-table", "Tabella G — Indici del report analitico", indicator_columns, analytical_rows))
+        indicator_tables.append(_periodic_table(_table("indicator-analytical-table", "Tabella G — Indici del report analitico", indicator_columns, analytical_rows), value_start=2, part_size=INDICATOR_PART_SIZE))
 
     diagnostics = list(report.diagnostics) + list(report.readiness.reasons)
     diagnostic_rows = [_row(f"diagnostic:{index}:{item.code}", [item.code, _label(_SEVERITY_LABELS, item.severity), _label(_SECTION_TITLES, item.section), item.message], [None] * 4) for index, item in enumerate(diagnostics)]
     section["diagnostics_actions"]["items"].append(_table("diagnostics", f"Diagnostica (stato: {_label(_READINESS_LABELS, report.readiness.status)})", ["Codice", "Severità", "Sezione", "Messaggio"], diagnostic_rows))
 
     section["appendices_methodology"]["items"].append(_text("appendix-index", "Indice delle appendici", "Indice delle appendici e riferimenti di pagina da compilare dall'impaginazione Typst."))
-    for statement in report.detailed_statements:
-        section["appendices_methodology"]["items"].append(_statement_table(f"appendix:{statement.id}", statement.title, statement, "row", context=True))
+    for letter, statement in zip("ABC", report.detailed_statements):
+        section["appendices_methodology"]["items"].append(
+            _statement_table(f"appendix:{statement.id}", f"Allegato {letter} — {statement.title}", statement, "row", context=True))
+    # Allegati in ordine v4: indice, A/B/C dei prospetti, D registro rettifiche,
+    # E dettagli delle ipotesi, F/G indicatori, metodologia e convenzioni.
+    section["appendices_methodology"]["items"].append(adjustments_register)
+    section["appendices_methodology"]["items"].extend(assumption_details)
+    section["appendices_methodology"]["items"].extend(indicator_tables)
     methodology_rows = [_row(
         f"indicator-method:{indicator.id}",
         [indicator.label, indicator.family, indicator.methodology, indicator.convention,
@@ -550,6 +581,10 @@ def expected_content_inventory(report: FinalReportModelV2) -> OrderedDict[str, s
                 content_ids = [item["id"]]
             else:
                 content_ids = [f"heading:{item['id']}", *(row["id"] for row in item["rows"])]
+                if "value_start" in item:
+                    total = len(item["columns"]) - item["value_start"] - 1
+                    for part in range(2, (total + item["part_size"] - 1) // item["part_size"] + 1):
+                        content_ids.extend(f"{row['id']}#parte:{part}" for row in item["rows"])
             for content_id in content_ids:
                 if content_id in expected:
                     raise ValueError(f"duplicate editorial content id: {content_id}")

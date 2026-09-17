@@ -65,15 +65,34 @@
 ]
 #let appendix-index() = context {
   let values = query(metadata).map(node => node.value)
-  for statement in report.detailed_statements {
+  let page-of(id) = {
+    let hits = values.filter(v => v.kind == "content" and v.content_id == id)
+    if hits.len() == 0 { none } else { hits.first().page }
+  }
+  for (letter, statement) in ("A", "B", "C").zip(report.detailed_statements) {
     let rows = values.filter(value => value.kind == "content" and
       value.content_id.starts-with("row:" + statement.id + ":"))
     if rows.len() == 0 { panic("appendix-index-without-source-rows") }
     let first = rows.first().page
     let last = rows.last().page
-    plex(9pt, statement.title + " · pagina " + str(first) +
+    plex(9pt, "Allegato " + letter + " · " + statement.title + " · pagina " + str(first) +
       if first == last { "" } else { "–" + str(last) })
     linebreak()
+  }
+  // Voci extra dell'indice: registro, matrice dei dettagli, tabelle F/G e
+  // metodologia emergono dall'inventario, non da un elenco a mano.
+  for section in inventory {
+    if section.id == "appendices_methodology" {
+      for item in section.items {
+        if item.kind == "table" and not item.id.starts-with("appendix:") {
+          let page = page-of("heading:" + item.id)
+          if page != none {
+            plex(9pt, item.title + " · pagina " + str(page))
+            linebreak()
+          }
+        }
+      }
+    }
   }
 }
 #let repeated-table-title(section, item, count) = table.cell(
@@ -91,59 +110,72 @@
   // cade nel ramo impilato, che ha spazio di wraping, non si ferma.
   let count = item.columns.len()
   let value-count = count - value-start - 1
+  let per = calc.min(value-count, 6)
   let label-width = if value-count >= 6 { 65mm } else { 78mm }
-  let value-width = (body-width - label-width) / value-count
+  let value-width = (body-width - label-width) / per
   item.rows.all(row => range(value-start, count - 1).all(i =>
     row.cells.at(i) == none or row.units.at(i) == none or
     measure(plex(8pt, display-value(row.cells.at(i), row.units.at(i),
       places: if row.units.at(i) == "eur" { 0 } else { none }))).width <= value-width - 6pt))
 }
-#let compact-period-table(section, item, value-start) = context {
+#let compact-period-table(section, item, value-start, part-size) = context {
   let count = item.columns.len()
-  let value-count = count - value-start - 1
-  let label-width = if value-count >= 6 { 65mm } else { 78mm }
-  let value-width = (body-width - label-width) / value-count
-  let cells = ()
-  for row in item.rows {
-    cells.push(table.cell(breakable: false)[
-      #marker((kind: "content", content_id: row.id))
-      #if value-start == 2 {
-        cell(row.cells.first(), none, available: label-width - 6pt, size: 6.5pt, fill: muted)
-        linebreak()
-        cell(row.cells.at(1), row.units.at(1), available: label-width - 6pt)
-      } else {
-        cell(row.cells.first(), row.units.first(), available: label-width - 6pt)
+  let total = count - value-start - 1
+  let per = calc.min(total, part-size)
+  let label-width = if total >= 6 { 65mm } else { 78mm }
+  let value-width = (body-width - label-width) / per
+  // Con più di `part-size` periodi la tabella si divide in parti verticali per
+  // gruppi di periodi (M2-02B difetto 5: «mai in orizzontale»): le etichette
+  // restano una, i valori girano in blocchi con intestazione ripetuta. Ogni
+  // parte porta i propri marcatori «{riga}#parte:N» — dichiarati in Python da
+  // `expected_content_inventory` — così nessuna pagina delle parti resta senza
+  // copertura e il piano editoriale può vincolare le note anche a esse.
+  for (part, offset) in range(0, total, step: per).enumerate() {
+    let from = value-start + offset
+    let to = calc.min(from + per, count - 1)
+    let cells = ()
+    for row in item.rows {
+      let marker-id = if part == 0 { row.id } else { row.id + "#parte:" + str(part + 1) }
+      cells.push(table.cell(breakable: false)[
+        #marker((kind: "content", content_id: marker-id))
+        #if value-start == 2 {
+          cell(row.cells.first(), none, available: label-width - 6pt, size: 6.5pt, fill: muted)
+          linebreak()
+          cell(row.cells.at(1), row.units.at(1), available: label-width - 6pt)
+        } else {
+          cell(row.cells.first(), row.units.first(), available: label-width - 6pt)
+        }
+        #let note = row.cells.last()
+        #if part == 0 and note != none and note != "" {
+          linebreak()
+          cell(note, none, available: label-width - 6pt, size: 6.3pt, fill: muted)
+        }
+      ])
+      for index in range(from, to) {
+        cells.push(table.cell(breakable: false, align: right,
+          cell(row.cells.at(index), row.units.at(index), available: value-width - 6pt)))
       }
-      #let note = row.cells.last()
-      #if note != none and note != "" {
-        linebreak()
-        cell(note, none, available: label-width - 6pt, size: 6.3pt, fill: muted)
-      }
-    ])
-    for index in range(value-start, count - 1) {
-      cells.push(table.cell(breakable: false, align: right,
-        cell(row.cells.at(index), row.units.at(index), available: value-width - 6pt)))
     }
+    table(columns: (label-width, ..((value-width,) * (to - from))), inset: (x: 3pt, y: 2.5pt),
+      stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
+      table.header(
+        repeated-table-title(section, item, to - from + 1),
+        table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
+          plex(7.2pt, weight: 600, fill: navy, item.columns.at(if value-start == 2 { 1 } else { 0 }))),
+        ..item.columns.slice(from, to).map(c => table.cell(
+          fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") }, align: right,
+          plex(7pt, weight: 600, fill: navy, c)))),
+      ..cells)
+    v(5mm)
   }
-  table(columns: (label-width, ..((value-width,) * value-count)), inset: (x: 3pt, y: 2.5pt),
-    stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
-    table.header(
-      repeated-table-title(section, item, value-count + 1),
-      table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-        plex(7.2pt, weight: 600, fill: navy, item.columns.at(if value-start == 2 { 1 } else { 0 }))),
-      ..item.columns.slice(value-start, count - 1).map(c => table.cell(
-        fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") }, align: right,
-        plex(7pt, weight: 600, fill: navy, c)))),
-    ..cells)
 }
 #let data-table(section, item) = context {
   let count = item.columns.len()
-  let periodic-start = if item.id.starts-with("appendix:") { 1 }
-    else if item.id in ("comparison:income_statement", "comparison:balance_sheet", "comparison:cashflow",
-      "forecast-income-statement", "forecast-balance-sheet", "forecast-cashflow",
-      "infrannual-closing-values") { 1 }
-    else if item.id in ("indicator-practice-table", "indicator-analytical-table") { 2 }
-    else { none }
+  // La periodicità è dichiarata dall'inventario (`value_start`/`part_size`),
+  // non indovinata dall'ID: Python e Typst devono vedere la stessa regola,
+  // perché `expected_content_inventory` pianifica i marcatori delle parti.
+  let periodic-start = if "value_start" in item { item.value_start } else { none }
+  let part-size = if "part_size" in item { item.part_size } else { 6 }
   let label-width = if count <= 3 { 65mm } else { 60mm }
   let column-width = (body-width - label-width) / calc.max(1, count - 1)
   let token-ok = (value, width) => value == none or value.split(regex("\\s+")).all(word =>
@@ -155,8 +187,10 @@
     token-ok(r.cells.at(0), label-width - 6pt) and
     r.cells.enumerate().all(pair => pair.at(0) == 0 or
       cell-ok(pair.at(1), r.units.at(pair.at(0)), column-width - 6pt)))
-  if periodic-start != none and count - periodic-start - 1 > 0 and compact-fits(item, periodic-start) {
-    compact-period-table(section, item, periodic-start)
+  if periodic-start != none and count - periodic-start - 1 > part-size {
+    compact-period-table(section, item, periodic-start, part-size)
+  } else if periodic-start != none and count - periodic-start - 1 > 0 and compact-fits(item, periodic-start) {
+    compact-period-table(section, item, periodic-start, count - periodic-start - 1)
   } else if fits {
     let cells = ()
     for row in item.rows {

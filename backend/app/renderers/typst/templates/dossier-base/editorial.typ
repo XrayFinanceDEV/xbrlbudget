@@ -267,9 +267,10 @@
       // Rilievo 1: la pagina tipo è UNA pagina. Nessun interblocco fra
       // intestazione di sezione e primo grafico; da lì in poi ogni grafico
       // occupa una fascia propria: colonna KPI verticale a sinistra (55 mm),
-      // grafico a destra (118 mm), come la v4. I valori esatti restano nelle
-      // tabelle di prospetto e nelle appendici: sotto il grafico niente
-      // doppia tabella, che nella v4 non c'è.
+      // grafico a destra (118 mm), come la v4. La tabella di sintesi resta,
+      // a tutta larghezza, sotto la fascia KPI+grafico — è lì anche nella v4
+      // (pag. 8 «Conto economico · € migliaia», pag. 11 «Indicatori del
+      // piano»): a mancare era solo l'interruzione di pagina, non la tabella.
       let has-kpi = "kpis" in item and item.kpis.len() > 0
       if index > 0 { pagebreak(weak: true) }
       let figure = [
@@ -282,6 +283,8 @@
         } else {
           chart-component(chart, gray: options.grayscale, indicators: report.indicator_catalog)
         }
+        #v(4mm)
+        #value-table(chart, places: if chart.unit == "eur" { 0 })
       ]
       context {
         if measure(block(width: body-width, figure)).height > 220mm {

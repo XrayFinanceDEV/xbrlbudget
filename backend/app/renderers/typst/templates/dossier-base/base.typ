@@ -74,13 +74,22 @@
     measure(plex(size, weight: 600, word)).width <= rail-width - 6pt)
   let chosen = if fits(15pt) { 15pt } else if fits(12pt) { 12pt } else if fits(10pt) { 10pt }
     else { panic("editorial-kpi-does-not-fit") }
-  block(width: rail-width, breakable: false)[
+  // `spacing: 0pt`: fra un riquadro e l'altro comanda la spaziatura scritta
+  // qui, non quella di blocco predefinita — che sommata al respiro interno
+  // portava ogni voce a 78 pt contro i ~51 della v4, e la colonna sembrava
+  // «numeri grossi ma sparsi» (rilievo del proprietario, 18/09).
+  block(width: rail-width, breakable: false, spacing: 0pt)[
     #line(length: 100%, stroke: 0.7pt + rule)
-    #v(7pt)
-    #plex(chosen, weight: 600, fill: navy, body)
-    #v(2pt)
-    #plex(7.8pt, fill: muted, kpi.label)
-    #v(7pt)
+    #v(9pt)
+    // Valore ed etichetta sono UN capoverso solo, separati da un a-capo: come
+    // due capoversi distinti Typst interpone la propria spaziatura di blocco,
+    // che qui non serve — l'etichetta sta sotto al numero, non a distanza.
+    #{
+      plex(chosen, weight: 600, fill: navy, body)
+      linebreak()
+      plex(7.8pt, fill: muted, kpi.label)
+    }
+    #v(11pt)
   ]
 }
 

@@ -169,7 +169,7 @@ def _indicatori(report: FinalReportModelV2) -> dict[str, Any]:
         ("PFN", _indicator_values(report, "practice.pfn", periods)),
     ])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("indicatori-debito-cassa-pfn", "Debito, cassa e PFN", chart, kpis)
+    block = s.chart_block("indicatori-debito-cassa-pfn", "Debito, cassa e PFN", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
     table = _indicator_table("indicatori-tabella", "Indicatori del piano", report, periods, [
@@ -203,7 +203,7 @@ def _liquidita(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.indicator_chart(report, "structural_balance", "Margini strutturali", "eur", periods,
         ["practice.ccn", "practice.mt", "practice.ms"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("structural_balance", "Margini strutturali", chart, kpis)
+    block = s.chart_block("structural_balance", "Margini strutturali", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
     # Il secondo grafico della v4 ("Liquidità corrente e immediata", current
@@ -236,7 +236,7 @@ def _redditivita(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.indicator_chart(report, "redditivita-quattro-serie", "Redditività e costo del debito", "percent",
         periods, ["practice.roi", "practice.roe", "practice.of_revenue", "practice.of_mol"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("redditivita-quattro-serie", "Redditività e costo del debito", chart, [])
+    block = s.chart_block("redditivita-quattro-serie", "Redditività e costo del debito", chart, [], kind="line")
     if block is not None:
         items.append(block)
     table = _indicator_table("redditivita-tabella", "Confronto della redditività", report, periods, [
@@ -270,7 +270,7 @@ def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.indicator_chart(report, "practice_asset_coverage", "Autonomia e copertura", "percent", periods,
         ["practice.indipendenza", "practice.copertura_immob"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("practice_asset_coverage", "Autonomia e copertura", chart, kpis)
+    block = s.chart_block("practice_asset_coverage", "Autonomia e copertura", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
     # Il secondo grafico della v4 (PFN/EBITDA, unità "volte", incompatibile
@@ -330,7 +330,7 @@ def _circolante(report: FinalReportModelV2) -> dict[str, Any]:
         "analytical.activity.inventory_turnover_days", "analytical.activity.payables_turnover_days",
         "analytical.activity.cash_conversion_cycle"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("circolante-giorni", "Giorni del capitale circolante e ciclo monetario", chart, kpis)
+    block = s.chart_block("circolante-giorni", "Giorni del capitale circolante e ciclo monetario", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
     table = _indicator_table("circolante-tabella", "Circolante e ciclo monetario", report, periods, [
@@ -385,8 +385,13 @@ def _composizione(report: FinalReportModelV2) -> dict[str, Any]:
         ("Oneri finanziari", _structure_values(report, "cost_incidence", "financial_charges", two_point)),
     ])
     items: list[dict[str, Any]] = []
+    # Il contratto nomina questo confronto un `dumbbell` (due periodi, due
+    # estremi congiunti). Qui restano le serie per voce di costo disegnate a
+    # linea: passare al dumbbell vuol dire trasporre serie e categorie, cioè
+    # contenuto della fase 3, non una forma da dichiarare qui. `kind` è
+    # comunque esplicito, perché il template non deve più indovinarlo.
     block = s.chart_block("composizione-incidenza-costi",
-        "Incidenza dei costi sul fatturato · confronto fra primo e ultimo periodo", chart, [])
+        "Incidenza dei costi sul fatturato · confronto fra primo e ultimo periodo", chart, [], kind="line")
     if block is not None:
         items.append(block)
     # Le barre al 100% della v4 (composizione impieghi/fonti) diventano UNA
@@ -459,7 +464,7 @@ def _break_even(report: FinalReportModelV2) -> dict[str, Any]:
         ("Pareggio", _structure_values(report, "break_even", "break_even_revenue", periods)),
     ])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("break-even-ricavi-pareggio", "Ricavi e break-even", chart, kpis)
+    block = s.chart_block("break-even-ricavi-pareggio", "Ricavi e break-even", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
     # Il secondo grafico della v4 (solo margine di sicurezza, %) resta fuori

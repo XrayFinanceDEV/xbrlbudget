@@ -171,7 +171,7 @@ def _ce(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.indicator_chart(report, "ce-margini", "Evoluzione dei margini", "percent", periods,
         ["practice.ebitda_margin", "analytical.profitability.ros"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("ce-margini", "Evoluzione dei margini", chart, kpis)
+    block = s.chart_block("ce-margini", "Evoluzione dei margini", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
     items.append(_ce_summary_table(report, statement, periods))
@@ -276,7 +276,7 @@ def _sp(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.chart_from_series("sp-patrimonio-debito", "Patrimonio e indebitamento", "eur", periods,
         [("Patrimonio netto", equity_values), ("Debiti finanziari", financial_debt_values)])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("sp-patrimonio-debito", "Patrimonio e indebitamento", chart, kpis)
+    block = s.chart_block("sp-patrimonio-debito", "Patrimonio e indebitamento", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
     items.append(_sp_summary_table(report, statement, periods))
@@ -340,7 +340,7 @@ def _flussi(report: FinalReportModelV2) -> dict[str, Any]:
                          ("investing.total_investing_cashflow", "Investimenti"),
                          ("financing.total_financing_cashflow", "Finanziario")])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("flussi-composizione", "Composizione dei flussi di cassa", chart, kpis)
+    block = s.chart_block("flussi-composizione", "Composizione dei flussi di cassa", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
     items.append(_cashflow_summary_table(statement, periods))

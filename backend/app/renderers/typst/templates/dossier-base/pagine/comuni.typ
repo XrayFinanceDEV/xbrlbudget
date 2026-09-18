@@ -22,7 +22,7 @@
   plex(size, weight: weight, fill: fill, value)
 }
 
-#let cell(value, unit, available: body-width, size: 8pt, fill: ink) = if unit == none {
+#let cell(value, unit, available: body-width, size: 8pt, fill: ink, weight: 400) = if unit == none {
   // Permit wrapping technical source names at separators without removing text.
   let display = if value == none { "n.d." } else {
     value.replace("_", "_\u{200b}").replace("+", "+\u{200b}")
@@ -31,12 +31,12 @@
   if display.split(regex("[\\s\u{200b}]+")).any(word => measure(plex(size, word)).width > available) {
     panic("editorial-cell-token-does-not-fit")
   }
-  plex(size, fill: fill, display)
+  plex(size, fill: fill, weight: weight, display)
 } else {
   // Euro interi nelle tabelle (decisione del proprietario, 2026-09-17); ogni
   // altra unità porta il proprio suffisso nella stessa cella («17,75%»,
   // «7,57×», «228,12 gg» — v4, Allegati F/G e i grafici di indicatori.py).
-  let display = plex(size, fill: fill, display-value-with-unit(value, unit, places: if unit == "eur" { 0 } else { none }))
+  let display = plex(size, fill: fill, weight: weight, display-value-with-unit(value, unit, places: if unit == "eur" { 0 } else { none }))
   if measure(display).width > available { panic("editorial-amount-does-not-fit") }
   display
 }
@@ -47,15 +47,12 @@
   #v(2mm)
 ]
 
-#let repeated-table-title(spec, item, count) = table.cell(
-  colspan: count,
-  fill: if gray-mode { rgb("#F2F2F2") } else { rgb("#F3F6F8") },
-  inset: (x: 3pt, y: 2.5pt),
-)[
-  #grid(columns: (auto, 1fr), column-gutter: 3mm,
-    plex(6.8pt, weight: 600, fill: blue, upper(spec.family)),
-    align(right, plex(7pt, weight: 500, fill: navy, item.title)))
-]
+// Riga «totale» alla maniera della v4: le voci che chiudono un blocco
+// (Totale…, EBITDA, Risultato netto, Cassa finale) sono in grassetto e
+// separate da un filo più marcato sopra, invece di una banda colorata.
+#let total-row(label) = label != none and (
+  label.starts-with("Totale") or label in ("EBITDA", "EBIT", "Risultato netto",
+    "Risultato ante imposte", "Cassa finale", "Patrimonio netto"))
 
 // Il catalogo v4 tiene ogni tabella a un massimo di 5 colonne di valore (vincolo
 // del proprietario, 2026-09-17): questo dispatcher non spacca più per periodi
@@ -80,20 +77,26 @@
   if fits {
     let cells = ()
     for row in item.rows {
+      let total = total-row(row.cells.at(0))
       for (index, value) in row.cells.enumerate() {
-        cells.push(table.cell(breakable: false)[
+        cells.push(table.cell(breakable: false,
+          stroke: if total { (top: 0.7pt + ink) } else { (:) })[
           #if index == 0 { marker((kind: "content", content_id: row.id)) }
-          #cell(value, row.units.at(index), available: if index == 0 { label-width - 6pt } else { column-width - 6pt })
+          #cell(value, row.units.at(index),
+            available: if index == 0 { label-width - 8pt } else { column-width - 8pt },
+            fill: if total { navy } else { ink }, weight: if total { 600 } else { 400 })
         ])
       }
     }
-    table(columns: (label-width, ..((column-width,) * (count - 1))), inset: 3pt,
-      stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
-      table.header(
-        repeated-table-title(spec, item, count),
-        ..item.columns.map(c => table.cell(
-          fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.2pt, weight: 500, fill: muted, c)))),
+    // Griglia della v4: intestazione 7,2 pt/500 muted con un filo scuro sotto,
+    // righe da 4 pt di respiro separate da un filo chiaro, numeri a destra.
+    // Nessun fondo colorato: la gerarchia la fanno i fili e il peso.
+    table(columns: (label-width, ..((column-width,) * (count - 1))),
+      inset: (x: 4pt, y: 4pt),
+      align: (column, row) => if column == 0 { left } else { right },
+      stroke: (column, row) => (left: none, right: none, top: none,
+        bottom: if row == 0 { 0.7pt + ink } else { 0.5pt + rule }),
+      table.header(..item.columns.map(c => plex(7.2pt, weight: 500, fill: muted, c))),
       ..cells)
   } else {
     // Long labels, large exact amounts: room to wrap, label | "col: value" lines.
@@ -112,14 +115,12 @@
         }
       ])
     }
-    table(columns: (label-column, w - label-column), inset: 3pt,
-      stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
+    table(columns: (label-column, w - label-column), inset: (x: 4pt, y: 4pt),
+      stroke: (column, row) => (left: none, right: none, top: none,
+        bottom: if row == 0 { 0.7pt + ink } else { 0.5pt + rule }),
       table.header(
-        repeated-table-title(spec, item, 2),
-        table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.2pt, weight: 500, fill: muted, item.columns.first())),
-        table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.2pt, weight: 500, fill: muted)[Valori])),
+        plex(7.2pt, weight: 500, fill: muted, item.columns.first()),
+        plex(7.2pt, weight: 500, fill: muted)[Valori]),
       ..cells)
   }
 }

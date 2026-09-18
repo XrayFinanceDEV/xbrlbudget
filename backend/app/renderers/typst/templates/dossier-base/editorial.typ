@@ -7,7 +7,7 @@
 // bisogno di resa che quel file non copre lo scrive nel proprio
 // `pagine/<gruppo>.typ` (vedi quei file per lo stato attuale).
 #import "base.typ": dossier, cover, body-width, navy, muted, rule, plex, marker
-#import "pagine/comuni.typ": page-header, render-item
+#import "pagine/comuni.typ": page-header, render-item, render-page
 #let report = json("model.json")
 #let options = json("options.json")
 #let inventory = json("editorial-inventory.json")
@@ -39,14 +39,9 @@
 }
 #show: body => dossier(report, options, body, note-footer: footer)
 #for spec in inventory {
-  if spec.id != "cover" {
-    page-header(spec)
-  }
-  for item in spec.items {
-    if item.kind == "cover" {
-      cover(report, kpis: spec.kpis)
-    } else {
-      render-item(spec, item, report, options)
-    }
+  if spec.id == "cover" {
+    cover(report, kpis: spec.kpis)
+  } else {
+    render-page(spec, report, options)
   }
 }

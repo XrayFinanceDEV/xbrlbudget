@@ -175,7 +175,7 @@ def _ce(report: FinalReportModelV2) -> dict[str, Any]:
     if block is not None:
         items.append(block)
     items.append(_ce_summary_table(report, statement, periods))
-    return {"id": "ce", "title": "Conto economico previsionale", "family": FAMILY,
+    return {"form": "rail+main", "id": "ce", "title": "Conto economico previsionale", "family": FAMILY,
             "subtitle": "Gli anni di piano sono confrontati sulla medesima base annuale.",
             "kpis": [] if block is not None else kpis, "items": items}
 
@@ -224,7 +224,7 @@ def _ipotesi(report: FinalReportModelV2) -> dict[str, Any]:
     ]
     aree_table = s.table("aree-piano", "Le sette aree del piano", aree_columns, aree_rows)
 
-    return {"id": "ipotesi", "title": "Ipotesi del piano", "family": FAMILY,
+    return {"form": "rail+main", "id": "ipotesi", "title": "Ipotesi del piano", "family": FAMILY,
             "subtitle": "Le ipotesi sono presentate per anno e per area, con origine e "
                         "collegamento ai risultati attesi.",
             "kpis": kpis, "items": [driver_table, aree_table]}
@@ -280,7 +280,7 @@ def _sp(report: FinalReportModelV2) -> dict[str, Any]:
     if block is not None:
         items.append(block)
     items.append(_sp_summary_table(report, statement, periods))
-    return {"id": "sp", "title": "Stato patrimoniale previsionale", "family": FAMILY,
+    return {"form": "rail+main", "id": "sp", "title": "Stato patrimoniale previsionale", "family": FAMILY,
             "subtitle": None,
             "kpis": [] if block is not None else kpis, "items": items}
 
@@ -344,7 +344,7 @@ def _flussi(report: FinalReportModelV2) -> dict[str, Any]:
     if block is not None:
         items.append(block)
     items.append(_cashflow_summary_table(statement, periods))
-    return {"id": "flussi", "title": "Flussi di cassa e sostenibilità", "family": FAMILY,
+    return {"form": "rail+main", "id": "flussi", "title": "Flussi di cassa e sostenibilità", "family": FAMILY,
             "subtitle": "Somme e riconciliazione sull'intero orizzonte di piano.",
             "kpis": [] if block is not None else kpis, "items": items}
 

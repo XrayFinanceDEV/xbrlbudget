@@ -180,7 +180,7 @@ def _indicatori(report: FinalReportModelV2) -> dict[str, Any]:
     ])
     if table is not None:
         items.append(table)
-    return {"id": "indicatori", "title": "Indicatori e rischi", "family": FAMILY,
+    return {"form": "rail+main", "id": "indicatori", "title": "Indicatori e rischi", "family": FAMILY,
             "subtitle": "PFN = debiti finanziari meno disponibilità liquide. Gli indicatori descrivono la "
                         "pratica, non costituiscono un rating.",
             "kpis": [] if block is not None else kpis, "items": items}
@@ -219,7 +219,7 @@ def _liquidita(report: FinalReportModelV2) -> dict[str, Any]:
     ])
     if table is not None:
         items.append(table)
-    return {"id": "liquidita", "title": "Liquidità e margini strutturali", "family": FAMILY,
+    return {"form": "rail+main", "id": "liquidita", "title": "Liquidità e margini strutturali", "family": FAMILY,
             "subtitle": "CCN, margine di tesoreria e margine di struttura sono distinti dal circolante operativo.",
             "kpis": [] if block is not None else kpis, "items": items}
 
@@ -284,7 +284,7 @@ def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
     ])
     if table is not None:
         items.append(table)
-    return {"id": "solidita", "title": "Solidità e copertura del debito", "family": FAMILY,
+    return {"form": "rail+main", "id": "solidita", "title": "Solidità e copertura del debito", "family": FAMILY,
             "subtitle": "Il DSCR segue la convenzione della pratica: non è un calcolo completo sul servizio "
                         "del debito.",
             "kpis": [] if block is not None else kpis, "items": items}
@@ -341,7 +341,7 @@ def _circolante(report: FinalReportModelV2) -> dict[str, Any]:
     ])
     if table is not None:
         items.append(table)
-    return {"id": "circolante", "title": "Circolante e ciclo monetario", "family": FAMILY,
+    return {"form": "rail+main", "id": "circolante", "title": "Circolante e ciclo monetario", "family": FAMILY,
             "subtitle": "Giorni su base 365; il ciclo monetario è calcolato prima degli arrotondamenti "
                         "individuali di DSO, DIO e DPO.",
             "kpis": [] if block is not None else kpis, "items": items}
@@ -477,7 +477,7 @@ def _break_even(report: FinalReportModelV2) -> dict[str, Any]:
         ])
     if table is not None:
         items.append(table)
-    return {"id": "break-even", "title": "Break-even e margine di sicurezza", "family": FAMILY,
+    return {"form": "rail+main", "id": "break-even", "title": "Break-even e margine di sicurezza", "family": FAMILY,
             "subtitle": "Il margine di sicurezza può risultare negativo quando i ricavi restano sotto il "
                         "pareggio operativo.",
             "kpis": [] if block is not None else kpis, "items": items}
@@ -558,7 +558,7 @@ def _diagnostica(report: FinalReportModelV2) -> dict[str, Any]:
         s.row("diagnostica:cassa", ["Cassa iniziale + flussi = cassa finale", _esito_cassa(report, periods)]),
     ]
     items.append(s.table("diagnostica-controlli", "Controlli di quadratura", ["Controllo", "Esito"], rows))
-    return {"id": "diagnostica", "title": "Diagnostica e punti da verificare", "family": FAMILY,
+    return {"form": "rail+main", "id": "diagnostica", "title": "Diagnostica e punti da verificare", "family": FAMILY,
             "subtitle": "Il controllo «9M rettificati + Q4 = chiusura» non è verificabile sul modello: non "
                         "esiste una stima Q4 indipendente dalla chiusura promossa, e si omette invece di "
                         "riprodurlo come spunta vuota.",

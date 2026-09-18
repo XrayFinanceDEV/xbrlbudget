@@ -21,11 +21,83 @@ from typing import Any
 from app.schemas.final_report_v2 import FinalReportModelV2
 
 from . import allegati, apertura, dati, indicatori, piano
-from .shared import chart_marker_width_mm  # re-exported: editorial_plan.py imports it from here
+from .shared import (  # noqa: F401  (riesportati: `editorial_plan.py` li importa da qui)
+    CHART_WIDTH_FULL_MM, CHART_WIDTH_KPI_MM, CHART_WIDTH_PANEL_MM, CHART_WIDTH_RAIL_MM,
+    PAGE_FORMS, RAIL_WIDTH_MM, chart_marker_width_mm,
+)
 
 # Ordine fisso del catalogo v4: apertura (1-2) · dati (3-6, solo infrannuale) ·
 # piano e risultati (7-10) · indicatori (11-18) · allegati (19-33).
 GROUPS = (apertura, dati, piano, indicatori, allegati)
+
+
+def _leading_rail_run(items: list[dict[str, Any]]) -> int:
+    """Quanti blocchi stanno dentro la `.row` della v4, cioe quelli accanto al
+    rail: la corsa iniziale di grafici (pagine 12, 14, 15, 17: due grafici uno
+    sopra l'altro nella colonna principale), altrimenti il solo primo blocco
+    (pagine 3, 7, 18: una tabella nella colonna principale, il resto a
+    larghezza intera sotto il rail)."""
+    if items and items[0]["kind"] == "chart":
+        count = 0
+        while count < len(items) and items[count]["kind"] == "chart":
+            count += 1
+        return count
+    return 1 if items else 0
+
+
+def _apply_page_form(page: dict[str, Any]) -> dict[str, Any]:
+    """Normalizza la forma di pagina: e l'unico punto che decide le geometrie
+    che Typst deve riprodurre e che `editorial_plan.py` rivuole identiche nel
+    marcatore (`chart_marker_width_mm`).
+
+    Una pagina che non dichiara `form` si comporta esattamente come prima di
+    questa funzione: `single`, grafico a 178 mm (o 118 mm con la colonna KPI
+    agganciata al grafico), tabellina dei valori sotto il grafico. Una pagina
+    executive dichiara `rail+main` (rail di 47 mm a sinistra della `.row`) o
+    `full+panels` (due grafici affiancati a meta larghezza) e ottiene le
+    colonne, il rail e la value-table disattivata.
+
+    Il rail prende i KPI della pagina; se la pagina non ne ha, eredita quelli
+    che il catalogo teneva appesi al primo grafico, e quel grafico li perde —
+    altrimenti la stessa cifra uscirebbe due volte, una nel rail e una nella
+    colonna da 55 mm del grafico.
+    """
+    form = page.get("form")
+    if form is not None and form not in PAGE_FORMS:
+        raise ValueError(f"unknown page form: {form!r} (expected one of {PAGE_FORMS})")
+    if form is None:
+        form = "cover" if any(item["kind"] == "cover" for item in page["items"]) else "single"
+    page["form"] = form
+    blocks = list(_iter_blocks(page))
+    if form == "single":
+        page["rail"] = list(page.get("kpis") or [])
+        return page
+    inside = _leading_rail_run(blocks) if form == "rail+main" else 0
+    rail_kpis = list(page.get("kpis") or [])
+    for position, item in enumerate(blocks):
+        item["rail"] = form == "rail+main" and position < inside
+        if item["kind"] != "chart":
+            continue
+        item["value_table"] = False
+        item["width_mm"] = (CHART_WIDTH_RAIL_MM if item["rail"]
+                            else CHART_WIDTH_PANEL_MM if form == "full+panels"
+                            else CHART_WIDTH_FULL_MM)
+    for item in blocks:
+        if item["kind"] == "chart" and item["rail"] and item.get("kpis"):
+            rail_kpis = rail_kpis or list(item["kpis"])
+            item["kpis"] = []
+    page["rail"] = rail_kpis
+    return page
+
+
+def _iter_blocks(page: dict[str, Any]):
+    """I blocchi di una pagina in ordine di lettura: un pannello non è un
+    blocco per il piano editoriale, i suoi grafici sí."""
+    for item in page["items"]:
+        if item["kind"] == "panel":
+            yield from item["items"]
+        else:
+            yield item
 
 
 def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
@@ -39,7 +111,7 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
         pages.extend(group.build(report))
     if not pages or pages[0]["id"] != "cover":
         raise ValueError("the catalog must start with the cover page")
-    return pages
+    return [_apply_page_form(page) for page in pages]
 
 
 def expected_content_inventory(report: FinalReportModelV2) -> OrderedDict[str, str]:
@@ -49,7 +121,7 @@ def expected_content_inventory(report: FinalReportModelV2) -> OrderedDict[str, s
     `editorial_plan.py`."""
     expected: OrderedDict[str, str] = OrderedDict()
     for page in build_inventory(report):
-        for item in page["items"]:
+        for item in _iter_blocks(page):
             if item["kind"] == "cover":
                 content_ids = ["cover"]
             elif item["kind"] in ("chart", "text", "note", "index"):
@@ -71,10 +143,11 @@ def chart_declarations(report: FinalReportModelV2) -> dict[str, dict[str, Any]]:
     separate registry keyed on the raw `report.chart_series`."""
     charts: dict[str, dict[str, Any]] = {}
     for page in build_inventory(report):
-        for item in page["items"]:
+        for item in _iter_blocks(page):
             if item["kind"] == "chart":
                 charts[item["id"]] = item
     return charts
 
 
-__all__ = ["build_inventory", "expected_content_inventory", "chart_declarations", "chart_marker_width_mm"]
+__all__ = ["build_inventory", "expected_content_inventory", "chart_declarations",
+           "chart_marker_width_mm", "PAGE_FORMS"]

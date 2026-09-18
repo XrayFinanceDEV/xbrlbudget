@@ -171,11 +171,11 @@ def _ce(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.indicator_chart(report, "ce-margini", "Evoluzione dei margini", "percent", periods,
         ["practice.ebitda_margin", "analytical.profitability.ros"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("ce-margini", "Evoluzione dei margini", chart, kpis)
+    block = s.chart_block("ce-margini", "Evoluzione dei margini", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
     items.append(_ce_summary_table(report, statement, periods))
-    return {"id": "ce", "title": "Conto economico previsionale", "family": FAMILY,
+    return {"form": "rail+main", "id": "ce", "title": "Conto economico previsionale", "family": FAMILY,
             "subtitle": "Gli anni di piano sono confrontati sulla medesima base annuale.",
             "kpis": [] if block is not None else kpis, "items": items}
 
@@ -224,7 +224,7 @@ def _ipotesi(report: FinalReportModelV2) -> dict[str, Any]:
     ]
     aree_table = s.table("aree-piano", "Le sette aree del piano", aree_columns, aree_rows)
 
-    return {"id": "ipotesi", "title": "Ipotesi del piano", "family": FAMILY,
+    return {"form": "rail+main", "id": "ipotesi", "title": "Ipotesi del piano", "family": FAMILY,
             "subtitle": "Le ipotesi sono presentate per anno e per area, con origine e "
                         "collegamento ai risultati attesi.",
             "kpis": kpis, "items": [driver_table, aree_table]}
@@ -276,11 +276,11 @@ def _sp(report: FinalReportModelV2) -> dict[str, Any]:
     chart = s.chart_from_series("sp-patrimonio-debito", "Patrimonio e indebitamento", "eur", periods,
         [("Patrimonio netto", equity_values), ("Debiti finanziari", financial_debt_values)])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("sp-patrimonio-debito", "Patrimonio e indebitamento", chart, kpis)
+    block = s.chart_block("sp-patrimonio-debito", "Patrimonio e indebitamento", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
     items.append(_sp_summary_table(report, statement, periods))
-    return {"id": "sp", "title": "Stato patrimoniale previsionale", "family": FAMILY,
+    return {"form": "rail+main", "id": "sp", "title": "Stato patrimoniale previsionale", "family": FAMILY,
             "subtitle": None,
             "kpis": [] if block is not None else kpis, "items": items}
 
@@ -340,11 +340,11 @@ def _flussi(report: FinalReportModelV2) -> dict[str, Any]:
                          ("investing.total_investing_cashflow", "Investimenti"),
                          ("financing.total_financing_cashflow", "Finanziario")])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("flussi-composizione", "Composizione dei flussi di cassa", chart, kpis)
+    block = s.chart_block("flussi-composizione", "Composizione dei flussi di cassa", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
     items.append(_cashflow_summary_table(statement, periods))
-    return {"id": "flussi", "title": "Flussi di cassa e sostenibilità", "family": FAMILY,
+    return {"form": "rail+main", "id": "flussi", "title": "Flussi di cassa e sostenibilità", "family": FAMILY,
             "subtitle": "Somme e riconciliazione sull'intero orizzonte di piano.",
             "kpis": [] if block is not None else kpis, "items": items}
 

@@ -6,10 +6,57 @@ pages exist — see `dossier_catalog/__init__.py` for the catalog itself.
 """
 from __future__ import annotations
 
+import json
 from decimal import ROUND_HALF_UP, Decimal
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from app.schemas.final_report_v2 import FinalReportModelV2
+
+# ── Forme di pagina e `kind` dei grafici (M2-02G fase 2, traccia A) ─────────
+# Il contratto di pagina (`contracts/dossier_page_contract.json`) vincola,
+# oltre alla sequenza dei blocchi, la FORMA di ciascun grafico e la forma di
+# ciascuna pagina. Il catalogo le dichiarava implicitamente: bar/line si
+# decideva dalla sola lista `bars` di `chart-layout.json`, e il KPI era o
+# della pagina o del grafico. Qui stanno le costanti dell'unico punto che le
+# risolve; la resa è in `pagine/comuni.typ`/`charts.typ`.
+#
+# Le larghezze sono vincolate dalla geometria del bundle (`chart-layout.json`:
+# 178 × 94 mm, e `chart_components._dimensions` non accetta chiavi nuove):
+# ogni grafico è alto 94 mm e largo quanto la colonna in cui sta.
+CHART_KINDS = ("bar", "line", "stacked", "dumbbell")
+PAGE_FORMS = ("cover", "single", "rail+main", "full+panels")
+CHART_WIDTH_FULL_MM = "178"      # nessuna colonna accanto
+CHART_WIDTH_KPI_MM = "118"       # colonna KPI da 55 mm a sinistra del grafico
+CHART_WIDTH_RAIL_MM = "126"      # rail di pagina da 47 mm + gutter da 5 mm
+CHART_WIDTH_PANEL_MM = "86"      # due pannelli affiancati + gutter da 6 mm
+RAIL_WIDTH_MM = "47"
+
+_CHART_LAYOUT_PATH = (Path(__file__).resolve().parents[1]
+                      / "templates" / "dossier-base" / "chart-layout.json")
+
+
+@lru_cache(maxsize=1)
+def _layout_bars() -> frozenset[str]:
+    """La lista `bars` del bundle, come ripiego per un item che non dichiara
+    alcun `kind`. Non è più la fonte della verità: è il comportamento storico
+    di chi non ha ancora adeguato la propria pagina."""
+    raw = json.loads(_CHART_LAYOUT_PATH.read_text(encoding="utf-8"))
+    return frozenset(raw["bars"])
+
+
+def chart_kind(chart: dict[str, Any], kind: str | None = None) -> str:
+    """Il `kind` effettivo di un grafico: quello dichiarato (dall'item o dal
+    `chart` stesso), altrimenti il ripiego storico della lista `bars`.
+    Una chiave `bars` non è più letta dal template se il kind è dichiarato."""
+    declared = kind if kind is not None else chart.get("kind")
+    if declared is None:
+        return "bar" if chart.get("id") in _layout_bars() else "line"
+    if declared not in CHART_KINDS:
+        raise ValueError(f"unknown chart kind: {declared!r} (expected one of {CHART_KINDS})")
+    return declared
+
 
 # ── Value formatting ─────────────────────────────────────────────────────────
 
@@ -209,7 +256,8 @@ def values_for_periods(row_obj: Any, statement: Any, periods: list[Any]) -> list
 # the page tells: no re-derivation, only a different window on the same data.
 
 def indicator_chart(report: FinalReportModelV2, chart_id: str, title: str, unit: str,
-                    periods: list[Any], indicator_ids: list[str]) -> dict[str, Any] | None:
+                    periods: list[Any], indicator_ids: list[str],
+                    kind: str | None = None) -> dict[str, Any] | None:
     axis = [str(period.year) for period in periods]
     series: list[dict[str, Any]] = []
     references: list[str] = []
@@ -228,12 +276,15 @@ def indicator_chart(report: FinalReportModelV2, chart_id: str, title: str, unit:
     thresholds = [{"label": indicator_by_id(report, ref).label + " · " + threshold.label,
                    "value": format(threshold.value, "f"), "source": threshold.source}
                   for ref in references for threshold in indicator_by_id(report, ref).thresholds]
-    return {"id": chart_id, "title": title, "unit": unit, "categories": axis,
-            "series": series, "indicator_ids": references, "thresholds": thresholds}
+    chart = {"id": chart_id, "title": title, "unit": unit, "categories": axis,
+             "series": series, "indicator_ids": references, "thresholds": thresholds}
+    chart["kind"] = chart_kind(chart, kind)
+    return chart
 
 
 def statement_chart(report: FinalReportModelV2, statement_id: str, chart_id: str, title: str, unit: str,
-                    periods: list[Any], rows: list[tuple[str, str]]) -> dict[str, Any] | None:
+                    periods: list[Any], rows: list[tuple[str, str]],
+                    kind: str | None = None) -> dict[str, Any] | None:
     """A chart drawn directly from `DetailedStatement` row values (euro
     amounts), never from a derived indicator. `rows` is a list of
     `(row_id, display_label)`; a row absent for every chosen period is
@@ -249,8 +300,10 @@ def statement_chart(report: FinalReportModelV2, statement_id: str, chart_id: str
         series.append({"label": display_label, "values": [exact(value) for value in values]})
     if not series:
         return None
-    return {"id": chart_id, "title": title, "unit": unit, "categories": axis,
-            "series": series, "indicator_ids": [], "thresholds": []}
+    chart = {"id": chart_id, "title": title, "unit": unit, "categories": axis,
+             "series": series, "indicator_ids": [], "thresholds": []}
+    chart["kind"] = chart_kind(chart, kind)
+    return chart
 
 
 def appendix_table_rows(statement: Any, periods: list[Any]) -> list[dict[str, Any]]:
@@ -400,7 +453,8 @@ def assumption_value(section: Any, field: str) -> Any:
 
 
 def chart_from_series(chart_id: str, title: str, unit: str, periods: list[Any],
-                      named_series: list[tuple[str, list[Any]]]) -> dict[str, Any] | None:
+                      named_series: list[tuple[str, list[Any]]],
+                      kind: str | None = None) -> dict[str, Any] | None:
     """Un grafico composto da serie già risolte dal chiamante (righe di
     prospetto, valori di `structure_series`, indicatori — qualunque
     combinazione): a differenza di `statement_chart`/`indicator_chart`, che
@@ -417,24 +471,52 @@ def chart_from_series(chart_id: str, title: str, unit: str, periods: list[Any],
         series.append({"label": label, "values": [exact(value) for value in values]})
     if not series:
         return None
-    return {"id": chart_id, "title": title, "unit": unit, "categories": axis,
-            "series": series, "indicator_ids": [], "thresholds": []}
+    chart = {"id": chart_id, "title": title, "unit": unit, "categories": axis,
+             "series": series, "indicator_ids": [], "thresholds": []}
+    chart["kind"] = chart_kind(chart, kind)
+    return chart
 
 
 def chart_marker_width_mm(item: dict[str, Any]) -> str:
-    """Pagina tipo: il grafico con colonna KPI occupa 118 mm (colonna 55 mm +
-    gutter), senza KPI resta a 178 — geometria dichiarata dalla stessa fonte
-    che il piano editoriale rivalida."""
-    return '118' if item.get("kpis") else '178'
+    """Larghezza del grafico, in millimetri, per la pagina tipo.
+    La fonte è `width_mm`, cioé la colonna che la forma di pagina (`form`) gli
+    ha assegnato: 126 mm dentro un rail da 47, 86 mm in un pannello, 118 mm con
+    la colonna KPI del solo grafico, 178 mm senza nulla accanto. Il ripiego
+    alla vecchia maniera (colonna KPI sì/no) resta per un item costruito fuori
+    dal catalogo, mai per una pagina che dichiari una forma."""
+    declared = item.get("width_mm")
+    if declared is not None:
+        return str(declared)
+    return CHART_WIDTH_KPI_MM if item.get("kpis") else CHART_WIDTH_FULL_MM
 
 
 def chart_block(chart_id: str, title: str, chart: dict[str, Any] | None,
-                kpis: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+                kpis: list[dict[str, Any] | None], kind: str | None = None) -> dict[str, Any] | None:
+    """Il blocco grafico di pagina. `kind` è la forma del grafico (bar · line ·
+    stacked · dumbbell): un item che non lo dichiara ottiene il ripiego della
+    lista `bars`, dichiarato qui una volta sola perché Typst legga sempre un
+    `chart.kind` esplicito e non debba indovinarlo."""
     if chart is None:
         return None
+    view = dict(chart)
+    view["kind"] = chart_kind(view, kind)
     shown_kpis = [item for item in kpis if item is not None]
     return {"id": f"chart:{chart_id}", "kind": "chart", "title": title,
-            "chart_id": chart_id, "chart": chart, "kpis": shown_kpis}
+            "chart_id": chart_id, "chart": view, "kpis": shown_kpis}
+
+
+def panel_grid(identifier: str, title: str, items: list[dict[str, Any]],
+               panels: int = 2) -> dict[str, Any] | None:
+    """Due (o `panels`) grafici affiancati a metà larghezza: la forma `full+panels`
+    delle pagine 13 e 16 della v4. I figli restano block-chart normali — cadauno
+    con il proprio `content_id`, la propria misura e la propria dichiarazione
+    Python — perché il piano editoriale e il probe di layout non hanno una
+    seconda anagrafe dei pannelli. Meno di due figli non sono un pannello: None,
+    gli item restano blocchi autonomi."""
+    shown = [item for item in items if item is not None]
+    if len(shown) < 2:
+        return None
+    return {"id": f"panel:{identifier}", "kind": "panel", "title": title, "panels": panels, "items": shown}
 
 
 # ── Short period headers + basis legend (Allegati, M2-02D fase 2) ───────────

@@ -7,6 +7,11 @@
 #let rule = if gray-mode { rgb("#DDDDDD") } else { rgb("#D5DDE4") }
 #let page-width = 210mm
 #let body-width = 178mm
+// Forma `rail+main` (v4, M2-02G traccia A punto 4): una colonna KPI di 47 mm
+// a sinistra del `.main`, gutter di 15 pt (5 mm): 47 + 5 + 126 = 178.
+#let rail-width = 47mm
+#let rail-gutter = 5mm
+#let rail-main-width = body-width - rail-width - rail-gutter
 #let note-width = body-width
 #let note-height = 26mm
 #let note-font = 9pt
@@ -53,6 +58,37 @@
   #line(length: 100%, stroke: 0.4pt + rule)
 ]
 
+// Rail di pagina (v4, M2-02G fase 2 punto 4): la colonna da 47 mm alta quanto
+// la pagina, riquadri separati da un filo da 0,7 pt, valore 15 pt/600 su
+// etichetta 7,8 pt muted (`kpi_valore` / `kpi_etichetta` dello style
+// contract). Il corpo 15 pt è una scelta, non una constant: un KPI lungo
+// («3 anni · 2027–2029», una serie di tre valori) scende a 12 e poi a 10 pt,
+// e se nemmeno 10 bastano la pagina si rifiuta — mai un testo che esce dalla
+// colonna senza dirlo.
+#let kpi-rail-item(kpi) = {
+  let body = kpi-text(kpi)
+  // Il valore va a capo come ogni testo: cio che non puo andare a capo e un
+  // token singolo (un importo, un «1.234 / 2.345» senza spazi). La misura è
+  // quella, non la stringa intera — lo stesso criterio di `safe-prose`.
+  let fits(size) = body.split(regex("\\s+")).all(word =>
+    measure(plex(size, weight: 600, word)).width <= rail-width - 6pt)
+  let chosen = if fits(15pt) { 15pt } else if fits(12pt) { 12pt } else if fits(10pt) { 10pt }
+    else { panic("editorial-kpi-does-not-fit") }
+  block(width: rail-width, breakable: false)[
+    #line(length: 100%, stroke: 0.7pt + rule)
+    #v(7pt)
+    #plex(chosen, weight: 600, fill: navy, body)
+    #v(2pt)
+    #plex(7.8pt, fill: muted, kpi.label)
+    #v(7pt)
+  ]
+}
+
+#let kpi-rail(kpis) = context box(width: rail-width)[
+  #for kpi in kpis { kpi-rail-item(kpi) }
+  #line(length: 100%, stroke: 0.7pt + rule)
+]
+
 #let note-slot() = block(width: note-width, height: note-height)[
   #line(length: 100%, stroke: 0.7pt + rule)
   #v(2pt)
@@ -65,9 +101,15 @@
   let accent = if options.grayscale { gray.darken(50%) } else { navy }
   set document(title: report.document.title, author: "Formula Finance",
     description: "Dossier editoriale del report budget")
-  set text(font: "IBM Plex Sans", lang: "it", size: 8.8pt, fill: ink)
+  set text(font: "IBM Plex Sans", lang: "it", size: 9pt, fill: ink)
   set par(leading: 3.5pt, justify: false)
-  set page(paper: "a4", margin: (left: 16mm, right: 16mm, top: 20mm, bottom: 46mm),
+  // Margini dallo style contract (`page.margini`: 17 / 16 / 19 / 16 mm). Il
+  // fondo NON è 19 mm: nello spazio sotto il corpo stanno il riquadro di
+  // commento (18 mm) e il piè di pagina (10 mm, `page.pie_pagina`), che in
+  // Typst vivono nel footer, e perciò richiedono 46 mm. Il corpo guadagna
+  // 3 mm in altezza, e nessuna misura del piano editoriale dipende da quel
+  // bordo: contano gli slot dei contenuti, non la posizione della pagina.
+  set page(paper: "a4", margin: (left: 16mm, right: 16mm, top: 17mm, bottom: 46mm),
     footer-descent: 4mm,
     header: context {
       if counter(page).get().first() > 1 {

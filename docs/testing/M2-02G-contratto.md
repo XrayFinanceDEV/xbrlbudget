@@ -117,23 +117,44 @@ Il catalogo citato è `backend/app/renderers/typst/dossier_catalog/`, verificato
 
 ### Differenze sistematiche della parte executive (valgono per tutte le 1–18)
 
-1. **Rail KPI**: la v4 ha una colonna KPI di 47 mm per **intera pagina** (layout `rail+main`, KPI
-   in alto a sinistra, bordi da 0,7 pt); il catalogo oggi lega i KPI al singolo grafico (colonna
-   55 mm accanto al grafico) o alla pagina, e su diverse pagine executive i 4 KPI del contratto
-   non ci sono affatto.
-2. **Value-table sotto il grafico**: `comuni.typ` stampa sempre la tabellina dei valori sotto
-   ogni grafico; nella v4 i numeri stanno solo nelle tavole di pagina. Sul contratto questa
-   riga non esiste: o la si disattiva sulle executive, la differenza va decisa (owner decision,
-   fase 2).
-3. **`kind` del grafico non è dichiarato**: il catalogo Python non trasporta bar/line/stacked/
-   dumbbell; la scelta è nella lista `bars` di `chart-layout.json` (9 id a barre, il resto linee).
-   Il contratto vuole che il kind diventi un attributo esplicito per le pagine executive.
+**Stato dopo la fase 2 — traccia A (fondazione del layout).** Le prime tre non sono più differenze
+*sistematiche*: il meccanismo esiste, e una pagina che lo dichiara lo ottiene. Quello che resta
+su ciascuna pagina è contenuto, non infrastruttura.
+
+1. **Rail KPI — risolto il meccanismo.** Una pagina dichiara `"form": "rail+main"` e il catalogo
+   (`dossier_catalog/__init__.py::_apply_page_form`) mette i KPI nel rail da 47 mm e stringe la
+   colonna principale a 126 mm; `pagine/comuni.typ::render_page` li rende come `.row` della v4, e
+   la striscia KPI in testa non si disegna più (duplicato). Dichiarate: `ipotesi`, `ce`, `sp`,
+   `flussi`, `indicatori`, `liquidita`, `solidita`, `break-even`, `diagnostica`, `circolante`.
+   Non dichiarate: `redditivita` e `composizione` (chiedono il `panel_grid`, cioè il secondo
+   grafico della fase 3) e le pagine 2–6 (in `apertura.py`/`dati.py`, perimetro della traccia
+   serie — il meccanismo è pronto, lì si aggiunge una riga). Il numero di KPI del contratto
+   (4 per pagina) resta contenuto di fase 3: dove la pagina ne ha 2, il rail ne mostra 2.
+2. **Value-table sotto il grafico — disattivata sulle pagine con una forma.** `_apply_page_form`
+   scrive `value_table: false` su ogni grafico di una pagina `rail+main`/`full+panels`; `comuni.typ`
+   la legge e salta la tabellina. Una pagina che non dichiara forma la mantiene com'era, quindi
+   gli allegati non cambiano.
+3. **`kind` del grafico — dichiarato.** `shared.chart_kind()` mette `kind` in ogni dict di
+   grafico (`bar`, `line`, `stacked`, `dumbbell`); il ripiego resta la lista `bars` di
+   `chart-layout.json`, e `charts.typ::kind` legge solo la chiave. `charts.typ` ha ora
+   `stacked-plot` (barre orizzontali al 100%, nessuna cifra sul segmento: i numeri restano
+   nelle tavole) e `dumbbell-plot` (○ iniziale → ● finale, valori a destra), e
+   `panel-grid` per i due grafici affiancati a 86 mm.
 4. **Riquadro di commento**: in v4 ogni pagina ha la nota (`has_note: true` su tutte e 33);
    nel catalogo le note sono solo editorial notes, non `items`: la conformità si verifica sul
    piano editoriale, non sul blocco.
-5. **Tipografia**: i ruoli dello style contract (9 pt corpo, 16 pt titolo, 7,5 pt occhiello,
-   legenda 7,6 pt…) sono il riferimento per `base.typ`/`comuni.typ`; le differenze di corpo
-   appartengono a M2-02B, non alle singole pagine.
+5. **Tipografia — applicata e sorvegliata.** Corpo 9 pt, titolo 16/600, occhiello 7,5/500,
+   tabella 8 pt con intestazione 7,2/500 muted, legenda 7,6 pt, nota 8/600 + testo 9 pt,
+   KPI del rail 15/600 su etichetta 7,8 pt, margine superiore 17 mm. Il fondo pagina resta
+   46 mm (non i 19 mm del CSS: lì sotto stanno riquadro di commento e piè, che in Typst sono
+   il footer). `test_style_contract_letto_dalla_tipografia` non si limita più al JSON: legge
+   i tre file del template e nomina il ruolo che ha smesso di essere applicato.
+
+Le **due colonne della forma** sono un'invariante numerica, non una scelta del template:
+47 + 5 + 126 = 178 e 86 + 6 + 86 = 178 (`shared.CHART_WIDTH_RAIL_MM`, `CHART_WIDTH_PANEL_MM`),
+e `editorial_plan._validate_records` rivuole la stessa misura nel marcatore Typst. I gutter
+sono 5 mm e 6 mm, non i 15 pt dell'artifact: due pannelli da 86 mm con 15 pt di gap
+sfonderebbero il corpo di 5,6 mm.
 
 ## Tabella di corrispondenza — allegati (pagine 19–33, priorità bassa)
 
@@ -159,3 +180,10 @@ pretendere.
   16 rail, 34 note, 33/33 pagine con nota).
 - La tabella sopra copre tutti e 33 gli id del catalogo AMBIENTA e tutto coincide con gli id del
   contratto tranne `cover` (contratto: `copertina`).
+- `tests/test_dossier_contract_conformance.py` (fase 2, traccia A) è il confronto meccanico:
+  una voce parametrizzata per pagina executive, con il diff fra i blocchi `binding` del
+  contratto e `build_inventory()`, e una lista di pagine non conformi dove ogni voce **nomina
+  il motivo** in `xfail(strict)`. Una pagina che diventa conforme senza che la voce venga
+  rimossa fa fallire la suite; e `test_le_quattro_forme_si_compilano_su_una_pagina_ciascuna`
+  compila davvero rail, pannelli, stacked e dumbbell con il probe di layout, per cui una forma
+  che esiste nell'inventario ma non nel foglio non basta.

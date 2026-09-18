@@ -10,13 +10,13 @@
 // proprio file `pagine/<gruppo>.typ`, non qui — questo file resta ciò che
 // serve OGGI, dimostrato da una pagina reale, non un catalogo di componenti
 // preparati in anticipo.
-#import "../base.typ": plex, marker, body-width, navy, blue, ink, muted, rule, gray-mode, kpi-strip, kpi-column
-#import "../charts.typ": chart-component, value-table
+#import "../base.typ": plex, marker, body-width, rail-width, rail-gutter, rail-main-width, navy, blue, ink, muted, rule, gray-mode, kpi-strip, kpi-column, kpi-rail
+#import "../charts.typ": chart-component, value-table, panel-grid
 #import "../chart-format.typ": display-value-with-unit
 
-#let safe-prose(size, value, weight: 400, fill: navy) = context {
+#let safe-prose(size, value, weight: 400, fill: navy, w: body-width) = context {
   if value.split(regex("\\s+")).any(word =>
-    measure(plex(size, weight: weight, word)).width > body-width) {
+    measure(plex(size, weight: weight, word)).width > w) {
     panic("editorial-prose-token-does-not-fit")
   }
   plex(size, weight: weight, fill: fill, value)
@@ -64,10 +64,10 @@
 // che tornasse a servirne uno, per esempio le tabelle F/G, se lo scrive da sé,
 // prendendo questa funzione a modello). Resta il ramo impilato per etichette
 // lunghe o importi che non entrano nella colonna.
-#let data-table(spec, item) = context {
+#let data-table(spec, item, w: body-width) = context {
   let count = item.columns.len()
-  let label-width = if count <= 3 { 65mm } else { 60mm }
-  let column-width = (body-width - label-width) / calc.max(1, count - 1)
+  let label-width = if count <= 3 { calc.min(65mm, w * 0.42) } else { calc.min(60mm, w * 0.40) }
+  let column-width = (w - label-width) / calc.max(1, count - 1)
   let token-ok = (value, width) => value == none or value.split(regex("\\s+")).all(word =>
     measure(plex(8pt, word)).width <= width)
   let amount-ok = (value, unit, width) => (value == none or
@@ -93,98 +93,124 @@
         repeated-table-title(spec, item, count),
         ..item.columns.map(c => table.cell(
           fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.5pt, weight: 600, fill: navy, c)))),
+          plex(7.2pt, weight: 500, fill: muted, c)))),
       ..cells)
   } else {
     // Long labels, large exact amounts: room to wrap, label | "col: value" lines.
+    let label-column = calc.min(65mm, w * 0.45)
     let cells = ()
     for row in item.rows {
       cells.push(table.cell(breakable: false)[
         #marker((kind: "content", content_id: row.id))
-        #cell(row.cells.first(), row.units.first(), available: 65mm - 6pt)
+        #cell(row.cells.first(), row.units.first(), available: label-column - 6pt)
       ])
       cells.push(table.cell(breakable: false)[
         #for index in range(1, count) {
           plex(7pt, weight: 600, fill: muted, item.columns.at(index) + ": ")
-          cell(row.cells.at(index), row.units.at(index), available: body-width - 65mm - 6pt)
+          cell(row.cells.at(index), row.units.at(index), available: w - label-column - 6pt)
           if index < count - 1 { linebreak() }
         }
       ])
     }
-    table(columns: (65mm, body-width - 65mm), inset: 3pt,
+    table(columns: (label-column, w - label-column), inset: 3pt,
       stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
       table.header(
         repeated-table-title(spec, item, 2),
         table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.5pt, weight: 600, item.columns.first())),
+          plex(7.2pt, weight: 500, fill: muted, item.columns.first())),
         table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.5pt, weight: 600)[Valori])),
+          plex(7.2pt, weight: 500, fill: muted)[Valori])),
       ..cells)
   }
 }
 
-#let table-block(spec, item) = {
+#let table-block(spec, item, w: body-width) = {
   block(sticky: true, heading(item))
-  data-table(spec, item)
+  data-table(spec, item, w: w)
   v(5mm)
 }
 
-// Pagina tipo (v4, M2-02B): colonna KPI verticale 55 mm a sinistra del
-// grafico, 118 mm; senza KPI il grafico resta a 178 mm. Una pagina intera per
-// il grafico, mai spezzata dal resto del contenuto della pagina (il catalogo
-// fisso garantisce che il contenuto di una pagina sia già tutto ciò che le
-// serve, non una lista che il template deve ancora impaginare da sé).
-#let chart-figure(item, gray: false, indicators: ()) = {
+// Pagina tipo (v4, M2-02B · forma di pagina M2-02G fase 2 punto 4): la colonna
+// KPI accanto al grafico è il comportamento storico di una pagina `single`; in
+// una pagina `rail+main` i KPI stanno nel rail della pagina e il grafico occupa
+// la colonna principale (126 mm), in una `full+panels` due grafici si affiancano
+// a 86 mm. La larghezza la dichiara Python in `width_mm` (è la stessa che
+// `editorial_plan.py` rivuole nel marcatore), qui si legge soltanto.
+#let chart-figure(item, gray: false, indicators: (), w: body-width) = {
   let has-kpi = "kpis" in item and item.kpis.len() > 0
+  let width-mm = if "width_mm" in item { str(item.width_mm) }
+    else if has-kpi { "118" } else { none }
+  let show-values = "value_table" not in item or item.value_table
   [
     #safe-prose(14pt, weight: 600, fill: navy, item.title)
     #v(3mm)
     #if has-kpi {
-      grid(columns: (55mm, 118mm), column-gutter: 5mm,
+      grid(columns: (55mm, w - 55mm - 5mm), column-gutter: 5mm,
         kpi-column(item.kpis),
-        chart-component(item.chart, gray: gray, indicators: indicators, width-mm: 118))
+        chart-component(item.chart, gray: gray, indicators: indicators, width-mm: width-mm))
     } else {
-      chart-component(item.chart, gray: gray, indicators: indicators)
+      chart-component(item.chart, gray: gray, indicators: indicators, width-mm: width-mm)
     }
-    #v(4mm)
-    #value-table(item.chart, places: if item.chart.unit == "eur" { 0 })
+    // La tabellina dei valori sotto il grafico (traccia A, punto 5) è il
+    // comportamento storico delle pagine che non dichiarano forma: nella v4 i
+    // numeri stanno solo nelle tavole di pagina, e una pagina `rail+main` o
+    // `full+panels` la numeri duplicati non li deve avere.
+    #if show-values {
+      v(4mm)
+      value-table(item.chart, places: if item.chart.unit == "eur" { 0 })
+    }
   ]
 }
 
-#let chart-block(item, gray: false, indicators: ()) = {
-  let figure = chart-figure(item, gray: gray, indicators: indicators)
+#let chart-block(item, gray: false, indicators: (), w: body-width) = {
+  let figure = chart-figure(item, gray: gray, indicators: indicators, w: w)
   context {
-    if measure(block(width: body-width, figure)).height > 220mm {
+    if measure(block(width: w, figure)).height > 220mm {
       panic("editorial-chart-with-values-does-not-fit")
     }
-    block(width: body-width, breakable: false, figure)
+    block(width: w, breakable: false, figure)
   }
   v(5mm)
 }
 
-#let text-block(item) = {
+// `panel_grid` (traccia A, punto 3): il blocco unico che la v4 chiama
+// «pannelli affiancati». I figli restano chart-item normali, con il proprio
+// marcatore e la propria larghezza dichiarata da Python.
+#let panel-block(item, gray: false, indicators: (), w: body-width) = {
+  let children = item.items.map(child => chart-figure(child, gray: gray,
+    indicators: indicators, w: (w - 6mm) / calc.max(1, item.items.len())))
+  context {
+    if measure(block(width: w, panel-grid(..children))).height > 220mm {
+      panic("editorial-panel-grid-does-not-fit")
+    }
+    block(width: w, breakable: false, panel-grid(..children))
+  }
+  v(5mm)
+}
+
+#let text-block(item, w: body-width) = {
   let content = [
     #marker((kind: "content", content_id: item.id))
     #safe-prose(14pt, weight: 600, fill: navy, item.title)
     #v(2mm)
-    #safe-prose(9pt, fill: muted, item.text)
+    #safe-prose(9pt, fill: muted, item.text, w: w)
   ]
   context {
-    if measure(block(width: body-width, content)).height > 220mm { panic("editorial-text-does-not-fit") }
-    block(width: body-width, breakable: false, content)
+    if measure(block(width: w, content)).height > 220mm { panic("editorial-text-does-not-fit") }
+    block(width: w, breakable: false, content)
   }
   v(5mm)
 }
 
-#let note-block(item) = {
+#let note-block(item, w: body-width) = {
   // Nota compatta senza titolo di sezione, stile metadati.
   let content = [
     #marker((kind: "content", content_id: item.id))
-    #safe-prose(7.2pt, fill: muted, item.text)
+    #safe-prose(7.2pt, fill: muted, item.text, w: w)
   ]
   context {
-    if measure(block(width: body-width, content)).height > 220mm { panic("editorial-availability-note-does-not-fit") }
-    block(width: body-width, breakable: false, content)
+    if measure(block(width: w, content)).height > 220mm { panic("editorial-availability-note-does-not-fit") }
+    block(width: w, breakable: false, content)
   }
   v(3mm)
 }
@@ -192,7 +218,7 @@
 // Indice a link-list (v4 pagina 19): ogni voce risolve la propria pagina
 // fisica dal vivo via `query(metadata)`, senza che Python debba conoscere in
 // anticipo su quale pagina finirà ciascun allegato.
-#let index-block(item) = context {
+#let index-block(item, w: body-width) = context {
   marker((kind: "content", content_id: item.id))
   safe-prose(14pt, weight: 600, fill: navy, item.title)
   v(2mm)
@@ -214,23 +240,67 @@
 // Intestazione di pagina tipo: occhiello (gruppo · numero pagina), titolo
 // neutro, sottotitolo di metodo, striscia KPI orizzontale. Una pagina fisica
 // per voce del catalogo: `pagebreak()` qui, mai dentro il ciclo degli item.
+//
+// In una pagina `rail+main` la striscia non si disegna: gli stessi KPI
+// scendono nel rail a sinistra del contenuto (traccia A, punto 4), e
+// disegnarli due volte sarebbe un duplicato, non un rinforzo.
 #let page-header(spec) = {
   pagebreak()
   context {
     let number = counter(page).get().first()
-    plex(7.4pt, weight: 600, fill: blue, tracking: 0.6pt,
+    plex(7.5pt, weight: 500, fill: blue, tracking: 0.5pt,
       upper(spec.family) + " · " + (if number < 10 { "0" } else { "" }) + str(number))
   }
-  v(3mm)
+  v(5pt)
   safe-prose(16pt, weight: 600, fill: navy, spec.title)
-  v(2mm)
+  v(5pt)
   if spec.subtitle != none {
-    safe-prose(8pt, fill: muted, spec.subtitle)
+    safe-prose(9pt, fill: muted, spec.subtitle)
   }
-  v(5mm)
-  if spec.kpis.len() > 0 {
+  v(11pt)
+  if spec.kpis.len() > 0 and spec.form != "rail+main" {
     kpi-strip(spec.kpis)
     v(5mm)
+  }
+}
+
+#let render-item(spec, item, report, options, w: body-width) = {
+  if item.kind == "table" { table-block(spec, item, w: w) }
+  else if item.kind == "chart" { chart-block(item, gray: options.grayscale, indicators: report.indicator_catalog, w: w) }
+  else if item.kind == "panel" { panel-block(item, gray: options.grayscale, indicators: report.indicator_catalog, w: w) }
+  else if item.kind == "note" { note-block(item, w: w) }
+  else if item.kind == "index" { index-block(item, w: w) }
+  else { text-block(item, w: w) }
+}
+
+// Render di una pagina: il dispatcher `rail+main` mette il rail (colonna da
+// 47 mm) accanto ai soli blocchi che la dichiarano — la `.row` della v4, non
+// l'intera pagina — e lascia il resto a larghezza intera.
+#let render-page(spec, report, options) = {
+  page-header(spec)
+  let items = spec.items
+  let index = 0
+  while index < items.len() {
+    let item = items.at(index)
+    let in-rail = "rail" in item and item.rail
+    if in-rail {
+      // Una corsa di blocchi contigui `rail: true` finisce dentro la `.row`.
+      let end = index
+      while end < items.len() and "rail" in items.at(end) and items.at(end).rail {
+        end = end + 1
+      }
+      grid(columns: (rail-width, rail-main-width), column-gutter: rail-gutter,
+        kpi-rail(spec.rail),
+        {
+          for position in range(index, end) {
+            render-item(spec, items.at(position), report, options, w: rail-main-width)
+          }
+        })
+      index = end
+    } else {
+      render-item(spec, item, report, options)
+      index = index + 1
+    }
   }
 }
 
@@ -238,10 +308,3 @@
 // `editorial.typ` rende direttamente con `cover()` di `base.typ` (ha bisogno
 // dell'intero `report`, non solo dell'item). `report`/`options` vengono
 // passati dal chiamante, mai letti da variabili globali qui.
-#let render-item(spec, item, report, options) = {
-  if item.kind == "table" { table-block(spec, item) }
-  else if item.kind == "chart" { chart-block(item, gray: options.grayscale, indicators: report.indicator_catalog) }
-  else if item.kind == "note" { note-block(item) }
-  else if item.kind == "index" { index-block(item) }
-  else { text-block(item) }
-}

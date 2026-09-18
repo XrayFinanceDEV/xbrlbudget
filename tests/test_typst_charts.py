@@ -134,8 +134,17 @@ def test_negative_bars_and_true_zero_do_not_create_fake_rectangles(renderer):
     artifact = renderer.render(report, document_state='final')
     with fitz.open(stream=artifact.data, filetype='pdf') as pdf:
         drawings = pdf[1].get_drawings()
-        bars = [d for d in drawings if d['fill'] is not None and d['type'] == 'fs']
+        # Dal lotto M2-02G fase 2 la legenda di un grafico a barre mostra un
+        # tassello pieno (il `kind` dichiarato dal catalogo), alto 6,5 pt: è
+        # un rettangolo pieno anche quello, ma non è una barra. Si selezionano
+        # i rettangoli dell'area di grafico, e si fissa a parte che il tassello
+        # ci sia — altrimenti questo filtro, da solo, non se ne accorgerebbe.
+        bars = [d for d in drawings if d['fill'] is not None and d['type'] == 'fs'
+                and d['rect'].height > 8]
+        swatch = [d for d in drawings if d['fill'] is not None and d['type'] == 'fs'
+                  and 6 < d['rect'].height < 8 and d['rect'].width < 12]
         zero = next(d['rect'].y0 for d in drawings if abs(d['width'] - 0.8) < 0.01)
+        assert len(swatch) == 1, "la legenda di un grafico a barre non mostra piú il tassello"
         assert len(bars) == 2
         assert any(abs(d['rect'].y0 - zero) < 0.01 for d in bars)
         assert any(abs(d['rect'].y1 - zero) < 0.01 for d in bars)

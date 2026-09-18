@@ -33,13 +33,16 @@ def test_catalog_order_is_the_fixed_v4_page_list(workflow):
     report = fixture_report(workflow, [2027, 2028, 2029])
     inventory = build_inventory(report)
     ids = [page["id"] for page in inventory]
-    # Ordine del catalogo v4: copertina, sintesi, le pagine di dati.py (solo
-    # infrannuale), ipotesi, CE, SP, flussi, indice allegati, A/B/C, poi D/E
-    # quando la fixture porta i loro dati, F, G (2 parti) e metodologia.
+    # Ordine del catalogo v4, gruppo per gruppo: apertura (copertina, sintesi),
+    # dati (solo infrannuale), piano (ipotesi, CE, SP, flussi), indicatori
+    # (calcolati da indicatori.build, non fissati qui), allegati (indice, A/B/C,
+    # D/E quando la fixture porta i loro dati, F, G, metodologia).
     head = ["cover", "sintesi"]
     if workflow == "infrannuale":
         head += ["fonti", "rettifiche", "chiusura", "indicatori-infrannuali"]
-    head += ["ipotesi", "ce", "sp", "flussi", "allegati"]
+    head += ["ipotesi", "ce", "sp", "flussi"]
+    indicatori_ids = [page["id"] for page in indicatori.build(report)]
+    head += indicatori_ids + ["allegati"]
     offset = len(head)
     assert ids[:offset] == head
     assert ids[offset:offset + 2] == ["allegato-A-1", "allegato-A-2"]
@@ -55,7 +58,6 @@ def test_catalog_order_is_the_fixed_v4_page_list(workflow):
 def test_empty_groups_never_crash_and_contribute_nothing():
     report = fixture_report("bilancio", [2027])
     assert dati.build(report) == []
-    assert indicatori.build(report) == []
 
 
 def test_groups_are_registered_in_the_fixed_v4_family_order():

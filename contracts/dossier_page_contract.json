@@ -1,0 +1,2269 @@
+{
+  "binding": {
+    "non_vincolanti": [
+      "numeri e valori mostrati: vengono dal modello v2"
+    ],
+    "priorita": "pagine 1-18 (priority=executive): il layout dell'artifact è l'obiettivo, priorità alta; pagine 19-33 (priority=allegati): la bozza attuale è già accettabile, differenze a priorità bassa (proprietario 2026-09-18)",
+    "riferimento": [
+      "title/headline/lede: testo del campione, nel prodotto titoli neutri + personalizzazione nei commenti del piano editoriale (dynamic: true)"
+    ],
+    "vincolanti": [
+      "ordine e elenco delle pagine",
+      "sequenza e forma dei blocchi per pagina",
+      "valori di stile (dossier_style_contract.json)",
+      "la nota di commento presente su ogni pagina"
+    ]
+  },
+  "chrome": {
+    "footer": {
+      "destra": "<n> / <totale>",
+      "from": "pages template nel generatore v4",
+      "sinistra": "nota unità di misura"
+    },
+    "header": {
+      "destra": "<title di pagina>",
+      "from": "pages template nel generatore v4",
+      "sinistra": "<company> · Report finale della pratica"
+    }
+  },
+  "page_count": 33,
+  "pages": [
+    {
+      "blocks": [
+        {
+          "fields": [
+            "ANALISI DI BILANCIO E PIANIFICAZIONE FINANZIARIA",
+            "Report Budget 2027 - 2029",
+            "Industria Toscana S.p.A.",
+            "Bilancio al 30 settembre 2026 · chiusura attesa 2026 · piano 2027–2029"
+          ],
+          "type": "meta_row"
+        },
+        {
+          "role": "cover-label",
+          "text": "REPORT FINALE DELLA PRATICA",
+          "type": "text"
+        },
+        {
+          "role": "cover-message",
+          "text": "Dati, rettifiche, ipotesi e risultati.  Un percorso leggibile e commentato.",
+          "type": "text"
+        },
+        {
+          "role": "cover-caption",
+          "text": "Sintesi della pratica infrannuale e delle proiezioni economiche, patrimoniali e finanziarie.",
+          "type": "text"
+        },
+        {
+          "kpis": [
+            "ricavi · chiusura 2026",
+            "EBITDA margin · 2029",
+            "PFN · 2029",
+            "orizzonte di piano"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "cover"
+        },
+        {
+          "fields": [
+            "Preparato per Industria Toscana S.p.A.",
+            "Preparato da Xray Finance",
+            "Versione Anteprima estetica · v5",
+            "Riferimento 15.09.2026"
+          ],
+          "optional": true,
+          "optional_reason": "costanti di deploy (fornitore, versione editoriale, data), non un campo del modello v2",
+          "type": "meta_row"
+        },
+        {
+          "columns": 2,
+          "entries": 13,
+          "type": "toc"
+        },
+        {
+          "title": "Commento di apertura",
+          "type": "note"
+        }
+      ],
+      "group": "COPERTINA",
+      "has_note": true,
+      "id": "copertina",
+      "layout": {
+        "form": "cover"
+      },
+      "note_expected": true,
+      "order": 1,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Dati, rettifiche, ipotesi e risultati.  Un percorso leggibile e commentato.",
+        "lede": "Sintesi della pratica infrannuale e delle proiezioni economiche, patrimoniali e finanziarie.",
+        "title": "Report Budget 2027 - 2029"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "ricavi · chiusura 2026",
+            "EBITDA margin · 2026–2029",
+            "PFN · fine piano",
+            "cassa · fine piano"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 3,
+          "series": [
+            "Ricavi",
+            "EBITDA",
+            "Risultato netto"
+          ],
+          "title": "Ricavi e redditività del piano",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "title": "Commento di sintesi",
+          "type": "note"
+        },
+        {
+          "caption": "Decisioni e punti da presidiare",
+          "columns": 2,
+          "headings": [
+            "Elementi favorevoli",
+            "Verifiche prioritarie"
+          ],
+          "items_per_column": [
+            3,
+            3
+          ],
+          "optional": true,
+          "optional_reason": "elenco redazionale a due colonne scritto a mano nel campione: nel prodotto la personalizzazione vive nei commenti del piano editoriale, non in un blocco dati",
+          "role": "two_columns",
+          "type": "text"
+        }
+      ],
+      "group": "SINTESI",
+      "has_note": true,
+      "id": "sintesi",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 2,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Il piano porta il margine EBITDA al 21% e riduce la PFN a € 1,05 mln",
+        "lede": "La lettura parte dai nove mesi rettificati, passa per la chiusura 2026 e sviluppa tre anni di piano.",
+        "title": "Sintesi esecutiva"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "data del bilancio infrannuale",
+            "periodo osservato",
+            "ricavi prima delle rettifiche",
+            "EBITDA prima delle rettifiche"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Conto economico di partenza",
+            "9M 2026"
+          ],
+          "indent_rows": 0,
+          "n_columns": 2,
+          "n_rows": 9,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento sui dati di partenza",
+          "type": "note"
+        },
+        {
+          "caption": "Perimetro delle fonti",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Fonte",
+            "Periodo / ruolo",
+            "Stato nel campione"
+          ],
+          "indent_rows": 0,
+          "n_columns": 3,
+          "n_rows": 4,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        }
+      ],
+      "group": "DATI DI PARTENZA",
+      "has_note": true,
+      "id": "fonti",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 3,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "I nove mesi sono il punto di partenza; la chiusura resta una stima",
+        "lede": "Conto economico di verifica al 30 settembre 2026. Importi in € migliaia; il progressivo non è direttamente comparabile con un esercizio completo.",
+        "title": "Bilancio infrannuale e fonti"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "rettifiche economiche",
+            "effetto sull’EBITDA",
+            "effetto sul risultato netto",
+            "utile 9M rettificato"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 3,
+          "n_series": 2,
+          "series": [
+            "Prima",
+            "Dopo"
+          ],
+          "title": "Prima e dopo le rettifiche",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "title": "Commento sulle rettifiche",
+          "type": "note"
+        },
+        {
+          "caption": "Riconciliazione del progressivo",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "Prima",
+            "Delta",
+            "Dopo"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 9,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "I dettagli e le motivazioni delle quattro rettifiche sono riportati in appendice.",
+          "type": "text"
+        }
+      ],
+      "group": "DATI DI PARTENZA",
+      "has_note": true,
+      "id": "rettifiche",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 4,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Le rettifiche riducono l’EBITDA di € 90 mila e l’utile di € 80 mila",
+        "lede": "Il confronto rende visibile l’effetto sui valori di partenza. Gli incrementi dei costi riducono il risultato.",
+        "title": "Rettifiche apportate"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "ricavi osservati rettificati",
+            "ricavi stimati · Q4",
+            "ricavi di chiusura",
+            "EBITDA di chiusura"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 3,
+          "n_series": 2,
+          "series": [
+            "Ricavi",
+            "EBITDA"
+          ],
+          "title": "Il passaggio alla chiusura",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "title": "Commento sulla chiusura attesa",
+          "type": "note"
+        },
+        {
+          "caption": "Dal progressivo alla base del piano",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M rettificati",
+            "Q4 stimato",
+            "2026 chiusura"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 9,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        }
+      ],
+      "group": "DATI DI PARTENZA",
+      "has_note": true,
+      "id": "chiusura",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 5,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Il quarto trimestre stimato aggiunge € 1,25 mln di ricavi e € 234 mila di EBITDA",
+        "lede": "Progressivo rettificato al 30.09.2026 + stima ottobre–dicembre = chiusura attesa al 31.12.2026.",
+        "title": "Dall’infrannuale alla chiusura"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "indicatori della pratica",
+            "EBITDA margin · 9M rettificati",
+            "EBITDA margin · chiusura",
+            "periodi di durata diversa"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "dumbbell",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "Periodo iniziale",
+            "Periodo finale"
+          ],
+          "title": "Dal progressivo alla chiusura",
+          "type": "chart",
+          "unit": "%"
+        },
+        {
+          "title": "Commento sul confronto infrannuale",
+          "type": "note"
+        },
+        {
+          "caption": "Indicatori finanziari e strutturali · progressivo e chiusura",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "9M 2026 R",
+            "2026 C"
+          ],
+          "indent_rows": 0,
+          "n_columns": 3,
+          "n_rows": 8,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "R = rettificato. Indicatori monetari in € migliaia. Il dettaglio di tutti i quindici indicatori è nell’Allegato F.",
+          "type": "text"
+        }
+      ],
+      "group": "DATI DI PARTENZA",
+      "has_note": true,
+      "id": "indicatori-infrannuali",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 6,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Gli indicatori collegano il progressivo rettificato alla chiusura attesa",
+        "lede": "I quindici indicatori della stampa infrannuale trovano spazio nel dossier. Qui sono confrontati progressivo rettificato e chiusura stimata.",
+        "title": "Indicatori dell’infrannuale"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "orizzonte del piano",
+            "crescita ricavi",
+            "EBITDA margin obiettivo",
+            "investimenti cumulati"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Driver · origine: dimostrativa",
+            "2027",
+            "2028",
+            "2029"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 6,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento sulle ipotesi",
+          "type": "note"
+        },
+        {
+          "caption": "Le sette aree del piano",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Area",
+            "Ipotesi da documentare"
+          ],
+          "indent_rows": 0,
+          "n_columns": 2,
+          "n_rows": 7,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "ipotesi",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 7,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Crescita dei ricavi e controllo dei costi sostengono l’espansione dei margini",
+        "lede": "Le ipotesi sono presentate per anno e per area, con origine e collegamento ai risultati attesi.",
+        "title": "Ipotesi del piano"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "ricavi · 2029",
+            "EBITDA · 2029",
+            "margine EBITDA · 2029",
+            "utile netto · 2029"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "EBITDA margin",
+            "EBIT margin"
+          ],
+          "title": "Evoluzione dei margini",
+          "type": "chart",
+          "unit": "%"
+        },
+        {
+          "caption": "Conto economico · € migliaia",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 9,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento economico",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "ce",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 8,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "L’EBITDA sale a € 1,27 mln; l’utile previsto raggiunge € 612 mila",
+        "lede": "C = chiusura stimata; P = previsione di piano. Gli anni sono confrontati sulla medesima base annuale.",
+        "title": "Conto economico previsionale"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "totale attivo · 2029",
+            "patrimonio netto · 2029",
+            "immobilizzazioni nette · 2029",
+            "debiti finanziari · 2029"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "Patrimonio netto",
+            "Debiti finanziari"
+          ],
+          "title": "Patrimonio e indebitamento",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "caption": "Stato patrimoniale · € migliaia",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 11,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento patrimoniale",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "sp",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 9,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Gli investimenti aumentano le immobilizzazioni; gli utili rafforzano il patrimonio",
+        "lede": "Il prospetto evidenzia impieghi e fonti, mantenendo separati liquidità e debiti finanziari.",
+        "title": "Stato patrimoniale previsionale"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "flussi operativi · triennio",
+            "investimenti · triennio",
+            "rimborsi · triennio",
+            "variazione cassa · triennio"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 3,
+          "n_series": 3,
+          "series": [
+            "Operativo",
+            "Investimenti",
+            "Finanziario"
+          ],
+          "title": "Composizione dei flussi di cassa",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "title": "Commento sulla cassa",
+          "type": "note"
+        },
+        {
+          "caption": "Riconciliazione della liquidità · € migliaia",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 6,
+          "total_rows": 1,
+          "type": "table",
+          "variant": "standard"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "flussi",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 10,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "La gestione operativa finanzia investimenti e rimborsi, con cassa finale in aumento",
+        "lede": "I flussi sono rappresentati con segno: entrate positive, uscite negative. La cassa finale riconcilia saldo iniziale e variazione.",
+        "title": "Flussi di cassa e sostenibilità"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "PFN · 2026–2029",
+            "PFN / EBITDA",
+            "circolante operativo · 2029",
+            "assorbimento circolante · triennio"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 3,
+          "series": [
+            "Debiti finanziari",
+            "Cassa",
+            "PFN"
+          ],
+          "title": "Debito, cassa e PFN",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "caption": "Indicatori del piano",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 4,
+          "total_rows": 1,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento su indicatori e rischi",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "indicatori",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 11,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "La PFN scende; il circolante continua ad assorbire risorse",
+        "lede": "PFN = debiti finanziari meno disponibilità liquide. Gli indicatori illustrano il campione e non costituiscono un rating.",
+        "title": "Indicatori e rischi"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "liquidità corrente · 2029",
+            "margine di tesoreria · 2029",
+            "margine di struttura · 2029"
+          ],
+          "n_kpis": 3,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 3,
+          "series": [
+            "CCN",
+            "Tesoreria",
+            "Struttura"
+          ],
+          "title": "Margini strutturali",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "Current ratio",
+            "Quick ratio"
+          ],
+          "title": "Liquidità corrente e immediata",
+          "type": "chart",
+          "unit": "volte"
+        },
+        {
+          "caption": "Quadro dei margini · € migliaia",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 3,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento sulla struttura finanziaria",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "liquidita",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 12,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "La liquidità cresce; il margine di struttura resta negativo fino al 2028",
+        "lede": "CCN e margine di tesoreria sono distinti dal circolante operativo. Le barre divergenti rendono visibile il passaggio attraverso lo zero.",
+        "title": "Liquidità e margini strutturali"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "children": [
+            {
+              "kind": "line",
+              "legend": "bottom",
+              "n_categories": 4,
+              "n_series": 2,
+              "series": [
+                "ROI",
+                "ROE"
+              ],
+              "title": "ROI e ROE",
+              "type": "chart",
+              "unit": "%"
+            },
+            {
+              "kind": "line",
+              "legend": "bottom",
+              "n_categories": 4,
+              "n_series": 2,
+              "series": [
+                "OF / ricavi",
+                "OF / MOL"
+              ],
+              "title": "Peso degli oneri finanziari",
+              "type": "chart",
+              "unit": "%"
+            }
+          ],
+          "panels": 2,
+          "type": "panel_grid"
+        },
+        {
+          "caption": "Confronto della redditività · percentuali",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 6,
+          "total_rows": 1,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento sulla redditività",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "redditivita",
+      "layout": {
+        "form": "full+panels",
+        "panel_grids": 1,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 13,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "ROI e margini crescono mentre il peso degli oneri si riduce",
+        "lede": "La redditività è descritta su attivo, capitale proprio e vendite. Il costo finanziario è confrontato sia con i ricavi sia con il MOL.",
+        "title": "Redditività e costo del debito"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "indipendenza finanziaria · 2029",
+            "copertura immobilizzazioni · 2029",
+            "PFN / EBITDA · 2029"
+          ],
+          "n_kpis": 3,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "Indipendenza",
+            "Copertura immobilizzazioni"
+          ],
+          "title": "Autonomia e copertura",
+          "type": "chart",
+          "unit": "%"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 1,
+          "series": [
+            "PFN / EBITDA"
+          ],
+          "title": "PFN / EBITDA",
+          "type": "chart",
+          "unit": "volte"
+        },
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 4,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento su solidità e coperture",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "solidita",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 14,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "La crescita del patrimonio rafforza la copertura delle immobilizzazioni",
+        "lede": "La copertura delle attività fisse e l’autonomia sono presentate senza mescolare percentuali, importi e rapporti in un unico grafico.",
+        "title": "Solidità e copertura del debito"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "giorni di credito · 2029",
+            "giorni di magazzino · 2029",
+            "giorni di debito · 2029",
+            "circolante operativo · 2029"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 3,
+          "series": [
+            "DSO · credito",
+            "DIO · magazzino",
+            "DPO · debito"
+          ],
+          "title": "Giorni del capitale circolante",
+          "type": "chart",
+          "unit": "giorni"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 1,
+          "series": [
+            "DSO + DIO − DPO"
+          ],
+          "title": "Ciclo di conversione del denaro",
+          "type": "chart",
+          "unit": "giorni"
+        },
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 4,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento sul circolante",
+          "type": "note"
+        },
+        {
+          "role": "source",
+          "text": "Base dimostrativa: saldi di fine anno; DSO su ricavi, DIO e DPO su materie prime, anno di 365 giorni. Nel prodotto si usano le basi e i valori del motore esistente.",
+          "type": "text"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "circolante",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 15,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Il ciclo di incasso si accorcia, ma il capitale operativo aumenta",
+        "lede": "Giorni di credito, magazzino e debito sono rappresentati separatamente; il ciclo monetario mostra il loro effetto combinato.",
+        "title": "Circolante e ciclo monetario"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "children": [
+            {
+              "kind": "stacked",
+              "legend": "bottom",
+              "n_categories": 4,
+              "n_series": 3,
+              "series": [
+                "Immobilizzazioni",
+                "Circolante e altro",
+                "Cassa"
+              ],
+              "title": "Composizione degli impieghi",
+              "type": "chart",
+              "unit": null
+            },
+            {
+              "kind": "stacked",
+              "legend": "bottom",
+              "n_categories": 4,
+              "n_series": 3,
+              "series": [
+                "Patrimonio netto",
+                "Debiti finanziari",
+                "Altre passività"
+              ],
+              "title": "Composizione delle fonti",
+              "type": "chart",
+              "unit": null
+            }
+          ],
+          "panels": 2,
+          "type": "panel_grid"
+        },
+        {
+          "caption": "Incidenza dei costi sul fatturato",
+          "kind": "dumbbell",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "Periodo iniziale",
+            "Periodo finale"
+          ],
+          "title": "Chiusura 2026 e fine piano",
+          "type": "chart",
+          "unit": "%"
+        },
+        {
+          "title": "Commento sulla composizione",
+          "type": "note"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "composizione",
+      "layout": {
+        "form": "full+panels",
+        "panel_grids": 1,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 16,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Il dossier mostra anche da cosa sono composti margini, impieghi e fonti",
+        "lede": "Le barre al 100% affiancano ai valori assoluti una lettura della struttura. Le componenti mantengono la stessa posizione e legenda nei quattro anni.",
+        "title": "Composizione economica e patrimoniale"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "ricavi di pareggio · 2029",
+            "margine di sicurezza · 2029"
+          ],
+          "n_kpis": 2,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "kind": "bar",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 2,
+          "series": [
+            "Ricavi",
+            "Pareggio"
+          ],
+          "title": "Ricavi e break-even",
+          "type": "chart",
+          "unit": "€ migliaia"
+        },
+        {
+          "kind": "line",
+          "legend": "bottom",
+          "n_categories": 4,
+          "n_series": 1,
+          "series": [
+            "Margine di sicurezza"
+          ],
+          "title": "Margine di sicurezza",
+          "type": "chart",
+          "unit": "%"
+        },
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 5,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento sul punto di pareggio",
+          "type": "note"
+        },
+        {
+          "role": "source",
+          "text": "Ipotesi di ripartizione esclusivamente dimostrativa. Nel prodotto il break-even deriva dal servizio di analisi esistente e dalla sua metodologia.",
+          "type": "text"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "break-even",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 17,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Il confronto con il pareggio rende leggibile il margine operativo del piano",
+        "lede": "La rappresentazione affianca fatturato previsto, ricavi di pareggio e margine di sicurezza. La separazione fra costi fissi e variabili è esplicita nel campione.",
+        "title": "Break-even e margine di sicurezza"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "kpis": [
+            "confermare la chiusura",
+            "validare le ipotesi",
+            "verificare la distribuzione",
+            "nessuna finalizzazione reale"
+          ],
+          "n_kpis": 4,
+          "type": "kpi_rail",
+          "variant": "rail"
+        },
+        {
+          "caption": "Priorità di verifica",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Priorità",
+            "Tema",
+            "Evidenza / azione"
+          ],
+          "indent_rows": 0,
+          "n_columns": 3,
+          "n_rows": 3,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento conclusivo e azioni",
+          "type": "note"
+        },
+        {
+          "caption": "Controlli del campione",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Controllo",
+            "Esito"
+          ],
+          "indent_rows": 0,
+          "n_columns": 2,
+          "n_rows": 4,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        }
+      ],
+      "group": "PIANO E RISULTATI",
+      "has_note": true,
+      "id": "diagnostica",
+      "layout": {
+        "form": "rail+main",
+        "panel_grids": 0,
+        "rows": 1
+      },
+      "note_expected": true,
+      "order": 18,
+      "priority": "executive",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Tre verifiche collegano le ipotesi del piano alle decisioni operative",
+        "lede": "I commenti interpretano i risultati; controlli e riconciliazioni restano distinti dalle valutazioni.",
+        "title": "Diagnostica e punti da verificare"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "columns": 1,
+          "entries": 13,
+          "type": "toc"
+        },
+        {
+          "title": "Come consultare gli allegati",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegati",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 19,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "I prospetti completi consentono di verificare la pratica e il piano",
+        "lede": "Questa sezione raccoglie il dettaglio contabile e finanziario. I prospetti sono visibili anche in stampa e non sono ridotti alle sole macro-voci.",
+        "title": "Allegati · indice dei prospetti"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 9,
+          "n_columns": 6,
+          "n_rows": 24,
+          "total_rows": 3,
+          "type": "table",
+          "variant": "full"
+        },
+        {
+          "role": "source",
+          "text": "Righe 1–24 di 47 · catalogo del progetto, valori dimostrativi.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al prospetto economico · produzione e costi",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-A-1",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 20,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Conto economico — prospetto completo",
+        "lede": "Allegato A · parte 1 di 2 · € migliaia · R: progressivo rettificato; C: chiusura stimata; P: piano.",
+        "title": "A · Conto economico · 1/2"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 2,
+          "n_columns": 6,
+          "n_rows": 23,
+          "total_rows": 11,
+          "type": "table",
+          "variant": "full"
+        },
+        {
+          "role": "source",
+          "text": "Righe 25–47 di 47 · catalogo del progetto, valori dimostrativi.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al prospetto economico · risultato",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-A-2",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 21,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Conto economico — prospetto completo",
+        "lede": "Allegato A · parte 2 di 2 · € migliaia · R: progressivo rettificato; C: chiusura stimata; P: piano.",
+        "title": "A · Conto economico · 2/2"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 18,
+          "n_columns": 6,
+          "n_rows": 23,
+          "total_rows": 4,
+          "type": "table",
+          "variant": "full"
+        },
+        {
+          "role": "source",
+          "text": "Righe 1–23 di 86 · catalogo del progetto, valori dimostrativi.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al prospetto patrimoniale · impieghi",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-B-1",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 22,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Stato patrimoniale — prospetto completo",
+        "lede": "Allegato B · parte 1 di 4 · € migliaia · R: progressivo rettificato; C: chiusura stimata; P: piano.",
+        "title": "B · Stato patrimoniale · 1/4"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 18,
+          "n_columns": 6,
+          "n_rows": 24,
+          "total_rows": 5,
+          "type": "table",
+          "variant": "full"
+        },
+        {
+          "role": "source",
+          "text": "Righe 24–46 di 86 · catalogo del progetto, valori dimostrativi.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al prospetto patrimoniale · crediti e liquidità",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-B-2",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 23,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Stato patrimoniale — prospetto completo",
+        "lede": "Allegato B · parte 2 di 4 · € migliaia · R: progressivo rettificato; C: chiusura stimata; P: piano.",
+        "title": "B · Stato patrimoniale · 2/4"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 19,
+          "n_columns": 6,
+          "n_rows": 24,
+          "total_rows": 3,
+          "type": "table",
+          "variant": "full"
+        },
+        {
+          "role": "source",
+          "text": "Righe 47–69 di 86 · catalogo del progetto, valori dimostrativi.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al prospetto patrimoniale · capitale e passività",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-B-3",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 24,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Stato patrimoniale — prospetto completo",
+        "lede": "Allegato B · parte 3 di 4 · € migliaia · R: progressivo rettificato; C: chiusura stimata; P: piano.",
+        "title": "B · Stato patrimoniale · 3/4"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 13,
+          "n_columns": 6,
+          "n_rows": 18,
+          "total_rows": 4,
+          "type": "table",
+          "variant": "full"
+        },
+        {
+          "role": "source",
+          "text": "Righe 70–86 di 86 · catalogo del progetto, valori dimostrativi.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al prospetto patrimoniale · riconciliazione",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-B-4",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 25,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Stato patrimoniale — prospetto completo",
+        "lede": "Allegato B · parte 4 di 4 · € migliaia · R: progressivo rettificato; C: chiusura stimata; P: piano.",
+        "title": "B · Stato patrimoniale · 4/4"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 24,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "Struttura del componente report-cashflow. Nel campione la riga altri incassi/pagamenti contiene una rettifica dimostrativa di riconciliazione: non è un rendiconto di una pratica reale.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al rendiconto · gestione operativa",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-C-1",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 26,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Rendiconto finanziario — prospetto completo",
+        "lede": "Allegato C · parte 1 di 2 · metodo indiretto · € migliaia.",
+        "title": "C · Rendiconto finanziario · 1/2"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 23,
+          "total_rows": 1,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "Struttura del componente report-cashflow. Nel campione la riga altri incassi/pagamenti contiene una rettifica dimostrativa di riconciliazione: non è un rendiconto di una pratica reale.",
+          "type": "text"
+        },
+        {
+          "title": "Commento al rendiconto · investimenti e finanziamenti",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-C-2",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 27,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Rendiconto finanziario — prospetto completo",
+        "lede": "Allegato C · parte 2 di 2 · metodo indiretto · € migliaia.",
+        "title": "C · Rendiconto finanziario · 2/2"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Rif.",
+            "Rettifica",
+            "Voce / contropartita",
+            "Delta",
+            "Motivazione"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 4,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "caption": "Effetto degli eventi sul progressivo",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "Prima",
+            "Delta",
+            "Dopo"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 9,
+          "total_rows": 2,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Commento al registro delle rettifiche",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-D",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 28,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Registro completo delle rettifiche e delle motivazioni",
+        "lede": "Allegato D · eventi economici · € migliaia.",
+        "title": "D · Registro rettifiche"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Driver",
+            "Origine demo",
+            "2027",
+            "2028",
+            "2029"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 11,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "caption": "Debito e calendario dei rimborsi · € migliaia",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Voce",
+            "2027",
+            "2028",
+            "2029"
+          ],
+          "indent_rows": 0,
+          "n_columns": 4,
+          "n_rows": 4,
+          "optional": true,
+          "optional_reason": "tabella debito iniziale/nuovi finanziamenti/rimborsi/debito finale: assente nel modello (mappatura 12-33, pag. 29) — derivabile solo da un servizio dedicato, non un obbligo",
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "Il campione non dettaglia singoli contratti. Nel report effettivo i prestiti, i debiti pregressi e le differenze temporanee saranno esposti come tabelle strutturate quando presenti.",
+          "type": "text"
+        },
+        {
+          "title": "Commento alla matrice delle ipotesi",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-E",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 29,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Ipotesi del piano — dettaglio dei driver e dei finanziamenti",
+        "lede": "Allegato E · tutti i driver usati nel campione · non una sintesi dei soli KPI.",
+        "title": "E · Matrice ipotesi e finanziamenti"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "9M 2026 R",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 6,
+          "n_rows": 15,
+          "total_rows": 1,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "paragraph",
+          "text": "Il progressivo rettificato copre nove mesi; chiusura e piano sono annuali. Gli indicatori monetari sono in € migliaia. Il DSCR segue la convenzione della pratica descritta nel corpo del dossier. Il periodo storico precedente non è presente in questo campione.",
+          "type": "text"
+        },
+        {
+          "title": "Commento alla tabella degli indicatori infrannuali",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-F",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 30,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Indicatori della pratica — tabella completa",
+        "lede": "Allegato F · i quindici indicatori già presenti nella stampa infrannuale, estesi ai periodi del piano.",
+        "title": "F · Indicatori infrannuali"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 15,
+          "total_rows": 1,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "Valori dimostrativi, basi dichiarate nell’anteprima. Acid Test e leva finanziaria non sono valorizzati nel campione; nel prodotto si usano i valori del servizio di analisi. Scoring Altman, FGPMI, EM-Score e break-even saranno riportati se disponibili nel modello, con le rispettive componenti.",
+          "type": "text"
+        },
+        {
+          "title": "Commento agli indici · liquidità e redditività",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-G-1",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 31,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Indici del report analitico — quadro completo",
+        "lede": "Allegato G · parte 1 di 2 · famiglie e denominazioni del report esistente.",
+        "title": "G · Indici analitici · 1/2"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Indicatore",
+            "2026 C",
+            "2027 P",
+            "2028 P",
+            "2029 P"
+          ],
+          "indent_rows": 0,
+          "n_columns": 5,
+          "n_rows": 11,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "role": "source",
+          "text": "Valori dimostrativi, basi dichiarate nell’anteprima. Acid Test e leva finanziaria non sono valorizzati nel campione; nel prodotto si usano i valori del servizio di analisi. Scoring Altman, FGPMI, EM-Score e break-even saranno riportati se disponibili nel modello, con le rispettive componenti.",
+          "type": "text"
+        },
+        {
+          "title": "Commento agli indici · rotazione ed efficienza",
+          "type": "note"
+        }
+      ],
+      "group": "ALLEGATI",
+      "has_note": true,
+      "id": "allegato-G-2",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 32,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Indici del report analitico — quadro completo",
+        "lede": "Allegato G · parte 2 di 2 · famiglie e denominazioni del report esistente.",
+        "title": "G · Indici analitici · 2/2"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "title": "Metodologia e lettura",
+          "type": "note"
+        },
+        {
+          "caption": "Fonti delle strutture",
+          "evidence": {
+            "header_repeated": "@media print thead{display:table-header-group} nel CSS del generatore"
+          },
+          "header_repeated": true,
+          "headers": [
+            "Struttura",
+            "Fonte nel progetto"
+          ],
+          "indent_rows": 0,
+          "n_columns": 2,
+          "n_rows": 5,
+          "total_rows": 0,
+          "type": "table",
+          "variant": "standard"
+        },
+        {
+          "title": "Limiti del campione",
+          "type": "note"
+        },
+        {
+          "role": "paragraph",
+          "text": "Il bilancio infrannuale illustrativo e la chiusura includono un movimento di patrimonio di € 50 mila oltre al risultato del trimestre residuo. Le altre rettifiche dei flussi sono dichiarate nel rendiconto dimostrativo.",
+          "type": "text"
+        }
+      ],
+      "group": "APPENDICI",
+      "has_note": true,
+      "id": "metodologia",
+      "layout": {
+        "form": "full",
+        "panel_grids": 0,
+        "rows": 0
+      },
+      "note_expected": true,
+      "order": 33,
+      "priority": "allegati",
+      "titles": {
+        "dynamic": {
+          "headline": true,
+          "lede": true,
+          "title": false
+        },
+        "headline": "Il dettaglio consente di ricostruire rettifiche, ipotesi e risultati",
+        "lede": "Documento dimostrativo per validare estetica e struttura editoriale. Non contiene dati di clienti reali.",
+        "title": "Metodologia e note"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "source": {
+    "file": "/home/peter/DEV/budget/inbox/artifacts/2026-09-15-report-finale/build-dossier-preview.py",
+    "generated_html_sections": 33,
+    "sha256": "82d01373fbd6f2da810b96112a4d734d0c7255b743e3762ee6bafa7e2bcc7203"
+  },
+  "totals": {
+    "blocks": {
+      "chart": 21,
+      "kpi_rail": 16,
+      "meta_row": 2,
+      "note": 34,
+      "panel_grid": 2,
+      "table": 34,
+      "text": 21,
+      "toc": 2
+    },
+    "chart_kinds": {
+      "bar": 7,
+      "dumbbell": 2,
+      "line": 10,
+      "stacked": 2
+    },
+    "pages_with_note": 33
+  }
+}

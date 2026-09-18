@@ -483,7 +483,11 @@ def chart_from_series(chart_id: str, title: str, unit: str, periods: list[Any],
 #: la v4 infatti li disegna più bassi (misurato: con 94 il dossier passava da
 #: 33 a 38 pagine fisiche).
 CHART_HEIGHT_FULL_MM = "94"
-CHART_HEIGHT_COMPACT_MM = "58"
+#: Un solo grafico dentro una pagina con rail: la v4 lo disegna alto ~46 mm,
+#: molto meno dei 94 della geometria base, e con una tavola sotto quei 94 mm
+#: spingevano l'ultima riga su una pagina orfana (misurato sulla pagina 9).
+CHART_HEIGHT_RAIL_MM = "70"
+CHART_HEIGHT_COMPACT_MM = "54"
 
 
 def chart_marker_height_mm(item: dict[str, Any]) -> str:

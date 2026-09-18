@@ -41,10 +41,24 @@
   display
 }
 
+// Titolo di blocco alla maniera della v4 (`h3.blk`, style contract
+// `titolo_blocco`): un filo scuro sopra, 7 pt di respiro, testo 9,5 pt/600.
+// Era 14 pt senza filo: un titolo grosso quanto il titolo di pagina e senza
+// lo stacco che separa un blocco dal precedente.
+#let block-title(title) = [
+  // Lo stacco sopra il filo lo dà già il blocco precedente (`v(5mm)`): il
+  // margine di 13 pt del CSS v4 qui si sommerebbe, e un'intestazione più alta
+  // di prima spingeva fuori pagina l'ultima riga di ogni prospetto degli
+  // Allegati (misurato: 42 pagine fisiche invece di 33).
+  #line(length: 100%, stroke: 0.9pt + navy)
+  #v(6pt)
+  #safe-prose(9.5pt, weight: 600, fill: navy, title)
+  #v(4pt)
+]
+
 #let heading(item) = [
   #marker((kind: "content", content_id: "heading:" + item.id))
-  #safe-prose(14pt, weight: 600, fill: navy, item.title)
-  #v(2mm)
+  #block-title(item.title)
 ]
 
 // Riga «totale» alla maniera della v4: le voci che chiudono un blocco sono in
@@ -145,8 +159,9 @@
     else if has-kpi { "118" } else { none }
   let show-values = "value_table" not in item or item.value_table
   [
-    #safe-prose(14pt, weight: 600, fill: navy, item.title)
-    #v(3mm)
+    // Il respiro sotto il titolo lo dà già `block-title`: i 3 mm che c'erano
+    // qui si sommavano e costavano una riga di tabella per pagina.
+    #block-title(item.title)
     #if has-kpi {
       grid(columns: (55mm, w - 55mm - 5mm), column-gutter: 5mm,
         kpi-column(item.kpis),
@@ -198,7 +213,7 @@
 #let text-block(item, w: body-width) = {
   let content = [
     #marker((kind: "content", content_id: item.id))
-    #safe-prose(14pt, weight: 600, fill: navy, item.title)
+    #block-title(item.title)
     #v(2mm)
     #safe-prose(9pt, fill: muted, item.text, w: w)
   ]
@@ -227,7 +242,7 @@
 // anticipo su quale pagina finirà ciascun allegato.
 #let index-block(item, w: body-width) = context {
   marker((kind: "content", content_id: item.id))
-  safe-prose(14pt, weight: 600, fill: navy, item.title)
+  block-title(item.title)
   v(2mm)
   let values = query(metadata).map(node => node.value)
   let page-of(id) = {

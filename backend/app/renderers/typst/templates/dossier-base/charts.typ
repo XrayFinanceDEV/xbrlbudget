@@ -288,38 +288,37 @@
         bars: shape == "bar", height-mm: height-mm) }
   }
 }
+// Legenda ORIZZONTALE sotto il grafico, come la v4: le voci stanno in riga e
+// vanno a capo solo quando la riga è piena. Prima erano impilate in verticale,
+// una per riga: rubavano tre righe di altezza al disegno e allontanavano il
+// nome della serie dal proprio colore.
 #let legend(chart, gray: false, thresholds: (), width-mm: none) = {
   let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
   let shape = kind(chart)
+  let marker(index) = {
+    let color = colors(gray).at(calc.rem(index, 4))
+    box(width: 12pt, height: 8pt)[
+      #if shape == "dumbbell" [
+        // I due marker del dumbbell non sono due serie: sono i due estremi del
+        // confronto, e la legenda della v4 li nomina così.
+        #place(left + horizon, dx: 2pt, dot(colors(gray).at(index), filled: index > 0))
+      ] else if shape == "line" [
+        #place(left + horizon, line(length: 12pt, stroke: (paint: color, thickness: 1.5pt, dash: dash(index))))
+      ] else [
+        #place(left + horizon, rect(width: 10pt, height: 6.5pt, fill: color, stroke: 0.3pt + ink))
+      ]
+    ]
+  }
   block(width: width, [
-    #if shape == "dumbbell" [
-      // I due marker del dumbbell non sono due serie: sono i due estremi del
-      // confronto, e la legenda della v4 li nomina cosi.
+    #box(inset: (top: 2pt))[
       #for (index, series) in chart.series.enumerate() {
-        grid(columns: (14pt, 1fr), column-gutter: 5pt,
-          box(width: 12pt, height: 8pt)[
-            #place(left + horizon, dx: 2pt, dot(colors(gray).at(index), filled: index > 0))],
-          plex(7.6pt, fill: muted, series.label))
-        v(3pt)
-      }
-    ] else [
-      #for (index, series) in chart.series.enumerate() {
-        let color = colors(gray).at(calc.rem(index, 4))
-        grid(columns: (14pt, 1fr), column-gutter: 5pt,
-          box(width: 12pt, height: 8pt)[
-            #if shape == "line" [
-              #place(left + horizon, line(length: 12pt, stroke: (paint: color, thickness: 1.5pt, dash: dash(index))))
-            ] else [
-              #place(left + horizon, rect(width: 10pt, height: 6.5pt, fill: color, stroke: 0.3pt + ink))
-            ]
-          ],
-          plex(7.6pt, fill: muted, series.label))
-        v(3pt)
+        box(inset: (right: 10pt), baseline: 2pt)[
+          #marker(index)#h(4pt)#plex(7.6pt, fill: muted, series.label)]
       }
     ]
     #for threshold in thresholds [
-      #plex(7pt, fill: muted, "Riferimento: " + threshold.label + " = " + display-value-with-unit(threshold.value, chart.unit))
       #v(2pt)
+      #plex(7pt, fill: muted, "Riferimento: " + threshold.label + " = " + display-value-with-unit(threshold.value, chart.unit))
     ]
   ])
 }

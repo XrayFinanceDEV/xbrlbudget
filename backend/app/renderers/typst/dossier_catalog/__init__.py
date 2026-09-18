@@ -22,7 +22,7 @@ from app.schemas.final_report_v2 import FinalReportModelV2
 
 from . import allegati, apertura, dati, indicatori, piano
 from .shared import (  # noqa: F401  (riesportati: `editorial_plan.py` li importa da qui)
-    CHART_HEIGHT_COMPACT_MM, CHART_HEIGHT_FULL_MM, CHART_WIDTH_FULL_MM, CHART_WIDTH_KPI_MM,
+    CHART_HEIGHT_COMPACT_MM, CHART_HEIGHT_FULL_MM, CHART_HEIGHT_RAIL_MM, CHART_WIDTH_FULL_MM, CHART_WIDTH_KPI_MM,
     CHART_WIDTH_PANEL_MM, CHART_WIDTH_RAIL_MM, PAGE_FORMS, RAIL_WIDTH_MM,
     chart_marker_height_mm, chart_marker_width_mm,
 )
@@ -92,7 +92,10 @@ def _apply_page_form(page: dict[str, Any]) -> dict[str, Any]:
         item["width_mm"] = (CHART_WIDTH_RAIL_MM if item["rail"]
                             else CHART_WIDTH_PANEL_MM if id(item) in in_panel
                             else CHART_WIDTH_FULL_MM)
-        if charts_in_column > 1:
+        if form == "rail+main":
+            item["height_mm"] = (CHART_HEIGHT_COMPACT_MM if charts_in_column > 1
+                                 else CHART_HEIGHT_RAIL_MM)
+        elif charts_in_column > 1:
             item["height_mm"] = CHART_HEIGHT_COMPACT_MM
     for item in blocks:
         if item["kind"] == "chart" and item["rail"] and item.get("kpis"):

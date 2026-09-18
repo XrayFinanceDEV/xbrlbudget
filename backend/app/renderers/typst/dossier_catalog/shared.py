@@ -482,10 +482,11 @@ def select_periods_with_adjusted(periods: list[Any], max_periods: int = 5) -> li
     return selected[-max_periods:] if len(selected) > max_periods else selected
 
 
-def indicator_values_for_periods(indicator: Any, periods: list[Any]) -> list[Any]:
-    """`indicator.values` reindexed onto a chosen subset of `indicator.periods`
-    — by period id, the `IndicatorDefinition` analogue of `values_for_periods`
-    (which reads a `DetailedStatementRow` against a separate `statement`)."""
+def indicator_object_values_for_periods(indicator: Any, periods: list[Any]) -> list[Any]:
+    """Come `indicator_values_for_periods`, ma a partire dall'oggetto indicatore
+    già risolto invece che dal suo identificativo: le due firme nascono da due
+    gruppi del catalogo (allegati e piano) e restano distinte per non costringere
+    chi ha già l'oggetto a ricercarlo di nuovo per id."""
     by_id = {period.id: value for period, value in zip(indicator.periods, indicator.values)}
     return [by_id.get(period.id) for period in periods]
 

@@ -208,7 +208,7 @@ def _indicators_by_keys(report: FinalReportModelV2, prefix: str, keys: tuple[str
 
 
 def _indicator_row(indicator: Any, periods: list[Any]) -> dict[str, Any]:
-    values = s.indicator_values_for_periods(indicator, periods)
+    values = s.indicator_object_values_for_periods(indicator, periods)
     if indicator.unit == "eur":
         cells = [indicator.label, *values]
         units = [None, *(["eur"] * len(values))]

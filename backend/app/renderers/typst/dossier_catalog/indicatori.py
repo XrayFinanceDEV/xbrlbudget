@@ -276,7 +276,7 @@ def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
     # Il secondo grafico della v4 (PFN/EBITDA, unità "volte", incompatibile
     # con il percent del primo) resta fuori dal grafico; il valore è comunque
     # KPI qui sopra e riga di tabella qui sotto.
-    table = _indicator_table("solidita-tabella", "Solidità e copertura del debito", report, periods, [
+    table = _indicator_table("solidita-tabella", "Autonomia, copertura e servizio del debito", report, periods, [
         ("practice.indipendenza", "Indipendenza finanziaria"),
         ("practice.copertura_immob", "Copertura immobilizzazioni"),
         ("practice.pfn_ebitda", "PFN / EBITDA"),
@@ -467,7 +467,7 @@ def _break_even(report: FinalReportModelV2) -> dict[str, Any]:
     # pareggio): il valore è comunque KPI e riga di tabella. Il margine può
     # essere negativo (ricavi sotto il pareggio): righe e barre lo mostrano
     # senza clamp, nessuna formula nel template.
-    table = _structure_table("break-even-tabella", "Break-even e margine di sicurezza", report, "break_even",
+    table = _structure_table("break-even-tabella", "Costi fissi, variabili e ricavi di pareggio", report, "break_even",
         periods, [
             ("fixed_costs", "Costi fissi", "eur"),
             ("variable_costs", "Costi variabili", "eur"),

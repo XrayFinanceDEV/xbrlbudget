@@ -34,7 +34,7 @@ def test_build_returns_the_pages_implemented_so_far():
     report = fixture_report("bilancio", [2027, 2028, 2029])
     pages = indicatori.build(report)
     assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita", "solidita",
-                                               "composizione"]
+                                               "composizione", "break-even"]
 
 
 def test_a_page_with_no_data_at_all_is_dropped_never_shown_blank():
@@ -207,6 +207,24 @@ def test_composizione_chart_uses_only_first_and_last_period():
         pytest.skip("cost_incidence assente su questa fixture")
     chart = _charts([page])[0]["chart"]
     assert len(chart["categories"]) == 2
+
+
+def test_break_even_table_shows_a_negative_safety_margin_without_clamping():
+    """Sulla fixture sintetica il margine di contribuzione è nullo/negativo
+    (nessuna ipotesi di piano -> quota fissa di default): il "ricavo di
+    pareggio" può restare assente, ma quando c'è la tabella non deve mai
+    troncare un valore negativo (v. nota della mappatura: la v4 dimostrativa
+    ha sempre margine positivo, i dati reali no)."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    group = indicatori._structure_group(report, "break_even")
+    safety = indicatori._structure_series(group, "safety_margin_pct")
+    negative = [v for v in safety.values if v is not None and v < 0]
+    if not negative:
+        pytest.skip("nessun margine negativo su questa fixture")
+    page = next(p for p in indicatori.build(report) if p["id"] == "break-even")
+    table = _tables([page])[0]
+    margin_row = next(row for row in table["rows"] if row["cells"][0] == "Margine di sicurezza")
+    assert any(cell is not None and cell.startswith("-") for cell in margin_row["cells"][1:])
 
 
 def test_indicator_table_display_label_none_uses_the_catalog_label():

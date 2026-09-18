@@ -419,6 +419,70 @@ def _composizione(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [], "items": items}
 
 
+# ── Pagina 17 · Break-even e margine di sicurezza ───────────────────────────
+
+
+def _structure_table(table_id: str, title: str, report: FinalReportModelV2, group_id: str, periods: list[Any],
+                     rows_spec: list[tuple[str, str, str]]) -> dict[str, Any] | None:
+    group = _structure_group(report, group_id)
+    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    rows = []
+    for series_id, display_label, unit in rows_spec:
+        series = _structure_series(group, series_id)
+        values = _values_by_period(series.values, group.periods, periods)
+        if not any(value is not None for value in values):
+            continue
+        rows.append(s.row(f"{table_id}:{series_id}", [display_label, *values], [None, *([unit] * len(values))]))
+    if not rows:
+        return None
+    return s.table(table_id, title, columns, rows)
+
+
+def _structure_kpi(report: FinalReportModelV2, group_id: str, series_id: str, desc: str, unit: str,
+                   periods: list[Any]) -> dict[str, Any] | None:
+    values = _structure_values(report, group_id, series_id, periods)
+    pairs = [(period, value) for period, value in zip(periods, values) if value is not None]
+    if not pairs:
+        return None
+    period, value = pairs[-1]
+    return s.kpi(f"{desc} · {period.year}", value, unit)
+
+
+def _break_even(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    kpis = [kpi for kpi in (
+        _structure_kpi(report, "break_even", "break_even_revenue", "ricavi di pareggio", "eur", periods),
+        _structure_kpi(report, "break_even", "safety_margin_pct", "margine di sicurezza", "percent", periods),
+    ) if kpi is not None]
+    chart = _chart("break-even-ricavi-pareggio", "Ricavi e break-even", "eur", periods, [
+        ("Ricavi", _statement_values(report, "income_statement", "ce01_ricavi_vendite", periods)),
+        ("Pareggio", _structure_values(report, "break_even", "break_even_revenue", periods)),
+    ])
+    items: list[dict[str, Any]] = []
+    block = s.chart_block("break-even-ricavi-pareggio", "Ricavi e break-even", chart, kpis)
+    if block is not None:
+        items.append(block)
+    # Il secondo grafico della v4 (solo margine di sicurezza, %) resta fuori
+    # dal grafico principale (unità incompatibile con l'eur di ricavi/
+    # pareggio): il valore è comunque KPI e riga di tabella. Il margine può
+    # essere negativo (ricavi sotto il pareggio): righe e barre lo mostrano
+    # senza clamp, nessuna formula nel template.
+    table = _structure_table("break-even-tabella", "Break-even e margine di sicurezza", report, "break_even",
+        periods, [
+            ("fixed_costs", "Costi fissi", "eur"),
+            ("variable_costs", "Costi variabili", "eur"),
+            ("contribution_margin", "Margine di contribuzione", "eur"),
+            ("break_even_revenue", "Ricavi di pareggio", "eur"),
+            ("safety_margin_pct", "Margine di sicurezza", "percent"),
+        ])
+    if table is not None:
+        items.append(table)
+    return {"id": "break-even", "title": "Break-even e margine di sicurezza", "family": FAMILY,
+            "subtitle": "Il margine di sicurezza può risultare negativo quando i ricavi restano sotto il "
+                        "pareggio operativo.",
+            "kpis": [] if block is not None else kpis, "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # "Niente pagine vuote" (m2-02d.md): su una fonte degenere (es. il
     # fixture sintetico "startup", dove ricavi/margini sono tutti a zero) sia
@@ -426,5 +490,5 @@ def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # — quella pagina si toglie dal catalogo qui, non entra come riquadro
     # bianco e non compare nell'indice.
     pages = [_indicatori(report), _liquidita(report), _redditivita(report), _solidita(report),
-             _circolante(report), _composizione(report)]
+             _circolante(report), _composizione(report), _break_even(report)]
     return [page for page in pages if page["items"]]

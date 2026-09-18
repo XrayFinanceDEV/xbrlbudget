@@ -47,12 +47,14 @@
   #v(2mm)
 ]
 
-// Riga «totale» alla maniera della v4: le voci che chiudono un blocco
-// (Totale…, EBITDA, Risultato netto, Cassa finale) sono in grassetto e
-// separate da un filo più marcato sopra, invece di una banda colorata.
+// Riga «totale» alla maniera della v4: le voci che chiudono un blocco sono in
+// grassetto e separate da un filo più marcato sopra, invece che da una banda
+// colorata. L'elenco è quello del CSS della v4 e non uno più largo: marcare
+// anche EBIT, risultato ante imposte e patrimonio netto faceva sette righe in
+// grassetto su nove, e un grassetto che vale per quasi tutto non distingue
+// più niente — è il rilievo del proprietario sulla leggibilità (18/09).
 #let total-row(label) = label != none and (
-  label.starts-with("Totale") or label in ("EBITDA", "EBIT", "Risultato netto",
-    "Risultato ante imposte", "Cassa finale", "Patrimonio netto"))
+  label.starts-with("Totale") or label in ("EBITDA", "Risultato netto", "Cassa finale"))
 
 // Il catalogo v4 tiene ogni tabella a un massimo di 5 colonne di valore (vincolo
 // del proprietario, 2026-09-17): questo dispatcher non spacca più per periodi
@@ -92,7 +94,7 @@
     // righe da 4 pt di respiro separate da un filo chiaro, numeri a destra.
     // Nessun fondo colorato: la gerarchia la fanno i fili e il peso.
     table(columns: (label-width, ..((column-width,) * (count - 1))),
-      inset: (x: 4pt, y: 4pt),
+      inset: (x: 4pt, y: 6pt),
       align: (column, row) => if column == 0 { left } else { right },
       stroke: (column, row) => (left: none, right: none, top: none,
         bottom: if row == 0 { 0.7pt + ink } else { 0.5pt + rule }),
@@ -115,7 +117,7 @@
         }
       ])
     }
-    table(columns: (label-column, w - label-column), inset: (x: 4pt, y: 4pt),
+    table(columns: (label-column, w - label-column), inset: (x: 4pt, y: 6pt),
       stroke: (column, row) => (left: none, right: none, top: none,
         bottom: if row == 0 { 0.7pt + ink } else { 0.5pt + rule }),
       table.header(

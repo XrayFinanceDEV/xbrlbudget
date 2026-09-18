@@ -285,6 +285,142 @@ def chunk(sequence: list[Any], size: int) -> list[list[Any]]:
     return [sequence[i:i + size] for i in range(0, len(sequence), size)]
 
 
+# ── Piano e risultati (v4 pagine 7-10): KPI/valori letti da più di una fonte ──
+# Aggiunte in fondo al file, come richiesto dalla regola comune della fase: un
+# helper qui solo se serve a più pagine — questi servono a «ipotesi», «sp» e
+# «flussi» (e, per `kpi_statement`, alla correzione dei due KPI di «ce»
+# descritta sotto), non a una pagina sola.
+#
+# `kpi_forecast` legge SOLO i campi grezzi persistiti (`sp*`/`ce*`, colonne
+# vere della tabella ORM): un aggregato come `ebitda`, `net_profit` o
+# `total_assets` è una `@property` Python su `ForecastIncomeStatement`/
+# `ForecastBalanceSheet`, mai una colonna — `kpi_forecast(report,
+# "income_statement", ("ebitda",), ...)` non trova mai un codice "ebitda" fra
+# le righe grezze di un report reale e ritorna sempre `None` (silenziosamente
+# omesso, mai un errore: verificato su AMBIENTA/575, scenario 18 — la pagina
+# «ce» mostrava così solo 2 dei 4 KPI dichiarati). Un aggregato vive già,
+# corretto, in `detailed_statements` (`build_detailed_statements` lo arricchisce
+# con `calculate_ce_result`/`balance_aggregates`): `kpi_statement` legge da lì.
+
+
+def kpi_statement(report: FinalReportModelV2, statement_id: str, code: str, desc: str,
+                  *, basis: str = "forecast", which: str = "last") -> dict[str, Any] | None:
+    """KPI da una riga di `detailed_statements` (aggregati compresi, a
+    differenza di `kpi_forecast`) al primo/ultimo periodo del `basis` dato.
+    Nessun valore inventato: un periodo senza valore è saltato, mai un altro
+    periodo al suo posto."""
+    statement = statement_by_id(report, statement_id)
+    row_obj = statement_row(statement, code)
+    periods = [period for period in statement.periods if period.basis == basis]
+    if not periods:
+        return None
+    period = periods[-1] if which == "last" else periods[0]
+    value = values_for_periods(row_obj, statement, [period])[0]
+    if value is None:
+        return None
+    return kpi(f"{desc} · {period.year}", value, "eur")
+
+
+def structure_group_by_id(report: FinalReportModelV2, group_id: str) -> Any:
+    for group in report.structure_series:
+        if group.id == group_id:
+            return group
+    raise ValueError(f"no structure series group {group_id!r}")
+
+
+def structure_values_for_periods(report: FinalReportModelV2, group_id: str, series_id: str,
+                                 periods: list[Any]) -> list[Any]:
+    """Come `values_for_periods`, ma per una serie di `structure_series`
+    (`composition_sources.financial_debt`, ...): la pagina che compone un
+    grafico misto (una riga di prospetto + una serie strutturale, mai un
+    secondo calcolo) legge da qui e da `values_for_periods` con la stessa
+    finestra di periodi."""
+    group = structure_group_by_id(report, group_id)
+    series_obj = next((series for series in group.series if series.id == series_id), None)
+    if series_obj is None:
+        return [None] * len(periods)
+    by_id = {period.id: value for period, value in zip(group.periods, series_obj.values)}
+    return [by_id.get(period.id) for period in periods]
+
+
+def kpi_structure(report: FinalReportModelV2, group_id: str, series_id: str, desc: str,
+                  *, basis: str = "forecast", which: str = "last") -> dict[str, Any] | None:
+    group = structure_group_by_id(report, group_id)
+    series_obj = next((series for series in group.series if series.id == series_id), None)
+    if series_obj is None:
+        return None
+    candidates = [(period, value) for period, value in zip(group.periods, series_obj.values)
+                 if period.basis == basis and value is not None]
+    if not candidates:
+        return None
+    period, value = candidates[-1] if which == "last" else candidates[0]
+    return kpi(f"{desc} · {period.year}", value, series_obj.unit)
+
+
+def indicator_values_for_periods(report: FinalReportModelV2, identifier: str, periods: list[Any]) -> list[Any] | None:
+    """Come `values_for_periods`, per un indicatore di `indicator_catalog`:
+    la finestra di periodi la sceglie la pagina, mai un `basis` implicito —
+    stesso principio del filtro già dentro `indicator_chart`, qui riusabile
+    anche per una riga di tabella o un KPI a serie (`kpi_indicator_periods`)."""
+    indicator = indicator_by_id(report, identifier)
+    if indicator is None:
+        return None
+    by_id = {period.id: value for period, value in zip(indicator.periods, indicator.values)}
+    return [by_id.get(period.id) for period in periods]
+
+
+def kpi_indicator_periods(report: FinalReportModelV2, identifier: str, desc: str,
+                          periods: list[Any]) -> dict[str, Any] | None:
+    """KPI a serie di un indicatore, ristretto esplicitamente ai `periods`
+    dati — a differenza di `kpi_indicator(mode="series")`, che prende TUTTI i
+    periodi disponibili dell'indicatore (storico/osservato/rettificato/
+    chiusura compresi sull'infrannuale): qui la pagina decide la finestra,
+    come già fa `indicator_chart` per un grafico."""
+    indicator = indicator_by_id(report, identifier)
+    if indicator is None:
+        return None
+    values = indicator_values_for_periods(report, identifier, periods)
+    return kpi_series(desc, values, indicator.unit)
+
+
+def assumption_section_by_key(report: FinalReportModelV2, key: str) -> Any:
+    for section in report.assumption_sections:
+        if section.key == key:
+            return section
+    raise ValueError(f"no assumption section {key!r}")
+
+
+def assumption_value(section: Any, field: str) -> Any:
+    """`None` se il campo non è fra le ipotesi lette per questa sezione (mai
+    un errore): non ogni campo del catalogo ha un valore per ogni scenario."""
+    for assumption in section.assumptions:
+        if assumption.field == field:
+            return assumption
+    return None
+
+
+def chart_from_series(chart_id: str, title: str, unit: str, periods: list[Any],
+                      named_series: list[tuple[str, list[Any]]]) -> dict[str, Any] | None:
+    """Un grafico composto da serie già risolte dal chiamante (righe di
+    prospetto, valori di `structure_series`, indicatori — qualunque
+    combinazione): a differenza di `statement_chart`/`indicator_chart`, che
+    leggono ciascuno una sola fonte, questo è il punto di composizione
+    quando un grafico ha bisogno di più di una fonte insieme (es. «Patrimonio
+    e indebitamento»: una riga di SP + una serie di `structure_series`). Una
+    serie assente su ogni periodo si scarta, come nei costruttori a fonte
+    singola."""
+    axis = [str(period.year) for period in periods]
+    series: list[dict[str, Any]] = []
+    for label, values in named_series:
+        if not any(value is not None for value in values):
+            continue
+        series.append({"label": label, "values": [exact(value) for value in values]})
+    if not series:
+        return None
+    return {"id": chart_id, "title": title, "unit": unit, "categories": axis,
+            "series": series, "indicator_ids": [], "thresholds": []}
+
+
 def chart_marker_width_mm(item: dict[str, Any]) -> str:
     """Pagina tipo: il grafico con colonna KPI occupa 118 mm (colonna 55 mm +
     gutter), senza KPI resta a 178 — geometria dichiarata dalla stessa fonte

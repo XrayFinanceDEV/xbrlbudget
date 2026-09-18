@@ -33,22 +33,18 @@ def test_catalog_order_is_the_fixed_v4_page_list(workflow):
     report = fixture_report(workflow, [2027, 2028, 2029])
     inventory = build_inventory(report)
     ids = [page["id"] for page in inventory]
-    # Copertina, sintesi, poi dati.py (fonti/rettifiche/chiusura/indicatori
-    # infrannuali — solo workflow infrannuale), CE previsionale, indice
-    # allegati, poi A (2 parti su questa fixture), B (4 parti), C (2 parti),
-    # infine D/E quando la fixture porta i loro dati, F, G (2 parti) e
-    # metodologia.
+    # Ordine del catalogo v4: copertina, sintesi, le pagine di dati.py (solo
+    # infrannuale), ipotesi, CE, SP, flussi, indice allegati, A/B/C, poi D/E
+    # quando la fixture porta i loro dati, F, G (2 parti) e metodologia.
     head = ["cover", "sintesi"]
     if workflow == "infrannuale":
         head += ["fonti", "rettifiche", "chiusura", "indicatori-infrannuali"]
-    head += ["ce", "allegati"]
+    head += ["ipotesi", "ce", "sp", "flussi", "allegati"]
     offset = len(head)
     assert ids[:offset] == head
     assert ids[offset:offset + 2] == ["allegato-A-1", "allegato-A-2"]
     assert ids[offset + 2:offset + 6] == ["allegato-B-1", "allegato-B-2", "allegato-B-3", "allegato-B-4"]
     assert ids[offset + 6:offset + 8] == ["allegato-C-1", "allegato-C-2"]
-    # D (registro rettifiche) ed E (matrice ipotesi) esistono solo quando la
-    # fixture porta dati per loro — «niente pagine vuote».
     tail = (["allegato-D", "allegato-E"] if workflow == "infrannuale" else []) + [
         "allegato-F", "allegato-G-1", "allegato-G-2", "metodologia"]
     assert ids[offset + 8:] == tail

@@ -255,11 +255,46 @@ def _redditivita(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [], "items": items}
 
 
+# ── Pagina 14 · Solidità e copertura del debito ─────────────────────────────
+
+
+def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    kpis = [kpi for kpi in (
+        s.kpi_indicator(report, "practice.indipendenza", "indipendenza finanziaria"),
+        s.kpi_indicator(report, "practice.copertura_immob", "copertura immobilizzazioni"),
+        s.kpi_indicator(report, "practice.pfn_ebitda", "PFN / EBITDA"),
+    ) if kpi is not None]
+    # Id riusato dal catalogo legacy `DOSSIER_CHARTS` (stessa coppia di
+    # indicatori: indipendenza + copertura immobilizzazioni).
+    chart = s.indicator_chart(report, "practice_asset_coverage", "Autonomia e copertura", "percent", periods,
+        ["practice.indipendenza", "practice.copertura_immob"])
+    items: list[dict[str, Any]] = []
+    block = s.chart_block("practice_asset_coverage", "Autonomia e copertura", chart, kpis)
+    if block is not None:
+        items.append(block)
+    # Il secondo grafico della v4 (PFN/EBITDA, unità "volte", incompatibile
+    # con il percent del primo) resta fuori dal grafico; il valore è comunque
+    # KPI qui sopra e riga di tabella qui sotto.
+    table = _indicator_table("solidita-tabella", "Solidità e copertura del debito", report, periods, [
+        ("practice.indipendenza", "Indipendenza finanziaria"),
+        ("practice.copertura_immob", "Copertura immobilizzazioni"),
+        ("practice.pfn_ebitda", "PFN / EBITDA"),
+        ("practice.dscr", None),
+    ])
+    if table is not None:
+        items.append(table)
+    return {"id": "solidita", "title": "Solidità e copertura del debito", "family": FAMILY,
+            "subtitle": "Il DSCR segue la convenzione della pratica: non è un calcolo completo sul servizio "
+                        "del debito.",
+            "kpis": [] if block is not None else kpis, "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # "Niente pagine vuote" (m2-02d.md): su una fonte degenere (es. il
     # fixture sintetico "startup", dove ricavi/margini sono tutti a zero) sia
     # il grafico sia la tabella di una pagina possono restare entrambi vuoti
     # — quella pagina si toglie dal catalogo qui, non entra come riquadro
     # bianco e non compare nell'indice.
-    pages = [_indicatori(report), _liquidita(report), _redditivita(report)]
+    pages = [_indicatori(report), _liquidita(report), _redditivita(report), _solidita(report)]
     return [page for page in pages if page["items"]]

@@ -33,7 +33,7 @@ def test_build_returns_the_pages_implemented_so_far():
     dropped_never_shown_blank` qui sotto, che verifica esattamente questo."""
     report = fixture_report("bilancio", [2027, 2028, 2029])
     pages = indicatori.build(report)
-    assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita"]
+    assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita", "solidita"]
 
 
 def test_a_page_with_no_data_at_all_is_dropped_never_shown_blank():
@@ -137,6 +137,34 @@ def test_redditivita_merges_two_v4_panels_into_one_four_series_chart():
     assert len(charts) == 1
     assert charts[0]["chart"]["unit"] == "percent"
     assert len(charts[0]["chart"]["series"]) <= 4
+
+
+def test_solidita_table_row_spec_leaves_the_dscr_label_to_the_catalog():
+    """`build_indicator_catalog` rinomina `practice.dscr` in "DSCR — proxy
+    della pratica" (la sola eccezione all'etichetta del catalogo, per
+    l'avvertenza che la v4 richiama esplicitamente): la riga della tabella
+    "solidita" passa `display_label=None` apposta, per non riscrivere quel
+    testo a mano e perdere l'avvertenza. Il DSCR è `None` su tutte e tre le
+    fixture sintetiche (oneri finanziari a zero -> denominatore nullo), quindi
+    qui si controlla l'ordine `rows_spec`, non la riga effettivamente resa."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = next(p for p in indicatori.build(report) if p["id"] == "solidita")
+    dscr_indicator = next(i for i in report.indicator_catalog if i.id == "practice.dscr")
+    assert "proxy della pratica" in dscr_indicator.label
+    assert dscr_indicator.values == [None, None, None]
+    table = _tables([page])[0]
+    assert all("DSCR" not in row["cells"][0] for row in table["rows"])
+
+
+def test_indicator_table_display_label_none_uses_the_catalog_label():
+    """Verifica diretta del meccanismo che `solidita` usa per `practice.dscr`
+    (`display_label=None`), su un indicatore presente (`practice.pfn`) cosicché
+    la riga risultante si possa davvero leggere."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    periods = indicatori._periods(report)
+    pfn = next(i for i in report.indicator_catalog if i.id == "practice.pfn")
+    table = indicatori._indicator_table("t", "Titolo", report, periods, [("practice.pfn", None)])
+    assert table["rows"][0]["cells"][0] == pfn.label
 
 
 def test_indicator_table_omits_missing_identifiers_and_drops_when_all_missing():

@@ -109,6 +109,17 @@ def build_indicator_catalog(sources: list[DossierSource]) -> list[IndicatorDefin
     results = [indicator_results(s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios')) for s in sources]
     definitions = [('practice.' + row['key'], row, 'pratica') for row in CATALOG['practice_indicators']]
     definitions += [('practice.' + key, {'label': label, 'format': 'pct'}, 'incidenze') for key, label in (('materials_revenue', 'Materie prime / Ricavi'), ('services_revenue', 'Servizi / Ricavi'), ('personnel_revenue', 'Personale / Ricavi'))]
+    # M2-02E: quattro indicatori canonici mancanti (pagine 7, 8, 12 del dossier v4). Come
+    # `materials_revenue`/`services_revenue`/`personnel_revenue` sopra, non stanno nel catalogo
+    # TS-generato (`contracts/final_report_dossier_catalog.json`, esportato da
+    # `frontend/lib/pratica-indicators.ts` per la scheda Indicatori della pratica, un perimetro
+    # diverso): entrano qui perché sono voci del solo modello v2 del report finale.
+    definitions += [
+        ('practice.opex_revenue', {'label': 'Costi Operativi / Ricavi', 'format': 'pct'}, 'incidenze'),
+        ('practice.effective_tax_rate', {'label': 'Aliquota Effettiva', 'format': 'pct'}, 'fiscalità'),
+        ('practice.ebit_margin', {'label': 'Margine EBIT', 'format': 'pct'}, 'redditività'),
+        ('practice.quick_ratio', {'label': 'Liquidità Immediata', 'format': 'ratio'}, 'liquidità'),
+    ]
     definitions += [('analytical.' + row['key'], row, row['category']) for row in CATALOG['analytical_indicators']]
     indicators = []
     for identifier, row, family in definitions:

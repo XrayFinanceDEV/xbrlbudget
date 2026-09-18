@@ -101,6 +101,7 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     amount('mt', current - v('sp05_rimanenze') - short, 'Attivo corrente pratica - rimanenze - debiti entro 12 mesi')
     amount('ccn', current - short, 'Attivo corrente pratica - debiti entro 12 mesi')
     ratio('current_ratio', current, short, 'Attivo corrente pratica / debiti entro 12 mesi')
+    ratio('quick_ratio', current - v('sp05_rimanenze'), short, 'Attivo corrente pratica - rimanenze / debiti entro 12 mesi')
     amount('ms', equity - fixed, 'Patrimonio netto - immobilizzazioni')
     ratio('copertura_immob', equity + long, fixed, '(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni × 100', percentage=True)
     ratio('indipendenza', equity, assets, 'Patrimonio netto / totale attivo × 100', percentage=True)
@@ -109,11 +110,33 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     ratio('roi', ce.ebit, assets, 'EBIT / totale attivo × 100', percentage=True)
     ratio('roe', ce.net_profit, equity, 'Utile netto CE canonico / patrimonio netto × 100', percentage=True, positive=True)
     ratio('ros', ce.ebit, revenue, 'EBIT / ricavi × 100', percentage=True)
+    ratio('ebit_margin', ce.ebit, revenue, 'EBIT / ricavi × 100', percentage=True)
     ratio('of_mol', interest, ce.ebitda, 'Oneri finanziari / EBITDA × 100', percentage=True)
     ratio('of_revenue', interest, revenue, 'Oneri finanziari / ricavi × 100', percentage=True)
     ratio('materials_revenue', v('ce05_materie_prime'), revenue, 'Materie prime / ricavi × 100', percentage=True)
     ratio('personnel_revenue', v('ce08_costi_personale'), revenue, 'Personale / ricavi × 100', percentage=True)
     ratio('services_revenue', v('ce06_servizi'), revenue, 'Servizi / ricavi × 100', percentage=True)
+    ratio('opex_revenue', ce.production_cost - v('ce09_ammortamenti'), revenue,
+          'Costi della produzione al netto degli ammortamenti (ce09) / ricavi × 100', percentage=True)
+
+    # Aliquota effettiva: stessa convenzione del motore di previsione
+    # (`calculations/forecast_engine.py::_tax_components`), ricalcolata qui sulle
+    # voci canoniche del periodo perché il motore lavora su base_inc/projected_inc,
+    # non su un singolo periodo del dossier. Stesso scarto oltre il 60%: un'aliquota
+    # implausibile non è "zero", è "non lo so" (mappatura-v4-pagine-1-11.md §Driver).
+    pbt = ce.profit_before_tax
+    tax_reason = 'zero_denominator' if pbt == 0 else 'non_positive_denominator' if pbt < 0 else None
+    tax_rate = None
+    if tax_reason is None:
+        tax_rate = ce.taxes / pbt
+        if tax_rate > Decimal('0.6'):
+            tax_reason = 'aliquota_fuori_intervallo_plausibile'
+    tax_value = None if tax_reason else tax_rate * HUNDRED
+    result['practice.effective_tax_rate'] = IndicatorResult(
+        tax_value, tax_reason,
+        'Imposte correnti (ce20_imposte) / risultato ante imposte × 100; scartata oltre il 60%, '
+        'stessa soglia usata da _tax_components per derivare l\'aliquota effettiva del motore.',
+        practice_convention)
 
     purchases = v('ce05_materie_prime') + v('ce06_servizi')
     dpo_base = purchases if purchases > 0 else revenue

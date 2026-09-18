@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T12:00:00Z",
-  "model_hash": "8f06592362e62dc7c206d4d872aa8db7d50cfb5debaffbb0b30f1a8657be3cd8",
-  "source_hash": "cfcdff833f005b2fe730cace6c31cc88989d73c15e250ff73252d1507457ad72",
+  "model_hash": "67f586ba5b4de21f17a80fd03e441995ee2d5e18f5c9ea267b6cc31342a57b34",
+  "source_hash": "1ea0e2a58f1cebba6484e16ab104248229f220d6844c1020736d2725b9a43ae2",
   "company": {
     "id": 3,
     "name": "Startup Srl",
@@ -6460,6 +6460,290 @@
       "family": "incidenze",
       "unit": "percent",
       "methodology": "Personale / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2030",
+          "year": 2030,
+          "label": "2030",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2031",
+          "year": 2031,
+          "label": "2031",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.opex_revenue",
+      "label": "Costi Operativi / Ricavi",
+      "family": "incidenze",
+      "unit": "percent",
+      "methodology": "Costi della produzione al netto degli ammortamenti (ce09) / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2030",
+          "year": 2030,
+          "label": "2030",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2031",
+          "year": 2031,
+          "label": "2031",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.effective_tax_rate",
+      "label": "Aliquota Effettiva",
+      "family": "fiscalità",
+      "unit": "percent",
+      "methodology": "Imposte correnti (ce20_imposte) / risultato ante imposte × 100; scartata oltre il 60%, stessa soglia usata da _tax_components per derivare l'aliquota effettiva del motore.",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2030",
+          "year": 2030,
+          "label": "2030",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2031",
+          "year": 2031,
+          "label": "2031",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ebit_margin",
+      "label": "Margine EBIT",
+      "family": "redditività",
+      "unit": "percent",
+      "methodology": "EBIT / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2030",
+          "year": 2030,
+          "label": "2030",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2031",
+          "year": 2031,
+          "label": "2031",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator"
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.quick_ratio",
+      "label": "Liquidità Immediata",
+      "family": "liquidità",
+      "unit": "ratio",
+      "methodology": "Attivo corrente pratica - rimanenze / debiti entro 12 mesi",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {

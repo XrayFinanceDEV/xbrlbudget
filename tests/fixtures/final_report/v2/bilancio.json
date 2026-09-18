@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T11:00:00Z",
-  "model_hash": "d81a85959d66f859333439ff29004c51e8d72977c665250b557ed300b74f33ac",
-  "source_hash": "21c3b1632301e4a5fa957712fb69ab40ee96c3c7fe2658628738e343b5d9f1c0",
+  "model_hash": "0d6d257a01d73d3cca399928909458162232e237d14c740103330cb10aac4b71",
+  "source_hash": "acd01d80ad6ce27ceef46d396547877b4588387b5bdf04b3e43666f29dc2862b",
   "company": {
     "id": 2,
     "name": "Bilancio Spa",
@@ -3994,6 +3994,114 @@
       ],
       "unavailable_reasons": [
         null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.opex_revenue",
+      "label": "Costi Operativi / Ricavi",
+      "family": "incidenze",
+      "unit": "percent",
+      "methodology": "Costi della produzione al netto degli ammortamenti (ce09) / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.effective_tax_rate",
+      "label": "Aliquota Effettiva",
+      "family": "fiscalità",
+      "unit": "percent",
+      "methodology": "Imposte correnti (ce20_imposte) / risultato ante imposte × 100; scartata oltre il 60%, stessa soglia usata da _tax_components per derivare l'aliquota effettiva del motore.",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ebit_margin",
+      "label": "Margine EBIT",
+      "family": "redditività",
+      "unit": "percent",
+      "methodology": "EBIT / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "100"
+      ],
+      "unavailable_reasons": [
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.quick_ratio",
+      "label": "Liquidità Immediata",
+      "family": "liquidità",
+      "unit": "ratio",
+      "methodology": "Attivo corrente pratica - rimanenze / debiti entro 12 mesi",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator"
       ],
       "source": "calculations.report_indicators",
       "thresholds": []

@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T10:00:00Z",
-  "model_hash": "56e25f7256c4703c8566072e57711ce69975da04682cac6c8992d59b729ea898",
-  "source_hash": "a7de033ff5e137caea0a33e67988fe0534b68bcb34dad0a2bdb9fc2b6123d7aa",
+  "model_hash": "abefc01ec2cb4b960d0b00229b445e0a22faf662064cfc3041b07dd70a27f577",
+  "source_hash": "606263bf0c8d69a536495f3eca2ea15a719a71f4f874d24c9ba10ef42b219945",
   "company": {
     "id": 1,
     "name": "Officina Aurora Srl",
@@ -5650,6 +5650,202 @@
         null,
         null,
         null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.opex_revenue",
+      "label": "Costi Operativi / Ricavi",
+      "family": "incidenze",
+      "unit": "percent",
+      "methodology": "Costi della produzione al netto degli ammortamenti (ce09) / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0",
+        "0",
+        "0"
+      ],
+      "unavailable_reasons": [
+        null,
+        null,
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.effective_tax_rate",
+      "label": "Aliquota Effettiva",
+      "family": "fiscalità",
+      "unit": "percent",
+      "methodology": "Imposte correnti (ce20_imposte) / risultato ante imposte × 100; scartata oltre il 60%, stessa soglia usata da _tax_components per derivare l'aliquota effettiva del motore.",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "0",
+        "0",
+        "0"
+      ],
+      "unavailable_reasons": [
+        null,
+        null,
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.ebit_margin",
+      "label": "Margine EBIT",
+      "family": "redditività",
+      "unit": "percent",
+      "methodology": "EBIT / ricavi × 100",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        "100",
+        "100",
+        "100"
+      ],
+      "unavailable_reasons": [
+        null,
+        null,
+        null
+      ],
+      "source": "calculations.report_indicators",
+      "thresholds": []
+    },
+    {
+      "id": "practice.quick_ratio",
+      "label": "Liquidità Immediata",
+      "family": "liquidità",
+      "unit": "ratio",
+      "methodology": "Attivo corrente pratica - rimanenze / debiti entro 12 mesi",
+      "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
+      "periods": [
+        {
+          "id": "forecast:2027",
+          "year": 2027,
+          "label": "2027",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2028",
+          "year": 2028,
+          "label": "2028",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        },
+        {
+          "id": "forecast:2029",
+          "year": 2029,
+          "label": "2029",
+          "basis": "forecast",
+          "period_months": 12,
+          "period_end": null,
+          "source": "synthetic_fixture"
+        }
+      ],
+      "values": [
+        null,
+        null,
+        null
+      ],
+      "unavailable_reasons": [
+        "zero_denominator",
+        "zero_denominator",
+        "zero_denominator"
       ],
       "source": "calculations.report_indicators",
       "thresholds": []

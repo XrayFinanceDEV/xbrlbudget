@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, prepare_editorial_report,
 )
+from app.renderers.typst.editorial_plan import _generator_hash as _dossier_catalog_hash
 from app.renderers.typst.note_fit import NoteFitProbe
 from app.renderers.typst.runtime import Compiler, RendererLimits, RendererUnavailable, _regular
 from app.schemas.editorial_notes import EditorialSession, GenerationWarning
@@ -38,7 +39,6 @@ class EditorialInputError(ValueError):
 
 _ROOT = Path(__file__).resolve().parents[3]
 _BUNDLE = _ROOT / "backend/app/renderers/typst/templates/dossier-base"
-_INVENTORY_SOURCE = _ROOT / "backend/app/renderers/typst/editorial_inventory.py"
 _COMMENTARY_SOURCE = Path(__file__).absolute()
 _COMMENTARY_HASH = hashlib.sha256(_regular(_COMMENTARY_SOURCE, 256 * 1024)).hexdigest()
 _LAYOUT_PROBE: DossierLayoutProbe | None = None
@@ -80,7 +80,7 @@ def current_render_signature() -> str:
     bundle = DossierTemplateBundle(_BUNDLE)
     version, entry, files = bundle.read(RendererLimits())
     compiler.verified_bytes()
-    inventory = _regular(_INVENTORY_SOURCE, 256 * 1024)
+    inventory_hash = _dossier_catalog_hash()
     # Automatic prose is fit-checked during prepare. A new generator definition
     # requires preparation again; a worker with outdated code must reload first.
     commentary_hash = hashlib.sha256(_regular(_COMMENTARY_SOURCE, 256 * 1024)).hexdigest()
@@ -90,7 +90,7 @@ def current_render_signature() -> str:
         "bundle_version": version,
         "entrypoint": entry,
         "compiler": compiler.binary_sha256,
-        "inventory": hashlib.sha256(inventory).hexdigest(),
+        "inventory": inventory_hash,
         "commentary": commentary_hash,
         "assets": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())},
     }, exclude_volatile=False)
@@ -146,7 +146,7 @@ def _current_rows(db, scenario_id: int, plan_hash: str) -> list[ReportEditorialN
 
 def _valid_plan_inventory(report: FinalReportModelV2, plan: EditorialPlan) -> bool:
     """Reject stored plans whose semantic contents or appendix parts drifted."""
-    from app.renderers.typst.editorial_inventory import expected_content_inventory
+    from app.renderers.typst.dossier_catalog import expected_content_inventory
 
     expected = expected_content_inventory(report)
     flattened = [content_id for page in plan.pages for content_id in page.content_ids]
@@ -276,7 +276,7 @@ def _state_snapshot(db, company_id: int, scenario_id: int, request):
 
 def _neutral_text(page, report=None, index=0) -> str:
     """Neutral reading guidance tied to a physical page, never financial advice."""
-    from app.renderers.typst.editorial_inventory import build_inventory
+    from app.renderers.typst.dossier_catalog import build_inventory
     titles = {section["id"]: section["title"] for section in build_inventory(report)} if report else {}
     title = titles.get(page.section_id, "Contenuti del dossier")
     prefix = f"Pagina {index + 1}. "
@@ -456,9 +456,9 @@ def save(db, company_id: int, scenario_id: int, request) -> EditorialSession:
 
 def _page_context(report: FinalReportModelV2, page) -> dict[str, Any]:
     """Exact canonical content on this authorized page; no client prose or archives."""
-    from app.renderers.typst.editorial_inventory import build_inventory
+    from app.renderers.typst.dossier_catalog import build_inventory
     inventory = {}
-    charts = {"chart:" + chart.id: chart.model_dump(mode="json") for chart in report.chart_series}
+    catalog = {indicator.id: indicator for indicator in report.indicator_catalog}
     for section in build_inventory(report):
         for item in section["items"]:
             kind = item["kind"]
@@ -466,27 +466,19 @@ def _page_context(report: FinalReportModelV2, page) -> dict[str, Any]:
                 inventory["cover"] = {"title": report.document.title, "company": {"name": report.company.name},
                     "periods": report.practice.periods.model_dump(mode="json")}
             elif kind == "chart":
-                key = "chart:" + item["chart_id"]
-                chart = charts[key]
-                catalog = {indicator.id: indicator for indicator in report.indicator_catalog}
-                inventory[key] = {"chart": chart, "indicators": [catalog[ref].model_dump(mode="json")
+                # The chart view is built once, in Python, by the page group
+                # (`dossier_catalog.shared.indicator_chart`/`statement_chart`)
+                # — a page-scoped chart may not even be one of the model's
+                # global `report.chart_series` entries, so it is read here
+                # straight off the item, never re-looked-up by id (M2-02D).
+                chart = item["chart"]
+                inventory[item["id"]] = {"chart": chart, "indicators": [catalog[ref].model_dump(mode="json")
                     for ref in chart.get("indicator_ids", [])]}
             elif kind == "table":
                 header = {key: value for key, value in item.items() if key != "rows"}
                 inventory["heading:" + item["id"]] = header
                 for row in item["rows"]:
                     inventory[row["id"]] = {"table": item["title"], "columns": item["columns"], "row": row}
-                # A table split across period parts (M2-02B: Allegati verticali,
-                # `expected_content_inventory`) repeats each row under a
-                # `#parte:N` marker starting at part 2 — same canonical row, a
-                # later physical part of the same table. Without this the
-                # continuation pages of a split appendix have no context.
-                if "value_start" in item:
-                    total = len(item["columns"]) - item["value_start"] - 1
-                    for part in range(2, (total + item["part_size"] - 1) // item["part_size"] + 1):
-                        for row in item["rows"]:
-                            inventory[f"{row['id']}#parte:{part}"] = {
-                                "table": item["title"], "columns": item["columns"], "row": row}
             else:
                 inventory[item["id"]] = item
     if any(content_id not in inventory for content_id in page.content_ids):

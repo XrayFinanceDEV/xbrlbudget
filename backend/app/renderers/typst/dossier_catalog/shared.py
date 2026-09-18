@@ -6,7 +6,7 @@ pages exist — see `dossier_catalog/__init__.py` for the catalog itself.
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from app.schemas.final_report_v2 import FinalReportModelV2
@@ -299,3 +299,86 @@ def chart_block(chart_id: str, title: str, chart: dict[str, Any] | None,
     shown_kpis = [item for item in kpis if item is not None]
     return {"id": f"chart:{chart_id}", "kind": "chart", "title": title,
             "chart_id": chart_id, "chart": chart, "kpis": shown_kpis}
+
+
+# ── Short period headers + basis legend (Allegati, M2-02D fase 2) ───────────
+# `period_label` ("2026 chiusura stimata (12 mesi)") wraps onto several lines
+# in a 5-column table — measured on Allegati A-C before this fix. The short
+# form carries a letter + year, with the legend spelled out once in the page
+# subtitle via `period_basis_legend`, never repeated per column.
+
+_BASIS_LETTERS = {"historical": "S", "observed": "O", "adjusted": "R", "closing": "C", "forecast": "P"}
+
+
+def period_label_short(period: Any) -> str:
+    """`<year> <letter>` (v4: `2026 C`, `2027 P`), with a leading `<N>M `
+    only for a genuinely partial period (`period_months` below 12) — read
+    from the model, never a hardcoded "9M"."""
+    letter = _BASIS_LETTERS.get(period.basis, period.basis[:1].upper())
+    months = f"{period.period_months}M " if period.period_months is not None and period.period_months < 12 else ""
+    return f"{months}{period.year} {letter}"
+
+
+def period_basis_legend(periods: list[Any]) -> str:
+    """The letters used by `period_label_short` on this exact column set,
+    spelled out once (`BASIS_LABELS`), in order of first appearance."""
+    seen: list[str] = []
+    for period in periods:
+        if period.basis not in seen:
+            seen.append(period.basis)
+    return "; ".join(f"{_BASIS_LETTERS.get(basis, basis[:1].upper())}: {BASIS_LABELS.get(basis, basis)}"
+                     for basis in seen)
+
+
+def select_periods_with_adjusted(periods: list[Any], max_periods: int = 5) -> list[Any]:
+    """Like `select_periods`, but keeps `basis == 'adjusted'` (the infrannuale
+    progressivo rettificato) when the statement has one — Allegato F (v4
+    pagina 30) tells the practice's own indicators through the partial
+    period too, unlike Allegati A-C/G which show only chiusura/storico +
+    piano. A workflow without an adjusted period degrades to exactly what
+    `select_periods` would return."""
+    forecast = sorted((p for p in periods if p.basis == "forecast"), key=lambda p: p.year)
+    closings = sorted((p for p in periods if p.basis == "closing"), key=lambda p: p.year)
+    historicals = sorted((p for p in periods if p.basis == "historical"), key=lambda p: p.year)
+    adjusted = sorted((p for p in periods if p.basis == "adjusted"), key=lambda p: p.year)
+    anchor = closings[-1] if closings else (historicals[-1] if historicals else None)
+    selected = adjusted[-1:] + ([anchor] if anchor is not None else []) + forecast
+    return selected[-max_periods:] if len(selected) > max_periods else selected
+
+
+def indicator_values_for_periods(indicator: Any, periods: list[Any]) -> list[Any]:
+    """`indicator.values` reindexed onto a chosen subset of `indicator.periods`
+    — by period id, the `IndicatorDefinition` analogue of `values_for_periods`
+    (which reads a `DetailedStatementRow` against a separate `statement`)."""
+    by_id = {period.id: value for period, value in zip(indicator.periods, indicator.values)}
+    return [by_id.get(period.id) for period in periods]
+
+
+# ── Value + unit in the same cell (Allegati E/F/G) ───────────────────────────
+# `cell()` (comuni.typ) only special-cases `unit == "eur"`; a bare "percent"/
+# "days"/"ratio" table cell would print the raw digits with no suffix. Rather
+# than touch that shared component, the suffix is baked into the string here
+# (Decimal-exact, never a float) and sent through as a plain token — `cell()`
+# already renders an arbitrary string verbatim when `unit` is `None`.
+
+_UNIT_SUFFIX = {"percent": "%", "days": " gg", "ratio": "×", "score": " punti"}
+_UNIT_PLACES = {"percent": 2, "days": 2, "ratio": 2, "score": 1}
+
+
+def format_unit(value: Any, unit: str) -> str | None:
+    """`7,57×`, `17,75%`, `228,12 gg` — unit in the value's own cell, never in
+    parentheses in the row label (owner's decision, Allegati F/G). Rounds an
+    exact `Decimal` (never a float) to the unit's own precision, Italian
+    locale (comma decimal, dot thousands). `unit == "eur"` is not handled
+    here: those cells go through the usual `row`/`cell` path instead, in
+    whole euros, exactly like Allegati A-C."""
+    if value is None:
+        return None
+    places = _UNIT_PLACES.get(unit, 2)
+    quant = Decimal(1).scaleb(-places)
+    rounded = Decimal(value).quantize(quant, rounding=ROUND_HALF_UP)
+    negative = rounded < 0
+    text = f"{abs(rounded):,.{places}f}"
+    text = text.replace(",", "").replace(".", ",").replace("", ".")
+    sign = "−" if negative else ""
+    return f"{sign}{text}{_UNIT_SUFFIX.get(unit, '')}"

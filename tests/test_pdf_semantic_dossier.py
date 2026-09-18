@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from app.renderers.typst import Compiler
+from app.renderers.typst.dossier_catalog import build_inventory
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, prepare_editorial_report, verify_editorial_layout,
 )
@@ -30,7 +31,7 @@ from app.schemas.final_report_v2 import FinalReportModelV2
 from tests.pdf_semantic import (
     assert_all_fonts_embedded, assert_appendix_row_count_matches_plan, assert_draft_watermark,
     assert_metadata_title, assert_no_field_code_style_labels, assert_no_forbidden_technical_strings,
-    assert_not_encrypted, assert_page_count, assert_pdf_signature, assert_text_absent, assert_text_present,
+    assert_not_encrypted, assert_page_count, assert_pdf_signature, assert_text_present,
     format_euro_integer, page_text_range, pdf_fonts, pdf_info, poppler_available, raw_page_texts,
 )
 from tests.test_final_report_v2 import fixture_report
@@ -41,10 +42,6 @@ BASE = ROOT / 'backend/app/renderers/typst/templates/dossier-base'
 BWRAP = Path('/usr/bin/bwrap')
 WORKFLOWS = ('infrannuale', 'bilancio', 'startup')
 YEARS = [2027, 2028, 2029]
-# Present only in the infrannuale workflow's "Rettifiche" narrative text
-# (editorial_inventory.build_inventory, guarded by `workflow_type == "infrannuale"`,
-# not by `infrannual_closing is not None`): a text-level, workflow-specific marker.
-INFRANNUAL_ONLY_TEXT = 'Il confronto non annualizza gli importi infrannuali'
 
 
 @pytest.fixture(scope='module')
@@ -175,18 +172,19 @@ def test_draft_pages_carry_the_watermark_and_final_pages_do_not(dossier):
 # --------------------------------------------------------------------------
 # conditional sections
 # --------------------------------------------------------------------------
+# Il vecchio test qui verificava che il testo «Il confronto non annualizza
+# gli importi infrannuali» comparisse solo sul workflow infrannuale: quel
+# testo veniva dal blocco «Rettifiche» del vecchio inventario generico, non
+# ancora reintrodotto — dati.py ha registro vuoto in questa fase (fondazione
+# M2-02D). Resta però vera, e verificabile senza quel testo, la garanzia più
+# generale: nessuna pagina del catalogo di questa fase dichiara
+# `infrannual_closing` come proprio id (nessuna pagina di quel gruppo esiste
+# ancora), su nessuno dei tre workflow — un futuro dati.py che implementa
+# quelle pagine dovrà reintrodurre anche la loro verifica testuale.
 
-def test_infrannual_sections_appear_only_on_the_infrannuale_workflow(dossier):
-    full_text = ' '.join(raw_page_texts(dossier.draft_path, expected_pages=dossier.page_count))
-    plan_section_ids = {page.section_id for page in dossier.report.editorial_plan.pages}
-    if dossier.workflow == 'infrannuale':
-        assert dossier.report.infrannual_closing is not None
-        assert 'infrannual_closing' in plan_section_ids
-        assert_text_present(full_text, INFRANNUAL_ONLY_TEXT, context='infrannuale-only text')
-    else:
-        assert dossier.report.infrannual_closing is None
-        assert 'infrannual_closing' not in plan_section_ids
-        assert_text_absent(full_text, INFRANNUAL_ONLY_TEXT, context='infrannuale-only text')
+def test_no_page_declares_infrannual_closing_before_dati_py_implements_it(dossier):
+    page_ids = {page.section_id for page in dossier.report.editorial_plan.pages}
+    assert 'infrannual_closing' not in page_ids
 
 
 # --------------------------------------------------------------------------
@@ -202,16 +200,33 @@ def test_no_forbidden_technical_strings_leak_into_the_dossier(dossier):
 # field-code-style labels — M2-02B integrazione, rilievo del coordinatore su AMBIENTA
 # --------------------------------------------------------------------------
 # A curated fixture's forecast lines already carry a real Italian label, so
-# this never turns red against `dossier` — the mutation proof lives beside
-# the fix it exercises, in `tests/test_editorial_inventory.py`
-# (`test_forecast_line_without_a_resolvable_label_raises_instead_of_leaking_the_code`),
-# where a report can be built with a line whose label equals its code without
-# an extra Typst compile. This test is the harness's own, independent check
-# that nothing *else* on the page reads like a field/model code.
+# this never turns red against `dossier`. Since M2-02D the pages implemented
+# read `DetailedStatementRow.label` directly (no resolve-or-raise step to
+# bypass any more — see `assert_no_field_code_style_labels`'s own docstring),
+# so there is no dedicated mutation test proving this specific leak shape any
+# more: the shape it used to guard cannot occur on these pages by
+# construction. This test remains the harness's own, independent check that
+# nothing *else* on the page reads like a field/model code.
 
 def test_no_field_code_style_labels_leak_into_the_dossier(dossier):
     full_text = ' '.join(raw_page_texts(dossier.draft_path, expected_pages=dossier.page_count))
     assert_no_field_code_style_labels(full_text)
+
+
+# --------------------------------------------------------------------------
+# column count — vincolo del proprietario, 2026-09-17
+# --------------------------------------------------------------------------
+
+def test_no_table_exceeds_five_value_columns(dossier):
+    """«Nessuna tabella del PDF supera 5 colonne di valori (più la colonna
+    voce)» — verificato qui sull'esatto inventario che ha prodotto il PDF
+    compilato (`dossier.report`), non su una fixture separata."""
+    for page in build_inventory(dossier.report):
+        for item in page['items']:
+            if item['kind'] != 'table':
+                continue
+            value_columns = len(item['columns']) - 1
+            assert value_columns <= 5, (page['id'], item['id'], item['columns'])
 
 
 # --------------------------------------------------------------------------

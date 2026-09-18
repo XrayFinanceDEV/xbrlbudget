@@ -267,13 +267,16 @@ _KEY_STYLE_LABEL_PATTERN = re.compile(r"\b[a-z][a-z0-9]*(?:[_.][a-z0-9]+)+\b")
 def assert_no_field_code_style_labels(full_text: str) -> None:
     """No row prints a raw field/model code as its label — `sp06c_crediti_collegate_breve`,
     `cashflow.operating.start.net_profit`, `ce01_ricavi_vendite` all leaked as
-    the "Voce" of a row on real (AMBIENTA) data before `editorial_inventory.py`
-    started resolving every forecast/closing-value line through
-    `detailed_statements` first and `_FORECAST_LABEL_OVERRIDES` second,
-    raising instead of falling back to the code (M2-02B integrazione, rilievo
-    del coordinatore). A curated fixture never exercised this: its forecast
-    lines already carry a real label, so this check is the harness's own
-    defense, independent of that mechanism."""
+    the "Voce" of a row on real (AMBIENTA) data before the (now removed)
+    `editorial_inventory.py` started resolving every forecast/closing-value
+    line through `detailed_statements` first and `_FORECAST_LABEL_OVERRIDES`
+    second, raising instead of falling back to the code (M2-02B integrazione,
+    rilievo del coordinatore). Since M2-02D (catalogo fisso) the implemented
+    pages read `DetailedStatementRow.label` directly — always a real Italian
+    label from the row catalog, no resolve-or-raise step left to bypass — so
+    this specific leak shape cannot recur there; this check remains the
+    harness's own independent defense, for whatever page group reads a label
+    from elsewhere next (`forecast.years[].*`, an assumption field, ...)."""
     scrubbed = _OVERRIDE_LABEL_PREFIX.sub("", full_text)
     found = sorted(set(_KEY_STYLE_LABEL_PATTERN.findall(scrubbed)) - _KEY_STYLE_LABEL_EXCEPTIONS)
     if found:

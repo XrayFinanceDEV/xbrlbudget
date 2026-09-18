@@ -3,7 +3,7 @@ from datetime import timedelta
 import hashlib
 import pytest
 
-from app.renderers.typst.editorial_inventory import expected_content_inventory
+from app.renderers.typst.dossier_catalog import expected_content_inventory
 from app.schemas.final_report import canonical_hash
 from app.schemas.final_report_v2 import EditorialNoteSlot, EditorialPage, EditorialPlan, EditorialTablePart
 from app.services import editorial_notes_service as service

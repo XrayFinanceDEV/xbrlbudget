@@ -15,14 +15,30 @@ from app.schemas.final_report_v2 import (
     EditorialTablePart, FinalReportModelV2,
 )
 from .chart_components import ChartTemplateBundle
-from .editorial_inventory import (build_inventory, chart_marker_width_mm, chart_view, expected_content_inventory)
+from .dossier_catalog import (build_inventory, chart_declarations, chart_marker_width_mm, expected_content_inventory)
 from .layout_probe import LayoutMeasurement, TypstLayoutProbe
 from .runtime import RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable, _regular
 
 _INVENTORY = 'editorial-inventory.json'
 _PT_PER_MM = Decimal(72) / Decimal('25.4')
-_GENERATOR_PATH = Path(__file__).with_name('editorial_inventory.py').absolute()
-_GENERATOR_HASH = hashlib.sha256(_regular(_GENERATOR_PATH, 256 * 1024)).hexdigest()
+# Il "generatore" del catalogo è l'intero pacchetto `dossier_catalog/`
+# (registro + gruppi + helper condivisi in `shared.py`), non più un unico
+# file: l'hash lega l'identità del layout a ciascuno dei suoi file, in ordine
+# fisso, così una modifica a un solo gruppo (es. `allegati.py`) invalida i
+# piani già misurati esattamente come prima faceva `editorial_inventory.py`.
+_GENERATOR_DIR = Path(__file__).with_name('dossier_catalog')
+_GENERATOR_FILES = tuple(sorted(_GENERATOR_DIR.glob('*.py')))
+
+
+def _generator_hash() -> str:
+    digest = hashlib.sha256()
+    for path in _GENERATOR_FILES:
+        digest.update(path.name.encode('utf-8'))
+        digest.update(_regular(path.absolute(), 256 * 1024))
+    return digest.hexdigest()
+
+
+_GENERATOR_HASH = _generator_hash()
 
 
 class DossierTemplateBundle(ChartTemplateBundle):
@@ -31,7 +47,7 @@ class DossierTemplateBundle(ChartTemplateBundle):
         version, _, files = super().read(limits)
         if 'editorial.typ' not in files or _INVENTORY in files:
             raise RendererUnavailable()
-        return version + '+editorial-3', 'editorial.typ', files
+        return version + '+editorial-4', 'editorial.typ', files
 
 
 @dataclass(frozen=True)
@@ -57,7 +73,7 @@ class DossierLayoutProbe(TypstLayoutProbe):
 
     @contextmanager
     def _private_job(self, serialized, files, binary, options):
-        if hashlib.sha256(_regular(_GENERATOR_PATH, 256 * 1024)).hexdigest() != _GENERATOR_HASH:
+        if _generator_hash() != _GENERATOR_HASH:
             raise RendererUnavailable()
         report = FinalReportModelV2.model_validate_json(serialized)
         inventory = json.dumps(build_inventory(report), ensure_ascii=False, allow_nan=False,
@@ -77,7 +93,13 @@ class DossierLayoutProbe(TypstLayoutProbe):
             if not isinstance(values, list) or not values:
                 raise ValueError()
             records = []
-            charts = {'chart:' + chart.id: chart for chart in report.chart_series}
+            # content_id -> chart item dict (kind="chart", chart=view, kpis=...),
+            # built once per page in `dossier_catalog.build_inventory` — the
+            # single source of truth for what Typst must have drawn. No more
+            # cross-reference into `report.chart_series` by id: a page-scoped
+            # chart (e.g. "Evoluzione dei margini") may not even be one of the
+            # model's global `chart_series` entries.
+            charts = chart_declarations(report)
             for value in values:
                 if not isinstance(value, dict) or type(value.get('page')) is not int or not 1 <= value['page'] <= max_pages:
                     raise ValueError()
@@ -89,14 +111,11 @@ class DossierLayoutProbe(TypstLayoutProbe):
                         raise ValueError()
                     records.append(DossierRecord(kind, page, content_id))
                 elif kind == 'chart':
-                    # La serie disegnata è la vista dell'inventario (`chart_view`),
-                    # non `chart.series` del modello v1: il modello resta fermo
-                    # agli anni di piano, la vista espone tutto il timeline.
-                    chart_id = content_id[len('chart:'):] if content_id.startswith('chart:') else ''
-                    view = chart_view(report, chart_id) if chart_id else None
+                    item = charts.get(content_id)
+                    view = item['chart'] if item is not None else None
                     # Rilievo 1: il grafico con colonna KPI si dichiara largo 118 mm
                     # (grid a due colonne in typst), gli altri restano a 178.
-                    declared = Decimal(chart_marker_width_mm(report, chart_id)) if chart_id else Decimal(-1)
+                    declared = Decimal(chart_marker_width_mm(item)) if item is not None else Decimal(-1)
                     if (view is None or set(value) != {'kind', 'content_id', 'page', 'width_mm', 'height_mm',
                             'measured_width_mm', 'measured_height_mm', 'unit', 'categories', 'series', 'thresholds'}
                             or value['unit'] != view['unit'] or value['categories'] != view['categories']
@@ -154,7 +173,7 @@ def build_editorial_plan(report: FinalReportModelV2, measurement: LayoutMeasurem
             or type(measurement.records) is not tuple
             or any(type(record) is not DossierRecord for record in measurement.records)
             or not isinstance(measurement.layout_version, str)
-            or not measurement.layout_version.endswith('+native-charts-1+editorial-3')):
+            or not measurement.layout_version.endswith('+native-charts-1+editorial-4')):
         raise ValueError('measurement does not bind to the complete dossier')
     for digest in (measurement.font_hash, measurement.layout_hash, measurement.asset_hash):
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in '0123456789abcdef' for char in digest):

@@ -106,7 +106,7 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     ratio('copertura_immob', equity + long, fixed, '(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni × 100', percentage=True)
     ratio('indipendenza', equity, assets, 'Patrimonio netto / totale attivo × 100', percentage=True)
     amount('pfn', pfn, 'Banche e obbligazioni se dettaglio positivo; altrimenti debito al netto dei dettagli non bancari noti; altrimenti debito totale; meno cassa e attività finanziarie.')
-    ratio('pfn_ebitda', pfn, ce.ebitda, 'PFN pratica / EBITDA del periodo')
+    ratio('pfn_ebitda', pfn, ce.ebitda, 'PFN pratica / EBITDA del periodo', positive=True)
     ratio('roi', ce.ebit, assets, 'EBIT / totale attivo × 100', percentage=True)
     ratio('roe', ce.net_profit, equity, 'Utile netto CE canonico / patrimonio netto × 100', percentage=True, positive=True)
     ratio('ros', ce.ebit, revenue, 'EBIT / ricavi × 100', percentage=True)

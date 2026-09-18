@@ -574,7 +574,9 @@ class FinalReportModel(ContractModel):
         if [year.year for year in self.forecast.years] != self.practice.periods.forecast_years:
             raise ValueError("forecast years must match practice periods")
         forecast_years = self.practice.periods.forecast_years
-        if any(series.categories != forecast_years for series in self.chart_series):
+        # Le DossierChartSeries del v2 dichiarano l'asse proprio (`period_ids`, M2-02G fase 2):
+        # solo le serie canoniche v1 restano vincolate agli anni di piano.
+        if any(series.categories != forecast_years for series in self.chart_series if isinstance(series, ChartSeries)):
             raise ValueError("chart categories must match practice forecast years")
         if self.readiness.status == "ready":
             if any(not source.available for source in self.source_revisions):

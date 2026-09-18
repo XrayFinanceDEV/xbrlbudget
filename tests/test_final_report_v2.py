@@ -111,6 +111,11 @@ def test_null_zero_negative_and_proxy_dscr_availability():
     assert values['practice.dscr'].reason == 'zero_denominator'
     assert values['practice.pfn'].value == Decimal('-100')
     assert values['practice.pfn_ebitda'].value is None
+    # M2-02G fase 2 (pag. 14): EBITDA negativa ⇒ rapporto non significativo,
+    # `None` con il suo motivo, mai una «volte» di ripiego.
+    negative = indicator_results(bs, {'ce01_ricavi_vendite': Decimal('100'), 'ce05_materie_prime': Decimal('300')})
+    assert negative['practice.pfn_ebitda'].value is None
+    assert negative['practice.pfn_ebitda'].reason == 'non_positive_denominator'
     bs['sp11_capitale'] = Decimal('-100')
     assert indicator_results(bs, inc)['practice.roe'].reason == 'non_positive_denominator'
 
@@ -205,6 +210,9 @@ def test_intra_api_has_distinct_observed_adjusted_and_closing_bases(client, snap
     assert statement.periods[columns['observed']].period_months == 9
     analytical = next(i for i in report.indicator_catalog if i.id == 'analytical.profitability.roi')
     assert analytical.values[columns['closing']] is None  # Old promoted-record metrics are not this source closing.
+    # Pag. 18, terzo controllo: dichiarato non verificabile, non omesso e non «passato».
+    control = [d for d in report.diagnostics if d.code == 'closing_progressive_check_unverifiable']
+    assert len(control) == 1 and control[0].severity == 'info' and 'non \u00e8 verificabile' in control[0].message
 
 
 def test_v2_requires_auth_and_company_ownership(client, monkeypatch):
@@ -424,6 +432,133 @@ def test_v2_dump_round_trips_the_structure_series():
     for workflow in ('bilancio', 'infrannuale', 'startup'):
         encoded = fixture_report(workflow).model_dump(mode='json')
         assert FinalReportModelV2.model_validate_json(json.dumps(encoded)).model_dump(mode='json') == encoded
+
+
+# --- M2-02G fase 2, traccia B: le serie delle pagine executive ---------------------
+
+EXECUTIVE_WINDOW_CHARTS = ('practice_margins_full', 'practice_liquidity_ratios',
+                           'practice_pfn_ebitda_trend', 'practice_safety_margin_trend')
+
+
+def _window_source(pid, year, basis, revenue):
+    from database.models import BalanceSheet, IncomeStatement
+    bs = {c.name: Decimal('0') for c in BalanceSheet.__table__.columns if c.name.startswith('sp')}
+    inc = {c.name: Decimal('0') for c in IncomeStatement.__table__.columns if c.name.startswith('ce')}
+    bs.update({'sp02_immob_immateriali': Decimal('80'), 'sp05_rimanenze': Decimal('20'),
+               'sp06_crediti_breve': revenue, 'sp09_disponibilita_liquide': Decimal('10'),
+               'sp11_capitale': revenue, 'sp16_debiti_breve': Decimal('100')})
+    # Costi non proporzionali ai ricavi: i margini cambiano fra periodo,
+    # quindi uno scambio di colonne nei test di mutazione è davvero rilevabile.
+    inc.update({'ce01_ricavi_vendite': revenue, 'ce05_materie_prime': revenue * Decimal('0.6') + (year - 2024)})
+    return DossierSource(StatementPeriod(id=pid, year=year, label=pid, basis=basis, period_months=12,
+                                         source='window-fixture'), bs, inc,
+                         fixed_split=(Decimal('40'), Decimal('40')))
+
+
+def window_report():
+    """v1 `infrannuale` + una chiusura 2026 accanto al piano 2027-2029."""
+    report = v1_report('infrannuale')
+    sources = [_window_source('closing:2026', 2026, 'closing', Decimal('250'))]
+    sources += [_window_source(f'forecast:{year}', year, 'forecast', Decimal('300') + i * Decimal('50'))
+                for i, year in enumerate(report.practice.periods.forecast_years)]
+    return extend_dossier(report, sources)
+
+
+def test_executive_window_charts_are_declared_on_the_closing_plus_plan_axis():
+    report = window_report()
+    statement_periods = {p.id: p.year for p in report.detailed_statements[0].periods}
+    for chart in (c for c in report.chart_series if c.id in EXECUTIVE_WINDOW_CHARTS):
+        assert chart.period_ids == ['closing:2026'] + [f'forecast:{y}' for y in report.practice.periods.forecast_years]
+        assert chart.categories == [statement_periods[pid] for pid in chart.period_ids] == [2026, 2027, 2028, 2029]
+        assert all(len(metric.values) == 4 for metric in chart.series)
+    indicators = {i.id: i for i in report.indicator_catalog}
+    margins = next(c for c in report.chart_series if c.id == 'practice_margins_full')
+    assert [m.key for m in margins.series] == ['practice.ebitda_margin', 'practice.ebit_margin']
+    by_id = {p.id: v for p, v in zip(indicators['practice.ebit_margin'].periods, indicators['practice.ebit_margin'].values)}
+    assert margins.series[1].values == [by_id[pid] for pid in margins.period_ids]
+    assert by_id['closing:2026'] is not None  # L'EBIT della chiusura è ricostruibile: il punto esiste.
+    safety = next(c for c in report.chart_series if c.id == 'practice_safety_margin_trend')
+    cells = {p.id: v for p, v in zip(group(window_report(), 'break_even').periods,
+                                     next(s for s in group(window_report(), 'break_even').series if s.id == 'safety_margin_pct').values)}
+    assert safety.series[0].values == [cells[pid] for pid in safety.period_ids]
+    # Parità valore/motivo: nessun punto inventato dove la fonte tace.
+    for chart in (c for c in report.chart_series if c.id in EXECUTIVE_WINDOW_CHARTS):
+        for metric in chart.series:
+            assert all(v is not None for v in metric.values)
+
+
+def test_window_chart_without_plan_assumptions_keeps_the_declared_nulls():
+    """Un anno di piano senza ipotesi esce `None` anche dalla serie di pag. 17:
+    il grafico deve riportare il buco dichiarato, non un valore di ripiego."""
+    report = window_report()
+    raw = report.model_dump(mode='json')
+    for s in raw['structure_series'][3]['series']:
+        if s['id'] == 'safety_margin_pct':
+            s['values'] = [s['values'][0], None, None, None]
+            s['unavailable_reasons'] = [None, 'assumptions_missing', 'assumptions_missing', 'assumptions_missing']
+    # Il grafico che mantiene i valori vecchi mentre la cella strutturale
+    # dichiara `None` è una contraddizione: va rifiutato.
+    with pytest.raises(ValueError, match='match referenced structure series'):
+        FinalReportModelV2.model_validate(raw, context={'skip_hash_validation': True})
+    # Con il `None` dichiarato anche nel grafico, la serie passa e resta forata.
+    for c in raw['chart_series']:
+        if c['id'] == 'practice_safety_margin_trend':
+            c['series'][0]['values'] = [c['series'][0]['values'][0], None, None, None]
+    validated = FinalReportModelV2.model_validate(raw, context={'skip_hash_validation': True})
+    safety = next(c for c in validated.chart_series if c.id == 'practice_safety_margin_trend')
+    assert safety.series[0].values[1:] == [None, None, None]
+
+
+@pytest.mark.parametrize('mutate, error', [
+    (lambda raw: _mutate_window(raw, 'practice_margins_full', 'practice.ebit_margin'), 'match referenced indicators'),
+    (lambda raw: _mutate_window(raw, 'practice_liquidity_ratios', 'practice.quick_ratio'), 'match referenced indicators'),
+    (lambda raw: _mutate_window(raw, 'practice_pfn_ebitda_trend', 'practice.pfn_ebitda'), 'match referenced indicators'),
+])
+def test_contract_rejects_a_window_chart_detached_from_its_indicator(mutate, error):
+    raw = window_report().model_dump(mode='json')
+    mutate(raw)
+    with pytest.raises(ValueError, match=error):
+        FinalReportModelV2.model_validate(raw, context={'skip_hash_validation': True})
+
+
+def _mutate_window(raw, chart_id, ref):
+    chart = next(c for c in raw['chart_series'] if c['id'] == chart_id)
+    index = [s['key'] for s in chart['series']].index(ref)
+    values = chart['series'][index]['values']
+    values[0], values[-1] = values[-1], values[0]
+
+
+def test_contract_rejects_incoherent_window_chart_declarations():
+    from app.schemas.final_report_v2 import DossierChartSeries
+    base = dict(id='x-window', title='X', unit='percent', categories=[2026, 2027],
+                series=[{'key': 'a', 'label': 'A', 'values': ['1', '2']}], methodology='m')
+    with pytest.raises(ValueError, match='cannot reference both'):
+        DossierChartSeries.model_validate(dict(base, indicator_ids=['practice.ebitda_margin'],
+                                               structure_refs=['break_even:safety_margin_pct']))
+    with pytest.raises(ValueError, match='must declare their periods'):
+        DossierChartSeries.model_validate(dict(base, structure_refs=['break_even:safety_margin_pct']))
+    with pytest.raises(ValueError, match='align with metrics'):
+        DossierChartSeries.model_validate(dict(base, indicator_ids=['practice.ros', 'practice.roi']))
+    raw = window_report().model_dump(mode='json')
+    for chart in raw['chart_series']:
+        if chart['id'] == 'practice_margins_full':
+            chart['period_ids'] = ['closing:2026', 'adjusted:2026']
+            chart['categories'] = [2026, 2026]
+    with pytest.raises(ValueError, match='must be unique'):
+        FinalReportModelV2.model_validate(raw, context={'skip_hash_validation': True})
+
+
+def test_annual_dossier_window_falls_back_to_the_last_historical_anchor():
+    from app.services.final_report_dossier import DossierSource, StatementPeriod, _window_periods
+    p = lambda pid, year, basis: StatementPeriod(id=pid, year=year, label=pid, basis=basis, period_months=12, source='x')
+    s = lambda pid, year, basis: DossierSource(p(pid, year, basis), None, None)
+    periods = [s('historical:2024', 2024, 'historical'), s('historical:2025', 2025, 'historical'),
+               s('forecast:2026', 2026, 'forecast'), s('forecast:2027', 2027, 'forecast')]
+    assert [x.id for x in _window_periods(periods)] == ['historical:2025', 'forecast:2026', 'forecast:2027']
+    closing = periods + [s('closing:2025', 2025, 'closing')]
+    assert [x.id for x in _window_periods(closing)][0].startswith('closing:')
+    five = [s('historical:2025', 2025, 'historical')] + [s(f'forecast:{y}', y, 'forecast') for y in range(2026, 2031)]
+    assert [x.id for x in _window_periods(five)] == [f'forecast:{y}' for y in range(2026, 2031)]
 
 
 if __name__ == '__main__':

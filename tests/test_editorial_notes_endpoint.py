@@ -22,7 +22,9 @@ def test_session_get_is_read_only_and_v1_unchanged(client, monkeypatch):
     assert payload["revision"] == 0 and payload["archived_notes"] == []
     assert payload["report"]["schema_version"] == 2
     assert payload["report"]["document"]["title"] == "Report Budget 2027"
-    assert len(payload["report"]["chart_series"]) == 16
+    # 6 canoniche v1 + 10 `DOSSIER_CHARTS` + 4 serie delle pagine executive
+    # (M2-02G fase 2: pag. 8, 12, 14, 17) = 20.
+    assert len(payload["report"]["chart_series"]) == 20
     assert payload["report"]["editorial_plan"] is None
     with client.sessions() as db:
         assert db.query(ReportEditorialState).count() == db.query(ReportEditorialNote).count() == 0

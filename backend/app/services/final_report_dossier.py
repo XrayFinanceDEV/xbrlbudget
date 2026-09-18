@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.schemas.final_report import FinalReportModel
+from app.schemas.final_report import Diagnostic, FinalReportModel
 from app.schemas.final_report_v2 import (
     DetailedStatement, DetailedStatementRow, DocumentIdentity, DossierChartSeries,
     EditorialReadiness, FinalReportModelV2, IndicatorDefinition, ReportSeries,
@@ -326,6 +326,79 @@ DOSSIER_CHARTS = (
 )
 
 
+#: Le serie che il contratto v4 chiede alle pagine executive (M2-02G fase 2,
+#: traccia B): pag. 8 «Evoluzione dei margini» (EBITDA + EBIT, chiusura inclusa),
+#: pag. 12 «Liquidità corrente e immediata» (current + quick ratio), pag. 14
+#: «PFN / EBITDA» in volte, pag. 17 «Margine di sicurezza». L'asse non sono i
+#: soli anni di piano: è la chiusura — o, in mancanza, l'ultimo storico — più gli
+#: anni di piano, la stessa selezione che il catalogo applica con
+#: `select_periods` (`dossier_catalog/shared.py`), dichiarata qui come
+#: `period_ids` perché l'anno da solo non distingue la chiusura dall'osservato.
+#: `(indicatori…, structure_refs…, metodologia)`: nessuna formula nuova, solo
+#: colonne degli indicatori/celle strutturali già nel modello.
+DOSSIER_WINDOW_CHARTS = (
+    ('practice_margins_full', 'Evoluzione dei margini',
+     ('practice.ebitda_margin', 'practice.ebit_margin'), (),
+     "EBITDA margin e EBIT margin (EBIT / ricavi × 100) dal catalogo indicatori, "
+     "sulla chiusura (o sull'ultimo storico) e sugli anni di piano: nessun punto "
+     "è ricalcolato dal renderer."),
+    ('practice_liquidity_ratios', 'Liquidità corrente e immediata',
+     ('practice.current_ratio', 'practice.quick_ratio'), (),
+     "Current ratio e quick ratio in convenzione pratica (attivo corrente della "
+     "pratica, rispettivamente al lordo e al netto delle rimanenze, su debiti "
+     "entro 12 mesi), stessi periodi del grafico dei margini strutturali."),
+    ('practice_pfn_ebitda_trend', 'PFN / EBITDA',
+     ('practice.pfn_ebitda',), (),
+     "Rapporto PFN pratica / EBITDA del periodo, in volte: EBITDA nulla o "
+     "negativa il periodo esce null con il proprio motivo (rapporto non "
+     "significativo), mai un numero di ripiego."),
+    ('practice_safety_margin_trend', 'Margine di sicurezza',
+     (), ('break_even:safety_margin_pct',),
+     "La serie `safety_margin_pct` del gruppo `break_even` di `structure_series`, "
+     "esposta come serie di grafico senza ricalcolo: stessi valori, stesse "
+     "colonne, stessi motivi."),
+)
+
+_WINDOW_MAX_PERIODS = 5
+
+
+def _window_periods(sources: list[DossierSource]) -> list[StatementPeriod]:
+    """Chiusura (o ultimo storico) + anni di piano, mai osservato/rettificato."""
+    by_basis = lambda basis: sorted((s.period for s in sources if s.period.basis == basis), key=lambda p: p.year)
+    forecast, closings, historicals = by_basis('forecast'), by_basis('closing'), by_basis('historical')
+    anchor = closings[-1] if closings else (historicals[-1] if historicals else None)
+    selected = ([anchor] if anchor is not None else []) + forecast
+    return selected[-_WINDOW_MAX_PERIODS:]
+
+
+def _closing_quadrature_control(report: FinalReportModel, sources: list[DossierSource]) -> Diagnostic | None:
+    """Il terzo controllo di pag. 18: «{M}M rettificati + Q4 = chiusura".
+
+    Il modello **non** lo può misurare: la chiusura è un esercizio a sé (una
+    proiezione promossa, o un consuntivo importato), non esiste una stima
+    autonoma della quota restante da confrontare, e dove l'identità regge essa
+    vale per costruzione — un tautogramma, non un esito. La regola del repo è
+    che un controllo mancante vale «non lo so», mai un verdetto: qui «non lo so»
+    viene dichiarato, con il suo motivo, a `severity: info` (non allarma la
+    readiness: non è un difetto misurato, è un confine del modello).
+    """
+    if report.practice.workflow_type != 'infrannuale':
+        return None  # nessun parziale, nessun controllo da dichiarare.
+    adjusted = [s.period for s in sources if s.period.basis == 'adjusted']
+    closing = [s.period for s in sources if s.period.basis == 'closing']
+    if not adjusted or not closing:
+        return None
+    months = adjusted[-1].period_months or 12
+    return Diagnostic(
+        code='closing_progressive_check_unverifiable', severity='info', section='closing',
+        message=(f"Il controllo «{months}M rettificati + restante dell'anno = chiusura» non è "
+                 "verificabile dal modello: la chiusura è un esercizio autonomo (proiezione "
+                 "promossa o consuntivo importato) e nessuna stima indipendente della quota "
+                 "restante esiste da riconciliare; dove l'identità regge, vale per costruzione. "
+                 "Controllo dichiarato non verificabile, non omesso."),
+    )
+
+
 def extend_dossier(report: FinalReportModel, sources: list[DossierSource]) -> FinalReportModelV2:
     """Freeze exact sources in v2; pagination and AI remain subsequent steps."""
     payload = report.model_dump(mode='python')
@@ -345,9 +418,35 @@ def extend_dossier(report: FinalReportModel, sources: list[DossierSource]) -> Fi
             metrics.append({'key': ref, 'label': indicator.label, 'values': [by_year.get(y) for y in years]})
         charts.append(DossierChartSeries(id=identifier, title=chart_title, unit=by_id[refs[0]].unit, categories=years,
             series=metrics, indicator_ids=list(refs), methodology='Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore.'))
+    window = _window_periods(sources)
+    axis = [p.id for p in window]
+    structure_cells = {(group.id, series.id): (group, series)
+                       for group in structure for series in group.series}
+    for identifier, chart_title, refs, struct_refs, methodology in DOSSIER_WINDOW_CHARTS:
+        metrics, units = [], []
+        for ref in refs:
+            indicator = by_id[ref]
+            by_period = {p.id: v for p, v in zip(indicator.periods, indicator.values)}
+            metrics.append({'key': ref, 'label': indicator.label, 'values': [by_period[pid] for pid in axis]})
+            units.append(indicator.unit)
+        for ref in struct_refs:
+            group_id, _, series_id = ref.partition(':')
+            group, series = structure_cells[(group_id, series_id)]
+            by_period = {p.id: v for p, v in zip(group.periods, series.values)}
+            metrics.append({'key': ref, 'label': series.label, 'values': [by_period[pid] for pid in axis]})
+            units.append(series.unit)
+        if any(unit != units[0] for unit in units):
+            raise ValueError(f'dossier window chart {identifier} mixes units')
+        charts.append(DossierChartSeries(id=identifier, title=chart_title, unit=units[0],
+            categories=[p.year for p in window], series=metrics, indicator_ids=list(refs),
+            structure_refs=list(struct_refs), period_ids=list(axis), methodology=methodology))
+    diagnostics = list(report.diagnostics)
+    closing_control = _closing_quadrature_control(report, sources)
+    if closing_control is not None and not any(item.code == closing_control.code for item in diagnostics):
+        diagnostics.append(closing_control)
     payload.update(document=DocumentIdentity(title=title, budget_years=years),
         detailed_statements=build_detailed_statements(sources), indicator_catalog=indicators,
-        structure_series=structure, chart_series=charts,
+        structure_series=structure, chart_series=charts, diagnostics=diagnostics,
         editorial_plan=None, editorial_notes=[],
         editorial_readiness=EditorialReadiness(status='pending', reasons=['Piano di impaginazione e commenti per pagina da preparare in M2-02A/M2-00C.']))
     draft = FinalReportModelV2.model_validate(payload, context={'skip_hash_validation': True})

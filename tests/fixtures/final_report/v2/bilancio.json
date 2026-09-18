@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T11:00:00Z",
-  "model_hash": "0d6d257a01d73d3cca399928909458162232e237d14c740103330cb10aac4b71",
-  "source_hash": "acd01d80ad6ce27ceef46d396547877b4588387b5bdf04b3e43666f29dc2862b",
+  "model_hash": "5b96ac408135b3152543bff702cf4393c65c862ec7973ed01ffc665e0d743fb5",
+  "source_hash": "ff4c2e693f9f0636abe52170c0d00f781dc84982f43d8f27f9ce5e011bba89cc",
   "company": {
     "id": 2,
     "name": "Bilancio Spa",
@@ -258,6 +258,8 @@
         "practice.mt",
         "practice.ms"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -279,6 +281,8 @@
       "indicator_ids": [
         "practice.current_ratio"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -316,6 +320,8 @@
         "practice.roe",
         "practice.ros"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -345,6 +351,8 @@
         "practice.indipendenza",
         "practice.copertura_immob"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -366,6 +374,8 @@
       "indicator_ids": [
         "practice.pfn"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -387,6 +397,8 @@
       "indicator_ids": [
         "practice.pfn_ebitda"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -408,6 +420,8 @@
       "indicator_ids": [
         "practice.dscr"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -445,6 +459,8 @@
         "practice.materials_revenue",
         "practice.services_revenue"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -474,6 +490,8 @@
         "practice.of_revenue",
         "practice.of_mol"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
@@ -511,7 +529,125 @@
         "analytical.liquidity.quick_ratio",
         "analytical.liquidity.acid_test"
       ],
+      "structure_refs": [],
+      "period_ids": [],
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
+    },
+    {
+      "id": "practice_margins_full",
+      "title": "Evoluzione dei margini",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.ebitda_margin",
+          "label": "EBITDA %",
+          "values": [
+            "100"
+          ]
+        },
+        {
+          "key": "practice.ebit_margin",
+          "label": "Margine EBIT",
+          "values": [
+            "100"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.ebitda_margin",
+        "practice.ebit_margin"
+      ],
+      "structure_refs": [],
+      "period_ids": [
+        "forecast:2027"
+      ],
+      "methodology": "EBITDA margin e EBIT margin (EBIT / ricavi × 100) dal catalogo indicatori, sulla chiusura (o sull'ultimo storico) e sugli anni di piano: nessun punto è ricalcolato dal renderer."
+    },
+    {
+      "id": "practice_liquidity_ratios",
+      "title": "Liquidità corrente e immediata",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.current_ratio",
+          "label": "Liquidità Corrente",
+          "values": [
+            null
+          ]
+        },
+        {
+          "key": "practice.quick_ratio",
+          "label": "Liquidità Immediata",
+          "values": [
+            null
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.current_ratio",
+        "practice.quick_ratio"
+      ],
+      "structure_refs": [],
+      "period_ids": [
+        "forecast:2027"
+      ],
+      "methodology": "Current ratio e quick ratio in convenzione pratica (attivo corrente della pratica, rispettivamente al lordo e al netto delle rimanenze, su debiti entro 12 mesi), stessi periodi del grafico dei margini strutturali."
+    },
+    {
+      "id": "practice_pfn_ebitda_trend",
+      "title": "PFN / EBITDA",
+      "unit": "ratio",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "practice.pfn_ebitda",
+          "label": "PFN / EBITDA",
+          "values": [
+            "0.005"
+          ]
+        }
+      ],
+      "indicator_ids": [
+        "practice.pfn_ebitda"
+      ],
+      "structure_refs": [],
+      "period_ids": [
+        "forecast:2027"
+      ],
+      "methodology": "Rapporto PFN pratica / EBITDA del periodo, in volte: EBITDA nulla o negativa il periodo esce null con il proprio motivo (rapporto non significativo), mai un numero di ripiego."
+    },
+    {
+      "id": "practice_safety_margin_trend",
+      "title": "Margine di sicurezza",
+      "unit": "percent",
+      "categories": [
+        2027
+      ],
+      "series": [
+        {
+          "key": "break_even:safety_margin_pct",
+          "label": "Margine di sicurezza %",
+          "values": [
+            "100.0000"
+          ]
+        }
+      ],
+      "indicator_ids": [],
+      "structure_refs": [
+        "break_even:safety_margin_pct"
+      ],
+      "period_ids": [
+        "forecast:2027"
+      ],
+      "methodology": "La serie `safety_margin_pct` del gruppo `break_even` di `structure_series`, esposta come serie di grafico senza ricalcolo: stessi valori, stesse colonne, stessi motivi."
     }
   ],
   "narrative": [

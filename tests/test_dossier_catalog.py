@@ -39,7 +39,17 @@ def test_catalog_order_is_the_fixed_v4_page_list(workflow):
     assert ids[4:6] == ["allegato-A-1", "allegato-A-2"]
     assert ids[6:10] == ["allegato-B-1", "allegato-B-2", "allegato-B-3", "allegato-B-4"]
     assert ids[10:12] == ["allegato-C-1", "allegato-C-2"]
-    assert len(ids) == 12
+    # D (registro rettifiche) ed E (matrice ipotesi) esistono solo quando la
+    # fixture porta dati per loro — «niente pagine vuote»: la fixture minimale
+    # `bilancio`/`startup` non ha rettifiche confermate né alcuno dei driver
+    # curati di Allegato E, `infrannuale` ha entrambi (vedi
+    # `tests/fixtures/final_report/*.json`). F (indicatori della pratica) e G
+    # (indici analitici, 2 parti: 26 indicatori / 13 per parte) leggono sempre
+    # dal catalogo indicatori, presente per costruzione su ogni fixture.
+    tail = (["allegato-D", "allegato-E"] if workflow == "infrannuale" else []) + [
+        "allegato-F", "allegato-G-1", "allegato-G-2", "metodologia"]
+    assert ids[12:] == tail
+    assert len(ids) == 12 + len(tail)
     assert all(page["items"] for page in inventory), "nessuna pagina vuota nel catalogo"
 
 
@@ -61,7 +71,11 @@ def test_appendix_rows_are_lossless_across_the_three_statements(workflow):
     proprietario): «rettifiche al minimo» riguarda le colonne, mai le righe."""
     report = fixture_report(workflow, [2027, 2028, 2029])
     inventory = build_inventory(report)
-    appendix_pages = [page for page in inventory if page["id"].startswith("allegato-")]
+    # Solo A/B/C portano righe `row:<statement>:<row>` (i tre prospetti
+    # completi): D/E/F/G sono anch'essi `allegato-*` ma le loro righe seguono
+    # una convenzione diversa (rettifica/ipotesi/indicatore), fuori scopo qui.
+    appendix_pages = [page for page in inventory
+                      if page["id"].split("-")[1:2] in (["A"], ["B"], ["C"])]
     by_statement: dict[str, list[str]] = {"income_statement": [], "balance_sheet": [], "cashflow": []}
     for page in appendix_pages:
         table = page["items"][0]

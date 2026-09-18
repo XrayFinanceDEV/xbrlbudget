@@ -483,6 +483,88 @@ def _break_even(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [] if block is not None else kpis, "items": items}
 
 
+# ── Pagina 18 · Diagnostica e punti da verificare ───────────────────────────
+# Le "4 spunte verdi" del campione dimostrativo non sono tutte verificabili
+# sul modello reale (v. mappatura della fase, pagina 18): "9M rettificati +
+# Q4 = chiusura" non ha un controllo indipendente (nessuna stima Q4 separata
+# dalla chiusura promossa) e si omette, invece di riprodurre un controllo che
+# non esiste. Le altre tre si leggono dal modello, mai da un testo fisso.
+
+_READINESS_LABELS = {"ready": "pronto", "draft": "bozza", "blocked": "bloccato"}
+
+
+def _esito_rettifiche(report: FinalReportModelV2) -> str:
+    codes = {"adjustments_reconciliation_unavailable", "adjustments_unconfirmed"}
+    hits = [diagnostic.message for diagnostic in report.diagnostics if diagnostic.code in codes]
+    if hits:
+        return "; ".join(hits)
+    if report.adjustments.confirmed:
+        return "Verificato: le rettifiche confermate sono riconciliate con il progressivo."
+    return "Le rettifiche non risultano confermate."
+
+
+def _esito_quadratura_sp(report: FinalReportModelV2, periods: list[Any]) -> str:
+    statement = s.statement_by_id(report, "balance_sheet")
+    code = ("total_assets+sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve"
+            "+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi")
+    values = s.values_for_periods(s.statement_row(statement, code), statement, periods)
+    checked = [(period, value) for period, value in zip(periods, values) if value is not None]
+    if not checked:
+        return "n.d.: nessun periodo verificabile"
+    scarti = [(period, value) for period, value in checked if value != 0]
+    if not scarti:
+        return f"Quadra su {len(checked)} periodi rappresentati."
+    dettaglio = "; ".join(f"{period.year}: {s.exact(value)}" for period, value in scarti)
+    return f"Scostamento residuo su {len(scarti)} periodi — {dettaglio}"
+
+
+def _esito_cassa(report: FinalReportModelV2, periods: list[Any]) -> str:
+    statement = s.statement_by_id(report, "cashflow")
+    beginning = s.values_for_periods(s.statement_row(statement, "cash_reconciliation.cash_beginning"),
+        statement, periods)
+    flow = s.values_for_periods(s.statement_row(statement, "cash_reconciliation.total_cashflow"),
+        statement, periods)
+    ending = s.values_for_periods(s.statement_row(statement, "cash_reconciliation.cash_ending"),
+        statement, periods)
+    checked = 0
+    scarti = []
+    for period, begin, flow_value, end in zip(periods, beginning, flow, ending):
+        if begin is None or flow_value is None or end is None:
+            continue
+        checked += 1
+        if begin + flow_value != end:
+            scarti.append((period, end - (begin + flow_value)))
+    if checked == 0:
+        return "n.d.: nessun periodo verificabile"
+    if not scarti:
+        return f"Verificato su {checked} periodi: cassa iniziale + flusso totale = cassa finale."
+    dettaglio = "; ".join(f"{period.year}: {s.exact(delta)}" for period, delta in scarti)
+    return f"Scostamento residuo su {len(scarti)} periodi — {dettaglio}"
+
+
+def _diagnostica(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    kpis = [kpi for kpi in (
+        s.kpi("stato di preparazione", s.label(_READINESS_LABELS, report.readiness.status)),
+        s.kpi("segnalazioni diagnostiche", len(report.diagnostics)),
+    ) if kpi is not None]
+    items: list[dict[str, Any]] = [s.text("diagnostica-priorita", "Priorità di verifica",
+        "Prima di presentare il piano, verificare: la chiusura dell'esercizio in corso rispetto ai dati più "
+        "recenti disponibili; la tenuta delle ipotesi di crescita e di costo rispetto all'operatività; i "
+        "tempi di incasso e di pagamento rispetto al piano del circolante.")]
+    rows = [
+        s.row("diagnostica:rettifiche", ["Prima + rettifiche = dopo", _esito_rettifiche(report)]),
+        s.row("diagnostica:quadratura", ["Attivo = passivo e patrimonio netto", _esito_quadratura_sp(report, periods)]),
+        s.row("diagnostica:cassa", ["Cassa iniziale + flussi = cassa finale", _esito_cassa(report, periods)]),
+    ]
+    items.append(s.table("diagnostica-controlli", "Controlli di quadratura", ["Controllo", "Esito"], rows))
+    return {"id": "diagnostica", "title": "Diagnostica e punti da verificare", "family": FAMILY,
+            "subtitle": "Il controllo «9M rettificati + Q4 = chiusura» non è verificabile sul modello: non "
+                        "esiste una stima Q4 indipendente dalla chiusura promossa, e si omette invece di "
+                        "riprodurlo come spunta vuota.",
+            "kpis": kpis, "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # "Niente pagine vuote" (m2-02d.md): su una fonte degenere (es. il
     # fixture sintetico "startup", dove ricavi/margini sono tutti a zero) sia
@@ -490,5 +572,5 @@ def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # — quella pagina si toglie dal catalogo qui, non entra come riquadro
     # bianco e non compare nell'indice.
     pages = [_indicatori(report), _liquidita(report), _redditivita(report), _solidita(report),
-             _circolante(report), _composizione(report), _break_even(report)]
+             _circolante(report), _composizione(report), _break_even(report), _diagnostica(report)]
     return [page for page in pages if page["items"]]

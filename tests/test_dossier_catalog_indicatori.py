@@ -34,7 +34,7 @@ def test_build_returns_the_pages_implemented_so_far():
     report = fixture_report("bilancio", [2027, 2028, 2029])
     pages = indicatori.build(report)
     assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita", "solidita",
-                                               "composizione", "break-even"]
+                                               "composizione", "break-even", "diagnostica"]
 
 
 def test_a_page_with_no_data_at_all_is_dropped_never_shown_blank():
@@ -225,6 +225,53 @@ def test_break_even_table_shows_a_negative_safety_margin_without_clamping():
     table = _tables([page])[0]
     margin_row = next(row for row in table["rows"] if row["cells"][0] == "Margine di sicurezza")
     assert any(cell is not None and cell.startswith("-") for cell in margin_row["cells"][1:])
+
+
+@pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
+def test_diagnostica_always_survives_the_empty_page_filter(workflow):
+    """A differenza delle altre pagine del gruppo, "diagnostica" ha sempre
+    un testo fisso e una tabella a 3 righe con un esito testuale (mai
+    `None`): sopravvive al filtro "niente pagine vuote" su ogni fixture."""
+    report = fixture_report(workflow, [2027, 2028, 2029])
+    page = next(p for p in indicatori.build(report) if p["id"] == "diagnostica")
+    table = _tables([page])[0]
+    assert len(table["rows"]) == 3
+    controls = [row["cells"][0] for row in table["rows"]]
+    assert controls == ["Prima + rettifiche = dopo", "Attivo = passivo e patrimonio netto",
+                        "Cassa iniziale + flussi = cassa finale"]
+    assert all(row["cells"][1] for row in table["rows"])  # mai una cella vuota
+
+
+def test_diagnostica_omits_the_q4_check_the_model_cannot_verify():
+    """Mappatura della fase, pagina 18: "9M rettificati + Q4 = chiusura" non
+    ha un controllo indipendente sul modello (nessuna stima Q4 separata dalla
+    chiusura promossa) — non compare come quarta riga, mai una spunta vuota."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = next(p for p in indicatori.build(report) if p["id"] == "diagnostica")
+    table = _tables([page])[0]
+    assert not any("Q4" in row["cells"][0] for row in table["rows"])
+
+
+def test_diagnostica_balance_check_reads_the_real_difference_row():
+    """Legge la riga "DIFFERENZA (Attivo - Passivo)" vera del prospetto SP,
+    mai un testo fisso indipendente dal modello: sulla fixture sintetica lo
+    sbilancio è −5,00 su ogni periodo (non zero — il fixture minimale non è
+    costruito per quadrare), e l'esito lo dichiara con l'importo esatto,
+    "diagnose never fabricate" — mai un "quadra" finto."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    periods = indicatori._periods(report)
+    esito = indicatori._esito_quadratura_sp(report, periods)
+    assert "Scostamento residuo su 3 periodi" in esito
+    assert "-5.00" in esito or "-5,00" in esito
+
+
+def test_diagnostica_readiness_kpi_uses_the_italian_label_not_the_raw_code():
+    """`report.readiness.status` è un codice inglese ("ready"/"draft"/
+    "blocked"): il KPI deve tradurlo, mai stampare il codice tecnico."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = next(p for p in indicatori.build(report) if p["id"] == "diagnostica")
+    readiness_kpi = next(kpi for kpi in page["kpis"] if kpi["label"] == "stato di preparazione")
+    assert readiness_kpi["value"] in ("pronto", "bozza", "bloccato")
 
 
 def test_indicator_table_display_label_none_uses_the_catalog_label():

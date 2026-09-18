@@ -347,6 +347,78 @@ def _circolante(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [] if block is not None else kpis, "items": items}
 
 
+# ── Pagina 16 · Composizione economica e patrimoniale ───────────────────────
+
+
+def _first_last_periods(periods: list[Any]) -> list[Any]:
+    if len(periods) <= 2:
+        return periods
+    return [periods[0], periods[-1]]
+
+
+def _structure_table(table_id: str, title: str, report: FinalReportModelV2, group_id: str, periods: list[Any],
+                     rows_spec: list[tuple[str, str, str]]) -> dict[str, Any] | None:
+    group = _structure_group(report, group_id)
+    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    rows = []
+    for series_id, display_label, unit in rows_spec:
+        series = _structure_series(group, series_id)
+        values = _values_by_period(series.values, group.periods, periods)
+        if not any(value is not None for value in values):
+            continue
+        rows.append(s.row(f"{table_id}:{series_id}", [display_label, *values], [None, *([unit] * len(values))]))
+    if not rows:
+        return None
+    return s.table(table_id, title, columns, rows)
+
+
+def _composizione(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    two_point = _first_last_periods(periods)
+    # Sostituisce il dumbbell della v4 (confronto chiusura -> fine piano) con
+    # un grafico a linea su due soli periodi — stesso disegno, nessun
+    # componente nuovo (v. commento di modulo).
+    chart = _chart("composizione-incidenza-costi", "Incidenza dei costi sul fatturato", "percent", two_point, [
+        ("Materie prime", _structure_values(report, "cost_incidence", "materials", two_point)),
+        ("Servizi", _structure_values(report, "cost_incidence", "services", two_point)),
+        ("Personale", _structure_values(report, "cost_incidence", "personnel", two_point)),
+        ("Oneri finanziari", _structure_values(report, "cost_incidence", "financial_charges", two_point)),
+    ])
+    items: list[dict[str, Any]] = []
+    block = s.chart_block("composizione-incidenza-costi",
+        "Incidenza dei costi sul fatturato · confronto fra primo e ultimo periodo", chart, [])
+    if block is not None:
+        items.append(block)
+    # Le barre al 100% della v4 (composizione impieghi/fonti) diventano UNA
+    # tabella di quota percentuale (impieghi + fonti insieme, non due tabelle
+    # separate: due titoli+intestazioni in più non ci stanno sulla stessa
+    # pagina fisica insieme al grafico — misurato su AMBIENTA, la seconda
+    # tabella separata spillava su una pagina fisica senza intestazione).
+    # Stessa fonte (`structure_series`), nessuna perdita di dato, senza un
+    # componente "barre 100%" che comuni.typ non ha.
+    composition_rows = [
+        ("composition_uses", "fixed_assets_share", "Immobilizzazioni nette (impieghi)"),
+        ("composition_uses", "current_other_share", "Circolante e altro (impieghi)"),
+        ("composition_uses", "cash_share", "Disponibilità liquide (impieghi)"),
+        ("composition_sources", "equity_share", "Patrimonio netto (fonti)"),
+        ("composition_sources", "financial_debt_share", "Debiti finanziari (fonti)"),
+        ("composition_sources", "other_liabilities_share", "Altre passività (fonti)"),
+    ]
+    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    rows = []
+    for group_id, series_id, display_label in composition_rows:
+        values = _structure_values(report, group_id, series_id, periods)
+        if not any(value is not None for value in values):
+            continue
+        rows.append(s.row(f"composizione-quote:{group_id}:{series_id}", [display_label, *values],
+                          [None, *(["percent"] * len(values))]))
+    if rows:
+        items.append(s.table("composizione-quote", "Composizione di impieghi e fonti · quote %", columns, rows))
+    return {"id": "composizione", "title": "Composizione economica e patrimoniale", "family": FAMILY,
+            "subtitle": "Quote percentuali sullo stesso totale; il dettaglio in euro è negli Allegati.",
+            "kpis": [], "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # "Niente pagine vuote" (m2-02d.md): su una fonte degenere (es. il
     # fixture sintetico "startup", dove ricavi/margini sono tutti a zero) sia
@@ -354,5 +426,5 @@ def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # — quella pagina si toglie dal catalogo qui, non entra come riquadro
     # bianco e non compare nell'indice.
     pages = [_indicatori(report), _liquidita(report), _redditivita(report), _solidita(report),
-             _circolante(report)]
+             _circolante(report), _composizione(report)]
     return [page for page in pages if page["items"]]

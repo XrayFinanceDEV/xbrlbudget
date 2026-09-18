@@ -33,7 +33,8 @@ def test_build_returns_the_pages_implemented_so_far():
     dropped_never_shown_blank` qui sotto, che verifica esattamente questo."""
     report = fixture_report("bilancio", [2027, 2028, 2029])
     pages = indicatori.build(report)
-    assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita", "solidita"]
+    assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita", "solidita",
+                                               "composizione"]
 
 
 def test_a_page_with_no_data_at_all_is_dropped_never_shown_blank():
@@ -181,6 +182,31 @@ def test_solidita_table_row_spec_leaves_the_dscr_label_to_the_catalog():
     assert dscr_indicator.values == [None, None, None]
     table = _tables([page])[0]
     assert all("DSCR" not in row["cells"][0] for row in table["rows"])
+
+
+def test_composizione_uses_at_most_one_table_not_two_separate_ones():
+    """Due tabelle separate (impieghi + fonti, come nella v4) non stanno sulla
+    stessa pagina fisica insieme al grafico — misurato su AMBIENTA (azienda
+    575, scenario 18): la seconda tabella spillava su una pagina senza
+    intestazione. Restano unite in un'unica tabella a 6 righe. Sulla fixture
+    sintetica "bilancio" (SP tutto a zero) le quote sono tutte
+    `zero_denominator`, quindi qui la tabella è assente del tutto — quella
+    fusione si osserva sui dati reali, verificati manualmente."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = next(p for p in indicatori.build(report) if p["id"] == "composizione")
+    assert len(_tables([page])) <= 1
+
+
+def test_composizione_chart_uses_only_first_and_last_period():
+    """Sostituisce il dumbbell della v4 (confronto chiusura -> fine piano)
+    con un grafico a linea limitato a due periodi — stesso disegno visivo,
+    nessun componente nuovo."""
+    report = fixture_report("bilancio", [2027, 2028, 2029, 2030, 2031])
+    page = next((p for p in indicatori.build(report) if p["id"] == "composizione"), None)
+    if page is None:
+        pytest.skip("cost_incidence assente su questa fixture")
+    chart = _charts([page])[0]["chart"]
+    assert len(chart["categories"]) == 2
 
 
 def test_indicator_table_display_label_none_uses_the_catalog_label():

@@ -103,7 +103,13 @@
     description: "Dossier editoriale del report budget")
   set text(font: "IBM Plex Sans", lang: "it", size: 9pt, fill: ink)
   set par(leading: 3.5pt, justify: false)
-  set page(paper: "a4", margin: (left: 16mm, right: 16mm, top: 20mm, bottom: 46mm),
+  // Margini dallo style contract (`page.margini`: 17 / 16 / 19 / 16 mm). Il
+  // fondo NON è 19 mm: nello spazio sotto il corpo stanno il riquadro di
+  // commento (18 mm) e il piè di pagina (10 mm, `page.pie_pagina`), che in
+  // Typst vivono nel footer, e perciò richiedono 46 mm. Il corpo guadagna
+  // 3 mm in altezza, e nessuna misura del piano editoriale dipende da quel
+  // bordo: contano gli slot dei contenuti, non la posizione della pagina.
+  set page(paper: "a4", margin: (left: 16mm, right: 16mm, top: 17mm, bottom: 46mm),
     footer-descent: 4mm,
     header: context {
       if counter(page).get().first() > 1 {

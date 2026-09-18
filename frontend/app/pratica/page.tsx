@@ -2105,10 +2105,10 @@ export default function InfraannualePage() {
                     La differenza fra attivo e passivo è il fabbisogno finanziario non coperto:{" "}
                     {formatEuro(fabbisognoScoperto)}.
                   </span>{" "}
-                  Il piano, così com'è, richiede questa finanza nel periodo residuo: la cassa
+                  Il piano, così com&apos;è, richiede questa finanza nel periodo residuo: la cassa
                   non può andare sotto zero e il motore non crea debito da solo. Puoi
                   ricalcolare con il circolante storico, correggere i dati nelle Rettifiche,
-                  oppure prendere atto che serve credito per quell'importo.
+                  oppure prendere atto che serve credito per quell&apos;importo.
                 </div>
               )}
             </CardContent>

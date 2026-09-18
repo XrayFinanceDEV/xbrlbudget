@@ -28,6 +28,7 @@ import type { EditorialNoteReference, EditorialSession } from "@/types/editorial
 import type { FinalReportModel, NarrativeBlock } from "@/types/final-report";
 import { Textarea } from "@/components/ui/textarea";
 import { decidePrepareReportAI, runPrepareReportAI, type PrepareReportAIStep } from "@/lib/prepare-report-ai";
+import { buildPdfOutline, pdfPageUrl } from "@/lib/report-pdf-outline";
 
 const narrativeTitles: Record<string, string> = { executive_summary: "Sintesi esecutiva", adjustments_and_closing: "Commento su rettifiche e chiusura", budget_assumptions: "Commento sulle ipotesi", economic_outlook: "Prospettiva economica", financial_outlook: "Prospettiva finanziaria", risks_and_actions: "Rischi e azioni suggerite" };
 const NARRATIVE_IDS = Object.keys(narrativeTitles);
@@ -137,6 +138,10 @@ export default function ReportPage() {
   // il modello, mai a ogni render.
   const pdfState: "draft" | "final" = model?.readiness.status === "ready" ? "final" : "draft";
   const previewKey = plan && selectedCompanyId && scenarioId ? `${selectedCompanyId}:${scenarioId}:${plan.plan_hash}:${pdfState}` : null;
+  // L'indice a sinistra dell'anteprima: la posizione nel piano È il numero di
+  // pagina fisica, perché il catalogo garantisce una pagina per voce.
+  const pdfOutline = useMemo(() => buildPdfOutline(plan?.pages ?? []), [plan]);
+  const [previewPage, setPreviewPage] = useState(1);
   const loadedPreviewKey = useRef<string | null>(null);
   // Dipendere da `loadInline`, non dall'oggetto `finalReportDownload`: quello
   // cambia identità a ogni render e l'effetto ripartirebbe da solo ogni volta
@@ -146,6 +151,7 @@ export default function ReportPage() {
     if (!previewKey || !selectedCompanyId || !scenarioId) return;
     if (loadedPreviewKey.current === previewKey) return;
     loadedPreviewKey.current = previewKey;
+    setPreviewPage(1);
     void loadInlinePreview(selectedCompanyId, scenarioId, pdfState);
   }, [previewKey, selectedCompanyId, scenarioId, pdfState, loadInlinePreview]);
 
@@ -162,7 +168,15 @@ export default function ReportPage() {
     {session.error ? <Alert variant="destructive"><AlertTitle>Impossibile caricare il dossier</AlertTitle><AlertDescription className="space-y-3"><p>{getErrorMessage(session.error, "Il dossier non è disponibile.")}</p><Button type="button" variant="outline" onClick={() => session.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Riprova</Button></AlertDescription></Alert> : null}
     {model ? <main className="space-y-6"><h1 className="text-3xl font-bold print:block">{model.document.title}</h1><ReadinessBanner readiness={model.readiness} className="print:hidden" />{model.readiness.reasons?.some((reason) => reason.code === "forecast_stale") ? <Alert className="border-amber-400 print:hidden"><AlertTitle>Previsionale da rigenerare</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3"><span>Le ipotesi sono cambiate dopo l&apos;ultima generazione.</span><Button type="button" variant="outline" onClick={regenerateForecast} disabled={regeneratingForecast}>{regeneratingForecast ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rigenera previsionale</Button></AlertDescription></Alert> : null}{pending ? <Alert className="print:hidden"><AlertTitle>Piano editoriale da preparare</AlertTitle><AlertDescription>{model.editorial_readiness.reasons.join(" ")} Usa “Prepara Report AI” prima di modificare o generare commenti.</AlertDescription></Alert> : null}
       <section id="pdf-preview" className="print:hidden"><Card><CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0"><CardTitle>Anteprima del PDF</CardTitle><Button type="button" variant="outline" size="sm" onClick={() => { if (selectedCompanyId && scenarioId) { loadedPreviewKey.current = previewKey; void finalReportDownload.loadInline(selectedCompanyId, scenarioId, pdfState); } }} disabled={pdfRequestBusy || aiPrepMode !== null}>{finalReportDownload.previewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Aggiorna anteprima</Button></CardHeader><CardContent>
-        {finalReportDownload.inlineUrl ? <iframe title="Anteprima del report PDF" src={finalReportDownload.inlineUrl} className="h-[80vh] w-full rounded-md border" /> : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{finalReportDownload.previewing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preparazione anteprima…</> : pending ? "Prepara il report con «Prepara Report AI» per vedere l'anteprima." : "Anteprima non disponibile."}</div>}
+        {finalReportDownload.inlineUrl ? <div className="flex gap-4">
+          {pdfOutline.length ? <nav aria-label="Pagine del report" className="sticky top-4 hidden max-h-[85vh] w-56 shrink-0 overflow-y-auto pr-1 lg:block">
+            <ol className="space-y-0.5">{pdfOutline.map((entry) => <li key={`${entry.page}-${entry.sectionId}`}>
+              <button type="button" onClick={() => setPreviewPage(entry.page)} className={`flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-xs hover:bg-muted ${previewPage === entry.page ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}>
+                <span className="w-5 shrink-0 tabular-nums text-right">{entry.page}</span><span className="truncate">{entry.label}</span>
+              </button></li>)}</ol>
+          </nav> : null}
+          <iframe title="Anteprima del report PDF" src={pdfPageUrl(finalReportDownload.inlineUrl, previewPage)} className="h-[85vh] min-w-0 flex-1 rounded-md border" />
+        </div> : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{finalReportDownload.previewing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preparazione anteprima…</> : pending ? "Prepara il report con «Prepara Report AI» per vedere l'anteprima." : "Anteprima non disponibile."}</div>}
       </CardContent></Card></section>
       {plan ? <EditorialNotes key={draftScope} plan={plan} notes={model.editorial_notes ?? []} archivedNotes={session.data!.archived_notes} drafts={draftBucket.values} dirty={draftBucket.dirty} savingId={savingId} generating={generating} onDraft={updateDraft} onSave={save} onGenerate={generate} onReassociate={() => toast.info("Testo archiviato copiato nella bozza della nota selezionata")} /> : null}
       <details className="print:hidden"><summary className="cursor-pointer text-sm font-medium text-muted-foreground">Vista web del dossier · tabelle e grafici per sezione</summary>

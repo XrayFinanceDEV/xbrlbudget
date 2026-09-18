@@ -42,7 +42,7 @@ def _stub_report(*, plan=True, readiness="draft", company_name="Ambienta"):
 
 
 def _rendered(data=b"%PDF-1.7 stub\ntrailer\n%%EOF"):
-    return SimpleNamespace(data=data, model_hash="a" * 64, template_version="dossier-final-1+editorial-3",
+    return SimpleNamespace(data=data, model_hash="a" * 64, template_version="dossier-final-1+editorial-4",
                            compiler_version="0.15.1", page_count=33, artifact_sha256="c" * 64)
 
 
@@ -215,7 +215,7 @@ def test_headers_and_filename(client, monkeypatch):
                                     "document_state": "draft", "grayscale": False}, exclude_volatile=False)
     assert response.headers["etag"] == f'"{expected_etag}"'
     assert response.headers["x-report-model-hash"] == "a" * 64
-    assert response.headers["x-report-template-version"] == "dossier-final-1+editorial-3"
+    assert response.headers["x-report-template-version"] == "dossier-final-1+editorial-4"
     assert response.headers["x-report-compiler-version"] == "0.15.1"
     assert response.headers["cache-control"] == "no-store"
 
@@ -306,7 +306,7 @@ def test_native_pdf_matches_get_v2_and_watermarks(client):
         assert all("BOZZA" in page.get_text() for page in pdf)
     assert draft.headers["etag"] == etag_of(v2, "draft", False)
     assert draft.headers["x-report-model-hash"] == v2["model_hash"]
-    assert draft.headers["x-report-template-version"].endswith("+editorial-3")
+    assert draft.headers["x-report-template-version"].endswith("+editorial-4")
     assert v2["document"]["title"] in draft.headers["content-disposition"]
 
     # Piano pronto non basta: «final» su report la cui readiness non è ready è 409,

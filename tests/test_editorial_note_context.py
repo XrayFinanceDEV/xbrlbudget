@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.renderers.typst.editorial_inventory import expected_content_inventory
+from app.renderers.typst.dossier_catalog import expected_content_inventory
 from app.services import editorial_notes_service as service
 from tests.test_final_report_v2 import fixture_report
 

@@ -32,6 +32,24 @@
   sign + groups.join(".") + if places == 0 { "" } else { "," + decimal }
 }
 #let unit-label(unit) = (eur: "euro", percent: "%", days: "giorni", ratio: "volte", score: "punti").at(unit)
+// Suffisso di cella per unità diverse da "eur" (v4: «7,57×», «17,75%»,
+// «228,12 gg») — mai per gli euro, che restano cifre nude nelle tabelle
+// (decisione del 2026-09-17) perché l'unità è già dichiarata dal titolo di
+// colonna/tabella o dall'asse del grafico. Fino a questa correzione ogni
+// tabella del catalogo era in euro, quindi nessuna cella con un'altra unità
+// aveva mai attraversato `display-value` — il suffisso mancava semplicemente
+// perché nessuno l'aveva ancora esercitato.
+#let unit-suffix(unit) = (eur: "", percent: "%", days: " gg", ratio: "×", score: " punti").at(unit, default: "")
+// Come `display-value`, ma con il suffisso dell'unità già incluso nella
+// stessa cella — per le tabelle (`comuni.typ::cell`, `charts.typ::value-table`),
+// mai per gli assi dei grafici (che hanno la propria etichetta `unit-label`
+// in testa, un suffisso per cella lì duplicherebbe l'informazione) né per i
+// KPI (che restano su `kpi-format`, con il proprio arrotondamento a 2 cifre
+// e `trim-decimals`: una tabella mostra invece la precisione intera del
+// valore, come già faceva `display-value` con `places: none`).
+#let display-value-with-unit(value, unit, places: none) = if value == none { "n.d." } else {
+  display-value(value, unit, places: places) + unit-suffix(unit)
+}
 // Formattazione dei KPI in colonna (v4, M2-02B): sola manipolazione di stringhe
 // decimali, nessuna aritmetica finanziaria nel template. Un KPI che il modello
 // non fornisce è omesso nell'inventario: qui non esiste via per il «n.d.».

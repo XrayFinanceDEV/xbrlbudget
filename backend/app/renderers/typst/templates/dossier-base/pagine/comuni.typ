@@ -12,7 +12,7 @@
 // preparati in anticipo.
 #import "../base.typ": plex, marker, body-width, navy, blue, ink, muted, rule, gray-mode, kpi-strip, kpi-column
 #import "../charts.typ": chart-component, value-table
-#import "../chart-format.typ": display-value
+#import "../chart-format.typ": display-value-with-unit
 
 #let safe-prose(size, value, weight: 400, fill: navy) = context {
   if value.split(regex("\\s+")).any(word =>
@@ -33,8 +33,10 @@
   }
   plex(size, fill: fill, display)
 } else {
-  // Euro interi nelle tabelle (decisione del proprietario, 2026-09-17).
-  let display = plex(size, fill: fill, display-value(value, unit, places: if unit == "eur" { 0 } else { none }))
+  // Euro interi nelle tabelle (decisione del proprietario, 2026-09-17); ogni
+  // altra unità porta il proprio suffisso nella stessa cella («17,75%»,
+  // «7,57×», «228,12 gg» — v4, Allegati F/G e i grafici di indicatori.py).
+  let display = plex(size, fill: fill, display-value-with-unit(value, unit, places: if unit == "eur" { 0 } else { none }))
   if measure(display).width > available { panic("editorial-amount-does-not-fit") }
   display
 }
@@ -69,7 +71,7 @@
   let token-ok = (value, width) => value == none or value.split(regex("\\s+")).all(word =>
     measure(plex(8pt, word)).width <= width)
   let amount-ok = (value, unit, width) => (value == none or
-    measure(plex(8pt, display-value(value, unit, places: if unit == "eur" { 0 } else { none }))).width <= width)
+    measure(plex(8pt, display-value-with-unit(value, unit, places: if unit == "eur" { 0 } else { none }))).width <= width)
   let cell-ok = (value, unit, width) => if unit == none { token-ok(value, width) } else { amount-ok(value, unit, width) }
   let fits = count >= 2 and item.rows.all(r =>
     token-ok(r.cells.at(0), label-width - 6pt) and

@@ -1,6 +1,6 @@
 // Native vectors only. Floats are confined to graphical coordinates/axis ticks.
 #import "base.typ": plex, navy, blue, ink, muted, rule
-#import "chart-format.typ": display-value, unit-label, precision
+#import "chart-format.typ": display-value-with-unit, unit-label, precision
 #let geometry = json("chart-layout.json")
 #let coordinate(value) = {
   let result = float(value)
@@ -154,7 +154,7 @@
     v(3pt)
   }
   #for threshold in thresholds {
-    plex(7pt, fill: muted, "Riferimento: " + threshold.label + " = " + display-value(threshold.value, chart.unit))
+    plex(7pt, fill: muted, "Riferimento: " + threshold.label + " = " + display-value-with-unit(threshold.value, chart.unit))
     v(2pt)
   }
   ])
@@ -183,7 +183,7 @@
   let width = float(geometry.width_mm) * 1mm
   let label-width = 135pt
   let column-width = (width - label-width) / chart.categories.len()
-  let shown(value) = display-value(value, chart.unit, places: places)
+  let shown(value) = display-value-with-unit(value, chart.unit, places: places)
   let fits = chart.series.all(s => s.values.all(v =>
     measure(plex(8pt, shown(v))).width <= column-width - 6pt))
   let cells = ()

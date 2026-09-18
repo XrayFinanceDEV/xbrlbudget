@@ -1,0 +1,377 @@
+{
+  "colors": {
+    "chart_strokes": {
+      "dumbbell_link": "#9CC0D8",
+      "gridline": "#E4E9EE",
+      "zero_axis": "#5E6B78"
+    },
+    "semantic": {
+      "amber": "#B7791F",
+      "deep": "#003049",
+      "ink": "#1B1F24",
+      "mid": "#669BBC",
+      "muted": "#5E6B78",
+      "rule": "#D5DDE4"
+    },
+    "series_palette": [
+      "#003049",
+      "#669BBC",
+      "#B7791F",
+      "#9CC0D8"
+    ],
+    "stato": {
+      "good": "#1B7F5C",
+      "warn": "var(--amber)"
+    }
+  },
+  "convenzioni": {
+    "dinamica": "il contratto descrive forma e stile: nessun numero del campione vincola il prodotto",
+    "ruoli": "un ruolo per selettore: il layout del prodotto deve replicare corpo/pesi/colori qui, non inventarne di propri",
+    "unita": "valori CSS originali conservati in 'css'; i px sono convertiti in pt ×0,75"
+  },
+  "page": {
+    "copertina_banda": {
+      "background": "var(--deep)",
+      "min_height": "108mm",
+      "padding": "24mm 20mm 14mm"
+    },
+    "foglio": {
+      "height": "297mm",
+      "width": "210mm"
+    },
+    "formato": "A4",
+    "margini": {
+      "bottom": "19mm",
+      "left": "16mm",
+      "right": "16mm",
+      "top": "17mm"
+    },
+    "pie_pagina": {
+      "border_top": ".5pt solid #E4E9EE",
+      "bottom": "10mm",
+      "font_size": "6.8pt"
+    },
+    "print": {
+      "@page_size": "A4",
+      "intestazione_tabella_ripetuta": "table-header-group"
+    },
+    "testata": {
+      "font_size": "7pt",
+      "left": "16mm",
+      "right": "16mm",
+      "top": "8mm"
+    }
+  },
+  "schema_version": 1,
+  "source": {
+    "file": "/home/peter/DEV/budget/inbox/artifacts/2026-09-15-report-finale/build-dossier-preview.py",
+    "generated_html_sections": 33,
+    "sha256": "82d01373fbd6f2da810b96112a4d734d0c7255b743e3762ee6bafa7e2bcc7203"
+  },
+  "spacing": {
+    "colonne_in_row": {
+      "gap": "15pt"
+    },
+    "due_colonne": {
+      "gap": "18pt"
+    },
+    "fonte": {
+      "bottom": "5pt",
+      "left": "0",
+      "right": "0",
+      "top": "5pt"
+    },
+    "grafico_dopo": "10pt",
+    "indice_allegati_voce": "6pt",
+    "indice_voce": "3pt",
+    "kpi_riquadro": {
+      "padding": {
+        "bottom": "7pt",
+        "left": "0",
+        "right": "0",
+        "top": "7pt"
+      },
+      "separatore": ".7pt solid var(--rule)"
+    },
+    "nota": {
+      "margin_top": "10pt",
+      "padding_top": "7pt",
+      "separatore": ".7pt solid var(--rule)"
+    },
+    "occhiello_dopo": "5pt",
+    "pannelli_affiancati": {
+      "gap": "15pt",
+      "margin_bottom": "12pt",
+      "margin_top": "8pt"
+    },
+    "rail_colonna": {
+      "width": "47mm"
+    },
+    "sottotitolo_dopo": "11pt",
+    "tabella_celle": "4pt",
+    "tabella_estesa_celle": "3.7pt",
+    "titolo_blocco": {
+      "margin": {
+        "bottom": "5pt",
+        "left": "0",
+        "right": "0",
+        "top": "13pt"
+      },
+      "padding_top": "7pt",
+      "separatore": ".9pt solid var(--deep)"
+    },
+    "titolo_pagina_dopo": "5pt"
+  },
+  "type": {
+    "copertina_azienda": {
+      "font_weight": "500",
+      "size": {
+        "css": "14pt",
+        "pt": 14.0
+      }
+    },
+    "copertina_didascalia": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "8.5pt",
+        "pt": 8.5
+      }
+    },
+    "copertina_etichetta": {
+      "color": "var(--muted)",
+      "letter_spacing": ".5pt",
+      "size": {
+        "css": "8pt",
+        "pt": 8.0
+      },
+      "text_transform": "uppercase"
+    },
+    "copertina_kicker": {
+      "color": "#9CC0D8",
+      "letter_spacing": ".6pt",
+      "size": {
+        "css": "8.6pt",
+        "pt": 8.6
+      }
+    },
+    "copertina_kpi_etichetta": {
+      "size": {
+        "css": "7.5pt",
+        "pt": 7.5
+      }
+    },
+    "copertina_kpi_valore": {
+      "size": {
+        "css": "14pt",
+        "pt": 14.0
+      }
+    },
+    "copertina_messaggio": {
+      "color": "var(--deep)",
+      "font_weight": "600",
+      "line_height": "1.25",
+      "size": {
+        "css": "18pt",
+        "pt": 18.0
+      }
+    },
+    "copertina_meta": {
+      "color": "#B8CBDC",
+      "size": {
+        "css": "8.8pt",
+        "pt": 8.8
+      }
+    },
+    "copertina_prep": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "8pt",
+        "pt": 8.0
+      }
+    },
+    "copertina_titolo": {
+      "font_weight": "600",
+      "letter_spacing": "-.3pt",
+      "line_height": "1.1",
+      "size": {
+        "css": "27pt",
+        "pt": 27.0
+      }
+    },
+    "corpo": {
+      "color": "var(--ink)",
+      "font_family": "'IBM Plex Sans',Arial,sans-serif",
+      "line_height": "1.42",
+      "size": {
+        "css": "9pt",
+        "pt": 9.0
+      }
+    },
+    "etichette_grafico": {
+      "fill": "var(--muted)",
+      "font_family": "'IBM Plex Sans',sans-serif",
+      "size": {
+        "css": "11px",
+        "pt": 8.25
+      }
+    },
+    "etichette_grafico_pannelli": {
+      "size": {
+        "css": "16px",
+        "pt": 12.0
+      }
+    },
+    "fonte": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "7.2pt",
+        "pt": 7.2
+      }
+    },
+    "indice_allegati_voce": {
+      "color": "var(--deep)",
+      "size": {
+        "css": "9pt",
+        "pt": 9.0
+      }
+    },
+    "indice_sezione": {
+      "color": "var(--muted)",
+      "font_weight": "500",
+      "letter_spacing": ".4pt",
+      "size": {
+        "css": "7.6pt",
+        "pt": 7.6
+      }
+    },
+    "indice_voce": {
+      "color": "var(--ink)",
+      "size": {
+        "css": "8.4pt",
+        "pt": 8.4
+      }
+    },
+    "intestazione_pagina_fissa": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "7pt",
+        "pt": 7.0
+      }
+    },
+    "intestazione_tabella": {
+      "color": "var(--muted)",
+      "font_weight": "500",
+      "size": {
+        "css": "7.2pt",
+        "pt": 7.2
+      }
+    },
+    "kpi_etichetta": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "7.8pt",
+        "pt": 7.8
+      }
+    },
+    "kpi_valore": {
+      "color": "var(--deep)",
+      "font_weight": "600",
+      "line_height": "1.2",
+      "size": {
+        "css": "15pt",
+        "pt": 15.0
+      }
+    },
+    "legenda": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "7.6pt",
+        "pt": 7.6
+      }
+    },
+    "occhiello": {
+      "color": "var(--mid)",
+      "font_weight": "500",
+      "letter_spacing": ".5pt",
+      "size": {
+        "css": "7.5pt",
+        "pt": 7.5
+      }
+    },
+    "pie_pagina_fisso": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "6.8pt",
+        "pt": 6.8
+      }
+    },
+    "sottotitolo": {
+      "color": "var(--muted)",
+      "line_height": "1.45",
+      "size": {
+        "css": "9pt",
+        "pt": 9.0
+      }
+    },
+    "sottotitolo_grafico": {
+      "color": "var(--muted)",
+      "size": {
+        "css": "7.2pt",
+        "pt": 7.2
+      }
+    },
+    "tabella": {
+      "line_height": "1.35",
+      "size": {
+        "css": "8pt",
+        "pt": 8.0
+      }
+    },
+    "tabella_estesa": {
+      "size": {
+        "css": "7.8pt",
+        "pt": 7.8
+      }
+    },
+    "testo_nota": {
+      "line_height": "1.5",
+      "size": {
+        "css": "9pt",
+        "pt": 9.0
+      }
+    },
+    "titolo_blocco": {
+      "color": "var(--deep)",
+      "font_weight": "600",
+      "size": {
+        "css": "9.5pt",
+        "pt": 9.5
+      }
+    },
+    "titolo_colonna": {
+      "font_weight": "600",
+      "size": {
+        "css": "9pt",
+        "pt": 9.0
+      }
+    },
+    "titolo_nota": {
+      "color": "var(--deep)",
+      "font_weight": "600",
+      "letter_spacing": ".15pt",
+      "size": {
+        "css": "8pt",
+        "pt": 8.0
+      }
+    },
+    "titolo_pagina": {
+      "font_weight": "600",
+      "letter_spacing": "-.15pt",
+      "line_height": "1.23",
+      "size": {
+        "css": "16pt",
+        "pt": 16.0
+      }
+    }
+  }
+}

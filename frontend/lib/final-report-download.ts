@@ -193,3 +193,31 @@ export function showPdfPreview(
 export function closePreviewTabOnError(tab: FinalReportPreviewTab | null): void {
   tab?.close();
 }
+
+/**
+ * Anteprima INLINE: l'URL oggetto del PDF mostrato dentro la pagina
+ * `/report`, al posto della vista web del dossier.
+ *
+ * Un URL oggetto resta allocato finché non lo si revoca: sostituirlo senza
+ * revocare il precedente lascia in memoria un PDF intero a ogni rigenerazione.
+ * Qui la sostituzione è una funzione sola — revoca il vecchio, crea il nuovo
+ * (o `null` per chiudere l'anteprima) — così il componente non deve
+ * ricordarsene a ogni chiamata. `revokeObjectURL` che fallisce (URL già
+ * revocato, ambiente senza supporto) non impedisce la creazione del nuovo:
+ * un'anteprima che non si apre sarebbe un danno peggiore di un URL non
+ * liberato.
+ */
+export function nextInlinePreviewUrl(
+  previous: string | null,
+  blob: Blob | null,
+  sink: FinalReportDownloadSink
+): string | null {
+  if (previous) {
+    try {
+      sink.revokeObjectURL(previous);
+    } catch {
+      // niente: vedi il commento sopra.
+    }
+  }
+  return blob ? sink.createObjectURL(blob) : null;
+}

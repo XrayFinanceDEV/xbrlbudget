@@ -14,6 +14,7 @@ import {
   type FinalReportDownloadSink,
   type FinalReportPreviewSink,
   type FinalReportPreviewTab,
+  nextInlinePreviewUrl,
 } from "./final-report-download";
 
 describe("resolveDownloadFilename", () => {
@@ -314,5 +315,59 @@ describe("closePreviewTabOnError", () => {
 describe("PREVIEW_BLOCKED_MESSAGE", () => {
   it("è un messaggio informativo non vuoto", () => {
     expect(PREVIEW_BLOCKED_MESSAGE.length).toBeGreaterThan(0);
+  });
+});
+
+describe("nextInlinePreviewUrl", () => {
+  const sink = () => {
+    const revoked: string[] = [];
+    const created: Blob[] = [];
+    return {
+      revoked,
+      created,
+      sink: {
+        createObjectURL: (blob: Blob) => {
+          created.push(blob);
+          return `blob:nuovo-${created.length}`;
+        },
+        revokeObjectURL: (url: string) => {
+          revoked.push(url);
+        },
+        triggerAnchorDownload: () => {},
+      },
+    };
+  };
+
+  it("revoca l'URL precedente prima di crearne uno nuovo: un PDF per volta in memoria", () => {
+    const { revoked, sink: downloadSink } = sink();
+    const url = nextInlinePreviewUrl("blob:vecchio", new Blob(["%PDF"]), downloadSink);
+    expect(revoked).toEqual(["blob:vecchio"]);
+    expect(url).toBe("blob:nuovo-1");
+  });
+
+  it("senza blob chiude l'anteprima: revoca e restituisce null", () => {
+    const { revoked, created, sink: downloadSink } = sink();
+    expect(nextInlinePreviewUrl("blob:vecchio", null, downloadSink)).toBeNull();
+    expect(revoked).toEqual(["blob:vecchio"]);
+    expect(created).toEqual([]);
+  });
+
+  it("una revoca che fallisce non impedisce la nuova anteprima", () => {
+    const { created } = sink();
+    const url = nextInlinePreviewUrl("blob:vecchio", new Blob(["%PDF"]), {
+      createObjectURL: () => "blob:nuovo",
+      revokeObjectURL: () => {
+        throw new Error("già revocato");
+      },
+      triggerAnchorDownload: () => {},
+    });
+    expect(url).toBe("blob:nuovo");
+    expect(created).toEqual([]);
+  });
+
+  it("senza URL precedente non revoca nulla", () => {
+    const { revoked, sink: downloadSink } = sink();
+    expect(nextInlinePreviewUrl(null, new Blob(["%PDF"]), downloadSink)).toBe("blob:nuovo-1");
+    expect(revoked).toEqual([]);
   });
 });

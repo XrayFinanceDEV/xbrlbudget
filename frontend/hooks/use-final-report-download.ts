@@ -8,6 +8,7 @@ import {
   PREVIEW_BLOCKED_MESSAGE,
   closePreviewTabOnError,
   createDownloadGuardState,
+  nextInlinePreviewUrl,
   isRetryableDownloadStatus,
   saveBlobAsFile,
   showPdfPreview,
@@ -57,6 +58,9 @@ type DownloadOutcome = { ok: true } | { ok: false; error: unknown; status: numbe
 export function useFinalReportDownload() {
   const [downloading, setDownloading] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  // Anteprima mostrata DENTRO la pagina `/report`: l'URL oggetto del PDF
+  // corrente, che sostituisce la resa web del dossier come vista principale.
+  const [inlineUrl, setInlineUrl] = useState<string | null>(null);
   // Stesso guard per download e anteprima: le due richieste PDF non devono
   // poter partire insieme (regola del brief M2-06A/anteprima-pdf).
   const guardRef = useRef(createDownloadGuardState());
@@ -146,5 +150,44 @@ export function useFinalReportDownload() {
     []
   );
 
-  return { download, downloading, preview, previewing };
+  /**
+   * Carica il PDF e lo tiene come URL oggetto da mostrare in pagina
+   * (`<iframe>`) invece di aprirlo in una scheda: nessuna finestra da
+   * preaprire, quindi nessun popup blocker da assecondare. Lo stesso guard
+   * del download e dell'anteprima in scheda: una sola richiesta PDF per volta.
+   */
+  const loadInline = useCallback(
+    async (companyId: number, scenarioId: number, documentState: FinalReportDocumentState) => {
+      const outcome = await withDownloadGuard<DownloadOutcome>(guardRef.current, async () => {
+        setPreviewing(true);
+        try {
+          const { blob } = await downloadFinalReportPdf(companyId, scenarioId, { documentState });
+          setInlineUrl((previous) => nextInlinePreviewUrl(previous, blob, previewSink));
+          return { ok: true };
+        } catch (error) {
+          const status = error instanceof FinalReportDownloadError ? error.status : null;
+          return { ok: false, error, status };
+        } finally {
+          setPreviewing(false);
+        }
+      });
+
+      if (outcome === null || outcome.ok) return;
+      const message = getErrorMessage(outcome.error, "Impossibile preparare l'anteprima del PDF");
+      const retryable = outcome.status !== null && isRetryableDownloadStatus(outcome.status);
+      toast.error(
+        message,
+        retryable
+          ? { action: { label: "Riprova", onClick: () => loadInline(companyId, scenarioId, documentState) } }
+          : undefined
+      );
+    },
+    []
+  );
+
+  const clearInline = useCallback(() => {
+    setInlineUrl((previous) => nextInlinePreviewUrl(previous, null, previewSink));
+  }, []);
+
+  return { download, downloading, preview, previewing, loadInline, clearInline, inlineUrl };
 }

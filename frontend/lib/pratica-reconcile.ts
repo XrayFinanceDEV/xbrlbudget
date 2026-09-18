@@ -2,12 +2,15 @@
 // When imported aggregates don't match the sum of detail sub-fields,
 // allocate the gap to the designated plug field.
 export function reconcileSubfields(data: Record<string, number>) {
-  const reconcile = (details: string[], parent: string, plug: string) => {
+  // `noDetailPlug`: dove va il divario quando la famiglia non ha alcun dettaglio
+  // (stessa regola di `residual_bucket` in importers/iv_cee_hierarchy.py).
+  const reconcile = (details: string[], parent: string, plug: string, noDetailPlug?: string) => {
     const total = data[parent] ?? 0;
     const sum = details.reduce((s, k) => s + (data[k] ?? 0), 0);
     const gap = total - sum;
     if (Math.abs(gap) > 0.01) {
-      data[plug] = (data[plug] ?? 0) + gap;
+      const target = noDetailPlug && Math.abs(sum) <= 0.01 ? noDetailPlug : plug;
+      data[target] = (data[target] ?? 0) + gap;
     }
   };
 
@@ -16,10 +19,10 @@ export function reconcileSubfields(data: Record<string, number>) {
     ["sp04a_partecipazioni", "sp04b_crediti_immob_breve", "sp04c_crediti_immob_lungo", "sp04d_altri_titoli", "sp04e_strumenti_derivati_attivi"],
     "sp04_immob_finanziarie", "sp04a_partecipazioni"
   );
-  // Rimanenze: gap → sp05e_acconti
+  // Rimanenze: gap → sp05e_acconti; senza alcun dettaglio → sp05a_materie_prime
   reconcile(
     ["sp05a_materie_prime", "sp05b_prodotti_in_corso", "sp05c_lavori_in_corso", "sp05d_prodotti_finiti", "sp05e_acconti"],
-    "sp05_rimanenze", "sp05e_acconti"
+    "sp05_rimanenze", "sp05e_acconti", "sp05a_materie_prime"
   );
   // Riserve: gap → sp12e_altre_riserve
   reconcile(
@@ -28,11 +31,11 @@ export function reconcileSubfields(data: Record<string, number>) {
      "sp12g_utili_perdite_portati", "sp12h_riserva_neg_azioni_proprie"],
     "sp12_riserve", "sp12e_altre_riserve"
   );
-  // Crediti breve: gap → sp06g_crediti_altri_breve
+  // Crediti breve: gap → sp06g_crediti_altri_breve; senza alcun dettaglio → sp06a_crediti_clienti_breve
   reconcile(
     ["sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve", "sp06c_crediti_collegate_breve",
      "sp06d_crediti_controllanti_breve", "sp06e_crediti_tributari_breve", "sp06f_imposte_anticipate_breve", "sp06g_crediti_altri_breve"],
-    "sp06_crediti_breve", "sp06g_crediti_altri_breve"
+    "sp06_crediti_breve", "sp06g_crediti_altri_breve", "sp06a_crediti_clienti_breve"
   );
   // Crediti lungo: gap → sp07g_crediti_altri_lungo
   reconcile(

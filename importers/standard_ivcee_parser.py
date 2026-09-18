@@ -572,7 +572,11 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
         sp05d = _optional_direct_value_re(
             asset_rows, r"^4\) prodotti finiti", rim_i + 1, cred_i
         )
+        # Senza alcun dettaglio stampato il residuo va a materie prime, non
+        # agli acconti (`iv_cee_hierarchy.residual_bucket`): stesso per i crediti.
         sp05e = sp05 - sp05a - sp05b - sp05c - sp05d
+        if sp05a + sp05b + sp05c + sp05d == 0:
+            sp05a, sp05e = sp05e, Decimal("0")
         sp06a = _optional_direct_value_re(
             asset_rows, r"^1\) verso clienti", cred_i + 1, fin_att_i
         )
@@ -580,6 +584,8 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
             asset_rows, r"^4-bis\) crediti tributari", cred_i + 1, fin_att_i
         )
         sp06g = sp06 - sp06a - sp06e
+        if sp06a + sp06e == 0:
+            sp06a, sp06g = sp06g, Decimal("0")
 
         pn_i = _find(pass_rows, "a) patrimonio netto")
         capitale_i = _find(pass_rows, "i - capitale", start=pn_i + 1)

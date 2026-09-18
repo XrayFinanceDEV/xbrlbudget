@@ -162,7 +162,12 @@ diverse, ed è importante non confonderle:
    `sp17`, `ce08`, `ce09`: se l'aggregato importato non è la somma dei suoi sotto-campi, il
    divario finisce nel secchio designato (`sp04a`, `sp05e`, `sp06g`, `sp07g`, `sp12e`, `sp16g`,
    `sp17g`, `ce08b`, `ce09c`). **Senza alcun tetto di importo**: serve a rendere lavorabile un
-   bilancio abbreviato, che dichiara solo gli aggregati.
+   bilancio abbreviato, che dichiara solo gli aggregati. Due eccezioni, decise dal proprietario
+   il 2026-09-18: quando `sp05` o `sp06` non hanno **nessun** dettaglio, il divario va in
+   `sp05a` materie prime e in `sp06a` crediti verso clienti — un totale nudo di rimanenze o di
+   crediti a breve è quasi sempre quello, e con acconti/verso altri ogni import richiedeva una
+   riclassifica. Con un dettaglio parziale il resto va ancora in `sp05e`/`sp06g`. La stessa regola
+   vive negli importatori: `iv_cee_hierarchy.residual_bucket`.
 2. **Uno sbilancio Attivo/Passivo ≤ 5 €** da arrotondamento d'import, tappato in
    `sp09_disponibilita_liquide`. Questo sì è cappato, e una sola volta: le rettifiche successive
    sono in partita doppia, quindi il pareggio si conserva da sé.

@@ -395,6 +395,30 @@ _RESIDUAL_BUCKET: Dict[str, str] = {
     "sp17_debiti_lungo": "sp17g_altri_debiti_lungo",
 }
 
+# Where the remainder goes when the family carries NO detail at all (the source
+# printed only the aggregate). Decision of the owner, 2026-09-18: a lone
+# «Rimanenze» is overwhelmingly raw materials/goods and a lone «Crediti entro
+# l'esercizio» is overwhelmingly trade receivables, so the residual "altri"
+# bucket (acconti, verso altri) made every such import need a reclassification
+# in Rettifiche. With partial detail the remainder really is "the rest" and
+# keeps going to `_RESIDUAL_BUCKET`. Long-term receivables (sp07) stay on
+# "verso altri": beyond the year they are mostly deposits and tax credits.
+_NO_DETAIL_BUCKET: Dict[str, str] = {
+    "sp05_rimanenze": "sp05a_materie_prime",
+    "sp06_crediti_breve": "sp06a_crediti_clienti_breve",
+}
+
+
+def residual_bucket(aggregate: str, detail_sum: Decimal) -> str:
+    """The sub-field that receives ``aggregate``'s unexplained remainder.
+
+    ``detail_sum`` is the sum of the typed sub-fields already read: zero means
+    the source printed the aggregate alone (see ``_NO_DETAIL_BUCKET``).
+    """
+    if detail_sum == 0 and aggregate in _NO_DETAIL_BUCKET:
+        return _NO_DETAIL_BUCKET[aggregate]
+    return _RESIDUAL_BUCKET[aggregate]
+
 
 def reconcile_source_detail(
     bs: Dict[str, Decimal],
@@ -422,12 +446,13 @@ def reconcile_source_detail(
     source is already consistent). Idempotent — a second call plugs nothing.
     """
     report: Dict[str, Decimal] = {}
-    for aggregate, bucket in _RESIDUAL_BUCKET.items():
+    for aggregate in _RESIDUAL_BUCKET:
         if aggregate not in bs:
             continue
         details = _DETAIL_GROUPS[aggregate]
         detail_sum = sum((_D(bs.get(k, 0)) for k in details), Decimal(0))
         residual = _D(bs[aggregate]) - detail_sum
+        bucket = residual_bucket(aggregate, detail_sum)
         # POSITIVE remainders only: the target case (abbreviato XBRL / TEBE CSV)
         # publishes the aggregate with NO detail, so residual >= 0. A NEGATIVE
         # residual means Σdetail already EXCEEDS the aggregate — an over-extraction

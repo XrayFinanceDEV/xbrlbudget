@@ -23,7 +23,7 @@ balance untouched), so a real abbreviato XBRL / TEBE CSV company IS forecastable
 
 * A synthetic TEBE CSV carrying real stock / trade receivables / payables /
   depreciation (all published as aggregates only) now imports and forecasts —
-  the reconcile fills sp05e/sp06g/sp16g and splits ce09 into ce09a/ce09b in
+  the reconcile fills sp05a/sp06a/sp16g and splits ce09 into ce09a/ce09b in
   proportion to the intangible/tangible asset base.
 
 Honest-failure contracts that are NOT changed by the fix:
@@ -104,7 +104,7 @@ _SYNTHETIC_XBRL = """<?xml version="1.0" encoding="UTF-8"?>
 # debiti breve 150,000 + debiti lungo 60,000). Net profit 20,000 = ricavi 600,000
 # - materie 200,000 - servizi 150,000 - personale 120,000 - ammortamenti 40,000 -
 # oneri diversi 42,000 - godimento 4,000 - imposte 24,000 = sp13 20,000.
-# reconcile_source_detail at import fills sp05e/sp06g/sp16g/sp17g/sp12e and
+# reconcile_source_detail at import fills sp05a/sp06a/sp16g/sp17g/sp12e and
 # splits ce09 into ce09a (immateriali) / ce09b (materiali), so the year clears
 # the forecast engine's aggregate/detail gate.
 _SYNTHETIC_CSV = """BILANCIO ESERCIZIO;Anno 2030;Anno 2029;Tag;Euro
@@ -307,8 +307,9 @@ def test_csv_route_full_cycle(monkeypatch, tmp_path):
             assert bs.total_assets == Decimal("440000.00")
             # The reconcile booked the aggregate-only detail into "altri" buckets
             # at import (proof the fix ran on the CSV route).
-            assert bs.sp05e_acconti == Decimal("60000.00")
-            assert bs.sp06g_crediti_altri_breve == Decimal("140000.00")
+            # (rimanenze e crediti a breve senza dettaglio: materie prime e clienti)
+            assert bs.sp05a_materie_prime == Decimal("60000.00")
+            assert bs.sp06a_crediti_clienti_breve == Decimal("140000.00")
             assert bs.sp16g_altri_debiti_breve == Decimal("150000.00")
             # ce09 split proportional to the 20k/180k intangible/tangible base.
             inc = fy.income_statement

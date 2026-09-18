@@ -79,8 +79,9 @@ describe("reconcileSubfields", () => {
     };
     reconcileSubfields(data);
     expect(data.sp04a_partecipazioni).toBe(1_000);
-    expect(data.sp05e_acconti).toBe(2_000);
-    expect(data.sp06g_crediti_altri_breve).toBe(3_000);
+    // senza alcun dettaglio: materie prime e crediti verso clienti (2026-09-18)
+    expect(data.sp05a_materie_prime).toBe(2_000);
+    expect(data.sp06a_crediti_clienti_breve).toBe(3_000);
     expect(data.sp07g_crediti_altri_lungo).toBe(4_000);
     expect(data.sp12e_altre_riserve).toBe(5_000);
     expect(data.sp16g_altri_debiti_breve).toBe(6_000);
@@ -121,5 +122,19 @@ describe("reconcileSubfields", () => {
     expect(data.sp17g_altri_debiti_lungo).toBe(300);
     expect(data.ce08b_salari_stipendi).toBe(500);
     expect(data.ce09c_svalutazioni).toBe(100);
+  });
+
+  it("rimanenze e crediti a breve con dettaglio parziale: il resto resta in acconti e verso altri", () => {
+    const data: Record<string, number> = {
+      sp05_rimanenze: 100_000,
+      sp05d_prodotti_finiti: 70_000,
+      sp06_crediti_breve: 50_000,
+      sp06e_crediti_tributari_breve: 5_000,
+    };
+    reconcileSubfields(data);
+    expect(data.sp05e_acconti).toBe(30_000);
+    expect(data.sp05a_materie_prime).toBeUndefined();
+    expect(data.sp06g_crediti_altri_breve).toBe(45_000);
+    expect(data.sp06a_crediti_clienti_breve).toBeUndefined();
   });
 });

@@ -2417,7 +2417,7 @@ CREDITI — DEBTOR-TYPE BREAKDOWN (split each group into entro + oltre):
 - CRITICAL: sp06a+sp06b+sp06c+sp06d+sp06e+sp06f+sp06g MUST equal sp06_crediti_breve.
 - CRITICAL: sp07a+sp07b+sp07c+sp07d+sp07e+sp07f+sp07g MUST equal sp07_crediti_lungo.
 - If a group is missing in the PDF, leave it at 0.
-- If the PDF shows only "Totale crediti" without a breakdown, put everything in sp06g_crediti_altri_breve (or sp07g_crediti_altri_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
+- If the PDF shows only "Totale crediti" without a breakdown, put everything in sp06a_crediti_clienti_breve (or sp07g_crediti_altri_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
 - IMPORTANT: Do NOT confuse C.II Crediti (operating receivables in "Attivo circolante") with B.III.2 Crediti (immobilized financial receivables). Only extract C.II values here.
 
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
@@ -2498,7 +2498,7 @@ CREDITI — DEBTOR-TYPE BREAKDOWN (split each group into entro + oltre):
 - CRITICAL: sp06a+sp06b+sp06c+sp06d+sp06e+sp06f+sp06g MUST equal sp06_crediti_breve.
 - CRITICAL: sp07a+sp07b+sp07c+sp07d+sp07e+sp07f+sp07g MUST equal sp07_crediti_lungo.
 - If a group is missing in the PDF, leave it at 0.
-- If the PDF shows only "Totale crediti" without a breakdown, put everything in sp06g_crediti_altri_breve (or sp07g_crediti_altri_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
+- If the PDF shows only "Totale crediti" without a breakdown, put everything in sp06a_crediti_clienti_breve (or sp07g_crediti_altri_lungo for long-term) to match the aggregate — do NOT invent sub-totals.
 - IMPORTANT: Do NOT confuse C.II Crediti (operating receivables in "Attivo circolante") with B.III.2 Crediti (immobilized financial receivables). Only extract C.II values here.
 
 DEBITI (in PASSIVO section, AFTER "Totale attivo"):
@@ -4462,6 +4462,12 @@ def _validate_crediti(balance_sheet_data: Dict[str, Decimal], label: str) -> Dic
         total = balance_sheet_data.get(aggregate, Decimal('0'))
         breakdown_sum = sum(balance_sheet_data.get(g, Decimal('0')) for g in groups)
         residual = total - breakdown_sum
+        if breakdown_sum == 0 and residual > Decimal('1'):
+            # Nessun dettaglio stampato: tutto a `residual_bucket` (crediti
+            # verso clienti a breve, decisione del proprietario 2026-09-18).
+            from importers.iv_cee_hierarchy import residual_bucket
+            balance_sheet_data[residual_bucket(aggregate, breakdown_sum)] = residual
+            continue
         if abs(residual) > Decimal('1'):
             current_altri = balance_sheet_data.get(altri_key, Decimal('0'))
             new_altri = current_altri + residual

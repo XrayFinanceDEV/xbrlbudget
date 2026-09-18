@@ -164,7 +164,8 @@ sola, per dedurne `Voce.dettaglio`, e poi li toglie. Un'armonizzazione dei prosp
 Un bilancio abbreviato valorizza spesso solo gli aggregati (`sp16_debiti_breve`) e lascia i
 sotto-campi a zero. `buildBalanceItemsWithTotals` applica `reconcileSubfields` a **ogni colonna
 d'anno separatamente** (partial / reference / prior), così il divario finisce nel secchio «altri»
-(`sp04a`, `sp05e`, `sp06g`, `sp07g`, `sp12e`, `sp16g`, `sp17g`) **prima** che le righe siano
+(`sp04a`, `sp05e`, `sp06g`, `sp07g`, `sp12e`, `sp16g`, `sp17g`; `sp05a`/`sp06a` quando rimanenze o
+crediti a breve non hanno alcun dettaglio) **prima** che le righe siano
 costruite, e il filtro degli zeri non nasconde il dettaglio. È lo stesso meccanismo che le
 Rettifiche applicano al caricamento (→ `RETTIFICHE.md` §4).
 

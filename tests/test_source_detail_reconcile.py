@@ -74,10 +74,44 @@ def test_negative_over_extraction_residual_is_not_swallowed():
 def test_is_idempotent():
     bs = {"sp05_rimanenze": Decimal("60000.00")}
     first = reconcile_source_detail(bs)
-    assert first == {"sp05e_acconti": Decimal("60000.00")}
+    assert first == {"sp05a_materie_prime": Decimal("60000.00")}
     second = reconcile_source_detail(bs)
     assert second == {}  # already consistent, nothing plugged
-    assert bs["sp05e_acconti"] == Decimal("60000.00")
+    assert bs["sp05a_materie_prime"] == Decimal("60000.00")
+
+
+def test_rimanenze_e_crediti_senza_dettaglio_vanno_a_materie_prime_e_clienti():
+    """Decisione del proprietario (2026-09-18): una «Rimanenze» o dei «Crediti
+    entro l'esercizio» stampati senza alcun dettaglio sono quasi sempre materie
+    prime/merci e crediti verso clienti. I crediti oltre restano su «verso altri».
+    """
+    bs = {
+        "sp05_rimanenze": Decimal("231250.00"),
+        "sp06_crediti_breve": Decimal("406636.57"),
+        "sp07_crediti_lungo": Decimal("1000.00"),
+    }
+    report = reconcile_source_detail(bs)
+    assert report == {
+        "sp05a_materie_prime": Decimal("231250.00"),
+        "sp06a_crediti_clienti_breve": Decimal("406636.57"),
+        "sp07g_crediti_altri_lungo": Decimal("1000.00"),
+    }
+
+
+def test_con_dettaglio_parziale_il_resto_resta_negli_altri():
+    """Se il documento stampa anche una sola sotto-voce, il resto è davvero
+    «altro»: acconti e crediti verso altri, come prima."""
+    bs = {
+        "sp05_rimanenze": Decimal("100000.00"),
+        "sp05d_prodotti_finiti": Decimal("70000.00"),
+        "sp06_crediti_breve": Decimal("50000.00"),
+        "sp06e_crediti_tributari_breve": Decimal("5000.00"),
+    }
+    reconcile_source_detail(bs)
+    assert bs["sp05e_acconti"] == Decimal("30000.00")
+    assert bs.get("sp05a_materie_prime", Decimal("0")) == Decimal("0")
+    assert bs["sp06g_crediti_altri_breve"] == Decimal("45000.00")
+    assert bs.get("sp06a_crediti_clienti_breve", Decimal("0")) == Decimal("0")
 
 
 def test_already_consistent_source_is_untouched():

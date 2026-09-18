@@ -6,8 +6,13 @@ import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
+import { useInvalidateAnalysis } from "@/hooks/use-queries";
+import { rigeneraBudgetRiusato } from "@/lib/budget-rigenera-riuso";
 import {
+  bulkUpsertAssumptions,
   createBudgetScenario,
+  getBalanceSheet,
+  getBudgetAssumptions,
   promoteProjection,
   getInfrannualeAIComments,
   generateInfrannualeAIComments,
@@ -76,6 +81,7 @@ export function StampaContent({
   onBeforePromote?: () => Promise<void>;
 }) {
   const router = useRouter();
+  const invalidateAnalysis = useInvalidateAnalysis();
   const { refreshCompanies, refreshYears } = useApp();
   const { logoUrl, userName } = useAuth();
   const { updatePratica } = usePratica();
@@ -369,11 +375,21 @@ export function StampaContent({
       });
 
       updatePratica({ budgetScenarioId: budget.id });
+      // Uno scenario riusato era calcolato sul vecchio anno base, che il
+      // promote ha appena riscritto: si rigenera con le ipotesi salvate
+      // (lib/budget-rigenera-riuso.ts). Un rifiuto non ferma il passaggio:
+      // l'utente arriva sul wizard col messaggio del motore.
+      const rigenerato = await rigeneraBudgetRiusato(budget.id, {
+        getAssumptions: () => getBudgetAssumptions(companyId, budget.id),
+        getBaseBalanceSheet: () => getBalanceSheet(companyId, baseYear),
+        bulkSave: (rows) => bulkUpsertAssumptions(companyId, budget.id, { assumptions: rows, auto_generate: true }),
+      }).catch((err: unknown) => ({ ok: false, message: getErrorMessage(err, "Ricalcolo del previsionale non riuscito") }));
+      invalidateAnalysis(companyId, budget.id);
       await refreshCompanies();
       await refreshYears();
-      toast.success(
-        "Scenario budget pronto",
-      );
+      if (rigenerato === null) toast.success("Scenario budget pronto");
+      else if (rigenerato.ok) toast.success(rigenerato.message);
+      else toast.error(`Scenario budget pronto, ma il previsionale non è stato ricalcolato: ${rigenerato.message}`);
       router.push("/budget");
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Errore nel passaggio al budget"));
@@ -387,6 +403,7 @@ export function StampaContent({
     fiscalYear,
     onBeforePromote,
     updatePratica,
+    invalidateAnalysis,
     refreshCompanies,
     refreshYears,
     router,

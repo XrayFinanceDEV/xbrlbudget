@@ -103,6 +103,22 @@ describe("tributari rateizzati al passo 5", () => {
     expect(tributariOltreRow(bs, p, anni)).toMatchObject({ opening: 46000, amounts: [23000, 23000, null], resta: 0, stato: "chiuso" });
     expect(breveRows(bs, 2026, null, p)[2]).toMatchObject({ importo: 50000, small: "saldo pagato nel 2027" });
   });
+  it("un piano salvato su un bilancio base poi rettificato si riallinea al nuovo saldo (TM, 2026-09-18)", () => {
+    // Salvato quando i crediti commerciali valevano 452.000 (breve 422.000), con 10.000
+    // della parte oltre scadenziati nel primo anno; poi una rettifica toglie 4.619,06 al breve.
+    const salvato = {
+      crediti_commerciali: { opening: 452000, amounts: [432000, 20000, 0], writeoff: null, non_incassato: false },
+      debiti_tributari: { opening: 96000, saldo: 50000, rateizzato: 46000, amounts: [23000, 23000, 0], acconto_pct: 80 },
+    } as Pregresso;
+    const rettificato = { ...bs, sp06_crediti_breve: "435380.94", sp16e_debiti_tributari_breve: "65000" } as unknown as BalanceSheet;
+    const p = pianoBase(rettificato, anni, salvato);
+    expect(p.crediti_commerciali).toEqual({ opening: 447380.94, amounts: [427380.94, 20000, 0], writeoff: null, non_incassato: false });
+    expect(oltreRows(rettificato, p, anni)[0]).toMatchObject({ amounts: [10000, 20000, 0], resta: 0, stato: "chiuso" });
+    // tributari: il rateizzato e le sue rate restano, il saldo assorbe la differenza
+    expect(p.debiti_tributari).toEqual({ opening: 100000, saldo: 54000, rateizzato: 46000, amounts: [23000, 23000, 0], acconto_pct: 80 });
+    expect(validatePregresso(p, openingMasses(rettificato), anni.length)).toEqual([]);
+    expect(pianoBase(rettificato, anni, p)).toBe(p);   // riallineato una volta, poi identita'
+  });
   it("withTributariAmount scrive la rata dell'anno e lascia saldo e acconto", () => {
     let p = pianoBase(bs, anni, {});
     p = withTributariAmount(bs, p, anni, 1, 20000);

@@ -142,6 +142,42 @@ function tributariDiPartenza(baseBs: BalanceSheet, years: number[]): PregressoTr
 }
 
 /**
+ * Un piano salvato porta la massa di apertura del bilancio base di QUEL
+ * momento. Se poi una rettifica cambia il bilancio base, il motore rifiuta il
+ * piano («Il saldo di apertura di … è cambiato: rivedi lo scadenziamento») e
+ * da questo passo non c'era modo di rimediare: ogni casella ricopiava
+ * l'apertura vecchia (TM BUSINESS GROUP, 2026-09-18). Qui il piano si
+ * riallinea al bilancio di oggi, conservando cio' che l'utente ha deciso:
+ * - saldi con riga «oltre»: nuova apertura, e nel primo anno il breve di oggi
+ *   piu' la quota oltre gia' scadenziata; gli anni successivi e l'inesigibile
+ *   restano. La quota oltre del primo anno si misura contro il breve di
+ *   allora, cioe' l'apertura salvata meno la massa oltre di oggi.
+ * - tributari: rateizzato e rate restano, il saldo assorbe la differenza —
+ *   solo se non diventa negativo; altrimenti il piano resta com'e' e la
+ *   validazione del passo dice perche'.
+ * Nulla da riallineare ⇒ restituisce l'oggetto ricevuto (identita', vedi sotto).
+ */
+export function riallineaAperture(baseBs: BalanceSheet, pregresso: Pregresso): Pregresso {
+  const masses = openingMasses(baseBs);
+  const patch: Pregresso = {};
+  for (const key of OLTRE_KEYS) {
+    const plan = pregresso[key] as PregressoPlan | null | undefined;
+    if (plan == null || Math.abs(num(plan.opening) - masses[key]) <= 0.01) continue;
+    const breveAllora = num(plan.opening) - massaOltre(baseBs, key);
+    const oltrePrimoAnno = Math.max(0, num(plan.amounts[0]) - breveAllora);
+    const amounts = plan.amounts.length ? [...plan.amounts] : [0];
+    amounts[0] = cents(massaBreve(baseBs, key) + oltrePrimoAnno);
+    (patch as Record<string, unknown>)[key] = { ...plan, opening: masses[key], amounts };
+  }
+  const trib = tributariPlan(pregresso);
+  if (trib && Math.abs(num(trib.opening) - masses.debiti_tributari) > 0.01) {
+    const saldo = cents(masses.debiti_tributari - num(trib.rateizzato));
+    if (saldo >= 0) patch.debiti_tributari = { ...trib, opening: masses.debiti_tributari, saldo };
+  }
+  return Object.keys(patch).length ? { ...pregresso, ...patch } : pregresso;
+}
+
+/**
  * Il piano di base che il wizard compone all'apertura del passo: `amounts[0]`
  * = la massa a breve dell'anno base (regola del proprietario: i saldi a breve
  * si liquidano nel primo anno), zero negli anni successivi finche' l'utente
@@ -167,6 +203,7 @@ function tributariDiPartenza(baseBs: BalanceSheet, years: number[]): PregressoTr
  */
 export function pianoBase(baseBs: BalanceSheet | undefined | null, years: number[], pregresso: Pregresso): Pregresso {
   if (!baseBs) return pregresso;
+  pregresso = riallineaAperture(baseBs, pregresso);
   const missing = OLTRE_KEYS.filter((key) => {
     const vuolePiano = key === "crediti_commerciali" || key === "debiti_fornitori" || massaOltre(baseBs, key) > 0;
     return vuolePiano && (pregresso[key] as PregressoPlan | null | undefined) == null;

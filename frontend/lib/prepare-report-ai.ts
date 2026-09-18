@@ -7,20 +7,27 @@
  * Regola CLAUDE.md «Frontend»: la sequenza e la scelta di «che cosa è da
  * rigenerare» vivono qui, in un modulo puro testabile in `environment:
  * node`; il componente (`app/report/page.tsx`) chiama `runPrepareReportAI`
- * iniettando le tre chiamate API vere e una `buildDecision` che applica
+ * iniettando le tre chiamate API vere e due decisori che applicano
  * `decidePrepareReportAI`, e mostra solo lo stato e il riepilogo che questo
  * modulo produce. Non importa nulla da `app/` o da `components/`.
  *
- * Perché la decisione sulle note si prende SOLO dopo il passo 1: prima di
- * preparare il piano non si sa quali note esistono né la loro freschezza —
+ * L'ORDINE conta, ed è: **commenti generali, poi piano, poi note di pagina.**
+ * I sei blocchi narrativi fanno parte del corpo del dossier, e il piano
+ * editoriale è misurato contro quel corpo (`body_hash` lato server):
+ * generarli DOPO aver preparato il piano lo rende immediatamente non più
+ * attuale, e lo scarico del PDF risponde «Piano editoriale non preparato o
+ * non più valido» a un utente che ha appena premuto il pulsante. Era il
+ * difetto segnalato dal proprietario il 2026-09-18.
+ *
+ * Perché la decisione sulle note si prende SOLO dopo il piano: prima di
+ * prepararlo non si sa quali note esistono né la loro freschezza —
  * `POST /editorial/prepare` può creare o riassociare pagine e restituisce la
  * sessione aggiornata (`revision`, `plan.plan_hash`, `report.source_hash`,
  * `report.editorial_notes`). Decidere sulle note lette PRIMA del prepare, e
  * poi chiamare la generazione con una `revision` non più corrente, farebbe
  * fallire la chiamata per conflitto ottimistico — o peggio, la farebbe
- * girare su un piano già superato. Per questo `runPrepareReportAI` è
- * generico sul tipo `TSession` restituito da `preparePlan`: non gli importa
- * la sua forma, la passa a `buildDecision` e ai passi successivi.
+ * girare su un piano già superato. La decisione sui commenti generali,
+ * invece, non dipende dal piano: si legge dal modello già a schermo.
  */
 
 export type Freshness = "fresh" | "stale" | "missing";
@@ -80,7 +87,14 @@ export function decidePrepareReportAI(input: PrepareReportAIInput): PrepareRepor
     : input.narrativeIds.some((id) => !isNarrativeBlockUpToDate(findBlock(id)));
 
   const eligibleNotes = input.notes.filter((note) => note.provenance !== "user" && !input.dirtyNoteIds.has(note.id));
-  const targets = eligibleNotes.filter((note) => input.forceAll || note.freshness !== "fresh");
+  // Una nota `automatic` è il testo neutro che `prepare` mette in ogni pagina
+  // per misurarne lo spazio, non un commento: nasce `fresh` rispetto al piano
+  // e senza questa riga il pulsante la considerava «già aggiornata» e non
+  // generava mai nulla — il dossier restava pieno di «Pagina 8. I grafici
+  // confrontano le serie disponibili.» (segnalato dal proprietario il
+  // 2026-09-18). Un segnaposto è sempre da generare.
+  const targets = eligibleNotes.filter((note) =>
+    input.forceAll || note.provenance === "automatic" || note.freshness !== "fresh");
 
   return {
     narrativeNeeded,
@@ -101,15 +115,25 @@ export interface PrepareReportAIStepResult {
 export interface PrepareReportAISteps<TSession> {
   /** Sempre chiamato, anche a piano già attuale: è l'unico modo di ottenere la revisione corrente (§1 del brief). */
   preparePlan: () => Promise<TSession>;
-  regenerateNarrative: (session: TSession) => Promise<void>;
+  regenerateNarrative: () => Promise<void>;
   regenerateNotes: (session: TSession, targets: ReadonlyArray<{ id: string; revision: number }>) => Promise<void>;
+}
+
+/** La parte di decisione che riguarda i sei blocchi narrativi: si prende dal modello già a schermo, prima del piano. */
+export type PrepareReportNarrativeDecision = Pick<PrepareReportAIDecision, "narrativeNeeded" | "narrativeHasEligible">;
+
+export interface PrepareReportAIDeciders<TSession> {
+  /** Dal modello corrente: i commenti generali si rigenerano PRIMA del piano. */
+  narrative: () => PrepareReportNarrativeDecision;
+  /** Dalla sessione tornata da `preparePlan`: solo lì le note sono quelle vere. */
+  notes: (session: TSession) => PrepareReportAIDecision;
 }
 
 export interface PrepareReportAIResult {
   plan: PrepareReportAIStepResult;
   narrative: PrepareReportAIStepResult;
   notes: PrepareReportAIStepResult & { generatedCount: number };
-  /** False solo quando il passo 1 (piano) è fallito: 2 e 3 non sono nemmeno stati tentati. */
+  /** False solo quando il piano è fallito: le note non sono nemmeno state tentate. */
   continued: boolean;
   /** Null quando il piano è fallito: senza una sessione fresca non c'è nulla da decidere. */
   decision: PrepareReportAIDecision | null;
@@ -128,21 +152,33 @@ async function runStep(run: () => Promise<void>): Promise<PrepareReportAIStepRes
 const defaultDescribeError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
- * Esegue la sequenza: piano, poi (se serve) i sei blocchi narrativi, poi (se
- * ci sono note candidate) le note di pagina. Un fallimento del piano ferma
- * tutto — senza piano non si generano né narrativa né note (§5 del brief).
- * Un fallimento della narrativa non ferma le note: sono contenuti
- * indipendenti nello schema, e ciò che riesce resta (§5). `notify`, se
+ * Esegue la sequenza: (se serve) i sei blocchi narrativi, poi il piano, poi
+ * (se ci sono note candidate) le note di pagina. Un fallimento del piano
+ * ferma le note — senza piano non si generano — mentre la narrativa, che è
+ * già stata tentata, conserva il proprio esito. Un fallimento della
+ * narrativa non ferma nulla: sono contenuti indipendenti nello schema, e
+ * ciò che riesce resta (§5 del brief). `notify`, se
  * passato, avvisa il chiamante prima di ogni passo *tentato* (mai per un
  * passo saltato), per aggiornare l'etichetta di stato a schermo.
  */
 export async function runPrepareReportAI<TSession>(
-  buildDecision: (session: TSession) => PrepareReportAIDecision,
+  deciders: PrepareReportAIDeciders<TSession>,
   steps: PrepareReportAISteps<TSession>,
   options?: { describeError?: (error: unknown) => string; notify?: (step: PrepareReportAIStep) => void }
 ): Promise<PrepareReportAIResult> {
   const describeError = options?.describeError ?? defaultDescribeError;
   const notify = options?.notify;
+
+  // 1. I commenti generali PRIMA del piano: fanno parte del corpo su cui il
+  //    piano è misurato, e rigenerarli dopo lo renderebbe subito superato.
+  const narrativeDecision = deciders.narrative();
+  let narrative: PrepareReportAIStepResult;
+  if (narrativeDecision.narrativeNeeded) {
+    notify?.("narrative");
+    narrative = await runStep(() => steps.regenerateNarrative());
+  } else {
+    narrative = { outcome: "skipped" };
+  }
 
   notify?.("plan");
   let session: TSession;
@@ -151,7 +187,7 @@ export async function runPrepareReportAI<TSession>(
   } catch (error) {
     return {
       plan: { outcome: "failed", error },
-      narrative: { outcome: "not_attempted" },
+      narrative,
       notes: { outcome: "not_attempted", generatedCount: 0 },
       continued: false,
       decision: null,
@@ -159,15 +195,7 @@ export async function runPrepareReportAI<TSession>(
     };
   }
   const plan: PrepareReportAIStepResult = { outcome: "done" };
-  const decision = buildDecision(session);
-
-  let narrative: PrepareReportAIStepResult;
-  if (decision.narrativeNeeded) {
-    notify?.("narrative");
-    narrative = await runStep(() => steps.regenerateNarrative(session));
-  } else {
-    narrative = { outcome: "skipped" };
-  }
+  const decision = { ...deciders.notes(session), ...narrativeDecision };
 
   let notes: PrepareReportAIStepResult & { generatedCount: number };
   if (decision.noteTargets.length > 0) {

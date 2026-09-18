@@ -97,11 +97,16 @@ export default function ReportPage() {
     setAiPrepStepLabel(AI_STEP_LABELS.plan);
     try {
       const result = await runPrepareReportAI<EditorialSession>(
-        (freshSession) => {
-          const planHash = freshSession.report.editorial_plan?.plan_hash ?? "unprepared";
-          const dirtyScope = `${scope}:${planHash}`;
-          const dirtyNoteIds = new Set(Object.entries(draftsByScope.current[dirtyScope]?.dirty ?? {}).filter(([, dirty]) => dirty).map(([id]) => id));
-          return decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: freshSession.report.narrative, notes: freshSession.report.editorial_notes ?? [], dirtyNoteIds, forceAll });
+        {
+          // I commenti generali si decidono sul modello già a schermo, perché
+          // vanno rigenerati PRIMA del piano (vedi lib/prepare-report-ai.ts).
+          narrative: () => decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: session.data!.report.narrative, notes: [], dirtyNoteIds: new Set<string>(), forceAll }),
+          notes: (freshSession) => {
+            const planHash = freshSession.report.editorial_plan?.plan_hash ?? "unprepared";
+            const dirtyScope = `${scope}:${planHash}`;
+            const dirtyNoteIds = new Set(Object.entries(draftsByScope.current[dirtyScope]?.dirty ?? {}).filter(([, dirty]) => dirty).map(([id]) => id));
+            return decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: freshSession.report.narrative, notes: freshSession.report.editorial_notes ?? [], dirtyNoteIds, forceAll });
+          },
         },
         {
           preparePlan: () => prepareEditorialSession(companyId, scId, { source_hash: session.data!.report.source_hash, expected_revision: session.data!.revision }),

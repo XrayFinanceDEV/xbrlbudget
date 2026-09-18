@@ -86,6 +86,19 @@ describe("decidePrepareReportAI", () => {
     expect(decision.noteSkippedUpToDateCount).toBe(0);
   });
 
+  it("una nota `automatic` è un segnaposto, non un commento: è sempre candidata anche se `fresh`", () => {
+    // `prepare` scrive in ogni pagina un testo neutro per misurarne lo spazio
+    // e lo marca `fresh` rispetto al piano appena costruito. Trattarlo come
+    // aggiornato significava non generare MAI un commento vero.
+    const notes: PrepareReportNote[] = [
+      { id: "segnaposto", revision: 0, provenance: "automatic", freshness: "fresh" },
+      { id: "commento-ai", revision: 4, provenance: "ai", freshness: "fresh" },
+    ];
+    const decision = decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: freshBlocks(), notes, dirtyNoteIds: new Set(), forceAll: false });
+    expect(decision.noteTargets).toEqual([{ id: "segnaposto", revision: 0 }]);
+    expect(decision.noteSkippedUpToDateCount).toBe(1);
+  });
+
   it("con forceAll rigenera comunque la narrativa anche se tutti i blocchi automatici sono fresh", () => {
     const decision = decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: freshBlocks(), notes: [], dirtyNoteIds: new Set(), forceAll: true });
     expect(decision.narrativeNeeded).toBe(true);
@@ -103,18 +116,21 @@ describe("runPrepareReportAI", () => {
     noteTargets: [{ id: "n1", revision: 1 }, { id: "n2", revision: 2 }],
     noteSkippedUpToDateCount: 1,
   };
-  const buildDecisionCompleta = () => decisionCompleta;
+  const deciderCompleti = { narrative: () => decisionCompleta, notes: () => decisionCompleta };
   const fakeSession: FakeSession = { revision: 7 };
 
-  it("esegue la sequenza completa nell'ordine piano → narrativa → note, passando la sessione fresca a entrambi i passi successivi", async () => {
+  it("esegue la sequenza completa nell'ordine narrativa → piano → note, passando la sessione fresca alle note", async () => {
     const calls: string[] = [];
     const preparePlan = vi.fn().mockImplementation(async () => { calls.push("plan"); return fakeSession; });
-    const regenerateNarrative = vi.fn().mockImplementation(async (session: FakeSession) => { calls.push(`narrative:${session.revision}`); });
+    const regenerateNarrative = vi.fn().mockImplementation(async () => { calls.push("narrative"); });
     const regenerateNotes = vi.fn().mockImplementation(async (session: FakeSession, targets) => { calls.push(`notes:${session.revision}:${targets.length}`); });
 
-    const result = await runPrepareReportAI(buildDecisionCompleta, { preparePlan, regenerateNarrative, regenerateNotes });
+    const result = await runPrepareReportAI(deciderCompleti, { preparePlan, regenerateNarrative, regenerateNotes });
 
-    expect(calls).toEqual(["plan", "narrative:7", "notes:7:2"]);
+    // I commenti generali fanno parte del corpo su cui il piano è misurato:
+    // generarli DOPO il piano lo renderebbe subito non più valido, e il PDF
+    // tornerebbe a rifiutarsi di scaricare (difetto del 2026-09-18).
+    expect(calls).toEqual(["narrative", "plan", "notes:7:2"]);
     expect(regenerateNotes).toHaveBeenCalledWith(fakeSession, decisionCompleta.noteTargets);
     expect(result.plan.outcome).toBe("done");
     expect(result.narrative.outcome).toBe("done");
@@ -124,14 +140,42 @@ describe("runPrepareReportAI", () => {
     expect(result.summary).toBe("piano aggiornato; commenti generati; 2 note generate, 1 già aggiornata");
   });
 
-  it("decide dopo il piano, non prima: buildDecision riceve la sessione appena restituita da preparePlan", async () => {
+  it("decide le NOTE dopo il piano, non prima: il decisore riceve la sessione appena restituita da preparePlan", async () => {
     const preparePlan = vi.fn().mockResolvedValue(fakeSession);
-    const buildDecision = vi.fn().mockReturnValue({ narrativeNeeded: false, narrativeHasEligible: true, noteTargets: [], noteSkippedUpToDateCount: 0 });
+    const notes = vi.fn().mockReturnValue({ narrativeNeeded: false, narrativeHasEligible: true, noteTargets: [], noteSkippedUpToDateCount: 0 });
 
-    await runPrepareReportAI(buildDecision, { preparePlan, regenerateNarrative: vi.fn(), regenerateNotes: vi.fn() });
+    await runPrepareReportAI({ narrative: () => ({ narrativeNeeded: false, narrativeHasEligible: true }), notes },
+      { preparePlan, regenerateNarrative: vi.fn(), regenerateNotes: vi.fn() });
 
-    expect(buildDecision).toHaveBeenCalledWith(fakeSession);
-    expect(preparePlan.mock.invocationCallOrder[0]).toBeLessThan(buildDecision.mock.invocationCallOrder[0]);
+    expect(notes).toHaveBeenCalledWith(fakeSession);
+    expect(preparePlan.mock.invocationCallOrder[0]).toBeLessThan(notes.mock.invocationCallOrder[0]);
+  });
+
+  it("i commenti generali si generano PRIMA del piano, così il piano misura il corpo definitivo", async () => {
+    const order: string[] = [];
+    const preparePlan = vi.fn().mockImplementation(async () => { order.push("plan"); return fakeSession; });
+    const regenerateNarrative = vi.fn().mockImplementation(async () => { order.push("narrative"); });
+
+    await runPrepareReportAI(
+      { narrative: () => ({ narrativeNeeded: true, narrativeHasEligible: true }),
+        notes: () => ({ narrativeNeeded: true, narrativeHasEligible: true, noteTargets: [], noteSkippedUpToDateCount: 0 }) },
+      { preparePlan, regenerateNarrative, regenerateNotes: vi.fn() });
+
+    expect(order).toEqual(["narrative", "plan"]);
+  });
+
+  it("un piano fallito conserva l'esito della narrativa già tentata, e non tenta le note", async () => {
+    const preparePlan = vi.fn().mockRejectedValue(new Error("scenario non trovato"));
+    const regenerateNarrative = vi.fn().mockResolvedValue(undefined);
+    const regenerateNotes = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runPrepareReportAI(deciderCompleti, { preparePlan, regenerateNarrative, regenerateNotes });
+
+    expect(regenerateNarrative).toHaveBeenCalledOnce();
+    expect(regenerateNotes).not.toHaveBeenCalled();
+    expect(result.narrative.outcome).toBe("done");
+    expect(result.notes.outcome).toBe("not_attempted");
+    expect(result.continued).toBe(false);
   });
 
   it("salta i passi già aggiornati senza chiamare le rispettive API", async () => {
@@ -140,7 +184,7 @@ describe("runPrepareReportAI", () => {
     const regenerateNotes = vi.fn().mockResolvedValue(undefined);
     const decision: PrepareReportAIDecision = { narrativeNeeded: false, narrativeHasEligible: true, noteTargets: [], noteSkippedUpToDateCount: 3 };
 
-    const result = await runPrepareReportAI(() => decision, { preparePlan, regenerateNarrative, regenerateNotes });
+    const result = await runPrepareReportAI({ narrative: () => decision, notes: () => decision }, { preparePlan, regenerateNarrative, regenerateNotes });
 
     expect(preparePlan).toHaveBeenCalledOnce();
     expect(regenerateNarrative).not.toHaveBeenCalled();
@@ -150,29 +194,12 @@ describe("runPrepareReportAI", () => {
     expect(result.summary).toBe("piano aggiornato; commenti già aggiornati; note già aggiornate");
   });
 
-  it("si interrompe al fallimento del piano: narrativa e note non vengono nemmeno tentate", async () => {
-    const preparePlan = vi.fn().mockRejectedValue(new Error("scenario non trovato"));
-    const regenerateNarrative = vi.fn().mockResolvedValue(undefined);
-    const regenerateNotes = vi.fn().mockResolvedValue(undefined);
-
-    const result = await runPrepareReportAI(buildDecisionCompleta, { preparePlan, regenerateNarrative, regenerateNotes });
-
-    expect(regenerateNarrative).not.toHaveBeenCalled();
-    expect(regenerateNotes).not.toHaveBeenCalled();
-    expect(result.plan.outcome).toBe("failed");
-    expect(result.narrative.outcome).toBe("not_attempted");
-    expect(result.notes).toEqual({ outcome: "not_attempted", generatedCount: 0 });
-    expect(result.continued).toBe(false);
-    expect(result.decision).toBeNull();
-    expect(result.summary).toBe("Impossibile preparare il piano editoriale: scenario non trovato");
-  });
-
   it("un errore parziale sulla narrativa non blocca le note, e il riepilogo nomina il passo fallito", async () => {
     const preparePlan = vi.fn().mockResolvedValue(fakeSession);
     const regenerateNarrative = vi.fn().mockRejectedValue(new Error("timeout del modello"));
     const regenerateNotes = vi.fn().mockResolvedValue(undefined);
 
-    const result = await runPrepareReportAI(buildDecisionCompleta, { preparePlan, regenerateNarrative, regenerateNotes });
+    const result = await runPrepareReportAI(deciderCompleti, { preparePlan, regenerateNarrative, regenerateNotes });
 
     expect(regenerateNotes).toHaveBeenCalledOnce();
     expect(result.narrative.outcome).toBe("failed");
@@ -186,7 +213,7 @@ describe("runPrepareReportAI", () => {
     const regenerateNarrative = vi.fn().mockResolvedValue(undefined);
     const regenerateNotes = vi.fn().mockRejectedValue(new Error("nota non valida"));
 
-    const result = await runPrepareReportAI(buildDecisionCompleta, { preparePlan, regenerateNarrative, regenerateNotes });
+    const result = await runPrepareReportAI(deciderCompleti, { preparePlan, regenerateNarrative, regenerateNotes });
 
     expect(result.narrative.outcome).toBe("done");
     expect(result.notes.outcome).toBe("failed");
@@ -201,7 +228,7 @@ describe("runPrepareReportAI", () => {
     const notify = vi.fn();
     const decision: PrepareReportAIDecision = { narrativeNeeded: false, narrativeHasEligible: true, noteTargets: [{ id: "n1", revision: 1 }], noteSkippedUpToDateCount: 0 };
 
-    await runPrepareReportAI(() => decision, { preparePlan, regenerateNarrative, regenerateNotes }, { notify });
+    await runPrepareReportAI({ narrative: () => decision, notes: () => decision }, { preparePlan, regenerateNarrative, regenerateNotes }, { notify });
 
     expect(notify.mock.calls.map((call) => call[0])).toEqual(["plan", "notes"]);
   });
@@ -209,7 +236,7 @@ describe("runPrepareReportAI", () => {
   it("usa `describeError` per tradurre l'errore nel riepilogo", async () => {
     const preparePlan = vi.fn().mockRejectedValue({ weird: "shape" });
     const result = await runPrepareReportAI(
-      buildDecisionCompleta,
+      deciderCompleti,
       { preparePlan, regenerateNarrative: vi.fn(), regenerateNotes: vi.fn() },
       { describeError: () => "errore tradotto" }
     );

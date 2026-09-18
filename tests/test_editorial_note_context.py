@@ -32,9 +32,12 @@ def test_page_context_rejects_unknown_content():
 
 
 @pytest.mark.parametrize("notes,expected", [
-    ([{"id": "note:a", "text": "Commento valido."}], {"note:a": "Commento valido."}),
-    ([{"id": "note:a", "text": "Uno"}, {"id": "note:a", "text": "Due"}], {}),
+    # La chiave che il modello rimanda è la posizione nel gruppo, non lo sha del commento.
+    ([{"id": "p1", "text": "Commento valido."}], {"note:a": "Commento valido."}),
+    ([{"id": "p1", "text": "Uno"}, {"id": "p1", "text": "Due"}], {}),
     ([{"id": "other", "text": "Inventato"}], {}),
+    # Il `note_id` non è più una chiave valida: al modello non viene nemmeno mostrato.
+    ([{"id": "note:a", "text": "Vecchia chiave"}], {}),
 ])
 def test_structured_provider_binds_ids_and_keeps_short_literal_text(monkeypatch, notes, expected):
     import anthropic
@@ -48,7 +51,28 @@ def test_structured_provider_binds_ids_and_keeps_short_literal_text(monkeypatch,
     assert service._generate_with_provider(contexts) == expected
     assert len(calls) == 1
     assert "9007199254740993.12" in calls[0]["messages"][0]["content"]
+    # Lo sha del commento non viaggia: era proprio ciò che il modello copiava male.
+    assert "note:a" not in calls[0]["messages"][0]["content"]
+    assert '"key":"p1"' in calls[0]["messages"][0]["content"]
     assert calls[0]["tool_choice"] == {"type": "tool", "name": "editorial_notes"}
+
+
+def test_una_chiave_sbagliata_non_annulla_le_altre_pagine_del_gruppo(monkeypatch):
+    """Il difetto del 2026-09-18: il modello rimandava gli id dei CONTENUTI
+    (`cover`, `chart:sintesi-andamento`) al posto della chiave, e l'intero
+    gruppo di otto pagine restava senza commento. Ora la pagina sbagliata
+    perde il proprio testo, le altre no."""
+    import anthropic
+    def create(**kwargs):
+        return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name="editorial_notes", input={"notes": [
+            {"id": "p1", "text": "Primo commento."},
+            {"id": "chart:sintesi-andamento", "text": "Identificativo di contenuto, non una chiave."},
+            {"id": "p3", "text": "Terzo commento."},
+        ]})])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only")
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kwargs: SimpleNamespace(messages=SimpleNamespace(create=create)))
+    contexts = [{"note_id": f"note:{letter}", "content": []} for letter in ("a", "b", "c")]
+    assert service._generate_with_provider(contexts) == {"note:a": "Primo commento.", "note:c": "Terzo commento."}
 
 
 def test_provider_absent_does_not_import_or_generate(monkeypatch):

@@ -460,7 +460,13 @@ def _page_context(report: FinalReportModelV2, page) -> dict[str, Any]:
     inventory = {}
     catalog = {indicator.id: indicator for indicator in report.indicator_catalog}
     for section in build_inventory(report):
-        for item in section["items"]:
+        # Un `panel` non è un contenuto: lo sono i grafici che contiene (stessa
+        # regola di `dossier_catalog._iter_blocks`). Senza scendere, le pagine
+        # a grafici affiancati (13 e 16) non trovavano il proprio contenuto e
+        # la generazione dei commenti si fermava su tutta la pagina.
+        blocks = [child for item in section["items"]
+                  for child in (item["items"] if item["kind"] == "panel" else [item])]
+        for item in blocks:
             kind = item["kind"]
             if kind == "cover":
                 inventory["cover"] = {"title": report.document.title, "company": {"name": report.company.name},

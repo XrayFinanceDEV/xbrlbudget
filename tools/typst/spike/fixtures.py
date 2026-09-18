@@ -24,10 +24,15 @@ _FIXED_TIMESTAMP: Final = "2032-02-03T04:05:06Z"
 # These are byte hashes, rather than model hashes.  They make an accidental edit
 # to a canonical fixture visible to the spike harness without treating the
 # canonical files as generated output.
+# Le impronte delle fixture canoniche: servono a far notare una modifica
+# ACCIDENTALE, non a vietarne una voluta. Erano ferme a prima del giro
+# «sette passi» (507944e), che ha riscritto legittimamente le sezioni di
+# ipotesi: da allora questo controllo era rosso, e non si vedeva perché
+# senza il compilatore Typst installato l'intero file si salta.
 CANONICAL_FIXTURE_SHA256: Final = {
-    "bilancio": "b2cd7b192d8617ac198b48eaf23eb26996745fe7c6600100b9c3dbec2a3a766c",
-    "infrannuale": "7e6e6740489b44304ae032fa0db0fb9c3e1de3a6c1eb21c22f02a064a8938e42",
-    "startup": "ce46fc2f8ef782f96dcbaa2e12f5e5a16de33f98ee913cca12cc766536207a48",
+    "bilancio": "d202fbbc5e07ca2f4654a024806e522223f8dc64c3d728f1fbef330bf57fb60c",
+    "infrannuale": "629d7edc77846d7d56a1f753e9b2621887d7de6fc40ab142d92152a2f1358783",
+    "startup": "3061389be8708c0a8bbb08bdd8f63ef50e5fb9a62ef4d42654cce1735c67843a",
 }
 
 # Metadata belongs to the harness, not to FinalReportModel.  In particular, the
@@ -227,8 +232,13 @@ def _assumption_sections(year_count: int) -> list[dict[str, object]]:
         {"key": "costi", "title": "Costi principali sintetici", "assumptions": [{
             "field": "personnel_growth_pct", "label": "Crescita personale sintetica", "values": empty,
             "provenance": "automatic", "active": True,
-        }]},
-        {"key": "altre-voci-ce", "title": "Altre voci CE sintetiche", "assumptions": [{
+        # Il catalogo delle sezioni (contracts/final_report_assumption_sections.json)
+        # ha SETTE chiavi, e queste prove erano rimaste su quelle vecchie:
+        # «altre-voci-ce» e «pregresso-nuovo» non esistono più, e `sp_indexing`
+        # appartiene a «patrimoniale-piano», non al circolante. La fixture non
+        # si costruiva più, ma il fallimento si vedeva solo con il compilatore
+        # Typst installato — senza, questi test si saltano.
+        }, {
             "field": "ce_overrides", "label": "Override economici sintetici ad alta densità", "values": empty,
             "provenance": "override", "active": True,
             "ce_overrides": [
@@ -239,15 +249,8 @@ def _assumption_sections(year_count: int) -> list[dict[str, object]]:
         {"key": "circolante", "title": "Capitale circolante sintetico", "assumptions": [{
             "field": "dso_days", "label": "Giorni incasso sintetici", "values": empty,
             "provenance": "user", "active": True,
-        }, {
-            "field": "sp_indexing", "label": "Indicizzazioni sintetiche con etichette estese", "values": empty,
-            "provenance": "automatic", "active": True,
-            "sp_indexing": [
-                {"field": "sp01_growth_pct", "driver": "ricavi"}, {"field": "sp04_growth_pct", "driver": "acquisti"},
-                {"field": "sp06e_growth_pct", "driver": "personale"}, {"field": "sp16f_growth_pct", "driver": "ricavi"},
-            ],
         }]},
-        {"key": "pregresso-nuovo", "title": "Pregresso e nuovo sintetico", "assumptions": [{
+        {"key": "patrimoniale-pregresso", "title": "Pregresso e nuovo sintetico", "assumptions": [{
             "field": "financing_loans", "label": "Finanziamenti sintetici per prova di tabella multipagina", "values": empty,
             "provenance": "user", "active": True,
             "financing_loans": [
@@ -270,6 +273,14 @@ def _assumption_sections(year_count: int) -> list[dict[str, object]]:
                 "debiti_previdenziali": {"opening": "7300.00", "amounts": ["2400.00", "2450.00", "2450.00"]},
                 "altri_debiti": {"opening": "5100.00", "amounts": ["1700.00", "1700.00", "1700.00"]},
             },
+        }]},
+        {"key": "patrimoniale-piano", "title": "Patrimoniale piano sintetica", "assumptions": [{
+            "field": "sp_indexing", "label": "Indicizzazioni sintetiche con etichette estese", "values": empty,
+            "provenance": "automatic", "active": True,
+            "sp_indexing": [
+                {"field": "sp01_growth_pct", "driver": "ricavi"}, {"field": "sp04_growth_pct", "driver": "acquisti"},
+                {"field": "sp06e_growth_pct", "driver": "personale"}, {"field": "sp16f_growth_pct", "driver": "ricavi"},
+            ],
         }]},
         {"key": "imposte", "title": "Imposte sintetiche", "assumptions": [{
             "field": "tax_temporary_differences", "label": "Differenze temporanee sintetiche per tabella fiscale multipagina", "values": empty,

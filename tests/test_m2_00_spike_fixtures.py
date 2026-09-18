@@ -72,7 +72,12 @@ class SpikeFixtureFactoryTest(unittest.TestCase):
         models = build_all_spike_fixtures()
         self.assertTrue(all("sintetica" in model.company.name.lower() for model in models.values()))
         self.assertTrue(all(len(model.adjustments.entries) == 18 for model in models.values()))
-        self.assertTrue(all(len(model.assumption_sections[5].assumptions[0].financing_loans) == 6 for model in models.values()))
+        # Per CHIAVE, non per posizione: le sezioni sono sette e il loro ordine
+        # è quello del catalogo, non un dettaglio che questo test debba fissare.
+        def section(model, key):
+            return next(s for s in model.assumption_sections if s.key == key)
+        self.assertTrue(all(len(section(model, "patrimoniale-pregresso").assumptions[0].financing_loans) == 6
+                            for model in models.values()))
         self.assertTrue(all(len(model.assumption_sections[6].assumptions[0].temporary_differences) == 8 for model in models.values()))
         wire = models["startup"].model_dump(mode="json")
         self.assertIn(None, wire["chart_series"][1]["series"][0]["values"])

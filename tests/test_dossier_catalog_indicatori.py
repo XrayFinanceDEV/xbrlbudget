@@ -23,14 +23,27 @@ def _tables(pages):
     return [item for item in _items(pages) if item["kind"] == "table"]
 
 
-@pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
-def test_build_returns_the_pages_implemented_so_far(workflow):
+def test_build_returns_the_pages_implemented_so_far():
     """Fase 2 in corso: il gruppo cresce di pagina in pagina (un commit a
     testa) — qui solo l'ordine v4 di ciò che esiste già, mai un conteggio
-    fisso che andrebbe aggiornato a ogni pagina aggiunta."""
-    report = fixture_report(workflow, [2027, 2028, 2029])
+    fisso che andrebbe aggiornato a ogni pagina aggiunta. Solo "bilancio":
+    "startup" ha ricavi e margini tutti a zero su questa fixture sintetica, e
+    la pagina "redditivita" (grafico e tabella entrambi vuoti) si toglie dal
+    catalogo di conseguenza — vedi `test_a_page_with_no_data_at_all_is_
+    dropped_never_shown_blank` qui sotto, che verifica esattamente questo."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
     pages = indicatori.build(report)
-    assert [page["id"] for page in pages] == ["indicatori", "liquidita"]
+    assert [page["id"] for page in pages] == ["indicatori", "liquidita", "redditivita"]
+
+
+def test_a_page_with_no_data_at_all_is_dropped_never_shown_blank():
+    """"Niente pagine vuote" (m2-02d.md): sul fixture "startup" ricavi e
+    margini sono tutti a zero/None, quindi "redditivita" (chart+tabella
+    entrambi vuoti) sparisce dal catalogo — mai un riquadro bianco."""
+    report = fixture_report("startup", [2027, 2028, 2029])
+    pages = indicatori.build(report)
+    assert "redditivita" not in [page["id"] for page in pages]
+    assert all(page["items"] for page in pages)
 
 
 def test_liquidita_page_reuses_the_structural_balance_chart_id():
@@ -108,6 +121,22 @@ def test_kpi_delta_needs_at_least_two_periods():
     periods3 = indicatori._periods(report3)
     delta = indicatori._kpi_delta(report3, "practice.ccn", "assorbimento circolante", "eur", periods3)
     assert delta is not None and delta["label"].startswith("assorbimento circolante · 2027-2029")
+
+
+def test_redditivita_merges_two_v4_panels_into_one_four_series_chart():
+    """La v4 affianca due grafici (ROI/ROE; OF/ricavi e OF/MOL) con
+    `panel_grid`, un componente che non esiste fuori da questo file e che le
+    regole della fase vietano di aggiungere a `pagine/comuni.typ`: qui
+    restano un solo grafico a 4 serie percentuali (il tetto `max_series: 4`
+    del layout lo permette esattamente) — nessuna pagina KPI in testa, come
+    nella v4."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = next(p for p in indicatori.build(report) if p["id"] == "redditivita")
+    assert page["kpis"] == []
+    charts = _charts([page])
+    assert len(charts) == 1
+    assert charts[0]["chart"]["unit"] == "percent"
+    assert len(charts[0]["chart"]["series"]) <= 4
 
 
 def test_indicator_table_omits_missing_identifiers_and_drops_when_all_missing():

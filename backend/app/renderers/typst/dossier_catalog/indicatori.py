@@ -224,5 +224,42 @@ def _liquidita(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [] if block is not None else kpis, "items": items}
 
 
+# ── Pagina 13 · Redditività e costo del debito ──────────────────────────────
+
+
+def _redditivita(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    # La v4 affianca due grafici (ROI/ROE; OF/ricavi e OF/MOL): qui restano
+    # uniti in un solo grafico a 4 serie, tutte in percentuale e su scala
+    # comparabile (v. commento di modulo) — il tetto di `chart-layout.json`
+    # (`max_series: 4`) lo permette esattamente, senza perdere alcuna serie.
+    chart = s.indicator_chart(report, "redditivita-quattro-serie", "Redditività e costo del debito", "percent",
+        periods, ["practice.roi", "practice.roe", "practice.of_revenue", "practice.of_mol"])
+    items: list[dict[str, Any]] = []
+    block = s.chart_block("redditivita-quattro-serie", "Redditività e costo del debito", chart, [])
+    if block is not None:
+        items.append(block)
+    table = _indicator_table("redditivita-tabella", "Confronto della redditività", report, periods, [
+        ("practice.roi", "ROI"),
+        ("practice.roe", "ROE"),
+        ("practice.ros", "ROS"),
+        ("practice.ebitda_margin", "EBITDA margin"),
+        ("practice.of_mol", "Oneri finanziari / MOL"),
+        ("practice.of_revenue", "Oneri finanziari / ricavi"),
+    ])
+    if table is not None:
+        items.append(table)
+    return {"id": "redditivita", "title": "Redditività e costo del debito", "family": FAMILY,
+            "subtitle": "Redditività e costo del debito in un unico grafico percentuale; la tabella riporta "
+                        "ogni indicatore per esteso.",
+            "kpis": [], "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
-    return [_indicatori(report), _liquidita(report)]
+    # "Niente pagine vuote" (m2-02d.md): su una fonte degenere (es. il
+    # fixture sintetico "startup", dove ricavi/margini sono tutti a zero) sia
+    # il grafico sia la tabella di una pagina possono restare entrambi vuoti
+    # — quella pagina si toglie dal catalogo qui, non entra come riquadro
+    # bianco e non compare nell'indice.
+    pages = [_indicatori(report), _liquidita(report), _redditivita(report)]
+    return [page for page in pages if page["items"]]

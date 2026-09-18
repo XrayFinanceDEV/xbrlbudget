@@ -120,12 +120,24 @@ class IndicatorDefinition(ContractModel):
 
 
 class DossierChartSeries(ContractModel):
+    """Graficio del dossier: colonne dell'asse, metriche e **riferimenti** alle fonti.
+
+    `period_ids` dichiara l'asse del grafico per id di periodo (`StatementPeriod`
+    del prospetto), non solo per anno: senza, l'asse sono gli anni di piano come
+    in v1 — una chiusura con lo stesso anno di un periodo osservato/rettificato
+    non è indirizzabile da un elenco di soli anni (M2-02G fase 2, serie delle
+    pagine executive). `structure_refs` («gruppo:serie», es.
+    `break_even:safety_margin_pct`) è la stessa cosa per le serie strutturali:
+    il grafico cita la serie, non la ricalcola.
+    """
     id: str = Field(pattern=ID_PATTERN)
     title: str
     unit: Unit
     categories: list[StrictInt] = Field(min_length=1)
     series: list[ChartMetric] = Field(min_length=1)
     indicator_ids: list[str] = Field(default_factory=list)
+    structure_refs: list[str] = Field(default_factory=list)
+    period_ids: list[str] = Field(default_factory=list)
     methodology: str
 
     @model_validator(mode="after")
@@ -136,6 +148,16 @@ class DossierChartSeries(ContractModel):
             raise ValueError("chart metric length must equal category length")
         if len({metric.key for metric in self.series}) != len(self.series):
             raise ValueError("chart metric keys must be unique")
+        if len(set(self.period_ids)) != len(self.period_ids):
+            raise ValueError("chart period IDs must be unique")
+        if self.indicator_ids and self.structure_refs:
+            raise ValueError("a chart cannot reference both indicators and structure series")
+        if self.indicator_ids and len(self.indicator_ids) != len(self.series):
+            raise ValueError("chart indicator references must align with metrics")
+        if self.structure_refs and len(self.structure_refs) != len(self.series):
+            raise ValueError("chart structure references must align with metrics")
+        if self.structure_refs and not self.period_ids:
+            raise ValueError("structure-referencing charts must declare their periods")
         return self
 
 
@@ -275,19 +297,40 @@ class FinalReportModelV2(FinalReportModel):
         if len(indicators) != len(self.indicator_catalog):
             raise ValueError("indicator IDs must be unique")
         canonical_ids = {"income_results", "margins", "cashflows", "liquidity_debt", "working_capital_days", "coverage"}
+        statement_periods = {p.id: p for p in self.detailed_statements[0].periods}
         for chart in self.chart_series:
             if chart.id in canonical_ids and not isinstance(chart, ChartSeries):
                 raise ValueError("canonical charts must retain their v1 shape")
             if isinstance(chart, DossierChartSeries):
+                if chart.period_ids and any(pid not in statement_periods for pid in chart.period_ids):
+                    raise ValueError("chart period references must exist in the statement periods")
+                axis = ([statement_periods[pid].year for pid in chart.period_ids] if chart.period_ids
+                        else chart.categories)
+                if chart.period_ids and chart.categories != axis:
+                    raise ValueError("chart categories must match the years of the referenced periods")
                 if any(ref not in indicators for ref in chart.indicator_ids):
                     raise ValueError("chart indicator references must exist")
-                if chart.indicator_ids and len(chart.indicator_ids) != len(chart.series):
-                    raise ValueError("chart indicator references must align with metrics")
                 for metric, ref in zip(chart.series, chart.indicator_ids):
                     indicator = indicators[ref]
-                    values = {p.year: v for p, v in zip(indicator.periods, indicator.values) if p.basis == "forecast"}
-                    if indicator.unit != chart.unit or metric.values != [values.get(y) for y in chart.categories]:
+                    if chart.period_ids:
+                        by_period = {p.id: v for p, v in zip(indicator.periods, indicator.values)}
+                        want = [by_period.get(pid) for pid in chart.period_ids]
+                    else:
+                        values = {p.year: v for p, v in zip(indicator.periods, indicator.values) if p.basis == "forecast"}
+                        want = [values.get(y) for y in chart.categories]
+                    if indicator.unit != chart.unit or metric.values != want:
                         raise ValueError("chart values and units must match referenced indicators")
+                for metric, ref in zip(chart.series, chart.structure_refs):
+                    group_id, _, series_id = ref.partition(":")
+                    series = next((s for group in self.structure_series if group.id == group_id
+                                   for s in group.series if s.id == series_id), None)
+                    if series is None:
+                        raise ValueError("chart structure references must exist in the structure series")
+                    by_period = {p.id: v for p, v in zip(
+                        next(g for g in self.structure_series if g.id == group_id).periods, series.values)}
+                    want = [by_period.get(pid) for pid in chart.period_ids]
+                    if any(pid not in by_period for pid in chart.period_ids) or series.unit != chart.unit or metric.values != want:
+                        raise ValueError("chart values and units must match referenced structure series")
         if len({n.id for n in self.editorial_notes}) != len(self.editorial_notes):
             raise ValueError("editorial note IDs must be unique")
         self._validate_structure_series(indicators)

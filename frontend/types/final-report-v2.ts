@@ -7,7 +7,7 @@ export interface StatementPeriod { id: string; year: number; label: string; basi
 export interface DetailedStatementRow { id: string; code: string; label: string; parent_id?: string | null; level: number; kind: "section" | "group" | "detail" | "subtotal" | "total"; applicable: boolean; values: (DecimalString | null)[]; unavailable_reasons: (string | null)[]; source: string }
 export interface DetailedStatement { id: "income_statement" | "balance_sheet" | "cashflow"; title: string; unit?: "eur"; catalog_version: string; periods: StatementPeriod[]; rows: DetailedStatementRow[] }
 export interface IndicatorDefinition { id: string; label: string; family: string; unit: DossierUnit; methodology: string; convention: string; periods: StatementPeriod[]; values: (DecimalString | null)[]; unavailable_reasons: (string | null)[]; source: string; thresholds?: { label: string; value: DecimalString; source: string }[] }
-export interface DossierChartSeries { id: string; title: string; unit: DossierUnit; categories: number[]; series: {key: string; label: string; values: (DecimalString | null)[]}[]; indicator_ids?: string[]; methodology: string }
+export interface DossierChartSeries { id: string; title: string; unit: DossierUnit; categories: number[]; series: {key: string; label: string; values: (DecimalString | null)[]}[]; indicator_ids?: string[]; structure_refs?: string[]; period_ids?: string[]; methodology: string }
 export interface EditorialTablePart { statement_id: DetailedStatement["id"]; row_ids: string[] }
 export interface EditorialNoteSlot { width_pt: DecimalString; height_pt: DecimalString; font_size_pt: DecimalString; max_lines: number }
 export interface EditorialPage { id: string; section_id: string; content_ids: string[]; table_parts?: EditorialTablePart[]; note_id: string; note_slot: EditorialNoteSlot }
@@ -125,15 +125,41 @@ function structureGroup(v: unknown, expectedId: string, statements: DetailedStat
   }
   return true;
 }
-function additionalChart(v: unknown, years: number[], indicators: Map<string, IndicatorDefinition>): v is DossierChartSeries {
-  if (!shape(v, ["id", "title", "unit", "categories", "series", "methodology"], ["indicator_ids"]) || !id(v.id) || !string(v.title) || !unit(v.unit) || !string(v.methodology) || !Array.isArray(v.categories) || v.categories.length !== years.length || v.categories.some((y, i) => y !== years[i]) || !Array.isArray(v.series) || !v.series.length) return false;
-  if (!v.series.every(s => shape(s, ["key", "label", "values"]) && string(s.key) && string(s.label) && Array.isArray(s.values) && s.values.length === years.length && s.values.every(x => x === null || decimal(x))) || !unique(v.series.map(s => s.key))) return false;
+function additionalChart(v: unknown, years: number[], indicators: Map<string, IndicatorDefinition>, statementPeriods: StatementPeriod[], structureGroups: unknown[]): v is DossierChartSeries {
+  // Parità col validatore Python (`dossier_invariants` in final_report_v2.py):
+  // `period_ids` dichiara l'asse per id di periodo (chiusura + piano, M2-02G
+  // fase 2); senza, l'asse resta quello v1 (solo anni di piano, base forecast).
+  // `structure_refs` («gruppo:serie») aggancia alle serie di `structure_series`.
+  if (!shape(v, ["id", "title", "unit", "categories", "series", "methodology"], ["indicator_ids", "structure_refs", "period_ids"]) || !id(v.id) || !string(v.title) || !unit(v.unit) || !string(v.methodology) || !Array.isArray(v.categories) || !Array.isArray(v.series) || !v.series.length) return false;
   const refs = v.indicator_ids ?? [];
-  if (!strings(refs) || (refs.length > 0 && refs.length !== v.series.length)) return false;
-  return refs.every((ref, i) => {
+  const srefs = v.structure_refs ?? [];
+  const pids = v.period_ids ?? [];
+  if (!strings(refs) || !strings(srefs) || !strings(pids) || !unique(pids)) return false;
+  if (refs.length && srefs.length) return false;
+  if (refs.length && refs.length !== v.series.length) return false;
+  if (srefs.length && (srefs.length !== v.series.length || !pids.length)) return false;
+  const byId = new Map(statementPeriods.map(p => [p.id, p.year] as const));
+  if (pids.some(pid => !byId.has(pid))) return false;
+  const axis = pids.length ? pids.map(pid => byId.get(pid)!) : years;
+  if (v.categories.length !== axis.length || v.categories.some((y, i) => y !== axis[i])) return false;
+  if (!v.series.every(s => shape(s, ["key", "label", "values"]) && string(s.key) && string(s.label) && Array.isArray(s.values) && s.values.length === axis.length && s.values.every(x => x === null || decimal(x))) || !unique(v.series.map(s => s.key))) return false;
+  const metricValues = (i: number): (string | null)[] => (v.series as {values: (string | null)[]}[])[i].values;
+  if (!refs.every((ref, i) => {
     const def = indicators.get(ref); if (!def || def.unit !== v.unit) return false;
+    if (pids.length) {
+      const values = new Map(def.periods.map((p, j) => [p.id, def.values[j]] as const));
+      return pids.every(pid => values.has(pid)) && sameValues(metricValues(i), pids.map(pid => values.get(pid) ?? null));
+    }
     const values = new Map(def.periods.flatMap((p, j) => p.basis === "forecast" ? [[p.year, def.values[j]] as const] : []));
-    return sameValues((v.series as {values: (string | null)[]}[])[i].values, years.map(y => values.get(y) ?? null));
+    return sameValues(metricValues(i), years.map(y => values.get(y) ?? null));
+  })) return false;
+  return srefs.every((ref, i) => {
+    const sep = ref.indexOf(":"); if (sep <= 0 || sep === ref.length - 1) return false;
+    const group = (structureGroups as ReportSeriesGroup[]).find(g => g.id === ref.slice(0, sep));
+    const series = group?.series.find(s => s.id === ref.slice(sep + 1));
+    if (!group || !series || series.unit !== v.unit) return false;
+    const values = new Map(group.periods.map((p, j) => [p.id, series.values[j]] as const));
+    return pids.every(pid => values.has(pid)) && sameValues(metricValues(i), pids.map(pid => values.get(pid) ?? null));
   });
 }
 function page(v: unknown): v is EditorialPage {
@@ -159,7 +185,7 @@ export function isFinalReportModelV2(value: unknown): value is FinalReportModelV
   const indicators = new Map(indicator_catalog.map(i => [i.id, i]));
   if (!Array.isArray(structure_series) || structure_series.length !== STRUCTURE_GROUP_ORDER.length
     || structure_series.some((g, i) => !structureGroup(g, STRUCTURE_GROUP_ORDER[i], detailed_statements, indicators))) return false;
-  if (!unique(value.chart_series.map(c => object(c) ? c.id : null)) || !value.chart_series.every(c => primary.includes(c) || additionalChart(c, years, indicators))) return false;
+  if (!unique(value.chart_series.map(c => object(c) ? c.id : null)) || !value.chart_series.every(c => primary.includes(c) || additionalChart(c, years, indicators, (detailed_statements as DetailedStatement[])[0].periods, structure_series as unknown[]))) return false;
   if (!shape(editorial_readiness, ["status", "reasons"]) || !["pending", "ready", "blocked"].includes(String(editorial_readiness.status)) || !strings(editorial_readiness.reasons)) return false;
   const notes = editorial_notes === undefined ? [] : editorial_notes;
   if (!Array.isArray(notes) || !notes.every(note) || !unique(notes.map(n => n.id))) return false;

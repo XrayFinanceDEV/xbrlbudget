@@ -7,5 +7,5 @@
   "table_font_pt": "8",
   "axis_font_pt": "7",
   "max_series": 4,
-  "bars": ["income_results", "cashflows", "structural_balance", "practice_net_debt", "economic_incidence", "financial_charges"]
+  "bars": ["income_results", "cashflows", "structural_balance", "practice_net_debt", "economic_incidence", "financial_charges", "rettifiche-prima-dopo", "chiusura-passaggio", "indicatori-infrannuali-confronto"]
 }

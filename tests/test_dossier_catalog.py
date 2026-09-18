@@ -3,9 +3,10 @@ Typst: la resa fisica è coperta da `test_typst_editorial_plan.py` e
 `test_pdf_semantic_dossier.py`. Sostituisce `test_editorial_inventory.py`
 (inventario generico rimosso): quel file testava un dump completo del
 modello — assunzioni annidate, indicatori a blocchi, confronto dei periodi —
-che questa fase del catalogo non produce più (`dati.py`/`indicatori.py`
-hanno registro vuoto; le loro pagine porteranno di nuovo quei test, quando
-esisteranno davvero, non prima).
+che questa fase del catalogo non produce più. `dati.py` (v4 pagine 3-6, solo
+workflow infrannuale) ha i propri test in `test_dossier_catalog_dati.py`;
+`indicatori.py` ha ancora registro vuoto, le sue pagine porteranno di nuovo
+quei test quando esisteranno davvero, non prima.
 """
 from decimal import Decimal
 
@@ -32,24 +33,26 @@ def test_catalog_order_is_the_fixed_v4_page_list(workflow):
     report = fixture_report(workflow, [2027, 2028, 2029])
     inventory = build_inventory(report)
     ids = [page["id"] for page in inventory]
-    # Copertina, sintesi, CE previsionale, indice allegati, poi A (2 parti su
-    # questa fixture), B (4 parti), C (2 parti) — nessuna pagina di dati.py o
-    # indicatori.py, a registro vuoto in questa fase.
-    assert ids[:4] == ["cover", "sintesi", "ce", "allegati"]
-    assert ids[4:6] == ["allegato-A-1", "allegato-A-2"]
-    assert ids[6:10] == ["allegato-B-1", "allegato-B-2", "allegato-B-3", "allegato-B-4"]
-    assert ids[10:12] == ["allegato-C-1", "allegato-C-2"]
+    # Copertina, sintesi, poi dati.py (fonti/rettifiche/chiusura/indicatori
+    # infrannuali — solo workflow infrannuale), CE previsionale, indice
+    # allegati, poi A (2 parti su questa fixture), B (4 parti), C (2 parti),
+    # infine D/E quando la fixture porta i loro dati, F, G (2 parti) e
+    # metodologia.
+    head = ["cover", "sintesi"]
+    if workflow == "infrannuale":
+        head += ["fonti", "rettifiche", "chiusura", "indicatori-infrannuali"]
+    head += ["ce", "allegati"]
+    offset = len(head)
+    assert ids[:offset] == head
+    assert ids[offset:offset + 2] == ["allegato-A-1", "allegato-A-2"]
+    assert ids[offset + 2:offset + 6] == ["allegato-B-1", "allegato-B-2", "allegato-B-3", "allegato-B-4"]
+    assert ids[offset + 6:offset + 8] == ["allegato-C-1", "allegato-C-2"]
     # D (registro rettifiche) ed E (matrice ipotesi) esistono solo quando la
-    # fixture porta dati per loro — «niente pagine vuote»: la fixture minimale
-    # `bilancio`/`startup` non ha rettifiche confermate né alcuno dei driver
-    # curati di Allegato E, `infrannuale` ha entrambi (vedi
-    # `tests/fixtures/final_report/*.json`). F (indicatori della pratica) e G
-    # (indici analitici, 2 parti: 26 indicatori / 13 per parte) leggono sempre
-    # dal catalogo indicatori, presente per costruzione su ogni fixture.
+    # fixture porta dati per loro — «niente pagine vuote».
     tail = (["allegato-D", "allegato-E"] if workflow == "infrannuale" else []) + [
         "allegato-F", "allegato-G-1", "allegato-G-2", "metodologia"]
-    assert ids[12:] == tail
-    assert len(ids) == 12 + len(tail)
+    assert ids[offset + 8:] == tail
+    assert len(ids) == offset + 8 + len(tail)
     assert all(page["items"] for page in inventory), "nessuna pagina vuota nel catalogo"
 
 

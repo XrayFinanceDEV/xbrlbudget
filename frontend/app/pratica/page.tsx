@@ -16,6 +16,7 @@ import {
   getExtraAccountingAlerts,
   putExtraAccountingAlerts,
   bulkUpsertAssumptions,
+  getAliquotaProposta,
   getIntraYearComparison,
   getScenarioAnalysis,
 } from "@/lib/api";
@@ -852,6 +853,9 @@ export default function InfraannualePage() {
         return ((overrideVal / refV) - 1) * 100;
       };
 
+      // L'aliquota del consuntivo di riferimento, non il 27,9 fisso: e' la
+      // proposta del commercialista (2026-09-18), stessa regola del budget.
+      const aliquota = (await getAliquotaProposta(importResult.companyId, fiscalYear - 1)).aliquota;
       const result = await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
         assumptions: [{
           forecast_year: fiscalYear,
@@ -866,7 +870,7 @@ export default function InfraannualePage() {
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
           ...buildCeOverridePayload(overrides),
           working_capital_mode: modoCircolante,
-          tax_rate: 27.9,
+          tax_rate: aliquota,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
           depreciation_rate: 20,
@@ -950,6 +954,9 @@ export default function InfraannualePage() {
         return ((importedVal / refV) - 1) * 100;
       };
 
+      // L'aliquota del consuntivo di riferimento, non il 27,9 fisso: e' la
+      // proposta del commercialista (2026-09-18), stessa regola del budget.
+      const aliquota = (await getAliquotaProposta(importResult.companyId, fiscalYear - 1)).aliquota;
       const result = await bulkUpsertAssumptions(importResult.companyId, scenario.id, {
         assumptions: [{
           forecast_year: fiscalYear,
@@ -968,7 +975,7 @@ export default function InfraannualePage() {
               .filter((item) => item.code.startsWith("sp"))
               .map((item) => [item.code, item.partial_value])
           ),
-          tax_rate: 27.9,
+          tax_rate: aliquota,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
           depreciation_rate: 20,

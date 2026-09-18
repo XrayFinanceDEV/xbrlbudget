@@ -17,6 +17,7 @@ import { getBudgetAssumptions, getIncomeStatement, getBalanceSheet } from "@/lib
 import {
   baseYearNote,
   forecastYearsFor,
+  withAliquotaProposta,
   withDefaultsForYears,
   withPregresso,
   withOtherLenders,
@@ -38,6 +39,7 @@ import type {
   TemporaryDifferenceInput,
 } from "@/types/api";
 import { toast } from "sonner";
+import { useAliquotaProposta } from "@/hooks/use-queries";
 
 export interface ScenarioAssumptionsState {
   baseYear: number;
@@ -395,6 +397,27 @@ export function useScenarioAssumptions({
   }, [forecastYears]);
 
   const isNew = idratato && existingAssumptionYears.size === 0;
+
+  // Uno scenario NUOVO nasce con l'aliquota proposta dall'ultimo consuntivo
+  // depositato (commercialista, 2026-09-18), una volta sola per scenario: da
+  // li' in poi e' dell'utente. Uno scenario salvato tiene la sua.
+  const aliquotaProposta = useAliquotaProposta(companyId, baseYear);
+  const propostaApplicataPer = useRef<string | null>(null);
+  // Uno scalare, non la mappa: l'effetto scrive la mappa e non deve ripartire
+  // per questo. Serve a non scrivere la proposta prima che i default del
+  // primo anno esistano (andrebbe persa, e la chiave la segnerebbe applicata).
+  const righePronte = forecastYears.length > 0 && forecastYears.every((y) => assumptions[y] !== undefined);
+  useEffect(() => {
+    if (!isNew || !righePronte || !aliquotaProposta.data) return;
+    const chiave = `${scenarioId}:${baseYear}`;
+    if (propostaApplicataPer.current === chiave) return;
+    propostaApplicataPer.current = chiave;
+    const aliquota = aliquotaProposta.data.aliquota;
+    setAssumptions((prev) => withAliquotaProposta(prev, forecastYears, aliquota));
+    // `forecastYears` non e' una dipendenza: l'aliquota si scrive una volta,
+    // e gli anni aggiunti dopo la ereditano da `withDefaultsForYears`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, righePronte, aliquotaProposta.data, scenarioId, baseYear]);
   const updateAll = useCallback((field: string, value: number | boolean | null) => {
     // L'inflazione attesa si scrive su ogni anno E riallinea le caselle
     // automatiche della parte fissa (spec 2026-09-15 §4.1, §4.3, Task 10) —

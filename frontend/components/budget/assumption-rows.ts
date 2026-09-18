@@ -101,8 +101,6 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
       rule(["sp04_growth_pct"], { key: "sp04", label: "Immobilizzazioni finanziarie %" }),
       rule(["sp06e_growth_pct"], { key: "sp06e", label: "Crediti tributari %",
             tooltip: "Variazione % anno-su-anno dei crediti tributari (IVA a credito ecc.). Vuoto = costanti. NON legati ai ricavi" }),
-      rule(["sp06f_growth_pct"], { key: "sp06f", label: "Imposte anticipate %",
-            tooltip: "Variazione % anno-su-anno delle imposte anticipate. Vuoto = costanti. NON legate ai ricavi" }),
       rule(["sp08_growth_pct"], { key: "sp08", label: "Attività finanziarie %" }),
       rule(["sp10_growth_pct"], { key: "sp10", label: "Ratei e risconti attivi %" }),
       rule(["sp14_growth_pct"], { key: "sp14", label: "Fondi per rischi e oneri %" }),

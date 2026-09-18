@@ -24,6 +24,9 @@ far girare un piano stressato e leggere quanta finanza richiede — la risposta 
 `scoperto_generato` anno per anno, con il picco in `fabbisogno_picco`.
 """
 import re
+# Numeri aggiornati il 2026-09-18 (imposte secondo il commercialista): dal secondo anno la cassa
+# incassa il credito da acconti dell'anno prima, compensato per intero invece di restare in sp06e
+# (con lo scoperto concesso la stessa compensazione riduce lo scoperto).
 from decimal import Decimal as D
 
 import pytest
@@ -280,11 +283,11 @@ PARITA = {
            "sp16_debiti_breve": "140000.00", "sp17a_debiti_banche_lungo": "50000.00",
            "sp13_utile_perdita": "61796.71", "ce15_oneri_finanziari": "5000.00",
            "ce20_imposte": "23913.02", "_total_assets": "468088.00"},
-    2028: {"sp09_disponibilita_liquide": "204440.72", "sp16a_debiti_banche_breve": "0.00",
+    2028: {"sp09_disponibilita_liquide": "230527.70", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144564.52", "sp17a_debiti_banche_lungo": "50000.00",
            "sp13_utile_perdita": "73592.47", "ce15_oneri_finanziari": "5000.00",
            "ce20_imposte": "28477.54", "_total_assets": "552606.11"},
-    2029: {"sp09_disponibilita_liquide": "329576.89", "sp16a_debiti_banche_breve": "0.00",
+    2029: {"sp09_disponibilita_liquide": "351099.36", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144752.16", "sp17a_debiti_banche_lungo": "50000.00",
            "sp13_utile_perdita": "85873.15", "ce15_oneri_finanziari": "5000.00",
            "ce20_imposte": "33229.69", "_total_assets": "645098.63"},
@@ -608,7 +611,7 @@ def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima
 
     Cash sweep con cassa minima 20.000,55 nel 2028 e nel 2029: nel 2028 la cassa
     chiude a zero con lo scoperto ancora aperto, e `cassa_sotto_minimo` lo dice;
-    nel 2029 lo scoperto e' chiuso e la cassa torna esattamente al minimo.
+    nel 2029 lo scoperto e' chiuso (e, dal 2026-09-18, anche il pregresso: vedi sotto).
     """
     engine, sessions = memory_sessions()
     try:
@@ -621,9 +624,13 @@ def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima
             det, _ = _dettagli(db, sid, rows)
         assert _eur(det[2027]["cassa_sotto_minimo"]) == 0.0       # sweep spento: nessun minimo
         assert mappe[2028]["sp09_disponibilita_liquide"] == D("0.00")
-        assert D(str(det[2028]["scoperto_residuo"])) == D("108714.36")
+        assert D(str(det[2028]["scoperto_residuo"])) == D("64288.76")
         assert D(str(det[2028]["cassa_sotto_minimo"])) == D("20000.55")
-        assert mappe[2029]["sp09_disponibilita_liquide"] == D("20000.55")
+        # Dal 2026-09-18 il 2028 compensa 44.425,60 di credito da acconti: nel 2029
+        # lo sweep chiude scoperto E debito bancario pregresso, e la cassa resta
+        # sopra il minimo (prima si fermava al minimo con parte del lungo aperto).
+        assert mappe[2029]["sp09_disponibilita_liquide"] == D("45002.71")
+        assert mappe[2029]["sp17a_debiti_banche_lungo"] == D("0")
         assert _eur(det[2029]["scoperto_residuo"]) == 0.0
         assert _eur(det[2029]["cassa_sotto_minimo"]) == 0.0
     finally:

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   forecastYearsFor,
   defaultAssumption,
+  withAliquotaProposta,
   withDefaultsForYears,
   withPregresso,
   withOtherLenders,
@@ -644,5 +645,18 @@ describe("withPregressoTrimmedToHorizon (rilievo 3, sui due punti di chiamata)",
       2026: { forecast_year: 2026, pregresso: { altri_debiti: { opening: 58, amounts: [58] } } },
     };
     expect(withPregressoTrimmedToHorizon(map, [2026, 2027, 2028])).toBe(map);
+  });
+});
+
+describe("aliquota del piano (commercialista, 2026-09-18)", () => {
+  it("withAliquotaProposta scrive la proposta, al centesimo, su ogni anno che ha una riga", () => {
+    const m = withAliquotaProposta({ 2027: { tax_rate: 27.9 }, 2028: { tax_rate: 27.9 } }, [2027, 2028, 2029], 30.925268);
+    expect(m[2027].tax_rate).toBe(30.93);
+    expect(m[2028].tax_rate).toBe(30.93);
+    expect(m[2029]).toBeUndefined();
+  });
+  it("un anno aggiunto allungando l'orizzonte eredita l'aliquota del piano, non il 27,9", () => {
+    const m = withDefaultsForYears({ 2027: { tax_rate: 24 } }, [2027, 2028], 5);
+    expect(m[2028].tax_rate).toBe(24);
   });
 });

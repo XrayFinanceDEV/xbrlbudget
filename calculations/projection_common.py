@@ -359,6 +359,26 @@ def runoff_schedule(opening, amounts, writeoff, year_index, horizon) -> RunoffYe
 
 
 # ── Tax settlement: saldo + acconto kernel ──
+ALIQUOTA_RIPIEGO = Decimal('27.9')   # IRES + IRAP
+
+
+def aliquota_effettiva(inc) -> Optional[Decimal]:
+    """L'aliquota effettiva di un conto economico, in percentuale assoluta (27,9 = 27,9%).
+
+    `ce20 / risultato ante imposte`; `None` quando non e' derivabile (imposte o
+    risultato non positivi) o supera il 60%, dove smette di descrivere un'aliquota.
+    E' la regola che il motore applicava da solo fino al 2026-09-18: ora serve a
+    PROPORRE l'aliquota (e alla migrazione), mai a sostituirla a quella scritta.
+    """
+    from calculations.ce_result import calculate_ce_result
+    tax = Decimal(str(getattr(inc, 'ce20_imposte', None) or 0))
+    pbt = calculate_ce_result(inc).profit_before_tax
+    if tax <= ZERO or pbt <= ZERO:
+        return None
+    rate = tax / pbt * Decimal('100')
+    return rate if rate <= Decimal('60') else None
+
+
 def acconti_dovuti(explicit_advances, reference_tax, acconto_pct=Decimal('100')) -> Decimal:
     """Gli acconti dell'anno: l'importo esplicito se maggiore di zero, altrimenti la percentuale dell'imposta di riferimento.
 
@@ -406,8 +426,11 @@ class TaxYear:
     rate_paid: Decimal
     generated_debt: Decimal
     generated_credit: Decimal
+    # Sempre zero dal 2026-09-18: il credito d'apertura si compensa per intero
+    # (`credito_compensato`). Il campo resta perche' dettagli e reti lo leggono.
     opening_credit_left: Decimal
     cash_out: Decimal
+    credito_compensato: Decimal = ZERO
 
 
 def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current_tax,
@@ -425,8 +448,13 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     opening_credit, saldo_due, rate_due = d(opening_credit), d(saldo_due), d(rate_due)
     current_tax, previous_tax = d(current_tax), d(previous_tax)
     acconti = acconti_dovuti(explicit_advances, previous_tax, acconto_pct)
-    used = min(opening_credit, saldo_due)
-    saldo_paid = saldo_due - used
+    # Commercialista, 2026-09-18: debito e credito dell'anno prima si chiudono
+    # sempre, non si accumulano. Il debito esce come saldo; il credito si
+    # compensa per intero (F24) e riduce le uscite per imposte, anche oltre gli
+    # acconti — `cash_out` puo' quindi essere negativo. Prima il credito si
+    # consumava solo contro il saldo, che e' zero proprio quando l'anno prima
+    # chiude a credito: il resto si trascinava da un anno all'altro.
+    saldo_paid = saldo_due
     net = current_tax - acconti
     # This is not diagnostic precision: year N+1 pays ``generated_debt`` as
     # its opening ``saldo_due``.  Keep that state at the same cent precision
@@ -437,8 +465,9 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     return TaxYear(
         saldo_paid=saldo_paid, acconti_paid=acconti, rate_paid=rate_due,
         generated_debt=generated_debt, generated_credit=max(ZERO, -net),
-        opening_credit_left=opening_credit - used,
-        cash_out=saldo_paid + acconti + rate_due,
+        opening_credit_left=ZERO,
+        cash_out=saldo_paid + acconti + rate_due - opening_credit,
+        credito_compensato=opening_credit,
     )
 
 

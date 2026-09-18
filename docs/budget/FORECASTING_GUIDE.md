@@ -133,7 +133,7 @@ fermato a metà, le colonne in cima sono solo gli anni che ha davvero prodotto.
     slider resta l'unico modo di differenziarla per anno) e le due righe della parte variabile.
 - Card **«Calcolate in altri passi»** (automatico): **Ammortamenti** (quote esistenti più i nuovi
   investimenti → passo 6), **Oneri finanziari** (mutui esistenti, nuovi finanziamenti, scoperto →
-  passi 5 e 6), **Imposte** (aliquota effettiva o forzata → passo 7); un valore forzato a mano in
+  passi 5 e 6), **Imposte** (aliquota proposta dall'ultimo consuntivo depositato, o scelta → passo 7); un valore forzato a mano in
   CE Prev. vince comunque su queste regole, finché non lo azzeri dal dialogo Ricalcola.
 
 **Che cosa ne fa il motore**

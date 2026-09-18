@@ -5,6 +5,10 @@ Budget: kit con rimanenze 1.000.000 (600 giorni sui 600.000 di ricavi), crescita
 segue la stessa regola del 6: il motore budget non legge il settore in nessun altro punto.
 Infrannuale: rimanenze di riferimento 150.000 su 100.000 di materiali (rapporto 1,5), parziale 140.000.
 """
+# Numeri aggiornati il 2026-09-18 (imposte secondo il commercialista): dal secondo anno la cassa
+# incassa il credito da acconti dell'anno prima, compensato per intero invece di restare in sp06e.
+# Misurato sulla sonda di `test_un_cash_sweep_nel_2028…`: 2028 +26.109,24 = credito 2027 compensato.
+# Con lo scoperto concesso la stessa compensazione riduce scoperto e interessi (ce15, sp13, ce20).
 from decimal import Decimal as D
 
 import pytest
@@ -48,7 +52,7 @@ def _budget(settore):
 @pytest.mark.parametrize("settore", [5, 6])
 def test_immobiliare_ed_edilizia_scalano_le_rimanenze_coi_ricavi(settore):
     anni = _budget(settore)
-    attesi = {2027: ("1100000.00", "44222.22"), 2028: ("1210000.00", "126974.44")}
+    attesi = {2027: ("1100000.00", "44222.22"), 2028: ("1210000.00", "140704.44")}
     fuori = []
     for anno, (rimanenze, cassa) in attesi.items():
         sp, det = anni[anno]
@@ -66,7 +70,7 @@ def test_immobiliare_ed_edilizia_scalano_le_rimanenze_coi_ricavi(settore):
 def test_negli_altri_settori_la_guardia_resta_com_e():
     anni = _budget(1)
     fuori = []
-    for anno, cassa in {2027: "144222.22", 2028: "336974.44"}.items():
+    for anno, cassa in {2027: "144222.22", 2028: "350704.44"}.items():
         sp, det = anni[anno]
         if sp["sp05_rimanenze"] != D("1000000.00") or sp["sp09_disponibilita_liquide"] != D(cassa):
             fuori.append(f"{anno}: sp05 {sp['sp05_rimanenze']}, sp09 {sp['sp09_disponibilita_liquide']}")

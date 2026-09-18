@@ -1429,13 +1429,16 @@ class ForecastEngine:
                 # un controllo che dichiara, non una copia che ricompone.
             sp06e = forecast_bs.get('sp06e_crediti_tributari_breve')
             if sp06e is not None:
+                # `sp06e` = quota costante del consuntivo + credito da acconti.
+                # Un override si ripartisce riempiendo prima la quota del
+                # consuntivo; l'eccedenza e' credito da compensare l'anno dopo.
                 sp06e = Decimal(str(sp06e))
-                declared = (Decimal(str(imposte.get('generated_credit') or 0))
-                            + Decimal(str(imposte.get('opening_credit_left') or 0)))
+                consuntivo = Decimal(str(imposte.get('crediti_tributari_consuntivo') or 0))
+                declared = consuntivo + Decimal(str(imposte.get('generated_credit') or 0))
                 if sp06e != cls._q(declared):
-                    left = cls._q(min(Decimal(str(imposte.get('opening_credit_left') or 0)), sp06e))
-                    imposte['opening_credit_left'] = left
-                    imposte['generated_credit'] = sp06e - left
+                    quota = cls._q(min(consuntivo, sp06e))
+                    imposte['crediti_tributari_consuntivo'] = quota
+                    imposte['generated_credit'] = sp06e - quota
         # 3) `indicizzazione`: il `valore` dichiarato segue la riga persistita.
         for code, voce in (details.get('indicizzazione') or {}).items():
             field = SP_INDEXABLE_FIELDS.get(code)
@@ -2076,7 +2079,8 @@ class ForecastEngine:
         return Decimal('0'), Decimal('0')
 
     @staticmethod
-    def _apply_sp_overrides(result: Dict, assumption, *, overdraft: "Optional[_Overdraft]" = None) -> Dict:
+    def _apply_sp_overrides(result: Dict, assumption, *, overdraft: "Optional[_Overdraft]" = None,
+                            anticipate_contro_riserve: bool = False) -> Dict:
         """Apply absolute balance-sheet overrides and rebuild affected totals.
 
         Overrides target persisted forecast field names.  Detail edits win over
@@ -2091,6 +2095,11 @@ class ForecastEngine:
         messaggio di successo). Assente (`None`) il clamp resta quello di sempre:
         e' il chiamante INFRANNUALE (`intra_year_engine`), il cui plug negativo
         va clampato a zero con la propria diagnostica e non alza mai.
+
+        `anticipate_contro_riserve` (previsionale budget, commercialista
+        2026-09-18): un override delle imposte anticipate (`sp06f`/`sp07f`) ha
+        contropartita `sp12e` altre riserve, non la cassa — le anticipate non
+        passano dal conto economico e non sono un incasso.
         """
         raw_overrides = getattr(assumption, 'sp_overrides', None) or {}
         if not isinstance(raw_overrides, dict):
@@ -2098,12 +2107,20 @@ class ForecastEngine:
 
         applied = set()
         signed_fields = {'sp13_utile_perdita', 'sp12h_riserva_neg_azioni_proprie'}
+        riserva_anticipate = Decimal('0')
         for field, raw_value in raw_overrides.items():
             if field not in result or raw_value is None:
                 continue
             value = Decimal(str(raw_value))
-            result[field] = value if field in signed_fields else max(Decimal('0'), value)
+            new_value = value if field in signed_fields else max(Decimal('0'), value)
+            if anticipate_contro_riserve and field in ('sp06f_imposte_anticipate_breve',
+                                                       'sp07f_imposte_anticipate_lungo'):
+                riserva_anticipate += new_value - result.get(field, Decimal('0'))
+            result[field] = new_value
             applied.add(field)
+        if riserva_anticipate and 'sp12e_altre_riserve' not in applied:
+            result['sp12e_altre_riserve'] = result.get('sp12e_altre_riserve', Decimal('0')) + riserva_anticipate
+            applied.add('sp12e_altre_riserve')
 
         detail_groups = {
             'sp04_immob_finanziarie': (
@@ -2829,28 +2846,24 @@ class ForecastEngine:
         override is interpreted as total tax expense and remains authoritative.
         """
         zero = Decimal('0')
-        deferred = deferred_tax_position(
-            getattr(assumption, 'tax_temporary_differences', None),
-            assumption.tax_rate,
-        )
+        # Le imposte anticipate non passano piu' dal conto economico
+        # (commercialista, 2026-09-18): nessuna differenza temporanea, nessuna
+        # imposta differita in `ce20`. La griglia salvata si ignora; le
+        # anticipate restano costanti e si cambiano solo con un override SP, con
+        # contropartita le riserve (`_apply_sp_overrides`).
+        deferred = deferred_tax_position(None, assumption.tax_rate)
         if assumption.ce20_override is not None:
             total_tax = Decimal(str(assumption.ce20_override))
             current_tax = max(zero, total_tax - deferred['deferred_expense'])
             return current_tax, deferred, total_tax
 
         profit_before_tax = calculate_ce_result(projected_inc).profit_before_tax
-        base_pbt = cls._pbt_from_income(base_inc)
-        base_tax = getattr(base_inc, 'ce20_imposte', None) or zero
-        effective_rate = None
-        if base_tax > 0 and base_pbt > 0:
-            effective_rate = base_tax / base_pbt
-            if effective_rate <= 0 or effective_rate > Decimal('0.6'):
-                effective_rate = None
-        rate = (
-            effective_rate
-            if effective_rate is not None
-            else Decimal(str(assumption.tax_rate)) / Decimal('100')
-        )
+        # `tax_rate` e' l'aliquota che si applica, cosi' com'e' (commercialista,
+        # 2026-09-18): il wizard la PROPONE dall'ultimo consuntivo depositato
+        # (`projection_common.aliquota_effettiva`) e l'utente la tiene o la
+        # cambia. Prima l'effettiva dell'anno base vinceva qui in silenzio, e con
+        # un anno base promosso dall'infrannuale era l'effettiva della proiezione.
+        rate = Decimal(str(assumption.tax_rate)) / Decimal('100')
         current_tax = max(zero, profit_before_tax * rate)
         total_tax = max(zero, current_tax + deferred['deferred_expense'])
         return current_tax, deferred, total_tax
@@ -3514,14 +3527,19 @@ class ForecastEngine:
         # — mirroring the tax/other debts on the passivo (sp16e_growth_pct). Default
         # (no %) → constant. Only the TRADE buckets (clienti/controllate/collegate/
         # controllanti/altri) are driven by DSO below.
-        tax_difference_lines = getattr(assumption, 'tax_temporary_differences', None) or []
-        current_tax, deferred, _ = self._tax_components(base_inc, forecast_inc, assumption)
+        current_tax, _, _ = self._tax_components(base_inc, forecast_inc, assumption)
         sp06e = _prev('sp06e_crediti_tributari_breve') * (D('1') + _sp_growth('sp06e_growth_pct'))
-        sp06f = (
-            deferred['short_asset']
-            if tax_difference_lines
-            else _prev('sp06f_imposte_anticipate_breve') * (D('1') + _sp_growth('sp06f_growth_pct'))
-        )
+        # Anticipate e fondo imposte differite COSTANTI (commercialista,
+        # 2026-09-18): niente griglia, niente `sp06f_growth_pct`. Si passa dal
+        # ramo che tiene `sp07f` e `sp14b` fuori dalla crescita delle loro
+        # famiglie, con i valori dell'anno prima al posto di quelli della griglia
+        # (il fondo imposte differite no: vedi `sp14` piu' sotto).
+        tax_difference_lines = True
+        deferred = {
+            'short_asset': _prev('sp06f_imposte_anticipate_breve'),
+            'long_asset': _prev('sp07f_imposte_anticipate_lungo'),
+        }
+        sp06f = deferred['short_asset']
 
         # DSO → sp06 TRADE receivables (short-term). Auto-derive DSO from the base year
         # TRADE receivables only (sp06 aggregate minus tax credits and deferred taxes),
@@ -3630,7 +3648,14 @@ class ForecastEngine:
         sp12b = _base('sp12b_riserve_rivalutazione')
         sp12c = _base('sp12c_riserva_legale')
         sp12d = _base('sp12d_riserve_statutarie')
-        sp12e = _base('sp12e_altre_riserve')
+        # `sp12e` riparte dall'anno base, piu' la contropartita cumulata degli
+        # override delle anticipate: costanti per regola (2026-09-18), si scostano
+        # dalla base solo per override, e quello scostamento e' la riserva che
+        # `_apply_sp_overrides` ha scritto. Senza, l'anno dopo la riserva
+        # tornerebbe alla base e la cassa assorbirebbe la differenza.
+        sp12e = _base('sp12e_altre_riserve') + (
+            _prev('sp06f_imposte_anticipate_breve') + _prev('sp07f_imposte_anticipate_lungo')
+            - _base('sp06f_imposte_anticipate_breve') - _base('sp07f_imposte_anticipate_lungo'))
         sp12f = _base('sp12f_riserva_copertura_flussi')
         sp12g = _prev('sp12g_utili_perdite_portati') + previous_profit
         sp12h = _base('sp12h_riserva_neg_azioni_proprie')
@@ -3639,31 +3664,26 @@ class ForecastEngine:
 
         # Other liabilities (non-debt)
         sp14_anchor, provision_factor = _sp_scale('sp14', 'sp14_growth_pct')
-        if tax_difference_lines:
-            sp14a = sp14_anchor('sp14a_fondi_trattamento_quiescenza') * provision_factor
-            sp14b = deferred['liability']
-            sp14c = sp14_anchor('sp14c_strumenti_derivati_passivi') * provision_factor
-            sp14d = sp14_anchor('sp14d_altri_fondi') * provision_factor
-            sp14 = _declare_indexed('sp14', sp14a + sp14b + sp14c + sp14d)
+        # Il fondo imposte differite segue le sue famiglie come sempre: la
+        # decisione del 2026-09-18 riguarda le sole anticipate (sp06f/sp07f).
+        sp14 = _declare_indexed('sp14', sp14_anchor('sp14_fondi_rischi') * provision_factor)
+        # I sotto-campi dell'anno precedente restano la sorgente delle sole
+        # PROPORZIONI del riparto: l'importo lo decide `sp14` qui sopra, e
+        # cambiarne l'ancora sposterebbe la ripartizione senza che nessuno
+        # l'abbia chiesto.
+        provision_fields = (
+            'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
+            'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
+        )
+        provision_values = [_prev(field) for field in provision_fields]
+        provision_total = sum(provision_values, ZERO)
+        if provision_total > 0:
+            sp14a, sp14b, sp14c, sp14d = [
+                sp14 * value / provision_total for value in provision_values
+            ]
         else:
-            sp14 = _declare_indexed('sp14', sp14_anchor('sp14_fondi_rischi') * provision_factor)
-            # I sotto-campi dell'anno precedente restano la sorgente delle sole
-            # PROPORZIONI del riparto: l'importo lo decide `sp14` qui sopra, e
-            # cambiarne l'ancora sposterebbe la ripartizione senza che nessuno
-            # l'abbia chiesto.
-            provision_fields = (
-                'sp14a_fondi_trattamento_quiescenza', 'sp14b_fondi_imposte',
-                'sp14c_strumenti_derivati_passivi', 'sp14d_altri_fondi',
-            )
-            provision_values = [_prev(field) for field in provision_fields]
-            provision_total = sum(provision_values, ZERO)
-            if provision_total > 0:
-                sp14a, sp14b, sp14c, sp14d = [
-                    sp14 * value / provision_total for value in provision_values
-                ]
-            else:
-                sp14a = sp14b = sp14c = ZERO
-                sp14d = sp14
+            sp14a = sp14b = sp14c = ZERO
+            sp14d = sp14
         # TFR fund: previous fund + accrual - payments. When the accrual is suspended
         # (companies with >60 employees pay the maturing TFR to the INPS treasury fund
         # from a given year rather than accruing it internally), the fund stops growing.
@@ -3876,6 +3896,15 @@ class ForecastEngine:
             previous_tax = prev_tax_details.get('current_tax')
             if previous_tax is None:
                 previous_tax = _base_inc('ce20_imposte')
+            # I crediti tributari del consuntivo (IVA, ritenute, …) restano FUORI
+            # dal meccanismo acconti/saldo: costanti per tutto il piano, il credito
+            # da acconti si somma sopra (decisione del proprietario, 2026-09-18).
+            # Si leggono dall'anno prima per portare avanti un override di `sp06e`.
+            if prev_tax_details.get('mode') == 'saldo_acconto':
+                crediti_consuntivo = D(str(
+                    prev_tax_details.get('crediti_tributari_consuntivo') or 0))
+            else:
+                crediti_consuntivo = _base('sp06e_crediti_tributari_breve')
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 # L'anno prima e' passato di qui: sa dire quanto di se' e' saldo
                 # e quanto e' rata, e lo consegna gia' scomposto.
@@ -3949,7 +3978,13 @@ class ForecastEngine:
                             f"«{self._passo_pregresso('debiti_tributari')}»."
                         )
                     saldo_due = max(ZERO, opening_tax_debt - rate_aperto)
-                opening_credit = _prev('sp06e_crediti_tributari_breve')
+                # Primo anno: il credito del consuntivo non e' credito da acconti,
+                # quindi non c'e' nulla da compensare. Dopo un anno manuale conta
+                # solo cio' che quell'anno porta OLTRE la quota del consuntivo.
+                opening_credit = (
+                    ZERO if year_index == 0
+                    else max(ZERO, _prev('sp06e_crediti_tributari_breve') - crediti_consuntivo)
+                )
             # Solo un piano vero mette il saldo in `mode: runoff` (spec §5.3):
             # senza piano non c'e' nulla di scadenziato da dichiarare, e l'unica
             # sede onesta di cio' che e' stato versato resta `details['imposte']`.
@@ -3970,7 +4005,7 @@ class ForecastEngine:
             tax_generated_short = tax_year.generated_debt
             sp16e = tax_year.generated_debt + r.residual_short
             sp17e = r.residual_long
-            sp06e = tax_year.generated_credit + tax_year.opening_credit_left
+            sp06e = crediti_consuntivo + tax_year.generated_credit
             sp06 = sp06_trade + sp06e + sp06f
         # Con un piano l'indicizzazione e' gia' stata scartata (Ruling 17),
         # quindi l'ancora torna a essere `_prev` e lo scorporo resta quello di
@@ -4477,13 +4512,16 @@ class ForecastEngine:
                     'generated_debt': tax_year.generated_debt,
                     'generated_credit': tax_year.generated_credit,
                     'opening_credit_left': tax_year.opening_credit_left,
+                    'credito_compensato': tax_year.credito_compensato,
+                    'crediti_tributari_consuntivo': crediti_consuntivo,
                     'mode': 'saldo_acconto',
                 }
                 if tax_year is not None else
                 {
                     'current_tax': current_tax, 'saldo_paid': ZERO, 'acconti_paid': ZERO,
                     'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
-                    'opening_credit_left': ZERO, 'mode': 'manual',
+                    'opening_credit_left': ZERO, 'credito_compensato': ZERO,
+                    'crediti_tributari_consuntivo': ZERO, 'mode': 'manual',
                 }
             )
 
@@ -4569,7 +4607,8 @@ class ForecastEngine:
             'sp17g_altri_debiti_lungo': sp17g,
             'sp18_ratei_risconti_passivi': sp18
         }
-        return self._apply_sp_overrides(result, assumption, overdraft=overdraft)
+        return self._apply_sp_overrides(result, assumption, overdraft=overdraft,
+                                        anticipate_contro_riserve=True)
 
 
 def generate_forecast_for_scenario(scenario_id: int, db_session: Session) -> Dict:

@@ -38,13 +38,17 @@ from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
 CREDITO_BASE = D("20000.00")
 
 # I numeri del gemello PIANO (nessun override), misurati su questa base.
+# Aggiornati il 2026-09-18 (imposte secondo il commercialista): i 20.000 di
+# crediti del consuntivo restano in `sp06e` e non pagano piu' i saldi (−10.000
+# di cassa per ciascuno dei due saldi), e il credito da acconti del 2027
+# (24.895,58) si compensa per intero nel 2028 invece di restare in `sp06e`.
 PIANO_CREDITO = {
-    2027: {"sp06e": D("34895.58"), "cassa": D("112207.22")},
-    2028: {"sp06e": D("34895.58"), "cassa": D("238789.02")},
+    2027: {"sp06e": D("44895.58"), "cassa": D("102207.22")},
+    2028: {"sp06e": D("20000.00"), "cassa": D("253684.60")},
 }
 PIANO_DEBITO = {
-    2027: {"sp16e": D("24104.42"), "cassa": D("161207.22")},
-    2028: {"sp16e": D("29864.47"), "cassa": D("297789.02")},
+    2027: {"sp16e": D("24104.42"), "cassa": D("151207.22")},
+    2028: {"sp16e": D("29864.47"), "cassa": D("277789.02")},
 }
 
 
@@ -165,7 +169,8 @@ def test_override_sp06e_non_si_annulla_l_anno_dopo(monkeypatch):
         for y in (2027, 2028):
             imp = righe[y][2]["imposte"]
             assert imp["mode"] == "saldo_acconto"
-            assert _q(D(str(imp["generated_credit"])) + D(str(imp["opening_credit_left"]))) \
+            assert _q(D(str(imp["generated_credit"])) + D(str(imp["opening_credit_left"]))
+                      + D(str(imp["crediti_tributari_consuntivo"]))) \
                 == _figlia(righe, y, "sp06e_crediti_tributari_breve"), \
                 (y, imp, "details['imposte'] non coincide col persistito")
     finally:
@@ -189,9 +194,16 @@ def test_override_sp16e_non_si_annulla_l_anno_dopo(monkeypatch):
                             extra_per_anno={"tutti": {"tax_advances_paid": 1000}},
                             overrides={2027: {"sp16e_debiti_tributari_breve": 0}})
         assert _figlia(righe, 2027, "sp16e_debiti_tributari_breve") == D("0")
+        # Il debito tolto dall'override esce di cassa NEL 2027 (e' come pagato
+        # subito) e il 2028 non lo ripaga: il 2028 torna quindi alla cassa del
+        # gemello, che quel saldo lo versa nel 2028. Fino al 2026-09-18 le due
+        # casse differivano per il credito residuo che si trascinava; il difetto
+        # che questo test tiene fermo e' il saldo ripagato, asserito qui sotto.
+        assert _figlia(righe, 2027, "sp09_disponibilita_liquide") \
+            == PIANO_DEBITO[2027]["cassa"] - PIANO_DEBITO[2027]["sp16e"]
         assert _figlia(righe, 2028, "sp09_disponibilita_liquide") \
-            != PIANO_DEBITO[2028]["cassa"], \
-            "la cassa 2028 e' identica al gemello: l'override si e' annullato da solo"
+            == PIANO_DEBITO[2028]["cassa"], \
+            "il 2028 ha ripagato il debito che l'override aveva gia' tolto"
         imp28 = righe[2028][2]["imposte"]
         assert D(str(imp28["saldo_paid"])) == D("0"), \
             f"saldo_paid {imp28['saldo_paid']} dichiarato su un debito tolto dall'override"
@@ -376,7 +388,9 @@ def _posizione(bs):
 def _scarto_di_flusso(lette, y):
     """Il «scarto di flusso dell'anno dopo» della revisione, al centesimo.
 
-    `pos(N) − [pos(N−1) + imposta corrente − saldo − acconti − rate]`: se un
+    `pos(N) − [pos(N−1) + imposta corrente − saldo − acconti − rate + credito
+    compensato]` (il credito dell'anno prima si compensa per intero dal
+    2026-09-18, ed e' un versamento dichiarato come il saldo): se un
     debito e' comparso o sparito senza che un versamento lo dica, questo non e'
     zero. Il rifiuto da solo non dimostra che la via LECITA tenga: dimostra solo
     che la via rotta e' chiusa, e questa e' meta' del cerchio.
@@ -385,7 +399,8 @@ def _scarto_di_flusso(lette, y):
     i = det["imposte"]
     return _q(_posizione(lette[y][0]) - (_posizione(lette[y - 1][0])
              + D(str(i["current_tax"])) - D(str(i["saldo_paid"]))
-             - D(str(i["acconti_paid"])) - D(str(i["rate_paid"]))))
+             - D(str(i["acconti_paid"])) - D(str(i["rate_paid"]))
+             + D(str(i.get("credito_compensato") or 0))))
 
 
 # ─────────────────────────────── I-a ───────────────────────────────
@@ -429,7 +444,8 @@ def test_a_rate_sotto_il_centesimo_le_parti_dicono_la_cella(monkeypatch):
                     d["residual_short"]) == _q(riga["sp16e_debiti_tributari_breve"]), (
                     y, lette[y][1]["imposte"], d)
                 assert _q(D(str(lette[y][1]["imposte"]["generated_credit"]))) + _q(
-                    lette[y][1]["imposte"]["opening_credit_left"]) == _q(
+                    lette[y][1]["imposte"]["opening_credit_left"]) + _q(
+                    lette[y][1]["imposte"]["crediti_tributari_consuntivo"]) == _q(
                     riga["sp06e_crediti_tributari_breve"]), (y, lette[y][1]["imposte"])
     finally:
         engine.dispose()
@@ -657,20 +673,19 @@ def test_i_c_confine_la_rata_dovuta_esatta_si_genera_un_centesimo_sotto_no(
 
 
 @pytest.mark.parametrize("forzato,apertura,generato", [
-    (D("5000.00"),  D("5000.00"), D("0.00")),       # sotto il credito d'apertura
-    (D("20000.00"), D("10000.00"), D("10000.00")),  # sopra il credito d'apertura
+    (D("5000.00"),  D("5000.00"), D("0.00")),       # sotto la quota del consuntivo
+    (D("30000.00"), D("20000.00"), D("10000.00")),  # sopra la quota del consuntivo
 ])
-def test_override_sp06e_riempie_prima_il_credito_d_apertura(
+def test_override_sp06e_riempie_prima_la_quota_del_consuntivo(
         monkeypatch, forzato, apertura, generato):
-    """Rilievo m-E, punto 5: la regola dichiarata della ripartizione forzata.
+    """Rilievo m-E, punto 5, sulla regola del 2026-09-18: la ripartizione forzata.
 
-    `test_override_sp06e_...` (in cima a questo file) asseriva gia' la SOMMA
-    delle due chiavi pari alla cella; qui si asserisce l'ORDINE, che e' la
-    meta' mancante: prima si esaurisce `opening_credit_left` (il credito
-    portato dall'anno prima), il resto va a `generated_credit`. Il gemello
-    senza override dichiara 10.000,00 + 24.895,58 = 34.895,58: sotto 10.000
-    tutta la cella e' credito d'apertura, sopra la eccedenza e' generata.
-    E' la mutazione 1 (ripartizione invertita) che questa riga uccide.
+    `sp06e` e' la quota costante dei crediti del consuntivo (20.000) piu' il
+    credito da acconti dell'anno. Un override riempie PRIMA la quota del
+    consuntivo, e l'eccedenza e' credito da acconti, che l'anno dopo si
+    compensa. Il gemello senza override dichiara 20.000,00 + 24.895,58: sotto
+    20.000 tutta la cella e' quota del consuntivo, sopra l'eccedenza e' generata.
+    E' la mutazione «ripartizione invertita» che questa riga uccide.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -681,7 +696,7 @@ def test_override_sp06e_riempie_prima_il_credito_d_apertura(
             assert res["forecast_generated"] is True, res["message"]
             lette = _dettagli(db, f"split-{forzato}", cid, sid, rows)
             imp = lette[2027][1]["imposte"]
-            assert _q(D(str(imp["opening_credit_left"]))) == _q(apertura), imp
+            assert _q(D(str(imp["crediti_tributari_consuntivo"]))) == _q(apertura), imp
             assert _q(D(str(imp["generated_credit"]))) == _q(generato), imp
             assert _q(apertura) + _q(generato) == _letto(lette, 2027, "sp06e_crediti_tributari_breve")
     finally:

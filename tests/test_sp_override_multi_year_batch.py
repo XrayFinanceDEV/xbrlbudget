@@ -74,7 +74,11 @@ def _build(db, user):
     -- cosi' un fabbisogno ereditato senza copertura si rifiuta sempre,
     invece di diventare uno scoperto silenzioso che nasconderebbe la prova."""
     company_id, scenario = _scenario(db, user)
-    rows = [_stress(2027), _stress(2028, overdraft_allowed=False)]
+    # Il 2028 investe 45.000 in piu' del 2027 (395.000,37): dal 2026-09-18 il
+    # 2028 compensa per intero il credito da acconti del 2027 (commercialista),
+    # e con la cassa in piu' la sonda perdeva il caso «un anno da solo fallisce»
+    # che questo file tiene fermo. Ritarata eseguendo il motore reale.
+    rows = [_stress(2027), _stress(2028, overdraft_allowed=False, tangible_investments=395000.37)]
     assumptions_service.bulk_upsert_assumptions(db, scenario.id, rows, auto_generate=False)
     return company_id, scenario
 

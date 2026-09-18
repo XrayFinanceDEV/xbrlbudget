@@ -217,6 +217,8 @@ def test_tax_components_keep_current_tax_out_of_deferred_settlement():
         base, projected, assumption
     )
 
+    # Commercialista, 2026-09-18: le anticipate non passano piu' dal conto
+    # economico. La griglia salvata si ignora: `ce20` e' la sola imposta corrente.
     assert current == D("25")
-    assert deferred["deferred_expense"] == D("-10")
-    assert total == D("15")
+    assert deferred["deferred_expense"] == D("0")
+    assert total == D("25")

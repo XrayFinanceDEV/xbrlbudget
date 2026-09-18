@@ -7,7 +7,7 @@ import {
   DEFAULT_ACCONTO_PCT,
   DEFAULT_TAX_RATE,
   SP17E_NOTA_AUTOMATICA,
-  TAX_RATE_PLACEHOLDER,
+  accontiRow,
   accontoPctValue,
   draftDisplay,
   impostePreview,
@@ -16,7 +16,6 @@ import {
   pregressoIgnoredTributari,
   singleYearValue,
   spTributariRows,
-  taxRateInputDisplay,
   taxRateValue,
   tributariOpening,
   tributariPlanOrDefault,
@@ -93,21 +92,6 @@ describe("taxRateValue", () => {
   });
 });
 
-describe("taxRateInputDisplay", () => {
-  it("valore assente => casella vuota", () => {
-    expect(taxRateInputDisplay({ value: null, uneven: false })).toBe("");
-  });
-
-  it("valore uguale al default 27,9 => casella vuota (non forzata)", () => {
-    expect(taxRateInputDisplay({ value: DEFAULT_TAX_RATE, uneven: false })).toBe("");
-  });
-
-  it("un valore diverso dal default si mostra per intero", () => {
-    expect(taxRateInputDisplay({ value: 24, uneven: false })).toBe(24);
-    expect(taxRateInputDisplay({ value: 0, uneven: false })).toBe(0); // zero vero, non "vuoto"
-  });
-});
-
 describe("spTributariRows", () => {
   it("anno base assente => baseLabel a trattino, mai zero", () => {
     const rows = spTributariRows(undefined, true);
@@ -133,21 +117,6 @@ describe("spTributariRows", () => {
   });
 });
 
-describe("TAX_RATE_PLACEHOLDER", () => {
-  // Era `auto ${DEFAULT_TAX_RATE}` e a schermo si leggeva «auto :»: il
-  // segnaposto non ci stava nella casella. Rimetterci dentro il numero
-  // tornerebbe a troncare — e un troncamento non da' alcun errore.
-  it("non ripete l'aliquota: e' la lunghezza a essere il difetto", () => {
-    expect(TAX_RATE_PLACEHOLDER).not.toContain(String(DEFAULT_TAX_RATE));
-    expect(TAX_RATE_PLACEHOLDER).not.toMatch(/\d/);
-  });
-
-  it("resta breve: la casella deve ospitare anche quattro cifre e una virgola", () => {
-    expect(TAX_RATE_PLACEHOLDER.length).toBeLessThanOrEqual(6);
-    expect(TAX_RATE_PLACEHOLDER.trim()).toBe(TAX_RATE_PLACEHOLDER);
-    expect(TAX_RATE_PLACEHOLDER).not.toBe("");
-  });
-});
 
 describe("impostePreview", () => {
   it("senza anno base o senza risposta: nessuna riga", () => {
@@ -411,5 +380,20 @@ describe("pregressoIgnoredTributari — misurato sul motore, non dedotto", () =>
 
   it("un anno solo basta", () => {
     expect(pregressoIgnoredTributari([conIgnored([]), conIgnored(["debiti_tributari"])])).toBe(true);
+  });
+});
+
+describe("accontiRow", () => {
+  it("lo zero salvato e' «non dichiarato»: casella vuota, e il segnaposto dice l'acconto del motore", () => {
+    const preview = {
+      scenario_id: 1, base_year: 2026, error: null,
+      forecast_years: [{ year: 2027, income_statement: {}, balance_sheet: {},
+        details: { imposte: { mode: "saldo_acconto", acconti_paid: "45000.00" } } }],
+    } as unknown as ForecastPreviewResponse;
+    const r = accontiRow(preview, 100);
+    expect(r.zeroIsEmpty).toBe(true);
+    expect(r.placeholder(2027)).toBe(`auto ${euro(45000)}`);
+    expect(r.placeholder(2028)).toBe("auto");
+    expect(r.sub).toContain("100% delle imposte dell'anno prima");
   });
 });

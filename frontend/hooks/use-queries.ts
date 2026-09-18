@@ -9,6 +9,7 @@ import {
   getIntraYearComparison,
   getMultiYearRatios,
   getCompleteAnalysis,
+  getAliquotaProposta,
 } from "@/lib/api";
 import { usePratica } from "@/contexts/PraticaContext";
 import type { BudgetScenario } from "@/types/api";
@@ -30,7 +31,18 @@ export const queryKeys = {
     ["companies", companyId, "scenarios", scenarioId, "comparison"] as const,
   multiYearRatios: (companyId: number, scenarioId: number) =>
     ["companies", companyId, "scenarios", scenarioId, "ratios"] as const,
+  aliquotaProposta: (companyId: number, year: number) =>
+    ["companies", companyId, "years", year, "aliquota-proposta"] as const,
 };
+
+/** L'aliquota proposta dall'ultimo consuntivo depositato (lib/budget-tax-rate.ts). */
+export function useAliquotaProposta(companyId: number | null, year: number | null) {
+  return useQuery({
+    queryKey: queryKeys.aliquotaProposta(companyId!, year!),
+    queryFn: () => getAliquotaProposta(companyId!, year!),
+    enabled: !!companyId && !!year,
+  });
+}
 
 // Budget scenarios only (filters out infrannuale)
 export function useScenarios(companyId: number | null) {

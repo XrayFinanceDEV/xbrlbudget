@@ -63,15 +63,18 @@ def test_falling_tax_generates_a_credit_and_rising_tax_a_debt():
     assert up.generated_debt == D("30")
 
 
-def test_opening_credit_offsets_the_saldo_and_explicit_advances_win():
+def test_opening_credit_is_compensated_in_full_and_explicit_advances_win():
+    """Commercialista, 2026-09-18: saldo e credito dell'anno prima si chiudono
+    entrambi; il credito si compensa per intero, anche oltre saldo e acconti."""
     t = tax_settlement_saldo_acconto(opening_credit=D("25"), saldo_due=D("40"), rate_due=D("10"),
                                      current_tax=D("100"), previous_tax=D("100"), acconto_pct=D("100"), explicit_advances=D("70"))
-    assert t.saldo_paid == D("15") and t.opening_credit_left == D("0")
+    assert t.saldo_paid == D("40") and t.credito_compensato == D("25") and t.opening_credit_left == D("0")
     assert t.acconti_paid == D("70") and t.generated_debt == D("30")
-    assert t.rate_paid == D("10") and t.cash_out == D("15") + D("70") + D("10")
+    assert t.rate_paid == D("10") and t.cash_out == D("40") + D("70") + D("10") - D("25")
     big = tax_settlement_saldo_acconto(opening_credit=D("100"), saldo_due=D("40"), rate_due=D("0"),
                                        current_tax=D("0"), previous_tax=D("0"), acconto_pct=D("0"), explicit_advances=None)
-    assert big.saldo_paid == D("0") and big.opening_credit_left == D("60") and big.acconti_paid == D("0")
+    assert big.saldo_paid == D("40") and big.opening_credit_left == D("0") and big.acconti_paid == D("0")
+    assert big.cash_out == D("-60")   # il credito eccedente rientra in cassa: non si trascina
 
 def test_explicit_zero_advances_means_not_declared_and_falls_back_to_pct():
     """Lo zero esplicito non è un override: significa 'non dichiarato' e ricade sulla percentuale."""

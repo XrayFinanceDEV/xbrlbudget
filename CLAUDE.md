@@ -137,10 +137,12 @@ or the wrong record goes.
   `round_decimal()` (`config.DECIMAL_PLACES`). Percentages are absolute (25.5 = 25,5%), not 0.255.
 - **OIC:** assets = equity + liabilities (tolerance €0.01, `config.py:235`) · CCN = current assets −
   current liabilities · MOL = RO + ammortamenti · RO is before financial items.
-- **Tax rate: the `24` in the schema is not what runs.** `24` (IRES only) is the Pydantic default
-  (`backend/app/schemas/budget.py:188`) and **no screen sends it**: every caller sends **27,9**
-  (IRES + IRAP — `STARTUP_TAX_RATE_PCT`, `frontend/app/budget/page.tsx:370`, plus three literals).
-  A `ce20_override` overrides the rate altogether.
+- **Tax rate: `tax_rate` is what runs, as written** (since 2026-09-18, the accountant's rule). The
+  screens **propose** the effective rate of the last **filed** annual year (`ce20` / pre-tax profit,
+  never a year promoted from the infrannuale, never a partial; 27,9 = IRES + IRAP when not derivable
+  or above 60%) — `GET /companies/{id}/years/{year}/aliquota-proposta`,
+  `backend/app/services/aliquota_service.py` — and the user keeps or changes it. The Pydantic default
+  `24` is sent by no screen. A `ce20_override` overrides the rate altogether.
 - **Sectors** (`config.Sector`, 1-6): Industria · Commercio · Servizi · Autotrasporti · Immobiliare ·
   Edilizia. Sector **1** uses the 5-component Altman model, sectors **2-6** the 4-component one; the
   sector also picks the FGPMI thresholds (`data/rating_tables.json`).
@@ -327,13 +329,31 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **Lo slider della quota fissa scrive tutti gli anni di piano** (`fixed_*_percentage`): il
   modello è per anno, l'interfaccia no. Uno scenario con valori diversi fra anni mostra un
   avviso e viene allineato al primo tocco.
-- **`tax_rate` è un ripiego, non l'aliquota che vince.** Il motore usa l'aliquota effettiva
-  dell'anno base (`ce20_imposte / risultato ante imposte`, scartata sopra il 60%) quando è
-  derivabile, e ricade su `tax_rate` solo se non lo è: su un'azienda con storico vero il 27,9
-  inviato dalle schermate quasi mai è il numero applicato (`_tax_components`, `calculations/forecast_engine.py`).
-- **Le imposte si pagano a saldo + acconto, non ad accumulo.** Il debito tributario generato a
-  fine anno N esce come saldo nell'anno N+1 — al netto del credito tributario di apertura, fino a
-  capienza — e l'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
+- **`tax_rate` è l'aliquota applicata, così com'è** (commercialista, 2026-09-18). Prima
+  l'effettiva dell'anno base vinceva in silenzio, e con un anno base promosso era l'aliquota della
+  proiezione. Ora il wizard la **propone** dall'ultimo consuntivo depositato e l'utente la tiene o
+  la cambia; uno scenario nuovo nasce con la proposta, gli anni aggiunti ereditano quella del
+  piano. Gli scenari salvati prima vanno migrati una volta (`scripts/migra_imposte_commercialista.py`,
+  prova per default, `--apply` per scrivere): senza, applicano il 27,9 salvato invece dell'effettiva.
+- **Le imposte anticipate non passano dal conto economico** (commercialista, 2026-09-18).
+  `sp06f`/`sp07f` restano quelle del consuntivo per tutto il piano: la griglia delle differenze
+  temporanee e `sp06f_growth_pct` non esistono più a schermo e il motore li ignora. Si cambiano
+  solo con un override dello SP previsionale, che ha contropartita **`sp12e` altre riserve**, mai la
+  cassa (`_apply_sp_overrides(anticipate_contro_riserve=True)`); `sp12e` porta avanti quella
+  riserva negli anni dopo (`_base(sp12e)` + scostamento cumulato delle anticipate). Il fondo
+  imposte differite (`sp14b`) segue `sp14` come sempre.
+- **Il rendiconto ha una riga propria per la posizione tributaria**: `delta_tax` =
+  Δ(`sp16e`+`sp17e`) − Δ(`sp06e`+`sp07e`), tolta da crediti, debiti e altre variazioni del
+  circolante (`backend/app/calculations/cashflow_detailed.py`); il totale del circolante non cambia.
+  Il catalogo del dossier si rigenera da `report-cashflow.tsx` con
+  `node tools/final_report/export_catalog.cjs`, che legge solo righe `get: (cf) => cf.<percorso>,`.
+- **Le imposte si pagano a saldo + acconto, non ad accumulo, e ogni anno debito e credito
+  dell'anno prima si chiudono** (commercialista, 2026-09-18). Il debito tributario generato a fine
+  anno N esce come saldo per intero nell'anno N+1; il credito da acconti di N si **compensa per
+  intero** in N+1 (`credito_compensato`), anche oltre gli acconti — non resta in `sp06e` a
+  trascinarsi. I crediti tributari del consuntivo (IVA, ritenute…) stanno **fuori** dal
+  meccanismo: costanti per tutto il piano (`crediti_tributari_consuntivo` in `details['imposte']`),
+  e un override di `sp06e` riempie prima quella quota. L'acconto di N è di default il 100% dell'imposta N−1, o l'importo esplicito di
   `tax_advances_paid` se **maggiore di zero**: zero in quella casella non vuol dire «zero
   acconti», vuol dire «non dichiarato», e ricade sulla percentuale
   (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`). Il debito generato
@@ -656,7 +676,8 @@ days, is discarded and the base-year stock is carried instead (`degenerate_turno
 threshold (see the Working capital bullet in «Intra-Year Engine» below) — measured on the parity bench: `holding__crescita`
 `sp16d` 44.772,50 → 50.000,00. Tax payables are the one balance whose behaviour changes **even without a
 plan**: they now settle **saldo + acconto** instead of accumulating forever — the debt generated at
-year-end N is paid as saldo in N+1, net of the opening tax credit up to its amount, and the advance
+year-end N is paid in full as saldo in N+1, a tax credit from excess advances is fully
+compensated in N+1 (the base year's own `sp06e` stays constant, outside the mechanism), and the advance
 defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` **greater than
 zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`).
 Before this lotto tax debt never left the balance sheet and projected cash was inflated by one

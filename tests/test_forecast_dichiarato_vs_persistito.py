@@ -101,11 +101,15 @@ def _posizione_tributaria_dichiarata(det):
                                                    e' tutto in `generated_debt`
     - `imposte.generated_credit`                   l'eccedenza degli acconti
     - `imposte.opening_credit_left`                il credito d'apertura residuo
+                                                   (sempre zero dal 2026-09-18)
+    - `imposte.crediti_tributari_consuntivo`       i crediti del consuntivo, fuori
+                                                   dal meccanismo e costanti
     """
     imposte = det.get("imposte") or {}
     pos = (D(str(imposte.get("generated_debt") or 0))
            - D(str(imposte.get("generated_credit") or 0))
-           - D(str(imposte.get("opening_credit_left") or 0)))
+           - D(str(imposte.get("opening_credit_left") or 0))
+           - D(str(imposte.get("crediti_tributari_consuntivo") or 0)))
     riga = (det.get("pregresso") or {}).get("debiti_tributari") or {}
     if riga.get("mode") == "runoff":
         pos += (D(str(riga.get("residual_short") or 0))
@@ -226,7 +230,8 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
     imposte = det["imposte"]
     if imposte["mode"] == "saldo_acconto":
         confronta("sp06e_crediti_tributari_breve",
-                  D(str(imposte["generated_credit"])) + D(str(imposte["opening_credit_left"])),
+                  D(str(imposte["generated_credit"])) + D(str(imposte["opening_credit_left"]))
+                  + D(str(imposte.get("crediti_tributari_consuntivo") or 0)),
                   "details['imposte']")
         # ── rilievo m-5, punto 2 (giro 4): anche `sp16e` ancorata alla sede
         # `imposte`, non solo a quella di riga ──
@@ -346,10 +351,14 @@ def _divergenze(bs, ce, det, row, prec=None, chiuse=None):
                               - D(str(i0["acconti_paid"])))
             if netto_generato > 0:
                 netto_generato = _q(netto_generato)
+            # Il credito compensato (commercialista, 2026-09-18) e' un
+            # versamento dichiarato come il saldo: chiude il credito dell'anno
+            # prima, quindi rientra nella posizione con il segno opposto.
             scarto = (_posizione_tributaria_dichiarata(det)
                       - _posizione_tributaria_dichiarata(det_p)
                       - (netto_generato - D(str(i0["saldo_paid"]))
-                         - D(str(i0["rate_paid"]))))
+                         - D(str(i0["rate_paid"]))
+                         + D(str(i0.get("credito_compensato") or 0))))
             if scarto != D("0"):
                 fuori.append(("flusso tributario",
                               f"scarto di flusso {scarto} sui dichiarati: la posizione "

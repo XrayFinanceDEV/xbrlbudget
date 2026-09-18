@@ -3,6 +3,9 @@
 Holding del kit (`ce13` 30.000): oggi operativo −10.000,00, mezzi di terzi 30.000,00, debito finanziario misurato 0,00.
 Kit senza partecipazioni: operativo 80.541,22 (2027) e 125.893,62 (2028), scarto zero, e tale resta.
 """
+# Numeri aggiornati il 2026-09-18 (imposte secondo il commercialista): dal secondo anno la cassa
+# incassa il credito da acconti dell'anno prima, compensato per intero invece di restare in sp06e
+# (con lo scoperto concesso la stessa compensazione riduce lo scoperto).
 from decimal import Decimal as D
 
 from backend.app.calculations.cashflow_detailed import DetailedCashFlowCalculator
@@ -20,7 +23,11 @@ def _rendiconti(holding):
         scenario = BudgetScenario(company_id=company_id, name="dividendi", base_year=2026, scenario_type="budget")
         db.add(scenario)
         db.commit()
-        righe = [dict(forecast_year=anno, revenue_growth_pct=3.33, tax_rate=27.9) for anno in (2027, 2028)]
+        # L'aliquota e' quella che il wizard proporrebbe: l'effettiva del consuntivo
+        # (20% sulla holding; sulla base normale non e' derivabile e resta 27,9).
+        # Fino al 2026-09-18 il motore la sostituiva da solo a `tax_rate`.
+        aliquota = 20 if holding else 27.9
+        righe = [dict(forecast_year=anno, revenue_growth_pct=3.33, tax_rate=aliquota) for anno in (2027, 2028)]
         esito = assumptions_service.bulk_upsert_assumptions(db, scenario.id, righe, auto_generate=True)
         assert esito["forecast_generated"] is True, esito["message"]
         precedente, rendiconti = base.balance_sheet, {}
@@ -54,7 +61,7 @@ def test_sulla_holding_i_dividendi_incassati_stanno_nell_operativo_e_lo_scarto_e
 
 
 def test_senza_partecipazioni_nulla_cambia_e_lo_scarto_e_dichiarato_a_zero():
-    attesi = {2027: "80541.22", 2028: "125893.62"}
+    attesi = {2027: "80541.22", 2028: "150789.20"}
     fuori = []
     for anno, cf in _rendiconti(holding=False).items():
         op, rec = cf.operating_activities, cf.cash_reconciliation

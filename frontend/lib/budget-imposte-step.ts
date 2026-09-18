@@ -26,7 +26,9 @@ import type { YearCellOff } from "@/lib/budget-year-cell";
  * default nello schema Pydantic (CLAUDE.md § Tax rate; `lib/budget-horizon.ts`
  * la scrive gia' cosi' su un'ipotesi nuova). La colonna `tax_rate` e' NOT
  * NULL: una casella lasciata vuota non puo' scrivere `null` come le altre
- * percentuali nullable, scrive questo valore esplicitamente.
+ * percentuali nullable, scrive questo valore esplicitamente. E' anche la
+ * proposta quando nessun bilancio depositato esprime un'aliquota effettiva
+ * (`GET …/aliquota-proposta`, commercialista 2026-09-18).
  */
 export const DEFAULT_TAX_RATE = 27.9;
 
@@ -61,30 +63,6 @@ export function singleYearValue(assumptions: AssumptionsMap, years: number[], fi
 export function taxRateValue(assumptions: AssumptionsMap, years: number[]): SingleYearValue {
   return singleYearValue(assumptions, years, "tax_rate");
 }
-
-/**
- * Che cosa mostrare nella casella dell'aliquota forzata: vuota quando il
- * valore e' il default 27,9 (cosi' la casella si legge come "non forzata",
- * anche se la colonna non ammette `null`), altrimenti il numero salvato.
- */
-export function taxRateInputDisplay(v: SingleYearValue): number | "" {
-  return v.value === null || v.value === DEFAULT_TAX_RATE ? "" : v.value;
-}
-
-/**
- * Il segnaposto della casella dell'aliquota forzata.
- *
- * Era `auto ${DEFAULT_TAX_RATE}` in una casella larga 80 px, e a schermo si
- * leggeva «auto :» — un troncamento che sembra un errore di rendering. Il
- * segnaposto quindi non ripete piu' il numero (che sta nella riga sotto la
- * casella e, quando il piano lo usa davvero, nella riga «Aliquota usata dal
- * piano»), e la casella e' stata allargata perche' ci stia anche un valore
- * digitato di quattro cifre e una virgola.
- *
- * Sta qui, e con la sua prova, perche' e' la lunghezza a essere il difetto:
- * un ripensamento che ci rimettesse dentro il 27,9 tornerebbe a troncare.
- */
-export const TAX_RATE_PLACEHOLDER = "auto";
 
 export interface SpTributariRow extends YearCellOff {
   field: string;
@@ -339,5 +317,31 @@ export function impostePreview(
     // dello stesso `forecast_years`, nessun ricalcolo.
     rows: [...rowsImposte(baseInc, previewYears), ...rowsImposteSaldoAcconto(previewYears)],
     pregressoIgnored: pregressoIgnoredTributari(previewYears),
+  };
+}
+
+/**
+ * La riga «Acconti versati nell'anno» del passo Imposte, forma strutturalmente
+ * compatibile con `YearInputRow`.
+ *
+ * Lo zero salvato (il default di colonna di `tax_advances_paid`) NON vuol dire
+ * «nessun acconto»: vuol dire «non dichiarato», e il motore versa allora la
+ * percentuale dell'imposta dell'anno prima (`acconti_dovuti`). A schermo
+ * quello zero si leggeva come «zero acconti». Ora la casella resta vuota e il
+ * segnaposto dice l'acconto che il motore applica davvero, letto
+ * dall'anteprima — nessun calcolo qui.
+ */
+export function accontiRow(preview: ForecastPreviewResponse | null | undefined, accontoPct: number) {
+  const perAnno = new Map((preview?.forecast_years ?? []).map((y) => [y.year, y.details?.imposte]));
+  return {
+    field: "tax_advances_paid",
+    label: "Acconti versati nell'anno",
+    sub: `vuoto = automatico, ${accontoPct.toLocaleString("it-IT")}% delle imposte dell'anno prima; un importo lo sostituisce`,
+    baseLabel: "—",
+    zeroIsEmpty: true,
+    placeholder: (year: number) => {
+      const d = perAnno.get(year);
+      return d && d.mode === "saldo_acconto" ? `auto ${euro(num(d.acconti_paid))}` : "auto";
+    },
   };
 }

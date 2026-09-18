@@ -389,6 +389,12 @@ export default function CashflowPage() {
                   indent={2}
                 />
                 <CashFlowRow
+                  label="Incremento/(decremento) dei debiti tributari netti"
+                  historicalValues={getValues((cf) => cf.operating_activities.working_capital_changes.delta_tax, historicalYears)}
+                  forecastValues={getValues((cf) => cf.operating_activities.working_capital_changes.delta_tax, forecastYears)}
+                  indent={2}
+                />
+                <CashFlowRow
                   label="Decremento/(incremento) ratei e risconti attivi"
                   historicalValues={getValues((cf) => cf.operating_activities.working_capital_changes.delta_accruals_deferrals_active, historicalYears)}
                   forecastValues={getValues((cf) => cf.operating_activities.working_capital_changes.delta_accruals_deferrals_active, forecastYears)}

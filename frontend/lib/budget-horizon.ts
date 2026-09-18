@@ -344,9 +344,27 @@ export function withDefaultsForYears(
   if (missing.length === 0) return current;
 
   const next: AssumptionsMap = { ...current };
+  // L'aliquota e' UNA per piano (il passo Imposte la scrive su ogni anno):
+  // un anno aggiunto allungando l'orizzonte eredita quella del piano, non il
+  // 27,9 di schema — che dal 2026-09-18 il motore applicherebbe davvero.
+  const conAliquota = years.find((y) => current[y]?.tax_rate !== undefined && current[y]?.tax_rate !== null);
+  const aliquota = conAliquota !== undefined ? current[conAliquota].tax_rate : undefined;
   for (const year of missing) {
     next[year] = defaultAssumption(year, scenarioId);
+    if (aliquota !== undefined) next[year] = { ...next[year], tax_rate: aliquota };
   }
+  return next;
+}
+
+/**
+ * Scrive l'aliquota proposta (dall'ultimo consuntivo depositato) su ogni anno
+ * di un piano NUOVO: e' il valore iniziale che l'utente poi tiene o cambia al
+ * passo Imposte. Arrotondata al centesimo, come la mostra la casella.
+ */
+export function withAliquotaProposta(current: AssumptionsMap, years: number[], aliquota: number): AssumptionsMap {
+  const v = Math.round(aliquota * 100) / 100;
+  const next: AssumptionsMap = { ...current };
+  for (const y of years) if (next[y]) next[y] = { ...next[y], tax_rate: v };
   return next;
 }
 

@@ -117,6 +117,19 @@ export const getFinancialYear = async (
   return data;
 };
 
+// L'aliquota fiscale proposta per un piano con anno base `year`: l'effettiva
+// dell'ultimo bilancio annuale depositato (mai un anno promosso), 27,9 se non
+// derivabile (`anno: null`). Commercialista, 2026-09-18.
+export const getAliquotaProposta = async (
+  companyId: number,
+  year: number
+): Promise<{ aliquota: number; anno: number | null }> => {
+  const { data } = await api.get<{ aliquota: number; anno: number | null }>(
+    `/companies/${companyId}/years/${year}/aliquota-proposta`
+  );
+  return data;
+};
+
 // Financial Statements
 export const getBalanceSheet = async (
   companyId: number,

@@ -34,7 +34,6 @@ import {
 import { useScenarioAssumptions } from "@/hooks/use-scenario-assumptions";
 import { BudgetWizard } from "@/components/budget/wizard/BudgetWizard";
 import { FinancingLoansGrid } from "@/components/budget/FinancingLoansGrid";
-import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
 import type {
   BudgetScenario,
   BudgetScenarioCreate,
@@ -1338,13 +1337,6 @@ function ScenarioFormStartup({
                         onUpdate={updateAssumption}
                         showHistorical={false}
                       />
-                      {group.title === "Fiscale" && (
-                        <TaxTemporaryDifferencesGrid
-                          forecastYears={forecastYears}
-                          assumptions={assumptions}
-                          onUpdate={updateTemporaryDifferences}
-                        />
-                      )}
                     </div>
                   ))}
                 </AccordionContent>

@@ -10,6 +10,9 @@ il minimo, anno per anno.
 """
 import json
 import sys
+# Numeri aggiornati il 2026-09-18 (imposte secondo il commercialista): dal secondo anno la cassa
+# incassa il credito da acconti dell'anno prima, compensato per intero invece di restare in sp06e
+# (con lo scoperto concesso la stessa compensazione riduce lo scoperto).
 from decimal import Decimal as D
 from pathlib import Path
 
@@ -98,9 +101,9 @@ def test_il_prestito_nuovo_segue_il_piano_e_la_cassa_eccedente_resta():
     assert errore is None
     fuori = _confronta(anni, {
         2027: ("119122.22", "16000.00", "48000.00", "9000.00"),
-        2028: ("223995.44", "16000.00", "32000.00", "8200.00"),
-        2029: ("343211.41", "16000.00", "16000.00", "7400.00"),
-        2030: ("477183.12", "16000.00", "0.00", "6600.00"),
+        2028: ("250559.44", "16000.00", "32000.00", "8200.00"),
+        2029: ("364379.55", "16000.00", "16000.00", "7400.00"),
+        2030: ("492800.22", "16000.00", "0.00", "6600.00"),
     }, CAMPI_CASSA_DEBITO_ONERI)
     assert not fuori, "\n".join(fuori)
     debito = anni[2027][2]["debito_bancario"]
@@ -176,12 +179,12 @@ def test_lo_sweep_decide_sulla_cassa_di_dopo_gli_override_aliquota_27_9(scoperto
 CON_PIANO = {
     "anni di rimborso": (
         [_riga(anno, existing_debt_repayment_years=3) for anno in (2027, 2028, 2029)],
-        {2027: ("82990.53", "411.52", "23456.79"), 2028: ("194013.60", "0.00", "11934.16"), 2029: ("318802.62", "0.00", "0.01")},
+        {2027: ("82990.53", "411.52", "23456.79"), 2028: ("219461.60", "0.00", "11934.16"), 2029: ("339077.96", "0.00", "0.01")},
     ),
     "contratti col residuo iniziale": (
         [_riga(2027, financing_loans=[{"name": "Pregresso", "amount": 0, "opening_residual": 35802.46,
                                         "duration_years": 5, "interest_rate": 4}]), _riga(2028), _riga(2029)],
-        {2027: ("91332.09", "5185.18", "23456.79"), 2028: ("209987.69", "0.00", "21481.48"), 2029: ("342615.75", "0.00", "14320.99")},
+        {2027: ("91332.09", "5185.18", "23456.79"), 2028: ("234440.25", "0.00", "21481.48"), 2029: ("361815.74", "0.00", "14320.99")},
     ),
 }
 
@@ -210,8 +213,8 @@ def test_senza_piano_lo_sweep_paga_il_pregresso_prima_a_breve_poi_a_lungo_e_mai_
     assert res["forecast_generated"] is True, res["message"]
     fuori = _confronta(anni, {
         2027: ("129772.48", "25000.09", "50000.20", "9350.02"),
-        2028: ("225680.76", "25000.09", "25000.11", "8262.51"),
-        2029: ("336139.07", "25000.09", "0.02", "7175.01"),
+        2028: ("252342.42", "25000.09", "25000.11", "8262.51"),
+        2029: ("357324.65", "25000.09", "0.02", "7175.01"),
     }, CAMPI_CASSA_DEBITO_ONERI)
     assert not fuori, "\n".join(fuori)
     senza_piano = anni[2027][2]["debito_bancario"]["pregresso_senza_piano"]
@@ -220,24 +223,28 @@ def test_senza_piano_lo_sweep_paga_il_pregresso_prima_a_breve_poi_a_lungo_e_mai_
 
 
 def test_lo_sweep_paga_il_pregresso_senza_piano_solo_dopo_lo_scoperto():
-    """Base banca. 2027: un investimento apre 255.075,69 di scoperto. 2028: la cassa netta lo riduce a 128.224,59,
-    niente da rimborsare. 2029: chiude lo scoperto e con i 24.530,92 che restano paga tutto il breve pregresso
-    (12.345,67) e 12.185,25 del lungo. Oggi il 2029 chiude con 0,01 di cassa e 11.271,55 su `sp17a`: lo sweep
-    decideva sulla cassa grezza, prima del centesimo."""
+    """Base banca. 2027: un investimento apre 300.075,69 di scoperto. 2028: la cassa netta lo riduce a 125.983,07,
+    niente da rimborsare. 2029: chiude lo scoperto e con i 30.149,90 che restano paga tutto il breve pregresso
+    (12.345,67) e 17.804,23 del lungo, e ne restano 5.652,56 su `sp17a`. In origine il 2029 chiudeva con 0,01 di
+    cassa: lo sweep decideva sulla cassa grezza, prima del centesimo.
+
+    L'investimento era 350.000,37: dal 2026-09-18 il 2028 compensa per intero il credito da acconti del 2027
+    (44.978,02) e con quello lo sweep 2029 chiudeva TUTTO il pregresso, perdendo il caso del rimborso parziale che
+    questo test tiene fermo. +45.000 di investimento lo riportano li'."""
     comuni = {"overdraft_allowed": True, "financing_interest_rate": 6.13}
-    rows = [_riga(2027, tangible_investments=350000.37, **comuni), _riga(2028, **comuni, **SWEEP0),
+    rows = [_riga(2027, tangible_investments=395000.37, **comuni), _riga(2028, **comuni, **SWEEP0),
             _riga(2029, **comuni, **SWEEP0)]
     res, anni, errore = _genera("sweep-dopo-scoperto", rows, BREVE, LUNGO)
     assert res["forecast_generated"] is True, res["message"]
     fuori = _confronta(anni, {
-        2027: ("0.00", "267421.36", "23456.79"),
-        2028: ("0.00", "140570.26", "23456.79"),
-        2029: ("0.00", "0.00", "11271.54"),
+        2027: ("0.00", "312421.36", "23456.79"),
+        2028: ("0.00", "138328.74", "23456.79"),
+        2029: ("0.00", "0.00", "5652.56"),
     }, CAMPI_CASSA_DEBITO_ONERI[:3])
     assert not fuori, "\n".join(fuori)
-    assert [_dec(anni[a][2]["scoperto_residuo"]) for a in (2027, 2028, 2029)] == [D("255075.69"), D("128224.59"), D("0")]
+    assert [_dec(anni[a][2]["scoperto_residuo"]) for a in (2027, 2028, 2029)] == [D("300075.69"), D("125983.07"), D("0")]
     senza_piano = anni[2029][2]["debito_bancario"]["pregresso_senza_piano"]
-    assert [_dec(senza_piano[k]) for k in ("rimborso_sweep", "breve", "lungo")] == [D("24530.92"), D("0.00"), D("11271.54")]
+    assert [_dec(senza_piano[k]) for k in ("rimborso_sweep", "breve", "lungo")] == [D("30149.90"), D("0.00"), D("5652.56")]
 
 
 def test_debito_bancario_quadra_con_sp16a_e_sp17a_su_tutta_la_griglia_del_banco(tmp_path):

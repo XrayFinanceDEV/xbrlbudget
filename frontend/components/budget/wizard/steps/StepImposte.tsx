@@ -20,8 +20,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { TaxTemporaryDifferencesGrid } from "@/components/budget/TaxTemporaryDifferencesGrid";
-import { computeEffectiveTaxRate } from "@/components/budget/assumption-rows";
+import { Button } from "@/components/ui/button";
+import { useAliquotaProposta } from "@/hooks/use-queries";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { euro, numOrNull, pct1 } from "@/lib/budget-format";
 import {
@@ -31,25 +31,23 @@ import {
   MANUAL_TAX_AVVISO,
   PREGRESSO_IGNORED_AVVISO,
   SP17E_NOTA_AUTOMATICA,
-  TAX_RATE_PLACEHOLDER,
+  accontiRow,
   accontoPctValue,
   draftDisplay,
   impostePreview,
   manualTaxYears,
   spTributariRows,
-  taxRateInputDisplay,
   taxRateValue,
   tributariOpening,
   withAccontoPct,
 } from "@/lib/budget-imposte-step";
-import { planTaxRate } from "@/lib/budget-tax-rate";
+import { planTaxRate, propostaLabel } from "@/lib/budget-tax-rate";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import type { Pregresso } from "@/types/api";
 import type { StepProps } from "../types";
 import { PreviewPanel } from "../PreviewPanel";
 import { YearInputTable, type YearInputRow } from "../YearInputTable";
 
-const ADVANCES_ROWS: YearInputRow[] = [{ field: "tax_advances_paid", label: "Acconti versati nell'anno", baseLabel: "—" }];
 
 /** Riga «etichetta / nota piccola» a sinistra, controllo a destra. */
 function TribRow({ label, small, children }: { label: string; small: string; children: React.ReactNode }): JSX.Element {
@@ -67,16 +65,15 @@ function TribRow({ label, small, children }: { label: string; small: string; chi
 export function StepImposte(p: StepProps): JSX.Element {
   const baseInc = p.historical[p.baseYear]?.income;
   const baseBs = p.historical[p.baseYear]?.balance;
-  const effectiveRate = baseInc ? computeEffectiveTaxRate(baseInc) : null;
+  // L'aliquota proposta dall'ultimo consuntivo depositato (commercialista,
+  // 2026-09-18): il motore applica quella del piano, cosi' com'e'.
+  const proposta = useAliquotaProposta(p.companyId, p.baseYear);
 
   const taxRate = taxRateValue(p.assumptions, p.forecastYears);
-  const taxRateDisplay = taxRateInputDisplay(taxRate);
-  // Quale aliquota il piano usera' davvero, e perche': una sola funzione, la
-  // stessa che rende il passo 4 (lib/budget-tax-rate.ts). Prima i due passi
-  // rispondevano in modo diverso sullo stesso caso.
+  // Quale aliquota il piano usera' davvero, e perche' (lib/budget-tax-rate.ts).
   const plan = useMemo(
-    () => planTaxRate(effectiveRate, p.assumptions, p.forecastYears),
-    [effectiveRate, p.assumptions, p.forecastYears],
+    () => planTaxRate(proposta.data ?? null, p.assumptions, p.forecastYears),
+    [proposta.data, p.assumptions, p.forecastYears],
   );
 
   const preview = useMemo(() => impostePreview(baseInc, p.preview.data), [baseInc, p.preview.data]);
@@ -111,6 +108,12 @@ export function StepImposte(p: StepProps): JSX.Element {
   const opening = useMemo(() => tributariOpening(baseBs), [baseBs]);
   const pregressoSalvato = p.assumptions[firstYear]?.pregresso;
   const pregresso = useMemo(() => (pregressoSalvato ?? {}) as Pregresso, [pregressoSalvato]);
+  // Lo zero salvato e' «non dichiarato»: la casella resta vuota e dice
+  // l'acconto che il motore applica (lib/budget-imposte-step.ts:accontiRow).
+  const advancesRows: YearInputRow[] = useMemo(
+    () => [accontiRow(p.preview.data, accontoPctValue(pregresso))],
+    [p.preview.data, pregresso],
+  );
   const setPregresso = (next: Pregresso) => {
     p.updatePregresso(next);
   };
@@ -129,25 +132,38 @@ export function StepImposte(p: StepProps): JSX.Element {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Aliquota</CardTitle>
+            <CardDescription>
+              Proposta dall&apos;ultimo bilancio depositato, mai da un infrannuale: puoi tenerla,
+              mettere {pct1(DEFAULT_TAX_RATE)} (IRES + IRAP) o un&apos;altra aliquota.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
               <div>
-                <div className="text-sm font-medium text-foreground">Aliquota effettiva {p.baseYear}</div>
-                <div className="text-xs text-muted-foreground">imposte / utile ante imposte</div>
+                <div className="text-sm font-medium text-foreground">Aliquota proposta</div>
+                <div className="text-xs text-muted-foreground">{propostaLabel(proposta.data ?? null)}</div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm tabular-nums text-foreground">{pct1(effectiveRate)}</span>
-                {plan.source === "effettiva" && <Badge variant="secondary">usata dal piano</Badge>}
+                <span className="text-sm tabular-nums text-foreground">
+                  {proposta.data ? pct1(proposta.data.aliquota) : "—"}
+                </span>
+                {plan.diversaDallaProposta && proposta.data && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => p.updateAll("tax_rate", Math.round(proposta.data!.aliquota * 100) / 100)}
+                  >
+                    Usa la proposta
+                  </Button>
+                )}
               </div>
             </div>
 
             <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
               <div>
-                <div className="text-sm font-medium text-foreground">Aliquota forzata</div>
-                <div className="text-xs text-muted-foreground">
-                  vuota = usa l&apos;effettiva, o {pct1(DEFAULT_TAX_RATE)} se non derivabile
-                </div>
+                <div className="text-sm font-medium text-foreground">Aliquota del piano</div>
+                <div className="text-xs text-muted-foreground">imposte correnti = utile ante imposte × aliquota</div>
               </div>
               <div className="flex items-center gap-1">
                 <Input
@@ -155,13 +171,9 @@ export function StepImposte(p: StepProps): JSX.Element {
                   min={0}
                   max={100}
                   step={0.1}
-                  // 80 px non bastavano nemmeno al segnaposto: a schermo si
-                  // leggeva «auto :». Qui ci sta il segnaposto e ci sta un
-                  // valore digitato di quattro cifre e una virgola.
                   className="w-28 text-right"
-                  aria-label="Aliquota forzata"
-                  placeholder={TAX_RATE_PLACEHOLDER}
-                  value={taxRateDisplay}
+                  aria-label="Aliquota del piano"
+                  value={taxRate.value ?? DEFAULT_TAX_RATE}
                   onChange={(e) => {
                     const raw = e.target.value.trim();
                     const v = raw === "" ? DEFAULT_TAX_RATE : (parseFieldValue("tax_rate", raw) ?? DEFAULT_TAX_RATE);
@@ -172,10 +184,7 @@ export function StepImposte(p: StepProps): JSX.Element {
               </div>
             </div>
 
-            {/* Nel caso comune questa riga ripeterebbe numero e badge di
-                quella dell'aliquota effettiva: `addsInformation` (deciso in
-                lib/budget-tax-rate.ts, col suo test) dice quando serve. */}
-            {plan.addsInformation && (
+            {(plan.source === "sostituita" || plan.nota) && (
               <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2.5">
                 <div>
                   <div className="text-sm font-medium text-foreground">Aliquota usata dal piano</div>
@@ -183,9 +192,7 @@ export function StepImposte(p: StepProps): JSX.Element {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm tabular-nums text-foreground">{plan.value}</span>
-                  <Badge variant={plan.source === "effettiva" ? "secondary" : "outline"}>
-                    {plan.sourceLabel}
-                  </Badge>
+                  <Badge variant="outline">{plan.sourceLabel}</Badge>
                 </div>
               </div>
             )}
@@ -196,17 +203,12 @@ export function StepImposte(p: StepProps): JSX.Element {
                 baseYear={p.baseYear}
                 assumptions={p.assumptions}
                 update={p.update}
-                rows={ADVANCES_ROWS}
+                rows={advancesRows}
+                yearsAsRows
               />
             </div>
           </CardContent>
         </Card>
-
-        <TaxTemporaryDifferencesGrid
-          forecastYears={p.forecastYears}
-          assumptions={p.assumptions}
-          onUpdate={p.updateTemporaryDifferences}
-        />
 
         <Card>
           <CardHeader>
@@ -270,6 +272,7 @@ export function StepImposte(p: StepProps): JSX.Element {
                     assumptions={p.assumptions}
                     update={p.update}
                     rows={tributariRows}
+                    yearsAsRows
                   />
                   {/* Il controllo che sulla via automatica non governa nulla non
                       si mostra inerte: sparisce, e questa riga dice perche'. */}

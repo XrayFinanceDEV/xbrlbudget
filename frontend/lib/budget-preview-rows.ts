@@ -359,8 +359,18 @@ export function rowsImposteSaldoAcconto(years: ForecastPreviewYear[]): PreviewRo
   // quando l'acconto ha superato l'imposta: righe a zero fisso non si mostrano.
   const rate = cells((d) => d.rate_paid);
   if (someNonZero(rate)) out.push(row("imposte-rate", "Rate del rateizzato", "sub", { value: null }, rate));
+  // Il credito dell'anno prima si compensa per intero (commercialista,
+  // 2026-09-18): riduce l'uscita, anche oltre gli acconti.
+  const compensato = cells((d) => num(d.credito_compensato ?? 0));
+  if (someNonZero(compensato)) {
+    out.push(row("imposte-compensato", "Credito dell'anno prima compensato", "sub", { value: null },
+      compensato.map((c) => (c.value === null ? c : { ...c, value: c.value ? -c.value : 0 }))));
+  }
+  // `num` su OGNI addendo: il motore serializza i Decimal come stringhe, e un
+  // `+` fra stringhe le concatena — «32356.00» + «45000.00» si leggeva
+  // 32.356, e la riga mostrava il solo saldo invece di saldo + acconti.
   out.push(row("imposte-cassa", "Uscita di cassa per imposte", "kpi", { value: null },
-    cells((d) => d.saldo_paid + d.acconti_paid + d.rate_paid)));
+    cells((d) => num(d.saldo_paid) + num(d.acconti_paid) + num(d.rate_paid) - num(d.credito_compensato ?? 0))));
   // «Saldo d'imposta da versare l'anno dopo», non «Debito tributario a fine
   // anno»: quella riga sta gia' sopra (`rowsImposte`, chiave "trib") ed e'
   // `sp16e` — nel motore `sp16e = generated_debt + residual_short` del piano a

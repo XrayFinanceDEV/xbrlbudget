@@ -128,14 +128,14 @@ const MINOR_FIELDS: readonly {
   { field: "sp04_growth_pct", label: "Immobilizzazioni finanziarie", baseField: "sp04_immob_finanziarie", code: "sp04" },
   { field: "sp06e_growth_pct", label: "Crediti tributari", baseField: "sp06e_crediti_tributari_breve",
     code: null, governata: "dalla posizione tributaria" },
-  { field: "sp06f_growth_pct", label: "Imposte anticipate entro", baseField: "sp06f_imposte_anticipate_breve",
-    code: null, governata: "dalla posizione fiscale" },
-  // La meta' OLTRE della stessa coppia. Non ha una `sp*_growth_pct` propria — la
-  // scrive il kernel del deferred, oppure segue `receivables_long_growth_pct` —
-  // quindi la riga e' di sola lettura (`inerte`). Mostrarne una e non l'altra
-  // faceva sembrare che l'esclusione valesse per meta' della coppia.
+  // Le imposte anticipate sono COSTANTI (commercialista, 2026-09-18): non
+  // passano dal conto economico e non hanno una percentuale; si cambiano solo
+  // a mano nello SP previsionale, con contropartita le riserve. Entrambe le
+  // righe sono quindi di sola lettura (`inerte`).
+  { field: "sp06f", label: "Imposte anticipate entro", baseField: "sp06f_imposte_anticipate_breve",
+    code: null, governata: "a mano nello SP previsionale: costanti, contro riserve", inerte: true },
   { field: "sp07f", label: "Imposte anticipate oltre", baseField: "sp07f_imposte_anticipate_lungo",
-    code: null, governata: "dalla posizione fiscale", inerte: true },
+    code: null, governata: "a mano nello SP previsionale: costanti, contro riserve", inerte: true },
   { field: "sp08_growth_pct", label: "Attività finanziarie", baseField: "sp08_attivita_finanziarie", code: "sp08" },
   { field: "sp10_growth_pct", label: "Ratei e risconti attivi", baseField: "sp10_ratei_risconti_attivi", code: "sp10" },
   { field: "sp14_growth_pct", label: "Fondi per rischi e oneri", baseField: "sp14_fondi_rischi", code: "sp14" },

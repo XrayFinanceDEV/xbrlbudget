@@ -99,7 +99,7 @@ describe("minorFieldsRows", () => {
     const rows = minorFieldsRows(balance(), { sp06e: "ricavi", sp06f: "ricavi", sp07f: "ricavi" });
     const governate = rows.filter((r) => r.code === null);
     expect(governate.map((r) => r.field)).toEqual([
-      "receivables_long_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct", "sp07f",
+      "receivables_long_growth_pct", "sp06e_growth_pct", "sp06f", "sp07f",
     ]);
     expect(rows.find((r) => r.field === "sp06e_growth_pct")?.andamento)
       .toBe("Governata dalla posizione tributaria");
@@ -109,19 +109,18 @@ describe("minorFieldsRows", () => {
     expect(rows.filter((r) => r.code !== null)).toHaveLength(11);
   });
 
-  it("le imposte anticipate sono escluse per INTERO, entro e oltre", () => {
-    // Mostrarne una sola meta' faceva sembrare che l'esclusione valesse per
-    // meta' della coppia: `sp07f` non ha nemmeno una percentuale propria — la
-    // scrive il kernel del deferred — quindi la sua riga e' di sola lettura.
+  it("le imposte anticipate sono escluse per INTERO, entro e oltre, e di sola lettura", () => {
+    // Dal 2026-09-18 (commercialista) sono costanti: nessuna percentuale, ne'
+    // entro ne' oltre; si cambiano solo a mano nello SP previsionale, con
+    // contropartita le riserve.
     const rows = minorFieldsRows(balance());
     const coppia = rows.filter((r) => r.field.startsWith("sp06f") || r.field === "sp07f");
     expect(coppia).toHaveLength(2);
     for (const r of coppia) {
       expect(r.code).toBeNull();
-      expect(r.andamento).toBe("Governata dalla posizione fiscale");
+      expect(r.andamento).toBe("Governata a mano nello SP previsionale: costanti, contro riserve");
+      expect(r.off).toBe(true);
     }
-    expect(coppia[0].off).toBeUndefined();          // sp06f ha ancora la sua %
-    expect(coppia[1].off).toBe(true);               // sp07f no: riga inerte
   });
 
   it("una voce con piano di scadenziamento non offre alcun driver (Ruling 17)", () => {

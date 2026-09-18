@@ -562,3 +562,22 @@ def save_adjustments(
         validation_report=(json.loads(fy.validation_report) if fy.validation_report else None),
         forecastable=bool(fy.forecastable),
     )
+
+
+@router.get("/companies/{company_id}/years/{year}/aliquota-proposta")
+def get_aliquota_proposta(
+    company_id: int,
+    year: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """L'aliquota fiscale da proporre per un piano con anno base `year`.
+
+    Effettiva dell'ultimo bilancio annuale depositato fino a `year` (mai un anno
+    promosso dall'infrannuale, mai un parziale); 27,9 se non derivabile.
+    Commercialista, 2026-09-18: e' una proposta, il motore applica `tax_rate`.
+    """
+    from app.services.aliquota_service import aliquota_proposta
+    validate_company_owned_by_user(db, company_id, user_id)
+    rate, anno = aliquota_proposta(db, company_id, year)
+    return {"aliquota": float(round(rate, 2)), "anno": anno}

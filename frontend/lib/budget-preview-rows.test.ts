@@ -459,6 +459,21 @@ describe("rowsImposteSaldoAcconto", () => {
     expect(Math.round(cassa * 100) / 100).toBe(66243.88);
   });
 
+  it("l'uscita di cassa somma anche quando il motore manda stringhe, e sottrae il credito compensato", () => {
+    // Il JSON dell'anteprima porta i Decimal come stringhe: prima «32356.00» +
+    // «45000.00» si concatenava e la riga mostrava 32.356 invece di 77.356.
+    const s = (v: string) => v as unknown as number;
+    const anno27 = saldoAcconto(2027, { saldo_paid: s("32356.00"), acconti_paid: s("45000.00"), rate_paid: s("0"),
+      credito_compensato: s("0") });
+    const anno28 = saldoAcconto(2028, { saldo_paid: s("0"), acconti_paid: s("33367.00"), rate_paid: s("0"),
+      credito_compensato: s("11633.00") });
+    const rows = rowsImposteSaldoAcconto([anno27, anno28]);
+    const cassa = rows.find((r) => r.label === "Uscita di cassa per imposte")!.years.map((c) => c.value);
+    expect(cassa).toEqual([77356, 21734]);
+    const comp = rows.find((r) => r.label === "Credito dell'anno prima compensato")!.years.map((c) => c.value);
+    expect(comp).toEqual([0, -11633]);
+  });
+
   it("la colonna base resta vuota: l'anno base non ha una liquidazione da mostrare", () => {
     for (const r of rowsImposteSaldoAcconto([saldoAcconto(2027)])) expect(r.base.value).toBeNull();
   });

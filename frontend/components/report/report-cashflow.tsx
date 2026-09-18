@@ -58,6 +58,7 @@ const CF_ROWS: CFRow[] = [
   { label: "Decremento/(incremento) delle rimanenze", get: (cf) => cf.operating.working_capital_changes.delta_inventory, kind: "detail" },
   { label: "Decremento/(incremento) dei crediti", get: (cf) => cf.operating.working_capital_changes.delta_receivables, kind: "detail" },
   { label: "Incremento/(decremento) dei debiti", get: (cf) => cf.operating.working_capital_changes.delta_payables, kind: "detail" },
+  { label: "Incremento/(decremento) dei debiti tributari netti", get: (cf) => cf.operating.working_capital_changes.delta_tax, kind: "detail" },
   { label: "Decremento/(incremento) ratei e risconti attivi", get: (cf) => cf.operating.working_capital_changes.delta_accruals_deferrals_active, kind: "detail" },
   { label: "Incremento/(decremento) ratei e risconti passivi", get: (cf) => cf.operating.working_capital_changes.delta_accruals_deferrals_passive, kind: "detail" },
   { label: "Altri incrementi/(decrementi) del ccn", get: (cf) => cf.operating.working_capital_changes.other_wc_changes, kind: "detail" },

@@ -178,8 +178,20 @@ class DetailedCashFlowCalculator:
         # Inventory: decrease is positive (releases cash)
         delta_inventory = D(bs_previous.sp05_rimanenze) - D(bs_current.sp05_rimanenze)
 
-        # Receivables - short term: decrease is positive (collect cash)
-        delta_receivables = D(bs_previous.sp06_crediti_breve) - D(bs_current.sp06_crediti_breve)
+        # Receivables - short term: decrease is positive (collect cash). Crediti
+        # tributari (sp06e) esclusi: stanno in `delta_tax` qui sotto.
+        delta_receivables = (
+            (D(bs_previous.sp06_crediti_breve) - D(bs_previous.sp06e_crediti_tributari_breve))
+            - (D(bs_current.sp06_crediti_breve) - D(bs_current.sp06e_crediti_tributari_breve))
+        )
+
+        # Debiti e crediti tributari, riga propria (commercialista, 2026-09-18): la
+        # posizione tributaria netta, entro e oltre. Esce da crediti, debiti e altre
+        # variazioni; il totale del circolante non cambia.
+        def _tax_position(bs):
+            return (D(bs.sp16e_debiti_tributari_breve) + D(bs.sp17e_debiti_tributari_lungo)
+                    - D(bs.sp06e_crediti_tributari_breve) - D(bs.sp07e_crediti_tributari_lungo))
+        delta_tax = _tax_position(bs_current) - _tax_position(bs_previous)
 
         # Payables: increase is positive (defer payment)
         # Only OPERATING debts belong in working capital (fornitori, tributari, previdenziali,
@@ -202,6 +214,9 @@ class DetailedCashFlowCalculator:
         ) + (
             (D(bs_current.sp17_debiti_lungo) - D(bs_current.financial_debt_long))
             - (D(bs_previous.sp17_debiti_lungo) - D(bs_previous.financial_debt_long))
+        ) - (
+            (D(bs_current.sp16e_debiti_tributari_breve) + D(bs_current.sp17e_debiti_tributari_lungo))
+            - (D(bs_previous.sp16e_debiti_tributari_breve) + D(bs_previous.sp17e_debiti_tributari_lungo))
         )
 
         # Accruals/deferrals - active
@@ -212,20 +227,24 @@ class DetailedCashFlowCalculator:
 
         # Other WC changes - includes long-term receivables and other balance sheet movements
         # Long-term receivables (sp07) - decrease is positive (converts to short-term or collected)
-        delta_long_receivables = D(bs_previous.sp07_crediti_lungo) - D(bs_current.sp07_crediti_lungo)
+        delta_long_receivables = (
+            (D(bs_previous.sp07_crediti_lungo) - D(bs_previous.sp07e_crediti_tributari_lungo))
+            - (D(bs_current.sp07_crediti_lungo) - D(bs_current.sp07e_crediti_tributari_lungo))
+        )
 
         # Include long-term receivables in "altri" working capital changes
         other_wc_changes = delta_long_receivables
 
         # In Italian GAAP cashflow, working capital total INCLUDES accruals/deferrals
         # They are shown as separate line items but included in the total
-        wc_total = (delta_inventory + delta_receivables + delta_payables +
+        wc_total = (delta_inventory + delta_receivables + delta_payables + delta_tax +
                    delta_accruals_active + delta_accruals_passive + other_wc_changes)
 
         working_capital_changes = WorkingCapitalChanges(
             delta_inventory=R(delta_inventory),
             delta_receivables=R(delta_receivables),
             delta_payables=R(delta_payables),
+            delta_tax=R(delta_tax),
             delta_accruals_deferrals_active=R(delta_accruals_active),
             delta_accruals_deferrals_passive=R(delta_accruals_passive),
             other_wc_changes=R(other_wc_changes),

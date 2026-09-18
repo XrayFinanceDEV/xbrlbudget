@@ -1706,6 +1706,17 @@
       "difference": false
     },
     {
+      "id": "cashflow:operating.working_capital_changes.delta_tax",
+      "code": "operating.working_capital_changes.delta_tax",
+      "label": "Incremento/(decremento) dei debiti tributari netti",
+      "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+      "level": 2,
+      "kind": "detail",
+      "field": "operating.working_capital_changes.delta_tax",
+      "dependencies": [],
+      "difference": false
+    },
+    {
       "id": "cashflow:operating.working_capital_changes.delta_accruals_deferrals_active",
       "code": "operating.working_capital_changes.delta_accruals_deferrals_active",
       "label": "Decremento/(incremento) ratei e risconti attivi",

@@ -40,6 +40,10 @@ tutto nel prestito: 100.000,38 / 4 = 25.000,095, una rata che cade esattamente
 sul confine di arrotondamento — e' li' che una sonda con importi tondi dichiara
 «zero occorrenze».
 """
+# Numeri aggiornati il 2026-09-18 (imposte secondo il commercialista): dal secondo anno la cassa
+# incassa il credito da acconti dell'anno prima, compensato per intero invece di restare in sp06e.
+# Misurato sulla sonda di `test_un_cash_sweep_nel_2028…`: 2028 +26.109,24 = credito 2027 compensato.
+# Con lo scoperto concesso la stessa compensazione riduce scoperto e interessi (ce15, sp13, ce20).
 from decimal import Decimal as D
 
 import pytest
@@ -226,8 +230,8 @@ def test_un_cash_sweep_nel_2028_paga_il_pregresso_e_lascia_il_prestito_al_suo_pi
             ]
             sp = _genera(db, "sweep-oltre", rows, BREVE, LUNGO)
         assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE + QUOTA_BREVE_PRESTITO[2027]
-        for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "230036.16"),
-                                             2029: ("25000.09", "0.02", "345042.89")}.items():
+        for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "256145.39"),
+                                             2029: ("25000.09", "0.02", "365088.67")}.items():
             assert sp[anno]["sp16a_debiti_banche_breve"] == D(breve), anno
             assert sp[anno]["sp17a_debiti_banche_lungo"] == D(lungo), anno
             assert sp[anno]["sp09_disponibilita_liquide"] == D(cassa), anno

@@ -1030,6 +1030,7 @@ class PDFReportRenderer:
             ("Var. Rimanenze", lambda cf: cf.operating_activities.working_capital_changes.delta_inventory),
             ("Var. Crediti", lambda cf: cf.operating_activities.working_capital_changes.delta_receivables),
             ("Var. Debiti", lambda cf: cf.operating_activities.working_capital_changes.delta_payables),
+            ("Var. Debiti tributari netti", lambda cf: cf.operating_activities.working_capital_changes.delta_tax),
             ("Altre variazioni", lambda cf: cf.operating_activities.working_capital_changes.other_wc_changes),
             ("Interessi pagati/incassati", lambda cf: cf.operating_activities.cash_adjustments.interest_paid_received),
             ("Imposte pagate", lambda cf: cf.operating_activities.cash_adjustments.taxes_paid),

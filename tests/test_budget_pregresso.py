@@ -103,7 +103,8 @@ def test_details_declare_the_three_keys_without_any_plan(monkeypatch):
                 assert details["imposte"]["current_tax"] > D("0")
                 assert set(details["imposte"]) == {"current_tax", "saldo_paid", "acconti_paid",
                                                    "rate_paid", "generated_debt", "generated_credit",
-                                                   "opening_credit_left", "mode"}
+                                                   "opening_credit_left", "credito_compensato",
+                                                   "crediti_tributari_consuntivo", "mode"}
     finally:
         engine.dispose()
 
@@ -335,21 +336,24 @@ def test_writeoff_survives_the_ce09_rounding_residual(monkeypatch):
 def test_receivables_plan_leaves_the_deferred_tax_quota_of_sp07_alone(monkeypatch):
     """Il lato oltre dei crediti e' pregresso solo per la parte COMMERCIALE:
     imposte anticipate e crediti tributari oltre l'anno dipendono dalla posizione
-    fiscale, non dalla rotazione, e restano quelli del percorso di sempre."""
+    fiscale, non dalla rotazione, e restano quelle del consuntivo (dal 2026-09-18
+    le anticipate sono costanti: niente griglia delle differenze temporanee)."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
             company_id, _ = seed_base_year(db, user_id=USER)
-            differences = [{"name": "Differenza temporanea 1", "kind": "deductible", "maturity": "long",
-                            "opening_amount": 0, "additions": 40000, "reversals": 0,
-                            "tax_rate": 25}]
-            rows = [dict(forecast_year=y, tax_temporary_differences=differences, **MANUAL_TAX)
-                    for y in (2027, 2028)]
+            # 10.000 di anticipate oltre l'esercizio nel consuntivo, tolte alla cassa
+            bs = db.query(models.FinancialYear).filter_by(company_id=company_id).one().balance_sheet
+            bs.sp07f_imposte_anticipate_lungo = D("10000")
+            bs.sp07_crediti_lungo += D("10000")
+            bs.sp09_disponibilita_liquide -= D("10000")
+            db.commit()
+            rows = [dict(forecast_year=y, **MANUAL_TAX) for y in (2027, 2028)]
             rows[0]["pregresso"] = {"crediti_commerciali": {"opening": 120000, "amounts": [60000]}}
             sc, _ = _run(db, company_id, rows)
             (_, bs0, _), _ = read_forecast_maps(db, sc.id)
-            assert bs0["sp07f_imposte_anticipate_lungo"] == D("10000.00")   # 40.000 × 25%
+            assert bs0["sp07f_imposte_anticipate_lungo"] == D("10000.00")   # costanti
             assert bs0["sp07a_crediti_clienti_lungo"] == D("60000.00")      # residuo commerciale
             assert bs0["sp07_crediti_lungo"] == D("70000.00")
             assert bs0["_total_assets"] == bs0["_total_liabilities"]
@@ -387,15 +391,23 @@ def test_constant_tax_pays_itself_and_leaves_no_debt(monkeypatch):
             # 50.000 di acconto contro 16.800 di imposta corrente -> 33.200 a credito
             assert ce0["ce20_imposte"] == D("16800.00")
             assert bs0["sp06e_crediti_tributari_breve"] == D("33200.00")
-            # senza acconti la stessa azienda tiene in cassa esattamente i 50.000
-            # non versati, e il debito generato si paga l'anno DOPO
+            # senza acconti la stessa azienda tiene in cassa i 50.000 non versati
+            # il primo anno. Dal secondo, col piano ad acconti, i 33.200 di credito
+            # si compensano (commercialista, 2026-09-18) e resta di differenza
+            # solo il debito che il piano senza acconti deve ancora versare,
+            # 16.800. Prima il credito si trascinava e la differenza restava
+            # 50.000 per sempre: quei 33.200 non tornavano mai in cassa.
             zero_acconto = [dict(r) for r in _tax_rows((2027, 2028, 2029))]
             zero_acconto[0]["pregresso"] = {"debiti_tributari": {
                 "opening": 0, "saldo": 0, "rateizzato": 0, "amounts": [], "acconto_pct": 0}}
             sc0, _ = _run(db, company_id, zero_acconto)
-            for (_, bs_acc, _), (_, bs_no, _) in zip(read_forecast_maps(db, sc.id),
-                                                     read_forecast_maps(db, sc0.id)):
-                assert bs_no["sp09_disponibilita_liquide"] - bs_acc["sp09_disponibilita_liquide"] == D("50000.00")
+            differenze = [
+                bs_no["sp09_disponibilita_liquide"] - bs_acc["sp09_disponibilita_liquide"]
+                for (_, bs_acc, _), (_, bs_no, _) in zip(read_forecast_maps(db, sc.id),
+                                                         read_forecast_maps(db, sc0.id))
+            ]
+            assert differenze == [D("50000.00"), D("16800.00"), D("16800.00")]
+            for _, bs_no, _ in read_forecast_maps(db, sc0.id):
                 assert bs_no["sp16e_debiti_tributari_breve"] == D("16800.00")
     finally:
         engine.dispose()
@@ -481,10 +493,12 @@ def test_the_debt_generated_is_last_years_tax_difference(monkeypatch):
         engine.dispose()
 
 
-def test_the_opening_tax_credit_absorbs_the_saldo_and_the_rest_survives(monkeypatch):
-    """Il credito tributario di apertura compensa il saldo fino a capienza, e
-    l'eccedenza resta credito invece di sparire. Senza quella compensazione il
-    saldo verrebbe versato per intero e la cassa direbbe il falso."""
+def test_the_consuntivo_tax_credit_stays_out_and_the_saldo_is_paid(monkeypatch):
+    """Commercialista, 2026-09-18: i crediti tributari del consuntivo (IVA,
+    ritenute…) NON sono credito da acconti. Restano costanti e non compensano il
+    saldo, che si versa per intero; il credito da acconti dell'anno si somma
+    sopra. Prima i 20.000 compensavano i 5.000 di saldo e i 15.000 restanti si
+    trascinavano."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -507,24 +521,26 @@ def test_the_opening_tax_credit_absorbs_the_saldo_and_the_rest_survives(monkeypa
                         .order_by(models.BudgetAssumptions.forecast_year).all())
             imposte = [y.details["imposte"] for y in ForecastEngine(db).compute_forecast(source, orm_rows).years]
             assert imposte[0]["mode"] == "saldo_acconto"
-            assert imposte[0]["saldo_paid"] == D("0")             # 5.000 tutti compensati
-            assert imposte[0]["opening_credit_left"] == D("15000")
+            assert imposte[0]["saldo_paid"] == D("5000")          # saldo versato per intero
+            assert imposte[0]["credito_compensato"] == D("0")     # primo anno: niente da compensare
+            assert imposte[0]["opening_credit_left"] == D("0")
             assert imposte[0]["acconti_paid"] == D("50000")       # 100% del ce20 base
             assert imposte[0]["generated_credit"] == D("33200")
+            assert imposte[0]["crediti_tributari_consuntivo"] == D("20000")
             (_, bs0, _), _ = read_forecast_maps(db, sc.id)
-            assert bs0["sp06e_crediti_tributari_breve"] == D("48200.00")   # 33.200 + 15.000
+            assert bs0["sp06e_crediti_tributari_breve"] == D("53200.00")   # 20.000 costanti + 33.200
             assert bs0["sp16e_debiti_tributari_breve"] == D("0.00")
             assert bs0["_total_assets"] == bs0["_total_liabilities"]
     finally:
         engine.dispose()
 
 
-def test_the_leftover_tax_credit_is_spent_on_a_later_saldo(monkeypatch):
-    """Il credito di apertura non consumato viaggia di anno in anno e paga il
-    SALDO di un anno successivo — il debito generato a fine anno N si versa in
-    N+1. Senza quel versamento il credito resterebbe li' per sempre: e' un
-    difetto che nessun anno singolo puo' vedere, perche' il saldo non tocca il
-    patrimoniale (sp16e nasce dal debito generato, e la cassa e' il plug)."""
+def test_the_tax_credit_of_a_year_is_compensated_the_next_and_never_piles_up(monkeypatch):
+    """Commercialista, 2026-09-18: debito e credito dell'anno prima si chiudono
+    ogni anno. Il credito da acconti di N si compensa per intero in N+1 (anche
+    quando N+1 non ha saldo da versare), il debito di N esce come saldo in N+1,
+    e i crediti del consuntivo restano costanti accanto. Prima il credito si
+    spendeva solo contro un saldo, quindi senza saldo si trascinava."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -541,18 +557,20 @@ def test_the_leftover_tax_credit_is_spent_on_a_later_saldo(monkeypatch):
             orm_rows = (db.query(models.BudgetAssumptions).filter_by(scenario_id=sc.id)
                         .order_by(models.BudgetAssumptions.forecast_year).all())
             imposte = [y.details["imposte"] for y in ForecastEngine(db).compute_forecast(source, orm_rows).years]
-            # 2027: 5.000 di saldo compensati, restano 15.000; l'acconto (50.000)
-            #       supera l'imposta (45.600) e genera altri 4.400 di credito
-            assert (imposte[0]["saldo_paid"], imposte[0]["opening_credit_left"]) == (D("0"), D("15000"))
-            # 2028: niente saldo da pagare (2027 non ha generato debito), quindi il
-            #       credito resta intero a 19.400 e l'anno chiude con 34.560 di debito
-            assert (imposte[1]["saldo_paid"], imposte[1]["opening_credit_left"]) == (D("0"), D("19400"))
-            # 2029: il saldo del 2028 (34.560) consuma i 19.400 e se ne versano 15.160
-            assert imposte[2]["saldo_paid"] == D("15160")
-            assert imposte[2]["opening_credit_left"] == D("0")
-            (_, _, _), (_, bs1, _), (_, bs2, _) = read_forecast_maps(db, sc.id)
-            assert bs1["sp06e_crediti_tributari_breve"] == D("19400.00")
-            assert bs2["sp06e_crediti_tributari_breve"] == D("0.00")
+            # 2027: i 5.000 di saldo si versano; l'acconto (50.000) supera
+            #       l'imposta (45.600) e genera 4.400 di credito
+            assert (imposte[0]["saldo_paid"], imposte[0]["generated_credit"]) == (D("5000"), D("4400"))
+            # 2028: i 4.400 si compensano per intero anche senza saldo; l'anno
+            #       chiude con 34.560 di debito
+            assert (imposte[1]["saldo_paid"], imposte[1]["credito_compensato"]) == (D("0"), D("4400"))
+            assert imposte[1]["generated_debt"] == D("34560.00")
+            # 2029: il saldo del 2028 si versa intero, nessun credito da compensare
+            assert (imposte[2]["saldo_paid"], imposte[2]["credito_compensato"]) == (D("34560.00"), D("0"))
+            assert all(i["opening_credit_left"] == D("0") for i in imposte)
+            (_, bs0, _), (_, bs1, _), (_, bs2, _) = read_forecast_maps(db, sc.id)
+            assert bs0["sp06e_crediti_tributari_breve"] == D("24400.00")   # 20.000 + 4.400
+            assert bs1["sp06e_crediti_tributari_breve"] == D("20000.00")   # i 4.400 sono chiusi
+            assert bs2["sp06e_crediti_tributari_breve"] == D("20000.00")
     finally:
         engine.dispose()
 
@@ -717,15 +735,16 @@ def test_switching_from_manual_to_automatic_carries_the_tax_position_over(monkey
             sc, _ = _run(db, company_id, rows)
             imposte = [d["imposte"] for d in _details_of(db, sc.id)]
             assert imposte[0]["mode"] == "manual"
-            # 2028 legge il patrimoniale del 2027: 5.000 di saldo, compensati dai
-            # 20.000 di credito, e 15.000 di credito che restano
+            # 2028 legge il patrimoniale del 2027: 5.000 di saldo da versare; i
+            # 20.000 di credito sono la quota del consuntivo, che resta (nulla da
+            # compensare: l'anno manuale non porta credito oltre quella quota)
             assert imposte[1]["mode"] == "saldo_acconto"
-            assert imposte[1]["saldo_paid"] == D("0")
-            assert imposte[1]["opening_credit_left"] == D("15000")
+            assert imposte[1]["saldo_paid"] == D("5000")
+            assert imposte[1]["credito_compensato"] == D("0")
             assert imposte[1]["acconti_paid"] == D("16800")   # 100% dell'imposta 2027
             (_, bs0, _), (_, bs1, _) = read_forecast_maps(db, sc.id)
             assert (bs0["sp06e_crediti_tributari_breve"], bs0["sp16e_debiti_tributari_breve"]) == (D("20000.00"), D("5000.00"))
-            assert bs1["sp06e_crediti_tributari_breve"] == D("15000.00")
+            assert bs1["sp06e_crediti_tributari_breve"] == D("20000.00")
             assert bs1["sp16e_debiti_tributari_breve"] == D("0.00")
             assert bs1["_total_assets"] == bs1["_total_liabilities"]
     finally:
@@ -754,7 +773,9 @@ def test_explicit_advances_beat_the_percentage(monkeypatch):
             assert imposte[1]["acconti_paid"] == D("8000")
             (_, bs0, _), (_, bs1, _) = read_forecast_maps(db, sc.id)
             assert bs0["sp16e_debiti_tributari_breve"] == D("8800.00")
-            # il saldo 2027 (8.800) si versa nel 2028 attingendo al credito residuo
-            assert bs1["sp06e_crediti_tributari_breve"] == D("6200.00")   # 15.000 − 8.800
+            # il saldo 2027 (8.800) si versa per intero nel 2028: i 20.000 di
+            # crediti del consuntivo restano fuori dal meccanismo (2026-09-18)
+            assert imposte[1]["saldo_paid"] == D("8800.00")
+            assert bs1["sp06e_crediti_tributari_breve"] == D("20000.00")
     finally:
         engine.dispose()

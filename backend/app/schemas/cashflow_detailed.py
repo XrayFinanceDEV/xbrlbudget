@@ -36,6 +36,10 @@ class WorkingCapitalChanges(BaseModel):
     delta_inventory: Decimal = Field(description="Decremento/(incremento) delle rimanenze")
     delta_receivables: Decimal = Field(description="Decremento/(incremento) dei crediti entro esercizio")
     delta_payables: Decimal = Field(description="Incremento/(decremento) dei debiti entro esercizio")
+    delta_tax: Decimal = Field(
+        default=Decimal("0"),
+        description="Incremento/(decremento) dei debiti tributari al netto dei crediti tributari"
+    )
     delta_accruals_deferrals_active: Decimal = Field(
         default=Decimal("0"),
         description="Decremento/(incremento) ratei e risconti attivi"

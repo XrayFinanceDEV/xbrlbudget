@@ -496,6 +496,10 @@ export interface ImposteDetail {
   generated_debt: number;
   generated_credit: number;
   opening_credit_left: number;
+  /** Il credito dell'anno prima compensato per intero quest'anno (dal 2026-09-18). */
+  credito_compensato?: number;
+  /** I crediti tributari del consuntivo, fuori dal meccanismo e costanti. */
+  crediti_tributari_consuntivo?: number;
   mode: "saldo_acconto" | "manual";
 }
 
@@ -931,6 +935,9 @@ export interface WorkingCapitalChanges {
   delta_inventory: number;
   delta_receivables: number;
   delta_payables: number;
+  /** Debiti tributari al netto dei crediti tributari (entro e oltre), dal 2026-09-18
+   *  fuori da crediti e debiti. Il rendiconto si calcola al volo: c'e' sempre. */
+  delta_tax: number;
   delta_accruals_deferrals_active: number;
   delta_accruals_deferrals_passive: number;
   other_wc_changes: number;

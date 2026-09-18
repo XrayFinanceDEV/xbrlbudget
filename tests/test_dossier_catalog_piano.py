@@ -185,9 +185,14 @@ def test_sp_summary_table_has_eleven_rows_and_assets_equal_liabilities():
     totale_passivo = next(r for r in table["rows"] if r["cells"][0] == "Totale passivo e netto")
     assert totale_attivo["cells"][1:] == [shared.exact(v) for v in expected_total_assets]
     assert totale_passivo["cells"][1:] == [shared.exact(v) for v in expected_total_liabilities]
-    # Nessun sottotitolo su «sp»: senza, la pagina non entra nel vincolo di
-    # una pagina fisica con l'11esima riga (v. il commit che l'ha tolto).
-    assert page["subtitle"] is None
+    # Il sottotitolo su «sp» era stato tolto perché con 11 righe la pagina non
+    # entrava più in un foglio solo. Da M2-02G la forma `rail+main` toglie la
+    # tabellina dei valori sotto il grafico e lo spazio c'è: il sottotitolo
+    # torna, e porta la legenda delle lettere di colonna («C: chiusura
+    # stimata; P: previsione di piano»), che senza di lui resterebbe muta.
+    # Che la pagina continui a entrare in un foglio lo verifica il probe di
+    # layout in `test_typst_editorial_plan.py`, non un'asserzione a occhio qui.
+    assert page["subtitle"] is not None and "P: previsione di piano" in page["subtitle"]
 
 
 def test_sp_commercial_receivables_row_is_the_sum_of_short_and_long():

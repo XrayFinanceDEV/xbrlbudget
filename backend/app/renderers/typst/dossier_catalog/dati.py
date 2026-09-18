@@ -122,13 +122,13 @@ def _column_label(period: Any) -> str:
 
 
 def _bar_chart(chart_id: str, title: str, unit: str, categories: list[str],
-              series: list[tuple[str, list[Any]]]) -> dict[str, Any] | None:
+              series: list[tuple[str, list[Any]]], kind: str = "bar") -> dict[str, Any] | None:
     built = [{"label": label, "values": [s.exact(v) for v in values]}
              for label, values in series if any(v is not None for v in values)]
     if not built:
         return None
     return {"id": chart_id, "title": title, "unit": unit, "categories": categories,
-            "series": built, "indicator_ids": [], "thresholds": [], "kind": "bar"}
+            "series": built, "indicator_ids": [], "thresholds": [], "kind": kind}
 
 
 # ── Pagina 3 — Bilancio infrannuale e fonti ─────────────────────────────────
@@ -318,6 +318,7 @@ def _indicatori_infrannuali(report: FinalReportModelV2) -> dict[str, Any] | None
     # Rimando all'Allegato F nel sottotitolo, non in un blocco a parte — vedi
     # la nota nella pagina «rettifiche» sullo stesso trabocco su dati reali.
     return {"id": "indicatori-infrannuali", "title": "Indicatori dell'infrannuale", "family": FAMILY,
+            "form": "rail+main",
             "subtitle": "Il progressivo rettificato e la chiusura attesa sono confrontati sugli stessi "
                         "indicatori, con durate diverse; il dettaglio è nell'Allegato F.",
             "kpis": [] if block is not None else kpis, "items": items}
@@ -369,7 +370,7 @@ def _confronto_chart(report: FinalReportModelV2, adjusted: Any, closing: Any) ->
     if not categories:
         return None
     return _bar_chart("indicatori-infrannuali-confronto", "Dal progressivo alla chiusura", unit, categories,
-                      [("Rettificato", adj_values), ("Chiusura", close_values)])
+                      [("Rettificato", adj_values), ("Chiusura", close_values)], kind="dumbbell")
 
 
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:

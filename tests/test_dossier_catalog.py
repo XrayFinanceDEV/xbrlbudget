@@ -134,7 +134,7 @@ def test_ce_summary_table_reads_the_nine_canonical_rows_verbatim(workflow):
     table = next(item for item in ce_page["items"] if item["kind"] == "table")
     statement = shared.statement_by_id(report, "income_statement")
     periods = shared.forecast_periods(statement)
-    assert table["columns"] == ["Voce", *[shared.period_label(period) for period in periods]]
+    assert table["columns"] == ["Voce", *[shared.period_label_short(period) for period in periods]]
     labels = [row["cells"][0] for row in table["rows"]]
     assert labels == ["Ricavi", "Costi operativi", "EBITDA", "Ammortamenti", "EBIT",
                       "Oneri finanziari", "Risultato ante imposte", "Imposte", "Risultato netto"]

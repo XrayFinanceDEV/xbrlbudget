@@ -136,7 +136,7 @@ def _indicator_table(table_id: str, title: str, report: FinalReportModelV2, peri
     così com'è — necessario per `practice.dscr`, che porta il suffisso
     "— proxy della pratica" (v. `build_indicator_catalog`), non riscrivibile a
     mano senza perdere quell'avvertenza."""
-    columns = ["Indicatore", *[s.period_label(period) for period in periods]]
+    columns = ["Indicatore", *[s.period_label_short(period) for period in periods]]
     rows = []
     for identifier, display_label in rows_spec:
         indicator = s.indicator_by_id(report, identifier)
@@ -359,7 +359,7 @@ def _first_last_periods(periods: list[Any]) -> list[Any]:
 def _structure_table(table_id: str, title: str, report: FinalReportModelV2, group_id: str, periods: list[Any],
                      rows_spec: list[tuple[str, str, str]]) -> dict[str, Any] | None:
     group = _structure_group(report, group_id)
-    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     rows = []
     for series_id, display_label, unit in rows_spec:
         series = _structure_series(group, series_id)
@@ -409,7 +409,7 @@ def _composizione(report: FinalReportModelV2) -> dict[str, Any]:
         ("composition_sources", "financial_debt_share", "Debiti finanziari (fonti)"),
         ("composition_sources", "other_liabilities_share", "Altre passività (fonti)"),
     ]
-    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     rows = []
     for group_id, series_id, display_label in composition_rows:
         values = _structure_values(report, group_id, series_id, periods)
@@ -430,7 +430,7 @@ def _composizione(report: FinalReportModelV2) -> dict[str, Any]:
 def _structure_table(table_id: str, title: str, report: FinalReportModelV2, group_id: str, periods: list[Any],
                      rows_spec: list[tuple[str, str, str]]) -> dict[str, Any] | None:
     group = _structure_group(report, group_id)
-    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     rows = []
     for series_id, display_label, unit in rows_spec:
         series = _structure_series(group, series_id)

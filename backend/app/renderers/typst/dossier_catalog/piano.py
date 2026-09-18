@@ -1,11 +1,14 @@
 """Gruppo PIANO E RISULTATI (v4 pagine 7-10): ipotesi del piano, conto economico
 previsionale, stato patrimoniale previsionale, flussi di cassa e sostenibilità.
 
-Tutte e quattro le pagine sono anni-di-piano soltanto (`shared.forecast_periods`,
-mai `select_periods`): la pagina deve rendere identica sui tre workflow
-(bilancio, infrannuale, startup), e solo l'infrannuale ha un periodo di
-chiusura — usarlo come ancora, come fa la v4 dimostrativa, romperebbe le
-altre due. Precedente di «ce» (v4 pagina 8), fondazione M2-02D.
+CE, SP e indicatori mostrano **l'ancora più gli anni di piano**
+(`shared.select_periods`: la chiusura attesa, o in mancanza l'ultimo esercizio
+storico), come il contratto v4 (M2-02G): un piano si legge contro il punto da
+cui parte, e senza quella colonna la prima variazione non ha termine di
+paragone. La regola non rompe gli altri workflow — un bilancio annuale porta
+il suo ultimo storico, e uno startup che non ha né chiusura né storico
+degrada agli anni di piano soltanto. I flussi restano anni-di-piano: un
+rendiconto di periodo per la chiusura non esiste in tutti i workflow.
 """
 from __future__ import annotations
 
@@ -135,7 +138,7 @@ def _driver_row(identifier: str, label: str, values: list[Any], unit: str) -> di
 
 
 def _ce_summary_table(report: FinalReportModelV2, statement: Any, periods: list[Any]) -> dict[str, Any]:
-    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     rows = []
     for code, display_label in _CE_SUMMARY_ROWS:
         row_obj = s.statement_row(statement, code)
@@ -147,7 +150,7 @@ def _ce_summary_table(report: FinalReportModelV2, statement: Any, periods: list[
 
 def _ce(report: FinalReportModelV2) -> dict[str, Any]:
     statement = s.statement_by_id(report, "income_statement")
-    periods = s.forecast_periods(statement)  # «CE previsionale = anni di piano», m2-02d.md
+    periods = s.select_periods(statement.periods)  # ancora + anni di piano (contratto v4)
     kpis = [kpi for kpi in (
         s.kpi_forecast(report, "income_statement",
                        ("ce01_ricavi_vendite", "revenue", "production_value"), "ricavi"),
@@ -169,14 +172,15 @@ def _ce(report: FinalReportModelV2) -> dict[str, Any]:
     # margine operativo (EBIT/ricavi) già nel catalogo indicatori — nessun
     # calcolo qui, solo una finestra sui periodi che la pagina racconta.
     chart = s.indicator_chart(report, "ce-margini", "Evoluzione dei margini", "percent", periods,
-        ["practice.ebitda_margin", "analytical.profitability.ros"])
+        ["practice.ebitda_margin", "practice.ebit_margin"])
     items: list[dict[str, Any]] = []
     block = s.chart_block("ce-margini", "Evoluzione dei margini", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
     items.append(_ce_summary_table(report, statement, periods))
     return {"form": "rail+main", "id": "ce", "title": "Conto economico previsionale", "family": FAMILY,
-            "subtitle": "Gli anni di piano sono confrontati sulla medesima base annuale.",
+            "subtitle": "Gli anni sono confrontati sulla medesima base annuale. "
+                        + s.period_basis_legend(periods) + ".",
             "kpis": [] if block is not None else kpis, "items": items}
 
 
@@ -206,7 +210,7 @@ def _ipotesi(report: FinalReportModelV2) -> dict[str, Any]:
         s.kpi("investimenti cumulati", investments_total, "eur") if investments_total is not None else None,
     ) if kpi is not None]
 
-    driver_columns = ["Voce", *[s.period_label(period) for period in periods]]
+    driver_columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     driver_rows = [
         _driver_row("revenue_growth", "Ricavi · crescita annua", growth, "percent"),
         _driver_row("opex_revenue", "Costi operativi / ricavi", opex_revenue, "percent"),
@@ -231,7 +235,7 @@ def _ipotesi(report: FinalReportModelV2) -> dict[str, Any]:
 
 
 def _sp_summary_table(report: FinalReportModelV2, statement: Any, periods: list[Any]) -> dict[str, Any]:
-    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     fixed_assets = s.values_for_periods(s.statement_row(statement, "fixed_assets"), statement, periods)
     rimanenze = s.values_for_periods(s.statement_row(statement, "sp05_rimanenze"), statement, periods)
     crediti_commerciali = _sum_two_rows(statement, periods, _SP_COMMERCIAL_RECEIVABLE_CODES)
@@ -264,7 +268,7 @@ def _sp_summary_table(report: FinalReportModelV2, statement: Any, periods: list[
 
 def _sp(report: FinalReportModelV2) -> dict[str, Any]:
     statement = s.statement_by_id(report, "balance_sheet")
-    periods = s.forecast_periods(statement)  # «SP previsionale = anni di piano», come «ce»
+    periods = s.select_periods(statement.periods)  # ancora + anni di piano, come «ce»
     kpis = [kpi for kpi in (
         s.kpi_statement(report, "balance_sheet", "total_assets", "totale attivo"),
         s.kpi_statement(report, "balance_sheet", _SP_EQUITY_CODE, "patrimonio netto"),
@@ -281,12 +285,12 @@ def _sp(report: FinalReportModelV2) -> dict[str, Any]:
         items.append(block)
     items.append(_sp_summary_table(report, statement, periods))
     return {"form": "rail+main", "id": "sp", "title": "Stato patrimoniale previsionale", "family": FAMILY,
-            "subtitle": None,
+            "subtitle": "Saldi di fine esercizio. " + s.period_basis_legend(periods) + ".",
             "kpis": [] if block is not None else kpis, "items": items}
 
 
 def _cashflow_summary_table(statement: Any, periods: list[Any]) -> dict[str, Any]:
-    columns = ["Voce", *[s.period_label(period) for period in periods]]
+    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
     rows = []
     for code, display_label in _CASHFLOW_SUMMARY_ROWS:
         row_obj = s.statement_row(statement, code)

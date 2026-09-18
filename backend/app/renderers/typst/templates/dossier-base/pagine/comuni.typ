@@ -93,7 +93,7 @@
         repeated-table-title(spec, item, count),
         ..item.columns.map(c => table.cell(
           fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.5pt, weight: 600, fill: navy, c)))),
+          plex(7.2pt, weight: 500, fill: muted, c)))),
       ..cells)
   } else {
     // Long labels, large exact amounts: room to wrap, label | "col: value" lines.
@@ -117,9 +117,9 @@
       table.header(
         repeated-table-title(spec, item, 2),
         table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.5pt, weight: 600, item.columns.first())),
+          plex(7.2pt, weight: 500, fill: muted, item.columns.first())),
         table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
-          plex(7.5pt, weight: 600)[Valori])),
+          plex(7.2pt, weight: 500, fill: muted)[Valori])),
       ..cells)
   }
 }

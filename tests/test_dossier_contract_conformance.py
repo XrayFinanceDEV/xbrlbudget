@@ -334,6 +334,29 @@ def test_style_contract_letto_dalla_tipografia() -> None:
     assert style["type"]["kpi_valore"]["size"]["pt"] == 15.0
     assert style["colors"]["series_palette"] == ["#003049", "#669BBC", "#B7791F", "#9CC0D8"]
 
+    # Fin qui il JSON. Le righe sotto riguardano il template: un ruolo tipografico
+    # che lo style contract nomina e che `base.typ`/`comuni.typ`/`charts.typ` non
+    # esprimono piú non è "il contratto non vincola", è una regressione — ed è
+    # esattamente il modo in cui una forma di pagina torna `single` senza che
+    # nessuno se ne accorga.
+    templates = ROOT / "backend/app/renderers/typst/templates/dossier-base"
+    base = (templates / "base.typ").read_text(encoding="utf-8")
+    comuni = (templates / "pagine/comuni.typ").read_text(encoding="utf-8")
+    grafici = (templates / "charts.typ").read_text(encoding="utf-8")
+    assert "size: 9pt" in base, "il corpo del documento non è piú 9 pt"
+    assert "safe-prose(16pt, weight: 600" in comuni, "il titolo di pagina non è piú 16 pt/600"
+    assert "plex(7.5pt, weight: 500, fill: blue" in comuni, "l'occhiello non è piú 7,5 pt/500"
+    assert "size: 8pt" in comuni, "la tabella non è piú 8 pt"
+    assert "plex(7.2pt, weight: 500, fill: muted" in comuni, "l'intestazione di tabella non è piú 7,2 pt/500 muted"
+    assert "7.6pt, fill: muted" in grafici, "la legenda dei grafici non è piú 7,6 pt muted"
+    assert "#let rail-width = 47mm" in base, "il rail non è piú largo 47 mm come lo style contract"
+    assert style["spacing"]["rail_colonna"]["width"] == "47mm"
+    assert "15pt" in base and "7.8pt, fill: muted, kpi.label" in base, "il KPI del rail non è piú 15 pt su 7,8 pt"
+    # Le colonne della forma devono richiudere il foglio: sono la stessa somma
+    # che Typst mette nel grid e che `editorial_plan` rivuole nel marcatore.
+    assert 47 + 5 + float(shared.CHART_WIDTH_RAIL_MM) == 178
+    assert 2 * float(shared.CHART_WIDTH_PANEL_MM) + 6 == 178
+
 
 # ── La fondazione: kind, forme di pagina, pannelli ──────────────────────────
 

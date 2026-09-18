@@ -7,7 +7,7 @@ import { DossierContent } from "./Dossier";
 describe("DossierContent", () => {
   it("prints every chart, indicator value and full CE/SP/CF attachments", () => {
     const html = renderToStaticMarkup(<DossierContent report={annual as FinalReportModelV2} />);
-    expect((html.match(/data-testid="final-report-chart-/g) ?? []).length).toBe(16);
+    expect((html.match(/data-testid="final-report-chart-/g) ?? []).length).toBe(20); // +4 serie pagine executive (M2-02G fase 2: pag. 8/12/14/17)
     expect((html.match(/Convenzione:/g) ?? []).length).toBe(48); // + practice.quick_ratio/ebit_margin/opex_revenue/effective_tax_rate (M2-02E)
     expect(html).toContain("Allegati");
     expect(html).toContain("Conto economico");

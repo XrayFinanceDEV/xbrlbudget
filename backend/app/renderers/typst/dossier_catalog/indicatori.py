@@ -186,5 +186,43 @@ def _indicatori(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [] if block is not None else kpis, "items": items}
 
 
+# ── Pagina 12 · Liquidità e margini strutturali ─────────────────────────────
+
+
+def _liquidita(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    kpis = [kpi for kpi in (
+        s.kpi_indicator(report, "practice.current_ratio", "liquidità corrente"),
+        s.kpi_indicator(report, "practice.mt", "margine di tesoreria"),
+        s.kpi_indicator(report, "practice.ms", "margine di struttura"),
+    ) if kpi is not None]
+    # Id di grafico riusato apposta: è lo stesso "structural_balance" già
+    # dichiarato fra i grafici a barre di `chart-layout.json` (e nel catalogo
+    # legacy `DOSSIER_CHARTS` di `final_report_dossier.py`, stessi tre
+    # indicatori) — nessuna voce nuova da aggiungere lì.
+    chart = s.indicator_chart(report, "structural_balance", "Margini strutturali", "eur", periods,
+        ["practice.ccn", "practice.mt", "practice.ms"])
+    items: list[dict[str, Any]] = []
+    block = s.chart_block("structural_balance", "Margini strutturali", chart, kpis)
+    if block is not None:
+        items.append(block)
+    # Il secondo grafico della v4 ("Liquidità corrente e immediata", current
+    # ratio + quick ratio) non ha una pagina fisica propria in questo gruppo
+    # (v. commento di modulo): entrambi gli indicatori restano leggibili in
+    # tabella, e la liquidità corrente anche come KPI qui sopra.
+    table = _indicator_table("liquidita-tabella", "Quadro dei margini e della liquidità", report, periods, [
+        ("practice.ccn", "Capitale circolante netto"),
+        ("practice.mt", "Margine di tesoreria"),
+        ("practice.ms", "Margine di struttura"),
+        ("practice.current_ratio", "Liquidità corrente"),
+        ("practice.quick_ratio", "Liquidità immediata"),
+    ])
+    if table is not None:
+        items.append(table)
+    return {"id": "liquidita", "title": "Liquidità e margini strutturali", "family": FAMILY,
+            "subtitle": "CCN, margine di tesoreria e margine di struttura sono distinti dal circolante operativo.",
+            "kpis": [] if block is not None else kpis, "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
-    return [_indicatori(report)]
+    return [_indicatori(report), _liquidita(report)]

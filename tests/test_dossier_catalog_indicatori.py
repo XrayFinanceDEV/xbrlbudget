@@ -24,12 +24,38 @@ def _tables(pages):
 
 
 @pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
-def test_build_returns_only_page_11_so_far(workflow):
-    """Fase 2 in corso: solo «indicatori» (v4 pagina 11) è implementata;
-    le altre sette pagine del gruppo arrivano nei prossimi commit."""
+def test_build_returns_the_pages_implemented_so_far(workflow):
+    """Fase 2 in corso: il gruppo cresce di pagina in pagina (un commit a
+    testa) — qui solo l'ordine v4 di ciò che esiste già, mai un conteggio
+    fisso che andrebbe aggiornato a ogni pagina aggiunta."""
     report = fixture_report(workflow, [2027, 2028, 2029])
     pages = indicatori.build(report)
-    assert [page["id"] for page in pages] == ["indicatori"]
+    assert [page["id"] for page in pages] == ["indicatori", "liquidita"]
+
+
+def test_liquidita_page_reuses_the_structural_balance_chart_id():
+    """`structural_balance` è già dichiarato fra i grafici a barre di
+    `chart-layout.json` (e nel catalogo legacy `DOSSIER_CHARTS`, stessi tre
+    indicatori CCN/MT/MS): riusarlo qui evita una voce duplicata."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = indicatori.build(report)[1]
+    assert page["id"] == "liquidita"
+    charts = _charts([page])
+    assert len(charts) == 1
+    assert charts[0]["chart"]["id"] == "structural_balance"
+    assert {series["label"] for series in charts[0]["chart"]["series"]} == {"CCN", "Margine di Tesoreria",
+                                                                             "Margine di Struttura"}
+
+
+def test_liquidita_table_omits_current_and_quick_ratio_when_denominator_is_zero():
+    """Sulla fixture sintetica (SP tutto a zero) `practice.current_ratio` e
+    `practice.quick_ratio` sono `None` per `zero_denominator`: la riga si
+    omette, mai un «n.d.» — le altre tre righe restano."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    page = indicatori.build(report)[1]
+    table = _tables([page])[0]
+    row_labels = [row["cells"][0] for row in table["rows"]]
+    assert row_labels == ["Capitale circolante netto", "Margine di tesoreria", "Margine di struttura"]
 
 
 def test_indicatori_page_has_chart_and_summary_table():

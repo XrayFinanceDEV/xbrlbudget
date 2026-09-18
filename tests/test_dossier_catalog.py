@@ -32,21 +32,21 @@ def test_catalog_order_is_the_fixed_v4_page_list(workflow):
     report = fixture_report(workflow, [2027, 2028, 2029])
     inventory = build_inventory(report)
     ids = [page["id"] for page in inventory]
-    # Copertina, sintesi, CE previsionale, indice allegati, poi A (2 parti su
-    # questa fixture), B (4 parti), C (2 parti) — nessuna pagina di dati.py o
-    # indicatori.py, a registro vuoto in questa fase.
-    assert ids[:4] == ["cover", "sintesi", "ce", "allegati"]
-    assert ids[4:6] == ["allegato-A-1", "allegato-A-2"]
-    assert ids[6:10] == ["allegato-B-1", "allegato-B-2", "allegato-B-3", "allegato-B-4"]
-    assert ids[10:12] == ["allegato-C-1", "allegato-C-2"]
-    assert len(ids) == 12
+    # Copertina, sintesi, CE previsionale, indicatori (pag. 11 del catalogo v4
+    # — le altre pagine 12-18 sono ancora in corso in questa fase), indice
+    # allegati, poi A (2 parti su questa fixture), B (4 parti), C (2 parti) —
+    # nessuna pagina di dati.py, a registro vuoto in questa fase.
+    assert ids[:5] == ["cover", "sintesi", "ce", "indicatori", "allegati"]
+    assert ids[5:7] == ["allegato-A-1", "allegato-A-2"]
+    assert ids[7:11] == ["allegato-B-1", "allegato-B-2", "allegato-B-3", "allegato-B-4"]
+    assert ids[11:13] == ["allegato-C-1", "allegato-C-2"]
+    assert len(ids) == 13
     assert all(page["items"] for page in inventory), "nessuna pagina vuota nel catalogo"
 
 
 def test_empty_groups_never_crash_and_contribute_nothing():
     report = fixture_report("bilancio", [2027])
     assert dati.build(report) == []
-    assert indicatori.build(report) == []
 
 
 def test_groups_are_registered_in_the_fixed_v4_family_order():

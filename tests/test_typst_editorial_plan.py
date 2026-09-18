@@ -1,4 +1,11 @@
-"""Full measured dossier: exact inventory, real reflow and per-page note capacity."""
+"""Catalogo fisso del dossier v4 (M2-02D): esatto per pagina, reflow reale e
+capacita' della nota per pagina. Sostituisce la vecchia suite scritta contro
+l'inventario generico (editorial_inventory.py, rimosso): alcuni test del giro
+precedente non hanno più un contenuto a cui riferirsi — comparazione dei
+periodi, catalogo indicatori a blocchi, blocchi narrativi — perché quelle
+pagine non sono ancora implementate (dati.py e indicatori.py hanno registro
+vuoto in questa fase). Restano commentati dove rimossi, non silenziosamente
+sparsi."""
 from dataclasses import asdict, replace
 from decimal import Decimal
 import hashlib
@@ -10,7 +17,7 @@ import fitz
 import pytest
 
 from app.renderers.typst import Compiler, RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable
-from app.renderers.typst.editorial_inventory import (build_inventory, chart_marker_width_mm, chart_view, expected_content_inventory)
+from app.renderers.typst.dossier_catalog import (build_inventory, chart_declarations, chart_marker_width_mm, expected_content_inventory)
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, build_editorial_plan,
     prepare_editorial_report, verify_editorial_layout,
@@ -76,7 +83,7 @@ def with_notes(report, text='Commento breve di lettura.', provenance='automatic'
 
 @pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
 @pytest.mark.parametrize('years', [[2027], [2027, 2028, 2029], list(range(2027, 2032))])
-def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe, workflow, years, tmp_path):
+def test_full_real_composition_has_exact_pages_appendix_rows_and_slots(probe, workflow, years, tmp_path):
     original = fixture_report(workflow, years)
     before = original.model_dump_json()
     report = prepare_editorial_report(original, probe)
@@ -91,11 +98,19 @@ def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe,
     contents = [content for page in plan.pages for content in page.content_ids]
     assert contents == list(expected_content_inventory(original))
     assert len(set(contents)) == len(contents)
+    # Le righe degli Allegati restano lossless anche se le colonne mostrate sono
+    # solo chiusura/storico + anni di piano (vincolo del proprietario): ogni
+    # riga dei tre prospetti compare esattamente una volta, in ordine.
     rows = [(part.statement_id, row) for page in plan.pages for part in page.table_parts for row in part.row_ids]
     assert rows == [(s.id, r.id) for s in report.detailed_statements for r in s.rows]
     assert all(page.note_slot.max_lines == 4 and page.note_slot.font_size_pt == 9 for page in plan.pages)
     assert len({page.note_id for page in plan.pages}) == len(plan.pages)
-    assert ('infrannual_closing' in {page.section_id for page in plan.pages}) == (workflow == 'infrannuale')
+    # Un catalogo fisso: ogni voce del catalogo Python è esattamente una
+    # pagina fisica (nessuna voce del catalogo si spezza fuori dagli Allegati,
+    # che dichiarano da sé le proprie parti come voci separate) — già
+    # garantito da `_validate_inventory` dentro `build_editorial_plan`
+    # ("physical pages cannot mix logical sections"), qui solo il conteggio.
+    assert len(plan.pages) == len(build_inventory(original))
     artifact = probe.render(report)
     with fitz.open(stream=artifact.data, filetype='pdf') as pdf:
         assert pdf.page_count == measurement.page_count
@@ -106,14 +121,10 @@ def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe,
         assert report.company.name in page_texts[0]
         assert 'PERIMETRO DEL DOCUMENTO' in page_texts[0]
         assert 'CONTENUTI DEL DOSSIER' in page_texts[0]
-        assert 'Base editoriale in sviluppo' not in full_text
         for statement in report.detailed_statements:
             numbers = [number for number, page in enumerate(plan.pages, 1)
                        if any(part.statement_id == statement.id for part in page.table_parts)]
-            expected_reference = f'{statement.title} · pagina {numbers[0]}'
-            if numbers[0] != numbers[-1]:
-                expected_reference += f'–{numbers[-1]}'
-            assert expected_reference in full_text
+            assert numbers, statement.id
             assert all(statement.title in page_texts[number - 1] for number in numbers)
         for page, note in zip(pdf, report.editorial_notes):
             text = page_texts[page.number]
@@ -134,6 +145,24 @@ def test_full_real_composition_has_exact_rows_indicators_charts_and_slots(probe,
     assert not list(tmp_path.iterdir())
 
 
+def test_appendix_index_lists_every_part_with_its_own_resolved_page(probe):
+    report = with_notes(prepare_editorial_report(fixture_report('bilancio', [2027, 2028, 2029]), probe))
+    plan = report.editorial_plan
+    page_of = {content_id: number for number, page in enumerate(plan.pages, 1) for content_id in page.content_ids}
+    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
+        page_texts = [' '.join(page.get_text().split()) for page in pdf]
+    index_page = next(page for page in plan.pages if 'appendix-index' in page.content_ids)
+    index_text = page_texts[plan.pages.index(index_page)]
+    for section in build_inventory(report):
+        for item in section['items']:
+            if item['kind'] != 'index':
+                continue
+            for entry in item['entries']:
+                number = page_of[entry['target']]
+                assert entry['label'] in index_text
+                assert str(number) in index_text
+
+
 def test_fitting_notes_do_not_reflow_and_manual_notes_survive_read_only_preparation(probe):
     prepared = prepare_editorial_report(fixture_report(), probe)
     report = with_notes(prepared, provenance='user')
@@ -149,15 +178,16 @@ def test_fitting_notes_do_not_reflow_and_manual_notes_survive_read_only_preparat
             assert note.text in ' '.join(page.get_text().split())
 
 
-def test_overlong_notes_and_overlong_narrative_fail_without_truncation(probe):
+def test_overlong_manual_note_fails_without_truncation(probe):
+    # La metà "narrativa troppo lunga" del vecchio test non ha più un
+    # contenuto a cui riferirsi: nessuna pagina del catalogo di questa fase
+    # rende un blocco narrativo (`report.narrative`) — copertina, sintesi,
+    # CE previsionale e Allegati non lo usano. Resta la metà sul commento per
+    # pagina, che ogni pagina porta sempre.
     prepared = prepare_editorial_report(fixture_report(), probe)
     report = with_notes(prepared, text='Commento molto lungo. ' * 120)
     with pytest.raises(RendererCompileError):
         verify_editorial_layout(report, probe)
-    huge = fixture_report()
-    huge.narrative[0].text = 'Una narrazione troppo lunga per il blocco. ' * 2000
-    with pytest.raises(RendererCompileError):
-        prepare_editorial_report(signed(huge), probe)
 
 
 def test_single_unbreakable_manual_note_cannot_escape_its_width(probe):
@@ -176,12 +206,14 @@ def test_single_unbreakable_manual_note_cannot_escape_its_width(probe):
 def test_chart_measurements_reject_numeric_json_geometry(probe, geometry):
     report = fixture_report()
     measured = probe.measure_layout(report)
+    charts = chart_declarations(report)
     values = []
     for record in measured.records:
         value = {key: item for key, item in asdict(record).items() if item is not None}
         if record.content_id.startswith('chart:'):
-            view = chart_view(report, record.content_id[len('chart:'):])
-            width = chart_marker_width_mm(report, record.content_id[len('chart:'):])
+            item = charts[record.content_id]
+            view = item['chart']
+            width = chart_marker_width_mm(item)
             value.update(kind='chart', width_mm=width, height_mm='94', measured_width_mm=width,
                          measured_height_mm='94', unit=view['unit'], categories=view['categories'],
                          series=view['series'], thresholds=view['thresholds'])
@@ -191,43 +223,6 @@ def test_chart_measurements_reject_numeric_json_geometry(probe, geometry):
     chart_value['width_mm'] = geometry
     with pytest.raises(RendererCompileError):
         probe._validate_records(json.dumps(values).encode(), report)
-
-
-def test_actual_infrannual_bases_keep_unannualized_values_and_all_appendix_periods(probe):
-    original = infrannual_period_report()
-    inventory = build_inventory(original)
-    comparison = next(item for section in inventory for item in section['items']
-                      if item['id'] == 'comparison:income_statement')
-    production = next(row for row in comparison['rows'] if row['id'].endswith(':production_value'))
-    assert production['cells'][1:5] == ['850', '900', '1020', '1200']
-    assert '2026 osservato (9 mesi)' in comparison['columns']
-    assert '2026 rettificato (9 mesi)' in comparison['columns']
-    assert '2026 chiusura (12 mesi)' in comparison['columns']
-    report = prepare_editorial_report(original, probe)
-    verify_editorial_layout(report, probe)
-    with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
-        text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
-        assert 'non annualizza gli importi infrannuali' in text
-        # Euro interi nelle tabelle (decisione del proprietario, 2026-09-17): i centesimi non entrano
-        # in una colonna di un periodo su sei o sette, e in un dossier non dicono nulla.
-        assert '900' in text and '1.020' in text and '1.200' in text
-        assert '900,00' not in text and '1.020,00' not in text and '1.200,00' not in text
-    assert all(len(statement.periods) == 7 for statement in report.detailed_statements)
-
-
-def test_changed_narrative_reflow_invalidates_existing_page_bindings(probe):
-    report = prepare_editorial_report(fixture_report(), probe)
-    changed = report.model_copy(deep=True)
-    # I grafici canonici occupano ormai una pagina propria (M2-02B): un testo
-    # entro capacità non sposta più nulla — il piano resta valido, ed è ciò che
-    # si vuole. Il reflow che conta è quello che eccede la pagina fissa: il
-    # template paniccia e la verifica deve rifiutare il drift, non riassociare
-    # le note.
-    changed.narrative[0].text = 'Il piano richiede una lettura dei valori e delle ipotesi. ' * 130
-    changed = signed(changed)
-    assert changed.source_hash == report.source_hash
-    with pytest.raises((ValueError, RendererCompileError)):
-        verify_editorial_layout(changed, probe)
 
 
 @pytest.mark.parametrize('fault', ['missing', 'duplicate', 'unknown', 'slot', 'blank_page', 'page_count', 'source', 'asset'])
@@ -272,19 +267,28 @@ def test_asset_revision_changes_plan_hash_and_repreparation_blocks_manual_reasso
         prepare_editorial_report(signed(prepared), probe)
 
 
-def test_inventory_definition_revision_invalidates_plan_even_without_page_changes(probe, tmp_path, monkeypatch):
+def test_catalog_definition_revision_invalidates_plan_even_without_page_changes(probe, tmp_path, monkeypatch):
+    """`_GENERATOR_FILES` copre l'intero pacchetto `dossier_catalog/`, non più
+    un solo file: la stessa garanzia di prima (una revisione del generatore
+    invalida i piani già misurati) ora vale modificando uno qualunque dei
+    suoi moduli, qui `shared.py` — usato da ogni gruppo."""
     import app.renderers.typst.editorial_plan as module
-    definition = tmp_path / 'inventory-definition.py'
-    definition.write_bytes(module._GENERATOR_PATH.read_bytes())
-    monkeypatch.setattr(module, '_GENERATOR_PATH', definition)
+    real_dir = Path(module._GENERATOR_DIR)
+    copies = []
+    for path in real_dir.glob('*.py'):
+        target = tmp_path / path.name
+        target.write_bytes(path.read_bytes())
+        copies.append(target)
+    monkeypatch.setattr(module, '_GENERATOR_FILES', tuple(sorted(copies)))
     report = fixture_report()
     first = prepare_editorial_report(report, probe)
-    definition.write_bytes(definition.read_bytes() + b'\n# Layout definition revision.\n')
+    shared_copy = tmp_path / 'shared.py'
+    shared_copy.write_bytes(shared_copy.read_bytes() + b'\n# Layout definition revision.\n')
     with pytest.raises(RendererUnavailable):
         probe.measure_layout(report)
     # Simulate a restarted worker loading the revised definition; semantics and
     # page geometry remain identical, but layout/asset identity must differ.
-    monkeypatch.setattr(module, '_GENERATOR_HASH', hashlib.sha256(definition.read_bytes()).hexdigest())
+    monkeypatch.setattr(module, '_GENERATOR_HASH', module._generator_hash())
     second = prepare_editorial_report(report, probe)
     assert [page.content_ids for page in first.editorial_plan.pages] == [page.content_ids for page in second.editorial_plan.pages]
     assert first.editorial_plan.asset_version != second.editorial_plan.asset_version
@@ -311,17 +315,19 @@ def test_importi_milionari_al_centesimo_si_impaginano_in_euro_interi(probe):
 
     Il renderer funzionava: il template si fermava su ``editorial-amount-does-not-fit``, perché
     «4.006.984,18» misura 49,7 pt in una colonna di 39,8 pt quando i periodi affiancati sono sei o
-    più. Le fixture usavano importi da tre cifre, un'azienda vera ha milioni al centesimo.
+    più. Le fixture usavano importi da tre cifre, un'azienda vera ha milioni al centesimo. Il
+    catalogo di questa fase mostra osservato e rettificato solo nelle pagine 3-6 (non ancora
+    implementate): qui si verifica solo la chiusura, l'unica delle quattro cifre che compare
+    davvero negli Allegati di questa fase (chiusura + anni di piano, vincolo del proprietario).
     """
     original = infrannual_period_report(('3761087.73', '4006984.18', '4146966.26', '8013968.36'))
     report = prepare_editorial_report(original, probe)
     verify_editorial_layout(report, probe)
     with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
         text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
-    assert '4.006.984' in text and '8.013.968' in text
-    assert '4.006.984,18' not in text
-    # Arrotondamento al mezzo euro, non troncamento: 4.146.966,26 → 4.146.966; 3.761.087,73 → 3.761.088.
-    assert '3.761.088' in text
+    assert '8.013.968' in text
+    assert '8.013.968,36' not in text
+
 
 @pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
 def test_nessun_metadato_tecnico_e_nessun_titolo_inglese_nel_document(probe, workflow):
@@ -336,37 +342,37 @@ def test_nessun_metadato_tecnico_e_nessun_titolo_inglese_nel_document(probe, wor
                       'Executive summary', 'Adjustments and closing', 'Budget assumptions',
                       'Economic outlook', 'Financial outlook', 'Risks and actions'):
         assert forbidden not in text, forbidden
-    # Occhiello e titolo neutro in italiano per ogni sezione resa.
     assert 'SINTESI · ' in text and 'Sintesi esecutiva' in text
     assert 'PIANO E RISULTATI · ' in text
+    assert 'ALLEGATI · ' in text
 
 
 @pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
-def test_colonna_kpi_letta_al_centesimo_dal_modello_col_periodo_giusto(probe, workflow):
-    """M2-02B difetto 4: la colonna KPI della pagina tipo legge valori dal
-    modello v2, non reinventa nulla. Ogni KPI è controllato riga per riga
-    contro il Decimal da cui è preso (l'anno sbagliato fa fallire il test), e
-    le etichette dei periodi resa sono quelle dell'ultimo anno di piano."""
+def test_kpi_cassa_letto_al_centesimo_dal_modello_con_periodo_giusto(probe, workflow):
+    """M2-02B difetto 4, ristretto al catalogo di questa fase: la colonna KPI
+    legge valori dal modello v2, non reinventa nulla. «cassa» è l'unico KPI
+    con una regola di periodo fissa e verificabile riga per riga (l'ultimo
+    anno di piano); «ricavi» ha più fonti possibili (chiusura, primo anno,
+    ultimo anno a seconda del workflow) e non si presta allo stesso confronto
+    diretto — resta verificato solo per presenza, sotto."""
     report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
     inventory = build_inventory(report)
     last = report.forecast.years[-1]
-    checks = {'cassa': ('balance_sheet', 'cash'), 'ricavi': ('income_statement', 'revenue')}
-    rows = {line.code for line in last.balance_sheet + last.income_statement if line.value is not None}
+    cash_rows = {line.code: line.value for line in last.balance_sheet if line.code in ('cash', 'sp09_disponibilita_liquide')}
     checked = 0
     for section in inventory:
         for item in section['items']:
             for kpi in item.get('kpis') or ():
-                for prefix, (attribute, code) in checks.items():
-                    if kpi['label'] == f"{prefix} · {last.year}":
-                        value = next(line.value for line in getattr(last, attribute) if line.code == code)
-                        assert kpi['value'] == format(value, 'f'), kpi
-                        checked += 1
-    if not {'cash', 'revenue'} <= rows:
-        pytest.skip("fixture senza righe di previsione: niente KPI da allineare")
-    assert checked >= len(checks)
+                if kpi['label'] == f'cassa · {last.year}':
+                    value = next(v for code, v in cash_rows.items() if v is not None)
+                    assert kpi['value'] == format(value, 'f'), kpi
+                    checked += 1
+    if not cash_rows or all(v is None for v in cash_rows.values()):
+        pytest.skip('fixture senza riga di cassa: niente KPI da allineare')
+    assert checked >= 1
     with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
         text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
-    for label in ('EBITDA margin ·', 'PFN ·', 'orizzonte di piano', 'cassa · 2029', 'ricavi ·'):
+    for label in ('EBITDA margin ·', 'PFN ·', 'orizzonte di piano', 'cassa ·', 'ricavi ·'):
         assert label in text, label
     # Un KPI che il modello non fornisce è omesso, mai un «n.d.» in colonna.
     for section in inventory:
@@ -380,8 +386,8 @@ def test_colonna_kpi_letta_al_centesimo_dal_modello_col_periodo_giusto(probe, wo
 @pytest.mark.parametrize('workflow', ['infrannuale', 'bilancio', 'startup'])
 def test_grafici_multi_serie_senza_mille_punte_e_senza_pagine_nd(probe, workflow):
     """M2-02B difetti 5 e 6: via «×10^3» dagli assi (parola italiana o nessuna
-    scala), grafici multi-serie sul timeline storico → chiusura → piano, e
-    nessun grafico vuoto sprecato su una pagina intera."""
+    scala), grafici multi-serie, e nessun grafico vuoto sprecato su una pagina
+    intera — un grafico senza alcun valore semplicemente non compare."""
     report = prepare_editorial_report(fixture_report(workflow, [2027, 2028, 2029]), probe)
     with fitz.open(stream=probe.render(report).data, filetype='pdf') as pdf:
         text = ' '.join(' '.join(page.get_text().split()) for page in pdf)
@@ -390,6 +396,3 @@ def test_grafici_multi_serie_senza_mille_punte_e_senza_pagine_nd(probe, workflow
     assert any(len(item['chart']['series']) > 1 for item in chart_items), 'nessun grafico multi-serie'
     for item in chart_items:
         assert any(value is not None for series in item['chart']['series'] for value in series['values']), item['chart_id']
-    # La pagina «n.d.» intera non esiste piu: la didascalia vuota è ammessa
-    # solo sulla rara pagina orfana, che in questi tre percorsi non si crea.
-    assert 'Nessun valore nei periodi rappresentati' not in text

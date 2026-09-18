@@ -45,13 +45,13 @@
   #v(2mm)
 ]
 
-#let repeated-table-title(page, item, count) = table.cell(
+#let repeated-table-title(spec, item, count) = table.cell(
   colspan: count,
   fill: if gray-mode { rgb("#F2F2F2") } else { rgb("#F3F6F8") },
   inset: (x: 3pt, y: 2.5pt),
 )[
   #grid(columns: (auto, 1fr), column-gutter: 3mm,
-    plex(6.8pt, weight: 600, fill: blue, upper(page.family)),
+    plex(6.8pt, weight: 600, fill: blue, upper(spec.family)),
     align(right, plex(7pt, weight: 500, fill: navy, item.title)))
 ]
 
@@ -62,7 +62,7 @@
 // che tornasse a servirne uno, per esempio le tabelle F/G, se lo scrive da sé,
 // prendendo questa funzione a modello). Resta il ramo impilato per etichette
 // lunghe o importi che non entrano nella colonna.
-#let data-table(page, item) = context {
+#let data-table(spec, item) = context {
   let count = item.columns.len()
   let label-width = if count <= 3 { 65mm } else { 60mm }
   let column-width = (body-width - label-width) / calc.max(1, count - 1)
@@ -88,7 +88,7 @@
     table(columns: (label-width, ..((column-width,) * (count - 1))), inset: 3pt,
       stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
       table.header(
-        repeated-table-title(page, item, count),
+        repeated-table-title(spec, item, count),
         ..item.columns.map(c => table.cell(
           fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
           plex(7.5pt, weight: 600, fill: navy, c)))),
@@ -112,7 +112,7 @@
     table(columns: (65mm, body-width - 65mm), inset: 3pt,
       stroke: (left: none, right: none, top: none, bottom: 0.4pt + rule),
       table.header(
-        repeated-table-title(page, item, 2),
+        repeated-table-title(spec, item, 2),
         table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
           plex(7.5pt, weight: 600, item.columns.first())),
         table.cell(fill: if gray-mode { rgb("#F7F7F7") } else { rgb("#F8FAFB") },
@@ -121,9 +121,9 @@
   }
 }
 
-#let table-block(page, item) = {
+#let table-block(spec, item) = {
   block(sticky: true, heading(item))
-  data-table(page, item)
+  data-table(spec, item)
   v(5mm)
 }
 
@@ -212,22 +212,22 @@
 // Intestazione di pagina tipo: occhiello (gruppo · numero pagina), titolo
 // neutro, sottotitolo di metodo, striscia KPI orizzontale. Una pagina fisica
 // per voce del catalogo: `pagebreak()` qui, mai dentro il ciclo degli item.
-#let page-header(page) = {
+#let page-header(spec) = {
   pagebreak()
   context {
     let number = counter(page).get().first()
     plex(7.4pt, weight: 600, fill: blue, tracking: 0.6pt,
-      upper(page.family) + " · " + (if number < 10 { "0" } else { "" }) + str(number))
+      upper(spec.family) + " · " + (if number < 10 { "0" } else { "" }) + str(number))
   }
   v(3mm)
-  safe-prose(16pt, weight: 600, fill: navy, page.title)
+  safe-prose(16pt, weight: 600, fill: navy, spec.title)
   v(2mm)
-  if page.subtitle != none {
-    safe-prose(8pt, fill: muted, page.subtitle)
+  if spec.subtitle != none {
+    safe-prose(8pt, fill: muted, spec.subtitle)
   }
   v(5mm)
-  if page.kpis.len() > 0 {
-    kpi-strip(page.kpis)
+  if spec.kpis.len() > 0 {
+    kpi-strip(spec.kpis)
     v(5mm)
   }
 }
@@ -236,8 +236,8 @@
 // `editorial.typ` rende direttamente con `cover()` di `base.typ` (ha bisogno
 // dell'intero `report`, non solo dell'item). `report`/`options` vengono
 // passati dal chiamante, mai letti da variabili globali qui.
-#let render-item(page, item, report, options) = {
-  if item.kind == "table" { table-block(page, item) }
+#let render-item(spec, item, report, options) = {
+  if item.kind == "table" { table-block(spec, item) }
   else if item.kind == "chart" { chart-block(item, gray: options.grayscale, indicators: report.indicator_catalog) }
   else if item.kind == "note" { note-block(item) }
   else if item.kind == "index" { index-block(item) }

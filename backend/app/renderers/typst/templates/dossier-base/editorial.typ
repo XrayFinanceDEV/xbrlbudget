@@ -38,15 +38,15 @@
   ]
 }
 #show: body => dossier(report, options, body, note-footer: footer)
-#for page in inventory {
-  if page.id != "cover" {
-    page-header(page)
+#for spec in inventory {
+  if spec.id != "cover" {
+    page-header(spec)
   }
-  for item in page.items {
+  for item in spec.items {
     if item.kind == "cover" {
-      cover(report, kpis: page.kpis)
+      cover(report, kpis: spec.kpis)
     } else {
-      render-item(page, item, report, options)
+      render-item(spec, item, report, options)
     }
   }
 }

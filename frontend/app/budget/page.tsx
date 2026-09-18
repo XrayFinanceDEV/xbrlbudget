@@ -1323,8 +1323,10 @@ function ScenarioFormStartup({
                               ? computeEffectiveTaxRate(historicalData[baseYear].income)
                               : null;
                             return eff !== null
-                              ? `Aliquota effettiva dall'anno base ${baseYear}: ≈ ${eff}% (usata automaticamente dal motore)`
-                              : "Aliquota effettiva dall'anno base non derivabile: il motore usa il valore qui sotto";
+                              // Dal 2026-09-18 (073927b) il motore applica `tax_rate` così com'è: l'effettiva
+                              // è un riferimento per chi compila, non più un valore che vince in silenzio.
+                              ? `Aliquota effettiva dell'anno base ${baseYear}: ≈ ${eff}%, come riferimento. Il motore applica il valore qui sotto.`
+                              : "Aliquota effettiva dell'anno base non derivabile: il motore applica il valore qui sotto.";
                           })()}
                         </p>
                       )}

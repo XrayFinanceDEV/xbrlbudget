@@ -204,6 +204,15 @@ def test_supplied_authoritative_thresholds_only(renderer):
             indicator.values[index] = values[chart.categories.index(period.year)]
             indicator.unavailable_reasons[index] = None
     indicator.thresholds = [IndicatorThreshold(label='Soglia dimostrativa', value=Decimal('1.5'), source='Fonte canonica della fixture')]
+    # Lo stesso indicatore è citato anche dalle serie a finestra delle pagine executive
+    # (M2-02G traccia B, `practice_liquidity_ratios`): il validatore pretende che ogni
+    # grafico coincida colonna per colonna con la propria fonte, quindi la mutazione va
+    # propagata là dove l'indicatore è riferito per id di periodo, non per anno.
+    by_period = {period.id: value for period, value in zip(indicator.periods, indicator.values)}
+    for other in report.chart_series:
+        for metric, reference in zip(other.series, getattr(other, 'indicator_ids', ())):
+            if reference == indicator.id and getattr(other, 'period_ids', None):
+                metric.values = [by_period.get(pid) for pid in other.period_ids]
     report = signed(report)
     artifact = renderer.render(report, document_state='final')
     with fitz.open(stream=artifact.data, filetype='pdf') as pdf:

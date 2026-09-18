@@ -206,10 +206,15 @@ def _liquidita(report: FinalReportModelV2) -> dict[str, Any]:
     block = s.chart_block("structural_balance", "Margini strutturali", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
-    # Il secondo grafico della v4 ("Liquidità corrente e immediata", current
-    # ratio + quick ratio) non ha una pagina fisica propria in questo gruppo
-    # (v. commento di modulo): entrambi gli indicatori restano leggibili in
-    # tabella, e la liquidità corrente anche come KPI qui sopra.
+    # Secondo grafico della v4: current ratio e quick ratio in «volte», su una
+    # scala propria — non stanno nel primo, che è in euro. `quick_ratio` è nel
+    # catalogo indicatori da M2-02E.
+    liquidity = s.indicator_chart(report, "practice_liquidity_ratios", "Liquidità corrente e immediata",
+        "ratio", periods, ["practice.current_ratio", "practice.quick_ratio"])
+    liquidity_block = s.chart_block("practice_liquidity_ratios", "Liquidità corrente e immediata",
+        liquidity, [], kind="line")
+    if liquidity_block is not None:
+        items.append(liquidity_block)
     table = _indicator_table("liquidita-tabella", "Quadro dei margini e della liquidità", report, periods, [
         ("practice.ccn", "Capitale circolante netto"),
         ("practice.mt", "Margine di tesoreria"),
@@ -229,16 +234,22 @@ def _liquidita(report: FinalReportModelV2) -> dict[str, Any]:
 
 def _redditivita(report: FinalReportModelV2) -> dict[str, Any]:
     periods = _periods(report)
-    # La v4 affianca due grafici (ROI/ROE; OF/ricavi e OF/MOL): qui restano
-    # uniti in un solo grafico a 4 serie, tutte in percentuale e su scala
-    # comparabile (v. commento di modulo) — il tetto di `chart-layout.json`
-    # (`max_series: 4`) lo permette esattamente, senza perdere alcuna serie.
-    chart = s.indicator_chart(report, "redditivita-quattro-serie", "Redditività e costo del debito", "percent",
-        periods, ["practice.roi", "practice.roe", "practice.of_revenue", "practice.of_mol"])
+    # La v4 affianca due grafici invece di sovrapporre quattro serie in uno:
+    # la redditività del capitale (ROI, ROE) e il peso degli oneri finanziari
+    # (su ricavi e su MOL) hanno ordini di grandezza diversi, e su un asse solo
+    # le due coppie si schiacciavano a vicenda.
+    redditivita_chart = s.indicator_chart(report, "redditivita-roi-roe", "ROI e ROE", "percent",
+        periods, ["practice.roi", "practice.roe"])
+    oneri_chart = s.indicator_chart(report, "redditivita-oneri", "Peso degli oneri finanziari", "percent",
+        periods, ["practice.of_revenue", "practice.of_mol"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("redditivita-quattro-serie", "Redditività e costo del debito", chart, [], kind="line")
-    if block is not None:
-        items.append(block)
+    panel = s.panel_grid("redditivita", "Redditività e costo del debito", [
+        s.chart_block("redditivita-roi-roe", "ROI e ROE", redditivita_chart, [], kind="line"),
+        s.chart_block("redditivita-oneri", "Peso degli oneri finanziari", oneri_chart, [], kind="line"),
+    ])
+    block = panel
+    if panel is not None:
+        items.append(panel)
     table = _indicator_table("redditivita-tabella", "Confronto della redditività", report, periods, [
         ("practice.roi", "ROI"),
         ("practice.roe", "ROE"),
@@ -249,9 +260,10 @@ def _redditivita(report: FinalReportModelV2) -> dict[str, Any]:
     ])
     if table is not None:
         items.append(table)
-    return {"id": "redditivita", "title": "Redditività e costo del debito", "family": FAMILY,
-            "subtitle": "Redditività e costo del debito in un unico grafico percentuale; la tabella riporta "
-                        "ogni indicatore per esteso.",
+    return {"form": "full+panels", "id": "redditivita", "title": "Redditività e costo del debito",
+            "family": FAMILY,
+            "subtitle": "Redditività del capitale e peso degli oneri finanziari su due scale distinte; "
+                        "la tabella riporta ogni indicatore per esteso.",
             "kpis": [], "items": items}
 
 
@@ -273,9 +285,14 @@ def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
     block = s.chart_block("practice_asset_coverage", "Autonomia e copertura", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
-    # Il secondo grafico della v4 (PFN/EBITDA, unità "volte", incompatibile
-    # con il percent del primo) resta fuori dal grafico; il valore è comunque
-    # KPI qui sopra e riga di tabella qui sotto.
+    # Secondo grafico della v4: PFN / EBITDA in «volte». Non può stare nel
+    # primo, che è in percentuale — è proprio per questo che la v4 ne affianca
+    # due invece di mescolare le unità.
+    leva = s.indicator_chart(report, "practice_pfn_ebitda_trend", "PFN / EBITDA", "ratio", periods,
+        ["practice.pfn_ebitda"])
+    leva_block = s.chart_block("practice_pfn_ebitda_trend", "PFN / EBITDA", leva, [], kind="line")
+    if leva_block is not None:
+        items.append(leva_block)
     table = _indicator_table("solidita-tabella", "Autonomia, copertura e servizio del debito", report, periods, [
         ("practice.indipendenza", "Indipendenza finanziaria"),
         ("practice.copertura_immob", "Copertura immobilizzazioni"),
@@ -322,17 +339,21 @@ def _circolante(report: FinalReportModelV2) -> dict[str, Any]:
         s.kpi_indicator(report, "analytical.activity.payables_turnover_days", "giorni di debito (DPO)"),
         _kpi_circolante_operativo(report, periods),
     ) if kpi is not None]
-    # I due grafici della v4 (giorni DSO/DIO/DPO; ciclo di conversione) sono
-    # entrambi in giorni: qui restano in un solo grafico a 4 serie (tetto
-    # `max_series: 4` rispettato esattamente).
-    chart = s.indicator_chart(report, "circolante-giorni", "Giorni del capitale circolante e ciclo monetario",
+    # I due grafici della v4 sono entrambi in giorni, ma dicono cose diverse:
+    # il primo le tre durate che l'azienda governa, il secondo il loro saldo.
+    # Tenuti insieme, il ciclo si confondeva con le sue componenti.
+    chart = s.indicator_chart(report, "circolante-giorni", "Giorni del capitale circolante",
         "days", periods, ["analytical.activity.receivables_turnover_days",
-        "analytical.activity.inventory_turnover_days", "analytical.activity.payables_turnover_days",
-        "analytical.activity.cash_conversion_cycle"])
+        "analytical.activity.inventory_turnover_days", "analytical.activity.payables_turnover_days"])
+    ciclo = s.indicator_chart(report, "circolante-ciclo", "Ciclo di conversione del denaro", "days", periods,
+        ["analytical.activity.cash_conversion_cycle"])
     items: list[dict[str, Any]] = []
-    block = s.chart_block("circolante-giorni", "Giorni del capitale circolante e ciclo monetario", chart, kpis, kind="line")
+    block = s.chart_block("circolante-giorni", "Giorni del capitale circolante", chart, kpis, kind="line")
     if block is not None:
         items.append(block)
+    ciclo_block = s.chart_block("circolante-ciclo", "Ciclo di conversione del denaro", ciclo, [], kind="line")
+    if ciclo_block is not None:
+        items.append(ciclo_block)
     table = _indicator_table("circolante-tabella", "Circolante e ciclo monetario", report, periods, [
         ("analytical.activity.receivables_turnover_days", "Giorni di credito · DSO"),
         ("analytical.activity.inventory_turnover_days", "Giorni di magazzino · DIO"),
@@ -375,51 +396,62 @@ def _structure_table(table_id: str, title: str, report: FinalReportModelV2, grou
 def _composizione(report: FinalReportModelV2) -> dict[str, Any]:
     periods = _periods(report)
     two_point = _first_last_periods(periods)
-    # Sostituisce il dumbbell della v4 (confronto chiusura -> fine piano) con
-    # un grafico a linea su due soli periodi — stesso disegno, nessun
-    # componente nuovo (v. commento di modulo).
-    chart = _chart("composizione-incidenza-costi", "Incidenza dei costi sul fatturato", "percent", two_point, [
-        ("Materie prime", _structure_values(report, "cost_incidence", "materials", two_point)),
-        ("Servizi", _structure_values(report, "cost_incidence", "services", two_point)),
-        ("Personale", _structure_values(report, "cost_incidence", "personnel", two_point)),
-        ("Oneri finanziari", _structure_values(report, "cost_incidence", "financial_charges", two_point)),
-    ])
     items: list[dict[str, Any]] = []
-    # Il contratto nomina questo confronto un `dumbbell` (due periodi, due
-    # estremi congiunti). Qui restano le serie per voce di costo disegnate a
-    # linea: passare al dumbbell vuol dire trasporre serie e categorie, cioè
-    # contenuto della fase 3, non una forma da dichiarare qui. `kind` è
-    # comunque esplicito, perché il template non deve più indovinarlo.
-    block = s.chart_block("composizione-incidenza-costi",
-        "Incidenza dei costi sul fatturato · confronto fra primo e ultimo periodo", chart, [], kind="line")
-    if block is not None:
-        items.append(block)
-    # Le barre al 100% della v4 (composizione impieghi/fonti) diventano UNA
-    # tabella di quota percentuale (impieghi + fonti insieme, non due tabelle
-    # separate: due titoli+intestazioni in più non ci stanno sulla stessa
-    # pagina fisica insieme al grafico — misurato su AMBIENTA, la seconda
-    # tabella separata spillava su una pagina fisica senza intestazione).
-    # Stessa fonte (`structure_series`), nessuna perdita di dato, senza un
-    # componente "barre 100%" che comuni.typ non ha.
-    composition_rows = [
-        ("composition_uses", "fixed_assets_share", "Immobilizzazioni nette (impieghi)"),
-        ("composition_uses", "current_other_share", "Circolante e altro (impieghi)"),
-        ("composition_uses", "cash_share", "Disponibilità liquide (impieghi)"),
-        ("composition_sources", "equity_share", "Patrimonio netto (fonti)"),
-        ("composition_sources", "financial_debt_share", "Debiti finanziari (fonti)"),
-        ("composition_sources", "other_liabilities_share", "Altre passività (fonti)"),
+    # Le due barre al 100% della v4: impieghi e fonti affiancati. Si disegnano
+    # sulle QUOTE (`*_share`), non sugli importi: sono già normalizzate a 100 e
+    # non possono essere negative, e una composizione con un segmento negativo
+    # non è disegnabile — il componente `stacked` la rifiuta apposta.
+    uses = _chart("composizione-impieghi", "Composizione degli impieghi", "percent", periods, [
+        ("Immobilizzazioni", _structure_values(report, "composition_uses", "fixed_assets_share", periods)),
+        ("Circolante e altro", _structure_values(report, "composition_uses", "current_other_share", periods)),
+        ("Cassa", _structure_values(report, "composition_uses", "cash_share", periods)),
+    ])
+    sources = _chart("composizione-fonti", "Composizione delle fonti", "percent", periods, [
+        ("Patrimonio netto", _structure_values(report, "composition_sources", "equity_share", periods)),
+        ("Debiti finanziari", _structure_values(report, "composition_sources", "financial_debt_share", periods)),
+        ("Altre passività", _structure_values(report, "composition_sources", "other_liabilities_share", periods)),
+    ])
+    panel = s.panel_grid("composizione", "Composizione di impieghi e fonti", [
+        s.chart_block("composizione-impieghi", "Composizione degli impieghi", uses, [], kind="stacked"),
+        s.chart_block("composizione-fonti", "Composizione delle fonti", sources, [], kind="stacked"),
+    ])
+    if panel is not None:
+        items.append(panel)
+    # L'incidenza dei costi è un dumbbell: una riga per voce, i due estremi del
+    # periodo congiunti. Le categorie sono le VOCI e le due serie sono i due
+    # periodi — l'opposto del grafico a linee che c'era prima, dove le voci
+    # erano serie e i periodi categorie.
+    incidence_rows = [
+        ("materials", "Materie prime"),
+        ("services", "Servizi"),
+        ("personnel", "Personale"),
+        ("financial_charges", "Oneri finanziari"),
     ]
-    columns = ["Voce", *[s.period_label_short(period) for period in periods]]
-    rows = []
-    for group_id, series_id, display_label in composition_rows:
-        values = _structure_values(report, group_id, series_id, periods)
+    labels: list[str] = []
+    first_values: list[Any] = []
+    last_values: list[Any] = []
+    for series_id, display_label in incidence_rows:
+        values = _structure_values(report, "cost_incidence", series_id, two_point)
         if not any(value is not None for value in values):
             continue
-        rows.append(s.row(f"composizione-quote:{group_id}:{series_id}", [display_label, *values],
-                          [None, *(["percent"] * len(values))]))
-    if rows:
-        items.append(s.table("composizione-quote", "Composizione di impieghi e fonti · quote %", columns, rows))
-    return {"id": "composizione", "title": "Composizione economica e patrimoniale", "family": FAMILY,
+        labels.append(display_label)
+        first_values.append(values[0])
+        last_values.append(values[-1] if len(values) > 1 else None)
+    incidence = None
+    if labels and len(two_point) > 1:
+        incidence = {"id": "composizione-incidenza-costi", "title": "Incidenza dei costi sul fatturato",
+                     "unit": "percent", "categories": labels,
+                     "series": [{"label": s.period_label_short(two_point[0]),
+                                 "values": [s.exact(value) for value in first_values]},
+                                {"label": s.period_label_short(two_point[-1]),
+                                 "values": [s.exact(value) for value in last_values]}],
+                     "indicator_ids": [], "thresholds": [], "kind": "dumbbell"}
+    block = s.chart_block("composizione-incidenza-costi", "Incidenza dei costi sul fatturato",
+        incidence, [], kind="dumbbell")
+    if block is not None:
+        items.append(block)
+    return {"form": "full+panels", "id": "composizione", "title": "Composizione economica e patrimoniale",
+            "family": FAMILY,
             "subtitle": "Quote percentuali sullo stesso totale; il dettaglio in euro è negli Allegati.",
             "kpis": [], "items": items}
 
@@ -467,11 +499,16 @@ def _break_even(report: FinalReportModelV2) -> dict[str, Any]:
     block = s.chart_block("break-even-ricavi-pareggio", "Ricavi e break-even", chart, kpis, kind="bar")
     if block is not None:
         items.append(block)
-    # Il secondo grafico della v4 (solo margine di sicurezza, %) resta fuori
-    # dal grafico principale (unità incompatibile con l'eur di ricavi/
-    # pareggio): il valore è comunque KPI e riga di tabella. Il margine può
-    # essere negativo (ricavi sotto il pareggio): righe e barre lo mostrano
-    # senza clamp, nessuna formula nel template.
+    # Secondo grafico della v4: il solo margine di sicurezza, in percentuale —
+    # unità incompatibile con l'euro di ricavi e pareggio, e per questo un
+    # grafico a sé. Può risultare negativo (ricavi sotto il pareggio) e si
+    # disegna com'è, senza clamp: nessuna formula nel template.
+    safety = _chart("break-even-margine-sicurezza", "Margine di sicurezza", "percent", periods, [
+        ("Margine di sicurezza", _structure_values(report, "break_even", "safety_margin_pct", periods)),
+    ])
+    safety_block = s.chart_block("break-even-margine-sicurezza", "Margine di sicurezza", safety, [], kind="line")
+    if safety_block is not None:
+        items.append(safety_block)
     table = _structure_table("break-even-tabella", "Costi fissi, variabili e ricavi di pareggio", report, "break_even",
         periods, [
             ("fixed_costs", "Costi fissi", "eur"),
@@ -547,26 +584,50 @@ def _esito_cassa(report: FinalReportModelV2, periods: list[Any]) -> str:
     return f"Scostamento residuo su {len(scarti)} periodi — {dettaglio}"
 
 
+def _partial_months(report: FinalReportModelV2) -> int | None:
+    """I mesi del progressivo osservato, letti dal modello. Il sottotitolo di
+    questa pagina diceva «9M» scritto fisso: su AMBIENTA, che è a sei mesi,
+    era semplicemente falso (rilievo della traccia B, 18/09)."""
+    statement = s.statement_by_id(report, "income_statement")
+    for period in statement.periods:
+        if period.basis in ("adjusted", "observed") and period.period_months is not None:
+            return period.period_months
+    return None
+
+
 def _diagnostica(report: FinalReportModelV2) -> dict[str, Any]:
     periods = _periods(report)
+    controlli = [
+        ("diagnostica:rettifiche", "Prima + rettifiche = dopo", _esito_rettifiche(report)),
+        ("diagnostica:quadratura", "Attivo = passivo e patrimonio netto", _esito_quadratura_sp(report, periods)),
+        ("diagnostica:cassa", "Cassa iniziale + flussi = cassa finale", _esito_cassa(report, periods)),
+    ]
     kpis = [kpi for kpi in (
         s.kpi("stato di preparazione", s.label(_READINESS_LABELS, report.readiness.status)),
         s.kpi("segnalazioni diagnostiche", len(report.diagnostics)),
+        s.kpi("controlli di quadratura", len(controlli)),
+        s.kpi("periodi nel dossier", len(s.statement_by_id(report, "income_statement").periods)),
     ) if kpi is not None]
-    items: list[dict[str, Any]] = [s.text("diagnostica-priorita", "Priorità di verifica",
-        "Prima di presentare il piano, verificare: la chiusura dell'esercizio in corso rispetto ai dati più "
-        "recenti disponibili; la tenuta delle ipotesi di crescita e di costo rispetto all'operatività; i "
-        "tempi di incasso e di pagamento rispetto al piano del circolante.")]
-    rows = [
-        s.row("diagnostica:rettifiche", ["Prima + rettifiche = dopo", _esito_rettifiche(report)]),
-        s.row("diagnostica:quadratura", ["Attivo = passivo e patrimonio netto", _esito_quadratura_sp(report, periods)]),
-        s.row("diagnostica:cassa", ["Cassa iniziale + flussi = cassa finale", _esito_cassa(report, periods)]),
-    ]
-    items.append(s.table("diagnostica-controlli", "Controlli di quadratura", ["Controllo", "Esito"], rows))
+    # «Priorità di verifica» è una tavola, non un paragrafo: il contratto la
+    # nomina così, e tre voci in riga si leggono e si spuntano, un capoverso no.
+    priorita = s.table("diagnostica-priorita", "Priorità di verifica",
+        ["Priorità", "Tema", "Evidenza da procurare"], [
+        s.row("diagnostica-priorita:chiusura", ["1", "Chiusura dell'esercizio in corso",
+            "Dati contabili più recenti, da confrontare con la stima."]),
+        s.row("diagnostica-priorita:ipotesi", ["2", "Ipotesi di crescita e di costo",
+            "Ordini, capacità operativa e contratti in essere."]),
+        s.row("diagnostica-priorita:circolante", ["3", "Tempi di incasso e di pagamento",
+            "Scaduto e condizioni reali, da confrontare con i giorni ipotizzati."]),
+    ])
+    items: list[dict[str, Any]] = [priorita]
+    items.append(s.table("diagnostica-controlli", "Controlli di quadratura", ["Controllo", "Esito"],
+        [s.row(identifier, [label, esito]) for identifier, label, esito in controlli]))
+    months = _partial_months(report)
+    periodo = f"{months}M rettificati" if months is not None else "progressivo rettificato"
     return {"form": "rail+main", "id": "diagnostica", "title": "Diagnostica e punti da verificare", "family": FAMILY,
-            "subtitle": "Il controllo «9M rettificati + Q4 = chiusura» non è verificabile sul modello: non "
-                        "esiste una stima Q4 indipendente dalla chiusura promossa, e si omette invece di "
-                        "riprodurlo come spunta vuota.",
+            "subtitle": f"Il controllo «{periodo} + periodo residuo = chiusura» non è verificabile sul "
+                        "modello: non esiste una stima del residuo indipendente dalla chiusura promossa, e "
+                        "si dichiara invece di riprodurlo come spunta vuota.",
             "kpis": kpis, "items": items}
 
 

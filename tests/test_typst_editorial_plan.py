@@ -17,7 +17,8 @@ import fitz
 import pytest
 
 from app.renderers.typst import Compiler, RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable
-from app.renderers.typst.dossier_catalog import (build_inventory, chart_declarations, chart_marker_width_mm, expected_content_inventory)
+from app.renderers.typst.dossier_catalog import (build_inventory, chart_declarations, chart_marker_height_mm,
+                                                 chart_marker_width_mm, expected_content_inventory)
 from app.renderers.typst.editorial_plan import (
     DossierLayoutProbe, DossierTemplateBundle, build_editorial_plan,
     prepare_editorial_report, verify_editorial_layout,
@@ -227,8 +228,11 @@ def test_chart_measurements_reject_numeric_json_geometry(probe, geometry):
             item = charts[record.content_id]
             view = item['chart']
             width = chart_marker_width_mm(item)
-            value.update(kind='chart', width_mm=width, height_mm='94', measured_width_mm=width,
-                         measured_height_mm='94', unit=view['unit'], categories=view['categories'],
+            # L'altezza, come la larghezza, la dichiara la pagina: una con due
+            # grafici in colonna li vuole più bassi (M2-02G).
+            height = chart_marker_height_mm(item)
+            value.update(kind='chart', width_mm=width, height_mm=height, measured_width_mm=width,
+                         measured_height_mm=height, unit=view['unit'], categories=view['categories'],
                          series=view['series'], thresholds=view['thresholds'])
         values.append(value)
     assert probe._validate_records(json.dumps(values).encode(), report) == measured.records

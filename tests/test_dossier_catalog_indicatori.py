@@ -12,7 +12,13 @@ from tests.test_final_report_v2 import fixture_report
 
 
 def _items(pages):
-    return [item for page in pages for item in page["items"]]
+    """I blocchi in ordine di lettura: un `panel` non è un blocco, lo sono i
+    grafici che contiene (stessa regola di `dossier_catalog._iter_blocks`)."""
+    blocks = []
+    for page in pages:
+        for item in page["items"]:
+            blocks.extend(item["items"] if item["kind"] == "panel" else [item])
+    return blocks
 
 
 def _charts(pages):
@@ -151,20 +157,20 @@ def test_kpi_delta_needs_at_least_two_periods():
     assert delta is not None and delta["label"].startswith("assorbimento circolante · 2027-2029")
 
 
-def test_redditivita_merges_two_v4_panels_into_one_four_series_chart():
-    """La v4 affianca due grafici (ROI/ROE; OF/ricavi e OF/MOL) con
-    `panel_grid`, un componente che non esiste fuori da questo file e che le
-    regole della fase vietano di aggiungere a `pagine/comuni.typ`: qui
-    restano un solo grafico a 4 serie percentuali (il tetto `max_series: 4`
-    del layout lo permette esattamente) — nessuna pagina KPI in testa, come
+def test_redditivita_affianca_i_due_pannelli_della_v4():
+    """La v4 affianca due grafici — ROI/ROE e peso degli oneri finanziari —
+    invece di sovrapporre quattro serie su un asse solo: hanno ordini di
+    grandezza diversi e insieme si schiacciavano. Nessun KPI in testa, come
     nella v4."""
     report = fixture_report("bilancio", [2027, 2028, 2029])
     page = next(p for p in indicatori.build(report) if p["id"] == "redditivita")
     assert page["kpis"] == []
     charts = _charts([page])
-    assert len(charts) == 1
-    assert charts[0]["chart"]["unit"] == "percent"
-    assert len(charts[0]["chart"]["series"]) <= 4
+    assert [chart["chart_id"] for chart in charts] == ["redditivita-roi-roe", "redditivita-oneri"]
+    assert all(chart["chart"]["unit"] == "percent" for chart in charts)
+    assert all(chart["chart"]["kind"] == "line" for chart in charts)
+    panels = [item for item in page["items"] if item["kind"] == "panel"]
+    assert len(panels) == 1 and panels[0]["panels"] == 2
 
 
 def test_solidita_table_row_spec_leaves_the_dscr_label_to_the_catalog():
@@ -197,16 +203,26 @@ def test_composizione_uses_at_most_one_table_not_two_separate_ones():
     assert len(_tables([page])) <= 1
 
 
-def test_composizione_chart_uses_only_first_and_last_period():
-    """Sostituisce il dumbbell della v4 (confronto chiusura -> fine piano)
-    con un grafico a linea limitato a due periodi — stesso disegno visivo,
-    nessun componente nuovo."""
+def test_composizione_e_due_stacked_affiancati_piu_un_dumbbell():
+    """Il contratto v4: due barre al 100% affiancate (impieghi, fonti) e il
+    confronto delle incidenze di costo come dumbbell — una riga per voce, i
+    due estremi del periodo congiunti. Le categorie del dumbbell sono le VOCI
+    e le serie i due periodi: l'opposto del grafico a linee di prima."""
     report = fixture_report("bilancio", [2027, 2028, 2029, 2030, 2031])
     page = next((p for p in indicatori.build(report) if p["id"] == "composizione"), None)
     if page is None:
         pytest.skip("cost_incidence assente su questa fixture")
-    chart = _charts([page])[0]["chart"]
-    assert len(chart["categories"]) == 2
+    assert page["form"] == "full+panels"
+    charts = {chart["chart_id"]: chart["chart"] for chart in _charts([page])}
+    for chart_id in ("composizione-impieghi", "composizione-fonti"):
+        if chart_id in charts:
+            assert charts[chart_id]["kind"] == "stacked"
+            assert charts[chart_id]["unit"] == "percent"
+    incidenza = charts.get("composizione-incidenza-costi")
+    if incidenza is not None:
+        assert incidenza["kind"] == "dumbbell"
+        assert len(incidenza["series"]) == 2
+        assert incidenza["categories"] and all(isinstance(c, str) for c in incidenza["categories"])
 
 
 def test_break_even_table_shows_a_negative_safety_margin_without_clamping():
@@ -234,7 +250,7 @@ def test_diagnostica_always_survives_the_empty_page_filter(workflow):
     `None`): sopravvive al filtro "niente pagine vuote" su ogni fixture."""
     report = fixture_report(workflow, [2027, 2028, 2029])
     page = next(p for p in indicatori.build(report) if p["id"] == "diagnostica")
-    table = _tables([page])[0]
+    table = next(item for item in _tables([page]) if item["id"] == "diagnostica-controlli")
     assert len(table["rows"]) == 3
     controls = [row["cells"][0] for row in table["rows"]]
     assert controls == ["Prima + rettifiche = dopo", "Attivo = passivo e patrimonio netto",
@@ -248,7 +264,7 @@ def test_diagnostica_omits_the_q4_check_the_model_cannot_verify():
     chiusura promossa) — non compare come quarta riga, mai una spunta vuota."""
     report = fixture_report("bilancio", [2027, 2028, 2029])
     page = next(p for p in indicatori.build(report) if p["id"] == "diagnostica")
-    table = _tables([page])[0]
+    table = next(item for item in _tables([page]) if item["id"] == "diagnostica-controlli")
     assert not any("Q4" in row["cells"][0] for row in table["rows"])
 
 

@@ -59,9 +59,9 @@
   }
   result
 }
-#let cartesian-plot(chart, gray: false, thresholds: (), width-mm: none, bars: none) = {
+#let cartesian-plot(chart, gray: false, thresholds: (), width-mm: none, bars: none, height-mm: none) = {
   let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
-  let height = float(geometry.plot_height_mm) * 1mm
+  let height = if height-mm == none { float(geometry.plot_height_mm) * 1mm } else { float(height-mm) * 1mm }
   let bars = if bars != none { bars } else { kind(chart) == "bar" }
   let values = chart.series.map(s => s.values.filter(v => v != none).map(coordinate)).flatten()
   if values.len() == 0 {
@@ -164,9 +164,9 @@
 // numeri restano nelle tavole di pagina e negli Allegati (è ciò che la v4
 // dichiara nel proprio sottotitolo). Nessun numero nasce qui: `share` è la
 // stessa divisione che già decide la lunghezza del segmento.
-#let stacked-plot(chart, gray: false, width-mm: none) = {
+#let stacked-plot(chart, gray: false, width-mm: none, height-mm: none) = {
   let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
-  let height = float(geometry.plot_height_mm) * 1mm
+  let height = if height-mm == none { float(geometry.plot_height_mm) * 1mm } else { float(height-mm) * 1mm }
   let rows = chart.categories.len()
   let label-w = calc.min(34mm, width * 0.26)
   let ox = label-w + 5pt
@@ -212,10 +212,10 @@
 // periodo iniziale, cerchio pieno = periodo finale, segmento `dumbbell-link`
 // fra i due, valori `a → b` a destra. Due serie sole: la terza non avrebbe
 // due estremi da congiungere, e disegnarla sarebbe un'invenzione del template.
-#let dumbbell-plot(chart, gray: false, width-mm: none) = {
+#let dumbbell-plot(chart, gray: false, width-mm: none, height-mm: none) = {
   if chart.series.len() != 2 { panic("dumbbell-chart-requires-two-series") }
   let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
-  let height = float(geometry.plot_height_mm) * 1mm
+  let height = if height-mm == none { float(geometry.plot_height_mm) * 1mm } else { float(height-mm) * 1mm }
   let rows = chart.categories.len()
   let label-w = calc.min(38mm, width * 0.30)
   let values-w = calc.min(30mm, width * 0.22)
@@ -271,9 +271,9 @@
     }
   ]
 }
-#let plot(chart, gray: false, thresholds: (), width-mm: none) = {
+#let plot(chart, gray: false, thresholds: (), width-mm: none, height-mm: none) = {
   let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
-  let height = float(geometry.plot_height_mm) * 1mm
+  let height = if height-mm == none { float(geometry.plot_height_mm) * 1mm } else { float(height-mm) * 1mm }
   let values = chart.series.map(s => s.values.filter(v => v != none).map(coordinate)).flatten()
   if values.len() == 0 {
     // Un grafico vuoto non è una figura pulita: è il caso che in una pagina
@@ -282,9 +282,10 @@
       plex(11pt, fill: muted)[n.d. · Nessun dato disponibile per i periodi rappresentati]))
   } else {
     let shape = kind(chart)
-    if shape == "stacked" { stacked-plot(chart, gray: gray, width-mm: width-mm) }
-    else if shape == "dumbbell" { dumbbell-plot(chart, gray: gray, width-mm: width-mm) }
-    else { cartesian-plot(chart, gray: gray, thresholds: thresholds, width-mm: width-mm, bars: shape == "bar") }
+    if shape == "stacked" { stacked-plot(chart, gray: gray, width-mm: width-mm, height-mm: height-mm) }
+    else if shape == "dumbbell" { dumbbell-plot(chart, gray: gray, width-mm: width-mm, height-mm: height-mm) }
+    else { cartesian-plot(chart, gray: gray, thresholds: thresholds, width-mm: width-mm,
+        bars: shape == "bar", height-mm: height-mm) }
   }
 }
 #let legend(chart, gray: false, thresholds: (), width-mm: none) = {
@@ -322,20 +323,29 @@
     ]
   ])
 }
-#let chart-component(chart, gray: false, indicators: (), width-mm: none) = context {
+// `height-mm` lo dichiara Python quando la pagina ne mette due in colonna:
+// due grafici da 94 mm più una tavola non stanno in un foglio, e la v4
+// infatti li disegna più bassi. Senza dichiarazione vale la geometria base.
+#let chart-component(chart, gray: false, indicators: (), width-mm: none, height-mm: none) = context {
   let width = if width-mm == none { float(geometry.width_mm) * 1mm } else { float(width-mm) * 1mm }
-  let height = float(geometry.height_mm) * 1mm
-  let legend-height = float(geometry.legend_height_mm) * 1mm
+  let declared-height = if height-mm == none { geometry.height_mm } else { str(height-mm) }
+  let height = float(declared-height) * 1mm
+  // In un riquadro compatto la legenda riservata scende a 20 mm: i 32 della
+  // geometria base sono tarati sul riquadro pieno, e lasciarli qui toglieva
+  // al disegno metà della propria altezza.
+  let legend-height = if height-mm == none { float(geometry.legend_height_mm) * 1mm } else { 20mm }
   if chart.series.len() > geometry.max_series { panic("chart-series-exceed-distinct-styles") }
   let thresholds = references(chart, indicators)
   let key = legend(chart, gray: gray, thresholds: thresholds, width-mm: width-mm)
   if measure(block(width: width, key)).height > legend-height { panic("chart-legend-does-not-fit") }
-  let body = stack(dir: ttb, spacing: 0pt, plot(chart, gray: gray, thresholds: thresholds, width-mm: width-mm),
+  let body = stack(dir: ttb, spacing: 0pt,
+      plot(chart, gray: gray, thresholds: thresholds, width-mm: width-mm,
+        height-mm: if height-mm == none { none } else { float(declared-height) - 20.0 }),
       block(width: width, height: legend-height, key))
   let measured = measure(body)
   if measured.height > height { panic("chart-component-does-not-fit") }
   metadata((kind: "chart", content_id: "chart:" + chart.id, page: here().page(),
-    width_mm: if width-mm == none { geometry.width_mm } else { str(width-mm) }, height_mm: geometry.height_mm,
+    width_mm: if width-mm == none { geometry.width_mm } else { str(width-mm) }, height_mm: declared-height,
     measured_width_mm: str(measured.width / 1mm), measured_height_mm: str(measured.height / 1mm),
     unit: chart.unit, categories: chart.categories, series: chart.series, thresholds: thresholds))
   block(width: width, height: height, breakable: false, body)

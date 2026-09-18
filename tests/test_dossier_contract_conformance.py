@@ -231,49 +231,41 @@ NON_CONFORMANT: dict[str, str] = {
     "cover": "perimetro M2-02F: la copertina è la composizione unica di `base.typ::cover` "
              "(meta_row, tre text e toc del contratto non sono item), e non dichiara la forma "
              "`cover` per il proprio rail.",
-    # -- pagine 2-6: `apertura.py`/`dati.py`, perimetro della traccia serie. Il meccanismo c'è,
-    #    lì manca una riga di `form` e i `kind` dei grafici: non le si dichiara da qui.
-    "fonti": "forma `rail+main` non dichiarata (file di un'altra traccia); rail a 1 KPI contro "
-             "4, seconda tavola assente e prima tavola a 3 colonne contro 2.",
-    "rettifiche": "forma `rail+main` non dichiarata (file di un'altra traccia): i KPI stanno al "
-                  "grafico, non al rail; mancano il grafico «Prima e dopo» e la riga di testo.",
-    "chiusura": "forma `rail+main` non dichiarata (file di un'altra traccia); il grafico "
-                "«rettificato → chiusura» e la seconda tavola non ci sono.",
-    "indicatori-infrannuali": "forma `rail+main` non dichiarata (file di un'altra traccia); il "
-                              "confronto esce a barre dove il contratto nomina un `dumbbell` — "
-                              "ma qui la forma È contenuto (oggi 4 serie su 2 periodi, il "
-                              "dumbbell sono 2 serie su 4 categorie): trasporlo è fase 3.",
-    # -- pagine 7-18: `piano.py`/`indicatori.py`, forma e kind dichiarati da questa traccia.
-    "ipotesi": "forma dichiarata; il rail ha 3 KPI contro i 4 del contratto («investimenti "
-               "cumulati» non è nel modello: traccia B).",
-    "ce": "forma dichiarata; 1 serie contro le 2 del contratto (l'EBIT margin alla chiusura non "
-          "è esposto, mappatura 1-11 pag. 8) e tavola a 4 colonne contro 5.",
-    "sp": "forma dichiarata e `kind='bar'` dichiarato; resta la colonna della chiusura che il "
-          "modello non espone (tavola a 4 colonne contro 5).",
-    "flussi": "forma dichiarata e `kind='bar'` dichiarato; su questa fixture il grafico non "
-              "esce (flussi tutti a zero, `chart_block` risponde None) e il rail resta vuoto: "
-              "su AMBIENTA il grafico c'è.",
-    "indicatori": "forma dichiarata; tavola a 4 colonne contro le 5 del contratto (manca il "
-                  "periodo di chiusura).",
-    "liquidita": "forma dichiarata; il contratto chiede DUE grafici (barre strutturali + linee "
-                 "current/quick ratio) e il secondo non esiste come blocco (`quick_ratio` non è "
-                 "esposto: traccia B). Rail a 2 KPI contro 3.",
-    "redditivita": "forma `full+panels` NON dichiarata di proposito: farla a due grafici vuol "
-                   "dire dividere le 4 serie in due da 2, che è contenuto della fase 3 — e una "
-                   "pagina senza KPI da mettere in colonna non ha neanche il rail.",
-    "solidita": "forma dichiarata; il secondo grafico (PFN / EBITDA in «volte») non esiste come "
-                "blocco, e il rail ha 2 KPI contro 3.",
-    "circolante": "pagina assente dalla fixture sintetica: `indicatori._circolante` produce una "
-                  "pagina vuota quando gli indici di rotazione sono tutti a zero, e la fixture "
-                  "è uno di quei casi (su AMBIENTA la pagina c'è).",
-    "composizione": "forma `full+panels` non dichiarata: il contratto chiede due `stacked` nel "
-                    "pannello al posto della tavola di quote, e il `dumbbell` delle incidenze al "
-                    "posto delle linee — entrambe le cose chiedono di trasporre serie e "
-                    "categorie, cioè contenuto di fase 3, non una forma.",
-    "break-even": "forma dichiarata e `kind='bar'` dichiarato sul primo grafico; il secondo "
-                  "(margine di sicurezza %) e la tavola nominata al blocco 3 non esistono.",
-    "diagnostica": "forma dichiarata; rail a 2 KPI contro 4, e «Priorità di verifica» è un "
-                   "blocco text dove il contratto nomina una tavola.",
+    # -- Le differenze qui sotto sono quasi tutte della FIXTURE, non del catalogo: la
+    #    fixture sintetica non ha un periodo di chiusura né uno storico, quindi
+    #    `select_periods` degrada ai soli anni di piano e ogni tavola esce a 4 colonne
+    #    invece di 5. Su AMBIENTA (azienda 575, scenario 18) le stesse pagine hanno le
+    #    cinque colonne del contratto. Dove la differenza è invece reale, è scritto.
+    "fonti": "rail a 1 KPI contro 4, seconda tavola assente e prima tavola a 3 colonne "
+             "contro 2: contenuto della pagina, non forma.",
+    "rettifiche": "sulla fixture il grafico «Prima e dopo» non esce (rettifiche assenti) e "
+                  "manca la riga di testo di rimando all'Allegato D, che qui vive nel "
+                  "sottotitolo per non far traboccare la pagina.",
+    "chiusura": "sulla fixture mancano progressivo e chiusura, quindi il grafico non esce e "
+                "la seconda tavola nemmeno.",
+    "indicatori-infrannuali": "sulla fixture non ci sono periodo rettificato e chiusura: il "
+                              "dumbbell non ha i suoi due estremi e la pagina resta la sola "
+                              "tavola. Il `kind` dichiarato è `dumbbell`.",
+    "ipotesi": "il rail ha 3 KPI contro i 4 del contratto: «investimenti cumulati» esiste "
+               "solo con le ipotesi patrimoniali compilate.",
+    "ce": "tavola a 4 colonne contro 5 (fixture senza ancora).",
+    "sp": "tavola a 4 colonne contro 5 (fixture senza ancora).",
+    "flussi": "sulla fixture i flussi sono tutti a zero, il grafico non esce e il rail resta "
+              "vuoto; su AMBIENTA la pagina è completa.",
+    "indicatori": "tavola a 4 colonne contro 5 (fixture senza ancora).",
+    "liquidita": "sulla fixture il secondo grafico (current/quick ratio) non ha valori e il "
+                 "rail ha 2 KPI contro 3; i blocchi sono dichiarati.",
+    "redditivita": "tavola a 4 colonne contro 5 (fixture senza ancora); i due pannelli "
+                   "affiancati ci sono.",
+    "solidita": "sulla fixture manca la copertura delle immobilizzazioni (1 serie contro 2) e "
+                "il rail ha 2 KPI contro 3; il secondo grafico PFN/EBITDA è dichiarato.",
+    "circolante": "pagina assente dalla fixture sintetica: `indicatori._circolante` non "
+                  "produce nulla quando gli indici di rotazione sono tutti a zero, e la "
+                  "fixture è uno di quei casi (su AMBIENTA la pagina c'è).",
+    "composizione": "sulla fixture le quote di impieghi e fonti sono tutte assenti, quindi il "
+                    "pannello non si compone e resta il solo dumbbell delle incidenze.",
+    "break-even": "tavola a 4 colonne contro 5 (fixture senza ancora) e manca la riga di testo "
+                  "sul metodo, che qui vive nel sottotitolo.",
 }
 
 EXECUTIVE_PAGE_IDS = [CATALOG_OF_CONTRACT.get(page["id"], page["id"]) for page in executive_contract_pages()]

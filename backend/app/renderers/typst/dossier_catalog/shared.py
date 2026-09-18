@@ -477,6 +477,22 @@ def chart_from_series(chart_id: str, title: str, unit: str, periods: list[Any],
     return chart
 
 
+#: Altezza del riquadro grafico. Quella piena è la geometria base di
+#: `chart-layout.json`; la ridotta serve alle pagine che ne mettono DUE in
+#: colonna più una tavola — due riquadri da 94 mm non stanno in un foglio, e
+#: la v4 infatti li disegna più bassi (misurato: con 94 il dossier passava da
+#: 33 a 38 pagine fisiche).
+CHART_HEIGHT_FULL_MM = "94"
+CHART_HEIGHT_COMPACT_MM = "58"
+
+
+def chart_marker_height_mm(item: dict[str, Any]) -> str:
+    """Altezza del grafico in millimetri, dichiarata dalla forma di pagina.
+    Senza dichiarazione vale la geometria base, come prima di M2-02G."""
+    declared = item.get("height_mm")
+    return str(declared) if declared is not None else CHART_HEIGHT_FULL_MM
+
+
 def chart_marker_width_mm(item: dict[str, Any]) -> str:
     """Larghezza del grafico, in millimetri, per la pagina tipo.
     La fonte è `width_mm`, cioé la colonna che la forma di pagina (`form`) gli

@@ -150,9 +150,11 @@
     #if has-kpi {
       grid(columns: (55mm, w - 55mm - 5mm), column-gutter: 5mm,
         kpi-column(item.kpis),
-        chart-component(item.chart, gray: gray, indicators: indicators, width-mm: width-mm))
+        chart-component(item.chart, gray: gray, indicators: indicators, width-mm: width-mm,
+          height-mm: item.at("height_mm", default: none)))
     } else {
-      chart-component(item.chart, gray: gray, indicators: indicators, width-mm: width-mm)
+      chart-component(item.chart, gray: gray, indicators: indicators, width-mm: width-mm,
+        height-mm: item.at("height_mm", default: none))
     }
     // La tabellina dei valori sotto il grafico (traccia A, punto 5) è il
     // comportamento storico delle pagine che non dichiarano forma: nella v4 i
@@ -173,7 +175,9 @@
     }
     block(width: w, breakable: false, figure)
   }
-  v(5mm)
+  // Dopo un riquadro compatto lo stacco è minore: due grafici e una tavola
+  // sulla stessa pagina non hanno 5 mm da regalare due volte.
+  v(if "height_mm" in item { 3mm } else { 5mm })
 }
 
 // `panel_grid` (traccia A, punto 3): il blocco unico che la v4 chiama

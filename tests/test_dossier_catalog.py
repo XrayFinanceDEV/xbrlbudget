@@ -179,7 +179,11 @@ def test_expected_content_inventory_is_ordered_unique_and_starts_with_cover(work
     assert len(expected) == len(set(expected))
     flattened = []
     for page in inventory:
-        for item in page["items"]:
+        # Un `panel` non è un blocco: lo sono i grafici che contiene (stessa
+        # regola di `dossier_catalog._iter_blocks`).
+        blocks = [child for item in page["items"]
+                  for child in (item["items"] if item["kind"] == "panel" else [item])]
+        for item in blocks:
             if item["kind"] == "cover":
                 flattened.append("cover")
             elif item["kind"] in ("chart", "text", "note", "index"):
@@ -194,7 +198,9 @@ def test_expected_content_inventory_is_ordered_unique_and_starts_with_cover(work
     # pagine del catalogo) lo dimostra `build_editorial_plan`, già coperto da
     # `test_typst_editorial_plan.py`.
     for page in inventory:
-        for item in page["items"]:
+        blocks = [child for item in page["items"]
+                  for child in (item["items"] if item["kind"] == "panel" else [item])]
+        for item in blocks:
             owned = ["cover"] if item["kind"] == "cover" else (
                 [item["id"]] if item["kind"] in ("chart", "text", "note", "index")
                 else [f"heading:{item['id']}", *(row["id"] for row in item["rows"])])

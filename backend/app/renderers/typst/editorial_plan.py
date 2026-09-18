@@ -15,7 +15,8 @@ from app.schemas.final_report_v2 import (
     EditorialTablePart, FinalReportModelV2,
 )
 from .chart_components import ChartTemplateBundle
-from .dossier_catalog import (build_inventory, chart_declarations, chart_marker_width_mm, expected_content_inventory)
+from .dossier_catalog import (build_inventory, chart_declarations, chart_marker_height_mm,
+                              chart_marker_width_mm, expected_content_inventory)
 from .layout_probe import LayoutMeasurement, TypstLayoutProbe
 from .runtime import RendererCompileError, RendererInputError, RendererLimits, RendererUnavailable, _regular
 
@@ -116,6 +117,10 @@ class DossierLayoutProbe(TypstLayoutProbe):
                     # Rilievo 1: il grafico con colonna KPI si dichiara largo 118 mm
                     # (grid a due colonne in typst), gli altri restano a 178.
                     declared = Decimal(chart_marker_width_mm(item)) if item is not None else Decimal(-1)
+                    # L'altezza è dichiarata come la larghezza: una pagina con due
+                    # grafici in colonna li chiede più bassi (M2-02G), e il
+                    # marcatore deve riportare esattamente quella misura.
+                    declared_height = Decimal(chart_marker_height_mm(item)) if item is not None else Decimal(-1)
                     if (view is None or set(value) != {'kind', 'content_id', 'page', 'width_mm', 'height_mm',
                             'measured_width_mm', 'measured_height_mm', 'unit', 'categories', 'series', 'thresholds'}
                             or value['unit'] != view['unit'] or value['categories'] != view['categories']
@@ -123,7 +128,7 @@ class DossierLayoutProbe(TypstLayoutProbe):
                             or any(not isinstance(value[k], str) or not Decimal(value[k]).is_finite()
                                    or Decimal(value[k]) != literal for k, literal in (
                                 ('width_mm', declared), ('measured_width_mm', declared),
-                                ('height_mm', Decimal(94)), ('measured_height_mm', Decimal(94))))):
+                                ('height_mm', declared_height), ('measured_height_mm', declared_height)))):
                         raise ValueError()
                     # Store the validated marker; the inventory view is canonical.
                     records.append(DossierRecord('content', page, content_id))

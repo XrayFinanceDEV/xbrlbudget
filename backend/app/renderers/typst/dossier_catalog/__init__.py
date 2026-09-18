@@ -22,8 +22,9 @@ from app.schemas.final_report_v2 import FinalReportModelV2
 
 from . import allegati, apertura, dati, indicatori, piano
 from .shared import (  # noqa: F401  (riesportati: `editorial_plan.py` li importa da qui)
-    CHART_WIDTH_FULL_MM, CHART_WIDTH_KPI_MM, CHART_WIDTH_PANEL_MM, CHART_WIDTH_RAIL_MM,
-    PAGE_FORMS, RAIL_WIDTH_MM, chart_marker_width_mm,
+    CHART_HEIGHT_COMPACT_MM, CHART_HEIGHT_FULL_MM, CHART_WIDTH_FULL_MM, CHART_WIDTH_KPI_MM,
+    CHART_WIDTH_PANEL_MM, CHART_WIDTH_RAIL_MM, PAGE_FORMS, RAIL_WIDTH_MM,
+    chart_marker_height_mm, chart_marker_width_mm,
 )
 
 # Ordine fisso del catalogo v4: apertura (1-2) · dati (3-6, solo infrannuale) ·
@@ -74,14 +75,25 @@ def _apply_page_form(page: dict[str, Any]) -> dict[str, Any]:
         return page
     inside = _leading_rail_run(blocks) if form == "rail+main" else 0
     rail_kpis = list(page.get("kpis") or [])
+    # Due grafici in colonna sulla stessa pagina si disegnano più bassi: con
+    # l'altezza piena il secondo spingeva la tavola su una pagina fisica in
+    # più, e il catalogo garantisce una pagina per voce (misurato su AMBIENTA:
+    # 38 pagine invece di 33).
+    charts_in_column = sum(1 for item in blocks if item["kind"] == "chart")
+    # Solo i grafici DENTRO un pannello stanno a metà larghezza: un grafico che
+    # segue il pannello (il dumbbell delle incidenze, v4 pagina 16) occupa la
+    # riga per intero, e stringerlo a 86 mm lo faceva traboccare di pagina.
+    in_panel = {id(child) for item in page["items"] if item["kind"] == "panel" for child in item["items"]}
     for position, item in enumerate(blocks):
         item["rail"] = form == "rail+main" and position < inside
         if item["kind"] != "chart":
             continue
         item["value_table"] = False
         item["width_mm"] = (CHART_WIDTH_RAIL_MM if item["rail"]
-                            else CHART_WIDTH_PANEL_MM if form == "full+panels"
+                            else CHART_WIDTH_PANEL_MM if id(item) in in_panel
                             else CHART_WIDTH_FULL_MM)
+        if charts_in_column > 1:
+            item["height_mm"] = CHART_HEIGHT_COMPACT_MM
     for item in blocks:
         if item["kind"] == "chart" and item["rail"] and item.get("kpis"):
             rail_kpis = rail_kpis or list(item["kpis"])

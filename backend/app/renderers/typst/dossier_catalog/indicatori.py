@@ -290,11 +290,69 @@ def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
             "kpis": [] if block is not None else kpis, "items": items}
 
 
+# ── Pagina 15 · Circolante e ciclo monetario ────────────────────────────────
+
+
+def _kpi_circolante_operativo(report: FinalReportModelV2, periods: list[Any]) -> dict[str, Any] | None:
+    """Rimanenze + crediti commerciali (breve+lungo) − fornitori, sull'ultimo
+    periodo con tutt'e quattro le righe valorizzate. Somma di righe di
+    prospetto già canoniche (`sp05_rimanenze`, `sp06a`/`sp07a` crediti
+    clienti, la riga aggregata "Fornitori" già presente nel catalogo SP) — non
+    un calcolo finanziario nuovo, la stessa somma che la mappatura della fase
+    dichiara "derivabile" per questo KPI (nessun indicatore unico lo copre)."""
+    statement = s.statement_by_id(report, "balance_sheet")
+    codes = ("sp05_rimanenze", "sp06a_crediti_clienti_breve", "sp07a_crediti_clienti_lungo",
+             "sp16d_debiti_fornitori_breve+sp17d_debiti_fornitori_lungo")
+    values = {code: s.values_for_periods(s.statement_row(statement, code), statement, periods) for code in codes}
+    for index in range(len(periods) - 1, -1, -1):
+        parts = [values[code][index] for code in codes]
+        if any(part is None for part in parts):
+            continue
+        rimanenze, crediti_breve, crediti_lungo, fornitori = parts
+        return s.kpi(f"circolante operativo · {periods[index].year}",
+                     rimanenze + crediti_breve + crediti_lungo - fornitori, "eur")
+    return None
+
+
+def _circolante(report: FinalReportModelV2) -> dict[str, Any]:
+    periods = _periods(report)
+    kpis = [kpi for kpi in (
+        s.kpi_indicator(report, "analytical.activity.receivables_turnover_days", "giorni di credito (DSO)"),
+        s.kpi_indicator(report, "analytical.activity.inventory_turnover_days", "giorni di magazzino (DIO)"),
+        s.kpi_indicator(report, "analytical.activity.payables_turnover_days", "giorni di debito (DPO)"),
+        _kpi_circolante_operativo(report, periods),
+    ) if kpi is not None]
+    # I due grafici della v4 (giorni DSO/DIO/DPO; ciclo di conversione) sono
+    # entrambi in giorni: qui restano in un solo grafico a 4 serie (tetto
+    # `max_series: 4` rispettato esattamente).
+    chart = s.indicator_chart(report, "circolante-giorni", "Giorni del capitale circolante e ciclo monetario",
+        "days", periods, ["analytical.activity.receivables_turnover_days",
+        "analytical.activity.inventory_turnover_days", "analytical.activity.payables_turnover_days",
+        "analytical.activity.cash_conversion_cycle"])
+    items: list[dict[str, Any]] = []
+    block = s.chart_block("circolante-giorni", "Giorni del capitale circolante e ciclo monetario", chart, kpis)
+    if block is not None:
+        items.append(block)
+    table = _indicator_table("circolante-tabella", "Circolante e ciclo monetario", report, periods, [
+        ("analytical.activity.receivables_turnover_days", "Giorni di credito · DSO"),
+        ("analytical.activity.inventory_turnover_days", "Giorni di magazzino · DIO"),
+        ("analytical.activity.payables_turnover_days", "Giorni di debito · DPO"),
+        ("analytical.activity.cash_conversion_cycle", "Ciclo di conversione del denaro"),
+    ])
+    if table is not None:
+        items.append(table)
+    return {"id": "circolante", "title": "Circolante e ciclo monetario", "family": FAMILY,
+            "subtitle": "Giorni su base 365; il ciclo monetario è calcolato prima degli arrotondamenti "
+                        "individuali di DSO, DIO e DPO.",
+            "kpis": [] if block is not None else kpis, "items": items}
+
+
 def build(report: FinalReportModelV2) -> list[dict[str, Any]]:
     # "Niente pagine vuote" (m2-02d.md): su una fonte degenere (es. il
     # fixture sintetico "startup", dove ricavi/margini sono tutti a zero) sia
     # il grafico sia la tabella di una pagina possono restare entrambi vuoti
     # — quella pagina si toglie dal catalogo qui, non entra come riquadro
     # bianco e non compare nell'indice.
-    pages = [_indicatori(report), _liquidita(report), _redditivita(report), _solidita(report)]
+    pages = [_indicatori(report), _liquidita(report), _redditivita(report), _solidita(report),
+             _circolante(report)]
     return [page for page in pages if page["items"]]

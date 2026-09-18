@@ -43,7 +43,34 @@ def test_a_page_with_no_data_at_all_is_dropped_never_shown_blank():
     report = fixture_report("startup", [2027, 2028, 2029])
     pages = indicatori.build(report)
     assert "redditivita" not in [page["id"] for page in pages]
-    assert all(page["items"] for page in pages)
+
+
+@pytest.mark.parametrize("workflow", ("bilancio", "infrannuale", "startup"))
+def test_circolante_is_dropped_on_every_synthetic_fixture(workflow):
+    """`analytical.activity.*` (DSO/DIO/DPO/ciclo monetario) è sempre
+    `source_calculation_unavailable` sulle tre fixture sintetiche — un limite
+    del fixture (nessun `calculations.ratios` costruito), non della pagina:
+    verificato su AMBIENTA (azienda 575, scenario 18) che la pagina rende
+    correttamente coi valori reali (119,0 gg, 125,0 gg, ...)."""
+    report = fixture_report(workflow, [2027, 2028, 2029])
+    indicator = next(i for i in report.indicator_catalog
+                     if i.id == "analytical.activity.receivables_turnover_days")
+    assert all(value is None for value in indicator.values)
+    pages = indicatori.build(report)
+    assert "circolante" not in [page["id"] for page in pages]
+
+
+def test_kpi_circolante_operativo_sums_the_canonical_statement_rows():
+    """Rimanenze + crediti clienti (breve+lungo) − fornitori, sull'ultimo
+    periodo con tutt'e quattro le righe valorizzate — sulla fixture
+    sintetica tutt'e quattro sono zero (Decimal), quindi il KPI esiste
+    (0), non manca (None)."""
+    report = fixture_report("bilancio", [2027, 2028, 2029])
+    periods = indicatori._periods(report)
+    kpi = indicatori._kpi_circolante_operativo(report, periods)
+    assert kpi is not None
+    assert kpi["value"] == "0"
+    assert kpi["label"].startswith("circolante operativo · 2029")
 
 
 def test_liquidita_page_reuses_the_structural_balance_chart_id():

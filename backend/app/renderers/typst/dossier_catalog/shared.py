@@ -520,6 +520,26 @@ def chart_block(chart_id: str, title: str, chart: dict[str, Any] | None,
         return None
     view = dict(chart)
     view["kind"] = chart_kind(view, kind)
+    # Un dumbbell confronta DUE estremi: con una serie sola non c'è nulla da
+    # congiungere. Capita quando uno dei due periodi non ha alcun valore — su
+    # FORMETAL (azienda 613, infrannuale a 4 mesi) il progressivo rettificato
+    # non aveva indicatori, la serie spariva e il template andava in panico
+    # (`dumbbell-chart-requires-two-series`) facendo fallire l'intera
+    # preparazione del piano: il PDF diventava non scaricabile. Qui il blocco
+    # non si emette: la pagina resta senza quel grafico, e i valori disponibili
+    # restano nella propria tavola.
+    if view["kind"] == "dumbbell" and len(view.get("series") or ()) != 2:
+        return None
+    # Una composizione al 100% non sa disegnare una quota negativa — e una
+    # quota negativa esiste eccome: un patrimonio netto sotto zero la produce.
+    # Il template va in panico apposta (`stacked-chart-negative-value`), e un
+    # panico in questa fase fa fallire la preparazione dell'intero piano. Qui
+    # si degrada a barre affiancate: stessa fonte, stessi numeri, il segno si
+    # vede invece di far saltare il documento.
+    if view["kind"] == "stacked" and any(
+            value is not None and Decimal(value) < 0
+            for series in view.get("series") or () for value in series.get("values") or ()):
+        view["kind"] = "bar"
     shown_kpis = [item for item in kpis if item is not None]
     return {"id": f"chart:{chart_id}", "kind": "chart", "title": title,
             "chart_id": chart_id, "chart": view, "kpis": shown_kpis}

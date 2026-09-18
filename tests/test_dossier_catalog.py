@@ -240,3 +240,34 @@ def test_chart_declarations_key_by_content_id_and_expose_page_scoped_charts():
 def test_build_inventory_rejects_non_v2_report():
     with pytest.raises(TypeError):
         build_inventory(object())
+
+
+def test_dumbbell_con_una_sola_serie_non_diventa_un_blocco():
+    """Un dumbbell confronta due estremi: con una serie sola non c'è nulla da
+    congiungere, e il template va in panico (`dumbbell-chart-requires-two-
+    series`). Un panico qui fa fallire la preparazione dell'INTERO piano, e il
+    PDF diventa non scaricabile — è ciò che è successo su FORMETAL (azienda
+    613, infrannuale a 4 mesi), dove il progressivo rettificato non aveva
+    indicatori e la sua serie spariva. Il blocco non si emette e basta."""
+    chart = {"id": "confronto", "title": "Confronto", "unit": "percent",
+             "categories": ["Materie prime", "Servizi"],
+             "series": [{"label": "Chiusura", "values": ["3.15", "34.86"]}],
+             "indicator_ids": [], "thresholds": []}
+    assert shared.chart_block("confronto", "Confronto", chart, [], kind="dumbbell") is None
+    chart["series"].append({"label": "Fine piano", "values": ["3.15", "33.88"]})
+    block = shared.chart_block("confronto", "Confronto", chart, [], kind="dumbbell")
+    assert block is not None and block["chart"]["kind"] == "dumbbell"
+
+
+def test_composizione_con_una_quota_negativa_degrada_a_barre():
+    """Una quota negativa esiste: un patrimonio netto sotto zero la produce. Le
+    barre al 100% non sanno disegnarla e il template lo dichiara con un panico,
+    che però farebbe fallire tutto il piano. Il grafico degrada a barre
+    affiancate: stessi numeri, il segno si vede."""
+    chart = {"id": "fonti", "title": "Composizione delle fonti", "unit": "percent",
+             "categories": ["2026", "2027"],
+             "series": [{"label": "Patrimonio netto", "values": ["-4.20", "1.10"]},
+                        {"label": "Debiti finanziari", "values": ["54.00", "52.00"]}],
+             "indicator_ids": [], "thresholds": []}
+    block = shared.chart_block("fonti", "Composizione delle fonti", chart, [], kind="stacked")
+    assert block is not None and block["chart"]["kind"] == "bar"

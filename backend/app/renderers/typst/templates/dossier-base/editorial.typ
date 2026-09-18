@@ -40,7 +40,7 @@
 #show: body => dossier(report, options, body, note-footer: footer)
 #for spec in inventory {
   if spec.id == "cover" {
-    cover(report, kpis: spec.kpis)
+    cover(report, kpis: spec.kpis, toc: spec.at("toc", default: ()))
   } else {
     render-page(spec, report, options)
   }

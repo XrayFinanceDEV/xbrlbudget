@@ -128,7 +128,7 @@ def _bar_chart(chart_id: str, title: str, unit: str, categories: list[str],
     if not built:
         return None
     return {"id": chart_id, "title": title, "unit": unit, "categories": categories,
-            "series": built, "indicator_ids": [], "thresholds": []}
+            "series": built, "indicator_ids": [], "thresholds": [], "kind": "bar"}
 
 
 # ── Pagina 3 — Bilancio infrannuale e fonti ─────────────────────────────────
@@ -152,7 +152,7 @@ def _fonti(report: FinalReportModelV2) -> dict[str, Any] | None:
     items.append(_perimetro_table(report, statement, observed))
     if not items:
         return None
-    return {"id": "fonti", "title": "Bilancio infrannuale e fonti", "family": FAMILY,
+    return {"id": "fonti", "title": "Bilancio infrannuale e fonti", "family": FAMILY, "form": "rail+main",
             "subtitle": "Il conto economico di verifica precede le rettifiche; il progressivo non è "
                         "direttamente comparabile con un esercizio completo.",
             "kpis": kpis, "items": items}
@@ -225,7 +225,7 @@ def _rettifiche(report: FinalReportModelV2) -> dict[str, Any] | None:
     # (misurato su AMBIENTA) — un blocco in più trabocca su una seconda
     # pagina fisica orfana, senza intestazione, che viola l'invariante «una
     # pagina fisica per voce di catalogo».
-    return {"id": "rettifiche", "title": "Rettifiche apportate", "family": FAMILY,
+    return {"id": "rettifiche", "title": "Rettifiche apportate", "family": FAMILY, "form": "rail+main",
             "subtitle": "Il confronto rende visibile l'effetto delle rettifiche confermate sui valori di "
                         "partenza, senza contropartite; il dettaglio di ciascuna è nell'Allegato D.",
             "kpis": [] if block is not None else kpis, "items": items}
@@ -271,7 +271,7 @@ def _chiusura(report: FinalReportModelV2) -> dict[str, Any] | None:
     if block is not None:
         items.append(block)
     items.append(_chiusura_table(statement, adjusted, closing))
-    return {"id": "chiusura", "title": "Dall'infrannuale alla chiusura", "family": FAMILY,
+    return {"id": "chiusura", "title": "Dall'infrannuale alla chiusura", "family": FAMILY, "form": "rail+main",
             "subtitle": "Il progressivo rettificato più la stima del periodo residuo compone la "
                         "chiusura attesa, base del piano.",
             "kpis": [] if block is not None else kpis, "items": items}

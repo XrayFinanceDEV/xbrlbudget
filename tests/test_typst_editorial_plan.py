@@ -119,8 +119,21 @@ def test_full_real_composition_has_exact_pages_appendix_rows_and_slots(probe, wo
         full_text = ' '.join(page_texts)
         assert report.document.title in page_texts[0]
         assert report.company.name in page_texts[0]
-        assert 'PERIMETRO DEL DOCUMENTO' in page_texts[0]
-        assert 'CONTENUTI DEL DOSSIER' in page_texts[0]
+        # Copertina come la v4 (M2-02G): occhiello, messaggio, striscia KPI e
+        # indice delle sezioni col numero di pagina. I due blocchi precedenti
+        # («Perimetro del documento», «Contenuti del dossier» a sei voci senza
+        # numeri) non esistono più.
+        assert 'REPORT FINALE DELLA PRATICA' in page_texts[0]
+        assert 'PERIMETRO DEL DOCUMENTO' not in page_texts[0]
+        catalog = build_inventory(original)
+        cover_toc = catalog[0]['toc']
+        assert cover_toc, 'la copertina deve elencare le sezioni'
+        for entry in cover_toc:
+            assert entry['label'] in page_texts[0], entry
+            # Il numero stampato è la posizione reale della pagina nel
+            # documento compilato, non una promessa di Python.
+            assert catalog[entry['page'] - 1]['title'] == entry['label'], entry
+            assert entry['label'] in page_texts[entry['page'] - 1], entry
         for statement in report.detailed_statements:
             numbers = [number for number, page in enumerate(plan.pages, 1)
                        if any(part.statement_id == statement.id for part in page.table_parts)]
@@ -361,8 +374,12 @@ def test_kpi_cassa_letto_al_centesimo_dal_modello_con_periodo_giusto(probe, work
     cash_rows = {line.code: line.value for line in last.balance_sheet if line.code in ('cash', 'sp09_disponibilita_liquide')}
     checked = 0
     for section in inventory:
-        for item in section['items']:
-            for kpi in item.get('kpis') or ():
+        # I KPI stanno sul singolo blocco oppure, nelle pagine con una forma
+        # dichiarata, nel rail di pagina (M2-02G traccia A): la regola di
+        # periodo è la stessa, cambia solo dove il catalogo li appende.
+        candidates = [kpi for item in section['items'] for kpi in item.get('kpis') or ()]
+        candidates += list(section.get('rail') or ())
+        for kpi in candidates:
                 if kpi['label'] == f'cassa · {last.year}':
                     value = next(v for code, v in cash_rows.items() if v is not None)
                     assert kpi['value'] == format(value, 'f'), kpi

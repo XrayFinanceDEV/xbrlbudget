@@ -141,15 +141,93 @@
   body
 }
 
+// La riga di contesto sotto il nome dell'azienda (v4: «Bilancio al 30
+// settembre 2026 · chiusura attesa 2026 · piano 2027–2029»): percorso,
+// scenario di origine, anno base e periodo di piano in una riga sola, dove la
+// v4 li mette. Prima erano un blocco «Perimetro del documento» a quattro
+// caselle sotto la banda, che la v4 non ha.
+#let cover-context(report) = {
+  let years = report.document.budget_years
+  let plan = if years.len() == 1 { str(years.first()) }
+    else { str(years.first()) + "–" + str(years.last()) }
+  let workflow = if report.practice.workflow_type == "infrannuale" { "Bilancio infrannuale" }
+    else if report.practice.workflow_type == "startup" { "Piano startup" }
+    else { "Bilancio annuale" }
+  let origin = if report.practice.source_scenario != none {
+    let months = report.practice.source_scenario.period_months
+    if months == none { report.practice.source_scenario.name }
+    else { report.practice.source_scenario.name + " · " + str(months) + " mesi" }
+  } else { report.practice.budget_scenario.name }
+  (workflow + " · " + origin + " · anno base " + str(report.practice.budget_scenario.base_year)
+    + " · piano " + plan)
+}
+
 #let cover-heading(report, company-size) = [
     #plex(8pt, fill: white)[REPORT BUDGET]
     #v(7mm)
     #plex(27pt, weight: 600, fill: white, report.document.title)
     #v(7mm)
     #plex(company-size, weight: 500, fill: white, report.company.name)
+    #v(3mm)
+    #plex(8.5pt, fill: rgb("#9CC0D8"), cover-context(report))
 ]
 
-#let cover(report, kpis: ()) = {
+// Striscia KPI di copertina (v4): quattro colonne separate da un filo
+// verticale, non la striscia di pagina tipo (che i separatori non li ha).
+#let cover-kpi-strip(kpis) = context {
+  let column-width = body-width / kpis.len()
+  // Il valore si adatta alla colonna come nel rail: un KPI lungo
+  // («3 anni · 2027–2029») scende di corpo invece di andare a capo e
+  // spingere l'etichetta fuori riga.
+  // La misura è sulla riga intera, non parola per parola: «3 anni · 2027–2029»
+  // ha parole strette e una riga larga, e andando a capo spingeva l'etichetta
+  // fuori allineamento rispetto alle altre tre colonne.
+  let fits(size) = kpis.all(kpi =>
+    measure(plex(size, weight: 600, kpi-text(kpi))).width <= column-width - 10mm)
+  let size = if fits(15pt) { 15pt } else if fits(12pt) { 12pt } else { 10pt }
+  block(width: body-width, breakable: false)[
+    #line(length: 100%, stroke: 0.6pt + rule)
+    #v(3.5mm)
+    #grid(columns: (1fr,) * kpis.len(), column-gutter: 0mm,
+      ..kpis.enumerate().map(((index, kpi)) => block(width: 100%, inset: (
+          left: if index == 0 { 0mm } else { 5mm }, right: 5mm))[
+        #if index > 0 {
+          place(left, dx: -5mm, dy: -1mm, line(angle: 90deg, length: 13mm, stroke: 0.6pt + rule))
+        }
+        #plex(size, weight: 600, fill: navy, kpi-text(kpi))
+        #v(1.2mm)
+        #plex(7.8pt, fill: muted, kpi.label)
+      ]))
+    #v(3.5mm)
+    #line(length: 100%, stroke: 0.4pt + rule)
+  ]
+}
+
+// Indice di copertina (v4: 13 voci su due colonne, col numero di pagina a
+// destra). Il numero arriva da Python insieme all'etichetta: il catalogo dà
+// una pagina fisica per voce e il piano editoriale lo verifica sul documento
+// compilato, quindi non serve risolverlo qui con `query`, che alla prima
+// passata di introspezione è vuota. Una sola tabella a quattro colonne, non
+// due cicli di blocchi: le righe devono stare in un'altezza data, e un ciclo
+// di `v()` non la governa.
+#let cover-toc(entries) = {
+  let cell(entry) = if entry == none { (none, none) } else {
+    (plex(8pt, entry.label), align(right, plex(8pt, weight: 600, str(entry.page))))
+  }
+  let half = calc.ceil(entries.len() / 2)
+  let left-column = entries.slice(0, half)
+  let right-column = entries.slice(half)
+  let rows = ()
+  for index in range(half) {
+    let left = cell(left-column.at(index, default: none))
+    let right = cell(right-column.at(index, default: none))
+    rows += (left.at(0), left.at(1), right.at(0), right.at(1))
+  }
+  table(columns: (1fr, auto, 1fr, auto), column-gutter: (4mm, 10mm, 4mm),
+    inset: (x: 0pt, y: 3pt), stroke: (x, y) => (bottom: 0.4pt + rule), ..rows)
+}
+
+#let cover(report, kpis: (), toc: ()) = {
   marker((kind: "content", content_id: "cover"))
   context {
     let chosen = none
@@ -162,48 +240,22 @@
     if chosen == none { panic("cover-name-does-not-fit") }
     block(height: 88mm, chosen)
   }
-  v(9mm)
-  plex(7.4pt, fill: blue, weight: 600, tracking: 0.6pt)[PERIMETRO DEL DOCUMENTO]
+  v(8mm)
+  plex(7.5pt, fill: blue, weight: 500, tracking: 0.5pt)[REPORT FINALE DELLA PRATICA]
   v(3mm)
-  plex(16pt, weight: 600, fill: navy)[Dati di partenza, ipotesi e risultati del piano]
-  v(5mm)
-  context {
-    let years = report.document.budget_years
-    let budget-period = if years.len() == 1 { str(years.first()) }
-      else { str(years.first()) + " – " + str(years.last()) }
-    let workflow = if report.practice.workflow_type == "infrannuale" { "Bilancio infrannuale" }
-      else if report.practice.workflow_type == "startup" { "Piano startup" }
-      else { "Bilancio annuale" }
-    let source = if report.practice.source_scenario != none {
-      let months = report.practice.source_scenario.period_months
-      report.practice.source_scenario.name + if months == none { "" } else { " · " + str(months) + " mesi" }
-    } else { report.practice.budget_scenario.name }
-    grid(columns: (1fr, 1fr, 1fr), column-gutter: 8mm,
-      [#line(length: 100%, stroke: 0.6pt + rule)
-       #v(2mm)#plex(7pt, fill: muted)[PERCORSO]#v(1mm)#plex(9pt, weight: 500, workflow)],
-      [#line(length: 100%, stroke: 0.6pt + rule)
-       #v(2mm)#plex(7pt, fill: muted)[PERIODO DI PIANO]#v(1mm)#plex(9pt, weight: 500, budget-period)],
-      [#line(length: 100%, stroke: 0.6pt + rule)
-       #v(2mm)#plex(7pt, fill: muted)[ANNO BASE]#v(1mm)#plex(9pt, weight: 500, str(report.practice.budget_scenario.base_year))])
-    v(5mm)
-    plex(7pt, fill: muted)[SCENARIO DI ORIGINE]
-    v(1mm)
-    plex(9pt, weight: 500, source)
-  }
+  plex(16pt, weight: 600, fill: navy)[Dati di partenza, ipotesi e risultati del piano.]
+  linebreak()
+  plex(16pt, weight: 600, fill: navy)[Un percorso leggibile e commentato.]
+  v(3mm)
+  plex(8.5pt, fill: muted)[Sintesi della pratica e delle proiezioni economiche, patrimoniali e finanziarie.]
   if kpis.len() > 0 {
     v(6mm)
-    kpi-strip(kpis)
+    cover-kpi-strip(kpis)
   }
-  v(6mm)
-  plex(7.4pt, fill: blue, weight: 600, tracking: 0.6pt)[CONTENUTI DEL DOSSIER]
-  v(3mm)
-  grid(columns: (1fr, 1fr), column-gutter: 10mm, row-gutter: 2mm,
-    [#plex(8.8pt, weight: 500)[01 · Sintesi e qualità dei dati]],
-    [#plex(8.8pt, weight: 500)[02 · Bilancio e rettifiche]],
-    [#plex(8.8pt, weight: 500)[03 · Ipotesi del piano]],
-    [#plex(8.8pt, weight: 500)[04 · Proiezioni e indicatori]],
-    [#plex(8.8pt, weight: 500)[05 · Lettura per pagina]],
-    [#plex(8.8pt, weight: 500)[06 · Allegati completi]])
+  if toc.len() > 0 {
+    v(6mm)
+    cover-toc(toc)
+  }
 }
 
 #let parent-labels(statement, row) = {

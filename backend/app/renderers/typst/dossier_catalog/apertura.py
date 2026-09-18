@@ -38,12 +38,13 @@ def _sintesi(report: FinalReportModelV2) -> dict[str, Any]:
     # ricavi delle vendite (con fallback), la cifra che l'utente riconosce.
     chart = s.statement_chart(report, "income_statement", "sintesi-andamento",
         "Ricavi e redditività del piano", "eur", periods,
-        [("production_value", "Ricavi"), ("ebitda", "EBITDA"), ("net_profit", "Risultato netto")])
+        [("production_value", "Ricavi"), ("ebitda", "EBITDA"), ("net_profit", "Risultato netto")],
+        kind="bar")
     items: list[dict[str, Any]] = []
     block = s.chart_block("sintesi-andamento", "Ricavi e redditività del piano", chart, kpis)
     if block is not None:
         items.append(block)
-    return {"id": "sintesi", "title": "Sintesi esecutiva", "family": "Sintesi",
+    return {"id": "sintesi", "title": "Sintesi esecutiva", "family": "Sintesi", "form": "rail+main",
             "subtitle": "I dati osservati, la chiusura attesa e gli anni di piano sono tenuti "
                         "distinti in tutto il dossier.",
             "kpis": [] if items else kpis, "items": items}

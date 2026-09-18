@@ -100,6 +100,35 @@ def _iter_blocks(page: dict[str, Any]):
             yield item
 
 
+#: Le sezioni che la copertina elenca, nell'ordine del catalogo (v4 pagina 1:
+#: 13 voci su due colonne, ciascuna col proprio numero di pagina). Non sono
+#: tutte le 33 pagine: le pagine di approfondimento degli indicatori (12-17) e
+#: i singoli allegati stanno sotto la voce che li introduce, come nella v4.
+#: Una sezione assente dal flusso (le pagine dati mancano su un budget annuale)
+#: semplicemente non compare.
+COVER_SECTIONS = ("sintesi", "fonti", "rettifiche", "chiusura", "indicatori-infrannuali",
+                  "ipotesi", "ce", "sp", "flussi", "indicatori", "diagnostica",
+                  "allegati", "metodologia")
+
+
+def _fill_cover_toc(pages: list[dict[str, Any]]) -> None:
+    """L'indice della copertina, costruito dall'inventario stesso: etichetta =
+    titolo neutro della pagina, numero = posizione della pagina nel catalogo.
+
+    Il numero si conta qui, non lo risolve Typst dal vivo come fa l'indice
+    degli allegati: il catalogo garantisce **una pagina fisica per voce**, e
+    `editorial_plan._validate_inventory` lo verifica misurando il documento
+    compilato (una sola sezione per pagina, pagine contigue da 1). Se
+    quell'invariante saltasse, il piano editoriale fallirebbe forte prima che
+    un indice sbagliato possa uscire in un PDF.
+    """
+    entries = []
+    for position, page in enumerate(pages, start=1):
+        if page["id"] in COVER_SECTIONS:
+            entries.append({"label": page["title"], "page": position})
+    pages[0]["toc"] = entries
+
+
 def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
     """The ordered list of pages for this report's workflow. Each page's
     `items` are already the exact, curated v4 content for that one physical
@@ -111,7 +140,9 @@ def build_inventory(report: FinalReportModelV2) -> list[dict[str, Any]]:
         pages.extend(group.build(report))
     if not pages or pages[0]["id"] != "cover":
         raise ValueError("the catalog must start with the cover page")
-    return [_apply_page_form(page) for page in pages]
+    shaped = [_apply_page_form(page) for page in pages]
+    _fill_cover_toc(shaped)
+    return shaped
 
 
 def expected_content_inventory(report: FinalReportModelV2) -> OrderedDict[str, str]:

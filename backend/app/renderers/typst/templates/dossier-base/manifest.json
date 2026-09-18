@@ -4,7 +4,7 @@
   "files": {
     "OFL-1.1.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
     "PROVENANCE.md": "fa78908331dc236b98e4f43cbcfed42189e86943413f8398f57c30afc6d0c155",
-    "base.typ": "33bb8660aaaf6b591136ca83f337e81a5cfd5df7be8efca8700188b7e460dc8a",
+    "base.typ": "bc9228c63f9649bd8290d9c8692480dab3e0e4a669959735dfd1b43ef20bcaff",
     "fonts/IBMPlexSans-Italic.ttf": "a9c6ef9942c49e49d11e11a6dacc0b3a087978757e9b22a06b8ac22a6400fb15",
     "fonts/IBMPlexSans-Medium.ttf": "331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907",
     "fonts/IBMPlexSans-Regular.ttf": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5",
@@ -14,7 +14,7 @@
     "chart-format.typ": "02f5018fcc7215089c28204e9cc229602adf70f9f1c341891e05af6df6d74f0e",
     "chart-layout.json": "b5f3c7c15886131bba112d70b84fcc179d1bf5a995f76d17934d652119f912cb",
     "charts-preview.typ": "499daa5a1ed190c848e80b0b58ea483dc1978d70750eafa6efed70dca08a59c5",
-    "editorial.typ": "47f46d4357bf46c008d87bf9a9f9b59ed6da3d78087ce3ba7f89376110482a9b",
+    "editorial.typ": "221e74109417a02a991683608ca64f7a21fd393f160717d91e060c29ab959465",
     "note-fit.typ": "f392a522260c7e1b206e38477918fbcf82bac7c5c5385bd49d53e28e12b567c9",
     "pagine/comuni.typ": "f3edb161ef22b677af57a2a3ed5cae449eacf2b68364a579008f8d3301a75984",
     "pagine/apertura.typ": "b3f89e661b0cbee7dbd6238e64201cba3a2e3a51685760ee46c7663cdb75afa8",

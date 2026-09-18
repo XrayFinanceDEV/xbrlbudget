@@ -233,9 +233,6 @@ NON_CONFORMANT: dict[str, str] = {
              "`cover` per il proprio rail.",
     # -- pagine 2-6: `apertura.py`/`dati.py`, perimetro della traccia serie. Il meccanismo c'è,
     #    lì manca una riga di `form` e i `kind` dei grafici: non le si dichiara da qui.
-    "sintesi": "forma `rail+main` non dichiarata (file di un'altra traccia) e grafico a linee: "
-               "`sintesi-andamento` non dichiara `kind='bar'` (contratto: barre, 3 serie × 4 "
-               "periodi); rail a 0 KPI contro 4.",
     "fonti": "forma `rail+main` non dichiarata (file di un'altra traccia); rail a 1 KPI contro "
              "4, seconda tavola assente e prima tavola a 3 colonne contro 2.",
     "rettifiche": "forma `rail+main` non dichiarata (file di un'altra traccia): i KPI stanno al "

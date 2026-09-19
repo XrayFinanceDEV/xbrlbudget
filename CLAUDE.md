@@ -999,6 +999,11 @@ See `docs/agents/issue-tracker.md`.
 
 Le cinque label canoniche, con i nomi di default. See `docs/agents/triage-labels.md`.
 
+### Riprodurre un artifact
+
+Il layout è la consegna, non il contenuto: pilota di 5 pagine, contratto estratto, verifica con la
+vision. See `docs/agents/riprodurre-un-artifact.md`.
+
 ### Domain docs
 
 Single-context. See `docs/agents/domain.md`.

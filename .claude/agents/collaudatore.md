@@ -153,12 +153,28 @@ questa missione: un run che la ignora dipinge conclusioni su una proiezione che 
   `fixed_materials_growth_pct`, e così per i servizi): il risultato è
   `base×fisso%×(1+cresc.fissa) + base×(1−fisso%)×(1+cresc.ricavi)`. **Leggi la riga di ipotesi**
   per sapere le percentuali vere: non dare per buono il 40% di default.
-- **L'aliquota inviata non è quella applicata.** Le schermate mandano 27,9% (IRES+IRAP, mai il
-  `24` dello schema Pydantic), ma il motore la usa **solo come ripiego**: se l'anno base ha
-  un'aliquota effettiva utilizzabile — `ce20_imposte / risultato ante imposte`, scartata se
-  supera il 60% — applica **quella** (`forecast_engine.py:564-573`). Su un'azienda con storico
-  vero il 27,9 quasi mai è il numero che vedrai. Ricava l'aliquota attesa dall'anno base prima
-  di gridare al rilievo. Un `ce20_override` scavalca comunque tutto.
+- **L'aliquota applicata è quella scritta, non quella del consuntivo.** `tax_rate` è l'aliquota
+  che gira, **così com'è** (`ForecastEngine._tax_components`): se lo scenario dice 24, il motore
+  applica 24 anche se l'anno base ha un'effettiva del 31. Non è un bug, e non è una cosa da
+  «ricavare l'attesa dall'anno base prima di gridare al rilievo»: era così fino al 2026-09-18,
+  e la regola è stata **rovesciata** dal `073927b` (decisione del commercialista). Le quattro cose che
+  sembrano un difetto da quella parte sono tutte deliberate:
+  - **l'effettiva si propone, non si applica.** `GET /companies/{id}/years/{anno}/aliquota-proposta`
+    (`backend/app/services/aliquota_service.py`) la calcola dall'ultimo **consuntivo depositato**
+    (`ce20_imposte / risultato ante imposte`, con il cap del 60% e il ripiego 27,9 — quella soglia
+    vive **lì**, non nel motore), e la schermata la mostra: l'utente la tiene o la cambia. Una
+    proposta che l'utente ha cambiato non è un errore di calcolo.
+  - **il 27,9 fisso lo manda solo la forma Startup** (`STARTUP_TAX_RATE_PCT`);
+    il wizard del previsionale e il percorso infrannuale portano la **proposta**
+    (`useAliquotaProposta`, e `getAliquotaProposta` in `app/pratica/page.tsx`). Mai il `24` dello
+    schema Pydantic, che non è inviato da nessuna schermata.
+  - **un `ce20_override` scavalca l'aliquota del tutto**, e si interpreta come imposta **totale**,
+    quindi `current_tax = totale − differite`. Su quell'anno nessuna aliquota viene applicata.
+  - **le imposte anticipate non passano dal conto economico** (stessa decisione): `sp06f`/`sp07f`
+    restano quelli del consuntivo per tutto il piano, e si cambiano solo con un override dello SP
+    previsionale, la cui contropartita è `sp12e` altre riserve — **mai la cassa**. Vedertele ferme
+    su un piano che cresce non è un difetto: `sp06f_growth_pct` non è reso da nessuna schermata e
+    il motore lo ignora deliberatamente (`forecast_engine.py`, commento «anticipate COSTANTI»).
 - **La cassa è il plug** (`sp09`) e quando va negativa diventa debito a breve (`sp16`). La cassa
   «che non torna» è il progetto, non un difetto.
 - **DSO/DIO/DPO non impostati si derivano dall'anno base su 360 giorni**, e dai crediti e debiti

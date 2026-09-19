@@ -31,6 +31,8 @@ from scripts.riallinea import (  # noqa: E402
     commits_nell_intervallo,
     documenti_che_nominano_file,
     simboli_non_documentati,
+    classifica_sha,
+    verifica_sha_rapporto,
 )
 
 
@@ -612,3 +614,79 @@ def test_due_rotte_diverse_non_si_confondono(tmp_path):
     sim = [Simbolo("/companies/{company_id}/years/{year}/aliquota-proposta", "rotta",
                    "x.py", "aggiunto")]
     assert documenti_che_nominano(sim, [str(tmp_path)]) == []
+
+
+# --- A) i sha citati da un rapporto devono essere raggiungibili -------------
+# Misurato in questo giro, procurato da chi verificava: un rapporto citava
+# `c1b77d1` e `b44c80d`, gli sha PRE-amend di due commit emendati. Esistevano
+# come oggetti (`git cat-file -e` rispondeva verde) e NON erano raggiungibili da
+# HEAD, quindi `git gc` li avrebbe cancellati lasciando un riferimento morto
+# nella pagina che parla di riferimenti morti. Il predicato giusto e' la
+# raggiungibilita', e il rapporto di riallineamento non era sottoposto a verifica
+# da niente: questo e' quel niente che chiude il buco.
+
+def _repo_git(tmp_path):
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "T")
+    (tmp_path / "a.py").write_text("def uno():\n    pass\n", encoding="utf-8")
+    git("add", "a.py")
+    git("commit", "-q", "-m", "primo")
+    return git
+
+
+def test_sha_antenatore_di_head_passa(tmp_path):
+    _repo_git(tmp_path)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path,
+                          capture_output=True, text=True).stdout.strip()
+    cit = verifica_sha_rapporto(f"**SHA verificato:** `{head}`\n", repo=tmp_path)
+    assert [(c.sha, c.esito) for c in cit] == [(head[:7], "antenato")] or \
+           [(c.sha, c.esito) for c in cit] == [(head, "antenato")]
+    assert not any(c.esito != "antenato" for c in cit)
+
+
+def test_sha_corteggiato_come_abbreviato_ancora_di_sette(tmp_path):
+    _repo_git(tmp_path)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path,
+                          capture_output=True, text=True).stdout.strip()
+    cit = verifica_sha_rapporto(f"da `{head[:7]}` a HEAD\n", repo=tmp_path)
+    assert [c.esito for c in cit] == ["antenato"]
+
+
+def test_sha_orfano_di_un_amend_e_distinto_da_inesistente(tmp_path):
+    git = _repo_git(tmp_path)
+    vecchio = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path,
+                             capture_output=True, text=True).stdout.strip()
+    # Emenda: `vecchio` resta un oggetto valido, ma scivola fuori dalla storia.
+    (tmp_path / "b.py").write_text("def due():\n    pass\n", encoding="utf-8")
+    git("add", "b.py")
+    git("commit", "-q", "--amend", "-m", "primo, emendato")
+
+    cit = verifica_sha_rapporto(
+        f"emendato: era `{vecchio}`, ora `deadbeef1`.\n", repo=tmp_path)
+    esiti = {c.esito for c in cit}
+    assert "orfano" in esiti, "l'orfano di amend deve avere un esito proprio"
+    assert "inesistente" in esiti, "e va distinto da uno sha che non esiste affatto"
+    assert all("antenato" != e for e in esiti)
+
+
+def test_sha_preso_anche_in_mezzo_a_un_comando_inline(tmp_path):
+    # Nei rapporti veri uno sha capita dentro `scripts/riallinea.py --da 1490476
+    # --a ffedd1a`: non e' adiacente a un backtick, e filtrare su "fra backtick"
+    # ne perderebbe una parte.
+    git = _repo_git(tmp_path)
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "due"],
+                   cwd=tmp_path, check=True, capture_output=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path,
+                          capture_output=True, text=True).stdout.strip()
+    base = head[:7]
+    assert classifica_sha(base, tmp_path) == "antenato"
+    assert [c.sha for c in verifica_sha_rapporto(
+        f"`riallinea.py --da {base} --a HEAD`\n", repo=tmp_path)] == [base]
+
+
+def test_sotto_sette_cifre_non_e_un_candidato(tmp_path):
+    _repo_git(tmp_path)
+    assert verifica_sha_rapporto("il default 12 e il cap 60 qui\n", repo=tmp_path) == []

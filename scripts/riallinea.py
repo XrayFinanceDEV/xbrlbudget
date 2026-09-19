@@ -17,8 +17,10 @@ Spec: docs/superpowers/specs/2026-08-14-agente-riallineamento-design.md
 import argparse
 import datetime
 import json
+import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List
@@ -391,6 +393,64 @@ def riduci_generici(citazioni: List[Citazione]):
 # collaudatore.md` senza che nessun giro la vedesse: un limite di corpus, non
 # una mancata verifica. Le due radici nuove costano citazioni fantasma dalla
 # skill stessa, e stanno in ESCLUSI_DAL_CORPUS sotto con la misura.
+# ── A) i sha citati da un rapporto devono essere raggiungibili ───────────────
+# Un rapporto di riallineamento non era sottoposto a verifica da niente, e su
+# questo giro ha citato due sha PRE-amend: oggetti che `git cat-file -e` conferma
+# e che `git merge-base --is-ancestor` scarta. Alla prima `git gc` sarebbero
+# diventati riferimenti morti nella pagina che parla di riferimenti morti. Il
+# predicato giusto e' la raggiungibilita', non l'esistenza.
+_SHA_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
+
+
+@dataclass
+class ShaCitato:
+    sha: str
+    riga: int
+    esito: str        # antenato | orfano | inesistente
+
+
+def _git_ok(args, repo):
+    return subprocess.run(["git", *args], cwd=str(repo),
+                          capture_output=True).returncode == 0
+
+
+def classifica_sha(sha, repo="."):
+    """I tre esiti sono tre difetti diversi, non tre modi di dire 'no'.
+
+    `orfano` e' quello che nessun controllo precedente vedeva: l'oggetto c'e',
+    quindi `cat-file -e` da' verde, ma non e' nella storia di HEAD -- il caso
+    dell'amend. `inesistente` e' un typo (o, raro, una parola italiana scritta
+    solo con cifre esadecimali: il falso positivo costa una verifica in piu', non
+    un disallineamento mancato).
+    """
+    if sha == _EMPTY_TREE:
+        return "antenato"          # l'albero vuoto di git: citato a ragione
+    if not _git_ok(["cat-file", "-e", sha + "^{commit}"], repo):
+        return "inesistente"
+    return ("antenato" if _git_ok(["merge-base", "--is-ancestor", sha, "HEAD"], repo)
+            else "orfano")
+
+
+def candidati_sha(testo):
+    """(sha, riga) per ogni token esadecimale di 7-40 cifre.
+
+    Non si filtrano sui backtick: nei rapporti veri uno sha capita dentro
+    `riallinea.py --da 1490476 --a ffedd1a`, dove di backtick non e' adiacente.
+    """
+    return [(m.group(1), testo.count("\n", 0, m.start()) + 1)
+            for m in _SHA_RE.finditer(testo)]
+
+
+def verifica_sha_rapporto(testo, repo="."):
+    """Ogni occorrenza, con l'esito. Non corregge nulla: classifica e basta."""
+    memo, out = {}, []
+    for sha, riga in candidati_sha(testo):
+        if sha not in memo:
+            memo[sha] = classifica_sha(sha, repo)
+        out.append(ShaCitato(sha, riga, memo[sha]))
+    return out
+
+
 RADICI_DOC = ["docs", "CLAUDE.md", ".claude/agents", ".claude/skills"]
 RADICE_MEMORIA = str(
     Path.home() / ".claude" / "projects" / "-home-peter-DEV-budget" / "memory"
@@ -448,7 +508,32 @@ def main() -> None:
     ap.add_argument("--data", default=None,
                     help="data ISO della registrazione (AAAA-MM-GG); default: oggi, "
                          "calcolata dallo script se lo skill non la passa esplicitamente")
+    ap.add_argument("--sha", nargs="?", const="AUTO", metavar="RAPPORTO",
+                    help="verifica i sha citati da un rapporto (default: quello della "
+                         "--data) e termina: tre esiti, antenato/orfano/inesistente. "
+                         "Non corregge: esce 1 con l'elenco.")
     args = ap.parse_args()
+
+    if args.sha is not None:
+        data = args.data or datetime.date.today().isoformat()
+        percorso = (Path("docs/superpowers/allineamento") / f"{data}.md"
+                    if args.sha == "AUTO" else Path(args.sha))
+        if not percorso.exists():
+            print(f"rapporto non trovato: {percorso}", file=sys.stderr)
+            raise SystemExit(2)
+        cit = verifica_sha_rapporto(percorso.read_text(encoding="utf-8",
+                                                       errors="replace"))
+        per_esito = {}
+        for c in cit:
+            per_esito.setdefault(c.esito, []).append(c)
+        for esito in ("antenato", "orfano", "inesistente"):
+            righe = per_esito.get(esito, [])
+            print(f"{esito:12} {len(righe):4}  " +
+                  (", ".join(sorted({c.sha[:9] for c in righe})) if righe else ""))
+        cattivi = [c for c in cit if c.esito != "antenato"]
+        for c in cattivi:
+            print(f"  {percorso}:{c.riga}  {c.esito}  {c.sha}", file=sys.stderr)
+        raise SystemExit(1 if cattivi else 0)
 
     if args.registra:
         data = args.data or datetime.date.today().isoformat()

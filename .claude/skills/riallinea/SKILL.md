@@ -61,6 +61,14 @@ nessuno la rilegge. Nel dubbio si segnala.
 5. **Correggi solo dentro la lista chiusa** (sotto). Tutto il resto va in «Da decidere».
 6. **Verifica anche la memoria**, ma non modificarla: solo riferimenti morti a rapporto.
 7. **Scrivi il rapporto**, sempre, anche a esito nullo.
+7-bis. **Verifica gli sha che il rapporto cita**, prima di committarlo:
+   `python3 scripts/riallinea.py --sha --data <AAAA-MM-GG>`. Tre esiti distinti perche' sono
+   tre difetti diversi: `antenato` (ok), `orfano` (l'oggetto esiste a `cat-file -e` ma non e'
+   raggiungibile da HEAD: il caso del commit emendato a meta' giro, che nessuno sguardo
+   precedente vedeva), `inesistente`. Esce 1 con l'elenco e **non corregge nulla**: la
+   correzione e' non citare sha irraggiungibili, riscrivendo la frase coi sostituti. Il numero
+   e' 7-bis e non 8 per non rinumerare una procedura citata per numero altrove (qui al passo 9,
+   e nel piano notturno).
 8. **Committa in due volte**: prima le correzioni con il messaggio
    `docs(allineamento): correzioni dimostrabili`, poi il rapporto con
    `docs(allineamento): rapporto AAAA-MM-GG` (data del rapporto, non del giorno in cui

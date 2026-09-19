@@ -2126,3 +2126,12 @@ git commit -m "docs(budget): anteprima del previsionale e percorso a sette passi
 > `patrimoniale-piano`, `imposte`): `lib/budget-wizard-steps.ts` è l'unica fonte, e lo stato
 > attuale è descritto in `docs/frontend/PRATICA-PERCORSO.md` §passi e
 > `docs/budget/FORECASTING_GUIDE.md` passi 5 e 6.
+
+> **AGGIUNTA 2026-09-18 (riallineamento 2026-09-18).** Il commit `073927b` («il calcolo delle
+> imposte secondo il commercialista») ha **ritirato** `TaxTemporaryDifferencesGrid`, che questo
+> piano dava per «Create:»: le imposte anticipate non passano più dal conto economico, il motore
+> ignora `tax_temporary_differences` e il mastrino non esiste in nessuna schermata — non c'è un
+> successore da cercare. Lo stesso commit ha cambiato anche la regola dell'aliquota: `tax_rate` è
+> quella che il motore applica, e l'effettiva dell'anno base serve solo a **proporla**
+> (`GET /companies/{id}/years/{anno}/aliquota-proposta`). Stato attuale: `CLAUDE.md` › Key
+> Conventions e `docs/budget/FORECASTING_GUIDE.md` passo 7.

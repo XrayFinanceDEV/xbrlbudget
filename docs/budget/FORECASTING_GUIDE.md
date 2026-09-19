@@ -389,14 +389,18 @@ foglio.»
 
 **Che cosa inserisci**
 
-- **Aliquota effettiva {anno base}**: imposta su risultato ante imposte, in sola lettura, con il
-  contrassegno *usata dal piano* quando è quella che il motore applicherà.
-- **Aliquota forzata**: vuota = usa l'effettiva, o il 27,9% (IRES + IRAP) quando l'effettiva non è
-  derivabile. Quando il piano usa un'aliquota diversa da quella dell'anno base compare la riga
-  **«Aliquota usata dal piano»** con il perché.
-- **Acconti versati nell'anno**, anno per anno.
-- **Mastrino imposte anticipate e differite**: righe di *Descrizione*, *Apertura*, *Incrementi*,
-  *Riversamenti* e un'aliquota per riga.
+- **Aliquota proposta**: in sola lettura, l'aliquota effettiva dell'ultimo bilancio annuale
+  **depositato** (mai un anno promosso dall'infrannuale), con il ripiego 27,9% (IRES + IRAP)
+  quando nessun consuntivo la esprime. Accanto, quando il piano ne usa un'altra, il pulsante
+  **«Usa la proposta»**.
+- **Aliquota del piano**: modificabile, ed è quella che il motore applica. Il vuoto non vuol dire
+  niente: la casella ricade sul 27,9%, non sull'effettiva.
+- **«Aliquota usata dal piano»**: compare solo quando c'è qualcosa da dichiarare — il piano usa
+  un'aliquota diversa dalla proposta, o un `ce20_override` sostituisce l'aliquota con un importo
+  su uno o più anni.
+- **Acconto sull'imposta dell'anno prima**, in percentuale: la regola con cui il motore calcola
+  l'acconto quando non è dichiarato un importo (vuoto = 100%).
+- **Acconti versati nell'anno**, anno per anno: un importo qui sostituisce quella percentuale.
 - **«Posizione tributaria manuale»** (accordion): *Debiti tributari entro %* e, solo quando è
   attiva la via manuale, *Debiti tributari oltre %*.
 - In fondo, un rimando: **«Debiti tributari {anno} a breve · saldo pagato nel {anno 1} · passo
@@ -404,10 +408,16 @@ foglio.»
   «N rate uguali» — non stanno più qui: si scadenziano al passo 5 **«Patrimoniale pregresso»**,
   nella card «Altre voci oltre 12 mesi».
 
+Il **mastrino delle imposte anticipate e differite** non c'è più: dal 2026-09-18 le anticipate non
+passano dal conto economico (commercialista) e il motore budget le ignora — `sp06f`/`sp07f`
+restano quelle del consuntivo per tutto il piano e si cambiano solo con un override dello SP
+previsionale.
+
 **Che cosa ne fa il motore**
 
 Le imposte si pagano **a saldo + acconto**, non si accumulano: il debito generato a fine anno N
-esce come saldo nell'anno N+1, al netto del credito tributario di apertura fino a capienza, e
+esce come saldo **per intero** nell'anno N+1, e un credito d'imposta dell'anno prima si compensa
+a sua volta per intero — anche oltre gli acconti, non solo fino alla capienza del saldo; e
 l'acconto di N è di default il **100%** dell'imposta N−1 — o l'importo che hai scritto in
 «Acconti versati nell'anno», **a condizione che sia maggiore di zero**: zero in quella casella non
 vuol dire «zero acconti», vuol dire «non dichiarato», e il motore ricade sulla percentuale. Le
@@ -418,10 +428,17 @@ La **via manuale** è un'alternativa, non un complemento: valorizzare una percen
 crescita e **ignora il piano** di saldo, rate e acconti scadenziato al passo 5. Quando succede, il
 motore lo dichiara e la schermata lo dice.
 
-Sull'aliquota, quello che scrivi qui è un **ripiego**: il motore usa l'effettiva dell'anno base
-quando è derivabile e legge il campo forzato solo quando non lo è. E se in CE Prev. hai forzato a
-importo una riga imposte, su quell'anno **nessuna aliquota viene applicata**: quell'importo è
-l'imposta.
+Sull'aliquota, **quello che scrivi è quello che gira** (commercialista, 2026-09-18): il motore
+applica `tax_rate` così com'è (`ForecastEngine._tax_components`). L'effettiva dell'anno base non
+vince più in silenzio — la usa solo la *proposta*, che è un suggerimento del server
+(`GET /companies/{id}/years/{anno}/aliquota-proposta`, dove vivono il cap al 60% e il ripiego
+27,9%), e il motore non la legge affatto. L'unica cosa che scavalca l'aliquota è un importo: se in
+CE Prev. hai forzato a importo una riga imposte, su quell'anno **nessuna aliquota viene applicata**
+— quell'importo è l'imposta.
+
+> Gli scenari salvati prima del 2026-09-18 vanno migrati una volta
+> (`scripts/migra_imposte_commercialista.py`, prova per default, `--apply` per scrivere): senza,
+> applicano l'aliquota salvata invece dell'effettiva che il motore derivava per loro.
 
 **Che cosa mostra l'anteprima**
 

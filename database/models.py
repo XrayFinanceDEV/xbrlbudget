@@ -676,7 +676,7 @@ class BudgetAssumptions(Base):
     # dell'anno intero precedente (assestato), 'infrannuale' = giorni osservati nel
     # periodo parziale, portati avanti. NULL vale 'storico': e' il comportamento di
     # prima, e nessuno scenario gia' salvato cambia numeri finche' l'utente non sceglie.
-    working_capital_mode = Column(String(16), nullable=True)   # 'storico' | 'infrannuale'
+    working_capital_mode = Column(String(16), nullable=True)   # 'storico' (NULL) | 'infrannuale' | 'equilibrio'
 
     # Financial parameters
     interest_rate_receivables = Column(Numeric(10, 6), default=0, nullable=False)  # % on receivables

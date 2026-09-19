@@ -1548,3 +1548,9 @@ CCN, current ratio e circolante di Altman.
 > pregresso» (`components/budget/wizard/steps/StepPatrimonialePregresso.tsx`). Stato attuale:
 > `CLAUDE.md` › «Il percorso unico "Pratica"», `docs/frontend/PRATICA-PERCORSO.md` §passi 5-7,
 > `docs/budget/FORECASTING_GUIDE.md` passi 5 e 6.
+
+> **AGGIUNTA 2026-09-18 (riallineamento 2026-09-18).** Un nome di test di questo piano è stato
+> rinominato da `073927b`: `test_opening_credit_offsets_the_saldo_and_explicit_advances_win` si
+> chiama ora `test_opening_credit_is_compensated_in_full_and_explicit_advances_win`
+> (`tests/test_projection_common_runoff.py`) — il credito d'apertura si compensa **per intero**,
+> non fino alla capienza del saldo. Niente altro di questo piano è cambiato con quel commit.

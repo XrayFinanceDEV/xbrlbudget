@@ -90,14 +90,25 @@ residuo zero e non genera ammortamento aggiuntivo.
 Un investimento senza lo split immateriale/materiale **solleva errore**. Nessuno split 50/50
 inventato. La regola gemella esiste nel budget.
 
-### TFR: quota statutaria
+### TFR: l'accantonamento dei mesi residui si misura sull'anno consolidato
+```
+ce08a = ce08a del parziale + ce08a dell'anno di riferimento × (12 − mesi) / 12
+```
+La quota che matura nei mesi che mancano si misura sull'**anno consolidato**, non sul personale
+proiettato (decisione del proprietario, 2026-09-16): il bilancio annuale precedente è assestato,
+una situazione infrannuale no. Si somma a quanto è già stato contabilizzato nel periodo, quindi il
+fondo cresce della sola quota dei mesi residui. Su AMBIENTA 2026/6M: 33.673,36 già maturati più
+metà dei 94.682,97 del 2025, cioè un fondo di **170.193,73** invece di 209.564,77.
+
+**Solo quando il riferimento non porta `ce08a`** resta il ripiego di sempre, la quota statutaria sul
+proiettato:
 ```
 quota annua = base retributiva / 13,5
 ```
 dove la base sono i salari e stipendi se disponibili, altrimenti **il 70% del costo del
-personale totale** — fallback per quando l'import non ha lo spacchettamento della voce B.9.
-
-Il **fondo** cresce dell'accantonamento dei **mesi residui**, non dell'intera quota annua.
+personale totale** — per quando l'import non ha lo spacchettamento della voce B.9. È
+`projection_common.tfr_accrual_quota`, kernel condiviso col budget; il ramo consolidato invece è
+solo dell'infrannuale, perché solo qui esiste un parziale da completare.
 
 ### Coerenza delle sotto-voci del personale
 Le quattro sotto-voci non superano mai il totale: la quota TFR è cappata al residuo disponibile,
@@ -109,10 +120,12 @@ ce20 = max(0, risultato ante imposte proiettato × aliquota)
 ```
 Mai negative: nessun credito d'imposta inventato.
 
-> **Divergenza da conoscere**: l'**aliquota effettiva** derivata dall'anno base (con cap al 60% e
-> fallback) esiste **solo nel budget**, non nell'infrannuale, che usa direttamente l'aliquota
-> dell'assunzione. Nell'interfaccia infrannuale l'override del risultato è tradotto dal frontend
-> in un'aliquota effettiva.
+> **La divergenza non esiste più** (commercialista, 2026-09-18, commit `073927b`): i due motori
+> applicano **l'aliquota dell'assunzione così com'è**. L'aliquota effettiva dell'anno base non è più
+> derivata da nessuno dei due — `projection_common.aliquota_effettiva` (dove vivono il cap al 60% e
+> il ripiego 27,9%) la chiamano solo la **proposta**
+> (`GET /companies/{id}/years/{anno}/aliquota-proposta`) e lo script di migrazione. Anche la tab
+> Proiezione dell'infrannuale ora manda quella proposta come `tax_rate`, invece del 27,9 fisso.
 
 **La posizione tributaria al 31/12** (lotto 3A, Task 5, decisione 4 del proprietario) non è più «apertura + imposta
 − acconti»: al 31/12 resta **solo il saldo dell'anno in corso**, `imposta(anno) − acconti(anno)`, positivo in
@@ -120,12 +133,27 @@ Mai negative: nessun credito d'imposta inventato.
 `ce20` dell'anno di riferimento; senza riferimento l'imposta su cui commisurarli non esiste, quindi **zero** —
 tutta l'imposta dell'anno resta da versare al 31/12 (il lato prudente, mai un acconto inventato). La regola è
 `projection_common.acconti_dovuti`, la stessa del motore budget, e la posizione la costruisce
-`projection_common.posizione_tributaria_fine_anno`. Quanto era aperto al mese del parziale **esce di cassa entro
-fine anno**:
+`projection_common.posizione_tributaria_fine_anno`. Il **debito** aperto al mese del parziale **esce di cassa
+entro fine anno**; il **credito** aperto invece **resta in bilancio** e si somma a quello che l'anno stesso
+genera (decisione del proprietario 2026-09-16, che rivede la decisione 4 del lotto 3A: incassarlo entro l'anno
+gonfiava la cassa proiettata di un importo che nessuno aveva deciso — 184.140,58 € su AMBIENTA 2026/6M, con
+18.131 € di utile). È il lato prudente dei due, e la diagnostica `posizione_tributaria_apertura`
+(`_declare_posizione_tributaria`) lo dichiara a schermo, voce per voce, quando c'è qualcosa da dichiarare.
 
 ```
-uscita = (debito di apertura − credito di apertura) + imposta dei mesi residui − posizione netta di fine anno
+sp06e = credito di chiusura + credito di apertura     ← il credito aperto resta
+sp16e = debito di chiusura                            ← il debito aperto è uscito
 ```
+
+⚠️ **`cash_out` del kernel è rimasto alla regola vecchia** e sottrae ancora il credito d'apertura:
+```
+cash_out = (debito di apertura − credito di apertura) + imposta dei mesi residui − posizione netta di fine anno
+```
+cioè dichiara un incasso che il bilancio non fa. **A sbagliare è `cash_out`, non il bilancio**: la cassa è il
+plug, quindi è lo stato patrimoniale a decidere quanta cassa c'è, e quel campo non ha **nessun lettore in
+produzione** (solo `tests/test_intra_year_imposte.py` e `tests/test_projection_common_runoff.py`; lo stesso
+vale per `TaxYear.cash_out`, la variante budget). Va deciso se togliere la sottrazione o togliere il campo —
+non usarlo come misura dell'uscita per imposte finché è così.
 
 Misurato sui test (`tests/test_intra_year_imposte.py`): apertura 1.150.949,04, imposta dell'anno 120.000, acconti
 99.247,26 → `sp16e` **20.752,74** e un'uscita di cassa di **1.250.196,30**. Prima: `sp16e` 1.171.701,78 con cassa
@@ -139,10 +167,10 @@ calcolare DSO/DPO; se sono configurate differenze temporanee, anche `sp06f` è e
 proietta quindi soltanto crediti e debiti operativi reali, mentre i campi fiscali ricevono
 direttamente la chiusura del kernel.
 
-Questa separazione rende inutile un conguaglio su `sp06g` o `sp16g`: la variazione fra posizione
-fiscale di apertura e di chiusura, insieme all'imposta dei mesi residui già inclusa nel risultato
-economico, produce per identità esattamente `cash_out`. La capienza di una voce «altri» non decide
-più se un pagamento o un incasso fiscale esiste. Sui due casi reali che prima lasciavano residui
+Questa separazione rende inutile un conguaglio su `sp06g` o `sp16g`: la capienza di una voce «altri» non
+decide più se un pagamento fiscale esiste. L'identità col `cash_out` del kernel regge però **solo sul lato
+debito**: da quando il credito d'apertura resta in bilancio (sopra), `cash_out` continua a sottrarlo e quindi
+non misura più l'uscita di cassa per imposte di questo motore. Sui due casi reali che prima lasciavano residui
 (scenari 8 e 18 del database di riferimento), `tax_settlement_reclass_below_zero` non viene più
 emessa perché il residuo non nasce più.
 
@@ -185,7 +213,7 @@ pulito.
 | **Crediti oltre, attività finanziarie, ratei, fondi rischi** | invariati dal parziale |
 | **Capitale e riserve** | **presi dal parziale così come sono** |
 | **Risultato** | = risultato del CE proiettato, per costruzione |
-| **Fondo TFR** | parziale + accantonamento dei mesi residui |
+| **Fondo TFR** | parziale + accantonamento dei mesi residui, misurato sul `ce08a` dell'**anno consolidato** (ripiego: quota statutaria sul proiettato) |
 | **Debiti a breve** | **debito finanziario (banche/altri finanziatori/obbligazioni)**: invariato dal parziale, come i debiti a lungo sotto; **residuo operativo non fiscale** (fornitori/previdenziali/altri): con riferimento proporzionale ai costi operativi proiettati (salvo rapporto degenere, sotto), senza riferimento invariato; `sp16e` è governato dalla posizione tributaria |
 | **Debiti a lungo** | **solo movimenti espliciti**: rimborsi e nuovi finanziamenti; la quota del prestito nuovo che scade l'anno dopo sta nei debiti a breve, e il debito bancario pregresso si riduce solo con le proprie rate |
 | **Cassa** | plug di chiusura, ma **solo verso l'alto** (vedi sotto) |
@@ -240,13 +268,15 @@ voci, in ogni settore, e un **denominatore nullo** in qualunque settore restano 
 Quando il diagnostic scatta, dichiara la soglia applicata nel campo `soglia_giorni`: `"365"`, o
 `null` dove di soglia non ce n'è — e nei settori senza soglia su `sp05_rimanenze` non scatta mai.
 
-> **La formula è duplicata**: `calculateProjectedBS` (frontend, `app/pratica/page.tsx`) e
-> `_project_balance_sheet` (backend). Devono restare d'accordo. Quando divergevano si otteneva
-> il caso peggiore — il plug di cassa del frontend scaricava i 165 M eccedenti sui debiti a
-> breve e mostrava a schermo un bilancio che "quadra", mentre il record persistito restava
-> sbilanciato e il promote lo rifiutava, senza che nulla spiegasse la differenza. Dal
-> 2026-09-02 il lato client non calcola più la proiezione — la legge dal forecast che il motore
-> ha persistito — quindi la guardia esiste in un posto solo e non c'è nulla da tenere d'accordo.
+> **La formula non è duplicata, e non va riduplicata.** Dal 2026-09-02 `_project_balance_sheet`
+> (backend) è l'unico posto in cui lo SP si deriva: `calculateProjectedBS`
+> (`frontend/app/pratica/page.tsx`) salva le ipotesi, fa rigenerare il motore e **rilegge** il
+> forecast persistito. Fino a quel giorno la stessa formula esisteva anche in TypeScript, e quando
+> le due divergevano si otteneva il caso peggiore — il plug di cassa del frontend scaricava i 165 M
+> eccedenti sui debiti a breve e mostrava a schermo un bilancio che "quadra", mentre il record
+> persistito restava sbilanciato e il promote lo rifiutava, senza che nulla spiegasse la
+> differenza. La guardia esiste quindi in un posto solo, e un secondo motore ri-divergerebbe alla
+> prima modifica del primo.
 
 ### Nessuna destinazione implicita dell'utile
 Capitale e riserve si prendono dal parziale invariati. Il commento nel codice è netto: *il
@@ -354,6 +384,68 @@ nuovo e residuo pregresso sulla stessa riga) viene spezzato in due contratti dal
 del kernel (`projection_common.contratti_da_riga_finanziamento`, `separa_prestiti_nuovi`,
 `quota_breve_prestiti_nuovi`), e dà gli stessi numeri di due righe separate.
 
+## 5-bis. Da dove vengono i giorni del circolante: `working_capital_mode`
+
+**Le rotazioni del riferimento sono una delle tre modalità, non il comportamento del motore.** La
+scelta è dell'utente, esplicita, e sta su `BudgetAssumptions.working_capital_mode`
+(`database/models.py`, schema `Literal["storico", "infrannuale", "equilibrio"]` in
+`backend/app/schemas/budget.py`). **`NULL` vale `storico`**, quindi nessuno scenario già salvato si
+muove. A schermo è la tendina della tab Proiezione, con etichette e spiegazioni in un modulo puro
+(`frontend/lib/pratica-circolante.ts`, `MODI_CIRCOLANTE`).
+
+La modalità riguarda **solo l'infrannuale**: `ForecastEngine` non legge quel campo. E governa **solo
+le voci che ruotano** — rimanenze, aggregato dei crediti a breve, residuo operativo dei debiti (§5
+sopra). Il debito finanziario `sp16a-c`/`sp17a-c` non ruota in nessuna modalità.
+
+| Modalità | Giorni usati | Quando è quella giusta |
+|---|---|---|
+| `storico` (default) | rotazioni dell'**anno intero di riferimento** | è un bilancio assestato, ma assume che l'azienda torni a quel comportamento |
+| `infrannuale` | i giorni **osservati nel periodo**, annualizzati e portati avanti | è il circolante che l'azienda ha adesso, anche quando non si finanzia da solo |
+| `equilibrio` | i giorni che fanno **chiudere la cassa a zero**, cercati fra i due estremi sopra | quando serve sapere quanto circolante ci vuole perché il piano stia in piedi |
+
+Non è un'etichetta: su AMBIENTA 2026/6M sono **71 giorni di incasso contro 103**, cioè 357.561,87 €
+di cassa proiettata in più o in meno.
+
+**`infrannuale` ricade su `storico` quando l'osservazione non basta**, senza che sia un errore: il
+periodo deve stare fra 3 e 11 mesi (`_MIN_TURNOVER_OBSERVATION_MONTHS`) e la base economica
+annualizzata del parziale deve essere positiva. Sotto quella soglia i giorni osservati non esistono,
+e si usano quelli del riferimento.
+
+### `equilibrio`: un motore dentro il motore, dentro un corridoio
+
+`_cerca_equilibrio` (`calculations/intra_year_engine.py`) **ripete la proiezione intera** con giorni
+diversi, senza persistere nulla — per questo il giro di calcolo sta in `_calcola_proiezione`, che è
+una funzione pura delle ipotesi. Il corridoio va da 0 (giorni osservati nel periodo) a 1 (giorni
+dell'anno consolidato), e **fuori non si va**: sono i due soli comportamenti che quell'azienda ha
+davvero avuto. Muovere i giorni liberamente finché la cassa torna a zero vorrebbe dire che nessuna
+azienda mostra più un fabbisogno — cioè inventare un miglioramento del circolante che nessuno ha
+deciso.
+
+Tre esiti, tutti dichiarati:
+
+1. **i giorni osservati bastano già** (`prova(0)` non ha fabbisogno): nessuno si muove, nessuna
+   diagnostica in più;
+2. **serve spostarsi**: si bisecca la quota in `[0, 1]` per `_PASSI_EQUILIBRIO` = **12** passi (un
+   quarto di millesimo), riproiettando ogni volta da capo, e si tiene l'ultima quota che chiude.
+   Diagnostica **`circolante_di_equilibrio`** (`warning`), con `quota_storico` e i giorni di
+   partenza/arrivo/estremo per ciascuna voce;
+3. **non bastano nemmeno i giorni consolidati**: resta il fabbisogno, e la diagnostica è
+   **`equilibrio_non_raggiungibile`** (`warning`) — quel piano non si finanzia dentro il
+   comportamento che l'azienda ha già avuto: serve finanza, o vanno riviste le ipotesi di CE.
+
+In modalità `equilibrio` la rete `turnover_projection_below_observed` (§5, «Contraddizione col
+parziale») **non gira**: gli estremi del corridoio li ha scelti l'utente, e una rete che riporta
+l'osservato chiuderebbe il corridoio su se stesso.
+
+Le tre diagnostiche di questa sezione — `circolante_di_equilibrio`, `equilibrio_non_raggiungibile`,
+più `posizione_tributaria_apertura` del §4 — arrivano all'utente perché il frontend rende le
+diagnostiche in modo generico (codice + messaggio, `frontend/lib/forecast-diagnostics.ts`): non
+servono righe dedicate a schermo, servono qui. Test: `tests/test_intra_year_circolante_modo.py`.
+
+> **Non misurato:** che cosa resta della quota cercata oggi quando la proiezione viene **promossa** a
+> `FinancialYear` e l'anno dopo un piano budget la rilegge come stock d'apertura. Il test del modo
+> gira su ipotesi costruite, non sul kit end-to-end.
+
 ## 6. I gate: cosa blocca un infrannuale
 
 ### Gate semantico sulla fonte
@@ -420,8 +512,8 @@ base, tipo scenario o mesi **riscatena la rivalidazione**.
 |---|---|---|
 | Selezione anno fonte | **esatta**, nessun fallback | preferisce l'anno pieno, con fallback |
 | Gate semantico | — | **lo stesso**, riusato dall'infrannuale |
-| Aliquota imposte | quella dell'assunzione | **effettiva**, derivata dall'anno base, cap 60% |
-| Cassa negativa | cassa a zero + diagnostico, **nessun debito creato** | aumenta il debito a breve |
+| Aliquota imposte | quella dell'assunzione | **la stessa**: quella dell'assunzione, così com'è (dal 2026-09-18) |
+| Cassa negativa | cassa a zero + diagnostico `unfunded_financing_requirement`, **nessun debito creato**; in modalità `equilibrio` prima si cerca il circolante che chiude (§5-bis) | **solleva** e non produce nulla, salvo scoperto concesso (`overdraft_allowed`) o regime dei fidi espliciti (`bank_lines_amount`), dove il fabbisogno diventa scoperto/tiraggio dichiarato |
 | Rimborso debito | rata sull'aggregato | stessa rata, ripartita sulle sotto-voci |
 | Nuovi finanziamenti | importo singolo | scadenzario multi-prestito |
 | Guardia ricavi negativi | **assente** | presente |

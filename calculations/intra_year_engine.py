@@ -1523,9 +1523,14 @@ class IntraYearEngine:
         due volte fra le diagnostiche.
 
         Fixed assets: partial year values adjusted for remaining depreciation.
-        Working capital: turnover ratios from reference year applied to projected P&L.
-        Equity: capital constant, reserves + previous profit, current profit from projection.
-        Cash: plug variable.
+        Working capital: the days come from `working_capital_mode` -- reference-year turnover
+        ratios in 'storico' (the default), the days observed in the period in 'infrannuale',
+        a point inside the corridor between the two in 'equilibrio'.
+        Equity: capital AND reserves taken from the partial year exactly as they are -- the
+        previous year's result is never moved into reserves, that needs a shareholders'
+        resolution (see the "Preserve YTD equity movements" comment below); current profit
+        from the projection.
+        Cash: plug variable, upward only.
 
         When the reference year is absent (ref_bs is None) we cannot derive
         turnover ratios, so we fall back to using the partial-year stocks as the

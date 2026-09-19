@@ -33,7 +33,13 @@ denominatore non è valido):
    ricalcolata qui invece di letta dal motore perché `_tax_components` lavora su una coppia
    `base_inc`/`projected_inc` di due periodi distinti, non su un singolo periodo del dossier — il
    brief ammette esplicitamente questa via («se non è riusabile senza toccare il motore, calcola
-   lo stesso rapporto... e dichiaralo nella metodologia»). Motivo `non_positive_denominator` se
+   lo stesso rapporto... e dichiaralo nella metodologia»).
+   > **Nota 2026-09-18 — a questa frase non credete più per la parte sul motore.** Dal commit
+   > `073927b` (commercialista) `_tax_components` **non deriva nessuna aliquota**: applica
+   > `tax_rate` così com'è, `base_inc` è un parametro morto e la soglia del 60% vive in
+   > `projection_common.aliquota_effettiva`, che serve solo a **proporre** l'aliquota. Il dossier
+   > non potrebbe leggere dal motore una proporzione che il motore non calcola più: la formula e la
+   > soglia di questo indicatore restano giuste, la motivazione qui sopra è storica. Motivo `non_positive_denominator` se
    il risultato ante imposte non è positivo, `aliquota_fuori_intervallo_plausibile` (nuovo, non
    presente altrove nel file) se il rapporto supera il 60%.
 3. **`practice.ebit_margin`** — Margine EBIT, %. Formula: `EBIT / ricavi × 100`, identica a

@@ -246,7 +246,7 @@ Prima di tutto questo, però, il **corpo** è validato da
 numerico, un NaN/infinito, un `forecast_year` mancante o un `overrides` che non è una lista
 rispondono **422**, e nulla viene scritto né rigenerato. Fino al lotto 2 la rotta non aveva
 alcuno schema (`request: Any = Body(...)`), quindi un `"abc"` giungeva intatto al
-`Decimal(str(raw_value))` del motore (`forecast_engine.py:1594`, dentro `_apply_sp_overrides`),
+`Decimal(str(raw_value))` del motore (dentro `ForecastEngine._apply_sp_overrides`),
 che solleva `decimal.InvalidOperation` — un `ArithmeticError`, non un `ValueError` — e l'unica
 risposta possibile era un **500** «Forecast regeneration failed» (M2). Il rollback era già
 corretto e nulla restava scritto: sbagliato era solo il codice. Un corpo valido si comporta
@@ -271,7 +271,7 @@ sola, eliminando sia la concorrenza sia il rifiuto spurio. `PUT /assumptions/{ye
 transazionale del giro 2 per un aggiornamento di un singolo anno — nessun chiamante nel
 frontend la usa più.
 
-`_apply_sp_overrides` (`forecast_engine.py:1569-1672`) e i controlli che corrono sulla stessa
+`ForecastEngine._apply_sp_overrides` e i controlli che corrono sulla stessa
 scrittura hanno cinque comportamenti da conoscere:
 
 1. una chiave che non esiste nel risultato è **ignorata in silenzio**;
@@ -357,12 +357,16 @@ deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2484`):
 | DIO | `sp05 / ce01 × 360` | il denominatore è il **ricavo**, non gli acquisti (`:2238-2252`) |
 | DPO | `sp16d / (ce05 + ce06) × 360` | solo i debiti **verso fornitori**, non l'aggregato `sp16` (`:2429-2442`) |
 
-> **L'aliquota di default non è quella che l'app usa.** Lo schema Pydantic ha
-> `tax_rate: Decimal = 24` (`backend/app/schemas/budget.py:188`, l'IRES da sola), ma ogni
-> chiamante del frontend manda **27,9** — la miscela IRES 24 + IRAP 3,9 dichiarata in
-> `STARTUP_TAX_RATE_PCT` (`app/budget/page.tsx:370`) e ripetuta letterale in
-> `app/pratica/page.tsx:780, 877` e in `lib/budget-horizon.ts:245`. Il 24% si vede solo su una
-> chiamata che ometta il campo.
+> **L'aliquota di default non è quella che l'app usa, e dal 2026-09-18 è quella che gira.** Lo
+> schema Pydantic ha `tax_rate: Decimal = 24` (`backend/app/schemas/budget.py`, l'IRES da sola) e
+> nessuna schermata la manda; il motore applica `tax_rate` **così com'è**
+> (`ForecastEngine._tax_components`), quindi ciò che il client scrive è ciò che si paga. Chi manda
+> che cosa: il wizard ipotesi e la tab Proiezione dell'infrannuale mandano l'**aliquota proposta**
+> dal server (`GET /companies/{id}/years/{anno}/aliquota-proposta`: l'effettiva dell'ultimo
+> consuntivo depositato, con cap al 60% e ripiego 27,9); la forma **Startup** manda il 27,9 fisso
+> (`STARTUP_TAX_RATE_PCT` in `app/budget/page.tsx`), che è la sola aliquota sensata quando non
+> esiste un consuntivo; un anno aggiunto allungando l'orizzonte eredita quella del piano
+> (`lib/budget-horizon.ts`). Il 24% si vede solo su una chiamata che ometta il campo.
 
 Il circolante scala quindi con i ricavi e i costi previsionali, **anche quando questi vengono
 da un override CE**: `_calculate_balance_sheet` legge `forecast_inc`, cioè il conto economico
@@ -856,9 +860,10 @@ Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoIn
 breve (`sp06`/`sp16x`); il resto sta oltre 12 mesi (`sp07`/`sp17x`). **Con un piano il lato lungo
 è interamente pregresso**: il motore rigenera dalla formula di oggi solo il lato a breve
 (generato + il residuo dovuto l'anno dopo), il resto del residuo ci resta per tutto il piano e la
-percentuale di crescita di quella voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`)
-smette di applicarsi (`calculations/forecast_engine.py:2745-2763` per i crediti, `:3104-3128` per
-fornitori/previdenziali/altri debiti). Nell'ultimo anno di piano tutto il residuo non scadenziato
+percentuale di crescita di quella voce (`receivables_long_growth_pct`, o
+`sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi (`_calculate_balance_sheet` in
+`calculations/forecast_engine.py`, blocco `crediti_commerciali` per i crediti e blocchi
+`debiti_fornitori`/`debiti_previdenziali`/`altri_debiti` per gli altri). Nell'ultimo anno di piano tutto il residuo non scadenziato
 è oltre: non c'è un «anno dopo» nel piano, e il motore non inventa scadenze.
 
 ### `details['pregresso'][chiave]` — una per ciascuna delle cinque voci, ogni anno

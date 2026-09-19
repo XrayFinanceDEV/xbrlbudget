@@ -71,7 +71,8 @@ python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
 
 ### API — INPUT → ASSUMPTIONS → OUTPUT
 
-The router exposes 62 routes. The workflow above uses the ones that matter; the rest are legacy or
+The router exposes about 75 typed routes — a count that ages at every new route, so the live list is
+`GET /openapi.json`, not this line. The workflow above uses the ones that matter; the rest are legacy or
 per-year detail. Two things about them are worth knowing:
 
 - **Import endpoints are four, not three:** `POST /api/v1/import/{xbrl|csv|pdf|pdf-ocr}`. XBRL = 6
@@ -375,7 +376,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **Un saldo con un piano ha il lato lungo interamente pregresso.** Il motore rigenera dalla
   formula di oggi solo il lato a breve (generato + il residuo dovuto l'anno dopo); il resto del
   residuo, oltre l'esercizio, resta lì per tutto il piano e la percentuale di crescita di quella
-  voce (`sp07_growth`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
+  voce (`receivables_long_growth_pct`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
   peso dal residuo lungo (`_calculate_balance_sheet` in `calculations/forecast_engine.py`, blocco
   `crediti_commerciali` per i crediti, blocchi `debiti_fornitori`/`debiti_previdenziali`/`altri_debiti`
   per fornitori/previdenziali/altri debiti). `details['pregresso'][saldo]['mode']` vale `"runoff"`
@@ -702,13 +703,19 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   reference year (the frontend derives them from the user's overrides). Depreciation is always
   annualized, never grown; taxes are recomputed on projected pre-tax profit, and at 31/12 only the current year's
   balance remains: tax of the year minus the advances paid in the year (`tax_advances_paid` if greater than zero,
-  otherwise 100% of the reference year's `ce20`); whatever was open at the partial month leaves cash by year end
-  (`projection_common.posizione_tributaria_fine_anno`), so a budget born from the promote no longer inherits it.
+  otherwise 100% of the reference year's `ce20`). Of what was open at the partial month, the **debt** leaves cash by
+  year end, so a budget born from the promote no longer inherits it; the **credit stays on the balance sheet** and
+  adds to the one the year itself generates (`sp06e` = closing credit + opening credit, owner's decision
+  2026-09-16 revising decision 4 of lotto 3A: collecting it within the year inflated projected cash by an amount
+  nobody had decided — 184.140,58 € on AMBIENTA 2026/6M). The `posizione_tributaria_apertura` diagnostic declares
+  both sides (`projection_common.posizione_tributaria_fine_anno`, `_declare_posizione_tributaria`).
   Automatic tax balances stay outside working-capital turnover: `sp06e`/`sp16e` (and governed
   deferred-tax balances) are removed from reference and partial stocks before DSO/DPO are applied,
-  then receive the kernel closing balance directly. Opening-to-closing tax movement plus remaining
-  tax expense equals `cash_out` by identity; no arbitrary `sp06g`/`sp16g` capacity or tax
-  reclassification residual exists.
+  then receive the kernel closing balance directly. No arbitrary `sp06g`/`sp16g` capacity or tax
+  reclassification residual exists. **The kernel's `cash_out` is stale on the credit side**: it still
+  subtracts the opening credit, so it no longer measures this engine's tax cash outflow — the balance sheet is
+  right (cash is the plug, so the BS decides), and that field has no reader in production (two tests only, same
+  for the budget `TaxYear.cash_out`). Do not anchor anything on it until it is fixed or removed.
   Financial debt (`sp16a-c`/`sp17a-c`: banks, other lenders, bonds) is carried forward from the
   partial year's own split, as its own block — never rebuilt from the reference year's proportions,
   because a real loan is not driven by turnover. Only the operating residual of `sp16`/`sp17`
@@ -729,8 +736,8 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
 - **This engine is not the budget engine on two points that change the balance sheet.** Capital and
   reserves are taken from the partial year **as they are** — a prior-year result is never moved into
   reserves, because that needs a shareholders' resolution (`calculations/intra_year_engine.py`,
-  the "Preserve YTD equity movements" comment in `_project_balance_sheet`; that same method's own
-  docstring — "reserves + previous profit" — still says otherwise and is wrong). And both engines
+  the "Preserve YTD equity movements" comment in `_project_balance_sheet`; the method's docstring
+  used to say "reserves + previous profit" and was wrong — corrected 2026-09-18). And both engines
   plug cash **upward only**, but they part company on what a negative residual costs you: qui è
   **clampato a zero** con una diagnostica `unfunded_financing_requirement` (il blocco "CASH PLUG"
   di `_project_balance_sheet`) e la proiezione esce lo stesso,
@@ -740,7 +747,22 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   secco o, a scoperto concesso, in uno scoperto dichiarato — anche quando il fabbisogno nasce da un
   `sp_overrides` che squilibra lo SP: il controllo sta sulla cassa finale, dopo la normalizzazione
   (`generate_projection`), e mai una `sp09` negativa resta persistita.
-- **Working capital rotates on the reference year's turnover ratios — the inventory and
+- **Where the working-capital days come from is the user's explicit choice, not the engine's rule**
+  (`BudgetAssumptions.working_capital_mode`, `Literal["storico","infrannuale","equilibrio"]`, `NULL` = `storico`
+  so no saved scenario moves; read **only** by this engine, never by `ForecastEngine`). `storico` = the reference
+  year's ratios — the behaviour the bullet below describes, and now one of three; `infrannuale` = the days
+  observed in the period, carried forward (it falls back to `storico` when the observation is too short:
+  `_MIN_TURNOVER_OBSERVATION_MONTHS` = 3, or a non-positive annualized base); `equilibrio` = **a second engine
+  inside the engine** (`_cerca_equilibrio`), which reprojects the whole year at both ends of a corridor and then
+  bisects it for 12 steps looking for the days that close cash at zero. The corridor's ends are the only two
+  behaviours the company has actually had — observed period and last full year — because moving days freely would
+  mean no company ever shows a funding requirement. Three declared outcomes: the observed days already suffice
+  and nothing moves; it moves and says by how much (`circolante_di_equilibrio`); not even the consolidated days
+  close it (`equilibrio_non_raggiungibile`), and the requirement stays. In `equilibrio` the
+  `turnover_projection_below_observed` net is off by design. UI: `frontend/lib/pratica-circolante.ts`
+  (`MODI_CIRCOLANTE`) + the select in `app/pratica/page.tsx`. →
+  `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5-bis
+- **In `storico` (the default) working capital rotates on the reference year's turnover ratios — the inventory and
   receivables aggregates and the operating-debt residual only; financial debt
   (`sp16a-c`/`sp17a-c`) never rotates, it is carried from the partial year as its own block
   (bullet above).** A ratio implying **more than a year of stock is DEGENERATE** (`_turnover_ratio` → `None`): the observed partial-year stock is
@@ -781,9 +803,12 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   schermo (i sottototali delle 22 righe di CE che l'utente digita) sta nel client; tutto ciò che
   **deriva** uno stato patrimoniale da un conto economico — rotazioni, quote residue, imposte,
   rimborso del debito, plug di cassa — sta in `calculations/intra_year_engine.py`. Il gemello
-  TypeScript che c'era (`lib/pratica-projected-bs.ts`, `lib/pratica-turnover.ts`) era divergito su
-  quattro punti e faceva mostrare a Proiezione, Indicatori e Stampa **tre bilanci diversi della
-  stessa azienda**. Ogni superficie di modifica — ipotesi, CE Prev., SP Prev. — salva e fa
+  TypeScript che girava fino al 2026-09-02 (`computeProjectedBS` in `lib/pratica-projected-bs.ts`, più
+  `lib/pratica-turnover.ts`, cancellato) era divergito su quattro punti e faceva mostrare a Proiezione,
+  Indicatori e Stampa **tre bilanci diversi della stessa azienda**. `lib/pratica-projected-bs.ts` esiste
+  ancora ed è importato, ma ormai solo per **leggere** il forecast persistito
+  (`projectedItemsFromForecast`); `calculateProjectedBS` in `app/pratica/page.tsx` salva le ipotesi, fa
+  rigenerare il motore e rilegge — non calcola. Ogni superficie di modifica — ipotesi, CE Prev., SP Prev. — salva e fa
   rigenerare il motore; il rendiconto legge lo stesso `ForecastYear`. Un secondo motore ri-diverge
   alla prima modifica del primo.
 - **Promote** (`POST /scenarios/{id}/promote`, `backend/app/services/promote_service.py`): copies the

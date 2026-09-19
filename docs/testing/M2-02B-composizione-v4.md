@@ -6,6 +6,12 @@
 `dfa2231` (correzioni al merge), `646cd73` (note compatte + etichette mai
 codice campo + xfail M2-04 tolto), `0f96fd5` (`editorial-3`).
 
+> **Nota 2026-09-18.** `editorial_inventory.py` non esiste più: il catalogo è stato spezzato nel
+> pacchetto `backend/app/renderers/typst/dossier_catalog/`, dove la stessa informazione sta su più
+> moduli e i suoi `_forecast_table` / `_statement_table`, citati qui sotto, **non hanno un
+> successore uno-a-uno**. Le osservazioni di composizione restano valide; i due nomi si leggono
+> come nomi storici, non come funzioni da aprire.
+
 Riferimento visivo: `inbox/artifacts/2026-09-15-report-finale/report-finale-anteprima-v4.pdf`
 (33 pagine, workflow bilancio). Bozza di collaudo:
 `inbox/artifacts/2026-09-17-m2-02b/ambienta-bozza.pdf` (53 pagine, azienda

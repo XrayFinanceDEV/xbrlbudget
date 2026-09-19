@@ -21,7 +21,7 @@ Ogni pagina è autonoma. L'ordine sotto è quello in cui i fatti accadono a un f
 | 02 | [Estrazione e scelta dell'estrattore](REGOLE-IMPORT-02-ESTRAZIONE.md) | Ordine di lettura del testo, deterministico vs LLM, riscatto vision, OCR, XBRL, CSV, come si sceglie il candidato |
 | 03 | [Spacchettature e netting](REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md) | Ricostruzione righe, fondi ammortamento, grafie, tipizzazione debiti, entro/oltre, dove può finire la massa non classificata |
 | 04 | [Quadrature, gate e rifiuti](REGOLE-IMPORT-04-QUADRATURE.md) | I controlli contabili, le tolleranze, i messaggi di errore e il loro ordine, l'affidabilità dei conti critici |
-| 05 | [Bilancio infrannuale](REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward, i gate del previsionale |
+| 05 | [Bilancio infrannuale](REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward, le tre modalità del circolante, i gate del previsionale |
 | 06 | [Persistenza e round-trip](REGOLE-IMPORT-06-PERSISTENZA.md) | Cosa finisce sul DB, stati di validazione, hash, versioni, provenienza, baseline di regressione |
 
 Documenti preesistenti nella stessa cartella ([IMPORT-OVERVIEW](IMPORT-OVERVIEW.md),

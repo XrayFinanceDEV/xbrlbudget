@@ -40,7 +40,9 @@ backend/app/renderers/typst/templates/dossier-base/
 l'occhiello (`"Sintesi"`, `"Piano e risultati"`, `"Allegati"` — stampato in maiuscolo da Typst),
 `title` è il titolo neutro di pagina, `subtitle` la nota di metodo (v4: sottotitolo statico, mai un
 numero), `kpis` una lista di dict KPI (vedi sotto), `items` una lista di **blocchi** (`kind`:
-`"table"` · `"chart"` · `"text"` · `"note"` · `"index"` · `"cover"`, quest'ultimo solo in copertina).
+`"table"` · `"chart"` · `"text"` · `"note"` · `"index"` · `"cover"`, quest'ultimo solo in copertina,
+più `"panel"` — due serie affiancate, `shared.py`, srotolato da `__init__.py` — e `"dumbbell"`,
+il confronto fra due soli periodi di `indicatori.py`: due `kind` nati dopo questa pagina).
 
 **Un gruppo con registro vuoto** espone `def build(report): return []` — nessuna pagina compare,
 l'indice non la elenca, nessun riquadro vuoto. Non serve altro: `__init__.py` concatena

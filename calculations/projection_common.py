@@ -403,9 +403,15 @@ def posizione_tributaria_fine_anno(*, opening_credit, opening_debt, remaining_cu
                                    reference_tax, explicit_advances) -> PosizioneTributariaFineAnno:
     """La posizione tributaria al 31/12 dell'infrannuale (spec lotto 3A §4.3, decisione 4 del proprietario).
 
-    Al 31/12 resta solo il saldo dell'anno in corso: imposta dell'anno meno acconti versati nell'anno. Quanto era
-    aperto al mese del parziale esce di cassa entro fine anno: `cash_out` = posizione netta di apertura + imposta
-    che matura nei mesi restanti − posizione netta di fine anno. Il budget che nasce dal promote scadenzia quel saldo.
+    Al 31/12 resta solo il saldo dell'anno in corso: imposta dell'anno meno acconti versati nell'anno. Il DEBITO
+    aperto al mese del parziale esce di cassa entro fine anno, e il budget che nasce dal promote scadenzia quel
+    saldo.
+
+    ATTENZIONE: dal 2026-09-16 il CREDITO d'apertura NON si incassa piu' — il chiamante
+    (`intra_year_engine`) lo somma al credito di chiusura e lo tiene in bilancio — ma `cash_out` qui sotto
+    continua a sottrarlo: `posizione netta di apertura + imposta dei mesi restanti − posizione netta di fine
+    anno`. Quel campo non ha lettori in produzione (solo due test) e non misura piu' l'uscita di cassa per
+    imposte: va corretto o rimosso, non usato.
     """
     d = lambda v: Decimal(str(v or 0))
     acconti = acconti_dovuti(explicit_advances, reference_tax)

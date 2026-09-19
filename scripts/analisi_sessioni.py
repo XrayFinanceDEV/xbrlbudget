@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 r"""
-analisi_sessioni.py — estrattore di metadati dalle trascrizioni di Claude Code.
+analisi_sessioni.py — estrattore di metadati dalle trascrizioni di Claude Code e di pi.
 
 Scansiona le trascrizioni JSONL del progetto (sessioni principali + trascrizioni dei
 subagenti) e produce, per ogni sessione principale, una "scheda" in markdown; in piu'
@@ -9,6 +9,12 @@ scrive aggregati complessivi in JSON e markdown.
 
 Uso:
     python scripts/analisi_sessioni.py --da 2026-08-24 --out .superpowers/retrospettiva
+    python scripts/analisi_sessioni.py --da 2026-09-11 --a 2026-09-19 --out <dir>
+
+Dall'11/09 legge anche le sessioni pi (worker su modello locale gx10/Qwen), una run per
+file JSONL in ~/.pi/agent/sessions/--<percorso-worktree>--/*.jsonl con "budget" nel nome:
+worktree, modello, turni, strumenti, comandi falliti, git commit, token (il formato li
+riporta per messaggio) e compattazioni.
 
 Cosa legge (sola lettura):
     <projects-dir>/*.jsonl                      sessioni principali
@@ -672,6 +678,201 @@ def scan_session(path, da, fine, tz):
     return S
 
 
+# ------------------------------------------------------------------ sessioni pi
+#
+# Formato (verificato il 19/09/2026 su ~/.pi/agent/sessions): una riga per record,
+#   {"type":"session",  id, timestamp ISO, cwd}                    ← worktree della run
+#   {"type":"model_change", provider, modelId}
+#   {"type":"thinking_level_change", …}                            ← ignorato
+#   {"type":"compaction", timestamp, summary}                      ← contata, summary mai copiato
+#   {"type":"message", timestamp, message:{role:user|assistant|toolResult, …}}
+# assistant: usage{input,output,cacheRead,cacheWrite,reasoning,totalTokens,cost{total}} per
+# ogni messaggio; blocchi content di tipo toolCall{name, arguments(stringa)}; stopReason.
+# toolResult: toolName, isError — il contenuto NON viene mai letto oltre il flag.
+
+DEFAULT_PI = os.path.expanduser("~/.pi/agent/sessions")
+
+
+def scan_pi_session(path, da, fine, tz):
+    sid = re.sub(r".*_", "", os.path.splitext(os.path.basename(path))[0])
+    S = {
+        "id": sid, "path": path, "dir": os.path.basename(os.path.dirname(path)),
+        "pid": None, "cwd": None,
+        "first": None, "last": None, "active_s": 0.0,
+        "providers": Counter(), "models": Counter(),
+        "turns": 0, "user_msgs": 0, "tool_calls": 0, "tools": Counter(),
+        "in": 0, "out": 0, "cache_read": 0, "cache_write": 0, "reasoning": 0,
+        "total_tokens": 0, "cost_sum": 0.0,
+        "tool_errors": Counter(), "errors_total": 0,
+        "git_commits": [], "branches": Counter(),
+        "sleep_s": 0.0, "n_sleep": 0, "orca_types": Counter(),
+        "compactions": [], "aborts": 0, "api_errors": 0,
+        "in_range_n": 0, "bash_cmds": Counter(),
+    }
+    ts_events = []
+    t = Tally()
+    for line in iter_lines(path):
+        t.add()
+        if not line.startswith("{"):
+            t.bad += 1
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            t.bad += 1
+            continue
+        ts = parse_ts(rec.get("timestamp"))
+        typ = rec.get("type")
+        if ts is not None:
+            ts_events.append(ts)
+            if da <= ts < fine:
+                S["in_range_n"] += 1
+        if typ == "session":
+            S["pid"] = rec.get("id")
+            S["cwd"] = rec.get("cwd")
+            continue
+        if typ == "compaction":
+            if ts and da <= ts < fine:
+                S["compactions"].append({"ts": ts})
+            continue
+        if typ != "model_change" and typ != "message":
+            continue
+        if typ == "model_change":
+            S["providers"][rec.get("provider") or "?"] += 1
+            S["models"][rec.get("modelId") or "?"] += 1
+            continue
+        msg = rec.get("message") or {}
+        role = msg.get("role")
+        if role == "user":
+            S["user_msgs"] += 1
+            continue
+        if role == "toolResult":
+            if msg.get("isError") and ts and da <= ts < fine:
+                S["tool_errors"][msg.get("toolName") or "?"] += 1
+                S["errors_total"] += 1
+            continue
+        if role != "assistant":
+            continue
+        S["providers"][msg.get("provider") or "?"] += 1
+        S["models"][msg.get("model") or "?"] += 1
+        if not (ts and da <= ts < fine):
+            continue
+        S["turns"] += 1
+        u = msg.get("usage") or {}
+        S["in"] += int(u.get("input") or 0)
+        S["out"] += int(u.get("output") or 0)
+        S["cache_read"] += int(u.get("cacheRead") or 0)
+        S["cache_write"] += int(u.get("cacheWrite") or 0)
+        S["reasoning"] += int(u.get("reasoning") or 0)
+        S["total_tokens"] += int(u.get("totalTokens") or 0)
+        S["cost_sum"] += float(((u.get("cost") or {}).get("total")) or 0)
+        sr = msg.get("stopReason")
+        if sr == "aborted":
+            S["aborts"] += 1
+        elif sr == "error":
+            S["api_errors"] += 1
+        cont = msg.get("content")
+        if isinstance(cont, list):
+            for blk in cont:
+                if not isinstance(blk, dict) or blk.get("type") != "toolCall":
+                    continue
+                name = blk.get("name") or "?"
+                S["tool_calls"] += 1
+                S["tools"][name] += 1
+                argstr = blk.get("arguments")
+                if not isinstance(argstr, str):
+                    argstr = json.dumps(argstr or {}, ensure_ascii=False)
+                one = argstr.replace("\\n", " ")
+                if re.search(r"\bgit commit\b", one.split("<<")[0]):
+                    m = re.search(r"-m\s+\\?['\"](.{2,140}?)\\?['\"]", one)
+                    if not m:
+                        m = re.search(r"<<-?\s*['\"]?[A-Z_]+['\"]?\s*\n\s*(.{2,140})", argstr)
+                    S["git_commits"].append({
+                        "ts": ts, "msg": redact(m.group(1) if m else one)[:120]})
+                for mb in re.finditer(r"\bXrayFinanceDEV/([\w.-]+(?:/[\w.-]+)*)", one):
+                    tok = mb.group(0)
+                    ctx = one[max(0, mb.start() - 12):mb.start()]
+                    # il remote si chiama XrayFinanceDEV: `--repo XrayFinanceDEV/xbrlbudget`
+                    # e gli URL `.../issues/N` non sono branch
+                    if tok == "XrayFinanceDEV/xbrlbudget" or "repo" in ctx or "/issues" in tok:
+                        continue
+                    S["branches"][tok] += 1
+                if "orca-ide orchestration" in one:
+                    mt = re.search(r"--type\s+([a-z_]+)", one)
+                    S["orca_types"][mt.group(1) if mt else "?"] += 1
+                for ms in re.finditer(r"\bsleep\s+(\d+(?:\.\d+)?)", one):
+                    S["n_sleep"] += 1
+                    S["sleep_s"] += float(ms.group(1))
+                if name == "bash":
+                    S["bash_cmds"][redact(one.split("&&")[0])[:80]] += 1
+    S["n_lines"], S["n_bad"] = t.lines, t.bad
+    all_ts = sorted(set(x for x in ts_events if x))
+    active = 0.0
+    for prev, cur in zip(all_ts, all_ts[1:]):
+        gap = (cur - prev).total_seconds()
+        if 0 <= gap <= PAUSE_Soglie:
+            active += gap
+    S["active_s"] = active
+    S["first"] = all_ts[0] if all_ts else None
+    S["last"] = all_ts[-1] if all_ts else None
+    S["worktree"] = (S["cwd"] or S["dir"] or "?").split("/")[-1]
+    return S
+
+
+def render_pi_card(S, tz):
+    A = (lambda *a: [out.append(x) for x in a])
+    out = []
+    A(f"# Scheda pi `{S['id'][:13]}`")
+    A("")
+    A(f"- **File**: `{os.path.relpath(S['path'], DEFAULT_PI)}` — {S['n_lines']} righe lette, "
+      f"{S['n_bad']} scartate")
+    A(f"- **Worktree**: `{S['cwd']}` (dir `{S['dir']}`)")
+    A(f"- **Inizio / fine (ora locale)**: {fmt(S['first'], tz)} → {fmt(S['last'], tz)}")
+    span = ((S['last'] - S['first']).total_seconds() if S['first'] and S['last'] else None)
+    A(f"- **Estensione**: {fmt_dur(span)} — **tempo attivo** (senza pause > 30 min): "
+      f"{fmt_dur(S['active_s'])}")
+    A(f"- **Provider/modello**: " + ", ".join(f"{k} ({n})" for k, n in S['models'].most_common(3)))
+    A(f"- **Turni assistant**: {S['turns']} · **chiamate strumento**: {S['tool_calls']} "
+      f"· **fallite**: {S['errors_total']}")
+    A(f"- **Token**: input {human(S['in'])} · output {human(S['out'])} · "
+      f"cache-lettura {human(S['cache_read'])} · cache-scrittura {human(S['cache_write'])} · "
+      f"totali {human(S['total_tokens'])} · costo dichiarato USD {S['cost_sum']:.4f}")
+    A(f"- **Compattazioni**: {len(S['compactions'])} · **aborti**: {S['aborts']} · "
+      f"**errori API**: {S['api_errors']}")
+    if S["branches"]:
+        A(f"- **Branch citati nei comandi**: "
+          + ", ".join(f"`{b}` ({n})" for b, n in S["branches"].most_common(4)))
+    A("")
+    A("## Strumenti")
+    A("")
+    A("| strumento | chiamate | fallite |")
+    A("|---|---|---|")
+    for k, n in S["tools"].most_common():
+        A(f"| `{k}` | {n} | {S['tool_errors'].get(k, 0)} |")
+    A("")
+    A(f"## git commit eseguiti — {len(S['git_commits'])}")
+    A("")
+    for c in S["git_commits"][:40]:
+        A(f"- `{fmt(c['ts'], tz)}` — {c['msg']}")
+    if len(S["git_commits"]) > 40:
+        A(f"- … altri {len(S['git_commits']) - 40}")
+    A("")
+    if S["orca_types"]:
+        A("## Orchestrazione (messaggi `--type`)")
+        A("")
+        A(" · ".join(f"`{k}`×{v}" for k, v in S["orca_types"].most_common(8)))
+        A("")
+    top = {k: v for k, v in S["bash_cmds"].most_common(10) if v > 1}
+    if top or S["n_sleep"]:
+        A("## Bash ripetuti e attese")
+        A("")
+        for k, v in top.items():
+            A(f"- ×{v} — `{k}`")
+        A(f"- sleep: {S['n_sleep']} chiamate, {fmt_dur(S['sleep_s'])} cumulati")
+        A("")
+    return "\n".join(out)
+
+
 # ------------------------------------------------------------------ schede
 
 def render_card(S, tz, da, agent_cap=10 ** 9, owner_cap=10 ** 9, resume_cap=10 ** 9):
@@ -844,6 +1045,10 @@ def main(argv=None):
     ap.add_argument("--a", default=None, help="data di fine periodo (esclusiva), default: ora")
     ap.add_argument("--out", default=".superpowers/retrospettiva")
     ap.add_argument("--projects", default=DEFAULT_PROJECTS)
+    ap.add_argument("--pi", default=DEFAULT_PI,
+                    help="cartella ~/.pi/agent/sessions (o equivalente); le sottocartelle "
+                         "con 'budget' nel nome sono del progetto")
+    ap.add_argument("--no-pi", action="store_true", help="non leggere le sessioni pi")
     ap.add_argument("--tz", default=os.environ.get("TZ") or "Europe/Rome")
     ap.add_argument("--db", default=os.environ.get("DATABASE_PATH")
                     or "/home/peter/DEV/budget/financial_analysis.db",
@@ -907,6 +1112,27 @@ def main(argv=None):
             fh.write(card)
         sessions.append(S)
 
+    # ---------------------------------------------------- sessioni pi (novità del periodo)
+    pi_sessions, pi_lines, pi_bad, pi_skipped = [], 0, 0, 0
+    if not args.no_pi and os.path.isdir(args.pi):
+        for d in sorted(glob.glob(os.path.join(args.pi, "*"))):
+            if not os.path.isdir(d) or "budget" not in os.path.basename(d):
+                continue
+            for p in sorted(glob.glob(os.path.join(d, "*.jsonl"))):
+                if _dt.datetime.fromtimestamp(os.path.getmtime(p), _dt.timezone.utc) < da:
+                    pi_skipped += 1
+                    continue
+                P = scan_pi_session(p, da, a_fine, tz)
+                if not P["in_range_n"]:
+                    pi_skipped += 1
+                    continue
+                pi_lines += P["n_lines"]
+                pi_bad += P["n_bad"]
+                with open(os.path.join(cards_dir, f"pi-{P['id']}.md"),
+                          "w", encoding="utf-8") as fh:
+                    fh.write(render_pi_card(P, tz))
+                pi_sessions.append(P)
+
     # ------------------------------------------------------------ aggregato
     rows = []
     per_model_main = defaultdict(Counter)   # usage dei messaggi del main loop
@@ -952,7 +1178,8 @@ def main(argv=None):
             fam = (model_family(model) or model_family(a.get("meta_model"))
                    or model_family(a.get("model_requested")) or "sconosciuto")
             all_agents.append({
-                "sessione": S["id"], "agente": a.get("meta_agent_id") or aid,
+                "sessione": S["id"], "esecutore": f"subagente Claude ({fam})",
+                "agente": a.get("meta_agent_id") or aid,
                 "descrizione": a.get("description"), "tipo_agente": a.get("subagent_type"),
                 "nome": a.get("meta_name"), "model": model, "famiglia_modello": fam,
                 "model_richiesto": a.get("model_requested"), "isolation": a.get("isolation"),
@@ -983,7 +1210,8 @@ def main(argv=None):
                 bucket["riprese"] += a.get("resumes") or 0
                 bucket["errori_api"] += tr.get("api_errors", 0)
         rows.append({
-            "sessione": S["id"], "inizio": fmt(S["first"], tz), "fine": fmt(S["last"], tz),
+            "sessione": S["id"], "esecutore": "Claude principale",
+            "inizio": fmt(S["first"], tz), "fine": fmt(S["last"], tz),
             "estensione_s": int((S["last"] - S["first"]).total_seconds()) if S["first"] and S["last"] else 0,
             "attivo_s": int(S["active_s"]), "righe_lette": S["n_lines"],
             "righe_scartate": S["n_bad"], "messaggi_proprietario": S["owner_n"],
@@ -1011,13 +1239,78 @@ def main(argv=None):
             "branch": dict(S["branches"]),
         })
 
+    # ------------------------------------------------------------ esecutori e righe pi
+    per_exec = defaultdict(Counter)
+    for S in sessions:
+        b = per_exec["Claude principale"]
+        b["sessioni"] += 1
+        b["durata_attiva_s"] += int(S["active_s"])
+        b["strumenti"] += sum(S["tools"].values())
+        b["comandi_falliti"] += S["errors_total"]
+        b["commit"] += len(S["git_commits"])
+        b["merge"] += len(S["git_merges"])
+        b["messaggi_proprietario"] += S["owner_n"]
+        b["compattazioni"] += len(S["compactions"])
+        b["riprese"] += len(S["resumes"])
+        for mdl, n in S["tok_main"].items():
+            b["token_in_out"] += n
+    for a in all_agents:
+        b = per_exec[a["esecutore"]]
+        b["agenti"] += 1
+        b["token_notifica"] += a["token"] or 0
+        b["out"] += a.get("out_trascrizione") or 0
+        b["in"] += a.get("in_trascrizione") or 0
+        b["cache_letto"] += a.get("cache_letto_trascrizione") or 0
+        b["cache_creazione"] += a.get("cache_creazione_trascrizione") or 0
+        b["strumenti"] += a["strumenti"] or 0
+        b["durata_attiva_s"] += a["durata_s"] or 0
+        b["riprese"] += a["riprese"] or 0
+        b["errori_api"] += a["errori_api"] or 0
+    pi_rows = []
+    for P in pi_sessions:
+        b = per_exec["pi"]
+        b["sessioni"] += 1
+        b["turni"] += P["turns"]
+        b["durata_attiva_s"] += int(P["active_s"])
+        b["strumenti"] += P["tool_calls"]
+        b["comandi_falliti"] += P["errors_total"]
+        b["commit"] += len(P["git_commits"])
+        b["compattazioni"] += len(P["compactions"])
+        b["aborti"] += P["aborts"]
+        b["token_in_out"] += P["in"] + P["out"]
+        pi_rows.append({
+            "sessione": P["id"], "esecutore": "pi", "worktree": P["worktree"],
+            "cwd": P["cwd"],
+            "inizio": fmt(P["first"], tz), "fine": fmt(P["last"], tz),
+            "estensione_s": int((P["last"] - P["first"]).total_seconds())
+            if P["first"] and P["last"] else 0,
+            "attivo_s": int(P["active_s"]), "turni": P["turns"],
+            "strumenti": dict(P["tools"]), "strumenti_tot": P["tool_calls"],
+            "comandi_falliti": P["errors_total"],
+            "token_in": P["in"], "token_out": P["out"],
+            "token_cache_lettura": P["cache_read"], "token_cache_scrittura": P["cache_write"],
+            "token_totali": P["total_tokens"], "costo_dichiarato_usd": round(P["cost_sum"], 4),
+            "modelli": dict(P["models"]), "provider": dict(P["providers"]),
+            "compattazioni": len(P["compactions"]), "aborti": P["aborts"],
+            "errori_api": P["api_errors"],
+            "commit": len(P["git_commits"]),
+            "commit_elenco": [{"ts": fmt(c["ts"], tz), "msg": c["msg"]}
+                              for c in P["git_commits"]],
+            "branch": dict(P["branches"]),
+            "sleep_s": P["sleep_s"], "n_sleep": P["n_sleep"],
+            "bash_top_ripetuti": {c: n for c, n in P["bash_cmds"].most_common(8)},
+            "orca": dict(P["orca_types"]),
+            "righe_lette": P["n_lines"], "righe_scartate": P["n_bad"],
+        })
+
     agg = {
         "generato_il": fmt(_dt.datetime.now(_dt.timezone.utc), tz),
         "periodo": {"da": fmt(da, tz), "a": fmt(a_fine, tz)},
         "projects_dir": args.projects,
         "totali": {
-            "sessioni": len(sessions), "subagenti": tot_sub,
-            "righe_lette": tot_lines, "righe_scartate": tot_bad,
+            "sessioni": len(sessions), "subagenti": tot_sub, "sessioni_pi": len(pi_sessions),
+            "righe_lette": tot_lines + pi_lines, "righe_scartate": tot_bad + pi_bad,
+            "righe_lette_claude": tot_lines, "righe_lette_pi": pi_lines,
             "agenti_classificati": len(all_agents),
         },
         "regola_classificazione": [{"tipo": k, "regex": v} for k, v in WORK_RULES]
@@ -1029,17 +1322,22 @@ def main(argv=None):
         "per_modello_trascrizioni": {k: dict(v) for k, v in sorted(per_model_tr.items())},
         "per_modello_main_loop": {k: dict(v) for k, v in sorted(per_model_main.items())},
         "per_tipo_lavoro": {k: dict(v) for k, v in sorted(per_work.items())},
+        "per_esecutore": {k: dict(v) for k, v in sorted(per_exec.items())},
+        "sessioni_pi": pi_rows,
         "agenti": all_agents,
     }
     with open(os.path.join(args.out, "aggregato.json"), "w", encoding="utf-8") as fh:
         json.dump(agg, fh, ensure_ascii=False, indent=1, default=str)
 
-    md = ["# Aggregato sessioni Claude Code", "",
-          f"Periodo: **{fmt(da, tz)} → {fmt(a_fine, tz)}** · progetto: `{args.projects}`",
+    md = ["# Aggregato sessioni Claude Code e pi", "",
+          f"Periodo: **{fmt(da, tz)} → {fmt(a_fine, tz)}** · progetto: `{args.projects}`"
+          + (f" · pi: `{args.pi}`" if pi_sessions else ""),
           "",
-          f"- sessioni principali: **{len(sessions)}**",
-          f"- subagenti con trascrizione: **{tot_sub}**",
-          f"- righe JSONL lette: **{tot_lines}** · scartate: **{tot_bad}**",
+          f"- sessioni principali Claude: **{len(sessions)}**",
+          f"- subagenti Claude con trascrizione: **{tot_sub}**",
+          f"- sessioni pi: **{len(pi_sessions)}** (cartelle con `budget` nel nome, "
+          f"fuori periodo: {pi_skipped})",
+          f"- righe JSONL lette: **{tot_lines + pi_lines}** · scartate: **{tot_bad + pi_bad}**",
           ""]
     md.append("## Una riga per sessione")
     md.append("")
@@ -1097,13 +1395,49 @@ def main(argv=None):
     for r in agg["regola_classificazione"]:
         md.append(f"- **{r['tipo']}** ← `{r['regex']}`")
     md.append("")
+    md.append("## Per esecutore")
+    md.append("")
+    md.append("| esecutore | sessioni | agenti | turni | token notifica | token main in+out "
+              "| output | input | cache letto | cache creazione | strumenti | durata attiva | "
+              "riprese | commit | falliti | compatt. |")
+    md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for k in sorted(per_exec, key=lambda x: (x != "Claude principale", x != "pi", x)):
+        v = per_exec[k]
+        md.append("| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            k, v.get("sessioni", 0), v.get("agenti", 0), v.get("turni", 0),
+            human(v.get("token_notifica", 0)), human(v.get("token_in_out", 0)),
+            human(v.get("out", 0)), human(v.get("in", 0)),
+            human(v.get("cache_letto", 0)), human(v.get("cache_creazione", 0)),
+            human(v.get("strumenti", 0)), fmt_dur(v.get("durata_attiva_s")),
+            v.get("riprese", 0), v.get("commit", 0), v.get("comandi_falliti", 0),
+            v.get("compattazioni", 0)))
+    md.append("")
+    md.append("Nota: le colonne token di `Claude principale` sono input+output dal main loop; "
+              "quelle di `subagente Claude` vengono dalle trascrizioni dei subagenti (mai "
+              "sommare alle notifiche); `pi` riporta il costo dichiarato nei messaggi (USD 0 su "
+              "provider locale gx10: qui il conto lo paga il tempo).")
+    md.append("")
+    md.append("## Sessioni pi — una riga per run")
+    md.append("")
+    md.append("| sessione | worktree | inizio | attivo | estensione | turni | strumenti | "
+              "falliti | token in/out | cache letta | compatt. | commit | modelli |")
+    md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for r in sorted(pi_rows, key=lambda x: x["inizio"]):
+        md.append("| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} / {} | {} | {} | {} | {} |".format(
+            r["sessione"][:13], r["worktree"][:28], r["inizio"][:16], fmt_dur(r["attivo_s"]),
+            fmt_dur(r["estensione_s"]), r["turni"], human(r["strumenti_tot"]),
+            r["comandi_falliti"], human(r["token_in"]), human(r["token_out"]),
+            human(r["token_cache_lettura"]), r["compattazioni"], r["commit"],
+            ",".join(sorted(r["modelli"]))))
+    md.append("")
     with open(os.path.join(args.out, "aggregato.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
 
     print(f"sessioni principali lette: {len(sessions)} (scartate perche' fuori periodo: {skipped})")
     print(f"subagenti con trascrizione: {tot_sub}")
-    print(f"righe JSONL lette: {tot_lines}")
-    print(f"righe scartate (malformate/non-JSON): {tot_bad}")
+    print(f"sessioni pi lette: {len(pi_sessions)} (scartate perche' fuori periodo: {pi_skipped})")
+    print(f"righe JSONL lette: {tot_lines + pi_lines} (Claude {tot_lines} · pi {pi_lines})")
+    print(f"righe scartate (malformate/non-JSON): {tot_bad + pi_bad}")
     print(f"agenti classificati: {len(all_agents)}")
     print(f"schede in {os.path.join(cards_dir, '*.md')}")
     print(f"aggregati in {args.out}/aggregato.{{json,md}}")

@@ -174,7 +174,7 @@ comunque, nessuna assunzione sulla stringa `editorial-2`/`editorial-3` in
 quei due file).
 
 Matrice tre workflow × orizzonti 1/3/5 anni (punto 5): coperta da
-`test_full_real_composition_has_exact_rows_indicators_charts_and_slots`
+`test_full_real_composition_has_exact_pages_appendix_rows_and_slots`
 (`tests/test_typst_editorial_plan.py`, `@pytest.mark.parametrize` su
 workflow × years), dentro la suite da 328; nessun test dedicato aggiuntivo
 necessario.

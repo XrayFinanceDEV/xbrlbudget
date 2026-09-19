@@ -7,7 +7,7 @@ tiene, mette 27,9 o altro; il motore applica `tax_rate` cosi' com'e'.
 
 «Depositato» = `FinancialYear` annuale (`period_months` NULL o 12) che non nasce da un
 promote (`promoted_from_scenario_id` NULL), di anno non successivo a quello dato.
-Il frontend porta la stessa regola in `lib/aliquota-proposta.ts`.
+Il frontend porta la stessa regola in `frontend/lib/budget-tax-rate.ts`.
 """
 from decimal import Decimal
 from typing import Optional, Tuple

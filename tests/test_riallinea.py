@@ -33,6 +33,8 @@ from scripts.riallinea import (  # noqa: E402
     simboli_non_documentati,
     classifica_sha,
     verifica_sha_rapporto,
+    puntatori_morti,
+    indice_rete,
 )
 
 
@@ -690,3 +692,123 @@ def test_sha_preso_anche_in_mezzo_a_un_comando_inline(tmp_path):
 def test_sotto_sette_cifre_non_e_un_candidato(tmp_path):
     _repo_git(tmp_path)
     assert verifica_sha_rapporto("il default 12 e il cap 60 qui\n", repo=tmp_path) == []
+
+
+# --- B) il produttore di candidati che mancava alla lista chiusa 1-2 ---------
+# Fino ad oggi i «percorso nominato che non esiste» andavano scoperti a mano,
+# giro dopo giro. Misurato su questo repo: 2754 percorsi in backtick con una
+# barra, 614 non risolvono dalla radice, 125 hanno la directory padre che
+# esiste, 41 hanno un basename che non esiste in nessun file. Il predicato e'
+# l'ultimo: "non risolve dalla radice" darebbe 120 falsi positivi in un colpo,
+# perche' qui un modulo di frontend si scrive `lib/pratica-codes.ts` relativo a
+# `frontend/` ed e' la forma normale.
+
+def _tocca(p, testo):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(testo, encoding="utf-8")
+    return p
+
+
+def test_puntatore_morto_in_un_docstring_di_codice(tmp_path):
+    # Il caso di stamattina: aliquota_service.py:10 puntava a un file mai nato.
+    # Una docstring .py non e' nel corpus nemmeno dopo l'allargamento di
+    # RADICI_DOC: se si scandiscono solo i .md, questa classe resta invisibile.
+    _tocca(tmp_path / "backend/app/services/svc.py",
+           '"""La regola. Il frontend la porta in `lib/mai-nato.ts`."""\n')
+    out = puntatori_morti([tmp_path / "backend/app/services/svc.py"], root=tmp_path)
+    assert [(o.percorso, o.bersagli) for o in out] == [("lib/mai-nato.ts", [])]
+    assert out[0].correggibile is False
+
+
+def test_puntatore_vivo_se_il_basename_esiste_in_una_directory_ignorata(tmp_path):
+    # Si confronta col DISCO, non con l'indice: inbox/ e .superpowers/ sono
+    # ignorati DI PROPOSITO, e sul solo `git ls-files` diventano 15 falsi
+    # positivi (build-dossier-preview.py, le sonde).
+    _tocca(tmp_path / ".superpowers/scratch/prova.py", "x = 1\n")
+    _tocca(tmp_path / "docs/nota.md", "vedi `scratch/prova.py` qui\n")
+    assert puntatori_morti([tmp_path / "docs/nota.md"], root=tmp_path) == []
+
+
+def test_puntatore_non_e_candidato_dentro_un_fenced_block(tmp_path):
+    # La lezione del falso positivo di stamattina: un link dentro un ```markdown
+    # che e' il MODELLO di un file generato altrove non e' un link vivo, e
+    # 'correggerlo' rompe il modello. Qui si salta il recinto, punto: il
+    # raffinamento (risolverlo rispetto al file che il blocco genera) non e'
+    # implementato, e il costo e' perdere candidati, mai inventarli.
+    _tocca(tmp_path / "docs/x/uno.md", "# vero\n")   # il file che il piano crea
+    _tocca(tmp_path / "docs/piano.md",
+           "Crea `docs/x/uno.md`:\n\n```markdown\n[spec](specs/mai-nata.md)\n```\n")
+    assert puntatori_morti([tmp_path / "docs/piano.md"], root=tmp_path) == []
+
+
+def test_puntatore_un_file_che_un_piano_diceva_di_creare_e_mai_nato_e_un_candidato(tmp_path):
+    # Il rovescio del test sopra, ed e' la ragione per cui il file creato va
+    # toccato davvero: un `Create` di un piano disatteso in esecuzione non ha
+    # meccanismo di rientro, ed e' la classe di falso nata con
+    # aliquota-proposta.ts. Qui il percorso NON e' in un recinto: e' una
+    # promessa, e va in elenco come `assente`.
+    _tocca(tmp_path / "docs/piano.md", "Create `lib/mai-nato.ts` (+test).\n")
+    out = puntatori_morti([tmp_path / "docs/piano.md"], root=tmp_path)
+    assert [(o.percorso, o.kind) for o in out] == [("lib/mai-nato.ts", "assente")]
+
+
+def test_puntatore_salta_i_segnaposto(tmp_path):
+    # template che non pretendono di risolvere
+    _tocca(tmp_path / "docs/t.md",
+           "`rapporto/AAAA-MM-GG.md`, `<percorso>`, `{company_id}`, `*/glob.ts`\n")
+    assert puntatori_morti([tmp_path / "docs/t.md"], root=tmp_path) == []
+
+
+def test_puntatore_lib_relativo_a_frontend_non_e_morto(tmp_path):
+    # La convenzione del progetto, non una deroga: `lib/pratica-codes.ts` vive in
+    # frontend/lib/. Un predicato "risolve dalla radice" lo chiamerebbe morto.
+    _tocca(tmp_path / "frontend/lib/pratica-codes.ts", "export const X = 1\n")
+    _tocca(tmp_path / "CLAUDE.md", "see `lib/pratica-codes.ts`\n")
+    assert puntatori_morti([tmp_path / "CLAUDE.md"], root=tmp_path) == []
+
+
+def test_puntatore_correggibile_solo_se_il_bersaglio_e_unico(tmp_path):
+    # Meta dei candidati sono menzioni storiche legittime (editorial_inventory.py
+    # x13, pratiche-turnover dichiarato cancellato): un bersaglio assente non e'
+    # mai correggibile, e piu' di uno non e' dimostrato. Solo l'uno-e-uno vale.
+    _tocca(tmp_path / "frontend/lib/uno.ts", "x\n")
+    _tocca(tmp_path / "backend/altro/uno.ts", "y\n")
+    # `vecchio/` non e' suffisso di nessuno dei due: il nome vive, in due posti.
+    _tocca(tmp_path / "docs/d.md", "`vecchio/uno.ts` e `lib/mai-nato.ts`\n")
+    out = {o.percorso: o for o in puntatori_morti([tmp_path / "docs/d.md"], root=tmp_path)}
+    assert sorted(out) == ["lib/mai-nato.ts", "vecchio/uno.ts"]
+    assert out["vecchio/uno.ts"].correggibile is False   # due bersagli: ambiguo
+    assert len(out["vecchio/uno.ts"].bersagli) == 2
+    assert out["lib/mai-nato.ts"].correggibile is False  # zero: storia, non typo
+
+
+def test_puntatore_unico_bersaglio_che_non_e_suffisso_e_correggibile(tmp_path):
+    # Il caso della lista chiusa 1: il percorso non risolve e non e' nemmeno la
+    # forma corta di un file reale (suffisso), ma il basename vive in UN SOLO
+    # posto. E' l'unico in cui la correzione e' dimostrata, non proposta.
+    _tocca(tmp_path / "frontend/lib/vero.ts", "x\n")
+    _tocca(tmp_path / "docs/d.md", "vedi `vecchio/vero.ts`\n")
+    out = puntatori_morti([tmp_path / "docs/d.md"], root=tmp_path)
+    assert [(o.percorso, o.correggibile, o.bersagli) for o in out] == [
+        ("vecchio/vero.ts", True, ["frontend/lib/vero.ts"])]
+
+
+def test_puntatore_forma_corta_non_e_un_difetto(tmp_path):
+    # `lib/pratica-codes.ts` NON risolve dalla radice e il suo basename vive:
+    # e' la convenzione del progetto (suffisso di frontend/lib/...), non deriva.
+    # Se questa classe finisse fra i candidati, il flag ne porterebbe ~573 e
+    # nessuno aprirebbe piu' l'elenco dei 41 veri.
+    _tocca(tmp_path / "frontend/lib/pratica-codes.ts", "export const X = 1\n")
+    _tocca(tmp_path / "docs/d.md", "codice in `lib/pratica-codes.ts`\n")
+    assert puntatori_morti([tmp_path / "docs/d.md"], root=tmp_path) == []
+
+
+def test_puntatore_un_percorso_con_la_barra_iniziale_non_e_un_candidato(tmp_path):
+    # Misurato al primo `--puntatori` vero: 8 delle 18 classi `unico` erano cosi'.
+    # `/openapi.json` e la rotta Swagger, `/data/taxonomy_mapping.json` e la
+    # radice del server: un percorso che inizia con / non pretende di essere
+    # relativo al repo, e il solo basename lo chiamava "correggibile".
+    _tocca(tmp_path / "tests/fixtures/openapi.json", "{}\n")
+    _tocca(tmp_path / "docs/d.md", "swagger su `/openapi.json`, poi `data/x.json`\n")
+    _tocca(tmp_path / "data/x.json", "{}\n")
+    assert puntatori_morti([tmp_path / "docs/d.md"], root=tmp_path) == []

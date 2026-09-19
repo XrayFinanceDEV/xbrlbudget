@@ -451,6 +451,135 @@ def verifica_sha_rapporto(testo, repo="."):
     return out
 
 
+# ── B) candidati «puntatore morto» (lista chiusa §§1-2) ─────────────────────
+# Fino ad oggi andavano scoperti a mano, giro dopo giro: la lista chiusa esiste
+# da sempre, il suo produttore di candidati no. Misurato su questo repo: 2754
+# percorsi in backtick con una barra, 614 non risolvono dalla radice, 125 hanno
+# la directory padre che esiste, 41 hanno un basename che non esiste in nessun
+# file. Il predicato e' l'ultimo, perche' gli altri tre producono rumore:
+# `lib/pratica-codes.ts` NON risolve dalla radice (vive in frontend/lib/, ed e'
+# la convenzione del progetto) e chiamarlo morto darebbe ~573 falsi positivi in
+# un colpo, seppellendo i 41 veri.
+_PERCORSO_RE = re.compile(
+    r"`([A-Za-z0-9_.\-/]+\.(?:py|ts|tsx|js|jsx|md|json|typ|cjs|sql|sh|ya?ml))`")
+_SEGNAPOSTO_RE = re.compile(r"AAAA|YYYY|MM-GG|<|\{|\}")
+
+# Il disco, non l'indice: `inbox/` e `.superpowers/` sono ignorati DI PROPOSITO
+# e un percorso che ci punta dentro e' vivo. Sul solo `git ls-files` questa
+# classe misurava 15 falsi positivi (build-dossier-preview.py, le sonde).
+_SALTA = ("node_modules", "__pycache__", "/.git/", "/.next/", "/venv/", "/.venv/",
+          "/dist/", "/build/")
+# I verbali si scandiscono lo stesso, ma MARCATI: non si correggono mai (regola
+# dei piani e spec datati), e nasconderli sarebbe peggio che contarli.
+VERBALI = ("docs/superpowers/plans/", "docs/superpowers/specs/",
+           "docs/piano-import-2026-07/", "docs/outputs/", "docs/archive/")
+
+
+@dataclass
+class Puntatore:
+    file: str
+    riga: int
+    percorso: str
+    kind: str             # assente (storica) | unico (correggibile) | ambiguo
+    bersagli: List[str]
+    correggibile: bool
+    verbale: bool
+
+
+def indice_rete(root="."):
+    """basename -> percorsi relativi, letti dal DISCO. Una passata sola."""
+    idx = {}
+    for r, cart, files in os.walk(str(root)):
+        rr = os.path.relpath(r, root).replace(os.sep, "/")
+        rr = "" if rr == "." else "/" + rr + "/"
+        if any(s in rr for s in _SALTA):
+            cart[:] = []
+            continue
+        for n in files:
+            p = os.path.relpath(os.path.join(r, n), root).replace(os.sep, "/")
+            idx.setdefault(n, []).append(p)
+    return idx
+
+
+def righe_non_in_recinto(testo, md=True):
+    """Le righe fuori dai fenced block. Solo per il markdown.
+
+    Si SALTA il recinto, non lo si risolve: il raffinamento corretto (risolvere
+    un percorso dentro un blocco 'crea il file X' rispetto a X, non al documento
+    che lo mostra) non e' implementato qui. Il costo e' PERDERE candidati dentro
+    gli esempi, mai inventarne: la direzione giusta di questo strumento.
+    """
+    out, recinto = [], False
+    for n, riga in enumerate(testo.splitlines(), start=1):
+        if md and riga.lstrip().startswith("```"):
+            recinto = not recinto
+            continue
+        if not recinto:
+            out.append((n, riga))
+    return out
+
+
+def file_di_codice(root=".", escludi=("tests", "legacy")):
+    """I file di codice da scandire per i puntatori: le DOCSTRING contengono
+    rimandi al frontend esattamente come le pagine di docs/, e il caso di
+    stamattina (`aliquota_service.py:10`) stava proprio li'.
+
+    `tests/` ed `legacy/` sono esclusi DI PROPOSITO e la cosa va dichiarata: il
+    primo e' pieno di percorsi-fixture che non promettono di esistere, il secondo
+    e' deprecato e le sue menzioni sono storiche per definizione.
+    """
+    out = []
+    base = Path(root)
+    for r, cart, files in os.walk(str(base)):
+        rr = "/" + os.path.relpath(r, root).replace(os.sep, "/") + "/"
+        if any(s in rr for s in _SALTA) or any("/" + e + "/" in rr for e in escludi):
+            cart[:] = []
+            continue
+        for n in files:
+            if Path(n).suffix in ESTENSIONI_CODICE:
+                out.append(os.path.relpath(os.path.join(r, n), root).replace(os.sep, "/"))
+    return sorted(out)
+
+
+def puntatori_morti(files, root=".", indice=None):
+    """Candidati, mai correzioni: meta' di questi sono menzioni storiche.
+
+    `editorial_inventory.py` x13 (modulo spezzato in `dossier_catalog/`, e alcune
+    frasi dicono proprio che non esiste piu') e `lib/pratica-turnover.ts` in
+    `CLAUDE.md:807` (dentro una frase che lo dichiara cancellato) sono candidati
+    VERI e non correggibili: e' per questo che `correggibile` esiste.
+    """
+    idx = indice if indice is not None else indice_rete(root)
+    tutti = {p for v in idx.values() for p in v}
+    out = []
+    for fl in files:
+        f = Path(fl)
+        try:
+            testo = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for n, riga in righe_non_in_recinto(testo, md=f.suffix == ".md"):
+            for m in _PERCORSO_RE.finditer(riga):
+                p = m.group(1).replace(os.sep, "/")
+                if p.startswith("/") or _SEGNAPOSTO_RE.search(p):
+                    # /aperta/cos'e': una rotta HTTP o un percorso assoluto del
+                    # server, non un rimando al repo. Il solo basename la faceva
+                    # comparire come "correggibile" (misurato: 8 righe su 18).
+                    continue
+                if (Path(root) / p).exists() or (f.parent / p).exists():
+                    continue
+                # forma corta della convenzione: `lib/x.ts` per frontend/lib/x.ts
+                if any(x.endswith("/" + p) for x in tutti):
+                    continue
+                bers = sorted(idx.get(os.path.basename(p), []))
+                kind = ("assente" if not bers else
+                        "unico" if len(bers) == 1 else "ambiguo")
+                rel = str(f).replace(os.sep, "/")
+                out.append(Puntatore(rel, n, p, kind, bers, len(bers) == 1,
+                                     any(v in rel for v in VERBALI)))
+    return out
+
+
 RADICI_DOC = ["docs", "CLAUDE.md", ".claude/agents", ".claude/skills"]
 RADICE_MEMORIA = str(
     Path.home() / ".claude" / "projects" / "-home-peter-DEV-budget" / "memory"
@@ -512,6 +641,9 @@ def main() -> None:
                     help="verifica i sha citati da un rapporto (default: quello della "
                          "--data) e termina: tre esiti, antenato/orfano/inesistente. "
                          "Non corregge: esce 1 con l'elenco.")
+    ap.add_argument("--puntatori", action="store_true",
+                    help="elenca i candidati 'puntatore morto' su docs, istruzioni "
+                         "agli agenti, memoria e codice. Candidati, mai correzioni.")
     args = ap.parse_args()
 
     if args.sha is not None:
@@ -534,6 +666,31 @@ def main() -> None:
         for c in cattivi:
             print(f"  {percorso}:{c.riga}  {c.esito}  {c.sha}", file=sys.stderr)
         raise SystemExit(1 if cattivi else 0)
+
+    if args.puntatori:
+        root = "."
+        prose = [str(f).replace(os.sep, "/")
+                 for f in _markdown_da_radici(RADICI_DOC + [args.memoria])]
+        out = puntatori_morti(prose + file_di_codice(root), root=root)
+        indice = indice_rete(root)
+        for k in ("assente", "unico", "ambiguo"):
+            n = [o for o in out if o.kind == k]
+            print(f"{k:9} {len(n):4}  " +
+                  ("(menzioni storiche, non correggibili)" if k == "assente" else
+                   "(§1 della lista chiusa: bersaglio unico, correzione provata)"
+                   if k == "unico" else "lo stesso nome in piu' posti"))
+        print(f"di cui nei verbali (non correggibili per regola): "
+              f"{sum(1 for o in out if o.verbale)} su {len(out)}")
+        # Prima le pagine vive, poi i verbali: una riga di un piano datato non e'
+        # correggibile per regola, e sfogliare 198 righe non correggibili per
+        # arrivare alle 50 che lo sono e' il modo in cui un elenco diventa vuoto.
+        for o in sorted(out, key=lambda x: (x.verbale, x.kind != "unico", x.file, x.riga)):
+            print(f"  {'[verbale] ' if o.verbale else ''}{o.file}:{o.riga}  "
+                  f"`{o.percorso}`  [{o.kind}]"
+                  + (f" -> {', '.join(o.bersagli[:3])}"
+                     + (f" (+{len(o.bersagli) - 3})" if len(o.bersagli) > 3 else "")
+                     if o.bersagli else ""))
+        raise SystemExit(0)
 
     if args.registra:
         data = args.data or datetime.date.today().isoformat()

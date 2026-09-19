@@ -47,17 +47,19 @@ agente ci committava sopra.
 
 ## 2. Numeri
 
-**Il periodo pesa 715 USD di API (sole sessioni iniziate nel periodo) contro 1.656 della settimana
-scorsa, con un esecutore nuovo che di API non pesa nulla.** Claude resta il revisore, pi diventa
-l'implementatore.
+**Sulle sessioni iniziate nel periodo, Claude costa 715 USD di API — ma non è il costo del periodo,
+e nemmeno un confronto con i 1.656 della settimana scorsa: esclude la sessione più cara del periodo,
+`b066…23a4` (223 agenti, 11-13/09), il cui `cost-state` è cumulativo e non scindibile.** Il periodo
+non è costato meno: è in parte inscomponibile. Con un esecutore nuovo che di API non pesa nulla:
+Claude resta il revisore, pi diventa l'implementatore.
 
 | | settimana precedente | questo periodo |
 |---|---|---|
 | sessioni principali Claude | 12 | **4** (+1, la `4db3…4d3d` del 19/09, fuori finestra) |
 | trascrizioni di subagente Claude | ~145 | **256 lette, 133 classificate** |
 | run pi | 12 | **78** |
-| USD (cost-state, sessioni iniziate nel periodo) | 1.655,93 | **715,36** |
-| commit nell'albero (`--all`) | 262 | **379** (318 non-merge, 61 merge) |
+| USD (cost-state, **sole sessioni iniziate nel periodo; esclusa la `b066…23a4`, non scindibile — non è un confronto con i 1.656 della colonna a sinistra**) | 1.655,93 | **715,36** |
+| commit nell'albero (`--all`, finestra `--until=2026-09-19T00:00`) | 262 | **357** (297 non-merge, 60 merge) |
 | righe JSONL lette / scartate | n/d | **175.405 / 1** |
 
 Le quattro sessioni principali Claude del periodo (più una quinta, tutta del 19/09 e quindi fuori
@@ -120,15 +122,17 @@ letta e ignorata.
 | 2 | **Un perimetro di ricognizione scritto nel prompt del pianificatore.** | **no** | La regola non è da nessuna parte: `regole-comuni.md` del dossier v4 (36 file, il registro più curato del periodo) non contiene mai la parola «perimetro» nel senso della raccomandazione — compare solo come «Worker attivi e loro perimetro, da NON toccare». Sui 18 agenti «scrittura di piani» del periodo il cache-lettura mediano è 8,83M con un max di 71,59M (`aggregato.json` → `agenti`): nessuno scivolone da 33,5M come quello della scorsa retrospettiva, ma è un dato di fatto, non un perimetro dichiarato. |
 | 3 | **Il modello si sceglie per compito a ogni dispaccio, e il conteggio si misura.** | **applicata** | È la raccomandazione che ha funzionato meglio. Il conteggio ora esiste: la colonna `esecutore` e il blocco `per_esecutore` di `aggregato.json` (aggiunta in commit `4554e42`). Misurato: **4 agenti opus su 133 (3%)**, tutti e quattro «revisione» (`agenti[*].famiglia_modello == "opus"`). La regola dell'11/09 è rispettata: vedi §5.3. |
 | 4 | **Lo stato del piano si ristampa da solo dopo ogni compattazione.** | **parziale** | Il sintomo è migliorato: «quanti task mancano / a che punto siamo» chiesto **2 volte in 8 giorni** contro 9 della settimana scorsa (§5.4). Ma il meccanismo non c'è: non una riga in testa a nessun `progress.md` del periodo, nessun `stato.md` in testa ai 3 registri nuovi. Il miglioramento viene dal canale sostitutivo — il proprietario usa `check`/`worker-read` di Orca, non il registro. |
-| 5 | **Gli emendamenti del piano finiscono nei ruling, non nel piano.** | **applicata** | `git log --follow` conta i colpi: il piano del report finale ha **10 commit** (9 dopo la stesura) e i **6 heading di task aggiunti in corsa** sono nel **piano**, non nei ruling (§5.1). Ma la direzione del rimprovero si è invertita, e il registro è rimasto il posto delle decisioni: 28 Ruling numerati nell'ondata del 12/09, **zero** nel dossier v4 — le due deviazioni più costose del periodo (il fermo del 17/09, il contratto estratto il 18/09) vivono in file di memoria, non in righe di registro. |
+| 5 | **Gli emendamenti del piano finiscono nei ruling, non nel piano.** | **no** | La prova che avevo raccolto dice il contrario dell'«applicata», e la correggo: i **6 heading di task aggiunti in corsa** stanno nel **piano**, non nei ruling (§5.1), e nel dossier v4 i Ruling sono **zero** — le due deviazioni più costose del periodo (il fermo del 17/09, il contratto estratto il 18/09) vivono in file di memoria, non in righe di registro. Se mai è parziale per un verso: la direzione del rimprovero si è invertita, e i 28 Ruling numerati dell'ondata del 12/09 e i 33 del registro 3A mostrano che *quando il registro viene usato* lì finiscono le decisioni — ma il periodo in cui il piano è stato emendato di più (§5.1, §5.2) è esattamente quello in cui i ruling non sono stati scritti. |
 | 6 | **Un figlio pi va dispacciato dall'HEAD integrato, con un task autosufficiente, e mai in tre.** | **parziale** | La terza parte è quella violata: **4 run pi nello stesso istante alle 11:45 dell'11/09** (sweep sugli intervalli, `aggregato.json` → `sessioni_pi`), e il 14/09 è un giorno di 29 run. Il task autosufficiente regge nei fatti (le ricezioni del dossier: «BASE `997068b`», «base `884718d` (verificato con `git log --oneline -1` prima di iniziare — invariato)»). L'HEAD integrato è quello che è mancato davvero — vedi §5.2, che è la voce più costosa del periodo. |
-| 7 | **Si scrive `Closes #NN` nel commit, il giorno che si corregge.** | **no** | Misurato: **1 commit su 379** porta `Closes #NN` nel corpo nel periodo (`git log --all --since=2026-09-10T22:00 --pretty=%b | grep -c 'Closes #'` → `4dc1296`, `Closes #51 / Refs #52`). Le 8 issue create e chiuse nel periodo sono state chiuse a mano: la mediana di **1,16 giorni** tra creazione e chiusura è il tempo di un ciclo di lavoro, non il segno di un collegamento automatico. La colpa non è la svista: nessuno ha scritto la regola in un posto che l'implementatore legge (`regole-comuni.md` del dossier non la cita, e nei 4 registri «Closes» non compare mai). |
+| 7 | **Si scrive `Closes #NN` nel commit, il giorno che si corregge.** | **no** | Misurato: **1 commit su 357** porta `Closes #NN` nel corpo nel periodo (`git log --all --since=2026-09-10T22:00 --until=2026-09-19T00:00 --pretty=%b \| grep -c 'Closes #'` → `4dc1296`, `Closes #51 / Refs #52`). Le 8 issue create e chiuse nel periodo sono state chiuse a mano: la mediana di **1,16 giorni** tra creazione e chiusura è il tempo di un ciclo di lavoro, non il segno di un collegamento automatico. La colpa non è la svista: nessuno ha scritto la regola in un posto che l'implementatore legge (`regole-comuni.md` del dossier non la cita, e nei 4 registri «Closes» non compare mai). |
 
-**Totale: 2 applicate, 3 parziali, 2 no.** Il pattern è netto e vale come raccomandazione nuova: le
-due applicate sono quelle con un **artefatto verificabile** (un campo in `aggregato.json`, un campo
-in un registro); le due non applicate sono quelle che richiedevano una **nuova abitudine di
-scrittura** in un file che nessuno ha toccato. Una raccomandazione che non diventa un campo, una riga
-di codice o un test non si applica da sola.
+**Totale: 1 applicata, 3 parziali, 3 no.** Il pattern regge, ma si è assottigliato: l'unica
+applicata (la 3) è precisamente quella che ha partorito un **artefatto verificabile** — un campo in
+`aggregato.json`; le tre non applicate sono quelle che richiedevano una **nuova abitudine di
+scrittura** in un file che nessuno ha toccato (il perimetro nel prompt, `Closes #NN` nel commit, gli
+emendamenti nei ruling). Le tre parziali dicono la stessa cosa da un'altra riva: il meccanismo non è
+stato scritto mai, e il sintomo è migliorato per vie sostitutive. Una raccomandazione che non diventa
+un campo, una riga di codice o un test non si applica da sola.
 
 ---
 
@@ -216,12 +220,19 @@ generatore della v4; il 19/09 la verifica accetta su dati veri.
    di accettazione misuravano altro» (`sdd/2026-09-17-dossier-v4/m2-02g-contratto-pagine.md:3-7`).
    La forma a parole era nel brief: «KPI + grafico margini + tabella CE 9 righe»
    (`docs/agents/riprodurre-un-artifact.md` §1), che è una descrizione di contenuto.
-2. *«Spec e piano hanno dichiarato l'artifact non vincolante» → confermata nel testo, non nei tempi.*
-   La frase c'è, nel piano: «Il numero di pagine è determinato dai contenuti, non dalle 33 pagine del
-   campione» (`2026-09-13-report-finale-e-pdf-typst.md:905-909`), e in una seconda forma a `:920`.
-   La memoria dice che fu scritta «venti minuti dopo che l'artifact era nato»: **non verificabile**
-   dai dati — l'artifact non è in git e il piano ha un solo commit nel giorno, `1f66cdf` del 13/09.
-   Quel che si può dire è che la frase è rimasta in vigore cinque giorni, fino al 18/09.
+2. *«Spec e piano hanno dichiarato l'artifact non vincolante» → confermata, tempi compresi.*
+   La frase nasce nella nota V3 dell'artifact, 15/09 **16:19**
+   (`inbox/artifacts/2026-09-15-report-finale/ANTEPRIMA-V3.md:3-5`, «Il numero di pagine è proprio
+   del campione, non un limite o un obiettivo per i report effettivi»; le note hanno l'ora sul
+   disco: V3 16:19, V4 16:25, V5 16:36), ed entra nella spec (`2026-09-15-report-budget-dossier-design.md:62`,
+   «le sue 33 pagine non sono un vincolo») e nel piano (`2026-09-13-report-finale-e-pdf-typst.md:909`,
+   con il richiamo alla v4 a `:923`) con lo stesso commit, `02983d9` del 15/09 **16:39**:
+   `git log -S "non dalle 33 pagine del campione" -- <piano>`. La memoria diceva «venti minuti dopo
+   che l'artifact era nato»: **venti minuti, esatto**. Una precedente stesura di questo rapporto
+   giudicava il claim «non verificabile» e attribuiva la clausola a `1f66cdf`: falso su tutti e due
+   i punti — le note di rilascio stanno su disco con la loro ora, e il piano non ha «un solo commit
+   nel giorno» (§5.1 ne conta 10, tutti entro la finestra). La clausola è poi rimasta in vigore
+   quattro giorni, fino al 18/09.
 3. *«Si è distribuito il ventaglio prima del pilota» → confermata, e costa più delle altre due.*
    M2-02D è «Quattro agenti in parallelo, un gruppo ciascuno» (`m2-02d-fase2.md:4`): cinque merge di
    gruppo nello stesso giorno (`4eeeb9e`…`df5ec17`) su un contratto che nessuno aveva validato su una
@@ -443,15 +454,16 @@ sette vecchie.
    del template.** §3.7. Impatto stimato: la mediana di 1,16 giorni è già buona, quindi l'impatto non
    è il ritardo — è che `days-to-fix` resta cieco e la prossima retrospettiva dovrà chiedere di nuovo
    «chi ha chiuso cosa». La raccomandazione com'era scritta non funziona: ha chiesto un'abitudine a
-   379 commit e ne ha ottenuta una. Va sostituita da un meccanismo: o `Closes #NN` nel template di
+   357 commit e ne ha ottenuta una. Va sostituita da un meccanismo: o `Closes #NN` nel template di
    `regole-comuni.md` (dove l'implementatore lo legge davvero), o un check a fine lotto che elenca le
-   issue chiuse a mano — **non** un richiamo nel prompt, che è il livello a 1/379 di adesione.
+   issue chiuse a mano — **non** un richiamo nel prompt, che è il livello a 1/357 di adesione.
 6. **(vecchia 2 e 4, da tenere con un'altra forma) Le raccomandazioni che chiedono una nuova abitudine
-   di scrittura vanno convertite in un artefatto o muoiono.** §3.2, §3.4. Prova del periodo: delle
-   due raccomandazioni applicate, entrambe hanno partorito un campo in un JSON (`esecutore`,
-   `per_esecutore`) o una sezione di registro; delle due non applicate, entrambe chiedevano una riga
-   in un file (il perimetro nel prompt del pianificatore, la riga di testa di `progress.md`) che
-   nessuno ha scritto. Le eccezioni
+   di scrittura vanno convertite in un artefatto o muoiono.** §3.2, §3.4, §3.5. La prova si è
+   assottigliata con la correzione della riga 5 di §3 — dalle «due applicate» ne resta **una**, ed
+   è precisamente quella che ha partorito un campo in un JSON (`esecutore`, `per_esecutore`); le tre
+   non applicate chiedevano tutte una riga in un file (il perimetro nel prompt del pianificatore, la
+   riga di testa di `progress.md` era una via, `Closes #NN` nel commit un'altra, gli emendamenti nei
+   ruling la terza) che nessuno ha scritto. Le eccezioni
    confermano: la regola «details annidati in Decimal» il coordinatore l'ha scritta dentro
    `regole-comuni.md` il giorno stesso, e infatti il float non è più riapparso. Questa voce vale come
    meta-regola: quando una

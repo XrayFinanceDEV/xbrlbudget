@@ -385,7 +385,13 @@ def riduci_generici(citazioni: List[Citazione]):
     return ridotte, generici
 
 
-RADICI_DOC = ["docs", "CLAUDE.md"]
+# Le istruzioni AGGANCATE al repo sono corpus a pieno titolo: non le legge una
+# persona che dubita, le esegue un agente. Fino al 2026-09-19 qui mancavano, e
+# la regola dell'aliquota rovesciata viveva proprio in `.claude/agents/
+# collaudatore.md` senza che nessun giro la vedesse: un limite di corpus, non
+# una mancata verifica. Le due radici nuove costano citazioni fantasma dalla
+# skill stessa, e stanno in ESCLUSI_DAL_CORPUS sotto con la misura.
+RADICI_DOC = ["docs", "CLAUDE.md", ".claude/agents", ".claude/skills"]
 RADICE_MEMORIA = str(
     Path.home() / ".claude" / "projects" / "-home-peter-DEV-budget" / "memory"
 )

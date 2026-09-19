@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,7 @@ from scripts.riallinea import (  # noqa: E402
     _pathspec,
     carica_stato,
     documenti_che_nominano,
+    RADICI_DOC,
     riduci_generici,
     salva_stato,
     simboli_da_diff,
@@ -252,6 +254,31 @@ def test_una_radice_che_e_un_singolo_file_viene_letta(tmp_path):
     cit = documenti_che_nominano(sim, [str(claude_md)])
     assert [c.file for c in cit] == [str(claude_md)]
     assert cit[0].riga == 1
+
+
+def test_le_istruzioni_agli_agenti_sono_corpus():
+    # Un'istruzione a un agente e' il posto PIU' costoso dove una regola puo'
+    # essere sbagliata: non la legge una persona che dubita, la ESEGUE. Sul giro
+    # 2026-09-19 la regola dell'aliquota rovesciata viveva proprio in
+    # `.claude/agents/collaudatore.md`, e nessun giro l'aveva mai vista perche'
+    # RADICI_DOC si fermava a `docs/` + `CLAUDE.md`: un limite di corpus, non
+    # una mancata verifica.
+    assert ".claude/agents" in RADICI_DOC
+    assert ".claude/skills" in RADICI_DOC
+
+
+def test_una_regola_sotto_claude_agents_viene_raccolta_dalle_radici_veri(tmp_path, monkeypatch):
+    # Non basta che la radice sia nell'elenco: `.claude` inizia con un punto,
+    # e una scansione che saltasse le directory nascoste farebbe sparire IL SOLO
+    # file che contiene una regola sbagliata, senza alcun errore.
+    _scrivi(tmp_path, "docs/vivo.md", "Il netting usa `net_contra_accounts`.\n")
+    _scrivi(tmp_path, "CLAUDE.md", "Also mentions `net_contra_accounts`.\n")
+    _scrivi(tmp_path, ".claude/agents/collaudatore.md", "Il motore usa `net_contra_accounts`.\n")
+    monkeypatch.chdir(tmp_path)
+    sim = [Simbolo("net_contra_accounts", "funzione", "calculations/x.py", "aggiunto")]
+    trovati = {Path(c.file).as_posix() for c in documenti_che_nominano(sim, RADICI_DOC)}
+    assert ".claude/agents/collaudatore.md" in trovati
+    assert {"docs/vivo.md", "CLAUDE.md"} <= trovati
 
 
 # --- riduci_generici -------------------------------------------------------

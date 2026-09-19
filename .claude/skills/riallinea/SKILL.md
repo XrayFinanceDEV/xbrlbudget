@@ -89,9 +89,10 @@ nessuno la rilegge. Nel dubbio si segnala.
 
 ## Strategia per lo sweep completo (`--completo`)
 
-Un `--completo` sul repo reale produce **5822 simboli, 11338 citazioni, 141 nomi
-generici e 40 manopole senza alcuna citazione** (misurato il 2026-09-19; era 2722/5722/50
-il 2026-08-14 — il corpus raddoppia, e questi numeri invecchiano: rimisurali invece di
+Un `--completo` sul repo reale produce **5857 simboli, 11366 citazioni, 143 nomi
+generici e 40 manopole senza alcuna citazione** (rimisurato il 2026-09-19 dopo
+l'allargamento di `RADICI_DOC` a `.claude/`; era 5822/11338/141/40 prima, e
+2722/5722/50 il 2026-08-14 — il corpus raddoppia, e questi numeri invecchiano: rimisurali invece di
 citarli). Nessun modello può leggere il codice dietro undicimila affermazioni in
 un'unica esecuzione. Campionare in silenzio sarebbe
 peggio di non verificare affatto: produrrebbe un rapporto che sembra esaustivo e non
@@ -289,3 +290,17 @@ sul giro 2026-09-18 erano 49 citazioni fantasma. Dal 2026-09-19
 `docs/superpowers/allineamento/` è escluso dal corpus (`ESCLUSI_DAL_CORPUS`, con la sua
 prova): il JSON lo dichiara in `esclusi_dal_corpus`. Restano fuori solo i rapporti, non i
 verbali di piani e spec — quelli sono corpus a pieno titolo.
+
+**Il corpus comprendeva solo `docs/` + `CLAUDE.md`, e non era bastante** (dal 2026-09-19). Le
+istruzioni *agite* dagli agenti — `.claude/agents/`, `.claude/skills/` — erano
+fuori da ogni giro, in `diff` come in `--completo`, con entrambe le chiavi: non una verifica
+mancata, un file invisibile. Il costo è misurato, non un limite teorico: la regola dell'aliquota
+rovesciata da `073927b` viveva in `.claude/agents/collaudatore.md` e nessun giro l'aveva mai vista.
+L'allargamento costa **+28 citazioni su 11 366 (0,24%)**, di cui 9 dalla SKILL stessa:
+auto-descrizioni (`SOGLIA_GENERICO`, `ESCLUSI_DAL_CORPUS`, `salva_stato`) che restano verificabili
+e quindi *utili*, non fantasma. Se un giorno crescessero al punto da distorcere i conteggi dei
+generici, la voce da escludere è `.claude/skills/` — e 0,24% è il parametro con cui deciderlo.
+Corollario operativo, che prima non aveva motivo di esistere e ora ce l'ha: una riga di questa
+pagina che descrive lo strumento **va mossa nello stesso commit** che muove lo strumento. Da quando
+la SKILL è dentro il corpus, una riga rimasta indietro non è più una svista di redazione — è
+un'affermazione falsa che il giro dopo il join troverà, e troverà come non verificata da nessuno.

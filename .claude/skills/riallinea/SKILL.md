@@ -38,7 +38,7 @@ nessuno la rilegge. Nel dubbio si segnala.
      la prosa di un commit che tocca solo `.md` non produce alcun candidato: il canale per
      simbolo salta le righe non-codice, e quello per file è invertito (cerca i documenti che
      nominano un file *toccato*, quindi una cita verso un file che l'intervallo non tocca —
-     `aliquota-proposta.ts`, mai esistito — non la vede). Su 914 commit dall'1 giugno, 160
+     «aliquota-proposta.ts», mai esistito — non la vede). Su 914 commit dall'1 giugno, 160
      toccano solo `.md` e 52 di questi aggiungevano un rimando a un file di codice: quella
      classe la copre `--puntatori` (o `--completo`), non la spina. È pinato in
      `tests/test_riallinea.py`.
@@ -107,23 +107,32 @@ nessuno la rilegge. Nel dubbio si segnala.
 
 `python3 scripts/riallinea.py --puntatori` elenca i percorsi citati in backtick il cui **basename
 non esiste in nessun file del repo** — la classe di difetto che finora veniva fuori solo a mano,
-giro dopo giro (`editorial_inventory.py` x13, `lib/aliquota-proposta.ts`,
-`components/IntraYearAiComments.tsx`). **È un generatore di candidati, non un gate**: esce 0 sempre
+giro dopo giro (esempi senza backtick, per la convenzione sotto: «editorial_inventory.py» x13,
+«lib/aliquota-proposta.ts», «components/IntraYearAiComments.tsx»). **È un generatore di candidati,
+non un gate**: esce 0 sempre
 e metà dell'elenco sono menzioni storiche corrette. Da qui le tre scelte che lo rendono leggibile:
 
 - il predicato è il **basename**, non il percorso: `lib/pratica-codes.ts` non risolve dalla radice
   (vive in `frontend/lib/`, convenzione del progetto) e trattarlo da morto darebbe ~573 falsi
   positivi, seppellendo i ~41 veri;
-- sono candidati anche i **nomi senza barra** (`CONTEXT-MAP.md`, il caso di `docs/agents/domain.md`)
+- sono candidati anche i **nomi senza barra** («CONTEXT-MAP.md», il caso di `docs/agents/domain.md`)
   e il **codice**, perché le docstring dei servizi puntano al frontend: il caso di oggi era
   `aliquota_service.py:10`;
 - i **verbali** (`docs/superpowers/plans|specs/`, `docs/piano-import-2026-07/`, `docs/outputs/`,
   `docs/archive/`) entrano marcati `[verbale]` e ordinati per ultimi: non si correggono mai, e in
-  mezzo agli altri sono rumore (misurato: 176 su 247).
+  mezzo agli altri sono rumore (misurato: 176 su 244).
 
 I fenced block del markdown sono saltati; il costo è perdere candidati dentro gli esempi, mai
-inventarne. **Non è un passo del giro**: 247 candidati non sono una cosa da mettere in coda a una
+inventarne. **Non è un passo del giro**: 244 candidati non sono una cosa da mettere in coda a una
 notturna. È lo strumento di 1) e 2) quando si investigate.
+
+**Convenzione: un esempio di file morto si scrive senza backtick.** Il predicato di `--puntatori`
+prende solo i percorsi fra backtick, quindi una pagina che *cita come esempio* il file morto di cui
+sta parlando lo ricandida a ogni giro: misurato, 8 dei 252 candidati erano le pagine dello strumento
+su sé stesso. La regola è (a) e non un marcatore `<!-- esempio -->` (opzione b) perché un marcatore
+che *supprime* un candidato è un modo di nascondere un puntatore morto, che è l'esatto contrario
+di ciò che questo strumento deve sapere fare. Il vincolo è tenuto da
+`test_lo_strumento_non_produce_candidati_su_se_stesso`.
 
 ## Strategia per lo sweep completo (`--completo`)
 

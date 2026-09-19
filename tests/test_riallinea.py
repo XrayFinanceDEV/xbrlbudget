@@ -838,3 +838,20 @@ def test_una_cita_aggiunta_da_un_commit_solo_documenti_non_produce_candidato():
            "+def aliquota_proposta(company, year):\n")
     assert [s.nome for s in simboli_da_diff(doc)] == []      # la prosa non candida
     assert "aliquota_proposta" in [s.nome for s in simboli_da_diff(cod)]  # il codice si
+
+
+# --- D) la skill non deve candidare sé stessa ----------------------------------
+
+def test_lo_strumento_non_produce_candidati_su_se_stesso():
+    # Autoinquinamento, la stessa forma delle 49 citazioni fantasma di
+    # RADICI_DOC: la skill e il docstring del script citano FRA BACKTICK i file
+    # morti di cui stanno parlando, e `--puntatori` li legge come puntatori.
+    # Misurato il 2026-09-19: 8 dei 252 candidati (5 SKILL.md, 3
+    # scripts/riallinea.py) erano le proprie pagine dello strumento, e ogni giro
+    # futuro le avrebbe ripresentate come se fossero un difetto scoperto ora.
+    # La cura e' la convenzione, non un meccanismo: un esempio di file morto si
+    # scrive senza backtick (vedi la riga corrispondente nella SKILL).
+    radice = Path(_SCRIPT).parent.parent
+    propri = [radice / "scripts" / "riallinea.py",
+              radice / ".claude" / "skills" / "riallinea" / "SKILL.md"]
+    assert puntatori_morti(propri, root=radice) == []

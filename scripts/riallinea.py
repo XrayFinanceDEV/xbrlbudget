@@ -544,9 +544,9 @@ def file_di_codice(root=".", escludi=("tests", "legacy")):
 def puntatori_morti(files, root=".", indice=None):
     """Candidati, mai correzioni: meta' di questi sono menzioni storiche.
 
-    `editorial_inventory.py` x13 (modulo spezzato in `dossier_catalog/`, e alcune
-    frasi dicono proprio che non esiste piu') e `lib/pratica-turnover.ts` in
-    `CLAUDE.md:807` (dentro una frase che lo dichiara cancellato) sono candidati
+    editorial_inventory.py x13 (modulo spezzato in dossier_catalog/, e alcune frasi
+    dicono proprio che non esiste piu') e lib/pratica-turnover.ts in CLAUDE.md:807
+    (dentro una frase che lo dichiara cancellato) sono candidati
     VERI e non correggibili: e' per questo che `correggibile` esiste.
     """
     idx = indice if indice is not None else indice_rete(root)
@@ -568,7 +568,7 @@ def puntatori_morti(files, root=".", indice=None):
                     continue
                 if (Path(root) / p).exists() or (f.parent / p).exists():
                     continue
-                # forma corta della convenzione: `lib/x.ts` per frontend/lib/x.ts
+                # forma corta della convenzione: lib/x.ts per frontend/lib/x.ts
                 if any(x.endswith("/" + p) for x in tutti):
                     continue
                 bers = sorted(idx.get(os.path.basename(p), []))

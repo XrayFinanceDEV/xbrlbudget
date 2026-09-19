@@ -40,7 +40,7 @@ Crea `docs/superpowers/2026-08-14-inventario-claude-md.md`:
 ```markdown
 # Inventario dello snellimento di CLAUDE.md
 
-**Data:** 2026-08-14 · **Spec:** [design](../specs/2026-08-14-claude-md-snellito-design.md)
+**Data:** 2026-08-14 · **Spec:** [design](specs/2026-08-14-claude-md-snellito-design.md)
 
 Ogni affermazione rimossa da `CLAUDE.md` è registrata qui con la sua destinazione.
 Chi rivede controlla questa tabella, non 1.170 righe di diff.

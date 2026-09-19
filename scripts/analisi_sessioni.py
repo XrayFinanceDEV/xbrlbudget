@@ -412,13 +412,13 @@ def scan_session(path, da, fine, tz):
             continue
         ts = parse_ts(rec.get("timestamp"))
         if ts is not None:
-            ts_events.append(ts)
-            if ts >= da:
+            if da <= ts < fine:
+                ts_events.append(ts)
                 S["in_range_n"] += 1
         if rec.get("isSidechain"):
             continue
         typ = rec.get("type")
-        if ts is not None and ts >= fine:
+        if ts is not None and (ts >= fine or ts < da):
             continue
         if rec.get("cwd"):
             S["cwd"] = rec["cwd"]
@@ -724,8 +724,8 @@ def scan_pi_session(path, da, fine, tz):
         ts = parse_ts(rec.get("timestamp"))
         typ = rec.get("type")
         if ts is not None:
-            ts_events.append(ts)
             if da <= ts < fine:
+                ts_events.append(ts)
                 S["in_range_n"] += 1
         if typ == "session":
             S["pid"] = rec.get("id")

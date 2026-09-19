@@ -812,3 +812,29 @@ def test_puntatore_un_percorso_con_la_barra_iniziale_non_e_un_candidato(tmp_path
     _tocca(tmp_path / "docs/d.md", "swagger su `/openapi.json`, poi `data/x.json`\n")
     _tocca(tmp_path / "data/x.json", "{}\n")
     assert puntatori_morti([tmp_path / "docs/d.md"], root=tmp_path) == []
+
+
+# --- C) il limite della spina: una cita in un .md non e' un candidato --------
+
+def test_una_cita_aggiunta_da_un_commit_solo_documenti_non_produce_candidato():
+    # PIN, non scoperta. Due canali, e nessuno dei due vede una cita NUOVA scritta
+    # dentro la prosa di un commit che tocca solo .md:
+    #   1. `simboli_da_diff` salta le righe di file non-codice
+    #      (`if not _e_codice(file_corrente): continue`) -- un .md e' pieno di
+    #      identifier che non pretendono di essere simboli;
+    #   2. `documenti_che_nominano_file` e' INVERTITO: cerca i documenti che
+    #      nominano un file *toccato* dal commit. Una cita verso un file che
+    #      l'intervallo non tocca -- `aliquota-proposta.ts`, che non e' mai
+    #      esistito -- non la vede nessuno.
+    # Misurato il 2026-09-19: su 914 commit dall'1 giugno, 160 (17%) toccano solo
+    # .md e 52 di questi aggiungevano un riferimento a un file di codice. La
+    # copertura meccanica di quella classe e' `--puntatori` (che non e' un passo
+    # del giro) o `--completo`; la spina da sola, qui, e' cieca di costruzione.
+    doc = ("diff --git a/docs/x.md b/docs/x.md\n"
+           "--- a/docs/x.md\n+++ b/docs/x.md\n"
+           "+Il servizio sta in `aliquota_service.py` e il client in `budget_tax_rate.ts`.\n")
+    cod = ("diff --git a/a/b.py b/a/b.py\n"
+           "--- a/a/b.py\n+++ b/a/b.py\n"
+           "+def aliquota_proposta(company, year):\n")
+    assert [s.nome for s in simboli_da_diff(doc)] == []      # la prosa non candida
+    assert "aliquota_proposta" in [s.nome for s in simboli_da_diff(cod)]  # il codice si

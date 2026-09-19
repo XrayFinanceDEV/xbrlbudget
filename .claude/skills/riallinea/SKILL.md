@@ -34,6 +34,14 @@ nessuno la rilegge. Nel dubbio si segnala.
      avrebbe mai pescate. `docs/budget/FORECASTING_GUIDE.md` — la pagina più sbagliata
      di quel giro — non nomina né un simbolo mosso né un file di codice: era raggiungibile
      **solo** dal messaggio di `073927b`.
+   - **Un buco della spina, quantificato (2026-09-19):** una citazione *nuova* scritta dentro
+     la prosa di un commit che tocca solo `.md` non produce alcun candidato: il canale per
+     simbolo salta le righe non-codice, e quello per file è invertito (cerca i documenti che
+     nominano un file *toccato*, quindi una cita verso un file che l'intervallo non tocca —
+     `aliquota-proposta.ts`, mai esistito — non la vede). Su 914 commit dall'1 giugno, 160
+     toccano solo `.md` e 52 di questi aggiungevano un rimando a un file di codice: quella
+     classe la copre `--puntatori` (o `--completo`), non la spina. È pinato in
+     `tests/test_riallinea.py`.
    - **Poi verifica TUTTE le citazioni prodotte** (`citazioni`, per nome di simbolo, e
      `citazioni_file`, per percorso di file toccato). Se un diff enorme ne produce troppe
      per una verifica completa, applica la strategia dello sweep (sotto) e dichiaralo nel

@@ -23,6 +23,12 @@ from scripts.riallinea import (  # noqa: E402
     riduci_generici,
     salva_stato,
     simboli_da_diff,
+    LIMITE_CORPO_COMMIT,
+    TRONCATO,
+    commit_da_log,
+    commits_nell_intervallo,
+    documenti_che_nominano_file,
+    simboli_non_documentati,
 )
 
 
@@ -369,3 +375,213 @@ def test_registra_con_ripresa_l3_sopravvive_a_una_registrazione_successiva(tmp_p
     letto = json.loads(stato_path.read_text(encoding="utf-8"))
     assert letto["ultimo_sha"] == "aaa1111"
     assert letto["ripresa_l3"] == "docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md"
+
+
+# --- commit dell'intervallo: la spina dorsale del giro ---------------------
+# Misurato sul giro 2026-09-18 (`1f09819..b9ca1a6`): delle 14 frasi false
+# corrette a mano, UNA sola era raggiungibile dalle citazioni per simbolo
+# (`_tax_components` in M2-02E). Le altre 13 non nominavano alcun simbolo
+# mosso: sono prosa che descrive una REGOLA. L'unico artefatto del repo che
+# parla la stessa lingua della prosa e' il messaggio di commit, quindi la
+# raccolta lo porta a galla invece di lasciarlo alla buona volonta' di chi
+# legge.
+
+def _log_finto(*record):
+    """Il formato che `commits_nell_intervallo` chiede a git, costruito a mano."""
+    fuori = ""
+    for sha, data, soggetto, corpo, file in record:
+        fuori += (
+            "\x1eCOMMIT\x1f" + sha + "\x1f" + data + "\x1f" + soggetto + "\x1f" + corpo + "\x1e"
+            + "\n" + "".join(f + "\n" for f in file)
+        )
+    return fuori
+
+
+def test_commit_da_log_legge_sha_data_soggetto_corpo_e_file():
+    testo = _log_finto(
+        ("abc1234", "2026-09-18", "feat(imposte): il calcolo secondo il commercialista",
+         "L'aliquota scritta e' quella che gira.\n", ["calculations/forecast_engine.py"]),
+    )
+    out = commit_da_log(testo)
+    assert len(out) == 1
+    c = out[0]
+    assert c.sha == "abc1234"
+    assert c.data == "2026-09-18"
+    assert c.soggetto == "feat(imposte): il calcolo secondo il commercialista"
+    assert "quella che gira" in c.corpo
+    assert c.file == ["calculations/forecast_engine.py"]
+
+
+def test_commit_da_log_tiene_i_commit_separati():
+    testo = _log_finto(
+        ("aaa", "2026-09-17", "primo", "", ["a.py"]),
+        ("bbb", "2026-09-18", "secondo", "corpo\n", ["b.py", "c.ts"]),
+    )
+    out = commit_da_log(testo)
+    assert [c.sha for c in out] == ["aaa", "bbb"]
+    assert out[1].file == ["b.py", "c.ts"]
+
+
+def test_commit_da_log_su_log_vuoto():
+    assert commit_da_log("") == []
+
+
+def test_commit_da_log_tronca_un_corpo_lunghissimo():
+    # Il corpo serve a capire SE il commit cambia una regola, non a rileggerlo
+    # tutto: 126 commit con i corpi interi farebbero un JSON illeggibile.
+    lungo = "x" * (LIMITE_CORPO_COMMIT + 500)
+    out = commit_da_log(_log_finto(("aaa", "2026-09-18", "s", lungo, ["a.py"])))
+    assert len(out[0].corpo) <= LIMITE_CORPO_COMMIT + len(TRONCATO)
+    assert out[0].corpo.endswith(TRONCATO)
+
+
+def test_commits_nell_intervallo_su_un_repo_vero(tmp_path):
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True,
+                       capture_output=True)
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "T")
+    (tmp_path / "a.py").write_text("def uno():\n    pass\n", encoding="utf-8")
+    (tmp_path / "nota.md").write_text("niente codice\n", encoding="utf-8")
+    git("add", "a.py", "nota.md")
+    git("commit", "-q", "-m", "primo")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path,
+                          capture_output=True, text=True).stdout.strip()
+    (tmp_path / "a.py").write_text("def uno():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "nota.md").write_text("cambiata\n", encoding="utf-8")
+    git("add", "a.py", "nota.md")
+    git("commit", "-q", "-m", "secondo: cambia una regola")
+    out = commits_nell_intervallo(f"{base}..HEAD", cwd=str(tmp_path))
+    assert [c.soggetto for c in out] == ["secondo: cambia una regola"]
+    # Solo file di codice: un commit di sola documentazione non serve a nulla qui.
+    assert out[0].file == ["a.py"]
+
+
+# --- simboli mossi che nessun documento nomina -----------------------------
+# `working_capital_mode` (Column), `MODI_CIRCOLANTE` (costante esportata) e le
+# loro diagnostiche sono entrati nel giro 2026-09-18 con ZERO citazioni: il
+# simbolo veniva raccolto, il join non produceva niente, e il niente veniva
+# buttato. Una manopola pubblica che nessun documento nomina e' il rilievo piu'
+# economico che questa raccolta possa produrre, e prima non lo produceva.
+
+def test_manopola_nuova_senza_citazioni_e_un_rilievo():
+    sim = [Simbolo("working_capital_mode", "colonna", "database/models.py", "aggiunto")]
+    out = simboli_non_documentati(sim, [])
+    assert [s["nome"] for s in out] == ["working_capital_mode"]
+    assert out[0]["genere"] == "colonna"
+    assert out[0]["file"] == "database/models.py"
+
+
+def test_una_manopola_citata_non_e_un_rilievo():
+    sim = [Simbolo("working_capital_mode", "colonna", "database/models.py", "aggiunto")]
+    cit = [Citazione("working_capital_mode", "CLAUDE.md", 1, "...")]
+    assert simboli_non_documentati(sim, cit) == []
+
+
+def test_un_simbolo_rimosso_non_e_una_manopola_da_documentare():
+    # Un simbolo cancellato che nessuno nominava e' pulizia riuscita, non un buco.
+    sim = [Simbolo("vecchia_colonna", "colonna", "database/models.py", "rimosso")]
+    assert simboli_non_documentati(sim, []) == []
+
+
+def test_una_funzione_interna_nuova_non_e_una_manopola():
+    # Altrimenti ogni helper privato di ogni commit diventerebbe un rilievo.
+    sim = [
+        Simbolo("_cerca_equilibrio", "funzione", "calculations/intra_year_engine.py", "aggiunto"),
+        Simbolo("helper", "funzione", "x.py", "aggiunto"),
+    ]
+    assert simboli_non_documentati(sim, []) == []
+
+
+def test_una_rotta_nuova_senza_citazioni_e_un_rilievo():
+    sim = [Simbolo("/companies/{id}/aliquota-proposta", "rotta",
+                   "backend/app/api/v1/financial_years.py", "aggiunto")]
+    assert [s["nome"] for s in simboli_non_documentati(sim, [])] == [
+        "/companies/{id}/aliquota-proposta"]
+
+
+# --- la seconda chiave di join: il PERCORSO del file ----------------------
+# Misurato sullo stesso giro: la chiave "nome di simbolo" non tocca
+# REGOLE-IMPORT-05 (la pagina che descriveva la regola vecchia), mentre la
+# chiave "percorso del file toccato" la prende con 4 righe. Non le sostituisce:
+# `FORECASTING_GUIDE.md` non nomina alcun file di codice e resta invisibile a
+# entrambe — per quella serve il messaggio di commit.
+
+def test_trova_chi_nomina_un_file_toccato(tmp_path):
+    _scrivi(tmp_path, "docs/a.md", "Il motore sta in `calculations/intra_year_engine.py`.\n")
+    _scrivi(tmp_path, "docs/b.md", "Niente.\n")
+    cit = documenti_che_nominano_file(["calculations/intra_year_engine.py"], [str(tmp_path)])
+    assert [c.file for c in cit] == [str(tmp_path / "docs/a.md")]
+    assert cit[0].simbolo == "intra_year_engine.py"
+
+
+def test_il_join_sul_percorso_basta_il_nome_del_file(tmp_path):
+    _scrivi(tmp_path, "docs/a.md", "vedi `intra_year_engine.py` al blocco CASH PLUG\n")
+    cit = documenti_che_nominano_file(["calculations/intra_year_engine.py"], [str(tmp_path)])
+    assert len(cit) == 1
+
+
+def test_il_join_sul_percorso_ignora_i_file_non_di_codice(tmp_path):
+    _scrivi(tmp_path, "docs/a.md", "vedi `README.md` e `dati.csv`\n")
+    assert documenti_che_nominano_file(["README.md", "dati.csv"], [str(tmp_path)]) == []
+
+
+# --- il corpus non si auto-inquina ----------------------------------------
+# Il rapporto di un giro finisce in docs/, quindi al giro successivo le sue
+# citazioni rientrano nel conteggio: misurato, 49 citazioni fantasma e un
+# simbolo spinto sopra SOGLIA_GENERICO solo per questo.
+
+def test_i_rapporti_di_allineamento_non_entrano_nel_corpus(tmp_path):
+    _scrivi(tmp_path, "docs/superpowers/allineamento/2026-09-18.md", "`foo_bar` citato qui\n")
+    _scrivi(tmp_path, "docs/vivo.md", "`foo_bar` citato qui\n")
+    sim = [Simbolo("foo_bar", "funzione", "x.py", "aggiunto")]
+    cit = documenti_che_nominano(sim, [str(tmp_path)])
+    assert [c.file for c in cit] == [str(tmp_path / "docs/vivo.md")]
+
+
+def test_l_esclusione_vale_anche_per_il_join_sul_percorso(tmp_path):
+    _scrivi(tmp_path, "docs/superpowers/allineamento/2026-09-18.md", "`x.py` citato\n")
+    assert documenti_che_nominano_file(["x.py"], [str(tmp_path)]) == []
+
+
+def test_una_costante_interna_non_e_una_manopola():
+    # Misurato sul giro 2026-09-18: allargare a `costante` e `tipo` porta la
+    # lista da 1 riga a 110, quasi tutte costanti di layout e tipi interni
+    # (`CHART_HEIGHT_COMPACT_MM`, `DownloadGuardState`). Una lista di 110 righe
+    # non e' un rilievo: e' il rumore che seppellisce quello vero.
+    sim = [
+        Simbolo("CHART_HEIGHT_COMPACT_MM", "costante", "backend/app/renderers/x.py", "aggiunto"),
+        Simbolo("DownloadGuardState", "tipo", "frontend/lib/final-report-download.ts", "aggiunto"),
+    ]
+    assert simboli_non_documentati(sim, []) == []
+
+
+def test_una_manopola_dentro_i_test_non_conta(tmp_path):
+    # Una colonna dichiarata in una fixture di test non e' una manopola
+    # dell'applicazione: nessuno deve documentarla.
+    sim = [
+        Simbolo("colonna_finta", "colonna", "tests/test_qualcosa.py", "aggiunto"),
+        Simbolo("altra", "colonna", "frontend/lib/x.test.ts", "aggiunto"),
+    ]
+    assert simboli_non_documentati(sim, []) == []
+
+
+def test_una_rotta_documentata_con_altri_segnaposto_e_documentata(tmp_path):
+    # Il codice scrive `{company_id}`, `CLAUDE.md` scrive `{id}`: e' la stessa
+    # rotta, e confrontarla alla lettera la fa risultare non documentata.
+    # Misurato: era 1 dei 2 rilievi del giro 2026-09-18, ed era un falso.
+    _scrivi(tmp_path, "docs/a.md",
+            "La proposta sta su `GET /companies/{id}/years/{year}/aliquota-proposta`.\n")
+    sim = [Simbolo("/companies/{company_id}/years/{year}/aliquota-proposta", "rotta",
+                   "backend/app/api/v1/financial_years.py", "aggiunto")]
+    cit = documenti_che_nominano(sim, [str(tmp_path)])
+    assert len(cit) == 1
+    assert simboli_non_documentati(sim, cit) == []
+
+
+def test_due_rotte_diverse_non_si_confondono(tmp_path):
+    _scrivi(tmp_path, "docs/a.md", "`GET /companies/{id}/years/{year}/altra-cosa`\n")
+    sim = [Simbolo("/companies/{company_id}/years/{year}/aliquota-proposta", "rotta",
+                   "x.py", "aggiunto")]
+    assert documenti_che_nominano(sim, [str(tmp_path)]) == []

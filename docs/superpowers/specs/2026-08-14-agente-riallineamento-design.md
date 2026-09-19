@@ -198,3 +198,18 @@ lo skill funzioni lanciandolo a mano.
    cambia comportamento senza cambiare nome, e la documentazione la descrive senza citarla per
    nome, la fase B non la pesca. È un limite strutturale del filtro per nome; lo sweep completo
    lo attenua ma non lo elimina.
+
+---
+
+> **AGGIUNTA 2026-09-19 — la raccolta non è più solo simboli.** Questa spec descrive un
+> join su un'unica chiave, il nome di un simbolo mosso. Misurato sul giro 2026-09-18: delle
+> 14 frasi false poi corrette, **una sola** era raggiungibile da quella chiave — le altre 13
+> erano prosa che descrive una regola e non nominava alcun identificatore, quindi nessun
+> join poteva pescarle (né `diff` né `--completo`, che usano la stessa chiave). `scripts/riallinea.py`
+> consegna ora tre cose in più, con la loro prova in `tests/test_riallinea.py`: i **commit**
+> dell'intervallo (soggetto, corpo, file di codice toccati) come punto di partenza del giro;
+> le **manopole nuove che nessun documento nomina** (`non_documentati`: colonne e rotte con
+> zero citazioni — su quel giro una riga sola, `working_capital_mode`, il buco più grosso che
+> la raccolta scartava); un secondo join sul **percorso del file** toccato. Ed esclude dal
+> corpus `docs/superpowers/allineamento/`, che si auto-citava. Lo stato attuale è in
+> `.claude/skills/riallinea/SKILL.md` § «Che cosa contiene il JSON della raccolta».

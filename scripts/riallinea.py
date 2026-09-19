@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Parte meccanica del riallineamento documentazione <-> codice.
 
-Trova i simboli che il codice ha mosso in un intervallo di commit e quali documenti
-li nominano. NON modifica documentazione: osserva e riferisce. Chi decide cosa
-correggere e cosa segnalare e' lo skill `/riallinea`, che consuma questo JSON.
+Consegna quattro cose su un intervallo di commit: i COMMIT (soggetto, corpo, file di
+codice toccati), i SIMBOLI mossi e chi li nomina, le MANOPOLE nuove che nessun
+documento nomina, e le righe di documentazione che nominano un FILE toccato.
+NON modifica documentazione: osserva e riferisce. Chi decide cosa correggere e cosa
+segnalare e' lo skill `/riallinea`, che consuma questo JSON.
+
+I commit sono la spina dorsale, non un extra: un join per nome di simbolo non vede
+la prosa che descrive una regola, e su un giro reale erano 13 frasi false su 14.
 
 Solo libreria standard: deve girare con `python3 scripts/riallinea.py`, senza venv.
 
@@ -125,6 +130,72 @@ def simboli_mossi(rev_range: str, cwd: str = ".") -> List[Simbolo]:
     return simboli_da_diff(diff)
 
 
+# ── I COMMIT: la spina dorsale del giro ──
+# Misurato sul giro 2026-09-18 (`1f09819..b9ca1a6`, 126 commit): delle 14 frasi
+# false corrette, UNA sola era raggiungibile dalle citazioni per simbolo. Le
+# altre 13 erano prosa che descrive una REGOLA e non nominava alcun simbolo
+# mosso, quindi nessun join poteva pescarle — ne' `diff` ne' `--completo`, che
+# usano la stessa chiave. Il messaggio di commit e' l'unico artefatto del repo
+# scritto nella stessa lingua della prosa: dice che comportamento e' cambiato.
+# Per questo la raccolta lo consegna sempre, e lo skill parte da li'.
+LIMITE_CORPO_COMMIT = 600
+TRONCATO = " […]"
+
+# Separatori chiesti a git: NON possono comparire in un messaggio scritto a mano.
+_SEP_RECORD = "\x1e"
+_SEP_CAMPO = "\x1f"
+_FORMATO_LOG = (_SEP_RECORD + "COMMIT" + _SEP_CAMPO + "%H" + _SEP_CAMPO + "%ad"
+                + _SEP_CAMPO + "%s" + _SEP_CAMPO + "%b" + _SEP_RECORD)
+
+
+@dataclass(frozen=True)
+class Commit:
+    """Un commit dell'intervallo, coi soli file di CODICE che ha toccato.
+
+    `corpo` e' troncato a LIMITE_CORPO_COMMIT: serve a decidere SE quel commit
+    cambia una regola, non a rileggerlo per intero.
+    """
+    sha: str
+    data: str
+    soggetto: str
+    corpo: str
+    file: List[str]
+
+
+def commit_da_log(testo: str) -> List[Commit]:
+    """I commit, letti dall'output di `git log` nel formato `_FORMATO_LOG`.
+
+    Parte pura, testabile senza un repo: `commits_nell_intervallo` si limita a
+    chiamare git e passare qui il testo — la stessa divisione di
+    `simboli_da_diff`/`simboli_mossi`.
+    """
+    fuori = []
+    for pezzo in testo.split(_SEP_RECORD + "COMMIT" + _SEP_CAMPO)[1:]:
+        testa, _, coda = pezzo.partition(_SEP_RECORD)
+        campi = testa.split(_SEP_CAMPO)
+        if len(campi) < 4:
+            continue
+        sha, data, soggetto, corpo = campi[0], campi[1], campi[2], campi[3]
+        corpo = corpo.strip()
+        if len(corpo) > LIMITE_CORPO_COMMIT:
+            corpo = corpo[:LIMITE_CORPO_COMMIT] + TRONCATO
+        file = [r.strip() for r in coda.splitlines() if r.strip()]
+        fuori.append(Commit(sha, data, soggetto.strip(), corpo,
+                            [f for f in file if _e_codice(f)]))
+    return fuori
+
+
+def commits_nell_intervallo(rev_range: str, cwd: str = ".") -> List[Commit]:
+    """Come commit_da_log, ma prende il log da git. `--no-merges`: un merge non
+    cambia un comportamento, lo unisce."""
+    log = subprocess.run(
+        ["git", "log", "--no-merges", "--date=short", "--name-only",
+         "--format=" + _FORMATO_LOG, rev_range, "--", *_pathspec()],
+        cwd=cwd, capture_output=True, check=True,
+    ).stdout.decode("utf-8", errors="replace")
+    return commit_da_log(log)
+
+
 @dataclass(frozen=True)
 class Citazione:
     simbolo: str
@@ -133,24 +204,21 @@ class Citazione:
     testo: str
 
 
-def documenti_che_nominano(simboli, radici) -> List[Citazione]:
-    """Le righe di documentazione che nominano uno dei simboli mossi.
+# I rapporti di riallineamento stanno essi stessi in docs/, quindi al giro dopo
+# le loro citazioni rientrerebbero nel conteggio: misurato sul giro 2026-09-18,
+# 49 citazioni fantasma e un simbolo spinto sopra SOGLIA_GENERICO solo per
+# questo. Il corpus non deve contenere i verbali di chi lo ha misurato.
+ESCLUSI_DAL_CORPUS = ("superpowers/allineamento/",)
 
-    E' questa fase a rendere il costo proporzionale al CAMBIAMENTO invece che al
-    corpus: solo i documenti che nominano un simbolo mosso entrano in verifica.
-    Il confine di parola (\\b) evita che `resolve` peschi `_resolve_ce_field`.
 
-    `radici` sono percorsi da scandire: una cartella e' scandita ricorsivamente
-    per `*.md`, ma una radice che e' essa stessa un file `.md` (es. CLAUDE.md,
-    che vive nella root e non e' una cartella) viene letta direttamente —
-    altrimenti sparirebbe in silenzio da ogni riallineamento.
+def _markdown_da_radici(radici):
+    """I file `.md` da leggere, in ordine deterministico, esclusi i rapporti.
+
+    Una cartella e' scandita ricorsivamente; una radice che e' essa stessa un
+    file `.md` (es. CLAUDE.md, che vive nella root e non e' una cartella) viene
+    letta direttamente — altrimenti sparirebbe in silenzio da ogni
+    riallineamento.
     """
-    if not simboli:
-        return []
-    per_nome = {}
-    for s in simboli:
-        per_nome.setdefault(s.nome, re.compile(r"\b" + re.escape(s.nome) + r"\b"))
-    out = []
     for radice in radici:
         base = Path(radice)
         if not base.exists():
@@ -160,15 +228,130 @@ def documenti_che_nominano(simboli, radici) -> List[Citazione]:
         else:
             candidati = sorted(base.rglob("*.md"))
         for md in candidati:
-            try:
-                righe = md.read_text(encoding="utf-8", errors="ignore").splitlines()
-            except OSError:
+            percorso = str(md).replace("\\", "/")
+            if any(esc in percorso for esc in ESCLUSI_DAL_CORPUS):
                 continue
-            for n, testo in enumerate(righe, start=1):
-                for nome, regola in per_nome.items():
-                    if regola.search(testo):
-                        out.append(Citazione(nome, str(md), n, testo.strip()[:200]))
+            yield md
+
+
+def _righe_che_corrispondono(radici, per_nome, costruisci):
+    """Il cuore condiviso dei due join: una passata sui documenti, N regex."""
+    out = []
+    for md in _markdown_da_radici(radici):
+        try:
+            righe = md.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        for n, testo in enumerate(righe, start=1):
+            for nome, regola in per_nome.items():
+                if regola.search(testo):
+                    out.append(costruisci(nome, str(md), n, testo))
     return out
+
+
+_SEGNAPOSTO = re.compile(r"\{[^{}]*\}")
+
+
+def _regex_simbolo(simbolo) -> "re.Pattern":
+    """La regex con cui si cerca un simbolo nei documenti.
+
+    Una ROTTA si confronta coi segnaposto normalizzati: il codice scrive
+    `{company_id}`, `CLAUDE.md` scrive `{id}`, ed e' la stessa rotta —
+    confrontarla alla lettera la fa risultare non documentata (misurato: 1 dei 2
+    rilievi del giro 2026-09-18 era proprio questo falso). Tutto il resto resta
+    un confronto per parola intera, com'era.
+    """
+    if simbolo.genere == "rotta":
+        pezzi = [re.escape(p) for p in _SEGNAPOSTO.split(simbolo.nome)]
+        return re.compile(r"\{[^{}/]*\}".join(pezzi))
+    return re.compile(r"\b" + re.escape(simbolo.nome) + r"\b")
+
+
+def documenti_che_nominano(simboli, radici) -> List[Citazione]:
+    """Le righe di documentazione che nominano uno dei simboli mossi.
+
+    E' questa fase a rendere il costo proporzionale al CAMBIAMENTO invece che al
+    corpus: solo i documenti che nominano un simbolo mosso entrano in verifica.
+    Il confine di parola (\\b) evita che `resolve` peschi `_resolve_ce_field`.
+
+    **Limite da conoscere, misurato**: la chiave e' il NOME DEL SIMBOLO, quindi
+    una frase di prosa che descrive una regola senza nominare alcun
+    identificatore e' invisibile a questo join — e lo e' in entrambi i modi,
+    perche' `--completo` usa la stessa chiave. Sul giro 2026-09-18, 13 frasi
+    false su 14 erano di quella forma: per quelle servono i `commits` e il join
+    sul percorso, qui sotto.
+    """
+    if not simboli:
+        return []
+    per_nome = {}
+    for s in simboli:
+        per_nome.setdefault(s.nome, _regex_simbolo(s))
+    return _righe_che_corrispondono(
+        radici, per_nome,
+        lambda nome, file, n, testo: Citazione(nome, file, n, testo.strip()[:200]))
+
+
+def documenti_che_nominano_file(file_toccati, radici) -> List[Citazione]:
+    """La seconda chiave di join: il PERCORSO di un file di codice toccato.
+
+    Misurato sul giro 2026-09-18: la chiave "nome di simbolo" non tocca
+    `REGOLE-IMPORT-05-INFRANNUALE.md` — la pagina che descriveva la regola
+    vecchia — mentre questa la prende con 4 righe. Non sostituisce l'altra, la
+    affianca: 649 righe su 61 pagine vive nello stesso intervallo.
+
+    `Citazione.simbolo` porta il basename del file, cosi' la riduzione dei
+    generici e il formato del rapporto restano gli stessi dell'altro join.
+    """
+    per_nome = {}
+    for f in file_toccati:
+        if not _e_codice(f):
+            continue
+        base = f.split("/")[-1]
+        per_nome.setdefault(base, re.compile(re.escape(base)))
+    if not per_nome:
+        return []
+    return _righe_che_corrispondono(
+        radici, per_nome,
+        lambda nome, file, n, testo: Citazione(nome, file, n, testo.strip()[:200]))
+
+
+# Le manopole pubbliche: stato PERSISTITO (una colonna) e superficie di CHIAMATA
+# (una rotta). Nient'altro, e la ragione e' misurata sul giro 2026-09-18:
+# allargare a `costante` e `tipo` porta la lista da 1 riga a 110, quasi tutte
+# costanti di layout e tipi interni. Le funzioni restano fuori per lo stesso
+# motivo — un helper privato non e' una manopola.
+GENERI_MANOPOLA = ("colonna", "rotta")
+
+
+def _e_test(percorso: str) -> bool:
+    """Un simbolo dichiarato in un test non e' una manopola dell'applicazione."""
+    base = percorso.split("/")[-1]
+    return (percorso.startswith("tests/") or ".test." in base
+            or base.startswith("test_") or "/__tests__/" in percorso)
+
+
+def simboli_non_documentati(simboli, citazioni):
+    """Le manopole NUOVE che nessun documento nomina.
+
+    E' il rilievo piu' economico che questa raccolta possa produrre, e fino al
+    2026-09-19 lo buttava via: `working_capital_mode` (una `Column` con schema
+    `Literal` a tre valori, una tendina e due diagnostiche) e' entrato nel giro
+    2026-09-18 con ZERO citazioni. Il simbolo veniva raccolto, il join non
+    produceva nulla, e il nulla era indistinguibile da «allineato».
+
+    Solo `stato == "aggiunto"`: un simbolo rimosso che nessuno nominava e'
+    pulizia riuscita, non un buco.
+    """
+    citati = {c.simbolo for c in citazioni}
+    fuori = []
+    for s in simboli:
+        if s.stato != "aggiunto" or s.genere not in GENERI_MANOPOLA:
+            continue
+        if s.nome.startswith("_") or s.nome in citati or _e_test(s.file):
+            continue
+        fuori.append({"nome": s.nome, "genere": s.genere, "file": s.file})
+    fuori.sort(key=lambda d: (d["genere"], d["nome"]))
+    return fuori
 
 
 SOGLIA_GENERICO = 40
@@ -273,24 +456,40 @@ def main() -> None:
 
     stato = carica_stato(args.stato)
     if args.completo:
+        # Nessun intervallo, quindi nessun commit da leggere e nessun file
+        # "toccato": le due chiavi nuove non hanno senso qui e restano vuote,
+        # dichiarate — mai omesse, o a valle l'assenza si legge come zero.
         simboli = simboli_mossi(_EMPTY_TREE + ".." + args.a)
         intervallo = "completo"
+        commits, file_toccati = [], []
     else:
         da = args.da or stato.get("ultimo_sha")
         if not da:
             ap.error("nessuno sha di partenza: passa --da la prima volta")
         intervallo = f"{da}..{args.a}"
         simboli = simboli_mossi(intervallo)
+        commits = commits_nell_intervallo(intervallo)
+        file_toccati = sorted({f for c in commits for f in c.file})
 
     radici = RADICI_DOC + [args.memoria]
     citazioni = documenti_che_nominano(simboli, radici)
+    non_documentati = simboli_non_documentati(simboli, citazioni)
     citazioni, generici = riduci_generici(citazioni)
+    citazioni_file, generici_file = riduci_generici(
+        documenti_che_nominano_file(file_toccati, radici))
     print(json.dumps({
         "intervallo": intervallo,
+        "sha_verificato": subprocess.run(["git", "rev-parse", args.a],
+                                         capture_output=True, text=True).stdout.strip(),
+        "commits": [asdict(c) for c in commits],
         "simboli": [asdict(s) for s in simboli],
         "citazioni": [asdict(c) for c in citazioni],
         "generici": generici,
+        "non_documentati": non_documentati,
+        "citazioni_file": [asdict(c) for c in citazioni_file],
+        "generici_file": generici_file,
         "radici": radici,
+        "esclusi_dal_corpus": list(ESCLUSI_DAL_CORPUS),
         "stato": stato,
     }, ensure_ascii=False, indent=1))
 

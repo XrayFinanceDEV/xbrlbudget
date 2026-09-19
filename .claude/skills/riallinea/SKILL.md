@@ -18,19 +18,46 @@ nessuno la rilegge. Nel dubbio si segnala.
 
 ## Procedura
 
-1. **Raccogli.** `python3 scripts/riallinea.py` (aggiungi `--completo` se l'utente
-   chiede lo sweep integrale; `--da <sha>` alla prima esecuzione).
-2. **Modo `diff` (default): verifica TUTTE le citazioni prodotte.** L'intervallo è
-   guidato dal diff, quindi tipicamente poche decine di affermazioni — è pensato per
-   essere esaustivo (vedi «Limite da dichiarare» sotto). Se un giorno un diff enorme
-   produce troppe citazioni per una verifica completa, applica comunque la strategia
-   dello sweep (sotto) e dichiaralo nel rapporto: è un'eccezione, non la norma.
+1. **Raccogli, su un HEAD fermo.** `python3 scripts/riallinea.py --a <sha>` (aggiungi
+   `--completo` se l'utente chiede lo sweep integrale; `--da <sha>` alla prima
+   esecuzione). **Passa `--a` esplicito e verifica contro quello sha**, dichiarandolo nel
+   rapporto: nel giro 2026-09-18 `main` si è mosso durante l'esecuzione, le prime letture
+   erano su un albero vecchio e un rilievo è stato scritto e poi ritirato. Il JSON porta
+   `sha_verificato`: è quello che va nel rapporto.
+2. **Modo `diff` (default): parti dai `commits`, POI verifica tutte le citazioni.**
+   - **I commit vengono prima, e non sono un extra.** Per ciascuno, il soggetto e il
+     corpo dicono se ha cambiato una **regola**. Per ogni commit che ne cambia una,
+     chiediti: *quali pagine enunciano quella regola?* — e cercale per **argomento**
+     («aliquota», «TFR», «circolante»), non per nome di simbolo. È l'unico modo di
+     arrivare a una pagina di prosa, e la misura dice quanto conta: sul giro 2026-09-18,
+     **13 frasi false su 14 non nominavano alcun simbolo mosso**, quindi nessun join le
+     avrebbe mai pescate. `docs/budget/FORECASTING_GUIDE.md` — la pagina più sbagliata
+     di quel giro — non nomina né un simbolo mosso né un file di codice: era raggiungibile
+     **solo** dal messaggio di `073927b`.
+   - **Poi verifica TUTTE le citazioni prodotte** (`citazioni`, per nome di simbolo, e
+     `citazioni_file`, per percorso di file toccato). Se un diff enorme ne produce troppe
+     per una verifica completa, applica la strategia dello sweep (sotto) e dichiaralo nel
+     rapporto: è un'eccezione, non la norma.
 3. **Modo `--completo`: applica la strategia a tre livelli** descritta sotto — non è
    negoziabile caso per caso.
 4. **Per ciascuna citazione verificata**, apri il codice e stabilisci:
    - `OK` — il codice conferma. Nessuna azione.
    - `MORTO` — il simbolo nominato non esiste più.
    - `SMENTITO` — esiste, ma il codice fa altro.
+
+   Più due classi che non nascono da una citazione, e vanno guardate comunque:
+   - **`non_documentati` — una manopola nuova che nessun documento nomina.** Una colonna
+     o una rotta aggiunta nell'intervallo con **zero** citazioni. Non è una frase
+     sbagliata: è una funzionalità di cui nessuna pagina parla, e il silenzio non si
+     distingue da «allineato». Verifica che sia davvero una manopola dell'utente e, se lo
+     è, va in «Da decidere» con la proposta di dove documentarla. Misurato: nel giro
+     2026-09-18 la lista avrebbe avuto **una riga sola**, `working_capital_mode` — una
+     scelta di motore a tre valori, con dentro una ricerca per bisezione, zero occorrenze
+     in tutta la documentazione. Era il buco più grosso del giro, e la raccolta lo
+     scartava.
+   - **`citazioni_file` — una pagina che nomina un file toccato.** Chiave debole (basta
+     il basename) ma prende pagine che il nome di simbolo non tocca. Trattala come le
+     altre citazioni: si apre il codice, si giudica.
 5. **Correggi solo dentro la lista chiusa** (sotto). Tutto il resto va in «Da decidere».
 6. **Verifica anche la memoria**, ma non modificarla: solo riferimenti morti a rapporto.
 7. **Scrivi il rapporto**, sempre, anche a esito nullo.
@@ -62,9 +89,11 @@ nessuno la rilegge. Nel dubbio si segnala.
 
 ## Strategia per lo sweep completo (`--completo`)
 
-Un `--completo` sul repo reale produce circa 2722 simboli, 5722 citazioni, 50 nomi
-generici, in circa 45 secondi di sola raccolta. Nessun modello può leggere il codice
-dietro 5722 affermazioni in un'unica esecuzione. Campionare in silenzio sarebbe
+Un `--completo` sul repo reale produce **5822 simboli, 11338 citazioni, 141 nomi
+generici e 40 manopole senza alcuna citazione** (misurato il 2026-09-19; era 2722/5722/50
+il 2026-08-14 — il corpus raddoppia, e questi numeri invecchiano: rimisurali invece di
+citarli). Nessun modello può leggere il codice dietro undicimila affermazioni in
+un'unica esecuzione. Campionare in silenzio sarebbe
 peggio di non verificare affatto: produrrebbe un rapporto che sembra esaustivo e non
 lo è — il guasto stesso che questo strumento esiste per prevenire.
 
@@ -83,7 +112,7 @@ Tre livelli, in quest'ordine, senza eccezioni:
    tetto dichiarato proprio per questo: essere un solo file non lo rende piccolo.
 2. **Livello 2 — tutti i candidati `MORTO`, su tutto il repo.** Prima di leggere una
    sola citazione, fai passare **ogni simbolo** (non ogni citazione — molte citazioni
-   condividono lo stesso simbolo, quindi il lavoro è sui ~2722 simboli, non sulle 5722
+   condividono lo stesso simbolo, quindi il lavoro è sui ~5822 simboli, non sulle 11338
    righe) per un controllo meccanico di esistenza:
    ```bash
    git grep -n -w -- '<nome_simbolo>' -- '*.py' '*.ts' '*.tsx' '*.js' '*.jsx'
@@ -132,8 +161,8 @@ Tre livelli, in quest'ordine, senza eccezioni:
    tempo, è un tetto esplicito che chiunque legga lo skill può cambiare
    consapevolmente.
 
-**Con un tetto di 300 su ~5722 citazioni candidate, uno sweep guarda circa il 5% del
-corpo al Livello 3.** Servono all'incirca 19 sweep perché il giro dell'alfabeto si
+**Con un tetto di 300 su ~11338 citazioni candidate, uno sweep guarda meno del 3% del
+corpo al Livello 3.** Servono all'incirca 38 sweep perché il giro dell'alfabeto si
 chiuda e si ricominci da dove si era partiti la prima volta — la ripresa fa
 avanzare la copertura sweep dopo sweep invece di rileggere sempre la stessa testa,
 ma resta un giro lento: chi decide se e quando lanciare lo sweep completo deve saperlo
@@ -149,11 +178,30 @@ riportano nel rapporto con il conteggio, non si aprono uno per uno.
 
 **In testa a ogni rapporto di uno sweep completo:**
 ```
-Candidate: 5722 · Verificate a fondo: <L1 + L2 + L3> (L1 CLAUDE.md: N · L2 MORTO: N · L3: N/300)
+Candidate: <conteggio> · Verificate a fondo: <L1 + L2 + L3> (L1 CLAUDE.md: N · L2 MORTO: N · L3: N/300)
 Livello 3 ripartito da: <ripresa_l3 dello stato, o «inizio (nessuna ripresa salvata)»>
 Livello 3 arrivato a: <ultimo documento verificato PER INTERO — il nuovo ripresa_l3>
 Non esaminate questa esecuzione: <conteggio> citazioni in <elenco documenti>
+Manopole nuove senza citazioni: <conteggio> (anche zero)
+Corrette da citazione: N · corrette da un commit: N
 ```
+
+## Che cosa contiene il JSON della raccolta
+
+| Chiave | Che cos'è | Che ci fai |
+|---|---|---|
+| `commits` | i commit dell'intervallo (sha, data, soggetto, corpo troncato, file di codice toccati; senza merge, solo codice) | **si legge per primo**: quali regole sono cambiate |
+| `sha_verificato` | lo sha risolto di `--a` | va nel rapporto; verifica contro questo, non contro `HEAD` |
+| `simboli` | i simboli mossi (definizioni aggiunte/rimosse) | materia prima dei due join |
+| `citazioni` | righe di doc che nominano un simbolo mosso | si verificano tutte |
+| `citazioni_file` | righe di doc che nominano un **file** toccato | chiave debole, si verificano come le altre |
+| `non_documentati` | colonne e rotte nuove che **nessun** documento nomina | candidate funzionalità non documentate |
+| `generici` / `generici_file` | i nomi troppo comuni per essere verificati per nome (≥ `SOGLIA_GENERICO`) | si riportano col conteggio, non si aprono |
+| `esclusi_dal_corpus` | i percorsi non letti (i rapporti di allineamento) | si dichiara nel rapporto |
+| `stato` | `STATO.json` come era prima del giro | `ultimo_sha`, `ultimo_completo`, `ripresa_l3` |
+
+In `--completo` non esiste un intervallo: `commits` e `citazioni_file` sono **vuoti per
+costruzione**, dichiarati e non omessi.
 
 ## La lista chiusa — ciò che puoi correggere da solo
 
@@ -186,22 +234,43 @@ Riscriverlo cancellerebbe la traccia di quello che si era deciso in quel momento
 
 `docs/superpowers/allineamento/AAAA-MM-GG.md`, con in testa il modo, l'intervallo, i
 conteggi (nel caso `--completo`, i conteggi a tre livelli sopra), e **da quanto non si
-lancia uno sweep completo** (`ultimo_completo` dello stato). Sezioni: «Corretto
-automaticamente» (con la regola che l'ha autorizzata), «Da decidere» (citazione, riga
-di codice, proposta NON applicata), «Memoria — riferimenti morti», «Non verificabile».
+lancia uno sweep completo** (`ultimo_completo` dello stato). Sezioni: «Regole cambiate (dai commit)» — i commit
+dell'intervallo che cambiano un comportamento e, per ciascuno, le pagine che enunciano
+quella regola e il loro esito — «Manopole nuove non documentate» (`non_documentati`, anche
+a zero: una sezione assente si legge come «non guardato»), «Corretto automaticamente» (con
+la regola che l'ha autorizzata), «Da decidere» (citazione, riga di codice, proposta NON
+applicata), «Memoria — riferimenti morti», «Non verificabile».
 
 ## Limite da dichiarare in ogni rapporto
 
+**La chiave di join è il nome di un simbolo, e la documentazione è prosa: è QUESTO il
+limite, non l'intervallo.** Una frase che descrive una regola senza nominare un
+identificatore non è raggiungibile da nessun join — né in `diff` né in `--completo`, che
+usano la stessa chiave. La misura, sul giro 2026-09-18: delle 14 frasi false poi corrette,
+**una sola** era raggiungibile dalle citazioni per simbolo; 13 no. Il join sul percorso
+del file ne recupera una parte (prende `REGOLE-IMPORT-05` con 4 righe, dove il simbolo non
+arrivava) ma non tocca una pagina scritta per l'utente: `FORECASTING_GUIDE.md`, **zero
+righe** su entrambe le chiavi. Per quelle pagine esiste un solo strumento, e sono i
+`commits`.
+
+Dichiara quindi in ogni rapporto **quante delle affermazioni corrette venivano da una
+citazione e quante da un commit**: è la sola misura che dice se questo strumento sta
+funzionando.
+
 Un controllo guidato dal diff trova la **deriva**, non l'errore di nascita: una frase
-sbagliata fin dall'inizio non è mai stata «mossa» e nessun diff la segnala. Solo
-`--completo` la prende.
+sbagliata fin dall'inizio non è mai stata «mossa» e nessun diff la segnala — e nemmeno
+`--completo`, se quella frase non nomina un simbolo. Misurato:
+`API-PREVISIONALE.md:249` puntava `_apply_sp_overrides` a una riga sbagliata **già** a
+`1f09819`, e nessun giro l'aveva vista.
 
 Il modo `--completo` è per costruzione **parziale nella verifica** — vedi la
 strategia a tre livelli sopra, con il tetto esplicito e l'elenco di ciò che resta
-fuori. Il modo `diff` è invece **esaustivo sul proprio intervallo**: verifica tutte le
-citazioni che produce, senza campionamento. Sono limiti complementari, non
-intercambiabili: `diff` è completo ma cieco a ciò che non è cambiato di recente;
-`--completo` vede tutto ma non può leggerlo tutto in una sola esecuzione.
+fuori. Il modo `diff` verifica tutte le citazioni che produce, senza campionamento: è
+esaustivo **sulle citazioni**, che non è affatto esaustivo **sulle affermazioni** — è
+esattamente la frase che questo paragrafo esiste per correggere. Sono limiti
+complementari, non intercambiabili: `diff` è completo sul proprio intervallo ma cieco a
+ciò che non è cambiato di recente; `--completo` vede tutti i simboli ma non può leggerli
+tutti in una sola esecuzione, e nessuno dei due vede la prosa.
 
 **Cieco ai cambi di corpo, non solo all'errore di nascita.** `_REGOLE` aggancia solo
 righe di *definizione* aggiunte o rimosse (una `def`, una `class`, un `Column(...)`,
@@ -212,9 +281,11 @@ passivo aggiunta dal commit `9ffdb14` sarebbe stata invisibile a firma invariata
 «Trova la deriva, non l'errore di nascita» promette quindi più di quanto il meccanismo
 dia: trova la deriva **delle interfacce**, non dei comportamenti.
 
-**Il corpus si auto-inquina fra un giro e il successivo.** Il rapporto di uno sweep
-finisce esso stesso dentro `docs/`, quindi le sue citazioni entrano nel conteggio del
-giro successivo: misurato su questo repo, `create` passa da 38 a 45 citazioni — sopra
-`SOGLIA_GENERICO` — solo perché il rapporto che ne parla è stato aggiunto al corpus.
-Non c'è (ancora) un'esclusione per i rapporti di riallineamento stessi: se un simbolo
-generico compare per la prima volta a causa di un rapporto precedente, dichiaralo.
+**Il corpus si auto-inquinava fra un giro e il successivo, e ora non più.** Il rapporto di
+uno sweep finisce esso stesso dentro `docs/`, quindi le sue citazioni entravano nel
+conteggio del giro dopo: misurato, `create` passava da 38 a 45 citazioni — sopra
+`SOGLIA_GENERICO` — solo perché il rapporto che ne parlava era stato aggiunto al corpus, e
+sul giro 2026-09-18 erano 49 citazioni fantasma. Dal 2026-09-19
+`docs/superpowers/allineamento/` è escluso dal corpus (`ESCLUSI_DAL_CORPUS`, con la sua
+prova): il JSON lo dichiara in `esclusi_dal_corpus`. Restano fuori solo i rapporti, non i
+verbali di piani e spec — quelli sono corpus a pieno titolo.

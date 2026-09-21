@@ -116,6 +116,20 @@ dirotta ogni client su gx10, `temperature=0`:
 - Il timeout del proxy di staging per l'import PDF è 300 s: 155 s ci stanno, 419 s no. I tempi per
   rotta entrano fra le metriche del confronto.
 
+**Altri due file, thinking spento** (stessi totali e stesso utile di Haiku in entrambi):
+
+- `budget_353` (rotta A/B, `llm`), 154 s. 13 campi diversi, tutti **dentro** un aggregato. Qwen
+  riempie i dettagli SP che Haiku lasciava vuoti (spariscono 4 avvisi di gerarchia incoerente su
+  `sp03`/`sp05`/`sp12`/`sp14`), ma peggiora quelli del CE: tutto il personale in `ce08d`, gli
+  ammortamenti in `ce09c` svalutazioni, i debiti tributari dentro `sp16g`.
+- `budget_615` (rotta C, AGO), 113 s, `verified` per entrambi. Qwen porta di nuovo le rimanenze in
+  variazione (`ce10`) dove Haiku gonfia ricavi (+133.206,69) e acquisti (+157.549,66): sui ricavi
+  Haiku sbaglia un KPI. **Ma Qwen sbaglia la scadenza del debito bancario**: il PDF stampa
+  «Debiti verso banche (EE) 7.602,77» e «(OE) 837.488,96» (entro/oltre esercizio), Haiku li divide
+  giusti, Qwen mette 845.091,73 tutto a breve — un errore che attraversa CCN, current ratio e Altman.
+- Il «completeness retry» della rotta C ripete tre volte la stessa estrazione (identica a
+  `temperature=0`) anche su `budget_615`: ~60 s spesi per nulla.
+
 ### 4. Banco di confronto — `scripts/confronto_llm.py`
 
 - Corpus: gli 87 PDF comparati di `Test/` (gitignorato, bilanci di clienti: mai committati).

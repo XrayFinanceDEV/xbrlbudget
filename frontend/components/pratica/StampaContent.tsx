@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import { useInvalidateAnalysis } from "@/hooks/use-queries";
+import { useIntermedioDownload } from "@/hooks/use-intermedio-download";
 import { rigeneraBudgetRiusato } from "@/lib/budget-rigenera-riuso";
 import {
   bulkUpsertAssumptions,
@@ -19,7 +20,7 @@ import {
   saveInfrannualeAIComments,
   type InfrannualeAIComments,
 } from "@/lib/api";
-import type { IntraYearComparison, IntraYearComparisonItem } from "@/types/api";
+import type { CrisiInfrannuale, IntraYearComparison, IntraYearComparisonItem, RatingCrisi } from "@/types/api";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Printer, Sparkles, X } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
@@ -38,14 +39,12 @@ import { formatEuro, formatPct, deltaPct } from "@/lib/pratica-format";
 import { ALWAYS_SHOW_CODES, VP_CODES, EXTRA_ALERT_DEFS } from "@/lib/pratica-codes";
 import { ceDerivatiDaForecast, valoreCeProiettato } from "@/lib/pratica-ce-proiettato";
 import {
-  computeIndicators,
-  scoreIndicator,
   INDICATOR_DEFS,
-  crisisScores,
   scoreDotColor,
-  computeCrisisRating,
+  type IndicatorSet,
   type SerieIndicatori,
 } from "@/lib/pratica-indicators";
+import { RATING_COLOR, vistaColonna } from "@/lib/pratica-crisi";
 import { IndicatoriCharts } from "@/components/pratica/IndicatoriCharts";
 import {
   buildBalanceItemsWithTotals,
@@ -57,8 +56,9 @@ export function StampaContent({
   comparison,
   overrides,
   projectedBS,
-  forecastBs,
   forecastIs,
+  crisi,
+  crisiError,
   extraAlerts,
   companyName,
   fiscalYear,
@@ -70,8 +70,9 @@ export function StampaContent({
   comparison: IntraYearComparison;
   overrides: Record<string, string>;
   projectedBS: IntraYearComparisonItem[];
-  forecastBs: Record<string, number>;
   forecastIs: Record<string, number>;
+  crisi: CrisiInfrannuale | null;
+  crisiError: unknown;
   extraAlerts: Record<string, boolean>;
   companyName: string;
   fiscalYear: number;
@@ -97,7 +98,6 @@ export function StampaContent({
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
   const refYear = comparison.reference_year;
   const partialYear = comparison.partial_year;
-  const annFactor = 12 / periodMonths;
 
   // Load stored AI comments on mount / scenario change
   useEffect(() => {
@@ -125,6 +125,26 @@ export function StampaContent({
     setAiComments((prev) => ({ ...prev, [key]: value }));
     setAiCommentsDirty(true);
   };
+  // Il documento che si consegna e' il report intermedio generato dal server
+  // (`POST .../infrannuale/report/pdf`), non la stampa del browser di questa
+  // pagina, che resta come anteprima a schermo. Un commento modificato e non
+  // ancora salvato si salva prima: il PDF legge i commenti dal server.
+  const { download: downloadPdf, downloading: downloadingPdf } = useIntermedioDownload();
+  const handleDownloadPdf = async () => {
+    if (!companyId || !scenarioId) return;
+    if (aiCommentsDirty) {
+      try {
+        await saveInfrannualeAIComments(companyId, scenarioId, aiComments);
+        setAiCommentsStale(false);
+        setAiCommentsDirty(false);
+      } catch {
+        toast.error("Errore nel salvataggio dei commenti: il PDF non è stato generato");
+        return;
+      }
+    }
+    await downloadPdf(companyId, scenarioId, !avvisoCommentiChiuso);
+  };
+
   const handleCommentBlur = async () => {
     if (!companyId || !scenarioId || !aiCommentsDirty) return;
     try {
@@ -184,51 +204,21 @@ export function StampaContent({
   const balanceItems = buildBalanceItemsWithTotals(comparison.balance_items);
   const projBSMap = new Map(projectedBS.map(i => [i.code, i.annualized_value]));
 
-  // --- Indicators ---
-  const storicoBs: Record<string, number> = {};
-  const storicoIs: Record<string, number> = {};
-  for (const item of comparison.balance_items) storicoBs[item.code] = item.reference_value;
-  for (const item of comparison.income_items) storicoIs[item.code] = item.reference_value;
-
-  const infraBs: Record<string, number> = {};
-  const infraIs: Record<string, number> = {};
-  for (const item of comparison.balance_items) infraBs[item.code] = item.partial_value;
-  for (const item of comparison.income_items) infraIs[item.code] = item.partial_value * annFactor;
-
-  const storicoInd = computeIndicators(storicoBs, storicoIs);
-  const infraInd = computeIndicators(infraBs, infraIs);
-  const proiezioneInd = computeIndicators(forecastBs, forecastIs);
+  // --- Indicators: calcolati dal server (`GET .../infrannuale/crisi`) ---
+  // Il rating di infrannuale e proiezione segue i segnali spuntati in pagina,
+  // anche non ancora salvati (`vistaColonna`); lo storico non ne ha mai.
+  const alertCount = Object.values(extraAlerts).filter(Boolean).length;
+  const storicoVista = vistaColonna(crisi?.storico ?? null, 0);
+  const infraVista = vistaColonna(crisi?.infrannuale ?? null, alertCount);
+  const proiezioneVista = periodMonths === 12 ? null : vistaColonna(crisi?.proiezione ?? null, alertCount);
 
   // Le etichette sono di questa vista: in Stampa la colonna porta anche
   // l'anno ("Infrann. 9M 2026"), nella tab Indicatori no.
   const serieGrafici: SerieIndicatori[] = [
-    { periodo: `Storico ${refYear}`, indicatori: storicoInd },
-    { periodo: `Infrann. ${periodMonths}M ${partialYear}`, indicatori: infraInd },
-    {
-      periodo: `Proiezione ${partialYear}`,
-      indicatori: periodMonths === 12 ? null : proiezioneInd,
-    },
+    { periodo: `Storico ${refYear}`, indicatori: storicoVista?.indicatori ?? null },
+    { periodo: `Infrann. ${periodMonths}M ${partialYear}`, indicatori: infraVista?.indicatori ?? null },
+    { periodo: `Proiezione ${partialYear}`, indicatori: proiezioneVista?.indicatori ?? null },
   ];
-
-  const storicoScores = INDICATOR_DEFS.map(d => scoreIndicator(d.key, storicoInd));
-  const infraScores = INDICATOR_DEFS.map(d => scoreIndicator(d.key, infraInd));
-  const proiezioneScores = INDICATOR_DEFS.map(d => scoreIndicator(d.key, proiezioneInd));
-
-  const alertCount = Object.values(extraAlerts).filter(Boolean).length;
-
-  // Il punteggio di crisi NON usa tutte le righe rese: le bande di
-  // `computeCrisisRating` sono tarate sul numero di indicatori che le
-  // alimentano (vedi `CRISIS_SCORING_KEYS`). Gli array qui sopra restano
-  // allineati a INDICATOR_DEFS perche' li indicizza il pallino di riga.
-  const storicoCrisis = crisisScores(storicoInd);
-  const infraCrisis = crisisScores(infraInd);
-  const proiezioneCrisis = crisisScores(proiezioneInd);
-
-  const storicoRating = computeCrisisRating(storicoCrisis, 0);
-  const infraRating = computeCrisisRating(infraCrisis, alertCount);
-  const proiezioneRating = computeCrisisRating(proiezioneCrisis, alertCount);
-
-  const oltreCount = (scores: number[]) => scores.filter(s => s < 0.33).length;
 
   const formatInd = (value: number, format: "euro" | "pct" | "ratio") => {
     if (format === "euro") return formatEuro(value);
@@ -270,7 +260,7 @@ export function StampaContent({
         projected_value: projBSMap.get(it.code) ?? 0,
       };
     }
-    const indicatorsRow = (ind: ReturnType<typeof computeIndicators>) => ({
+    const indicatorsRow = (ind: IndicatorSet) => ({
       DSCR: ind.dscr.toFixed(2),
       EBITDA_margin_pct: ind.ebitda_margin.toFixed(1),
       current_ratio: ind.current_ratio.toFixed(2),
@@ -281,12 +271,19 @@ export function StampaContent({
       PFN_EBITDA: ind.pfn_ebitda.toFixed(2),
       OF_MOL_pct: ind.of_mol.toFixed(1),
     });
-    const ratingRow = (rating: ReturnType<typeof computeCrisisRating>, scores: number[], alerts: number) => ({
-      code: rating.code,
-      label: rating.label,
-      oltre_count: scores.filter((s) => s < 0.33).length,
-      alerts,
+    const ratingRow = (rating: RatingCrisi) => ({
+      code: rating.codice,
+      label: rating.etichetta,
+      oltre_count: rating.oltre,
+      alerts: rating.segnali,
     });
+    // Una colonna che non c'e' (periodo di 12 mesi, proiezione non generata,
+    // indicatori non ancora letti) resta fuori dal contesto, non va a zero.
+    const colonne = [
+      ["Storico", storicoVista],
+      ["Infrannuale", infraVista],
+      ["Proiezione", proiezioneVista],
+    ] as const;
     return {
       scenario: { name: "Infrannuale", company_name: companyName },
       reference_year: refYear,
@@ -294,16 +291,12 @@ export function StampaContent({
       period_months: periodMonths,
       income_map,
       balance_map,
-      indicators: {
-        Storico: indicatorsRow(storicoInd),
-        Infrannuale: indicatorsRow(infraInd),
-        Proiezione: indicatorsRow(proiezioneInd),
-      },
-      ratings: {
-        Storico: ratingRow(storicoRating, storicoCrisis, 0),
-        Infrannuale: ratingRow(infraRating, infraCrisis, alertCount),
-        Proiezione: ratingRow(proiezioneRating, proiezioneCrisis, alertCount),
-      },
+      indicators: Object.fromEntries(
+        colonne.flatMap(([nome, vista]) => (vista ? [[nome, indicatorsRow(vista.indicatori)]] : [])),
+      ),
+      ratings: Object.fromEntries(
+        colonne.flatMap(([nome, vista]) => (vista ? [[nome, ratingRow(vista.rating)]] : [])),
+      ),
     };
   };
 
@@ -436,10 +429,16 @@ export function StampaContent({
             Genera commenti AI
           </Button>
         )}
-        <Button onClick={() => window.print()} variant="outline">
-          <Printer className="h-4 w-4 mr-2" />
-          Stampa PDF
-        </Button>
+        {companyId && scenarioId && (
+          <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf}>
+            {downloadingPdf ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4 mr-2" />
+            )}
+            Scarica PDF
+          </Button>
+        )}
       </div>
 
       {aiCommentsStale && !avvisoCommentiChiuso && (
@@ -726,23 +725,38 @@ export function StampaContent({
       <div>
         <h2 className="text-base font-semibold mb-2">Indicatori della Crisi d&apos;Impresa</h2>
 
+        {!storicoVista || !infraVista ? (
+          <p className={cn("text-sm", crisiError ? "text-destructive" : "text-muted-foreground")}>
+            {crisiError
+              ? `Indicatori non disponibili: ${getErrorMessage(crisiError)}`
+              : "Calcolo degli indicatori..."}
+          </p>
+        ) : (<>
         {/* Rating cards */}
         <div className={cn("grid gap-4 mb-4 stampa-blocco", periodMonths === 12 ? "grid-cols-2" : "grid-cols-3")}>
           {[
-            { label: `Storico ${refYear}`, rating: storicoRating, oltre: oltreCount(storicoCrisis), alerts: 0 },
-            { label: `Infrann. ${periodMonths}M ${partialYear}`, rating: infraRating, oltre: oltreCount(infraCrisis), alerts: alertCount },
-            ...(periodMonths !== 12 ? [{ label: `Proiezione ${partialYear}`, rating: proiezioneRating, oltre: oltreCount(proiezioneCrisis), alerts: alertCount }] : []),
+            { label: `Storico ${refYear}`, vista: storicoVista },
+            { label: `Infrann. ${periodMonths}M ${partialYear}`, vista: infraVista },
+            ...(periodMonths !== 12 ? [{ label: `Proiezione ${partialYear}`, vista: proiezioneVista }] : []),
           ].map(col => (
             <div key={col.label} className="flex items-center justify-between rounded-lg border border-border p-3">
               <div>
                 <p className="text-xs text-muted-foreground">{col.label}</p>
-                <p className={cn("text-2xl font-bold", col.rating.color)}>{col.rating.code}</p>
+                <p className={cn("text-2xl font-bold", col.vista ? RATING_COLOR[col.vista.rating.livello] : "text-muted-foreground")}>
+                  {col.vista?.rating.codice ?? "—"}
+                </p>
               </div>
               <div className="text-right">
-                <p className={cn("text-sm font-medium", col.rating.color)}>{col.rating.label}</p>
-                <p className="text-xs text-muted-foreground">
-                  {col.oltre}/14 oltre{col.alerts > 0 ? ` + ${col.alerts} segn.` : ""}
-                </p>
+                {col.vista ? (
+                  <>
+                    <p className={cn("text-sm font-medium", RATING_COLOR[col.vista.rating.livello])}>{col.vista.rating.etichetta}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {col.vista.rating.oltre}/14 oltre{col.vista.rating.segnali > 0 ? ` + ${col.vista.rating.segnali} segn.` : ""}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Proiezione non generata</p>
+                )}
               </div>
             </div>
           ))}
@@ -767,33 +781,38 @@ export function StampaContent({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {INDICATOR_DEFS.map((def, idx) => (
+            {INDICATOR_DEFS.map((def) => (
               <TableRow key={def.key}>
                 <TableCell className="font-medium">{def.label}</TableCell>
                 <TableCell className="text-right">
                   <span className="inline-flex items-center gap-2">
-                    <span className="text-muted-foreground">{formatInd(storicoInd[def.key], def.format)}</span>
-                    <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(storicoScores[idx]))} />
+                    <span className="text-muted-foreground">{formatInd(storicoVista.indicatori[def.key], def.format)}</span>
+                    <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(storicoVista.punteggi[def.key]))} />
                   </span>
                 </TableCell>
                 <TableCell className="text-right">
                   <span className="inline-flex items-center gap-2">
-                    <span>{formatInd(infraInd[def.key], def.format)}</span>
-                    <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(infraScores[idx]))} />
+                    <span>{formatInd(infraVista.indicatori[def.key], def.format)}</span>
+                    <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(infraVista.punteggi[def.key]))} />
                   </span>
                 </TableCell>
                 {periodMonths !== 12 && (
                   <TableCell className="text-right">
-                    <span className="inline-flex items-center gap-2">
-                      <span className="font-medium">{formatInd(proiezioneInd[def.key], def.format)}</span>
-                      <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(proiezioneScores[idx]))} />
-                    </span>
+                    {proiezioneVista ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="font-medium">{formatInd(proiezioneVista.indicatori[def.key], def.format)}</span>
+                        <span className={cn("inline-block h-2.5 w-2.5 rounded-full print:h-2 print:w-2", scoreDotColor(proiezioneVista.punteggi[def.key]))} />
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                 )}
               </TableRow>
             ))}
           </TableBody>
         </Table>
+        </>)}
       </div>
 
       <CommentBlock k="indicatori" placeholder="Commento sugli indicatori della crisi d'impresa..." />

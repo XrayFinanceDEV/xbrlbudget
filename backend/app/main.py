@@ -54,6 +54,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Il nome del PDF scaricato arriva in Content-Disposition: senza esporla, da
+    # un'origine diversa (Netlify -> API) il browser la nasconde e il client ricade
+    # su un nome di ripiego («Report Budget.pdf», anche per il report intermedio).
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -123,6 +127,7 @@ def health_check():
 
 # Import and include API routes
 from app.api.v1 import companies, financial_years, calculations, imports, budget_scenarios, analysis, reports, admin
+from app.api.v1 import intermedio_report
 app.include_router(companies.router, prefix=settings.API_V1_PREFIX, tags=["companies"])
 app.include_router(financial_years.router, prefix=settings.API_V1_PREFIX, tags=["financial_years"])
 app.include_router(calculations.router, prefix=settings.API_V1_PREFIX, tags=["calculations"])
@@ -130,6 +135,7 @@ app.include_router(imports.router, prefix=settings.API_V1_PREFIX, tags=["imports
 app.include_router(budget_scenarios.router, prefix=settings.API_V1_PREFIX, tags=["budget_scenarios"])
 app.include_router(analysis.router, prefix=settings.API_V1_PREFIX, tags=["analysis"])
 app.include_router(reports.router, prefix=settings.API_V1_PREFIX, tags=["reports"])
+app.include_router(intermedio_report.router, prefix=settings.API_V1_PREFIX, tags=["reports"])
 app.include_router(admin.router, prefix=settings.API_V1_PREFIX, tags=["admin"])
 
 

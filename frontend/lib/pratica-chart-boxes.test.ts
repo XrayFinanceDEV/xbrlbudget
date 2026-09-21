@@ -6,12 +6,10 @@ import {
   INDICATOR_CHART_BOXES,
   INDICATOR_DEFS,
   buildIndicatorChartData,
-  computeIndicators,
   indicatorAxisWidth,
   indicatorFormat,
   formatIndicatorAxis,
   formatIndicatorTooltip,
-  scoreIndicator,
   type IndicatorSet,
   type SerieIndicatori,
 } from "@/lib/pratica-indicators";
@@ -367,6 +365,18 @@ describe("indicatorAxisWidth", () => {
   });
 });
 
+/**
+ * I ricavi di AIC SRL 2025 (100,92 €, il fatturato vero sta su `ce04`) con
+ * 425.850 € di materie: l'insieme come lo calcola il server, con i soli campi
+ * che questi test leggono.
+ */
+const RICAVI_AIC: IndicatorSet = indicatori({
+  _revenue_raw: 100.92,
+  _ebitda_raw: 100.92 - 425850,
+  materials_revenue: (425850 / 100.92) * 100,
+  ebitda_margin: ((100.92 - 425850) / 100.92) * 100,
+});
+
 describe("ricavi troppo piccoli per fare da base (#33)", () => {
   // La guardia esistente è su denominatore ZERO, e 100,92 € di ricavi non sono
   // zero: su AIC SRL «Materie / Ricavi» 2025 vale 421.930,8%, l'asse arriva a
@@ -374,15 +384,12 @@ describe("ricavi troppo piccoli per fare da base (#33)", () => {
   // piatte indistinguibili dallo zero. Il grafico è corretto rispetto ai dati;
   // sono i dati a non essere un'incidenza.
   //
-  // La correzione è di RESA e basta: `computeIndicators` e `scoreIndicator` non
+  // La correzione è di RESA e basta: il calcolo e il punteggio (`calculations/crisi_impresa.py`) non
   // si toccano, perché cambiare il denominatore a monte sposterebbe i punteggi
   // e quindi il rating di crisi di ogni azienda.
 
   it("i ricavi di AIC SRL: l'incidenza a sei cifre non finisce sul grafico", () => {
-    const ind = computeIndicators(
-      {},
-      { ce01_ricavi_vendite: 100.92, ce05_materie_prime: 425850 },
-    );
+    const ind = RICAVI_AIC;
     // Il rapporto grezzo resta quello che è: nessuno lo ha ritoccato.
     expect(ind.materials_revenue).toBeGreaterThan(400000);
 
@@ -394,10 +401,7 @@ describe("ricavi troppo piccoli per fare da base (#33)", () => {
   it("l'asse si restringe perché il valore degenere non produce più un'etichetta", () => {
     // È l'effetto che l'issue chiede: senza la riga a sei cifre l'asse torna
     // alla larghezza minima invece di riservare spazio a «600.000%».
-    const ind = computeIndicators(
-      {},
-      { ce01_ricavi_vendite: 100.92, ce05_materie_prime: 425850 },
-    );
+    const ind = RICAVI_AIC;
     const riquadro = INDICATOR_CHART_BOXES.find((b) => b.id === "incidenza-economica")!;
     const righe = buildIndicatorChartData([{ periodo: "Storico 2025", indicatori: ind }]);
     expect(indicatorAxisWidth(righe, riquadro)).toBe(AXIS_WIDTH_MIN);
@@ -472,13 +476,11 @@ describe("ricavi troppo piccoli per fare da base (#33)", () => {
     // Il pallino di riga e il rating di crisi continuano a leggere
     // l'`IndicatorSet`, non la riga del grafico. È il confine che #25 aveva
     // già fissato e che questa correzione non attraversa.
-    const ind = computeIndicators(
-      {},
-      { ce01_ricavi_vendite: 100.92, ce05_materie_prime: 425850 },
-    );
+    const ind = RICAVI_AIC;
     const [riga] = buildIndicatorChartData([{ periodo: "Storico 2025", indicatori: ind }]);
     expect(riga.ebitda_margin).toBeNull();
-    // EBITDA largamente negativo: il punteggio resta 0, come prima.
-    expect(scoreIndicator("ebitda_margin", ind)).toBe(0);
+    // L'insieme non e' stato toccato: il punteggio lo legge il server da li'
+    // (`test_crisi_impresa.py`), e un EBITDA largamente negativo resta 0.
+    expect(ind.ebitda_margin).toBeLessThan(-400000);
   });
 });

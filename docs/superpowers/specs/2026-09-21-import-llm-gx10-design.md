@@ -51,7 +51,7 @@ Configurazione da ambiente (propagata da `backend/app/core/config.py` come oggi 
 | `GX10_BASE_URL` | — | base senza `/v1` |
 | `GX10_API_KEY` | — | Bearer |
 | `GX10_MODEL` | `qwen3.8-flash-next` | |
-| `GX10_REASONING` | `medium` | passato come `chat_template_kwargs.reasoning_effort` |
+| `GX10_THINKING` | `off` | `off` → `chat_template_kwargs.enable_thinking=false`; `low`/`medium`/`xhigh` → `reasoning_effort` (vedi §3) |
 | `LLM_FALLBACK` | `on` | `off` solo per il banco di confronto |
 
 Ogni punto di chiamata ha un **nome di rotta stabile** (`ab_sections`, `ab_vision`, `vision_rescue`,
@@ -63,8 +63,14 @@ e restituisce la risposta, sostituendo `model` con quello del provider scelto e 
 client. I controlli «manca `ANTHROPIC_API_KEY` ⇒ rotta spenta» diventano «nessun provider
 disponibile per questa rotta».
 
-`max_tokens`: su gx10 il reasoning consuma lo stesso budget. Se la prova su un bilancio mostra
-troncamenti, il modulo aggiunge un margine per gx10 invece di toccare i valori per Haiku.
+`max_tokens`: su gx10 il reasoning consuma lo stesso budget; con il thinking spento (default) il
+problema sparisce (§3). I valori restano quelli di Haiku.
+
+`temperature`: le chiamate di oggi non la impostano (Haiku usa il suo default). Su gx10 vale il
+default di vLLM. Il ciclo «completeness retry» della rotta C (`_COGE_SP_MAX_ATTEMPTS`) ha senso solo
+se due estrazioni possono differire: con `temperature=0` le tre ripetizioni sono identiche e costano
+~35 s l'una. Il piano decide se gx10 gira a temperatura di default o se il ciclo si ferma alla prima
+estrazione identica alla precedente.
 
 ### 2. Ripiego e tracciabilità
 
@@ -89,6 +95,26 @@ Un PDF di rotta A/B e uno di rotta C dal corpus `Test/`, eseguiti con `tests/_im
 (DB in memoria) con tutte le chiamate su gx10 e ripiego spento. Si guardano gli errori (troncamenti,
 tool mancante, schema, tempi) e si correggono prima del confronto. Se la prova rivela un problema
 strutturale, questa spec si aggiorna.
+
+**Esito su `budget_624` (rotta C, contrapposte 8 cifre), 2026-09-21**, harness usa-e-getta che
+dirotta ogni client su gx10, `temperature=0`:
+
+| thinking | CoGe SP | vision | dettagli | totale import |
+|---|---|---|---|---|
+| `medium` | 8192/8192 token di solo thinking → nessun `tool_use`, rotta ripiega sul vision | 95 s | 131 s | 419 s |
+| `low` | idem, 210 s | 52 s | **16384/16384 di thinking**, nessun `tool_use` | 657 s |
+| **spento** | 3 × 35 s, `tool_use` ok | 21 s | 14 s | **155 s** |
+
+- `reasoning_effort` arriva al template anche via `/v1/messages` (verificato: output diversi fra
+  `low` e `xhigh`, identici fra `/v1/messages` e `/v1/chat/completions`). Il `low` non accorcia:
+  il ragionamento si allunga fino a esaurire il budget. **Default: thinking spento.**
+- Gli stessi numeri finali in tutte e tre le varianti (attivo 1.972.377,52, utile 8.906,79).
+- Contro la baseline Haiku (mai verificata) 13 campi su 46 diversi, e sul PDF ha ragione Qwen:
+  rimanenze merci 1.468.999,24 in `sp05` (Haiku le omette dall'attivo), variazione rimanenze a CE
+  invece di rimanenze finali dentro `ce04` (il `ce04` di Haiku è esattamente altri ricavi +
+  rimanenze finali + proventi finanziari), perdite portate a nuovo negative come stampate.
+- Il timeout del proxy di staging per l'import PDF è 300 s: 155 s ci stanno, 419 s no. I tempi per
+  rotta entrano fra le metriche del confronto.
 
 ### 4. Banco di confronto — `scripts/confronto_llm.py`
 

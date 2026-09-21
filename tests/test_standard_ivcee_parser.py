@@ -853,7 +853,7 @@ def test_contradictory_source_is_rejected_before_api_key_fallback(
     assert "ANTHROPIC_API_KEY" not in message
 
 
-def test_infrannual_llm_fallback_uses_single_year_when_prior_column_is_absent(
+def test_infrannual_macro_analysis_does_not_request_absent_prior_column(
     tmp_path, monkeypatch
 ):
     """Non-standard monocolumn PDFs must never be forced into the dual-year prompt."""
@@ -861,7 +861,7 @@ def test_infrannual_llm_fallback_uses_single_year_when_prior_column_is_absent(
     from sqlalchemy.orm import sessionmaker
 
     from database.db import Base
-    from importers import pdf_extractor_llm, pdf_importer, standard_ivcee_parser
+    from importers import pdf_extractor_llm, pdf_importer, standard_ivcee_parser, macro_analysis
 
     pdf = tmp_path / "infrannual-monocolumn.pdf"
     _write_compact_infrannual_pdf(pdf)
@@ -869,7 +869,7 @@ def test_infrannual_llm_fallback_uses_single_year_when_prior_column_is_absent(
     source_ce, _ = extract_standard_ivcee_income(str(pdf))
     llm_bs = {key: value for key, value in source_bs.items() if not key.startswith("_source")}
     llm_ce = {key: value for key, value in source_ce.items() if not key.startswith("_source")}
-    calls = {"single": 0, "dual": 0}
+    calls = {"single": 0, "dual": 0, "macros": 0}
 
     monkeypatch.setattr(
         standard_ivcee_parser, "extract_standard_ivcee_balances", lambda _path: (None, None)
@@ -883,15 +883,21 @@ def test_infrannual_llm_fallback_uses_single_year_when_prior_column_is_absent(
 
     def single_year(_path, force_llm=False):
         calls["single"] += 1
-        assert force_llm is True
-        return dict(llm_bs), dict(llm_ce)
+        raise AssertionError("page-window extractor must not bypass macro analysis")
 
     def dual_year(_path):
         calls["dual"] += 1
         raise AssertionError("dual-year extractor must not be called")
 
+    def macros(_path, *, include_prior):
+        calls['macros'] += 1
+        assert include_prior is False
+        return dict(llm_bs), dict(llm_ce), None, None, {
+            'status': 'verified', 'income_verified': True}
+
     monkeypatch.setattr(pdf_extractor_llm, "extract_pdf_with_llm", single_year)
     monkeypatch.setattr(pdf_extractor_llm, "extract_pdf_both_years_with_llm", dual_year)
+    monkeypatch.setattr(macro_analysis, 'analyze_pdf_macros', macros)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
     engine = create_engine("sqlite:///:memory:")
@@ -910,7 +916,7 @@ def test_infrannual_llm_fallback_uses_single_year_when_prior_column_is_absent(
         )
         assert result["success"] is True
         assert result["prior_year_imported"] is False
-        assert calls == {"single": 1, "dual": 0}
+        assert calls == {"single": 0, "dual": 0, "macros": 1}
     finally:
         engine.dispose()
 

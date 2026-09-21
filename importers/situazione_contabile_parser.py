@@ -458,6 +458,7 @@ _SP_PASSIVO_RULES = [
 
 # CE keyword rules for COSTI section
 _CE_COSTI_RULES = [
+    (['RIM.INIZ'], 'ce10'),
     (['RICAVI'], 'ce01_return'),  # Returns/discounts in cost section
     # Variazioni rimanenze MUST be before materie prime (descriptions often contain "MERCI")
     (['VARIAZ', 'RIMANENZ'], 'ce10'),
@@ -513,6 +514,8 @@ _CE_COSTI_RULES = [
 
 # CE keyword rules for RICAVI section
 _CE_RICAVI_RULES = [
+    (['RIM.FIN'], 'ce10_close'),
+    (['PROV.FIN'], 'ce14'),
     # More specific rules first
     (['VARIAZ', 'RIMANENZ'], 'ce10_close'),
     (['VAR.RIM'], 'ce10_close'),
@@ -534,6 +537,8 @@ _EQUITY_RULES = [
 
 def _classify_sp_attivo(desc_upper: str) -> str:
     """Classify an attivo entry by description keywords. Returns field or 'sp06' default."""
+    # RIM. is a ledger abbreviation, not an unknown asset to put in receivables.
+    desc_upper = re.sub(r'\bRIM\.(?=\s|$)', 'RIMANENZE', desc_upper)
     for keywords, field in _SP_ATTIVO_RULES:
         if _kw_match(desc_upper, keywords):
             return field
@@ -880,6 +885,14 @@ _RISERVA_FIELD = {
 
 def _debt_type(desc_upper: str) -> str:
     """Typed-debt OIC sub-letter for a passivo debt line (a..g)."""
+    if any(w in desc_upper for w in ('C/COMPENS', 'SINDAC', 'CLIENTI C/ANTICIP')):
+        return 'g'
+    if re.search(r'\bSOC[IO]+\b.*FINAN|FINAN.*\bSOC[IO]+\b', desc_upper):
+        return 'b'
+    if any(w in desc_upper for w in ('ERARI', 'TRIBUTAR', 'REGIONI C/')):
+        return 'e'
+    if any(w in desc_upper for w in ('FSBA', 'EBNA', 'SAN.ART', 'SANART')):
+        return 'f'
     if _kw_any(desc_upper, ['OBBLIGAZION']):
         return 'c'
     # Altri finanziatori / soci FIRST, so the generic FINANZ→banche rule below does not
@@ -891,7 +904,7 @@ def _debt_type(desc_upper: str) -> str:
     # -BANCA (EMILBANCA); incl. bank financings ("FINANZIAMENTO <banca>"), salvo-buon-fine
     # (SBF), and bank advances against invoices/credits ("ANTICIPO FATTURE", "ANTICIPI SU
     # CREDITI") which are short-term bank debt even when the bank name carries no 'BANC'.
-    if _kw_any(desc_upper, ['BANC', 'MUTU', 'C/C', 'C.C.', 'SCOPERT',
+    if re.search(r'\bC[/.]C(?:\.|\b)', desc_upper) or _kw_any(desc_upper, ['BANC', 'MUTU', 'SCOPERT',
                             'FINANZIAM', 'FINANZ', 'S.B.F', 'SBF',
                             'ANTICIPO FATTUR', 'ANTICIPI SU FATTUR', 'ANTICIPI SU CRED']):
         return 'a'
@@ -1137,7 +1150,7 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                         _kw_match(desc_upper, ['PERDITA', 'ESERCIZ'])):
                     if not _kw_any(desc_upper, ['PORTATI', 'PRECEDENT', 'NUOVO']):
                         return
-                if _kw_match(desc_upper, ['CAPITALE']):
+                if _kw_match(desc_upper, ['CAPITALE']) and 'RISERV' not in desc_upper:
                     capitale += entry.amount
                 else:
                     riserve += entry.amount
@@ -4366,12 +4379,42 @@ def _hier_reconstruct(pages_data, full: str):
         else:
             f = _classify_sp_attivo(d)
             addb({'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f), a)
-    for _c, d, a in mp:
+    def _passivo_parts(code, desc, amount):
+        """Keep parent totals but inspect children of ambiguous equity/debt heads.
+
+        A root named RISULTATI DELL'ESERCIZIO can contain PORTATI A NUOVO;
+        CAPITALE E RISERVE contains two different equity destinations. Stopping
+        at these roots preserves quadratura while misclassifying their nature.
+        Only disjoint direct children fitting the parent are used; any uncovered
+        amount retains the parent's original classification.
+        """
+        tag = _classify_sp_passivo(desc)
+        ambiguous = (tag == 'equity_total' and 'CAPITALE' in desc and 'RISERV' in desc)
+        ambiguous = ambiguous or (tag == 'sp16' and 'RISULTAT' in desc)
+        if ambiguous:
+            descendants = list(dict.fromkeys(
+                (c, d, a) for c, d, a in pas if c.startswith(code + '.')
+            ))
+            direct = [(c, d, a) for c, d, a in descendants
+                      if not any(c.startswith(other + '.') for other, _, _ in descendants)]
+            covered = sum((a for _, _, a in direct), Z)
+            # Duplicate/incomplete geometries must not double count the parent.
+            if direct and len({c for c, _, _ in direct}) == len(direct) and covered == amount:
+                for c, d, a in direct:
+                    yield from _passivo_parts(c, d, a)
+                return
+        yield code, desc, amount
+
+    passivo_parts = [part for c, d, a in mp for part in _passivo_parts(c, d, a)]
+    for _c, d, a in passivo_parts:
         if _is_fondo_amm(d):
             _net_fondo(_c, d, a, pas)
             continue
         t = _classify_sp_passivo(d)
-        if t == 'equity_total':
+        if _is_prior_result_caption(d):
+            addb('sp12', a)
+            addb('sp12g_utili_perdite_portati', a)
+        elif t == 'equity_total':
             addb('sp11' if (_kw_match(d, ['CAPITALE']) and 'RISERV' not in d) else 'sp12', a)
         elif t in ('depr_sp02', 'depr_sp03', 'depr_sp04'):
             addb(t.replace('depr_', ''), -a)

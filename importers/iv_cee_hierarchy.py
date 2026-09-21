@@ -538,12 +538,9 @@ def check_quadratura(bs: Dict[str, Decimal], ce: Optional[Dict[str, Decimal]] = 
     if ce:
         utile_ce = _net_profit_from_ce(ce)
         sp13 = _D(bs.get("sp13_utile_perdita", 0))
-        # Tolleranza SEPARATA (e più larga) per l'utile: lo SP è ancorato dal pareggio,
-        # mentre l'utile CE è RICOSTRUITO sommando ~25 voci estratte da un pass LLM
-        # indipendente — uno scarto di pochi euro su un bilancio in euro interi è rumore,
-        # non un errore di composizione. Scala con la dimensione del bilancio (0.1% del
-        # totale attivo, minimo €2). NON tocca la tolleranza del pareggio Attivo==Passivo.
-        utile_tol = max(Decimal("2"), att * Decimal("0.001"))
+        # A large asset total cannot legitimise a different income result.
+        # Callers may allow a small absolute printed-rounding tolerance only.
+        utile_tol = tol
         if abs(utile_ce - sp13) > utile_tol:
             utile_match = False
             warnings.append(f"Utile CE {eur_it(utile_ce)} != sp13 {eur_it(sp13)} "

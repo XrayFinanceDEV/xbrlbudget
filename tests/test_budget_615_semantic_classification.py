@@ -165,7 +165,10 @@ def test_budget_615_full_import_is_verified_and_forecastable(monkeypatch):
     assert result["forecastable"] is True
     assert result["validation_report"]["hierarchy_consistent"] is True
     assert result["validation_report"]["semantic_valid"] is True
-    assert result["warnings"] == []
+    # Macro accounting is valid, but a credential-free run must not pretend
+    # that the optional semantic search for further detail actually ran.
+    assert len(result["warnings"]) == 1
+    assert result["warnings"][0].startswith("RICERCA DETTAGLI NON COMPLETA: no_api_key.")
 
     with session_factory() as db:
         year = db.query(FinancialYear).filter_by(company_id=result["company_id"]).one()

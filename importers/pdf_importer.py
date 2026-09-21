@@ -20,7 +20,7 @@ from config import Sector
 
 logger = logging.getLogger(__name__)
 
-_PDF_PARSER_VERSION = "semantic-v3-2026-07-20"
+_PDF_PARSER_VERSION = "macro-analysis-v7-2026-09-21"
 
 
 def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
@@ -138,6 +138,23 @@ def _classify_balance_failure(
         source_attivo = source_passivo = None
 
     if source_attivo is not None and source_passivo is not None:
+        # In a two-sided ledger, the liabilities footer often EXCLUDES the
+        # profit printed immediately below. That is not a source imbalance.
+        printed_profit = controls.get('utile') or -(controls.get('perdita') or Decimal('0'))
+        if not printed_profit and controls.get('pareggio') == source_attivo:
+            # Some ledgers label profit "ECCEDENZA (UTILE)". Reuse the
+            # independently cross-footed source controls, without another LLM.
+            from importers.ledger_evidence import prepare_ledger
+            from importers.detail_enrichment import collect_source_rows
+            try:
+                _, source_audit = prepare_ledger(collect_source_rows(file_path))
+            except (OSError, ValueError, RuntimeError):
+                source_audit = {}
+            if source_audit.get('status') == 'ready':
+                printed_profit = Decimal(source_audit['controls']['bs_profit'])
+        if (printed_profit and abs(source_attivo-source_passivo-printed_profit)<=Decimal('.01')
+                and controls.get('pareggio') == source_attivo):
+            source_passivo += printed_profit
         difference = abs(source_attivo - source_passivo)
         if difference > Decimal('2'):
             detail = (
@@ -872,8 +889,11 @@ def import_pdf_balance_sheet(
                     source_control_error,
                 )
 
+        _macro_report = {}
+
         def _llm_extract():
             """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
+            nonlocal _macro_report
             # /import/pdf-ocr supplies structured MinerU table rows.  Build an
             # evidence-only IV-CEE candidate from those rows before touching the
             # original PDF.  It is accepted only through the same structural and
@@ -985,6 +1005,20 @@ def import_pdf_balance_sheet(
 
             if not api_key:
                 raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
+            if not is_trial_balance and not is_scanned and not _ocr_source:
+                # Native IV-CEE: exhaustive macro acquisition replaces the old
+                # page-window single/dual/retry loop. Never enrich an incomplete
+                # base or silently fall back to the very reader that lost pages.
+                from importers.macro_analysis import analyze_pdf_macros, MacroAnalysisError
+                from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+                try:
+                    bs, ce, prior_bs, prior_ce, _macro_report = analyze_pdf_macros(
+                        file_path,
+                        include_prior=not period_months and has_comparative_ivcee_columns(file_path),
+                    )
+                except MacroAnalysisError as exc:
+                    raise PDFImportError(str(exc)) from exc
+                return bs, ce, prior_bs, prior_ce
             logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
             from importers.pdf_extractor_llm import (
                 extract_pdf_with_llm, extract_pdf_both_years_with_llm,
@@ -1171,7 +1205,25 @@ def import_pdf_balance_sheet(
         # persistita nel validation_report. Inizializzata QUI per la stessa ragione
         # di _rescued_sections — il blocco che la legge sta fuori da `if candidates:`.
         _rescue_reasons: Dict[str, str] = {}
-        if is_trial_balance:
+        # Independent source proofs precede candidate scoring. A balanced LLM
+        # hypothesis is not sufficient when printed families contradict it.
+        from importers.source_reconciliation import extract_source_candidates, apply_source_candidate
+        _source_candidates = []
+        _source_reports = {}
+        try:
+            if not is_scanned and not _ocr_source:
+                _source_candidates = extract_source_candidates(file_path)
+        except Exception as source_err:
+            logger.warning("Source cross-foot unavailable: %s", source_err)
+        _source_complete = bool(_source_candidates and _source_candidates[0][0] is not None
+                                and _source_candidates[0][1] is not None)
+        if _source_complete:
+            balance_sheet_data, income_data = map(dict, _source_candidates[0][:2])
+            prior_bs_data = prior_ce_data = None
+            if len(_source_candidates) > 1 and all(v is not None for v in _source_candidates[1][:2]):
+                prior_bs_data, prior_ce_data = map(dict, _source_candidates[1][:2])
+            logger.info("Using independently cross-footed source SP and CE")
+        if is_trial_balance and not _source_complete:
             # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the
             # CoGe LLM extractor and the deterministic best-effort parser, then keep the
             # CLEANER one — the candidate whose unclassified residual (_plug_residual, read
@@ -1436,7 +1488,7 @@ def import_pdf_balance_sheet(
                  prior_bs_data, prior_ce_data) = _extract_route_c_last_resort(
                     _llm_extract
                 )
-        if not is_trial_balance:
+        if not is_trial_balance and not _source_complete:
             # IV CEE format (routes A/B) — use LLM extraction
             balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
             # Debiti aggregates (sp16/sp17) are schema-derived totals with no source
@@ -1462,6 +1514,52 @@ def import_pdf_balance_sheet(
             except Exception as _iv_err:
                 logger.warning(f"IV-CEE balance reconcile skipped: {_iv_err}")
 
+        # Source-proved parents and typed partitions replace stale hypotheses,
+        # even if those hypotheses balanced. Do not retain old specific fields
+        # or balancing-plug metadata alongside the new source statement.
+        if _source_candidates and not _macro_report:
+            balance_sheet_data, income_data, _source_reports['current'] = apply_source_candidate(
+                balance_sheet_data, income_data, _source_candidates[0])
+            if _source_candidates[0][0] is not None and not _source_complete:
+                sc_quadratura_warnings = []  # diagnostics of the discarded SP candidate
+                _declared_for_reliability = None
+            if len(_source_candidates) > 1 and prior_bs_data:
+                prior_bs_data, prior_ce_data, _source_reports['prior'] = apply_source_candidate(
+                    prior_bs_data, prior_ce_data, _source_candidates[1])
+        _source_current = _source_reports.get('current', {})
+        if _macro_report:
+            # The macro candidate was independently cross-footed. Do not let a
+            # declined source-layout reader demote it, or CE sign helpers modify it.
+            _source_current = _macro_report
+            _source_reports['current'] = _macro_report
+            if prior_bs_data:
+                _source_reports['prior'] = _macro_report.get('prior', {})
+            elif _macro_report.get('prior', {}).get('status') == 'incomplete':
+                sc_quadratura_warnings.append(
+                    'ANNO PRECEDENTE NON IMPORTATO: macrovoci del comparativo non riconciliate. '
+                    + '; '.join(_macro_report['prior'].get('errors', [])))
+        _source_review = bool(_source_current.get('requires_review'))
+        if _source_current.get('status') == 'verified' and not _source_current.get('income_verified'):
+            _source_review = True
+            _source_current['requires_review'] = True
+        if _source_review:
+            sc_quadratura_warnings.append(
+                "CONTROLLO DELLA FONTE DA VERIFICARE: " + '; '.join(_source_current.get('errors') or _source_current.get('warnings') or [
+                    'SP riconciliato, conto economico non verificato integralmente sul documento'])
+            )
+
+        # A balanced extraction can still be analytically empty. Re-read source
+        # details AFTER candidate selection/netting, independently of its route.
+        # Details preserve each aggregate; the separate ledger maturity policy
+        # may move short/long portions but preserves combined credits/debts.
+        # Controls, CE and period results cannot be changed by the LLM.
+        from importers.detail_enrichment import enrich_pdf_details
+        balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
+            file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
+            ocr_text=ocr_text,
+        )
+        sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
+
         # GENERAL rule for ALL routes: enforce the accounting identity utile_CE == sp13.
         # The result of the year is one number that must appear identically on the CE
         # (bottom line) and the SP (sp13). SP and CE are extracted independently and drift,
@@ -1481,14 +1579,27 @@ def import_pdf_balance_sheet(
             # let it arbitrate (a misread CE-section total flips the result sign).
             _decl_ce = (None if _text_garbled
                         else _declared_control_totals(file_path, text=ocr_text))
-            income_data = enforce_ce_sp_identity(
-                balance_sheet_data, income_data, "import",
-                prefer="sp13", declared=_decl_ce)
-            if prior_bs_data and prior_ce_data:
+            if not _source_review and not _source_current.get('income_verified'):
+                income_data = enforce_ce_sp_identity(
+                    balance_sheet_data, income_data, "import",
+                    prefer="sp13", declared=_decl_ce)
+            if prior_bs_data and prior_ce_data and not _source_reports.get('prior', {}).get('income_verified'):
                 prior_ce_data = enforce_ce_sp_identity(
                     prior_bs_data, prior_ce_data, "import-prior", prefer="sp13")
         except Exception as _ce_sp_err:
             logger.warning(f"CE↔SP identity enforcement skipped: {_ce_sp_err}")
+
+        # Mandatory final closure, independent of analytical reader availability,
+        # accepted proposals and extraction route. This changes only residual
+        # subfields, never parent totals or either statement's balance/result.
+        from importers.residual_finalization import finalize_pdf_residuals
+        balance_sheet_data, income_data, _residual_report = finalize_pdf_residuals(
+            balance_sheet_data, income_data)
+        _prior_residual_report = {}
+        if prior_bs_data:
+            prior_bs_data, prior_ce_data, _prior_residual_report = finalize_pdf_residuals(
+                prior_bs_data, prior_ce_data)
+        sc_quadratura_warnings.extend(_residual_report['warnings'])
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
@@ -1570,7 +1681,17 @@ def import_pdf_balance_sheet(
             ) from _qd_err
 
         warnings = mapper.validate_hierarchy(balance_sheet_data)
-        if balance_sheet_data.get("_source_maturity_unspecified"):
+        _maturity_audit = _detail_report.get('periods', {}).get('current', {}).get('maturity', {}).get('families', {})
+        if any(e.get('basis', '').startswith('management_')
+               for family in _maturity_audit.values() for e in family.get('evidence', [])) or any(
+                   e.get('basis', '').startswith('management_') for e in _source_current.get('maturity', [])):
+            warnings.append(
+                "SCADENZE STIMATE CON REGOLA GESTIONALE: in assenza di indicazioni "
+                "esplicite, crediti/debiti entro 12 mesi e finanziamenti/mutui "
+                "(anche soci o altri finanziatori) oltre 12 mesi. "
+                "Le scadenze documentate prevalgono; consultare la provenienza dell'importazione."
+            )
+        if balance_sheet_data.get("_source_maturity_unspecified") and 'sp16_debiti_breve' not in _maturity_audit:
             warnings.append(
                 "SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "
                 "sottovoci sono stati conservati nel breve termine; verificare la "
@@ -1650,8 +1771,22 @@ def import_pdf_balance_sheet(
             logger.warning(f"Reliability non calcolata: {_rel_err}")
 
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        _validation_payload['residual_finalization'] = _residual_report
+        _validation_payload['warnings'].extend(_residual_report['warnings'])
+        _validation_payload['warnings'].extend(_detail_report.get('warnings', []))
+        _validation_payload['source_reconciliation'] = _source_current
+        _validation_payload['macro_analysis'] = _macro_report or {
+            'status': 'verified' if _source_complete else 'existing_route',
+            'method': 'source_crossfoot' if _source_complete else 'existing_extractor',
+        }
+        _validation_payload['warnings'].extend(_macro_report.get('warnings', []))
+        _validation_payload["detail_enrichment"] = {
+            **{k: v for k, v in _detail_report.items() if k != "periods"},
+            **_detail_report.get("periods", {}).get("current", {}),
+        }
         _critical_ok = _reliability is None or _reliability.all_critical_ok
-        _forecastable = _qd.semantic_valid and _critical_ok
+        _forecastable = (_qd.semantic_valid and _critical_ok and not _source_review
+                         and not _residual_report['requires_review'])
 
         _stored_parser_version = _PDF_PARSER_VERSION
         if extraction_context is not None:
@@ -1764,7 +1899,7 @@ def import_pdf_balance_sheet(
                 ).first()
 
                 _prior_ok = _should_import_prior(
-                    fresh_prior_balances, _prior_q.is_empty,
+                    fresh_prior_balances and not _prior_residual_report.get('requires_review'), _prior_q.is_empty,
                     has_existing=existing_prior is not None,
                 )
                 if not _prior_ok:
@@ -1775,7 +1910,7 @@ def import_pdf_balance_sheet(
                     prior_year_imported = existing_prior is not None
                     warnings.append(
                         f"ANNO PRECEDENTE NON IMPORTATO [{prior_fiscal_year}]: "
-                        + "; ".join(_prior_q.warnings)
+                        + "; ".join([*_prior_q.warnings, *_prior_residual_report.get('warnings', [])])
                     )
                 else:
                     if not fresh_prior_balances:
@@ -1799,6 +1934,20 @@ def import_pdf_balance_sheet(
                         db.flush()
 
                     _prior_validation = _validation_report_payload(_prior_q)
+                    _prior_validation['residual_finalization'] = _prior_residual_report
+                    _prior_validation['warnings'].extend(_prior_residual_report.get('warnings', []))
+                    _prior_validation['warnings'].extend(_detail_report.get('warnings', []))
+                    _prior_validation['source_reconciliation'] = _source_reports.get('prior', {})
+                    if _macro_report:
+                        _prior_validation['macro_analysis'] = _macro_report.get('prior', {})
+                    _prior_source_review = bool(_source_reports.get('prior', {}).get('requires_review'))
+                    _prior_validation['warnings'].extend(_source_reports.get('prior', {}).get('errors', []))
+                    _prior_forecastable = (_prior_q.semantic_valid
+                        and not _prior_residual_report.get('requires_review') and not _prior_source_review)
+                    _prior_validation["detail_enrichment"] = {
+                        **{k: v for k, v in _detail_report.items() if k != "periods"},
+                        **_detail_report.get("periods", {}).get("prior", {}),
+                    }
                     if extraction_context is not None:
                         _prior_source_detail_fields = int(
                             prior_bs_data.get("_mineru_source_detail_fields", 0) or 0
@@ -1818,12 +1967,12 @@ def import_pdf_balance_sheet(
                         period_months=None,  # Full 12-month year
                         validation_status=_resolve_validation_status(
                             bool(fresh_prior_balances),
-                            _prior_q.semantic_valid,
+                            _prior_forecastable,
                         ),
                         validation_report=json.dumps(_prior_validation, ensure_ascii=False),
                         source_sha256=_source_sha256,
                         parser_version=_stored_parser_version,
-                        forecastable=_prior_q.semantic_valid,
+                        forecastable=_prior_forecastable,
                     )
                     db.add(prior_fy)
                     db.flush()

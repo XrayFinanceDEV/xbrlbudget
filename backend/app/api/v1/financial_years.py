@@ -496,6 +496,22 @@ def save_adjustments(
         _prior_report = json.loads(fy.validation_report) if fy.validation_report else {}
         if isinstance(_prior_report, dict) and "critical_accounts" in _prior_report:
             validation_payload["critical_accounts"] = _prior_report["critical_accounts"]
+        if isinstance(_prior_report, dict) and "detail_enrichment" in _prior_report:
+            # Evidence describes the import, even after a manual reclassification.
+            validation_payload["detail_enrichment"] = _prior_report["detail_enrichment"]
+            if isinstance(_prior_report['detail_enrichment'], dict):
+                validation_payload['warnings'].extend(_prior_report['detail_enrichment'].get('warnings', []))
+        if isinstance(_prior_report, dict) and "source_reconciliation" in _prior_report:
+            validation_payload["source_reconciliation"] = _prior_report["source_reconciliation"]
+        if isinstance(_prior_report, dict) and "macro_analysis" in _prior_report:
+            validation_payload["macro_analysis"] = _prior_report["macro_analysis"]
+            if isinstance(_prior_report['macro_analysis'], dict):
+                validation_payload['warnings'].extend(_prior_report['macro_analysis'].get('warnings', []))
+        if isinstance(_prior_report, dict) and "residual_finalization" in _prior_report:
+            # Historical import allocations remain auditable after correction.
+            # Current hierarchy validation, not an old residual conflict, gates
+            # manually corrected values below.
+            validation_payload["residual_finalization"] = _prior_report["residual_finalization"]
     except Exception:
         pass
     # RULE: a rettifica may NOT restore forecastable while the preserved
@@ -518,7 +534,22 @@ def save_adjustments(
     _critical_ok = True
     if isinstance(_preserved, dict) and "all_critical_ok" in _preserved:
         _critical_ok = bool(_preserved["all_critical_ok"])
-    _forecastable = bool(new_q.semantic_valid) and _critical_ok
+    _source_proof = validation_payload.get("source_reconciliation")
+    _source_ok = not (isinstance(_source_proof, dict) and _source_proof.get("requires_review"))
+    _residual_ok = True
+    if isinstance(validation_payload.get('residual_finalization'), dict):
+        from importers.residual_finalization import finalize_pdf_residuals
+        # Inspect copies only: manual edits are not auto-filled here. A no-op
+        # must not clear a one-cent excess hidden by the hierarchy tolerance;
+        # a real correction can clear it without erasing the historical audit.
+        _, _, _current_residual = finalize_pdf_residuals(merged_bs, merged_is)
+        _residual_ok = not _current_residual['requires_review']
+        validation_payload['residual_conflicts_current'] = {
+            key: value for key, value in _current_residual['families'].items()
+            if value['status'] == 'conflict'
+        }
+        validation_payload['warnings'].extend(_current_residual['warnings'])
+    _forecastable = bool(new_q.semantic_valid) and _critical_ok and _source_ok and _residual_ok
     # Stato a tre vie identico a quello dell'import: senza questo, la PRIMA
     # rettifica salvata degraderebbe "unbalanced" a "review_required" pur
     # restando il bilancio sbilanciato, perdendo il segnale per la UI.

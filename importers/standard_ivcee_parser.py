@@ -26,7 +26,7 @@ import fitz
 
 
 _AMOUNT_RE = re.compile(r"^\(?-?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?\)?-?$")
-_DATE_RE = re.compile(r"\d{2}/\d{2}/20\d{2}")
+_DATE_RE = re.compile(r"\d{2}[-/]\d{2}[-/]20\d{2}")
 _TOL = Decimal("2")
 
 

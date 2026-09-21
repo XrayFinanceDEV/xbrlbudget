@@ -1024,4 +1024,15 @@ export const saveInfrannualeAIComments = async (
   );
 };
 
+/** Indicatori della crisi d'impresa: un solo motore, sul server. */
+export const getCrisiInfrannuale = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<import('@/types/api').CrisiInfrannuale> => {
+  const { data } = await api.get<import('@/types/api').CrisiInfrannuale>(
+    `/companies/${companyId}/scenarios/${scenarioId}/infrannuale/crisi`,
+  );
+  return data;
+};
+
 export default api;

@@ -19,12 +19,14 @@ import {
   getAliquotaProposta,
   getIntraYearComparison,
   getScenarioAnalysis,
+  getCrisiInfrannuale,
 } from "@/lib/api";
 import { useRettificheYear } from "@/hooks/use-rettifiche-year";
 import { badgeScheda, rigaRettifiche } from "@/lib/pratica-rettifiche-stato";
 import { blockedStep, senzaPraticaAttiva } from "@/lib/pratica-steps";
 import type {
   BudgetScenario,
+  CrisiInfrannuale,
   IntraYearComparison,
   IntraYearComparisonItem,
   ScenarioAnalysis,
@@ -393,6 +395,35 @@ export default function InfraannualePage() {
     importResult?.companyId && scenario?.scenario_type === "infrannuale"
       ? `${importResult.companyId}:${scenario.id}`
       : null;
+
+  // Indicatori della crisi d'impresa: li calcola il server, e la tab
+  // Indicatori e la Stampa li leggono da qui. Si rileggono ogni volta che la
+  // pagina ricarica il confronto o l'analisi (una rettifica, una proiezione
+  // rigenerata): `comparison` e `analysis` sono stato di pagina, cambiano
+  // identita' solo quando vengono riscritti, non a ogni render.
+  const [crisi, setCrisi] = useState<CrisiInfrannuale | null>(null);
+  const [crisiError, setCrisiError] = useState<unknown>(null);
+  const crisiRequest = useRef(0);
+  const crisiCompanyId = importResult?.companyId ?? null;
+  const crisiScenarioId = scenario?.scenario_type === "infrannuale" ? scenario.id : null;
+  useEffect(() => {
+    const requestId = ++crisiRequest.current;
+    if (!crisiCompanyId || !crisiScenarioId || !comparison || !analysis) {
+      setCrisi(null);
+      setCrisiError(null);
+      return;
+    }
+    setCrisiError(null);
+    getCrisiInfrannuale(crisiCompanyId, crisiScenarioId)
+      .then((data) => {
+        if (requestId === crisiRequest.current) setCrisi(data);
+      })
+      .catch((error: unknown) => {
+        if (requestId !== crisiRequest.current) return;
+        setCrisi(null);
+        setCrisiError(error);
+      });
+  }, [crisiCompanyId, crisiScenarioId, comparison, analysis]);
   const [ratingVisible, setRatingVisible] = useState(false);
   const [showNoAlertsConfirm, setShowNoAlertsConfirm] = useState(false);
 
@@ -2192,9 +2223,8 @@ export default function InfraannualePage() {
                   </CardHeader>
                   <CardContent>
                     <IndicatoriTable
-                      comparison={comparison!}
-                      forecastBs={analysis!.forecast_years?.[0]?.balance_sheet || {}}
-                      forecastIs={analysis!.forecast_years?.[0]?.income_statement || {}}
+                      crisi={crisi}
+                      crisiError={crisiError}
                       extraAlerts={extraAlerts}
                       showRating={ratingVisible}
                       hideProiezione={periodMonths === 12}
@@ -2256,8 +2286,9 @@ export default function InfraannualePage() {
               projectedBS={projectedBS ?? buildBalanceItemsWithTotals(
                 comparison.balance_items.map((i) => ({ ...i, annualized_value: i.partial_value }))
               )}
-              forecastBs={analysis.forecast_years?.[0]?.balance_sheet || {}}
               forecastIs={analysis.forecast_years?.[0]?.income_statement || {}}
+              crisi={crisi}
+              crisiError={crisiError}
               extraAlerts={extraAlerts}
               companyName={importResult?.companyName || ""}
               fiscalYear={fiscalYear}

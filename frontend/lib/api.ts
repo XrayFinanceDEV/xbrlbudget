@@ -1035,4 +1035,40 @@ export const getCrisiInfrannuale = async (
   return data;
 };
 
+/**
+ * Scarica il report intermedio dell'infrannuale (PDF Typst, stesso impianto del
+ * report finale). Sostituisce la stampa del browser della tab Stampa.
+ * `avvisoCommenti: false` quando l'utente ha chiuso l'avviso sui commenti
+ * scritti prima dell'ultima proiezione: chiuso a schermo, sparisce dal PDF.
+ */
+export const downloadIntermedioPdf = async (
+  companyId: number,
+  scenarioId: number,
+  options: { avvisoCommenti: boolean },
+): Promise<DownloadFinalReportPdfResult> => {
+  const response = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/scenarios/${scenarioId}/infrannuale/report/pdf`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+      },
+      body: JSON.stringify({ avviso_commenti: options.avvisoCommenti }),
+    },
+  );
+  if (!response.ok) {
+    let detail: string | null = null;
+    try {
+      const data = await response.json();
+      if (data && typeof data.detail === 'string') detail = data.detail;
+    } catch {
+      // Corpo non JSON: si ricade sulla mappa per stato.
+    }
+    throw new FinalReportDownloadError(response.status, resolveDownloadErrorMessage(response.status, detail));
+  }
+  const blob = await response.blob();
+  return { blob, filename: resolveDownloadFilename(response.headers.get('Content-Disposition')) };
+};
+
 export default api;

@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import { useInvalidateAnalysis } from "@/hooks/use-queries";
+import { useIntermedioDownload } from "@/hooks/use-intermedio-download";
 import { rigeneraBudgetRiusato } from "@/lib/budget-rigenera-riuso";
 import {
   bulkUpsertAssumptions,
@@ -124,6 +125,26 @@ export function StampaContent({
     setAiComments((prev) => ({ ...prev, [key]: value }));
     setAiCommentsDirty(true);
   };
+  // Il documento che si consegna e' il report intermedio generato dal server
+  // (`POST .../infrannuale/report/pdf`), non la stampa del browser di questa
+  // pagina, che resta come anteprima a schermo. Un commento modificato e non
+  // ancora salvato si salva prima: il PDF legge i commenti dal server.
+  const { download: downloadPdf, downloading: downloadingPdf } = useIntermedioDownload();
+  const handleDownloadPdf = async () => {
+    if (!companyId || !scenarioId) return;
+    if (aiCommentsDirty) {
+      try {
+        await saveInfrannualeAIComments(companyId, scenarioId, aiComments);
+        setAiCommentsStale(false);
+        setAiCommentsDirty(false);
+      } catch {
+        toast.error("Errore nel salvataggio dei commenti: il PDF non è stato generato");
+        return;
+      }
+    }
+    await downloadPdf(companyId, scenarioId, !avvisoCommentiChiuso);
+  };
+
   const handleCommentBlur = async () => {
     if (!companyId || !scenarioId || !aiCommentsDirty) return;
     try {
@@ -408,10 +429,16 @@ export function StampaContent({
             Genera commenti AI
           </Button>
         )}
-        <Button onClick={() => window.print()} variant="outline">
-          <Printer className="h-4 w-4 mr-2" />
-          Stampa PDF
-        </Button>
+        {companyId && scenarioId && (
+          <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf}>
+            {downloadingPdf ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4 mr-2" />
+            )}
+            Scarica PDF
+          </Button>
+        )}
       </div>
 
       {aiCommentsStale && !avvisoCommentiChiuso && (

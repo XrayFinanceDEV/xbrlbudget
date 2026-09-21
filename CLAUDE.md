@@ -875,6 +875,18 @@ La Proiezione rende 22 righe di CE modificabili a mano e ne ricalcola i sottotot
 commenti generati da Haiku e poi editabili. I due grafici degli indicatori sono un componente
 solo (`components/pratica/IndicatoriCharts.tsx`), reso sia dalla tab sia dalla Stampa.
 
+**Il documento che si consegna non è la stampa del browser della tab Stampa**, che resta
+un'anteprima a schermo: «Scarica PDF» chiama `POST /scenarios/{id}/infrannuale/report/pdf`, il
+**report intermedio** (Typst: 9 pagine di sintesi, crisi d'impresa e segnali, più gli allegati A/B dei prospetti
+completi), fatto con
+gli stessi file del dossier finale (`intermedio_catalog.py`, `intermedio_renderer.py`, bundle
+`templates/intermedio/` che legge `dossier-base` senza modificarlo: toccare `dossier-base` o
+`dossier_catalog/` invalida i piani editoriali già preparati del finale). Il PDF legge i commenti
+**salvati**: il pulsante salva prima quelli modificati. **I 14 indicatori della crisi, il
+punteggio e la classe A3→D si calcolano solo sul server** (`calculations/crisi_impresa.py`,
+`GET /scenarios/{id}/infrannuale/crisi`); il client sceglie il rating dal numero di segnali in
+pagina fra quelli che il server manda per 0..7 segnali, e non ha più una copia delle bande.
+
 **Come si comportano gli override della Proiezione, o i commenti AI della Stampa?**
 → [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) §11-§12
 **Un grafico degli Indicatori è sbagliato, o la Stampa impagina male?**

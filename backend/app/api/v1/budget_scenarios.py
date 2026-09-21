@@ -24,6 +24,7 @@ from app.core.ownership import validate_company_owned_by_user
 from app.schemas import budget as budget_schemas
 from app.schemas import forecast as forecast_schemas
 from app.schemas import analysis as analysis_schemas
+from app.schemas.crisi import CrisiInfrannuale
 from database import models
 from calculations.forecast_engine import ForecastEngine
 
@@ -500,6 +501,35 @@ def get_intra_year_comparison(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
+
+@router.get(
+    "/companies/{company_id}/scenarios/{scenario_id}/infrannuale/crisi",
+    response_model=CrisiInfrannuale,
+    summary="Indicatori della crisi d'impresa: storico, infrannuale, proiezione",
+)
+def get_crisi_infrannuale(
+    company_id: int,
+    scenario_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """I 14 indicatori della crisi con punteggio e classe di rischio (A3 -> D).
+
+    Un solo motore (`calculations/crisi_impresa.py`): lo leggono la tab
+    Indicatori, la Stampa e il report PDF intermedio.
+    """
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gli indicatori della crisi sono disponibili solo per gli scenari infrannuali",
+        )
+    from app.services.crisi_service import crisi_infrannuale
+    try:
+        return crisi_infrannuale(db, scenario)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 # ===== Infrannuale AI Comments (Stampa tab) =====
